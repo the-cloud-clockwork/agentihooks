@@ -50,10 +50,12 @@ import ledger_media  # noqa: E402
 from scripts.gates import talk  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
     composition,
+    ledger_blockers,
     ledger_closed,
     ledger_task_duplicates,
     page_policy,
     ports,
+    request_body,
     request_metrics,
     server_code,
     server_compose,
@@ -91,6 +93,7 @@ WATCH_PASS = threading.Lock()
 HANDOFF = {}
 THREADS_EXHAUSTED = 75
 TLS_HANDSHAKE_S = 10
+BODY_DRAIN_S = 2
 PROBE_FILE = ".healthz"
 FILE_ORIGIN = "null"
 MAX_BODY = 1 << 20
@@ -313,6 +316,7 @@ CAPS = {
     "max_plan": ("max-plan-agents", 0, MAX_CAP),
     "masters_step": ("masters-step", 0, MAX_CAP),
     "compact_limit": ("compact-limit", MIN_COMPACT, MAX_COMPACT),
+    "focus_weight": ("focus-weight", 0, 100),
 }
 PAGE_LIMITS = {
     "capacity": {key: [low, high] for key, (_, low, high) in CAPS.items()},
@@ -639,7 +643,8 @@ def deliver_alerts(slug, state):
         master = operator_mail.master_address(inbox.redis, slug, agents)
         addresses = {a.name: a.seat or a.name for a in live}
         alerts = [{**a, "target": addresses.get(a["target"], "master")} for a in fresh]
-        sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since)
+        render = functools.partial(ledger_alerts.message, tier=ledger_blockers.autonomy(slug), doc=state)
+        sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since, render=render)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"alert delivery for {slug}: {exc}\n")
         unrelayed_on(ALERTS, slug, meta["rev"])
@@ -745,9 +750,11 @@ def workspace_tails(slug, task_id):
 
 
 def write_gate(slug):
-    """Every op write: masters fenced to the items they own, page chat to the front door, inside the talk budget."""
+    """Every op write: masters fenced to the items they own, page chat to the front door, asks of the operator behind
+    the blocker protocol, inside the talk budget."""
     swarm = ports.swarm()
-    return swarm.master_fence.Fence(slug, swarm.front_door.Door(slug, talk.Budget(slug)))
+    protocol = ledger_blockers.Gate(slug, talk.Budget(slug))
+    return swarm.master_fence.Fence(slug, swarm.front_door.Door(slug, protocol))
 
 
 def api_services():
@@ -811,6 +818,16 @@ def sample_streams():
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
 
+def request_caller(headers) -> str:
+    if headers is None:
+        return "-"
+    if headers.get("X-Ledger-Agent"):
+        return headers["X-Ledger-Agent"]
+    if headers.get("X-Ledger-Tick"):
+        return "tick"
+    return "controller" if headers.get("X-Controller-Credential") else "-"
+
+
 class Handshake(Exception):
     pass
 
@@ -858,17 +875,39 @@ class Handler(BaseHTTPRequestHandler):
                 raise Handshake from exc
             self.request.settimeout(None)
         super().setup()
+        self.raw_rfile = self.rfile
 
     def log_message(self, fmt, *args):
         if self.path.startswith("/api/v1/"):
-            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?', 1)[0]}\n")
+            caller = request_caller(getattr(self, "headers", None))
+            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.partition('?')[0]} {caller}\n")
             return
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 
     @request_metrics.measured
     def handle_one_request(self) -> None:
         self.command, self.path, self.raw_requestline = None, "/", b""
+        self.rfile = getattr(self, "raw_rfile", self.rfile)
         return super().handle_one_request()
+
+    def parse_request(self) -> bool:
+        parsed = super().parse_request()
+        if parsed:
+            self.rfile = request_body.Body(self.rfile, request_body.length(self.headers))
+        return parsed
+
+    def send_response(self, code, message=None):
+        unread = isinstance(getattr(self, "rfile", None), request_body.Body) and not self.rfile.drain(
+            MAX_BODY, self.connection, BODY_DRAIN_S
+        )
+        super().send_response(code, message)
+        if unread:
+            self.send_header("Connection", "close")
+
+    def finish(self):
+        super().finish()
+        if isinstance(getattr(self, "rfile", None), request_body.Body) and self.rfile.left != 0:
+            request_body.linger(self.connection, BODY_DRAIN_S)
 
     def send(self, code, body, ctype):
         if self.path.startswith("/api/v1/") and code >= 400 and ctype != "application/json":
@@ -1040,6 +1079,14 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             return self.send(400, str(exc), "text/plain")
         return self.send(200, json.dumps(saved), "application/json")
+
+    def send_export(self, data):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
 
     def send_logo(self):
         try:

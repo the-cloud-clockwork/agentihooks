@@ -6,8 +6,10 @@ import os
 import re
 import socket
 import sys
+import tempfile
 import time
 import zlib
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -28,6 +30,7 @@ from tests.shards import (
     source_sizes,
     warm_imports,
 )
+from tests.workflow_commands import refuse_commands
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
@@ -76,6 +79,7 @@ def pytest_configure_node(node):
 
 
 def pytest_collection_modifyitems(config, items):
+    refuse_commands([item.nodeid for item in items])
     reused = _reused(config)[0]
     if reused:
         kept = [item for item in items if re.sub(r"@[^\[\]]*$", "", item.nodeid) not in reused]
@@ -438,6 +442,31 @@ def _production_redis_key_guard(monkeypatch):
 def ledger_port():
     with ledger_guard.reserve_port() as hold:
         yield hold.getsockname()[1]
+
+
+@contextmanager
+def memory_folder(settle_s=5.0):
+    folder = tempfile.TemporaryDirectory(dir="/dev/shm")
+    try:
+        yield Path(folder.name)
+    finally:
+        # Children a test started can still write into its home while the folder is removed.
+        deadline = time.monotonic() + settle_s
+        while True:
+            try:
+                folder.cleanup()
+                break
+            except OSError as error:
+                if error.errno != errno.ENOTEMPTY or time.monotonic() > deadline:
+                    raise
+                time.sleep(0.05)
+
+
+@pytest.fixture
+def memory_path():
+    """A scratch folder on tmpfs, so a ledger database there commits without waiting on runner disk fsync."""
+    with memory_folder() as path:
+        yield path
 
 
 @pytest.fixture(autouse=True)

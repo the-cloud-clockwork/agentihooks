@@ -1,9 +1,13 @@
+import json
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
+
+from tests.mutation_sandbox_input_proof import REPORT_ARTIFACT, SPLIT_ALGORITHM, nested_report
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -195,3 +199,78 @@ def test_proofs_reuse_selected_mutation_and_smoke_execution():
             assert job["with"] == {"base": "${{ inputs.base }}"}
     callable = yaml.safe_load((_ROOT / ".github/workflows/mutation-preflight.yml").read_text())
     assert callable[True]["workflow_call"]["inputs"]["base"] == {"type": "string", "required": True}
+
+
+def test_a_nested_report_with_workflow_command_text_stays_out_of_the_log(tmp_path):
+    planted = "tests/test_plant.py::test_case[##[error]planted]"
+    junit = tmp_path / "source-7.xml"
+    junit.write_text(
+        '<testsuites><testsuite tests="3" failures="1" errors="0" skipped="1">'
+        f'<testcase name="{planted}" time="1.5"><failure message="##[error]planted"/></testcase>'
+        "</testsuite></testsuites>"
+    )
+    result = subprocess.CompletedProcess([], 1, stdout=f"FAILED {planted}\n", stderr="::error::nested\n")
+    summary = nested_report(result, junit)
+    assert summary == (
+        "nested pytest exited 1; tests 3 failures 1 errors 0 skipped 1; "
+        f"read source-7.xml and source-7.log in the {REPORT_ARTIFACT} artifact"
+    )
+    kept = (tmp_path / "source-7.log").read_text() == f"FAILED {planted}\n::error::nested\n"
+    assert kept, "the report log lost the nested output"
+    assert nested_report(subprocess.CompletedProcess([], 2, stdout="", stderr=""), tmp_path / "missing.xml") == (
+        f"nested pytest exited 2; no junit report; read missing.xml and missing.log in the {REPORT_ARTIFACT} artifact"
+    )
+
+
+def test_focused_proofs_upload_every_nested_report():
+    steps = _workflow()["jobs"]["tests"]["steps"]
+    run = next(s for s in steps if s.get("name") == "Run selected tests")
+    upload = next(s for s in steps if s.get("name") == "Retain nested proof reports")
+    assert steps.index(upload) == steps.index(run) + 1
+    assert run["env"]["PROOF_REPORT_DIR"] == "${{ runner.temp }}/proof-reports"
+    assert upload["if"] == "always()"
+    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["with"]["name"] == REPORT_ARTIFACT
+    assert upload["with"]["path"] == run["env"]["PROOF_REPORT_DIR"]
+
+
+def test_the_sandbox_proof_groups_share_the_suite_evenly():
+    from pytest_split.algorithms import Algorithms
+
+    durations = json.loads((_ROOT / ".test_durations").read_text())
+    untimed = [f"tests/test_untimed.py::test_{index}" for index in range(len(durations) // 20)]
+    items = [SimpleNamespace(nodeid=nodeid) for nodeid in [*durations, *untimed]]
+    groups = Algorithms[SPLIT_ALGORITHM].value(8, items, durations)
+    counts = [len(group.selected) for group in groups]
+    seconds = [group.duration for group in groups]
+    assert max(counts) <= 1.5 * min(counts), counts
+    assert max(seconds) <= 1.1 * sum(seconds) / len(seconds), seconds
+
+
+def test_an_untimed_test_counts_as_its_own_file_mean():
+    from tests.split_fallback import file_mean_durations
+
+    durations = {
+        "tests/test_slow.py::test_a": 30.0,
+        "tests/test_slow.py::test_b": 50.0,
+        "tests/test_fast.py::test_a": 0.1,
+    }
+    nodeids = [*durations, "tests/test_slow.py::test_new", "tests/test_other.py::test_new"]
+    filled = file_mean_durations(nodeids, durations)
+    assert filled["tests/test_slow.py::test_new"] == 40.0
+    assert "tests/test_other.py::test_new" not in filled
+    assert {nodeid: filled[nodeid] for nodeid in durations} == durations
+
+
+def test_the_sandbox_proof_loads_the_file_mean_fallback():
+    import ast
+
+    tree = ast.parse((_ROOT / "tests/mutation_sandbox_input_proof.py").read_text())
+    pairs = {
+        (first.value, second.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.List)
+        for first, second in zip(node.elts, node.elts[1:])
+        if isinstance(first, ast.Constant) and isinstance(second, ast.Constant)
+    }
+    assert ("-p", "tests.split_fallback") in pairs

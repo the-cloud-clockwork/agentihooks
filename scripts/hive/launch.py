@@ -17,6 +17,7 @@ from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Sta
 HIVE = "hive"
 ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "planner": "plan", "dispatcher": "dispatch"}
 TTL_MS = 300000
+LAUNCH_MS = 75000
 ORDERS = "controller-launch-orders"
 ENDINGS = "launch-endings"
 PENDING = "hive launch ordered, waiting for its acknowledgement"
@@ -141,6 +142,11 @@ def _pinned(hives: list[dict], task: dict, role: str) -> tuple[list[dict], place
 
     if task.get("hive"):
         hives = [hive for hive in hives if hive["id"] == task["hive"]]
+    if task.get("needs"):
+        equipped = [hive for hive in hives if placement.equipped(task, hive)]
+        if not equipped:
+            return equipped, placement.Wait(placement.needs_refusal(task, hives), role)
+        hives = equipped
     if not task.get("workstation"):
         return hives, None
     kept = [hive for hive in hives if hive["id"] == hive_id()]
@@ -198,14 +204,22 @@ class HiveLaunch:
         self.sleep = time.sleep
         self.opening = orders.build_opening
         self.placement_cache: dict[tuple[str, str], Selection | placement.Wait] | None = None
+        self._pass_hives: tuple[dict, list[dict]] | None = None
         self._quota_accounts = None
 
     def hives(self) -> list[dict]:
-        return placement.for_swarm(loaded_hives(self.store), self.slug)
+        if self.placement_cache is None:
+            return placement.for_swarm(loaded_hives(self.store), self.slug)
+        if self._pass_hives is None or self._pass_hives[0] is not self.placement_cache:
+            self._pass_hives = (self.placement_cache, placement.for_swarm(loaded_hives(self.store), self.slug))
+        return self._pass_hives[1]
 
     def _record_wait(self, lane: str, task: dict, selected: Selection | placement.Wait) -> Selection | placement.Wait:
         reason = selected.reason if isinstance(selected, placement.Wait) else ""
-        placement_waits.observe(self.store, self.slug, lane, task["id"], reason, lease.now_ms(self.store))
+        from scripts.swarm.commands import hive_id
+
+        machine = hive_id() if task.get("workstation") else ""
+        placement_waits.observe(self.store, self.slug, lane, task["id"], reason, lease.now_ms(self.store), machine)
         return selected
 
     def select(self, config: SwarmConfig, lane: str, task: dict) -> Selection | placement.Wait:
@@ -213,8 +227,15 @@ class HiveLaunch:
             return self._select(config, lane, task)
         key = (lane, task["id"])
         if key not in self.placement_cache:
-            self.placement_cache[key] = self._select(config, lane, task)
+            self.placement_cache[key] = self._spend(self._select(config, lane, task))
         return self.placement_cache[key]
+
+    def _spend(self, selected: Selection | placement.Wait) -> Selection | placement.Wait:
+        if isinstance(selected, Selection) and selected.master_placement is None:
+            for hive in self._pass_hives[1]:
+                if hive["id"] == selected.hive:
+                    hive["room"] -= 1
+        return selected
 
     def _select(self, config: SwarmConfig, lane: str, task: dict) -> Selection | placement.Wait:
         chosen = config.lanes.get(lane, {})
@@ -245,13 +266,13 @@ class HiveLaunch:
         from scripts.swarm.commands import hive_id
 
         if lane != placement.MASTER:
-            for hive in hives:
+            for index, hive in enumerate(hives):
                 if hive["id"] == hive_id():
                     bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
                     taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
                     limited = admission.capped(admission.Room(hive["room"], **ROOM_DETAILS), taken, bound)
                     if limited.room < hive["room"]:
-                        hive["room"], hive["refusal"] = limited.room, admission.refusal(limited)
+                        hives[index] = {**hive, "room": limited.room, "refusal": admission.refusal(limited)}
         placing = _Placing(config, task, saved, decision, role, rows, hives, now)
         found = self._account_selection(placing, harness)
         if auto and harness == "codex" and isinstance(found, placement.Wait):
@@ -358,6 +379,9 @@ class HiveLaunch:
         selected = self.select(request.config, request.lane, request.task)
         if isinstance(selected, placement.Wait):
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
+        if refused := self.queue_refusal(request, selected, self.store.redis.xlen(self.orders.stream(selected.hive))):
+            self._record_wait(request.lane, request.task, placement.Wait(refused))
+            return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
         named = replace(
             request,
             config=replace(request.config, repo=selected.origin) if selected.origin else request.config,
@@ -384,22 +408,35 @@ class HiveLaunch:
             local_slots.release(self.store, selected.hive, self.slug, request.name)
             raise
 
+    def queue_refusal(self, request: SpawnRequest, selected: Selection, queued: int) -> str:
+        from scripts.master_login_chain import BUDGET
+
+        ttl = BUDGET.order_ttl_ms if selected.route_kind == placement.MASTER_LOGIN else TTL_MS
+        if queued < ttl // LAUNCH_MS:
+            return ""
+        return (
+            f"no hive for {request.lane} {placement.HAS_ROOM}: {selected.hive} holds {queued} queued launches, "
+            f"the most its {ttl // 1000} second launch deadline serves at {LAUNCH_MS // 1000} seconds each"
+        )
+
     def send_order(self, request: SpawnRequest, selected: Selection, task: dict) -> Outcome:
         from scripts.master_login_chain import BUDGET
 
         ttl = BUDGET.order_ttl_ms if selected.route_kind == placement.MASTER_LOGIN else TTL_MS
         admitted = self.admit(request, selected)
-        if selected.route_kind != placement.MASTER_LOGIN and not self.slots.reserve(
-            f"{selected.account.harness}:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
-        ):
-            self.end(admitted, "account reservation is full")
-            return Outcome(
-                "spawn",
-                Status.UNAVAILABLE,
-                HIVE,
-                {"harness": selected.account.harness},
-                detail="account reservation is full",
+        if selected.route_kind != placement.MASTER_LOGIN:
+            account = selected.account
+            reading = self.slots.reserve_reading(
+                f"{account.harness}:{account.name}", admitted.execution_id, account.cap, TTL_MS
             )
+            if not reading.accepted:
+                refused = (
+                    f"account reservation is full: account={account.harness}:{account.name} "
+                    f"sessions={reading.sessions} cap={account.cap} "
+                    f"five_left={account.five_left} week_left={account.week_left}"
+                )
+                self.end(admitted, refused)
+                return Outcome("spawn", Status.UNAVAILABLE, HIVE, {"harness": account.harness}, detail=refused)
         prompt_ref = self.store.key(self.slug, f"launch-prompt:{admitted.execution_id}")
         order = LaunchOrder(
             self.slug,
@@ -416,12 +453,30 @@ class HiveLaunch:
             lease.now_ms(self.store) + ttl,
             selected.hive,
         )
-        with self.store.redis.pipeline() as pipe:
-            pipe.set(prompt_ref, json.dumps(task), px=ttl)
-            pipe.hset(self.store.key(self.slug, ORDERS), request.task["id"], json.dumps(order.__dict__))
-            Orders(pipe).send(selected.hive, order)
-            pipe.execute()
+        if refused := self.publish(request, selected, task, order, ttl):
+            self._record_wait(request.lane, request.task, placement.Wait(refused))
+            self.end(admitted, refused)
+            return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
         return self.answer(request, order)
+
+    def publish(self, request: SpawnRequest, selected: Selection, task: dict, order: LaunchOrder, ttl: int) -> str:
+        from redis.exceptions import WatchError
+
+        stream = self.orders.stream(selected.hive)
+        with self.store.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(stream)
+                    refused = self.queue_refusal(request, selected, pipe.xlen(stream))
+                    if not refused:
+                        pipe.multi()
+                        pipe.set(order.prompt_ref, json.dumps(task), px=ttl)
+                        pipe.hset(self.store.key(self.slug, ORDERS), request.task["id"], json.dumps(order.__dict__))
+                        Orders(pipe).send(selected.hive, order)
+                        pipe.execute()
+                    return refused
+                except WatchError:
+                    continue
 
     def collect(self, request: SpawnRequest) -> Outcome:
         order = self.orders_for(request.task["id"])
@@ -487,7 +542,7 @@ class HiveLaunch:
         if local:
             local_slots.release(self.store, selected.hive, self.slug, request.name)
         refused = admission.refusal(admission.room(reading, pending=held))
-        return f"no hive for {request.lane} has room: {selected.hive} {refused}"
+        return f"no hive for {request.lane} {placement.HAS_ROOM}: {selected.hive} {refused}"
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
         from scripts.swarm_v2.runtime import codex

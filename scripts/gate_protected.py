@@ -25,6 +25,8 @@ EQUIVALENCE = ("equivalence.yml", "ledger-equivalence")
 EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh")
 EQUIVALENCE_TUNABLE = ("steps", "timeout-minutes")
 UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
+SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
+FROZEN = "tests/registry/FROZEN_GATES.json"
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -54,7 +56,7 @@ def runners(policy: object = None) -> list[str]:
 
 def reuse_jobs(policy: object = None) -> list[dict]:
     jobs = []
-    for factory in (ci_reuse.reuse_job, ci_reuse.paged_reuse_job):
+    for factory in (ci_reuse.reuse_job, ci_reuse.paged_reuse_job, ci_reuse.retried_reuse_job):
         for runner in runners(policy):
             job = factory()
             if runner != job["runs-on"]:
@@ -93,17 +95,19 @@ def _aggregator_problems(
             and base_id == "gate-required"
             and head_job.get("steps")
             in [
-                diagnostic(
-                    forward(
-                        finish(
-                            rerun(
-                                shape(
-                                    required(
-                                        ci_reuse.gate_steps(
-                                            **form,
-                                            summary=summary,
-                                            docs="docs" in ci_wiring.needs_of(head_job),
-                                            watcher_loss=watcher_loss,
+                sonar(
+                    diagnostic(
+                        forward(
+                            finish(
+                                rerun(
+                                    shape(
+                                        required(
+                                            ci_reuse.gate_steps(
+                                                **form,
+                                                summary=summary,
+                                                docs="docs" in ci_wiring.needs_of(head_job),
+                                                watcher_loss=watcher_loss,
+                                            )
                                         )
                                     )
                                 )
@@ -111,6 +115,7 @@ def _aggregator_problems(
                         )
                     )
                 )
+                for sonar in (list, ci_reuse.test_only_sonar)
                 for diagnostic, forward in (
                     (list, list),
                     (ci_reuse.selection_diagnostic, list),
@@ -155,6 +160,7 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
     previous = base["jobs"].get("durations", base["jobs"].get("select", {}))
     producer = head["jobs"].get("durations", head["jobs"].get("select", {}))
     prefix = ci_reuse.duration_provenance_steps()
+    retried = ci_reuse.retried_duration_provenance_steps()
     problems = []
     if "durations" in base["jobs"] and "durations" not in head["jobs"]:
         selection = base["jobs"].get("select", {})
@@ -164,11 +170,9 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
             "outputs": previous.get("outputs", {}) | selection.get("outputs", {}),
             "timeout-minutes": selection.get("timeout-minutes"),
         }
-    bounded_prefix = [
-        prefix[0] | {"env": {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}},
-        *prefix[1:],
-    ]
-    if producer.get("steps", [])[: len(prefix)] not in (prefix, bounded_prefix):
+    bounds = {"env": {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}}
+    admitted = [variant for steps in (prefix, retried) for variant in (steps, [steps[0] | bounds, *steps[1:]])]
+    if producer.get("steps", [])[: len(prefix)] not in admitted:
         problems.append("The head skips reuse without protected durations provenance.")
     mutable = {"steps", "if", "runs-on"}
     selection_permissions = ({"contents": "read"}, {"contents": "read", "actions": "read"})
@@ -187,8 +191,12 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
         and not (
             field == "outputs"
             and producer is head["jobs"].get("select")
-            and set(UNUSED_SELECT_OUTPUTS).issubset(outputs)
-            and producer.get(field) == trimmed
+            and (
+                set(UNUSED_SELECT_OUTPUTS).issubset(outputs)
+                and producer.get(field) == trimmed
+                or "sonar" not in outputs
+                and producer.get(field) == outputs | SONAR_SELECT_OUTPUT
+            )
         )
     ]
     problems += [
@@ -247,10 +255,11 @@ def grade(
                 "if": "${{ always() }}",
                 "runs-on": runner,
                 "timeout-minutes": 5,
-                "steps": finish(ci_reuse.summary_steps()),
+                "steps": finish(retry(ci_reuse.summary_steps())),
             }
             for runner in runners(policy)
             for finish in (list, ci_reuse.pipefail_summary)
+            for retry in (list, ci_reuse.retried_summary)
         ]
         if summary not in canonical:
             problems.append("The test summary must use the reviewed reporting job.")
@@ -335,6 +344,38 @@ def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[
     return []
 
 
+def _blob(root: Path, rev: str, path: str) -> str | None:
+    listing = _git(root, "ls-tree", rev, path).split()
+    return listing[2] if listing[1:2] == ["blob"] else None
+
+
+def _frozen_problems(root: Path, merge_base: str, base: str, head: str) -> list[str]:
+    if _blob(root, base, FROZEN) is None:
+        return []
+    registry = json.loads(_git(root, "show", f"{base}:{FROZEN}"))
+
+    def changed(path: str) -> bool:
+        return _blob(root, head, path) not in {_blob(root, merge_base, path), _blob(root, base, path)}
+
+    if changed(FROZEN):
+        kept = json.loads(_git(root, "show", f"{head}:{FROZEN}")) if _blob(root, head, FROZEN) else {}
+        return [
+            f"The head drops the frozen gate file {path} from {FROZEN}; a frozen file stays frozen."
+            for path in sorted(set(registry) - set(kept))
+        ] + [
+            f"The head changes {FROZEN} and the frozen gate file {path} together; "
+            "land the registry by its own pull request first."
+            for path in sorted(registry)
+            if changed(path)
+        ]
+    return [
+        f"The head changes the frozen gate file {path} to content {FROZEN} on the base does not accept; "
+        "announce its blob there by its own pull request first."
+        for path, accepted in sorted(registry.items())
+        if changed(path) and _blob(root, head, path) not in accepted
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
@@ -359,6 +400,7 @@ def main(argv: list[str] | None = None) -> int:
     governed = {"branch-lanes.yml"} if "branch-lanes.yml" in tip_workflows and not preflight else set()
     problems += preflight
     problems += _equivalence_problems(tip_workflows, head_workflows)
+    problems += _frozen_problems(root, merge_base, args.base, args.head)
     problems += [
         f"{file}: {problem}"
         for file, workflow in head_workflows.items()

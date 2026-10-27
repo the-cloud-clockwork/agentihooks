@@ -6,10 +6,12 @@ import re
 import sys
 import tempfile
 import traceback
+from collections import Counter
 from pathlib import Path
 from time import process_time
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
+import pytest
 from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_cpu_quota import quota_cpus
@@ -86,50 +88,129 @@ def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, s
     return kept
 
 
-def file_seconds(root: Path, files: list[str]) -> dict[str, float]:
-    durations = root / ".test_durations"
-    durations = json.loads(durations.read_text()) if durations.exists() else {}
-    seconds = dict.fromkeys(files, 0.01)
+def unit_records(root: Path) -> list[dict[str, float]]:
+    path = root / ".test_durations"
+    return [json.loads(path.read_text())] if path.exists() else []
+
+
+def traced_records(root: Path) -> list[dict[str, float]]:
+    folder = Path(os.environ.get("MUTATION_STATS_CACHE", root / ".mutation-stats-cache"))
+    records = [json.loads(path.read_text()) for path in folder.glob("*.json")]
+    return [record["durations"] for record in records if record["status"] == 0]
+
+
+def recorded_seconds(records: list[dict[str, float]]) -> dict[str, float]:
+    durations = {}
+    for record in records:
+        for nodeid, seconds in record.items():
+            nodeid = re.sub(r"@[^\[\]]*$", "", nodeid)
+            durations[nodeid] = max(durations.get(nodeid, 0), seconds)
+    return durations
+
+
+def file_seconds(root: Path, files: list[str], *, split: bool = False) -> dict[str, float]:
+    durations = recorded_seconds([*unit_records(root), *traced_records(root)])
+    return entry_seconds(durations, files, split=split)
+
+
+def entry_seconds(durations: dict[str, float], files: list[str], *, split: bool = False) -> dict[str, float]:
+    seconds = {} if split else dict.fromkeys(files, 0.01)
     by_file = {}
     for entry in files:
         by_file.setdefault(test_file(entry), []).append(entry)
+    matched = set()
     for nodeid, duration in durations.items():
         for entry in by_file.get(test_file(nodeid), ()):
             if selects(entry, nodeid):
-                seconds[entry] += duration
+                key = nodeid if split else entry
+                seconds[key] = seconds.get(key, 0.01) + duration
+                matched.add(entry)
+    for entry in files:
+        if entry not in matched:
+            seconds.setdefault(entry, 0.01)
     return seconds
 
 
+def collect_test_ids(test_runner, files: list[str]) -> list[str]:
+    handle, name = tempfile.mkstemp()
+    os.close(handle)
+    output = Path(name)
+
+    def collect():
+        import pytest
+
+        def finish(session):
+            output.write_text(json.dumps(sorted({item.nodeid for item in session.items})))
+
+        os.environ["MUTANT_UNDER_TEST"] = "stats"
+        try:
+            status = pytest.main(
+                [*test_runner._pytest_add_cli_args, "--collect-only", "-q", "-m", "not wall_clock", *files],
+                plugins=[SimpleNamespace(pytest_collection_finish=finish)],
+            )
+            code = int(status not in (0, 5))
+        except BaseException:
+            traceback.print_exc()
+            code = 1
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(code)
+
+    try:
+        process = multiprocessing.get_context("fork").Process(target=collect)
+        process.start()
+        process.join()
+        if process.exitcode != 0:
+            raise SystemExit(process.exitcode)
+        return json.loads(output.read_text())
+    finally:
+        output.unlink()
+
+
 def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
-    return split_parts(files, file_seconds(root, files), part)
+    # Every part must split identically, and each restores its own traced cache.
+    return split_parts(files, entry_seconds(recorded_seconds(unit_records(root)), files), part)
 
 
 def split_parts(files: list[str], seconds: dict[str, float], part: tuple[int, int]) -> list[str]:
     # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
     index, total = part
+    return partition(files, seconds, total)[index]
+
+
+def partition(files: list[str], seconds: dict[str, float], total: int) -> list[list[str]]:
     parts = [[] for _ in range(total)]
+    loads = Counter()
     for path in sorted(files, key=lambda path: (-seconds[path], path)):
-        min(parts, key=lambda chosen: sum(seconds[path] for path in chosen)).append(path)
-    return sorted(parts[index])
+        chosen = min(range(total), key=loads.__getitem__)
+        parts[chosen].append(path)
+        loads[chosen] += seconds[path]
+    return [sorted(part) for part in parts]
 
 
 def stats_shards(root: Path, files: list[str], count: int, seconds: dict[str, float] | None = None) -> list[list[str]]:
     if seconds is None:
         seconds = file_seconds(root, files)
     # Files that share an xdist group never run concurrently in CI, so they share a shard here.
-    units = []
-    for path in files:
-        groups = set(GROUP.findall((root / test_file(path)).read_text())) - IMPORT_GROUPS
-        keys = {f"group {group}" for group in groups} or {test_file(path)}
+    units, owners, groups = {}, {}, {}
+    for number, path in enumerate(files):
+        name = test_file(path)
+        if name not in groups:
+            groups[name] = set(GROUP.findall((root / name).read_text())) - IMPORT_GROUPS
+        keys = {f"group {group}" for group in groups[name]} or {name}
         members = [path]
-        for unit in [unit for unit in units if unit[0] & keys]:
-            units.remove(unit)
-            keys |= unit[0]
-            members = unit[1] + members
-        units.append((keys, members))
+        for unit in sorted({owners[key] for key in keys if key in owners}):
+            joined, before = units.pop(unit)
+            keys |= joined
+            members = before + members
+        units[number] = (keys, members)
+        owners.update(dict.fromkeys(keys, number))
     shards = [[] for _ in range(max(1, min(count, len(units))))]
-    for _, members in sorted(units, key=lambda unit: (-sum(seconds[path] for path in unit[1]), unit[1])):
-        min(shards, key=lambda shard: sum(seconds[path] for path in shard)).extend(members)
+    loads = Counter()
+    for _, members in sorted(units.values(), key=lambda unit: (-sum(seconds[path] for path in unit[1]), unit[1])):
+        chosen = min(range(len(shards)), key=loads.__getitem__)
+        shards[chosen].extend(members)
+        loads[chosen] += sum(seconds[path] for path in members)
     # pytest drops a package conftest for files given after a file from another folder.
     return [sorted(shard) for shard in shards]
 
@@ -177,6 +258,8 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     ]
     start = process_time()
     status = test_runner.run_stats(tests=tests)
+    # A bucket of only wall clock tests deselects everything, and pytest reports that as no tests collected.
+    status = 0 if status == pytest.ExitCode.NO_TESTS_COLLECTED else status
     dependencies = {}
     if measured:
         from subprocess import check_output
@@ -310,7 +393,10 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
     try:
         if mode == "collect":
             output, key, index, total = Path(stats[0]), stats[1], int(stats[2]), int(stats[3])
-            files = part_files(Path.cwd(), config.pytest_add_cli_args_test_selection, (index, total))
+            files = config.pytest_add_cli_args_test_selection
+            if total > 1:
+                files = collect_test_ids(test_runner, files)
+            files = part_files(Path.cwd(), files, (index, total))
             write_part(output, key, (index, total), collect_file_stats(runner, test_runner, files, workers, Path.cwd()))
             raise SystemExit(0)
         shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)

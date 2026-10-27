@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -497,12 +498,11 @@ def maybe_refresh_on_tool_call(
         return None
     result = _refresh()
     from hooks.context.broadcast import get_broadcast_context
-    from hooks.context.project_cache import defer_project_context, project_context
+    from hooks.context.project_cache import project_context
+    from hooks.context.task_context import offer
 
-    project = project_context(session_id)
+    project = offer(session_id, "PreToolUse", project_context(session_id), claim_delivery)
     if not claim_delivery:
-        if project:
-            defer_project_context(session_id, project)
         return None
     fleet = get_broadcast_context(session_id, result["created_ids"]) if result else None
     return "\n\n".join(part for part in (project, fleet) if part) or None
@@ -560,6 +560,10 @@ def inject_on_session_start(session_id: str = "", cwd: str = "") -> bool:
         from hooks.config import BRAIN_ENABLED
     except ImportError:
         return False
+    if session_id:
+        from hooks.context import brain_routes
+
+        brain_routes.remember(os.environ, session_id)
     if not BRAIN_ENABLED:
         return False
     refreshed = force_refresh()
@@ -568,9 +572,11 @@ def inject_on_session_start(session_id: str = "", cwd: str = "") -> bool:
         from hooks.context.project_cache import project_context
         from hooks.context.project_identity import resolve_project
         from hooks.context.project_sessions import record_session
+        from hooks.context.task_context import offer, restart
 
         record_session(session_id, resolve_project(cwd))
-        context = project_context(session_id, cwd)
+        restart(session_id)
+        context = offer(session_id, "SessionStart", project_context(session_id, cwd))
         if context:
             inject_context(context, skip_compression=True, kind="brain")
     return refreshed
@@ -604,7 +610,8 @@ def get_status() -> dict:
         )
     except ImportError:
         return {"enabled": False, "error": "config not loaded"}
-    from hooks.context.project_cache import cache_scope_mismatch_total
+    from hooks.context import brain_routes, task_context
+    from hooks.context.project_cache import FALLBACK, cache_scope_mismatch_total, scoped_feed_fallback_total
 
     source = _get_source()
     entry_count = 0
@@ -660,5 +667,8 @@ def get_status() -> dict:
         "active_broadcasts": active_broadcasts,
         "content_hash": _content_hash or _load_persisted_hash(),
         "cache_scope_mismatch_total": cache_scope_mismatch_total(),
+        FALLBACK: scoped_feed_fallback_total(),
+        task_context.OUTCOMES: task_context.outcomes(),
+        brain_routes.FAILURES: brain_routes.failures(os.environ),
         "warnings": warnings,
     }

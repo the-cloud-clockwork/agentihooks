@@ -56,7 +56,12 @@ class Admission:
         taken = {agent.seat for agent in self.store.agents(slug)}
         seat = tick._free_seat(slug, lane, taken, self.store.handoff_seat(slug, task_id))
         record = AgentRecord(name, lane, task_id, seat=seat, state="starting", started_at=now, hive=request["hive"])
-        agent = self.store.start_execution(slug, record)
+        previous = self.store.execution_occupants(slug).get(seat)
+        try:
+            agent = self.store.start_execution(slug, record, previous.execution_id if previous else "")
+        except Exception:
+            self._unclaim(slug, task_id, name)
+            raise
         live = self._mark(slug, request, row, name)
         if live is None:
             return None

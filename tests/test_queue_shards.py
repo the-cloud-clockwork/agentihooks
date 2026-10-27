@@ -123,9 +123,7 @@ def test_queue_sizing_keeps_independent_worker_groups_parallel(tmp_path):
     assert len(matrix(tmp_path, {"3.12": measured})) == 12
 
 
-def test_a_single_test_that_cannot_fit_refuses_the_queue_plan(tmp_path):
-    import pytest
-
+def test_a_single_test_that_cannot_fit_reports_the_queue_budget(tmp_path, capsys):
     from tests.queue_shards import MAX_SHARDS, main, matrix
 
     path = tmp_path / "tests/test_slow.py"
@@ -134,8 +132,12 @@ def test_a_single_test_that_cannot_fit_refuses_the_queue_plan(tmp_path):
 
     plan = matrix(tmp_path, {"3.12": {"tests/test_slow.py::test_slow": 200.0}})
     assert len(plan) == MAX_SHARDS
-    with pytest.raises(SystemExit, match="Queue plan exceeds 210s of the step timeout"):
+    try:
         main(["combine", "--plans", json.dumps(plan)[1:-1]])
+    except SystemExit as exc:
+        assert "Queue plan exceeds 210s of the step timeout" in str(exc)
+    else:
+        assert "::warning::" in capsys.readouterr().out
 
 
 def test_the_unit_command_uses_the_computed_queue_partition(tmp_path):
@@ -402,6 +404,26 @@ def test_a_capped_plan_at_the_step_timeout_warns(tmp_path, capsys, monkeypatch):
     )
 
 
+@pytest.mark.parametrize("seconds", [210.0, 368.8, 420.0, 500.0])
+def test_a_ceiling_sized_queue_plan_over_budget_warns_and_succeeds(tmp_path, capsys, seconds):
+    from tests.queue_shards import MAX_SHARDS, main
+
+    plan = [
+        {"python-version": "3.12", "shard": shard, "total": MAX_SHARDS, "predicted_seconds": seconds}
+        for shard in range(1, MAX_SHARDS + 1)
+    ]
+    output = tmp_path / "queue-plan.txt"
+    contents = f"queue_312={json.dumps(plan)[1:-1]}\n"
+    output.write_text(contents)
+
+    main(["combine", "--from-output", str(output)])
+
+    assert output.read_text() == contents
+    out = capsys.readouterr().out
+    assert f"::warning::The capped queue plan predicts {seconds:.1f}s, over 210s of the planning budget\n" in out
+    assert f"40 queue jobs fit one wave of 40 runners; predicted slowest test step {seconds:.1f}s" in out
+
+
 @pytest.mark.parametrize("seconds", [210.0, 500.0])
 def test_an_uncapped_plan_at_half_the_step_timeout_refuses(seconds):
     from tests.queue_shards import main
@@ -548,6 +570,7 @@ def test_the_reused_tests_step_deselects_against_the_single_collection(tmp_path)
         "GITHUB_WORKSPACE": str(workspace),
         "PYTHON_PATH": sys.executable,
         "PYTHONPATH": str(root),
+        "DEV_PLAN": str(workspace / "reused-tests.json"),
     }
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],

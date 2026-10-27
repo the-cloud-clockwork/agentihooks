@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from redis import Redis
 
 STATE_FILE = "hive-create.json"
-NAME_PREFIX = "swarm-hive-"
 WORKSTATION_RECORD = "k8s/agentihooks-swarm-workstation-hive"
 HOST_KEY = "ssh_host_key"
 HOST_PUBLIC_KEY = "ssh_host_public_key"
@@ -96,10 +95,15 @@ def _start(tools: Tools, options: Options) -> dict:
     if saved.get("name") and not saved.get("finished"):
         tools.out(f"hive create {saved['name']}: resuming the unfinished create")
         return saved
-    name = f"{NAME_PREFIX}{int(tools.clock())}"
+    name = machine.name(
+        tools.redis, options.node, assign=not options.dry_run, taken=lambda: machine.held_names(tools.redis, tools.run)
+    )
+    if saved.get("name") == name:
+        tools.out(f"hive create {name}: redeploying the hive of node {options.node}")
+        return {**saved, "finished": False}
     services = json.loads(_kubectl(tools, ["get", "service", "-A", "-o", "json"]))["items"]
     lan_ip = create_render.lan_address(services)
-    port = create_render.next_port(services, lan_ip)
+    port = create_render.kept_port(services, name) or create_render.next_port(services, lan_ip)
     return {"name": name, "record": invite.default_path(name), "ssh_port": port, "lan_ip": lan_ip, "node": options.node}
 
 
@@ -205,24 +209,26 @@ def _ssh_keys(tools: Tools, options: Options) -> str:
     return openbao_kv.summary(tools.state["record"], entries, total)
 
 
-def _files(tools: Tools, options: Options) -> dict[str, str]:
+def _files(tools: Tools, options: Options, cwd: str) -> dict[str, str]:
     state = tools.state
     hive = create_render.Hive(state["name"], state["record"], state["ssh_port"], state["node"], state["lan_ip"])
-    template = create_github.read(tools.run, options.repo, create_render.TEMPLATE_PATH, options.base)
+    template = create_github.read(tools.run, options.repo, create_render.TEMPLATE_PATH, options.base, cwd)
     return create_render.render(template, hive)
 
 
 def _manifests(tools: Tools, options: Options) -> str:
     if tools.state.get("pr"):
         return f"kept pull request {tools.state['pr']}"
-    files = _files(tools, options)
-    if options.dry_run:
-        for path, text in files.items():
-            tools.out(f"--- {path}\n{text}")
-        return f"would open a pull request into {options.repo} {options.base} with {', '.join(files)}"
-    name = tools.state["name"]
-    message = f"Add worker hive {name}\n\nRendered by agentihooks hive create from {create_render.TEMPLATE_PATH}."
-    tools.state["pr"] = create_github.open_pr(tools.run, options.repo, options.base, name, files, message)
+    with tempfile.TemporaryDirectory() as folder:
+        clone = create_github.clone(tools.run, options.repo, folder)
+        files = _files(tools, options, clone)
+        if options.dry_run:
+            for path, text in files.items():
+                tools.out(f"--- {path}\n{text}")
+            return f"would open a pull request into {options.repo} {options.base} with {', '.join(files)}"
+        name = tools.state["name"]
+        message = f"Add worker hive {name}\n\nRendered by agentihooks hive create from {create_render.TEMPLATE_PATH}."
+        tools.state["pr"] = create_github.open_pr(tools.run, options.repo, options.base, name, files, message, clone)
     return f"opened pull request {tools.state['pr']}"
 
 
@@ -238,7 +244,8 @@ def _merged(tools: Tools, options: Options) -> str:
     if found != "MERGED":
         if not create_github.merge(tools.run, url):
             checks = f"pull request {url} checks to pass"
-            _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url))
+            required = create_github.required_checks(tools.run, options.repo, options.base)
+            _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url, required))
             create_github.squash(tools.run, url)
         _wait(
             tools, options, f"pull request {url} to merge", lambda: create_github.pr_state(tools.run, url) == "MERGED"

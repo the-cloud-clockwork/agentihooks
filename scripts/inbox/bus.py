@@ -46,6 +46,10 @@ class Receipt:
     delivery: Delivery
 
 
+class SentElsewhere(ValueError):
+    pass
+
+
 class SeatInbox:
     def __init__(self, bus: Bus, swarm: str):
         if not swarm:
@@ -74,7 +78,7 @@ class SeatInbox:
         except StateConflict:
             event = Envelope.decode(self.state.get(key).value)
             if (event.swarm, event.key, event.data) != (self.swarm, address, asdict(message)):
-                raise ValueError("item id already belongs to a different message") from None
+                raise SentElsewhere("item id already belongs to a different message") from None
         self.bus.events.publish(_subject(self.swarm, address), event)
         publish_wake(self.bus, event)
         return event

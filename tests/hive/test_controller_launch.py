@@ -33,6 +33,7 @@ def setup():
     store.redis.sadd(registry.INDEX, "remote")
     publish_room(store, "remote", hive["max_agents"])
     herdr = Mock(spec=HerdrRuntime)
+    herdr.pass_memo = None
     herdr.choose = Mock()
     herdr._profile_decision.return_value = ProfileDecision("engineer", "task", "engineer")
     herdr._quota_accounts = [Account("claude", "account", "room", 0, 80, 80, 6)]
@@ -165,6 +166,104 @@ def test_publishes_fenced_order_after_host_admission(setup, monkeypatch):
         profile_decision={"validation": {"pid": 12}, "host_overlays": ["engineer-host"]},
         execution=outcome.value.execution,
     )
+
+
+def test_refuses_an_order_the_hive_queue_cannot_serve_before_its_deadline(setup):
+    from scripts.hive import admission, launch, placement_waits
+    from scripts.hive.orders import Orders
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    store, slug = setup.store, setup.config.slug
+    name = store.next_name(slug, "eng")
+    record = AgentRecord(name, "eng", "task", seat=f"eng-1@{slug}", state="starting")
+    store.put_agent(slug, record)
+    store.seats.occupy(record.seat, name, 0)
+    stream = Orders(store.redis).stream("remote")
+    for _ in range(4):
+        store.redis.xadd(stream, {"order": "{}"})
+    task = {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch}
+    outcome = setup.launcher.spawn(SpawnRequest(setup.config, "eng", name, task))
+    refused = (
+        "no hive for eng has room: remote holds 4 queued launches, "
+        "the most its 300 second launch deadline serves at 75 seconds each"
+    )
+    assert outcome == Outcome("spawn", Status.UNAVAILABLE, launch.HIVE, detail=refused)
+    row = placement_waits.read(store, slug)["task"]
+    assert (row["lane"], row["reason"]) == ("eng", refused)
+    assert store.redis.xlen(stream) == 4
+    assert setup.launcher.orders_for("task") is None
+    assert admission.reserve(store.redis, "remote", f"{slug}/{name}", 1) == (True, 0)
+
+
+def test_a_queue_below_the_deadline_budget_is_not_refused(setup):
+    from scripts.hive.orders import Orders
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    stream = Orders(setup.store.redis).stream("remote")
+    for _ in range(3):
+        setup.store.redis.xadd(stream, {"order": "{}"})
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+    request = SpawnRequest(setup.config, "eng", "eng-name", {"id": "task"})
+    assert setup.launcher.queue_refusal(request, selected, 3) == ""
+
+
+def test_a_master_login_order_is_held_to_its_own_launch_deadline(setup):
+    from scripts.hive import placement
+    from scripts.master_login_chain import BUDGET
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    selected = replace(setup.launcher.select(setup.config, "eng", {"id": "task"}), route_kind=placement.MASTER_LOGIN)
+    request = SpawnRequest(setup.config, "master", "master-name", {"id": "task"})
+    fits = BUDGET.order_ttl_ms // 75000
+    assert fits > 4
+    assert setup.launcher.queue_refusal(request, selected, fits - 1) == ""
+    assert setup.launcher.queue_refusal(request, selected, fits) == (
+        f"no hive for master has room: remote holds {fits} queued launches, "
+        f"the most its {BUDGET.order_ttl_ms // 1000} second launch deadline serves at 75 seconds each"
+    )
+
+
+def test_an_order_racing_another_controller_into_a_full_queue_is_refused(setup):
+    from scripts.hive import launch, placement_waits
+    from scripts.hive.orders import Orders
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    store, slug = setup.store, setup.config.slug
+    name = store.next_name(slug, "eng")
+    record = AgentRecord(name, "eng", "task", seat=f"eng-1@{slug}", state="starting")
+    store.put_agent(slug, record)
+    store.seats.occupy(record.seat, name, 0)
+    stream = Orders(store.redis).stream("remote")
+    for _ in range(3):
+        store.redis.xadd(stream, {"order": "{}"})
+    checked = setup.launcher.queue_refusal
+    calls = []
+
+    def racing(request, selected, queued):
+        calls.append(queued)
+        if len(calls) == 2:
+            store.redis.xadd(stream, {"order": "{}"})
+        return checked(request, selected, queued)
+
+    setup.launcher.queue_refusal = racing
+    task = {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch}
+    outcome = setup.launcher.spawn(SpawnRequest(setup.config, "eng", name, task))
+    assert outcome == Outcome(
+        "spawn",
+        Status.UNAVAILABLE,
+        launch.HIVE,
+        detail="no hive for eng has room: remote holds 4 queued launches, "
+        "the most its 300 second launch deadline serves at 75 seconds each",
+    )
+    assert calls == [3, 3, 4]
+    row = placement_waits.read(store, slug)["task"]
+    assert (row["lane"], row["reason"]) == ("eng", outcome.detail)
+    assert store.redis.xlen(stream) == 4
+    assert setup.launcher.orders_for("task") is None
+    endings = [json.loads(raw)["reason"] for raw in store.redis.hvals(store.key(slug, launch.ENDINGS))]
+    assert endings == [outcome.detail]
 
 
 def test_local_mode_keeps_the_original_spawn_call(setup):
@@ -576,20 +675,20 @@ def test_reservation_contention_ends_the_unlaunched_execution(setup):
     from scripts.swarm_v2.runtime.base import Status
 
     request = request_for(setup)
-    from unittest.mock import patch
-
     setup.launcher.wait = Mock(return_value="pending")
-    with patch.object(type(setup.launcher.slots), "reserve", return_value=False):
-        result = setup.launcher.spawn(request)
+    for index in range(6):
+        assert setup.launcher.slots.reserve("claude:account", f"other-{index}", 6, 300000)
+    result = setup.launcher.spawn(request)
+    refused = "account reservation is full: account=claude:account sessions=6 cap=6 five_left=80 week_left=80"
     assert result.status is Status.UNAVAILABLE
-    assert result.detail == "account reservation is full"
+    assert result.detail == refused
     assert result.value == {"harness": "claude"}
     assert result.operation == "spawn"
     assert result.backend == "hive"
     ended = setup.store.execution_registry.records("fixture")[0]
     assert ended.state == "ended"
     assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), ended.execution_id)) == {
-        "reason": "account reservation is full",
+        "reason": refused,
         "generation": ended.generation,
     }
     assert setup.store.redis.xrange(setup.launcher.orders.stream("remote")) == []
@@ -1891,7 +1990,7 @@ def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead
     placement = Placement("kubernetes", master_seats=lambda: frozenset(("master-2",)))
     original = RoutedRuntime(setup.herdr, RuntimeRouter([backend], disabled=disabled, placement=placement))
     fenced = FencedRuntime(setup.store, "fixture", setup.held, original, "distributed")
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: False)
     task = {"id": "master-2"}
     refused = (
         DISABLED.format(backend="hive")
@@ -1902,7 +2001,7 @@ def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead
     with pytest.raises(SwarmError, match=refused):
         fenced.spawn(setup.config, "master", "master name", task)
     backend.spawn.assert_not_called()
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: True)
     assert fenced.placement_refusal("master", task) == ""
 
 

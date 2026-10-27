@@ -539,6 +539,35 @@ def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, ch
 
 
 @pytest.mark.parametrize(
+    "uses",
+    [
+        "./provenance-grader/.github/actions/retry-upload",
+        "./.github/actions/retry-upload",
+        "./provenance-grader/.github/actions/other-upload",
+    ],
+)
+@pytest.mark.parametrize("bounded", [False, True])
+def test_protected_provenance_admits_only_the_retried_evidence_upload(uses, bounded):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {"steps": ci_reuse.duration_provenance_steps()}
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["steps"] = ci_reuse.retried_duration_provenance_steps()
+    if bounded:
+        head["jobs"]["select"]["steps"][0]["env"] = {
+            "GIT_HTTP_LOW_SPEED_LIMIT": "1000",
+            "GIT_HTTP_LOW_SPEED_TIME": "60",
+        }
+    head["jobs"]["select"]["steps"][-1]["uses"] = uses
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    admitted = uses == "./provenance-grader/.github/actions/retry-upload"
+    assert problems == ([] if admitted else ["The head skips reuse without protected durations provenance."])
+
+
+@pytest.mark.parametrize(
     ("change", "red"),
     [
         ({}, False),
@@ -549,9 +578,13 @@ def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, ch
         ({"set": {"files_1": "${{ steps.other.outputs.files_1 }}"}}, True),
         ({"drop": ("files_1", "files_2", "files_3"), "set": {"extra": "1"}}, True),
         ({"absent": ("files_3",), "drop": ("files_1", "files_2")}, True),
+        ({"set": {"sonar": "${{ steps.select.outputs.sonar }}"}}, False),
+        ({"set": {"sonar": "skip"}}, True),
+        ({"drop": ("legs",), "set": {"sonar": "${{ steps.select.outputs.sonar }}"}}, True),
+        ({"base": {"sonar": "skip"}, "set": {"sonar": "${{ steps.select.outputs.sonar }}"}}, True),
     ],
 )
-def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs(change, red):
+def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs_or_adding_sonar(change, red):
     from scripts import ci_reuse
 
     base = _workflow()
@@ -565,6 +598,7 @@ def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs(ch
     }
     for key in change.get("absent", ()):
         del base["jobs"]["select"]["outputs"][key]
+    base["jobs"]["select"]["outputs"].update(change.get("base", {}))
     base["jobs"]["gate"]["needs"].append("select")
     head = copy.deepcopy(base)
     outputs = head["jobs"]["select"]["outputs"]
@@ -717,6 +751,28 @@ def test_the_protected_grader_admits_only_the_exact_paged_reuse_variant(weakened
         step["run"] = step["run"].replace("--page-size 5", "--page-size 100")
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, policy)
     assert bool(problems) == weakened, problems
+
+
+@pytest.mark.parametrize("uses", ["./.github/actions/retry-upload", "./.github/actions/other-upload"])
+@pytest.mark.parametrize("anton", [False, True])
+def test_the_protected_grader_admits_only_the_retried_evidence_upload(uses, anton):
+    from scripts import ci_reuse
+
+    base, head = _protected_pair()
+    head["jobs"]["reuse"] = ci_reuse.retried_reuse_job()
+    policy = _POLICY if anton else None
+    if anton:
+        head["jobs"]["reuse"]["runs-on"] = _anton()
+        [install] = [
+            step for step in head["jobs"]["reuse"]["steps"] if step.get("name") == "Install metadata dependencies"
+        ]
+        install["env"] = {"PYTHONNOUSERSITE": "1"}
+    [publish] = [
+        step for step in head["jobs"]["reuse"]["steps"] if step.get("name") == "Publish protected tested tree evidence"
+    ]
+    publish["uses"] = uses
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, policy)
+    assert bool(problems) == (uses != "./.github/actions/retry-upload"), problems
 
 
 def test_a_head_cannot_replace_the_protected_reuse_decision():
@@ -994,6 +1050,44 @@ def test_the_tests_gate_may_start_requiring_the_postgres_scenario_on_pull_reques
     assert gate_protected.grade(base, config, head, config, _TODAY, policy) == []
 
 
+@pytest.mark.parametrize("weakened", [False, True])
+def test_the_tests_gate_may_skip_sonar_when_selection_marks_the_pull_request_test_only(weakened):
+    from scripts import ci_reuse
+
+    head = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    base = copy.deepcopy(head)
+    del base["test.yml"]["jobs"]["select"]["outputs"]["sonar"]
+    step = base["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    for old, new in reversed(ci_reuse.TEST_ONLY_SONAR):
+        step["run"] = step["run"].replace(new, old)
+    gate = head["test.yml"]["jobs"]["gate-required"]
+    assert ci_reuse.test_only_sonar(base["test.yml"]["jobs"]["gate-required"]["steps"]) == gate["steps"]
+    assert '- (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)' in gate["steps"][0]["run"]
+    if weakened:
+        gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('"skip"', '"skip" or true')
+    config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    problems = gate_protected.grade(base, config, head, config, _TODAY, policy)
+    assert bool(problems) == weakened, problems
+
+
+def test_a_base_skipping_sonar_on_test_only_changes_still_refuses_a_head_that_drops_the_writer_lock():
+    from scripts import ci_reuse
+
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    gate = base["test.yml"]["jobs"]["gate-required"]
+    assert ci_reuse.TEST_ONLY_SONAR[0][1] in gate["steps"][0]["run"]
+    assert ci_reuse.POSTGRES_REQUIRED[1] in gate["steps"][0]["run"]
+    head = copy.deepcopy(base)
+    step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    step["run"] = step["run"].replace(ci_reuse.POSTGRES_REQUIRED[1], ci_reuse.POSTGRES_REQUIRED[0])
+    config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade(base, config, base, config, _TODAY, policy) == []
+    problems = gate_protected.grade(base, config, head, config, _TODAY, policy)
+    assert any("changes its steps" in problem for problem in problems), problems
+
+
 @pytest.mark.parametrize("existing", [False, True])
 def test_a_declared_documentation_check_cannot_switch_to_legacy_aggregation(existing):
     from scripts import ci_reuse
@@ -1151,6 +1245,8 @@ def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
     [
         ('then .value.result == "success"', 'then .value.result != "failure"'),
         ('"semgrep", "sonar"', '"semgrep"'),
+        ('"sonar", "writer-lock"]', '"sonar"]'),
+        ('then ["sonar"] else [] end', 'then ["sonar"] else ["sonar"] end'),
         ("exit 1", "exit 0"),
     ],
 )
@@ -1288,6 +1384,83 @@ def test_the_separate_summary_accepts_only_the_reviewed_shell(shell, declared_on
         assert problems == []
     else:
         assert "The test summary must use the reviewed reporting job." in problems
+
+
+def _separate_summary(head, steps):
+    head["jobs"]["test-summary"] = {
+        "needs": ["unit", "unit-selected"],
+        "if": "${{ always() }}",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "steps": steps,
+    }
+    head["jobs"]["unit-selected"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["gate-required"]["needs"].append("unit-selected")
+    return {"not_gates": {"test.yml/test-summary": _entry()}}
+
+
+@pytest.mark.parametrize("pipefail", [False, True])
+def test_the_separate_summary_may_retry_each_download_once(pipefail):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.retried_summary(ci_reuse.summary_steps())
+    if pipefail:
+        steps = ci_reuse.pipefail_summary(steps)
+    config = _separate_summary(head, steps)
+    assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _TODAY, _POLICY) == []
+
+
+def test_the_retried_summary_waits_and_downloads_each_report_once_more():
+    from scripts import ci_reuse
+
+    checkout, durations, flakes, summarize = ci_reuse.summary_steps()
+    steps = ci_reuse.retried_summary([checkout, durations, flakes, summarize])
+    assert [step.get("name") for step in steps] == [
+        None,
+        "Download this run's test durations",
+        "Download this run's test durations, wait before attempt 2",
+        "Download this run's test durations, attempt 2",
+        "Download this run's test flakes",
+        "Download this run's test flakes, wait before attempt 2",
+        "Download this run's test flakes, attempt 2",
+        "Summarize this run's tests",
+    ]
+    assert steps[0] == checkout and steps[-1] == summarize
+    assert steps[1] == {**durations, "id": "download-this-runs-test-durations", "continue-on-error": True}
+    assert steps[4] == {**flakes, "id": "download-this-runs-test-flakes", "continue-on-error": True}
+    for first, wait, second in (steps[1:4], steps[4:7]):
+        retry = f"steps.{first['id']}.outcome == 'failure'"
+        assert wait == {
+            "name": f"{first['name']}, wait before attempt 2",
+            "if": retry,
+            "shell": "bash",
+            "run": f'echo "::warning::{first["name"]} failed, as an artifact service outage does; '
+            'retrying it once in 30 seconds."\nsleep 30\n',
+        }
+        assert second == {
+            "name": f"{first['name']}, attempt 2",
+            "if": retry,
+            "uses": first["uses"],
+            "with": first["with"],
+        }
+
+
+@pytest.mark.parametrize("change", ["second continues", "no wait", "first fails the job"])
+def test_a_separate_summary_cannot_weaken_its_download_retry(change):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.retried_summary(ci_reuse.summary_steps())
+    if change == "second continues":
+        steps[3] = {**steps[3], "continue-on-error": True}
+    elif change == "no wait":
+        del steps[2]
+    else:
+        steps[1] = {key: value for key, value in steps[1].items() if key != "continue-on-error"}
+    config = _separate_summary(head, steps)
+    problems = gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _TODAY, _POLICY)
+    assert "The test summary must use the reviewed reporting job." in problems
 
 
 @pytest.mark.parametrize("change", ["steps", "needs", "if", "runs-on", "timeout-minutes", "env"])
@@ -1647,7 +1820,7 @@ def test_a_weakened_forwarded_statistics_form_is_red(before, after):
     )
 
 
-@pytest.mark.parametrize("prefix", ["", _SELECTION_DIAGNOSTIC])
+@pytest.mark.parametrize("prefix", ["", _SELECTION_DIAGNOSTIC], ids=["bare", "after_selection_diagnostic"])
 def test_the_forwarded_statistics_line_without_the_selection_diagnostic_is_red(prefix):
     base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     head = copy.deepcopy(base)
@@ -1687,3 +1860,115 @@ def test_the_forwarded_statistics_form_passes_only_a_forwarded_skip(plan, forwar
     result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
     expected = plan == "success" and (stats == "success" or (stats == "skipped" and forwarded == "true"))
     assert (result.returncode == 0) == expected, result.stdout + result.stderr
+
+
+def _put(repo: Path, files: dict, message: str) -> str:
+    for name, text in files.items():
+        path = repo / name
+        if text is None:
+            path.unlink()
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _hash(text: str) -> str:
+    return subprocess.run(
+        ["git", "hash-object", "--stdin"], input=text, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _registry(*accepted: str) -> str:
+    return json.dumps({"scripts/gate.py": list(accepted)})
+
+
+@pytest.fixture
+def frozen(repo):
+    _commit(repo, {"test.yml": _workflow()}, {}, "base")
+    _put(repo, {"scripts/gate.py": "old\n", gate_protected.FROZEN: _registry(_hash("old\n"))}, "freeze")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    return repo
+
+
+def _frozen_grade(repo, head, capsys):
+    _git(repo, "checkout", "-q", "dev")
+    code = gate_protected.main(["--root", str(repo), "--head", head])
+    return code, capsys.readouterr().out
+
+
+def test_a_planted_edit_to_a_frozen_gate_file_is_red(frozen, capsys):
+    head = _put(frozen, {"scripts/gate.py": "planted\n"}, "plant")
+    code, out = _frozen_grade(frozen, head, capsys)
+    assert code == 1
+    assert (
+        f"::error::The head changes the frozen gate file scripts/gate.py to content {gate_protected.FROZEN} "
+        "on the base does not accept; announce its blob there by its own pull request first.\n"
+    ) in out
+
+
+def test_deleting_a_frozen_gate_file_is_red(frozen, capsys):
+    head = _put(frozen, {"scripts/gate.py": None}, "delete")
+    assert _frozen_grade(frozen, head, capsys)[0] == 1
+
+
+def test_announcing_a_blob_alone_is_green(frozen, capsys):
+    head = _put(frozen, {gate_protected.FROZEN: _registry(_hash("old\n"), _hash("new\n"))}, "announce")
+    code, out = _frozen_grade(frozen, head, capsys)
+    assert code == 0
+    assert out.endswith(": 0 protected gate problems\n")
+
+
+def test_landing_an_announced_blob_is_green(frozen, capsys):
+    _git(frozen, "checkout", "-q", "dev")
+    _put(frozen, {gate_protected.FROZEN: _registry(_hash("old\n"), _hash("new\n"))}, "announce")
+    _git(frozen, "checkout", "-q", "-b", "land")
+    head = _put(frozen, {"scripts/gate.py": "new\n"}, "land")
+    assert _frozen_grade(frozen, head, capsys)[0] == 0
+
+
+def test_announcing_and_landing_in_one_pull_request_is_red(frozen, capsys):
+    head = _put(
+        frozen,
+        {"scripts/gate.py": "new\n", gate_protected.FROZEN: _registry(_hash("old\n"), _hash("new\n"))},
+        "both",
+    )
+    code, out = _frozen_grade(frozen, head, capsys)
+    assert code == 1
+    assert (
+        f"::error::The head changes {gate_protected.FROZEN} and the frozen gate file scripts/gate.py together; "
+        "land the registry by its own pull request first.\n"
+    ) in out
+
+
+@pytest.mark.parametrize("registry", ["{}", None])
+def test_dropping_a_path_from_the_registry_is_red(frozen, capsys, registry):
+    head = _put(frozen, {gate_protected.FROZEN: registry}, "unfreeze")
+    code, out = _frozen_grade(frozen, head, capsys)
+    assert code == 1
+    assert "::error::The head drops the frozen gate file scripts/gate.py from" in out
+
+
+def test_a_head_behind_a_landed_frozen_change_is_green(frozen, capsys):
+    head = _put(frozen, {"notes.txt": "unrelated\n"}, "unrelated")
+    _git(frozen, "checkout", "-q", "dev")
+    _put(frozen, {gate_protected.FROZEN: _registry(_hash("old\n"), _hash("new\n"))}, "announce")
+    _put(frozen, {"scripts/gate.py": "new\n"}, "land")
+    assert _frozen_grade(frozen, head, capsys)[0] == 0
+
+
+def test_a_base_without_a_registry_freezes_nothing(repo, capsys):
+    _commit(repo, {"test.yml": _workflow()}, {}, "base")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _put(repo, {"scripts/gate_protected.py": "anything\n"}, "edit")
+    assert _frozen_grade(repo, head, capsys)[0] == 0
+
+
+def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_current_content():
+    registry = json.loads((_ROOT / gate_protected.FROZEN).read_text())
+    rulesets = {str(path.relative_to(_ROOT)) for path in (_ROOT / ".github/rulesets").glob("*.json")}
+    assert set(registry) == {"scripts/gate_protected.py", ".github/workflows/gate-protected.yml", *rulesets}
+    for path, accepted in registry.items():
+        assert _git(_ROOT, "rev-parse", f"HEAD:{path}") in accepted, path

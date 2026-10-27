@@ -29,6 +29,7 @@ def test_sonar_remains_required_during_promotion_trigger_rollout():
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
         "${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
+        "${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && needs.select.outputs.sonar != 'skip' }}",
     )
     assert not sonar.get("continue-on-error")
     gate = next(step for step in sonar["steps"] if step.get("name") == "SonarQube Quality Gate")
@@ -36,6 +37,13 @@ def test_sonar_remains_required_during_promotion_trigger_rollout():
     assert not gate.get("continue-on-error")
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+
+
+def test_sonar_gives_dev_push_runs_thirty_minutes_and_keeps_fifteen_elsewhere():
+    assert (
+        _workflow()["jobs"]["sonar"]["timeout-minutes"]
+        == "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 30 || 15 }}"
+    )
 
 
 def test_sonar_restores_no_cache_since_the_runner_image_carries_the_downloads():
@@ -216,3 +224,41 @@ def test_secret_detection_includes_all_tracked_text_and_hidden_configuration():
     assert properties["sonar.scanner.excludeHiddenFiles"] == "false"
     assert properties["sonar.sources"] == "."
     assert "tests/**" in properties["sonar.exclusions"].split(",")
+    assert ".git/**" in properties["sonar.exclusions"].split(",")
+
+
+@pytest.mark.parametrize(
+    ("paths", "mark"),
+    [
+        (["tests/test_a.py", "tests/registry/FLOORS.json"], "skip"),
+        (["tests/test_a.py", "scripts/a.py"], "run"),
+        (["scripts/a.py", "tests/test_a.py"], "run"),
+        (["docs/tests/a.md"], "run"),
+        ([], "run"),
+    ],
+)
+def test_selection_marks_sonar_skip_only_when_every_changed_path_is_under_tests(tmp_path, paths, mark):
+    [step] = [step for step in _workflow()["jobs"]["select"]["steps"] if step.get("id") == "select"]
+    lines = step["run"].splitlines()
+    start = next(index for index, line in enumerate(lines) if "diff --no-ext-diff" in line)
+    end = next(index for index, line in enumerate(lines) if line.startswith('echo "sonar=$sonar"'))
+    git = tmp_path / "bin" / "git"
+    git.parent.mkdir()
+    if paths:
+        git.write_text("#!/usr/bin/env bash\nprintf '%s\\0' " + " ".join(f"'{path}'" for path in paths) + "\n")
+    else:
+        git.write_text("#!/usr/bin/env bash\n")
+    git.chmod(0o755)
+    output = tmp_path / "output"
+    env = dict(
+        os.environ,
+        PATH=f"{git.parent}:{os.environ['PATH']}",
+        GITHUB_OUTPUT=str(output),
+        GITHUB_WORKSPACE=str(tmp_path),
+        RUNNER_TEMP=str(tmp_path),
+    )
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", "\n".join(lines[start : end + 1])], env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output.read_text() == f"sonar={mark}\n"

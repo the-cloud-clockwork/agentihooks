@@ -3,12 +3,16 @@ import os
 import re
 import shlex
 import subprocess
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
 from scripts import ci_select
+from tests.shard_budget import step_seconds
 
 pytestmark = pytest.mark.unit
 
@@ -72,6 +76,179 @@ def test_a_change_to_the_test_harness_runs_the_full_suite(repo, changed):
 
 def test_a_source_change_selects_the_tests_that_import_it(repo):
     assert decide(repo, ["hooks/sample.py"]) == ("selected", [["tests/test_sample.py"]])
+
+
+def test_a_source_change_selects_recorded_runtime_dependents(repo):
+    write(
+        repo,
+        {
+            "hooks/runtime.py": "from hooks.sample import VALUE\nDEADLINE = VALUE + 1\n",
+            "tests/test_runtime.py": "from hooks.runtime import DEADLINE\n",
+        },
+    )
+    manifest = {
+        "units": ["hooks/sample.py::<module>", "hooks/runtime.py::<module>"],
+        "tests": {
+            "tests/test_runtime.py::TestRuntime::test_deadline": {"units": [0, 1]},
+            "tests/test_other.py::test_unrelated": {"units": [1]},
+        },
+    }
+    scope, legs = ci_select.decide(repo, ["hooks/sample.py"], {}, 3, manifest=manifest)
+    assert scope == "selected"
+    assert {path for leg in legs for path in leg} == {"tests/test_sample.py", "tests/test_runtime.py"}
+
+
+def test_selected_tests_expose_a_planted_runtime_dependency_failure(repo):
+    write(
+        repo,
+        {
+            "hooks/__init__.py": "",
+            "hooks/sample.py": "VALUE = 2\n",
+            "hooks/runtime.py": "from hooks.sample import VALUE\nDEADLINE = VALUE + 1\n",
+            "tests/test_sample.py": "from hooks.sample import VALUE\ndef test_positive(): assert VALUE > 0\n",
+            "tests/test_runtime.py": "from hooks.runtime import DEADLINE\ndef test_deadline(): assert DEADLINE == 2\n",
+        },
+    )
+    manifest = {
+        "units": ["hooks/sample.py::<module>"],
+        "tests": {"tests/test_runtime.py::test_deadline": {"units": [0]}},
+    }
+    outcomes = []
+    for recorded in (None, manifest):
+        scope, legs = ci_select.decide(repo, ["hooks/sample.py"], {}, 12, manifest=recorded)
+        assert scope == "selected"
+        files = [path for leg in legs for path in leg]
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import runpy, sys; [test() for path in sys.argv[1:] for name, test in runpy.run_path(path).items() "
+                "if name.startswith('test_') and callable(test)]",
+                *files,
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        outcomes.append((len(files), result.returncode))
+        if recorded is not None:
+            assert "AssertionError" in result.stderr
+    assert outcomes == [(1, 0), (2, 1)]
+
+
+def test_recorded_dependents_still_use_parallel_selected_legs(repo):
+    write(repo, {"tests/test_runtime.py": "import os\n", "tests/test_deleted.py": "import os\n"})
+    (repo / "tests/test_deleted.py").unlink()
+    manifest = {
+        "units": ["hooks/sample.py::deadline"],
+        "tests": {
+            "tests/test_runtime.py::test_deadline[first]": {"units": [0]},
+            "tests/test_runtime.py::test_deadline[second]": {"units": [0]},
+            "tests/test_deleted.py::test_deadline": {"units": [0]},
+            "tests/test bad.py::test_deadline": {"units": [0]},
+        },
+    }
+    scope, legs = ci_select.decide(
+        repo,
+        ["hooks/sample.py"],
+        seconds(test_sample=ci_select.LEG_SECONDS, test_runtime=ci_select.LEG_SECONDS),
+        12,
+        manifest=manifest,
+    )
+    assert scope == "selected"
+    assert sorted(legs) == [["tests/test_runtime.py"], ["tests/test_sample.py"]]
+
+
+def test_main_reads_the_same_recorded_coverage_as_mutation(repo, monkeypatch, tmp_path, capsys):
+    write(repo, {"tests/test_runtime.py": "import os\n"})
+    git(repo, "add", "tests/test_runtime.py")
+    git(repo, "commit", "-m", "runtime baseline")
+    write(repo, {"hooks/sample.py": "VALUE = 2\n"})
+    git(repo, "add", "hooks/sample.py")
+    git(repo, "commit", "-m", "change")
+    monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
+    manifest = {
+        "units": ["hooks/sample.py::<module>"],
+        "tests": {"tests/test_runtime.py::test_deadline": {"units": [0]}},
+    }
+    calls = []
+
+    def now(zone):
+        assert zone is UTC
+        return datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(ci_select, "datetime", SimpleNamespace(now=now))
+
+    def record(repository, before):
+        calls.append(repository)
+        assert before == "2026-10-25T12:00:00Z"
+        return {"id": 123}, manifest
+
+    monkeypatch.setattr(ci_select, "find_record", record)
+    output = run_main(repo, monkeypatch, tmp_path, "pull_request")
+    assert calls == ["owner/repo"]
+    assert "scope=selected" in output
+    assert "tests/test_runtime.py" in output
+    assert "Recorded coverage from dev run 123" in capsys.readouterr().out
+
+
+def test_a_missing_record_preserves_import_selection(repo, monkeypatch, tmp_path):
+    write(repo, {"hooks/sample.py": "VALUE = 2\n"})
+    git(repo, "add", "hooks/sample.py")
+    git(repo, "commit", "-m", "change")
+    monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
+    monkeypatch.setattr(ci_select, "find_record", lambda *_: None)
+    output = run_main(repo, monkeypatch, tmp_path, "pull_request")
+    assert "scope=selected" in output
+    assert "files_1=tests/test_sample.py\n" in output
+
+
+@pytest.mark.parametrize("path", ["scripts/config.json", "docs/notes.md", "other.py"])
+def test_main_does_not_fetch_coverage_for_changes_outside_python_sources(repo, monkeypatch, tmp_path, path):
+    write(repo, {path: "{}"})
+    git(repo, "add", path)
+    git(repo, "commit", "-m", "change")
+    monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
+
+    def record(*_):
+        pytest.fail("Coverage lookup is unnecessary for a change outside Python sources")
+
+    monkeypatch.setattr(ci_select, "find_record", record)
+    run_main(repo, monkeypatch, tmp_path, "pull_request")
+
+
+def test_the_workflow_supplies_recorded_coverage_access():
+    job = yaml.safe_load(WORKFLOW.read_text())["jobs"]["select"]
+    select = next(step for step in job["steps"] if step.get("name") == "Select the tests the change reaches")
+    assert select["env"]["CI_SELECT_REPOSITORY"] == "${{ github.repository }}"
+    assert select["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token || github.token }}"
+    assert job["permissions"]["actions"] == "read"
+    token = next(step for step in job["steps"] if step.get("id") == "app-token")
+    assert (
+        "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository"
+        in token["if"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("fork", "actor", "expected"),
+    [(False, "nestorcolt", True), (True, "nestorcolt", False), (False, "dependabot[bot]", False)],
+)
+def test_recorded_coverage_token_supports_unprivileged_pull_requests(fork, actor, expected):
+    job = yaml.safe_load(WORKFLOW.read_text())["jobs"]["select"]
+    token = next(step for step in job["steps"] if step.get("id") == "app-token")
+    condition = token["if"].replace("&&", "and").replace("||", "or")
+    values = {
+        "github.event_name": "pull_request",
+        "github.event.pull_request.head.repo.full_name": "fork/repo" if fork else "owner/repo",
+        "github.repository": "owner/repo",
+        "github.actor": actor,
+    }
+    for name in sorted(values, key=len, reverse=True):
+        condition = condition.replace(name, repr(values[name]))
+    assert eval(condition) is expected
+    select = next(step for step in job["steps"] if step.get("id") == "select")
+    assert '"$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select' in select["run"]
 
 
 def test_a_changed_test_file_selects_itself(repo):
@@ -239,10 +416,23 @@ def test_a_selection_at_its_leg_budget_still_runs_selected(heavy):
     assert len(legs) == 3
 
 
-def test_a_selection_over_its_leg_budget_runs_the_full_suite(heavy):
+def test_a_selection_over_its_leg_budget_stays_selected_within_its_leg_limit(heavy):
     budget = ci_select.LEG_SECONDS
     durations = seconds(test_sample=1.0, test_heavy1=budget, test_heavy2=budget, test_heavy3=budget - 0.5)
-    assert decide(heavy, ["hooks/sample.py"], durations) == ("full", [])
+    scope, legs = decide(heavy, ["hooks/sample.py"], durations)
+    assert scope == "selected"
+    assert len(legs) == 3
+    assert sorted(file for leg in legs for file in leg) == [
+        "tests/test_heavy1.py",
+        "tests/test_heavy2.py",
+        "tests/test_heavy3.py",
+        "tests/test_sample.py",
+    ]
+
+
+def test_a_harness_change_runs_the_full_suite_however_large_the_selection(heavy):
+    durations = seconds(test_sample=1.0, **{f"test_heavy{index}": 10 * ci_select.LEG_SECONDS for index in range(1, 4)})
+    assert decide(heavy, ["hooks/sample.py", "pyproject.toml"], durations) == ("full", [])
 
 
 @pytest.mark.parametrize(("total", "count"), [(1.0, 1), (180.0, 1), (180.5, 2), (360.0, 2), (360.5, 3)])
@@ -402,7 +592,10 @@ def test_the_workflow_keeps_a_one_file_change_selected_after_dev_moves(repo, mon
         "github.event.pull_request.head.sha": head,
         "github.base_ref": "dev",
         "github.event_name": "pull_request",
+        "github.repository": "owner/repo",
+        "steps.app-token.outputs.token || github.token": "token",
     }
+    monkeypatch.setattr(ci_select, "find_record", lambda *_: None)
     step = next(s for s in yaml.safe_load(WORKFLOW.read_text())["jobs"]["select"]["steps"] if s.get("id") == "select")
     for name, value in step["env"].items():
         monkeypatch.setenv(name, EXPRESSION.sub(lambda found: context[found.group(1)], value))
@@ -514,6 +707,22 @@ def test_the_workflow_selects_nine_legs_for_a_large_change(repo):
     scope, legs = decide(repo, ["hooks/sample.py"], durations, workflow_legs())
     assert scope == "selected"
     assert len(legs) == 9
+
+
+def test_the_workflow_caps_a_selection_at_the_unit_shard_count(repo):
+    write(repo, {f"tests/test_tick{index}.py": "from hooks import sample\n" for index in range(1, 31)})
+    durations = seconds(test_sample=15.0, **{f"test_tick{index}": ci_select.LEG_SECONDS for index in range(1, 31)})
+    scope, legs = decide(repo, ["hooks/sample.py"], durations, workflow_legs())
+    assert scope == "selected"
+    assert len(legs) == workflow_legs() == len(jobs()["unit"]["strategy"]["matrix"]["shard"])
+    assert sorted(file for leg in legs for file in leg) == sorted(
+        ["tests/test_sample.py", *(f"tests/test_tick{index}.py" for index in range(1, 31))]
+    )
+
+
+def test_a_selected_leg_has_the_time_of_a_full_suite_shard():
+    assert step_seconds("unit-selected") >= step_seconds("unit")
+    assert jobs()["unit-selected"]["timeout-minutes"] >= jobs()["unit"]["timeout-minutes"]
 
 
 def test_the_workflow_hands_every_leg_its_files(repo, monkeypatch, tmp_path, capsys):

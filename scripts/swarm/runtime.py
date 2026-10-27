@@ -6,9 +6,11 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -310,6 +312,7 @@ def deferring(herdr: "HerdrRuntime") -> "HerdrRuntime":
 
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
+    pass_memo: dict | None = None
 
     def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call, defer_master_canary=False):
         self.home, self.run, self.herdr = home, run, herdr
@@ -323,6 +326,14 @@ class HerdrRuntime:
         self.end, self.reap = reaper.retire, reaper.reap
         self._quota_previous = {}
         self._host_spent = capacity.no_spawns
+        self._reserving = threading.Lock()
+
+    def launch_room(self, config):
+        if not hasattr(self, "_quota_accounts"):
+            return 1
+        from scripts.swarm.capacity import free_seats
+
+        return sum(free_seats(row) for row in self._quota_open(""))
 
     def has_capacity(self, config):
         environ = dict(os.environ)
@@ -587,8 +598,15 @@ class HerdrRuntime:
             )
         if not decision.bundle_revision:
             kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
-            decision = replace(decision, bundle_revision=kept or overlays.revision())
+            decision = replace(decision, bundle_revision=kept or self._bundle_revision())
         return decision
+
+    def _bundle_revision(self):
+        if self.pass_memo is None:
+            return timing.call(overlays.revision)
+        if "bundle_revision" not in self.pass_memo:
+            self.pass_memo["bundle_revision"] = timing.call(overlays.revision)
+        return self.pass_memo["bundle_revision"]
 
     def planned_account(self, task_id, agent):
         planned = getattr(self, "_quota_tasks", {}).get(task_id)
@@ -612,12 +630,47 @@ class HerdrRuntime:
             row = next(row for row in eligible if row.name == seat.account)
         return row
 
-    def _reserve_account(self, account, lane, agent):
+    def _claim_account(self, agent, preferred, lane):
+        with self._reserving:
+            account = self._quota_account(agent, preferred, None, lane)
+            self._reserve_account(account, lane, agent)
+        return account
+
+    def _admitted_account(self, agent, name, lane, environ):
+        from scripts.swarm import capacity
+
+        read = self.quota_accounts or capacity.accounts
+        rows = read(environ, time.time(), refresh=False)
+        rows = capacity.unreserved(rows) if lane == MASTER else rows
+        row = next((row for row in rows if (row.harness, row.name) == (agent, name)), None)
+        if row is None or not capacity.free_seats(row):
+            raise SpawnError(
+                f"admitted account {name} has no {agent} seat on this hive; returned for controller readmission",
+                "unavailable",
+            )
+        return row
+
+    def _route_account(self, agent, saved, task_id, lane, admitted):
+        if admitted:
+            return None, self._admitted_account(agent, saved.get("account"), lane, dict(os.environ))
+        account = self._claim_account(agent, saved.get("account") or self.planned_account(task_id, agent), lane)
+        return account, account
+
+    @contextmanager
+    def _seat_returned_on_failure(self, account, lane, agent):
+        try:
+            yield
+        except BaseException:
+            with self._reserving:
+                self._reserve_account(account, lane, agent, -1)
+            raise
+
+    def _reserve_account(self, account, lane, agent, seats=1):
         if account is not None:
             if lane in getattr(self, "_quota_allocations", {}):
-                self._quota_allocations[lane][agent] -= 1
+                self._quota_allocations[lane][agent] -= seats
             self._quota_accounts = [
-                replace(row, sessions=row.sessions + 1)
+                replace(row, sessions=row.sessions + seats)
                 if (row.harness, row.name) == (account.harness, account.name)
                 else row
                 for row in self._quota_accounts
@@ -672,13 +725,19 @@ class HerdrRuntime:
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
         route_kind = self._route_kind(lane, want or requested or saved.get("harness", ""), task, config.slug)
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
+        admitted = bool(relaunch and relaunch.get("account") and task.get("admitted_execution_id"))
         saved = (
             self._quota_transfer(saved, profile, environ, lane, want, self._planned_slot(task["id"]))
-            if saved and quota_transfer and route_kind != "interactive"
+            if saved and quota_transfer and route_kind != "interactive" and not admitted
             else saved
         )
         avoid = (task.get("transfer") or {}).get("avoid_harness") or task.get("avoid_harness")
-        if saved and not quota_transfer and (saved["harness"] != want if want else saved["harness"] == avoid):
+        if (
+            saved
+            and not quota_transfer
+            and not admitted
+            and (saved["harness"] != want if want else saved["harness"] == avoid)
+        ):
             saved = {}
         if route_kind == "interactive" and lane == MASTER:
             agent, reason = want or requested or saved.get("harness") or "claude", "interactive login"
@@ -694,7 +753,7 @@ class HerdrRuntime:
         agent, reason = (
             (agent, reason)
             if route_kind == "interactive"
-            else self._quota_choice(agent, reason, bool(requested or quota_transfer or want), lane)
+            else self._quota_choice(agent, reason, bool(requested or quota_transfer or want or admitted), lane)
         )
         if saved and agent != saved["harness"]:
             saved = {key: value for key, value in saved.items() if key not in ("model", "account")}
@@ -751,32 +810,30 @@ class HerdrRuntime:
         )
         rc = remote_control.decision(lane, agent, route_kind, config.slug, login) if front else {}
         account = None
-        if hasattr(self, "_quota_accounts") and route_kind != "interactive":
-            account = self._quota_account(
-                agent, saved.get("account") or self.planned_account(task["id"], agent), None, lane
+        if route_kind != "interactive" and (hasattr(self, "_quota_accounts") or (admitted and quota_transfer)):
+            account, routed = self._route_account(agent, saved, task["id"], lane, admitted)
+            route = ["--route", routed.name]
+        with self._seat_returned_on_failure(account, lane, agent):
+            placed = self._account_launch(
+                config,
+                lane,
+                task,
+                name,
+                [
+                    *argv,
+                    "--",
+                    *route,
+                    *remote_control.arguments(rc),
+                    *_model_args(
+                        agent,
+                        picked.__dict__,
+                        environ,
+                        effort_range.bounds(config, lane),
+                        preserve=preserves_effort(bool(saved), lane),
+                    ),
+                    *mode,
+                ],
             )
-            route = ["--route", account.name]
-        placed = self._account_launch(
-            config,
-            lane,
-            task,
-            name,
-            [
-                *argv,
-                "--",
-                *route,
-                *remote_control.arguments(rc),
-                *_model_args(
-                    agent,
-                    picked.__dict__,
-                    environ,
-                    effort_range.bounds(config, lane),
-                    preserve=preserves_effort(bool(saved), lane),
-                ),
-                *mode,
-            ],
-        )
-        self._reserve_account(account, lane, agent)
         placed = codex.complete(config, name, placed, self._terminate)
         placed_kind = "api" if placed.account == "api" else route_kind
         return replace(

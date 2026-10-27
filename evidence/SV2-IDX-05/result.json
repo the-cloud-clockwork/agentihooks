@@ -1,0 +1,56 @@
+{
+  "package": "SV2-IDX-05",
+  "dependency": "SV2-IDX-04",
+  "dependency_evidence": "evidence/SV2-IDX-04/result.json records the scoped search these tools call; its search core, request layer and the catalog, chunk and archive tables are unchanged here",
+  "integration_gate": "G4",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7225",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7259",
+  "package_complete": false,
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket, and a recording stub stands in for the MCP server; no model, HTTP server, MCP transport or Pod runs",
+  "interfaces": [
+    "hooks.memory.api.records.call(tools, name, grant, request, now, embedder) answers session_list, session_search, session_get and session_records with a stable operation id, and maps refusals to invalid_request, forbidden_scope, evidence_unavailable, evidence_integrity, cursor_expired, alias_expired and dependency_unavailable",
+    "session_list pages the retained sessions in the grant's corpus whose every event project lies inside the allowed projects and at least one event names one of them, each with its harness, projects, task ids, first and last source timestamps, event count and per source durable watermark",
+    "session_search answers through the SV2-IDX-04 search and adds to every hit a citation (session, source generation, first and last sequence, event ids), its omitted character count and the session's harness, task ids and source timestamps; no hit carries a provider resume command",
+    "session_get returns one visible session's summary; a session outside the grant, narrowed away or no longer retained is unavailable",
+    "session_records expands a citation to the exact catalog records and the archived source text of every event in the cited sequence range, widened by up to twenty events on each side and paged by up to two hundred, after checking every cited event id is still held at the cited sequences; the archive verifies each object's digest and range",
+    "Pagination cursors are rows of the session_cursor table bound to the grant, the request without its cursor, the position and a fingerprint of the full listing; they survive a restart, expire nine hundred seconds after first issue by the caller's clock, a reissue never extends that lifetime, and a changed listing expires them instead of returning a mismatched page",
+    "Compatibility aliases list_sessions, get_session, get_session_segment, search_sessions and search_semantic terminate in their target tools under the same grant, carry their owner and expiry in the answer, count session_alias_calls, and are refused after their expiry",
+    "hooks.mcp.sessions registers session_list, session_search, session_get and session_records in the agentihooks MCP server only when AGENTIHOOKS_SESSION_CATALOG is set, and the aliases only when AGENTIHOOKS_SESSION_ALIASES is 1; the grant comes from the operator's AGENTIHOOKS_SESSION_PRINCIPAL, AGENTIHOOKS_SESSION_CORPUS and AGENTIHOOKS_SESSION_PROJECTS, never the agent's display name"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "request_schema": "2.x",
+    "storage": "SQLite catalog from SV2-IDX-01 with the chunk and index tables of SV2-IDX-02 and SV2-IDX-03, the search of SV2-IDX-04 and the session_cursor table added here",
+    "aliases": "until 2027-01-31T00:00:00Z"
+  },
+  "states": {
+    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40208107174 at 99da74ac5cd23955ea6be0494c12a796a21beca4, with every changed line mutant killed.",
+    "accepted": "A tool request is accepted when its envelope, scope and cursor pass; it answers in one call with state answered.",
+    "committed": "The tools write only cursor rows and the resolution failure, alias call and scope rejection counters; every event, source, record, archive and chunk row stays as captured.",
+    "externally_verified": "Not yet: no deployed session service, MCP transport or central database ran; a live check belongs to the G4 rollout gate."
+  },
+  "metrics": {
+    "evidence_reference_resolution_failures": "count of citations or session references refused because the session is no longer available to the grant, a cited event is not held as cited, or the archived bytes fail their digest or range, kept under the grant's corpus; case records report it with its access domain and principal dimensions",
+    "session_alias_calls": "count of calls through a compatibility alias, kept under the grant's corpus"
+  },
+  "cases": {
+    "a": "evidence/SV2-IDX-05/a-result.json",
+    "b": "evidence/SV2-IDX-05/b-result.json",
+    "c": "evidence/SV2-IDX-05/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Hide the new tools by unsetting AGENTIHOOKS_SESSION_CATALOG and AGENTIHOOKS_SESSION_ALIASES; the archive, catalog and the SV2-IDX-04 search stay as they are and read only to these tools.",
+    "authoritative_objects": "The session event, source, record and archive manifest rows and archived objects from SV2-IDX-01; chunks, vectors and cursor rows are derived or transient, and the tools write none of the authoritative rows.",
+    "proof": "Case C registers the tools against a recording server with the catalog set, with aliases on and with neither, and shows the protected catalog, chunk and index state unchanged."
+  },
+  "remaining_limitations": [
+    "The MCP tools pass no embedder, so their search answers lexical only with the reason no_active_index or no_embedder until a provider adapter is wired.",
+    "Task ids and source timestamps come from task_id and timestamp fields on captured records; a capture that does not write them reports no tasks and null timestamps.",
+    "Expansion reads each event's archived range separately; a wide range costs one archive read per event.",
+    "Search hits are not paged by cursor; the SV2-IDX-04 limit of fifty bounds them.",
+    "No consumer of the retired service's tool names was found in this repository, so the aliases stay off unless AGENTIHOOKS_SESSION_ALIASES is 1.",
+    "The consumer inventory covers this repository only; callers elsewhere are inventoried by SV2-MIG-01."
+  ],
+  "compatibility": "Explicitly local compatibility path. Case A compares session_search with the preceding accepted SV2-IDX-04 search on the same request: every SV2-IDX-04 answer field is identical and each hit only adds citation, omitted_chars and session. The aliases keep the retired service's tool names but take the new request shape, so a caller passing the retired arguments is refused as invalid_request rather than answered from another store.",
+  "authority": "The caller's Grant decides corpus and projects; a request may only narrow them, a cursor from another grant reads as expired, and a refusal reveals no titles, text or counts."
+}

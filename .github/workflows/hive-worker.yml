@@ -75,5 +75,5 @@ jobs:
       - name: Publish the proven hive worker image
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         run: |
-          docker tag local/agentihooks-hive-worker:dev ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev
+          docker tag localhost:5001/agentihooks-hive-worker:dev ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev
           docker push ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev

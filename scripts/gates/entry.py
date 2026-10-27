@@ -11,6 +11,7 @@ import sys
 
 from scripts.gates import lift, log, modes
 from scripts.gates.base import Call, Decision, Who
+from scripts.gates.brain import BrainGate
 from scripts.gates.build import BuildGate
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.identity import PinnedIdentity
@@ -43,6 +44,7 @@ GATES = {
         PushStop(),
         QuietClaim(),
         OnePush(),
+        BrainGate(),
     )
 }
 HOST_GATES = {gate.name: gate for gate in (PlacementGate(), PromptGuard(), NodeCaps(), Terminations(), SignIns())}
@@ -58,6 +60,11 @@ def main(argv=None, stdin=None, environ=None, home=None):
         return 1
     payload = json.loads((stdin or sys.stdin).read() or "{}")
     call = Call.from_payload(payload)
+    return evaluate(gate, call, environ, home)
+
+
+def evaluate(gate, call, environ=None, home=None):
+    environ = os.environ if environ is None else environ
     if not gate.matches(call):
         return 0
     who = Who.from_env(environ)
@@ -67,7 +74,7 @@ def main(argv=None, stdin=None, environ=None, home=None):
     decision = _decide(gate, call, who, home, mode)
     if decision.allowed:
         return 0
-    if lift.lifted(who.swarm, payload.get("session_id"), gate.name, home) or lift.held(
+    if lift.lifted(who.swarm, call.session, gate.name, home) or lift.held(
         who.swarm, who.name, who.task, gate.name, home, command=call.command
     ):
         _record(who, log.Row.of(gate.name, "observe", who, call.tool, LIFTED + decision.reason), home)
@@ -78,6 +85,12 @@ def main(argv=None, stdin=None, environ=None, home=None):
     _record(who, log.Row.of(gate.name, "deny", who, call.tool, decision.reason), home)
     print(decision.reason, file=sys.stderr)
     return 2
+
+
+def native(name, operation, environ=None):
+    from scripts.inbox.seen import receiving_session
+
+    return evaluate(HOST_GATES[name], Call(operation, session=receiving_session(environ)), environ)
 
 
 def _decide(gate, call, who, home, mode="enforce"):

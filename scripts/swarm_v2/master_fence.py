@@ -128,7 +128,7 @@ def check_send(inbox, sender: str, address: str) -> None:
         log.append(slug, log.Row.of(NAME, "fail-open", Who(name=sender), "inbox", f"{type(exc).__name__}: {exc}"))
         return
     writer = seats.writer(sender)
-    if writer != owner:
+    if writer != owner and not (writer == seats.lead and seats.stuck(inbox, owner)):
         inbox.redis.hincrby(seats.table.key(slug), REFUSALS)
         raise InboxError(send_refusal(slug, task, owner, writer))
 
@@ -145,6 +145,15 @@ def _doctor_master_send(inbox, seats, sender: str, address: str) -> bool:
     return sender in masters.held(inbox.redis, doctor, store.agents(doctor)).values()
 
 
+def retiring(store, slug: str) -> set[str]:
+    """Seats asked to retire as the swarm shrank: what they owned is the front door's from the ask on, while the
+    master writes its handoff and before the tick retires the seat."""
+    from scripts.swarm_v2 import master_scale
+
+    table = masters.MasterSeats(store.redis)
+    return set(json.loads(table.redis.hget(table.key(slug), master_scale.RETIRING) or "{}"))
+
+
 class Seats:
     """The swarm's live master seats and phase owners, as one write reads them."""
 
@@ -154,7 +163,8 @@ class Seats:
         self.slug, self.doc = slug, doc
         self.names = {a.name: a.seat or a.name for a in agents if a.lane == MASTER and a.state != "finished"}
         self.names.update({name: seat for seat, name in held.items()})
-        self.live = list(held)
+        asked = retiring(store, slug)
+        self.live = [address for address in held if address not in asked]
         self.lead = masters.lead_of(slug, self.live)
         self.table = masters.MasterSeats(store.redis)
         self.count = self.table.count(slug)
@@ -169,6 +179,17 @@ class Seats:
             return record["seat"], record["rev"]
         owners = functools.partial(self.table.owners, self.slug, self.doc)
         return masters.route(item, self.doc, owners, self.live, self.lead), 0
+
+    def stuck(self, inbox, seat: str) -> bool:
+        """The seat's master has left an item that needs work unread past the wake window, outage time excluded."""
+        from scripts.inbox import wake
+        from scripts.inbox.store import now_ms
+        from scripts.swarm import outage
+
+        now, window = now_ms(), wake.window_ms(os.environ)
+        names = [name for name, held in self.names.items() if held == seat]
+        items = [item for name in names for item in inbox.open_mail(name) if not item.fyi and item.state != "read"]
+        return any(now - item.created_at - outage.paused_ms(self.slug, item.created_at, now) > window for item in items)
 
     def _retired(self, record: dict) -> int:
         return self.table.retired_at(self.slug, record["seat"])

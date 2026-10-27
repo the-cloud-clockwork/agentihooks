@@ -950,6 +950,47 @@ def test_launch_preparation_reports_a_refused_operator_email(ah, rendered, tmp_p
     monkeypatch.setattr(operator_email, "send", lambda *_: "email failed: down")
     assert login.prepare_launch(_environ(rendered), tmp_path) is None
     assert capsys.readouterr().err == "[agenti] operator login email refused: email failed: down\n"
+    token_records = (login._token_folder(_environ(rendered)) / "login-notifications.jsonl").read_text()
+    assert [json.loads(line) for line in token_records.splitlines()] == [
+        {
+            "step": "token",
+            "outcome": "captcha",
+            "transport": "refused",
+            "agent": "master@a-1",
+            "reason": "email failed: down",
+        }
+    ]
+
+
+def test_a_forced_fallback_sends_once_through_the_gateway_notifications_tool(ah, rendered, tmp_path, monkeypatch):
+    from hooks.integrations.mailer import EmailClient
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+    from scripts.swarm import operator_email
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+
+    def check(environ, account):
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", lambda *_: "failure")
+    monkeypatch.setattr(EmailClient, "reachable", lambda self, timeout=3.0: False)
+    sent = []
+    monkeypatch.setattr(operator_email, "gateway_send", lambda *args: sent.append(args) or {"status": "sent"})
+    environ = {
+        **_environ(rendered),
+        "AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com",
+        "MCP_KEY_GATEWAY": "k",
+        "LANGFUSE_MCP_URL": "https://gw/mcp/",
+    }
+    assert login.prepare_launch(environ, tmp_path) is None
+    assert [(url, key, arguments["to"], arguments["subject"]) for url, key, arguments in sent] == [
+        ("https://gw/mcp/", "k", "op@example.com", "Master login fell back to token routing")
+    ]
+    token_records = (login._token_folder(environ) / "login-notifications.jsonl").read_text()
+    assert [json.loads(line)["transport"] for line in token_records.splitlines()] == ["email"]
 
 
 def test_launch_preparation_recovers_the_stored_login_before_any_browser_step(ah, rendered, tmp_path, monkeypatch):
@@ -1364,3 +1405,55 @@ def test_token_home_creates_settings_when_rendered_settings_are_absent(ah, rende
     (rendered / "settings.json").unlink()
     target = login.token_home(_environ(rendered))
     assert json.loads((target / "settings.json").read_text()) == {}
+
+
+def _plain_shell(tmp_path, monkeypatch):
+    operator = tmp_path / "plain"
+    (operator / ".claude").mkdir(parents=True)
+    (operator / ".claude" / "settings.json").write_text('{"forceLoginMethod": "claudeai"}')
+    (operator / ".claude" / "CLAUDE.md").write_text("operator persona")
+    (operator / ".claude.json").write_text(
+        json.dumps({"hasCompletedOnboarding": True, login.ACCOUNT: OPERATOR_ACCOUNT})
+    )
+    monkeypatch.setenv("HOME", str(operator))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: operator))
+    decoy = tmp_path / "process-claude"
+    decoy.mkdir()
+    (decoy / "CLAUDE.md").write_text("process persona")
+    (decoy / ".claude.json").write_text(json.dumps({"decoy": True}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(decoy))
+    for name in ("CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    environ = {key: value for key, value in _environ(operator).items() if key != "CLAUDE_CONFIG_DIR"}
+    return operator, {**environ, "HOME": str(operator)}
+
+
+def test_prepare_from_a_plain_shell_builds_from_the_default_claude_home(ah, tmp_path, monkeypatch):
+    operator, environ = _plain_shell(tmp_path, monkeypatch)
+    _login(login.build(operator / ".claude"))
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.setattr(login, "keep", lambda *_: True)
+    target, found = login.prepare(environ, tmp_path)
+    assert (target, found) == (login.home(), "masteratexample_com")
+    assert (target / "CLAUDE.md").read_text() == "operator persona"
+    assert json.loads((target / login.CONFIG).read_text()) == {
+        "hasCompletedOnboarding": True,
+        login.ACCOUNT: MASTER_ACCOUNT,
+    }
+
+
+def test_browser_home_from_a_plain_shell_builds_from_the_default_claude_home(ah, tmp_path, monkeypatch):
+    _, environ = _plain_shell(tmp_path, monkeypatch)
+    target = login.browser_home(environ)
+    assert target == login.home()
+    assert (target / "CLAUDE.md").read_text() == "operator persona"
+    assert json.loads((target / login.CONFIG).read_text()) == {"hasCompletedOnboarding": True}
+
+
+def test_token_home_from_a_plain_shell_builds_from_the_default_claude_home(ah, tmp_path, monkeypatch):
+    _, environ = _plain_shell(tmp_path, monkeypatch)
+    target = login.token_home(environ)
+    assert target == ah / "master-token" / "masterata_1" / "claude"
+    assert (target / "CLAUDE.md").read_text() == "operator persona"
+    assert json.loads((target / "settings.json").read_text()) == {}
+    assert json.loads((target / login.CONFIG).read_text()) == {"hasCompletedOnboarding": True}

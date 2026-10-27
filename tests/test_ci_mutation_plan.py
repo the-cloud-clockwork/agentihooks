@@ -645,6 +645,32 @@ def test_stats_parts_read_the_stored_durations_once(tmp_path, monkeypatch):
     assert len(reads) == 1
 
 
+@pytest.mark.parametrize(("target", "limit", "expected"), [(81, 10, (2, 80)), (41, 10, (4, 40)), (5, 3, (2, 80))])
+def test_statistics_parts_balance_recorded_cases_within_one_file(tmp_path, target, limit, expected):
+    (tmp_path / "tests").mkdir()
+    test = "tests/test_sample.py"
+    (tmp_path / test).write_text("def test_value(): pass\n")
+    (tmp_path / ".test_durations").write_text(
+        json.dumps({f"{test}::test_value[{value}]@shared": 40 for value in range(4)})
+    )
+    parts, wall = plan.stats_part_count(tmp_path, [test], target, limit)
+    assert (parts, wall) == (expected[0], pytest.approx(expected[1], abs=0.1))
+
+
+def test_statistics_parts_use_traced_timings_when_units_underestimate_collection(tmp_path, monkeypatch):
+    (tmp_path / "tests").mkdir()
+    test = "tests/test_sample.py"
+    (tmp_path / test).write_text("def test_value(): pass\n")
+    nodes = [f"{test}::test_value[{value}]" for value in range(4)]
+    (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(nodes, 1)))
+    cache = tmp_path / ".mutation-stats-cache"
+    cache.mkdir()
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
+    (cache / "successful.json").write_text(json.dumps({"status": 0, "durations": dict.fromkeys(nodes, 40)}))
+    (cache / "failed.json").write_text(json.dumps({"status": 1, "durations": dict.fromkeys(nodes, 1000)}))
+    assert plan.stats_part_count(tmp_path, [test], 41, 10) == (4, pytest.approx(40, abs=0.1))
+
+
 def _project(tmp_path, durations):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
@@ -943,3 +969,78 @@ def test_mutation_lane_cli_requires_capacity_width_and_run(missing, monkeypatch)
     with pytest.raises(SystemExit) as error:
         main()
     assert error.value.code == 2
+
+
+def test_the_import_scan_finds_imports_nested_in_every_statement_body():
+    source = """
+import a
+from . import sibling
+def f():
+    import b
+class C:
+    from c import d
+if x:
+    import e
+else:
+    import f2
+for i in y:
+    pass
+else:
+    import g
+while z:
+    import h
+try:
+    import i
+except E:
+    import j
+else:
+    import k
+finally:
+    import l
+with m:
+    import n
+match v:
+    case 1:
+        import o
+async def q():
+    async with r:
+        import s
+value = lambda: __import__("t")
+"""
+    names = plan._imported("scripts/pkg/mod.py", source)
+    imported = {"a", "b", "e", "f2", "g", "h", "i", "j", "k", "l", "n", "o", "s"}
+    assert set(names) == imported | {"scripts.pkg", "scripts.pkg.sibling", "c", "c.d"}
+    assert len(names) == len(imported) + 4
+    assert plan._imported("scripts/x.py", "def broken(:\n") == []
+
+
+def test_narrowing_keeps_the_covering_tests_of_a_fully_recorded_file_and_whole_other_files(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_recorded.py").write_text(
+        "def test_a():\n    pass\nclass TestB:\n    def test_c(self):\n        pass\n"
+    )
+    (tests / "test_partial.py").write_text("def test_d():\n    pass\ndef test_e():\n    pass\n")
+    (tests / "test_stale.py").write_text("def test_f():\n    pass\n")
+    chosen = ["tests/test_partial.py", "tests/test_recorded.py", "tests/test_stale.py"]
+    covering = {"tests/test_recorded.py::TestB::test_c", "tests/test_partial.py::test_d", "tests/test_other.py::test_x"}
+    recorded = {
+        "tests/test_recorded.py": {"test_a", "TestB::test_c"},
+        "tests/test_partial.py": {"test_d"},
+        "tests/test_stale.py": {"test_f"},
+    }
+    assert plan.narrow(tmp_path, chosen, covering, recorded, {"tests/test_stale.py"}) == [
+        "tests/test_partial.py",
+        "tests/test_recorded.py::TestB::test_c",
+        "tests/test_stale.py",
+    ]
+    assert plan.narrow(tmp_path, ["tests/test_recorded.py"], set(), recorded, set()) == ["tests/test_recorded.py"]
+
+
+def test_defined_tests_name_test_functions_and_methods_but_not_their_nested_helpers(tmp_path):
+    path = tmp_path / "test_sample.py"
+    path.write_text(
+        "def test_one():\n    def helper():\n        pass\n"
+        "class TestGroup:\n    def test_two(self):\n        pass\n    def setup(self):\n        pass\n"
+    )
+    assert plan.defined_tests(path) == {"test_one", "TestGroup.test_two"}

@@ -12,12 +12,13 @@ import functools
 import json
 import re
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import idle, merge_queue, mutation_wait, outage
+from scripts.swarm import github_reads, idle, merge_queue, mutation_wait, outage
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
@@ -128,6 +129,7 @@ def pull_request(raw):
     started = any(
         suite.get("workflowRun")
         and suite.get("status") != "COMPLETED"
+        and suite.get("conclusion") != "CANCELLED"
         and not _superseded(suite, newest)
         and (not raw.get("gated") or not required_runs or _run_key(suite) in required_runs)
         for suite in suites
@@ -321,6 +323,7 @@ def view(url, run=subprocess.run, required_checks=None):
     if mutation_wait.backing_off():
         return None
     try:
+        github_reads.charge("swarm.checks.fresh", "graphql", time.time())
         done = run(
             ["gh", "api", "graphql", "-f", f"query={PULL_QUERY.replace('$number', number)}", "-f", f"url={url}"],
             capture_output=True,
@@ -408,8 +411,8 @@ def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=
         if checks is None or suites is None:
             return None
         raw["commits"] = commits
-        raw["statusCheckRollup"] = checks
-        raw["checkSuites"] = suites
+        raw["statusCheckRollup"] = [check for check in checks if check]
+        raw["checkSuites"] = [suite for suite in suites if suite]
         if required_checks is not None:
             return _required_pull_request(raw, required_checks)
         files = _gate_files(commit.get("file")) if gate_workflows is None else gate_workflows
@@ -450,7 +453,12 @@ def views(
             f"p{i}:" + selection.replace("$url", json.dumps(url)).replace("$number", _number(url))
             for i, url in enumerate(batch)
         ]
-        data = _graphql("{" + " ".join(fields) + "}", run)
+        query = "{" + " ".join(fields) + "}"
+        data = (
+            github_reads.snapshot(query, time.time(), lambda: _graphql(query, run))
+            if cache is not None
+            else _graphql(query, run)
+        )
         gates = _workflow_gates(data, run, cache)
         for i, url in enumerate(batch):
             raw = data.get(f"p{i}")
@@ -464,6 +472,7 @@ def views(
 
 
 def _graphql(query, run, **variables):
+    github_reads.charge("swarm.checks", "graphql", time.time())
     try:
         done = run(
             ["gh", "api", "graphql", "-f", f"query={query}"]
@@ -802,10 +811,11 @@ def _priorities(mail, doc, raised):
         if item in seen or row.get("by") == SENDER or not _by_agent(mail, row):
             continue
         if not seeding and item not in raised:
-            text = (
-                f"New priority on ledger {mail.slug} for {item}: {row['text']}\n"
-                "Triage it: resolve it if the call is yours, else leave it for the operator."
-            )
+            from scripts.swarm_ledger import ledger_blockers
+
+            rec = ledger_blockers.record(ledger_blockers.find(doc, item))
+            step = ledger_blockers.notice(mail.slug, mail.store.config(mail.slug).autonomy, item, rec)
+            text = f"New priority on ledger {mail.slug} for {item}: {row['text']}\n{step}"
             owner = mail.owner(item)
             mail.inbox.send(SENDER, owner, text, ref=f"{mail.slug}:priority:{item}")
             sent.append(f"told {owner}: priority {item}")

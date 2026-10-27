@@ -15,6 +15,7 @@ from scripts.swarm_ledger import ledger, ledger_server, new_ledger
 SLUG = "outbox-2026-01-01"
 ENG = "eng-1@demo"
 BOSS = "master@demo"
+OPERATOR_LINE = "o-0"
 COUNT = itertools.count(1)
 QUEUED = "queued locally, it replays when the server returns"
 
@@ -47,6 +48,7 @@ def server(monkeypatch, request):
     served = Server(monkeypatch)
     served.start()
     ledger.call(SLUG, [{"op": "join", "id": "join-boss", "by": BOSS, "role": "orchestrator"}])
+    ledger.call(SLUG, [{"op": "add", "thread": "chat", "id": OPERATOR_LINE, "text": "Carry on"}])
     yield served
     served.stop()
 
@@ -85,7 +87,9 @@ def test_talk_sent_while_the_server_is_stopped_queues_and_lands_once_in_order_wh
         {"posted": False, "queued": True}
     ]
     assert run.err == f"ledger server not answering on {ledger.BASE}: {QUEUED}\n"
-    assert run(capsys, ENG, "say", "Tests run in continuous integration now") == [{"posted": False, "queued": True}]
+    assert run(capsys, ENG, "say", "Tests run in continuous integration now", "--reply-to", OPERATOR_LINE) == [
+        {"posted": False, "queued": True}
+    ]
     assert run(capsys, ENG, "question", "add", "Which port should the service use") == [
         {"question": "add", "queued": True}
     ]
@@ -142,8 +146,8 @@ def test_an_answer_sent_while_the_server_is_stopped_lands_as_the_master_when_it_
 def test_talk_sent_after_the_server_returns_lands_after_the_talk_queued_before_it(server, capsys):
     phase = f"phases/{stored()['phases'][0]['id']}"
     server.stop()
-    run(capsys, ENG, "say", "First message")
-    run(capsys, ENG, "say", "Second message")
+    run(capsys, ENG, "say", "First message", "--reply-to", OPERATOR_LINE)
+    run(capsys, ENG, "say", "Second message", "--reply-to", OPERATOR_LINE)
     assert [record["args"]["ops"][0]["text"] for record in queued()] == ["First message", "Second message"]
     server.start()
     run(capsys, ENG, "comment", phase, "Third arrives after both")
@@ -176,7 +180,7 @@ def test_reads_and_untalkative_writes_still_fail_while_the_server_is_stopped(ser
 
 def test_an_untalkative_write_is_refused_while_queued_talk_still_waits_so_it_never_overtakes_it(server, capsys):
     server.stop()
-    run(capsys, ENG, "say", "Queued first")
+    run(capsys, ENG, "say", "Queued first", "--reply-to", OPERATOR_LINE)
     held = outbox.path().read_text()
     with pytest.raises(SystemExit, match="still waits in"):
         ledger.call(SLUG, [{"op": "join", "id": "join-eng", "by": ENG, "role": "member"}])
@@ -187,7 +191,7 @@ def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay
     import urllib.error
 
     server.stop()
-    run(capsys, ENG, "say", "Kept through a busy server")
+    run(capsys, ENG, "say", "Kept through a busy server", "--reply-to", OPERATOR_LINE)
     held = outbox.path().read_text()
     revision = json.dumps({"error": {"code": "revision_conflict", "message": "persisted"}}).encode()
     for code, body in ((503, b""), (500, b""), (429, b""), (409, revision)):
@@ -228,7 +232,7 @@ def test_a_record_the_server_keeps_answering_busy_is_set_aside_once_it_is_older_
     server.stop()
     from types import SimpleNamespace
 
-    run(capsys, ENG, "say", "Busy for too long")
+    run(capsys, ENG, "say", "Busy for too long", "--reply-to", OPERATOR_LINE)
     entry = aged(seconds)
     now = entry["args"]["queued_at"] + seconds
     monkeypatch.setattr(outbox, "time", SimpleNamespace(time=lambda: now))
@@ -250,7 +254,7 @@ def test_a_record_the_server_keeps_answering_busy_is_set_aside_once_it_is_older_
 
 def test_a_stopped_server_never_expires_held_talk(server, capsys):
     server.stop()
-    run(capsys, ENG, "say", "Held through a long outage")
+    run(capsys, ENG, "say", "Held through a long outage", "--reply-to", OPERATOR_LINE)
     aged(10 * outbox.DEFAULT_BUSY_AGE)
     report = outbox.flush(None)
     assert (report.left, report.rejected) == (1, [])
@@ -274,8 +278,8 @@ def test_a_failing_ledger_record_holds_its_later_ledger_records_and_never_the_in
     from scripts.inbox import cli
 
     server.stop()
-    run(capsys, ENG, "say", "First held")
-    run(capsys, ENG, "say", "Second held")
+    run(capsys, ENG, "say", "First held", "--reply-to", OPERATOR_LINE)
+    run(capsys, ENG, "say", "Second held", "--reply-to", OPERATOR_LINE)
     sent = outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False})
     outbox.append(sent)
     calls, applied = [], []
@@ -304,7 +308,7 @@ def test_a_flush_without_a_store_keeps_inbox_records_untried(server, capsys):
 
 def test_an_expired_record_is_set_aside_as_it_was_written(server, monkeypatch, capsys):
     server.stop()
-    run(capsys, ENG, "say", "Expired verbatim")
+    run(capsys, ENG, "say", "Expired verbatim", "--reply-to", OPERATOR_LINE)
     aged(10)
     line = outbox.path().read_text()
     monkeypatch.setenv(outbox.BUSY_AGE_ENV, "5")
@@ -379,7 +383,7 @@ def test_a_ledger_outage_does_not_hold_a_queued_inbox_record(server, capsys, mon
     from scripts.inbox import cli
 
     server.stop()
-    run(capsys, ENG, "say", "Waits for the ledger")
+    run(capsys, ENG, "say", "Waits for the ledger", "--reply-to", OPERATOR_LINE)
     sent = outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False})
     outbox.append(sent)
     applied = []
@@ -393,7 +397,7 @@ def test_a_redis_record_and_a_ledger_record_replay_independently(server, capsys)
     server.stop()
     inbox = outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False})
     outbox.append(inbox)
-    run(capsys, ENG, "say", "Ledger talk behind an inbox send")
+    run(capsys, ENG, "say", "Ledger talk behind an inbox send", "--reply-to", OPERATOR_LINE)
     server.start()
     report = outbox.flush(None)
     assert chat(stored()) == ["Ledger talk behind an inbox send"]
@@ -403,7 +407,7 @@ def test_a_redis_record_and_a_ledger_record_replay_independently(server, capsys)
 
 def test_an_inbox_send_goes_live_past_waiting_ledger_talk_and_the_inbox_flush_replays_it(server, capsys):
     server.stop()
-    run(capsys, ENG, "say", "Replayed by the inbox")
+    run(capsys, ENG, "say", "Replayed by the inbox", "--reply-to", OPERATOR_LINE)
     live = []
     found = outbox.submit(object(), outbox.record("send", ENG, {"text": "x"}), lambda store, entry: live.append(entry))
     assert found is None and len(live) == 1
@@ -418,7 +422,15 @@ STALE = "0" * 64
 
 
 def chat_op(item, text):
-    return {"op": "add", "thread": "chat", "id": item, "text": text, "by": ENG, "to": "operator"}
+    return {
+        "op": "add",
+        "thread": "chat",
+        "id": item,
+        "text": text,
+        "by": ENG,
+        "to": "operator",
+        "reply_to": OPERATOR_LINE,
+    }
 
 
 def queue_ops(*ops):

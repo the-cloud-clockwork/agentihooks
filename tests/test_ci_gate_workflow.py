@@ -17,12 +17,15 @@ LINT_CONTROLS = [
     "Check every pull request job is a need of Gate Required",
     "Hold the size and complexity limits",
     "Hold swallowed exceptions in hooks and gates",
+    "Hold dead code in hooks and scripts",
+    "Hold the locked guard tests",
     "Fail on known vulnerabilities new against the base",
     "Run every Swarm Ledger dashboard query against this head's metrics tables",
 ]
 LINT_SETUP = [
     "Install ruff",
     "Install PyYAML",
+    "Install vulture",
     "Set up uv",
     "Check out the base revision",
     "Check out the protected grader",
@@ -110,6 +113,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "shard-check",
             "brain-smoke",
             "writer-lock",
+            "install-smoke",
             "wiring",
             "size",
             "dependency-audit",
@@ -165,22 +169,85 @@ def test_each_cheap_gate_grades_in_lint_after_its_setup_even_after_an_earlier_re
 
 def test_lint_grades_dashboard_columns_with_the_antoncore_dev_checker():
     steps = _workflow()["jobs"]["lint"]["steps"]
-    token = next((s for s in steps if s.get("id") == "antoncore-token"), None)
+    token = next((s for s in steps if s.get("id") == "app-token"), None)
     assert token is not None
     assert token["with"]["repositories"] == "antoncore"
     assert token["with"]["permission-contents"] == "read"
-    checkout = next((s for s in steps if s.get("with", {}).get("repository") == "the-cloud-clockwork/antoncore"), None)
+    checkout = next((s for s in steps if s.get("env", {}).get("REPOSITORY") == "the-cloud-clockwork/antoncore"), None)
     assert checkout is not None
-    assert checkout["if"] == "${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}"
-    assert checkout["with"]["token"] == "${{ steps.antoncore-token.outputs.token }}"
-    assert checkout["with"]["ref"] == "dev"
-    assert checkout["with"]["persist-credentials"] is False
-    assert "scripts/swarm_dashboard_columns.py" in checkout["with"]["sparse-checkout"]
+    assert checkout["if"] == "${{ !cancelled() && steps.app-token.outcome == 'success' }}"
+    assert checkout["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    assert checkout["env"]["REF"] == "dev"
+    assert checkout["env"]["DESTINATION"] == ".antoncore"
+    assert "uses" not in checkout
+    assert "git " not in checkout["run"]
+    assert "scripts/swarm_dashboard_columns.py" in checkout["env"]["SELECTED_PATHS"]
     check = next((s for s in steps if "swarm_dashboard_columns.py check" in s.get("run", "")), None)
     assert check is not None
     assert steps.index(token) < steps.index(checkout) < steps.index(check)
     assert '--agentihooks "$GITHUB_WORKSPACE"' in check["run"]
     assert "No module named" in check["run"]
+
+
+@pytest.mark.parametrize("failure", ["", "missing", "api"])
+def test_rest_checkout_reads_selected_files_from_one_revision_and_fails_closed(tmp_path, failure):
+    import io
+    import os
+    import tarfile
+
+    script = next(step for step in _workflow()["jobs"]["lint"]["steps"] if step.get("id") == "antoncore-checkout")[
+        "run"
+    ]
+    archive = tmp_path / "source.tar.gz"
+    with tarfile.open(archive, "w:gz") as bundle:
+        for name in ("checker.py", "dashboards/one.json", "unselected.txt"):
+            if failure == "missing" and name == "checker.py":
+                continue
+            data = name.encode()
+            member = tarfile.TarInfo(f"source-revision/{name}")
+            member.size = len(data)
+            bundle.addfile(member, io.BytesIO(data))
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    gh = tools / "gh"
+    gh.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'case "$2" in\n'
+        "  repos/owner/repo/commits/dev) echo source-revision ;;\n"
+        "  repos/owner/repo/tarball/source-revision)\n"
+        '    [[ "$FAILURE" != api ]] || exit 19\n'
+        '    cat "$ARCHIVE" ;;\n'
+        "  *) exit 17 ;;\n"
+        "esac\n"
+    )
+    gh.chmod(0o755)
+    output = tmp_path / "output"
+    destination = tmp_path / "selected"
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "REPOSITORY": "owner/repo",
+            "REF": "dev",
+            "DESTINATION": str(destination),
+            "SELECTED_PATHS": "checker.py\ndashboards/",
+            "GITHUB_OUTPUT": str(output),
+            "ARCHIVE": str(archive),
+            "FAILURE": failure,
+        },
+        capture_output=True,
+        text=True,
+    )
+    if failure:
+        assert result.returncode != 0
+        assert not output.exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert (destination / "checker.py").read_text() == "checker.py"
+        assert (destination / "dashboards/one.json").read_text() == "dashboards/one.json"
+        assert not (destination / "unselected.txt").exists()
+        assert output.read_text() == "revision=source-revision\n"
 
 
 def test_lint_prepares_the_dashboard_checker_in_the_background_before_the_other_lint_steps():

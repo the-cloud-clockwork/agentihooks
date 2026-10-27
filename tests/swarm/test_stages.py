@@ -193,12 +193,12 @@ def waiting_of(tasks, **doc):
     return seconds_of(found)
 
 
-def test_the_tick_readiness_exempts_the_doctor_fix_phase_from_a_focus_and_needs_no_task_list():
+def test_tick_readiness_keeps_own_focus_nonexclusive_and_needs_no_task_list():
     from scripts.doctor import loop
 
     task = {"id": "t3", "state": "open", "phase": loop.FIX_PHASE}
     doc = {"tasks": [task], "freezes": [{"verb": "focus", "target": "tasks/t9"}]}
-    assert [stages.claimable(doc, loop.FIX_PHASE)(task), stages.claimable(doc, "")(task)] == [True, False]
+    assert [stages.claimable(doc, loop.FIX_PHASE)(task), stages.claimable(doc, "")(task)] == [True, True]
     assert stages.claimable({}, "")({"id": "t3", "state": "open"}) is True
 
 
@@ -441,7 +441,8 @@ def test_adjacent_host_and_quota_holds_stay_apart_and_empty_samples_hold_nothing
     assert seconds_of(found) == {("host_hold", ""): 300.0, ("quota_hold", ""): 300.0, ("seat_wait", ""): 3000.0}
 
 
-def test_holds_separated_by_a_sample_gap_do_not_cover_the_gap():
+def test_holds_separated_by_a_sample_gap_do_not_cover_the_gap(monkeypatch):
+    monkeypatch.setattr(stages.bottleneck, "SAMPLE_GAP_MS", 5 * 60_000)
     found = stages.report(
         rows(
             ledger_events=[ledger("task done", at(7), "tasks/t0")],

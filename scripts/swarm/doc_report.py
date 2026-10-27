@@ -15,8 +15,8 @@ STAMP = "%Y-%m-%dT%H:%M:%SZ"
 ASK = "The watchdog has not acknowledged the doc item report for this task. Ask it to read its inbox and reply."
 
 
-def address() -> str:
-    return os.environ.get(ADDRESS_ENV, "").strip() or DEFAULT_ADDRESS
+def address(configured: str = "") -> str:
+    return configured.strip() or os.environ.get(ADDRESS_ENV, "").strip() or DEFAULT_ADDRESS
 
 
 def ack_ms() -> int:
@@ -62,11 +62,16 @@ def _send(inbox: InboxStore, slug: str, task: dict, record: dict) -> None:
         pass
 
 
-def report(inbox: InboxStore, ledger, slug: str, task: dict, at_ms: int) -> str:
+def report(inbox: InboxStore, ledger, slug: str, task: dict, at_ms: int, recipient: str = "") -> str:
     if task.get("state") != "done" or not task.get(ITEMS) or _current(task):
         return ""
     pr_url = task["pr_url"]
-    record = {"item": report_id(slug, task["id"], pr_url), "to": address(), "pr": pr_url, "sent_at": utc(at_ms)}
+    record = {
+        "item": report_id(slug, task["id"], pr_url),
+        "to": address(recipient),
+        "pr": pr_url,
+        "sent_at": utc(at_ms),
+    }
     ledger.update_task(slug, task["id"], {FIELD: record})
     _send(inbox, slug, task, record)
     return f"reported doc items of {task['id']} to {record['to']}"
@@ -101,9 +106,13 @@ def _settle(inbox: InboxStore, ledger, slug: str, task: dict, at_ms: int) -> str
     return f"raised a Priority for the unacknowledged doc item report of {task['id']}"
 
 
-def report_pass(inbox: InboxStore, ledger, slug: str, tasks: list[dict], at_ms: int) -> list[str]:
+def report_pass(inbox: InboxStore, ledger, slug: str, tasks: list[dict], at_ms: int, recipient: str = "") -> list[str]:
     actions = []
     for task in tasks:
-        step = _settle if _current(task) else report
-        actions.append(step(inbox, ledger, slug, task, at_ms))
+        action = (
+            _settle(inbox, ledger, slug, task, at_ms)
+            if _current(task)
+            else report(inbox, ledger, slug, task, at_ms, recipient)
+        )
+        actions.append(action)
     return [a for a in actions if a]

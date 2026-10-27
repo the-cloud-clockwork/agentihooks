@@ -84,7 +84,7 @@ def test_shard_grading_keeps_head_data_separate_from_base_modules():
     assert commands == [
         "python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED",
         'python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \\\n'
-        '  --collected collected-data/collected.json --plan "$PLAN" --flakes shard-flakes/*/flakes.jsonl'
+        '  --collected collected-data/collected.json --plan "$PLAN" --flakes shard-flakes/*/flakes.jsonl $BRANCH_PLAN'
         ' | tee -a "$GITHUB_STEP_SUMMARY"\n',
         "python -m tests.shard_budget $REPORT shard-durations/*/durations.json",
     ]
@@ -155,15 +155,32 @@ def test_shard_summary_step_passes_and_writes_a_normal_summary(tmp_path, interpr
 def test_grouped_download_preserves_shard_integrity_without_installed_dependencies(tmp_path, case):
     steps = _jobs()["shard-check"]["steps"]
     downloads = [step for step in steps if step.get("uses", "").startswith("actions/download-artifact@")]
-    assert len(downloads) == 1
-    assert downloads[0]["with"] == {
-        "pattern": "{collected,reused-tests}-${{ matrix.python-version }}",
-        "path": "shard-data",
-    }
+    assert [download["with"] for download in downloads] == [
+        {"pattern": "{collected,reused-tests}-${{ matrix.python-version }}", "path": "shard-data"},
+        {"pattern": "{collected,reused-tests}-${{ matrix.python-version }}", "path": "shard-data"},
+        {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
+        {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
+        {"name": "reused-branch-${{ matrix.python-version }}", "path": "branch-plan"},
+        {"name": "reused-branch-${{ matrix.python-version }}", "path": "branch-plan"},
+    ]
+    branch, branch_retry = downloads[4], downloads[5]
+    assert branch["if"] == "needs.split.outputs.branch != '' && needs.split.outputs.branch != '0'"
+    assert branch["continue-on-error"] is True
+    assert branch_retry["if"] == steps[steps.index(branch_retry) - 1]["if"] == "steps.branch-plan.outcome == 'failure'"
+    for first, retry in ((downloads[0], downloads[1]), (downloads[2], downloads[3])):
+        assert first["continue-on-error"] is True
+        assert retry["if"] == f"steps.{first['id']}.outcome == 'failure'"
+        assert "continue-on-error" not in retry
+        assert "if" not in first
+        wait = steps[steps.index(retry) - 1]
+        assert wait["if"] == retry["if"]
+        assert wait["run"].splitlines()[-1] == "sleep 30"
+    require = next(step for step in steps if step.get("name") == "Require every planned shard report")
+    assert steps.index(downloads[2]) < steps.index(downloads[3]) < steps.index(require)
     assert not any(step.get("name") == "Install grader dependencies" for step in steps)
     prefetch = next(step for step in steps if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
-    assert steps.index(layout) < steps.index(prefetch)
+    assert steps.index(layout) < steps.index(prefetch) < steps.index(downloads[2])
     root = tmp_path / "shard-data"
     reports = tmp_path / "shard-reports"
     for index, nodeids in enumerate(
@@ -251,3 +268,46 @@ def test_shard_verifier_commands_run_with_only_system_python3(tmp_path, module):
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("missing", [None, "durations-3.12-1", "flakes-3.12-2"])
+def test_downloaded_reports_check_needs_no_new_base_grader(tmp_path, missing):
+    step = next(
+        step for step in _jobs()["shard-check"]["steps"] if step.get("name") == "Require every planned shard report"
+    )
+    for kind in ("durations", "flakes"):
+        for shard in (1, 2):
+            name = f"{kind}-3.12-{shard}"
+            if name != missing:
+                (tmp_path / "shard-reports" / name).mkdir(parents=True)
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={"PATH": os.defpath, "SHARDS": "[1,2]"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert (result.returncode == 0) == (missing is None), result.stdout + result.stderr
+    if missing:
+        assert missing in result.stdout + result.stderr
+
+
+def test_a_downloaded_report_that_is_a_file_is_still_missing(tmp_path):
+    step = next(
+        step for step in _jobs()["shard-check"]["steps"] if step.get("name") == "Require every planned shard report"
+    )
+    reports = tmp_path / "shard-reports"
+    reports.mkdir()
+    (reports / "durations-3.12-4").mkdir()
+    (reports / "flakes-3.12-4").write_text("not a report folder")
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={"PATH": os.defpath, "SHARDS": "[4]"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 1
+    assert "Missing shard reports: flakes-3.12-4" in result.stdout

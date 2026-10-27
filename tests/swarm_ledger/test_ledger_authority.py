@@ -103,13 +103,17 @@ def crew(live):
     return live
 
 
+def first_phase_comments():
+    return ledger.request(SLUG)["phases"][0]["comments"]
+
+
 def tasks(reply):
     return {task["id"] for task in reply["tasks"]}
 
 
 def test_pinned_worker_transport_cannot_create_a_task_as_master(crew):
     with pinned():
-        own = operation("add", by=WORKER, thread="chat", to="operator", text="Worker control")
+        own = operation("add", by=WORKER, thread="phases/p1/comments", text="Worker control")
         assert own["id"] not in ledger.request(SLUG, [own])["rejected"]
         denied = operation("task_add", by=WORKER, task="t1", title="Own author", lane="eng", phase="p1")
         assert denied["id"] in ledger.request(SLUG, [denied])["rejected"]
@@ -180,7 +184,7 @@ def test_a_bound_master_still_adds_tasks(crew):
 def test_an_alias_of_the_bound_name_writes_as_that_agent(crew):
     alias = "engineer-323133-0256"
     with pinned(), patch.object(server.authority, "resolve_name", lambda name: WORKER if name == alias else name):
-        said = operation("add", by=alias, thread="chat", to="operator", text="Alias control")
+        said = operation("add", by=alias, thread="phases/p1/comments", text="Alias control")
         reply = ledger.request(SLUG, [said])
     assert said["id"] not in reply["rejected"]
 
@@ -205,11 +209,11 @@ def test_the_operator_credential_keeps_full_administration(crew):
 
 def test_the_swarm_client_keeps_service_authority_inside_a_pinned_session(crew):
     with pinned():
-        LedgerClient().say(SLUG, "Service control", by="swarm")
+        LedgerClient().comment_phase(SLUG, "p1", "Service control", by="swarm")
         LedgerClient().say(SLUG, "Unsigned control")
-        LedgerClient(service=True).say(SLUG, "Tick relay", by=OTHER)
+        LedgerClient(service=True).comment_phase(SLUG, "p1", "Tick relay", by=OTHER)
         chat = LedgerClient().chat(SLUG)
-    said = [(entry.get("by"), entry["text"]) for entry in chat]
+    said = [(entry.get("by"), entry["text"]) for entry in chat + first_phase_comments()]
     assert ("swarm", "Service control") in said
     assert ("operator", "Unsigned control") in said
     assert (OTHER, "Tick relay") in said
@@ -217,11 +221,10 @@ def test_the_swarm_client_keeps_service_authority_inside_a_pinned_session(crew):
 
 def test_the_swarm_client_binds_agent_authored_writes_to_the_session(crew):
     with pinned():
-        LedgerClient().say(SLUG, "Own swarm line", by=WORKER)
+        LedgerClient().comment_phase(SLUG, "p1", "Own swarm line", by=WORKER)
         with pytest.raises(SwarmError) as refused:
-            LedgerClient().say(SLUG, "Forged swarm line", by=MASTER)
-        chat = LedgerClient().chat(SLUG)
-    said = [(entry.get("by"), entry["text"]) for entry in chat]
+            LedgerClient().comment_phase(SLUG, "p1", "Forged swarm line", by=MASTER)
+    said = [(entry.get("by"), entry["text"]) for entry in first_phase_comments()]
     assert (WORKER, "Own swarm line") in said
     assert "Forged swarm line" not in [text for _, text in said]
     assert str(refused.value).endswith(
@@ -548,3 +551,33 @@ def test_mutation_receiver_returns_exact_stale_epoch_error():
     assert error.value.status == 409
     assert error.value.code == "stale_controller"
     assert error.value.envelope() == {"error": {"code": "stale_controller", "message": "the controller lease is stale"}}
+
+
+def test_a_doctor_engineer_on_a_hive_is_issued_a_token_for_the_watched_ledger(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.doctor.priming import doctor_slug
+    from scripts.swarm_ledger import ports
+    from scripts.swarm_ledger.api import routes
+    from scripts.swarm_ledger.api.errors import APIError
+
+    placed = {doctor_slug("watched"): [SimpleNamespace(name=WORKER, hive="member-1")]}
+    store = SimpleNamespace(agents=lambda slug: placed.get(slug, []))
+    monkeypatch.setitem(ports.BOUND, "swarm", SimpleNamespace(store=SimpleNamespace(connect=lambda: store)))
+    server = SimpleNamespace(
+        authority=SimpleNamespace(
+            hive_member=lambda credential: credential,
+            hive_agent=authority.hive_agent,
+            hive_agent_token=lambda member, slug, name: f"{member} {slug} {name}",
+        )
+    )
+
+    def mint(credential, slug):
+        headers = {"X-Hive-Credential": credential, "X-Ledger-Agent": WORKER}
+        return routes.agent_token(SimpleNamespace(headers=headers), as_services(server), slug)
+
+    assert mint("member-1", "watched") == {"data": {"agent": WORKER, "token": f"member-1 watched {WORKER}"}}
+    for credential, slug in (("member-2", "watched"), ("member-1", "unrelated")):
+        with pytest.raises(APIError) as refused:
+            mint(credential, slug)
+        assert str(refused.value) == "Agent is not placed on this member's hive"

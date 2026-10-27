@@ -17,14 +17,17 @@ def test_hive_join_acquires_redis_before_starting_without_another_pull():
     assert " --pull never " in start
 
 
-def test_smoke_pulls_redis_from_the_ledger_load_registry():
+def test_smoke_retags_redis_to_the_ledger_load_registry():
     load = yaml.safe_load((ROOT / ".github/workflows/ledger-load.yml").read_text())["jobs"]["load"]
     registry = load["services"]["redis"]["image"].rsplit(":", 1)[0]
-    assert registry == "public.ecr.aws/docker/library/redis"
+    assert registry == "mirror.gcr.io/library/redis"
     workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())
     step = next(step for step in workflow["jobs"]["smoke"]["steps"] if step.get("name") == "Build the swarm image")
     for tag in ("7", "7-alpine"):
-        assert f"bash scripts/packaging/pull-runtime-image.sh {registry}:{tag} &&" in step["run"]
+        assert (
+            f"bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:{tag} &&" in step["run"]
+        )
+        assert f"docker tag public.ecr.aws/docker/library/redis:{tag} {registry}:{tag}" in step["run"]
     assert "pull-runtime-image.sh mirror.gcr.io/library/redis" not in step["run"]
 
 
@@ -50,5 +53,5 @@ def test_smoke_steps_after_the_build_run_only_when_the_build_and_redis_pulls_suc
     assert all("if" not in step for step in steps[: build + 1])
     gated = "${{ !cancelled() && steps.build.outcome == 'success' }}"
     after = steps[build + 1 :]
-    assert [step["if"] for step in after if "cancelled()" in step.get("if", "")] == [gated] * 4
+    assert [step["if"] for step in after if "cancelled()" in step.get("if", "")] == [gated] * 3
     assert all(step.get("if") == gated or "()" not in step.get("if", "") for step in after)

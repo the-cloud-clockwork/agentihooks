@@ -19,6 +19,47 @@ gh workflow run proofs.yml \
 
 For a stacked branch, set `base` to its dependency branch. Branch pushes run Mutation preflight before the first draft pull request; wait for its current head to pass. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
 
+## Required gate proof
+
+`mutation-plan`, `mutation-stats` and `mutation` are needs of `Gate — Required`
+in Tests, and `Gate — Required` is the required status check of both dev
+rulesets (`.github/rulesets/dev-history.json`, `dev-no-delete.json`). On a pull
+request into dev `mutation-plan` must succeed; `mutation-stats` must succeed
+unless a reused plan forwards its result; `mutation` must succeed unless the
+plan grades inline in `mutation-stats`.
+
+The both-ways proof is two full Tests dispatches with `gate_plant=true` on the
+plant branches `diffcheck/ci-323133-2650-t9-green` and
+`diffcheck/ci-323133-2650-t9-red`. Both plant branches add `bright()` to
+`scripts/term_colors.py`; they differ only in the assertion of
+`test_bright_shifts_a_colour_to_its_bright_code`:
+
+| Run | Assertion | Mutation result | Gate — Required |
+|---|---|---|---|
+| [Green 40460927967](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40460927967), head `461504b` | `colors.bright("31") == "91"` | 4 killed | success |
+| [Red 40460931731](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40460931731), head `a4a1bb2` | `colors.bright("31")` (truthiness only) | 3 survived, 1 killed on the changed line | failure, `mutation-stats` the only red need |
+
+## Red rate in pull request runs
+
+70 completed, non cancelled Tests pull request runs between
+2026-10-26 15:22Z and 23:03Z carried 17 red mutation jobs:
+
+| Cause | Runs | Kind |
+|---|---|---|
+| Surviving mutants on changed lines | 8 | Real: the gate doing its job |
+| Selected tests failing on the unmutated head | 2 | Real: the pull request broke a test |
+| Dependabot pull requests: no Dependabot secrets, so `Mint the tcc main ci App token` gets an empty client id | 6 | Tool: every token minting job in those runs fails, not only mutation |
+| Shard ran the full 1080 second budget on eight large swarm files | 1 | Tool: budget; files print `not mutated, over budget` and the shard exits 1, so the gate goes red |
+
+The audit's 38% (15 of 40) predates mutation moving into Tests. Excluding
+Dependabot runs, one of 64 runs (1.6%) was a mutation tool failure. Cancelled
+runs are outside the count. Separately, after the counted window, mutation
+planning was killed for memory (exit 137, Tests run 40424698293) between
+2026-10-26 23:45Z and 2026-10-27 00:22Z.
+
+The tool failures are routed as swarm follow ups: Dependabot secrets for the
+App token, the shard budget for large swarm files, and planner memory.
+
 ## Covering tests through production helpers
 
 Mutation planning supplements matching and importing test modules with recorded
@@ -974,6 +1015,109 @@ needed its `mutation` job skipped and the inline step successful. Other
 mutation changes merged between the two windows, so the 62 s drop in the median
 is not attributable to this change alone.
 
+## Planning input reuse
+
+Mutation sizing reuses expensive inputs while building a plan and checking
+statistics cache entries. This happens automatically in branch preflight and
+the pull request **Size mutation shards from stored timings** step.
+
+| Input | Work retained and reused | Boundary |
+|---|---|---|
+| Recorded dev coverage | The planner reads a record before estimating changed files and passes the manifest into selection. Job lookup requests 100 jobs per page, reducing pagination on large dev runs | One planner invocation; a read failure can trigger the [coverage retry](#unreadable-coverage-record). More than 100 jobs still require another page |
+| Test import index | `mentions` caches Unicode-normalized tokens and relative import detection. `imported_names` caches parsed imports by test text and package. `select_tests` parses a file only when it names a reached module's last component or contains a relative import; its import walk visits statements | In-process reuse by content and package, including repeated selection for changed sources. Each selection still reads test text; unrelated files avoid AST parsing |
+| Test duration map | `stats_part_count` computes `file_seconds` once, then passes the same map to every candidate part count and worker bucket. `split_parts` partitions using that map without rereading durations | One statistics part sizing calculation. A new plan reads its current duration input |
+| Statistics dependency fingerprints | `StatsInputs.for_test` retains a test file's dependency trace when multiple selectors name that file. `test_inputs` materializes each module's AST walk once while recording its dependencies | One `StatsInputs` instance, separately for measured and unmeasured dependencies. Recorded coverage and dynamically loaded inputs still participate in validation |
+
+These in-memory values reduce repeated planning work. The persisted statistics
+cache still validates its inputs before reusing collected results, as described
+in [Measured shards and split mutants](#measured-shards-and-split-mutants).
+[Report reuse](#reused-and-empty-pull-request-runs) is a separate decision that
+can skip planning altogether.
+
+### Planning reuse configuration and usage
+
+There is no enable switch, new cache directory or cache lifetime setting for
+this reuse. The workflows supply the repository, base and stored durations.
+The existing command, shown here with its default sizing values, runs in CI:
+
+```bash
+python -m scripts.ci_mutation.plan \
+  --base "$BASE" \
+  --head HEAD \
+  --repository "$GITHUB_REPOSITORY" \
+  --target 120 \
+  --stats-target 60 \
+  --limit 10
+```
+
+`--target` and `--stats-target` are target seconds for mutation shards and
+statistics parts; `--limit` caps their counts. They control sizing, not whether
+inputs are reused. The planner reads `.test_durations` as JSON when present;
+`file_seconds` starts each selected entry at 0.01 seconds and adds matching
+recorded test durations. Without the file, that starting estimate remains.
+Omitting `--repository` uses import selection without the recorded dev lookup.
+The repository lookup needs the workflow's `GH_TOKEN` for `gh api`.
+
+Use the [focused mutation proof](#pull-request-mutation-gate) on a pushed branch
+to exercise planning in CI. For a completed run, inspect the log and job step
+times without executing tests locally:
+
+```bash
+gh run view RUN_ID --log
+
+gh api repos/OWNER/REPO/actions/runs/RUN_ID/jobs --paginate \
+  --jq '.jobs[] | {name, steps: [.steps[] | select(.name == "Size mutation shards from stored timings") | {name, started_at, completed_at}]}'
+```
+
+Compare equal head, base, recorded manifest and duration inputs when measuring
+planning changes. Inspect the [selection artifact](#inspect-the-selection)
+to confirm that the same tests remain selected.
+
+### Planning reuse limits and troubleshooting
+
+- A syntax error in an unrelated test module may no longer be found during
+  import selection because that file is never parsed. Its own test run still
+  fails on the syntax error; a green plan does not validate every test file.
+- Missing coverage and unreadable coverage follow the existing
+  [record lookup outcomes](#retry-and-fallback). Reuse does not remove the
+  retry or the conservative selection after two failed reads.
+- A slow first plan can still spend time downloading and parsing the dev
+  manifest, reading test files and tracing dependencies before cache lookup.
+  Check those phases and the selected test set before attributing the delay
+  to mutation execution. Reuse does not guarantee a fixed total step time.
+
+### Planning reuse delivery evidence
+
+[Pull request 5462](https://github.com/the-cloud-clockwork/agentihooks/pull/5462)
+closed [issue 5352](https://github.com/the-cloud-clockwork/agentihooks/issues/5352).
+Its paired diagnostic used the original 57-mutant change with the same head,
+base, recorded manifest and live dev record, alternating before, after, after,
+before. The pull request records these observed seconds:
+
+| Phase | Before 1 | Before 2 | After 1 | After 2 |
+|---|---:|---:|---:|---:|
+| Record lookup | 11.22 | 10.95 | 8.68 | 8.79 |
+| Rest of sizing: selection, mutants and durations | 9.43 | 9.34 | 2.51 | 2.26 |
+| Statistics fingerprint startup, in the stats job | 18.40 | 17.98 | 14.29 | 13.31 |
+
+Selection matched the uploaded artifact in all four diagnostics. The separate
+CI sizing steps were 35 and 29 seconds for the original 57-mutant runs
+[39425710887](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39425710887)
+and [39426673491](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39426673491),
+and 25 and 27 seconds for the delivered branch's larger 145- and 153-mutant runs
+[39553508079](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39553508079)
+and [39554889987](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39554889987).
+Those CI runs used different inputs and are not a paired speed comparison.
+The delivery report identified download and parsing of the 13 MB dev record
+as most of the remaining sizing step time at that point.
+
+[Red Proofs 39553034360](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39553034360)
+observed nine job requests, 120 duration reads, unrelated module parsing and a
+duplicate file trace across the four failing seam tests.
+[Green Proofs 39553523380](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39553523380)
+passed all four, plus the plan, scope, stats cache, selection and test plan
+files. These are delivery measurements, not a current runner speed guarantee.
+
 ## Plan job dependencies
 
 The `mutation-plan` job of the Tests run installs only the third party
@@ -1322,7 +1466,7 @@ mutmut stops a mutant at its first failing test, and a shard runs the test that 
 
 For example, a function traced by tests of 2, 8 and 30 seconds costs 55.6 worker seconds per mutant without a killer. Once the 2 second test has killed one of its mutants, each mutant costs 8.1. Durations follow the same rules as split planning: the maximum observed duration, at least 5.6 seconds or the largest observed duration when a test has none. Shard sizing, the shard target and limit, and the 1080 second shard budget are unchanged; a lower estimate places more mutants on fewer shards.
 
-The preflight `stats` parts also keep each test file's statistics in one merged `mutation-test-stats-v2-<os>-` cache per run, which every part restores, so an unchanged test file is not traced again even when it moves to another part. A single part saves the cache itself; with more parts each uploads its cache folder and `refine` merges them and saves the cache once after all parts finish. An entry is reused when the gate code, configuration, runner options, installed packages (the project itself by its release, since its build number changes with every commit), the test file and everything it imports or names as a file are unchanged, together with the changed lines of each source among them. A file that reaches a dynamic import whose target is not a literal is also checked against every repository module its statistics bucket loaded and what those import or name; a collection that recorded no modules falls back to every Python module in the repository. Each part prints `Mutation stats cache: reused N test files; collect M` in its **Collect one stats part for every mutation shard** step.
+The preflight `stats` parts also keep each test file's statistics in one merged `mutation-test-stats-v2-<os>-` cache per run, which every part restores, so an unchanged test file is not traced again even when it moves to another part. A single part saves the cache itself; with more parts each uploads its cache folder and `refine` merges them and saves the cache once after all parts finish. An entry is reused when the gate code, configuration, runner options, installed packages (the project itself by its release, since its build number changes with every commit), the test file and everything it imports or names as a file are unchanged (except `.test_durations`, which CI rewrites from dev on every run and which only orders and splits tests), together with the changed lines of each source among them. A file that reaches a dynamic import whose target is not a literal is also checked against every repository module its statistics bucket loaded and what those import or name; a collection that recorded no modules falls back to every Python module in the repository. Each part prints `Mutation stats cache: reused N test files; collect M` in its **Collect one stats part for every mutation shard** step. The pull request `mutation-stats` parts of the Tests workflow keep the same merged cache; with more parts each uploads only the entries it wrote, and the first `mutation` shard restores the previous merged cache, lays the parts over it and saves it. When a lookup misses, a second line, `Mutation stats cache: misses {...}; changed inputs [...]`, counts each miss reason and names the five inputs that changed most often.
 
 Only the branch preflight (`mutation-preflight.yml`) carries killing tests between runs. A kill is recorded per function as the failing test's node id, in a file named by a digest of the function name. The preflight keeps them per branch in an actions cache:
 

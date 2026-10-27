@@ -2,6 +2,8 @@ import os
 import re
 from collections.abc import Mapping
 
+from hooks.context import worker_mode
+
 WORKERS = frozenset({"eng", "ci"})
 WAIT_TOOLS = frozenset({"Bash", "Monitor"})
 NATIVE_WAITS = frozenset({"sleep", "wait"})
@@ -40,7 +42,7 @@ def nudge(payload: dict, environ: Mapping[str, str] | None = None) -> str:
 
     env = os.environ if environ is None else environ
     slug, task, name = (env.get(k) for k in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_AGENT_NAME"))
-    if not (slug and task and name) or lane_of(name) not in WORKERS:
+    if not (slug and task and name) or worker_mode.active(env) or lane_of(name) not in WORKERS:
         return ""
     if not is_wait(payload.get("tool_name"), payload.get("tool_input") or {}) or declared_wait(slug, name):
         return ""

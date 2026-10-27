@@ -370,7 +370,7 @@ def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
 def _app_server_command(
     spec: AgentSpec, report: Path, agent_args: list[str], environ: dict[str, str], directory: Path, opening: Path | None
 ) -> list[str]:
-    return [
+    command = [
         sys.executable,
         "-P",
         "-m",
@@ -398,6 +398,20 @@ def _app_server_command(
         *_model_args("codex", agent_args, environ),
         *agent_args,
     ]
+    if environ.get("AGENTIHOOKS_SLOT_HIVE") and spec.execution:
+        command = [
+            sys.executable,
+            "-P",
+            "-m",
+            "scripts.hive.launch_logs",
+            "--slug",
+            environ["AGENTIHOOKS_SWARM"],
+            "--execution",
+            spec.execution,
+            "--",
+            *command,
+        ]
+    return command
 
 
 def _viewer_lines(serve: str, launcher: Path, name: str, environ: dict[str, str], inputs: list[str]) -> str:
@@ -1030,6 +1044,13 @@ def _launch_seconds(args) -> float:
     return LAUNCH_DEADLINE_S
 
 
+def _auth_request(args: argparse.Namespace, environ: dict[str, str]) -> None:
+    from scripts.gates.entry import native
+
+    if args.auth and native("sign-ins", "init-agent-auth", environ):
+        raise ValueError("explicit authentication refused by the sign ins gate")
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
     launch = LaunchDeadline(_launch_seconds(args))
@@ -1037,6 +1058,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
     operator_env.fill(active_env)
     try:
+        _auth_request(args, active_env)
         directory = _resolve_directory(args.dir, active_env)
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8") if args.prompt_file else args.prompt
         name = args.name or f"s-{time.strftime('%y%m%d-%H%M%S')}"

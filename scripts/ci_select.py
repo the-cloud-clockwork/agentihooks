@@ -4,9 +4,11 @@ import math
 import os
 import re
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scripts.ci_mutation.scope import select_tests
+from scripts.ci_test_plan import find_record
 from tests.shards import FIRST_SHARD_FILES, assign_files, source_sizes
 
 PULL_REQUEST = "pull_request"
@@ -28,6 +30,8 @@ HARNESS = frozenset(
         "tests/__init__.py",
         "tests/shards.py",
         "tests/flake_ledger.py",
+        "tests/pass_record.py",
+        "tests/dep_inputs.py",
         "tests/browser_coverage.py",
         "tests/node_capture.cjs",
     }
@@ -38,7 +42,7 @@ SUITE_SPEED = "tests/test_suite_speed.py"
 FAKEREDIS = "fakeredis"
 # Only the queue ran these whole tree checks, so a pull request adding, removing or moving a file passed its own tier.
 TREE_CHECKS = (f"{TESTS}/test_codeowners.py", f"{TESTS}/test_ci_pull_request_api.py")
-# Stored test seconds one leg runs inside the unit step timeout; a full shard holds about 157 and runs in 217.
+# Stored test seconds per leg up to the leg limit; a larger selection shares the legs and each runs longer.
 LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
 
@@ -77,8 +81,13 @@ def reshaped(root: Path, base: str, head: str) -> bool:
     return result.returncode == 1
 
 
-def selected_tests(root: Path, changed: list[str], tree_reshaped: bool) -> set[str]:
+def selected_tests(root: Path, changed: list[str], tree_reshaped: bool, manifest: dict | None = None) -> set[str]:
     tests = {path for path in changed if is_test(path)}
+    if manifest is not None:
+        units = {index for index, unit in enumerate(manifest["units"]) if unit.partition("::")[0] in changed}
+        tests.update(
+            test.partition("::")[0] for test, found in manifest["tests"].items() if units.intersection(found["units"])
+        )
     if tree_reshaped:
         tests.update(TREE_CHECKS)
     needles = set()
@@ -120,11 +129,8 @@ def file_seconds(durations: dict[str, float], files: set[str]) -> dict[str, floa
     return {path: total if total else UNKNOWN_SECONDS for path, total in seconds.items()}
 
 
-def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: int) -> list[list[str]] | None:
-    seconds = file_seconds(durations, tests)
-    total = sum(seconds.values())
-    if total > LEG_SECONDS * limit:
-        return None
+def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: int) -> list[list[str]]:
+    total = sum(file_seconds(durations, tests).values())
     count = min(limit, max(1, math.ceil(total / LEG_SECONDS)))
     files = sorted(tests - FIRST_SHARD_FILES)
     legs = assign_files(durations, files, count, source_sizes(root, files))
@@ -133,15 +139,19 @@ def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: in
 
 
 def decide(
-    root: Path, changed: list[str], durations: dict[str, float], limit: int, tree_reshaped: bool = False
+    root: Path,
+    changed: list[str],
+    durations: dict[str, float],
+    limit: int,
+    tree_reshaped: bool = False,
+    manifest: dict | None = None,
 ) -> tuple[str, list[list[str]]]:
     if needs_full_suite(changed):
         return FULL, []
-    tests = selected_tests(root, changed, tree_reshaped)
+    tests = selected_tests(root, changed, tree_reshaped, manifest)
     if not tests:
         return (NONE if all(is_doc(path) for path in changed) else FULL), []
-    legs = legs_for(root, tests, durations, limit)
-    return (FULL, []) if legs is None else (SELECTED, legs)
+    return SELECTED, legs_for(root, tests, durations, limit)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -152,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--legs", type=int, required=True)
     parser.add_argument("--root", type=Path, default=Path("."))
     parser.add_argument("--durations", type=Path, nargs="*")
+    parser.add_argument("--repository", default=os.environ.get("CI_SELECT_REPOSITORY"))
     args = parser.parse_args(argv)
     scope, legs = FULL, []
     if args.event == PULL_REQUEST:
@@ -159,7 +170,18 @@ def main(argv: list[str] | None = None) -> int:
         for path in args.durations or [args.root / DURATIONS]:
             durations.update(json.loads(path.read_text()))
         changed = changed_files(args.root, args.base, args.head)
-        scope, legs = decide(args.root, changed, durations, args.legs, reshaped(args.root, args.base, args.head))
+        manifest = None
+        if (
+            args.repository
+            and not needs_full_suite(changed)
+            and any(path.endswith(".py") and path.startswith(SOURCES) for path in changed)
+        ):
+            if found := find_record(args.repository, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")):
+                run, manifest = found
+                print(f"Recorded coverage from dev run {run['id']} adds runtime dependent tests.")
+        scope, legs = decide(
+            args.root, changed, durations, args.legs, reshaped(args.root, args.base, args.head), manifest
+        )
     outputs = {"scope": scope, "legs": json.dumps(list(range(1, len(legs) + 1))), "count": str(len(legs))}
     outputs.update({f"files_{index}": " ".join(leg) for index, leg in enumerate(legs, 1)})
     for key, value in outputs.items():

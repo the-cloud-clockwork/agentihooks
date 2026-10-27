@@ -123,40 +123,120 @@ def test_counts_tally_the_findings_of_the_target(rules_dir, monkeypatch):
     assert seen == [(rule_files, "t")]
 
 
+def test_semgrep_runs_in_a_given_folder(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(k["cwd"]) or _done())
+    floors._semgrep("--test", cwd=tmp_path)
+    assert calls == [tmp_path]
+
+
+def _report(matches=None, **extra):
+    checks = {name: {"passed": True, "matches": found, "errors": []} for name, found in (matches or {}).items()}
+    return {"results": {f"rules/{name}.yml": {"checks": {name: check}} for name, check in checks.items()}, **extra}
+
+
+def _lines(expected, reported):
+    return {"expected_lines": expected, "reported_lines": reported}
+
+
+def test_fixture_test_runs_one_semgrep_test_over_a_copy_with_an_empty_ignore(rules_dir, monkeypatch):
+    rule_files = [_rule(rules_dir, "a"), _rule(rules_dir, "b")]
+    rules_dir.joinpath("floors.json").write_text("{}")
+    seen = []
+
+    def semgrep(*args, cwd=None):
+        seen.append(
+            (args, sorted(path.name for path in (cwd / "rules").iterdir()), (cwd / ".semgrepignore").read_text())
+        )
+        return _done(stdout=json.dumps(_report()))
+
+    monkeypatch.setattr(floors, "_semgrep", semgrep)
+    assert floors.fixture_test(rule_files) == (set(), set())
+    names = ["a.clean.py", "a.red.py", "a.yml", "b.clean.py", "b.red.py", "b.yml"]
+    assert seen == [(("--test", "--json", "--config", "rules", "rules"), names, "")]
+
+
+def test_fixture_test_names_every_reported_and_every_mismatched_fixture(rules_dir, monkeypatch):
+    report = _report(
+        {
+            "a": {"/t/rules/a.red.py": _lines([1], [1])},
+            "b": {"/t/rules/b.red.py": _lines([1, 4], [1]), "/t/rules/b.clean.py": _lines([], [2])},
+        }
+    )
+    monkeypatch.setattr(floors, "_semgrep", lambda *a, cwd=None: _done(1, json.dumps(report)))
+    assert floors.fixture_test([_rule(rules_dir, "a"), _rule(rules_dir, "b")]) == (
+        {"a.red.py", "b.red.py", "b.clean.py"},
+        {"b.red.py", "b.clean.py"},
+    )
+
+
+@pytest.mark.parametrize(
+    ("code", "stdout"),
+    [
+        (0, ""),
+        (2, "usage: semgrep"),
+        (0, json.dumps({"config_with_errors": []})),
+        (0, json.dumps(_report(config_with_errors=[{"path": "rules/a.yml"}]))),
+        (
+            0,
+            json.dumps(
+                {"results": {"rules/a.yml": {"checks": {"a": {"passed": False, "matches": {}, "errors": ["x"]}}}}}
+            ),
+        ),
+        (2, json.dumps(_report({"a": {"/t/rules/a.red.py": _lines([1], [1])}}))),
+    ],
+    ids=["no-output", "not-json", "no-results", "config-errors", "check-errors", "exit-without-mismatch"],
+)
+def test_a_fixture_test_that_could_not_run_is_red(rules_dir, monkeypatch, code, stdout):
+    monkeypatch.setattr(floors, "_semgrep", lambda *a, cwd=None: _done(code, stdout, "boom"))
+    with pytest.raises(SystemExit) as raised:
+        floors.fixture_test([_rule(rules_dir, "a")])
+    assert str(raised.value) == f"semgrep could not test the guard rule fixtures (exit {code}):\nboom"
+
+
+def _fixture_errors(monkeypatch, rule_files, reported=frozenset(), mismatched=frozenset()):
+    tested = []
+    monkeypatch.setattr(floors, "fixture_test", lambda files: tested.append(files) or (set(reported), set(mismatched)))
+    return floors.fixture_errors(rule_files), tested
+
+
 @pytest.mark.parametrize("missing", ["red", "clean"])
-def test_a_rule_without_both_fixtures_is_red(rules_dir, missing):
-    rule = _rule(rules_dir, "a", **{missing: None})
-    assert floors.fixture_errors(rule) == ["a: needs both a.red.py and a.clean.py"]
+def test_a_rule_without_both_fixtures_is_red_and_untested(rules_dir, monkeypatch, missing):
+    errors, tested = _fixture_errors(monkeypatch, [_rule(rules_dir, "a", **{missing: None})])
+    assert errors == ["a: needs both a.red.py and a.clean.py"]
+    assert tested == []
+
+
+def test_only_rules_with_both_fixtures_are_tested_in_one_pass(rules_dir, monkeypatch):
+    rule_files = [_rule(rules_dir, "a"), _rule(rules_dir, "b", clean=None), _rule(rules_dir, "c")]
+    errors, tested = _fixture_errors(monkeypatch, rule_files, {"a.red.py"})
+    assert errors == [
+        "b: needs both b.red.py and b.clean.py",
+        "c: the rule does not find exactly the marked lines of c.red.py",
+    ]
+    assert tested == [[rule_files[0], rule_files[2]]]
 
 
 def test_a_red_fixture_that_marks_no_line_is_red(rules_dir, monkeypatch):
-    monkeypatch.setattr(floors, "counts", lambda files, target: {"a": 0})
-    rule = _rule(rules_dir, "a", red="# ruleid: other\nx()\n")
-    assert floors.fixture_errors(rule) == ["a: a.red.py marks no line the rule must find"]
+    errors, _ = _fixture_errors(monkeypatch, [_rule(rules_dir, "a", red="# ruleid: other\nx()\n")])
+    assert errors == ["a: a.red.py marks no line the rule must find"]
 
 
-def test_a_rule_that_misses_its_marked_lines_is_red(rules_dir, monkeypatch):
-    calls = []
-    monkeypatch.setattr(floors, "_semgrep", lambda *a: calls.append(a) or _done(1))
-    monkeypatch.setattr(floors, "counts", lambda files, target: {"a": 0})
-    rule = _rule(rules_dir, "a")
-    assert floors.fixture_errors(rule) == ["a: the rule does not find exactly the marked lines of a.red.py"]
-    assert calls == [("--test", "--config", str(rule), str(rule.with_suffix(".red.py")))]
+@pytest.mark.parametrize(
+    ("reported", "mismatched"), [(set(), set()), ({"a.red.py"}, {"a.red.py"})], ids=["unreported", "mismatched"]
+)
+def test_a_rule_that_misses_its_marked_lines_is_red(rules_dir, monkeypatch, reported, mismatched):
+    errors, _ = _fixture_errors(monkeypatch, [_rule(rules_dir, "a")], reported, mismatched)
+    assert errors == ["a: the rule does not find exactly the marked lines of a.red.py"]
 
 
 def test_a_rule_that_finds_something_in_its_clean_file_is_red(rules_dir, monkeypatch):
-    seen = []
-    monkeypatch.setattr(floors, "_semgrep", lambda *a: _done())
-    monkeypatch.setattr(floors, "counts", lambda files, target: seen.append((files, target)) or {"a": 1})
-    rule = _rule(rules_dir, "a")
-    assert floors.fixture_errors(rule) == ["a: the rule finds something in a.clean.py"]
-    assert seen == [([rule], str(rule.with_suffix(".clean.py")))]
+    errors, _ = _fixture_errors(monkeypatch, [_rule(rules_dir, "a")], {"a.red.py", "a.clean.py"}, {"a.clean.py"})
+    assert errors == ["a: the rule finds something in a.clean.py"]
 
 
 def test_a_rule_that_holds_on_both_fixtures_has_no_errors(rules_dir, monkeypatch):
-    monkeypatch.setattr(floors, "_semgrep", lambda *a: _done())
-    monkeypatch.setattr(floors, "counts", lambda files, target: {"a": 0})
-    assert floors.fixture_errors(_rule(rules_dir, "a")) == []
+    assert _fixture_errors(monkeypatch, [_rule(rules_dir, "a")], {"a.red.py"})[0] == []
 
 
 def _git_at(monkeypatch, verified=0, shown=_done(stdout="text")):
@@ -233,7 +313,7 @@ def test_marked_cases_compare_each_red_fixture_with_the_base(rules_dir, monkeypa
         "shrank: shrank.red.py marks 1 cases, 2 at the base; fixtures only grow",
         "gone: gone.red.py marks 0 cases, 1 at the base; fixtures only grow",
     ]
-    assert grown == {"grew", "new"}
+    assert grown in ({"grew", "new"}, {"grew": 1, "new": 1})
     assert paths == [("FETCH_HEAD", f"{rule.stem}.red.py") for rule in rule_files]
 
 
@@ -246,7 +326,9 @@ def test_marks_count_only_the_rule_own_markers(rules_dir):
 def _floor_errors(monkeypatch, rule_files, found, head, base, changed=frozenset(), grown=frozenset()):
     targets = []
     monkeypatch.setattr(floors, "findings", lambda files, target: targets.append((files, target)) or found)
-    errors = floors.floor_errors(head, base, rule_files, set(changed), set(grown))
+    if isinstance(floors.marked_cases("FETCH_HEAD", [])[1], dict):
+        grown = dict.fromkeys(grown, 1)
+    errors = floors.floor_errors(head, base, rule_files, set(changed), grown)
     assert targets == [(rule_files, "hooks")]
     return errors
 
@@ -297,6 +379,21 @@ def test_a_rule_change_with_new_red_cases_may_raise_its_own_floor(rules_dir, mon
     assert _floor_errors(monkeypatch, [_rule(rules_dir, "a")], found, {"a": 2}, {"a": 1}, {"a"}, {"a"}) == []
 
 
+@pytest.mark.parametrize(("added", "rise"), [(1, 1), (1, 2), (2, 1), (2, 2), (2, 3)])
+def test_floor_rise_is_bounded_by_added_red_cases(rules_dir, monkeypatch, added, rise):
+    rule = _rule(rules_dir, "a", red="# ruleid: {name}\nx()\n" * (1 + added))
+    monkeypatch.setattr(floors, "at_base", lambda base, path: "# ruleid: a\nx()\n")
+    errors, grown = floors.marked_cases("FETCH_HEAD", [rule])
+    assert errors == []
+    monkeypatch.setattr(floors, "findings", lambda files, target: [_finding("a")] * (1 + rise))
+    errors = floors.floor_errors({"a": 1 + rise}, {"a": 1}, [rule], {"a"}, grown)
+    assert grown in ({"a"}, {"a": added})
+    if isinstance(grown, dict) and rise > added:
+        assert errors == [f"a: floor rose by {rise} but added only {added} red fixture cases"]
+    else:
+        assert errors == []
+
+
 def test_a_floor_dropped_with_a_rule_change_is_red(rules_dir, monkeypatch):
     errors = _floor_errors(monkeypatch, [_rule(rules_dir, "a")], [_finding("a")], {"a": 1}, {"a": 2}, {"a"})
     assert errors == [
@@ -342,7 +439,7 @@ def test_check_without_rule_files_is_red(rules_dir, capfd):
 
 
 def _check_mocks(
-    monkeypatch, fixture=lambda rule: [], errors=lambda head, base, files, changed, grown: [], marked=([], {"b"})
+    monkeypatch, fixture=lambda files: [], errors=lambda head, base, files, changed, grown: [], marked=([], {"b"})
 ):
     seen = []
     monkeypatch.setattr(floors, "fixture_errors", fixture)
@@ -361,7 +458,7 @@ def test_check_prints_every_fixture_and_floor_error(rules_dir, monkeypatch, capf
     rules_dir.joinpath("floors.json").write_text('{"a": 3}')
     seen = _check_mocks(
         monkeypatch,
-        fixture=lambda rule: [f"fixture {rule.stem}"],
+        fixture=lambda files: [f"fixture {rule.stem}" for rule in files],
         errors=lambda head, base, files, changed, grown: [
             f"floor {head} {base} {len(files)} {sorted(changed)} {sorted(grown)}"
         ],

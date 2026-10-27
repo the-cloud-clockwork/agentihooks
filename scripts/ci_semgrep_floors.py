@@ -1,7 +1,9 @@
 import argparse
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -12,8 +14,10 @@ FLOORS = RULES / "floors.json"
 TARGET = "hooks"
 
 
-def _semgrep(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["semgrep", "scan", "--metrics", "off", *args], capture_output=True, text=True, cwd=ROOT)
+def _semgrep(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["semgrep", "scan", "--metrics", "off", *args], capture_output=True, text=True, cwd=cwd or ROOT
+    )
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
@@ -46,17 +50,53 @@ def counts(rule_files: list[Path], target: str) -> dict[str, int]:
     return tally(rule_files, findings(rule_files, target))
 
 
-def fixture_errors(rule: Path) -> list[str]:
-    red, clean = rule.with_suffix(".red.py"), rule.with_suffix(".clean.py")
-    if not red.is_file() or not clean.is_file():
-        return [f"{rule.stem}: needs both {red.name} and {clean.name}"]
+def _fixtures(rule: Path) -> tuple[Path, Path]:
+    return rule.with_suffix(".red.py"), rule.with_suffix(".clean.py")
+
+
+def fixture_test(rule_files: list[Path]) -> tuple[set[str], set[str]]:
+    # The repository ignores the guard folder, so a fresh copy with an empty ignore file grades every fixture.
+    with tempfile.TemporaryDirectory() as folder:
+        copy = Path(folder) / "rules"
+        copy.mkdir()
+        (Path(folder) / ".semgrepignore").write_text("")
+        for rule in rule_files:
+            for path in (rule, *_fixtures(rule)):
+                shutil.copy(path, copy / path.name)
+        done = _semgrep("--test", "--json", "--config", "rules", "rules", cwd=Path(folder))
+    failed = f"semgrep could not test the guard rule fixtures (exit {done.returncode}):\n{done.stderr}"
+    try:
+        report = json.loads(done.stdout)
+    except json.JSONDecodeError:
+        report = {}
+    if "results" not in report or report.get("config_with_errors"):
+        raise SystemExit(failed)
+    checks = [check for result in report["results"].values() for check in result["checks"].values()]
+    if any(check["errors"] for check in checks):
+        raise SystemExit(failed)
+    matches = [(Path(target).name, lines) for check in checks for target, lines in check["matches"].items()]
+    reported = {name for name, _ in matches}
+    mismatched = {name for name, lines in matches if lines["expected_lines"] != lines["reported_lines"]}
+    if done.returncode and not mismatched:
+        raise SystemExit(failed)
+    return reported, mismatched
+
+
+def fixture_errors(rule_files: list[Path]) -> list[str]:
+    tested = [rule for rule in rule_files if all(path.is_file() for path in _fixtures(rule))]
+    reported, mismatched = fixture_test(tested) if tested else (set(), set())
     errors = []
-    if f"ruleid: {rule.stem}" not in red.read_text():
-        errors.append(f"{rule.stem}: {red.name} marks no line the rule must find")
-    elif _semgrep("--test", "--config", str(rule), str(red)).returncode:
-        errors.append(f"{rule.stem}: the rule does not find exactly the marked lines of {red.name}")
-    if counts([rule], str(clean))[rule.stem]:
-        errors.append(f"{rule.stem}: the rule finds something in {clean.name}")
+    for rule in rule_files:
+        red, clean = _fixtures(rule)
+        if rule not in tested:
+            errors.append(f"{rule.stem}: needs both {red.name} and {clean.name}")
+            continue
+        if f"ruleid: {rule.stem}" not in red.read_text():
+            errors.append(f"{rule.stem}: {red.name} marks no line the rule must find")
+        elif red.name not in reported or red.name in mismatched:
+            errors.append(f"{rule.stem}: the rule does not find exactly the marked lines of {red.name}")
+        if clean.name in mismatched:
+            errors.append(f"{rule.stem}: the rule finds something in {clean.name}")
     return errors
 
 
@@ -80,8 +120,8 @@ def _marks(rule: Path, text: str | None) -> int:
     return 0 if text is None else text.count(f"ruleid: {rule.stem}")
 
 
-def marked_cases(base: str, rule_files: list[Path]) -> tuple[list[str], set[str]]:
-    errors, grown = [], set()
+def marked_cases(base: str, rule_files: list[Path]) -> tuple[list[str], dict[str, int]]:
+    errors, grown = [], {}
     for rule in rule_files:
         red = rule.with_suffix(".red.py")
         before = _marks(rule, at_base(base, red))
@@ -89,12 +129,12 @@ def marked_cases(base: str, rule_files: list[Path]) -> tuple[list[str], set[str]
         if now < before:
             errors.append(f"{rule.stem}: {red.name} marks {now} cases, {before} at the base; fixtures only grow")
         elif now > before:
-            grown.add(rule.stem)
+            grown[rule.stem] = now - before
     return errors, grown
 
 
 def floor_errors(
-    floors: dict[str, int], base: dict[str, int], rule_files: list[Path], changed: set[str], grown: set[str]
+    floors: dict[str, int], base: dict[str, int], rule_files: list[Path], changed: set[str], grown: dict[str, int]
 ) -> list[str]:
     names = {rule.stem for rule in rule_files}
     errors = [f"{name}: floor without a rule file" for name in sorted(set(floors) - names)]
@@ -110,6 +150,8 @@ def floor_errors(
                 f"{name}: floor rose from {was} to {floors[name]}; "
                 "a floor rises only with a rule change that adds red fixture cases"
             )
+        elif floors[name] > was and floors[name] - was > grown[name]:
+            errors.append(f"{name}: floor rose by {floors[name] - was} but added only {grown[name]} red fixture cases")
         if floors[name] < was and name in changed:
             errors.append(
                 f"{name}: floor dropped from {was} to {floors[name]} with a rule change; "
@@ -132,7 +174,7 @@ def check(base: str) -> int:
         print(f"no rule files in {RULES.relative_to(ROOT)}")
         return 1
     floors = json.loads(FLOORS.read_text()) if FLOORS.is_file() else {}
-    errors = [error for rule in rule_files for error in fixture_errors(rule)]
+    errors = fixture_errors(rule_files)
     shrunk, grown = marked_cases(base, rule_files)
     errors += shrunk
     errors += floor_errors(floors, base_floors(base), rule_files, changed_rules(base, rule_files), grown)

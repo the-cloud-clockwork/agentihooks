@@ -34,7 +34,9 @@ class Strict(Run):
 
     def plain(self):
         return [
-            [Path(arg).name if argv[0] == "ssh-keygen" and arg.startswith("/") else arg for arg in argv]
+            [Path(arg).name if argv[0] == "ssh-keygen" else "clone" if arg.startswith("/") else arg for arg in argv]
+            if argv[0] in ("ssh-keygen", "git")
+            else argv
             for argv in self.calls
         ]
 
@@ -108,9 +110,12 @@ def test_a_full_create_makes_exactly_these_calls(world):
 
     member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
     assert world.run.plain() == [
+        list(machine.LIST),
         ["kubectl", "get", "service", "-A", "-o", "json"],
         RESYNC,
         ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", NAME, "-f", "host_key"],
+        ["git", "init", "-q", "clone"],
+        ["git", "-C", "clone", "remote", "add", "origin", f"https://github.com/{REPO}.git"],
         ["gh", "api", "-H", create_github.RAW, f"repos/{REPO}/contents/{create_render.TEMPLATE_PATH}?ref=dev"],
         ["gh", "pr", "list", "-R", REPO, "--head", NAME, "--state", "all", "--json", "url,state", "--jq", PENDING],
         [*_gh_api(f"repos/{REPO}/git/ref/heads/dev"), ".object.sha"],
@@ -139,7 +144,7 @@ def test_a_full_create_makes_exactly_these_calls(world):
         list(machine.LIST),
         ["herdr", "machine", "add", "--label", NAME, "--remote-session", "default", TARGET],
     ]
-    timeouts = {"kubectl": 60, "ssh-keygen": 60, "gh": 120, "herdr": 300}
+    timeouts = {"kubectl": 60, "ssh-keygen": 60, "git": 120, "gh": 120, "herdr": 300}
     for name, kwargs in world.run.kwargs:
         assert {key: kwargs[key] for key in ("capture_output", "text", "timeout", "check")} == {
             **GH,
@@ -252,6 +257,20 @@ def test_a_failed_check_stops_the_create_without_merging(world):
     assert ["gh", "pr", "merge", PR, "--squash"] not in world.run.calls
 
 
+def test_a_failed_check_the_base_does_not_require_still_merges(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.required = ["Gate — Required"]
+    world.run.checks = [
+        [
+            {"__typename": "CheckRun", "name": "Gate — Required", "status": "COMPLETED", "conclusion": "SUCCESS"},
+            {"__typename": "CheckRun", "name": "Gate — Protected", "status": "COMPLETED", "conclusion": "FAILURE"},
+        ]
+    ]
+    create.create(world.tools, create.Options(timeout_s=60))
+    assert ["gh", "pr", "merge", PR, "--squash"] in world.run.calls
+    assert f"hive create {NAME}: merge: merged {PR}" in world.lines
+
+
 def test_checks_that_never_pass_time_out_naming_them(world):
     world.run.merge_error = AUTO_REFUSED
     world.run.checks = [[]]
@@ -360,7 +379,7 @@ def test_a_hub_record_that_cannot_be_read_is_a_refusal_naming_it(world):
 
 def test_gh_keeps_leading_space_and_trims_only_trailing_newlines():
     def run(argv, **kwargs):
-        assert kwargs == {"input": '{"a": 1}', **GH}
+        assert kwargs == {"input": '{"a": 1}', **GH, "cwd": None}
         return subprocess.CompletedProcess(argv, 0, "  text X\n\n", "")
 
     assert create_github.gh(run, ["api", "x"], {"a": 1}) == "  text X"

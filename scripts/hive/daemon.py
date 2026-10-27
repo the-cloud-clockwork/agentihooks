@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from hooks.context import account_sessions, broadcast
+from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, github_app_cli, master_claude_login, session_bands
 from scripts.hive import quota_refresh, registry
@@ -27,7 +27,8 @@ if TYPE_CHECKING:
 
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
-# A launch inside a beat can run for minutes, so headroom publishes on its own thread well inside its stale window.
+# A launch inside a beat can run for minutes, so headroom and the heartbeat publish on their own thread well
+# inside their stale windows.
 HEADROOM_SECONDS = 10
 RETRY_SECONDS = (1, 2, 4, 8, 16, 30)
 CONNECT_TIMEOUT_S = 3
@@ -76,6 +77,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     headroom.publish(redis, local_id, beat_ms)
     if not member:
         _refresh_launch_slots(redis, executions)
+    adopt_capabilities(redis, local_id)
     if not fenced:
         poll_orders(consumer)
     consumer.poll_commands()
@@ -150,6 +152,13 @@ def _slot_errors() -> tuple[type[Exception], ...]:
     return NatsError, TimeoutError, account_slots.Unavailable
 
 
+def adopt_capabilities(redis: "Redis", local_id: str) -> None:
+    """Launches inherit the daemon environment, so a render sees the capabilities this hive's record declares."""
+    os.environ.pop(profile_chain.HIVE_CAPABILITIES, None)
+    declared = json.loads(redis.hget(registry.key(local_id), "capabilities") or "[]")
+    os.environ[profile_chain.HIVE_CAPABILITIES] = ",".join(declared)
+
+
 def adopt_caps(redis: "Redis", report: dict) -> None:
     """A subscription slot takes the cap of a newer reading another live hive published, since quota is per account."""
     now = int(time.time() * 1000)
@@ -208,7 +217,9 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
         if stop.is_set():
             return
         try:
-            headroom.publish(redis, local_id, int(time.time() * 1000))
+            now_ms = int(time.time() * 1000)
+            headroom.publish(redis, local_id, now_ms)
+            registry.touch(redis, local_id, now_ms)
             orders.alive(redis, local_id)
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)

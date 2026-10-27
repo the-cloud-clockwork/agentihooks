@@ -25,6 +25,16 @@ FIXES = ("code", "tune")
 FIX_PHASE = "p2"
 SENDER = "doctor-timer"
 IDLE = ("stopped", "stopping")
+WORKSTATION_KINDS = (
+    "failed spawn",
+    "fresh restore",
+    "scheduled tick",
+    "master launch failed",
+    "master launch evidence unavailable",
+    "master waiting on input",
+    "ci reruns",
+    "runtime storage",
+)
 
 
 def verdicts(store, doctor):
@@ -66,7 +76,7 @@ def record(store, doctor, found, now_ms, cooldown_ms):
     """Keeps every finding with its detail; returns the ones first seen or shown again after a verdict."""
     judgments = verdicts(store, doctor)
     before = {k: json.loads(v) for k, v in store.redis.hgetall(judgments.key).items()}
-    shown = judgments.visible(found, now_ms, cooldown_ms, new_evidence=True)
+    shown = judgments.visible(found, now_ms, cooldown_ms, new_evidence=True, growth=ci_speed.class_growth)
     if found:
         details = {f.id: json.dumps({**f.as_dict(), "id": f.id, "measure": f.measure}) for f in found}
         store.redis.hset(_details_key(store, doctor), mapping=details)
@@ -328,6 +338,8 @@ def fix_tasks(watched, finding, verdict, fix, tasks):
             "judge": "the Standards reader",
         },
     }
+    if kind in WORKSTATION_KINDS:
+        cause["workstation"] = True
     fixed = {
         "task": f"{stem}-{fix}",
         "title": f"Move the number behind the {kind} finding",

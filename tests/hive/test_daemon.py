@@ -56,6 +56,38 @@ def test_beat_refreshes_reported_fields_and_expires_telemetry(redis, monkeypatch
     assert json.loads(redis.get(f"{registry.key('machine')}:sessions")) == {}
 
 
+def test_beat_exports_the_registered_capabilities_before_launching(redis, monkeypatch):
+    from hooks.context import profile_chain
+
+    seen = []
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    monkeypatch.setattr(
+        daemon, "poll_orders", lambda consumer: seen.append(daemon.os.environ[profile_chain.HIVE_CAPABILITIES])
+    )
+    monkeypatch.setenv(profile_chain.HIVE_CAPABILITIES, "headed")
+    registry.update(redis, "machine", ["name=Worker"])
+    daemon.beat(redis, "machine")
+    registry.update(redis, "machine", ["capabilities=headed,gpu"])
+    daemon.beat(redis, "machine")
+    assert seen == ["", "headed,gpu"]
+    assert profile_chain.hive_capabilities(daemon.os.environ) == {"headed", "gpu"}
+
+
+def test_an_unreadable_record_withdraws_the_exported_capabilities(redis, monkeypatch):
+    from hooks.context import profile_chain
+
+    monkeypatch.setenv(profile_chain.HIVE_CAPABILITIES, "headed")
+    redis.hset(registry.key("machine"), "capabilities", "not json")
+    with pytest.raises(ValueError):
+        daemon.adopt_capabilities(redis, "machine")
+    assert profile_chain.HIVE_CAPABILITIES not in daemon.os.environ
+    redis.delete(registry.key("machine"))
+    daemon.adopt_capabilities(redis, "machine")
+    assert daemon.os.environ[profile_chain.HIVE_CAPABILITIES] == ""
+
+
 def test_hive_heartbeat_renews_account_counters_from_its_own_quota_and_executions(redis, monkeypatch):
     from scripts.hive import account_slots
 
@@ -356,16 +388,45 @@ def _paced(monkeypatch, rounds):
 def test_headroom_publishes_on_the_scheduler_cadence_until_stopped(monkeypatch):
     from scripts.hive import headroom
 
-    calls = []
+    calls, touched = [], []
     monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: calls.append((client, hive, now_ms)))
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: touched.append((client, hive, now_ms)))
     monkeypatch.setattr(daemon.time, "time", lambda: 7.5)
     stop, waits, beats = _paced(monkeypatch, 3)
     connection, waiter = object(), object()
     PUBLISH_HEADROOM(connection, waiter, "local", stop)
     assert calls == [(connection, "local", 7_500), (connection, "local", 7_500)]
+    assert touched == calls
     assert beats == [(connection, "local"), (connection, "local")]
     assert waits == [(daemon.HEADROOM_SECONDS, waiter, daemon.HEADROOM_SECONDS + daemon.WAKE_SLACK_S)] * 3
     assert (daemon.HEADROOM_SECONDS + daemon.WAKE_SLACK_S) * 1000 < headroom.STALE_MS
+    assert (daemon.HEADROOM_SECONDS + daemon.WAKE_SLACK_S) * 1000 < registry.LIVE_MS
+
+
+def test_headroom_keeps_a_registered_hive_live_while_its_beat_runs_long(redis, monkeypatch):
+    from scripts.hive import headroom
+
+    registry.update(redis, "machine", ["name=Worker"])
+    redis.hset(registry.key("machine"), "heartbeat_at", "1000")
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(daemon.time, "time", lambda: 200.25)
+    stop, _, beats = _paced(monkeypatch, 2)
+    assert not registry.live(registry.show(redis, "machine"), 200_250)
+    PUBLISH_HEADROOM(redis, object(), "machine", stop)
+    assert redis.hget(registry.key("machine"), "heartbeat_at") == "200250"
+    assert registry.live(registry.show(redis, "machine"), 200_250)
+    assert beats == [(redis, "machine")]
+
+
+def test_headroom_never_registers_a_hive_it_does_not_find(redis, monkeypatch):
+    from scripts.hive import headroom
+
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(daemon.time, "time", lambda: 200.25)
+    stop, _, beats = _paced(monkeypatch, 2)
+    PUBLISH_HEADROOM(redis, object(), "gone", stop)
+    assert redis.keys("*") == []
+    assert beats == [(redis, "gone")]
 
 
 @pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError", "ResponseError", "JSONDecodeError", "KeyError"])
@@ -386,6 +447,7 @@ def test_headroom_keeps_its_cadence_through_a_failed_publish(monkeypatch, capsys
             raise failure
 
     monkeypatch.setattr(headroom, "publish", publish)
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
     monkeypatch.setattr(daemon.time, "time", lambda: 1)
     stop, _, beats = _paced(monkeypatch, 3)
     PUBLISH_HEADROOM(object(), object(), "local", stop)
@@ -435,6 +497,7 @@ def test_headroom_keeps_publishing_while_a_beat_blocks(monkeypatch):
 
     connection = object()
     monkeypatch.setattr(headroom, "publish", publish)
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
     monkeypatch.setattr(orders, "alive", lambda client, hive: None)
     monkeypatch.setattr(daemon, "beat", beat)
     with pytest.raises(KeyboardInterrupt):
@@ -715,6 +778,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "master_login": {"claude": ""},
         "master_login_enabled": "no",
         "repos": [],
+        "capabilities": [],
         "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
         "version": "",
     }

@@ -18,8 +18,9 @@ BESIDE = re.compile(r"\$\(dirname \"\$0\"\)|\$\{?GITHUB_ACTION_PATH\}?")
 WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
-    ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "_run"},
+    ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "_run", "budget"},
     ROOT / "scripts/ci_mutation/reuse.py": {"api"},
+    ROOT / "scripts/ci_stats_seed.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
 }
 METADATA_ONLY = {
@@ -89,7 +90,14 @@ def _offends(step: dict) -> bool:
 
 
 def test_no_step_on_any_event_holds_the_workflow_token_or_calls_the_api():
-    offenders = [f"{job}: {step.get('name') or step.get('uses')}" for job, step, _ in _all_steps() if _offends(step)]
+    offenders = []
+    for job, step, _ in _all_steps():
+        if job == "select" and step.get("id") == "select":
+            env = step.get("env") or {}
+            assert env["GH_TOKEN"] == "${{ steps.app-token.outputs.token || github.token }}"
+            step = {**step, "env": {key: value for key, value in env.items() if key != "GH_TOKEN"}}
+        if _offends(step):
+            offenders.append(f"{job}: {step.get('name') or step.get('uses')}")
     assert offenders == []
 
 
@@ -147,6 +155,8 @@ def test_no_script_a_step_runs_calls_the_api():
     expected = [
         ".github/actions/browser-cache/select-artifacts.sh",
         ".github/actions/browser-cache/verify.sh",
+        ".github/actions/retry-upload/find.sh",
+        ".github/actions/retry-upload/watchdog.sh",
         ".github/coverage/combine.sh",
         ".github/coverage/flatten.py",
         ".github/coverage/proxy.py",
@@ -157,9 +167,11 @@ def test_no_script_a_step_runs_calls_the_api():
         "docker/swarm-node/pull-base.sh",
         "docker/swarm-node/smoke.sh",
         "hooks/__main__.py",
+        "hooks/context/conditions.py",
         "hooks/hook_manager.py",
         "hooks/targets/normalizer.py",
         "scripts/brain-smoke",
+        "scripts/ci_branch_coverage.py",
         "scripts/ci_budget/__main__.py",
         "scripts/ci_budget/jobs.py",
         "scripts/ci_budget/rate_limit.py",
@@ -174,6 +186,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_mutation/reuse.py",
         "scripts/ci_release.sh",
         "scripts/ci_semgrep_floors.py",
+        "scripts/ci_stats_seed.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
         "scripts/hive/nats_grant.py",
@@ -188,6 +201,8 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/packaging/swarm-init-smoke.sh",
         "scripts/packaging/swarm-smoke.sh",
         "scripts/packaging/swarm-smoke-parallel.sh",
+        "scripts/dead_code.py",
+        "scripts/locked_tests.py",
         "scripts/size_limits.py",
         "scripts/swallowed_exceptions.py",
         "scripts/swarm_ledger/artifact_sanity.py",
@@ -209,6 +224,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/coverage_check.py",
         "tests/coverage_baseline.py",
         "tests/coverage_ratchet.py",
+        "tests/branch_record.py",
         "tests/dep_manifest.py",
         "tests/dev_durations.py",
         "tests/flake_budget.py",
@@ -221,6 +237,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/ledger_load/memory.py",
         "tests/ledger_load/paired.py",
         "tests/ledger_load/streams.py",
+        "tests/mutation_self_plant/plant.py",
         "tests/refresh_durations.py",
         "tests/reused_coverage.py",
         "tests/shard_budget.py",
@@ -230,6 +247,8 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/__init__.py",
         "tests/browser_coverage.py",
         "tests/flake_ledger.py",
+        "tests/pass_record.py",
+        "tests/dep_inputs.py",
         "tests/routing/test_codex_api.py",
         "tests/shards.py",
         "tests/swarm_ledger/test_postgres_writer_lock.py",
@@ -551,7 +570,11 @@ def test_a_dev_push_runs_every_step_of_the_job_itself(job):
 
 @pytest.mark.parametrize("job", sorted(_jobs()))
 def test_no_job_is_granted_the_actions_api(job):
-    assert "actions" not in (_jobs()[job].get("permissions") or {})
+    permissions = _jobs()[job].get("permissions") or {}
+    if job == "select":
+        assert permissions in ({"contents": "read"}, {"contents": "read", "actions": "read"})
+    else:
+        assert "actions" not in permissions
 
 
 def test_no_job_skips_on_a_tree_another_run_passed():

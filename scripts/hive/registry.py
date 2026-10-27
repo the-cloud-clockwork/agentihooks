@@ -29,6 +29,7 @@ JSON_FIELDS = {
     "interactive": dict,
     "master_login": dict,
     "repos": list,
+    "capabilities": list,
 }
 INT_FIELDS = ("max_agents", "heartbeat_at")
 LEGACY = "roles"
@@ -57,6 +58,7 @@ def _default(hive_id: str, ui: str = "no") -> dict:
         "master_login": {"claude": ""},
         "master_login_enabled": "no",
         "repos": [],
+        "capabilities": [],
         "heartbeat_at": 0,
         "version": "",
     }
@@ -80,20 +82,24 @@ def _count(setting: str, value: str) -> int:
     return int(value)
 
 
-def _excluded(setting: str, value: str) -> list[str]:
+def _names(setting: str, value: str, noun: str) -> list[str]:
     names = list(dict.fromkeys(name.strip() for name in value.split(",") if name.strip()))
     for name in names:
         if not EXCLUDED_NAME.fullmatch(name):
-            raise HiveError(f"{setting} takes lane roles or profiles, not {name!r}")
+            raise HiveError(f"{setting} takes {noun}, not {name!r}")
     return names
+
+
+def _excluded(setting: str, value: str) -> list[str]:
+    return _names(setting, value, "lane roles or profiles")
+
+
+def _capabilities(setting: str, value: str) -> list[str]:
+    return _names(setting, value, "capability names")
 
 
 def _master_swarms(setting: str, value: str) -> list[str]:
-    names = list(dict.fromkeys(name.strip() for name in value.split(",") if name.strip()))
-    for name in names:
-        if not EXCLUDED_NAME.fullmatch(name):
-            raise HiveError(f"{setting} takes swarm slugs, not {name!r}")
-    return names
+    return _names(setting, value, "swarm slugs")
 
 
 def _prefer(setting: str, value: str) -> dict[str, int]:
@@ -115,6 +121,7 @@ SETTINGS = {
     "master-swarms": ("master_swarms", _master_swarms),
     "prefer": ("prefer", _prefer),
     "max-agents": ("max_agents", _count),
+    "capabilities": ("capabilities", _capabilities),
 }
 
 
@@ -228,6 +235,17 @@ def hives(redis: "Redis") -> list[dict]:
 
 def live(record: dict, now_ms: int) -> bool:
     return record["heartbeat_at"] > 0 and now_ms - record["heartbeat_at"] <= LIVE_MS
+
+
+def touch(redis: "Redis", hive_id: str, now_ms: int) -> None:
+    hash_key = key(hive_id)
+
+    def refresh(pipe: "Pipeline") -> None:
+        if pipe.hexists(hash_key, "heartbeat_at"):
+            pipe.multi()
+            pipe.hset(hash_key, "heartbeat_at", now_ms)
+
+    redis.transaction(refresh, hash_key)
 
 
 def home(environ: Mapping[str, str] = os.environ) -> Path:

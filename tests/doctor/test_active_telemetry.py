@@ -153,7 +153,12 @@ def test_an_overflow_is_an_exporter_backlog():
 
 def test_accepted_observations_missing_from_langfuse_are_a_stale_acknowledgement():
     lost = _binding(
-        remote={"trace": "tr-1", "fresh_ms": NOW - 400_000, "observations": 30},
+        remote={
+            "trace": "tr-1",
+            "fresh_ms": NOW - 400_000,
+            "observations": 30,
+            "reconciliation": {"accepted": 40, "missing": ["lost"], "drift": 0},
+        },
         local=_local(accepted_at=NOW - 120_000),
     )
     [found] = traces.findings(_record(lost), LIMITS)
@@ -165,7 +170,12 @@ def test_accepted_observations_missing_from_langfuse_are_a_stale_acknowledgement
 
 def test_a_recent_acceptance_is_given_ingestion_time():
     ingesting = _binding(
-        remote={"trace": "tr-1", "fresh_ms": NOW - 400_000, "observations": 30},
+        remote={
+            "trace": "tr-1",
+            "fresh_ms": NOW - 400_000,
+            "observations": 30,
+            "reconciliation": {"accepted": 40, "missing": ["lost"], "drift": 0},
+        },
         local=_local(accepted_at=NOW - 20_000),
     )
     assert traces.findings(_record(ingesting), LIMITS) == []
@@ -367,7 +377,12 @@ def test_a_remote_with_no_event_time_shows_no_accepted_event():
 
 def test_a_stale_acknowledgement_reads_in_full():
     lost = _binding(
-        remote={"trace": "tr-1", "fresh_ms": NOW - 400_000, "observations": 30},
+        remote={
+            "trace": "tr-1",
+            "fresh_ms": NOW - 400_000,
+            "observations": 30,
+            "reconciliation": {"accepted": 40, "missing": ["lost"], "drift": 0},
+        },
         local=_local(accepted_at=NOW - 61_000),
     )
     [found] = traces.findings(_record(lost), LIMITS)
@@ -375,6 +390,7 @@ def test_a_stale_acknowledgement_reads_in_full():
     assert found.threshold == f"accepted observations absent from Langfuse past 60 seconds, {CADENCE}"
     assert found.evidence[4:] == (
         "exporter recorded 40 accepted observations, Langfuse holds 30",
+        "1 accepted observation identities missing from Langfuse",
         "last acceptance 61 seconds ago",
         "Langfuse last accepted event 400 seconds ago",
     )
@@ -410,7 +426,12 @@ def test_a_misattributed_finding_reads_in_full():
         _binding(traces=[], remote=None, local=None, started_at=NOW - 3_600_000),
         _binding(local=_local(generated_bytes=5000, oldest_unaccepted=NOW - 60_000)),
         _binding(
-            remote={"trace": "tr-1", "fresh_ms": NOW - 400_000, "observations": 30},
+            remote={
+                "trace": "tr-1",
+                "fresh_ms": NOW - 400_000,
+                "observations": 30,
+                "reconciliation": {"accepted": 40, "missing": ["lost"], "drift": 0},
+            },
             local=_local(accepted_at=NOW - 60_000),
         ),
     ],

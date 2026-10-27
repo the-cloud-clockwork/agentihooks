@@ -14,6 +14,13 @@ ANTON = "anton ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more 
 HIVE_FULL = f"{FULL}: {ANTON}"
 
 
+@pytest.fixture(autouse=True)
+def no_host_agents(monkeypatch):
+    from scripts.swarm import local_slots
+
+    monkeypatch.setattr(local_slots, "live", set)
+
+
 def capped(held, of, running, cpus=10):
     return (
         f"{HIVE_FULL}, and the local machine runs {held} of its {of} agents: cpu: {running} swarm agents at 0.5 CPU "
@@ -52,7 +59,7 @@ def hybrid(setup, monkeypatch, deployment="hybrid"):
     from scripts.swarm_v2.runtime.base import RuntimeRouter
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: True)
     workstation(monkeypatch, 10)
     setup.store.redis.delete(registry.key("remote"))
     setup.store.redis.srem(registry.INDEX, "remote")
@@ -235,6 +242,22 @@ def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch,
     fenced.runtime.hive_launch.spawn.assert_not_called()
 
 
+def test_the_module_fixture_keeps_agents_live_on_the_host_out_of_the_cap_count(setup, monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts import terminate_agent
+    from scripts.swarm.store import SwarmConfig
+
+    monkeypatch.setattr(terminate_agent, "sessions", lambda *args, **kwargs: [SimpleNamespace(name="host-agent")])
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    workstation(monkeypatch, 40)
+    setup.store.create(SwarmConfig("other-swarm", "agentihooks", 1, 1))
+    local_agents(setup, 8, slug="other-swarm", harness="codex")
+    task = {"id": "task", "seat": "eng-1@fixture", "launch_assignment": {"harness": "codex"}}
+    assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal("eng", task)
+
+
 @pytest.mark.parametrize("profile", ["qa", "frontend"])
 def test_ui_role_work_keeps_waiting_for_its_ui_host(setup, monkeypatch, profile):
     from scripts.swarm.profile_choice import ProfileDecision
@@ -294,7 +317,7 @@ def test_no_workstation_herdr_leaves_the_hive_wait(setup, monkeypatch):
 
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: False)
     assert fenced.placement_refusal("eng", {"id": "task"}) == HIVE_FULL
 
 
@@ -489,3 +512,128 @@ def test_the_machine_count_leaves_out_the_task_itself_and_holds_other_swarms_pen
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
     assert fenced.spawn(setup.config, "eng", "eng name", {"id": "task"}) == "placed on the workstation"
     assert fenced.placement_refusal("eng", {"id": "next"}) == capped(3, 2, 1, cpus=3)
+
+
+def pinned_wait(setup, slug, task, seen_at=None, machine=None, reason=FULL):
+    from scripts.hive import placement_waits
+    from scripts.swarm import lease
+    from scripts.swarm.commands import hive_id
+
+    now = lease.now_ms(setup.store) if seen_at is None else seen_at
+    row = {"lane": "eng", "reason": reason, "started_at": now, "seen_at": now, "workstation": machine or hive_id()}
+    setup.store.redis.hset(setup.store.key(slug, placement_waits.WAITS), task, json.dumps(row))
+
+
+def test_a_waiting_workstation_task_keeps_its_seat_from_overflow_work(setup, monkeypatch):
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    local_agents(setup, 7)
+    setup.store.update(setup.config.slug, local_max_agents=7)
+    pinned = {"id": "pinned", "workstation": True}
+    assert "local machine runs 7 of its 7 agents" in fenced.placement_refusal("eng", pinned)
+    setup.store.update(setup.config.slug, local_max_agents=8)
+    assert "local machine runs 7 of its 8 agents" in fenced.placement_refusal("eng", {"id": "task"})
+    with pytest.raises(SpawnError, match="local machine runs 7 of its 8 agents"):
+        fenced.spawn(setup.config, "eng", "eng name", {"id": "task"})
+    assert fenced.spawn(setup.config, "eng", "eng pinned", pinned) == "placed on the workstation"
+    assert setup.herdr.spawn.call_count == 1
+
+
+def test_a_waiting_workstation_task_of_another_swarm_keeps_its_seat(setup, monkeypatch):
+    from scripts.hive import placement_waits
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.store.create(SwarmConfig("watched", "agentihooks", 1, 1))
+    local_agents(setup, 6)
+    pinned_wait(setup, "watched", "first")
+    pinned_wait(setup, "watched", "second")
+    assert "local machine runs 6 of its 8 agents" in fenced.placement_refusal("eng", {"id": "task"})
+    setup.store.redis.hdel(setup.store.key("watched", placement_waits.WAITS), "second")
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+
+
+def test_a_stale_workstation_wait_reserves_nothing(setup, monkeypatch):
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.store.create(SwarmConfig("watched", "agentihooks", 1, 1))
+    local_agents(setup, 7)
+    pinned_wait(setup, "watched", "gone", seen_at=1)
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+
+
+def test_a_wait_pinned_to_another_workstation_or_not_for_a_seat_reserves_nothing(setup, monkeypatch):
+    from scripts.hive.placement import NEEDS_CAPABILITY
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.store.create(SwarmConfig("watched", "agentihooks", 1, 1))
+    local_agents(setup, 7)
+    pinned_wait(setup, "watched", "elsewhere", machine="another-workstation")
+    pinned_wait(setup, "watched", "gpu", reason=NEEDS_CAPABILITY.format(needs="gpu"))
+    pinned_wait(setup, "watched", "quota", reason="no advertised Claude account has room")
+    pinned_wait(setup, "watched", "repo", reason="no hive for eng lists the repo agentihooks")
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+
+
+def test_a_waiting_workstation_task_records_its_machine_and_clears_when_it_starts(setup, monkeypatch):
+    from scripts.hive import placement_waits
+    from scripts.swarm.commands import hive_id
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    local_agents(setup, 7)
+    setup.store.update(setup.config.slug, local_max_agents=7)
+    pinned = {"id": "pinned", "workstation": True}
+    fenced.placement_refusal("eng", pinned)
+    fenced.placement_refusal("eng", {"id": "task"})
+    rows = placement_waits.read(setup.store, setup.config.slug)
+    assert (rows["pinned"]["workstation"], "workstation" in rows["task"]) == (hive_id(), False)
+    setup.store.update(setup.config.slug, local_max_agents=8)
+    fenced.spawn(setup.config, "eng", "eng pinned", pinned)
+    assert "pinned" not in placement_waits.read(setup.store, setup.config.slug)
+
+
+def test_a_workstation_wait_reserves_only_while_fresh(setup):
+    from scripts.hive import placement_waits
+
+    pinned_wait(setup, setup.config.slug, "pinned", seen_at=0, machine="box")
+    assert placement_waits.workstation_waiting(setup.store, "box", placement_waits.FRESH_MS - 1) == 1
+    assert placement_waits.workstation_waiting(setup.store, "box", placement_waits.FRESH_MS) == 0
+
+
+def test_workstation_tasks_keep_no_seats_from_each_other(setup, monkeypatch):
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.store.create(SwarmConfig("watched", "agentihooks", 1, 1))
+    local_agents(setup, 7)
+    pinned_wait(setup, "watched", "first")
+    assert fenced.placement_refusal("eng", {"id": "pinned", "workstation": True}) == ""
+
+
+def test_a_slot_claim_keeps_the_reserved_seats(setup, monkeypatch):
+    from scripts.swarm import local_slots
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.store.create(SwarmConfig("watched", "agentihooks", 1, 1))
+    local_agents(setup, 7)
+    pinned_wait(setup, "watched", "first")
+    monkeypatch.setattr(local_slots, "held", lambda *_: 0)
+    with pytest.raises(SpawnError, match="runs 7 of its 8 agents with 1 kept for waiting workstation tasks"):
+        fenced.spawn(setup.config, "eng", "eng name", {"id": "task"})
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_overflow_counts_reserved_seats_against_the_cap():
+    assert overflow("engineer", Wait(FULL), 6, 8, 1) == Choice(LOCAL_MACHINE, FULL)
+    assert overflow("engineer", Wait(FULL), 7, 8, 1) == Wait(
+        f"{FULL}, and the local machine runs 7 of its 8 agents with 1 kept for waiting workstation tasks"
+    )

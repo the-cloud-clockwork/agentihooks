@@ -1,0 +1,60 @@
+{
+  "grant": {"principal": "backup-fixture", "corpus": "swarm-fixture", "projects": ["github.com/the-cloud-clockwork/agentihooks"]},
+  "provider": "claude",
+  "retention": "retain-until-deleted",
+  "sessions": [
+    {
+      "session_uid": "swarm-fixture:claude:worker-a:designated",
+      "source_generation": "device-1:inode-10:anchor-0",
+      "origin": "worker-a:projects/agentihooks/designated.jsonl",
+      "turns": [
+        [
+          {"kind": "user_text", "text": "which backup restores the session catalog"},
+          {"kind": "assistant_text", "text": "The latest verified backup set restores it."}
+        ],
+        [
+          {"kind": "user_text", "text": "record the checkpoint for the fixture task"},
+          {"kind": "assistant_text", "text": "The checkpoint names its branch bundle and manifest."}
+        ]
+      ]
+    },
+    {
+      "session_uid": "swarm-fixture:claude:worker-b:lost",
+      "source_generation": "device-2:inode-20:anchor-0",
+      "origin": "worker-b:projects/agentihooks/lost.jsonl",
+      "turns": [
+        [
+          {"kind": "user_text", "text": "this session keeps its first batch"},
+          {"kind": "assistant_text", "text": "Its second archive object is deleted before the backup."}
+        ],
+        [
+          {"kind": "user_text", "text": "this batch is the deliberately missing source object"}
+        ]
+      ],
+      "lost_batch": 1
+    }
+  ],
+  "query_session": "swarm-fixture:claude:worker-a:designated",
+  "checkpoint": {
+    "task_id": "fixture-task",
+    "materials": [
+      {"role": "manifest", "content": "{\"checkpoint_id\": \"fixture-task:1\", \"continuation\": \"context\"}"},
+      {"role": "source_bundle", "content": "fixture branch bundle for fixture-task"}
+    ]
+  },
+  "files": {
+    "ledger": "{\"slug\": \"backup-fixture\", \"tasks\": {\"fixture-task\": {\"status\": \"claimed\"}}}",
+    "coordination": "{\"claims\": {\"fixture-task\": {\"generation\": 3}}, \"seats\": [\"eng-1@backup-fixture\"]}",
+    "brain": "{\"arcs\": [{\"id\": \"fixture-arc\", \"lesson\": \"backups are verified by restore\"}]}"
+  },
+  "versions": {"catalog": "session-catalog-1", "ledger": "ledger-1", "coordination": "swarm-store-1", "brain": "brain-export-1"},
+  "key_ids": {"catalog": "fixture-key-catalog", "ledger": "fixture-key-ledger", "coordination": "fixture-key-coordination", "brain": "fixture-key-brain"},
+  "withheld_key": "fixture-key-brain",
+  "foreign_corpus": "personal-corpus",
+  "retired_version": {"component": "ledger", "accepted": "ledger-2"},
+  "policy": {"version": "backup-turn-v1", "max_chars": 1200},
+  "index_generation": "fixture-embed-v1",
+  "model": {"model": "fixture-hash-embedder-4", "dimension": 4},
+  "clock": {"captured": 1000.0, "later_capture": 2000.0, "drill_start": 1100.0, "step": 2.5},
+  "interrupt_after_gets": 6
+}
