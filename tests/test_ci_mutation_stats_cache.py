@@ -1502,3 +1502,20 @@ def test_prune_caps_the_cache_before_reading_its_records(tmp_path, monkeypatch):
     stats_dependencies.StoredStats(tmp_path, tmp_path, {}, {}).prune()
     assert read == [tmp_path / "new.json"]
     assert [path.name for path in tmp_path.iterdir()] == ["new.json"]
+
+
+def test_collected_stats_are_capped_before_the_cache_is_saved(tmp_path, monkeypatch):
+    from scripts.ci_mutation import stats_dependencies
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    _repository(root, {"module.py": "value = 1\n", "tests/test_module.py": "def test_one():\n    pass\n"})
+
+    def collect(chosen):
+        return [{"status": 0, "tests": {}, "durations": {f"{path}::test_one": 1 for path in chosen}, "cpu": 1}]
+
+    monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", 1)
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, ["tests/test_module.py"], [], collect)
+    assert list(cache.glob("*.index"))
+    assert not list(cache.glob("*.json"))
