@@ -29,7 +29,9 @@ Doctor finding. The judgment writes two things in one Redis transaction:
 | Verdict event | `agentihooks:swarm:<doctor>:doctor-verdicts` | sorted set | One member per judgment, scored by the judgment time in epoch milliseconds |
 
 `<doctor>` is the Doctor ledger, the watched ledger with `-doctor` appended,
-for example `rig-grade-swarm-doctor`. The key root `agentihooks` follows
+for example `rig-grade-swarm-doctor`. A watched ledger name longer than 41
+characters is shortened and given a six character digest before `-doctor`;
+`agentihooks doctor <slug> status` names the Doctor ledger. The key root `agentihooks` follows
 `AGENTIHOOKS_SWARM_KEY_PREFIX` when that is set.
 
 Each event holds these fields:
@@ -90,9 +92,9 @@ day within the last seven days. The command prints one JSON object:
   "events_by_value": {"false-positive": 2, "established": 1},
   "latest_by_value": {"false-positive": 1, "established": 1},
   "events": [
-    {"value": "false-positive", "note": "first pass", "by": "master@d44a5a-1", "at": 1792720000000, "measure": 3, "finding": "codex-launch/eng-2"},
-    {"value": "false-positive", "note": "same cause", "by": "master@d44a5a-1", "at": 1792760000000, "measure": 3, "finding": "codex-launch/eng-2"},
-    {"value": "established", "note": "", "by": "operator", "at": 1792770000000, "measure": 5, "finding": "stale-claim/t12"}
+    {"value": "false-positive", "note": "first pass", "by": "master@d44a5a-1", "at": 1792720000000, "measure": 3, "finding": "context-overrun/master@323133-0175"},
+    {"value": "false-positive", "note": "same cause", "by": "master@d44a5a-1", "at": 1792760000000, "measure": 3, "finding": "context-overrun/master@323133-0175"},
+    {"value": "established", "note": "", "by": "operator", "at": 1792770000000, "measure": 5, "finding": "red-dev-workflow/hive-worker.yml"}
   ]
 }
 ```
@@ -109,7 +111,8 @@ day within the last seven days. The command prints one JSON object:
 The day's false positive count is `events_by_value["false-positive"]`.
 `latest_by_value["false-positive"]` is the old lower bound, measured the same
 way, so the two side by side show how many repeated judgments the latest
-record hid:
+record hid. The window need not be a calendar day; this one is the first full
+day after collection began on the rig-grade-swarm Doctor:
 
 ```bash
 agentihooks doctor rig-grade-swarm verdict-log \
@@ -127,13 +130,15 @@ agentihooks doctor rig-grade-swarm verdict-log \
 
 ## Inspect the stored log
 
-Read the raw keys with the swarm's Redis address:
+Read the raw keys with the Redis the swarm connects to:
+`AGENTIHOOKS_HIVE_REDIS_URL` when set outside local mode, else
+`AGENTIHOOKS_SWARM_REDIS_URL`. The examples use the latter:
 
 ```bash
 redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" ZCARD agentihooks:swarm:rig-grade-swarm-doctor:doctor-verdicts
 redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" PTTL agentihooks:swarm:rig-grade-swarm-doctor:doctor-verdicts
 redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" ZRANGE agentihooks:swarm:rig-grade-swarm-doctor:doctor-verdicts -3 -1 WITHSCORES
-redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGET agentihooks:swarm:rig-grade-swarm-doctor:doctor-findings codex-launch/eng-2
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGET agentihooks:swarm:rig-grade-swarm-doctor:doctor-findings context-overrun/master@323133-0175
 ```
 
 Each member is a JSON pair `["<random id>", {event}]`. The random id keeps two
@@ -146,6 +151,7 @@ list the command prints, applying the same window checks:
 from scripts.doctor import loop
 from scripts.swarm import cli as swarm
 
+since, until = 1792713600000, 1792800000000
 store = swarm.connect()
 events = loop.verdicts(store, "rig-grade-swarm-doctor").events(since, until, swarm.now_ms())
 ```
@@ -154,8 +160,8 @@ events = loop.verdicts(store, "rig-grade-swarm-doctor").events(since, until, swa
 
 - Collection begins when the repair reaches the Doctor writer. Earlier
   verdict values and notes were overwritten and cannot be backfilled. On the
-  rig-grade-swarm Doctor that was 2026-10-25T00:11:55Z, when `pull-dev`
-  applied pull request 6825. A window spanning that transition has incomplete
+  rig-grade-swarm Doctor that was 2026-10-25T00:11:55Z, the Doctor `pull-dev`
+  time recorded as applied on ledger task t749. A window spanning that transition has incomplete
   event counts.
 - An empty log does not prove that no judgments occurred before collection
   began.
@@ -175,7 +181,7 @@ events = loop.verdicts(store, "rig-grade-swarm-doctor").events(since, until, swa
 | `doctor: verdict log window exceeds seven day retention` | `--since` is more than seven days before now | Pick a window inside the last seven days |
 | `doctor: verdict log needs --since before --until and --until no later than now` | The window is empty or reversed, or ends in the future | Put `--since` before `--until` and end the window at or before now; for the current day, end it at the present time |
 | `doctor: --since takes an ISO time such as 2026-10-06T12:00Z, not ...` | A bound is not an ISO 8601 time | Write it as `2026-10-23T00:00Z` |
-| `the following arguments are required: --since, --until` | A bound is missing | Pass both bounds |
+| `agentihooks doctor: error: the following arguments are required: --since, --until`, exit code 2 | A bound is missing | Pass both bounds |
 | `doctor: no Doctor watches <slug>; start one with ...` | The slug names neither a Doctor nor a ledger it watches | Use the watched ledger or its `-doctor` ledger |
-| `event_count` is 0 while `latest_count` is above 0 | The verdicts were written by Doctor code from before pull request 6825, or the log expired after a week with no judgment | Apply the fix with `agentihooks doctor <watched-ledger> intervene pull-dev` and count only windows that start after it |
+| `event_count` is 0 while `latest_count` is above 0 | The verdicts were written by Doctor code from before pull request 6825 | Check that the Doctor's checkout contains pull request 6825, and count only windows that start after collection began |
 | `event_count` is below `latest_count` | The window starts before collection began | Start the window after the application time |
