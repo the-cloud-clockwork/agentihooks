@@ -3,6 +3,7 @@ older than two heartbeats count as missing telemetry."""
 
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,8 @@ def measure(pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dic
         available_mb = host_budget._memory_mb(proc)[0]
         total_mb = _total_mb(proc)
         pod = _pod(CGROUP, now_ms, previous)
+        disk_free_gb = _free_gb(Path(os.environ.get("WORKTREE_ROOT", Path.home() / "dev" / "worktrees")))
+        disk_floor_gb = int(os.environ.get("WT_MIN_FREE_GB", "50"))
     except (OSError, ValueError, IndexError, KeyError, StopIteration):
         return None
     return {
@@ -39,6 +42,8 @@ def measure(pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dic
         "available_mb": available_mb,
         "total_mb": total_mb,
         **pod,
+        "disk_free_gb": disk_free_gb,
+        "disk_floor_gb": disk_floor_gb,
         "pending": pending,
         "agents": {harness: len(pids) for harness, pids in account_sessions.local_processes().items()},
         "measured_at": now_ms,
@@ -48,6 +53,13 @@ def measure(pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dic
 def _total_mb(proc: Path) -> int:
     line = next(line for line in (proc / "meminfo").read_text().splitlines() if line.startswith("MemTotal:"))
     return int(line.split()[1]) // 1024
+
+
+# The same folder wt.sh new measures before it refuses a worktree below WT_MIN_FREE_GB.
+def _free_gb(root: Path) -> int:
+    while not root.is_dir():
+        root = root.parent
+    return shutil.disk_usage(root).free // 2**30
 
 
 def _pod(cgroup: Path, now_ms: int, previous: dict | None) -> dict:
