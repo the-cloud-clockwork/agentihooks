@@ -27,10 +27,14 @@ GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 IMPORT_GROUPS = {"fakeredis"}
 
 
-def changed_mutations(filename: str, source: str, changed: set[int], *, decorated: bool = False) -> tuple[object, list]:
+def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[object, list]:
+    module, mutations, _ = created_mutations(filename, source)
+    return module, on_changed_lines(module, mutations, changed)
+
+
+def on_changed_lines(module, mutations: list, changed: set[int]) -> list:
     from libcst.metadata import MetadataWrapper, WhitespaceInclusivePositionProvider
 
-    module, mutations = created_mutations(filename, source, decorated)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(WhitespaceInclusivePositionProvider)
     selected = []
     for mutation in mutations:
@@ -44,32 +48,36 @@ def changed_mutations(filename: str, source: str, changed: set[int], *, decorate
         )
         if changed.intersection(lines):
             selected.append(mutation)
-    return module, selected
+    return selected
 
 
-def created_mutations(filename: str, source: str, decorated: bool) -> tuple[object, list]:
+def created_mutations(filename: str, source: str) -> tuple[object, list, list]:
     import libcst as cst
-    from libcst.metadata import MetadataWrapper, PositionProvider
+    from libcst.metadata import MetadataWrapper
     from mutmut.mutation.file_mutation import NEVER_MUTATE_FUNCTION_NAMES, MutationVisitor
     from mutmut.mutation.mutators import mutation_operators
     from mutmut.mutation.pragma_handling import get_ignored_lines
 
     class Visitor(MutationVisitor):
+        def __init__(self, ignored, decorated: bool) -> None:
+            super().__init__(mutation_operators, ignored)
+            self.decorated = decorated
+
         # mutmut 3.6.0 skips every decorated class, yet a dataclass keeps its methods, so their trampolines work.
         def _skip_node_and_children(self, node: cst.CSTNode) -> bool:
             skipped = super()._skip_node_and_children(node)
             if not skipped or not isinstance(node, cst.FunctionDef | cst.ClassDef) or not node.decorators:
                 return skipped
-            if not decorated and not (isinstance(node, cst.ClassDef) and all(map(is_dataclass, node.decorators))):
-                return True
-            position = self.get_metadata(PositionProvider, node, None)
-            if position is not None and position.start.line in self._ignored_node_lines:
+            if not self.decorated and not (isinstance(node, cst.ClassDef) and all(map(is_dataclass, node.decorators))):
                 return True
             return isinstance(node, cst.FunctionDef) and node.name.value in NEVER_MUTATE_FUNCTION_NAMES
 
     wrapper = MetadataWrapper(cst.parse_module(source))
-    visitor = Visitor(mutation_operators, get_ignored_lines(filename, source, wrapper))
-    return wrapper.visit(visitor), visitor.mutations
+    ignored = get_ignored_lines(filename, source, wrapper)
+    graded, possible = Visitor(ignored, False), Visitor(ignored, True)
+    module = wrapper.visit(graded)
+    wrapper.visit(possible)
+    return module, graded.mutations, possible.mutations
 
 
 def is_dataclass(decorator) -> bool:
@@ -80,17 +88,20 @@ def is_dataclass(decorator) -> bool:
     return isinstance(name, cst.Name) and name.value == "dataclass"
 
 
-def body_mutations(filename: str, source: str, changed: set[int]) -> int:
+def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int, int]:
     from libcst.metadata import MetadataWrapper, PositionProvider
 
-    module, possible = changed_mutations(filename, source, changed, decorated=True)
+    module, graded, possible = created_mutations(filename, source)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(PositionProvider)
-    return sum(
+    # mutmut emits only mutants inside a function or method.
+    found = sum(1 for mutation in on_changed_lines(module, graded, changed) if mutation.contained_by_top_level_function)
+    body = sum(
         positions[mutation.original_node].start.line
         >= positions[mutation.contained_by_top_level_function.body.body[0]].start.line
-        for mutation in possible
+        for mutation in on_changed_lines(module, possible, changed)
         if mutation.contained_by_top_level_function
     )
+    return found, body
 
 
 def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:

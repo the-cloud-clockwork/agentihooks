@@ -474,7 +474,7 @@ def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_
 def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count_without_mutants(monkeypatch):
     from mutmut.configuration import Config
 
-    from scripts.ci_mutation.selection import body_mutations, selected_mutants
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutants
 
     monkeypatch.setattr(
         Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
@@ -493,16 +493,26 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
         "@functools.lru_cache(maxsize=2)\n"
         "def cached(value):\n"
         "    return value - 1\n"
+        "\n"
+        "@functools.total_ordering\n"
+        "class Ordered:\n"
+        "    def __lt__(self, other):\n"
+        "        return self.count < other.count\n"
     )
     generated, names = selected_mutants("scripts/sample.py", source, {9})
     assert len(names) == 2
     assert all(name.startswith("xǁLauncherǁlaunch__mutmut_") for name in names)
     assert "self.count - 1" in generated
     compile(generated, "scripts/sample.py", "exec")
-    assert body_mutations("scripts/sample.py", source, {9}) == 2
-    assert selected_mutants("scripts/sample.py", source, {13})[1] == []
-    assert body_mutations("scripts/sample.py", source, {13}) == 2
-    assert body_mutations("scripts/sample.py", source, {4, 11}) == 0
+    assert mutation_counts("scripts/sample.py", source, {9}) == (2, 2)
+    assert selected_mutants("scripts/sample.py", source, {13, 18})[1] == []
+    assert mutation_counts("scripts/sample.py", source, {13}) == (0, 2)
+    assert (
+        mutation_counts("scripts/sample.py", source, {18})[0]
+        == 0
+        < mutation_counts("scripts/sample.py", source, {18})[1]
+    )
+    assert mutation_counts("scripts/sample.py", source, {4, 11}) == (0, 0)
 
 
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
