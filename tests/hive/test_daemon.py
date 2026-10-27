@@ -1,4 +1,5 @@
 import json
+import threading
 from unittest.mock import Mock
 
 import pytest
@@ -540,35 +541,37 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
     assert beats == [first, second]
     assert [(thread.target, thread.args[:-1], thread.daemon) for thread in threads] == [
         (daemon.publish_headroom, (first, first_waiter, "local"), True),
-        (daemon.publish_herdr_stats, (first, "local"), True),
+        (daemon.publish_herdr_stats, (first, first_waiter, "local"), True),
         (daemon.publish_headroom, (second, second_waiter, "local"), True),
-        (daemon.publish_herdr_stats, (second, "local"), True),
+        (daemon.publish_herdr_stats, (second, second_waiter, "local"), True),
     ]
     assert backed_off == [[True, True]]
     assert threads[2].args[-1].is_set() and threads[3].args[-1].is_set()
 
 
-class Stop:
-    def __init__(self, ticks):
-        self.ticks, self.waits = ticks, []
+def ticks(monkeypatch, count):
+    """A scheduler wait that returns `count` times, then sets the stop event."""
+    stop, waits = threading.Event(), []
 
-    def wait(self, seconds):
-        self.waits.append(seconds)
-        self.ticks -= 1
-        return self.ticks < 0
+    def wait(seconds, redis, timeout):
+        waits.append((seconds, timeout))
+        if len(waits) > count:
+            stop.set()
+
+    monkeypatch.setattr(daemon, "scheduled_wait", wait)
+    return stop, waits
 
 
 @pytest.mark.parametrize(("ui", "published"), [("yes", 2), ("no", 0)])
-def test_herdr_stats_publish_every_ten_seconds_from_the_interface_hive_only(redis, monkeypatch, ui, published):
+def test_herdr_stats_publish_on_the_scheduler_cadence_from_the_interface_hive_only(redis, monkeypatch, ui, published):
     from scripts.hive import herdr_stats
 
     redis.hset(registry.key("machine"), mapping={"name": "machine", "ui": ui, "heartbeat_at": "1"})
-    redis.sadd(registry.INDEX, "machine")
     calls = []
     monkeypatch.setattr(herdr_stats, "publish", lambda redis, now_ms: calls.append(now_ms))
-    stop = Stop(2)
-    daemon.publish_herdr_stats(redis, "machine", stop)
-    assert stop.waits == [herdr_stats.EVERY_S] * 3
+    stop, waits = ticks(monkeypatch, 2)
+    daemon.publish_herdr_stats(redis, "waiter", "machine", stop)
+    assert waits == [(herdr_stats.EVERY_S, herdr_stats.EVERY_S + daemon.WAKE_SLACK_S)] * 3
     assert len(calls) == published
 
 
@@ -579,10 +582,21 @@ def test_herdr_stats_keep_their_cadence_through_a_failed_publish(redis, monkeypa
 
     redis.hset(registry.key("machine"), mapping={"name": "machine", "ui": "yes", "heartbeat_at": "1"})
     monkeypatch.setattr(herdr_stats, "publish", Mock(side_effect=RedisError("down")))
-    stop = Stop(2)
-    daemon.publish_herdr_stats(redis, "machine", stop)
-    assert len(stop.waits) == 3
+    stop, waits = ticks(monkeypatch, 2)
+    daemon.publish_herdr_stats(redis, "waiter", "machine", stop)
+    assert len(waits) == 3
     assert capsys.readouterr().err.count("hive herdr stats publish failed (RedisError: down)") == 2
+
+
+def test_herdr_stats_end_when_their_wait_loses_the_connection(monkeypatch):
+    from redis.exceptions import ConnectionError
+
+    from scripts.hive import herdr_stats
+
+    monkeypatch.setattr(daemon, "scheduled_wait", Mock(side_effect=ConnectionError("lost")))
+    monkeypatch.setattr(herdr_stats, "publish", Mock())
+    daemon.publish_herdr_stats(object(), "waiter", "machine", threading.Event())
+    herdr_stats.publish.assert_not_called()
 
 
 def test_install_writes_the_service_and_enables_it(tmp_path):

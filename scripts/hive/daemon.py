@@ -225,13 +225,19 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
 
 
-def publish_herdr_stats(redis: "Redis", local_id: str, stop: threading.Event) -> None:
+def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
     """Only the hive that hosts the operator's interface runs the master herdr client, so only it publishes."""
-    from redis.exceptions import RedisError
+    from redis.exceptions import ConnectionError, RedisError, TimeoutError
 
     from scripts.hive import herdr_stats
 
-    while not stop.wait(herdr_stats.EVERY_S):
+    while not stop.is_set():
+        try:
+            scheduled_wait(herdr_stats.EVERY_S, redis=waiter, timeout=herdr_stats.EVERY_S + WAKE_SLACK_S)
+        except (ConnectionError, TimeoutError):
+            return
+        if stop.is_set():
+            return
         try:
             if (registry.show(redis, local_id) or {}).get("ui") == "yes":
                 herdr_stats.publish(redis, int(time.time() * 1000))
@@ -254,7 +260,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
             redis, waiter = connect()
             local_id = hive_id()
             threading.Thread(target=publish_headroom, args=(redis, waiter, local_id, stop), daemon=True).start()
-            threading.Thread(target=publish_herdr_stats, args=(redis, local_id, stop), daemon=True).start()
+            threading.Thread(target=publish_herdr_stats, args=(redis, waiter, local_id, stop), daemon=True).start()
             while True:
                 started = time.monotonic()
                 worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
