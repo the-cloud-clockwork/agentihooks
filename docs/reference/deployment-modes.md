@@ -359,16 +359,16 @@ An agent starts with the `env` block of its rendered Claude profile home. A bund
 `AGENTIHOOKS_HOSTED_LEDGER_URL` in its `settings.overrides.json` as a default. When the process that renders the
 profile has the variable set, that value replaces the profile's in the rendered `settings.json`; a profile value
 applies only when the rendering process has none. A hive that runs agents as herdr panes spawns each one through
-`init-agent` with the controller's environment, so the address in the hive's `hive.env`, or in a worker hive pod's
-environment, reaches its agents.
+`init-agent`, whose `select-profile` step renders the profile with the controller's environment, so the address in
+the hive's `hive.env`, or in a worker hive pod's environment, reaches its agents.
 
 The rendered home's stamp records the address it was rendered with. A render whose address differs builds a fresh
 home instead of reusing the cached one, so a changed address reaches the next agent without a manual rerender. An
 unchanged address keeps the cached home. The hive's systemd unit loads `hive.env` as its environment file when the
 controller starts, so restart the controller after changing the file.
 
-A worker hive reaching the hosted ledger over its internal name, with a bundle that names the public address. In
-the hive's environment:
+In this example a worker hive reaches the hosted ledger over its internal name while the bundle names the public
+address. In the hive's environment:
 
 ```bash
 AGENTIHOOKS_HOSTED_LEDGER_URL=https://swarm-internal.homeofanton.com:8765
