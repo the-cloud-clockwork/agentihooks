@@ -296,6 +296,11 @@ def test_a_helper_returning_after_its_assertion_is_not_disabled(tmp_path):
     assert not _measured(tmp_path, text)["_blocked"]["disabled"]
 
 
+def test_a_helper_returning_its_assertion_is_not_disabled(tmp_path):
+    text = GUARD.replace("    assert command\n", "    return command.assert_called_once()\n")
+    assert not _measured(tmp_path, text)["_blocked"]["disabled"]
+
+
 def test_only_checks_assert_methods_and_asserting_helpers_count_as_assertions(tmp_path):
     text = GUARD.replace(
         "        str(1)\n", "        assertion_noop()\n        mock.assert_called_once()\n        _blocked(1)\n"
@@ -399,7 +404,15 @@ def test_a_base_without_a_manifest_locks_the_head(tmp_path, capsys):
         (Path(LOCKED), "{", f"::error::{LOCKED} does not parse: "),
         (Path(LOCKED), "def test_x():\n    pass\x00\n", "::error::"),
     ],
-    ids=["no manifest", "manifest json", "manifest list", "manifest fields", "manifest texts", "test syntax", "test nul"],
+    ids=[
+        "no manifest",
+        "manifest json",
+        "manifest list",
+        "manifest fields",
+        "manifest texts",
+        "test syntax",
+        "test nul",
+    ],
 )
 def test_an_unreadable_tree_cannot_be_graded(tmp_path, capsys, path, text, message):
     base = _tree(tmp_path / "base", GUARD)

@@ -85,7 +85,7 @@ def _returns_early(statements: list[ast.stmt], before: tuple[int, int] | None = 
     pending: list[ast.AST] = list(statements)
     while pending:
         node = pending.pop()
-        if isinstance(node, ast.Return) and (before is None or (node.lineno, node.col_offset) < before):
+        if isinstance(node, ast.Return) and (before is None or (node.end_lineno, node.end_col_offset) < before):
             return True
         if not isinstance(node, (*DEFINITIONS, ast.Lambda)):
             pending.extend(ast.iter_child_nodes(node))
