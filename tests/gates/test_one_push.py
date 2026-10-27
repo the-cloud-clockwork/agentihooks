@@ -320,6 +320,29 @@ def test_a_push_passes_once_a_check_is_red_or_checks_resolved_or_the_pull_reques
     assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed
 
 
+@pytest.mark.parametrize("suite_status", ["COMPLETED", "QUEUED", "IN_PROGRESS"])
+@pytest.mark.parametrize(
+    ("check_status", "conclusion", "allowed"),
+    [("COMPLETED", "CANCELLED", True), ("QUEUED", None, False), ("IN_PROGRESS", None, False)],
+)
+def test_cancelled_suites_finish_but_active_checks_still_hold_a_push(
+    tree, tmp_path, suite_status, check_status, conclusion, allowed
+):
+    raw = {
+        "state": "OPEN",
+        "statusCheckRollup": [
+            {"name": name, "status": check_status, "conclusion": conclusion} for name in ("unit", "lint")
+        ],
+        "checkSuites": [
+            {"status": suite_status, "conclusion": "CANCELLED", "workflowRun": {"databaseId": 1}}
+        ],
+    }
+    decision = gate(pull_request(raw)).decide(bash("git push", tree), ME, state(tmp_path))
+    assert decision.allowed is allowed
+    if not allowed:
+        assert decision.reason == push_refusal("demo", URL)
+
+
 def test_a_push_passes_with_no_pull_request_or_into_another_repo(tree, tmp_path):
     assert gate(pull(), pr_url=None).decide(bash("git push -u origin HEAD", tree), ME, state(tmp_path)).allowed
     other = "https://github.com/o/elsewhere/pull/3"
