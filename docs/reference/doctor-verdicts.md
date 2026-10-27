@@ -92,8 +92,8 @@ day within the last seven days. The command prints one JSON object:
   "events_by_value": {"false-positive": 2, "established": 1},
   "latest_by_value": {"false-positive": 1, "established": 1},
   "events": [
-    {"value": "false-positive", "note": "first pass", "by": "master@d44a5a-1", "at": 1792720000000, "measure": 3, "finding": "context-overrun/master@323133-0175"},
-    {"value": "false-positive", "note": "same cause", "by": "master@d44a5a-1", "at": 1792760000000, "measure": 3, "finding": "context-overrun/master@323133-0175"},
+    {"value": "false-positive", "note": "first pass", "by": "master@d44a5a-1", "at": 1792720000000, "measure": 640, "finding": "context-overrun/master@323133-0175"},
+    {"value": "false-positive", "note": "same cause", "by": "master@d44a5a-1", "at": 1792760000000, "measure": 640, "finding": "context-overrun/master@323133-0175"},
     {"value": "established", "note": "", "by": "operator", "at": 1792770000000, "measure": 5, "finding": "red-dev-workflow/hive-worker.yml"}
   ]
 }
@@ -161,7 +161,10 @@ events = loop.verdicts(store, "rig-grade-swarm-doctor").events(since, until, swa
 - Collection begins when the repair reaches the Doctor writer. Earlier
   verdict values and notes were overwritten and cannot be backfilled. On the
   rig-grade-swarm Doctor that was 2026-10-25T00:11:55Z, the Doctor `pull-dev`
-  time recorded as applied on ledger task t749. A window spanning that transition has incomplete
+  time written in the APPLIED note of task t749 on the
+  `rig-grade-swarm-doctor` ledger (`agentihooks ledger --slug
+  rig-grade-swarm-doctor get tasks/t749`). The task carries no `applied_at`
+  field, so that note is the only record of the time. A window spanning that transition has incomplete
   event counts.
 - An empty log does not prove that no judgments occurred before collection
   began.
