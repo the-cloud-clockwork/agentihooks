@@ -13,6 +13,14 @@ import pytest
 from scripts.ci_mutation.runner import run_gate
 
 
+@pytest.fixture(autouse=True)
+def _restore_item_node_id():
+    added = "_nodeid" not in vars(pytest.Item)
+    yield
+    if added and "_nodeid" in vars(pytest.Item):
+        del pytest.Item._nodeid
+
+
 def _no_pytest(self, params, **kwargs):
     return 0
 
@@ -1244,21 +1252,21 @@ def test_mutmut_wait_skips_a_child_a_test_left_and_returns_the_forked_mutant(mon
 
 
 @pytest.mark.parametrize(
-    "version, kept, expected",
+    "version, preset, expected",
     [
         ((9, 2, 0), None, "tests/test_a.py::test_a"),
         ((9, 1, 99), None, None),
         ((10, 0, 0), "kept", "kept"),
     ],
 )
-def test_node_ids_reach_mutmut_only_where_pytest_dropped_them(monkeypatch, version, kept, expected):
+def test_node_ids_reach_mutmut_only_where_pytest_dropped_them(monkeypatch, version, preset, expected):
     from scripts.ci_mutation import selection
 
     class Item:
         nodeid = "tests/test_a.py::test_a"
 
-    if kept:
-        Item._nodeid = kept
+    if preset:
+        Item._nodeid = preset
     monkeypatch.setattr(selection.pytest, "version_tuple", version)
     monkeypatch.setattr(selection.pytest, "Item", Item)
     selection.keep_node_ids()
