@@ -57,7 +57,12 @@ def _slowest_committed_test(skip_rearmed: bool = True, skip_own_timeout: bool = 
             for node in ast.parse(path.read_text()).body
         )
         or skip_own_timeout
-        and "pytest.mark.timeout(" in path.read_text()
+        and any(
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "pytestmark" for target in node.targets)
+            and any(isinstance(call, ast.Attribute) and call.attr == "timeout" for call in ast.walk(node.value))
+            for node in ast.parse(path.read_text()).body
+        )
     }
     return max(
         max(
@@ -559,6 +564,8 @@ def test_the_timeout_bound_skips_only_a_file_that_sets_its_own_timeout(tmp_path,
     monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
     assert _slowest_committed_test(skip_rearmed=False, skip_own_timeout=True) == 1.0
     assert _slowest_committed_test(skip_rearmed=False) == 90.0
+    (tmp_path / "tests/test_slow.py").write_text("@pytest.mark.timeout(250)\ndef test_other():\n    pass\n")
+    assert _slowest_committed_test(skip_rearmed=False, skip_own_timeout=True) == 90.0
 
 
 def test_tests_keep_dev_pull_request_and_integration_triggers():
