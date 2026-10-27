@@ -120,6 +120,7 @@ def test_live_routes_keep_the_swarm_front_door_and_account(monkeypatch):
         check.FrontDoor("rig", "master@token", "", "route")
     ]
 
+
 @pytest.mark.parametrize("state", ["stopped", "paused"])
 def test_front_doors_excludes_swarms_that_are_not_running(state, monkeypatch):
     _stored(1, "one@example.com")
