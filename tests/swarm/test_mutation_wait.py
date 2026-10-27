@@ -257,6 +257,7 @@ def _shards(preflight, *reports, conclusion="failure", summary="cancelled"):
     preflight.jobs = [
         {"name": "plan", "conclusion": "success", "steps": []},
         {"name": "touched-tests", "conclusion": "success", "steps": []},
+        {"name": "refine", "conclusion": "skipped", "steps": []},
         {"name": "mutation-shard (0)", "conclusion": "success", "steps": []},
         {"name": "mutation", "conclusion": summary, "steps": []},
     ]
@@ -291,7 +292,36 @@ def test_complete_shard_reports_grade_a_run_whose_summary_was_cancelled(prefligh
     assert waits.resolution(held, {}, None, None, None, False) == (
         f"mutation preflight {URL}, now green; no failing mutants"
     )
-    assert "repos/org/repo/actions/artifacts/30/zip" not in preflight.requests
+    assert preflight.requests[-3:] == [
+        "repos/org/repo/actions/runs/123/jobs?per_page=100",
+        "repos/org/repo/actions/artifacts/20/zip",
+        "repos/org/repo/actions/artifacts/21/zip",
+    ]
+
+
+def test_the_newest_report_of_each_shard_grades_the_run(preflight):
+    _shards(preflight, _shard(0, 1))
+    at = preflight.artifacts[0]["created_at"]
+    preflight.artifacts.append({"id": 5, "name": "mutation-preflight-shard-0", "expired": False, "created_at": at})
+    preflight.archives[5] = _shard(0, 1, complete=False)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now green; no failing mutants"
+    )
+
+
+def test_a_cancelled_run_whose_shard_reports_cannot_be_fetched_ends_red_as_cancelled(preflight, monkeypatch):
+    _shards(preflight, _shard(0, 1), conclusion="cancelled")
+    original = subprocess.run
+
+    def api(args, **kwargs):
+        if args[-1].endswith("/zip"):
+            return subprocess.CompletedProcess(args, 1, b"")
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == f"mutation preflight {URL}, now red; run cancelled"
 
 
 def test_complete_shard_reports_name_their_survivors_when_the_summary_was_cancelled(preflight):

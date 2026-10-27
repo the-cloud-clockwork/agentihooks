@@ -238,12 +238,11 @@ def _archive(repo, artifact):
 
 
 def _shard_reports(repo, number, artifacts):
-    shards = {}
-    for artifact in artifacts:
-        if match := SHARD_REPORT.fullmatch(artifact["name"]):
-            index = int(match.group(1))
-            if index not in shards or artifact["id"] > shards[index]["id"]:
-                shards[index] = artifact
+    shards = {
+        int(match.group(1)): artifact
+        for artifact in sorted(artifacts, key=lambda row: row["id"])
+        if (match := SHARD_REPORT.fullmatch(artifact["name"]))
+    }
     if not shards:
         raise Missing
     jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100")["jobs"]
@@ -354,13 +353,15 @@ def _resolve(held, branches):
     outcome = f"mutation preflight {target}"
     if moved := _moved(target, run, outcome):
         return moved
-    if run.get("conclusion") in ("success", "failure"):
-        return _evidence(target, run, branches, outcome)[0]
-    ended = f"{outcome}, now red; run {run.get('conclusion')}"
-    if run.get("conclusion") != "cancelled" or run["path"] != WORKFLOW:
+    conclusion = run.get("conclusion")
+    ended = f"{outcome}, now red; run {conclusion}"
+    if conclusion not in ("success", "failure") and (conclusion != "cancelled" or run["path"] != WORKFLOW):
         return ended
-    verdict, sharded = _evidence(target, run, branches, outcome)
-    return verdict if sharded or not verdict else ended
+    try:
+        verdict, sharded = _evidence(target, run, branches, outcome)
+    except Unreachable:
+        return ""
+    return ended if conclusion == "cancelled" and not sharded else verdict
 
 
 def _evidence(target, run, branches, outcome):
@@ -377,7 +378,7 @@ def _evidence(target, run, branches, outcome):
     except (Skipped, FetchFailed) as error:
         return _unfetched(outcome, run["conclusion"], error), False
     except Unreachable:
-        return "", False
+        raise
     except (*UNREADABLE, StopIteration, zipfile.BadZipFile):
         return f"{outcome}, now red; complete mutation report unavailable; mutation may have been skipped", False
     if not covered:
