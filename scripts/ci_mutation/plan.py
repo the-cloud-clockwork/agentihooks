@@ -68,6 +68,7 @@ def estimate(
         units, unrecorded = changed_recorded_units(root, manifest, changes)
         if "lines" in manifest:
             covering = line_covering_tests(root, manifest, changes, paths)
+            print(f"PHASE covering {time.monotonic():.2f}")
         else:
             covering = covering_tests(manifest, units | drifted, paths)
         recorded = {}
@@ -78,9 +79,12 @@ def estimate(
             path, _, name = node(test).partition("[")[0].partition("::")
             recorded.setdefault(path, set()).add(name)
     for path, lines in changes.items():
+        print(f"PHASE loop {path} {time.monotonic():.2f}")
         chosen = every_test(root) if everything else select_tests(root, Path(path))
+        print(f"PHASE selected {time.monotonic():.2f}")
         if manifest is not None:
             chosen = sorted({*chosen, *recorded_tests(root, manifest, path, lines)})
+        print(f"PHASE recorded tests {time.monotonic():.2f}")
         if drift is not None and path not in unrecorded:
             chosen = narrow(root, chosen, covering, recorded, stale)
         if selection is not None:
@@ -92,6 +96,7 @@ def estimate(
             ):
                 raise SystemExit(f"{path}: not mutated, no matching or importing test modules")
             continue
+        print(f"PHASE narrowed {time.monotonic():.2f}")
         tests.update(chosen)
         _, mutations = changed_mutations(path, (root / path).read_text(), lines)
         # mutmut emits only mutants inside a function or method.
@@ -114,7 +119,9 @@ def read_record(repository: str) -> tuple[tuple[dict, dict] | None, str]:
     before = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     for attempt in (1, 2):
         try:
-            return find_record(repository, before), ""
+            found = find_record(repository, before)
+            print(f"PHASE record thread done {time.monotonic():.2f}")
+            return found, ""
         except RECORD_ERRORS as error:
             reason = record_failure(error)
             print(f"Reading the recorded dev coverage failed on attempt {attempt}: {reason}")
@@ -585,13 +592,22 @@ def stats_part_count(root: Path, tests: list[str], target: float, limit: int) ->
 def validate_tests(root: Path, tests: list[str]) -> None:
     from tests.test_collection_imports import SDK_GROUP, loads_heavy, loads_sdk_when_run
 
+    clean = set()
+    heavy = sdk = 0.0
     for test in sorted({test_file(entry) for entry in tests}):
         path = root / test
-        if loads_heavy(test.removesuffix(".py").replace("/", "."), set()):
+        clock = time.monotonic()
+        hit = loads_heavy(test.removesuffix(".py").replace("/", "."), clean)
+        heavy += time.monotonic() - clock
+        if hit:
             raise SystemExit(f"{test}: loads the MCP SDK while collecting")
         source = path.read_text()
-        if loads_sdk_when_run(source) and SDK_GROUP not in source:
+        clock = time.monotonic()
+        hit = loads_sdk_when_run(source)
+        sdk += time.monotonic() - clock
+        if hit and SDK_GROUP not in source:
             raise SystemExit(f"{test}: loads the MCP SDK without the mcp-sdk worker group")
+    print(f"PHASE validate heavy {heavy:.2f} sdk {sdk:.2f}")
 
 
 def main() -> int:
