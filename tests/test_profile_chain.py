@@ -307,6 +307,24 @@ def test_enforcements_and_conditions_load_from_package_role(tmp_path, monkeypatc
     assert ("profile:engineer", role / ".claude" / "conditions") in layers
 
 
+def test_malformed_render_stamp_keeps_profile_enforcements_loading(tmp_path, monkeypatch, package_roles):
+    from hooks.context import enforcement
+
+    role = package_roles("engineer")
+    entry = {"id": "pkg-1", "message": "package rule", "cadence": 3}
+    (role / "enforcements.json").write_text(json.dumps({"enforcements": [entry]}))
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / profile_chain.RENDER_STAMP).write_text(json.dumps({"render": ["brain"]}))
+    monkeypatch.setattr(profile_chain, "BUILT_IN_PROFILES", tmp_path / "builtin")
+    monkeypatch.setattr(enforcement, "claude_home", lambda: home)
+    monkeypatch.setattr(enforcement, "current_target", lambda: "claude")
+    monkeypatch.setattr(enforcement, "_get_bundle_path", lambda: None)
+    monkeypatch.setattr(enforcement, "_get_active_profile", lambda: "engineer")
+    monkeypatch.setattr(enforcement, "_get_linked_profiles", lambda: {})
+    assert [e["id"] for e in enforcement._load_profile_enforcements()] == ["pkg-1"]
+
+
 @pytest.mark.parametrize(
     ("manifest", "expected"),
     [(None, []), ("", []), ("name: x\n", []), ("name: x\nallowedOverlays: [router, brain]\n", ["router", "brain"])],
