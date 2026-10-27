@@ -88,6 +88,8 @@ class Run:
             return "\n".join(getattr(self, "tree", []))
         if argv[:2] == ["api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
             return json.dumps(getattr(self, "required", []))
+        if argv[:2] == ["pr", "list"] and "open" in argv:
+            return "\n".join(getattr(self, "open_heads", []))
         if argv[:2] == ["pr", "list"]:
             return self.prs[0] if self.prs else ""
         if argv[:2] == ["pr", "create"]:
@@ -810,6 +812,37 @@ def test_a_name_only_the_machine_map_holds_is_skipped(world):
     done = create.create(world.tools, create.Options(dry_run=True))
 
     assert done == "dry run of hive create swarm-hive-002: nothing written"
+
+
+def test_a_name_with_an_open_pull_request_is_skipped_and_refused_when_given(world):
+    world.run.open_heads = ["engineer-1", NAME]
+
+    assert create.create(world.tools, create.Options(dry_run=True)) == (
+        "dry run of hive create swarm-hive-002: nothing written"
+    )
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(name=NAME, dry_run=True))
+    assert str(refused.value).startswith(
+        f"hive create refuses {NAME}: it is already held by an open {REPO} pull request; "
+    )
+
+
+@pytest.mark.parametrize("given", ["Swarm-Hive-009", "swarm-hive-009/", " swarm-hive-009", "swarm-hive-009-", ""])
+def test_an_explicit_name_that_is_not_a_hive_name_is_refused_before_anything_is_read(world, given):
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(name=given, dry_run=True))
+
+    assert str(refused.value) == (
+        f"hive create refuses the name {given!r}: a hive name is lowercase letters, digits and dashes"
+    )
+    assert world.run.calls == []
+
+
+@pytest.mark.parametrize("given", ["swarm-hive-010", "h", "a1-b2"])
+def test_an_explicit_name_of_hive_shape_is_accepted(world, given):
+    assert create.create(world.tools, create.Options(name=given, dry_run=True)) == (
+        f"dry run of hive create {given}: nothing written"
+    )
 
 
 def test_an_unfinished_create_refuses_another_explicit_name(world):

@@ -12,6 +12,7 @@ RAW = "Accept: application/vnd.github.raw"
 AUTO_REFUSED = "auto merge is not allowed"
 PASSED = ("SUCCESS", "NEUTRAL", "SKIPPED")
 WAITING = (None, "PENDING", "EXPECTED")
+OPEN_LIMIT = 1000
 TRUNCATED = "truncated"
 TREE = f'if .truncated then "{TRUNCATED}" else .tree[].path end'
 REQUIRED = '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique'
@@ -46,6 +47,11 @@ def tree(run: Run, repo: str, ref: str) -> set[str]:
     if listed == TRUNCATED:
         raise auth.HiveError(f"the {repo} {ref} tree is too large to list, so hive create cannot see its hive files")
     return set(listed.splitlines())
+
+
+def open_heads(run: Run, repo: str) -> set[str]:
+    argv = ["pr", "list", "-R", repo, "--state", "open", "--limit", str(OPEN_LIMIT), "--json", "headRefName"]
+    return set(gh(run, [*argv, "--jq", ".[].headRefName"]).splitlines())
 
 
 def open_pr(

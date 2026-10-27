@@ -137,3 +137,12 @@ def test_a_truncated_tree_is_a_refusal():
     with pytest.raises(auth.HiveError) as refused:
         create_github.tree(_tree_run("truncated\n"), "o/r", "dev")
     assert str(refused.value) == "the o/r dev tree is too large to list, so hive create cannot see its hive files"
+
+
+def test_open_heads_lists_the_branch_of_every_open_pull_request():
+    run = _tree_run("swarm-hive-002\nengineer-1\n")
+    assert create_github.open_heads(run, "o/r") == {"swarm-hive-002", "engineer-1"}
+    assert run.calls == [
+        ["gh", "pr", "list", "-R", "o/r", "--state", "open", "--limit", "1000", "--json", "headRefName"]
+        + ["--jq", ".[].headRefName"]
+    ]
