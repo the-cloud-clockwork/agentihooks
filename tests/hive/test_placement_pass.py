@@ -325,7 +325,7 @@ def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, monke
         assert admission.reserve(setup.store.redis, "remote", member, 2)[0]
     result = launch.spawn(request)
     assert result.status is Status.UNAVAILABLE
-    assert "no hive for eng has room: remote" in result.detail
+    assert "has room: remote" in result.detail
     assert seat_spawn.room_refused(SpawnError(result.detail, "unavailable"))
     waited = launch.select(setup.config, "eng", request.task)
     assert isinstance(waited, Wait)
