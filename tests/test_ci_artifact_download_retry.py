@@ -9,8 +9,7 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
 # The protected grader compares test-summary with its reviewed form from the base branch.
-# shard-check takes its retry through its own pull request.
-EXEMPT = {"test-summary", "shard-check"}
+EXEMPT = {"test-summary"}
 
 
 def _jobs():
@@ -42,6 +41,7 @@ def test_every_tests_job_downloading_artifacts_is_covered():
         "coverage-baseline",
         "mutation-stats",
         "mutation",
+        "shard-check",
     } <= jobs - EXEMPT
 
 
