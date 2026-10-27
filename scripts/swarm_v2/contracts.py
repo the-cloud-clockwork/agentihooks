@@ -9,6 +9,7 @@ from jsonschema.exceptions import best_match
 from referencing import Registry, Resource
 
 SCHEMAS = Path(__file__).resolve().parents[2] / "docs" / "swarm-v2" / "schemas"
+SCOPE_KEYS = ("project_id", "brain_id", "swarm_id")
 
 
 def load(schemas: Path = SCHEMAS) -> dict:
@@ -85,6 +86,15 @@ def check(contracts: dict, name: str, doc: object) -> dict | None:
     return _refusal(contracts, doc, "invalid_request", *problem)
 
 
+def _outside(contracts: dict, name: str, doc: dict, grant: dict) -> dict | None:
+    authority = doc["authority"]
+    key = next((k for k in SCOPE_KEYS if k in grant and k in authority and authority[k] != grant[k]), None)
+    if key is None:
+        return None
+    contracts["failures"][(name, "outside_grant")] += 1
+    return _refusal(contracts, doc, "forbidden_scope", "outside_grant", f"{key} is outside the caller grant")
+
+
 def _write(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -94,8 +104,8 @@ def _write(path: Path, text: str) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def admit(contracts: dict, store: Path, name: str, doc: object) -> dict:
-    refusal = check(contracts, name, doc)
+def admit(contracts: dict, store: Path, name: str, doc: object, grant: dict | None = None) -> dict:
+    refusal = check(contracts, name, doc) or _outside(contracts, name, doc, grant or {})
     if refusal:
         return refusal
     (store / name).mkdir(parents=True, exist_ok=True)

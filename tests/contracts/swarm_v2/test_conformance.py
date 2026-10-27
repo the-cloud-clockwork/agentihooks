@@ -215,6 +215,16 @@ def test_b_a_record_outside_the_grant_is_refused_before_any_write(tmp_path, cont
     assert contracts.contract_validation_failures_total(loaded) == {f"{contract}/outside_grant": 1}
 
 
+def test_b_a_launch_for_another_swarm_is_refused(tmp_path):
+    loaded = contracts.load()
+    doc = json.loads((FIXTURES / "launch" / "current.json").read_text())
+    refusal = contracts.admit(
+        loaded, tmp_path, "launch", doc, grant={"swarm_id": conformance.FOREIGN_SCOPE["swarm_id"]}
+    )
+    assert refusal["detail"] == "swarm_id is outside the caller grant"
+    assert not list(tmp_path.rglob("*.json"))
+
+
 def test_b_a_grant_without_shared_scope_keys_admits_the_record(tmp_path):
     loaded = contracts.load()
     doc = json.loads((FIXTURES / "heartbeat" / "current.json").read_text())
@@ -230,6 +240,7 @@ def test_b_a_corrected_record_needs_a_new_request_under_the_right_grant(tmp_path
     outside = {"project_id": conformance.FOREIGN_SCOPE["project_id"]}
     assert contracts.admit(loaded, tmp_path, "launch", doc, grant=outside)["retry"] == "new_request"
     assert contracts.admit(loaded, tmp_path, "launch", doc, grant=outside)["error"] == "forbidden_scope"
+    assert contracts.contract_validation_failures_total(loaded) == {"launch/outside_grant": 2}
     inside = {"project_id": doc["authority"]["project_id"]}
     assert contracts.admit(loaded, tmp_path, "launch", doc, grant=inside)["state"] == "accepted"
 
