@@ -282,13 +282,13 @@ def test_a_real_not_duplicate_marker_is_stored_on_the_phase():
     text = """# Plan
 
 ## Phase one
-<!-- phase: id=a planning=auto not_duplicate="it covers a different seam" -->
+<!-- phase: id=a planning=auto not_duplicate="it covers a=b, a different seam" -->
 Prose.
 """
 
     result = normalize(text, "nd.md")
 
-    assert result.content["phases"][0]["not_duplicate"] == "it covers a different seam"
+    assert result.content["phases"][0]["not_duplicate"] == "it covers a=b, a different seam"
 
 
 def test_a_blank_not_duplicate_marker_is_refused():
