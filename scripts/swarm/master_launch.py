@@ -47,7 +47,7 @@ LEAD_STARTING = ("starting", SUSPECT)
 STARTING = (
     "the front door master {name} is {state} and every master seat is held (master seat count {count}), so no "
     "other master starts; "
-    "raise the master seat count, or run master up --replace to retire it first"
+    "raise the count with set masters=N, or run master up --replace to retire it first"
 )
 
 
