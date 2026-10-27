@@ -226,8 +226,15 @@ class HiveLaunch:
             return self._select(config, lane, task)
         key = (lane, task["id"])
         if key not in self.placement_cache:
-            self.placement_cache[key] = self._select(config, lane, task)
+            self.placement_cache[key] = self._spend(self._select(config, lane, task))
         return self.placement_cache[key]
+
+    def _spend(self, selected: Selection | placement.Wait) -> Selection | placement.Wait:
+        if isinstance(selected, Selection) and selected.master_placement is None:
+            for hive in self._pass_hives[1]:
+                if hive["id"] == selected.hive:
+                    hive["room"] -= 1
+        return selected
 
     def _select(self, config: SwarmConfig, lane: str, task: dict) -> Selection | placement.Wait:
         chosen = config.lanes.get(lane, {})

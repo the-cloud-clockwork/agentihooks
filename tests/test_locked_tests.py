@@ -186,6 +186,78 @@ def test_returns_inside_nested_definitions_do_not_disable_a_test(tmp_path):
     assert not any(entry["disabled"] for entry in measured.values())
 
 
+@pytest.mark.parametrize(
+    "body,exit",
+    [
+        ("    for item in command:\n        assert item\n", "        continue\n        assert item\n"),
+        ("    for item in command:\n        assert item\n", "        break\n        assert item\n"),
+        ("    for item in command:\n        assert item\n", "        assert item\n        return\n"),
+        ("    for item in command:\n        assert item\n", "        assert item\n        break\n"),
+        ("    while command:\n        assert command\n", "        assert command\n        return\n"),
+        (
+            "    for item in command:\n        pass\n    else:\n        assert command\n",
+            "        break\n    else:\n        assert command\n",
+        ),
+    ],
+    ids=["continue", "break", "late return", "late break", "while return", "break skips else"],
+)
+def test_loop_exits_that_skip_locked_assertions_are_red(tmp_path, capsys, body, exit):
+    clean = GUARD.replace("    assert command\n", body)
+    planted = clean.replace(body, body.splitlines(keepends=True)[0] + exit)
+    base = _tree(tmp_path / "base", clean)
+    head = _tree(tmp_path / "head", planted, record=clean)
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert f"The locked test {LOCKED}::_blocked is skipped, xfailed or returns early.\n" in out
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "    for item in command:\n        assert item\n        continue\n",
+        "    for item in command:\n        assert item\n    return command\n",
+        "    assert command\n    for item in command:\n        break\n",
+        "    for item in command:\n        for other in item:\n            break\n        assert item\n",
+        "    for item in command:\n        assert item\n    else:\n        return command\n",
+        "    for item in command:\n        continue\n    else:\n        assert command\n",
+        "    assert command\n    for item in command:\n        def unused():\n            assert item\n        break\n",
+        "    assert command\n    for item in command:\n        def unused():\n            assert item\n        return command\n",
+    ],
+    ids=[
+        "completed iteration",
+        "completed loop",
+        "completed assertion",
+        "inner break",
+        "loop else",
+        "continue reaches else",
+        "nested checking function break",
+        "nested checking function return",
+    ],
+)
+def test_loop_exits_after_all_locked_assertions_stay_green(tmp_path, body):
+    text = GUARD.replace("    assert command\n", body)
+    assert not _measured(tmp_path, text)["_blocked"]["disabled"]
+
+
+@pytest.mark.parametrize("name", ["_loop_helper", "test_loop"])
+@pytest.mark.parametrize("exit", ["continue", "break"])
+def test_loop_exits_before_asserting_helper_calls_are_disabled(tmp_path, name, exit):
+    text = GUARD + (
+        "\n\ndef _checked(value):\n    assert value\n"
+        f"\n\ndef {name}(values):\n    for value in values:\n        {exit}\n        _checked(value)\n"
+    )
+    assert _measured(tmp_path, text)[name]["disabled"]
+
+
+@pytest.mark.parametrize("name", ["_loop_helper", "test_loop"])
+def test_break_skipping_an_asserting_helper_in_loop_else_is_disabled(tmp_path, name):
+    text = GUARD + (
+        "\n\ndef _checked(value):\n    assert value\n"
+        f"\n\ndef {name}(values):\n    for value in values:\n        break\n    else:\n        _checked(values)\n"
+    )
+    assert _measured(tmp_path, text)[name]["disabled"]
+
+
 @pytest.mark.parametrize("decorator", ["@pytest.mark.skip", "@pytest.mark.parametrize('x', [])"])
 def test_a_new_skipped_test_in_a_locked_file_is_red(tmp_path, capsys, decorator):
     base = _tree(tmp_path / "base", GUARD)
