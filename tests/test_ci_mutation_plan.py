@@ -114,6 +114,33 @@ def test_measured_costs_merge_mappings_keep_slowest_durations_and_cover_missing_
     assert measured_costs([names[1]], []) == {names[1]: 80.6}
 
 
+def test_observed_mutant_execution_costs_drive_balanced_existing_workers(tmp_path, monkeypatch):
+    import hashlib
+    import json
+
+    from scripts.ci_mutation.killers import KillMemory
+    from scripts.ci_mutation.measured import measured_costs, plan_shards
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
+    memory = KillMemory(tmp_path)
+    names = [f"scripts.sample.x_f__mutmut_{index}" for index in range(8)]
+    observations = [20.0, 20.0, 20.0, 20.0, 1.0, 1.0, 1.0, 1.0]
+    for name, seconds in zip(names, observations, strict=True):
+        path = tmp_path / (hashlib.sha256(name.encode()).hexdigest() + ".cost")
+        path.write_text(json.dumps({"tests": ["test"], "seconds": seconds}))
+    results = [{"tests": {"scripts.sample.x_f": ["test"]}, "durations": {"test": 100.0}}]
+    costs = measured_costs(names, results, memory)
+    assert costs == dict(zip(names, observations, strict=True))
+    plan = plan_shards(costs, target=1, limit=4)
+    assert plan["shards"] == 4
+    assert plan["shard_worker_seconds"] == [21.0] * 4
+    assert set(plan["assignments"]) == set(names)
+    assert plan == plan_shards(dict(reversed(list(costs.items()))), target=1, limit=4)
+    assert measured_costs(names[:1], results) == {names[0]: 130.6}
+    changed = [{"tests": {"scripts.sample.x_f": ["different"]}, "durations": {"different": 2.0}}]
+    assert measured_costs(names[:1], changed, memory) == {names[0]: 8.1}
+
+
 def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_its_traced_sum(tmp_path):
     from types import SimpleNamespace
 
