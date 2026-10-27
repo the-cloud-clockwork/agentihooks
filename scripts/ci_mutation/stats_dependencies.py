@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 CONTEXT = "context.sha"
+SHARED = ".shared"
 # A restored cache of about 1 GB compressed held 3 GB of records and outran the planner's five minute job.
 CACHE_BYTES = 512 * 1024 * 1024
 
@@ -63,7 +64,7 @@ def measured_dependencies(
     return {node: sorted(found[node] | shared) for node in nodeids}
 
 
-def digest(value: dict) -> str:
+def digest(value: dict | list) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
@@ -75,6 +76,7 @@ class StoredStats:
     changes: dict
     misses: Counter = field(default_factory=Counter)
     changed: Counter = field(default_factory=Counter)
+    shared: set = field(default_factory=set)
 
     def pointer(self, path: str) -> Path:
         context = {name: value for name, value in self.context.items() if name != "inventory"}
@@ -107,6 +109,19 @@ class StoredStats:
             record_file.unlink()
             return None
 
+    def share(self, value: dict | list) -> str:
+        key = digest(value)
+        if key not in self.shared:
+            (self.folder / f"{key}{SHARED}").write_text(json.dumps(value, sort_keys=True))
+            self.shared.add(key)
+        return key
+
+    def unshare(self, key: object) -> dict | list | None:
+        if not isinstance(key, str) or not re.fullmatch(r"[0-9a-f]{64}", key):
+            return None
+        shared_file = self.folder / f"{key}{SHARED}"
+        return self.read(shared_file) if shared_file.is_file() else None
+
     def prune(self) -> None:
         cap(self.folder)
         for record_file in self.folder.glob("*.json"):
@@ -124,7 +139,10 @@ class StoredStats:
         if (record := self.read(record_file)) is None:
             self.misses["no record"] += 1
             return None
-        inputs, scope, measured = record["inputs"], record["scope"], record["measured"]
+        inputs, scope, measured = self.unshare(record["inputs"]), record["scope"], record["measured"]
+        if inputs is None:
+            self.misses["no inputs"] += 1
+            return None
         discovery = record.get("discovery", "")
         if (
             record["key"] != key
@@ -154,15 +172,25 @@ class StoredStats:
             for name, value in record.items()
             if name not in {"key", "inputs", "scope", "measured", "discovery", "context"}
         }
+        if "dependencies" in result:
+            result["dependencies"] = {test: self.unshare(ref) for test, ref in result["dependencies"].items()}
+            if None in result["dependencies"].values():
+                self.misses["no inputs"] += 1
+                return None
         return {**result, "reused": True} if measured else result
 
     def save(self, path: str, result: dict, inputs: dict, measured: bool, discovery: str = "") -> None:
         scope = self.scope(inputs)
         key = self.identity(path, inputs, scope, measured, discovery)
+        if "dependencies" in result:
+            result = {
+                **result,
+                "dependencies": {test: self.share(paths) for test, paths in result["dependencies"].items()},
+            }
         record = {
             **result,
             "key": key,
-            "inputs": inputs,
+            "inputs": self.share(inputs),
             "scope": scope,
             "measured": measured,
             "discovery": discovery,
