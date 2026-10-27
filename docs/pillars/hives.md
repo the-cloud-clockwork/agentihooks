@@ -455,14 +455,21 @@ each limit, and the smallest limit wins.
 
 - **Every beat,** right after the heartbeat is written and before launch orders, herdr reports and execution reports,
   stamped with the heartbeat time. A beat that fails after the heartbeat still leaves a fresh reading.
-- **Every 10 seconds on its own thread,** started for each Redis connection. A launch inside a beat can run
-  `init-agent` for minutes; the thread keeps the reading fresh while it does, and also renews the daemon's order
-  consumer marker (45 seconds), so a launch it still holds is not taken for an orphan. The thread paces with the
-  scheduler process timer, like the beat. A Redis error, or a reading that cannot be parsed, prints
-  `hive headroom publish failed (<error>: <detail>)` to stderr and the thread keeps going. When its timer connection
-  is lost the thread ends, and the reconnect starts a new one. Any other error ends the thread with a traceback until
-  the next reconnect; the beat still publishes on its own path, but a launch longer than 30 seconds then lapses the
-  reading.
+- **Every 10 seconds on its own thread.** A launch inside a beat can run `init-agent` for minutes; the thread keeps
+  the reading fresh while it does, and also renews the daemon's order consumer marker (45 seconds), so a launch it
+  still holds is not taken for an orphan. The thread paces with the scheduler process timer, like the beat. A Redis
+  error, or a reading that cannot be parsed, prints `hive headroom publish failed (<error>: <detail>)` to stderr and
+  the thread keeps going. A lost or timed out timer wait prints `hive headroom wait failed (<error>: <detail>)` and
+  ends the thread; any other error ends it with a traceback.
+
+The daemon checks its helper threads, the headroom publisher and the herdr stats publisher, at the start of every
+beat and starts again each one that has ended, so a helper is back within one beat of ending without waiting for the
+beat loop's own Redis connection to drop. Each check starts at most one thread per helper, so a Redis that stays down
+cannot make the daemon spin. A reconnect starts both helpers fresh on the new connection. The herdr stats thread logs
+a lost wait the same way, as `hive herdr stats wait failed (<error>: <detail>)`.
+
+Between a helper ending and the next beat, only the beat path publishes. A beat that holds a long launch therefore
+still lapses the reading once, until that beat ends and the next one restarts the thread.
 
 `hive list` appends the reading to each hive's line, its fields separated by tabs (shown aligned here):
 
@@ -484,6 +491,7 @@ or roll its pod, to pick up the publisher.
 |---|---|---|
 | `hive list` shows `headroom=missing` on a `live` hive | `journalctl --user -u agentihooks-hive`, or the pod log, for `hive headroom publish failed` | Fix the error it names; a Redis error clears when the connection returns. |
 | A launch waits with `missing telemetry` while another launch runs on that hive | The hive's agentihooks version | Upgrade and restart the hive service so the 10 second publisher runs. |
+| `headroom=missing` comes and goes on a `live` hive, with readings only as often as its beats | The log for `hive headroom wait failed`, and the hive's agentihooks version | A hive on code from before the helper restart lost its headroom thread for good on the first failed wait; upgrade and restart the hive service, or roll its pod. On current code the next beat restarts the thread. |
 | Room reads 0 with a fresh reading | The refusal detail: `cpu`, `ram` or `max agents` | The named limit is spent; wait for agents to finish or raise `max-agents` when the host has room. |
 
 ### Account caps on every hive
