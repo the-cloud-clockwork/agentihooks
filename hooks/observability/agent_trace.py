@@ -593,14 +593,14 @@ def _pending_bytes(state: dict, records: dict, pending: list) -> int:
     return len(json.dumps({"records": _waiting(state, records), "pending": pending}, ensure_ascii=False).encode())
 
 
-def _digest(value: object) -> str:
-    return hashlib.sha256(str(value).encode()).hexdigest()[:16]
+def _paged_digest(value: object) -> str:
+    return _digest("paged", str(value))[:8].hex()
 
 
 def _paged_out(paged: Mapping, key: str, record: dict) -> bool:
     message = _message_id(record)
-    return _digest(key) in paged.get("keys", ()) or (
-        message is not None and _digest(message) in paged.get("messages", ())
+    return _paged_digest(key) in paged.get("keys", ()) or (
+        message is not None and _paged_digest(message) in paged.get("messages", ())
     )
 
 
@@ -960,8 +960,8 @@ def _paged_ids(paged: Mapping, keys: list, values: list[dict], dropped: list[int
     open_messages = {_message_id(values[index]) for index in kept}
     messages = {_message_id(values[index]) for index in dropped} - open_messages - {None}
     return {
-        "keys": sorted({*paged.get("keys", ()), *(_digest(keys[index]) for index in dropped)}),
-        "messages": sorted({*paged.get("messages", ()), *map(_digest, messages)}),
+        "keys": sorted({*paged.get("keys", ()), *(_paged_digest(keys[index]) for index in dropped)}),
+        "messages": sorted({*paged.get("messages", ()), *map(_paged_digest, messages)}),
     }
 
 
