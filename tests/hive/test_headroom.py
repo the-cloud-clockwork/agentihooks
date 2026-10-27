@@ -34,7 +34,7 @@ def proc(tmp_path):
 @pytest.fixture(autouse=True)
 def agents(monkeypatch):
     found = {"claude": {}, "codex": {}}
-    monkeypatch.setattr(headroom.account_sessions, "local_processes", lambda proc: found)
+    monkeypatch.setattr(headroom.account_sessions, "local_processes", lambda: found)
     return found
 
 
@@ -250,6 +250,7 @@ def test_measure_adds_the_pod_memory_and_cpu_limits_beside_the_node_reading(proc
         "pod_cpus": 2.5,
         "pod_cpu_usec": 9_000_000,
         "pending": 0,
+        "agents": {"claude": 0, "codex": 0},
         "measured_at": 5,
     }
 

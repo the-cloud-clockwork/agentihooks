@@ -11,6 +11,7 @@ from scripts.hive import account_slots, daemon, registry
 pytestmark = pytest.mark.unit
 
 PUBLISH_HEADROOM = daemon.publish_headroom
+PUBLISH_HERDR_STATS = daemon.publish_herdr_stats
 
 
 @pytest.fixture
@@ -523,7 +524,7 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
             self.target, self.args, self.daemon = target, args, daemon
 
         def start(self):
-            assert all(thread.args[-1].is_set() for thread in threads)
+            assert all(thread.args[-1].is_set() for thread in threads if thread.args[0] is not self.args[0])
             threads.append(self)
 
     beats = []
@@ -570,7 +571,7 @@ def test_herdr_stats_publish_on_the_scheduler_cadence_from_the_interface_hive_on
     calls = []
     monkeypatch.setattr(herdr_stats, "publish", lambda redis, now_ms: calls.append(now_ms))
     stop, waits = ticks(monkeypatch, 2)
-    daemon.publish_herdr_stats(redis, "waiter", "machine", stop)
+    PUBLISH_HERDR_STATS(redis, "waiter", "machine", stop)
     assert waits == [(herdr_stats.EVERY_S, herdr_stats.EVERY_S + daemon.WAKE_SLACK_S)] * 3
     assert len(calls) == published
 
@@ -583,7 +584,7 @@ def test_herdr_stats_keep_their_cadence_through_a_failed_publish(redis, monkeypa
     redis.hset(registry.key("machine"), mapping={"name": "machine", "ui": "yes", "heartbeat_at": "1"})
     monkeypatch.setattr(herdr_stats, "publish", Mock(side_effect=RedisError("down")))
     stop, waits = ticks(monkeypatch, 2)
-    daemon.publish_herdr_stats(redis, "waiter", "machine", stop)
+    PUBLISH_HERDR_STATS(redis, "waiter", "machine", stop)
     assert len(waits) == 3
     assert capsys.readouterr().err.count("hive herdr stats publish failed (RedisError: down)") == 2
 
@@ -595,7 +596,7 @@ def test_herdr_stats_end_when_their_wait_loses_the_connection(monkeypatch):
 
     monkeypatch.setattr(daemon, "scheduled_wait", Mock(side_effect=ConnectionError("lost")))
     monkeypatch.setattr(herdr_stats, "publish", Mock())
-    daemon.publish_herdr_stats(object(), "waiter", "machine", threading.Event())
+    PUBLISH_HERDR_STATS(object(), "waiter", "machine", threading.Event())
     herdr_stats.publish.assert_not_called()
 
 

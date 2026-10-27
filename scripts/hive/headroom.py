@@ -40,7 +40,7 @@ def measure(pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dic
         "total_mb": total_mb,
         **pod,
         "pending": pending,
-        "agents": {harness: len(pids) for harness, pids in account_sessions.local_processes(proc).items()},
+        "agents": {harness: len(pids) for harness, pids in account_sessions.local_processes().items()},
         "measured_at": now_ms,
     }
 
