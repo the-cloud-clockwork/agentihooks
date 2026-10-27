@@ -862,6 +862,34 @@ A successful verification returns without a success message and skips `Cancel a 
 
 The old `Watch for the first failed graded job` step, fifteen second poll, ten read fallback and `<job> failed, so Gate Required cannot pass; cancelling this queue run.` line describe the replaced watcher. They are not the current early gate's output.
 
+### The shared runner loss reader
+
+`scripts.ci_queue_fail_fast` is no longer a job step. Since [pull request 7136](https://github.com/the-cloud-clockwork/agentihooks/pull/7136) it keeps only what the early verifier and the rerun classifier share:
+
+| Name | Use |
+|---|---|
+| `SELF` | The workflow job key `queue-fail-fast`. Contract tests pin `scripts.ci_reuse.WATCHER` and the tiers workflow to it |
+| `EXITED` | The step exit rule below, matched only on a `##[error]` log line |
+| `logged_loss(repo, job, seen)` | Answers whether a failed or cancelled job lost its runner |
+
+`scripts.ci_gate_queue` calls `logged_loss` on every poll for each original unit shard that did not succeed; `scripts.ci_unit_rerun` calls it once per failed shard in `unit-lost`. Both pass one `seen` dictionary for the whole run.
+
+`logged_loss` reads the job's log and keeps only `##[error]` lines and pytest result lines. The job lost its runner when that text carries a runner loss signature without a failed pytest result or a step timeout, or when it carries no failed pytest result and no `##[error]Process completed with exit code <1 to 127>.` or step timeout line. The runner loss signatures are `The runner has received a shutdown signal`, `lost communication with the server`, `The job was not acquired by Runner` and `The job log could not be read`. Exit codes 128 and above, such as 137 or 143 from a killed process, prove nothing alone.
+
+| Log read | Annotations read | Answer | Cached in `seen` |
+|---|---|---|---|
+| succeeds | not read | the rule above on the log lines | yes, so the log is read once per job |
+| fails | succeeds | the same rule on the annotations, with the exit line matched anywhere in a message | no, read again on the next poll |
+| fails | fails | lost | no |
+
+A lost answer is not a pass: the verifier still requires a successful `unit rerun` for that shard, as [Lost unit shard rerun](#lost-unit-shard-rerun) describes. The module's old `failed`, `settled`, `verdict` and `main` are gone, so `python -m scripts.ci_queue_fail_fast` judges nothing and no workflow calls it. List the callers that remain:
+
+```bash
+git grep -n "ci_queue_fail_fast" -- scripts .github tests/contracts tests/test_ci_reuse.py
+```
+
+The expected output is the `logged_loss` imports in `scripts/ci_gate_queue.py` and `scripts/ci_unit_rerun.py` and the `SELF` imports in the two contract tests. A hit under `.github` means a workflow runs the removed entry point again.
+
 ### Checking a watcher run
 
 List the early gate, recovery and later summary jobs, including jobs beyond the first page:
@@ -1227,7 +1255,7 @@ An empty result means no swarm tooling on this machine changed the queue while t
 
 The old `queue-fail-fast` watch loop wrote a `queue-rebuild-<run>-<attempt>` record whenever it found its group stale, until [pull request 6984](https://github.com/the-cloud-clockwork/agentihooks/pull/6984) removed that call, and `scripts.ci_queue_rebuild` linked that record to a cause. [Pull request 5706](https://github.com/the-cloud-clockwork/agentihooks/pull/5706) taught it to read the entry ahead: it took the parent of the stale group's commit, found the merge group run built at that parent, read the pull request number from its `gh-readonly-queue/dev/pr-<number>-<sha>` branch, and recorded `removed_ahead` with that pull request, actor, reason and event when the pull request left the queue while the stale group ran. The group's own dequeue or requeue still ranked first. Over the 72 records of 19 October, replaying the reader moved 26 of 65 `unknown` causes to `removed_ahead`.
 
-[Pull request 7136](https://github.com/the-cloud-clockwork/agentihooks/pull/7136) then deleted the record and the reader, since the early `Gate — Required` verifier had replaced the watch loop. The verifier rejects a stale group with `::error::queue group is no longer current` and writes no record; see [What the watcher reports](#what-the-watcher-reports). Name the entry ahead of a stale group by hand with these commands:
+[Pull request 7136](https://github.com/the-cloud-clockwork/agentihooks/pull/7136) then deleted the record and the reader, since the early `Gate — Required` verifier had replaced the watch loop: `scripts.ci_queue_rebuild`, its tests, the `tests/fixtures/ci_queue_legacy_watch.json` fixture and the fail fast module's own verdict code, leaving the [shared runner loss reader](#the-shared-runner-loss-reader). The record was not moved to the stale group path either, because the verifier fails that run from the queue ref alone and `Cancel a rejected queue run` takes no record input. `git grep "ci_queue_rebuild\|ci_queue_legacy_watch"` outside `changelog.d` and this page returns nothing. The verifier rejects a stale group with `::error::queue group is no longer current` and writes no record; see [What the watcher reports](#what-the-watcher-reports). Name the entry ahead of a stale group by hand with these commands:
 
 ```bash
 R=repos/the-cloud-clockwork/agentihooks
@@ -1250,7 +1278,7 @@ The window ran from 2026-10-20T02:00Z to 2026-10-21T02:00Z. It held 301 merge gr
 
 Every cancelled run falls into one of two kinds:
 
-- **Ejection of the entry itself.** A job of the run itself concluded `failure`, `timed_out` or `startup_failure`, and the run's `queue-fail-fast` job cancelled it; or the queue timed the entry out (`checks_timed_out`). This split is read from job conclusions, not from removal reasons: GitHub can give `failed_checks` even when every own run was cancelled clean. The fail fast job logs the failed job before cancelling: `<job> failed, so Gate Required cannot pass; cancelling this queue run.`
+- **Ejection of the entry itself.** A job of the run itself concluded `failure`, `timed_out` or `startup_failure`, and the run's `queue-fail-fast` job cancelled it; or the queue timed the entry out (`checks_timed_out`). This split is read from job conclusions, not from removal reasons: GitHub can give `failed_checks` even when every own run was cancelled clean. In that window's workflow the fail fast job logged the failed job before cancelling: `<job> failed, so Gate Required cannot pass; cancelling this queue run.` The current early verifier logs the errors listed under [What the watcher reports](#what-the-watcher-reports) instead.
 - **Rebuild caused by another entry.** No job of the run failed; GitHub rebuilt the group because an entry ahead of it left the queue, and cancelled the run building the old head. The trigger is the removal event of the entry ahead whose time falls inside the run: `failed_checks`, a removal by hand or a priority move (`manual`), or `checks_timed_out`.
 
 A cancelled run with no failed job and no removal ahead inside its window stays unattributed: an enqueue ahead, a base push or a ruleset change leaves no queue event that names it. Wall minutes are the run's own duration; runner minutes are the sum of its jobs' durations.
