@@ -36,6 +36,7 @@ def run_case(root):
     index.worker.register(index.domain, index.generation, model(inputs))
     index.enqueue(100.0)
     index.drain(FixtureEmbedder(model(inputs)), 100.0)
+    index.worker.activate(index.domain, index.generation, 0, now=100.0)
     recorder.consume(session.sequence, committed)
     clock[0] = 110.0
     queue.append("fixture-tail", records(inputs["turns"][1:3]))

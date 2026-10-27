@@ -374,3 +374,52 @@ def test_a_quarantined_batch_keeps_the_archive_prefix_incomplete(tmp_path):
     reopened = progress.Recorder(catalog, GRANT, scope, "agentihooks")
     assert reopened.meter.status(GRANT, scope, 200.0)["stages"]["archive"]["through"] == 0
     catalog.close()
+
+
+def test_inactive_replacement_cannot_clear_active_index_lag(tmp_path):
+    from tests.sv2_idx02_cases import grant, records
+    from tests.sv2_idx03_cases import FixtureEmbedder, Index, model
+    from tests.sv2_obs02_cases import FIXTURE
+
+    inputs = json.loads(FIXTURE.read_text())
+    index = Index(inputs, tmp_path)
+    caller = grant(inputs)
+    scope = metrics.Scope(index.domain, inputs["session_uid"], index.session.generation)
+    clock = [100.0]
+    recorder = progress.Recorder(
+        index.session.catalog, caller, scope, inputs["grant"]["projects"][0], clock=lambda: clock[0]
+    )
+    queue = spool.Spool(
+        spool.SpoolConfig(tmp_path / "spool", 1000000, 800000), clock=lambda: clock[0], progress=recorder
+    )
+
+    def upload(entry):
+        index.session.append([entry.records])
+
+    queue.append("baseline", records(inputs["turns"][:1]))
+    queue.flush(upload)
+    index.session.build()
+    index.worker.register(index.domain, index.generation, model(inputs))
+    index.enqueue(100.0)
+    index.drain(FixtureEmbedder(model(inputs)), 100.0)
+    index.worker.activate(index.domain, index.generation, 0, now=100.0)
+    before = recorder.meter.status(caller, scope, 100.0)["stages"]["indexed_chunk"]["through"]
+    clock[0] = 110.0
+    queue.append("tail", records(inputs["turns"][1:3]))
+    queue.flush(upload)
+    index.session.build()
+    index.enqueue(110.0)
+    index.drain(FixtureEmbedder(model(inputs), fail_calls=(1,)), 120.0)
+    replacement = inputs["next_index_generation"]
+    replacement_model = model(inputs, "next_model")
+    index.worker.register(index.domain, replacement, replacement_model)
+    index.enqueue(120.0, "next_index_generation")
+    index.drain(FixtureEmbedder(replacement_model), 130.0, "next_index_generation")
+    delayed = recorder.meter.status(caller, scope, 150.0)
+    assert delayed["stages"]["indexed_chunk"]["through"] == before
+    assert delayed["embedding_lag_seconds"] == 40.0
+    assert delayed["coverage"] == "partial"
+    assert index.worker.active(index.domain)["index_generation"] == index.generation
+    index.worker.activate(index.domain, replacement, 1, now=160.0)
+    assert recorder.meter.status(caller, scope, 170.0)["embedding_lag_seconds"] == 0.0
+    index.session.catalog.close()

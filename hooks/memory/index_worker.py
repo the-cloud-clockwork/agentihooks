@@ -1,6 +1,7 @@
 """Bounded incremental embedding: queue changed chunks, embed them in limited batches, keep progress through outages."""
 
 import json
+import time
 from dataclasses import dataclass
 
 from hooks.memory import embeddings
@@ -242,7 +243,7 @@ class IndexWorker:
         row = self.catalog.db.execute(CUTOVER, (domain,)).fetchone()
         return {"index_generation": row[0], "revision": row[1]} if row else {"index_generation": None, "revision": 0}
 
-    def activate(self, domain: str, generation: str, revision: int) -> int:
+    def activate(self, domain: str, generation: str, revision: int, now: float | None = None) -> int:
         with self.catalog._transaction():
             self._generation(domain, generation)
             if (
@@ -253,7 +254,10 @@ class IndexWorker:
             if self.active(domain)["revision"] != revision:
                 raise Conflict(STALE_CUTOVER)
             self.catalog.db.execute(SAVE_CUTOVER, (domain, generation, revision + 1))
-            return revision + 1
+        from hooks.memory.progress import indexed
+
+        indexed(self.catalog, domain, generation, time.time() if now is None else now)
+        return revision + 1
 
     def snapshot(self) -> dict[str, list]:
         return {table: sorted(self.catalog.db.execute(f"SELECT * FROM {table}").fetchall()) for table in INDEX_TABLES}

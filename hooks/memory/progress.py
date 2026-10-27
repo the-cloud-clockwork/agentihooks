@@ -94,6 +94,11 @@ class Recorder:
 def indexed(catalog: Catalog, domain: str, generation: str, now: float) -> None:
     meter = Metrics(catalog)
     with catalog._transaction():
+        active = catalog.db.execute(
+            "SELECT index_generation FROM index_cutover WHERE access_domain = ?", (domain,)
+        ).fetchone()
+        if active is None or active[0] != generation:
+            return
         for uid, source in catalog.db.execute(BOUND, (domain,)).fetchall():
             covered = catalog.db.execute(COMPLETE, (domain, uid, generation)).fetchall()
             through = max((json.loads(row[0]).get(source, 0) for row in covered), default=0)
