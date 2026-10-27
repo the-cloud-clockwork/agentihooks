@@ -58,8 +58,27 @@ def test_a_removed_gate_or_constant_is_red(tmp_path):
     gone = _tree(tmp_path / "gone", {"scripts/other.py": ""})
     renamed = _tree(tmp_path / "renamed", {"scripts/gate.py": GATE.replace("LINES =", "LIMIT =")})
     assert "no longer pinned" in threshold_pins.pin_errors(base, gone, PINS)[0][0]
-    with pytest.raises(threshold_pins.PinError, match="defines no literal LINES"):
+    with pytest.raises(threshold_pins.PinError, match="must bind LINES once"):
         threshold_pins.pin_errors(base, renamed, PINS)
+
+
+@pytest.mark.parametrize(
+    "rebinding",
+    [
+        "LINES = 400\n",
+        "LINES += 100\n",
+        "LINES: int = 400\n",
+        'RULES["C901"] = 99\n',
+        'del RULES["C901"]\n',
+        'RULES.update({"C901": 99})\n',
+        "def widen():\n    global LINES\n    LINES = 400\n",
+    ],
+)
+def test_a_second_binding_or_mutation_of_a_pinned_name_is_red(tmp_path, rebinding):
+    base = _tree(tmp_path / "base", {"scripts/gate.py": GATE})
+    head = _tree(tmp_path / "head", {"scripts/gate.py": GATE + rebinding})
+    with pytest.raises(threshold_pins.PinError, match="must bind (LINES|RULES) once"):
+        threshold_pins.pin_errors(base, head, PINS)
 
 
 def test_an_unknown_pin_kind_is_red(tmp_path):

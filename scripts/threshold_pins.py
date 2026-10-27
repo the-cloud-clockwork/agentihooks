@@ -16,20 +16,27 @@ PINS = (
     ("scripts/swallowed_exceptions.py", "RULES", "covers"),
     ("scripts/swallowed_exceptions.py", "SCOPE", "covers"),
     ("scripts/locked_tests.py", "DISABLING", "covers"),
+    ("scripts/locked_tests.py", "CHECKING_CALLS", "covers"),
+    ("scripts/locked_tests.py", "FIELDS", "covers"),
+    ("scripts/locked_tests.py", "CONFIGS", "covers"),
+    ("tests/coverage_grade.py", "GRADED", "covers"),
     ("scripts/threshold_pins.py", "PINS", "covers"),
     ("scripts/threshold_pins.py", "SHRINK_ONLY", "covers"),
     ("scripts/threshold_pins.py", "GRADED_BY", "covers"),
+    ("scripts/threshold_pins.py", "MUTATORS", "covers"),
 )
 SHRINK_ONLY = (
-    "tests/DEAD_CODE_ALLOWLIST.json",
     "tests/SIZE_ALLOWLIST.json",
     "tests/SWALLOWED_EXCEPTIONS_ALLOWLIST.json",
 )
-# Each of these rises only with its own gate's evidence, which that gate checks against the base.
+# Each of these moves only with its own gate's evidence, which that gate checks against the base.
 GRADED_BY = (
     (".semgrep-guards/floors.json", "scripts.ci_semgrep_floors"),
     ("tests/LOCKED_MANIFEST.json", "scripts.locked_tests"),
+    ("tests/DEAD_CODE_ALLOWLIST.json", "scripts.dead_code"),
+    ("tests/registry/FROZEN_GATES.json", "scripts.gate_protected"),
 )
+MUTATORS = ("update", "setdefault", "pop", "popitem", "clear", "append", "extend", "insert", "remove", "add", "discard")
 REGISTERED = ("*ALLOWLIST*.json", "*floors*.json", "*FLOOR*.json", "*MANIFEST*.json", "*BASELINE*.json")
 
 
@@ -37,14 +44,31 @@ class PinError(Exception):
     pass
 
 
+def _rebinds(node: ast.AST, name: str) -> bool:
+    if isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+        return isinstance(node.target, ast.Name) and node.target.id == name
+    if isinstance(node, (ast.Global, ast.Nonlocal)):
+        return name in node.names
+    if isinstance(node, (ast.Subscript, ast.Attribute)):
+        return isinstance(node.ctx, (ast.Store, ast.Del)) and isinstance(node.value, ast.Name) and node.value.id == name
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        return isinstance(node.func.value, ast.Name) and node.func.value.id == name and node.func.attr in MUTATORS
+    return False
+
+
 def constant(tree: Path, path: str, name: str):
     source = tree / path
     if not source.is_file():
         return None
-    for node in ast.parse(source.read_text()).body:
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
-            return ast.literal_eval(node.value)
-    raise PinError(f"{path} defines no literal {name}")
+    module = ast.parse(source.read_text())
+    bound = [
+        node
+        for node in module.body
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
+    ]
+    if len(bound) != 1 or any(_rebinds(node, name) for node in ast.walk(module)):
+        raise PinError(f"{path} must bind {name} once to a literal and never change it")
+    return ast.literal_eval(bound[0].value)
 
 
 def loosened(kind: str, base, head) -> str | None:
