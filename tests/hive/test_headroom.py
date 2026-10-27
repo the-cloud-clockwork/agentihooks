@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -39,6 +40,25 @@ def agents(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def disk(tmp_path, monkeypatch):
+    import shutil
+
+    probed = []
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("WORKTREE_ROOT", raising=False)
+    monkeypatch.delenv("WT_MIN_FREE_GB", raising=False)
+
+    def usage(path):
+        probed.append(Path(path))
+        return SimpleNamespace(total=100 * 2**30, used=90 * 2**30, free=int(9.9 * 2**30))
+
+    monkeypatch.setattr(shutil, "disk_usage", usage)
+    return probed
+
+
+@pytest.fixture(autouse=True)
 def cgroup(tmp_path, monkeypatch):
     folder = tmp_path / "cgroup"
     folder.mkdir()
@@ -53,10 +73,27 @@ def test_measure_reads_the_five_minute_load_and_available_memory(proc, monkeypat
         "load5": 3.456,
         "available_mb": 8000,
         "total_mb": 15625,
+        "disk_free_gb": 9,
+        "disk_floor_gb": 50,
         "pending": 3,
         "agents": {"claude": 0, "codex": 0},
         "measured_at": 77_000,
     }
+
+
+def test_measure_reads_free_disk_at_the_nearest_existing_folder_of_the_worktree_root(proc, disk, tmp_path):
+    assert headroom.measure(0, 1, proc)["disk_free_gb"] == 9
+    assert disk == [tmp_path / "home"]
+    (tmp_path / "home" / "dev" / "worktrees").mkdir(parents=True)
+    headroom.measure(0, 1, proc)
+    assert disk[-1] == tmp_path / "home" / "dev" / "worktrees"
+
+
+def test_measure_follows_the_worktree_root_and_floor_the_hive_sets(proc, disk, tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path))
+    monkeypatch.setenv("WT_MIN_FREE_GB", "80")
+    measured = headroom.measure(0, 1, proc)
+    assert (measured["disk_free_gb"], measured["disk_floor_gb"], disk) == (9, 80, [tmp_path])
 
 
 def test_measure_counts_the_agent_processes_in_the_process_table_it_reads(proc, agents):
