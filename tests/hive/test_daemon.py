@@ -459,19 +459,57 @@ def test_headroom_keeps_its_cadence_through_a_failed_publish(monkeypatch, capsys
 
 
 @pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError"])
-def test_headroom_ends_when_its_wait_loses_the_connection(monkeypatch, error):
+def test_headroom_keeps_publishing_after_its_wait_loses_the_connection(monkeypatch, capsys, error):
+    from redis import exceptions
+
+    from scripts.hive import headroom
+
+    calls, paused = [], []
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: calls.append((client, hive, now_ms)))
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(daemon.time, "time", lambda: 1)
+    stop, waits, beats = _paced(monkeypatch, 2)
+    paced = daemon.scheduled_wait
+
+    def wait(seconds, redis, timeout):
+        if not waits:
+            waits.append(None)
+            raise getattr(exceptions, error)("gone")
+        paced(seconds, redis, timeout)
+
+    class Stop:
+        def is_set(self):
+            return stop.is_set()
+
+        def wait(self, seconds):
+            paused.append(seconds)
+            return False
+
+    monkeypatch.setattr(daemon, "scheduled_wait", wait)
+    redis = object()
+    PUBLISH_HEADROOM(redis, object(), "local", Stop())
+    assert paused == [daemon.HEADROOM_SECONDS]
+    assert calls == [(redis, "local", 1_000)]
+    assert beats == [(redis, "local")]
+    assert capsys.readouterr().err == f"hive headroom wait failed ({error}: gone)\n"
+
+
+def test_headroom_stops_when_stopped_during_a_lost_wait_pause(monkeypatch):
     import threading
 
     from redis import exceptions
 
     from scripts.hive import headroom
 
+    stop = threading.Event()
+
     def wait(seconds, redis, timeout):
-        raise getattr(exceptions, error)("gone")
+        stop.set()
+        raise exceptions.ConnectionError("gone")
 
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
     monkeypatch.setattr(headroom, "publish", Mock(side_effect=AssertionError("published")))
-    PUBLISH_HEADROOM(object(), object(), "local", threading.Event())
+    PUBLISH_HEADROOM(object(), object(), "local", stop)
 
 
 def test_headroom_keeps_publishing_while_a_beat_blocks(monkeypatch):
