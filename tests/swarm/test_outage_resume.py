@@ -717,7 +717,7 @@ def test_a_pending_recovery_stops_once_its_attempts_are_spent(store, tmp_path, m
 
 
 @pytest.mark.parametrize("control", ["closed", "open", "typed", "wait"])
-def test_a_pending_recovery_after_its_outage_closes_retires_an_idle_holder_while_paused(
+def test_a_pending_recovery_after_its_outage_closes_retires_an_idle_holder_while_paused_unless_a_control_holds_it(
     store, tmp_path, monkeypatch, control
 ):
     from scripts.swarm.tick import IDLE_KILL_TICKS

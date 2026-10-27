@@ -328,7 +328,6 @@ def recovery_exhausted(store: RedisStore, slug: str, agent: AgentRecord) -> bool
 
 
 def recovery_holds(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> bool:
-    """A pending recovery holds idle retirement only while an outage is open or closed under RECOVERY_HOLD_MS ago."""
     if not recovery_pending(store, slug, agent):
         return False
     records = outage.read(slug).values()
