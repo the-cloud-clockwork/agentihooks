@@ -3540,7 +3540,7 @@ The check runs only when the pull request is outside the queue, after the staged
 | Newest group finished clean, an older group failed | Queues; only the newest group counts. |
 | Newest group still running, an older group failed | Queues; a running run is not judged. |
 | Newest group has one finished run that failed while another still runs | Refuses, naming the failed run. |
-| Newest group has a finished run judged failed above: a conclusion other than `success`, `skipped`, `neutral` or `cancelled`, or a cancelled run with a failed job or jobs that could not all be listed | Refuses, naming that run. |
+| Newest group has a finished run that failed: a conclusion other than `success`, `skipped`, `neutral` or `cancelled`, or a cancelled run with a failed job or jobs that could not all be listed | Refuses, naming that run. |
 | Runs of another pull request failed | Queues; they are not own runs. |
 
 To clear a refusal, read the named run's failed job, fix it with a new commit on the pull request branch, wait for the pull request checks and queue again. Runs created before the new head's committer time are not read, so a group run of the old head stops counting once a commit made after it lands. To see which runs the check reads, take the head's committer time and list the own runs created since then:
@@ -3551,7 +3551,7 @@ gh api "repos/<owner>/<repo>/actions/runs?event=merge_group&created=>=<committer
   --jq '.workflow_runs[] | select(.head_branch | test("^gh-readonly-queue/.+/pr-<number>-[0-9a-f]+$")) | [.created_at, .head_sha, .name, .conclusion, .html_url] | @tsv'
 ```
 
-Raise `page` until a page comes back empty. The check reads at most five pages of 100 runs and refuses when more exist.
+Raise `page` until the pages cover the listing's `total_count`. The check reads at most five pages of 100 runs and refuses when more exist.
 
 A red exit skips that read because the failure is already on the pull request's own checks. The reopen comment reads `Reopened by the swarm: its pull request <url> left the merge queue without merging. The next engineer continues it from the handoff its engineer left.` The next engineer fixes the failing check with a new commit, waits for the pull request checks and queues it with `agentihooks swarm <id> merge queue <url>`.
 
