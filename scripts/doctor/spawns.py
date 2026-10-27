@@ -5,7 +5,7 @@ from scripts.hive import admission, placement
 from scripts.swarm.health.findings import Finding
 
 TICK_MS = 60_000
-FAILURE = re.compile(r"^(?:spawn failed for ([^\s,:]+).*?|master spawn failed): (.+)$")
+FAILURE = re.compile(r"(?:spawn failed for ([^\s,:]+)(?:[\s,][^:]*)?|master spawn failed): (.+)")
 HOST_ROOM = re.compile(
     rf"no (?:{placement.HIVE}|{placement.HEADLESS}|{placement.UI_HIVE}) for \S+ {placement.HAS_ROOM}: (.+)"
 )

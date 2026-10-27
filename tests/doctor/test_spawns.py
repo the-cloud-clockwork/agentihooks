@@ -137,6 +137,18 @@ def test_host_room_filter_keeps_other_launch_faults(reason):
     assert found.evidence == (reason,)
 
 
+def test_reopened_suffix_keeps_the_subject_and_the_whole_reason():
+    record = load("spawns")
+    record["actions"] = [
+        f"{record['slug']}: spawn failed for dt2, task dt2 reopened: hive launch failed: a cpu: exited 1",
+        f"{record['slug']}: spawn failed for dt2, task dt2 reopened: no hive for eng has room: "
+        "a ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more under the 80 percent line",
+    ]
+    [found] = spawns.failed(record)
+    assert found.id == "failed-spawn/dt2"
+    assert found.evidence == ("hive launch failed: a cpu: exited 1",)
+
+
 def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     import os
     import subprocess
