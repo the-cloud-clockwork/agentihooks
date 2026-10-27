@@ -1,4 +1,29 @@
 {
+  "alias_gate_rollback": {
+    "aliases_on": [
+      "get_session",
+      "get_session_segment",
+      "list_sessions",
+      "search_semantic",
+      "search_sessions",
+      "session_get",
+      "session_list",
+      "session_records",
+      "session_search"
+    ],
+    "aliases_unset": [
+      "session_get",
+      "session_list",
+      "session_records",
+      "session_search"
+    ],
+    "aliases_unset_again": [
+      "session_get",
+      "session_list",
+      "session_records",
+      "session_search"
+    ]
+  },
   "case": "B",
   "dispatcher": {
     "consumer": "workforce task dispatcher",
@@ -72,6 +97,13 @@
         "uses": "/sessions"
       },
       {
+        "consumer": "private consumer label",
+        "decision": "alias",
+        "kind": "tool",
+        "target": "session_search",
+        "uses": "search_semantic"
+      },
+      {
         "consumer": "unlisted session export job",
         "decision": null,
         "kind": "ingestion",
@@ -86,10 +118,20 @@
       }
     ],
     "migration_unmapped_consumers": 1,
-    "revision": 4,
+    "revision": 5,
     "unmapped": [
       "unlisted session export job"
     ]
+  },
+  "resubmitted": {
+    "item": {
+      "consumer": "private consumer label",
+      "decision": "alias",
+      "kind": "tool",
+      "target": "session_search",
+      "uses": "search_semantic"
+    },
+    "replayed": false
   },
   "unknown": {
     "item": {

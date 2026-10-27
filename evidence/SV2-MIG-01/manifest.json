@@ -5,10 +5,10 @@
     "search_caller": "an agent memory call to the legacy semantic search tool"
   },
   "input_sha256": {
-    "fixture.json": "99f5afc9ddeaa0971e403c7e7ead45fccca54c1cbcd6c060f75bd07df6c4ba92",
-    "sv2_mig01_cases.py": "7fd1f88d51b6fac4117c5c7347f43d62591fbc5c06dc82535da58af38689e5aa"
+    "fixture.json": "411cef2f1948973b6ac72f1d38f161546eb86eca40c6296ec4c48922d9a63da9",
+    "sv2_mig01_cases.py": "97c013a8e496cf25c799954f1ee47e1aa48f62ab57e60b94f083c7fcad874a9c"
   },
   "mocked": true,
   "package": "SV2-MIG-01",
-  "tested_commit": "f907cb1697522ce2faccd14300dc3ec4c216d5f0"
+  "tested_commit": "ae58d723f5500e1edd5111b57512aa0b8cd5d06e"
 }

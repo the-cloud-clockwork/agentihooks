@@ -44,5 +44,5 @@
   },
   "status": "fixture_verified",
   "supported_versions": "session tools and alias table of SV2-IDX-05",
-  "tested_commit": "f907cb1697522ce2faccd14300dc3ec4c216d5f0"
+  "tested_commit": "ae58d723f5500e1edd5111b57512aa0b8cd5d06e"
 }

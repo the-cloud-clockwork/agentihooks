@@ -27,6 +27,9 @@
     },
     "replayed": true
   },
+  "lost_on_restart": [
+    "brain keeper dispatch hint"
+  ],
   "report": {
     "items": [
       {
