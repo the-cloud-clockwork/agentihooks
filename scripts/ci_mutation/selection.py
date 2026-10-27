@@ -461,7 +461,7 @@ def forked_children():
     class ForkedChildren(ModuleType):
         # mutmut reaps with os.wait() and raises KeyError on a child a test left behind in its own process.
         def __init__(self):
-            super().__init__("os")
+            super().__init__(os.__name__)
             self.pids = set()
 
         def __getattr__(self, name):
