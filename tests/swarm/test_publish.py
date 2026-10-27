@@ -1540,7 +1540,7 @@ def test_prepare_refuses_an_open_pull_request_head_the_worktree_does_not_descend
     from scripts.swarm import publish
 
     p = publication
-    diverged = git(p.root, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Unrelated pull request work")
+    diverged = git(p.root, "commit-tree", "HEAD^{tree}", "-p", "origin/dev", "-m", "Unrelated pull request work")
     git(p.root, "push", "origin", f"{diverged}:refs/heads/pull-head")
     p.task.update(pr_url="https://github.com/example/repo/pull/7", state="pr")
     monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "pull-head" if url else "")

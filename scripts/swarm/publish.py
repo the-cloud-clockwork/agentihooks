@@ -201,6 +201,19 @@ def merged_record(repo: Path, task: dict) -> bool:
     return pull["state"] == "MERGED" and pull["headRefName"] == task["branch"]
 
 
+def open_pull_head(root: Path, task: dict, branch: str, remote: str) -> str:
+    url = task.get("pr_url", "")
+    head = publish_queue.open_head(remote, url)
+    if head and head != branch:
+        git(root, "fetch", "origin", head)
+        if not descends(root, head):
+            raise SwarmError(
+                f"open pull request {url} delivers branch {head}, but worktree {root} on branch {branch} "
+                f"does not descend from it; continue from origin/{head} or close that pull request"
+            )
+    return head
+
+
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
     fields, cleared = [], {}
@@ -229,19 +242,11 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
                 output = execute(command, repository)
                 root = Path(output.splitlines()[-1])
             checkout = checkout_fields(root)
-            head = publish_queue.open_head(checkout["branch_repo"], scoped.get("pr_url", ""))
-            if head and head != checkout["branch"]:
-                git(root, "fetch", "origin", head)
-                if not descends(root, head):
-                    raise SwarmError(
-                        f"open pull request {scoped['pr_url']} delivers branch {head}, but worktree {root} on branch "
-                        f"{checkout['branch']} does not descend from it; continue from origin/{head} or close that pull request"
-                    )
+            head = open_pull_head(root, scoped, checkout["branch"], checkout["branch_repo"])
             delivery = head or target_branch(root, scoped, checkout["branch"], scoped if retired else task)
             if delivery != checkout["branch"]:
                 git(root, "branch", f"--set-upstream-to=origin/{delivery}")
-            if head:
-                checkout["branch"] = head
+            checkout["branch"] = head or checkout["branch"]
             fields.append({**checkout, "repository": str(repository)})
         except SwarmError as exc:
             raise PublicationRefusal(repository, refusal_branch(repository, scoped), str(exc)) from exc
