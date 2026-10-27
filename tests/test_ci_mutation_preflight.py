@@ -187,6 +187,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
         return None
 
     monkeypatch.setattr(planner, "own_bases", bases)
+    monkeypatch.setattr(planner, "touches_code", lambda *args: True)
     monkeypatch.setattr(planner, "find_record", record)
     monkeypatch.setattr(planner, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
     output = tmp_path / "output"
@@ -370,6 +371,7 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     assert merged["if"] in {
         "success() && hashFiles('.mutation-stats-cache/**') != ''",
         "success() && steps.merged-stats.outputs.found == 'true'",
+        "success() && steps.merged-stats.outputs.found == 'true' && steps.cache-budget.outputs.available == 'true'",
     }
     if "hashFiles" not in merged["if"]:
         check = refine_steps[refine_names.index("Check for merged test stats")]

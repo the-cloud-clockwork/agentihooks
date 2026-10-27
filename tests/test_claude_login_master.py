@@ -12,7 +12,7 @@ from scripts import master_claude_login as login
 
 @pytest.fixture
 def ah(tmp_path, monkeypatch):
-    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", tmp_path / "ah")
     monkeypatch.setattr(claude_login.shutil, "which", lambda name: f"/opt/{name}")
     rendered = tmp_path / "profiles" / "master" / "claude"
     rendered.mkdir(parents=True)

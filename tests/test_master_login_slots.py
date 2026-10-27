@@ -13,7 +13,7 @@ WORKER = "AH_CC_TOKEN_workeratexample_com"
 def ah(tmp_path, monkeypatch):
     monkeypatch.setattr(login, "MANAGED", tmp_path / "no-managed-settings.json")
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
-    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", tmp_path / "ah")
     monkeypatch.delenv(login.SLOT_ENV, raising=False)
     return tmp_path / "ah"
 

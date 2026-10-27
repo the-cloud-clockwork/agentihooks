@@ -514,7 +514,7 @@ def test_a_headless_hive_with_master_login_disabled_refuses_the_front_door_launc
     from scripts.hive import orders
 
     monkeypatch.setattr(hooks_config, "MASTER_CLAUDE_LOGIN", enabled)
-    monkeypatch.setattr(hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(hooks_config, "AGENTIHOOKS_HOME", tmp_path / "home")
     order, admitted, task = headless_front_door_order(setup, route)
     runtime = Mock()
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)

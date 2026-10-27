@@ -1,3 +1,4 @@
+import argparse
 import json
 import subprocess
 from pathlib import Path
@@ -83,8 +84,13 @@ class Run:
         if argv[:2] == ["api", "-H"]:
             assert f"contents/{create_render.TEMPLATE_PATH}?" in argv[3]
             return TEMPLATE
+        if argv[:2] == ["api", f"repos/{REPO}/git/trees/dev?recursive=1"]:
+            assert argv[2:] == ["--jq", create_github.TREE]
+            return "\n".join(getattr(self, "tree", []))
         if argv[:2] == ["api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
             return json.dumps(getattr(self, "required", []))
+        if argv[:2] == ["pr", "list"] and "open" in argv:
+            return "\n".join(getattr(self, "open_heads", []))
         if argv[:2] == ["pr", "list"]:
             return self.prs[0] if self.prs else ""
         if argv[:2] == ["pr", "create"]:
@@ -267,39 +273,36 @@ def test_a_rerun_resumes_the_unfinished_create_and_repeats_no_finished_step(worl
     assert (world.home / ".ssh" / "known_hosts").read_text().count("HOSTPUBLIC") == 1
 
 
-def test_a_finished_create_redeploys_the_same_hive_on_the_next_run(world):
+def test_a_finished_create_names_the_next_hive_on_the_next_run(world):
     create.create(world.tools, create.Options(timeout_s=60))
     calls = len(world.run.calls)
 
-    assert create.create(world.tools, create.Options(timeout_s=60)) == f"hive {NAME} is live in herdr as {TARGET}"
+    assert create.create(world.tools, create.Options(dry_run=True)) == (
+        "dry run of hive create swarm-hive-002: nothing written"
+    )
     later = world.run.calls[calls:]
     assert not [argv for argv in later if argv[:3] in (["gh", "pr", "create"], ["herdr", "machine", "add"])]
-    assert not [argv for argv in later if argv[0] in ("ssh-keygen", "ssh")]
     assert _state(world)["name"] == NAME and _state(world)["finished"] is True
-    assert f"hive create {NAME}: redeploying the hive of node worker-001" in world.lines
     assert len(world.tools.redis.keys(f"{auth.PREFIX}:member:*")) == 1
 
 
-def test_a_redeploy_that_stops_early_is_saved_unfinished(world):
+def test_a_second_create_that_stops_early_is_saved_unfinished_under_the_next_name(world):
     create.create(world.tools, create.Options(timeout_s=60))
-    Store.working = False
+    world.run.prs = []
 
-    with pytest.raises(auth.HiveError, match="waiting for an engineer working on the hive"):
+    with pytest.raises(auth.HiveError, match="rerun hive create to resume$"):
         create.create(world.tools, create.Options(timeout_s=0))
-    assert _state(world)["finished"] is False
+    assert _state(world)["name"] == "swarm-hive-002" and "finished" not in _state(world)
 
 
-def test_a_create_without_its_saved_state_reuses_the_record_pull_request_and_herdr_entry(world):
+def test_a_create_without_its_saved_state_names_a_new_hive_beside_the_one_it_finished(world):
     create.create(world.tools, create.Options(timeout_s=60))
     (world.home / "agentihooks" / create.STATE_FILE).unlink()
     world.run.machines = [{"id": "a1", "label": NAME, "target": TARGET}]
-    calls = len(world.run.calls)
 
-    assert create.create(world.tools, create.Options(timeout_s=60)) == f"hive {NAME} is live in herdr as {TARGET}"
-    later = world.run.calls[calls:]
-    assert not [argv for argv in later if argv[:3] in (["gh", "pr", "create"], ["herdr", "machine", "add"])]
-    assert not [argv for argv in later if argv[0] == "ssh-keygen"]
-    assert f"hive create {NAME}: manifests: opened pull request {PR}" in world.lines[len(create.STEPS) :]
+    assert create.create(world.tools, create.Options(dry_run=True)) == (
+        "dry run of hive create swarm-hive-002: nothing written"
+    )
     assert len(world.tools.redis.keys(f"{auth.PREFIX}:member:*")) == 1
 
 
@@ -310,7 +313,7 @@ def test_a_create_on_another_node_names_the_next_hive(world):
     with pytest.raises(auth.HiveError):
         create.create(world.tools, create.Options(node="worker-002", timeout_s=0))
     assert _state(world)["name"] == "swarm-hive-002" and _state(world)["node"] == "worker-002"
-    assert world.tools.redis.hgetall(machine.MACHINES) == {"worker-001": NAME, "worker-002": "swarm-hive-002"}
+    assert world.tools.redis.hgetall(machine.MACHINES) == {}
 
 
 def test_a_create_without_its_saved_state_keeps_the_port_of_the_hive_service(world, monkeypatch):
@@ -549,7 +552,9 @@ def _listing_line(world):
 
 
 def _keep_member(world):
-    world.tools.redis.hset(machine.MACHINES, "worker-001", NAME)
+    state = {"name": NAME, "record": RECORD, "ssh_port": 2225, "lan_ip": "10.10.30.207", "node": "worker-001"}
+    (world.home / "agentihooks").mkdir(exist_ok=True)
+    (world.home / "agentihooks" / create.STATE_FILE).write_text(json.dumps(state))
     grant = auth.mint(world.tools.redis, NAME, "redis://127.0.0.1:6379/0")
     world.bao.records[RECORD] = {"credential": auth.env_text("https://hive.example:8770", grant)}
     world.bao.versions[RECORD] = 1
@@ -579,9 +584,10 @@ def test_a_kept_member_left_unlisted_is_listed_on_the_rerun(world):
 
     assert world.bao.records[SIGNER]["member_swarms"] == {"old": ["demo"], member: ["demo"]}
     assert world.run.named("kubectl", "-n") == [RESYNC]
-    assert world.lines[0] == (
-        f"hive create {NAME}: invite: kept hive member {member} in OpenBao secret/{RECORD}; {LISTED.format(member)}"
-    )
+    assert world.lines[:2] == [
+        f"hive create {NAME}: resuming the unfinished create",
+        f"hive create {NAME}: invite: kept hive member {member} in OpenBao secret/{RECORD}; {LISTED.format(member)}",
+    ]
 
 
 def test_a_kept_member_that_was_revoked_is_replaced_by_a_new_listed_member(world):
@@ -681,7 +687,7 @@ def test_the_dry_run_of_a_kept_unlisted_member_names_its_listing(world):
 
     create.create(world.tools, create.Options(dry_run=True))
 
-    assert world.lines[0] == (
+    assert world.lines[1] == (
         f"hive create {NAME}: invite: kept hive member {member} in OpenBao secret/{RECORD}; "
         f"would list {member} on the hub signer record {SIGNER} for demo and refresh {SYNC}"
     )
@@ -706,7 +712,7 @@ def test_a_new_node_beside_live_hives_one_and_two_is_named_hive_three(world):
         create.create(world.tools, create.Options(node="worker-002", timeout_s=0))
 
     assert _state(world)["name"] == "swarm-hive-003"
-    assert redis.hgetall(machine.MACHINES) == {"worker-001": NAME, "worker-002": "swarm-hive-003"}
+    assert redis.hgetall(machine.MACHINES) == {"worker-001": NAME}
 
 
 @pytest.mark.parametrize(
@@ -733,3 +739,167 @@ def test_a_name_only_a_hive_member_holds_is_skipped(world):
     done = create.create(world.tools, create.Options(node="worker-002", dry_run=True))
 
     assert done == "dry run of hive create swarm-hive-003: nothing written"
+
+
+def _live_hive_one(world):
+    redis = world.tools.redis
+    redis.hset(machine.MACHINES, "worker-001", NAME)
+    member = auth.mint(redis, NAME, "redis://hive.example:6380/2")["id"]
+    redis.hset(registry.key(member), "heartbeat_at", NOW * 1000)
+    world.run.tree = [f"k8s/manifests/{NAME}/ssh-lan.yaml", "k8s/manifests/other/ssh-lan.yaml"]
+
+
+def test_a_create_on_the_node_of_a_live_hive_names_a_fresh_hive_and_leaves_the_live_one(world):
+    _live_hive_one(world)
+
+    done = create.create(world.tools, create.Options(node="worker-001", dry_run=True))
+
+    assert done == "dry run of hive create swarm-hive-002: nothing written"
+    assert [line for line in world.lines if line.startswith("--- ")] == [
+        "--- k8s/manifests/swarm-hive-002/ssh-lan.yaml\nport: 2225\nnode: worker-001\n"
+        "key: k8s/agentihooks-hive-swarm-hive-002\nip: 10.10.30.207\n"
+    ]
+    assert world.tools.redis.hgetall(machine.MACHINES) == {"worker-001": NAME}
+
+
+def test_an_explicit_name_of_a_live_hive_with_an_antoncore_overlay_is_refused(world):
+    _live_hive_one(world)
+
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(name=NAME, dry_run=True))
+
+    assert str(refused.value) == (
+        f"hive create refuses {NAME}: it is already held by a hive and the {REPO} file "
+        f"k8s/manifests/{NAME}/ssh-lan.yaml; "
+        "pass --name with an unused hive name, or leave it out to take the next one"
+    )
+    assert not world.run.named("kubectl")
+    assert not (world.home / "agentihooks" / create.STATE_FILE).exists()
+
+
+def test_an_explicit_name_held_only_by_an_antoncore_overlay_is_refused(world):
+    world.run.tree = ["k8s/manifests/swarm-hive-007/ssh-lan.yaml"]
+
+    with pytest.raises(auth.HiveError, match=r"^hive create refuses swarm-hive-007: it is already held by the "):
+        create.create(world.tools, create.Options(name="swarm-hive-007", dry_run=True))
+
+
+def test_an_explicit_name_held_only_by_a_hive_is_refused(world):
+    auth.mint(world.tools.redis, "swarm-hive-007", "redis://hive.example:6380/2")
+
+    with pytest.raises(auth.HiveError, match=r"^hive create refuses swarm-hive-007: it is already held by a hive; "):
+        create.create(world.tools, create.Options(name="swarm-hive-007", dry_run=True))
+
+
+def test_an_unused_explicit_name_is_created(world):
+    _live_hive_one(world)
+
+    done = create.create(world.tools, create.Options(name="swarm-hive-009", dry_run=True))
+
+    assert done == "dry run of hive create swarm-hive-009: nothing written"
+
+
+def test_a_name_only_an_antoncore_overlay_holds_is_skipped(world):
+    world.run.tree = [f"k8s/manifests/{NAME}/ssh-lan.yaml"]
+
+    done = create.create(world.tools, create.Options(dry_run=True))
+
+    assert done == "dry run of hive create swarm-hive-002: nothing written"
+
+
+def test_a_name_only_the_machine_map_holds_is_skipped(world):
+    world.tools.redis.hset(machine.MACHINES, "worker-009", NAME)
+
+    done = create.create(world.tools, create.Options(dry_run=True))
+
+    assert done == "dry run of hive create swarm-hive-002: nothing written"
+
+
+def test_a_name_with_an_open_pull_request_is_skipped_and_refused_when_given(world):
+    world.run.open_heads = ["engineer-1", NAME]
+
+    assert create.create(world.tools, create.Options(dry_run=True)) == (
+        "dry run of hive create swarm-hive-002: nothing written"
+    )
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(name=NAME, dry_run=True))
+    assert str(refused.value).startswith(
+        f"hive create refuses {NAME}: it is already held by an open {REPO} pull request; "
+    )
+
+
+@pytest.mark.parametrize("given", ["Swarm-Hive-009", "swarm-hive-009/", " swarm-hive-009", "swarm-hive-009-", ""])
+def test_an_explicit_name_that_is_not_a_hive_name_is_refused_before_anything_is_read(world, given):
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(name=given, dry_run=True))
+
+    assert str(refused.value) == (
+        f"hive create refuses the name {given!r}: a hive name is lowercase letters, digits and dashes"
+    )
+    assert world.run.calls == []
+
+
+@pytest.mark.parametrize("given", ["swarm-hive-010", "h", "a1-b2"])
+def test_an_explicit_name_of_hive_shape_is_accepted(world, given):
+    assert create.create(world.tools, create.Options(name=given, dry_run=True)) == (
+        f"dry run of hive create {given}: nothing written"
+    )
+
+
+def test_an_unfinished_create_refuses_another_explicit_name(world):
+    _keep_member(world)
+
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(name="swarm-hive-009", dry_run=True))
+
+    assert str(refused.value) == (
+        f"an unfinished hive create of {NAME} is saved; rerun hive create without --name to finish it"
+    )
+
+
+def test_an_unfinished_create_resumes_under_its_own_explicit_name(world):
+    _keep_member(world)
+
+    create.create(world.tools, create.Options(name=NAME, dry_run=True))
+
+    assert world.lines[0] == f"hive create {NAME}: resuming the unfinished create"
+
+
+def test_cli_create_passes_its_name(monkeypatch, capsys):
+    seen = {}
+    monkeypatch.setenv("OPENBAO_URL", "https://bao.test")
+    monkeypatch.setenv("OPENBAO_TOKEN", "token")
+    monkeypatch.setattr(cli, "redis_client", lambda: None)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "root")
+    monkeypatch.setattr(create, "create", lambda tools, options: seen.update(options=options) or "created")
+    assert cli.main(["create", "--name", "swarm-hive-009"]) == 0
+    assert seen["options"] == create.Options(name="swarm-hive-009")
+
+
+def test_cli_create_names_its_name_option():
+    parser = cli._parser()
+    (commands,) = [action for action in parser._actions if isinstance(action, argparse._SubParsersAction)]
+    (option,) = [action for action in commands.choices["create"]._actions if action.dest == "name"]
+    assert option.option_strings == ["--name"]
+    assert option.help == "hive name to create; defaults to the next unused swarm-hive name"
+
+
+def test_no_unused_hive_name_below_the_limit_is_a_refusal(world, monkeypatch):
+    monkeypatch.setattr(create, "NAME_LIMIT", 3)
+    world.run.tree = [f"k8s/manifests/{NAME}/ssh-lan.yaml"]
+    world.run.open_heads = ["swarm-hive-002"]
+
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(dry_run=True))
+
+    assert str(refused.value) == "hive create found no unused hive name below swarm-hive-003"
+    assert not world.run.named("kubectl")
+
+
+def test_the_last_name_below_the_limit_is_taken(world, monkeypatch):
+    monkeypatch.setattr(create, "NAME_LIMIT", 3)
+    world.run.tree = [f"k8s/manifests/{NAME}/ssh-lan.yaml"]
+
+    assert create.create(world.tools, create.Options(dry_run=True)) == (
+        "dry run of hive create swarm-hive-002: nothing written"
+    )

@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from scripts import ci_stats_seed as seed
-from scripts.ci_mutation.stats_dependencies import CONTEXT
+from scripts.ci_mutation.stats_dependencies import CONTEXT, SHARED
 
 pytestmark = pytest.mark.unit
 
@@ -86,6 +86,23 @@ def test_stats_runs_mark_their_context_and_the_seed_prunes_by_it(folder):
     assert new.load("tests/test_a.py") == {"status": 0}
 
 
+def test_prune_keeps_only_the_shared_inputs_a_kept_record_names(folder):
+    from scripts.ci_mutation.stats_dependencies import StoredStats
+
+    old = StoredStats(folder, folder, {"sources": {"uv.lock": "1"}, "inventory": []}, {})
+    new = StoredStats(folder, folder, {"sources": {"uv.lock": "2"}, "inventory": []}, {})
+    old.save("tests/test_a.py", {"status": 0, "dependencies": {"t": ["old.py"]}}, {"gone.py": "0" * 64}, False)
+    new.save("tests/test_a.py", {"status": 0, "dependencies": {"t": ["new.py"]}}, {}, False)
+    (folder / CONTEXT).write_text(new.context_digest())
+
+    assert seed.prune(folder) == 1
+
+    assert sorted(path.name for path in folder.glob(f"*{SHARED}")) == sorted(
+        f"{key}{SHARED}" for key in (new.share({}), new.share(["new.py"]))
+    )
+    assert new.load("tests/test_a.py") == {"status": 0, "dependencies": {"t": ["new.py"]}}
+
+
 def test_prune_drops_a_pointer_to_an_unreadable_record(folder):
     (folder / "p1.index").write_text(KEEP)
     (folder / f"{KEEP}.json").write_text("{")
@@ -160,7 +177,9 @@ def test_api_fails_when_gh_fails(tmp_path, monkeypatch):
 def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder, monkeypatch):
     archives = {
         5: _archive({"x.index": "old", "x.json": "{}"}),
-        6: _archive({"x.index": "new", f"{KEEP}.json": "{}", "collected-0": "", CONTEXT: "c"}),
+        6: _archive(
+            {"x.index": "new", f"{KEEP}.json": "{}", f"{SCOPED}{SHARED}": "{}", "collected-0": "", CONTEXT: "c"}
+        ),
     }
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
@@ -180,9 +199,15 @@ def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder,
         seed, "api", lambda path, binary=False: archives[int(path.split("/")[2])] if binary else responses[path]
     )
 
-    assert seed.harvest(7, folder) == 5
+    assert seed.harvest(7, folder) == 6
     assert (folder / "x.index").read_text() == "new"
-    assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", CONTEXT, "x.index", "x.json"]
+    assert sorted(path.name for path in folder.iterdir()) == [
+        f"{KEEP}.json",
+        f"{SCOPED}{SHARED}",
+        CONTEXT,
+        "x.index",
+        "x.json",
+    ]
 
 
 def test_harvest_skips_a_number_that_is_not_a_pull_request(tmp_path, monkeypatch, capsys):
