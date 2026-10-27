@@ -1,0 +1,52 @@
+name: Launcher pool mutation proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    runs-on: anton-oss-batch
+    timeout-minutes: 26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+      - name: Mutate the bounded constructor
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from scripts.ci_mutation.runner import run_gate
+
+          root = Path.cwd()
+          source = 'scripts/workflows/launchers.py'
+          lines = [index for index, line in enumerate((root / source).read_text().splitlines(), 1)
+                   if 'with ThreadPoolExecutor(max_workers=stage.count) as pool:' in line]
+          assert len(lines) == 1, lines
+          report = run_gate(root, {source: set(lines)}, root / '.pool-mutation', 1080)
+          print(json.dumps(report))
+          assert not report['failed'], report
+          assert report['files'][0]['counts'].get('killed', 0) > 0, report
+          PY
+      - name: Preserve complete mutation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-pool-mutation
+          path: .pool-mutation/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
