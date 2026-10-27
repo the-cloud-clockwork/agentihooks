@@ -448,12 +448,12 @@ def test_selection_refuses_an_unknown_stats_mode_before_touching_mutmut():
 
 
 def test_the_mutation_parent_reaps_only_the_workers_it_forked():
-    from scripts.ci_mutation.selection import OwnChildren
+    from scripts.ci_mutation.selection import own_children
 
     forks = iter([0, 41, 42])
     exits = iter([(7, 0), (42, 256), (41, 0)])
     system = SimpleNamespace(fork=lambda: next(forks), wait=lambda: next(exits), environ={"kept": "1"})
-    own = OwnChildren(system)
+    own = own_children(system)
     assert [own.fork(), own.fork(), own.fork()] == [0, 41, 42]
     assert own.wait() == (42, 256)
     assert own.wait() == (41, 0)
@@ -462,11 +462,11 @@ def test_the_mutation_parent_reaps_only_the_workers_it_forked():
 
 
 def test_a_child_a_test_left_behind_never_ends_the_mutation_run():
-    from scripts.ci_mutation.selection import OwnChildren
+    from scripts.ci_mutation.selection import own_children
 
     stray = subprocess.Popen([sys.executable, "-c", "pass"])
     os.waitid(os.P_PID, stray.pid, os.WEXITED | os.WNOWAIT)
-    own = OwnChildren()
+    own = own_children()
     worker = own.fork()
     if worker == 0:
         os._exit(3)
