@@ -5,6 +5,7 @@ agentihooks swarm init NAME [--plan FILE] [--content FILE] [--repo DIR]  the one
 agentihooks swarm names check NAME [--plan FILE]                  valid or invalid against the swarm name rule, with suggestions
 agentihooks swarm <id> create --repo DIR [--template NAME]         proof and demo swarms only; init calls it for every other swarm
 agentihooks swarm <id> start | pause | stop [--now] | status
+agentihooks swarm <id> probe
 agentihooks swarm <id> names [--json]                              the swarm code, its herdr space and every agent name it gave
 agentihooks swarm <id> url                                        print the ledger page link (create and start print it last)
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
@@ -1239,6 +1240,13 @@ def cmd_ledger_ready(store: RedisStore, args: argparse.Namespace) -> None:
     print(json.dumps(ledger_cutover.readiness(store, args.slug)))
 
 
+def cmd_probe(store, args):
+    from scripts.swarm import probe
+
+    for found in probe.run(store, args.slug, LedgerClient(), now_ms()):
+        print(found.line())
+
+
 def cmd_status(store, args):
     if args.json:
         store.config(args.slug)
@@ -2290,6 +2298,7 @@ def build_parser():
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
+    sub.add_parser("probe")
     sub.add_parser("ledger-ready")
     for verb in ("freeze", "focus", "unfreeze"):
         frozen = sub.add_parser(verb)

@@ -5622,6 +5622,24 @@ writers above or `task set`.
 - **No label appears.** Check the task's `state`: a `done` task never shows one. Otherwise set the field with
   `task set`, never by writing the ledger database.
 
+## Stability probes
+
+`agentihooks swarm <slug> probe` reads the live swarm and prints one tab separated line per invariant: `pass` or
+`fail`, the invariant and its measured number.
+
+| Invariant | Pass when |
+|---|---|
+| every hive live | every registered hive heartbeat is fresh |
+| every hive agent joins and writes the ledger | each live hive agent's join report passed ledger join and ledger write |
+| launch success hive H harness N | started launches over started and failed ones in the window reach the minimum rate |
+| full task list reads per minute | timed full task list reads from the swarm's ledger reach the minimum rate |
+| workstation agents at or under the root cap | running workstation workers fit the `root` hive's max agents; the swarm local limit is shown beside it |
+| merge queue groups moving | the dev merge queue is empty or merged inside the stall window |
+| release age | the latest GitHub release is no older than the maximum |
+
+Thresholds live in `scripts.swarm.probe.Thresholds`. A reader that fails prints `fail` with `unread:` and the
+error.
+
 ## Agent status comments
 
 Every agent, the master and the tick's own `swarm` author keep one status comment per ledger item. A new status
