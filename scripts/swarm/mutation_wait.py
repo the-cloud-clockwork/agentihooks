@@ -8,11 +8,13 @@ import zipfile
 import zlib
 from datetime import datetime, timezone
 
+from scripts.ci_mutation.merge import merge_reports
 from scripts.swarm import github_reads
 from scripts.swarm.lost_runner import home as _backoff_home
 from scripts.swarm.store import SwarmError
 
 RUN_URL = re.compile(r"https://github\.com/([^/]+/[^/]+)/actions/runs/([0-9]+)")
+SHARD_REPORT = re.compile(r"mutation-preflight-shard-([0-9]+)")
 WORKFLOW = ".github/workflows/mutation-preflight.yml"
 PROOFS = ".github/workflows/proofs.yml"
 EVENTS = {WORKFLOW: "push", PROOFS: "workflow_dispatch"}
@@ -211,25 +213,54 @@ def _branch_scope(repo, ref, run):
         return None
 
 
-def _report(target, started_at):
+def _report(target, run):
     repo, number = RUN_URL.fullmatch(target).groups()
-    since = datetime.fromisoformat(started_at)
-    artifacts = _api(f"repos/{repo}/actions/runs/{number}/artifacts?per_page=100")
-    matching = [
+    since = datetime.fromisoformat(run["run_started_at"])
+    artifacts = [
         artifact
-        for artifact in artifacts["artifacts"]
-        if artifact["name"] == "mutation-preflight-report"
-        and not artifact["expired"]
-        and datetime.fromisoformat(artifact["created_at"]) >= since
+        for artifact in _api(f"repos/{repo}/actions/runs/{number}/artifacts?per_page=100")["artifacts"]
+        if not artifact["expired"] and datetime.fromisoformat(artifact["created_at"]) >= since
     ]
+    matching = [artifact for artifact in artifacts if artifact["name"] == "mutation-preflight-report"]
     if not matching:
-        raise Missing
-    artifact = max(matching, key=lambda row: row["id"])
+        if run["path"] != WORKFLOW:
+            raise Missing
+        return _shard_reports(repo, number, artifacts), None, True
+    return (*_archive(repo, max(matching, key=lambda row: row["id"])), False)
+
+
+def _archive(repo, artifact):
     archive = _api(f"repos/{repo}/actions/artifacts/{artifact['id']}/zip", binary=True)
     with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
         name = next(name for name in zipped.namelist() if name == "report.json" or name.endswith("/report.json"))
         scope = json.loads(zipped.read("scope.json")) if "scope.json" in zipped.namelist() else None
         return json.loads(zipped.read(name)), scope
+
+
+def _shard_reports(repo, number, artifacts):
+    shards = {
+        int(match.group(1)): artifact
+        for artifact in sorted(artifacts, key=lambda row: row["id"])
+        if (match := SHARD_REPORT.fullmatch(artifact["name"]))
+    }
+    if not shards:
+        raise Missing
+    jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100")["jobs"]
+    if any(
+        job["name"].partition(" ")[0] not in ("mutation", "mutation-shard")
+        and job["conclusion"] not in ("success", "skipped")
+        for job in jobs
+    ):
+        raise Missing
+    reports = [_archive(repo, artifact)[0] for _, artifact in sorted(shards.items())]
+    measured = [report.get("shard") or {} for report in reports]
+    if (
+        [shard.get("index") for shard in measured] != list(range(len(reports)))
+        or not all(shard.get("total") == len(reports) and shard.get("complete") for shard in measured)
+        or any(report.get("units") for report in reports)
+    ):
+        raise Missing
+    return merge_reports(reports)
 
 
 def _skip(target, run):
@@ -262,7 +293,7 @@ def _skip(target, run):
 def _fetch(target, run):
     for pause in (*BACKOFF, None):
         try:
-            return _report(target, run["run_started_at"])
+            return _report(target, run)
         except RateLimited:
             raise
         except (Unreachable, zipfile.BadZipFile, zlib.error, EOFError) as error:
@@ -326,10 +357,20 @@ def _resolve(held, branches):
     outcome = f"mutation preflight {target}"
     if moved := _moved(target, run, outcome):
         return moved
-    if run.get("conclusion") != "success" and run.get("conclusion") != "failure":
-        return f"{outcome}, now red; run {run.get('conclusion')}"
+    conclusion = run.get("conclusion")
+    ended = f"{outcome}, now red; run {conclusion}"
+    if conclusion not in ("success", "failure") and (conclusion != "cancelled" or run["path"] != WORKFLOW):
+        return ended
     try:
-        report, scope = _fetch(target, run)
+        verdict, sharded = _evidence(target, run, branches, outcome)
+    except Unreachable:
+        return ""
+    return ended if conclusion == "cancelled" and not sharded else verdict
+
+
+def _evidence(target, run, branches, outcome):
+    try:
+        report, scope, sharded = _fetch(target, run)
         covered = _covers(target, run, scope, branches)
         failures = [
             f"{file['path']}:{failure['name']}:{failure['fingerprint']} ({failure['status']})"
@@ -339,17 +380,20 @@ def _resolve(held, branches):
         failures.extend(f"{row['path']}: {row['reason']}" for row in report["not_mutated"])
         failed = report["failed"]
     except (Skipped, FetchFailed) as error:
-        return _unfetched(outcome, run["conclusion"], error)
+        return _unfetched(outcome, run["conclusion"], error), False
     except Unreachable:
-        return ""
+        raise
     except (*UNREADABLE, StopIteration, zipfile.BadZipFile):
-        return f"{outcome}, now red; complete mutation report unavailable; mutation may have been skipped"
+        return f"{outcome}, now red; complete mutation report unavailable; mutation may have been skipped", False
     if not covered:
-        return f"{outcome}, now red; the mutation report does not grade the branch head from its dev merge base"
-    if run["conclusion"] == "success" and not failed and not failures:
-        return f"{outcome}, now green; no failing mutants"
+        return (
+            f"{outcome}, now red; the mutation report does not grade the branch head from its dev merge base",
+            sharded,
+        )
+    if (run["conclusion"] == "success" or sharded) and not failed and not failures:
+        return f"{outcome}, now green; no failing mutants", sharded
     detail = "; ".join(failures) or "mutation failed without a named survivor"
-    return f"{outcome}, now red; {detail}"
+    return f"{outcome}, now red; {detail}", sharded
 
 
 def run_resolution(target: str) -> str:
