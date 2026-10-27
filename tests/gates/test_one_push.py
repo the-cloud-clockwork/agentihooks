@@ -333,9 +333,7 @@ def test_cancelled_suites_finish_but_active_checks_still_hold_a_push(
         "statusCheckRollup": [
             {"name": name, "status": check_status, "conclusion": conclusion} for name in ("unit", "lint")
         ],
-        "checkSuites": [
-            {"status": suite_status, "conclusion": "CANCELLED", "workflowRun": {"databaseId": 1}}
-        ],
+        "checkSuites": [{"status": suite_status, "conclusion": "CANCELLED", "workflowRun": {"databaseId": 1}}],
     }
     decision = gate(pull_request(raw)).decide(bash("git push", tree), ME, state(tmp_path))
     assert decision.allowed is allowed
