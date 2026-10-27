@@ -175,12 +175,8 @@ def test_a_master_on_a_master_reserved_account_is_skipped_while_a_worker_there_s
     decision = json.loads(store.redis.get(store.key(SLUG, "quota-capacity")))
     decision["accounts"][0]["reserved"] = reserved
     store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(decision))
-    master = AgentRecord("master@abc-0000", "master", "", harness="claude", account="alpha", state="working")
-    agents = store.redis.hgetall(store.key(SLUG, "agents"))
-    store.redis.delete(store.key(SLUG, "agents"))
+    master = AgentRecord("director@abc-0000", "master", "", harness="claude", account="alpha", state="working")
     store.put_agent(SLUG, master)
-    for name, value in agents.items():
-        store.redis.hset(store.key(SLUG, "agents"), name, value)
     inbox = InboxStore(store.redis)
     item = inbox.send("swarm", master.name, "QUOTA HANDOFF WARNING")
     store.redis.hset(inbox.key("item", item.id), "created_at", 1_000_000)
