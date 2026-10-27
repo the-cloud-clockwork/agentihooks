@@ -507,8 +507,10 @@ agentihooks doctor rig-grade-swarm measure \
   ci-tier-wall-time/1792617600000-merge_group
 ```
 
-Both print the class line of `ci-runner-wait/["anton-oss"]` and
-`ci-tier-wall-time/merge_group`. The parser tries the target forms in this
+Both print the same class line as the stable ids
+`ci-runner-wait/["anton-oss"]` and `ci-tier-wall-time/merge_group`, which
+begin `ci-runner-wait anton-oss, window ...` and
+`ci-tier-wall-time queue, window ...`. The parser tries the target forms in this
 order:
 
 | Target subject | Read as | Example |
@@ -591,7 +593,7 @@ changing either requires a reviewed code change.
 | Window read error or incomplete snapshot | The command refuses the class result. A run value may already have printed; it does not establish a complete class read. |
 | `0 of 0 runs over ...` | No measurable samples for the selected tier or label set, or no scopes for a bare class. A label set can have jobs but no confirmed waits for `ci-runner-wait`, or no unconfirmed jobs for `ci-queue-age-unconfirmed`. Median and worst are omitted. This is no exposure, not evidence of improvement. |
 | `<finding> names no run attempt, runner label set or tier: ...` | The subject matches none of the target forms, and the command exits 1 before reading CI. A tier under a runner class (`ci-runner-wait/pull_request`), a label set under the wall time class, an event other than the two tiers (`ci-tier-wall-time/1792617600000-push`) and unbalanced JSON are refused this way. Copy the id from the notice. |
-| `runner labels [1, "a"] are not a list of names` | The JSON list holds something other than label strings. Quote the label set exactly as the notice prints it. |
+| `<finding> names no run attempt, runner label set or tier: runner labels [1, "a"] are not a list of names` | The JSON list holds something other than label strings. Quote the label set exactly as the notice prints it. |
 
 [Pull request 5076](https://github.com/the-cloud-clockwork/agentihooks/pull/5076)
 delivered this measurement path. Its source proof reported 818 of 818 recorded
@@ -894,19 +896,21 @@ in the current window are raised. The id itself does
 not change, so a verdict a master gives in one window still names the finding
 the next window raises.
 
-A verdict covers every finding of the same class and label set or tier. The
-comparison drops a leading window start, so a verdict recorded on an id such as
+A verdict of any value (`false-positive`, `early-real`, `established`,
+`insufficient-evidence` or `resolved`) covers every finding of the same class
+and label set or tier. The comparison drops a leading window start, so a verdict recorded on an id such as
 `ci-runner-wait/1792617600000-["anton-oss"]`, sent before pull request 5715,
 still covers `ci-runner-wait/["anton-oss"]`. It does not cover another tier or
 another label set: a verdict on `ci-tier-wall-time/merge_group` leaves
 `ci-tier-wall-time/pull_request` unjudged, and a verdict on `["a"]` leaves
 `["a", "b"]` unjudged.
 
-Within the verdict cooldown, a covered finding is held back while its worst
-settled measure stays at or under the judged worst plus the growth margin. The
-judged worst is the largest measure among the verdicts on the same scope given
-no more than 24 hours before this verdict, or after it (`JUDGED_SPAN_MS` in the
-CI speed detector), old window ids included. Members count as settled or open:
+Within the verdict cooldown, a covered finding is not recorded again as
+unjudged while its worst settled measure stays at or under the judged worst
+plus the growth margin. The judged worst is the largest measure among the
+verdicts of any value on the same scope given no earlier than 24 hours before
+this verdict (`JUDGED_SPAN_MS` in the CI speed detector), later verdicts and
+old window ids included. Members count as settled or open:
 
 | Member | State | Counts toward the settled worst |
 |---|---|---|
@@ -918,13 +922,17 @@ CI speed detector), old window ids included. Members count as settled or open:
 The tier wall time detector raises only completed runs, so its members are
 settled in practice; the open rule covers a group kept from code that raised
 running tiers. A group holding only open members has a settled worst of zero.
-An open crossing a master has judged therefore stays silent while only its
-clock grows. It returns when its run settles above the bar, or when the
-cooldown ends.
+A queue age finding a master has judged therefore stays silent while only
+its clock grows. When the queued job starts, the run joins a
+`ci-runner-wait` group, a different class that the queue age verdict does not
+cover.
 
-While a verdict stands, the notice for a finding is keyed on the finding id and
-the verdict's time, so the growth of its evidence across passes does not send
-it again under a new key. A new verdict starts a new key.
+Notices follow two paths:
+
+| Class | What is sent to each master |
+|---|---|
+| `ci-runner-wait`, `ci-tier-wall-time` | Once per run: each pass sends the groups raised this pass, naming only the runs not sent to that master before. A finished run that joins a judged group is still sent, alone in its notice. A run already sent is never sent again, however its measure grows. |
+| `ci-queue-age-unconfirmed` and the other Doctor CI speed findings | Once per notice key. Without a verdict on the exact id the key is the id; with one it is the id and the verdict's time, so a new verdict opens a new key. A verdict on an older window id never keys the stable id. |
 
 A corrected read that removes every run from a group, followed by a new
 crossing that refills the group in the same pass, leaves the finding standing:
@@ -932,11 +940,14 @@ the timer retracts only ids missing from the current window's groups.
 
 To see the groups the timer holds and their windows, read the record, a JSON
 string under `<prefix>:swarm:<doctor>:ci-speed`, where the prefix is
-`AGENTIHOOKS_SWARM_KEY_PREFIX` or `agentihooks`:
+`AGENTIHOOKS_SWARM_KEY_PREFIX` or `agentihooks`. The command needs `jq`; the
+Redis URL defaults to the one the swarm store uses when
+`AGENTIHOOKS_SWARM_REDIS_URL` is unset:
 
 ```bash
-redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" --raw \
-  GET agentihooks:swarm:rig-grade-swarm-doctor:ci-speed \
+doctor=rig-grade-swarm-doctor
+redis-cli -u "${AGENTIHOOKS_SWARM_REDIS_URL:-redis://127.0.0.1:6379/0}" --raw \
+  GET "${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}:swarm:$doctor:ci-speed" \
   | jq '.groups | to_entries[] | {id: .key, window: .value.window, runs: [.value.members[].run]}'
 ```
 
@@ -974,9 +985,9 @@ journalctl --user -t agentihooks-swarm --since '-6 hours' --no-pager -o cat \
 | A slow CI hour raised findings although GitHub had an incident | The incident names neither an `Actions` component nor Actions in its title, or the status page could not be read. Both hold nothing by design. |
 | A finding carries the incident evidence line | Some of its runs had jobs created inside the incident window. Compare those runs with the rest before acting. |
 | Ten slow runs raised one finding | Expected: one finding per class and label set or tier per pass. Read the run ids in the first evidence line. |
-| A second notice for the same group | A verdict was given and a later run passed the judged worst by more than the growth margin, or the verdict cooldown ended. |
+| A second notice for the same group | For runner wait and tier wall time, a run not sent before joined the group; the notice names only that run. For queue age, a new verdict or the cooldown ending opened a new notice key. |
 | A verdict was given on an id with a window start and the stable id still arrives | Check that the stable id names the same class and the same exact label set or tier; a verdict on one tier or label set never covers another. Then compare its settled worst with the judged worst plus the growth margin. |
-| `measure` refuses an id copied from an old notice | Copy the whole id, quotes included. A window start ahead of a tier or label set is accepted; see [Measure a CI run and its class over a window](#measure-a-ci-run-and-its-class-over-a-window). |
+| `measure` refuses an id copied from an old notice | Copy the whole id, quotes included, and compare it with the target forms in [Measure a CI run and its class over a window](#measure-a-ci-run-and-its-class-over-a-window). |
 
 #### Delivery evidence
 
@@ -1010,14 +1021,15 @@ Before it, each ten minute window minted a new runner wait or tier wall time
 id, so a verdict never held into the next window and the watched master
 received the same evidence two or three times in thirty minutes. The
 [red Proofs run 39715758369](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39715758369)
-failed 11 tests and 4 collections on the new id tests against dev code; the
+ran the new id tests on branch `wip/t648-red`, without the fix, and failed 11
+tests and 4 collections; the
 [green Proofs run 39717401266](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39717401266)
-passed them. The tests assert that two windows with the same tier and label
+on the pull request branch `engineer-d44a5a-0854` passed them. The tests assert that two windows with the same tier and label
 set yield one id, and run detector emitted ids, stable and window prefixed,
 through the measure entry point.
 
-The source task counted distinct runner wait and tier wall time ids in Doctor
-timer notices to the masters over equal six hour windows. The after window ran
+The source task's recorded proof counted distinct runner wait and tier wall
+time ids in Doctor timer notices to the masters over equal six hour windows. The after window ran
 from 06:39:52 to 12:39:52 UTC on 22 October, starting with the first tick after
 the watched master applied the change at 06:39:51 UTC:
 
@@ -1029,8 +1041,7 @@ the watched master applied the change at 06:39:51 UTC:
 The five ids after the change were one per runner label set or tier:
 `anton-oss`, `anton-oss-batch`, `anton-oss-queue`, `merge_group` and
 `pull_request`. Repeats of judged findings whose only growth was a running
-clock remained in that window and were left to a later runner wait and tier
-wall time fix.
+clock still occurred in that window; this change did not remove them.
 
 ### Inspect and diagnose a read
 
