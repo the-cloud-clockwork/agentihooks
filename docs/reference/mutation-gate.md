@@ -53,8 +53,9 @@ plant branches `diffcheck/ci-323133-2650-t9-green` and
 
 The audit's 38% (15 of 40) predates mutation moving into Tests. Excluding
 Dependabot runs, one of 64 runs (1.6%) was a mutation tool failure. Cancelled
-runs are outside the count, including the planner killed for memory (exit 137)
-between 23:45Z and 00:22Z.
+runs are outside the count. Separately, after the counted window, mutation
+planning was killed for memory (exit 137, Tests run 40424698293) between
+2026-10-26 23:45Z and 2026-10-27 00:22Z.
 
 ## Covering tests through production helpers
 
