@@ -8,7 +8,7 @@ moves to. The inventory itself is code: `hooks.memory.compatibility.CONSUMERS`, 
 ## Reusable search logic
 
 Only three components may be taken from the legacy service, and each already has an agentihooks implementation.
-`hooks.memory.compatibility.extract` names the target and records the source license (MIT). No legacy source was
+`hooks.memory.compatibility.extract` names the target and records the source license (MIT, the legacy repository's LICENSE file). No legacy source was
 copied, so no attribution notice is carried in code.
 
 | Component | agentihooks implementation |
@@ -60,10 +60,10 @@ with search code.
 | antoncore gateway OAuth routes | deployment | remove | OAuth server |
 | antoncore ArgoCD application, chart, ingress and image updater | deployment | remove | standalone daemon |
 | antoncore agent chart environment service URLs | deployment | remove | dispatcher |
-| antoncore LiteLLM unit and gateway MCP grants | deployment | replace | agentihooks session tools |
+| antoncore LiteLLM unit and gateway MCP grants | deployment | replace | the session tools registered by `hooks.mcp.sessions` |
 | antoncore backup of the legacy session databases | ingestion | replace | `hooks.memory.importer` reads the historical data; the databases stay read only until imported |
 | agentibrain reasoner feedback dispatch hint | brain extraction | remove | dispatcher |
-| agentibrain keeper MCP tool permission | brain extraction | replace | agentihooks session tools |
+| agentibrain keeper MCP tool permission | brain extraction | replace | the session tools registered by `hooks.mcp.sessions` |
 | agentibrain keeper dispatch service URL | brain extraction | remove | dispatcher |
 
 The antoncore and agentibrain changes are their own pull requests in those repositories; antoncore changes go

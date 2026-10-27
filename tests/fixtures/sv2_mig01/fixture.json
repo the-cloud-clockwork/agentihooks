@@ -13,6 +13,7 @@
     {"consumer": "private consumer label", "kind": "tool"},
     {"consumer": "private consumer label", "kind": "tool", "uses": "search_semantic", "decision": "alias"}
   ],
+  "corrected": {"consumer": "private consumer label", "kind": "tool", "uses": "search_semantic"},
   "private_label": "private consumer label",
   "source_module": "legacy transcript service MCP tools module",
   "extractable": ["turn_chunking", "vector_storage", "semantic_search"],

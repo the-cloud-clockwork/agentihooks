@@ -38,7 +38,7 @@ def test_aliased_tools_classify_as_alias_to_their_session_tool(name):
         ("collect_now", "hooks.memory.collector"),
         ("list_plans", "agentihooks plan read"),
         ("get_plan", "agentihooks plan read"),
-        ("mcp_tool_grant", "agentihooks session tools"),
+        ("mcp_tool_grant", "hooks.mcp.sessions"),
         ("postgres_history", "hooks.memory.importer"),
     ],
 )

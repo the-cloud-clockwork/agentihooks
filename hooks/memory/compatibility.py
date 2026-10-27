@@ -24,7 +24,7 @@ REPLACEMENTS = {
     "list_plans": "agentihooks plan read",
     "get_plan": "agentihooks plan read",
     "/sessions": "session_list",
-    "mcp_tool_grant": "agentihooks session tools",
+    "mcp_tool_grant": "hooks.mcp.sessions",
     "postgres_history": "hooks.memory.importer",
 }
 RETIRED = {

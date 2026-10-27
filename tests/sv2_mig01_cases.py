@@ -2,8 +2,10 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from hooks.mcp import sessions as mcp_sessions
 from hooks.memory import compatibility as compat
 from hooks.memory.api.ingest import Rejected
+from tests.sv2_idx05_cases import registered
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sv2_mig01" / "fixture.json"
 CASES_MODULE = Path(__file__)
@@ -79,8 +81,17 @@ def rejection(root: Path) -> dict:
     unchanged = inventory.dumps() == before
     disclosed = doc["private_label"] in json.dumps(refusals)
     unknown = inventory.add(doc["unknown"], 4)
+    resubmitted = inventory.add(doc["corrected"], 5)
+    catalog = {mcp_sessions.CATALOG_ENV: str(root / "catalog.sqlite3")}
+    rollback = {
+        "aliases_unset": registered(catalog),
+        "aliases_on": registered({**catalog, mcp_sessions.ALIASES_ENV: "1"}),
+        "aliases_unset_again": registered(catalog),
+    }
     return {
         "case": "B",
+        "resubmitted": resubmitted,
+        "alias_gate_rollback": rollback,
         "refusals": refusals,
         "refusals_left_state_unchanged": unchanged,
         "refusals_disclose_the_entry": disclosed,
@@ -99,6 +110,7 @@ def recovery(root: Path) -> dict:
     interrupted.add(doc["late"], 4)
     restarted = compat.Inventory.loads(record.read_text(encoding="utf-8"))
     survived = sorted(restarted.state["items"])
+    lost = sorted(set(interrupted.state["items"]) - set(survived))
     added = restarted.add(doc["late"], 4)
     record.write_text(restarted.dumps(), encoding="utf-8")
     replay = compat.Inventory.loads(record.read_text(encoding="utf-8")).add(doc["late"], 4)
@@ -107,6 +119,7 @@ def recovery(root: Path) -> dict:
     return {
         "case": "C",
         "survived_restart": survived,
+        "lost_on_restart": lost,
         "late_added": added,
         "late_replayed": replay,
         "stale_overwrite": stale,
