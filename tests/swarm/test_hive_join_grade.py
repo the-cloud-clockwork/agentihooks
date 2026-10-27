@@ -360,6 +360,7 @@ def test_a_client_error_status_retires_even_when_the_message_reads_refused(monke
 @pytest.mark.parametrize(
     ("message", "status", "error", "failed"),
     [
+        (REFUSED_JOIN, 399, "SwarmError", ("ledger_join",)),
         (REFUSED_JOIN, 500, "SwarmError", ("ledger_join",)),
         ("ledger sw: join failed", None, "IncompleteRead", ("ledger_join",)),
         (REFUSED_JOIN, None, "SwarmError", ("ledger_join", "ledger_write")),
