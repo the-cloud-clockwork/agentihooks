@@ -75,6 +75,17 @@ def test_bundle_preserves_every_shard_report_for_the_existing_aggregator(tmp_pat
     assert main([str(tmp_path / "shards"), "--shards", "2", "--output", str(tmp_path / "merged")]) == 1
 
 
+def test_successful_shard_keeps_only_the_report_and_revision(tmp_path):
+    from scripts.ci_mutation.evidence import stage
+
+    output, report = _evidence(tmp_path)
+    report["failed"] = False
+    (output / "report.json").write_text(json.dumps(report))
+    with patch("scripts.ci_mutation.evidence.subprocess.check_output", return_value="revision\n"):
+        stage(tmp_path, output, tmp_path / "bundle", (0, 1))
+    assert {p.name for p in (tmp_path / "bundle").iterdir()} == {"report.json", "replay.json"}
+
+
 def test_incomplete_bundle_keeps_logs_without_fabricating_a_report(tmp_path):
     from scripts.ci_mutation.evidence import stage
 
