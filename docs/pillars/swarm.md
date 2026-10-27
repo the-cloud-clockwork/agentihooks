@@ -1176,6 +1176,9 @@ agentihooks ledger \
   --quote "Remove the size allowance too."
 ```
 
+The ledger checks the quote against the operator's recorded words; a hosted ledger reads them from the shared swarm
+Redis. See [Relayed operator words](../reference/hosted-ledger-auth.md#relayed-operator-words).
+
 ### Retrace and inspect the result
 
 In the engineer's task work folder, include the authorized piece in `plan.md`
