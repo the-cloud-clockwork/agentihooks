@@ -86,6 +86,15 @@ def test_a_removed_gate_or_constant_is_red(tmp_path):
         'globals()["LINES"] = 400\n',
         'vars()["LINES"] = 400\n',
         'setattr(__import__(__name__), "LINES", 400)\n',
+        'locals()["LINES"] = 400\n',
+        'exec("LINES = 400")\n',
+        'eval("400")\n',
+        'compile("LINES = 400", "", "exec")\n',
+        "import sys\nsys.modules[__name__].LINES = 400\n",
+        'import sys\nsys.modules[__name__].__dict__["LINES"] = 400\n',
+        'import sys\nsys.modules[__name__].__setattr__("LINES", 400)\n',
+        "match 400:\n    case LINES:\n        pass\n",
+        "match [400]:\n    case [*LINES]:\n        pass\n",
     ],
 )
 def test_a_second_binding_or_mutation_of_a_pinned_name_is_red(tmp_path, rebinding):

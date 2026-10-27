@@ -49,17 +49,22 @@ def _rebinds(node: ast.AST, name: str) -> bool:
         return isinstance(node.target, ast.Name) and node.target.id == name
     if isinstance(node, (ast.Global, ast.Nonlocal)):
         return name in node.names
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.MatchAs, ast.MatchStar)):
         return node.name == name
     if isinstance(node, ast.alias):
         return (node.asname or node.name) == name
     if isinstance(node, ast.Name):
         return isinstance(node.ctx, ast.Del) and node.id == name
     if isinstance(node, (ast.Subscript, ast.Attribute)):
-        return isinstance(node.ctx, (ast.Store, ast.Del)) and isinstance(node.value, ast.Name) and node.value.id == name
+        if not isinstance(node.ctx, (ast.Store, ast.Del)):
+            return False
+        named = node.attr if isinstance(node, ast.Attribute) else getattr(node.slice, "value", None)
+        return named == name or isinstance(node.value, ast.Name) and node.value.id == name
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        return node.func.id in ("globals", "vars", "setattr")
+        return node.func.id in ("globals", "vars", "locals", "setattr", "exec", "eval", "compile")
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        if node.func.attr == "__setattr__":
+            return True
         return isinstance(node.func.value, ast.Name) and node.func.value.id == name and node.func.attr in MUTATORS
     return False
 
