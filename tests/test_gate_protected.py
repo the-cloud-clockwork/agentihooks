@@ -1798,7 +1798,9 @@ def test_the_required_grader_accepts_the_dev_parent_base_selection(repo, capsys)
 
 
 def test_the_required_grader_keeps_accepting_the_dev_parent_form_once_dev_carries_it(repo):
-    assert _grade_equivalence(repo, _dev_parent(_equivalence()), _dev_parent(_equivalence())) == 0
+    head = _dev_parent(_equivalence())
+    head["jobs"]["ledger-equivalence"]["timeout-minutes"] = 20
+    assert _grade_equivalence(repo, _dev_parent(_equivalence()), head) == 0
 
 
 def _duplicate_selector(workflow):
