@@ -81,14 +81,29 @@ def _texts(checks: list[ast.AST]) -> list[str]:
     return sorted(hashlib.sha256(ast.dump(node).encode()).hexdigest()[:16] for node in checks)
 
 
-def _returns_early(statements: list[ast.stmt], before: tuple[int, int] | None = None) -> bool:
-    pending: list[ast.AST] = list(statements)
+def _returns_early(
+    statements: list[ast.stmt],
+    before: tuple[int, int] | None = None,
+    helpers: frozenset[str] = frozenset(),
+) -> bool:
+    pending = [(node, ()) for node in statements]
     while pending:
-        node = pending.pop()
-        if isinstance(node, ast.Return) and (before is None or (node.end_lineno, node.end_col_offset) < before):
+        node, loops = pending.pop()
+        end = (node.end_lineno, node.end_col_offset) if isinstance(node, ast.stmt) else (0, 0)
+        if isinstance(node, ast.Return) and (before is None or end < before or any(loops)):
             return True
-        if not isinstance(node, (*DEFINITIONS, ast.Lambda)):
-            pending.extend(ast.iter_child_nodes(node))
+        if loops and loops[-1]:
+            if isinstance(node, ast.Break) or (isinstance(node, ast.Continue) and end < loops[-1]):
+                return True
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            last = max(
+                ((check.lineno, check.col_offset) for check in _checks(_nodes(node.body), helpers)),
+                default=None,
+            )
+            pending.extend((child, (*loops, last)) for child in node.body)
+            pending.extend((child, loops) for child in node.orelse)
+        elif not isinstance(node, (*DEFINITIONS, ast.Lambda)):
+            pending.extend((child, loops) for child in ast.iter_child_nodes(node))
     return False
 
 
@@ -167,10 +182,12 @@ def measure(tree: Path) -> dict[str, dict]:
                 "cases": cases,
                 TEXTS: _texts(checks),
                 "disabled": (
-                    not cases or _disables([*bodies[key], *_nodes(context)], skippers) or _returns_early(function.body)
+                    not cases
+                    or _disables([*bodies[key], *_nodes(context)], skippers)
+                    or _returns_early(function.body, helpers=helpers)
                 )
                 if test
-                else _returns_early(function.body, max((node.lineno, node.col_offset) for node in checks)),
+                else _returns_early(function.body, max((node.lineno, node.col_offset) for node in checks), helpers),
             }
     return measured
 
