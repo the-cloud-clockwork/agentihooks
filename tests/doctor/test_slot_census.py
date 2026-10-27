@@ -48,7 +48,7 @@ def test_a_local_pane_left_out_of_the_count_is_named():
     ]
     [found] = slot_census.findings(record(claims, lives))
     assert found.kind == slot_census.KIND
-    assert found.subject == "new"
+    assert found.subject == f"new@{AT}"
     assert found.measure == 2
     assert "engineer@a-2" in found.summary and "ci@b-3" in found.summary
     assert any("counted 1 of 6" in item for item in found.evidence)
@@ -62,6 +62,7 @@ def test_the_census_skips_masters_remote_hives_paneless_ended_and_unstarted_agen
         life("remote", hive="anton"),
         life("k8s", runtime_backend="kubernetes"),
         life("paneless", pane_id=""),
+        life("finished", state="finished"),
         life("ended", ended=AT - 1),
         life("later", started=AT + 1),
         life("predecessor", task="t9"),

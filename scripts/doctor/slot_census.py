@@ -20,6 +20,7 @@ def _alive(life, at, slug, claim):
         life.get("runtime_backend", "local") == "local"
         and life.get("hive", "") in ("", claim["machine"])
         and life.get("lane") != "master"
+        and life.get("state") not in ("finished", "ended")
         and bool(life.get("pane_id"))
         and life.get("started_at", 0) <= at
         and not 0 < life.get("ended_at", 0) <= at
@@ -53,7 +54,7 @@ def findings(record: dict) -> list[Finding]:
         found.append(
             Finding(
                 KIND,
-                claim["name"],
+                f"{claim['name']}@{line['at']}",
                 f"the local slot claim for {claim['name']} left {len(dropped)} live local agents out: {names}",
                 (
                     f"journal at {line['at']} pid {line['pid']}: {message}",
