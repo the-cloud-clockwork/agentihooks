@@ -1,5 +1,7 @@
+import ast
 import io
 import socket
+from pathlib import Path
 
 import pytest
 
@@ -275,3 +277,16 @@ def test_a_connection_whose_body_was_read_closes_at_once():
     connection = finished(request_body.Body(io.BytesIO(b""), 0))
 
     assert connection.calls == []
+
+
+def test_the_ledger_server_assigns_each_module_constant_once():
+    tree = ast.parse(Path(ledger_server.__file__).read_text())
+    names = [
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    ]
+
+    assert sorted(name for name in set(names) if names.count(name) > 1) == []

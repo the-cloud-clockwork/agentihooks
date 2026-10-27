@@ -267,13 +267,15 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
     assert steps in [
-        diagnostic(
-            forward(
-                finish(
-                    rerun(
-                        ci_reuse.inline_mutation(
-                            ci_reuse.postgres_required(
-                                ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+        ci_reuse.test_only_sonar(
+            diagnostic(
+                forward(
+                    finish(
+                        rerun(
+                            ci_reuse.inline_mutation(
+                                ci_reuse.postgres_required(
+                                    ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+                                )
                             )
                         )
                     )

@@ -164,6 +164,9 @@ class Store:
         return [launch("old", "failed"), launch("new", "started")] if slug == "s" else []
 
 
+STORE = Store()
+
+
 @pytest.fixture
 def live(monkeypatch):
     from scripts.hive import join_report, registry
@@ -177,11 +180,17 @@ def live(monkeypatch):
     ]
     reports = {"h1": report(), "h2": report(ledger_join=False), "new": report(), "here": report()}
     ticks = iter([0.0, 10.0])
-    monkeypatch.setattr(registry, "hives", lambda redis: records)
-    monkeypatch.setattr(registry, "show", lambda redis, hive: {"max_agents": 6} if hive == "root" else None)
-    monkeypatch.setattr(join_report, "read", lambda redis, agent: reports.get(agent.name, {}))
+    monkeypatch.setattr(registry, "hives", lambda redis: records if redis is STORE.redis else [])
+    monkeypatch.setattr(
+        registry, "show", lambda redis, hive: {"max_agents": 6} if (redis, hive) == (STORE.redis, "root") else None
+    )
+    monkeypatch.setattr(
+        join_report, "read", lambda redis, agent: reports.get(agent.name, {}) if redis is STORE.redis else {}
+    )
     monkeypatch.setattr(commands, "hive_id", lambda: "root")
-    monkeypatch.setattr(local_slots, "occupancy", lambda store, machine: ({"root": 5}[machine], 0))
+    monkeypatch.setattr(
+        local_slots, "occupancy", lambda store, machine: ({"root": 5}[machine] if store is STORE else 0, 0)
+    )
     monkeypatch.setattr(publish, "local_repository", lambda value, repo: f"/here/{value == repo}")
     monkeypatch.setattr(
         merge_stall,
@@ -200,7 +209,7 @@ def live(monkeypatch):
 
 
 def test_run_reads_the_live_swarm_into_one_line_per_invariant(live):
-    assert [found.line() for found in probe.run(Store(), "s", live, NOW)] == [
+    assert [found.line() for found in probe.run(STORE, "s", live, NOW)] == [
         "fail\tevery hive live\t2 of 3 live: gone",
         "fail\tevery hive agent joins and writes the ledger\t1 of 3 passed: h2, h3",
         "fail\tlaunch success hive pod harness codex\t0%, 0 of 1 started in the last 6 hours",
@@ -215,14 +224,16 @@ def test_run_reads_the_live_swarm_into_one_line_per_invariant(live):
 def test_run_counts_root_agents_only_on_the_root_hive(live, monkeypatch):
     from scripts.swarm import commands, local_slots
 
-    monkeypatch.setattr(local_slots, "occupancy", lambda store, machine: ({"root": 7}[machine], 0))
-    found = probe.run(Store(), "s", live, NOW, Thresholds(task_list_reads_min=20.0))
+    monkeypatch.setattr(
+        local_slots, "occupancy", lambda store, machine: ({"root": 7}[machine] if store is STORE else 0, 0)
+    )
+    found = probe.run(STORE, "s", live, NOW, Thresholds(task_list_reads_min=20.0))
     assert found[4] == Probe("full task list reads per minute", False, "18.0 per minute over 3 reads")
     assert found[5] == Probe(
         "workstation agents at or under the root cap", False, "7 running, root cap 6, swarm local limit 20"
     )
     monkeypatch.setattr(commands, "hive_id", lambda: "pod")
-    assert probe.run(Store(), "s", live, NOW)[5] == Probe(
+    assert probe.run(STORE, "s", live, NOW)[5] == Probe(
         "workstation agents at or under the root cap",
         False,
         "unread: SwarmError: counted only on the root hive, this host is pod",
@@ -272,7 +283,23 @@ def test_the_probe_command_prints_each_probe_line(monkeypatch, capsys):
 
     monkeypatch.setattr(probe, "run", run)
     monkeypatch.setattr(cli, "now_ms", lambda: NOW)
-    cli.cmd_probe("store", SimpleNamespace(slug="s"))
+    cli.probe_command("store", SimpleNamespace(slug="s"))
     assert capsys.readouterr().out == "pass\ta\t1\nfail\tb\t2\n"
     assert seen == [("store", "s", "LedgerClient", NOW)]
     assert cli.build_parser().parse_args(["s", "probe"]).command == "probe"
+
+
+def test_the_probe_verb_dispatches_to_its_parser_default_on_the_connected_store(monkeypatch, capsys):
+    from contextlib import nullcontext
+
+    from scripts.swarm import cli
+
+    store = SimpleNamespace(names=SimpleNamespace(swarm_slug=lambda ref: ref))
+    seen = []
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "refusal", lambda name, who: "")
+    monkeypatch.setattr(cli.ledger_route, "command", lambda *args: nullcontext())
+    monkeypatch.setattr(probe, "run", lambda *args: seen.append(args[:2]) or [Probe("a", True, "1")])
+    assert cli.main(["s", "probe"]) == 0
+    assert capsys.readouterr().out == "pass\ta\t1\n"
+    assert seen == [(store, "s")]

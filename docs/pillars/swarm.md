@@ -153,6 +153,60 @@ retired and its successor starts from the document; one that does not is retired
 the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
 `swarm status` flags it as a live binding finding, and it never retires the agent.
 
+### Stalled master recycle
+
+Each tick checks the live master of a running swarm. A master whose pane reads `working` while it has made no tool
+call for `AGENTIHOOKS_HEALTH_STALLED_MINUTES` (default **10**) is stalled: the tick sends it an inbox item asking for
+a Handoff v2, waits up to `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5), then recycles it in its seat with a
+recovery handoff and the reason `busy with no tool call for <n> minutes`. When the stall ends before the deadline (the
+master makes a tool call, its pane leaves `working` or it declares a wait), the request is withdrawn with `the master
+resumed work`. A stalled master of a proof swarm whose parent task is blocked stops the proof swarm instead.
+
+The quiet time counts from the master's last finished tool call, or from its session start when that is later.
+The check does not count while:
+
+| Condition | Why |
+|---|---|
+| The pane is not `working` | An idle master is waiting for input, not stalled. |
+| The master declared a wait | `swarm <slug> wait` names what it waits on. |
+| It started under six minutes ago | Startup grace. |
+| It has no recorded tool call, or none has finished since the last one began | It is inside a tool call. |
+| A tool call is still open | A long command or a subagent's `Agent` call is running. |
+
+The PreToolUse hook records each call as open under its tool use id, and the hook that ends a call closes it and
+writes the finished time. A call denied by an early PreToolUse guard, before the call is recorded, only gets its
+finished time. Three events end a call:
+
+| Event | What happened to the call |
+|---|---|
+| `PostToolUse` | It ran and succeeded. |
+| `PostToolUseFailure` | It ran and failed. |
+| A PreToolUse hook block | A guard or gate denied it, so it never ran and no post tool event follows. The hook closes it before it returns the block. |
+
+A failed or denied call therefore ends the call for the stall check exactly like a successful one, and a master that
+stalls right after one is recycled on time. Before
+[pull request 7569](https://github.com/the-cloud-clockwork/agentihooks/pull/7569), a call denied by the PreToolUse
+hook stayed open, so a master that stalled right after one read as mid tool and was never recycled. Only a hook
+block ends the call there: an error inside the hook itself leaves it open. A call refused at the permission prompt
+carries no tool use id; the session's turn end, an unblocked Stop, clears every open call it left.
+
+The records live under `$AGENTIHOOKS_HOME/swarm-activity/<slug>/` (default `~/.agentihooks/swarm-activity`):
+`<name>.last` holds the time the last call began, `<name>.done` the time the last call ended, and `<name>.open/` one
+entry per call still running. To see why a master is or is not counted as stalled:
+
+```bash
+A=~/.agentihooks/swarm-activity/<slug>
+cat "$A/master@<code>-<n>.last" "$A/master@<code>-<n>.done"   # millisecond timestamps
+ls "$A/master@<code>-<n>.open"                                # empty: no call in flight
+agentihooks swarm <slug> status --json                        # the stalled finding and its minutes
+```
+
+An entry left in `.open/` while the master sits stalled names the call that never ended; compare it with the
+master's last tool call before raising a finding. Change the threshold through the environment of the process that
+runs the tick, as described in [Configure the threshold](#configure-the-threshold). The same variable sets the
+`stalled` health finding, which counts from the last call start and ignores open calls, so a master inside a long
+call can show the finding while the recycle does not fire.
+
 ### Adopting a live master with no agent record
 
 A master pane can keep running after its agent record is gone, for example when the record was dropped while the
@@ -414,6 +468,35 @@ other item, and one whose owner seat has no live master, reaches the lead. Every
 claimant takes reaches the lead, the front door, whatever phase or hive it is about, and so does page chat naming a
 backend master; only a sync order and the `@swarm` information copy reach every live agent. The lead hands work to
 backend masters over the masters channel. While the lead seat is empty the lowest numbered live master answers.
+
+#### A new master beside a starting front door
+
+`master up --new`, and the new master offered when `master up` cannot resume the last one, never seat a master
+beyond the master seat count while the front door master is still coming up. The front door is coming up when a
+master record holding the lead seat (`master@<id>`, or no seat recorded) is in state `starting` or `suspect`, live
+or not. The launcher then takes the lowest free master seat, `master-2@<id>` and up; a seat is held by any agent
+record on it that is not `finished`, or a `finished` one whose session still runs. When that seat number is above
+the count from `set masters=N` (default 1), nothing starts and the command exits non zero with:
+
+```text
+the front door master <name> is starting and every master seat is held (master seat count 1), so no other master starts; the tick binds or replaces it, or run master up --replace to retire it first
+```
+
+When the free seat is within the count, the new master takes it beside the starting front door, as for a live
+front door. A front door that is live and past `starting` and `suspect` does not apply the count: the new master
+takes the next free seat beside it. `--replace` skips the check: it retires a live front door first and the new
+master takes `master@<id>`. With the default count of 1, a second master started while the front door comes up
+would hold a backend seat that owns no phase.
+
+```bash
+# Who holds each master seat and in what state
+agentihooks swarm <id> status
+# Wait for the tick to bind or replace the starting front door, or raise the count for a second master
+agentihooks swarm <id> set masters=2
+agentihooks swarm <id> master up --new
+# Or retire the front door and start a fresh one on master@<id>
+agentihooks swarm <id> master up --replace
+```
 
 ### Master pool
 
@@ -898,7 +981,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> close [--note TEXT] [--now]` | Close the ledger, with open tasks, follow ups or questions left or not: write a Summary section into the ledger overview, built from the ledger (merged tasks with their pull request links, tasks still open, follow ups still open, questions unanswered, phases done out of total, `--note` as a plain words paragraph on top), take a snapshot, retire every agent with the master last, put claimed tasks back to open, mark the ledger closed with `closed_at` and leave the swarm stopped. Settings, culture, seats and learned notes stay. While a master is live, `close` (and the ledger page's Close button, which runs the same command) hands the close to it as an inbox item instead; the master writes its paragraph and runs `close --note`. Without a live master, run by the master itself or with `--now`, it closes at once. The page then shows a Closed banner and HOME lists the ledger under Closed. |
 | `agentihooks swarm <id> reopen` | Reopen a closed ledger, retaining its Summary as history and running with the kept settings. A removed swarm is recreated from its newest snapshot. The tick starts a fresh master in the master seat; its prompt carries the summary and asks it to name that summary in its first ledger chat line. Engineers start only for eligible open tasks. The Closed banner and closed HOME card both run this command. A master still retiring must exit first. With no task left to start, the swarm drains and the master stays online. |
 | `agentihooks swarm <id> take-master [--replace]` | Run inside any Claude or Codex session to make it the swarm's master; the `take-master` skill runs it when the operator types "you are the master of ledger <id>". Refuses while another master is live; `--replace` retires that master first, and a dead master record is dropped. A session without `AGENTIHOOKS_AGENT_NAME` is named `master@<code>-<n>` on its session registry record, so `terminate-agent`, the tick and the inbox see it under that name. The session occupies the `master@<id>` seat and its agent record keeps the tick from spawning a second master. A closed ledger is reopened and a stopped or stopping swarm set running. Prints the full master priming: seat handoff, culture, recaps, learned notes, ledger summary and standing duties. |
-| `agentihooks swarm <id> master up [--last\|--new\|--replace]` | Run from a plain terminal to bring a master online. Without a flag it shows the last master (name, harness, when it last ran) and asks one question: 1 brings back the last master by reopening its own Claude or Codex conversation (`init-agent --resume`) in the `master@<id>` seat; 2 starts a new master through the tick's launch path, primed with the seat handoff, culture, recaps and learned notes. The last master is the newest master, from the agent registry or the swarm history. When it cannot be resumed (still running, no conversation id, harness not recorded, swarm repo gone, account out of quota, resume did not start) it says why and offers the new master; it never switches silently. An unclear answer is asked again, three tries in all. `--last` and `--new` answer without a prompt; `--last` that cannot resume exits non zero. A saved launch assignment or handoff launch missing a profile, harness, model or effort takes it from the swarm config: the master lane profile (default `master`), the master affinity harness (default claude) and the frontier model at an effort inside the swarm range. A live front door master does not stop it: the new master takes the lowest free master seat (`master-<n>@<id>`) and its own title `master <n> · <id>`, so two masters run side by side on distinct seats. A master seated this way holds no phase until the master seat count reaches its seat. `--replace` (exclusive with `--last` and `--new`) retires the live front door master first and the new one takes `master@<id>`; a front door that will not retire starts nothing. `--last` never resumes onto a live front door: it says why and offers the new master. The master joins the ledger as orchestrator; a closed ledger is reopened and a stopped swarm set paused. Prints the master, pane, seat and choice as JSON; a failed launch prints the reason and exits non zero. |
+| `agentihooks swarm <id> master up [--last\|--new\|--replace]` | Run from a plain terminal to bring a master online. Without a flag it shows the last master (name, harness, when it last ran) and asks one question: 1 brings back the last master by reopening its own Claude or Codex conversation (`init-agent --resume`) in the `master@<id>` seat; 2 starts a new master through the tick's launch path, primed with the seat handoff, culture, recaps and learned notes. The last master is the newest master, from the agent registry or the swarm history. When it cannot be resumed (still running, no conversation id, harness not recorded, swarm repo gone, account out of quota, resume did not start) it says why and offers the new master; it never switches silently. An unclear answer is asked again, three tries in all. `--last` and `--new` answer without a prompt; `--last` that cannot resume exits non zero. A saved launch assignment or handoff launch missing a profile, harness, model or effort takes it from the swarm config: the master lane profile (default `master`), the master affinity harness (default claude) and the frontier model at an effort inside the swarm range. A live front door master does not stop it: the new master takes the lowest free master seat (`master-<n>@<id>`) and its own title `master <n> · <id>`, so two masters run side by side on distinct seats. A master seated this way holds no phase until the master seat count reaches its seat. A front door still `starting` or `suspect` is different: a new master starts only in a free seat within the master seat count, else the command exits non zero naming the front door ([A new master beside a starting front door](#a-new-master-beside-a-starting-front-door)). `--replace` (exclusive with `--last` and `--new`) retires the live front door master first and the new one takes `master@<id>`; a front door that will not retire starts nothing. `--last` never resumes onto a live front door: it says why and offers the new master. The master joins the ledger as orchestrator; a closed ledger is reopened and a stopped swarm set paused. Prints the master, pane, seat and choice as JSON; a failed launch prints the reason and exits non zero. |
 | `agentihooks swarm <id> <profile> up` | Run from a plain terminal to open any role or overlay profile for yourself: a base role (`planner`, `engineer`, `qa`, `cicd`) or an installed overlay whose chain resolves to one, such as `frontend`. `master` is refused (use `master up`), as is a profile that is not installed or has no base role. It opens a quota routed Claude session in a pane of the swarm's herdr space with that profile, the inbox channel loaded, the frontier model, and `AGENTIHOOKS_SWARM` bound with lane `operator` and no task. The name comes from the swarm name registry by the role's kind (`planner@<code>-<n>`, `engineer@…`, `ci@…`) and its registry entry is marked as an operator launch. It is never put in the agent registry: it claims no task, takes no lane slot, and the tick neither nudges nor retires it; the context recycle gate skips it. It answers to you in its pane. A planner plans with you and, on your accept, appends the plan as manual phases (`ledger plan phases`), publishes it (`ledger publish-plan`), adds tasks to those phases, tells the master by inbox and ends with `swarm <id> exit`. The ledger records who appended each phase (`added_by`), and a planner holding no plan task may add tasks only to phases it appended. Other roles work with you and exit when you say so. Prints the name, pane, profile and role as JSON; a failed launch retires the name, prints the reason and exits non zero. |
 | `agentihooks swarm <id> agent-up <profile>` | The same launch as `<id> <profile> up`, in its parser form. |
 | `agentihooks swarm <id> exit` | An agent launched with `<profile> up` retires its own name and ends its session. Any other name is refused. |
@@ -929,7 +1012,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set talk-gate=deny\|log only\|skip` | Operator or master only. The ledger server counts each eng and ci agent's talk writes (comments, chat lines, follow-ups) since its last outcome: a pushed commit, an opened pull request, resolved checks, a task state, pull request or proof change. Past 10, `deny` refuses the write and `log only` (the default) logs the would-be deny in the gate log. Talk owed to the operator and a typed `lift the talk gate` pass. The ledger hook's nudge and Stop gate also restart on an outcome and skip tool calls made inside sub-agents. |
 | `agentihooks swarm <id> set intent-gate=deny\|log only\|skip` | Operator or master only. `swarm pr` writes the parent intent (project overview, phase, task) into the pull request body and arms the task's intent check. On the next tick the classifier reads that intent with the pull request title, body, changed files, the task proof and the task's plan slice, resolved the way `agentihooks plan read` resolves it (phase range, plan artifact or Swarm v2 package, without the shared sections), and judges whether the phase can use the change as delivered and whether it weakens anything the phase builds; under 0.3, or a weakening at 0.5 or more, the verdict is fail, with reasons. It also asks phase fit on its own, so a fail names its criterion: a change that fits the phase but is not usable yet fails on delivery, never as a phase mismatch. Each verdict records its stage, criterion, model and definition digest. `python -m scripts.gates.intent_calibration` measures the check on its corpus of retained and control inputs. `deny` returns a failed task to its agent (claimed again, a ledger comment and an inbox item); `log only` (the default) logs the fail in the gate log; `skip` skips the check. The `intent` gate (`python -m scripts.gates intent`) refuses `gh pr merge` and `swarm done` while the verdict is fail, or pending for under two minutes; a check still pending after two minutes passes unchecked and is counted. A pass names the plan lines it judged. A task whose plan passed intent at `swarm trace-plan` opens its pull request on that pass, with no pending hold, and the tick still judges the pull request and replaces the plan verdict. Running `swarm pr` again starts a new check. A split task's halves are judged and merged one by one; see [Intent grading of each half](#intent-grading-of-each-half). |
 | `agentihooks swarm <id> master move --to HIVE` | Orders the live master to hand off so its successor starts on that hive. It refuses the hive the master already runs on, a hive that is not live, and a hive hive placement would not give the master. One durable inbox order reaches the master seat; after the master's Handoff v2 the tick starts the successor through hive launch on the named hive. A master that leaves without handing off gets no pin. Walkthrough: [Master failover and master move](hives.md#master-failover-and-master-move). |
-| `agentihooks swarm <id> set local-max-agents=N` | With hive placement on, an eng, ci, plan or dispatch spawn no hive takes runs in the local machine's herdr panes while the machine runs fewer than N worker agents across every swarm. Default 8. See [Hive placement for one swarm on a local machine](hives.md#hive-placement-for-one-swarm-on-a-local-machine). |
+| `agentihooks swarm <id> set local-max-agents=N` | With hive placement on, an eng, ci, plan or dispatch spawn no hive takes runs in the local machine's herdr panes while the machine runs fewer than N worker agents across every swarm. Default 8. See [Hive placement for one swarm on a local machine](hives.md#hive-placement-for-one-swarm-on-a-local-machine). While this cap holds the lane, the spawn stall finding stays clear; see [The local agent cap hold](#the-local-agent-cap-hold). |
 | `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. See [Automatic failover](hives.md#automatic-failover). |
 | `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten. Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
 | `agentihooks swarm <id> shutdown` | Before a planned workstation shutdown: takes `snapshot.json`, writes `reboot.json` beside it naming every local agent of this machine with its seat, task, conversation, profile, overlays, harness, model, effort and account, and asks each master to save its Handoff v2 to `master-shutdown-handoff.md` without stopping. The first tick of the next boot (a new kernel boot id for this swarm and hive) starts the herdr server and reopens each agent named by the newest of `reboot.json` and the automatic snapshots in its own conversation and seat, on its account when the last quota reading shows room (a reading past the freshness window counts until one of its windows resets), else on the account the router picks. An agent whose own conversation does not reopen awaits a resume or fresh decision (`restore-decision`). Hive agents are never relaunched. An unplanned power loss recovers the same way from the newest automatic snapshot. |
@@ -2833,6 +2916,98 @@ reads `timed out`, `gave no answer` or `answered with a server error`) and one
 `heartbeat_age_s`, -1 when the hive never beat). A hive recovery is a
 `hive_samples` row with `live` 1 after one with `live` 0 for the same hive.
 
+### Spawn holds in the stage report
+
+A host sample with held spawns records who holds them. The stage report and
+the bottleneck remedy read that record.
+
+**Who holds the spawns.** Each collector pass picks the first match:
+
+| Condition | `held_by` | `held_harness` | `reason` |
+|---|---|---|---|
+| The tick holds spawns for host room | `host` | empty | The tick's hold, for example `host memory room 0` |
+| A lane with held spawns has an open hive placement wait | `host` | empty | `hive placement: <wait reason>`, for example `hive placement: no hive for eng has room` |
+| Neither | `quota` | The harness every held lane is pinned to, else empty | The capacity reason, then one note per held lane pinned to a harness |
+
+A pin note reads `<count> <lane> spawn held on the <lane> lane pinned to
+<harness>`, plural `spawns` above one, in lane name order and joined with
+`; `. A lane set to `auto` gets no note. Example:
+
+```text
+accounts have quota; 2 eng spawns held on the eng lane pinned to codex
+```
+
+That reason says accounts have quota and the lane pin holds the spawns. A
+`host` reason says host or hive room holds them, so no harness change helps.
+
+**How a hold is charged.** The `top stages` line charges each second of a
+hold span to at most as many waiting tasks as the sample held spawns. The
+tasks that became ready earliest are charged first. Their other claim wait
+seconds, and every second of the remaining waiting tasks, stay claim wait and
+are reported as seat wait or queue wait. Two held spawns over one wall hour
+therefore read at most 2.0 task hours of `quota hold`, however many tasks
+wait. The hold count is one total per sample across lanes, so a hold can be
+charged to a waiting task on a lane that held nothing.
+
+**When the remedy moves a pinned lane.** A standing `quota_hold` or
+`launch_failure` finding over its threshold runs the bottleneck remedy at
+autonomy `delegate` or `full`, once per stage per window:
+
+1. The stuck harness is the one the finding names. A `quota_hold` finding
+   that names both harnesses resolves to the one an `eng` or `ci` lane is
+   pinned to; with both or neither pinned, the remedy proposes a task with
+   `the finding names no single stuck harness`.
+2. No `eng` or `ci` lane pinned to that harness: `no lane is pinned to
+   <harness>`.
+3. For `quota_hold`, accounts of the stuck harness with placeable room keep
+   the pin: `<harness> accounts still have room`.
+4. Under hive placement, a move to Claude needs a live hive that hosts the
+   lane's role and profiles (neither excluded), is not draining and reports room above 0. Without one, or
+   for any move to Codex, the workstation must run the hybrid deployment with
+   a herdr server, host the lane and fit the lane cap within
+   `local-max-agents`. Otherwise the remedy proposes a task with `no eligible
+   host places <target> for the <lane> lane`. Free Claude quota seats alone
+   never move the lane.
+5. The lane moves to the other harness with model `auto`, and the remedy
+   records `Moved the <lane> lane from <source> to <target> after <stage> at
+   <value> <unit>, over its <threshold> threshold.`
+
+Without hive placement the room check passes. Below autonomy `delegate`, every
+step is replaced by a proposal to the master.
+
+**Inspect.** Read the two lines from the status command, and the recorded
+holds from the ClickHouse `swarm.host_samples` table:
+
+```bash
+agentihooks swarm example-swarm status | grep -E "bottleneck|top stages"
+```
+
+```sql
+SELECT ts_ms, held_spawns, held_by, held_harness, reason
+FROM swarm.host_samples
+WHERE ledger = 'example-swarm' AND held_spawns > 0
+ORDER BY ts_ms DESC LIMIT 20
+```
+
+The bottleneck line reports `host held spawns` and `quota held spawns` as
+percent shares. The remedy's last action shows on the status line that starts
+`Top bottleneck`.
+
+**Measured effect.** Delivered by pull request
+[6030](https://github.com/the-cloud-clockwork/agentihooks/pull/6030) for issue
+[6026](https://github.com/the-cloud-clockwork/agentihooks/issues/6026). On the
+`rig-grade-swarm` swarm, `quota hold on codex` read 71.2 task hours over four
+hours before the fix (21:46 UTC, 22 October 2026) and 114.3 when the fix
+landed with quota held spawns at 26 percent. At 04:50 UTC on 23 October, with
+the whole window after the fix, it was below the third top stage at 13.5 task
+hours and quota held spawns read 0 percent.
+
+| Symptom | Cause and action |
+|---|---|
+| `quota hold on codex` leads while Claude accounts have quota | Read `reason` on the held samples. A pin note means the lane pin holds the spawns; the remedy moves the lane once a hive or the workstation has room for Claude. |
+| Remedy proposes `no eligible host places claude for the eng lane` | No live hive hosting the lane has room and the workstation cannot take the lane. Free hive room or end idle agents; the remedy retries in the next window. |
+| A hold reads `hive placement: …` | Hive room, not account quota, holds the spawns. Read the hive placement waits and the hive room before changing lane pins. |
+
 ### Troubleshooting
 
 | Symptom | Cause and action |
@@ -3123,6 +3298,45 @@ seen merged is not read again.
 
 `--must`, `--check` and `--judge` on `task add` store a proof contract (what must be true, how it is
 checked, who judges it) that the agent's prompt carries.
+
+### Changing the kind of an existing task
+
+The master or the Doctor changes a task's kind when the proof the work needs turns out different from the
+one it was filed with, for example a `code` repair whose real proof is a measurement:
+
+```bash
+agentihooks ledger --slug <id> --as <name> task set <task> kind=tune
+```
+
+`task set` sends one `task_update` operation to the ledger API. A valid kind is stored on the same task and
+nothing else moves: its id, state, claimant, proof contract and comments stay as they were, so a claimed task
+stays with its owner. The next `done` then needs the new kind's proof from the table above. A `plan` task
+changed to another kind moves to the `eng` lane, because the plan lane accepts only plan tasks.
+
+A kind change also rewrites `steering.md` in the task's work folder so it shows the new kind. On a hosted ledger
+the work folder lives on the agent's host, not the ledger server; when the folder is absent on the server the
+rewrite is skipped and the kind still changes. The next spawn writes the steering notes on the host that runs
+the task.
+
+An unknown kind is refused before anything is stored. The API answers `400` with code `schema_invalid` and a
+message naming the accepted kinds, and the task reads exactly as it did before:
+
+```json
+{"error": {"code": "schema_invalid", "message": "Operation does not match its domain schema: kind must be one of ('code', 'ci', 'ops', 'troubleshoot', 'tune', 'research', 'plan', 'workflow')"}}
+```
+
+| Symptom | Cause and action |
+|---|---|
+| `task set <task> kind=<kind>` answers `500 storage_error` `Resource could not be read or written`, while other fields on the same task update | The hosted ledger runs a release from before pull request [#5696](https://github.com/the-cloud-clockwork/agentihooks/pull/5696), which wrote `steering.md` even when the work folder was absent on the server. Wait for the promotion that carries #5696 to reach the hosted ledger, then run the same `task set` again. |
+| `schema_invalid` with `kind must be one of` | The kind is misspelt or unknown. Use one of the listed kinds; the task was not changed. |
+| `500 storage_error` on a kind change on a release that carries #5696 | The work folder exists on the server but cannot be written, a permission or disk fault. Read the ledger server log line `Ledger API storage failure` for the cause. |
+
+`test_an_owned_task_changes_kind_over_http_and_an_invalid_kind_changes_nothing` in
+`tests/swarm_ledger/test_api_v1.py` pins this over the live HTTP API, added by pull request
+[#5719](https://github.com/the-cloud-clockwork/agentihooks/pull/5719). It failed against the rewrite from before
+#5696 in [run 39719415326](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39719415326) with the
+hosted `500` and passed with the fix in
+[run 39719418457](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39719418457).
 
 ### Shared areas in the opening prompt
 
@@ -3531,6 +3745,27 @@ head <sha> failed its last merge group run (Tests https://github.com/<owner>/<re
 ```
 
 When those runs cannot all be listed it refuses with `could not list every merge group run since head <sha> landed`. A head with no own merge group run passes. The merge pass's own requeue does not run this check; it judges only the runs since it last queued the pull request.
+
+The check runs only when the pull request is outside the queue, after the staged compatibility check and the queue intent gate, and before the required checks reading; a refusal enqueues nothing. A group is the set of own runs that share one merge group commit (`head_sha`), and the newest group is the one holding the most recently created run:
+
+| Own runs since the head commit | `merge queue` |
+|---|---|
+| None | Queues. |
+| Newest group finished clean, an older group failed | Queues; only the newest group counts. |
+| Newest group still running, an older group failed | Queues; a running run is not judged. |
+| Newest group has one finished run that failed while another still runs | Refuses, naming the failed run. |
+| Newest group has a finished run that failed: a conclusion other than `success`, `skipped`, `neutral` or `cancelled`, or a cancelled run with a failed job or jobs that could not all be listed | Refuses, naming that run. |
+| Runs of another pull request failed | Queues; they are not own runs. |
+
+To clear a refusal, read the named run's failed job, fix it with a new commit on the pull request branch, wait for the pull request checks and queue again. Runs created before the new head's committer time are not read, so a group run of the old head stops counting once a commit made after it lands. To see which runs the check reads, take the head's committer time and list the own runs created since then:
+
+```bash
+gh api "repos/<owner>/<repo>/commits/<head sha>" --jq '.commit.committer.date'
+gh api "repos/<owner>/<repo>/actions/runs?event=merge_group&created=>=<committer date>&per_page=100&page=1" \
+  --jq '.workflow_runs[] | select(.head_branch | test("^gh-readonly-queue/.+/pr-<number>-[0-9a-f]+$")) | [.created_at, .head_sha, .name, .conclusion, .html_url] | @tsv'
+```
+
+Raise `page` until the pages cover the listing's `total_count`. The check reads at most five pages of 100 runs and refuses when more exist.
 
 A red exit skips that read because the failure is already on the pull request's own checks. The reopen comment reads `Reopened by the swarm: its pull request <url> left the merge queue without merging. The next engineer continues it from the handoff its engineer left.` The next engineer fixes the failing check with a new commit, waits for the pull request checks and queues it with `agentihooks swarm <id> merge queue <url>`.
 
@@ -4572,8 +4807,8 @@ A detection pass reads:
 - **The watched tasks, once.** The CI detector and the trace detector share one read of the watched ledger's tasks.
 - **Every detector side by side.** Each detector runs in its own thread and is still timed as its own
   `doctor.<name>` step: `runtime storage`, `scheduled tick`, `health`, `inbox`, `handoff`, `spawn`,
-  `master launch`, `startup`, `context overrun`, `master prompt`, `ci`, `dev workflow` and, with telemetry on,
-  `trace`. A detector that raises is reported as `the <name> detector failed: <error type>: <message>` while the
+  `master launch`, `startup`, `context overrun`, `master prompt`, `ci`, `dev workflow`,
+  [`feature`](../reference/feature-live-checks.md) and, with telemetry on, `trace`. A detector that raises is reported as `the <name> detector failed: <error type>: <message>` while the
   others still report.
 - **Pull requests side by side.** The CI detector reads each open pull request of the watched tasks in a thread pool.
 - **Traces inside their budgets.** The trace detector reads active bindings and the historical backfill side by side,
@@ -5020,7 +5255,8 @@ Compare the finding with recent tool calls and the agent's progress. Inbox
 messages and task changes can show that work continued, but successful commands
 alone do not establish that the hook retained the identity needed to record
 activity. A finding is evidence to investigate; the master or operator judges
-it with `verdict`.
+it with `verdict`. For a master the same threshold also triggers the
+[stalled master recycle](#stalled-master-recycle).
 
 #### Wrapper loss and swarm identity
 
@@ -5081,6 +5317,94 @@ A verdict suppresses the finding under the existing cooldown rules; it does
 not update the activity clock. See the `verdict` command above for recurrence
 behavior and [Outage holds and recovery](#outage-holds-and-recovery) for provider
 or Redis outages, which have their own hold and resume behavior.
+
+### Spawn stall findings
+
+A `spawn stall` health finding means the swarm could have launched an agent for ten minutes and launched none. The
+tick checks for it at the end of every pass, after its spawn pass, so the finding reflects what that pass just tried.
+
+#### When the stall clock runs
+
+Each pass observes the swarm once. The stall clock runs only while every condition below holds:
+
+| Condition | Read from |
+|---|---|
+| The swarm is `running` | the swarm config |
+| A lane has ready work | the ready tasks of the watched ledger, without the tasks that recorded a placement wait since the previous pass |
+| The quota capacity decision places at least one agent | the same quota and seat decision the spawn pass uses |
+| The host room is not zero | the [Local host room](#local-host-room) or [Deployed host capacity](#deployed-host-capacity) reading |
+| The local agent cap did not hold the lane | the latest local cap refusal, described below |
+
+A pass that fails any condition clears the clock. The clock also starts over when a new agent launch appears, so it
+measures time since the last launch while launching was possible. Once it has run for ten minutes the finding shows in
+`agentihooks swarm <id> status`.
+
+#### The local agent cap hold
+
+With hive placement on, an eng, ci, plan or dispatch spawn that no hive takes runs in the local machine's herdr panes
+while that machine runs fewer worker agents than `local-max-agents`, counted across every swarm on the machine (see
+[Hive placement for one swarm on a local machine](hives.md#hive-placement-for-one-swarm-on-a-local-machine)). At that
+cap the spawn waits, and the tick records the refusal for the swarm: the machine, the agents it counted, the maximum and
+the time.
+
+A pass treats the lane as held by the cap, and clears the stall clock, when both are true:
+
+1. The latest local cap refusal was recorded at or after the previous pass's observation, so the cap refused a spawn
+   during this pass.
+2. That machine's local slots still read at or above the recorded maximum. The count is the union of the local worker
+   agents recorded by every swarm for this machine's hive (not masters, and not those still starting or ended) and
+   every named Claude or Codex session running on the machine that is not a master, plus local slot claims made in
+   the last five minutes whose agent has not yet appeared.
+
+With one local slot free the hold does not apply, and the clock keeps running; ten minutes of that still raise the
+finding. A refusal from an earlier pass, or one recorded for another machine whose slots have since freed, holds
+nothing. The swarm keeps only its latest local cap refusal, so each new refusal replaces the one before. On a swarm's
+first observation there is no previous pass, and any stored refusal counts.
+
+The fix shipped in [pull request 6322](https://github.com/the-cloud-clockwork/agentihooks/pull/6322). Before
+it, a full cap shared by two swarms on the operator's machine raised spawn stall on each of them, and masters closed
+the finding by hand.
+
+The Doctor measured the fix by counting spawn stall items in each master's inbox, with the same census script over two
+equal 24 hour windows: 14 items on `rig-grade-swarm` and 10 on `rig-grade-swarm-doctor` in the day ending about 12:30
+UTC on 23 October, against 0 and 0 in the day from 13:35:49 UTC on 23 October, when the ledger server code stamp
+showed the merged fix loaded. Run again with the end time 12:30 UTC on 23 October, the same script still
+read 14 and 10. The cap stayed in
+play through the after window, with 116 local cap observations between 09:34 and 10:34 UTC on 24 October.
+
+#### The finding and its delivery
+
+| Field | Value |
+|---|---|
+| kind | `spawn stall` |
+| subject | the swarm |
+| summary | `No agent has launched for ten minutes` |
+| evidence, first line | `A lane has a free seat, quota and claimable work` |
+| evidence, when present | `Admission refusals, latest first: ...`, each hive refusal reason with its host and task count, and the local cap as `local cap on <machine> (<taken> of <maximum> agents)` when it refused during the stall |
+| evidence, when present | `Last failed step <step>: <error>`, the latest tick step that failed during the stall |
+
+The first pass that sees the finding sends one inbox item from `swarm` to the swarm's master seat,
+`master@<id>`, with the summary and evidence. If that item is still open ten minutes later, the tick posts the same
+text once as a ledger notice. A new stall, after the clock clears and starts again, sends a new item.
+
+#### Investigate a spawn stall
+
+```bash
+agentihooks swarm <id> status --json
+agentihooks hive list
+```
+
+1. Read the `Admission refusals` evidence line. A `local cap on <machine> (8 of 8 agents)` entry with a raised finding
+   means the cap refused at some point in the stall but did not hold at the last pass: a slot was free at that pass,
+   or the refusal was recorded before it.
+2. Count what the cap counts on the named machine: the local worker agents in each swarm's `status`, plus any other
+   named Claude or Codex session running there that is not a master. A count under `local-max-agents` with no launch
+   means the spawn waited on something else; the other refusal reasons name it.
+3. A finding with no refusal line and no failed step carries no recorded hold. Compare the lane caps, scaling mode and
+   agents in `status` with the conditions above, then judge the finding with `verdict`.
+
+Raising `agentihooks swarm <id> set local-max-agents=N` lets more local spawns through; it is an operator decision
+about the machine, not a remedy for the finding.
 
 ### Stall watchdog
 
@@ -5413,6 +5737,8 @@ apply after both conditions pass.
 The special measurement rule applies only to `tune` tasks measuring `code` or
 `ci` dependencies. Dependencies of other kinds follow the usual dependency
 rules. There is no separate enable flag or measurement delay setting.
+
+To count Doctor verdicts over a window, including repeated judgments of one finding, use `agentihooks doctor <slug> verdict-log`; see [Doctor verdict history](../reference/doctor-verdicts.md).
 
 ### Configure and inspect a measurement task
 

@@ -168,6 +168,104 @@ def test_publishes_fenced_order_after_host_admission(setup, monkeypatch):
     )
 
 
+def test_refuses_an_order_the_hive_queue_cannot_serve_before_its_deadline(setup):
+    from scripts.hive import admission, launch, placement_waits
+    from scripts.hive.orders import Orders
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    store, slug = setup.store, setup.config.slug
+    name = store.next_name(slug, "eng")
+    record = AgentRecord(name, "eng", "task", seat=f"eng-1@{slug}", state="starting")
+    store.put_agent(slug, record)
+    store.seats.occupy(record.seat, name, 0)
+    stream = Orders(store.redis).stream("remote")
+    for _ in range(4):
+        store.redis.xadd(stream, {"order": "{}"})
+    task = {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch}
+    outcome = setup.launcher.spawn(SpawnRequest(setup.config, "eng", name, task))
+    refused = (
+        "no hive for eng has room: remote holds 4 queued launches, "
+        "the most its 300 second launch deadline serves at 75 seconds each"
+    )
+    assert outcome == Outcome("spawn", Status.UNAVAILABLE, launch.HIVE, detail=refused)
+    row = placement_waits.read(store, slug)["task"]
+    assert (row["lane"], row["reason"]) == ("eng", refused)
+    assert store.redis.xlen(stream) == 4
+    assert setup.launcher.orders_for("task") is None
+    assert admission.reserve(store.redis, "remote", f"{slug}/{name}", 1) == (True, 0)
+
+
+def test_a_queue_below_the_deadline_budget_is_not_refused(setup):
+    from scripts.hive.orders import Orders
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    stream = Orders(setup.store.redis).stream("remote")
+    for _ in range(3):
+        setup.store.redis.xadd(stream, {"order": "{}"})
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+    request = SpawnRequest(setup.config, "eng", "eng-name", {"id": "task"})
+    assert setup.launcher.queue_refusal(request, selected, 3) == ""
+
+
+def test_a_master_login_order_is_held_to_its_own_launch_deadline(setup):
+    from scripts.hive import placement
+    from scripts.master_login_chain import BUDGET
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    selected = replace(setup.launcher.select(setup.config, "eng", {"id": "task"}), route_kind=placement.MASTER_LOGIN)
+    request = SpawnRequest(setup.config, "master", "master-name", {"id": "task"})
+    fits = BUDGET.order_ttl_ms // 75000
+    assert fits > 4
+    assert setup.launcher.queue_refusal(request, selected, fits - 1) == ""
+    assert setup.launcher.queue_refusal(request, selected, fits) == (
+        f"no hive for master has room: remote holds {fits} queued launches, "
+        f"the most its {BUDGET.order_ttl_ms // 1000} second launch deadline serves at 75 seconds each"
+    )
+
+
+def test_an_order_racing_another_controller_into_a_full_queue_is_refused(setup):
+    from scripts.hive import launch, placement_waits
+    from scripts.hive.orders import Orders
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    store, slug = setup.store, setup.config.slug
+    name = store.next_name(slug, "eng")
+    record = AgentRecord(name, "eng", "task", seat=f"eng-1@{slug}", state="starting")
+    store.put_agent(slug, record)
+    store.seats.occupy(record.seat, name, 0)
+    stream = Orders(store.redis).stream("remote")
+    for _ in range(3):
+        store.redis.xadd(stream, {"order": "{}"})
+    checked = setup.launcher.queue_refusal
+    calls = []
+
+    def racing(request, selected, queued):
+        calls.append(queued)
+        if len(calls) == 2:
+            store.redis.xadd(stream, {"order": "{}"})
+        return checked(request, selected, queued)
+
+    setup.launcher.queue_refusal = racing
+    task = {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch}
+    outcome = setup.launcher.spawn(SpawnRequest(setup.config, "eng", name, task))
+    assert outcome == Outcome(
+        "spawn",
+        Status.UNAVAILABLE,
+        launch.HIVE,
+        detail="no hive for eng has room: remote holds 4 queued launches, "
+        "the most its 300 second launch deadline serves at 75 seconds each",
+    )
+    assert calls == [3, 3, 4]
+    row = placement_waits.read(store, slug)["task"]
+    assert (row["lane"], row["reason"]) == ("eng", outcome.detail)
+    assert store.redis.xlen(stream) == 4
+    assert setup.launcher.orders_for("task") is None
+    endings = [json.loads(raw)["reason"] for raw in store.redis.hvals(store.key(slug, launch.ENDINGS))]
+    assert endings == [outcome.detail]
+
+
 def test_local_mode_keeps_the_original_spawn_call(setup):
     from scripts.swarm.controller import FencedRuntime
 
@@ -798,6 +896,17 @@ def test_finished_receipt_collection_returns_the_exact_outcome_whatever_the_task
     assert setup.launcher.collect(request) == Outcome("spawn", Status.OK, "hive")
 
 
+def test_a_finished_receipt_marks_its_admission_reservation_joined(setup):
+    from scripts.hive import admission
+
+    request, order, _ = live_order(setup)
+    worker = setup.store.execution_registry.get("fixture", order.execution_id)
+    admission.record(setup.store.redis, order.hive, f"fixture/{worker.name}")
+    setup.store.put_agent("fixture", replace(worker, state="finished"))
+    assert setup.launcher.collect(request).ok
+    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == [f"fixture/{worker.name}{admission.JOINED}"]
+
+
 def test_an_ended_worker_receipt_is_still_refused(setup):
     from scripts.hive.launch import GONE
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -929,6 +1038,16 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
         ),
     )
     assert (live.launched_at, live.overlays, live.launch_timings) == (1234, ["tuner"], {"harness_at": 1300})
+
+
+def test_a_live_acknowledgement_marks_its_admission_reservation_joined(setup):
+    from scripts.hive import admission
+
+    _, order, ack = live_order(setup)
+    name = setup.store.execution_registry.get("fixture", order.execution_id).name
+    admission.record(setup.store.redis, order.hive, f"fixture/{name}")
+    assert setup.launcher.complete(order, ack).ok
+    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == [f"fixture/{name}{admission.JOINED}"]
 
 
 @pytest.mark.parametrize(

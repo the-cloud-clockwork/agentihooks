@@ -1054,11 +1054,14 @@ def test_the_tests_gate_may_start_requiring_the_postgres_scenario_on_pull_reques
 def test_the_tests_gate_may_skip_sonar_when_selection_marks_the_pull_request_test_only(weakened):
     from scripts import ci_reuse
 
-    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
-    head = copy.deepcopy(base)
-    head["test.yml"]["jobs"]["select"]["outputs"]["sonar"] = "${{ steps.select.outputs.sonar }}"
+    head = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    base = copy.deepcopy(head)
+    del base["test.yml"]["jobs"]["select"]["outputs"]["sonar"]
+    step = base["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    for old, new in reversed(ci_reuse.TEST_ONLY_SONAR):
+        step["run"] = step["run"].replace(new, old)
     gate = head["test.yml"]["jobs"]["gate-required"]
-    gate["steps"] = ci_reuse.test_only_sonar(gate["steps"])
+    assert ci_reuse.test_only_sonar(base["test.yml"]["jobs"]["gate-required"]["steps"]) == gate["steps"]
     assert '- (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)' in gate["steps"][0]["run"]
     if weakened:
         gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('"skip"', '"skip" or true')
@@ -1072,9 +1075,8 @@ def test_a_base_skipping_sonar_on_test_only_changes_still_refuses_a_head_that_dr
     from scripts import ci_reuse
 
     base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
-    base["test.yml"]["jobs"]["select"]["outputs"]["sonar"] = "${{ steps.select.outputs.sonar }}"
     gate = base["test.yml"]["jobs"]["gate-required"]
-    gate["steps"] = ci_reuse.test_only_sonar(gate["steps"])
+    assert ci_reuse.TEST_ONLY_SONAR[0][1] in gate["steps"][0]["run"]
     assert ci_reuse.POSTGRES_REQUIRED[1] in gate["steps"][0]["run"]
     head = copy.deepcopy(base)
     step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
@@ -1243,6 +1245,8 @@ def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
     [
         ('then .value.result == "success"', 'then .value.result != "failure"'),
         ('"semgrep", "sonar"', '"semgrep"'),
+        ('"sonar", "writer-lock"]', '"sonar"]'),
+        ('then ["sonar"] else [] end', 'then ["sonar"] else ["sonar"] end'),
         ("exit 1", "exit 0"),
     ],
 )

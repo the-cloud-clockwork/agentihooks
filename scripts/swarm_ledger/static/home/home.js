@@ -1,3 +1,4 @@
+import { monitor } from "./monitor.js";
 import { loadTips, readCollection, readLayout, readLedgerPage, writeBin, writeLayout, writeLedgerSwarm } from "../js/api.js";
 
 const view = new URLSearchParams(location.search).get("view") === "bin" ? "bin" : "home";
@@ -46,6 +47,7 @@ function shell() {
   main.prepend(h("header", {}, h("a", { class: "logo-link", href: "/", "aria-label": "HOME" }, h("span", { class: "logo", "aria-hidden": "true" })),
     h("span", { class: "brand", text: "agentihooks" }), h("h1", { text: heading }), view === "bin" ? h("span", { class: "total", id: "total" }) : null));
   if (view === "home") main.before(h("div", { class: "watermark", "aria-hidden": "true" }));
+  if (view === "home") main.querySelector("header").after(h("div", { class: "home-grid" }, monitor(), main.querySelector(".panel")));
   main.querySelector(".row.head").replaceChildren(...HEADS[view].map(headCell));
   main.after(h("a", { class: "fab", id, href, "aria-label": label }, icon(name)));
 }

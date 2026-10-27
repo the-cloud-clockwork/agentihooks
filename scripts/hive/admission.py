@@ -1,5 +1,6 @@
 """Admit each launch by the measured headroom of the machine it lands on; a pending reservation counts against the room
-for fifteen minutes, three five minute load windows."""
+for fifteen minutes, three five minute load windows, until its agent joins; a joined agent's load shows in the five
+minute load one window after launch, so its reservation ends there."""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -18,6 +19,8 @@ SWARM_PERCENT = 40
 AGENT_CPU = 0.5
 AGENT_MB = MEMORY_PER_AGENT_MB
 PENDING_MS = 900_000
+LOAD_WINDOW_MS = 300_000
+JOINED = "#joined"
 NO_READING = "no fresh headroom reading"
 # cpus/load5 shipped with the first headroom reading; a hive daemon still on an older image before total_mb
 # joined the schema still publishes them, so a reading missing only the RAM fields is read, not refused.
@@ -32,8 +35,9 @@ _RESERVE = """
 local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', millis)
+if redis.call('ZSCORE', KEYS[1], ARGV[1]) then return {1, redis.call('ZCARD', KEYS[1])} end
+redis.call('ZREM', KEYS[1], ARGV[1] .. ARGV[4])
 local held = redis.call('ZCARD', KEYS[1])
-if redis.call('ZSCORE', KEYS[1], ARGV[1]) then return {1, held} end
 if held >= tonumber(ARGV[2]) then return {0, held} end
 redis.call('ZADD', KEYS[1], millis + tonumber(ARGV[3]), ARGV[1])
 redis.call('PEXPIRE', KEYS[1], ARGV[3])
@@ -44,6 +48,14 @@ _PENDING = """
 local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 return redis.call('ZCOUNT', KEYS[1], '(' .. millis, '+inf')
+"""
+
+_JOIN = """
+local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if not score then return 0 end
+redis.call('ZREM', KEYS[1], ARGV[1])
+redis.call('ZADD', KEYS[1], tonumber(score) - tonumber(ARGV[2]), ARGV[1] .. ARGV[3])
+return 1
 """
 
 _RECORD = """
@@ -163,7 +175,7 @@ def key(machine: str) -> str:
 
 
 def reserve(redis: "Redis", machine: str, member: str, limit: int, ttl_ms: int = PENDING_MS) -> tuple[bool, int]:
-    admitted, held = redis.eval(_RESERVE, 1, key(machine), member, limit, ttl_ms)
+    admitted, held = redis.eval(_RESERVE, 1, key(machine), member, limit, ttl_ms, JOINED)
     return bool(admitted), int(held)
 
 
@@ -175,8 +187,12 @@ def pending(redis: "Redis", machine: str) -> int:
     return int(redis.eval(_PENDING, 1, key(machine)))
 
 
+def joined(redis: "Redis", machine: str, member: str) -> None:
+    redis.eval(_JOIN, 1, key(machine), member, PENDING_MS - LOAD_WINDOW_MS, JOINED)
+
+
 def release(redis: "Redis", machine: str, member: str) -> None:
-    redis.zrem(key(machine), member)
+    redis.zrem(key(machine), member, member + JOINED)
 
 
 def category(reason: str) -> str:

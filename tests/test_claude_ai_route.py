@@ -19,7 +19,7 @@ ORDER = "nestor.colt@gmail.com,thecloudclockwork@gmail.com"
 @pytest.fixture(autouse=True)
 def ah(tmp_path, monkeypatch):
     monkeypatch.setattr(login, "MANAGED", tmp_path / "no-managed-settings.json")
-    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", tmp_path / "ah")
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     monkeypatch.setenv(login.ORDER_ENV, ORDER)
     monkeypatch.chdir(tmp_path)

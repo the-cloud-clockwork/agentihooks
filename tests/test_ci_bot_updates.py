@@ -44,7 +44,11 @@ def test_a_newer_dev_push_replaces_only_the_pending_dev_push_run():
     concurrency = _workflow("test.yml")["concurrency"]
     assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
     assert concurrency["queue"] == "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}"
-    assert "github.event_name == 'push' && 'promotion-dev'" in concurrency["group"]
+    group = concurrency["group"]
+    assert "github.event_name == 'push' && 'promotion-dev'" in group or (
+        "github.event_name == 'push'" not in group
+        and "format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id)" in group
+    )
 
 
 ADOPT = (

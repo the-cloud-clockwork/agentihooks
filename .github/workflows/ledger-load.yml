@@ -122,8 +122,9 @@ jobs:
 
       - name: Preserve both stream CPU measurements and server logs
         if: ${{ always() && inputs.streams }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
+          after-cancel: true
           name: ledger-stream-cpu
           path: ${{ runner.temp }}/ledger-streams
           retention-days: 7
@@ -214,8 +215,9 @@ jobs:
 
       - name: Preserve the pair's load measurements and server logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
+          after-cancel: true
           name: compare-pair-${{ matrix.pair }}
           path: |
             load-evidence/*.log

@@ -28,7 +28,7 @@ DEFAULT = {
     "heartbeat_at": 0,
     "version": "",
 }
-HEADED = {**DEFAULT, "ui": "yes", "excluded": [], "max_agents": 10}
+HEADED = {**DEFAULT, "name": registry.MASTER_NAME, "ui": "yes", "excluded": [], "max_agents": 10}
 
 
 @pytest.fixture
@@ -80,7 +80,7 @@ def test_settings_merge_onto_the_stored_record_and_keep_reported_fields(redis):
     record = registry.update(redis, "box", ["name=Laptop", "ephemeral=yes", "max-agents=4"])
     expected = {
         **DEFAULT,
-        "name": "Laptop",
+        "name": registry.MASTER_NAME,
         "ui": "yes",
         "ephemeral": "yes",
         "excluded": ["qa"],
@@ -92,6 +92,22 @@ def test_settings_merge_onto_the_stored_record_and_keep_reported_fields(redis):
     }
     assert record == expected
     assert registry.show(redis, "box") == expected
+
+
+def test_the_interface_hive_is_named_swarm_master_whatever_name_it_was_given(redis):
+    registry.update(redis, "root", ["name=Laptop"])
+    assert registry.show(redis, "root")["name"] == "Laptop"
+    registry.update(redis, "root", ["ui=yes"])
+    assert registry.show(redis, "root")["name"] == "swarm-master"
+    assert registry.update(redis, "root", ["name=Desk"])["name"] == "swarm-master"
+    assert [hive["name"] for hive in registry.hives(redis)] == ["swarm-master"]
+    registry.update(redis, "root", ["ui=no"])
+    assert registry.show(redis, "root")["name"] == "Desk"
+
+
+def test_a_heartbeat_seeded_interface_hive_reads_as_swarm_master(redis):
+    redis.hset(registry.key("root"), mapping={"ui": "yes", "heartbeat_at": "1"})
+    assert registry.show(redis, "root")["name"] == "swarm-master"
 
 
 def test_a_restarted_registration_keeps_the_stored_settings(redis):
@@ -109,7 +125,7 @@ def test_a_restarted_registration_keeps_the_stored_settings(redis):
 def test_a_restarted_registration_keeps_a_stored_ui_and_ephemeral(redis):
     registry.update(redis, "box", ["ui=yes", "ephemeral=no"])
     restarted = registry.update(redis, "box", ["ui=no", "ephemeral=yes", "name=Pod"], keep=True)
-    assert restarted == {**HEADED, "name": "Pod"}
+    assert restarted == HEADED
     assert redis.hmget(registry.key("box"), "ui", "ephemeral", "name") == ["yes", "no", "Pod"]
 
 
@@ -286,7 +302,7 @@ def test_cli_set_show_and_list(redis, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["heartbeat_at"] == 50_000
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "box\tlive\tui=yes\tmax-agents=3\texcluded=qa\theadroom=missing\n"
+        "box\tname=swarm-master\tlive\tui=yes\tmax-agents=3\texcluded=qa\theadroom=missing\n"
         "pod\tstale\tui=no\tmax-agents=20\texcluded=eng\theadroom=missing\n"
     )
 
