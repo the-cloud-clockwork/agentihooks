@@ -100,7 +100,7 @@ def test_failed_and_expired_jobs_use_spawn_failure_accounting(store, tmp_path, r
     assert ledger.rows["t1"]["state"] == "open"
     assert store.claimant("sw", "t1") is None
     assert store.launches("sw")[0]["state"] == "failed"
-    assert store.launch_failures("sw", "t1")
+    assert store.launch_failures("sw")["t1"]
     assert not store.redis.hgetall(store.key("sw", "launch-jobs"))
 
 

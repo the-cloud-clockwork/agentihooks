@@ -157,6 +157,7 @@ class Placed:
     remote_control: dict = field(default_factory=dict)
     desired_route_kind: str | None = None
     conversation_id: str = ""
+    launch_job: dict = field(default_factory=dict)
 
 
 class Ledger(Protocol):
@@ -1253,6 +1254,7 @@ def _prepare(run, lane, task, taken, failing, peers):
         primed_task = {
             **timing.timed(primed, store, slug, seat, task),
             ACK_LATER: True,
+            "detached_launch": True,
             **_steer(slug, store, task, failing),
         }
     except Exception as exc:
@@ -1267,6 +1269,8 @@ def _launch(run, launch):
     record = launch.record
     try:
         placed = timing.timed(run.runtime.spawn, run.config, record.lane, record.name, launch.primed)
+        if placed.launch_job:
+            return placed, None
         launched = timing.timed(codex.admit_legacy, run.store, run.slug, placed_record(record, placed), run.runtime)
         return placed, launched
     except Exception as exc:
@@ -1287,6 +1291,11 @@ def _launch_all(run, clock, batch):
             actions += timing.timed(
                 _not_launched, run.slug, run.store, run.ledger, run.runtime, run.rows, failed, run.now_ms
             )
+        elif placed.launch_job:
+            from scripts.swarm import launch_job
+
+            launch_job.pending(run.store, run.slug, launch, placed)
+            actions.append(f"launching {launch.record.name} for {launch.task['id']}")
         else:
             started = Started(launch.record, launch.task, placed, launched)
             actions += timing.timed(_started, run.slug, run.config, run.store, run.ledger, run.doc, started, run.now_ms)
@@ -1392,7 +1401,7 @@ def _acknowledging(slug, store, agent):
     if agent.lane == MASTER:
         return False
     raw = store.redis.hget(store.key(slug, "launches"), agent.name)
-    return bool(raw) and json.loads(raw).get("state") == ACKNOWLEDGING
+    return bool(raw) and json.loads(raw).get("state") in (ACKNOWLEDGING, "launching")
 
 
 def _expire_launch(config, runtime, agent, error):
@@ -1417,10 +1426,14 @@ def _finished_launch(slug, store, doc, agent):
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     if config.engine == EVENTS_ENGINE:
         return []
+    from scripts.swarm import launch_job
     from scripts.swarm_v2.runtime import codex
 
-    rows, actions = {t["id"]: t for t in doc["tasks"]}, []
+    rows = {t["id"]: t for t in doc["tasks"]}
+    actions = launch_job.collect(_Pass(slug, config, store, ledger, runtime, rows, doc, now_ms))
     for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
+        if store.redis.hexists(store.key(slug, launch_job.KEY), agent.name):
+            continue
         task = rows.get(agent.task) or {"id": agent.task}
         try:
             placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True})
