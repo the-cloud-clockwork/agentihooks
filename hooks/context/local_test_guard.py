@@ -5,7 +5,7 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from hooks.context.shell_commands import commands
+from hooks.context.shell_commands import located
 
 ALLOW_LOCAL_TEST_RUN_ENV = "AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN"
 _FALSE = "false"
@@ -71,6 +71,9 @@ _PYTHON_TEST = re.compile(
     r"\b(?:pytest|unittest|tox|nox|mutmut|mutatest|mutpy)\b|scripts\.ci_mutation\b(?!\.clearances\b)"
 )
 _MUTATION_PATH = re.compile(r"(?:^|/)scripts/ci_mutation(?!/clearances\.py$)(?:/|$)")
+_HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(?P<q>['\"]?)(?P<end>\w+)(?P=q)")
+_SCRIPT_NAME = re.compile(r"[^\s'\"<>|;&]+\.py\b")
+_SCRIPT_BYTES = 1_000_000
 _NODE_TEST = re.compile(r"\b(?:jest|vitest|mocha)\b|node:test")
 _LITERAL = (
     r"(?P<module>\b(?:require|import)\s*\(\s*|\b(?:from|import)\s*)?"
@@ -254,6 +257,45 @@ def _test_command(tokens: list[str]) -> bool:
     return name.startswith(("test-", "test_")) and name.endswith(".sh")
 
 
+def _heredoc_scripts(command: str) -> dict[str, str]:
+    written, lines = {}, iter(command.splitlines(keepends=True))
+    for line in lines:
+        marker = _HEREDOC.search(line)
+        if not marker:
+            continue
+        body = []
+        for content in lines:
+            if content.rstrip("\r\n").lstrip("\t") == marker["end"]:
+                break
+            body.append(content)
+        written.update((Path(name).name, "".join(body)) for name in _SCRIPT_NAME.findall(line))
+    return written
+
+
+def _expanded(path: str) -> Path:
+    return Path(os.path.expanduser(os.path.expandvars(path)))
+
+
+def _script_on_disk(script: str, folders: list[str], cwd: str) -> str | None:
+    path = Path(cwd).joinpath(*(_expanded(folder) for folder in folders), _expanded(script))
+    try:
+        return path.read_text(errors="ignore") if path.stat().st_size <= _SCRIPT_BYTES else None
+    except OSError:
+        return None
+
+
+def _script_runs_tests(tokens: list[str], folders: list[str], written: dict[str, str], cwd: str) -> bool:
+    if not _PYTHON.fullmatch(Path(tokens[0]).name.partition("@")[0]):
+        return False
+    script = _python_script(tokens[1:])
+    if script is None:
+        return False
+    source = written.get(Path(script).name)
+    if source is None:
+        source = _script_on_disk(script, folders, cwd)
+    return source is not None and _python_code_runs_tests(source)
+
+
 def check_local_tests(payload: dict) -> None:
     if payload.get("tool_name") != "Bash" or local_tests_allowed():
         return
@@ -264,7 +306,11 @@ def check_local_tests(payload: dict) -> None:
         command = tool_input.get("command") or tool_input.get("cmd")
         if not command:
             return
-        runs_tests = any(_test_command(tokens) for tokens in commands(command))
+        written, cwd = _heredoc_scripts(command), payload.get("cwd") or os.getcwd()
+        runs_tests = any(
+            _test_command(tokens) or _script_runs_tests(tokens, folders, written, cwd)
+            for tokens, folders in located(command)
+        )
     except ValueError:
         raise BlockAction(_DENY) from None
     if runs_tests:
