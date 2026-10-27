@@ -1,0 +1,96 @@
+name: Compact mutation archive replay
+
+on:
+  workflow_call:
+    inputs:
+      run:
+        type: string
+        required: true
+      artifact:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run }}
+          name: ${{ inputs.artifact }}
+          path: archive
+      - name: Read the archived revision
+        id: revision
+        run: |
+          head=$(jq -er '.head | select(test("^[0-9a-f]{40}$"))' archive/replay.json)
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.revision.outputs.head }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          enable-cache: false
+      - name: Install dependencies at the recorded revision
+        working-directory: source
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+      - name: Replay the archived commands and verify the surviving fault
+        working-directory: source
+        env:
+          ARCHIVE_RUN: ${{ inputs.run }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from scripts.ci_mutation.evidence import replay
+
+          bundle = Path('../archive').resolve()
+          manifest = json.loads((bundle / 'replay.json').read_text())
+          for group in manifest['groups']:
+              original = json.loads((bundle / group['name'] / 'results.json').read_text())
+              survivors = {
+                  (path, row['name']): row
+                  for path, rows in original.items()
+                  for row in rows if row['status'] == 'survived'
+              }
+              if not survivors:
+                  continue
+              work = Path('../replayed').resolve()
+              replay(Path.cwd(), bundle, work, group['name'])
+              actual = json.loads((work / 'results.json').read_text())
+              reproduced = []
+              for (path, name), expected in survivors.items():
+                  row = next(row for row in actual[path] if row['name'] == name)
+                  assert row['status'] == 'survived', row
+                  assert row['fingerprint'] == expected['fingerprint'], row
+                  assert row['diff'] == expected['diff'], row
+                  reproduced.append(row)
+              proof = {'run': os.environ['ARCHIVE_RUN'], 'head': manifest['head'], 'group': group, 'reproduced': reproduced}
+              Path('../replay-proof.json').write_text(json.dumps(proof, indent=2) + '\n')
+              print(json.dumps(proof, indent=2))
+              break
+          else:
+              raise AssertionError('The archive contains no planted survivor')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compact-archive-replay-proof
+          path: |
+            replay-proof.json
+            replayed/results.json
+          if-no-files-found: error
+          retention-days: 7
