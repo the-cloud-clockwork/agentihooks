@@ -44,12 +44,23 @@ class Store:
         return SimpleNamespace(state=self.swarms[slug])
 
 
-def hive_port(hives, readings):
+def ports_for(hives, readings, here="", local=None):
     registry = SimpleNamespace(
         hives=lambda redis: hives, live=lambda hive, now: hive["live"], key=lambda hive: f"hive:{hive}"
     )
     headroom = SimpleNamespace(read=lambda redis, hive, now: readings.get(hive))
-    return SimpleNamespace(registry=registry, headroom=headroom)
+    hooks = SimpleNamespace(account_sessions=SimpleNamespace(local_processes=lambda: local or {}))
+    swarm = SimpleNamespace(commands=SimpleNamespace(hive_id=lambda: here))
+    return (
+        mock.patch.object(monitor.ports, "hive", return_value=SimpleNamespace(registry=registry, headroom=headroom)),
+        mock.patch.object(monitor.ports, "hooks", return_value=hooks),
+        mock.patch.object(monitor.ports, "swarm", return_value=swarm),
+    )
+
+
+def viewed(store, *patches):
+    with patches[0], patches[1], patches[2]:
+        return monitor.view(store, NOW)
 
 
 def test_a_bare_host_counts_its_load_and_free_memory():
@@ -64,40 +75,38 @@ def test_load_over_the_core_count_reads_as_every_core_busy():
     assert monitor.capacity({**HOST, "load5": 40.0})[0] == 16
 
 
-def test_view_counts_agent_processes_on_live_hives_and_swarms_running():
-    sessions = {
-        "root": {
-            "claude:a": 3,
-            "claude:b": 1,
-            "codex:c": 2,
-            "interactive:claude:a": 1,
-            "_executions": {"codex:c": ["x"]},
-        },
-        "pod": {"claude:a": 2, "codex:c": 0, "other:z": 4},
-        "gone": {"claude:a": 9},
-    }
-    store = Store({"a": "running", "b": "stopped", "c": "running"}, sessions)
+def test_agents_come_from_this_hosts_process_table_and_each_other_hives_headroom_reading():
+    store = Store({"a": "running", "b": "stopped", "c": "running"})
     hives = [{"id": "root", "live": True}, {"id": "pod", "live": True}, {"id": "gone", "live": False}]
-    port = hive_port(hives, {"root": HOST, "pod": POD, "gone": HOST})
-    with mock.patch.object(monitor.ports, "hive", return_value=port):
-        data = monitor.view(store, NOW)
+    readings = {
+        "root": {**HOST, "agents": {"claude": 99, "codex": 99}},
+        "pod": {**POD, "agents": {"claude": 4, "codex": 1}},
+        "gone": {**HOST, "agents": {"claude": 7}},
+    }
+    local = {"claude": {1: "x", 2: "y", 3: "z"}, "codex": {4: "w"}}
+    data = viewed(store, *ports_for(hives, readings, here="root", local=local))
     assert data == {
-        "agents": {"total": 8, "claude": 6, "codex": 2},
+        "agents": {"total": 9, "claude": 7, "codex": 2},
         "swarms": {"running": 2},
-        "hives": {"live": 2, "measured": 2},
+        "hives": {"live": 2, "reporting": 2, "measured": 2},
         "cpu": {"used": 7.5, "cores": 20.0},
         "memory": {"used_mb": 24000, "total_mb": 48000},
     }
 
 
-def test_a_live_hive_without_a_reading_is_counted_but_adds_no_load():
-    port = hive_port([{"id": "root", "live": True}], {})
-    with mock.patch.object(monitor.ports, "hive", return_value=port):
-        data = monitor.view(Store({}), NOW)
-    assert data["agents"] == {"total": 0, "claude": 0, "codex": 0}
-    assert data["hives"] == {"live": 1, "measured": 0}
-    assert data["cpu"] == {"used": 0, "cores": 0}
-    assert data["memory"] == {"used_mb": 0, "total_mb": 0}
+def test_a_hive_without_a_fresh_reading_is_left_out_never_counted_as_zero():
+    hives = [{"id": "root", "live": True}, {"id": "pod", "live": True}]
+    readings = {"root": {**HOST, "agents": {"claude": 2, "codex": 0}}}
+    data = viewed(Store({}), *ports_for(hives, readings))
+    assert data["agents"] == {"total": 2, "claude": 2, "codex": 0}
+    assert data["hives"] == {"live": 2, "reporting": 1, "measured": 1}
+
+
+def test_a_hive_that_predates_the_agent_reading_falls_back_to_its_session_report():
+    sessions = {"pod": {"claude:a": 3, "codex:b": 1, "interactive:claude:a": 1, "_executions": {"codex:b": ["x"]}}}
+    data = viewed(Store({}, sessions), *ports_for([{"id": "pod", "live": True}], {"pod": HOST}))
+    assert data["agents"] == {"total": 4, "claude": 3, "codex": 1}
+    assert data["hives"] == {"live": 1, "reporting": 1, "measured": 1}
 
 
 def test_an_unreachable_store_answers_503():

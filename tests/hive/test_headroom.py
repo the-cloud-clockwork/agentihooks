@@ -32,6 +32,13 @@ def proc(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def agents(monkeypatch):
+    found = {"claude": {}, "codex": {}}
+    monkeypatch.setattr(headroom.account_sessions, "local_processes", lambda proc: found)
+    return found
+
+
+@pytest.fixture(autouse=True)
 def cgroup(tmp_path, monkeypatch):
     folder = tmp_path / "cgroup"
     folder.mkdir()
@@ -47,8 +54,14 @@ def test_measure_reads_the_five_minute_load_and_available_memory(proc, monkeypat
         "available_mb": 8000,
         "total_mb": 15625,
         "pending": 3,
+        "agents": {"claude": 0, "codex": 0},
         "measured_at": 77_000,
     }
+
+
+def test_measure_counts_the_agent_processes_in_the_process_table_it_reads(proc, agents):
+    agents.update({"claude": {11: "a", 12: "b"}, "codex": {13: "c"}})
+    assert headroom.measure(0, 1, proc)["agents"] == {"claude": 2, "codex": 1}
 
 
 def test_measure_rounds_the_memory_total_down_to_whole_megabytes(proc):
@@ -93,6 +106,7 @@ def test_publish_counts_waiting_launch_orders_and_expires_with_the_heartbeat(red
         "available_mb": 8000,
         "total_mb": 15625,
         "pending": 2,
+        "agents": {"claude": 0, "codex": 0},
         "measured_at": 5_000,
     }
     assert 29_000 < redis.pttl(headroom.key("box")) <= 30_000

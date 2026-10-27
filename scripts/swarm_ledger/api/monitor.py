@@ -1,4 +1,4 @@
-"""The HOME resource monitor: agent processes and summed headroom from each live hive's heartbeat, and running swarms."""
+"""The HOME resource monitor: agent processes, CPU and memory from each live hive's headroom reading, and running swarms."""
 
 import json
 import time
@@ -27,33 +27,47 @@ def capacity(measured: dict) -> tuple[float, float, int, int]:
     return used, cores, max(total - available, 0), total
 
 
-def processes(store: object, hive: str) -> dict[str, int]:
-    """Agent processes one hive counted on its last heartbeat, by harness; its interactive slots are among them."""
-    sessions = json.loads(store.redis.get(f"{ports.hive().registry.key(hive)}:sessions") or "{}")
-    counts = dict.fromkeys(HARNESSES, 0)
-    for slot, count in sessions.items():
-        harness = slot.split(":")[0]
-        if harness in counts:
-            counts[harness] += count
-    return counts
+def processes(store: object, hive: str, measured: dict | None) -> dict[str, int] | None:
+    """Agent processes on one hive by harness: this host's process table read now, else the one the hive's last
+    headroom reading took, else, from a hive that predates that reading, its beat's per-slot session report; None
+    when the hive has nothing fresh."""
+    if hive == ports.swarm().commands.hive_id():
+        found = {harness: len(pids) for harness, pids in ports.hooks().account_sessions.local_processes().items()}
+    elif measured is not None and "agents" in measured:
+        found = measured["agents"]
+    else:
+        sessions = store.redis.get(f"{ports.hive().registry.key(hive)}:sessions")
+        if sessions is None:
+            return None
+        found = {}
+        for slot, count in json.loads(sessions).items():
+            harness = slot.split(":")[0]
+            if harness in HARNESSES:
+                found[harness] = found.get(harness, 0) + count
+    return {harness: int(found.get(harness, 0)) for harness in HARNESSES}
 
 
 def view(store: object, now_ms: int) -> dict:
     registry, headroom = ports.hive().registry, ports.hive().headroom
     running = sum(store.config(slug).state == "running" for slug in store.slugs())
     live = [hive for hive in registry.hives(store.redis) if registry.live(hive, now_ms)]
-    agents = dict.fromkeys(HARNESSES, 0)
-    for hive in live:
-        for harness, count in processes(store, hive["id"]).items():
+    readings = {hive["id"]: headroom.read(store.redis, hive["id"], now_ms) for hive in live}
+    measured = [reading for reading in readings.values() if reading is not None]
+    agents, reporting = dict.fromkeys(HARNESSES, 0), 0
+    for hive_id, reading in readings.items():
+        counts = processes(store, hive_id, reading)
+        if counts is None:
+            continue
+        reporting += 1
+        for harness, count in counts.items():
             agents[harness] += count
-    measured = [m for m in (headroom.read(store.redis, hive["id"], now_ms) for hive in live) if m is not None]
     used, cores, used_mb, total_mb = (
         (sum(column) for column in zip(*map(capacity, measured))) if measured else (0, 0, 0, 0)
     )
     return {
         "agents": {"total": sum(agents.values()), **agents},
         "swarms": {"running": running},
-        "hives": {"live": len(live), "measured": len(measured)},
+        "hives": {"live": len(live), "reporting": reporting, "measured": len(measured)},
         "cpu": {"used": round(used, 1), "cores": round(cores, 1)},
         "memory": {"used_mb": used_mb, "total_mb": total_mb},
     }

@@ -47,6 +47,7 @@ class Hive(Protocol):
 
 @runtime_checkable
 class Hooks(Protocol):
+    account_sessions: Any
     config: Any
     conditions: Any
     filters: Any
