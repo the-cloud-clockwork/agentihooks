@@ -527,12 +527,39 @@ def cmd_artifact(args):
     refused(state, fallback="rejected: join the ledger first and name a task it holds")
 
 
+def _repoint_plan(args, phases):
+    doc = call(args.slug)
+    selected = [phase for phase in doc["phases"] if phase["id"] in phases]
+    if {phase["id"] for phase in selected} != set(phases):
+        sys.exit("publish-plan names an unknown phase")
+    parents = {phase.get("plan", "") for phase in selected}
+    if len(parents) != 1 or not next(iter(parents)):
+        sys.exit("repoint needs phases belonging to one published plan")
+    plan = ledger_plans.find(doc, next(iter(parents)))
+    task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
+    file = upload_artifact(args.slug, args.name, args.path, {"task": task, "title": plan["title"], "plan": True})
+    if ledger_plans.plan_id(file["id"]) != plan["id"]:
+        sys.exit("repoint needs the original plan artifact")
+    artifact = f"{base()}/artifacts/{args.slug}/{file['id']}"
+    url = artifact if plan["url"] == plan["artifact"] else plan["url"]
+    ops = [
+        op("artifact_add", args, task=task, title=plan["title"], file=file, plan=True),
+        op("plan_add", args, plan=plan["id"], title=plan["title"], artifact=artifact, url=url, repoint=True),
+    ]
+    refused(call(args.slug, ops), ops)
+    affected = [phase["id"] for phase in doc["phases"] if phase.get("plan") == f"plans/{plan['id']}"]
+    print(json.dumps({"plan_url": url, "artifact": artifact, "phases": affected}))
+
+
 def cmd_publish_plan(args):
     from scripts.swarm_ledger import plan_ranges
 
     phases = comma_list(args.phase)
     if not phases:
         sys.exit("publish-plan needs --phase with the ids of the phases the plan fills")
+    if args.repoint:
+        _repoint_plan(args, phases)
+        return
     text = Path(args.path).read_text(encoding="utf-8")
     doc = call(args.slug)
     selected = [phase for phase in doc["phases"] if phase["id"] in phases]
@@ -1129,6 +1156,9 @@ def build_parser():
     task.add_argument("--quote", help="task set rank=...: the operator's words, so the rank stays his")
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")
+    publish.add_argument(
+        "--repoint", action="store_true", help="move an existing plan and all its phases to this server"
+    )
     publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")
     publish.add_argument("--title", default="", help="default the plan's first heading")
     publish.add_argument("--repo", default="", help="OWNER/NAME for the issue; default the current repo")

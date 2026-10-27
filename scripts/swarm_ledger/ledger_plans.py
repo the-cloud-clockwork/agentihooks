@@ -23,7 +23,9 @@ def check(op: dict) -> None:
         if not isinstance(op.get("phase"), str) or not isinstance(anchor, str) or not ANCHOR_RE.fullmatch(anchor):
             raise ValueError("slice_add needs phase and an anchor")
         return
-    if set(op) - {"op", "id", "by", "plan", "title", *LINKS}:
+    if "repoint" in op and not isinstance(op["repoint"], bool):
+        raise ValueError("plan_add repoint must be a boolean")
+    if set(op) - {"op", "id", "by", "plan", "title", "repoint", *LINKS}:
         raise ValueError("plan_add takes only plan title artifact url")
     if not isinstance(op.get("plan"), str) or not PLAN_RE.fullmatch(op["plan"]):
         raise ValueError("plan_add needs plan, an id of letters, digits, _ and -")
@@ -246,11 +248,34 @@ def apply(doc: dict, op: dict, ctx) -> bool:
     return not refusal
 
 
+def _repoint(doc: dict, existing: dict, plan: dict, op: dict, ctx) -> str:
+    from urllib.parse import urlsplit
+
+    expected = {**existing, "artifact": plan["artifact"]}
+    if existing["url"] == existing["artifact"]:
+        expected["url"] = plan["artifact"]
+    if expected != plan or urlsplit(existing["artifact"]).path != urlsplit(plan["artifact"]).path:
+        return "repoint may change only the server of the same plan artifact"
+    for phase in doc["phases"]:
+        if phase.get("plan") == f"plans/{plan['id']}":
+            phase["plan_ref"] = {**phase["plan_ref"], "artifact": plan["artifact"]}
+            phase["plan_url"] = plan["url"]
+    existing.update(plan)
+    ctx.record(op["by"], "updated", f"plans/{plan['id']}", text=plan["artifact"])
+    return ""
+
+
 def add_plan(doc: dict, op: dict, ctx) -> str:
     plans = doc.setdefault("plans", [])
     plan = {"id": op["plan"], "title": op["title"].strip(), **{key: op.get(key, "") for key in LINKS}}
     if existing := next((row for row in plans if row["id"] == plan["id"]), None):
-        return "" if existing == plan else f"plan {plan['id']} already exists"
+        if op.get("repoint"):
+            return _repoint(doc, existing, plan, op, ctx)
+        if existing == plan:
+            return ""
+        return f"plan {plan['id']} already exists"
+    if op.get("repoint"):
+        return "repoint needs an existing plan"
     plans.append(plan)
     ctx.record(op["by"], "added", f"plans/{plan['id']}", text=plan["title"])
     return ""
