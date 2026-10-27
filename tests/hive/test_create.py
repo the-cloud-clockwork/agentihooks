@@ -241,6 +241,14 @@ def test_the_manifests_step_opens_the_pull_request_through_its_clone_outside_a_g
     assert _state(world)["pr"] == PR
 
 
+def test_the_dry_run_lists_every_manifest_file(world, monkeypatch):
+    monkeypatch.setattr(create, "_files", lambda tools, options, cwd: {"a.yaml": "a", "b.yaml": "b"})
+    create.create(world.tools, create.Options(dry_run=True))
+    assert (
+        f"hive create {NAME}: manifests: would open a pull request into {REPO} dev with a.yaml, b.yaml" in world.lines
+    )
+
+
 def test_a_rerun_resumes_the_unfinished_create_and_repeats_no_finished_step(world):
     Store.working = False
     with pytest.raises(auth.HiveError, match="waiting for an engineer working on the hive; rerun hive create"):
