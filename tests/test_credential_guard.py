@@ -361,6 +361,8 @@ GH_TOKEN_RENDERERS = [
     "ssh hive-002 gh auth status",
     "docker exec worker gh auth status",
     "kubectl exec pod-0 -- gh auth status",
+    "ssh hive-002 'gh auth status'",
+    "ssh hive-002 gh --hostname github.com auth status",
     "gh -R owner/repo auth token",
 ]
 
@@ -369,6 +371,9 @@ GH_LEAK_FREE = [
     "gh auth setup-git",
     "gh pr view 7843",
     "gh pr list --search auth token",
+    "gh help auth status",
+    "gh -R owner/repo help auth status",
+    "gh",
     'gh issue comment 1 --body "auth status"',
     "gh api rate_limit --jq .rate.remaining",
     'test -n "${GH_TOKEN:-}" && echo set || echo unset',
@@ -381,10 +386,11 @@ GH_LEAK_FREE = [
 def test_gh_commands_that_print_a_token_are_refused(command):
     reason = decide({"tool_name": "Bash", "tool_input": {"command": command}})
 
-    assert reason is not None
-    assert reason.startswith("BLOCKED: printing the GitHub token (gh auth status or gh auth token).\n")
-    assert 'test -n "${GH_TOKEN:-}"' in reason
-    assert "gh api rate_limit" in reason
+    assert reason == (
+        block("printing the GitHub token (gh auth status or gh auth token)", KIND_ENVIRONMENT)
+        + '\nTo test whether the token is set:  test -n "${GH_TOKEN:-}" && echo set || echo unset'
+        + "\nTo test whether it works:  gh api rate_limit --jq .rate.remaining"
+    )
 
 
 @pytest.mark.parametrize("command", GH_LEAK_FREE)

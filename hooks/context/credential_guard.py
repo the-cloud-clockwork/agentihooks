@@ -546,8 +546,9 @@ def prints_gh_token(toks):
         if nested and prints_gh_token(tokens_of(tok)):
             return True
         if tok.split("/")[-1] == "gh":
-            args = [t for t in toks[i + 1 :] if not t.startswith("-")]
-            leading = 2 if toks[i + 1 : i + 2] and toks[i + 1].startswith("-") else 1
+            rest = toks[i + 1 :]
+            args = [t for t in rest if not t.startswith("-")]
+            leading = 2 if rest and rest[0].startswith("-") else 1
             if any(a == "auth" and b in GH_TOKEN_SUBCOMMANDS for a, b in zip(args[:leading], args[1:])):
                 return True
     return False
