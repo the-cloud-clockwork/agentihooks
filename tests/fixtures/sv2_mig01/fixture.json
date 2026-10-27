@@ -1,0 +1,20 @@
+{
+  "consumers": [
+    {"consumer": "agent memory semantic search call", "kind": "tool", "uses": "search_semantic"},
+    {"consumer": "workforce task dispatcher", "kind": "tool", "uses": "dispatch_task"},
+    {"consumer": "landing sessions indexed figure", "kind": "dashboard", "uses": "/sessions"}
+  ],
+  "late": {"consumer": "brain keeper dispatch hint", "kind": "brain_extraction", "uses": "dispatch_to_agent"},
+  "late_conflict": {"consumer": "brain keeper dispatch hint", "kind": "brain_extraction", "uses": "agent_search"},
+  "reclassify": {"consumer": "workforce task dispatcher", "kind": "tool", "uses": "search_semantic"},
+  "unknown": {"consumer": "unlisted session export job", "kind": "ingestion", "uses": "export_sessions"},
+  "bad": [
+    {"consumer": "private consumer label", "kind": "pager", "uses": "search_semantic"},
+    {"consumer": "private consumer label", "kind": "tool"},
+    {"consumer": "private consumer label", "kind": "tool", "uses": "search_semantic", "decision": "alias"}
+  ],
+  "private_label": "private consumer label",
+  "source_module": "legacy transcript service MCP tools module",
+  "extractable": ["turn_chunking", "vector_storage", "semantic_search"],
+  "retired": ["dispatcher", "agent_registry", "standalone_daemon", "dispatch_task", "register_agent", "daemon_installer"]
+}
