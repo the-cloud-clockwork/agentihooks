@@ -27,6 +27,7 @@
 /tests/dep_inputs.py @nestorcolt
 /tests/dep_manifest.py @nestorcolt
 /tests/mutation_line_selection_proof.py @nestorcolt
+/tests/mutation_self_plant/ @nestorcolt
 /tests/reused_coverage.py @nestorcolt
 /tests/test_coverage_*.py @nestorcolt
 /tests/dev_durations.py @nestorcolt
