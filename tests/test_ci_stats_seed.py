@@ -378,7 +378,8 @@ def test_harvest_keeps_pointers_it_wrote_before_a_timeout(folder, monkeypatch):
     assert taken == {"x.index"}
 
 
-def test_api_waits_at_most_until_the_deadline(monkeypatch):
+@pytest.mark.parametrize(("deadline", "timeout"), [(150.0, 50.0), (100.5, 0.5)])
+def test_api_waits_at_most_until_the_deadline(monkeypatch, deadline, timeout):
     seen = {}
 
     def run(command, **options):
@@ -388,8 +389,8 @@ def test_api_waits_at_most_until_the_deadline(monkeypatch):
     monkeypatch.setattr(seed.subprocess, "run", run)
     monkeypatch.setattr(seed, "time", SimpleNamespace(monotonic=lambda: 100.0))
 
-    assert seed.api("pulls/7", deadline=150.0) == {}
-    assert seen["timeout"] == 50.0
+    assert seed.api("pulls/7", deadline=deadline) == {}
+    assert seen["timeout"] == timeout
 
 
 @pytest.mark.parametrize("deadline", [100.0, 90.0])
