@@ -280,6 +280,19 @@ def test_the_folder_copy_holds_only_plain_text_files(homes):
     assert not (folder.parent / "escape").exists()
 
 
+def test_the_file_cap_counts_only_added_files_that_travel(homes):
+    with at(homes.hive):
+        folder = ledger_workspace.materialize("fixture", "task", {"progress.md": "step\n", "proof.md": "proof\n"})
+        (folder / "a0.log").write_text("x" * (ledger_workspace.SEED_CHARS + 1), encoding="utf-8")
+        for index in range(1, ledger_workspace.FILES + 2):
+            (folder / f"a{index:02}.txt").write_text(f"{index}\n", encoding="utf-8")
+        sent = ledger_workspace.seeds("fixture", "task")
+    assert sent["progress.md"] == "step\n" and sent["proof.md"] == "proof\n"
+    assert sorted(set(sent) - {"progress.md", "proof.md"}) == [
+        f"a{index:02}.txt" for index in range(1, ledger_workspace.FILES + 1)
+    ]
+
+
 def test_the_latest_execution_of_a_task_wins(setup):
     from dataclasses import replace
 

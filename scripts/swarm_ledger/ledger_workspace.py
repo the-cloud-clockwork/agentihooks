@@ -100,26 +100,31 @@ def seeds(slug, task_id):
 
 
 def contents(slug, task_id):
-    """Progress and proof keep their latest text; any other plain text file the agent added travels whole or not at all."""
+    """Progress and proof keep their latest text; another plain text file travels whole or not at all."""
     found = {}
+    added = 0
     for file in _files(folder(slug, task_id)):
+        seed = file.name in SEEDS
+        if not seed and added >= FILES:
+            break
         try:
-            if file.name not in SEEDS and file.stat().st_size > SEED_CHARS:
+            if not seed and file.stat().st_size > SEED_CHARS:
                 continue
             text = file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         found[file.name] = text[-SEED_CHARS:]
+        added += not seed
     return found
 
 
 def _files(path):
     try:
-        listed = sorted(path.iterdir())
+        listed = sorted(path.iterdir(), key=lambda file: (file.name not in SEEDS, file.name))
     except OSError:
         return []
     kept = [file for file in listed if file.name != "steering.md" and PART_RE.fullmatch(file.name)]
-    return [file for file in kept if file.is_file() and not file.is_symlink()][:FILES]
+    return [file for file in kept if file.is_file() and not file.is_symlink()]
 
 
 def materialize(slug, task_id, sent):
@@ -177,7 +182,7 @@ def mirror(store, slug, ledger):
         path = folder(slug, task_id)
         path.mkdir(parents=True, exist_ok=True)
         for name, text in copy.items():
-            if name != "steering.md" and PART_RE.fullmatch(name):
+            if name != "steering.md" and PART_RE.fullmatch(name) and not (path / name).is_symlink():
                 (path / name).write_text(text, encoding="utf-8")
 
 
