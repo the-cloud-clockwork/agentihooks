@@ -14,6 +14,7 @@ STOOD_DOWN = "stood_down"
 RECORDS, ENDPOINTS, OPENINGS = "codex-transport", "codex-endpoints", "codex-openings"
 VIEWERS = "codex-viewers"
 PUBLISHING = "execution-publishing"
+RESERVE_ATTEMPTS = 1
 IDENTITY = ("execution_id", "execution_generation", "seat", "agent_name", "task_id", "endpoint_ref", "transport")
 
 

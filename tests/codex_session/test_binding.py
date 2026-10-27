@@ -8,6 +8,7 @@ from scripts.codex_session.binding import (
     ENDPOINTS,
     OPENINGS,
     RECORDS,
+    RESERVE_ATTEMPTS,
     SCHEMA_VERSION,
     STARTING,
     TRANSPORT,
@@ -75,30 +76,63 @@ def test_two_executions_cannot_share_one_endpoint(bindings):
     assert bindings.get(SLUG, "exe-two") is None
 
 
-def test_a_concurrent_change_refuses_the_reservation(bindings, monkeypatch):
+def test_a_change_on_every_attempt_refuses_the_reservation(bindings, monkeypatch):
     from redis.exceptions import WatchError
 
+    attempts = []
+
     def interrupted(self):
+        attempts.append(1)
         raise WatchError("changed")
 
     monkeypatch.setattr(type(bindings.redis.pipeline()), "execute", interrupted)
     with pytest.raises(BindingError, match=EXACT["concurrent launch"]):
         bindings.reserve(SLUG, record())
+    assert len(attempts) == RESERVE_ATTEMPTS == 5
 
 
 @pytest.mark.parametrize("watched", [RECORDS, ENDPOINTS])
-def test_a_change_to_either_watched_key_during_the_reservation_refuses_it(bindings, monkeypatch, watched):
+def test_a_change_to_either_watched_key_during_the_reservation_reruns_it(bindings, monkeypatch, watched):
     pipeline = type(bindings.redis.pipeline())
     checked = pipeline.hget
+    changes = []
 
     def changed_meanwhile(self, name, key):
-        bindings.redis.hset(bindings.store.key(SLUG, watched), "intruder", "exe-other")
+        if not changes:
+            changes.append(key)
+            bindings.redis.hset(bindings.store.key(SLUG, watched), "intruder", "exe-other")
         return checked(self, name, key)
 
     monkeypatch.setattr(pipeline, "hget", changed_meanwhile)
-    with pytest.raises(BindingError, match=EXACT["concurrent launch"]):
+    reserved = bindings.reserve(SLUG, record())
+    assert bindings.get(SLUG, "exe-one") == reserved
+    assert bindings.redis.hget(bindings.store.key(SLUG, ENDPOINTS), reserved.endpoint_ref) == "exe-one"
+    assert bindings.redis.hget(bindings.store.key(SLUG, watched), "intruder") == "exe-other"
+
+
+@pytest.mark.parametrize(
+    ("concurrent", "refusal"),
+    [
+        (record(endpoint="unix:///run/cx/two/s"), "duplicate launch"),
+        (record(execution="exe-two"), "endpoint already belongs to another execution"),
+    ],
+)
+def test_a_rerun_refuses_what_the_concurrent_launch_reserved(bindings, monkeypatch, concurrent, refusal):
+    pipeline = type(bindings.redis.pipeline())
+    checked = pipeline.hexists
+    launched = []
+
+    def raced(self, name, key):
+        if not launched:
+            launched.append(None)
+            launched[0] = bindings.reserve(SLUG, concurrent)
+        return checked(self, name, key)
+
+    monkeypatch.setattr(pipeline, "hexists", raced)
+    with pytest.raises(BindingError, match=EXACT[refusal]):
         bindings.reserve(SLUG, record())
-    assert bindings.redis.hget(bindings.store.key(SLUG, RECORDS), "exe-one") is None
+    assert bindings.get(SLUG, concurrent.execution_id) == launched[0]
+    assert bindings.redis.hget(bindings.store.key(SLUG, ENDPOINTS), concurrent.endpoint_ref) == concurrent.execution_id
 
 
 def test_updates_keep_the_record_identity(bindings):
