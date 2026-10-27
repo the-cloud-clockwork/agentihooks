@@ -173,7 +173,7 @@ def test_completed_mutant_cost_survives_a_kill_and_cache_reload(tmp_path, monkey
 def test_only_completed_mutant_tests_record_cost(tmp_path, monkeypatch):
     import pytest
 
-    memory = killers.KillMemory(tmp_path / "killers")
+    memory = killers.KillMemory(tmp_path / "missing" / "killers")
     ticks = iter(range(20))
     monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
     for status in [0, 1, 2, 3, 4, 5]:

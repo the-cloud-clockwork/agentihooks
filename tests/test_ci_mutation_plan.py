@@ -115,19 +115,18 @@ def test_measured_costs_merge_mappings_keep_slowest_durations_and_cover_missing_
 
 
 def test_observed_mutant_execution_costs_drive_balanced_existing_workers(tmp_path, monkeypatch):
-    import hashlib
-    import json
-
-    from scripts.ci_mutation.killers import KillMemory
+    from scripts.ci_mutation import killers
     from scripts.ci_mutation.measured import measured_costs, plan_shards
 
     monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
-    memory = KillMemory(tmp_path)
+    memory = killers.KillMemory(tmp_path)
     names = [f"scripts.sample.x_f__mutmut_{index}" for index in range(8)]
     observations = [20.0, 20.0, 20.0, 20.0, 1.0, 1.0, 1.0, 1.0]
-    for name, seconds in zip(names, observations, strict=True):
-        path = tmp_path / (hashlib.sha256(name.encode()).hexdigest() + ".cost")
-        path.write_text(json.dumps({"tests": ["test"], "seconds": seconds}))
+    ticks = iter(value for seconds in observations for value in [100.0, 100.0 + seconds])
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    for name in names:
+        memory.prepare(name, ["test"])
+        assert memory.wrap(lambda *args, **kwargs: 0)(object(), ["test"]) == 0
     results = [{"tests": {"scripts.sample.x_f": ["test"]}, "durations": {"test": 100.0}}]
     costs = measured_costs(names, results, memory)
     assert costs == dict(zip(names, observations, strict=True))
@@ -137,6 +136,7 @@ def test_observed_mutant_execution_costs_drive_balanced_existing_workers(tmp_pat
     assert set(plan["assignments"]) == set(names)
     assert plan == plan_shards(dict(reversed(list(costs.items()))), target=1, limit=4)
     assert measured_costs(names[:1], results) == {names[0]: 130.6}
+    assert measured_costs(names[:1], [], memory) == {names[0]: 80.6}
     changed = [{"tests": {"scripts.sample.x_f": ["different"]}, "durations": {"different": 2.0}}]
     assert measured_costs(names[:1], changed, memory) == {names[0]: 8.1}
 

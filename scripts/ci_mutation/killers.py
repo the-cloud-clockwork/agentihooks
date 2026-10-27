@@ -18,12 +18,16 @@ class KillMemory:
         # Upload refuses some characters mangled names may hold, so the file is named by a digest.
         return self.folder / hashlib.sha256(mutant.partition("__mutmut_")[0].encode()).hexdigest()
 
+    def _cost_path(self, mutant: str, tests: Iterable[str]) -> Path:
+        key = json.dumps([mutant, sorted(set(tests))])
+        return self.folder / (hashlib.sha256(key.encode()).hexdigest() + ".cost")
+
     def killer(self, mutant: str) -> str | None:
         path = self._path(mutant)
         return path.read_text() if path.is_file() else None
 
     def cost(self, mutant: str, tests: Iterable[str]) -> float | None:
-        path = self.folder / (hashlib.sha256(mutant.encode()).hexdigest() + ".cost")
+        path = self._cost_path(mutant, tests)
         if not path.is_file():
             return None
         record = json.loads(path.read_text())
@@ -51,7 +55,7 @@ class KillMemory:
             if mutant is not None and status in (0, 1):
                 seconds = time.monotonic() - started
                 self.folder.mkdir(parents=True, exist_ok=True)
-                path = self.folder / (hashlib.sha256(mutant.encode()).hexdigest() + ".cost")
+                path = self._cost_path(mutant, self.rank)
                 partial = path.with_name(f"{path.name}.{os.getpid()}")
                 partial.write_text(json.dumps({"tests": sorted(self.rank), "seconds": seconds}))
                 partial.replace(path)
