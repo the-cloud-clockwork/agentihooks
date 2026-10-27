@@ -421,8 +421,8 @@ backend masters over the masters channel. While the lead seat is empty the lowes
 beyond the master seat count while the front door master is still coming up. The front door is coming up when a
 master record holding the lead seat (`master@<id>`, or no seat recorded) is in state `starting` or `suspect`, live
 or not. The launcher then takes the lowest free master seat, `master-2@<id>` and up; a seat is held by any agent
-record on it that is not `finished`, or a `finished` one whose session still runs. When that seat number is above the count from `set masters=N` (default 1),
-nothing starts and the command exits non zero with:
+record on it that is not `finished`, or a `finished` one whose session still runs. When that seat number is above
+the count from `set masters=N` (default 1), nothing starts and the command exits non zero with:
 
 ```text
 the front door master <name> is starting and every master seat is held (master seat count 1), so no other master starts; the tick binds or replaces it, or run master up --replace to retire it first
