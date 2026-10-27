@@ -1240,7 +1240,7 @@ def cmd_ledger_ready(store: RedisStore, args: argparse.Namespace) -> None:
     print(json.dumps(ledger_cutover.readiness(store, args.slug)))
 
 
-def cmd_probe(store, args):
+def probe_command(store, args):
     from scripts.swarm import probe
 
     for found in probe.run(store, args.slug, LedgerClient(), now_ms()):
@@ -2298,7 +2298,7 @@ def build_parser():
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
-    sub.add_parser("probe")
+    sub.add_parser("probe").set_defaults(handler=probe_command)
     sub.add_parser("ledger-ready")
     for verb in ("freeze", "focus", "unfreeze"):
         frozen = sub.add_parser(verb)
@@ -2460,7 +2460,7 @@ def dispatch(argv):
         elif len(argv) == 3 and argv[2] == "up" and argv[1] != "master":
             argv = [argv[0], "agent-up", argv[1]]
         args = build_parser().parse_args(argv)
-        handler = globals()[f"cmd_{args.command.replace('-', '_')}"]
+        handler = vars(args).get("handler") or globals()[f"cmd_{args.command.replace('-', '_')}"]
     who = Who.from_env()
     if text := refusal(vars(args).get("name"), who):
         print(f"swarm: {text}", file=sys.stderr)

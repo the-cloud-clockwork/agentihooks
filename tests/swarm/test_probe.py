@@ -283,7 +283,7 @@ def test_the_probe_command_prints_each_probe_line(monkeypatch, capsys):
 
     monkeypatch.setattr(probe, "run", run)
     monkeypatch.setattr(cli, "now_ms", lambda: NOW)
-    cli.cmd_probe("store", SimpleNamespace(slug="s"))
+    cli.probe_command("store", SimpleNamespace(slug="s"))
     assert capsys.readouterr().out == "pass\ta\t1\nfail\tb\t2\n"
     assert seen == [("store", "s", "LedgerClient", NOW)]
     assert cli.build_parser().parse_args(["s", "probe"]).command == "probe"

@@ -86,6 +86,21 @@ def test_start_reports_plan_shape_and_warns_before_spawning(env, capsys, monkeyp
     assert "engineer width 1 is below engineer cap 4" in observed[0].err
 
 
+def test_probe_runs_through_its_parser_default_on_the_connected_store(env, capsys, monkeypatch):
+    from scripts.swarm import probe
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    capsys.readouterr()
+    seen = []
+    monkeypatch.setattr(
+        probe, "run", lambda *args: seen.append(args[:3]) or [probe.Probe("every hive live", True, "1 of 1 live")]
+    )
+    assert run("sw", "probe") == 0
+    assert capsys.readouterr().out == "pass\tevery hive live\t1 of 1 live\n"
+    assert seen == [(store, "sw", ledger)]
+
+
 def test_status_json_includes_plan_shape_without_cap_warning_when_wide_enough(env, capsys):
     run("demo", "create", "--repo", "/repo", "--max-eng-agents", "1")
     capsys.readouterr()
