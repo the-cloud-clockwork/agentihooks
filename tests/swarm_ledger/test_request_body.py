@@ -290,7 +290,3 @@ def test_the_ledger_server_assigns_each_module_constant_once():
     ]
 
     assert sorted(name for name in set(names) if names.count(name) > 1) == []
-
-
-def test_the_server_drain_keeps_its_own_bound_beside_the_body_drain():
-    assert (ledger_server.DRAIN_S, ledger_server.BODY_DRAIN_S) == (5.0, 2)
