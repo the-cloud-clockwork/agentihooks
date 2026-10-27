@@ -61,7 +61,7 @@ def needs_full_suite(changed: list[str]) -> bool:
 
 
 def is_doc(path: str) -> bool:
-    return path.startswith(DOCS) or path.endswith(DOC)
+    return path.endswith(DOC) or path.startswith(DOCS)
 
 
 def naming_tests(root: Path, needles: set[str]) -> set[str]:
