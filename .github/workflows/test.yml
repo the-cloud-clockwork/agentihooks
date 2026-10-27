@@ -3120,17 +3120,45 @@ jobs:
 
       - name: Download this run's test durations
         if: ${{ always() }}
+        id: download-this-runs-test-durations
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &test-summary-download-this-runs-test-durations
           pattern: durations-3.*
           path: test-reports
 
+      - name: Download this run's test durations, wait before attempt 2
+        if: steps.download-this-runs-test-durations.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download this run's test durations failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download this run's test durations, attempt 2
+        if: steps.download-this-runs-test-durations.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *test-summary-download-this-runs-test-durations
+
       - name: Download this run's test flakes
         if: ${{ always() }}
+        id: download-this-runs-test-flakes
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &test-summary-download-this-runs-test-flakes
           pattern: flakes-3.*
           path: test-reports
+
+      - name: Download this run's test flakes, wait before attempt 2
+        if: steps.download-this-runs-test-flakes.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download this run's test flakes failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download this run's test flakes, attempt 2
+        if: steps.download-this-runs-test-flakes.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *test-summary-download-this-runs-test-flakes
 
       - name: Summarize this run's tests
         if: ${{ always() }}
@@ -3217,6 +3245,54 @@ jobs:
         with:
           path: ~/durations-samples
           key: durations-samples-${{ github.sha }}
+
+  # Pull request caches stay on their own ref, so dev carries the merged pull requests' records for first runs to restore.
+  mutation-stats-seed:
+    if: ${{ !cancelled() && github.event_name == 'push' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore the dev test stats
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-test-stats-v2-${{ runner.os }}-
+
+      - name: Mint the token that reads the merged pull requests' test stats
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Add the merged pull requests' test stats
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BEFORE: ${{ github.event.before }}
+        run: python -m scripts.ci_stats_seed .mutation-stats-cache --head "$GITHUB_SHA" --before "$BEFORE"
+
+      - name: Save the dev test stats
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   flake-budget:
     needs: [unit]
@@ -3691,20 +3767,20 @@ jobs:
           overwrite: true
 
       - name: Keep only the test stats this part wrote
-        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         env:
           PART: ${{ matrix.part }}
         run: mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \;
 
       - name: Upload this part's test stats cache
-        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-test-stats-cache-${{ matrix.part }}
           path: .mutation-stats-fresh/
           include-hidden-files: true
           if-no-files-found: ignore
-          retention-days: 1
+          retention-days: 7
 
       - name: Mutate the only shard in the statistics job
         id: mutate

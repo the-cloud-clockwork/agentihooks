@@ -34,6 +34,7 @@ PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lin
     "coverage-baseline",
     "promote",
     "refresh-durations",
+    "mutation-stats-seed",
     "count-record",
     "flake-budget",
     "swarm-image",
