@@ -106,7 +106,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MUTATION_SHARD_CPU_QUOTA: "3"
-        run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
+        run: |
+          python - "$BASE" "$GITHUB_REPOSITORY" <<'PROBE'
+          import cProfile, pstats, sys, time
+          t0 = time.perf_counter()
+          sys.argv = ["plan", "--base", sys.argv[1], "--repository", sys.argv[2]]
+          from scripts.ci_mutation import plan
+          print(f"PHASE import {time.perf_counter() - t0:.2f}", flush=True)
+          orig = plan.read_record
+          def timed(*a):
+              s = time.perf_counter()
+              r = orig(*a)
+              print(f"PHASE read_record {s - t0:.2f} to {time.perf_counter() - t0:.2f}", flush=True)
+              return r
+          plan.read_record = timed
+          prof = cProfile.Profile()
+          prof.enable()
+          code = plan.main()
+          prof.disable()
+          print(f"PHASE total {time.perf_counter() - t0:.2f}", flush=True)
+          pstats.Stats(prof).sort_stats("cumulative").print_stats(60)
+          pstats.Stats(prof).sort_stats("tottime").print_stats(25)
+          sys.exit(code)
+          PROBE
 
       - name: Upload planned mutation test selection
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
