@@ -51,7 +51,8 @@ def measured_costs(names: list[str], results: list[dict], memory: KillMemory | N
         seconds = (
             durations.get(killer, missing) if killer in tests.get(function, ()) else functions.get(function, fallback)
         )
-        costs[name] = MUTANT_SECONDS + 1.25 * seconds
+        observed = memory.cost(name, tests.get(function, ())) if memory is not None else None
+        costs[name] = observed if observed is not None else MUTANT_SECONDS + 1.25 * seconds
     return costs
 
 

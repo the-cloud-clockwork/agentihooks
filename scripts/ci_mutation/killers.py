@@ -1,4 +1,6 @@
 import hashlib
+import json
+import time
 import os
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -20,6 +22,13 @@ class KillMemory:
         path = self._path(mutant)
         return path.read_text() if path.is_file() else None
 
+    def cost(self, mutant: str, tests: Iterable[str]) -> float | None:
+        path = self.folder / (hashlib.sha256(mutant.encode()).hexdigest() + ".cost")
+        if not path.is_file():
+            return None
+        record = json.loads(path.read_text())
+        return record["seconds"] if record["tests"] == sorted(tests) else None
+
     def order(self, mutant: str, tests: Iterable[str]) -> list[str]:
         killer = self.killer(mutant)
         return sorted(tests, key=lambda test: test != killer)
@@ -34,9 +43,19 @@ class KillMemory:
 
     def wrap(self, execute_pytest: Callable[..., int]) -> Callable[..., int]:
         def execute_remembering_kills(runner, params, **kwargs):
-            if self.mutant is not None:
+            mutant = self.mutant
+            if mutant is not None:
                 kwargs["plugins"] = [*kwargs.get("plugins", []), self]
-            return execute_pytest(runner, params, **kwargs)
+            started = time.monotonic()
+            status = execute_pytest(runner, params, **kwargs)
+            if mutant is not None and status in (0, 1):
+                seconds = time.monotonic() - started
+                self.folder.mkdir(parents=True, exist_ok=True)
+                path = self.folder / (hashlib.sha256(mutant.encode()).hexdigest() + ".cost")
+                partial = path.with_name(f"{path.name}.{os.getpid()}")
+                partial.write_text(json.dumps({"tests": sorted(self.rank), "seconds": seconds}))
+                partial.replace(path)
+            return status
 
         return execute_remembering_kills
 
