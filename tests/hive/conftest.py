@@ -13,3 +13,4 @@ def _no_headroom_thread(monkeypatch):
     from scripts.hive import daemon
 
     monkeypatch.setattr(daemon, "publish_headroom", lambda redis, waiter, local_id, stop: None)
+    monkeypatch.setattr(daemon, "publish_herdr_stats", lambda redis, waiter, local_id, stop: None)
