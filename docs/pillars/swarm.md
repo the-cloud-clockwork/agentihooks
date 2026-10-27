@@ -144,8 +144,8 @@ follow up, question, blocked task and done task, each phase it ticks or reopens,
 The master recycles like any agent: at `AGENTIHOOKS_COMPACT_LIMIT` it writes a handoff document and runs
 `agentihooks swarm <id> handoff <doc>`. The next tick retires it and spawns the next master with the document,
 so one master is always online. A master busy with no tool call past the stall threshold is recycled the same
-way without its own document: see [Stalled master recycle](#stalled-master-recycle). `issue`, `pr`, `done` and `block` refuse the master. The swarm panel on the
-ledger page shows the master as the first card.
+way without its own document: see [Stalled master recycle](#stalled-master-recycle). `issue`, `pr`, `done` and
+`block` refuse the master. The swarm panel on the ledger page shows the master as the first card.
 
 Before the tick retires a live master that reported its hook, for any reason (a live binding mismatch, a failed
 launch check, the idle limit or a stopping swarm), it sends that master an inbox item asking for a Handoff v2 and
@@ -5146,15 +5146,13 @@ or Redis outages, which have their own hold and resume behavior.
 ### Stalled master recycle
 
 A master that shows busy with no tool call past the stall threshold is recycled by its swarm's tick through a
-recovery handoff in the same seat, so a stalled master never waits on the operator to stop it. Before this
-([pull request 7340](https://github.com/the-cloud-clockwork/agentihooks/pull/7340)), a proof swarm's master stayed busy
-with no tool call for at least 145 minutes with six inbox items unread, and since that swarm's controls accept only
-the operator and its own master, nobody else could stop it.
+recovery handoff in the same seat, so a stalled master never waits on the operator to stop it. A proof swarm's
+controls accept only the operator and its own master, so no other agent can stop a stalled proof master.
 
-Every tick that is not stopping or stopped checks the swarm's live master. Its stall clock runs only when all of
-these hold:
+Every tick of a swarm that is not stopping or stopped checks the swarm's live master. Its stall clock runs only
+when all of these hold:
 
-| Condition | Why the clock holds otherwise |
+| Clock runs only when | Reason |
 |---|---|
 | The master's pane reports `working` | An idle or waiting pane is not stalled. |
 | The master has no declared wait (`swarm <id> wait`) | A declared wait is work in progress. |
@@ -5180,8 +5178,10 @@ the tick acts in this order:
    kills the process here. The next master starts in the same seat from that handoff. The journal line is
    `recycled master <name> in its seat after <n> minutes busy with no tool call`.
 
-If the master makes a tool call while the ask is pending, the clock resets: the tick withdraws the request and closes
-the ask item as done with `the master resumed work`. Retire requests raised for other reasons are left alone.
+While the ask is pending, the tick withdraws it as soon as the clock stops or falls back under the threshold: the
+master starts or finishes a tool call, declares a wait, or its pane leaves `working`. It closes the ask item as done
+with `the master resumed work` in every one of these cases, including a pane that went idle. Retire requests raised
+for other reasons are left alone.
 
 The recovery handoff is runtime written. Its envelope carries reason `recycle`, the master's name and seat and the
 ledger; its body marks Done, Stopped at and Decisions and promises as `unknown`, because the stalled master reported
@@ -5206,11 +5206,12 @@ turn end.
 
 #### Configure
 
-The threshold and handoff wait are read by the process that runs the tick, so set them in that service's environment,
-as in [Configure the threshold](#configure-the-threshold):
+The threshold and handoff wait are read by the process that runs the tick. For normal operation set them in the
+swarm timer's or controller's managed environment, as in [Configure the threshold](#configure-the-threshold), since
+the timer starts each tick as its own child process. A prefix on a manual tick affects only that invocation:
 
 ```bash
-# Recycle after 20 quiet minutes and give the master 3 minutes to hand off
+# Manual tick: recycle after 20 quiet minutes and give the master 3 minutes to hand off
 AGENTIHOOKS_HEALTH_STALLED_MINUTES=20 AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES=3 agentihooks swarm tick
 ```
 
@@ -5235,7 +5236,7 @@ ls ~/.agentihooks/swarm-activity/<id>/<master name>.open/
 |---|---|
 | A master busy for longer than the threshold is not recycled | A tool call is still open, it declared a wait, its pane does not read `working`, or the swarm is stopping. List its open markers; a leftover one from a failed call means the `PostToolUseFailure` hook is not installed. |
 | The ask arrives but the master keeps working | Expected: its next tool call withdraws the ask as resumed. |
-| A proof swarm stopped instead of recycling its master | Its parent task is blocked; unblock or close that task in the parent swarm. |
+| A proof swarm stopped instead of recycling its master | Its parent task is blocked. Nothing restarts the proof swarm when the parent task is unblocked; run `agentihooks swarm <id> start` to continue the proof. |
 | The successor starts with unknown Done and Stopped at | Expected for a recovery handoff; it rebuilds its state from the ledger and the master inbox. |
 
 ### Spawn stall findings
