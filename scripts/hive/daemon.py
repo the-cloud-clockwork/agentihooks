@@ -214,7 +214,7 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
             scheduled_wait(HEADROOM_SECONDS, redis=waiter, timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
         except (ConnectionError, TimeoutError) as exc:
             print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
-            if stop.wait(HEADROOM_SECONDS):
+            if isinstance(exc, ConnectionError) and stop.wait(HEADROOM_SECONDS):
                 return
         if stop.is_set():
             return

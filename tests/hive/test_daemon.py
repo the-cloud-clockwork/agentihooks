@@ -488,7 +488,7 @@ def test_headroom_keeps_publishing_after_its_wait_loses_the_connection(monkeypat
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
     redis = object()
     PUBLISH_HEADROOM(redis, object(), "local", Stop())
-    assert paused == [daemon.HEADROOM_SECONDS]
+    assert paused == ([daemon.HEADROOM_SECONDS] if error == "ConnectionError" else [])
     assert calls == [(redis, "local", 1_000)]
     assert beats == [(redis, "local")]
     assert capsys.readouterr().err == f"hive headroom wait failed ({error}: gone)\n"
