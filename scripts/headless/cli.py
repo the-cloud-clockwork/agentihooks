@@ -6,9 +6,9 @@ import argparse
 import json
 import os
 import sys
+import time
 import uuid
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from pathlib import Path
 
 from scripts.headless import profile_run
@@ -37,7 +37,7 @@ def parser() -> argparse.ArgumentParser:
 
 def default_run_dir(environ: Mapping[str, str]) -> Path:
     home = Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     return home / "headless" / f"{stamp}-{uuid.uuid4().hex[:8]}"
 
 

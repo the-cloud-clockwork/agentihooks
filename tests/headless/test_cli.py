@@ -142,6 +142,51 @@ def test_run_refuses_an_unknown_harness(captured, capsys):
     assert "invalid choice: 'gemini'" in capsys.readouterr().err
 
 
+def test_run_refuses_an_unknown_tier(captured, capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["run", "engineer", "--input", "x", "--tier", "mid"])
+
+    assert exit_info.value.code == 2
+    err = capsys.readouterr().err
+    assert err.startswith("usage: agentihooks headless run ")
+    assert "invalid choice: 'mid'" in err
+
+
+def test_the_command_requires_an_action(captured, capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main([])
+
+    assert exit_info.value.code == 2
+    assert "the following arguments are required: action" in capsys.readouterr().err
+
+
+def test_run_help_names_every_flag(captured, capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "300")
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["run", "--help"])
+
+    assert exit_info.value.code == 0
+    out = capsys.readouterr().out
+    for text in (
+        "Prompt text, or a file holding it",
+        "JSON schema file the output must match",
+        "Run folder for the transcript",
+        "Seconds before the run is killed",
+    ):
+        assert re.search(rf"\s{{2}}{re.escape(text)}$", out, re.MULTILINE), text
+
+
+def test_top_help_names_the_command_and_the_run_action(captured, capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "300")
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+
+    out = capsys.readouterr().out
+    assert out.startswith("usage: agentihooks headless ")
+    assert "Run a full rendered profile unattended and print its result as JSON" in out.splitlines()
+    assert re.search(r"\s{2}Run one profile on one input$", out, re.MULTILINE)
+
+
 def test_run_refuses_a_schema_file_that_is_not_json(captured, tmp_path, capsys):
     runs, _ = captured
     schema = tmp_path / "schema.json"
