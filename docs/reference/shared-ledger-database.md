@@ -236,17 +236,18 @@ rows. Sample the newest generation of every ledger for unrecorded bumps over a w
 ```bash
 while sleep 5; do
   psql -At "$AGENTIHOOKS_SWARM_DATABASE_URL" -c "
-  SELECT now(), l.slug, l.generation FROM ledgers l
+  SELECT l.slug, l.generation FROM ledgers l
   WHERE NOT EXISTS (SELECT 1 FROM row_changes r WHERE r.slug = l.slug AND r.generation = l.generation)"
-done | tee -a unrecorded-bumps.log
+done | sort -u | tee unrecorded-bumps.log
 ```
 
-Each new `slug|generation` pair in the log is an unrecorded bump. A sample sees only each ledger's newest generation,
+Stop the loop at the end of the window; each line in the log is one unrecorded bump. A sample sees only each ledger's newest generation,
 so bumps between samples go uncounted; a ledger nobody has written since it was created can show once and is not a
 bump.
 
-Ledger task t691 recorded this figure with its generation poll probe on 23 October: 286 bumps in the hour before the
-floor reached the hosted ledger server and 344 in the hour after, none unrecorded in either. The old workstation
+Ledger task t691 measured with its own generation poll probe on 23 October, which counts every bump as well as the
+unrecorded ones that this query alone shows: 286 bumps in the hour before the floor reached the hosted ledger server
+and 344 in the hour after, none unrecorded in either. The old workstation
 writer had already been replaced on 22 October, so the floor guards against its return rather than moving a live
 count.
 
