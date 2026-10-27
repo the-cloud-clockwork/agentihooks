@@ -365,6 +365,7 @@ def test_rendered_overlays_read_the_home_stamp(tmp_path, wrapped):
             "render stamp field overlays is a list holding an object, expected a list of strings",
         ),
         ({"overlays": [1]}, "render stamp field overlays is a list holding a number, expected a list of strings"),
+        ({"overlays": [True]}, "render stamp field overlays is a list holding a boolean, expected a list of strings"),
         ({"overlays": None}, "render stamp field overlays is null, expected a list of strings"),
         ({"render": {"overlays": None}}, "render stamp field overlays is null, expected a list of strings"),
     ],
