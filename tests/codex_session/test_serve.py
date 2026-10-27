@@ -95,6 +95,7 @@ def test_the_serve_parser_reads_every_option_and_its_defaults(capsys):
         "seat": "eng-1@sw",
         "overlay": [],
         "bundle_revision": "",
+        "home": "",
         "exclude": "",
         "report": "",
         "previous_execution": "",
@@ -233,6 +234,30 @@ def test_prepare_routes_renders_and_builds_the_launch(tmp_path, monkeypatch):
     assert spec.execution_id == "exe-admitted"
     assert (spec.account_type, spec.allowed_tokens, spec.bundle_revision) == ("", frozenset({"AH_CX_TOKEN_t"}), "abc")
     assert spec.startup_timeout_s == 7.0
+
+
+def test_prepare_mounts_the_home_init_agent_rendered_after_the_bundle_moved(tmp_path, monkeypatch):
+    home = tmp_path / "rendered" / "engineer" / "codex"
+    root = tmp_path / "engineer"
+    root.mkdir()
+    (root / "profile.yml").write_text("model: gpt-6.1-sol\neffort: high\n")
+    inspected = []
+
+    def rerender(*args, **kwargs):
+        raise AssertionError("serve rendered the profile again after the bundle checkout moved")
+
+    monkeypatch.setattr(serve.select_profile.profiles, "_chain", lambda name: [(name, root)])
+    monkeypatch.setattr(serve.select_profile.profiles, "render", rerender)
+    monkeypatch.setattr(serve.select_profile.profiles, "channels", lambda name: "amygdala,brain")
+    monkeypatch.setattr(serve.select_profile.plugins, "claude_only", lambda name: False)
+    monkeypatch.setattr(serve.select_profile.binding, "inspect", lambda *seen: inspected.append(seen))
+    monkeypatch.setattr(
+        serve, "route_account", lambda environ, route, exclude: (codex_router.CodexAccount("t"), "open", {})
+    )
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw", f"--home={home}"]
+    spec = serve.prepare(serve._parser().parse_args(argv), [], {**SWARM_ENV, "HOME": str(tmp_path)})
+    assert inspected == [(home, "engineer", "codex")]
+    assert spec.codex_home == str(home)
 
 
 def test_prepare_checks_the_login_of_an_interactive_route_and_opens_nothing_without_a_prompt(tmp_path, monkeypatch):
