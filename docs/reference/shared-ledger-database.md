@@ -238,12 +238,12 @@ while sleep 5; do
   psql -At "$AGENTIHOOKS_SWARM_DATABASE_URL" -c "
   SELECT l.slug, l.generation FROM ledgers l
   WHERE NOT EXISTS (SELECT 1 FROM row_changes r WHERE r.slug = l.slug AND r.generation = l.generation)"
-done | awk '!seen[$0]++ { print; fflush() }' | tee -a unrecorded-bumps.log
+done | awk '!seen[$0]++ { print; fflush() }' | tee unrecorded-bumps.log
 ```
 
-Each line in the log is one unrecorded bump, printed the first time a sample sees it. A sample sees only each ledger's newest generation,
-so bumps between samples go uncounted; a ledger nobody has written since it was created can show once and is not a
-bump.
+Each line is an unrecorded generation, printed once per run of the command the first time a sample sees it. A sample
+sees only each ledger's newest generation, so bumps between samples go uncounted. A ledger nobody has written since it
+was created shows once without being a bump, because creation records no changed rows.
 
 Ledger task t691 measured with its own generation poll probe on 23 October, which counts every bump as well as the
 unrecorded ones that this query alone shows: 286 bumps in the hour before the floor reached the hosted ledger server
