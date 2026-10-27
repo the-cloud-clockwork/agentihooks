@@ -93,7 +93,7 @@ def _schema(record: object) -> bool:
         and all(_strings(record.get(key)) for key in ("passed", "failed", "flaky"))
         and _strings(units)
         and isinstance(tests, dict)
-        and all(_valid_test(test, len(units)) for test in tests.values())
+        and all(_valid_test(test, len(units), set()) for test in tests.values())
     )
 
 
