@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from scripts import ci_select
+from tests.shard_budget import step_seconds
 
 pytestmark = pytest.mark.unit
 
@@ -717,6 +718,11 @@ def test_the_workflow_caps_a_selection_at_the_unit_shard_count(repo):
     assert sorted(file for leg in legs for file in leg) == sorted(
         ["tests/test_sample.py", *(f"tests/test_tick{index}.py" for index in range(1, 31))]
     )
+
+
+def test_a_selected_leg_has_the_time_of_a_full_suite_shard():
+    assert step_seconds("unit-selected") >= step_seconds("unit")
+    assert jobs()["unit-selected"]["timeout-minutes"] >= jobs()["unit"]["timeout-minutes"]
 
 
 def test_the_workflow_hands_every_leg_its_files(repo, monkeypatch, tmp_path, capsys):
