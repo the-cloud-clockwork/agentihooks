@@ -238,10 +238,10 @@ while sleep 5; do
   psql -At "$AGENTIHOOKS_SWARM_DATABASE_URL" -c "
   SELECT l.slug, l.generation FROM ledgers l
   WHERE NOT EXISTS (SELECT 1 FROM row_changes r WHERE r.slug = l.slug AND r.generation = l.generation)"
-done | sort -u | tee unrecorded-bumps.log
+done | awk '!seen[$0]++ { print; fflush() }' | tee -a unrecorded-bumps.log
 ```
 
-Stop the loop at the end of the window; each line in the log is one unrecorded bump. A sample sees only each ledger's newest generation,
+Each line in the log is one unrecorded bump, printed the first time a sample sees it. A sample sees only each ledger's newest generation,
 so bumps between samples go uncounted; a ledger nobody has written since it was created can show once and is not a
 bump.
 
