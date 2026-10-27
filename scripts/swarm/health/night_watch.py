@@ -199,7 +199,8 @@ def _agent_limit(watch, ready) -> str:
     covered = {(row["lane"], task) for task, row in waits.items()}
     if any((lane, task["id"]) not in covered for lane, tasks in ready.items() for task in tasks):
         return ""
-    return spawn_stall.refusals(waits, {}, since)
+    local = json.loads(watch.store.redis.get(watch.store.key(watch.slug, spawn_stall.LOCAL_REFUSAL)) or "{}")
+    return spawn_stall.refusals(waits, local, since)
 
 
 def _spawn(watch, state):
