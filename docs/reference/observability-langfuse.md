@@ -507,8 +507,8 @@ record in this order:
 A zero, negative, missing or null value counts as absent. The life keeps the
 raw `started_at`, so a hive agent resolved from its launch time still has life
 `name#0` and its traces correlate as before. The `telemetry never exported`
-and `telemetry misattributed` ids use the resolved start; the count drift id
-keeps the raw life.
+and `telemetry misattributed` ids use the resolved start; the
+`telemetry count drift` id keeps the raw life.
 
 An unknown start raises `telemetry start unknown` instead of any other active
 telemetry finding for that binding. The Doctor does not apply the grace, does
