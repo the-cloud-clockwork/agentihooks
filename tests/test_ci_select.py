@@ -735,6 +735,28 @@ def test_the_workflow_selects_nine_legs_for_a_large_change(repo):
     assert len(legs) == 9
 
 
+def test_the_workflow_keeps_a_selection_over_twelve_legs_selected(repo):
+    write(repo, {f"tests/test_tick{index}.py": "from hooks import sample\n" for index in range(1, 25)})
+    selected = seconds(test_sample=15.0, **{f"test_tick{index}": 160.0 for index in range(1, 25)})
+    assert sum(selected.values()) > ci_select.LEG_SECONDS * workflow_legs()
+    scope, legs = decide(repo, ["hooks/sample.py"], suite(selected, 682.0 * ci_select.FULL_SHARDS), workflow_legs())
+    assert scope == "selected"
+    assert len(legs) == workflow_legs()
+
+
+@pytest.mark.parametrize("job", ["split", "unit", "shard-check"])
+def test_the_full_suite_jobs_stay_skipped_on_a_selected_pull_request(job):
+    assert "needs.select.outputs.scope == 'full'" in jobs()[job]["if"]
+
+
+def test_a_selected_leg_has_the_time_of_a_full_shard():
+    def tests_step(name):
+        return next(step for step in jobs()[name]["steps"] if step.get("id") == "tests")
+
+    assert jobs()["unit-selected"]["timeout-minutes"] >= jobs()["unit"]["timeout-minutes"]
+    assert tests_step("unit-selected")["timeout-minutes"] >= tests_step("unit")["timeout-minutes"]
+
+
 def test_the_workflow_hands_every_leg_its_files(repo, monkeypatch, tmp_path, capsys):
     write(repo, {f"tests/test_tick{index}.py": "from hooks import sample\n" for index in range(1, 10)})
     durations = seconds(test_sample=15.0, **{f"test_tick{index}": 160.0 for index in range(1, 10)})
