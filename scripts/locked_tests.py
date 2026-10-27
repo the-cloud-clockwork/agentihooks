@@ -236,18 +236,18 @@ def load(tree: Path) -> dict[str, dict] | None:
 def write(tree: Path) -> None:
     entries = {
         key: {field: entry[field] for field in (*FIELDS, TEXTS)}
-        for key, entry in sorted(measure(tree).items())
+        for key, entry in sorted(measure(tree, named(load(tree) or {})).items())
         if not entry["disabled"]
     }
     (tree / MANIFEST).write_text(json.dumps(entries, indent=1) + "\n")
 
 
-def unlocking_configs(tree: Path) -> list[str]:
+def unlocking_configs(tree: Path, modules: tuple[str, ...] = LOCKED) -> list[str]:
     paths = sorted({path for pattern in CONFIGS for path in tree.glob(pattern) if path.is_file()})
     return [
         f"{path.relative_to(tree)} names the locked module {stem}; a locked test cannot be ignored or deselected."
         for path in paths
-        for stem in (Path(name).stem for name in LOCKED)
+        for stem in (Path(name).stem for name in modules)
         if stem in path.read_text()
     ]
 
@@ -298,7 +298,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.write:
             write(args.head)
             return 0
-        configs = unlocking_configs(args.head)
         recorded = load(args.head)
         if recorded is None:
             raise GradeError(f"the head has no {MANIFEST}")
@@ -307,7 +306,9 @@ def main(argv: list[str] | None = None) -> int:
             # Only the pull request that introduces the manifest meets a base without one.
             print(f"::notice::The base has no {MANIFEST}; the head manifest locks itself.")
             base = recorded
-        head = measure(args.head, named(base, recorded))
+        modules = named(base, recorded)
+        head = measure(args.head, modules)
+        configs = unlocking_configs(args.head, modules)
     except (GradeError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1

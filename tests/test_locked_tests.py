@@ -455,6 +455,23 @@ def test_a_module_only_the_base_manifest_names_is_still_measured(tmp_path, capsy
     )
 
 
+def test_writing_the_manifest_keeps_the_modules_it_names(tmp_path):
+    root = _lock_extra(_tree(tmp_path, GUARD))
+    assert locked_tests.main(["--write", "--head", str(root)]) == 0
+    assert f"{EXTRA}::test_new" in json.loads((root / locked_tests.MANIFEST).read_text())
+
+
+def test_a_config_ignoring_a_module_the_manifest_names_is_refused(tmp_path, capsys):
+    base = _tree(tmp_path / "base", GUARD)
+    head = _lock_extra(_tree(tmp_path / "head", GUARD))
+    (head / "conftest.py").write_text('collect_ignore = ["tests/extra/test_new.py"]\n')
+    assert _grade(base, head, capsys) == (
+        1,
+        "4 locked tests on the base, 5 measured on the head, 1 errors\n"
+        "::error::conftest.py names the locked module test_new; a locked test cannot be ignored or deselected.\n",
+    )
+
+
 @pytest.mark.parametrize("module", ["../outside.py", "/etc/outside.py"])
 def test_a_manifest_module_outside_the_checkout_is_refused(tmp_path, capsys, module):
     base = _tree(tmp_path / "base", GUARD)
