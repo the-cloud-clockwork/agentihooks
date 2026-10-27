@@ -441,18 +441,20 @@ printf '%s\\n' "$*" >> "$PULL_LOG"
     assert (waits.read_text().splitlines() if waits.exists() else []) == ["10"] * min(failures, 2)
 
 
-@pytest.mark.parametrize(
-    "script,pull",
-    [
-        ("kind-smoke.sh", 'node="$(bash "$chart/ci/pull-kind-node.sh")"'),
-        ("kind-published.sh", 'node="$(bash "$(dirname "$0")/pull-kind-node.sh")"'),
-    ],
-)
-def test_kind_scripts_create_the_cluster_from_the_retried_node_pull(script, pull):
-    text = (ROOT / "deploy/helm/agentihooks-swarm/ci" / script).read_text()
+def test_kind_smoke_creates_the_cluster_from_the_retried_node_pull():
+    text = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh").read_text()
     creates = [line for line in text.splitlines() if "kind create cluster" in line]
-    assert creates and all(f"{pull} && kind create cluster" in line for line in creates)
-    assert all('--image "$node"' in line for line in creates)
+    pull = 'node="$(bash "$chart/ci/pull-kind-node.sh")"'
+    assert creates == [f'{{ {pull} && kind create cluster --name "$cluster" --image "$node"; }} &']
+
+
+def test_kind_published_pulls_the_node_before_waiting_for_the_release_image():
+    lines = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-published.sh").read_text().splitlines()
+    pull = lines.index('node="$(bash "$(dirname "$0")/pull-kind-node.sh")"')
+    create = lines.index('kind create cluster --name "$cluster" --image "$node" &')
+    wait = lines.index('until docker pull -q "$image"; do')
+    assert pull < create < wait
+    assert [line for line in lines if "kind create cluster" in line] == [lines[create]]
 
 
 def test_startup_stages_creates_the_cluster_from_the_retried_node_pull():
