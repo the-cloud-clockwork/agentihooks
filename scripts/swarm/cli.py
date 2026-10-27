@@ -1660,18 +1660,19 @@ def cmd_pr(store, args):
     agent = _worker(store, args)
     config = store.config(args.slug)
     awaiting = "approval" if config.autonomy == ASSIST else ""
-    head, repo = pull_branch(args.url)
-    branch = {"branch": head, "branch_repo": repo} if head else {}
-    fields = {"pr_url": args.url, "state": "pr", "awaiting": awaiting, **branch}
     ledger = LedgerClient()
     doc = ledger.state(args.slug)
     row = next(t for t in doc["tasks"] if t.get("id") == agent.task)
+    keeps_main = args.prerequisite is not None and row.get("pr_url") not in (None, "", args.url)
+    head, repo = ("", "") if keeps_main else pull_branch(args.url)
+    branch = {"branch": head, "branch_repo": repo} if head else {}
+    fields = {"state": "pr", "awaiting": awaiting, **branch} | ({} if keeps_main else {"pr_url": args.url})
     fields.update(_split_binding(row, args.url, args.half))
     scoped = _pull_scope(row, args)
     row.update(scoped)
     fields.update(scoped)
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
-    if row.get("pr_url") != args.url:
+    if not keeps_main and row.get("pr_url") != args.url:
         lift.drop_task(args.slug, agent.task)
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
