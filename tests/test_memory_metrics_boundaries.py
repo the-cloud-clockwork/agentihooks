@@ -118,6 +118,8 @@ def test_spool_attachment_takes_the_canonical_lock(captured, tmp_path):
 
 def test_initial_capture_zeros_and_duplicate_archive_ignore_stale_clock(captured):
     catalog, meter, scope = captured
+    for stage in metrics.STAGES:
+        advance(meter, scope, stage, 0, 0.0)
     clock = [150.0]
     recorder = progress.Recorder(catalog, GRANT, scope, "agentihooks", clock=lambda: clock[0])
     entry = spool.Entry(1, "one", 100.0, [{}], 10)
@@ -191,6 +193,9 @@ def test_index_cursor_boundaries_and_replay(captured, monkeypatch):
     assert meter.snapshot()["memory_stage_progress"] == []
     advance(meter, scope, "local_spool", 3, 100.0)
     advance(meter, scope, "archive", 3, 110.0)
+    monkeypatch.setattr(progress, "COMPLETE", query.replace(":1}", ":4}"))
+    progress.indexed(catalog, scope.access_domain, "active", 120.0)
+    assert meter.status(GRANT, scope, 120.0)["stages"]["indexed_chunk"]["through"] is None
     monkeypatch.undo()
     progress.indexed(catalog, scope.access_domain, "active", 120.0)
     assert meter.status(GRANT, scope, 120.0)["stages"]["indexed_chunk"]["through"] is None

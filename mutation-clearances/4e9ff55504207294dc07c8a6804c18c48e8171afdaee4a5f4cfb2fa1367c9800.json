@@ -1,0 +1,6 @@
+{
+  "hooks/memory/metrics.py:hooks.memory.metrics.x\u01c1Metrics\u01c1bind__mutmut_27:c859760370a7a642b7bddb7f37ce9357b442d11cbbe9c45a0ec7f1a0c39e5993": {
+    "reader": "standards-reader",
+    "reason": "SQLite statement keywords and identifiers change case only. No string literal or returned mapping key changes; SQLite identifiers are case insensitive."
+  }
+}

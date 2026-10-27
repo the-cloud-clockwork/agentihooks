@@ -1,0 +1,6 @@
+{
+  "hooks/memory/progress.py:hooks.memory.progress.x\u01c1Recorder\u01c1buffered__mutmut_51:239826970388019181639bddf8b8eda70d453eecad60e504e88f6ceb47b37b5c": {
+    "reader": "standards-reader",
+    "reason": "SQLite statement keywords and identifiers change case only. No string literal or returned mapping key changes; SQLite identifiers are case insensitive."
+  }
+}

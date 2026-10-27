@@ -1,0 +1,6 @@
+{
+  "hooks/memory/progress.py:hooks.memory.progress.x\u01c1Recorder\u01c1consume__mutmut_15:b0f691cdb42de0a41daa231939ec58c822665ad8942bf5d7432ee66062554927": {
+    "reader": "standards-reader",
+    "reason": "Only the unused fallback tuple timestamp changes; the expression selects element zero."
+  }
+}

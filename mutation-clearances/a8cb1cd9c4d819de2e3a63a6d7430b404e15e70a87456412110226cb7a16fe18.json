@@ -1,0 +1,6 @@
+{
+  "hooks/memory/metrics.py:hooks.memory.metrics.x\u01c1Metrics\u01c1_advance__mutmut_19:b5a589d7afcede163e86248b6ab8232d55f8106e0c0e6a4d6d12efc45faeb1da": {
+    "reader": "standards-reader",
+    "reason": "A missing empty list becomes None. Both are false and indexing remains behind the same truth checks, preserving outputs, writes and exceptions."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "hooks/memory/metrics.py:hooks.memory.metrics.x\u01c1Metrics\u01c1coverage__mutmut_6:07448352bb780a7dee3d618deafa2cd9e5db15c448abfabc36da601cbf1f4762": {
+    "reader": "standards-reader",
+    "reason": "The temporary scoped grant principal is unused. Coverage and status authorization read only corpus and projects."
+  }
+}

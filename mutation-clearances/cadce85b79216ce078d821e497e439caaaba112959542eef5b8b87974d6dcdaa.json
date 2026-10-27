@@ -1,0 +1,6 @@
+{
+  "hooks/memory/progress.py:hooks.memory.progress.x_indexed__mutmut_9:43e7229f9638a7cda83795ecd22ad79a0baa8e085d4f724064bece81f51dab5f": {
+    "reader": "standards-reader",
+    "reason": "SQLite statement keywords and identifiers change case only. No string literal or returned mapping key changes; SQLite identifiers are case insensitive."
+  }
+}

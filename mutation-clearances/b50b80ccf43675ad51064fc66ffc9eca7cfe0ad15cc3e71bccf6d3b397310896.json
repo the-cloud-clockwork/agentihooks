@@ -1,0 +1,6 @@
+{
+  "hooks/memory/api/records.py:hooks.memory.api.records.x\u01c1SessionTools\u01c1session_get__mutmut_16:8584cf5a23ffa88616c25c8b4f0bb317661328e2e4c10a71749270f86ae3242f": {
+    "reader": "standards-reader",
+    "reason": "The temporary scoped grant principal is unused. Coverage and status authorization read only corpus and projects."
+  }
+}

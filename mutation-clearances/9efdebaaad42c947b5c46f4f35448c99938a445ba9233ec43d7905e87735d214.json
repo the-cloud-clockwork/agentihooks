@@ -1,0 +1,6 @@
+{
+  "hooks/memory/progress.py:hooks.memory.progress.x_indexed__mutmut_66:7a54f266474361eebac744ed0b7f79757421939aae27725c683ed1a4c7d9248a": {
+    "reader": "standards-reader",
+    "reason": "Only the unused fallback tuple timestamp changes; the expression selects element zero."
+  }
+}
