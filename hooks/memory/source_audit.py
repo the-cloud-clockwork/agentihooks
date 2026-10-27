@@ -19,6 +19,7 @@ VECTOR_FIELDS = frozenset({"chunk_idx", "timestamp", "text_preview"})
 BAD_SOURCE = "a source observation needs a name and only raw bytes, a preview list and vector rows of the legacy shape"
 HASH_MISMATCH = "the raw bytes do not match the hash recorded for this source"
 STALE = "the audit moved past this revision; read it again and rerun"
+DUPLICATE = "each source may appear once in a run; merge its raw, preview and vector rows into one observation"
 NOT_LOSSLESS = "only a source with its full raw transcript may be labelled a lossless import"
 UNKNOWN = "this source has not been audited"
 
@@ -97,7 +98,9 @@ def _gaps(entries: list[dict], preview: list[dict], limits: LegacyLimits) -> lis
     held = {entry["uuid"] for entry in preview}
     present = [index for index, entry in enumerate(entries) if entry["uuid"] in held]
     absent = [index for index, entry in enumerate(entries) if entry["uuid"] not in held]
-    first, last = (present[0], present[-1]) if present else (len(entries), len(entries))
+    if not present:
+        return [{"start": start, "end": end, "cause": "unplaced"} for start, end in _ranges(absent)]
+    first, last = present[0], present[-1]
     head = "trimmed_head" if len(preview) >= limits.preview_entries else "missing_head"
     found = []
     for start, end in _ranges(absent):
@@ -220,6 +223,8 @@ class SourceAudit:
 
     def run(self, observations: list, revision: int) -> dict:
         found = [audit_source(observation, self.limits) for observation in observations]
+        if len({item["source"] for item in found}) != len(found):
+            raise Rejected("duplicate_source", DUPLICATE)
         outcomes = [(item, self._outcome(item)) for item in found]
         changes = [(item, outcome) for item, outcome in outcomes if outcome in ("added", "upgraded", "updated")]
         if changes and revision <= self.state["revision"]:

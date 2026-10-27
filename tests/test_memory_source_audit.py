@@ -85,6 +85,13 @@ def test_a_head_gap_below_the_entry_cap_is_not_called_trimmed():
     assert found["preview"]["missing_ranges"] == [{"start": 0, "end": 0, "cause": "missing_head"}]
 
 
+def test_ranges_are_unplaced_when_no_preview_entry_matches_the_raw_transcript():
+    lines = [user("u0", "a"), user("u1", "b"), user("u2", "c")]
+    items = [preview("x", "a"), preview("y", "b")]
+    found = audit.audit_source({"source": "s", "raw": raw(*lines), "preview": items}, SMALL)
+    assert found["preview"]["missing_ranges"] == [{"start": 0, "end": 2, "cause": "unplaced"}]
+
+
 def test_vector_rows_are_matched_to_raw_turns_and_renumbering_is_reported():
     lines = [user("u0", "first"), user("u1", "second"), user("u2", "third")]
     rows = [vector(0, "User: first\n"), vector(1, "User: third\n"), vector(2, "User: gone\n")]
@@ -125,6 +132,49 @@ def test_vector_only_and_missing_sources_are_classified_apart():
     missing = audit.audit_source({"source": "s", "preview": [], "vectors": []})
     assert (missing["class"], missing["confidence"]) == (audit.MISSING, "none")
     assert missing["preview_sha256"] is missing["vectors_sha256"] is None
+
+
+def test_raw_entries_tolerate_missing_fields_and_odd_blocks():
+    data = raw(
+        {"type": "summary", "uuid": "s"},
+        {"type": "user", "uuid": "u", "message": "x"},
+        {"type": "assistant", "uuid": "a", "message": {"content": ["text", {"type": "text"}, {"type": "tool_use"}]}},
+    )
+    entries, _ = audit.raw_entries(data)
+    assert [(entry["content"], entry["tools"]) for entry in entries] == [("", []), ("", []), ("", [""])]
+
+
+def test_turns_render_summaries_into_the_open_turn():
+    entries, _ = audit.raw_entries(raw(user("u", "a"), {"type": "summary", "uuid": "s", "summary": "done"}))
+    assert audit.turns(entries) == ["User: a\nSummary: done\n"]
+
+
+def test_adjacent_missing_entries_merge_into_one_range():
+    lines = [user(f"u{n}", "a") for n in range(4)]
+    found = audit.audit_source({"source": "s", "raw": raw(*lines), "preview": [preview("u0", "a")]}, SMALL)
+    assert found["preview"]["missing_ranges"] == [{"start": 1, "end": 3, "cause": "uncollected_tail"}]
+
+
+def test_a_preview_at_the_entry_cap_marks_a_trimmed_head():
+    lines = [user("u0", "a"), user("u1", "b"), user("u2", "c")]
+    items = [preview("u1", "b"), preview("u2", "c")]
+    found = audit.audit_source({"source": "s", "raw": raw(*lines), "preview": items}, SMALL)
+    assert found["preview"]["missing_ranges"] == [{"start": 0, "end": 0, "cause": "trimmed_head"}]
+
+
+def test_preview_entries_at_the_char_cap_or_unknown_to_the_raw_are_not_counted():
+    lines = [user("u0", "12345")]
+    items = [preview("u0", "12345"), preview("zz", "other")]
+    found = audit.audit_source({"source": "s", "raw": raw(*lines), "preview": items}, SMALL)
+    assert (found["preview"]["capped"], found["preview"]["diverged"]) == (0, 0)
+
+
+def test_vectors_match_the_first_turn_with_a_shared_prefix_and_report_in_chunk_order():
+    lines = [user("u0", "same text one"), user("u1", "same text two"), user("u2", "other")]
+    rows = [vector(5, "User: other\n"), vector(3, "User: same t")]
+    found = audit.audit_source({"source": "s", "raw": raw(*lines), "vectors": rows}, SMALL)
+    assert found["vectors"]["renumbered"] == [{"chunk_idx": 3, "turn": 0}, {"chunk_idx": 5, "turn": 2}]
+    assert found["vectors"]["turns_without_vector"] == 1
 
 
 def test_legacy_limits_default_to_the_retired_service_caps():
@@ -196,6 +246,16 @@ def test_a_stale_revision_is_refused_before_any_write():
     assert rejected(lambda: held.run(late, 4)).error_class == "stale_revision"
     assert held.dumps() == before
     assert held.run(late, 5)["p"]["outcome"] == "updated"
+    assert held.state["sources"]["p"]["preview_sha256"] == audit._json_sha([preview("u", "d")])
+    assert held.state["revision"] == 5
+
+
+def test_a_source_named_twice_in_one_run_is_refused_before_any_write():
+    held = audit.SourceAudit()
+    twice = [{"source": "a", "raw": b"{}"}, {"source": "a", "preview": [preview("u", "c")]}]
+    error = rejected(lambda: held.run(twice, 1))
+    assert (error.error_class, error.detail) == ("duplicate_source", audit.DUPLICATE)
+    assert held.state == {"revision": 0, "sources": {}}
 
 
 def test_report_lists_each_class_separately_with_counts():

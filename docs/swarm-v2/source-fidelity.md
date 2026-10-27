@@ -31,7 +31,7 @@ Read from the retired service's store, collector and embedding code:
 | Vector rows | text preview cut to 1000 characters | rows compared at that cap |
 | Vector rows | `chunk_idx` numbered over the trimmed preview, upserted in place | `renumbered` rows and `orphans` |
 
-Missing ranges are entry index ranges in the raw transcript, so they exist only for `full_raw` sources. A
+When no preview entry matches the raw transcript, its ranges are `unplaced`. Missing ranges are entry index ranges in the raw transcript, so they exist only for `full_raw` sources. A
 preview-only source reports `missing_ranges: "unknown"`; the audit never fills absent text from a preview or a
 vector row. Limits are `LegacyLimits` (500, 500, 1000 by default).
 
@@ -40,9 +40,10 @@ vector row. Limits are `LegacyLimits` (500, 500, 1000 by default).
 Each classification keeps the hashes of the raw bytes, preview and vector rows it was made from. A rerun after
 more raw files appear upgrades only the sources whose class rose; unchanged sources replay. A lower observation,
 such as a raw file gone again, is reported `kept` and never downgrades the held classification. A run that would
-change the record at or below its current revision is refused as `stale_revision` with nothing written.
+change the record at or below its current revision is refused as `stale_revision` with nothing written; a run in
+which every source replays is accepted as a no op. A run naming one source twice is refused as `duplicate_source`.
 
 ## Rollback
 
-Revert the classification projections, the audit record, and keep the source hashes and evidence. The raw files,
-Redis previews and vector rows are authoritative and are never deleted by the audit.
+Revert by deleting the classification record, the projection, while keeping the source hashes in the package evidence.
+The raw files, Redis previews and vector rows are authoritative and are never deleted by the audit.

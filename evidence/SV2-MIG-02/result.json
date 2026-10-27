@@ -4,6 +4,8 @@
     "B",
     "C"
   ],
+  "compatibility": "the legacy service had no fidelity classification and served capped previews as session history; hooks.memory.importer is unchanged and still imports only raw provider transcripts, so the audit adds a read only classification ahead of it and alters no accepted protocol",
+  "dependencies": "SV2-MIG-01: its consumer inventory replaces the legacy session database backup with hooks.memory.importer; this audit decides which legacy sources that importer may treat as lossless, and changes no SV2-MIG-01 interface",
   "evidence_class": "mocked: the legacy Redis previews and vector rows are fixture data shaped like the retired transcript service's store and embedding code, and a JSON file stands in for the authoritative audit record; no legacy Redis, Postgres or service was read",
   "fixture_inputs": {
     "capped_redis_preview": "beta, a legacy Redis entry preview with one entry at the 500 character cap",
@@ -29,16 +31,22 @@
   "remaining_limitations": [
     "The legacy caps and defects are read from the retired service's store, collector, parser and embedding source; a live Redis and Postgres export is not audited here and needs its own read only run.",
     "Raw entries are matched to preview entries by uuid and to vector rows by the legacy chunk text; a preview entry without a uuid cannot be placed in a missing range.",
-    "The audit record has no lock; one writer updates it at a time."
+    "The audit record has no lock; one writer updates it at a time.",
+    "SourceAudit takes no grant: it is run by the operator over files and exports the operator already holds, and it returns no session content, only counts, ranges and hashes; a grant check belongs to whichever caller later exposes the report.",
+    "SourceAudit.loads trusts its own record file: a hand edited record could claim full_raw for a source, so certify must be run on a record this audit wrote, and the raw hash it returns is checked again by the importer against the raw file."
   ],
-  "rollback_rehearsal": "C reverted to the record on disk after an interrupted upgrade, so beta stayed preview_only with its preview hash; rerunning upgraded only beta, a rerun after its raw file disappeared kept beta full_raw with its raw hash, and B showed every refusal left the record byte identical",
+  "rollback_rehearsal": "reverting means deleting the classification record while the source hashes and the a, b and c evidence files are kept; C rehearsed it by reloading the record on disk after an interrupted upgrade, so beta stayed preview_only with its preview hash; rerunning upgraded only beta, a rerun after its raw file disappeared kept beta full_raw with its raw hash, and B showed every refusal left the record byte identical",
+  "rollout_safety": "the audit is a new standalone module with no caller in the hook, collector or importer paths; disabling it means not running it, and every earlier import and search path keeps its last qualified behavior",
   "spec_mapping": {
     "authoritative_record": "the audit JSON file written by cases A and C is the authoritative classification record in this mocked fixture; raw files, previews and vector rows stay authoritative sources and are never deleted",
     "authority": "SourceAudit is an operator side reader of historical data and takes no grant; it changes no session data and a classification never widens access",
     "boundary": "the audit reads legacy previews and vector rows as data; it does not rebuild the legacy collector, store or service",
-    "owned_paths": "hooks/memory/source_audit.py and docs/swarm-v2/source-fidelity.md; the planned hooks/memory/migrations package would shadow the existing hooks.memory.migrations module, so the audit is a sibling module"
+    "owned_paths": "hooks/memory/source_audit.py and docs/swarm-v2/source-fidelity.md; the planned hooks/memory/migrations package would shadow the existing hooks.memory.migrations module, so the audit is a sibling module",
+    "repeat": "case A builds the audit twice from the same fixture inputs into two separate record folders with no shared state; the repeat is an independent same input run, not a second dataset",
+    "replay": "a run whose every source replays unchanged is accepted at any revision as a no op, so a retry with the same inputs has no duplicate effect; any run that would change the record at or below the current revision is refused before writing"
   },
   "status": "fixture_verified",
   "supported_versions": "legacy transcript service store, collector and embeddings at its archived head; session corpus importer of SV2-RET",
-  "tested_commit": "522f96b4e486e82b536d81c193922540f99183d4"
+  "tested_commit": "522f96b4e486e82b536d81c193922540f99183d4",
+  "timing_and_cleanup": "the audit reads no clock and holds no lease, so no fake clock applies; each case writes only under its own pytest tmp_path, which pytest removes, and no fixture source file is changed"
 }
