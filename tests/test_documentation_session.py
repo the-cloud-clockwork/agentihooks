@@ -538,3 +538,42 @@ def test_retry_pending_runs_due_requests_oldest_write_first(tmp_path, monkeypatc
     os.utime(older, ns=(1, 1))
     documentation_session.retry_pending()
     assert processed == [("b.json", 0.0), ("a.json", 0.0)]
+
+
+def due_requests(tmp_path, monkeypatch, clock, count, process):
+    monkeypatch.setattr(documentation_session, "HOME", tmp_path)
+    monkeypatch.setattr(documentation_session, "time", clock)
+    monkeypatch.setattr(documentation_session, "process", process)
+    folder = tmp_path / "documentation"
+    folder.mkdir()
+    for index in range(count):
+        os.utime(stored(folder / f"{index}.json"), ns=(index + 1, index + 1))
+
+
+def test_the_tick_sweep_runs_every_due_request_past_the_session_end_bound(tmp_path, monkeypatch):
+    processed = []
+    count = documentation_session.RETRY_LIMIT + 2
+    due_requests(tmp_path, monkeypatch, Clock(0.0), count, lambda path, now: processed.append(path.name))
+    documentation_session.retry()
+    assert processed == [f"{index}.json" for index in range(count)]
+
+
+def test_the_session_end_sweep_keeps_its_bound(tmp_path, monkeypatch):
+    processed = []
+    count = documentation_session.RETRY_LIMIT + 2
+    due_requests(tmp_path, monkeypatch, Clock(0.0), count, lambda path, now: processed.append(path.name))
+    documentation_session.retry_pending("fixture")
+    assert len(processed) == documentation_session.RETRY_LIMIT
+
+
+def test_the_tick_sweep_starts_no_request_once_its_budget_is_spent(tmp_path, monkeypatch):
+    clock, processed = Clock(0.0), []
+
+    def slow(path, now):
+        processed.append(path.name)
+        clock.at += documentation_session.RETRY_BUDGET_S
+
+    due_requests(tmp_path, monkeypatch, clock, 3, slow)
+    documentation_session.retry()
+    assert processed == ["0.json"]
+    assert documentation_session.RETRY_BUDGET_S < documentation_session.RETRY_OPTIONS["timeout_sec"]
