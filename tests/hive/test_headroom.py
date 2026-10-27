@@ -45,7 +45,7 @@ def disk(tmp_path, monkeypatch):
     probed = []
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(Path, "home", lambda: home)
     monkeypatch.delenv("WORKTREE_ROOT", raising=False)
     monkeypatch.delenv("WT_MIN_FREE_GB", raising=False)
     monkeypatch.setattr(headroom, "WINDOWS", tmp_path / "no-windows")
@@ -158,6 +158,8 @@ def test_publish_counts_waiting_launch_orders_and_expires_with_the_heartbeat(red
         "load5": 3.456,
         "available_mb": 8000,
         "total_mb": 15625,
+        "disk_free_gb": 9,
+        "disk_floor_gb": 50,
         "pending": 2,
         "agents": {"claude": 0, "codex": 0},
         "measured_at": 5_000,
@@ -302,6 +304,8 @@ def test_measure_adds_the_pod_memory_and_cpu_limits_beside_the_node_reading(proc
         "pod_available_mb": 5400,
         "pod_cpus": 2.5,
         "pod_cpu_usec": 9_000_000,
+        "disk_free_gb": 9,
+        "disk_floor_gb": 50,
         "pending": 0,
         "agents": {"claude": 0, "codex": 0},
         "measured_at": 5,
