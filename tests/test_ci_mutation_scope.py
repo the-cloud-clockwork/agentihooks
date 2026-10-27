@@ -132,6 +132,7 @@ def test_selection_parses_only_test_modules_that_name_a_reached_module(tmp_path,
     parse = scope.ast.parse
     monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
     scope.imported_names.cache_clear()
+    scope.module_facts.cache_clear()
     assert select_tests(tmp_path, Path("hooks/context/parsed_sample.py")) == [
         "tests/test_direct.py",
         "tests/test_helper_user.py",
@@ -746,6 +747,53 @@ def test_a_word_inside_a_longer_identifier_does_not_mark_a_file_for_parsing(tmp_
     parse = scope.ast.parse
     monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
     scope.imported_names.cache_clear()
+    scope.module_facts.cache_clear()
     scope.mentions.cache_clear()
     assert select_tests(tmp_path, Path("hooks/context/word_sample.py")) == ["tests/test_direct.py"]
     assert parsed == ["from hooks.context import word_sample\n"]
+
+
+def test_a_file_naming_only_the_last_part_of_a_module_is_not_parsed(tmp_path, monkeypatch):
+    from scripts.ci_mutation import scope
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_direct.py").write_text("from hooks.context import part_sample\n")
+    (tests / "test_other.py").write_text("from scripts.other import part_sample\n")
+    parsed = []
+    parse = scope.ast.parse
+    monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
+    scope.imported_names.cache_clear()
+    scope.module_facts.cache_clear()
+    scope.mentions.cache_clear()
+    assert select_tests(tmp_path, Path("hooks/context/part_sample.py")) == ["tests/test_direct.py"]
+    assert parsed == ["from hooks.context import part_sample\n"]
+
+
+def test_module_facts_names_every_import_and_nested_function_from_one_parse(monkeypatch):
+    from scripts.ci_mutation import scope
+
+    source = (
+        "import os.path\n"
+        "try:\n    from . import sibling\nexcept ImportError:\n    from .. import parent as p\n"
+        "class TestGroup:\n    def test_one(self):\n        import json\n"
+        "        def helper():\n            pass\n"
+        "async def test_two():\n    match 1:\n        case 1:\n            from hooks import context\n"
+    )
+    parsed = []
+    parse = scope.ast.parse
+    monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
+    scope.imported_names.cache_clear()
+    scope.module_facts.cache_clear()
+    assert scope.imported_names(source, ("tests", "unit")) == {
+        "os.path",
+        "tests.unit",
+        "tests.unit.sibling",
+        "tests",
+        "tests.parent",
+        "json",
+        "hooks",
+        "hooks.context",
+    }
+    assert scope.module_facts(source)[1] == {"TestGroup.test_one", "TestGroup.test_one.helper", "test_two"}
+    assert parsed == [source]
