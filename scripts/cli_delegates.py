@@ -2,6 +2,7 @@ import importlib
 from collections.abc import Callable
 
 DELEGATED_CLIS = {
+    "agents": "scripts.agents.cli",
     "msg": "scripts.inbox.cli",
     "recall": "scripts.recall.cli",
     "trace": "scripts.trace_cli",
