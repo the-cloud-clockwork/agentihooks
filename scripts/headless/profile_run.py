@@ -55,7 +55,7 @@ def claude_args(run: ProfileRun) -> list[str]:
 
 
 def codex_args(run: ProfileRun) -> list[str]:
-    args = ["exec", "--json", "-o", str(run.run_dir / CODEX_LAST_MESSAGE)]
+    args = ["exec", "--json", "--skip-git-repo-check", "-o", str(run.run_dir / CODEX_LAST_MESSAGE)]
     if run.schema is not None:
         args += ["--output-schema", str(run.run_dir / CODEX_OUTPUT_SCHEMA)]
     return [*args, "--", run.input]
