@@ -36,6 +36,7 @@ ROWS = [
     "agents-box",
     "handoff-box",
     "recovery-box",
+    "context-box",
     "freeze-box",
     "architecture-box",
 ]

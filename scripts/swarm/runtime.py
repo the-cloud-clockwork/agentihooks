@@ -636,6 +636,26 @@ class HerdrRuntime:
             self._reserve_account(account, lane, agent)
         return account
 
+    def _admitted_account(self, agent, name, lane, environ):
+        from scripts.swarm import capacity
+
+        read = self.quota_accounts or capacity.accounts
+        rows = read(environ, time.time(), refresh=False)
+        rows = capacity.unreserved(rows) if lane == MASTER else rows
+        row = next((row for row in rows if (row.harness, row.name) == (agent, name)), None)
+        if row is None or not capacity.free_seats(row):
+            raise SpawnError(
+                f"admitted account {name} has no {agent} seat on this hive; returned for controller readmission",
+                "unavailable",
+            )
+        return row
+
+    def _route_account(self, agent, saved, task_id, lane, admitted):
+        if admitted:
+            return None, self._admitted_account(agent, saved.get("account"), lane, dict(os.environ))
+        account = self._claim_account(agent, saved.get("account") or self.planned_account(task_id, agent), lane)
+        return account, account
+
     @contextmanager
     def _seat_returned_on_failure(self, account, lane, agent):
         try:
@@ -663,7 +683,7 @@ class HerdrRuntime:
 
     def _route_kind(self, lane, harness, task, slug):
         if master_claude_login.enabled(slug, task.get("seat", ""), lane, harness or "claude"):
-            return "interactive"
+            return "subscription" if self._master_account_spent() else "interactive"
         explicit = task.get("route_kind")
         if explicit or lane != MASTER or harness not in ("", "claude"):
             return explicit or "subscription"
@@ -676,7 +696,8 @@ class HerdrRuntime:
     def _master_account_spent(self):
         from redis.exceptions import RedisError
 
-        from scripts.routing import master_account, reservation
+        from scripts.routing import master_account
+        from scripts.swarm import quota_handoff
 
         if not hasattr(self, "_quota_accounts"):
             return False
@@ -688,7 +709,8 @@ class HerdrRuntime:
             (row for row in self._quota_accounts if declared and (row.harness, row.name) == ("claude", declared.slug)),
             None,
         )
-        if own is None or own.week_left is None or 100 - own.week_left < reservation.MASTER_LEAVES:
+        thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
+        if own is None or (own.state != "CLOSED" and not quota_handoff.trigger(replace(own, reserved=""), thresholds)):
             return False
         return any(row.kind != "api" and row.name != own.name for row in self._quota_eligible("claude", MASTER))
 
@@ -705,13 +727,19 @@ class HerdrRuntime:
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
         route_kind = self._route_kind(lane, want or requested or saved.get("harness", ""), task, config.slug)
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
+        admitted = bool(relaunch and relaunch.get("account") and task.get("admitted_execution_id"))
         saved = (
             self._quota_transfer(saved, profile, environ, lane, want, self._planned_slot(task["id"]))
-            if saved and quota_transfer and route_kind != "interactive"
+            if saved and quota_transfer and route_kind != "interactive" and not admitted
             else saved
         )
         avoid = (task.get("transfer") or {}).get("avoid_harness") or task.get("avoid_harness")
-        if saved and not quota_transfer and (saved["harness"] != want if want else saved["harness"] == avoid):
+        if (
+            saved
+            and not quota_transfer
+            and not admitted
+            and (saved["harness"] != want if want else saved["harness"] == avoid)
+        ):
             saved = {}
         if route_kind == "interactive" and lane == MASTER:
             agent, reason = want or requested or saved.get("harness") or "claude", "interactive login"
@@ -727,7 +755,7 @@ class HerdrRuntime:
         agent, reason = (
             (agent, reason)
             if route_kind == "interactive"
-            else self._quota_choice(agent, reason, bool(requested or quota_transfer or want), lane)
+            else self._quota_choice(agent, reason, bool(requested or quota_transfer or want or admitted), lane)
         )
         if saved and agent != saved["harness"]:
             saved = {key: value for key, value in saved.items() if key not in ("model", "account")}
@@ -748,7 +776,7 @@ class HerdrRuntime:
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
         argv += ["--claim-fence", json.dumps(task["claim_fence"])] if task.get("claim_fence") else []
-        argv += ["--defer-canary"] if lane == MASTER and self.defer_master_canary else []
+        argv += ["--defer-canary"] if lane == MASTER and self.defer_master_canary and agent != "codex" else []
         argv += _titled(config.slug, lane, task.get("seat", ""))
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)
@@ -775,8 +803,9 @@ class HerdrRuntime:
         picked = replace(picked, effort=saved["effort"]) if saved.get("effort") else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
-        login = master_claude_login.enabled(config.slug, task.get("seat", ""), lane, agent)
-        route_kind = "interactive" if login else route_kind
+        login = route_kind == "interactive" and master_claude_login.enabled(
+            config.slug, task.get("seat", ""), lane, agent
+        )
         route = master_claude_login.route(login) or (
             ["--route", "interactive"]
             if route_kind == "interactive"
@@ -784,9 +813,9 @@ class HerdrRuntime:
         )
         rc = remote_control.decision(lane, agent, route_kind, config.slug, login) if front else {}
         account = None
-        if hasattr(self, "_quota_accounts") and route_kind != "interactive":
-            account = self._claim_account(agent, saved.get("account") or self.planned_account(task["id"], agent), lane)
-            route = ["--route", account.name]
+        if route_kind != "interactive" and (hasattr(self, "_quota_accounts") or (admitted and quota_transfer)):
+            account, routed = self._route_account(agent, saved, task["id"], lane, admitted)
+            route = ["--route", routed.name]
         with self._seat_returned_on_failure(account, lane, agent):
             placed = self._account_launch(
                 config,

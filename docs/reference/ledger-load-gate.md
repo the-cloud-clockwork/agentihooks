@@ -188,8 +188,8 @@ runs on a workstation, the script pulls the mirror name as before.
 
 Since [pull request 5000](https://github.com/the-cloud-clockwork/agentihooks/pull/5000),
 every later step that builds on the image runs only when
-`!cancelled() && steps.build.outcome == 'success'`: the four parallel scenarios, swarm init,
-Python setup and the terminal clients check. A failed Redis pull fails the
+`!cancelled() && steps.build.outcome == 'success'`: Python setup, the parallel scenarios with swarm init
+and the terminal clients check. A failed Redis pull fails the
 build step, those steps are skipped and the job ends red at once. The
 attestation proof step runs only on `workflow_dispatch` and does not depend on
 the build.

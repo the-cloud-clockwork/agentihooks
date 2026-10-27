@@ -91,8 +91,8 @@ def calls_heavy(name: str, seen: set[str]) -> bool:
     return any(loads_heavy(dep, seen) for dep in _function_imports(path, function))
 
 
-def loads_sdk_when_run(source: str) -> bool:
-    seen: set[str] = set()
+def loads_sdk_when_run(source: str, seen: set[str] | None = None) -> bool:
+    seen = set() if seen is None else seen
     return any(loads_heavy(name, seen) or calls_heavy(name, seen) for name in _import_names(source, _ANY_IMPORT))
 
 

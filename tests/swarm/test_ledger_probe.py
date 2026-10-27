@@ -774,13 +774,14 @@ def test_idle_ticks_and_nudges_pause_while_the_alert_holds(store):
     ledger, clock = raise_alert(store)
     runtime = FakeRuntime()
     runtime.statuses[name] = "idle"
+    rows = {"t1": {"id": "t1", "state": "claimed", "claimed_by": name}}
     for n in range(IDLE_NUDGE_TICKS + 2):
-        assert _watch_idle("sw", store, ledger, runtime, {}, worker(store, name), stale + n) == []
+        assert _watch_idle("sw", store, ledger, runtime, rows, worker(store, name), stale + n) == []
     assert InboxStore(store.redis).inbox(name) == [] and worker(store, name).idle_ticks == 0
     ledger.read_s = 0.1
     observe(store, ledger, clock)
     observe(store, ledger, clock)
-    actions = _watch_idle("sw", store, ledger, runtime, {}, worker(store, name), stale + 10)
+    actions = _watch_idle("sw", store, ledger, runtime, rows, worker(store, name), stale + 10)
     [item] = InboxStore(store.redis).inbox(name)
     assert actions == [f"nudged stale {name} through its inbox as message {item.id}"] and runtime.nudged == []
 

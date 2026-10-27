@@ -1,6 +1,7 @@
 /.github/ @nestorcolt
 /.semgrep/ @nestorcolt
 /.semgrep-guards/ @nestorcolt
+/.semgrep-incidents/ @nestorcolt
 /scripts/ci_mutation/ @nestorcolt
 /scripts/ci_budget/rate_limit.py @nestorcolt
 /scripts/ci_*.py @nestorcolt
@@ -23,11 +24,14 @@
 /tests/*MANIFEST* @nestorcolt
 /tests/*BASELINE* @nestorcolt
 /tests/*ALLOWLIST* @nestorcolt
+/tests/branch_record.py @nestorcolt
 /tests/count_floor.py @nestorcolt
 /tests/coverage_*.py @nestorcolt
 /tests/dep_inputs.py @nestorcolt
 /tests/dep_manifest.py @nestorcolt
 /tests/mutation_line_selection_proof.py @nestorcolt
+/tests/mutation_self_plant/ @nestorcolt
+/tests/pass_record.py @nestorcolt
 /tests/reused_coverage.py @nestorcolt
 /tests/test_coverage_*.py @nestorcolt
 /tests/dev_durations.py @nestorcolt

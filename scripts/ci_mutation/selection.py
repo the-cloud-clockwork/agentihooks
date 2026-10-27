@@ -192,19 +192,25 @@ def stats_shards(root: Path, files: list[str], count: int, seconds: dict[str, fl
     if seconds is None:
         seconds = file_seconds(root, files)
     # Files that share an xdist group never run concurrently in CI, so they share a shard here.
-    units = []
-    for path in files:
-        groups = set(GROUP.findall((root / test_file(path)).read_text())) - IMPORT_GROUPS
-        keys = {f"group {group}" for group in groups} or {test_file(path)}
+    units, owners, groups = {}, {}, {}
+    for number, path in enumerate(files):
+        name = test_file(path)
+        if name not in groups:
+            groups[name] = set(GROUP.findall((root / name).read_text())) - IMPORT_GROUPS
+        keys = {f"group {group}" for group in groups[name]} or {name}
         members = [path]
-        for unit in [unit for unit in units if unit[0] & keys]:
-            units.remove(unit)
-            keys |= unit[0]
-            members = unit[1] + members
-        units.append((keys, members))
+        for unit in sorted({owners[key] for key in keys if key in owners}):
+            joined, before = units.pop(unit)
+            keys |= joined
+            members = before + members
+        units[number] = (keys, members)
+        owners.update(dict.fromkeys(keys, number))
     shards = [[] for _ in range(max(1, min(count, len(units))))]
-    for _, members in sorted(units, key=lambda unit: (-sum(seconds[path] for path in unit[1]), unit[1])):
-        min(shards, key=lambda shard: sum(seconds[path] for path in shard)).extend(members)
+    loads = Counter()
+    for _, members in sorted(units.values(), key=lambda unit: (-sum(seconds[path] for path in unit[1]), unit[1])):
+        chosen = min(range(len(shards)), key=loads.__getitem__)
+        shards[chosen].extend(members)
+        loads[chosen] += sum(seconds[path] for path in members)
     # pytest drops a package conftest for files given after a file from another folder.
     return [sorted(shard) for shard in shards]
 
@@ -449,6 +455,34 @@ def run_unit(
     return run_tests(runner, mutant_name=mutant_name, tests=memory.prepare(mutant_name, chosen))
 
 
+def forked_children():
+    # Defined inside a function: a mutated copy trampolines top level methods,
+    # and mutmut reads os.environ in its forced fail.
+    class ForkedChildren(ModuleType):
+        # mutmut reaps with os.wait() and raises KeyError on a child a test left behind in its own process.
+        def __init__(self):
+            super().__init__(os.__name__)
+            self.pids = set()
+
+        def __getattr__(self, name):
+            return getattr(os, name)
+
+        def fork(self):
+            pid = os.fork()
+            if pid:
+                self.pids.add(pid)
+            return pid
+
+        def wait(self):
+            while True:
+                pid, status = os.wait()
+                if pid in self.pids:
+                    self.pids.discard(pid)
+                    return pid, status
+
+    return ForkedChildren()
+
+
 def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
     from mutmut import __main__ as runner
 
@@ -529,6 +563,7 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     runner.PytestRunner.execute_pytest = memory.wrap(runner.PytestRunner.execute_pytest)
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
     runner.write_all_mutants_to_file = write_selected
+    runner.os = forked_children()
     for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
         sys.modules.pop(name)
     runner.cli(["run", "--max-children", str(worker_count(os.cpu_count()))])

@@ -45,11 +45,13 @@ def complete():
 def test_complete_queue_waits_for_the_shard_judge_and_every_inventory_row():
     jobs = complete()
     assert ci_gate_queue.verify(jobs, [2, 7])
-    for index in range(len(jobs)):
-        assert ci_gate_queue.verify(jobs[:index] + jobs[index + 1 :], [2, 7]) is False
+    queue_only = ci_gate_queue.verify([job for job in jobs if job["name"] not in ci_gate_queue.SKIPPED], [2, 7])
+    for index, job in enumerate(jobs):
+        expected = queue_only if job["name"] in ci_gate_queue.SKIPPED else False
+        assert ci_gate_queue.verify(jobs[:index] + jobs[index + 1 :], [2, 7]) is expected
         pending = copy.deepcopy(jobs)
         pending[index].update(status="in_progress", conclusion=None)
-        assert ci_gate_queue.verify(pending, [2, 7]) is False
+        assert ci_gate_queue.verify(pending, [2, 7]) is expected
 
 
 @pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out", "neutral", "skipped", None])
@@ -63,12 +65,17 @@ def test_a_failed_or_skipped_required_job_never_passes(name, conclusion):
 
 
 @pytest.mark.parametrize("name", ["lint", "reuse", "sonar", "unit-selected", "mutation", "helm-kind"])
-def test_an_unexpected_running_promotion_or_pull_request_gate_never_passes(name):
+@pytest.mark.parametrize("conclusion", ["success", "failure", "cancelled", "timed_out"])
+def test_an_unexpected_running_promotion_or_pull_request_gate_never_passes(name, conclusion):
     jobs = complete()
-    next(job for job in jobs if job["name"] == name)["conclusion"] = "success"
-    with pytest.raises(ValueError) as failure:
-        ci_gate_queue.verify(jobs, [2, 7])
-    assert name in str(failure.value)
+    queue_only = ci_gate_queue.verify([job for job in jobs if job["name"] not in ci_gate_queue.SKIPPED], [2, 7])
+    next(job for job in jobs if job["name"] == name)["conclusion"] = conclusion
+    if queue_only:
+        assert ci_gate_queue.verify(jobs, [2, 7])
+    else:
+        with pytest.raises(ValueError) as failure:
+            ci_gate_queue.verify(jobs, [2, 7])
+        assert name in str(failure.value)
 
 
 @pytest.mark.parametrize("name", ["select", "unit (3.12, 2)", "shard-check (3.12)"])
@@ -104,8 +111,9 @@ def test_recovery_requires_the_matching_successful_rerun_and_confirmed_loss(orig
             ci_gate_queue.verify(jobs + [dict(rerun, conclusion=result)], [2, 7], lost=lambda job: True)
 
 
-def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes():
-    watcher = ci_gate_queue.watcher("runner")
+@pytest.mark.parametrize("deferred", [False, True])
+def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(deferred):
+    watcher = ci_gate_queue.watcher("runner", deferred=deferred)
     workflow = {
         "test.yml": {
             "jobs": {
@@ -159,16 +167,23 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
     changed["test.yml"]["jobs"]["gate-required"]["name"] = "other"
     with pytest.raises(ValueError):
         ci_gate_queue.normalize(changed)
+    announced = copy.deepcopy(workflow)
+    announced["test.yml"]["jobs"]["gate-required"]["needs"].append("install-smoke")
+    ci_gate_queue.normalize(announced)
+    announced["test.yml"]["jobs"]["gate-required"]["needs"].append("unannounced")
+    with pytest.raises(ValueError):
+        ci_gate_queue.normalize(announced)
 
 
-def test_the_early_watcher_binds_the_plan_and_uses_protected_code_and_app_quota():
-    job = ci_gate_queue.watcher("runner")
+@pytest.mark.parametrize("deferred", [False, True])
+def test_the_early_watcher_binds_the_plan_and_uses_protected_code_and_app_quota(deferred):
+    job = ci_gate_queue.watcher("runner", deferred=deferred)
     assert job["name"] == "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
     assert (
         ci_gate_queue.SUMMARY_NAME
         == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
     )
-    assert job["needs"] == ["split", "select", "reuse", "admission"]
+    assert job["needs"] == ["split", "select", "reuse", "admission"] + (["shard-check"] if deferred else [])
     assert job["runs-on"] == "runner"
     assert job["timeout-minutes"] == 60
     assert job["outputs"] == {"failed": "${{ steps.watch.outputs.failed }}"}

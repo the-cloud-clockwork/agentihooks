@@ -38,3 +38,6 @@ deploy/helm/*/templates/
 
 # Guard rule fixtures are red by design; scripts.ci_semgrep_floors tests them
 .semgrep-guards/
+
+# Outage rule fixtures are red by design; each runs only under semgrep --test
+.semgrep-incidents/

@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from scripts.hive.launch import Selection
 from scripts.swarm import controller
 from scripts.swarm.tick import ACK_LATER, SpawnError, _room_wait, _spawn_order
 from scripts.swarm_v2.runtime.base import RuntimeRouter
@@ -275,3 +276,95 @@ def test_master_placement_and_spawn_hand_the_pass_memo_to_the_workstation_check(
             runtime.placement_refusal("master", {"id": "master"})
     assert len(memos) == 1
     assert memos[0] is pass_memo
+
+
+@pytest.mark.parametrize("in_pass", [False, True])
+def test_a_selection_in_one_pass_takes_its_hive_room_from_later_tasks(setup, in_pass):  # noqa: F811
+    from dataclasses import replace
+
+    from scripts.hive.placement import Wait
+    from tests.hive.test_controller_launch import publish_room
+
+    publish_room(setup.store, "remote", 1)
+    launch = setup.launcher
+    launch.placement_cache = {} if in_pass else None
+    first = launch.select(setup.config, "eng", {"id": "one"})
+    second = launch.select(setup.config, "eng", {"id": "two"})
+    assert isinstance(first, Selection)
+    assert first.hive == "remote"
+    if in_pass:
+        assert isinstance(second, Wait)
+        assert launch.select(setup.config, "eng", {"id": "one"}) is first
+        assert [hive["room"] for hive in launch.hives() if hive["id"] == "remote"] == [0]
+        master = replace(first, master_placement=Mock())
+        assert launch._spend(master) is master
+        assert [hive["room"] for hive in launch.hives() if hive["id"] == "remote"] == [0]
+    else:
+        assert isinstance(second, Selection)
+
+
+@pytest.mark.parametrize("role", ["eng", "engineer"])
+@pytest.mark.parametrize("in_pass", [False, True])
+def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, monkeypatch, in_pass, role):  # noqa: F811
+    from scripts.hive import admission, launch
+    from scripts.hive.placement import Wait
+    from scripts.swarm import seat_spawn
+    from scripts.swarm_v2.runtime.base import Status
+    from tests.hive.test_controller_launch import publish_room
+
+    if role == "engineer":
+        monkeypatch.delitem(launch.ROLE_PROFILES, "engineer")
+    if in_pass:
+        write_hive(setup, id="spare", slots=[])
+    publish_room(setup.store, "remote", 2)
+    launch = setup.launcher
+    launch.placement_cache = {} if in_pass else None
+    request = request_for(setup)
+    assert isinstance(launch.select(setup.config, "eng", request.task), Selection)
+    for member in ("other/engineer-1", "other/engineer-2"):
+        assert admission.reserve(setup.store.redis, "remote", member, 2)[0]
+    result = launch.spawn(request)
+    assert result.status is Status.UNAVAILABLE
+    assert "has room: remote" in result.detail
+    assert seat_spawn.room_refused(SpawnError(result.detail, "unavailable"))
+    waited = launch.select(setup.config, "eng", request.task)
+    assert isinstance(waited, Wait)
+    assert isinstance(launch.select(setup.config, "eng", {"id": "later"}), Wait)
+    if in_pass:
+        assert (waited.reason, waited.role) == (result.detail, role)
+        rooms = {hive["id"]: hive["room"] for hive in launch.hives()}
+        assert rooms["remote"] == 0
+        assert rooms["spare"] > 0
+
+
+@pytest.mark.parametrize(
+    "refused",
+    [
+        "no hive for eng has room: remote cpu: five minute load 1.17 on 8 CPUs, fits 0 more",
+        "no hive has room, and the local machine runs 4 of its 4 agents",
+        ", and the local machine runs 4 of its 4 agents: cpu: five minute load 1.17 on 8 CPUs",
+    ],
+)
+def test_a_refused_hive_reservation_waits_when_placement_no_longer_reports_it(refused):
+    from types import SimpleNamespace
+
+    import fakeredis
+
+    from scripts.handoff import transfers
+    from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
+    from scripts.swarm.tick import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
+    ledger = FakeLedger([{"id": "t1", "lane": "eng"}])
+    transfers.record(store, "sw", SimpleNamespace(name="old", seat="master@sw", task=MASTER), "recycle", "", 500)
+    actions = tick("sw", store, ledger, FakeRuntime(crash=SpawnError(refused, "unavailable")), now_ms=1_000)
+    assert not [action for action in actions if "spawn failed" in action]
+    assert f"task t1 waits: {refused}" in actions
+    assert f"the master waits: {refused}" in actions
+    assert store.redis.get(store.key("sw", "master-start")) is None
+    [transfer] = transfers.list_transfers(store, "sw")
+    assert (transfer["successor"], transfer["binding"]) == ("", {"state": "pending"})
+    assert ledger.rows["t1"]["state"] == "open"
+    assert [row["state"] for row in store.launches("sw")] == ["waiting"]

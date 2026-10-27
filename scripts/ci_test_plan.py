@@ -21,6 +21,8 @@ from tests import dep_manifest
 UNIT_JOBS = frozenset(f"unit (3.12, {shard})" for shard in range(1, 21))
 # Full scope runs carry these into their own coverage for the tests they reuse.
 COVERAGE = frozenset(f"coverage-3.12-{shard}" for shard in range(1, 21))
+PACKED = "dep-manifest-packed"
+PACKED_FILE = "packed.json"
 CANDIDATES = 10
 REQUESTS = 100
 PAGE_REQUESTS = 1 + 3 * CANDIDATES
@@ -34,10 +36,10 @@ class UnusableRecord(ValueError):
     pass
 
 
-def _api(endpoint: str) -> bytes:
+def _api(endpoint: str, timeout: int = 60) -> bytes:
     for attempt in range(SERVER_ATTEMPTS):
         try:
-            return gh_api([endpoint], timeout=60).stdout
+            return gh_api([endpoint], timeout=timeout).stdout
         except subprocess.CalledProcessError as error:
             stderr = error.stderr.decode()
             print(stderr, file=sys.stderr)
@@ -50,37 +52,45 @@ def _strings(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def _valid_test(record: object, unit_count: int) -> bool:
+def _valid_test(record: object, unit_count: int, checked: set[int]) -> bool:
     if not isinstance(record, dict):
         return False
-    units = record.get("units")
+    files, units = record.get("files"), record.get("units")
+    # An unpacked manifest shares one files list across many tests; each list is checked once.
+    if id(files) not in checked:
+        if not _strings(files):
+            return False
+        checked.add(id(files))
     return (
-        _strings(record.get("files"))
-        and isinstance(record.get("escapes"), bool)
+        isinstance(record.get("escapes"), bool)
         and isinstance(units, list)
-        and all(type(unit) is int and 0 <= unit < unit_count for unit in units)
+        and set(map(type, units)) <= {int}
+        and (not units or (min(units) >= 0 and max(units) < unit_count))
     )
 
 
 def _valid_manifest(manifest: object) -> bool:
     if not isinstance(manifest, dict):
         return False
-    tests = manifest.get("tests")
+    tests, checked = manifest.get("tests"), set()
     return (
         isinstance(manifest.get("commit"), str)
         and bool(manifest["commit"])
         and _strings(manifest.get("units"))
         and isinstance(tests, dict)
         and bool(tests)
-        and all(_valid_test(record, len(manifest["units"])) for record in tests.values())
+        and all(_valid_test(record, len(manifest["units"]), checked) for record in tests.values())
     )
 
 
 def _manifest(data: bytes) -> dict:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            manifest = json.loads(archive.read("manifest.json"))
-    except (zipfile.BadZipFile, zlib.error, KeyError, ValueError) as error:
+            if PACKED_FILE in archive.namelist():
+                manifest = dep_manifest.unpack(json.loads(archive.read(PACKED_FILE)))
+            else:
+                manifest = json.loads(archive.read("manifest.json"))
+    except (zipfile.BadZipFile, zlib.error, KeyError, ValueError, TypeError, IndexError, AttributeError) as error:
         raise UnusableRecord(str(error)) from error
     if not _valid_manifest(manifest):
         raise UnusableRecord("dependency manifest schema is invalid or empty")
@@ -103,8 +113,8 @@ def _usable(pool: ThreadPoolExecutor, actions: str, runs: list[dict], tally: Cou
     for run, listing in zip(runs, listings):
         tally["searched"] += 1
         artifacts = json.loads(listing.result())["artifacts"]
-        kept = [item for item in artifacts if item["name"] == "dep-manifest" and not item["expired"]]
-        live = {item["name"] for item in artifacts if not item["expired"]}
+        live = {item["name"]: item for item in artifacts if not item["expired"]}
+        kept = [live[name] for name in (PACKED, "dep-manifest") if name in live]
         if not kept or any(name not in live for name in COVERAGE):
             tally["unavailable"] += 1
             continue

@@ -7,6 +7,8 @@ import re
 import subprocess
 import time
 import zipfile
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
@@ -17,7 +19,7 @@ import yaml
 
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
-from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
+from scripts.ci_mutation.scope import discover_changes, graded_green, module_facts, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, partition, stats_shards
 from scripts.ci_test_plan import find_record
 from tests.dep_manifest import (
@@ -36,6 +38,7 @@ from tests.dep_manifest import changes as recorded_changes
 MUTANT_SECONDS = 5.6
 WORKERS = 4
 RECORD_RETRY_SECONDS = 10
+STATEMENT_BODIES = ("body", "orelse", "finalbody", "handlers", "cases")
 TEST_WORKFLOW = ".github/workflows/test.yml"
 COLLECTING_JOBS = {
     TEST_WORKFLOW: ("unit", "unit-selected", "mutation-stats"),
@@ -97,6 +100,11 @@ def estimate(
 
 def every_test(root: Path) -> list[str]:
     return sorted(path.relative_to(root).as_posix() for path in (root / "tests").rglob("test_*.py") if path.is_file())
+
+
+def touches_code(root: Path, base: str, head: str) -> bool:
+    names = _git(root, "diff", "--name-only", "-z", f"{base}...{head}", "--", "hooks/", "scripts/").split("\0")
+    return any(name.endswith(".py") for name in names)
 
 
 def record_failure(error: Exception) -> str:
@@ -230,15 +238,23 @@ def _imported(path: str, source: str) -> list[str]:
         return []
     package = path.removesuffix(".py").replace("/", ".").split(".")
     names = []
-    for found in ast.walk(tree):
+    for found in _import_statements(tree.body):
         if isinstance(found, ast.Import):
             names.extend(alias.name for alias in found.names)
-        elif isinstance(found, ast.ImportFrom):
+        else:
             parent = package[: len(package) - found.level] if found.level else []
             base = ".".join([*parent, *filter(None, [found.module])])
             names.append(base)
             names.extend(f"{base}.{alias.name}" if base else alias.name for alias in found.names)
     return names
+
+
+def _import_statements(statements: list) -> Iterator[ast.Import | ast.ImportFrom]:
+    for statement in statements:
+        if isinstance(statement, ast.Import | ast.ImportFrom):
+            yield statement
+        for field in STATEMENT_BODIES:
+            yield from _import_statements(getattr(statement, field, ()))
 
 
 def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[set[int], set[str]]:
@@ -527,21 +543,22 @@ def file_text(path: Path) -> str:
     return path.read_text() if path.is_file() else ""
 
 
-@cache
 def defined_tests(path: Path) -> set[str]:
-    return {name for _, _, _, name in _spans(ast.parse(path.read_text())) if name.rpartition(".")[2].startswith("test")}
+    return {name for name in module_facts(path.read_text())[1] if name.rpartition(".")[2].startswith("test")}
 
 
 def narrow(
     root: Path, chosen: list[str], covering: set[str], recorded: dict[str, set[str]], stale: set[str]
 ) -> list[str]:
-    kept = set()
+    kept, by_file = set(), {}
+    for test in covering:
+        by_file.setdefault(test_file(test), set()).add(test)
     for path in chosen:
         defined = {name.replace(".", "::") for name in defined_tests(root / path)}
         if path in stale or not defined <= recorded.get(path, set()):
             kept.add(path)
         else:
-            kept.update(test for test in covering if test_file(test) == path)
+            kept.update(by_file.get(path, ()))
     return sorted(kept) or chosen
 
 
@@ -572,12 +589,17 @@ def stats_part_count(root: Path, tests: list[str], target: float, limit: int) ->
 def validate_tests(root: Path, tests: list[str]) -> None:
     from tests.test_collection_imports import SDK_GROUP, loads_heavy, loads_sdk_when_run
 
+    # A module a clean walk visited cannot reach the SDK, so later walks may skip it.
+    clean = set()
     for test in sorted({test_file(entry) for entry in tests}):
         path = root / test
-        if loads_heavy(test.removesuffix(".py").replace("/", "."), set()):
+        if loads_heavy(test.removesuffix(".py").replace("/", "."), clean):
             raise SystemExit(f"{test}: loads the MCP SDK while collecting")
         source = path.read_text()
-        if loads_sdk_when_run(source) and SDK_GROUP not in source:
+        walked = set(clean)
+        if not loads_sdk_when_run(source, walked):
+            clean = walked
+        elif SDK_GROUP not in source:
             raise SystemExit(f"{test}: loads the MCP SDK without the mcp-sdk worker group")
 
 
@@ -591,24 +613,30 @@ def main() -> int:
     parser.add_argument("--repository")
     args = parser.parse_args()
     root = Path.cwd()
-    bases = own_bases(root, args.base, args.head, graded_green)
-    print(f"Mutation bases: {' '.join(bases)}")
-    changes = discover_changes(root, bases, args.head)
     manifest, failure = None, ""
-    if args.repository and not changes:
-        print("No change remains to mutate, so the recorded dev coverage is not read.")
-    elif args.repository:
-        found, failure = read_record(args.repository)
-        if failure:
-            print(
-                "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every"
-                f" test module is selected for each changed file: {failure}"
-            )
-        elif found is None:
-            print("No dev test dependency manifest found; tests are selected by import only.")
-        else:
-            run, manifest = found
-            print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
+    with ThreadPoolExecutor() as pool:
+        # The record downloads while the bases, changes and test imports are worked out.
+        if args.repository and touches_code(root, args.base, args.head):
+            record = pool.submit(read_record, args.repository)
+        bases = own_bases(root, args.base, args.head, graded_green)
+        print(f"Mutation bases: {' '.join(bases)}")
+        changes = discover_changes(root, bases, args.head)
+        if args.repository and not changes:
+            print("No change remains to mutate, so the recorded dev coverage is not read.")
+        elif args.repository:
+            for path in changes:
+                select_tests(root, Path(path))
+            found, failure = record.result()
+            if failure:
+                print(
+                    "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so"
+                    f" every test module is selected for each changed file: {failure}"
+                )
+            elif found is None:
+                print("No dev test dependency manifest found; tests are selected by import only.")
+            else:
+                run, manifest = found
+                print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
     selection = {}
     seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure))
     validate_tests(root, tests)

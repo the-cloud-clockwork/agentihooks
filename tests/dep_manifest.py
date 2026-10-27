@@ -138,6 +138,34 @@ def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, envi
     }
 
 
+def pack(manifest: dict) -> dict:
+    files, spans = {}, {}
+    packed = {key: value for key, value in manifest.items() if key not in ("tests", "lines")}
+    packed["tests"] = {
+        test: [found["units"], files.setdefault(tuple(found["files"]), len(files)), found["escapes"]]
+        for test, found in manifest["tests"].items()
+    }
+    if "lines" in manifest:
+        packed["lines"] = {
+            test: [spans.setdefault((path, tuple(found)), len(spans)) for path, found in paths.items()]
+            for test, paths in manifest["lines"].items()
+        }
+    packed["files"] = [list(found) for found in files]
+    packed["spans"] = [[path, list(found)] for path, found in spans]
+    return packed
+
+
+def unpack(packed: dict) -> dict:
+    files, spans = packed.pop("files"), packed.pop("spans")
+    packed["tests"] = {
+        test: {"units": units, "files": files[index], "escapes": escapes}
+        for test, (units, index, escapes) in packed["tests"].items()
+    }
+    if "lines" in packed:
+        packed["lines"] = {test: dict(spans[index] for index in found) for test, found in packed["lines"].items()}
+    return packed
+
+
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout
 
@@ -149,6 +177,8 @@ def _show(repo: Path, revision: str, path: str) -> str | None:
 
 def changes(repo: Path, base: str, head: str) -> list[tuple[str, str | None, str | None]]:
     paths = _git(repo, "diff", "--no-renames", "--name-only", base, head).splitlines()
+    # A numstat diff fetches every missing blob of a blobless clone in one request; each show would fetch its own.
+    _git(repo, "diff", "--no-renames", "--numstat", base, head, "--", "*.py")
     found = []
     for path in paths:
         if path.endswith(".py"):
@@ -262,6 +292,23 @@ def deselect(reused: list[str], collected: list[str]) -> dict:
     return {"tests": sorted(tests), "files": sorted(path for path, whole in files.items() if whole)}
 
 
+def branch_only(plans: list[dict], tests: list[str]) -> list[str]:
+    dev = {test for plan in plans if "runs" not in plan for test in plan["tests"]}
+    return [test for test in tests if test not in dev]
+
+
+def _deselect_plans(paths: list[Path], collected: Path, out: Path) -> int:
+    plans = [json.loads(path.read_text()) for path in paths]
+    chosen = deselect([test for plan in plans for test in plan["tests"]], json.loads(collected.read_text()))
+    if len(plans) > 1 or any("runs" in plan for plan in plans):
+        chosen["branch"] = branch_only(plans, chosen["tests"])
+    out.write_text(json.dumps(chosen))
+    print(f"Reusing {len(chosen['tests'])} collected tests; {len(chosen['files'])} test files are not collected")
+    if "branch" in chosen:
+        print(f"{len(chosen['branch'])} of them passed on earlier runs of this pull request")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -272,6 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     built.add_argument("--commit", required=True)
     built.add_argument("--environment", required=True)
     built.add_argument("--out", type=Path, required=True)
+    built.add_argument("--packed", type=Path)
     checked = commands.add_parser("invalidated")
     checked.add_argument("--manifest", type=Path, required=True)
     checked.add_argument("--repo", type=Path, default=Path.cwd())
@@ -283,15 +331,12 @@ def main(argv: list[str] | None = None) -> int:
     measured.add_argument("--ref", default="origin/dev")
     measured.add_argument("--merges", type=int, default=40)
     deselected = commands.add_parser("deselect")
-    deselected.add_argument("--plan", type=Path, required=True)
+    deselected.add_argument("--plan", type=Path, action="append", required=True)
     deselected.add_argument("--collected", type=Path, required=True)
     deselected.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "deselect":
-        chosen = deselect(json.loads(args.plan.read_text())["tests"], json.loads(args.collected.read_text()))
-        args.out.write_text(json.dumps(chosen))
-        print(f"Reusing {len(chosen['tests'])} collected tests; {len(chosen['files'])} test files are not collected")
-        return 0
+        return _deselect_plans(args.plan, args.collected, args.out)
     if args.command == "build":
         reports = sorted(args.inputs.rglob("*.jsonl"))
         if not reports:
@@ -302,6 +347,8 @@ def main(argv: list[str] | None = None) -> int:
             print("::error::The coverage data holds no per test contexts.", file=sys.stderr)
             return 1
         args.out.write_text(json.dumps(manifest, separators=(",", ":")))
+        if args.packed:
+            args.packed.write_text(json.dumps(pack(manifest), separators=(",", ":")))
         escaping = sum(found["escapes"] for found in manifest["tests"].values())
         print(f"Dependency manifest: {len(manifest['tests'])} tests, {len(manifest['units'])} units, {escaping} escape")
         return 0

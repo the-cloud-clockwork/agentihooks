@@ -471,7 +471,9 @@ Each scan joins it with:
 | `telemetry never exported` | no trace for the binding's session past the grace, once the agent has completed a turn (a recorded Stop or session end, or a second prompt in the exporter cursor) or has worked past the first turn bound |
 | `exporter backlog` | observations queued in the cursor, or a pending cap overflow, and the oldest unaccepted source event older than the threshold |
 | `telemetry stale` | generated progress unaccepted past the threshold while nothing is queued, even with the exporter process alive; or the exporter recorded more accepted observations than Langfuse holds past the threshold since its last acceptance |
+| `telemetry count drift` | past the grace, a Langfuse trace was found for the binding's session and the exporter cursor's accepted aggregate (accepted identities plus paged spans) differs from the accepted observation identities, which are rebuilt from the transcript up to the accepted offset when the cursor holds paged spans; any difference raises it, alongside a misattributed or stale finding; id the agent's life, number the size of the difference. When the identities cannot be read it is not raised; the failed read is listed on `trace reader unavailable` |
 | `telemetry misattributed` | a trace tagged with the agent carries another life, seat, task, harness or resolved profile, or the session was accepted with no trace under the agent |
+| `telemetry start unknown` | the binding has no positive start; see [Agent start](#agent-start) |
 | `trace reader unavailable` | the trace listing or any active read failed or ran out of its budget |
 | `trace coverage partial` | the historical backfill has not read every listed trace's observations yet; see [Trace coverage](#trace-coverage) |
 | `wait history partial` | the wait history of an agent with a turn gap over the limit was not read inside the 15 second wait budget or the 55 second step deadline it shares with the trace reads; its turn gaps are not judged that scan |
@@ -490,6 +492,64 @@ An agent Langfuse could not be read for is judged only on its local exporter.
 
 Watermarks and the outage start live in
 `<swarm home>/<slug>/doctor-telemetry.json`.
+
+#### Agent start
+
+The grace, the first turn bound and the age in `telemetry never exported` are
+all measured from the binding's start. The Doctor takes it from the agent
+record in this order:
+
+1. `started_at`, the spawn time, when it is above zero.
+2. `launched_at`, the time the swarm launched the agent, when it is above
+   zero. A hive agent can carry a zero `started_at` while its launch time is
+   recorded.
+3. Otherwise the start is unknown.
+
+A zero, negative, missing or null value counts as absent. The life keeps the
+raw `started_at`, so a hive agent resolved from its launch time still has life
+`name#0` and its traces correlate as before. The `telemetry never exported`
+and `telemetry misattributed` ids use the resolved start; the
+`telemetry count drift` id keeps the raw life.
+
+An unknown start raises `telemetry start unknown` instead of any other active
+telemetry finding for that binding. The Doctor does not apply the grace, does
+not compute an age and does not judge the binding never exported, stale or
+misattributed until a start is recorded. The finding has measure 1 and its id
+is the agent name alone, so the Doctor master gets one notice per agent while
+the gap lasts.
+
+| Agent record | Resolved start | Result at a scan |
+|---|---|---|
+| `started_at` 60 seconds ago, `launched_at` 10 minutes ago | spawn time | inside the 60 second grace: no finding |
+| `started_at` 0, `launched_at` 60 seconds ago | launch time | inside the grace: no finding |
+| `started_at` 0, `launched_at` 3700 seconds ago, past the first turn bound; read this scan, no trace, nothing accepted locally, no backlog | launch time | `telemetry never exported` after 3700 seconds |
+| `started_at` 0 or absent, `launched_at` 0 or absent | none | `telemetry start unknown` |
+
+Example finding for an agent with neither time recorded:
+
+```json
+{
+  "kind": "telemetry start unknown",
+  "subject": "engineer@hive-1",
+  "summary": "working agent start is unknown",
+  "evidence": [
+    "agent engineer@hive-1",
+    "seat unknown",
+    "task unknown",
+    "session unknown",
+    "no positive spawn or launch timestamp; launch grace cannot be established"
+  ],
+  "threshold": "an observed start is required to judge active telemetry"
+}
+```
+
+Before pull request
+[#5670](https://github.com/the-cloud-clockwork/agentihooks/pull/5670), a zero
+`started_at` was subtracted directly, so hive agents were reported as never
+exported with ages of decades and skipped the grace. If this finding appears,
+check the agent record in the swarm store: a working agent needs a positive
+`started_at` or `launched_at`. The order is fixed in code; no setting changes
+it.
 
 ### Read budget
 

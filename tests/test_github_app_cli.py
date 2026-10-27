@@ -44,7 +44,7 @@ def test_process_environment_overrides_stored_helpers_and_preserves_existing_git
     assert env["GIT_CONFIG_VALUE_0"] == "false"
     assert env["GIT_CONFIG_KEY_1"] == env["GIT_CONFIG_KEY_2"] == "credential.https://github.com.helper"
     assert env["GIT_CONFIG_VALUE_1"] == ""
-    assert env["GIT_CONFIG_VALUE_2"] == f"!{github_app_cli.sys.executable} -m scripts.github_app_cli credential"
+    assert env["GIT_CONFIG_VALUE_2"] == f"!{github_app_cli.sys.executable} -P -m scripts.github_app_cli credential"
 
 
 def test_cli_token_prints_only_the_selected_token(monkeypatch, capsys):
@@ -201,8 +201,10 @@ def renewal(monkeypatch, tmp_path, mode="app", key=True):
         monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "pem")
     else:
         monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    monkeypatch.setattr(github_app_cli, "_AUTH", Mock(get_token=Mock(return_value="cached")))
     mint = Mock(return_value="fresh")
-    monkeypatch.setattr(github_app_cli, "token", mint)
+    factory = Mock(return_value=Mock(get_token=mint))
+    monkeypatch.setattr(github_app_cli, "GitHubAppAuth", factory)
     return tmp_path / "github-token", mint
 
 

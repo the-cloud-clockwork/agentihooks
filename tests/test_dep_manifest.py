@@ -62,7 +62,13 @@ def _deselect_in_test_count(tmp_path, head_manifest):
         (checkout / "tests" / "dep_manifest.py").write_text(manifest)
     (workspace / "reused-tests.json").write_text(json.dumps({"tests": reused}))
     (runner / "collected.json").write_text(json.dumps(collected))
-    env = {**os.environ, "RUNNER_TEMP": str(runner), "GITHUB_WORKSPACE": str(workspace), "PYTHON_PATH": sys.executable}
+    env = {
+        **os.environ,
+        "RUNNER_TEMP": str(runner),
+        "GITHUB_WORKSPACE": str(workspace),
+        "PYTHON_PATH": sys.executable,
+        "DEV_PLAN": str(workspace / "reused-tests.json"),
+    }
     run = _step("test-count", "Deselect the reused tests")["run"]
     subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=workspace, env=env, check=True)
     return json.loads((runner / "reused.json").read_text()), dep_manifest.deselect(reused, collected)
@@ -606,3 +612,57 @@ def test_the_reused_plan_reaches_workers_but_never_nested_pytest_runs(tmp_path, 
     worker = SimpleNamespace(stash=pytest.Stash(), workerinput=node.workerinput)
     assert conftest._reused(worker) == conftest._reused(controller)
     assert conftest._reused(SimpleNamespace(stash=pytest.Stash())) == (frozenset(), frozenset())
+
+
+def test_a_packed_manifest_stores_each_file_list_and_line_span_once_and_unpacks_to_the_same_manifest():
+    files = ["hooks/a.py", "tests/conftest.py"]
+    manifest = {
+        "version": 2,
+        "commit": "c",
+        "environment": "e",
+        "units": ["hooks/a.py::a", "hooks/b.py::b"],
+        "tests": {
+            "tests/test_a.py::test_one": {"units": [0], "files": list(files), "escapes": False},
+            "tests/test_a.py::test_two": {"units": [0, 1], "files": list(files), "escapes": True},
+            "tests/test_b.py::test_b": {"units": [1], "files": [], "escapes": False},
+        },
+        "lines": {
+            "tests/test_a.py::test_one": {"hooks/a.py": [1, 2]},
+            "tests/test_a.py::test_two": {"hooks/a.py": [1, 2], "hooks/b.py": [5]},
+        },
+    }
+    packed = dep_manifest.pack(json.loads(json.dumps(manifest)))
+    assert packed["files"] == [files, []]
+    assert packed["spans"] == [["hooks/a.py", [1, 2]], ["hooks/b.py", [5]]]
+    assert packed["tests"]["tests/test_a.py::test_two"] == [[0, 1], 0, True]
+    assert packed["lines"]["tests/test_a.py::test_two"] == [0, 1]
+    assert {key: packed[key] for key in ("version", "commit", "environment", "units")} == {
+        key: manifest[key] for key in ("version", "commit", "environment", "units")
+    }
+    assert dep_manifest.unpack(json.loads(json.dumps(packed))) == manifest
+
+
+def test_a_packed_manifest_without_lines_unpacks_without_lines():
+    manifest = {"commit": "c", "units": [], "tests": {"t": {"units": [], "files": ["x"], "escapes": False}}}
+    assert dep_manifest.unpack(dep_manifest.pack(manifest)) == manifest
+
+
+def test_the_build_writes_the_packed_manifest_only_when_asked_and_the_workflow_uploads_it(tmp_path, monkeypatch):
+    built = {"version": 2, "commit": "c", "units": [], "tests": {"t": {"units": [], "files": ["x"], "escapes": False}}}
+    monkeypatch.setattr(dep_manifest, "build", lambda *args: built)
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "a.jsonl").write_text("")
+    out, packed = tmp_path / "manifest.json", tmp_path / "packed.json"
+    argv = ["build", "--coverage", "c", "--inputs", str(tmp_path / "inputs"), "--commit", "c", "--environment", "e"]
+    assert dep_manifest.main([*argv, "--out", str(out)]) == 0
+    assert not packed.exists()
+    assert dep_manifest.main([*argv, "--out", str(out), "--packed", str(packed)]) == 0
+    assert json.loads(out.read_text()) == built
+    assert dep_manifest.unpack(json.loads(packed.read_text())) == built
+    build = _step("sonar", "Build the test dependency manifest")
+    assert '--packed "$RUNNER_TEMP/dep-manifest/packed.json"' in build["run"]
+    upload = _step("sonar", "Upload the packed test dependency manifest")
+    assert upload["if"] == _step("sonar", "Upload the test dependency manifest")["if"]
+    assert upload["with"]["name"] == "dep-manifest-packed"
+    assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/packed.json"
+    assert upload["with"]["if-no-files-found"] == "error"

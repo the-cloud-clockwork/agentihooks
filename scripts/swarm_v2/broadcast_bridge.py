@@ -11,6 +11,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from hooks.context import worker_mode
+
 if TYPE_CHECKING:
     from scripts.swarm_v2.broadcasts import Delivery
 
@@ -63,7 +65,7 @@ class RemoteFleet:
 
 
 def claim(session_id: str, channels: list[str], environ: Mapping[str, str]) -> int:
-    if not environ.get(GRANT_FILE) or not environ.get(API_URL):
+    if not environ.get(GRANT_FILE) or not environ.get(API_URL) or worker_mode.active(environ):
         return 0
     from scripts.swarm_v2.broadcasts import FLAG, sync_local
 

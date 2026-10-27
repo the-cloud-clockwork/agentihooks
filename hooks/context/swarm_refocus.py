@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME
-from hooks.context import master_coding
+from hooks.context import master_coding, worker_mode
 from scripts.swarm_ledger import plan_read
 
 STATE_DIR = AGENTIHOOKS_HOME / "swarm-refocus"
@@ -56,7 +56,7 @@ def _master_block(ledger: dict, cap: int) -> str:
 def refocus_context(session_id, event, environ=None):
     env = os.environ if environ is None else environ
     binding = _binding(env)
-    if not (binding and session_id):
+    if not (binding and session_id) or worker_mode.active(env):
         return ""
     ledger = _read_ledger(_ledger_dir(env), *binding)
     block = (

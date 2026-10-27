@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import re
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from scripts.swarm_ledger import ledger_closed, ports
 
@@ -14,6 +14,7 @@ from .services import Services
 
 WORKSPACE_RE = re.compile(r"tasks/[\w.-]+/workspace")
 FILE_RE = re.compile(r"files/(media|artifacts)/[\w.-]+")
+CONTEXT_RE = re.compile(r"swarm/context/[\w.-]+/[\w.:-]+")
 
 
 def body(handler: object, services: Services) -> dict:
@@ -65,6 +66,8 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
     if path == "swarm/models":
         catalog = services.swarm.models()
         return {"data": catalog, "revision": resources.revision(catalog)}
+    if CONTEXT_RE.fullmatch(unquote(path)):
+        return context_evidence(services, slug, *unquote(path).split("/")[2:])
     if path == "swarm" or path.startswith("swarm/"):
         return resources.swarm_read(services.swarm.status(slug), path, query)
     if WORKSPACE_RE.fullmatch(path):
@@ -87,6 +90,16 @@ def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
         return task_list.read(services.repository, slug, query)
     entry = services.repository.current(slug)
     return resources.read(entry.state, path, query, entry.views)
+
+
+def context_evidence(services: Services, slug: str, task: str, ref: str) -> dict:
+    context_view = ports.swarm().context_view
+    if not context_view.enabled(os.environ):
+        raise APIError(404, "resource_missing", context_view.OFF)
+    try:
+        return {"data": context_view.expand(services.swarm.store(), slug, task, ref)}
+    except context_view.Refused as refused:
+        raise APIError(refused.status, refused.reason, str(refused)) from None
 
 
 def agent_token(handler: object, services: Services, slug: str) -> dict:
@@ -122,6 +135,16 @@ def workspace(services: Services, slug: str, task_id: str) -> dict:
     return {"data": tails, "revision": resources.revision(tails)}
 
 
+def global_read(services: Services, name: str) -> dict:
+    if name == "tips":
+        from scripts.swarm_ledger import page_tips
+
+        return {"data": page_tips.values()}
+    from . import monitor
+
+    return monitor.route(services)
+
+
 def global_resource(handler: object, services: Services, parts: list) -> dict:
     from . import admin, routing
 
@@ -135,10 +158,8 @@ def global_resource(handler: object, services: Services, parts: list) -> dict:
         from . import hives
 
         return hives.route(handler, services, parts, body)
-    if parts == ["tips"] and handler.command == "GET":
-        from scripts.swarm_ledger import page_tips
-
-        return {"data": page_tips.values()}
+    if parts in (["tips"], ["monitor"]) and handler.command == "GET":
+        return global_read(services, parts[0])
     if parts == ["layout"]:
         return admin.layout(handler, services, None if handler.command == "GET" else body(handler, services))
     if handler.command == "GET" and parts[0] in ("ledgers", "bin"):

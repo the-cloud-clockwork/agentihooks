@@ -1,0 +1,47 @@
+rules:
+  - id: app-token-git-https
+    languages: [yaml]
+    severity: ERROR
+    message: >-
+      A workflow hands a GitHub App token to Git over HTTPS. On 27 October GitHub refused Git over HTTPS for the App
+      while its REST API kept working, and promotion tags failed. Use the REST API through gh api instead: git/refs to
+      create a ref, tarball to read another repository's files instead of a checkout or clone. An x-access-token URL
+      puts a token into Git over HTTPS the same way, whichever token it carries.
+    pattern-either:
+      - patterns:
+          - pattern: |
+              uses: $ACTION
+              ...
+              with:
+                ...
+                token: $TOKEN
+                ...
+          - metavariable-regex:
+              metavariable: $ACTION
+              regex: ^actions/checkout@
+          - metavariable-regex:
+              metavariable: $TOKEN
+              regex: .*\bsteps\.[^.]+\.outputs\.token\b
+          - focus-metavariable: $TOKEN
+      - patterns:
+          - pattern: |
+              run: $SCRIPT
+          - metavariable-regex:
+              metavariable: $SCRIPT
+              regex: (?s).*x-access-token.*
+          - focus-metavariable: $SCRIPT
+      - patterns:
+          - pattern: |
+              env:
+                ...
+                GH_TOKEN: $TOKEN
+                ...
+              ...
+              run: $SCRIPT
+          - metavariable-regex:
+              metavariable: $TOKEN
+              regex: .*\bsteps\.[^.]+\.outputs\.token\b
+          - metavariable-regex:
+              metavariable: $SCRIPT
+              regex: (?s).*(gh repo clone|gh auth setup-git|\bgit (push|clone|fetch|pull|ls-remote) [^|;&]*https://).*
+          - focus-metavariable: $SCRIPT

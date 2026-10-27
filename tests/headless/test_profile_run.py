@@ -106,6 +106,7 @@ def test_codex_args_keeps_the_base_flags_before_the_schema_flag(tmp_path):
     assert profile_run.codex_args(run) == [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "-o",
         str(run.run_dir / "last-message.txt"),
         "--output-schema",
@@ -265,6 +266,7 @@ def test_the_codex_argv_without_a_schema(fake_agentihooks, tmp_path):
         "--",
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "-o",
         str(run.run_dir / "last-message.txt"),
         "--",

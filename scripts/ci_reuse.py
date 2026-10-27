@@ -83,10 +83,9 @@ INLINE_SKIP = (
 POSTGRES_REQUIRED = ('"semgrep", "sonar"]', '"semgrep", "sonar", "writer-lock"]')
 
 TEST_ONLY_SONAR = (
-    ('"semgrep", "sonar"', '"semgrep"'),
     (
         '\n      + (if $scope == "full"',
-        '\n      + (if .select.outputs.sonar == "skip" then [] else ["sonar"] end)\n      + (if $scope == "full"',
+        '\n      - (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)\n      + (if $scope == "full"',
     ),
 )
 
@@ -212,6 +211,30 @@ def summary_steps() -> list[dict]:
 
 def pipefail_summary(steps: list[dict]) -> list[dict]:
     return [{**step, "shell": "bash"} if step.get("name") == "Summarize this run's tests" else step for step in steps]
+
+
+def retried_summary(steps: list[dict]) -> list[dict]:
+    retried = []
+    for step in steps:
+        uses = step.get("uses")
+        if not (uses and uses.startswith("actions/download-artifact@")):
+            retried.append(step)
+            continue
+        name = step["name"]
+        slug = "-".join(re.findall(r"[a-z0-9]+", name.lower().replace("'", "")))
+        condition = f"steps.{slug}.outcome == 'failure'"
+        retried += [
+            {**step, "id": slug, "continue-on-error": True},
+            {
+                "name": f"{name}, wait before attempt 2",
+                "if": condition,
+                "shell": "bash",
+                "run": f'echo "::warning::{name} failed, as an artifact service outage does; '
+                'retrying it once in 30 seconds."\nsleep 30\n',
+            },
+            {"name": f"{name}, attempt 2", "if": condition, "uses": step["uses"], "with": step["with"]},
+        ]
+    return retried
 
 
 def selection_diagnostic(steps: list[dict]) -> list[dict]:
@@ -382,6 +405,15 @@ def _differs(expected, actual, prefix=""):
     return keys
 
 
+def _published(artifacts, run):
+    if any(item["name"].startswith("reused-branch-") for item in artifacts):
+        return "it reused tests from earlier runs of its pull request"
+    name = f"required-tree-{run['run_attempt']}"
+    if len([item for item in artifacts if item["name"] == name and not item["expired"]]) != 1:
+        return f"not exactly one {name} artifact"
+    return None
+
+
 def _refusal(args, current, workflow, run):
     for key, value in (("event", "pull_request"), ("status", "completed"), ("conclusion", "success")):
         if run[key] != value:
@@ -395,9 +427,8 @@ def _refusal(args, current, workflow, run):
     if workflow_files != current["inputs"]["workflow"]:
         return "workflow files differ at its head"
     artifacts = _lines(folder / "artifacts.jsonl")
-    name = f"required-tree-{run['run_attempt']}"
-    if len([item for item in artifacts if item["name"] == name and not item["expired"]]) != 1:
-        return f"not exactly one {name} artifact"
+    if reason := _published(artifacts, run):
+        return reason
     record = _proof(folder / "proof.zip")
     expected = {
         "version": 1,

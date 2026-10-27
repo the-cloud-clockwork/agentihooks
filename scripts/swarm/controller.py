@@ -65,6 +65,9 @@ class FencedLedger:
 class FencedRuntime:
     def __init__(self, store: RedisStore, slug: str, held: lease.Lease, runtime, deployment: str):
         self.store, self.slug, self.held = store, slug, held
+        self.kubernetes_proof = (
+            slug.startswith("proof-") and os.environ.get("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF") == slug
+        )
         from scripts.swarm_v2.runtime.routed import RoutedRuntime, hive_controller
 
         if (
@@ -127,7 +130,7 @@ class FencedRuntime:
             return self._local_refusal(lane, task, claim)
         router = self.runtime.router
         if router.placement.backend == "hive":
-            if not _hive_lane(lane, task):
+            if not _hive_lane(lane, task, self.kubernetes_proof):
                 original = self.runtime.original_runtime.router
                 wanted = original.placed_backend(lane, task)
                 return (
@@ -153,7 +156,7 @@ class FencedRuntime:
     def _local_refusal(self, lane: str, task: dict, name: str) -> str:
         if lane == "master":
             return ""
-        from scripts.hive import admission, registry
+        from scripts.hive import admission, placement_waits, registry
         from scripts.hive.placement import LOCAL_FULL, equipped, needs_refusal
         from scripts.swarm.commands import hive_id
 
@@ -165,7 +168,9 @@ class FencedRuntime:
         taken = local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum) if name else held
         if taken >= maximum:
             self._local_full(machine, taken, maximum)
-            return f"{LOCAL_FULL}{taken} of its {maximum} agents: {found.reason}: {found.detail}"
+            refused = f"{LOCAL_FULL}{taken} of its {maximum} agents: {found.reason}: {found.detail}"
+            placement_waits.observe(self.store, self.slug, lane, task["id"], refused, lease.now_ms(self.store))
+            return refused
         if name:
             admission.record(self.store.redis, machine, f"{self.slug}/{name}")
         return ""
@@ -192,7 +197,7 @@ class FencedRuntime:
         if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr(self._pass_memo()):
             return waited.reason
         from scripts.hive import admission, placement_waits, registry
-        from scripts.hive.placement import LOCAL_FULL, Choice, equipped, hosts, overflow
+        from scripts.hive.placement import LOCAL_FULL, Choice, equipped, hosts, local_full, overflow
         from scripts.swarm.commands import hive_id
 
         machine = hive_id()
@@ -201,18 +206,21 @@ class FencedRuntime:
             return waited.reason
         found, held, local_max = self._workstation_room(machine, task)
         refused = f": {found.reason}: {found.detail}"
-        chosen = overflow(waited.role, waited, held, local_max)
+        reserved = (
+            0
+            if task.get("workstation")
+            else placement_waits.workstation_waiting(self.store, machine, lease.now_ms(self.store))
+        )
+        chosen = overflow(waited.role, waited, held, local_max, reserved)
         if not isinstance(chosen, Choice):
             if LOCAL_FULL not in chosen.reason:
                 return chosen.reason
             self._local_full(machine, held, local_max)
             return chosen.reason + refused
-        if (
-            claim
-            and (taken := local_slots.claim(self.store, machine, self.slug, task["id"], claim, local_max)) >= local_max
-        ):
+        room = local_max - reserved
+        if claim and (taken := local_slots.claim(self.store, machine, self.slug, task["id"], claim, room)) >= room:
             self._local_full(machine, taken, local_max)
-            return f"{waited.reason}{LOCAL_FULL}{taken} of its {local_max} agents{refused}"
+            return local_full(waited, taken, local_max, reserved).reason + refused
         if claim:
             admission.record(self.store.redis, machine, f"{self.slug}/{claim}")
         self.store.redis.hdel(self.store.key(self.slug, placement_waits.WAITS), task["id"])
@@ -266,7 +274,9 @@ class FencedRuntime:
             runtime = self.runtime
             if workstation:
                 runtime = runtime.herdr_runtime
-            elif not _hive_lane(lane, task) and getattr(runtime, "hive_launch", None) is not None:
+            elif (
+                not _hive_lane(lane, task, self.kubernetes_proof) and getattr(runtime, "hive_launch", None) is not None
+            ):
                 runtime = runtime.original_runtime
             return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 
@@ -290,7 +300,9 @@ class FencedRuntime:
             return self.runtime.hive_launch.expire(request)
 
 
-def _hive_lane(lane: str, task: dict) -> bool:
+def _hive_lane(lane: str, task: dict, kubernetes_proof: bool) -> bool:
+    if kubernetes_proof and lane == "eng":
+        return False
     return lane in HIVE_LANES or lane == "master" or bool(task.get("hive"))
 
 

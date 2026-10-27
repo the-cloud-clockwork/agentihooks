@@ -302,6 +302,7 @@ def test_prepare_retires_only_the_merged_repository_branch(repositories, monkeyp
 
     monkeypatch.setattr(publish, "git", git_call)
     monkeypatch.setattr(publish, "execute", execute)
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "")
 
     result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
 

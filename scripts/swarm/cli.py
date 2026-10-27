@@ -5,6 +5,7 @@ agentihooks swarm init NAME [--plan FILE] [--content FILE] [--repo DIR]  the one
 agentihooks swarm names check NAME [--plan FILE]                  valid or invalid against the swarm name rule, with suggestions
 agentihooks swarm <id> create --repo DIR [--template NAME]         proof and demo swarms only; init calls it for every other swarm
 agentihooks swarm <id> start | pause | stop [--now] | status
+agentihooks swarm <id> probe
 agentihooks swarm <id> names [--json]                              the swarm code, its herdr space and every agent name it gave
 agentihooks swarm <id> url                                        print the ledger page link (create and start print it last)
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
@@ -1239,6 +1240,13 @@ def cmd_ledger_ready(store: RedisStore, args: argparse.Namespace) -> None:
     print(json.dumps(ledger_cutover.readiness(store, args.slug)))
 
 
+def probe_command(store, args):
+    from scripts.swarm import probe
+
+    for found in probe.run(store, args.slug, LedgerClient(), now_ms()):
+        print(found.line())
+
+
 def cmd_status(store, args):
     if args.json:
         store.config(args.slug)
@@ -1660,18 +1668,19 @@ def cmd_pr(store, args):
     agent = _worker(store, args)
     config = store.config(args.slug)
     awaiting = "approval" if config.autonomy == ASSIST else ""
-    head, repo = pull_branch(args.url)
-    branch = {"branch": head, "branch_repo": repo} if head else {}
-    fields = {"pr_url": args.url, "state": "pr", "awaiting": awaiting, **branch}
     ledger = LedgerClient()
     doc = ledger.state(args.slug)
     row = next(t for t in doc["tasks"] if t.get("id") == agent.task)
+    keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
+    head, repo = pull_branch(args.url)
+    branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
+    fields = {"state": "pr", "awaiting": awaiting, **branch} | ({} if keeps_main else {"pr_url": args.url})
     fields.update(_split_binding(row, args.url, args.half))
     scoped = _pull_scope(row, args)
     row.update(scoped)
     fields.update(scoped)
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
-    if row.get("pr_url") != args.url:
+    if not keeps_main and row.get("pr_url") != args.url:
         lift.drop_task(args.slug, agent.task)
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
@@ -2290,6 +2299,7 @@ def build_parser():
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
+    sub.add_parser("probe").set_defaults(handler=probe_command)
     sub.add_parser("ledger-ready")
     for verb in ("freeze", "focus", "unfreeze"):
         frozen = sub.add_parser(verb)
@@ -2451,7 +2461,7 @@ def dispatch(argv):
         elif len(argv) == 3 and argv[2] == "up" and argv[1] != "master":
             argv = [argv[0], "agent-up", argv[1]]
         args = build_parser().parse_args(argv)
-        handler = globals()[f"cmd_{args.command.replace('-', '_')}"]
+        handler = vars(args).get("handler") or globals()[f"cmd_{args.command.replace('-', '_')}"]
     who = Who.from_env()
     if text := refusal(vars(args).get("name"), who):
         print(f"swarm: {text}", file=sys.stderr)

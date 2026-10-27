@@ -287,9 +287,9 @@ def test_another_member_inbox_differs_from_the_shared_user_inbox(tmp_path, capsy
 def test_lint_grades_the_member_grants_against_the_antoncore_dev_hive_user():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     steps = workflow["jobs"]["lint"]["steps"]
-    checkout = next(s for s in steps if s.get("with", {}).get("repository") == "the-cloud-clockwork/antoncore")
-    assert checkout["with"]["ref"] == "dev"
-    assert grants.HIVE_VALUES in checkout["with"]["sparse-checkout"].split()
+    checkout = next(s for s in steps if s.get("env", {}).get("REPOSITORY") == "the-cloud-clockwork/antoncore")
+    assert checkout["env"]["REF"] == "dev"
+    assert grants.HIVE_VALUES in checkout["env"]["SELECTED_PATHS"].split()
     check = next(s for s in steps if "scripts.ci_hive_nats_grants" in s.get("run", ""))
     assert check["if"] == "${{ !cancelled() }}"
     assert steps.index(checkout) < steps.index(check)
@@ -443,5 +443,5 @@ def test_the_controller_grant_serves_hub_slot_requests():
 
 def test_lint_checks_out_the_antoncore_service_users():
     steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
-    checkout = next(s for s in steps if s.get("with", {}).get("repository") == "the-cloud-clockwork/antoncore")
-    assert grants.SERVICE_USERS in checkout["with"]["sparse-checkout"].split()
+    checkout = next(s for s in steps if s.get("env", {}).get("REPOSITORY") == "the-cloud-clockwork/antoncore")
+    assert grants.SERVICE_USERS in checkout["env"]["SELECTED_PATHS"].split()
