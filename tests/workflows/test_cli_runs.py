@@ -138,3 +138,14 @@ def test_run_never_overwrites_an_existing_run(setup_run, monkeypatch, capsys):
     assert cli.main(args) == 1
     assert json.loads(capsys.readouterr().out)["error"]
     assert store.load(root / "same") == expected
+
+
+def test_run_reports_broken_workflow_layers_as_json(setup_run, monkeypatch, capsys):
+    root, case, launch = setup_run
+    errors = ["first workflow is invalid", "second workflow is invalid"]
+    monkeypatch.setattr(loader, "resolve", lambda cwd: ({}, errors))
+    monkeypatch.setattr(cli, "HeadlessProfile", Mock(return_value=Mock(launch=launch)))
+    assert cli.main(["run", "pair", "--case", str(case)]) == 1
+    assert json.loads(capsys.readouterr().out) == {"error": "\n".join(errors)}
+    assert not root.exists()
+    launch.assert_not_called()

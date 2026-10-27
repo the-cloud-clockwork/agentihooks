@@ -102,7 +102,7 @@ def execute(folder: Path, state: dict) -> dict:
 def run_workflow(args: argparse.Namespace) -> dict:
     found, errors = loader.resolve(Path.cwd())
     if errors:
-        raise ValueError("\\n".join(errors))
+        raise ValueError("\n".join(errors))
     if args.name not in found:
         raise ValueError(f"no workflow named {args.name}")
     definition = found[args.name].workflow
