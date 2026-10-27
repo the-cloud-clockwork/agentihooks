@@ -42,7 +42,7 @@ SUITE_SPEED = "tests/test_suite_speed.py"
 FAKEREDIS = "fakeredis"
 # Only the queue ran these whole tree checks, so a pull request adding, removing or moving a file passed its own tier.
 TREE_CHECKS = (f"{TESTS}/test_codeowners.py", f"{TESTS}/test_ci_pull_request_api.py")
-# Stored test seconds per leg up to the leg limit; past it the legs grow, at most to a full suite shard.
+# Stored test seconds per leg up to the leg limit; a larger selection shares the legs and each runs longer.
 LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
 
