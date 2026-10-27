@@ -123,7 +123,11 @@ def main(argv: list[str] | None = None) -> int:
             written += harvest(number, args.folder, taken, deadline)
         except subprocess.TimeoutExpired:
             skipped.append(number)
-    note = f"skipped {sorted(skipped)} past the budget, never retried" if skipped else "none skipped"
+    note = (
+        f"skipped {sorted(skipped)} on a GitHub timeout or past the budget, never retried"
+        if skipped
+        else "none skipped"
+    )
     before = size(args.folder)
     kept = prune(args.folder)
     after = size(args.folder)

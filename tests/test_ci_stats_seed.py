@@ -278,17 +278,18 @@ def test_main_harvests_newest_first_and_skips_pulls_past_the_budget(folder, monk
     def harvest(number, found, taken, deadline):
         harvested.append(number)
         assert deadline == 7.0 + seed.BUDGET
-        if number < 3:
+        if number == 1:
             raise subprocess.TimeoutExpired(["gh"], 0)
-        return 1
+        return number - 1
 
     monkeypatch.setattr(seed, "harvest", harvest)
 
     assert seed.main([str(folder), "--head", "h", "--before", "b"]) == 0
 
     assert harvested == [3, 2, 1]
-    assert "1 files from pull requests [1, 2, 3], skipped [1, 2] past the budget, never retried;" in (
-        capsys.readouterr().out
+    assert (
+        "3 files from pull requests [1, 2, 3], skipped [1] on a GitHub timeout or past the budget, never retried;"
+        in (capsys.readouterr().out)
     )
     assert (folder / seed.SEEDED).read_text() == "h\n"
 
@@ -305,7 +306,10 @@ def test_main_skips_a_pull_whose_github_call_timed_out(folder, monkeypatch, caps
 
     assert seed.main([str(folder), "--head", "h", "--before", "b"]) == 0
 
-    assert "1 files from pull requests [1, 2], skipped [2] past the budget, never retried;" in capsys.readouterr().out
+    assert (
+        "1 files from pull requests [1, 2], skipped [2] on a GitHub timeout or past the budget, never retried;"
+        in capsys.readouterr().out
+    )
 
 
 def test_harvest_keeps_pointers_a_newer_pull_request_already_wrote(folder, monkeypatch):
@@ -431,6 +435,7 @@ def test_dev_pushes_save_the_stats_cache_pull_request_runs_restore():
     restored = next(s for s in jobs["mutation-stats"]["steps"] if s.get("name") == "Restore compatible test stats")
     job = jobs["mutation-stats-seed"]
     steps = {step.get("name"): step for step in job["steps"]}
+    assert seed.BUDGET * 2 <= job["timeout-minutes"] * 60
     assert job["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
     assert job["permissions"] == {"contents": "read"}
     mint = next(step for step in job["steps"] if step.get("id") == "app-token")
