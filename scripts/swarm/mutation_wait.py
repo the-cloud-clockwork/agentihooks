@@ -354,10 +354,16 @@ def _resolve(held, branches):
     outcome = f"mutation preflight {target}"
     if moved := _moved(target, run, outcome):
         return moved
-    conclusion = run.get("conclusion")
-    ended = f"{outcome}, now red; run {conclusion}"
-    if conclusion not in ("success", "failure") and not (conclusion == "cancelled" and run["path"] == WORKFLOW):
+    if run.get("conclusion") in ("success", "failure"):
+        return _evidence(target, run, branches, outcome)[0]
+    ended = f"{outcome}, now red; run {run.get('conclusion')}"
+    if run.get("conclusion") != "cancelled" or run["path"] != WORKFLOW:
         return ended
+    verdict, sharded = _evidence(target, run, branches, outcome)
+    return verdict if sharded or not verdict else ended
+
+
+def _evidence(target, run, branches, outcome):
     try:
         report, scope, sharded = _fetch(target, run)
         covered = _covers(target, run, scope, branches)
@@ -369,21 +375,20 @@ def _resolve(held, branches):
         failures.extend(f"{row['path']}: {row['reason']}" for row in report["not_mutated"])
         failed = report["failed"]
     except (Skipped, FetchFailed) as error:
-        return ended if conclusion == "cancelled" else _unfetched(outcome, conclusion, error)
+        return _unfetched(outcome, run["conclusion"], error), False
     except Unreachable:
-        return ""
+        return "", False
     except (*UNREADABLE, StopIteration, zipfile.BadZipFile):
-        if conclusion == "cancelled":
-            return ended
-        return f"{outcome}, now red; complete mutation report unavailable; mutation may have been skipped"
-    if conclusion == "cancelled" and not sharded:
-        return ended
+        return f"{outcome}, now red; complete mutation report unavailable; mutation may have been skipped", False
     if not covered:
-        return f"{outcome}, now red; the mutation report does not grade the branch head from its dev merge base"
-    if (conclusion == "success" or sharded) and not failed and not failures:
-        return f"{outcome}, now green; no failing mutants"
+        return (
+            f"{outcome}, now red; the mutation report does not grade the branch head from its dev merge base",
+            sharded,
+        )
+    if (run["conclusion"] == "success" or sharded) and not failed and not failures:
+        return f"{outcome}, now green; no failing mutants", sharded
     detail = "; ".join(failures) or "mutation failed without a named survivor"
-    return f"{outcome}, now red; {detail}"
+    return f"{outcome}, now red; {detail}", sharded
 
 
 def run_resolution(target: str) -> str:
