@@ -4,11 +4,15 @@ import io
 import json
 from contextlib import redirect_stdout
 
+from hooks.context import worker_mode
+
 
 def run(payload: dict) -> tuple[list[str], str | None]:
     """Dispatch one event to the ledger hook; return its context blocks and its stop block reason."""
     from scripts.swarm_ledger import ledger_hook
 
+    if worker_mode.active():
+        return [], None
     out = io.StringIO()
     with redirect_stdout(out):
         ledger_hook.dispatch(payload)

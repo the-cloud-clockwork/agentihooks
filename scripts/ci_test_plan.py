@@ -3,8 +3,10 @@ import io
 import itertools
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 import zipfile
 import zlib
 from collections import Counter
@@ -19,22 +21,31 @@ from tests import dep_manifest
 UNIT_JOBS = frozenset(f"unit (3.12, {shard})" for shard in range(1, 21))
 # Full scope runs carry these into their own coverage for the tests they reuse.
 COVERAGE = frozenset(f"coverage-3.12-{shard}" for shard in range(1, 21))
+PACKED = "dep-manifest-packed"
+PACKED_FILE = "packed.json"
 CANDIDATES = 10
 REQUESTS = 100
 PAGE_REQUESTS = 1 + 3 * CANDIDATES
 JOB_PAGE = 100
+SERVER_ERROR = re.compile(r"HTTP 5\d\d")
+SERVER_ATTEMPTS = 3
+SERVER_BACKOFF = 5
 
 
 class UnusableRecord(ValueError):
     pass
 
 
-def _api(endpoint: str) -> bytes:
-    try:
-        return gh_api([endpoint], timeout=60).stdout
-    except subprocess.CalledProcessError as error:
-        print(error.stderr.decode(), file=sys.stderr)
-        raise
+def _api(endpoint: str, timeout: int = 60) -> bytes:
+    for attempt in range(SERVER_ATTEMPTS):
+        try:
+            return gh_api([endpoint], timeout=timeout).stdout
+        except subprocess.CalledProcessError as error:
+            stderr = error.stderr.decode()
+            print(stderr, file=sys.stderr)
+            if attempt + 1 == SERVER_ATTEMPTS or not SERVER_ERROR.search(stderr):
+                raise
+            time.sleep(SERVER_BACKOFF * 2**attempt)
 
 
 def _strings(value: object) -> bool:
@@ -70,8 +81,11 @@ def _valid_manifest(manifest: object) -> bool:
 def _manifest(data: bytes) -> dict:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            manifest = json.loads(archive.read("manifest.json"))
-    except (zipfile.BadZipFile, zlib.error, KeyError, ValueError) as error:
+            if PACKED_FILE in archive.namelist():
+                manifest = dep_manifest.unpack(json.loads(archive.read(PACKED_FILE)))
+            else:
+                manifest = json.loads(archive.read("manifest.json"))
+    except (zipfile.BadZipFile, zlib.error, KeyError, ValueError, TypeError, IndexError, AttributeError) as error:
         raise UnusableRecord(str(error)) from error
     if not _valid_manifest(manifest):
         raise UnusableRecord("dependency manifest schema is invalid or empty")
@@ -94,8 +108,8 @@ def _usable(pool: ThreadPoolExecutor, actions: str, runs: list[dict], tally: Cou
     for run, listing in zip(runs, listings):
         tally["searched"] += 1
         artifacts = json.loads(listing.result())["artifacts"]
-        kept = [item for item in artifacts if item["name"] == "dep-manifest" and not item["expired"]]
-        live = {item["name"] for item in artifacts if not item["expired"]}
+        live = {item["name"]: item for item in artifacts if not item["expired"]}
+        kept = [live[name] for name in (PACKED, "dep-manifest") if name in live]
         if not kept or any(name not in live for name in COVERAGE):
             tally["unavailable"] += 1
             continue

@@ -6,6 +6,7 @@ import re
 import sys
 import tempfile
 import traceback
+from collections import Counter
 from pathlib import Path
 from time import process_time
 from types import ModuleType, SimpleNamespace
@@ -174,29 +175,42 @@ def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]
 def split_parts(files: list[str], seconds: dict[str, float], part: tuple[int, int]) -> list[str]:
     # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
     index, total = part
+    return partition(files, seconds, total)[index]
+
+
+def partition(files: list[str], seconds: dict[str, float], total: int) -> list[list[str]]:
     parts = [[] for _ in range(total)]
+    loads = Counter()
     for path in sorted(files, key=lambda path: (-seconds[path], path)):
-        min(parts, key=lambda chosen: sum(seconds[path] for path in chosen)).append(path)
-    return sorted(parts[index])
+        chosen = min(range(total), key=loads.__getitem__)
+        parts[chosen].append(path)
+        loads[chosen] += seconds[path]
+    return [sorted(part) for part in parts]
 
 
 def stats_shards(root: Path, files: list[str], count: int, seconds: dict[str, float] | None = None) -> list[list[str]]:
     if seconds is None:
         seconds = file_seconds(root, files)
     # Files that share an xdist group never run concurrently in CI, so they share a shard here.
-    units = []
-    for path in files:
-        groups = set(GROUP.findall((root / test_file(path)).read_text())) - IMPORT_GROUPS
-        keys = {f"group {group}" for group in groups} or {test_file(path)}
+    units, owners, groups = {}, {}, {}
+    for number, path in enumerate(files):
+        name = test_file(path)
+        if name not in groups:
+            groups[name] = set(GROUP.findall((root / name).read_text())) - IMPORT_GROUPS
+        keys = {f"group {group}" for group in groups[name]} or {name}
         members = [path]
-        for unit in [unit for unit in units if unit[0] & keys]:
-            units.remove(unit)
-            keys |= unit[0]
-            members = unit[1] + members
-        units.append((keys, members))
+        for unit in sorted({owners[key] for key in keys if key in owners}):
+            joined, before = units.pop(unit)
+            keys |= joined
+            members = before + members
+        units[number] = (keys, members)
+        owners.update(dict.fromkeys(keys, number))
     shards = [[] for _ in range(max(1, min(count, len(units))))]
-    for _, members in sorted(units, key=lambda unit: (-sum(seconds[path] for path in unit[1]), unit[1])):
-        min(shards, key=lambda shard: sum(seconds[path] for path in shard)).extend(members)
+    loads = Counter()
+    for _, members in sorted(units.values(), key=lambda unit: (-sum(seconds[path] for path in unit[1]), unit[1])):
+        chosen = min(range(len(shards)), key=loads.__getitem__)
+        shards[chosen].extend(members)
+        loads[chosen] += sum(seconds[path] for path in members)
     # pytest drops a package conftest for files given after a file from another folder.
     return [sorted(shard) for shard in shards]
 

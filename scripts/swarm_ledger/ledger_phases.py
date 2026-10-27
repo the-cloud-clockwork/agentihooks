@@ -156,6 +156,11 @@ def append(doc: dict, op: dict, ctx) -> bool:
         validate(doc["phases"] + added)
         for refusal in filter(None, (ledger_plans.phase_refusal(doc, phase) for phase in added)):
             raise ValueError(refusal)
+        from scripts.swarm_ledger import plan_ranges
+
+        for phase in added:
+            if "plan_ref" in phase:
+                plan_ranges.check_phase_ref(doc, phase)
     except ValueError as exc:
         ctx.refused.append(str(exc))
         return False

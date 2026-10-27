@@ -209,24 +209,26 @@ def _ssh_keys(tools: Tools, options: Options) -> str:
     return openbao_kv.summary(tools.state["record"], entries, total)
 
 
-def _files(tools: Tools, options: Options) -> dict[str, str]:
+def _files(tools: Tools, options: Options, cwd: str) -> dict[str, str]:
     state = tools.state
     hive = create_render.Hive(state["name"], state["record"], state["ssh_port"], state["node"], state["lan_ip"])
-    template = create_github.read(tools.run, options.repo, create_render.TEMPLATE_PATH, options.base)
+    template = create_github.read(tools.run, options.repo, create_render.TEMPLATE_PATH, options.base, cwd)
     return create_render.render(template, hive)
 
 
 def _manifests(tools: Tools, options: Options) -> str:
     if tools.state.get("pr"):
         return f"kept pull request {tools.state['pr']}"
-    files = _files(tools, options)
-    if options.dry_run:
-        for path, text in files.items():
-            tools.out(f"--- {path}\n{text}")
-        return f"would open a pull request into {options.repo} {options.base} with {', '.join(files)}"
-    name = tools.state["name"]
-    message = f"Add worker hive {name}\n\nRendered by agentihooks hive create from {create_render.TEMPLATE_PATH}."
-    tools.state["pr"] = create_github.open_pr(tools.run, options.repo, options.base, name, files, message)
+    with tempfile.TemporaryDirectory() as folder:
+        clone = create_github.clone(tools.run, options.repo, folder)
+        files = _files(tools, options, clone)
+        if options.dry_run:
+            for path, text in files.items():
+                tools.out(f"--- {path}\n{text}")
+            return f"would open a pull request into {options.repo} {options.base} with {', '.join(files)}"
+        name = tools.state["name"]
+        message = f"Add worker hive {name}\n\nRendered by agentihooks hive create from {create_render.TEMPLATE_PATH}."
+        tools.state["pr"] = create_github.open_pr(tools.run, options.repo, options.base, name, files, message, clone)
     return f"opened pull request {tools.state['pr']}"
 
 

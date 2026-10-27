@@ -2014,9 +2014,9 @@ def on_post_tool_use(payload: dict) -> None:
             recycle_context = _recycle_directive(_trace_session_id)
             if recycle_context:
                 inject_context(recycle_context, also_log=False, skip_compression=True)
-            from hooks.context.project_cache import take_project_context
+            from hooks.context.task_context import deliver_pending
 
-            project_context = take_project_context(_trace_session_id)
+            project_context = deliver_pending(_trace_session_id, "PostToolUse")
             if project_context:
                 inject_context(project_context, also_log=False, skip_compression=True)
             if BROADCAST_ENABLED:

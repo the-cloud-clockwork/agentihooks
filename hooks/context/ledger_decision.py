@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME
+from hooks.context import worker_mode
 from hooks.targets import capabilities
 
 STATE_DIR = AGENTIHOOKS_HOME / "ledger-decision"
@@ -23,7 +24,7 @@ PHASES_DIRECTIVE = (
 def directive(payload, environ=None):
     env = os.environ if environ is None else environ
     session_id = payload.get("session_id") or ""
-    if not session_id or not _is_plan_accept(payload):
+    if not session_id or worker_mode.active(env) or not _is_plan_accept(payload):
         return ""
     binding = _binding(env, session_id)
     if not binding:
