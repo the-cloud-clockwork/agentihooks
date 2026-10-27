@@ -328,7 +328,14 @@ def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, in_pa
         assert [hive["room"] for hive in launch.hives() if hive["id"] == "remote"] == [0]
 
 
-def test_a_refused_hive_reservation_waits_when_placement_no_longer_reports_it():
+@pytest.mark.parametrize(
+    "refused",
+    [
+        "no hive for eng has room: remote cpu: five minute load 1.17 on 8 CPUs, fits 0 more",
+        "no hive has room, and the local machine runs 4 of its 4 agents",
+    ],
+)
+def test_a_refused_hive_reservation_waits_when_placement_no_longer_reports_it(refused):
     import fakeredis
 
     from scripts.swarm.store import RedisStore, SwarmConfig
@@ -337,7 +344,6 @@ def test_a_refused_hive_reservation_waits_when_placement_no_longer_reports_it():
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
-    refused = "no hive for eng has room: remote cpu: five minute load 1.17 on 8 CPUs, fits 0 more"
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}])
     actions = tick("sw", store, ledger, FakeRuntime(crash=SpawnError(refused, "unavailable")), now_ms=1_000)
     assert not [action for action in actions if "spawn failed" in action]

@@ -1371,9 +1371,10 @@ def _failed_room_wait(runtime, lane, task):
 
 
 def _refused_reservation(lane, task, exc):
-    from scripts.hive.placement import HAS_ROOM
+    from scripts.hive.placement import HAS_ROOM, LOCAL_FULL
 
-    refused = isinstance(exc, SpawnError) and str(exc).startswith(f"no hive for {lane} {HAS_ROOM}: ")
+    marks = (f"no hive for {lane} {HAS_ROOM}: ", f"no hive {HAS_ROOM}{LOCAL_FULL}")
+    refused = isinstance(exc, SpawnError) and str(exc).startswith(marks)
     return f"task {task['id']} waits: {exc}" if refused else ""
 
 
