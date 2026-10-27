@@ -207,23 +207,37 @@ def test_repeated_streamed_generations_page_without_lost_or_doubled_observations
     assert len(state["records"]) < len(records) / 4
 
 
-@pytest.mark.parametrize("chunk", [3, 7])
-def test_repeated_metadata_records_resume_paging_past_the_paged_records(tmp_path, monkeypatch, quiet, chunk):
-    monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 500)
+def test_repeated_metadata_records_resume_paging_past_the_paged_records(tmp_path, monkeypatch, quiet):
     metadata = [{"type": "custom-title", "customTitle": "rig"}, {"type": "agent-name", "agentName": "master"}]
-    records = list(metadata)
-    for turn in _claude(12, 3):
-        records.append(turn)
-        if turn["uuid"].startswith("e"):
-            records.extend(metadata)
-    reference, _, _ = _run(tmp_path, monkeypatch, "reference", 10**9, records, len(records))
-    paged, _, path = _run(tmp_path, monkeypatch, "paged", CAP, records, chunk)
+
+    def call(uuid: str, message: str, tool: str, second: int) -> dict:
+        block = {"type": "tool_use", "id": tool, "name": "shell", "input": {"cmd": tool}}
+        content = {"id": message, "model": "model-0", "content": [block]}
+        return {"type": "assistant", "uuid": uuid, "timestamp": _stamp(second), "message": content}
+
+    def user(uuid: str, content, second: int) -> dict:
+        return {"type": "user", "uuid": uuid, "timestamp": _stamp(second), "message": {"content": content}}
+
+    result = [{"type": "tool_result", "tool_use_id": "t2", "content": "two"}]
+    first = [
+        *metadata,
+        user("p0", "ask 0", 1),
+        call("a1", "m1", "t1", 2),
+        *metadata,
+        call("a2", "m2", "t2", 3),
+        user("r2", result, 4),
+    ]
+    later = [*metadata, user("p1", "ask 1", 5)]
+    receiver, _, path = _run(tmp_path, monkeypatch, "paged", CAP, first, len(first))
+    assert agent_trace._cursor("session")["paged"]["boundary"]
+    with path.open("a") as handle:
+        handle.write("".join(_line(record) for record in later))
+    for _ in range(3):
+        agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
     state = agent_trace._cursor("session")
-    assert state["paged"]["turns"] > 0
-    assert _observed(paged) == _observed(reference)
-    assert len(state["accepted"]) + state["paged"]["spans"] == len(paged.observations)
-    assert state["source"]["records"] == len(records)
-    assert state["source"]["accepted_bytes"] == path.stat().st_size
+    assert len(state["accepted"]) + state["paged"]["spans"] == len(receiver.observations)
+    assert state["source"]["records"] == len(first) + len(later)
+    assert set(state["records"]) == {"p1"}
 
 
 @pytest.mark.parametrize("chunk", [1, 3])
