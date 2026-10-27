@@ -16,7 +16,7 @@ VALUE_FLAGS = {"-j": "job", "--job": "job", "-R": "repo", "--repo": "repo"}
 GH_TIMEOUT_SEC = 8
 RERUN_CAP = 2
 REST_RERUN = re.compile(
-    r"(?:^|/)repos/(?P<repo>[^/]+/[^/]+)/actions/(?P<kind>runs|jobs)/(?P<id>\d+)/rerun(?:-failed-jobs)?$"
+    r"(?:^|/)repos/(?P<repo>[^/]+/[^/]+)/actions/(?:runs/(?P<run>\d+)/rerun(?:-failed-jobs)?|jobs/(?P<job>\d+)/rerun)$"
 )
 
 
@@ -42,7 +42,7 @@ def _rest_target(args):
     for word in args:
         found = REST_RERUN.search(word)
         if found:
-            return Target(**{found["kind"][:-1]: found["id"], "repo": found["repo"]})
+            return Target(run=found["run"] or "", job=found["job"] or "", repo=found["repo"])
     return None
 
 
