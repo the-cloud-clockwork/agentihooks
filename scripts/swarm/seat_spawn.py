@@ -35,7 +35,7 @@ def room_refused(error: BaseException) -> bool:
     from scripts.hive.placement import HAS_ROOM, LOCAL_FULL
     from scripts.swarm.tick import SpawnError
 
-    marks = rf"no hive (?:for \S+ {HAS_ROOM}: |{HAS_ROOM}{re.escape(LOCAL_FULL)})"
+    marks = rf"no hive for \S+ {HAS_ROOM}: |(?:no hive {HAS_ROOM})?{re.escape(LOCAL_FULL)}"
     return isinstance(error, SpawnError) and re.match(marks, str(error)) is not None
 
 

@@ -335,6 +335,7 @@ def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, in_pa
     [
         "no hive for eng has room: remote cpu: five minute load 1.17 on 8 CPUs, fits 0 more",
         "no hive has room, and the local machine runs 4 of its 4 agents",
+        ", and the local machine runs 4 of its 4 agents: cpu: five minute load 1.17 on 8 CPUs",
     ],
 )
 def test_a_refused_hive_reservation_waits_when_placement_no_longer_reports_it(refused):

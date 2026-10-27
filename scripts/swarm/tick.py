@@ -1727,11 +1727,12 @@ def _master(slug, config, store, runtime, now_ms, past_host=False):
         record, placed = seat_spawn.place(slug, config, store, runtime, MASTER, now_ms, prepare)
     except seat_spawn.SeatFailed as spawn_failure:
         exc, record = spawn_failure.error, spawn_failure.record
-        transfers.failed(store, slug, record)
         store.drop_agent(slug, record.name)
         if seat_spawn.room_refused(exc):
+            transfers.detach(store, slug, record)
             master_start.withdraw(store, slug, pending)
             return [f"the master waits: {exc}"]
+        transfers.failed(store, slug, record)
         affinity.failed(store, slug, str(exc))
         return master_start.failed(store, slug, f"master spawn failed: {exc}", now_ms)
     affinity.placed(store, slug, placed.harness)
