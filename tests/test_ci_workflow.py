@@ -1562,6 +1562,23 @@ def test_a_failed_background_nats_download_leaves_the_install_to_the_action(tmp_
     assert not (tmp_path / "env").exists()
 
 
+def test_the_nats_wait_stops_at_once_when_the_background_download_died_without_a_status(tmp_path):
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    (tmp_path / "nats-bg.pid").write_text(f"{dead.pid}\n")
+    (tmp_path / "nats-bg.log").write_text("")
+    env = {
+        **os.environ,
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_PATH": str(tmp_path / "path"),
+        "GITHUB_ENV": str(tmp_path / "env"),
+    }
+    run = _selected_step("Use the pinned nats server download")["run"]
+    result = subprocess.run(["bash", "-e", "-c", run], env=env, capture_output=True, text=True, timeout=20)
+    assert result.returncode != 0
+    assert not (tmp_path / "path").exists()
+
+
 def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
     jobs = _workflow()["jobs"]
     adopt = next(s for s in jobs["split"]["steps"] if s.get("name") == "Adopt latest dev durations")

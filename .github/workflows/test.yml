@@ -1635,6 +1635,7 @@ jobs:
             echo "$status" > "$RUNNER_TEMP/nats-bg.status.tmp"
             mv "$RUNNER_TEMP/nats-bg.status.tmp" "$RUNNER_TEMP/nats-bg.status"
           ' > "$RUNNER_TEMP/nats-bg.log" 2>&1 < /dev/null &
+          echo "$!" > "$RUNNER_TEMP/nats-bg.pid"
 
       - name: Download the selected legs
         id: download-the-selected-legs
@@ -1728,7 +1729,8 @@ jobs:
         continue-on-error: true
         timeout-minutes: 3
         run: |
-          for _ in $(seq 150); do [[ -f "$RUNNER_TEMP/nats-bg.status" ]] && break; sleep 1; done
+          pid=$(cat "$RUNNER_TEMP/nats-bg.pid")
+          for _ in $(seq 150); do [[ -f "$RUNNER_TEMP/nats-bg.status" ]] || ! kill -0 "$pid" 2>/dev/null && break; sleep 1; done
           cat "$RUNNER_TEMP/nats-bg.log"
           [[ "$(cat "$RUNNER_TEMP/nats-bg.status")" == 0 ]]
           echo "$RUNNER_TEMP/nats-bg" >> "$GITHUB_PATH"
