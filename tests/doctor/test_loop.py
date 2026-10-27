@@ -134,7 +134,19 @@ def finding_of(kind):
     return {**found.as_dict(), "id": found.id, "measure": found.measure}, judged("established")[1]
 
 
-@pytest.mark.parametrize("kind", ["failed spawn", "ci reruns", "scheduled tick", "master launch failed"])
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "failed spawn",
+        "fresh restore",
+        "scheduled tick",
+        "master launch failed",
+        "master launch evidence unavailable",
+        "master waiting on input",
+        "ci reruns",
+        "runtime storage",
+    ],
+)
 def test_a_finding_read_from_workstation_only_sources_gives_a_workstation_cause_task(kind):
     cause, fixed = loop.fix_tasks(WATCHED, *finding_of(kind), "code", ())
     assert cause["workstation"] is True

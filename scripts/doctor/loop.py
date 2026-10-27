@@ -25,16 +25,15 @@ FIXES = ("code", "tune")
 FIX_PHASE = "p2"
 SENDER = "doctor-timer"
 IDLE = ("stopped", "stopping")
-WORKSTATION_KINDS = frozenset(
-    {
-        "failed spawn",
-        "fresh restore",
-        "scheduled tick",
-        "master launch failed",
-        "master launch evidence unavailable",
-        "master waiting on input",
-        "ci reruns",
-    }
+WORKSTATION_KINDS = (
+    "failed spawn",
+    "fresh restore",
+    "scheduled tick",
+    "master launch failed",
+    "master launch evidence unavailable",
+    "master waiting on input",
+    "ci reruns",
+    "runtime storage",
 )
 
 
