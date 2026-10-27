@@ -537,15 +537,27 @@ def _repoint_plan(args, phases):
         sys.exit("repoint needs phases belonging to one published plan")
     plan = ledger_plans.find(doc, next(iter(parents)))
     task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
-    file = upload_artifact(args.slug, args.name, args.path, {"task": task, "title": plan["title"], "plan": True})
+    if args.path:
+        file = upload_artifact(args.slug, args.name, args.path, {"task": task, "title": plan["title"], "plan": True})
+    else:
+        file_id = plan["artifact"].rsplit("/", 1)[-1]
+        file = next(
+            (
+                row["file"]
+                for row in doc.get("artifacts", [])
+                if row.get("plan") is True and row["file"]["id"] == file_id
+            ),
+            None,
+        )
+        if file is None:
+            sys.exit("repoint needs the original artifact registered on this server")
     if ledger_plans.plan_id(file["id"]) != plan["id"]:
         sys.exit("repoint needs the original plan artifact")
     artifact = f"{base()}/artifacts/{args.slug}/{file['id']}"
     url = artifact if plan["url"] == plan["artifact"] else plan["url"]
-    ops = [
-        op("artifact_add", args, task=task, title=plan["title"], file=file, plan=True),
-        op("plan_add", args, plan=plan["id"], title=plan["title"], artifact=artifact, url=url, repoint=True),
-    ]
+    ops = [op("plan_add", args, plan=plan["id"], title=plan["title"], artifact=artifact, url=url, repoint=True)]
+    if args.path:
+        ops.insert(0, op("artifact_add", args, task=task, title=plan["title"], file=file, plan=True))
     refused(call(args.slug, ops), ops)
     affected = [phase["id"] for phase in doc["phases"] if phase.get("plan") == f"plans/{plan['id']}"]
     print(json.dumps({"plan_url": url, "artifact": artifact, "phases": affected}))
@@ -560,6 +572,8 @@ def cmd_publish_plan(args):
     if args.repoint:
         _repoint_plan(args, phases)
         return
+    if not args.path:
+        sys.exit("publish-plan needs a path unless --repoint is used")
     text = Path(args.path).read_text(encoding="utf-8")
     doc = call(args.slug)
     selected = [phase for phase in doc["phases"] if phase["id"] in phases]
@@ -1155,7 +1169,7 @@ def build_parser():
     )
     task.add_argument("--quote", help="task set rank=...: the operator's words, so the rank stays his")
     publish = sub.add_parser("publish-plan")
-    publish.add_argument("path")
+    publish.add_argument("path", nargs="?", help="plan file; omit with --repoint to use the registered artifact")
     publish.add_argument(
         "--repoint", action="store_true", help="move an existing plan and all its phases to this server"
     )

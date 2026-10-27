@@ -684,8 +684,9 @@ def test_publish_plan_creates_one_plan_its_phase_parents_and_a_slice_per_marker(
     assert state["tasks"] == []
 
 
+@pytest.mark.parametrize("local_copy", [True, False])
 def test_repoint_published_plan_moves_all_phase_references_without_another_issue(
-    plan_ledger, tmp_path, monkeypatch, capsys
+    plan_ledger, tmp_path, monkeypatch, capsys, local_copy
 ):
     file, plan_id = published(plan_ledger, tmp_path, monkeypatch)
     before = core.sync(plan_ledger)[0]
@@ -693,7 +694,8 @@ def test_repoint_published_plan_moves_all_phase_references_without_another_issue
     monkeypatch.setattr(
         ledger.ledger_publish, "publish", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("new publication"))
     )
-    cli(monkeypatch, plan_ledger, "publish-plan", str(tmp_path / "plan.md"), "--phase", "p1", "--repoint")
+    path = [str(tmp_path / "plan.md")] if local_copy else []
+    cli(monkeypatch, plan_ledger, "publish-plan", *path, "--phase", "p1", "--repoint")
     state = core.sync(plan_ledger)[0]
     target = f"https://ledger.example/artifacts/{plan_ledger}/{file['id']}"
     assert state["plans"] == [{"id": plan_id, "title": "Rollout", "artifact": target, "url": PLAN}]
@@ -703,6 +705,50 @@ def test_repoint_published_plan_moves_all_phase_references_without_another_issue
     assert state["slices"] == before["slices"]
     assert state["tasks"] == before["tasks"]
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["phases"] == ["p1", "p2"]
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ("unknown", "publish-plan names an unknown phase"),
+        ("unplanned", "repoint needs phases belonging to one published plan"),
+        ("different", "repoint needs phases belonging to one published plan"),
+        ("missing", "repoint needs the original artifact registered on this server"),
+        ("changed", "repoint needs the original plan artifact"),
+    ],
+)
+def test_repoint_refuses_invalid_inputs_before_updating_the_ledger(plan_ledger, tmp_path, monkeypatch, change, message):
+    from unittest.mock import Mock
+
+    file, _ = published(plan_ledger, tmp_path, monkeypatch)
+    doc = core.sync(plan_ledger)[0]
+    phase = "p1,p2"
+    path = []
+    if change == "unknown":
+        phase = "unknown"
+    elif change == "unplanned":
+        doc["phases"][0].pop("plan")
+    elif change == "different":
+        doc["phases"][0]["plan"] = "plans/other"
+    elif change == "missing":
+        doc["artifacts"] = []
+    else:
+        path = [str(tmp_path / "plan.md")]
+        monkeypatch.setattr(ledger, "upload_artifact", lambda *a: {**file, "id": "different.md"})
+    call = Mock(return_value=doc)
+    monkeypatch.setattr(ledger, "call", call)
+    args = ledger.build_parser().parse_args(
+        ["--slug", plan_ledger, "--as", "planner", "publish-plan", *path, "--phase", phase, "--repoint"]
+    )
+    with pytest.raises(SystemExit, match=message):
+        ledger.cmd_publish_plan(args)
+    call.assert_called_once_with(plan_ledger)
+
+
+def test_publish_without_repoint_still_needs_a_local_path():
+    args = ledger.build_parser().parse_args(["--slug", "s", "--as", "planner", "publish-plan", "--phase", "p1"])
+    with pytest.raises(SystemExit, match="publish-plan needs a path unless --repoint is used"):
+        ledger.cmd_publish_plan(args)
 
 
 def test_publishing_the_same_plan_again_keeps_one_plan_and_its_slices(plan_ledger, tmp_path, monkeypatch):
