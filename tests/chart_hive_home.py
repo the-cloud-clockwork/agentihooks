@@ -282,6 +282,123 @@ def hives_problems(chart: str) -> list[str]:
     return found
 
 
+STORAGE = {
+    "hiveStorage": {
+        "default": {"homes": "/var/lib/hive-homes"},
+        "nodes": {
+            "data-node": {
+                "homes": "/mnt/data/hive/homes",
+                "tmp": "/mnt/data/hive/tmp",
+                "mount": {"path": "/mnt/data", "fsType": "xfs"},
+            }
+        },
+        "homeFolders": {"hives": ["legacy-hive"], "nodeSelector": {"pool": "swarm"}},
+    },
+    "workers": {"node": "data-node", "nodeSelector": {"pool": "swarm"}},
+}
+
+
+def template(chart: str, values: dict) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["helm", "template", "fixture", chart, *BASE, "-f", "-"],
+        input=yaml.safe_dump(values),
+        capture_output=True,
+        text=True,
+    )
+
+
+def storage_documents(text: str) -> dict:
+    documents = [d for d in yaml.safe_load_all(text) if d]
+    return {d["kind"]: d for d in documents if d["kind"] in {"Job", "DaemonSet"}} | {"Deployment": hive(text)}
+
+
+def storage_problems(found_docs: dict) -> list[str]:
+    spec = found_docs["Deployment"]["spec"]["template"]["spec"]
+    volumes = {v["name"]: {k: x for k, x in v.items() if k != "name"} for v in spec["volumes"]}
+    found = []
+    if volumes["home"] != {"hostPath": {"path": "/mnt/data/hive/homes/fixture", "type": "Directory"}}:
+        found.append(f"a hive on data-node has home {volumes['home']}, expected its folder under the node homes")
+    if volumes["tmp"] != {"hostPath": {"path": "/mnt/data/hive/tmp/fixture", "type": "Directory"}}:
+        found.append(f"a hive on data-node has tmp {volumes['tmp']}, expected its folder under the node tmp")
+    if spec.get("nodeSelector") != {"kubernetes.io/hostname": "data-node", "pool": "swarm"}:
+        found.append(f"a hive on data-node is placed by {spec.get('nodeSelector')}")
+    if found_docs["Deployment"]["spec"].get("strategy", {}).get("type") != "Recreate":
+        found.append("a hive with node storage does not roll out by Recreate")
+    job = found_docs.get("Job")
+    if job is None:
+        return [*found, "a hive with node storage renders no folder Job"]
+    pod = job["spec"]["template"]["spec"]
+    script = pod["containers"][0]["command"][-1]
+    if job["metadata"]["annotations"].get("helm.sh/hook") != "pre-install,pre-upgrade":
+        found.append("the folder Job does not run before the hive installs or upgrades")
+    if pod.get("nodeSelector") != {"kubernetes.io/hostname": "data-node"}:
+        found.append(f"the folder Job runs on {pod.get('nodeSelector')}, expected data-node")
+    if pod["volumes"] != [{"name": "storage", "hostPath": {"path": "/mnt/data", "type": "Directory"}}]:
+        found.append(f"the folder Job mounts {pod['volumes']}, expected the existing data mount")
+    if '$3 == "xfs"' not in script or "exit 1" not in script:
+        found.append("the folder Job does not refuse when the data filesystem is not mounted")
+    if "/storage/hive/homes/fixture /storage/hive/tmp/fixture" not in script:
+        found.append("the folder Job does not make the hive home and tmp folders")
+    folders = found_docs.get("DaemonSet")
+    if folders is None:
+        return [*found, "hiveStorage.homeFolders.hives renders no DaemonSet"]
+    pod = folders["spec"]["template"]["spec"]
+    excluded = pod.get("affinity", {}).get("nodeAffinity", {}).get("requiredDuringSchedulingIgnoredDuringExecution")
+    if excluded != {
+        "nodeSelectorTerms": [
+            {"matchExpressions": [{"key": "kubernetes.io/hostname", "operator": "NotIn", "values": ["data-node"]}]}
+        ]
+    }:
+        found.append(f"the home folder DaemonSet can run on a node with its own storage: {excluded}")
+    if pod["volumes"] != [{"name": "homes", "hostPath": {"path": "/var/lib/hive-homes", "type": "DirectoryOrCreate"}}]:
+        found.append(f"the home folder DaemonSet mounts {pod['volumes']}, expected hiveStorage.default.homes")
+    if "legacy-hive" not in pod["containers"][0]["command"][-1]:
+        found.append("the home folder DaemonSet does not make the listed hive folders")
+    return found
+
+
+def node_storage_problems(chart: str) -> list[str]:
+    rendered = template(chart, STORAGE)
+    if rendered.returncode != 0:
+        return [f"the chart refused node storage: {rendered.stderr.strip()!r}"]
+    documents = storage_documents(rendered.stdout)
+    found = storage_problems(documents)
+    planted = yaml.safe_load(yaml.safe_dump(documents))
+    planted["Deployment"]["spec"]["template"]["spec"]["volumes"][-1] = {"name": "tmp", "emptyDir": {}}
+    if not storage_problems(planted):
+        found.append("the check passed a hive on data-node whose tmp is an emptyDir")
+    planted = yaml.safe_load(yaml.safe_dump(documents))
+    planted["DaemonSet"]["spec"]["template"]["spec"].pop("affinity")
+    if not storage_problems(planted):
+        found.append("the check passed a home folder DaemonSet that runs on data-node")
+    default = template(chart, {"hiveStorage": STORAGE["hiveStorage"], "workers": {"node": "other-node"}})
+    home = (
+        next((v for v in hive(default.stdout)["spec"]["template"]["spec"]["volumes"] if v["name"] == "home"), None)
+        if default.returncode == 0
+        else None
+    )
+    if home != {"name": "home", "hostPath": {"path": "/var/lib/hive-homes/fixture", "type": "Directory"}}:
+        found.append(f"a hive on a node with no entry has home {home}, expected its folder under default.homes")
+    nodes = STORAGE["hiveStorage"]["nodes"]
+    refusals = {
+        "has no hiveStorage.nodes entry": {"workers": {"node": "data-node"}},
+        "is not under its mount": {
+            "hiveStorage": {"nodes": {"data-node": {**nodes["data-node"], "tmp": "/var/tmp/hive"}}},
+            "workers": {"node": "data-node"},
+        },
+        "without its fsType": {
+            "hiveStorage": {"nodes": {"data-node": {**nodes["data-node"], "mount": {"path": "/mnt/data"}}}},
+            "workers": {"node": "data-node"},
+        },
+        "needs hiveStorage.default.homes": {"hiveStorage": {"homeFolders": {"hives": ["legacy-hive"]}}},
+    }
+    for reason, values in refusals.items():
+        refused = template(chart, values)
+        if refused.returncode == 0 or reason not in refused.stderr:
+            found.append(f"the chart did not refuse storage that {reason}: {refused.stderr.strip()!r}")
+    return found
+
+
 def main(chart: str) -> list[str]:
     found = problems(render(chart, None), None)
     pinned = render(chart, yaml.safe_dump(HOST))
@@ -304,7 +421,7 @@ def main(chart: str) -> list[str]:
     except subprocess.CalledProcessError as refused:
         if "exactly one volume source" not in refused.stderr:
             found.append(f"the chart refused two home sources with {refused.stderr.strip()!r}")
-    return found + hives_problems(chart)
+    return found + hives_problems(chart) + node_storage_problems(chart)
 
 
 if __name__ == "__main__":
