@@ -18,13 +18,23 @@ def start(home: Path, config: SwarmConfig, lane: str, name: str, launch: dict) -
     folder = home / config.slug / KEY
     folder.mkdir(parents=True, exist_ok=True)
     request, result = folder / f"{name}.request.json", folder / f"{name}.json"
-    job = {"path": str(result), "started_at": int(time.time() * 1000), "timeout": SPAWN_TIMEOUT_S}
+    job = {
+        "path": str(result),
+        "request": str(request),
+        "started_at": int(time.time() * 1000),
+        "timeout": SPAWN_TIMEOUT_S,
+    }
     request.write_text(
         json.dumps(
             {"home": str(home), "config": asdict(config), "lane": lane, "name": name, "launch": launch, "job": job}
         )
     )
-    with (folder / f"{name}.log").open("ab") as errors:
+    return job
+
+
+def spawn(job: dict) -> None:
+    request = Path(job["request"])
+    with request.with_suffix(".log").open("ab") as errors:
         subprocess.Popen(
             [sys.executable, "-m", "scripts.swarm.launch_job", str(request)],
             stdin=subprocess.DEVNULL,
@@ -32,7 +42,6 @@ def start(home: Path, config: SwarmConfig, lane: str, name: str, launch: dict) -
             stderr=errors,
             start_new_session=True,
         )
-    return job
 
 
 def run(request: Path) -> None:
@@ -52,6 +61,9 @@ def run(request: Path) -> None:
         if time.time() >= deadline:
             raise SpawnError("workstation launch job timed out", "ambiguous")
         placed = runtime._launch(config, spec["lane"], name=spec["name"], **spec["launch"])
+        if time.time() >= deadline:
+            runtime.reap_name(spec["name"])
+            raise SpawnError("workstation launch job timed out", "ambiguous", placed.pane_id, harness=placed.harness)
         outcome = {"placed": asdict(placed)}
     except Exception as exc:
         outcome = {
@@ -126,6 +138,12 @@ def collect(run) -> list[str]:
                 run.store.refresh(run.slug, agent.task, agent.name, engine.LEASE_MS)
                 continue
             placed = completed(picked, placed)
+            if agent.state == "finished":
+                actions.append(
+                    engine._finished_launch(run.slug, run.store, run.doc, engine.placed_record(agent, placed))
+                )
+                run.store.redis.hdel(key, name)
+                continue
             placed = codex.complete(run.config, name, placed, run.runtime.reap_name)
             launched = codex.admit_legacy(run.store, run.slug, engine.placed_record(agent, placed), run.runtime)
         except Exception as exc:

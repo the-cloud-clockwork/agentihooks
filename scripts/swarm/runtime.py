@@ -949,7 +949,7 @@ class HerdrRuntime:
         ordered = ordered or (
             len(passed) > 1 and passed[:2] in (["--route", "interactive"], ["--route", "master-login"])
         )
-        if task.get("detached_launch") and not ordered:
+        if task.get("detached_launch") and not ordered and not task.get("admitted_execution_id"):
             from scripts.swarm import launch_job
 
             agent = argv[argv.index("--agent") + 1]

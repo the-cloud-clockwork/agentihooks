@@ -1278,6 +1278,8 @@ def _launch(run, launch):
 
 
 def _launch_all(run, clock, batch):
+    from scripts.swarm import launch_job
+
     if not batch:
         return []
     at, contexts = time.monotonic(), [copy_context() for _ in batch]
@@ -1286,16 +1288,21 @@ def _launch_all(run, clock, batch):
     clock.charge(at, [error for _, error in outcomes if isinstance(error, Exception)], len(batch))
     actions = []
     for launch, (placed, launched) in zip(batch, outcomes):
+        if placed and placed.launch_job:
+            try:
+                launch_job.pending(run.store, run.slug, launch, placed)
+                launch_job.spawn(placed.launch_job)
+            except Exception as exc:
+                run.store.redis.hdel(run.store.key(run.slug, launch_job.KEY), launch.record.name)
+                launched = SpawnError(str(exc), harness=placed.harness)
+            else:
+                actions.append(f"launching {launch.record.name} for {launch.task['id']}")
+                continue
         if isinstance(launched, Exception):
             failed = Failed(launch.record, launch.task, launched)
             actions += timing.timed(
                 _not_launched, run.slug, run.store, run.ledger, run.runtime, run.rows, failed, run.now_ms
             )
-        elif placed.launch_job:
-            from scripts.swarm import launch_job
-
-            launch_job.pending(run.store, run.slug, launch, placed)
-            actions.append(f"launching {launch.record.name} for {launch.task['id']}")
         else:
             started = Started(launch.record, launch.task, placed, launched)
             actions += timing.timed(_started, run.slug, run.config, run.store, run.ledger, run.doc, started, run.now_ms)
@@ -1400,6 +1407,8 @@ def _acknowledging_error(exc):
 def _acknowledging(slug, store, agent):
     if agent.lane == MASTER:
         return False
+    if store.redis.hexists(store.key(slug, "launch-jobs"), agent.name):
+        return True
     raw = store.redis.hget(store.key(slug, "launches"), agent.name)
     return bool(raw) and json.loads(raw).get("state") in (ACKNOWLEDGING, "launching")
 
