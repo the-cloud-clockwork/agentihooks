@@ -106,7 +106,34 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MUTATION_SHARD_CPU_QUOTA: "3"
-        run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
+        run: |
+          python - "$BASE" "$GITHUB_REPOSITORY" <<'PROBE'
+          import functools, sys, threading, time
+          t0 = time.perf_counter()
+          sys.argv = ["plan", "--base", sys.argv[1], "--repository", sys.argv[2]]
+          from scripts.ci_mutation import plan
+          from scripts import ci_test_plan
+          print(f"PHASE import {time.perf_counter() - t0:.2f}", flush=True)
+          def timed(module, name):
+              orig = getattr(module, name)
+              @functools.wraps(orig)
+              def wrapper(*a, **k):
+                  s = time.perf_counter()
+                  try:
+                      return orig(*a, **k)
+                  finally:
+                      e = time.perf_counter()
+                      print(f"PHASE {name} {threading.current_thread().name} {s - t0:.2f} to {e - t0:.2f} = {e - s:.2f}", flush=True)
+              setattr(module, name, wrapper)
+          for name in ("read_record", "touches_code", "own_bases", "discover_changes", "select_tests", "record_drift", "estimate", "validate_tests", "stats_part_count", "changed_mutations", "line_covering_tests", "narrow"):
+              if hasattr(plan, name):
+                  timed(plan, name)
+          for name in ("_api", "_manifest", "_valid_manifest", "find_record"):
+              timed(ci_test_plan, name)
+          code = plan.main()
+          print(f"PHASE total {time.perf_counter() - t0:.2f}", flush=True)
+          sys.exit(code)
+          PROBE
 
       - name: Upload planned mutation test selection
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
