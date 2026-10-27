@@ -1044,7 +1044,7 @@ def test_the_tests_gate_may_start_requiring_the_postgres_scenario_on_pull_reques
     head = copy.deepcopy(base)
     gate = head["test.yml"]["jobs"]["gate-required"]
     gate["steps"] = ci_reuse.postgres_required(gate["steps"])
-    assert '"sonar", "writer-lock"]' in gate["steps"][0]["run"]
+    assert '"writer-lock"]' in gate["steps"][0]["run"]
     config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
     assert gate_protected.grade(base, config, head, config, _TODAY, policy) == []
@@ -1054,12 +1054,14 @@ def test_the_tests_gate_may_start_requiring_the_postgres_scenario_on_pull_reques
 def test_the_tests_gate_may_skip_sonar_when_selection_marks_the_pull_request_test_only(weakened):
     from scripts import ci_reuse
 
-    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
-    head = copy.deepcopy(base)
-    head["test.yml"]["jobs"]["select"]["outputs"]["sonar"] = "${{ steps.select.outputs.sonar }}"
+    head = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    base = copy.deepcopy(head)
+    del base["test.yml"]["jobs"]["select"]["outputs"]["sonar"]
+    step = base["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    for old, new in reversed(ci_reuse.TEST_ONLY_SONAR):
+        step["run"] = step["run"].replace(new, old)
     gate = head["test.yml"]["jobs"]["gate-required"]
-    gate["steps"] = ci_reuse.test_only_sonar(gate["steps"])
-    assert '(if .select.outputs.sonar == "skip" then [] else ["sonar"] end)' in gate["steps"][0]["run"]
+    assert ci_reuse.test_only_sonar(base["test.yml"]["jobs"]["gate-required"]["steps"]) == gate["steps"]
     if weakened:
         gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('"skip"', '"skip" or true')
     config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
@@ -1224,7 +1226,8 @@ def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
     ("before", "after"),
     [
         ('then .value.result == "success"', 'then .value.result != "failure"'),
-        ('"semgrep", "sonar"', '"semgrep"'),
+        ('"semgrep", "writer-lock"]', '"semgrep"]'),
+        ('else ["sonar"] end', "else [] end"),
         ("exit 1", "exit 0"),
     ],
 )

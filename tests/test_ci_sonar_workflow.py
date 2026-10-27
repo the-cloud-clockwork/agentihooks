@@ -29,6 +29,7 @@ def test_sonar_remains_required_during_promotion_trigger_rollout():
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
         "${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
+        "${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && needs.select.outputs.sonar != 'skip' }}",
     )
     assert not sonar.get("continue-on-error")
     gate = next(step for step in sonar["steps"] if step.get("name") == "SonarQube Quality Gate")

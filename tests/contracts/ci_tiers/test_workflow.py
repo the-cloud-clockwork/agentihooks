@@ -99,6 +99,7 @@ def jobs_for(event, base_ref="dev", scope="full"):
                     analysis="A1" if runs else "",
                     shards="[0, 1]",
                     stats_parts="[0, 1]",
+                    sonar="run",
                 ),
             )
             del pending[name]
@@ -134,14 +135,16 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     steps = jobs["gate-required"]["steps"]
     steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
     assert steps in [
-        ci_reuse.selection_diagnostic(
-            forward(
-                finish(
-                    rerun(
-                        ci_reuse.inline_mutation(
-                            ci_reuse.postgres_required(
-                                ci_reuse.gate_steps(
-                                    queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True
+        ci_reuse.test_only_sonar(
+            ci_reuse.selection_diagnostic(
+                forward(
+                    finish(
+                        rerun(
+                            ci_reuse.inline_mutation(
+                                ci_reuse.postgres_required(
+                                    ci_reuse.gate_steps(
+                                        queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True
+                                    )
                                 )
                             )
                         )
