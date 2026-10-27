@@ -244,8 +244,9 @@ def test_selection_marks_sonar_skip_only_when_every_changed_path_is_under_tests(
     end = next(index for index, line in enumerate(lines) if line.startswith('echo "sonar=$sonar"'))
     git = tmp_path / "bin" / "git"
     git.parent.mkdir()
-    git.write_text("#!/usr/bin/env bash\nprintf '%s\\0' " + " ".join(f"'{path}'" for path in paths) + "\n")
-    if not paths:
+    if paths:
+        git.write_text("#!/usr/bin/env bash\nprintf '%s\\0' " + " ".join(f"'{path}'" for path in paths) + "\n")
+    else:
         git.write_text("#!/usr/bin/env bash\n")
     git.chmod(0o755)
     output = tmp_path / "output"
