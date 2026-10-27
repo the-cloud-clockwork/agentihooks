@@ -229,11 +229,19 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
                 output = execute(command, repository)
                 root = Path(output.splitlines()[-1])
             checkout = checkout_fields(root)
-            delivery = target_branch(root, scoped, checkout["branch"], scoped if retired else task)
+            head = publish_queue.open_head(checkout["branch_repo"], scoped.get("pr_url", ""))
+            if head and head != checkout["branch"]:
+                git(root, "fetch", "origin", head)
+                if not descends(root, head):
+                    raise SwarmError(
+                        f"open pull request {scoped['pr_url']} delivers branch {head}, but worktree {root} on branch "
+                        f"{checkout['branch']} does not descend from it; continue from origin/{head} or close that pull request"
+                    )
+            delivery = head or target_branch(root, scoped, checkout["branch"], scoped if retired else task)
             if delivery != checkout["branch"]:
                 git(root, "branch", f"--set-upstream-to=origin/{delivery}")
-                if publish_queue.open_head(checkout["branch_repo"], scoped.get("pr_url", "")) == delivery:
-                    checkout["branch"] = delivery
+            if head:
+                checkout["branch"] = head
             fields.append({**checkout, "repository": str(repository)})
         except SwarmError as exc:
             raise PublicationRefusal(repository, refusal_branch(repository, scoped), str(exc)) from exc
