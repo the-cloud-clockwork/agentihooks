@@ -506,20 +506,22 @@ record in this order:
 
 A zero, negative, missing or null value counts as absent. The life keeps the
 raw `started_at`, so a hive agent resolved from its launch time still has life
-`name#0` and its traces correlate as before. Finding ids use the resolved
-start.
+`name#0` and its traces correlate as before. The `telemetry never exported`
+and `telemetry misattributed` ids use the resolved start; the count drift id
+keeps the raw life.
 
 An unknown start raises `telemetry start unknown` instead of any other active
 telemetry finding for that binding. The Doctor does not apply the grace, does
 not compute an age and does not judge the binding never exported, stale or
 misattributed until a start is recorded. The finding has measure 1 and its id
-is the agent name alone, so it is raised once per agent while the gap lasts.
+is the agent name alone, so the Doctor master gets one notice per agent while
+the gap lasts.
 
 | Agent record | Resolved start | Result at a scan |
 |---|---|---|
 | `started_at` 60 seconds ago, `launched_at` 10 minutes ago | spawn time | inside the 60 second grace: no finding |
 | `started_at` 0, `launched_at` 60 seconds ago | launch time | inside the grace: no finding |
-| `started_at` 0, `launched_at` 3700 seconds ago, past the first turn bound, no trace | launch time | `telemetry never exported` after 3700 seconds |
+| `started_at` 0, `launched_at` 3700 seconds ago, past the first turn bound; read this scan, no trace, nothing accepted locally, no backlog | launch time | `telemetry never exported` after 3700 seconds |
 | `started_at` 0 or absent, `launched_at` 0 or absent | none | `telemetry start unknown` |
 
 Example finding for an agent with neither time recorded:
@@ -545,7 +547,8 @@ Before pull request
 `started_at` was subtracted directly, so hive agents were reported as never
 exported with ages of decades and skipped the grace. If this finding appears,
 check the agent record in the swarm store: a working agent needs a positive
-`started_at` or `launched_at`. Nothing configures the resolution order.
+`started_at` or `launched_at`. The order is fixed in code; no setting changes
+it.
 
 ### Read budget
 
