@@ -32,8 +32,8 @@ def measure(pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dic
         available_mb = host_budget._memory_mb(proc)[0]
         total_mb = _total_mb(proc)
         pod = _pod(CGROUP, now_ms, previous)
-        disk_free_gb = _free_gb(Path(os.environ.get("WORKTREE_ROOT", Path.home() / "dev" / "worktrees")))
-        disk_floor_gb = int(os.environ.get("WT_MIN_FREE_GB", "50"))
+        disk_free_gb = _free_gb(Path(os.environ.get("WORKTREE_ROOT") or Path.home() / "dev" / "worktrees"))
+        disk_floor_gb = int(os.environ.get("WT_MIN_FREE_GB") or "50")
     except (OSError, ValueError, IndexError, KeyError, StopIteration):
         return None
     return {

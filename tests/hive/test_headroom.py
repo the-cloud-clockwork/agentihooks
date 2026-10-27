@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -41,8 +42,6 @@ def agents(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def disk(tmp_path, monkeypatch):
-    import shutil
-
     probed = []
     home = tmp_path / "home"
     home.mkdir()
@@ -94,6 +93,13 @@ def test_measure_follows_the_worktree_root_and_floor_the_hive_sets(proc, disk, t
     monkeypatch.setenv("WT_MIN_FREE_GB", "80")
     measured = headroom.measure(0, 1, proc)
     assert (measured["disk_free_gb"], measured["disk_floor_gb"], disk) == (9, 80, [tmp_path])
+
+
+def test_measure_reads_an_empty_worktree_root_or_floor_as_unset_like_wt_sh(proc, disk, tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKTREE_ROOT", "")
+    monkeypatch.setenv("WT_MIN_FREE_GB", "")
+    measured = headroom.measure(0, 1, proc)
+    assert (measured["disk_floor_gb"], disk) == (50, [tmp_path / "home"])
 
 
 def test_measure_counts_the_agent_processes_in_the_process_table_it_reads(proc, agents):
