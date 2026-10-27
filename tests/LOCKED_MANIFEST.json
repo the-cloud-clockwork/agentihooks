@@ -1,0 +1,927 @@
+{
+ "tests/context/test_branch_guard.py::TestBranchGuard::_assert_blocked": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_branch_delete_main": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_checkout_dev": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_checkout_feature_allowed_with_signal": {
+  "assertions": 0,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_checkout_feature_blocked_without_signal": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_checkout_main": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_commit": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_commit_message_with_main_allowed": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_diff": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_echo_with_main_allowed": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_empty_command": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_force_push": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_force_push_short": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_force_with_lease": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_gh_pr_merge": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_heredoc_commit_with_main_allowed": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_log_main": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_merge_dev": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_merge_main": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_non_git": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_pull_main_allowed": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_push_dev": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_push_feature_branch": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_push_head_allowed": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_push_head_main": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_push_head_master": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_push_main": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_push_master": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_rebase_main": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_reset_main": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_status": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestBranchGuard::test_switch_master": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestOnlyTheCommandsOwnOperands::test_branch_create_with_protected_word_in_a_comment_allowed": {
+  "assertions": 0,
+  "calls": 2,
+  "cases": 2
+ },
+ "tests/context/test_branch_guard.py::TestOnlyTheCommandsOwnOperands::test_operand_of_the_git_command_blocked": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 9
+ },
+ "tests/context/test_branch_guard.py::TestOnlyTheCommandsOwnOperands::test_protected_word_in_other_text_allowed": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 10
+ },
+ "tests/context/test_branch_guard.py::TestPRBaseGuard::_assert_blocked_with_signal": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestPRBaseGuard::test_pr_bare_create_blocked": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestPRBaseGuard::test_pr_base_dev_allowed": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestPRBaseGuard::test_pr_base_read_from_the_create_command_only": {
+  "assertions": 0,
+  "calls": 4,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestPRBaseGuard::test_pr_into_dev_needs_no_signal_or_counter": {
+  "assertions": 0,
+  "calls": 5,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestPRBaseGuard::test_pr_no_signal_blocked": {
+  "assertions": 1,
+  "calls": 4,
+  "cases": 4
+ },
+ "tests/context/test_branch_guard.py::TestPRBaseGuard::test_protected_pr_base_blocked_with_signal": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 3
+ },
+ "tests/context/test_branch_guard.py::TestPrSignalResetsCounter::test_set_pr_signal_clears_counter": {
+  "assertions": 2,
+  "calls": 7,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestResolveCwd::test_a_cd_prefix_expands_home_and_variables": {
+  "assertions": 2,
+  "calls": 9,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::TestResolveCwd::test_a_cd_prefix_names_the_directory": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 3
+ },
+ "tests/context/test_branch_guard.py::TestResolveCwd::test_a_missing_payload_folder_falls_back_to_the_process_folder": {
+  "assertions": 1,
+  "calls": 4,
+  "cases": 1
+ },
+ "tests/context/test_branch_guard.py::test_a_push_of_a_head_that_skipped_the_cheap_gates_is_blocked": {
+  "assertions": 1,
+  "calls": 7,
+  "cases": 1
+ },
+ "tests/context/test_prod_lockdown.py::test_allowed_controls_operation_cannot_skip_a_protected_merge": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 1
+ },
+ "tests/context/test_prod_lockdown.py::test_arithmetic_does_not_turn_a_literal_message_into_an_operation": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_prod_lockdown.py::test_executed_substitution_is_still_an_operation": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 5
+ },
+ "tests/context/test_prod_lockdown.py::test_inert_message_text_passes": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 7
+ },
+ "tests/context/test_prod_lockdown.py::test_inline_message_cannot_hide_the_following_real_target": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/context/test_prod_lockdown.py::test_merge_message_may_contain_several_equals": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_prod_lockdown.py::test_message_filter_and_parser_fallback_preserve_real_operations": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 8
+ },
+ "tests/context/test_prod_lockdown.py::test_operands_of_separate_commands_do_not_join": {
+  "assertions": 0,
+  "calls": 2,
+  "cases": 10
+ },
+ "tests/context/test_prod_lockdown.py::test_parameter_default_hash_does_not_comment_out_a_substitution": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/context/test_prod_lockdown.py::test_parameter_expansion_keeps_executed_commands": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 2
+ },
+ "tests/context/test_prod_lockdown.py::test_quoted_message_is_not_an_operation": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 6
+ },
+ "tests/context/test_prod_lockdown.py::test_raw_enqueue_mutation_outside_a_swarm_is_unchanged": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_prod_lockdown.py::test_real_production_operand_is_blocked": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 4
+ },
+ "tests/context/test_prod_lockdown.py::test_real_protected_operation_in_same_call_is_blocked": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 15
+ },
+ "tests/context/test_prod_lockdown.py::test_release_signal_cannot_skip_a_blocked_rule_in_any_order": {
+  "assertions": 1,
+  "calls": 5,
+  "cases": 1
+ },
+ "tests/context/test_prod_lockdown.py::test_shell_script_message_is_not_executed": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/context/test_prod_lockdown.py::test_signal_authorizes_its_own_operation": {
+  "assertions": 0,
+  "calls": 2,
+  "cases": 3
+ },
+ "tests/context/test_prod_lockdown.py::test_signal_does_not_authorize_another_command_in_the_chain": {
+  "assertions": 2,
+  "calls": 6,
+  "cases": 80
+ },
+ "tests/context/test_prod_lockdown.py::test_single_word_merge_message_is_not_a_branch": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 5
+ },
+ "tests/context/test_prod_lockdown.py::test_swarm_session_cannot_run_the_raw_enqueue_mutation": {
+  "assertions": 2,
+  "calls": 4,
+  "cases": 13
+ },
+ "tests/context/test_prod_lockdown.py::test_swarm_session_keeps_the_swarm_queue_command": {
+  "assertions": 0,
+  "calls": 2,
+  "cases": 15
+ },
+ "tests/test_credential_guard.py::TestEnvironmentNames::test_block_message_gives_the_safe_form": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestEnvironmentNames::test_safe_form_lists_valid_names_and_counts_malformed": {
+  "assertions": 3,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestEnvironmentNames::test_safe_form_never_prints_the_malformed_name_or_value": {
+  "assertions": 2,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestGrepLongOptionIsNotACount::test_guard_blocks_it": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestGrepLongOptionIsNotACount::test_unguarded_command_would_print_the_value": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestIdentifierShapedSecondLine::test_block_message_offers_only_the_awk_form_and_counts": {
+  "assertions": 3,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestIdentifierShapedSecondLine::test_guard_blocks_the_filtered_listing": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestIdentifierShapedSecondLine::test_safe_form_never_prints_the_second_line": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestIdentifierShapedSecondLine::test_unguarded_filtered_listing_would_print_the_second_line": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestMultilineEnvValues::test_block_message_names_multiline_values": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestMultilineEnvValues::test_guard_blocks_the_listing": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestMultilineEnvValues::test_safe_form_never_prints_either_line": {
+  "assertions": 3,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestMultilineEnvValues::test_unguarded_listing_would_print_the_second_line": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestProcEnvironReads::test_a_proc_working_directory_still_allows_other_files": {
+  "assertions": 2,
+  "calls": 4,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestProcEnvironReads::test_grep_tool_on_proc_environ_is_refused": {
+  "assertions": 4,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestProcEnvironReads::test_neighbouring_commands_still_pass": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 9
+ },
+ "tests/test_credential_guard.py::TestProcEnvironReads::test_read_from_a_proc_working_directory_is_refused": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 4
+ },
+ "tests/test_credential_guard.py::TestProcEnvironReads::test_read_is_refused_with_the_leak_free_alternative": {
+  "assertions": 4,
+  "calls": 3,
+  "cases": 37
+ },
+ "tests/test_credential_guard.py::TestProcEnvironReads::test_read_tool_on_an_environ_file_elsewhere_passes": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 3
+ },
+ "tests/test_credential_guard.py::TestProcEnvironReads::test_read_tool_on_proc_environ_is_refused": {
+  "assertions": 2,
+  "calls": 1,
+  "cases": 2
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_a_tool_input_naming_the_grant_file_is_near_a_credential": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_compound_keeps_its_cd": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_decide_never_rewrites": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_env_prefix_and_path_survive": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_excludes_never_name_a_denied_home_path": {
+  "assertions": 2,
+  "calls": 0,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_file_operands_untouched": {
+  "assertions": 1,
+  "calls": 4,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_filename_only_grep_untouched": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_grep_r_gains_excludes": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_non_recursive_grep_untouched": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_quoted_delimiters_are_data": {
+  "assertions": 2,
+  "calls": 4,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_recursive_search_leaves_the_worker_grant_out": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_rg_gains_negative_globs": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveRewrite::test_the_grant_file_the_worker_home_writes_is_a_credential": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveTreeScan::test_cd_moves_the_root": {
+  "assertions": 2,
+  "calls": 8,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveTreeScan::test_clean_tree_allows": {
+  "assertions": 1,
+  "calls": 4,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveTreeScan::test_decide_skips_the_walk": {
+  "assertions": 1,
+  "calls": 4,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveTreeScan::test_dotenv_in_tree_blocks": {
+  "assertions": 1,
+  "calls": 5,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveTreeScan::test_find_without_name_filter_scans": {
+  "assertions": 2,
+  "calls": 7,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRecursiveTreeScan::test_pruned_dirs_are_skipped": {
+  "assertions": 1,
+  "calls": 5,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRunsOnEveryTarget::test_copilot_normalized_payload_blocks": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestRunsOnEveryTarget::test_template_files_still_readable": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestStandaloneLauncher::test_explicit_read_exits_2": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestStandaloneLauncher::test_garbage_elsewhere_exits_0": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestStandaloneLauncher::test_garbage_near_credential_exits_2": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestStandaloneLauncher::test_search_exits_0": {
+  "assertions": 1,
+  "calls": 4,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::TestStandaloneLauncher::test_switch_off": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::test_access_env_block_names_the_token_and_the_eval_form": {
+  "assertions": 3,
+  "calls": 4,
+  "cases": 1
+ },
+ "tests/test_credential_guard.py::test_guard_decision": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 131
+ },
+ "tests/test_credential_guard.py::test_guard_never_raises_on_garbage": {
+  "assertions": 0,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_allowed_commands_are_not_blocked": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 62
+ },
+ "tests/test_kubectl_mutation_guard.py::test_allowlist_without_namespace_logs_an_empty_namespace": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_allowlisted_pod_lets_cp_into_pod_through": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_allowlisted_pod_lets_mutating_exec_through": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_allowlisted_pod_lets_shell_mutation_through": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_allowlisted_segment_does_not_hide_a_later_mutation": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 5
+ },
+ "tests/test_kubectl_mutation_guard.py::test_blocked_commands_are_blocked": {
+  "assertions": 3,
+  "calls": 1,
+  "cases": 33
+ },
+ "tests/test_kubectl_mutation_guard.py::test_boolean_flags_keep_the_target": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 9
+ },
+ "tests/test_kubectl_mutation_guard.py::test_bypass_lookup_failure_keeps_the_guard": {
+  "assertions": 3,
+  "calls": 5,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_case_insensitive_block": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_chained_command_with_safe_prefix_still_blocks": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_check_kubectl_mutation_payload_allows_on_bypass": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_check_kubectl_mutation_payload_allows_safe_command": {
+  "assertions": 0,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_check_kubectl_mutation_payload_raises_block_action": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_cp_dest_target": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 7
+ },
+ "tests/test_kubectl_mutation_guard.py::test_cp_into_non_allowlisted_pod_still_blocked": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_empty_command_returns_none": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_exec_allowlist_entries": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 4
+ },
+ "tests/test_kubectl_mutation_guard.py::test_malformed_allowlist_entry_blocks_nothing_extra": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_non_allowlisted_pod_still_blocked": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_parse_kubectl_target": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 17
+ },
+ "tests/test_kubectl_mutation_guard.py::test_target_allowlisted": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 7
+ },
+ "tests/test_kubectl_mutation_guard.py::test_unknown_value_flag_allowlists_nothing": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_violation_message_carries_the_rule_description": {
+  "assertions": 3,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_kubectl_mutation_guard.py::test_violation_message_names_doctrine_and_volunteers_no_unlock": {
+  "assertions": 6,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestGenericSecretShape::test_code_is_not_flagged": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 7
+ },
+ "tests/test_secrets.py::TestGenericSecretShape::test_literal_is_flagged": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 4
+ },
+ "tests/test_secrets.py::TestGenericSecretShape::test_redact_leaves_code_expressions": {
+  "assertions": 3,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestRedact::test_redact_clean_text_unchanged": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestRedact::test_redact_db_url": {
+  "assertions": 2,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestRedact::test_redact_multiple_secrets": {
+  "assertions": 2,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestRedact::test_redact_replaces_secrets": {
+  "assertions": 2,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestRedactModes::test_redact_off_returns_unchanged": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestRedactModes::test_redact_strict_redacts_stripe": {
+  "assertions": 2,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_aws_access_key": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_aws_secret_key": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_bearer_token": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_clean_text": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_db_url": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_env_var_reference": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_env_var_reference_placeholder": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_generic_secret_value": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_github_token": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_nosecret_case_insensitive": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_nosecret_only_suppresses_marked_line": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_nosecret_suppresses_line": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScan::test_scan_private_key": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScanModes::test_scan_off_returns_empty": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScanModes::test_scan_standard_detects_standard": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScanModes::test_scan_standard_misses_jwt": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScanModes::test_scan_standard_misses_slack_token": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScanModes::test_scan_standard_misses_stripe_key": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScanModes::test_scan_strict_detects_jwt": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScanModes::test_scan_strict_detects_slack_token": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScanModes::test_scan_strict_detects_standard": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScanModes::test_scan_strict_detects_stripe_key": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::TestScanModes::test_scan_warn_detects_standard": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1
+ },
+ "tests/test_secrets.py::test_a_git_app_secret_name_is_a_reference_while_a_private_key_literal_is_refused": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_secrets.py::test_a_private_key_whose_end_names_another_algorithm_is_redacted_to_the_end": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_secrets.py::test_a_private_key_with_or_without_an_algorithm_is_redacted_whole": {
+  "assertions": 2,
+  "calls": 3,
+  "cases": 7
+ },
+ "tests/test_secrets.py::test_external_secret_remote_property_references_are_not_credential_values": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 3
+ },
+ "tests/test_secrets.py::test_memory_mode_detects_short_secret_assignments": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 3
+ },
+ "tests/test_secrets.py::test_memory_mode_preserves_references_and_safe_text": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 4
+ },
+ "tests/test_secrets.py::test_scan_redis_connection_credentials": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 8
+ },
+ "tests/test_secrets.py::test_standard_mode_never_flags_a_keyword_key_holding_an_object": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_secrets.py::test_strict_mode_finds_a_keyword_key_holding_an_object": {
+  "assertions": 2,
+  "calls": 3,
+  "cases": 30
+ },
+ "tests/test_secrets.py::test_strict_mode_hides_every_credential_value_of_the_object": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1
+ },
+ "tests/test_secrets.py::test_strict_mode_leaves_an_object_without_a_credential_literal_under_a_keyword": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 7
+ }
+}

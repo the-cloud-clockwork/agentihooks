@@ -738,6 +738,25 @@ def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
     assert "paths" not in workflow[True]["pull_request"]
 
 
+def test_mutation_gate_plants_itself_whenever_its_code_changes():
+    steps = _workflow()["jobs"]["lint"]["steps"]
+    [changed] = [step for step in steps if step.get("id") == "self-plant"]
+    assert changed["if"] == "${{ !cancelled() && github.event_name == 'pull_request' }}"
+    listed = changed["run"].split("for path in ", 1)[1].split("; do", 1)[0].replace("\\\n", " ").split()
+    assert {"scripts/ci_mutation", "tests/mutation_self_plant", "hooks/context/conditions.py", "pyproject.toml"} <= set(
+        listed
+    )
+    assert '! diff -rq "$RUNNER_TEMP/base/$path" "$path"' in changed["run"]
+    [grade] = [step for step in steps if "self-plant-$mode" in step.get("run", "")]
+    assert grade["run"].startswith('grader="$RUNNER_TEMP/grader/tests/mutation_self_plant/plant.py"\n')
+    assert "for mode in kill survive; do" in grade["run"] and " &\n" in grade["run"]
+    assert 'exit "$failed"' in grade["run"]
+    later = steps[steps.index(changed) + 1 : steps.index(grade) + 1]
+    assert all("steps.self-plant.outputs.changed == 'true'" in step["if"] for step in later)
+    names = [step.get("name") for step in steps]
+    assert names.index("Check out the protected grader") < names.index(changed["name"])
+
+
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
 def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())
@@ -1316,7 +1335,11 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
     upload_index, upload = _unit_step_index(lambda s: s.get("name") == "Upload durations")
     run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
     job = _workflow()["jobs"]["unit"]
-    between = job["steps"][run_index + 1 : upload_index]
+    between = [
+        step
+        for step in job["steps"][run_index + 1 : upload_index]
+        if not step["name"].endswith((", wait before attempt 2", ", attempt 2"))
+    ]
     assert [step["name"] for step in between] in (
         [],
         [
@@ -1701,11 +1724,16 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         "matrix": {"part": "${{ fromJSON(needs.mutation-plan.outputs.stats_parts) }}"},
     }
     setup = [step for step in mutation["steps"] if not str(step.get("name", "")).startswith(("Mutate", "Upload"))]
-    downloads = ("Download the shared mutation stats", "Download the reused preflight report")
+    downloads = (
+        "Download the shared mutation stats",
+        "Download the reused preflight report",
+        "Download every part's test stats cache",
+    )
     setup = [
         step
         for step in setup
-        if step.get("name") not in downloads and step.get("with", {}).get("path") != ".mutation-stats-cache"
+        if not str(step.get("name", "")).startswith(downloads)
+        and step.get("with", {}).get("path") != ".mutation-stats-cache"
     ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
     assert stats_steps[: len(setup)] == setup
@@ -1958,7 +1986,14 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         "always() && steps.mutate.outcome != 'skipped'",
     )
     for job in (stats, mutation):
-        assert all(step["if"] == skipped or step["if"] in unguarded for step in job["steps"])
+        guarded = {step.get("id") for step in job["steps"] if step["if"] == skipped or step["if"] in unguarded}
+        assert all(
+            step["if"] == skipped
+            or step["if"] in unguarded
+            or (retry := re.fullmatch(r"steps\.(.+)\.outcome == 'failure'", step["if"])) is not None
+            and retry[1] in guarded
+            for step in job["steps"]
+        )
     steps = {step.get("name"): step for step in mutation["steps"]}
     assert steps["Mutate changed Python files"]["if"] == f"github.event_name == 'pull_request' && {skipped}"
     assert steps["Mutate dispatched Python files"]["if"] == f"github.event_name == 'workflow_dispatch' && {skipped}"
