@@ -291,7 +291,7 @@ def test_a_second_create_that_stops_early_is_saved_unfinished_under_the_next_nam
 
     with pytest.raises(auth.HiveError, match="rerun hive create to resume$"):
         create.create(world.tools, create.Options(timeout_s=0))
-    assert _state(world)["name"] == "swarm-hive-002" and _state(world)["finished"] is False
+    assert _state(world)["name"] == "swarm-hive-002" and "finished" not in _state(world)
 
 
 def test_a_create_without_its_saved_state_names_a_new_hive_beside_the_one_it_finished(world):
