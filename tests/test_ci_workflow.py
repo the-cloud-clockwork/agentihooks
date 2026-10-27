@@ -174,7 +174,18 @@ def test_every_delivery_upload_uses_the_bounded_retry_action():
     action = yaml.safe_load((_ROOT / ".github/actions/retry-upload/action.yml").read_text())
     default = int(action["inputs"]["attempt-seconds"]["default"])
     assert 0 < default <= 120
-    pending = [_ROOT / ".github/workflows/test.yml"]
+    pending = []
+    for path in (_ROOT / ".github/workflows").glob("*.y*ml"):
+        workflow = yaml.safe_load(path.read_text())
+        triggers = workflow.get("on", workflow.get(True, {}))
+        push = triggers.get("push") or {}
+        dev_push = (
+            "push" in triggers
+            and any(Path("dev").match(pattern) for pattern in push.get("branches", ["dev"]))
+            and not any(Path("dev").match(pattern) for pattern in push.get("branches-ignore", []))
+        )
+        if any(event in triggers for event in ("pull_request", "pull_request_target", "merge_group")) or dev_push:
+            pending.append(path)
     seen = set()
     plain = []
     uploads = []
@@ -1967,7 +1978,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     evidence = stats_steps[len(setup) + 2]
     assert evidence["if"] == "failure()"
     assert evidence["with"]["name"] == "mutation-evidence-stats-${{ matrix.part }}"
-    assert evidence["with"]["overwrite"] is True
+    assert evidence["uses"] == "./.workflow-revision/.github/actions/retry-upload"
     names = [step.get("name") for step in mutation["steps"]]
     download = mutation["steps"][names.index("Download the shared mutation stats")]
     assert names.index("Download the shared mutation stats") < names.index("Mutate changed Python files")
