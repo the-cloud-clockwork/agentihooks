@@ -18,6 +18,7 @@ def _a_420_second_step(monkeypatch):
 
     monkeypatch.setattr(queue_shards, "STEP_SECONDS", 420)
     monkeypatch.setattr(queue_shards, "SLOWDOWN", 1.15)
+    monkeypatch.setattr(queue_shards, "MAX_SHARDS", 40)
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
 
 
@@ -32,6 +33,21 @@ def test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout():
     )
     assert result.returncode == 0, result.stderr
     assert int(result.stdout) == minutes * 60
+
+
+def test_a_merge_group_asks_for_at_most_sixteen_unit_shards_of_the_shared_queue_pool(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_parallel.py").write_text("")
+    script = (
+        "import sys; from pathlib import Path; from tests.queue_shards import matrix;"
+        " root = Path(sys.argv[1]);"
+        " print(len(matrix(root, {'3.12': {f'tests/test_parallel.py::test_{i}': 6.0 for i in range(4000)}})))"
+    )
+    result = subprocess.run([sys.executable, "-c", script, str(tmp_path)], cwd=_ROOT, capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-1] == "16"
 
 
 _RECORDED_QUEUE_RUNS = [
