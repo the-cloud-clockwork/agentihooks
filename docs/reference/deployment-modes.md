@@ -350,7 +350,7 @@ The launch settings carry the address and the credential:
 - On the workstation, set `AGENTIHOOKS_HOSTED_LEDGER_URL` in the env file the tick loads. The tick then reads the
   hosted server secret (`SWARM_SECRET`, else OpenBao) and hands each spawned agent its
   `AGENTIHOOKS_LEDGER_AGENT_TOKEN`; without the secret the tick still runs and its agents keep the workstation server.
-- On a hive, set `AGENTIHOOKS_HOSTED_LEDGER_URL` in the controller's `controller.env`. Every launch hands it to the
+- On a hive, set `AGENTIHOOKS_HOSTED_LEDGER_URL` in the hive's `hive.env`. Every launch hands it to the
   worker home beside `AGENTIHOOKS_SWARM_API_URL`.
 
 ### The launch route wins over a profile setting
