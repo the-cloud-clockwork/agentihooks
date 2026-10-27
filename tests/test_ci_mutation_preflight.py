@@ -12,6 +12,9 @@ import yaml
 _ROOT = Path(__file__).resolve().parents[1]
 
 
+_MERGED_STATS_CHECK = 'if [[ -n "$(find .mutation-stats-cache -type f -print -quit 2>/dev/null)" ]]; then echo found=true >> "$GITHUB_OUTPUT"; fi'
+
+
 def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/mutation-preflight.yml").read_text())
 
@@ -329,14 +332,23 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     assert fresh["env"] == {"PART": "${{ matrix.part }}"}
     part = steps[names.index("Upload this part's test stats cache")]
     assert part["if"] == "success() && strategy.job-total != 1"
-    assert part["uses"] == "actions/upload-artifact@v4"
+    assert part["uses"] == "./.github/actions/retry-upload"
     assert part["with"] == {
         "name": "mutation-test-stats-cache-${{ matrix.part }}",
         "path": ".mutation-stats-fresh/",
         "include-hidden-files": True,
         "if-no-files-found": "ignore",
         "retention-days": 1,
-        "overwrite": True,
+    }
+    stats_part = steps[names.index("Upload mutation stats part")]
+    assert "if" not in stats_part
+    assert stats_part["uses"] == part["uses"]
+    assert stats_part["with"] == {
+        "name": "mutation-stats-${{ matrix.part }}",
+        "path": ".mutation-stats/",
+        "include-hidden-files": True,
+        "if-no-files-found": "error",
+        "retention-days": 1,
     }
     collect = names.index("Collect one stats part for every mutation shard")
     assert names.index(restore["name"]) < collect < names.index(single["name"])
@@ -355,10 +367,38 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     }
     merged = refine_steps[refine_names.index("Save the merged test stats")]
     assert merged["uses"] == "actions/cache/save@v4"
-    assert merged["if"] == "success() && hashFiles('.mutation-stats-cache/**') != ''"
+    assert merged["if"] in {
+        "success() && hashFiles('.mutation-stats-cache/**') != ''",
+        "success() && steps.merged-stats.outputs.found == 'true'",
+    }
+    if "hashFiles" not in merged["if"]:
+        check = refine_steps[refine_names.index("Check for merged test stats")]
+        assert check["id"] == "merged-stats"
+        assert check["run"] == _MERGED_STATS_CHECK
+        assert (
+            refine_names.index(download["name"])
+            < refine_names.index(check["name"])
+            < refine_names.index(merged["name"])
+        )
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
     assert refine_names.index(base["name"]) < refine_names.index(download["name"]) < refine_names.index(merged["name"])
     assert "matrix.part" not in str([restore, single, merged])
+
+
+def test_merged_stats_presence_check_handles_missing_empty_and_nested_caches(tmp_path, monkeypatch):
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    for case in ("missing", "empty", "directories", "empty_file", "populated_file"):
+        root = tmp_path / case
+        root.mkdir()
+        if case != "missing":
+            cache = root / ".mutation-stats-cache" / "nested"
+            cache.mkdir(parents=True)
+            if case in {"empty_file", "populated_file"}:
+                (cache / "stats.json").write_text("{}" if case == "populated_file" else "")
+        output.write_text("")
+        subprocess.run(["bash", "-e", "-c", _MERGED_STATS_CHECK], cwd=root, check=True, timeout=2)
+        assert output.read_text() == ("found=true\n" if case in {"empty_file", "populated_file"} else "")
 
 
 def test_a_stats_part_uploads_only_the_cache_entries_it_wrote(tmp_path):

@@ -20,7 +20,16 @@ from tests.swarm_ledger import legacy_page  # noqa: E402
 
 browser = chromium_browser
 SLUGS = ("resize-one-2026-10-06", "resize-two-2026-10-06")
-HEIGHT_ROWS = ("capacity-box", "quota-box", "hives-box", "overlays-box", "agents-box", "handoff-box", "recovery-box")
+HEIGHT_ROWS = (
+    "capacity-box",
+    "quota-box",
+    "hives-box",
+    "overlays-box",
+    "agents-box",
+    "handoff-box",
+    "recovery-box",
+    "context-box",
+)
 HANDOFFS = [
     {
         "seat": f"eng-{n}@rig",

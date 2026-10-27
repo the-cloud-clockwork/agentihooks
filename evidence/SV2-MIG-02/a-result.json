@@ -1,0 +1,125 @@
+{
+  "case": "A",
+  "first": {
+    "matches_memory": true,
+    "report": {
+      "full_raw": [
+        "alpha"
+      ],
+      "missing": [
+        "delta"
+      ],
+      "preview_only": [
+        "beta"
+      ],
+      "revision": 1,
+      "source_fidelity_classes": {
+        "full_raw": 1,
+        "missing": 1,
+        "preview_only": 1,
+        "vector_only": 1
+      },
+      "sources": [
+        {
+          "class": "full_raw",
+          "confidence": "lossless",
+          "preview": {
+            "capped": 1,
+            "diverged": 0,
+            "missing_ranges": [
+              {
+                "cause": "incremental_offset_gap",
+                "end": 3,
+                "start": 3
+              },
+              {
+                "cause": "uncollected_tail",
+                "end": 5,
+                "start": 5
+              }
+            ],
+            "preview_entries": 4
+          },
+          "preview_sha256": "9bbed3c4aee3113fc8707051b75e71281b6ee336abad83064c45b5928db3cf7a",
+          "raw": {
+            "entries": 6,
+            "turns": 3,
+            "unparsed_lines": 0
+          },
+          "raw_sha256": "c10e017688020ea4a06425c1f2383dc64362ac482ba81d127238801a63abd8d4",
+          "source": "alpha",
+          "vectors": {
+            "orphans": 1,
+            "renumbered": [
+              {
+                "chunk_idx": 1,
+                "turn": 2
+              }
+            ],
+            "turns_without_vector": 1,
+            "vector_rows": 3
+          },
+          "vectors_sha256": "5a83b712907ab1259b105f66a24213599ca14b95721c3ccd0e657d9c106f6939"
+        },
+        {
+          "class": "preview_only",
+          "confidence": "lossy",
+          "preview": {
+            "missing_ranges": "unknown",
+            "possibly_capped": 1,
+            "possibly_trimmed": false,
+            "preview_entries": 4
+          },
+          "preview_sha256": "18b917fc2ce6b0ecc7065944837e86c61e4301aa0c3347878914d9cc2b99c389",
+          "raw_sha256": null,
+          "source": "beta",
+          "vectors": {
+            "preview_chars": 1000,
+            "vector_rows": 0
+          },
+          "vectors_sha256": null
+        },
+        {
+          "class": "missing",
+          "confidence": "none",
+          "preview": {
+            "missing_ranges": "unknown",
+            "possibly_capped": 0,
+            "possibly_trimmed": false,
+            "preview_entries": 0
+          },
+          "preview_sha256": null,
+          "raw_sha256": null,
+          "source": "delta",
+          "vectors": {
+            "preview_chars": 1000,
+            "vector_rows": 0
+          },
+          "vectors_sha256": null
+        },
+        {
+          "class": "vector_only",
+          "confidence": "fragment",
+          "preview": {
+            "missing_ranges": "unknown",
+            "possibly_capped": 0,
+            "possibly_trimmed": false,
+            "preview_entries": 0
+          },
+          "preview_sha256": null,
+          "raw_sha256": null,
+          "source": "gamma",
+          "vectors": {
+            "preview_chars": 1000,
+            "vector_rows": 2
+          },
+          "vectors_sha256": "9c666bfd728e32c23ee51871b69aac45f46c82cb4b8fde23e71f8edd28c8fca3"
+        }
+      ],
+      "vector_only": [
+        "gamma"
+      ]
+    }
+  },
+  "repeat_matches": true
+}

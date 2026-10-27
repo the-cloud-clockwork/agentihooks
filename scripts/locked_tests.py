@@ -1,6 +1,8 @@
 import argparse
 import ast
+import hashlib
 import json
+from collections import Counter
 from pathlib import Path
 
 LOCKED = tuple(
@@ -15,6 +17,7 @@ LOCKED = tuple(
 )
 MANIFEST = Path("tests/LOCKED_MANIFEST.json")
 FIELDS = ("assertions", "calls", "cases")
+TEXTS = "texts"
 DISABLING = {"skip", "skipif", "xfail", "importorskip", "exit", "_exit", "skipTest", "SkipTest"}
 CHECKING_CALLS = {"raises", "warns", "deprecated_call", "fail"}
 CONFIGS = (
@@ -55,9 +58,11 @@ def _disables(nodes: list[ast.AST], skippers: set[str]) -> bool:
     )
 
 
-def _assertions(nodes: list[ast.AST], helpers: frozenset[str]) -> int:
-    return sum(
-        isinstance(node, ast.Assert)
+def _checks(nodes: list[ast.AST], helpers: frozenset[str]) -> list[ast.AST]:
+    return [
+        node
+        for node in nodes
+        if isinstance(node, ast.Assert)
         or (
             isinstance(node, ast.Call)
             and (
@@ -65,18 +70,56 @@ def _assertions(nodes: list[ast.AST], helpers: frozenset[str]) -> int:
                 or (isinstance(node.func, ast.Attribute) and node.func.attr.startswith("assert"))
             )
         )
-        for node in nodes
-    )
+    ]
 
 
-def _returns_early(statements: list[ast.stmt]) -> bool:
-    pending: list[ast.AST] = list(statements)
-    while pending:
-        node = pending.pop()
-        if isinstance(node, ast.Return):
-            return True
+def _assertions(nodes: list[ast.AST], helpers: frozenset[str]) -> int:
+    return len(_checks(nodes, helpers))
+
+
+def _texts(checks: list[ast.AST]) -> list[str]:
+    return sorted(hashlib.sha256(ast.dump(node).encode()).hexdigest()[:16] for node in checks)
+
+
+def _loop_checks(statements: list[ast.stmt], helpers: frozenset[str]) -> list[ast.AST]:
+    nodes: list[ast.AST] = list(statements)
+    for node in nodes:
         if not isinstance(node, (*DEFINITIONS, ast.Lambda)):
-            pending.extend(ast.iter_child_nodes(node))
+            nodes.extend(ast.iter_child_nodes(node))
+    return _checks(nodes, helpers)
+
+
+def _returns_early(
+    statements: list[ast.stmt],
+    before: tuple[int, int] | None = None,
+    helpers: frozenset[str] = frozenset(),
+) -> bool:
+    pending = [(node, ()) for node in statements]
+    while pending:
+        node, loops = pending.pop()
+        if isinstance(node, ast.Return) and (
+            before is None or (node.end_lineno, node.end_col_offset) < before or any(any(loop) for loop in loops)
+        ):
+            return True
+        if loops and (
+            (isinstance(node, ast.Break) and any(loops[-1]))
+            or (
+                isinstance(node, ast.Continue)
+                and loops[-1][0]
+                and (node.end_lineno, node.end_col_offset) < loops[-1][0]
+            )
+        ):
+            return True
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            last = max(
+                ((check.lineno, check.col_offset) for check in _loop_checks(node.body, helpers)),
+                default=None,
+            )
+            context = (last, bool(_loop_checks(node.orelse, helpers)))
+            pending.extend((child, (*loops, context)) for child in node.body)
+            pending.extend((child, loops) for child in node.orelse)
+        elif not isinstance(node, (*DEFINITIONS, ast.Lambda)):
+            pending.extend((child, loops) for child in ast.iter_child_nodes(node))
     return False
 
 
@@ -145,18 +188,22 @@ def measure(tree: Path) -> dict[str, dict]:
             skippers |= {function.name for key, function, _ in functions if _disables(bodies[key], skippers)}
         for key, function, context in functions:
             test = function.name.startswith("test")
-            assertions = _assertions(bodies[key], helpers)
-            if not (test or assertions):
+            checks = _checks(bodies[key], helpers)
+            if not (test or checks):
                 continue
             cases = _cases(context, constants)
             measured[key] = {
-                "assertions": assertions,
+                "assertions": len(checks),
                 "calls": sum(isinstance(node, ast.Call) for node in bodies[key]),
                 "cases": cases,
-                "disabled": test
-                and (
-                    not cases or _disables([*bodies[key], *_nodes(context)], skippers) or _returns_early(function.body)
-                ),
+                TEXTS: _texts(checks),
+                "disabled": (
+                    not cases
+                    or _disables([*bodies[key], *_nodes(context)], skippers)
+                    or _returns_early(function.body, helpers=helpers)
+                )
+                if test
+                else _returns_early(function.body, max((node.lineno, node.col_offset) for node in checks), helpers),
             }
     return measured
 
@@ -170,7 +217,10 @@ def load(tree: Path) -> dict[str, dict] | None:
     except json.JSONDecodeError as exc:
         raise GradeError(f"{MANIFEST} is not valid JSON: {exc}") from exc
     if not isinstance(data, dict) or not all(
-        isinstance(entry, dict) and all(isinstance(entry.get(field), int) for field in FIELDS)
+        isinstance(entry, dict)
+        and all(isinstance(entry.get(field), int) for field in FIELDS)
+        and isinstance(entry.get(TEXTS, []), list)
+        and all(isinstance(text, str) for text in entry.get(TEXTS, []))
         for entry in data.values()
     ):
         raise GradeError(f"{MANIFEST} must map each locked test to its assertions, calls and cases")
@@ -179,7 +229,7 @@ def load(tree: Path) -> dict[str, dict] | None:
 
 def write(tree: Path) -> None:
     entries = {
-        key: {field: entry[field] for field in FIELDS}
+        key: {field: entry[field] for field in (*FIELDS, TEXTS)}
         for key, entry in sorted(measure(tree).items())
         if not entry["disabled"]
     }
@@ -211,9 +261,19 @@ def grade(base: dict, recorded: dict, head: dict) -> list[str]:
                 errors.append(f"The locked test {key} has {found[field]} {field}, the base locks {floor[field]}.")
             if key not in recorded or recorded[key][field] < floor[field]:
                 errors.append(f"The head {MANIFEST} drops or lowers the locked {field} of {key}.")
+        # A base manifest written before texts were pinned grades by counts only.
+        if TEXTS in floor:
+            if found is not None and Counter(floor[TEXTS]) - Counter(found[TEXTS]):
+                errors.append(f"The locked test {key} changes or drops an assertion the base locks.")
+            if key not in recorded or Counter(floor[TEXTS]) - Counter(recorded[key].get(TEXTS)):
+                errors.append(f"The head {MANIFEST} drops or changes the locked assertion texts of {key}.")
     for key, entry in sorted(recorded.items()):
         found = head.get(key)
-        if found is None or any(entry[field] > found[field] for field in FIELDS):
+        if (
+            found is None
+            or any(entry[field] > found[field] for field in FIELDS)
+            or Counter(entry.get(TEXTS)) - Counter(found[TEXTS])
+        ):
             errors.append(
                 f"The head {MANIFEST} records more than {key} measures; run python -m scripts.locked_tests --write."
             )

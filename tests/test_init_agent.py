@@ -862,6 +862,44 @@ def test_swarm_launch_replaces_only_the_inherited_gateway_key(monkeypatch, tmp_p
     assert all(value not in launcher for value in (managed, inherited, other))
 
 
+def _master_launch(tmp_path, companion, extra):
+    state = tmp_path / ".agentihooks"
+    state.mkdir()
+    (state / ".env").write_text("OTHER_KEY=file-other\n")
+    (state / "gateway-master.env").write_text(companion)
+    environ = {
+        "HOME": str(tmp_path),
+        "PATH": os.environ["PATH"],
+        "AGENTIHOOKS_SWARM": "example",
+        "AGENTIHOOKS_SWARM_SPAWN": "1",
+        **extra,
+    }
+    return init_agent._launch_environ(environ, "master@abcdef-0001", False)
+
+
+def test_a_master_launch_carries_the_gateway_key_from_a_companion_env_file(tmp_path):
+    launched = _master_launch(tmp_path, "MCP_KEY_GATEWAY=managed-gateway\n", {})
+    assert launched["MCP_KEY_GATEWAY"] == "managed-gateway"
+    assert "OTHER_KEY" not in launched
+
+
+def test_a_master_launch_without_the_gateway_key_gets_the_named_email_refusal(tmp_path, monkeypatch):
+    from hooks.integrations import mailer
+    from scripts.swarm import operator_email
+
+    mail = {"AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com", "LANGFUSE_MCP_URL": "https://gw/mcp/"}
+    launched = _master_launch(tmp_path, "UNRELATED=x\n", mail)
+    assert "MCP_KEY_GATEWAY" not in launched
+    sent = []
+    monkeypatch.setattr(mailer.EmailClient, "_instance", None)
+    monkeypatch.setattr(mailer.EmailClient, "reachable", lambda self, timeout=3.0: False)
+    monkeypatch.setattr(operator_email, "gateway_send", lambda *a: sent.append(a) or {"status": "sent"})
+    assert operator_email.send("S", "T", launched, str(tmp_path)) == (
+        "email failed: the SMTP relay is unreachable and MCP_KEY_GATEWAY is not set"
+    )
+    assert sent == []
+
+
 def test_a_quota_handoff_keeps_its_swarm_identity(monkeypatch, tmp_path):
     assert _handoff(monkeypatch, tmp_path, None, extra=["--dry-run"], env_extra=AGENT_ENV) == 0
     launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))

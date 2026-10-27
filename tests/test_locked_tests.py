@@ -44,22 +44,33 @@ MANIFEST_TEXT = """{
  "tests/test_secrets.py::TestGuard::test_no_raise": {
   "assertions": 0,
   "calls": 1,
-  "cases": 1
+  "cases": 1,
+  "texts": []
  },
  "tests/test_secrets.py::TestGuard::test_raises": {
   "assertions": 1,
   "calls": 2,
-  "cases": 1
+  "cases": 1,
+  "texts": [
+   "8af78b2968d96322"
+  ]
  },
  "tests/test_secrets.py::_blocked": {
   "assertions": 1,
   "calls": 0,
-  "cases": 1
+  "cases": 1,
+  "texts": [
+   "14bb4618231c149a"
+  ]
  },
  "tests/test_secrets.py::test_blocks": {
   "assertions": 2,
   "calls": 1,
-  "cases": 2
+  "cases": 2,
+  "texts": [
+   "6184e37469fc43c5",
+   "ed198a9be751aa93"
+  ]
  }
 }
 """
@@ -131,6 +142,8 @@ def test_the_head_defaults_to_the_working_directory(tmp_path, capsys, monkeypatc
         GUARD.replace('CASES = [("a", 1), ("b", 2)]', "CASES = []"),
         GUARD.replace("        str(1)\n", "        return\n        str(1)\n"),
         GUARD.replace("        str(1)\n", "        if str(1):\n            return\n"),
+        GUARD.replace("    assert command\n", "    if command:\n        return\n    assert command\n"),
+        GUARD.replace("    assert command\n", "    return; assert command\n"),
     ],
     ids=[
         "skip",
@@ -154,6 +167,8 @@ def test_the_head_defaults_to_the_working_directory(tmp_path, capsys, monkeypatc
         "empty cases",
         "early return",
         "nested return",
+        "helper early return",
+        "helper return on the assertion line",
     ],
 )
 def test_a_skipped_or_xfailed_locked_test_is_red(tmp_path, capsys, planted):
@@ -169,6 +184,78 @@ def test_returns_inside_nested_definitions_do_not_disable_a_test(tmp_path):
     text = text.replace('            int("x")\n', "            int((lambda: 'x')())\n")
     measured = _measured(tmp_path, text)
     assert not any(entry["disabled"] for entry in measured.values())
+
+
+@pytest.mark.parametrize(
+    "body,exit",
+    [
+        ("    for item in command:\n        assert item\n", "        continue\n        assert item\n"),
+        ("    for item in command:\n        assert item\n", "        break\n        assert item\n"),
+        ("    for item in command:\n        assert item\n", "        assert item\n        return\n"),
+        ("    for item in command:\n        assert item\n", "        assert item\n        break\n"),
+        ("    while command:\n        assert command\n", "        assert command\n        return\n"),
+        (
+            "    for item in command:\n        pass\n    else:\n        assert command\n",
+            "        break\n    else:\n        assert command\n",
+        ),
+    ],
+    ids=["continue", "break", "late return", "late break", "while return", "break skips else"],
+)
+def test_loop_exits_that_skip_locked_assertions_are_red(tmp_path, capsys, body, exit):
+    clean = GUARD.replace("    assert command\n", body)
+    planted = clean.replace(body, body.splitlines(keepends=True)[0] + exit)
+    base = _tree(tmp_path / "base", clean)
+    head = _tree(tmp_path / "head", planted, record=clean)
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert f"The locked test {LOCKED}::_blocked is skipped, xfailed or returns early.\n" in out
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "    for item in command:\n        assert item\n        continue\n",
+        "    for item in command:\n        assert item\n    return command\n",
+        "    assert command\n    for item in command:\n        break\n",
+        "    for item in command:\n        for other in item:\n            break\n        assert item\n",
+        "    for item in command:\n        assert item\n    else:\n        return command\n",
+        "    for item in command:\n        continue\n    else:\n        assert command\n",
+        "    assert command\n    for item in command:\n        def unused():\n            assert item\n        break\n",
+        "    assert command\n    for item in command:\n        def unused():\n            assert item\n        return command\n",
+    ],
+    ids=[
+        "completed iteration",
+        "completed loop",
+        "completed assertion",
+        "inner break",
+        "loop else",
+        "continue reaches else",
+        "nested checking function break",
+        "nested checking function return",
+    ],
+)
+def test_loop_exits_after_all_locked_assertions_stay_green(tmp_path, body):
+    text = GUARD.replace("    assert command\n", body)
+    assert not _measured(tmp_path, text)["_blocked"]["disabled"]
+
+
+@pytest.mark.parametrize("name", ["_loop_helper", "test_loop"])
+@pytest.mark.parametrize("exit", ["continue", "break"])
+def test_loop_exits_before_asserting_helper_calls_are_disabled(tmp_path, name, exit):
+    text = GUARD + (
+        "\n\ndef _checked(value):\n    assert value\n"
+        f"\n\ndef {name}(values):\n    for value in values:\n        {exit}\n        _checked(value)\n"
+    )
+    assert _measured(tmp_path, text)[name]["disabled"]
+
+
+@pytest.mark.parametrize("name", ["_loop_helper", "test_loop"])
+def test_break_skipping_an_asserting_helper_in_loop_else_is_disabled(tmp_path, name):
+    text = GUARD + (
+        "\n\ndef _checked(value):\n    assert value\n"
+        f"\n\ndef {name}(values):\n    for value in values:\n        break\n    else:\n        _checked(values)\n"
+    )
+    assert _measured(tmp_path, text)[name]["disabled"]
 
 
 @pytest.mark.parametrize("decorator", ["@pytest.mark.skip", "@pytest.mark.parametrize('x', [])"])
@@ -192,6 +279,7 @@ def test_a_deleted_locked_test_is_red(tmp_path, capsys):
             f"::error::The head {locked_tests.MANIFEST} drops or lowers the locked {field} of {key}."
             for field in locked_tests.FIELDS
         ),
+        f"::error::The head {locked_tests.MANIFEST} drops or changes the locked assertion texts of {key}.",
     ]
 
 
@@ -205,8 +293,16 @@ def test_a_deleted_locked_test_is_red(tmp_path, capsys):
             GUARD.replace("        str(1)\n", "        pass\n"),
             "TestGuard::test_no_raise has 0 calls, the base locks 1.",
         ),
+        (
+            GUARD.replace("    assert code\n", "    assert True\n"),
+            "test_blocks changes or drops an assertion the base locks.",
+        ),
+        (
+            GUARD.replace("    assert command\n", "    assert command or True\n"),
+            "_blocked changes or drops an assertion the base locks.",
+        ),
     ],
-    ids=["assert", "helper", "case", "call"],
+    ids=["assert", "helper", "case", "call", "assert true swap", "helper assert text"],
 )
 def test_a_weakened_locked_test_is_red_even_when_rerecorded(tmp_path, capsys, planted, message):
     base = _tree(tmp_path / "base", GUARD)
@@ -229,6 +325,52 @@ def test_a_manifest_recording_more_than_the_head_measures_is_red(tmp_path, capsy
             " run python -m scripts.locked_tests --write."
         ],
     )
+
+
+@pytest.mark.parametrize(
+    "texts,message",
+    [
+        ([], "drops or changes the locked assertion texts of"),
+        (["8af78b2968d96322", "0000000000000000"], "records more than"),
+    ],
+    ids=["dropped", "unmeasured"],
+)
+def test_a_manifest_text_the_base_or_head_disagrees_with_is_red(tmp_path, capsys, texts, message):
+    base = _tree(tmp_path / "base", GUARD)
+    head = _tree(tmp_path / "head", GUARD)
+    data = locked_tests.load(head)
+    data[f"{LOCKED}::TestGuard::test_raises"]["texts"] = texts
+    (head / locked_tests.MANIFEST).write_text(json.dumps(data))
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert [line for line in out.splitlines()[1:] if message in line] == out.splitlines()[1:]
+    assert f"{LOCKED}::TestGuard::test_raises" in out
+
+
+def test_an_added_assertion_keeps_the_locked_texts_green(tmp_path, capsys):
+    base = _tree(tmp_path / "base", GUARD)
+    head = _tree(tmp_path / "head", GUARD.replace("    assert code\n", "    assert code\n    assert code > 0\n"))
+    assert _grade(base, head, capsys)[0] == 0
+
+
+def test_a_base_manifest_without_texts_grades_by_counts(tmp_path, capsys):
+    base = _tree(tmp_path / "base", GUARD)
+    data = locked_tests.load(base)
+    for entry in data.values():
+        del entry["texts"]
+    (base / locked_tests.MANIFEST).write_text(json.dumps(data))
+    head = _tree(tmp_path / "head", GUARD.replace("    assert code\n", "    assert True\n"))
+    assert _grade(base, head, capsys)[0] == 0
+
+
+def test_a_helper_returning_after_its_assertion_is_not_disabled(tmp_path):
+    text = GUARD.replace("    assert command\n", "    assert command\n    return command\n")
+    assert not _measured(tmp_path, text)["_blocked"]["disabled"]
+
+
+def test_a_helper_returning_its_assertion_is_not_disabled(tmp_path):
+    text = GUARD.replace("    assert command\n", "    return command.assert_called_once()\n")
+    assert not _measured(tmp_path, text)["_blocked"]["disabled"]
 
 
 def test_only_checks_assert_methods_and_asserting_helpers_count_as_assertions(tmp_path):
@@ -326,10 +468,23 @@ def test_a_base_without_a_manifest_locks_the_head(tmp_path, capsys):
             '{"t": {"assertions": 1, "calls": 1}}',
             f"::error::{locked_tests.MANIFEST} must map each locked test to its assertions, calls and cases\n",
         ),
+        (
+            locked_tests.MANIFEST,
+            '{"t": {"assertions": 1, "calls": 1, "cases": 1, "texts": [1]}}',
+            f"::error::{locked_tests.MANIFEST} must map each locked test to its assertions, calls and cases\n",
+        ),
         (Path(LOCKED), "{", f"::error::{LOCKED} does not parse: "),
         (Path(LOCKED), "def test_x():\n    pass\x00\n", "::error::"),
     ],
-    ids=["no manifest", "manifest json", "manifest list", "manifest fields", "test syntax", "test nul"],
+    ids=[
+        "no manifest",
+        "manifest json",
+        "manifest list",
+        "manifest fields",
+        "manifest texts",
+        "test syntax",
+        "test nul",
+    ],
 )
 def test_an_unreadable_tree_cannot_be_graded(tmp_path, capsys, path, text, message):
     base = _tree(tmp_path / "base", GUARD)
@@ -362,7 +517,8 @@ def test_the_repository_manifest_matches_its_locked_tests():
     measured = locked_tests.measure(_ROOT)
     assert not [key for key, entry in measured.items() if entry["disabled"]]
     assert locked_tests.load(_ROOT) == {
-        key: {field: entry[field] for field in locked_tests.FIELDS} for key, entry in measured.items()
+        key: {field: entry[field] for field in (*locked_tests.FIELDS, locked_tests.TEXTS)}
+        for key, entry in measured.items()
     }
     assert {key.split("::")[0] for key in measured} == set(locked_tests.LOCKED)
     assert locked_tests.unlocking_configs(_ROOT) == []

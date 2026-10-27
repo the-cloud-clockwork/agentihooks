@@ -197,8 +197,8 @@ On a pull request, the `select` job in `.github/workflows/test.yml` runs `script
 
 | Scope | When | What runs |
 |---|---|---|
-| `full` | The change touches a harness file or a `conftest.py`, the selected tests would need more than twelve legs, or no test was selected and the change is not documentation only | `split`, `unit` and `shard-check`, the whole suite |
-| `selected` | One or more tests were selected and fit in twelve legs | `unit-selected`, one job per leg of about 180 stored seconds, on the `files_<leg>` line of the `selection` artifact the `select` job uploads |
+| `full` | The change touches a harness file or a `conftest.py`, or no test was selected and the change is not documentation only | `split`, `unit` and `shard-check`, the whole suite |
+| `selected` | One or more tests were selected | `unit-selected`, one job per leg of about 180 stored seconds, at most twenty legs (the `unit` shard count); a larger selection shares those twenty legs, each running longer, on the `files_<leg>` line of the `selection` artifact the `select` job uploads |
 | `none` | Every changed file is documentation (`docs/` or a `.md` file) | no unit tests |
 
 The merge queue always runs the whole suite. `tests/test_suite_speed.py` holds two whole suite checks that read every test module mentioning `fakeredis`:
@@ -470,7 +470,7 @@ The queue shard planner and the shard budget grade shards against the time their
 |---|---|---|---|---|
 | `tests.queue_shards` (`STEP_SECONDS`) | `unit` | `Run tests` | 12 minutes | 720 s; the planner grows shards toward `TARGET_SECONDS`, 195 s, and a queue plan must predict its slowest shard under half of it, 360 s |
 | `tests.shard_budget`, a unit shard | `unit` | `Run tests` | 12 minutes | 720 s of elapsed test step time |
-| `tests.shard_budget`, a selected leg | `unit-selected` | `Run the selected tests` | 7 minutes | 420 s of elapsed test step time |
+| `tests.shard_budget`, a selected leg | `unit-selected` | `Run the selected tests` | 12 minutes | 720 s of elapsed test step time |
 
 ### How a limit is read
 
@@ -525,13 +525,13 @@ python -m tests.shard_budget shard-durations/*/durations.json
 The first line names the slowest shard and the limit of its own step; one line per shard follows, slowest first:
 
 ```text
-2 shards, slowest 431.0 s of test time against the 7 minute Run the selected tests deadline of 420 s
-durations-3.12-1 431.0 s over budget
+2 shards, slowest 731.0 s of test time against the 12 minute Run the selected tests deadline of 720 s
+durations-3.12-1 731.0 s over budget
 durations-3.12-2 120.0 s
-::error::1 of 2 shards passed the 420 s budget.
+::error::1 of 2 shards passed the 720 s budget.
 ```
 
-When shards over budget have different limits, the last line joins them, for example `passed the 420 or 720 s budget`. `--budget <seconds>` replaces every step limit with one number, and the first line then reads `against a budget of <seconds> s`.
+When shards over budget have different limits, the last line joins them with `or`. `--budget <seconds>` replaces every step limit with one number, and the first line then reads `against a budget of <seconds> s`.
 
 ### Tests that pin the limits
 
@@ -550,7 +550,7 @@ When shards over budget have different limits, the last line joins them, for exa
 | `split` fails with `IndexError: list index out of range` from `step_seconds` | The `unit` job or its `Run tests` step was renamed | Update `STEPS` in `tests/shard_budget.py` with the new name |
 | `TypeError: 'NoneType' object is not subscriptable` from `step_seconds` | The step's `timeout-minutes` was removed or written as an expression | Keep a plain integer `timeout-minutes` on the step |
 | The queue plans more shards than the step timeout needs | An older planner with a fixed timeout; before pull request 5043 it assumed 420 s while the step allowed 720 s | Merge `origin/dev`; the `split` log prints `of 195s` while the timeout is 12 minutes |
-| A selected leg passes 420 s and nothing turns red | `shard-check` never runs beside `unit-selected` | Grade the leg's artifact by hand as above |
+| A selected leg passes 720 s and nothing turns red | `shard-check` never runs beside `unit-selected` | Grade the leg's artifact by hand as above |
 | `KeyError` from `tests.shard_budget` | An `elapsed.json` names a job other than `unit` or `unit-selected` | Add the job and its step to `STEPS` |
 
 ### Delivery evidence
