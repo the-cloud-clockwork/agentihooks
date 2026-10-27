@@ -2357,6 +2357,16 @@ jobs:
           fi
           python -m scripts.locked_tests --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
+      # dev's copy holds the pin list, so a pull request cannot unpin the threshold it loosens.
+      # Only the pull request that introduces the check meets a grader without it; its own copy grades.
+      - name: Pin thresholds, floors and allowlists against the base
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/threshold_pins.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.threshold_pins --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
       - name: Fail on known vulnerabilities new against the base
         if: ${{ !cancelled() }}
