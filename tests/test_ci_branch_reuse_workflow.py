@@ -109,11 +109,13 @@ def test_the_planner_names_the_jobs_and_steps_the_workflow_runs():
 
 
 @pytest.mark.parametrize("job", LEG_JOBS)
-def test_both_uploads_use_the_upload_action_itself_and_the_names_the_grader_reads(job):
+def test_both_uploads_survive_a_cancel_and_carry_the_names_the_grader_reads(job):
     record = _step(job, "Upload this leg's branch record")
     coverage = _step(job, "Upload this leg's branch coverage")
     for upload in (record, coverage):
-        assert upload["uses"].startswith("actions/upload-artifact@")
+        assert upload["uses"] == "./.github/actions/retry-upload"
+        assert upload["with"]["after-cancel"] is True
+        assert upload["if"].startswith("always() && ")
         assert upload["with"]["retention-days"] == 7
     assert record["with"]["path"] == "branch-record/record.json"
     assert _name(record["with"]["name"]).startswith(PREFIX)
