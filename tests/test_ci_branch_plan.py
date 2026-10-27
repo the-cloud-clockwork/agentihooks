@@ -39,6 +39,19 @@ def _no_workflow_environment(monkeypatch):
     monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    now, sleeps = [0], []
+
+    def nap(seconds):
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(ci_branch_plan, "monotonic", lambda: now[0])
+    monkeypatch.setattr(ci_branch_plan, "sleep", nap)
+    return sleeps
+
+
 @pytest.fixture
 def repo(tmp_path):
     root = tmp_path / "repo"
@@ -140,7 +153,7 @@ def _github(monkeypatch, runs, records, jobs=None):
     def api(endpoint):
         calls.append(endpoint)
         if endpoint == LISTING:
-            return json.dumps({"workflow_runs": runs}).encode()
+            return json.dumps({"workflow_runs": runs() if callable(runs) else runs}).encode()
         if endpoint.endswith("/zip"):
             return payloads[int(endpoint.split("/artifacts/")[1].split("/")[0])]
         run_id = int(endpoint.split("/runs/")[1].split("/")[0])
@@ -609,6 +622,72 @@ def test_an_expired_record_of_a_started_leg_counts_as_missing(tmp_path, monkeypa
     assert _plan(tmp_path, root) == EMPTY
     assert _downloads(calls) == []
     assert "Pull request run 101: started test legs left no branch-record-3.12-1-1;" in capsys.readouterr().out
+
+
+def test_every_started_leg_missing_its_record_is_named(tmp_path, monkeypatch, repo, capsys):
+    root, commits = repo
+    run = _run(101)
+    record = _record(run, commits["record"], passed=["test_h"])
+    _github(monkeypatch, [run], {101: [record]}, jobs={101: [_job("1"), _job("2"), _job("3")]})
+    assert _plan(tmp_path, root) == EMPTY
+    assert (
+        "::warning title=Unusable branch record::Pull request run 101: started test legs left no"
+        " branch-record-3.12-2-1, branch-record-3.12-3-1; neither it nor any older run is reused.\n"
+    ) in capsys.readouterr().out
+
+
+def test_a_leg_started_in_an_earlier_attempt_still_needs_its_record(tmp_path, monkeypatch, repo, capsys):
+    root, commits = repo
+    run = _run(101, run_attempt=2)
+    record = _record(run, commits["record"], passed=["test_h"], leg="2", attempt=2)
+    _github(monkeypatch, [run], {101: [record]}, jobs={101: {1: [_job("1")], 2: [_job("2", attempt=2)]}})
+    assert _plan(tmp_path, root) == EMPTY
+    assert "Pull request run 101: started test legs left no branch-record-3.12-1-1;" in capsys.readouterr().out
+
+
+def test_a_run_still_running_at_the_first_poll_is_read_once_it_completes(tmp_path, monkeypatch, repo, clock):
+    root, commits = repo
+    run = _run(101)
+    snapshots = iter([[_run(101, status="in_progress")]])
+    calls, _ = _github(
+        monkeypatch, lambda: next(snapshots, [run]), {101: [_record(run, commits["record"], passed=["test_h"])]}
+    )
+    assert _plan(tmp_path, root)["tests"] == _ids("test_h")
+    assert clock == [15]
+    assert calls.count(LISTING) == 2
+
+
+@pytest.mark.parametrize("wait", [None, 30])
+@pytest.mark.parametrize("pending", [102, 101])
+def test_a_run_unfinished_when_the_wait_ends_hides_itself_and_every_older_run(
+    tmp_path, monkeypatch, repo, capsys, clock, wait, pending
+):
+    root, commits = repo
+    polls = {None: 17, 30: 3}[wait]
+    runs = {102: _run(102), 101: _run(101)}
+    records = {run_id: [_record(run, commits["record"], passed=["test_h"])] for run_id, run in runs.items()}
+    runs[pending]["status"] = "in_progress"
+    calls, _ = _github(monkeypatch, list(runs.values()), records)
+    plan = _plan(tmp_path, root, *(() if wait is None else ("--wait-seconds", str(wait))))
+    assert [entry["run"] for entry in plan["runs"]] == ([] if pending == 102 else [102])
+    assert clock == [15] * (polls - 1)
+    assert calls.count(LISTING) == polls
+    assert f"{ACTIONS}/runs/{pending}/artifacts?per_page=100&page=1" not in calls
+    assert (
+        f"::warning title=Unusable branch record::Pull request run {pending}: it was still in_progress after waiting"
+        f" {wait or 240} seconds; neither it nor any older run is reused.\n"
+    ) in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("budget", "reused"), [(6, _ids("test_h")), (5, [])])
+def test_every_poll_counts_against_the_request_budget(tmp_path, monkeypatch, repo, budget, reused):
+    root, commits = repo
+    run = _run(101)
+    snapshots = iter([[_run(101, status="queued")]])
+    records = [_record(run, commits["record"], passed=["test_h"], leg=leg) for leg in ("1", "2")]
+    _github(monkeypatch, lambda: next(snapshots, [run]), {101: records})
+    monkeypatch.setattr(ci_branch_plan, "REQUESTS", budget)
+    assert _plan(tmp_path, root)["tests"] == reused
 
 
 def test_a_run_without_test_leg_jobs_contributes_nothing_and_hides_nothing(tmp_path, monkeypatch, repo, capsys):
