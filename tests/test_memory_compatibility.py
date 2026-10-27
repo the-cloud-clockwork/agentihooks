@@ -28,9 +28,63 @@ def test_aliased_tools_classify_as_alias_to_their_session_tool(name):
     assert compat.classify(entry) == {**entry, "decision": "alias", "target": ALIASES[name]}
 
 
-def test_a_replaced_capability_names_its_agentihooks_target():
-    entry = {"consumer": "landing", "kind": "dashboard", "uses": "/sessions"}
-    assert compat.classify(entry) == {**entry, "decision": "replace", "target": "session_list"}
+@pytest.mark.parametrize(
+    ("use", "target"),
+    [
+        ("/sessions", "session_list"),
+        ("get_session_actions", "session_records"),
+        ("agent_search", "session_search"),
+        ("search_history", "session_search"),
+        ("collect_now", "hooks.memory.collector"),
+        ("list_plans", "agentihooks plan read"),
+        ("get_plan", "agentihooks plan read"),
+        ("mcp_tool_grant", "agentihooks session tools"),
+        ("postgres_history", "hooks.memory.importer"),
+    ],
+)
+def test_a_replaced_capability_names_its_agentihooks_target(use, target):
+    entry = {"consumer": "caller", "kind": "dashboard", "uses": use}
+    assert compat.classify(entry) == {**entry, "decision": "replace", "target": target}
+
+
+def test_retired_uses_map_to_their_features():
+    assert compat.RETIRED_BY_USE == {
+        **dict.fromkeys(
+            (
+                "dispatch_task",
+                "get_dispatch_job",
+                "list_dispatch_jobs",
+                "plan_task",
+                "get_dispatch_plan",
+                "list_dispatch_plans",
+                "execute_plan",
+                "run_agent",
+                "dispatch_to_agent",
+                "/dispatch/jobs",
+                "dispatch_url",
+            ),
+            "dispatcher",
+        ),
+        **dict.fromkeys(
+            (
+                "register_agent",
+                "deregister_agent",
+                "heartbeat_agent",
+                "list_agents",
+                "get_agent",
+                "find_agents",
+                "discover_local_agents",
+                "/agents",
+            ),
+            "agent_registry",
+        ),
+        **dict.fromkeys(("/health", "service_deployment", "daemon_installer"), "standalone_daemon"),
+        **dict.fromkeys(("/authorize", "/token", "/register"), "oauth_server"),
+        **dict.fromkeys(("list_handoff_projects", "handoff"), "handoff_service"),
+        **dict.fromkeys(("list_memory_files", "get_memory_file"), "memory_files"),
+        "generate_summary": "summary_synthesis",
+        "restore_session": "session_restore",
+    }
 
 
 @pytest.mark.parametrize(
@@ -56,6 +110,8 @@ def test_an_unknown_capability_stays_unmapped():
         {**SEARCH, "decision": "alias"},
         {**SEARCH, "consumer": ""},
         {**SEARCH, "uses": 3},
+        {**SEARCH, "uses": ""},
+        {**SEARCH, "kind": ""},
         {**SEARCH, "kind": "pager"},
     ],
 )
@@ -72,18 +128,56 @@ def test_every_known_consumer_has_a_target_or_a_removal():
 
 def test_every_legacy_tool_is_in_the_inventory():
     tools = {entry["uses"] for entry in compat.CONSUMERS if entry["kind"] == "tool"}
-    assert set(ALIASES) <= tools
-    assert {"dispatch_task", "register_agent", "restore_session", "get_session_actions"} <= tools
-    assert not tools & (compat.NOT_TOOLS | {"mcp_tool_grant", "postgres_history"})
-    assert not any(tool.startswith("/") for tool in tools)
+    assert tools == {
+        "list_sessions",
+        "get_session",
+        "get_session_segment",
+        "search_sessions",
+        "search_semantic",
+        "get_session_actions",
+        "agent_search",
+        "search_history",
+        "collect_now",
+        "list_plans",
+        "get_plan",
+        "dispatch_task",
+        "get_dispatch_job",
+        "list_dispatch_jobs",
+        "plan_task",
+        "get_dispatch_plan",
+        "list_dispatch_plans",
+        "execute_plan",
+        "run_agent",
+        "dispatch_to_agent",
+        "register_agent",
+        "deregister_agent",
+        "heartbeat_agent",
+        "list_agents",
+        "get_agent",
+        "find_agents",
+        "discover_local_agents",
+        "list_handoff_projects",
+        "handoff",
+        "list_memory_files",
+        "get_memory_file",
+        "generate_summary",
+        "restore_session",
+    }
 
 
-@pytest.mark.parametrize("component", sorted(compat.EXTRACTABLE))
-def test_search_components_extract_without_copying(component):
+@pytest.mark.parametrize(
+    ("component", "target"),
+    [
+        ("turn_chunking", "hooks.memory.chunking"),
+        ("vector_storage", "hooks.memory.embeddings"),
+        ("semantic_search", "hooks.memory.search"),
+    ],
+)
+def test_search_components_extract_without_copying(component, target):
     assert compat.extract(component, "module") == {
         "component": component,
         "source_module": "module",
-        "target": compat.EXTRACTABLE[component],
+        "target": target,
         "source_license": "MIT",
         "copied": False,
     }

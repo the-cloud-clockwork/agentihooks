@@ -59,10 +59,10 @@ RETIRED = {
     "session_restore": ("restore_session",),
 }
 RETIRED_BY_USE = {use: feature for feature, uses in RETIRED.items() for use in uses}
-NOT_TOOLS = frozenset({"service_deployment", "daemon_installer", "dispatch_url"})
+NOT_TOOLS = frozenset({"service_deployment", "daemon_installer", "dispatch_url", "mcp_tool_grant", "postgres_history"})
 LEGACY_TOOLS = (
     *ALIASES,
-    *(use for use in REPLACEMENTS if not use.startswith("/") and use not in ("mcp_tool_grant", "postgres_history")),
+    *(use for use in REPLACEMENTS if not use.startswith("/") and use not in NOT_TOOLS),
     *(use for use in RETIRED_BY_USE if not use.startswith("/") and use not in NOT_TOOLS),
 )
 CONSUMERS = (
