@@ -32,6 +32,12 @@ rules:
           - pattern-inside: |
               def _front(...):
                 ...
+          - pattern-inside: |
+              def spawn(...):
+                ...
+          - pattern-inside: |
+              def resume(...):
+                ...
       - pattern-either:
           - pattern: launch_token(...)
           - pattern: $MODULE.launch_token(...)
@@ -43,6 +49,41 @@ rules:
     paths:
       include:
         - scripts/init_agent.py
+        - scripts/swarm/runtime.py
         - scripts/front_door_route.py
         - scripts/routing/claude_ai.py
+        - '*.test.py'
+  - id: feature-front-door-runtime-check
+    languages: [python]
+    severity: ERROR
+    message: Ordered 2026-10-27, master spawn and resume must apply the deterministic front door route before account selection.
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  def spawn(...):
+                    ...
+              - pattern-not: |
+                  def spawn(...):
+                    ...
+                    forced = front_door_route.check(...)
+                    ...
+                    route_kind = self._route_kind(..., forced)
+                    ...
+                    route = forced or ...
+                    ...
+          - patterns:
+              - pattern: |
+                  def resume(...):
+                    ...
+              - pattern-not: |
+                  def resume(...):
+                    ...
+                    forced = front_door_route.check(...)
+                    ...
+                    route = forced or ...
+                    ...
+    paths:
+      include:
+        - scripts/swarm/runtime.py
         - '*.test.py'

@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from scripts import agent_choice, master_claude_login
+from scripts import agent_choice, front_door_route, master_claude_login
 from scripts.handoff import envelope
 from scripts.init_agent import PREDECESSOR
 from scripts.profiles import binding, plugins
@@ -49,7 +49,7 @@ from scripts.swarm.pane import (
 )
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, connect
 from scripts.swarm.tick import Placed, SpawnError
-from scripts.swarm_v2 import front_door
+from scripts.swarm_v2 import front_door, masters
 
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
 SPAWN_TIMEOUT_S = 300
@@ -681,7 +681,9 @@ class HerdrRuntime:
             return self._saved_choice(saved, profile, quota_transfer, environ)
         return self._rotation(requested, environ, _prefer(profile, avoid))
 
-    def _route_kind(self, lane, harness, task, slug):
+    def _route_kind(self, lane, harness, task, slug, forced=()):
+        if forced:
+            return "interactive"
         if master_claude_login.enabled(slug, task.get("seat", ""), lane, harness or "claude"):
             return "subscription" if self._master_account_spent() else "interactive"
         explicit = task.get("route_kind")
@@ -725,7 +727,9 @@ class HerdrRuntime:
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
-        route_kind = self._route_kind(lane, want or requested or saved.get("harness", ""), task, config.slug)
+        title = _titled(config.slug, lane, task.get("seat", ""))
+        forced = front_door_route.check(profile, masters.title(config.slug, task.get("seat", "")), [])
+        route_kind = self._route_kind(lane, want or requested or saved.get("harness", ""), task, config.slug, forced)
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
         admitted = bool(relaunch and relaunch.get("account") and task.get("admitted_execution_id"))
         saved = (
@@ -777,7 +781,7 @@ class HerdrRuntime:
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
         argv += ["--claim-fence", json.dumps(task["claim_fence"])] if task.get("claim_fence") else []
         argv += ["--defer-canary"] if lane == MASTER and self.defer_master_canary and agent != "codex" else []
-        argv += _titled(config.slug, lane, task.get("seat", ""))
+        argv += title
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)
         if saved.get("model"):
@@ -803,10 +807,8 @@ class HerdrRuntime:
         picked = replace(picked, effort=saved["effort"]) if saved.get("effort") else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
-        login = route_kind == "interactive" and master_claude_login.enabled(
-            config.slug, task.get("seat", ""), lane, agent
-        )
-        route = master_claude_login.route(login) or (
+        login = bool(forced)
+        route = forced or (
             ["--route", "interactive"]
             if route_kind == "interactive"
             else (["--route", saved["account"]] if saved.get("account") else [])
@@ -879,7 +881,9 @@ class HerdrRuntime:
             agent.overlays,
         )
         argv += _pinned(agent.overlays, agent.profile_decision.get("bundle_revision"))
-        argv += _titled(config.slug, agent.lane, agent.seat)
+        title = _titled(config.slug, agent.lane, agent.seat)
+        forced = front_door_route.check(agent.profile, masters.title(config.slug, agent.seat), [])
+        argv += title
         defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}), config)
         picked = model_pick.ModelPick(
             agent.model or defaults.model,
@@ -887,8 +891,8 @@ class HerdrRuntime:
             source=agent.model_source or ("recorded" if agent.model else defaults.source),
         )
         front = front_door.holds(config.slug, agent.seat)
-        login = master_claude_login.enabled(config.slug, agent.seat, agent.lane, agent.harness)
-        route = master_claude_login.route(login) or (
+        login = bool(forced)
+        route = forced or (
             ["--route", "interactive"]
             if agent.route_kind == "interactive"
             else (["--route", agent.account] if agent.account else [])
