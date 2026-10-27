@@ -55,3 +55,22 @@ jobs:
       - name: Fetch with the job token
         # ok: app-token-git-https
         run: git fetch --no-tags origin "$GITHUB_SHA"
+
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: id
+          private-key: key
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # ruleid: app-token-git-https
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Push over the App credential the checkout persisted, reported once at the checkout above
+        # ok: app-token-git-https
+        run: git push origin "refs/tags/v$NEXT"
