@@ -288,24 +288,22 @@ jobs:
 
       - name: Upload this part's test stats cache
         if: success() && strategy.job-total != 1
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: mutation-test-stats-cache-${{ matrix.part }}
           path: .mutation-stats-fresh/
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 1
-          overwrite: true
 
       - name: Upload mutation stats part
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: mutation-stats-${{ matrix.part }}
           path: .mutation-stats/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
-          overwrite: true
 
       - name: Restore the tests that killed this branch's earlier mutants
         if: strategy.job-total == 1
