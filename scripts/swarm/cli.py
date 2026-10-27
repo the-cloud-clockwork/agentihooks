@@ -1663,9 +1663,9 @@ def cmd_pr(store, args):
     ledger = LedgerClient()
     doc = ledger.state(args.slug)
     row = next(t for t in doc["tasks"] if t.get("id") == agent.task)
-    keeps_main = args.prerequisite is not None and row.get("pr_url") not in (None, "", args.url)
-    head, repo = ("", "") if keeps_main else pull_branch(args.url)
-    branch = {"branch": head, "branch_repo": repo} if head else {}
+    keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
+    head, repo = pull_branch(args.url)
+    branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
     fields = {"state": "pr", "awaiting": awaiting, **branch} | ({} if keeps_main else {"pr_url": args.url})
     fields.update(_split_binding(row, args.url, args.half))
     scoped = _pull_scope(row, args)

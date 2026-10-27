@@ -13,7 +13,7 @@ def test_swarm_pr_records_the_scope_each_staged_or_prerequisite_pull_request_del
     _, ledger, stamped = started
     assert run("sw", "pr", FIRST, "--prerequisite", " tests that accept both gate states ") == 0
     first = {FIRST: {"kind": "prerequisite", "scope": "tests that accept both gate states"}}
-    assert ledger.rows["t1"]["pull_scopes"] == first
+    assert (ledger.rows["t1"]["pull_scopes"], ledger.rows["t1"]["pr_url"]) == (first, FIRST)
     assert stamped[-1][2]["pull_scopes"] == first
     assert run("sw", "pr", SECOND, "--stage", "the gate") == 0
     both = {**first, SECOND: {"kind": "stage", "scope": "the gate"}}
