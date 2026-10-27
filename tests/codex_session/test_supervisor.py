@@ -236,8 +236,10 @@ def test_a_failed_cleanup_keeps_the_launch_failure(store, server, clock, root, t
 
     monkeypatch.setattr(supervisor, "_connect_bound", failed)
     monkeypatch.setattr(store, "drop_agent", denied)
-    with pytest.raises(RuntimeError, match="^startup failed$"):
+    with pytest.raises(RuntimeError) as raised:
         supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    assert str(raised.value) == "startup failed"
+    assert "NoPermissionError" in raised.value.__notes__[0]
     assert only_record(store).state == FAILED
 
 
@@ -842,8 +844,9 @@ def test_failed_process_stop_still_removes_execution_folder(store, server, clock
         monkeypatch.setattr(process, "wait", refused_wait)
         return process
 
-    with pytest.raises(OSError, match="process wait failed"):
+    with pytest.raises(supervisor.LaunchFailure, match=f"^{supervisor.NEVER_ANSWERED}") as raised:
         supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root, popen=spawn))
+    assert "process wait failed" in raised.value.__notes__[0]
     assert server.processes[0].poll() is not None
     assert list(root.iterdir()) == []
     assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
