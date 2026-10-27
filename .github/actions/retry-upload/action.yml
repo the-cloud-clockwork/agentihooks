@@ -1,5 +1,5 @@
 name: Retried artifact upload
-description: Upload an artifact of this run, retried in place up to two more times. Every attempt overwrites the name, so a retry replaces a copy an earlier attempt finalized.
+description: Upload an artifact of this run, retried in place up to two more times. A path that matches no files is never attempted, and a watchdog ends any attempt that outlives its bound. Every attempt overwrites the name, so a retry replaces a copy an earlier attempt finalized.
 inputs:
   name:
     description: Artifact name
@@ -18,11 +18,39 @@ inputs:
     description: warn, error or ignore when the path matches nothing
     required: false
     default: warn
+  attempt-seconds:
+    description: Seconds one attempt may run before its upload process is ended
+    required: false
+    default: "120"
+  after-cancel:
+    description: Keep uploading once the job is cancelled, for a caller that runs on always()
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
+    - name: Find the files to upload
+      id: files
+      if: inputs.after-cancel == 'true' || !cancelled()
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.name }}
+        PATHS: ${{ inputs.path }}
+        INCLUDE_HIDDEN: ${{ inputs.include-hidden-files }}
+        IF_NO_FILES_FOUND: ${{ inputs.if-no-files-found }}
+      run: bash "$GITHUB_ACTION_PATH/find.sh"
+    - name: Bound attempt 1
+      if: steps.files.outputs.found == 'true' && (inputs.after-cancel == 'true' || !cancelled())
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.name }}
+        ATTEMPT: "1"
+        ATTEMPT_SECONDS: ${{ inputs.attempt-seconds }}
+        UPLOAD_PROCESS: upload-artifact/[^ ]*/dist/upload/index\.js
+      run: bash "$GITHUB_ACTION_PATH/watchdog.sh" arm
     - name: Upload, attempt 1
       id: first
+      if: steps.files.outputs.found == 'true' && (inputs.after-cancel == 'true' || !cancelled())
       continue-on-error: true
       uses: actions/upload-artifact@v4
       with:
@@ -32,17 +60,30 @@ runs:
         if-no-files-found: ${{ inputs.if-no-files-found }}
         retention-days: ${{ inputs.retention-days }}
         overwrite: true
-    - name: Wait before attempt 2
-      if: steps.first.outcome == 'failure'
+    - name: Release attempt 1
+      if: always() && steps.files.outputs.found == 'true'
       shell: bash
       env:
         ARTIFACT: ${{ inputs.name }}
+        ATTEMPT: "1"
+        ATTEMPT_SECONDS: ${{ inputs.attempt-seconds }}
+        UPLOAD_PROCESS: upload-artifact/[^ ]*/dist/upload/index\.js
+      run: bash "$GITHUB_ACTION_PATH/watchdog.sh" disarm
+    - name: Wait before attempt 2
+      if: steps.first.outcome == 'failure' && (inputs.after-cancel == 'true' || !cancelled())
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.name }}
+        ATTEMPT: "2"
+        ATTEMPT_SECONDS: ${{ inputs.attempt-seconds }}
+        UPLOAD_PROCESS: upload-artifact/[^ ]*/dist/upload/index\.js
       run: |
         echo "::warning title=Retried upload::Attempt 1 to upload $ARTIFACT failed; retrying in place."
         sleep 10
+        bash "$GITHUB_ACTION_PATH/watchdog.sh" arm
     - name: Upload, attempt 2
       id: second
-      if: steps.first.outcome == 'failure'
+      if: steps.first.outcome == 'failure' && (inputs.after-cancel == 'true' || !cancelled())
       continue-on-error: true
       uses: actions/upload-artifact@v4
       with:
@@ -52,16 +93,30 @@ runs:
         if-no-files-found: ${{ inputs.if-no-files-found }}
         retention-days: ${{ inputs.retention-days }}
         overwrite: true
-    - name: Wait before attempt 3
-      if: steps.second.outcome == 'failure'
+    - name: Release attempt 2
+      if: always() && steps.first.outcome == 'failure'
       shell: bash
       env:
         ARTIFACT: ${{ inputs.name }}
+        ATTEMPT: "2"
+        ATTEMPT_SECONDS: ${{ inputs.attempt-seconds }}
+        UPLOAD_PROCESS: upload-artifact/[^ ]*/dist/upload/index\.js
+      run: bash "$GITHUB_ACTION_PATH/watchdog.sh" disarm
+    - name: Wait before attempt 3
+      if: steps.second.outcome == 'failure' && (inputs.after-cancel == 'true' || !cancelled())
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.name }}
+        ATTEMPT: "3"
+        ATTEMPT_SECONDS: ${{ inputs.attempt-seconds }}
+        UPLOAD_PROCESS: upload-artifact/[^ ]*/dist/upload/index\.js
       run: |
         echo "::warning title=Retried upload::Attempt 2 to upload $ARTIFACT failed; retrying in place."
         sleep 20
+        bash "$GITHUB_ACTION_PATH/watchdog.sh" arm
     - name: Upload, attempt 3
-      if: steps.second.outcome == 'failure'
+      id: third
+      if: steps.second.outcome == 'failure' && (inputs.after-cancel == 'true' || !cancelled())
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.name }}
@@ -70,3 +125,12 @@ runs:
         if-no-files-found: ${{ inputs.if-no-files-found }}
         retention-days: ${{ inputs.retention-days }}
         overwrite: true
+    - name: Release attempt 3
+      if: always() && steps.second.outcome == 'failure'
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.name }}
+        ATTEMPT: "3"
+        ATTEMPT_SECONDS: ${{ inputs.attempt-seconds }}
+        UPLOAD_PROCESS: upload-artifact/[^ ]*/dist/upload/index\.js
+      run: bash "$GITHUB_ACTION_PATH/watchdog.sh" disarm

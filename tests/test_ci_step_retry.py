@@ -132,23 +132,62 @@ _UPLOAD_WITH = {
 }
 
 
+_LIVE = "inputs.after-cancel == 'true' || !cancelled()"
+
+
 def test_the_upload_is_tried_three_times_overwriting_and_only_the_last_failure_is_red():
     steps = _upload_action()["runs"]["steps"]
     uploads = [s for s in steps if s.get("uses", "").startswith("actions/upload-artifact@")]
     assert len(uploads) == 3
     assert [s.get("continue-on-error", False) for s in uploads] == [True, True, False]
-    assert "if" not in uploads[0]
+    assert uploads[0]["if"] == f"steps.files.outputs.found == 'true' && ({_LIVE})"
     for before, after in zip(uploads, uploads[1:]):
-        assert after["if"] == f"steps.{before['id']}.outcome == 'failure'"
+        assert after["if"] == f"steps.{before['id']}.outcome == 'failure' && ({_LIVE})"
     for upload in uploads:
         assert upload["with"] == _UPLOAD_WITH
+
+
+def test_a_path_matching_nothing_is_decided_once_before_any_attempt():
+    steps = _upload_action()["runs"]["steps"]
+    files = steps[0]
+    assert files["id"] == "files"
+    assert files["if"] == _LIVE
+    assert "continue-on-error" not in files
+    assert files["run"] == 'bash "$GITHUB_ACTION_PATH/find.sh"'
+    assert files["env"] == {
+        "ARTIFACT": "${{ inputs.name }}",
+        "PATHS": "${{ inputs.path }}",
+        "INCLUDE_HIDDEN": "${{ inputs.include-hidden-files }}",
+        "IF_NO_FILES_FOUND": "${{ inputs.if-no-files-found }}",
+    }
+
+
+def test_every_attempt_is_armed_before_and_released_after_its_upload():
+    steps = _upload_action()["runs"]["steps"]
+    uploads = [i for i, s in enumerate(steps) if s.get("uses", "").startswith("actions/upload-artifact@")]
+    for attempt, i in enumerate(uploads, 1):
+        arm, release = steps[i - 1], steps[i + 1]
+        assert arm["if"] == steps[i]["if"]
+        assert arm["run"].splitlines()[-1] == 'bash "$GITHUB_ACTION_PATH/watchdog.sh" arm'
+        assert release["run"] == 'bash "$GITHUB_ACTION_PATH/watchdog.sh" disarm'
+        assert release["if"].startswith("always() && ")
+        for step in (arm, release):
+            assert step["env"] == {
+                "ARTIFACT": "${{ inputs.name }}",
+                "ATTEMPT": str(attempt),
+                "ATTEMPT_SECONDS": "${{ inputs.attempt-seconds }}",
+                "UPLOAD_PROCESS": "upload-artifact/[^ ]*/dist/upload/index\\.js",
+            }
+    assert steps[uploads[0] + 1]["if"] == "always() && steps.files.outputs.found == 'true'"
+    assert steps[uploads[1] + 1]["if"] == "always() && steps.first.outcome == 'failure'"
+    assert steps[uploads[2] + 1]["if"] == "always() && steps.second.outcome == 'failure'"
 
 
 def test_every_absorbed_upload_failure_waits_and_warns_before_the_next_attempt():
     steps = _upload_action()["runs"]["steps"]
     uploads = [i for i, s in enumerate(steps) if s.get("uses", "").startswith("actions/upload-artifact@")]
     for before, after, wait in zip(uploads, uploads[1:], ("sleep 10", "sleep 20")):
-        waits = steps[before + 1 : after]
+        waits = steps[before + 2 : after]
         assert len(waits) == 1
         assert waits[0]["if"] == steps[after]["if"]
         assert "::warning title=Retried upload::" in waits[0]["run"]
@@ -160,7 +199,129 @@ def test_a_missing_file_stays_red_by_default_only_where_the_caller_asks():
     inputs = _upload_action()["inputs"]
     assert inputs["if-no-files-found"]["default"] == "warn"
     assert inputs["include-hidden-files"]["default"] == "false"
+    assert inputs["attempt-seconds"]["default"] == "120"
+    assert inputs["after-cancel"]["default"] == "false"
     assert all(inputs[name]["required"] for name in ("name", "path", "retention-days"))
+
+
+_UPLOAD_SCRIPTS = _ROOT / ".github/actions/retry-upload"
+
+
+def _find(tmp_path, paths, mode="error", hidden="false"):
+    work = tmp_path / "work"
+    work.mkdir(exist_ok=True)
+    output = tmp_path / "output"
+    output.write_text("")
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path),
+        "GITHUB_OUTPUT": str(output),
+        "ARTIFACT": "coverage-3.12-5",
+        "PATHS": paths,
+        "INCLUDE_HIDDEN": hidden,
+        "IF_NO_FILES_FOUND": mode,
+    }
+    done = subprocess.run(
+        ["bash", str(_UPLOAD_SCRIPTS / "find.sh")], cwd=work, env=env, capture_output=True, text=True, timeout=30
+    )
+    return done, output.read_text()
+
+
+@pytest.mark.parametrize(
+    "mode, code, said",
+    [
+        ("error", 1, "::error title=Retried upload::No files match the path of coverage-3.12-5"),
+        ("warn", 0, "::warning title=Retried upload::No files match the path of coverage-3.12-5"),
+        ("ignore", 0, "No files match the path of coverage-3.12-5; nothing uploaded."),
+    ],
+)
+def test_a_path_matching_nothing_ends_before_any_attempt(tmp_path, mode, code, said):
+    done, output = _find(tmp_path, ".coverage\njs-coverage/\n", mode)
+    assert done.returncode == code, done.stderr
+    assert output == "found=false\n"
+    assert said in done.stdout
+    assert ("::" in done.stdout) == (mode != "ignore")
+
+
+@pytest.mark.parametrize(
+    "layout, paths, hidden, found",
+    [
+        ({"work/.coverage.1": "x"}, ".coverage\n.coverage.*\n", "true", True),
+        ({"work/.coverage.1": "x"}, ".coverage\n.coverage.*\n", "false", False),
+        ({"work/js-coverage/a.json": "x"}, "js-coverage/\n", "false", True),
+        ({"work/js-coverage/.a.json": "x"}, "js-coverage/\n", "false", False),
+        ({"work/js-coverage/.a.json": "x"}, "js-coverage/\n", "true", True),
+        ({"work/empty/": None}, "empty/\n", "true", False),
+        ({"coverage-baseline/baseline.json": "x"}, "~/coverage-baseline\n", "false", True),
+        ({"work/reports/deep/report.txt": "x"}, "reports/**/*.txt\n", "false", True),
+        ({"work/kept.txt": "x"}, "!kept.txt\n", "false", False),
+    ],
+)
+def test_the_path_is_resolved_as_the_upload_resolves_it(tmp_path, layout, paths, hidden, found):
+    for name, text in layout.items():
+        target = tmp_path / name
+        if text is None:
+            target.mkdir(parents=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text)
+    done, output = _find(tmp_path, paths, "error", hidden)
+    assert output == f"found={str(found).lower()}\n"
+    assert done.returncode == (0 if found else 1), done.stdout + done.stderr
+
+
+def _watchdog(tmp_path, action, seconds):
+    env = {
+        **os.environ,
+        "RUNNER_TEMP": str(tmp_path),
+        "ARTIFACT": "coverage-3.12-5",
+        "ATTEMPT": "1",
+        "ATTEMPT_SECONDS": str(seconds),
+        "UPLOAD_PROCESS": f"{tmp_path.name}/upload-artifact/[^ ]*/dist/upload/index\\.js",
+    }
+    return subprocess.run(
+        ["bash", str(_UPLOAD_SCRIPTS / "watchdog.sh"), action], env=env, capture_output=True, text=True, timeout=30
+    )
+
+
+@pytest.mark.wall_clock
+def test_a_stalled_upload_attempt_is_ended_at_its_bound(tmp_path):
+    upload = subprocess.Popen(
+        ["bash", "-c", f'exec -a "{tmp_path.name}/upload-artifact/v4/dist/upload/index.js" sleep 300']
+    )
+    started = time.monotonic()
+    try:
+        assert _watchdog(tmp_path, "arm", 1).returncode == 0
+        assert upload.wait(timeout=20) == -15
+        assert time.monotonic() - started < 15
+    finally:
+        upload.kill()
+        released = _watchdog(tmp_path, "disarm", 1)
+    assert released.returncode == 0
+    assert "::warning title=Retried upload::Attempt 1 to upload coverage-3.12-5 exceeded 1s and was ended." in (
+        released.stdout
+    )
+
+
+def test_an_attempt_that_ends_in_time_releases_its_watchdog_quietly(tmp_path):
+    assert _watchdog(tmp_path, "arm", 300).returncode == 0
+    [pid] = [int(p.read_text()) for p in tmp_path.glob("retry-upload-*-1.pid")]
+    released = _watchdog(tmp_path, "disarm", 300)
+    assert released.returncode == 0
+    assert released.stdout == ""
+    assert not list(tmp_path.glob("retry-upload-*"))
+    deadline = time.monotonic() + 10
+    while _alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not _alive(pid)
+
+
+def _alive(pid):
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except FileNotFoundError:
+        return False
+    return state not in ("Z", "X")
 
 
 @pytest.mark.parametrize(
