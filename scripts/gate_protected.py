@@ -333,7 +333,7 @@ def _dev_parent_form(steps: list[dict]) -> list[dict]:
     form = deepcopy(steps)
     if EQUIVALENCE_DEV_PARENT in form:
         return form
-    for index, step in enumerate(form):
+    for index, step in list(enumerate(form)):
         settings = step.get("with") or {}
         if settings.get("path") == "base":
             settings["ref"] = EQUIVALENCE_DEV_PARENT_REF
