@@ -456,7 +456,8 @@ def run_unit(
 
 
 def forked_children():
-    # Defined inside a function: a mutated copy trampolines top level methods, and mutmut reads os.environ in its forced fail.
+    # Defined inside a function: a mutated copy trampolines top level methods,
+    # and mutmut reads os.environ in its forced fail.
     class ForkedChildren(ModuleType):
         # mutmut reaps with os.wait() and raises KeyError on a child a test left behind in its own process.
         def __init__(self):

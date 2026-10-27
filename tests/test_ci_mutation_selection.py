@@ -1211,7 +1211,7 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
 
     def cli(args):
         assert args == ["run", "--max-children", str(expected)]
-        assert type(runner.os).__name__ == "ForkedChildren"
+        assert (runner.os.pids, runner.os.environ) == (set(), os.environ)
         runner.collect_or_load_stats(object())
 
     runner.cli = cli
