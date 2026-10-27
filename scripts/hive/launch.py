@@ -500,6 +500,7 @@ class HiveLaunch:
         if not ack or ack.status != "live":
             return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
         _match("ack host", order.hive, ack.target.get("host_id"))
+        admission.joined(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
         if agent.runtime_target != ack.target:
             bound = replace(
                 agent,
@@ -628,6 +629,7 @@ class HiveLaunch:
             self.end(agent, LATE)
             self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             return Outcome("spawn", Status.REFUSED, HIVE, detail=LATE)
+        admission.joined(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
         placed = Placed(
             agent.pane_id,
             agent.harness,
