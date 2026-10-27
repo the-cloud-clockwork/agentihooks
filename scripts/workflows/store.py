@@ -1,4 +1,4 @@
-"""The run folder: workflow.json plus outputs/, saved so a process crash never leaves a partial file."""
+"""The run folder: workflow.json plus outputs/, saved so a crash never leaves a partial file."""
 
 from __future__ import annotations
 
@@ -32,5 +32,8 @@ def load(folder: Path) -> dict:
 
 def save(folder: Path, state: dict) -> None:
     temp = folder / f".{STATE_FILE}.tmp"
-    temp.write_text(json.dumps(state))
+    with temp.open("w") as handle:
+        handle.write(json.dumps(state))
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(temp, folder / STATE_FILE)

@@ -73,6 +73,30 @@ def test_a_failed_replace_leaves_the_previous_state_intact(tmp_path, monkeypatch
     assert store.load(folder) == first
 
 
+def test_save_syncs_the_full_temp_file_to_disk_before_replacing(tmp_path, monkeypatch):
+    folder = tmp_path / "run-1"
+    first = store.create(folder, tiny(), "case")
+    changed = {**first, "visit": 9}
+    synced = []
+    real_fsync = store.os.fsync
+
+    def record(fd):
+        synced.append(
+            (
+                json.loads((folder / ".workflow.json.tmp").read_text()),
+                store.load(folder),
+            )
+        )
+        real_fsync(fd)
+
+    monkeypatch.setattr(store.os, "fsync", record)
+
+    store.save(folder, changed)
+
+    assert synced == [(changed, first)]
+    assert store.load(folder) == changed
+
+
 def test_default_root_honours_agentihooks_home(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
 
