@@ -242,7 +242,7 @@ def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch,
     fenced.runtime.hive_launch.spawn.assert_not_called()
 
 
-def test_an_agent_live_on_the_host_leaves_the_eight_agent_cap_count_unchanged(setup, monkeypatch):
+def test_the_module_fixture_keeps_agents_live_on_the_host_out_of_the_cap_count(setup, monkeypatch):
     from types import SimpleNamespace
 
     from scripts import terminate_agent
