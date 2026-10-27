@@ -287,3 +287,19 @@ def test_the_probe_command_prints_each_probe_line(monkeypatch, capsys):
     assert capsys.readouterr().out == "pass\ta\t1\nfail\tb\t2\n"
     assert seen == [("store", "s", "LedgerClient", NOW)]
     assert cli.build_parser().parse_args(["s", "probe"]).command == "probe"
+
+
+def test_the_probe_verb_dispatches_to_its_parser_default_on_the_connected_store(monkeypatch, capsys):
+    from contextlib import nullcontext
+
+    from scripts.swarm import cli
+
+    store = SimpleNamespace(names=SimpleNamespace(swarm_slug=lambda ref: ref))
+    seen = []
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "refusal", lambda name, who: "")
+    monkeypatch.setattr(cli.ledger_route, "command", lambda *args: nullcontext())
+    monkeypatch.setattr(probe, "run", lambda *args: seen.append(args[:2]) or [Probe("a", True, "1")])
+    assert cli.main(["s", "probe"]) == 0
+    assert capsys.readouterr().out == "pass\ta\t1\n"
+    assert seen == [(store, "s")]
