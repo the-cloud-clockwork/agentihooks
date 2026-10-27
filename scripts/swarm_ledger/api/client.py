@@ -41,15 +41,16 @@ def export_file(base: str, slug: str, environ=os.environ) -> Path:
     return home / "ledger-exports" / f"{hashlib.sha256(f'{base} {slug}'.encode()).hexdigest()[:32]}.json"
 
 
-def stored_export(path: Path) -> tuple | None:
+def read_export_file(path: Path) -> tuple | None:
     try:
         stored = orjson.loads(path.read_bytes())
-        return stored["generation"], stored["state"]
+        generation, state = stored["generation"], stored["state"]
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    return (generation, state) if isinstance(generation, int) and isinstance(state, dict) else None
 
 
-def store_export(path: Path, generation: int, state: dict) -> None:
+def write_export_file(path: Path, generation: int, state: dict) -> None:
     partial = path.with_name(f"{path.name}.{uuid.uuid4().hex}")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -153,13 +154,13 @@ class ResourceClient:
     def stored_export(self, slug: str) -> dict:
         """The full export, read as the changes since the one the last command on this host stored for it."""
         path, kept = export_file(self.base, slug), {}
-        stored = stored_export(path)
+        stored = read_export_file(path)
         if stored is not None:
             kept[(self.base, slug)] = stored
         state = self.export(slug, kept)
         fresh = kept.get((self.base, slug))
         if fresh is not None and (stored is None or fresh[0] != stored[0]):
-            store_export(path, *fresh)
+            write_export_file(path, *fresh)
         return state
 
     def mutate(self, slug: str, operations: list) -> dict:

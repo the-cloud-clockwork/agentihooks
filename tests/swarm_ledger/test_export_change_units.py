@@ -195,19 +195,22 @@ def test_unfit_changes_read_the_export_whole_outside_kept_exports(monkeypatch, t
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
     broken = {"generation": 6, "changes": {"lists": {"tasks": {"order": ["x"], "items": {}}}, "set": [], "drop": []}}
     client, server = reader(monkeypatch, broken, {"generation": 7, "data": {"tasks": []}})
-    api.store_export(api.export_file("http://a", "s"), 5, {"tasks": []})
+    api.write_export_file(api.export_file("http://a", "s"), 5, {"tasks": []})
     assert client.stored_export("s") == {"tasks": []}
     assert [payload for *_, payload in server.sent] == [{"since": 5}, {"since": 0}]
-    assert api.stored_export(api.export_file("http://a", "s")) == (7, {"tasks": []})
+    assert api.read_export_file(api.export_file("http://a", "s")) == (7, {"tasks": []})
     assert api.KEPT is None
 
 
-def test_an_unreadable_stored_export_reads_it_whole(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "stored", ['{"generation": 5}', "[1]", '{"generation": "5", "state": {}}', '{"generation": 5, "state": []}']
+)
+def test_an_unreadable_stored_export_reads_it_whole(monkeypatch, tmp_path, stored):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     client, server = reader(monkeypatch, {"generation": 7, "data": {"tasks": []}})
     path = api.export_file("http://a", "s")
     path.parent.mkdir()
-    path.write_text('{"generation": 5}')
+    path.write_text(stored)
     assert client.stored_export("s") == {"tasks": []}
     assert [payload for *_, payload in server.sent] == [{"since": 0}]
     assert json.loads(path.read_text()) == {"generation": 7, "state": {"tasks": []}}
@@ -216,8 +219,8 @@ def test_an_unreadable_stored_export_reads_it_whole(monkeypatch, tmp_path):
 def test_an_unchanged_export_is_not_stored_again(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     client, _ = reader(monkeypatch, {"generation": 6, "changes": {"lists": {}, "set": [], "drop": []}})
-    api.store_export(api.export_file("http://a", "s"), 6, {"chat": []})
-    monkeypatch.setattr(api, "store_export", lambda *args: pytest.fail("stored again"))
+    api.write_export_file(api.export_file("http://a", "s"), 6, {"chat": []})
+    monkeypatch.setattr(api, "write_export_file", lambda *args: pytest.fail("stored again"))
     assert client.stored_export("s") == {"chat": []}
 
 
@@ -226,7 +229,7 @@ def test_a_refused_store_leaves_no_partial_file(monkeypatch, tmp_path):
         raise OSError("full")
 
     monkeypatch.setattr(api.os, "replace", full)
-    api.store_export(tmp_path / "exports" / "e.json", 1, {})
+    api.write_export_file(tmp_path / "exports" / "e.json", 1, {})
     assert list((tmp_path / "exports").iterdir()) == []
 
 
@@ -248,4 +251,4 @@ def test_a_snapshot_outside_kept_exports_reads_the_stored_export(monkeypatch, tm
     client, server = reader(monkeypatch, {"generation": 5, "data": {"_meta": {"members": {}}}})
     assert "crew" in client.snapshot("s")["_meta"]
     assert server.sent == [("http://a", "s", "export", {"since": 0})]
-    assert api.stored_export(api.export_file("http://a", "s")) == (5, {"_meta": {"members": {}}})
+    assert api.read_export_file(api.export_file("http://a", "s")) == (5, {"_meta": {"members": {}}})
