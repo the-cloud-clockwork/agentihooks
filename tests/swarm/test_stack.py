@@ -14,9 +14,10 @@ from scripts.inbox.seats import SeatRegistry
 from scripts.swarm import claim_hold, cli, dispatcher, stack, tick
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_comments, task_dependencies
+from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 
-_fixture = env
+_fixture = env, tmp_path
 AGENT = "engineer@a1b2c3-0001"
 HEAD = "a" * 40
 BASE = "b" * 40

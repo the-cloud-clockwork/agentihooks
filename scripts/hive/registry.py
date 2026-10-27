@@ -237,6 +237,17 @@ def live(record: dict, now_ms: int) -> bool:
     return record["heartbeat_at"] > 0 and now_ms - record["heartbeat_at"] <= LIVE_MS
 
 
+def touch(redis: "Redis", hive_id: str, now_ms: int) -> None:
+    hash_key = key(hive_id)
+
+    def refresh(pipe: "Pipeline") -> None:
+        if pipe.hexists(hash_key, "heartbeat_at"):
+            pipe.multi()
+            pipe.hset(hash_key, "heartbeat_at", now_ms)
+
+    redis.transaction(refresh, hash_key)
+
+
 def home(environ: Mapping[str, str] = os.environ) -> Path:
     chosen = environ.get("AGENTIHOOKS_HOME") or os.environ.get("AGENTIHOOKS_HOME")
     return Path(chosen or Path.home() / ".agentihooks")

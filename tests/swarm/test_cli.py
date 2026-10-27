@@ -15,14 +15,14 @@ from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
+from tests.swarm.memory_fixture import tmp_path
+from tests.swarm.profile_fixture import validated
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm.test_tick_lock import hold_tick
 
 real_reconcile = timer.reconcile
-
-
-from tests.swarm.profile_fixture import validated
+_fixture = tmp_path
 
 
 @pytest.fixture

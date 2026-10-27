@@ -1,0 +1,40 @@
+{
+  "case": "B",
+  "corrected_request": "partial",
+  "disclosed_fragments": [],
+  "occupied_target": [
+    "other.txt"
+  ],
+  "protected_state_unchanged": true,
+  "refusals": {
+    "foreign_corpus": "the grant does not cover the backed up corpus; nothing was restored",
+    "missing_key": "no encryption key is available for a backup component; nothing was restored",
+    "not_isolated": "the restore target holds other data; restore into an empty folder",
+    "unknown_set": "the backup set is not recorded",
+    "unsupported_format": "the backup format major version is not supported by this release; nothing was restored",
+    "unsupported_version": "a backup component version is not supported by this release; nothing was restored"
+  },
+  "refused_targets_created": {
+    "foreign_corpus": false,
+    "missing_key": false,
+    "unknown_set": false,
+    "unsupported_format": false,
+    "unsupported_version": false
+  },
+  "tampered_accepted": false,
+  "tampered_drill_status": "failed",
+  "upload_without_drill": {
+    "accepted": false,
+    "metric": {
+      "backup_restore_verification_status": {
+        "failed": 0,
+        "partial": 0,
+        "uploaded": 1,
+        "verified": 0
+      },
+      "retention_allowed": false
+    },
+    "preserved": null,
+    "retention_allowed": false
+  }
+}
