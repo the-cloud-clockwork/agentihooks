@@ -112,6 +112,6 @@ def test_a_referred_answer_retry_returns_the_first_answer(inbox):
 
 def test_a_lane_agent_reply_to_a_closed_operator_item_is_refused(inbox):
     asked = inbox.send("operator", ENG.name, "is the fix merged")
-    inbox.close(asked.id, ENG.name, "done")
+    inbox.close(asked.id, ENG.name, "cancel")
     with pytest.raises(InboxError, match=f"message {asked.id} is closed"):
         inbox.reply(asked.id, ENG.name, "merged")
