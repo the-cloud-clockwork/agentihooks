@@ -51,6 +51,8 @@ def loosened(kind: str, base, head) -> str | None:
     if kind == COVERS:
         missing = [item for item in base if item not in head]
         return f"drops {missing}" if missing else None
+    if kind != AT_MOST:
+        raise PinError(f"unknown pin kind {kind!r}")
     if isinstance(base, dict):
         if not isinstance(head, dict):
             return f"is no longer a mapping: {head!r}"
@@ -65,18 +67,19 @@ def loosened(kind: str, base, head) -> str | None:
     return f"rose from {base} to {head}" if head > base else None
 
 
-def pin_errors(base: Path, head: Path, pins=PINS) -> list[str]:
-    errors = []
+def pin_errors(base: Path, head: Path, pins=PINS) -> tuple[list[str], int]:
+    errors, compared = [], 0
     for path, name, kind in pins:
         was = constant(base, path, name)
         if was is None:
             continue
+        compared += 1
         now = constant(head, path, name)
         if now is None:
             errors.append(f"{path} is gone, so {name} is no longer pinned")
         elif (found := loosened(kind, was, now)) is not None:
             errors.append(f"{path} {name} {found}; thresholds never loosen against the base")
-    return errors
+    return errors, compared
 
 
 def shrunk(base, head, where: str) -> list[str]:
@@ -90,14 +93,18 @@ def shrunk(base, head, where: str) -> list[str]:
     return [] if base == head else [f"{where}changed from {base!r} to {head!r}"]
 
 
-def allowlist_errors(base: Path, head: Path, allowlists=SHRINK_ONLY) -> list[str]:
-    errors = []
+def allowlist_errors(base: Path, head: Path, allowlists=SHRINK_ONLY) -> tuple[list[str], int]:
+    errors, compared = [], 0
     for path in allowlists:
-        if not ((base / path).is_file() and (head / path).is_file()):
+        if not (base / path).is_file():
+            continue
+        compared += 1
+        if not (head / path).is_file():
+            errors.append(f"{path} is gone, so its gate grades nothing")
             continue
         was, now = json.loads((base / path).read_text()), json.loads((head / path).read_text())
         errors += [f"{path}: {error}; allowlists only shrink" for error in shrunk(was, now, "")]
-    return errors
+    return errors, compared
 
 
 def tracked(tree: Path) -> list[str]:
@@ -126,11 +133,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", type=Path, default=Path.cwd())
     args = parser.parse_args(argv)
     try:
-        errors = pin_errors(args.base, args.head) + allowlist_errors(args.base, args.head) + registry_errors(args.head)
+        pinned, pins = pin_errors(args.base, args.head)
+        held, allowlists = allowlist_errors(args.base, args.head)
+        errors = pinned + held + registry_errors(args.head)
     except (PinError, SyntaxError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
-    print(f"{len(PINS)} thresholds pinned, {len(SHRINK_ONLY)} allowlists held, {len(errors)} errors")
+    print(f"{pins} thresholds compared, {allowlists} allowlists compared, {len(errors)} errors")
     for error in errors:
         print(f"::error::{error}")
     return 1 if errors else 0

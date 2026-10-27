@@ -28,16 +28,12 @@ def _tree(root: Path, files: dict[str, str]) -> Path:
     return root
 
 
-def _allowlist(counts: dict) -> str:
-    return json.dumps(counts)
-
-
 def test_an_unchanged_or_tightened_gate_holds(tmp_path):
     base = _tree(tmp_path / "base", {"scripts/gate.py": GATE})
     tighter = GATE.replace("LINES = 300", "LINES = 250").replace('"hooks/", ', '"hooks/", "tests/", ')
     head = _tree(tmp_path / "head", {"scripts/gate.py": tighter})
-    assert threshold_pins.pin_errors(base, base, PINS) == []
-    assert threshold_pins.pin_errors(base, head, PINS) == []
+    assert threshold_pins.pin_errors(base, base, PINS) == ([], 3)
+    assert threshold_pins.pin_errors(base, head, PINS) == ([], 3)
 
 
 @pytest.mark.parametrize(
@@ -52,7 +48,7 @@ def test_an_unchanged_or_tightened_gate_holds(tmp_path):
 def test_a_loosened_threshold_is_red(tmp_path, loosen, message):
     base = _tree(tmp_path / "base", {"scripts/gate.py": GATE})
     head = _tree(tmp_path / "head", {"scripts/gate.py": GATE.replace(*loosen)})
-    errors = threshold_pins.pin_errors(base, head, PINS)
+    errors, _ = threshold_pins.pin_errors(base, head, PINS)
     assert len(errors) == 1
     assert message in errors[0]
 
@@ -61,28 +57,41 @@ def test_a_removed_gate_or_constant_is_red(tmp_path):
     base = _tree(tmp_path / "base", {"scripts/gate.py": GATE})
     gone = _tree(tmp_path / "gone", {"scripts/other.py": ""})
     renamed = _tree(tmp_path / "renamed", {"scripts/gate.py": GATE.replace("LINES =", "LIMIT =")})
-    assert "no longer pinned" in threshold_pins.pin_errors(base, gone, PINS)[0]
+    assert "no longer pinned" in threshold_pins.pin_errors(base, gone, PINS)[0][0]
     with pytest.raises(threshold_pins.PinError, match="defines no literal LINES"):
         threshold_pins.pin_errors(base, renamed, PINS)
+
+
+def test_an_unknown_pin_kind_is_red(tmp_path):
+    base = _tree(tmp_path / "base", {"scripts/gate.py": GATE})
+    with pytest.raises(threshold_pins.PinError, match="unknown pin kind 'at least'"):
+        threshold_pins.pin_errors(base, base, (("scripts/gate.py", "LINES", "at least"),))
 
 
 def test_a_pin_the_base_lacks_grades_nothing(tmp_path):
     base = _tree(tmp_path / "base", {"scripts/other.py": ""})
     head = _tree(tmp_path / "head", {"scripts/gate.py": GATE})
-    assert threshold_pins.pin_errors(base, head, PINS) == []
+    assert threshold_pins.pin_errors(base, head, PINS) == ([], 0)
 
 
 def test_an_allowlist_only_shrinks(tmp_path):
     counts = {"a.py": {"C901": 14}, "b.py": 3}
-    base = _tree(tmp_path / "base", {ALLOWLIST: _allowlist(counts)})
-    shrunk = _tree(tmp_path / "shrunk", {ALLOWLIST: _allowlist({"a.py": {"C901": 13}})})
-    grown = _tree(tmp_path / "grown", {ALLOWLIST: _allowlist({"a.py": {"C901": 15}, "b.py": 3, "c.py": 1})})
-    assert threshold_pins.allowlist_errors(base, shrunk, (ALLOWLIST,)) == []
-    errors = threshold_pins.allowlist_errors(base, grown, (ALLOWLIST,))
-    assert errors == [
-        f"{ALLOWLIST}: c.py is new; the base does not allow it; allowlists only shrink",
-        f"{ALLOWLIST}: a.py C901 rose from 14 to 15; allowlists only shrink",
-    ]
+    base = _tree(tmp_path / "base", {ALLOWLIST: json.dumps(counts)})
+    shrunk = _tree(tmp_path / "shrunk", {ALLOWLIST: json.dumps({"a.py": {"C901": 13}})})
+    grown = _tree(tmp_path / "grown", {ALLOWLIST: json.dumps({"a.py": {"C901": 15}, "b.py": 3, "c.py": 1})})
+    gone = _tree(tmp_path / "gone", {"tests/other.json": "{}"})
+    assert threshold_pins.allowlist_errors(base, shrunk, (ALLOWLIST,)) == ([], 1)
+    assert threshold_pins.allowlist_errors(base, grown, (ALLOWLIST,)) == (
+        [
+            f"{ALLOWLIST}: c.py is new; the base does not allow it; allowlists only shrink",
+            f"{ALLOWLIST}: a.py C901 rose from 14 to 15; allowlists only shrink",
+        ],
+        1,
+    )
+    assert threshold_pins.allowlist_errors(base, gone, (ALLOWLIST,)) == (
+        [f"{ALLOWLIST} is gone, so its gate grades nothing"],
+        1,
+    )
 
 
 def test_an_unregistered_floor_or_allowlist_is_red(tmp_path):
@@ -103,7 +112,8 @@ def test_an_unregistered_floor_or_allowlist_is_red(tmp_path):
 
 
 def test_every_pin_and_allowlist_names_a_real_literal_in_this_repository():
-    assert threshold_pins.pin_errors(_ROOT, _ROOT) == []
+    assert threshold_pins.pin_errors(_ROOT, _ROOT) == ([], len(threshold_pins.PINS))
+    assert threshold_pins.allowlist_errors(_ROOT, _ROOT) == ([], len(threshold_pins.SHRINK_ONLY))
     assert threshold_pins.registry_errors(_ROOT) == []
     for path in threshold_pins.SHRINK_ONLY:
         assert (_ROOT / path).is_file(), path
