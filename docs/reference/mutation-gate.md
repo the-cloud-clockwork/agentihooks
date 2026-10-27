@@ -49,13 +49,16 @@ plant branches `diffcheck/ci-323133-2650-t9-green` and
 | Surviving mutants on changed lines | 8 | Real: the gate doing its job |
 | Selected tests failing on the unmutated head | 2 | Real: the pull request broke a test |
 | Dependabot pull requests: no Dependabot secrets, so `Mint the tcc main ci App token` gets an empty client id | 6 | Tool: every token minting job in those runs fails, not only mutation |
-| Shard ran the full 1080 second budget on eight large swarm files | 1 | Tool: budget |
+| Shard ran the full 1080 second budget on eight large swarm files | 1 | Tool: budget; files print `not mutated, over budget` and the shard exits 1, so the gate goes red |
 
 The audit's 38% (15 of 40) predates mutation moving into Tests. Excluding
 Dependabot runs, one of 64 runs (1.6%) was a mutation tool failure. Cancelled
 runs are outside the count. Separately, after the counted window, mutation
 planning was killed for memory (exit 137, Tests run 40424698293) between
 2026-10-26 23:45Z and 2026-10-27 00:22Z.
+
+The tool failures are routed as swarm follow ups: Dependabot secrets for the
+App token, the shard budget for large swarm files, and planner memory.
 
 ## Covering tests through production helpers
 
