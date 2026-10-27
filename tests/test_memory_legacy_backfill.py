@@ -383,6 +383,61 @@ def test_deactivate_hides_only_the_run_projection(tmp_path):
     assert ledger.projection(catalog, "corp") == []
 
 
+def test_the_ledger_creates_missing_parent_folders_and_projects_its_generation(tmp_path):
+    ledger = backfill.BackfillLedger(tmp_path / "a" / "b" / "c.db")
+    ledger.mark("r", "corpus:claude:laptop:s1", "g1", 0, {"x": 1})
+    catalog = Catalog(tmp_path / "catalog.db")
+    assert ledger.projection(catalog, "corpus") == [
+        {"session_uid": "corpus:claude:laptop:s1", "source_generation": "g1", "events": []}
+    ]
+
+
+@pytest.mark.parametrize("changed", ["content", "batch_size"])
+def test_a_run_id_is_bound_to_its_generations_and_batch_size(tmp_path, changed):
+    first = make_plan(source(raw=raw("s1", "/work/proj", "a")))
+    run(tmp_path, first, limit=0)
+    other = (
+        make_plan(source(raw=raw("s1", "/work/proj", "b")))
+        if changed == "content"
+        else make_plan(source(raw=raw("s1", "/work/proj", "a")), batch_size=3)
+    )
+    refused = run(tmp_path, other)
+    assert refused == {"state": "rejected", "error": {"class": "plan_mismatch", "detail": backfill.PLAN_MISMATCH}}
+
+
+def test_a_report_names_its_run_and_importer_version(tmp_path):
+    result = run(tmp_path, make_plan(source(raw=raw("s1", "/work/proj", "a"))), "r7")
+    assert (result["run_id"], result["importer_version"]) == ("r7", backfill.IMPORTER_VERSION)
+
+
+def test_the_command_line_requires_a_command_and_a_corpus(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        backfill.main([])
+    with pytest.raises(SystemExit):
+        backfill.main(["run", str(tmp_path / "c.db"), str(tmp_path / "l.db"), str(tmp_path / "p.json"), "r1"])
+
+
+def test_the_command_line_grants_no_project_by_default_and_passes_its_limit(tmp_path, capsys):
+    (tmp_path / "s1.jsonl").write_bytes(raw("s1", "/elsewhere", "a"))
+    plan_file = tmp_path / "plan.json"
+    plan_file.write_text(json.dumps({"corpus": "corpus", "sources": [source(location="s1.jsonl", raw="s1.jsonl")]}))
+    assert backfill.load_plan(plan_file).aliases == {}
+    base = ["run", tmp_path / "c.db", tmp_path / "l.db", plan_file]
+    code, stopped = cli(capsys, *base, "r1", "--corpus", "corpus", "--limit", "0")
+    assert (code, stopped["state"], stopped[backfill.METRIC]) == (0, "partial", 1)
+    code, done = cli(capsys, *base, "r1", "--corpus", "corpus")
+    assert (code, done["state"], done["unknown_attribution_events"]) == (0, "completed", 1)
+    bad = tmp_path / "bad.json"
+    forged = source("s2", location="s1.jsonl", raw="s1.jsonl", raw_sha256="0" * 64)
+    bad.write_text(json.dumps({"corpus": "corpus", "sources": [forged]}))
+    cli(capsys, "run", tmp_path / "c.db", tmp_path / "l.db", bad, "r2", "--corpus", "corpus")
+    code, report = cli(capsys, "report", tmp_path / "l.db", "r2")
+    assert (code, report["run_id"]) == (0, "r2")
+    assert report["quarantined"] == [
+        {"session_uid": "corpus:claude:laptop:s2", "reason": backfill.REFUSED, "detail": "s1.jsonl: raw_hash_mismatch"}
+    ]
+
+
 def test_gaps_keep_a_finished_run_from_reading_as_a_clean_completion(tmp_path):
     assert run(tmp_path, make_plan(source(location="nothing")))["state"] == backfill.GAPS
     forged = make_plan(source("s2", raw=raw("s2", "/work/proj", "b"), raw_sha256="0" * 64))

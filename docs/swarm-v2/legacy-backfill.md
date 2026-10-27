@@ -1,8 +1,8 @@
 # Legacy backfill (SV2-MIG-03)
 
 `hooks.memory.legacy_backfill.backfill` imports legacy session history into the session corpus. It reads legacy
-transcripts, previews and vector rows as data and writes only the session catalog and its own backfill ledger; it
-does not rebuild the retired transcript service.
+transcripts, previews and vector rows as data and writes only the session catalog and its own backfill ledger; it does
+not rebuild the retired transcript service.
 
 ## Source selection and identity
 
@@ -20,8 +20,8 @@ source audit and imported once from its highest class: `full_raw`, then `preview
 
 A raw session uses the importer's generation, `import:<raw sha256>`, so a session `hooks.memory.importer` already
 committed replays with no second copy. Preview and vector sessions use `legacy:<digest>`. Records keep their original
-timestamps as `source_time`; a project comes only from an absolute alias, and events without one count as unknown
-attribution apart from verified alias events.
+timestamps as `source_time`, and a blank legacy timestamp is stored as absent; a project comes only from an absolute
+alias, and events without one count as unknown attribution apart from verified alias events.
 
 Each imported session is recorded with its migration run, importer version, source digest, fidelity and confidence.
 
@@ -44,11 +44,14 @@ python -m hooks.memory.legacy_backfill projection CATALOG LEDGER CORPUS
 ```
 
 `PLAN` is JSON with `corpus`, `aliases`, `batch_size` and `sources`; a source's `raw` names a transcript file beside
-the plan. The command runs in the operator role: the grant's principal is `operator`, its corpus `--corpus` and its projects the
-`--project` values. A refused run prints its error and exits 1.
+the plan. The command is a local, unauthenticated operator invocation: whoever can run it on the host holding the
+catalog acts as the operator. The grant's principal is `operator`, its corpus `--corpus` and its projects the
+`--project` values, and the grant check then limits what the run may write. A refused run prints its error and exits
+1.
 
 ## Rollback
 
 `BackfillLedger.projection` lists the active backfilled sessions of a corpus with their catalog events; it is the read
-path consumers cut over to in SV2-MIG-04. `deactivate` marks one run's sessions inactive, so they leave the projection. Catalog events, the backfill ledger rows and every source
-file stay; the sources are authoritative and are never deleted by the backfill.
+path consumers cut over to in SV2-MIG-04. `deactivate` marks one run's sessions inactive, so they leave the
+projection. Catalog events, the backfill ledger rows and every source file stay; the sources are authoritative and are
+never deleted by the backfill.

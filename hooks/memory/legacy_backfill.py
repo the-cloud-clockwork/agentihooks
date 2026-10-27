@@ -92,7 +92,7 @@ class BackfillLedger:
         return self.db.execute(IMPORTED, (session_uid, generation)).fetchone() is not None
 
     def mark(self, run_id: str, session_uid: str, generation: str, records: int, provenance: dict) -> None:
-        self.db.execute(MARK, (session_uid, generation, run_id, records, json.dumps(provenance, sort_keys=True)))
+        self.db.execute(MARK, (session_uid, generation, run_id, records, json.dumps(provenance)))
 
     def quarantine(self, run_id: str, session_uid: str, reason: str, detail: str) -> None:
         self.db.execute(QUARANTINE, (run_id, session_uid, reason, detail))
@@ -168,8 +168,8 @@ def _audited(sources: list[dict]) -> tuple[list[tuple[dict, dict]], list[dict]]:
 
 def _select(sources: list[dict]) -> dict:
     held, refused = _audited(sources)
-    top = max((audit.RANK[found["class"]] for _, found in held), default=audit.RANK[audit.MISSING])
-    best = [(source, found) for source, found in held if audit.RANK[found["class"]] == top]
+    ranks = [audit.RANK[found["class"]] for _, found in held]
+    best = [(source, found) for source, found in held if audit.RANK[found["class"]] == max(ranks)]
     digests = sorted({_content_digest(found) for _, found in best} - {None})
     if len(digests) > 1:
         conflict = [{"reason": CONFLICT, "detail": found_digest} for found_digest in digests]
@@ -385,8 +385,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run")
-    run.add_argument("catalog", type=Path)
-    run.add_argument("ledger", type=Path)
+    run.add_argument("catalog")
+    run.add_argument("ledger")
     run.add_argument("plan", type=Path)
     run.add_argument("run_id")
     run.add_argument("--corpus", required=True)
@@ -394,11 +394,11 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--limit", type=int)
     for name in ("deactivate", "report"):
         command = commands.add_parser(name)
-        command.add_argument("ledger", type=Path)
+        command.add_argument("ledger")
         command.add_argument("run_id")
     projected = commands.add_parser("projection")
-    projected.add_argument("catalog", type=Path)
-    projected.add_argument("ledger", type=Path)
+    projected.add_argument("catalog")
+    projected.add_argument("ledger")
     projected.add_argument("corpus")
     args = parser.parse_args(argv)
     ledger = BackfillLedger(args.ledger)
@@ -422,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
             }
     finally:
         ledger.close()
-    print(json.dumps(result, sort_keys=True))
+    print(json.dumps(result))
     return 1 if result.get("state") == "rejected" else 0
 
 
