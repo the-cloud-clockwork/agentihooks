@@ -687,7 +687,7 @@ def test_any_other_event_change_still_loses_the_base_trust(tmp_path, monkeypatch
     }
 
 
-@pytest.mark.parametrize("change", [None, "group", "queue", "cancel", "extra", "name", "events", "untrusted"])
+@pytest.mark.parametrize("change", [None, "group", "queue", "cancel", "extra", "name", "events", "untrusted", "job"])
 def test_tests_dispatch_concurrency_keeps_the_hosted_lane(change):
     import copy
 
@@ -715,6 +715,8 @@ def test_tests_dispatch_concurrency_keeps_the_hosted_lane(change):
         updated.setdefault("on", updated.get(True, {}))["schedule"] = [{"cron": "0 * * * *"}]
     elif change == "untrusted":
         baseline = None
+    elif change == "job":
+        updated["jobs"]["untrusted"] = {"concurrency": {"group": "other"}}
     assert bool(lanes.problems(updated, baseline)) == (change is not None)
 
 
