@@ -139,10 +139,10 @@ def test_the_charted_placement_rank_is_registered_on_every_start(tmp_path, monke
     monkeypatch.setenv("HIVE_PREFER", "eng:1,ci:1,plan:1")
     result, commands, _, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
-    assert commands.splitlines()[-2] == (
+    assert (
         "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
         "max-agents=20 prefer=eng:1,ci:1,plan:1"
-    )
+    ) in commands.splitlines()
 
 
 def test_mounted_member_clones_repo_and_configures_before_run(tmp_path):

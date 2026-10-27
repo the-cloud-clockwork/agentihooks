@@ -938,8 +938,7 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
 5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
    max-agents=<workers.maxAgents> prefer=<workers.prefer>`, by default `excluded=master master-swarms= max-agents=20
    prefer=`. `workers.prefer` takes `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to
-   the lowest ranked hive while admission leaves it room, so the rank lives in the hive's values and every start
-   writes it again.
+   the lowest ranked hive while admission leaves it room.
 6. Runs `agentihooks hive run`.
 
 When the pod stops, for an image update, a rollout or a node drain, its preStop runs `agentihooks hive drain --wait
