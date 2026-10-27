@@ -45,7 +45,7 @@ class PinError(Exception):
 
 
 def _writes(node: ast.Subscript | ast.Attribute, name: str) -> bool:
-    if isinstance(node, ast.Attribute) and node.attr == "__dict__":
+    if isinstance(node, ast.Attribute) and node.attr in ("__dict__", "f_globals", "f_locals"):
         return True
     if not isinstance(node.ctx, (ast.Store, ast.Del)):
         return False
