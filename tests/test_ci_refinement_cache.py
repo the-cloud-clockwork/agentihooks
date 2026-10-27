@@ -27,7 +27,10 @@ def test_optional_refinement_cache_retries_fit_inside_the_job_budget():
     assert check["continue-on-error"] is True
     budget = next(step for step in steps if step.get("id") == "cache-budget")
     assert budget["continue-on-error"] is True
-    assert steps.index(check) < steps.index(budget) < steps.index(first)
+    preparation = next(step for step in steps if step.get("id") == "cache-preparation-budget")
+    assert preparation["continue-on-error"] is True
+    assert check["if"] == "steps.cache-preparation-budget.outputs.available == 'true'"
+    assert steps.index(preparation) < steps.index(check) < steps.index(budget) < steps.index(first)
     assert steps.index(check) < steps.index(first)
     upload = next(step for step in steps if step.get("name") == "Upload the measured mutation plan")
     assert steps.index(upload) < steps.index(first) < steps.index(retry)
@@ -37,14 +40,16 @@ def test_optional_refinement_cache_retries_fit_inside_the_job_budget():
     assert not refine.get("continue-on-error", False)
 
 
-@pytest.mark.parametrize(("elapsed", "available"), [(0, True), (119, True), (120, False), (300, False)])
-def test_refinement_skips_cache_without_time_for_both_attempts(tmp_path, elapsed, available):
+@pytest.mark.parametrize(("budget_id", "limit"), [("cache-budget", 120), ("cache-preparation-budget", 180)])
+@pytest.mark.parametrize(("remaining", "available"), [(120, True), (1, True), (0, False), (-180, False)])
+def test_refinement_skips_cache_without_time_for_both_attempts(tmp_path, budget_id, limit, remaining, available):
     workflow = Path(__file__).resolve().parents[1] / ".github/workflows/mutation-preflight.yml"
     job = yaml.safe_load(workflow.read_text())["jobs"]["refine"]
     start = next(step for step in job["steps"] if step.get("id") == "refinement-start")
     assert job["steps"][0] == start
     assert "started=$(date +%s)" in start["run"]
-    budget = next(step for step in job["steps"] if step.get("id") == "cache-budget")
+    budget = next(step for step in job["steps"] if step.get("id") == budget_id)
+    elapsed = limit - remaining
     assert budget["env"] == {"REFINEMENT_STARTED_AT": "${{ steps.refinement-start.outputs.started }}"}
     clock = tmp_path / "date"
     clock.write_text("#!/usr/bin/env bash\necho 1000\n")

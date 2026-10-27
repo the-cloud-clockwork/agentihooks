@@ -419,8 +419,17 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Check cache preparation budget
+        id: cache-preparation-budget
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          REFINEMENT_STARTED_AT: ${{ steps.refinement-start.outputs.started }}
+        run: if (( $(date +%s) - REFINEMENT_STARTED_AT < 180 )); then echo available=true >> "$GITHUB_OUTPUT"; fi
+
       - name: Check for merged test stats
         id: merged-stats
+        if: steps.cache-preparation-budget.outputs.available == 'true'
         timeout-minutes: 1
         continue-on-error: true
         run: if [[ -n "$(find .mutation-stats-cache -type f -print -quit 2>/dev/null)" ]]; then echo found=true >> "$GITHUB_OUTPUT"; fi
