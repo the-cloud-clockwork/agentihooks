@@ -217,11 +217,12 @@ def pipefail_summary(steps: list[dict]) -> list[dict]:
 def retried_summary(steps: list[dict]) -> list[dict]:
     retried = []
     for step in steps:
-        if not step.get("uses", "").startswith("actions/download-artifact@"):
+        uses = step.get("uses")
+        if not (uses and uses.startswith("actions/download-artifact@")):
             retried.append(step)
             continue
         name = step["name"]
-        slug = re.sub(r"[^a-z0-9]+", "-", name.lower().replace("'", "")).strip("-")
+        slug = "-".join(re.findall(r"[a-z0-9]+", name.lower().replace("'", "")))
         condition = f"steps.{slug}.outcome == 'failure'"
         retried += [
             {**step, "id": slug, "continue-on-error": True},
