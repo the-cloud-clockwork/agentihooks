@@ -12,6 +12,7 @@ from hooks.memory import source_audit as audit
 from hooks.memory.api.ingest import SCHEMA_VERSION, Grant, Rejected, digest, ingest
 from hooks.memory.catalog import Catalog
 from hooks.memory.importer import PROVIDERS, read_source
+from hooks.memory.migrations import OPERATOR
 
 IMPORTER_VERSION = "1"
 METRIC = "legacy_import_remaining_records"
@@ -19,7 +20,7 @@ IDENTITY = ("provider", "installation", "native_session_id")
 MATERIAL = ("raw", "raw_sha256", "preview", "vectors")
 PREVIEW_KINDS = {"user": "user_text", "assistant": "assistant_text", "summary": "system_text"}
 CONFLICT, REFUSED, IDENTITY_CONFLICT = "conflicting_source_content", "refused_source", "event_identity_conflict"
-UNAVAILABLE = "dependency_unavailable"
+UNAVAILABLE, GAPS = "dependency_unavailable", "completed_with_gaps"
 STALE = "another runner moved this checkpoint; reopen the run and resume from its checkpoint"
 PLAN_MISMATCH = "this run was opened for different sources; start a new run id"
 PRAGMAS = ("PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", "PRAGMA busy_timeout=5000")
@@ -48,6 +49,10 @@ SESSIONS = (
     "WHERE run_id = ? ORDER BY session_uid, source_generation"
 )
 DEACTIVATE = "UPDATE legacy_backfill_session SET active = 0 WHERE run_id = ? AND active = 1"
+ACTIVE = (
+    "SELECT session_uid, source_generation FROM legacy_backfill_session WHERE active = 1 "
+    "ORDER BY session_uid, source_generation"
+)
 
 
 @dataclass(frozen=True)
@@ -103,6 +108,13 @@ class BackfillLedger:
 
     def deactivate(self, run_id: str) -> int:
         return self.db.execute(DEACTIVATE, (run_id,)).rowcount
+
+    def projection(self, catalog: Catalog, domain: str) -> list[dict]:
+        return [
+            {"session_uid": uid, "source_generation": generation, "events": catalog.events(domain, uid, generation)}
+            for uid, generation in self.db.execute(ACTIVE).fetchall()
+            if uid.startswith(f"{domain}:")
+        ]
 
 
 def _text(value: object) -> bool:
@@ -324,8 +336,10 @@ def _remaining(ledger: BackfillLedger, items: list[dict]) -> list[dict]:
 def _report(run: _Run, items: list[dict], size: int, state: str, handled: list[dict]) -> dict:
     left = _remaining(run.ledger, items)
     planned = [item for item in items if item["outcome"] == "import"]
+    missing = [item["session_uid"] for item in items if item["outcome"] == "missing"]
+    quarantined = run.ledger.quarantined(run.run_id)
     return {
-        "state": state,
+        "state": GAPS if state == "completed" and (missing or quarantined) else state,
         "run_id": run.run_id,
         "importer_version": IMPORTER_VERSION,
         "principal": run.grant.principal,
@@ -333,8 +347,8 @@ def _report(run: _Run, items: list[dict], size: int, state: str, handled: list[d
         "sessions": handled,
         METRIC: sum(len(item["events"]) for item in left),
         "remaining_sessions": [item["session_uid"] for item in left],
-        "missing": [item["session_uid"] for item in items if item["outcome"] == "missing"],
-        "quarantined": run.ledger.quarantined(run.run_id),
+        "missing": missing,
+        "quarantined": quarantined,
         "verified_alias_events": sum(event["project_id"] is not None for item in planned for event in item["events"]),
         "unknown_attribution_events": sum(event["project_id"] is None for item in planned for event in item["events"]),
     }
@@ -377,19 +391,26 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("run_id")
     run.add_argument("--corpus", required=True)
     run.add_argument("--project", action="append", default=[])
-    run.add_argument("--principal", default="operator")
     run.add_argument("--limit", type=int)
     for name in ("deactivate", "report"):
         command = commands.add_parser(name)
         command.add_argument("ledger", type=Path)
         command.add_argument("run_id")
+    projected = commands.add_parser("projection")
+    projected.add_argument("catalog", type=Path)
+    projected.add_argument("ledger", type=Path)
+    projected.add_argument("corpus")
     args = parser.parse_args(argv)
     ledger = BackfillLedger(args.ledger)
     try:
         if args.command == "run":
-            grant = Grant(args.principal, args.corpus, frozenset(args.project))
+            grant = Grant(OPERATOR, args.corpus, frozenset(args.project))
             with closing(Catalog(args.catalog)) as catalog:
                 result = backfill(catalog, ledger, grant, load_plan(args.plan), args.run_id, args.limit)
+        elif args.command == "projection":
+            with closing(Catalog(args.catalog)) as catalog:
+                found = ledger.projection(catalog, args.corpus)
+            result = {"corpus": args.corpus, "sessions": [{**item, "events": len(item["events"])} for item in found]}
         elif args.command == "deactivate":
             result = {"run_id": args.run_id, "deactivated": ledger.deactivate(args.run_id)}
         else:

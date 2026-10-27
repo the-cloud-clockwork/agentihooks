@@ -18,9 +18,9 @@
     "hooks.memory.legacy_backfill.backfill groups legacy sources by provider, installation and native session id and imports each session once from its highest fidelity source as classified by hooks.memory.source_audit.audit_source: full_raw through hooks.memory.importer.read_source, preview_only and vector_only as lossy and fragment records with their original timestamps",
     "session_uid is corpus:provider:installation:native_session_id, so equal native ids from different machines stay separate sessions; a raw source uses the importer's source_generation and batch_id import:<raw sha256>, so a session the importer already committed replays without a second copy",
     "every imported session is recorded in BackfillLedger with its migration run, importer version, source digest, all source references holding that content, fidelity, first and last event time, verified alias projects and unknown attribution events",
-    "BackfillLedger.open binds a run id to a digest of its planned work; BackfillLedger.advance moves the batch checkpoint only from the expected batch; BackfillLedger.deactivate hides one run's projections without deleting catalog events or source files",
-    "the report counts legacy_import_remaining_records, lists remaining, missing and quarantined sessions, and counts verified alias events apart from unknown attribution events",
-    "python -m hooks.memory.legacy_backfill run, report and deactivate"
+    "BackfillLedger.open binds a run id to a digest of its planned work; BackfillLedger.advance moves the batch checkpoint only from the expected batch; BackfillLedger.projection lists the active backfilled sessions of a corpus with their catalog events, and BackfillLedger.deactivate removes one run's sessions from that projection without deleting catalog events or source files",
+    "the report counts legacy_import_remaining_records, lists remaining, missing and quarantined sessions, counts verified alias events apart from unknown attribution events, and a finished run with missing or quarantined sessions reports completed_with_gaps rather than completed",
+    "python -m hooks.memory.legacy_backfill run, report, projection and deactivate; run grants in the operator role named by hooks.memory.migrations.OPERATOR"
   ],
   "metrics": "legacy_import_remaining_records counts the records of planned imports not yet recorded in the backfill ledger, reported after every run, including partial and interrupted ones",
   "mocked": true,
@@ -35,14 +35,15 @@
   "remaining_limitations": [
     "The backfill reads sources the operator lists in a plan file; discovering legacy Redis previews and vector rows and exporting them into that plan is a separate read only step that is not part of this package.",
     "Two copies of a session at the same fidelity with different content are quarantined rather than merged, even when one is a prefix of the other; the operator resolves them by choosing one copy in a new plan under a new run id.",
-    "Preview and vector records carry no byte range in the transcript, so their events use byte range zero and are labelled lossy or fragment through the session provenance."
+    "Preview and vector records carry no byte range in the transcript, so their events use byte range zero and are labelled lossy or fragment through the session provenance.",
+    "Search and other consumers do not read BackfillLedger.projection yet; moving them onto it is the SV2-MIG-04 cutover."
   ],
-  "rollback_rehearsal": "case C deactivated the completed run's four session projections with BackfillLedger.deactivate; all catalog events and every fixture source file were kept",
+  "rollback_rehearsal": "case C took the completed run's four sessions out of BackfillLedger.projection with BackfillLedger.deactivate; the projection was empty afterwards while all nine catalog events and every fixture source file were kept",
   "rollout_safety": "the backfill is a standalone module run by the operator; no hook, collector, importer or search path calls it, so disabling it means not running it",
   "spec_mapping": {
-    "authority": "actor and scope come from the ingest Grant: the plan corpus must equal the granted corpus and every alias project must be granted, or nothing is written; the command line builds the grant from the operator's corpus and project flags",
+    "authority": "actor and scope come from the ingest Grant: the plan corpus must equal the granted corpus and every alias project must be granted, or nothing is written; the command line runs in the operator role with the operator's corpus and project flags, and the fixture cases pass the fixture grant",
     "boundary": "the backfill reads legacy transcripts, previews and vector rows as data and writes only the session catalog and its own ledger; it does not rebuild the legacy collector, store or service",
-    "owned_paths": "hooks/memory/legacy_backfill.py and docs/swarm-v2/legacy-backfill.md; the planned hooks/memory/migrations package would shadow the existing hooks.memory.migrations module, so the backfill is a sibling module, and the backfill ledger is a SQLite file next to the catalog instead of a migrations folder",
+    "owned_paths": "hooks/memory/legacy_backfill.py and docs/swarm-v2/legacy-backfill.md; the planned hooks/memory/migrations package would shadow the existing hooks.memory.migrations module, so the backfill is a sibling module, and the backfill ledger is a SQLite file next to the catalog instead of a migrations folder; hooks.memory.migrations stages schema migrations of catalog columns with operator approval, while this package imports session data, so its run tags and projection live in the backfill ledger",
     "recovery": "a run stopped by its limit or by a catalog outage reports its remaining records and resumes at the stored batch checkpoint; a runner holding an older checkpoint is refused with stale_checkpoint",
     "rejection": "two copies of one session with different bytes are quarantined with both digests, a raw source whose bytes do not match its recorded digest is quarantined as refused_source, and a catalog event already held at a backfill event identity with other content quarantines the session as event_identity_conflict while the held event stays unchanged",
     "repeat": "case A runs the full fixture twice into two separate folders with no shared state and compares the results",

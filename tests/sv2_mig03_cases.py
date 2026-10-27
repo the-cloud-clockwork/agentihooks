@@ -199,6 +199,7 @@ def recovery(root: Path) -> dict:
     except backfill.Rejected as error:
         stale = error.error_class
     replay = backfill.backfill(catalog, ledger, grant(doc), plan(), RUN)
+    shown_before = [item["session_uid"] for item in ledger.projection(catalog, doc["corpus"])]
     deactivated = ledger.deactivate(RUN)
     result = {
         "case": "C",
@@ -214,6 +215,8 @@ def recovery(root: Path) -> dict:
         "rollback": {
             "deactivated": deactivated,
             "active_after": [row["active"] for row in ledger.sessions(RUN)],
+            "projection_before": shown_before,
+            "projection_after": ledger.projection(catalog, doc["corpus"]),
             "catalog_events_kept": len(events(catalog, doc["corpus"])),
             "sources_kept": all(path.is_file() for path in RAW_FILES),
         },

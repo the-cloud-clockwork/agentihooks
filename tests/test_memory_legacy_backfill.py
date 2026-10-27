@@ -375,7 +375,19 @@ def test_deactivate_hides_only_the_run_projection(tmp_path):
     assert ledger.deactivate("r1") == 0
     assert [row["active"] for row in ledger.sessions("r1")] == [False]
     assert [row["active"] for row in ledger.sessions("r2")] == [True]
-    assert Catalog(tmp_path / "catalog.db").db.execute("SELECT COUNT(*) FROM session_event").fetchone()[0] == 2
+    catalog = Catalog(tmp_path / "catalog.db")
+    assert catalog.db.execute("SELECT COUNT(*) FROM session_event").fetchone()[0] == 2
+    [shown] = ledger.projection(catalog, "corpus")
+    assert shown["session_uid"] == "corpus:claude:laptop:s2"
+    assert [event["record"]["text"] for event in shown["events"]] == ["b"]
+    assert ledger.projection(catalog, "corp") == []
+
+
+def test_gaps_keep_a_finished_run_from_reading_as_a_clean_completion(tmp_path):
+    assert run(tmp_path, make_plan(source(location="nothing")))["state"] == backfill.GAPS
+    forged = make_plan(source("s2", raw=raw("s2", "/work/proj", "b"), raw_sha256="0" * 64))
+    assert run(tmp_path, forged, "r2")["state"] == backfill.GAPS
+    assert run(tmp_path, make_plan(source("s3", raw=raw("s3", "/work/proj", "c"))), "r3")["state"] == "completed"
 
 
 @pytest.mark.parametrize("case", ["A", "B", "C"])
@@ -428,7 +440,10 @@ def test_the_command_line_runs_reports_and_deactivates(tmp_path, capsys):
     code, report = cli(capsys, "report", ledger, "r1")
     assert (code, report["checkpoint"], report["quarantined"]) == (0, 1, [])
     assert report["sessions"][0]["provenance"]["source_references"] == ["s1.jsonl"]
+    code, shown = cli(capsys, "projection", catalog, ledger, "corpus")
+    assert (code, shown["corpus"], [item["events"] for item in shown["sessions"]]) == (0, "corpus", [1])
     assert cli(capsys, "deactivate", ledger, "r1") == (0, {"run_id": "r1", "deactivated": 1})
+    assert cli(capsys, "projection", catalog, ledger, "corpus") == (0, {"corpus": "corpus", "sessions": []})
     loaded = backfill.load_plan(plan_file)
     assert loaded.batch_size == 50
     assert loaded.sources[0]["raw"] == (folder / "s1.jsonl").read_bytes()

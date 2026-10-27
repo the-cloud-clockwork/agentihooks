@@ -14,7 +14,7 @@
     "fixtures/sv2_mig03/laptop-copy-a/s-shared.jsonl": "b9e0df8c6a531eb3caeb3799737baeb7bab970227341f2fdc44ad3cfdff30614",
     "fixtures/sv2_mig03/laptop-copy-b/s-conflict.jsonl": "7f94c59e066492ceba295d788ff1d275b70f68f905b249780f2b4712de75aba1",
     "fixtures/sv2_mig03/laptop-copy-b/s-shared.jsonl": "b9e0df8c6a531eb3caeb3799737baeb7bab970227341f2fdc44ad3cfdff30614",
-    "sv2_mig03_cases.py": "f5d8f8e63ccdd787f339f7a8badc59355979d6d05c850c117d3e255486b34bc0"
+    "sv2_mig03_cases.py": "07d38af2f65fb46239a89f0a344bb3b5a994b623ce893c75002671d3ba5d8ce9"
   },
   "mocked": true,
   "package": "SV2-MIG-03",

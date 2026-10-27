@@ -32,7 +32,7 @@ it with other sources is refused as `plan_mismatch`. The checkpoint moves one ba
 the runner read, so an older runner is refused as `stale_checkpoint`. A run stopped by `limit` reports `partial`, a
 catalog outage reports `interrupted`; both report `legacy_import_remaining_records` and the remaining sessions, and a
 rerun with the same run id resumes at the checkpoint. Sessions already recorded are skipped, so no event is written
-twice.
+twice. A finished run with missing or quarantined sessions reports `completed_with_gaps`, never `completed`.
 
 ## Command line
 
@@ -40,12 +40,15 @@ twice.
 python -m hooks.memory.legacy_backfill run CATALOG LEDGER PLAN RUN_ID --corpus C --project P [--limit N]
 python -m hooks.memory.legacy_backfill report LEDGER RUN_ID
 python -m hooks.memory.legacy_backfill deactivate LEDGER RUN_ID
+python -m hooks.memory.legacy_backfill projection CATALOG LEDGER CORPUS
 ```
 
 `PLAN` is JSON with `corpus`, `aliases`, `batch_size` and `sources`; a source's `raw` names a transcript file beside
-the plan. The grant comes from `--corpus` and `--project`. A refused run prints its error and exits 1.
+the plan. The command runs in the operator role: the grant's principal is `operator`, its corpus `--corpus` and its projects the
+`--project` values. A refused run prints its error and exits 1.
 
 ## Rollback
 
-`deactivate` marks one run's session projections inactive. Catalog events, the backfill ledger rows and every source
+`BackfillLedger.projection` lists the active backfilled sessions of a corpus with their catalog events; it is the read
+path consumers cut over to in SV2-MIG-04. `deactivate` marks one run's sessions inactive, so they leave the projection. Catalog events, the backfill ledger rows and every source
 file stay; the sources are authoritative and are never deleted by the backfill.

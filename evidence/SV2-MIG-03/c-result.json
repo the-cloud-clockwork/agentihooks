@@ -130,7 +130,7 @@
     ],
     "remaining_sessions": [],
     "sessions": [],
-    "state": "completed",
+    "state": "completed_with_gaps",
     "unknown_attribution_events": 6,
     "verified_alias_events": 3
   },
@@ -175,7 +175,7 @@
         "session_uid": "engineering:claude:laptop:s-vector"
       }
     ],
-    "state": "completed",
+    "state": "completed_with_gaps",
     "unknown_attribution_events": 6,
     "verified_alias_events": 3
   },
@@ -188,6 +188,13 @@
     ],
     "catalog_events_kept": 9,
     "deactivated": 4,
+    "projection_after": [],
+    "projection_before": [
+      "engineering:claude:desktop:s-shared",
+      "engineering:claude:laptop:s-preview",
+      "engineering:claude:laptop:s-shared",
+      "engineering:claude:laptop:s-vector"
+    ],
     "sources_kept": true
   },
   "stale_runner_advance": "stale_checkpoint",

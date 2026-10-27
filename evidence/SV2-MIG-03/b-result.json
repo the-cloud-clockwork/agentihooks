@@ -101,7 +101,7 @@
         "session_uid": "engineering:claude:laptop:s-vector"
       }
     ],
-    "state": "completed",
+    "state": "completed_with_gaps",
     "unknown_attribution_events": 6,
     "verified_alias_events": 3
   }
