@@ -398,6 +398,16 @@ def test_kind_proof_pulls_every_dockerfile_base_through_the_bounded_pull_before_
         assert script.index(pull) < build
 
 
+@pytest.mark.parametrize(
+    "failures,source",
+    [
+        (0, "mirror.gcr.io/kindest/node:v1.37.0@sha256:node"),
+        (1, "docker.io/kindest/node:v1.37.0@sha256:node"),
+        (2, "mirror.gcr.io/kindest/node:v1.37.0@sha256:node"),
+        (3, ""),
+    ],
+)
+
 def test_kind_proof_retries_the_node_image_pull_before_creating_the_cluster(tmp_path, failures, source):
     script = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh").read_text()
     start = script.index("pull_node() {")
