@@ -60,3 +60,17 @@ def test_set_usage_names_the_engine_choices(env, capsys):  # noqa: F811
     capsys.readouterr()
     assert run("sw", "set", "unknown=value") == 1
     assert capsys.readouterr().err.endswith("=<value>, engine=legacy|events\n")
+
+
+def test_events_switch_persists_the_checkout_origin_without_replacing_its_path(env, tmp_path):  # noqa: F811
+    store, _, _ = env
+    checkout = tmp_path / "source"
+    git = checkout / ".git"
+    git.mkdir(parents=True)
+    (git / "config").write_text('[remote "origin"]\n\turl = git@github.com:The-Cloud-Clockwork/agentihooks.git\n')
+    run("sw", "create", "--repo", str(checkout))
+
+    assert run("sw", "set", "engine=events") == 0
+    config = store.config("sw")
+    assert config.repo == str(checkout)
+    assert config.repo_origin == "github.com/the-cloud-clockwork/agentihooks"
