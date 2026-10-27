@@ -14,13 +14,6 @@ ANTON = "anton ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more 
 HIVE_FULL = f"{FULL}: {ANTON}"
 
 
-@pytest.fixture(autouse=True)
-def no_host_agents(monkeypatch):
-    from scripts.swarm import local_slots
-
-    monkeypatch.setattr(local_slots, "live", set)
-
-
 def capped(held, of, running, cpus=10):
     return (
         f"{HIVE_FULL}, and the local machine runs {held} of its {of} agents: cpu: {running} swarm agents at 0.5 CPU "
@@ -55,11 +48,12 @@ def test_ui_roles_keep_their_ui_host_rule(role):
 
 def hybrid(setup, monkeypatch, deployment="hybrid"):
     from scripts.hive import registry
-    from scripts.swarm import controller
+    from scripts.swarm import controller, local_slots
     from scripts.swarm_v2.runtime.base import RuntimeRouter
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
     monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: True)
+    monkeypatch.setattr(local_slots, "live", set)
     workstation(monkeypatch, 10)
     setup.store.redis.delete(registry.key("remote"))
     setup.store.redis.srem(registry.INDEX, "remote")
@@ -240,22 +234,6 @@ def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch,
         fenced.spawn(setup.config, lane, "eng name", task)
     setup.herdr.spawn.assert_not_called()
     fenced.runtime.hive_launch.spawn.assert_not_called()
-
-
-def test_the_module_fixture_keeps_agents_live_on_the_host_out_of_the_cap_count(setup, monkeypatch):
-    from types import SimpleNamespace
-
-    from scripts import terminate_agent
-    from scripts.swarm.store import SwarmConfig
-
-    monkeypatch.setattr(terminate_agent, "sessions", lambda *args, **kwargs: [SimpleNamespace(name="host-agent")])
-    fenced = hybrid(setup, monkeypatch)
-    fill_anton(setup)
-    workstation(monkeypatch, 40)
-    setup.store.create(SwarmConfig("other-swarm", "agentihooks", 1, 1))
-    local_agents(setup, 8, slug="other-swarm", harness="codex")
-    task = {"id": "task", "seat": "eng-1@fixture", "launch_assignment": {"harness": "codex"}}
-    assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal("eng", task)
 
 
 @pytest.mark.parametrize("profile", ["qa", "frontend"])
