@@ -419,9 +419,7 @@ def test_kind_proof_retries_the_node_image_pull_before_creating_the_cluster(tmp_
     log = tmp_path / "docker.log"
     docker = tools / "docker"
     docker.write_text(
-        "#!/usr/bin/env bash\n"
-        'printf \'%s\\n\' "$*" >> "$PULL_LOG"\n'
-        '(( $(wc -l < "$PULL_LOG") > FAILURES ))\n'
+        '#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >> "$PULL_LOG"\n(( $(wc -l < "$PULL_LOG") > FAILURES ))\n'
     )
     docker.chmod(0o755)
     result = subprocess.run(
