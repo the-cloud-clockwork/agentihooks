@@ -1289,14 +1289,9 @@ def _launch_all(run, clock, batch):
     actions = []
     for launch, (placed, launched) in zip(batch, outcomes):
         if placed and placed.launch_job:
-            try:
-                launch_job.pending(run.store, run.slug, launch, placed)
-                launch_job.spawn(placed.launch_job)
-            except Exception as exc:
-                run.store.redis.hdel(run.store.key(run.slug, launch_job.KEY), launch.record.name)
-                launched = SpawnError(str(exc), harness=placed.harness)
-            else:
-                actions.append(f"launching {launch.record.name} for {launch.task['id']}")
+            launched = launch_job.dispatch(run, launch, placed)
+            if isinstance(launched, str):
+                actions.append(launched)
                 continue
         if isinstance(launched, Exception):
             failed = Failed(launch.record, launch.task, launched)
@@ -1407,8 +1402,6 @@ def _acknowledging_error(exc):
 def _acknowledging(slug, store, agent):
     if agent.lane == MASTER:
         return False
-    if store.redis.hexists(store.key(slug, "launch-jobs"), agent.name):
-        return True
     raw = store.redis.hget(store.key(slug, "launches"), agent.name)
     return bool(raw) and json.loads(raw).get("state") in (ACKNOWLEDGING, "launching")
 
@@ -1439,10 +1432,8 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     from scripts.swarm_v2.runtime import codex
 
     rows = {t["id"]: t for t in doc["tasks"]}
-    actions = launch_job.collect(_Pass(slug, config, store, ledger, runtime, rows, doc, now_ms))
-    for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
-        if store.redis.hexists(store.key(slug, launch_job.KEY), agent.name):
-            continue
+    actions, pending = launch_job.collect(_Pass(slug, config, store, ledger, runtime, rows, doc, now_ms))
+    for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a) and a.name not in pending]:
         task = rows.get(agent.task) or {"id": agent.task}
         try:
             placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True})

@@ -100,6 +100,16 @@ def pending(store, slug: str, launch, placed: Placed) -> None:
     store.record_launch(slug, launch.record, STATE)
 
 
+def dispatch(run, launch, placed: Placed) -> str | SpawnError:
+    try:
+        pending(run.store, run.slug, launch, placed)
+        spawn(placed.launch_job)
+    except Exception as exc:
+        run.store.redis.hdel(run.store.key(run.slug, KEY), launch.record.name)
+        return SpawnError(str(exc), harness=placed.harness)
+    return f"launching {launch.record.name} for {launch.task['id']}"
+
+
 def completed(picked: Placed, placed: Placed) -> Placed:
     return replace(
         picked,
@@ -119,11 +129,11 @@ def completed(picked: Placed, placed: Placed) -> Placed:
     )
 
 
-def collect(run) -> list[str]:
+def collect(run) -> tuple[list[str], set[str]]:
     from scripts.swarm import tick as engine
     from scripts.swarm_v2.runtime import codex
 
-    key, actions = run.store.key(run.slug, KEY), []
+    key, actions, waiting = run.store.key(run.slug, KEY), [], set()
     agents = {agent.name: agent for agent in run.store.agents(run.slug)}
     for name, raw in run.store.redis.hgetall(key).items():
         saved = json.loads(raw)
@@ -136,16 +146,12 @@ def collect(run) -> list[str]:
             placed = read(picked.launch_job, run.now_ms)
             if placed is None:
                 run.store.refresh(run.slug, agent.task, agent.name, engine.LEASE_MS)
+                waiting.add(name)
                 continue
             placed = completed(picked, placed)
-            if agent.state == "finished":
-                actions.append(
-                    engine._finished_launch(run.slug, run.store, run.doc, engine.placed_record(agent, placed))
-                )
-                run.store.redis.hdel(key, name)
-                continue
-            placed = codex.complete(run.config, name, placed, run.runtime.reap_name)
-            launched = codex.admit_legacy(run.store, run.slug, engine.placed_record(agent, placed), run.runtime)
+            if agent.state != "finished":
+                placed = codex.complete(run.config, name, placed, run.runtime.reap_name)
+                launched = codex.admit_legacy(run.store, run.slug, engine.placed_record(agent, placed), run.runtime)
         except Exception as exc:
             error = exc if isinstance(exc, SpawnError) else SpawnError(str(exc), harness=picked.harness)
             if not error.harness:
@@ -159,17 +165,22 @@ def collect(run) -> list[str]:
                 run.slug, run.store, run.ledger, run.runtime, run.rows, engine.Failed(agent, task, error), run.now_ms
             )
         else:
-            actions += engine._started(
-                run.slug,
-                run.config,
-                run.store,
-                run.ledger,
-                run.doc,
-                engine.Started(agent, task, placed, launched),
-                run.now_ms,
-            )
+            if agent.state == "finished":
+                actions.append(
+                    engine._finished_launch(run.slug, run.store, run.doc, engine.placed_record(agent, placed))
+                )
+            else:
+                actions += engine._started(
+                    run.slug,
+                    run.config,
+                    run.store,
+                    run.ledger,
+                    run.doc,
+                    engine.Started(agent, task, placed, launched),
+                    run.now_ms,
+                )
         run.store.redis.hdel(key, name)
-    return actions
+    return actions, waiting
 
 
 if __name__ == "__main__":

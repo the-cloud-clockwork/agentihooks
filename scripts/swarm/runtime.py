@@ -946,9 +946,7 @@ class HerdrRuntime:
             ]
         passed = argv[argv.index("--") + 1 :] if "--" in argv else []
         ordered = lane == MASTER or (task.get("handoff_envelope") or {}).get("reason") == "quota"
-        ordered = ordered or (
-            len(passed) > 1 and passed[:2] in (["--route", "interactive"], ["--route", "master-login"])
-        )
+        ordered = ordered or passed[:2] in (["--route", "interactive"], ["--route", "master-login"])
         if task.get("detached_launch") and not ordered and not task.get("admitted_execution_id"):
             from scripts.swarm import launch_job
 
