@@ -708,7 +708,7 @@ def test_the_workflow_selects_nine_legs_for_a_large_change(repo):
     assert len(legs) == 9
 
 
-def test_the_workflow_splits_a_selection_over_twelve_legs_within_the_full_suite_runners(repo):
+def test_the_workflow_caps_a_selection_at_the_unit_shard_count(repo):
     write(repo, {f"tests/test_tick{index}.py": "from hooks import sample\n" for index in range(1, 31)})
     durations = seconds(test_sample=15.0, **{f"test_tick{index}": ci_select.LEG_SECONDS for index in range(1, 31)})
     scope, legs = decide(repo, ["hooks/sample.py"], durations, workflow_legs())
