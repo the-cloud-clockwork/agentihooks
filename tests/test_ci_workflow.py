@@ -2051,7 +2051,10 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
     capped = mutation[mutation_names.index("Cap the merged test stats")]
     assert capped["if"] == first
-    assert "import cap; " in capped["run"] and capped["run"].endswith("' .mutation-stats-cache")
+    assert capped["run"] == (
+        "python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap;"
+        ' print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")\' .mutation-stats-cache'
+    )
     assert mutation_names.index(base["name"]) == 1
     order = [
         base["name"],

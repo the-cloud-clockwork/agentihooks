@@ -395,7 +395,7 @@ jobs:
           merge-multiple: true
 
       - name: Cap the merged test stats
-        run: python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap; print(f"Mutation stats cache: dropped {cap(Path(sys.argv[1]))} records past the cap")' .mutation-stats-cache
+        run: python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap; print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")' .mutation-stats-cache
 
       - name: Save the merged test stats
         if: success() && hashFiles('.mutation-stats-cache/**') != ''
