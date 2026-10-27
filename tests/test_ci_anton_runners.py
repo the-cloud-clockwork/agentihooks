@@ -52,7 +52,7 @@ MOVED = {
     ("ledger-row-memory.yml", "replay"): BATCH,
     ("mutation-preflight.yml", "mutation"): LIGHT,
     ("mutation-preflight.yml", "mutation-shard"): BATCH,
-    ("mutation-preflight.yml", "plan"): LIGHT,
+    ("mutation-preflight.yml", "plan"): STANDARD,
     ("mutation-preflight.yml", "refine"): LIGHT,
     ("mutation-replay.yml", "plan"): LIGHT,
     ("mutation-replay.yml", "grade"): BATCH,
