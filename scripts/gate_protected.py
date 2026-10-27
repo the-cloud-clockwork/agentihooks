@@ -22,7 +22,7 @@ FULL_PREFLIGHT_CHECKOUT = {"fetch-depth": 0}
 PREFLIGHT_FETCH = 'git fetch --no-tags origin "$GITHUB_SHA"'
 SHALLOW_PREFLIGHT_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
 EQUIVALENCE = ("equivalence.yml", "ledger-equivalence")
-EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh")
+EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh", "$", "`")
 EQUIVALENCE_TUNABLE = ("steps", "timeout-minutes")
 EQUIVALENCE_DEV_PARENT = {
     "name": "Select the dev parent of the tested merge",
