@@ -232,6 +232,7 @@ jobs:
       scope: ${{ steps.select.outputs.scope }}
       legs: ${{ steps.select.outputs.legs }}
       count: ${{ steps.select.outputs.count }}
+      sonar: ${{ steps.select.outputs.sonar }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
@@ -611,6 +612,7 @@ jobs:
         env:
           BASE: origin/${{ github.base_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
           EVENT: ${{ github.event_name }}
           CI_SELECT_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
@@ -619,6 +621,15 @@ jobs:
             printf 'scope=full\nlegs=[]\ncount=0\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          git -C "$GITHUB_WORKSPACE" diff --no-ext-diff --no-renames --name-only -z "$PR_BASE" "$GITHUB_SHA" > "$RUNNER_TEMP/changed-paths"
+          sonar=run
+          if [[ -s "$RUNNER_TEMP/changed-paths" ]]; then
+            sonar=skip
+            while IFS= read -r -d '' path; do
+              [[ "$path" == tests/* ]] || sonar=run
+            done < "$RUNNER_TEMP/changed-paths"
+          fi
+          echo "sonar=$sonar" >> "$GITHUB_OUTPUT"
           durations=("$RUNNER_TEMP/grader/.test_durations")
           for file in ~/dev-durations/.test_durations ~/dev-durations/.test_durations-3.12; do
             [[ -f "$file" ]] && durations+=("$file")
@@ -2021,7 +2032,7 @@ jobs:
         run: python3 -m tests.shard_budget $REPORT shard-reports/durations-*/durations.json
 
   sonar:
-    if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}
+    if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && needs.select.outputs.sonar != 'skip' }}
     # Waits for the shards' coverage through needs; the API that could poll for it has an hourly quota every run shares.
     needs: [unit, unit-selected, select, reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
@@ -3078,6 +3089,7 @@ jobs:
                 ["select", "split", "shard-check", "test-count"]
               else
                 ["select", "test-count", "lint", "docs", "semgrep", "sonar", "writer-lock"]
+                - (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)
                 + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
                 + (if $mutation == "true" then ["mutation-plan", "mutation-stats"] + (if $inline == "true" then [] else ["mutation"] end) else [] end)
               end) as $required
