@@ -34,7 +34,9 @@ class Strict(Run):
 
     def plain(self):
         return [
-            [Path(arg).name if argv[0] == "ssh-keygen" and arg.startswith("/") else arg for arg in argv]
+            [Path(arg).name if argv[0] == "ssh-keygen" else "clone" if arg.startswith("/") else arg for arg in argv]
+            if argv[0] in ("ssh-keygen", "git")
+            else argv
             for argv in self.calls
         ]
 
@@ -112,6 +114,8 @@ def test_a_full_create_makes_exactly_these_calls(world):
         ["kubectl", "get", "service", "-A", "-o", "json"],
         RESYNC,
         ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", NAME, "-f", "host_key"],
+        ["git", "init", "-q", "clone"],
+        ["git", "-C", "clone", "remote", "add", "origin", f"https://github.com/{REPO}.git"],
         ["gh", "api", "-H", create_github.RAW, f"repos/{REPO}/contents/{create_render.TEMPLATE_PATH}?ref=dev"],
         ["gh", "pr", "list", "-R", REPO, "--head", NAME, "--state", "all", "--json", "url,state", "--jq", PENDING],
         [*_gh_api(f"repos/{REPO}/git/ref/heads/dev"), ".object.sha"],
@@ -140,7 +144,7 @@ def test_a_full_create_makes_exactly_these_calls(world):
         list(machine.LIST),
         ["herdr", "machine", "add", "--label", NAME, "--remote-session", "default", TARGET],
     ]
-    timeouts = {"kubectl": 60, "ssh-keygen": 60, "gh": 120, "herdr": 300}
+    timeouts = {"kubectl": 60, "ssh-keygen": 60, "git": 120, "gh": 120, "herdr": 300}
     for name, kwargs in world.run.kwargs:
         assert {key: kwargs[key] for key in ("capture_output", "text", "timeout", "check")} == {
             **GH,
@@ -375,7 +379,7 @@ def test_a_hub_record_that_cannot_be_read_is_a_refusal_naming_it(world):
 
 def test_gh_keeps_leading_space_and_trims_only_trailing_newlines():
     def run(argv, **kwargs):
-        assert kwargs == {"input": '{"a": 1}', **GH}
+        assert kwargs == {"input": '{"a": 1}', **GH, "cwd": None}
         return subprocess.CompletedProcess(argv, 0, "  text X\n\n", "")
 
     assert create_github.gh(run, ["api", "x"], {"a": 1}) == "  text X"

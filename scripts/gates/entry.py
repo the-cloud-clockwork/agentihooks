@@ -11,6 +11,7 @@ import sys
 
 from scripts.gates import lift, log, modes
 from scripts.gates.base import Call, Decision, Who
+from scripts.gates.brain import BrainGate
 from scripts.gates.build import BuildGate
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.identity import PinnedIdentity
@@ -43,6 +44,7 @@ GATES = {
         PushStop(),
         QuietClaim(),
         OnePush(),
+        BrainGate(),
     )
 }
 HOST_GATES = {gate.name: gate for gate in (PlacementGate(), PromptGuard(), NodeCaps(), Terminations(), SignIns())}

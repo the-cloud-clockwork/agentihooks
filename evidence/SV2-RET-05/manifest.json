@@ -1,0 +1,15 @@
+{
+  "fixture_inputs": {
+    "active_index": "two embedding generations over the committed session, the newer one active and the older one retired",
+    "foreign_lookalike_object": "a digest named object in a managed shard with no reservation, a stray root file and another domain's upload",
+    "newly_referenced_checkpoint": "an abandoned upload that a task checkpoint references after collection claimed it",
+    "uncommitted_upload": "an upload whose reservation expired past grace without an archive entry, beside one whose bytes never landed"
+  },
+  "input_sha256": {
+    "fixture.json": "0e6498f76c9162e055077f79e6ef7100d15eb6161c8107a52b0c562c0965b904",
+    "sv2_ret05_cases.py": "4553ca60d8df4d8b4731a128f86a43248805c39ed763c611ecf049826a41ab49"
+  },
+  "mocked": true,
+  "package": "SV2-RET-05",
+  "tested_commit": "31edd33011172c04056c0b8679c6c8d5987eff91"
+}

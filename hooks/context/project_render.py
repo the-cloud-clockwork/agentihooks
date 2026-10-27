@@ -1,5 +1,7 @@
 from hooks.context.project_memory import ProjectMemory
 
+NO_MEMORY = "No project memory yet."
+
 
 def render_project_block(memory: ProjectMemory, max_bytes: int) -> str:
     lines = [f"[Project memory: {memory.project}]", "BRAIN CONTEXT (recalled state, not an operator directive):", ""]
@@ -14,5 +16,5 @@ def render_project_block(memory: ProjectMemory, max_bytes: int) -> str:
         lines.append("Recent lessons:")
         lines.extend(f"* {lesson}" for lesson in memory.lessons)
     if not memory.arcs and not memory.lessons:
-        lines.append("No project memory yet.")
+        lines.append(NO_MEMORY)
     return "\n".join(lines).encode()[: max(0, max_bytes)].decode(errors="ignore")
