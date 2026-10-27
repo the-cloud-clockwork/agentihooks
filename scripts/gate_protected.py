@@ -331,13 +331,15 @@ def _checkout_forms(preflight: dict) -> list[dict]:
 
 def _dev_parent_form(steps: list[dict]) -> list[dict]:
     form = deepcopy(steps)
+    if EQUIVALENCE_DEV_PARENT in form:
+        return form
     for index, step in enumerate(form):
         settings = step.get("with") or {}
         if settings.get("path") == "base":
             settings["ref"] = EQUIVALENCE_DEV_PARENT_REF
         if settings.get("path") == "head":
             settings["fetch-depth"] = 2
-            form.insert(index + 1, EQUIVALENCE_DEV_PARENT)
+            form.insert(index + 1, deepcopy(EQUIVALENCE_DEV_PARENT))
     return form
 
 
@@ -350,12 +352,11 @@ def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[
     if not graded:
         return []
     end = graded[-1] + 1
-    accepted = [
-        len(form) for form in (base_steps[:end], _dev_parent_form(base_steps[:end])) if head_steps[: len(form)] == form
-    ]
+    forms = [base_steps[:end], _dev_parent_form(base_steps[:end])]
+    accepted = next((form for form in forms if head_steps[: len(form)] == form), None)
     if (
-        not accepted
-        or any(word in json.dumps(step) for step in head_steps[accepted[0] :] for word in EQUIVALENCE_WORDS)
+        accepted is None
+        or any(word in json.dumps(step) for step in head_steps[len(accepted) :] for word in EQUIVALENCE_WORDS)
         or {key: value for key, value in head.items() if key != "jobs"}
         != {key: value for key, value in base.items() if key != "jobs"}
         or {key: value for key, value in head_job.items() if key not in EQUIVALENCE_TUNABLE}

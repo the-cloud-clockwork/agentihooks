@@ -1801,6 +1801,21 @@ def test_the_required_grader_keeps_accepting_the_dev_parent_form_once_dev_carrie
     assert _grade_equivalence(repo, _dev_parent(_equivalence()), _dev_parent(_equivalence())) == 0
 
 
+def _duplicate_selector(workflow):
+    steps = _equivalence_steps(_dev_parent(workflow))
+    steps.insert(1, copy.deepcopy(steps[1]))
+    return workflow
+
+
+@pytest.mark.parametrize("head", [_duplicate_selector, _event_base])
+def test_a_dev_carrying_the_dev_parent_form_refuses_any_other_selection(repo, capsys, head):
+    assert _grade_equivalence(repo, _dev_parent(_equivalence()), head(_equivalence())) == 1
+    assert (
+        "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
+        in capsys.readouterr().out.splitlines()
+    )
+
+
 def _full_history(steps):
     steps[0]["with"]["fetch-depth"] = 0
 
