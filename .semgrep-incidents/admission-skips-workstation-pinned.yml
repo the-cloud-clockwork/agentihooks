@@ -1,0 +1,31 @@
+rules:
+  - id: admission-skips-workstation-pinned
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive admission count leaves out agents whose task is pinned to the workstation. On 27 October the workstation
+      hive held eight agents under a cap of six because pinned agents were not counted. Count every live agent on the
+      hive, pinned or not.
+    patterns:
+      - pattern-inside: |
+          def $COUNT(...):
+              ...
+      - metavariable-regex:
+          metavariable: $COUNT
+          regex: .*(room|admi|running|occupan|held|count|capacity|slots|_full).*
+      - pattern-either:
+          - pattern: '[... for $AGENT in $AGENTS if <... not $AGENT.get("workstation") ...>]'
+          - pattern: '[... for $AGENT in $AGENTS if <... not $AGENT["workstation"] ...>]'
+          - pattern: '[... for $AGENT in $AGENTS if <... not $AGENT.workstation ...>]'
+          - pattern: '($X for $AGENT in $AGENTS if <... not $AGENT.get("workstation") ...>)'
+          - pattern: '($X for $AGENT in $AGENTS if <... not $AGENT["workstation"] ...>)'
+          - pattern: '($X for $AGENT in $AGENTS if <... not $AGENT.workstation ...>)'
+          - pattern: |
+              if $AGENT.get("workstation"):
+                  continue
+          - pattern: |
+              if $AGENT["workstation"]:
+                  continue
+          - pattern: |
+              if $AGENT.workstation:
+                  continue

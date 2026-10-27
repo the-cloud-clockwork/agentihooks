@@ -1386,6 +1386,83 @@ def test_the_separate_summary_accepts_only_the_reviewed_shell(shell, declared_on
         assert "The test summary must use the reviewed reporting job." in problems
 
 
+def _separate_summary(head, steps):
+    head["jobs"]["test-summary"] = {
+        "needs": ["unit", "unit-selected"],
+        "if": "${{ always() }}",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "steps": steps,
+    }
+    head["jobs"]["unit-selected"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["gate-required"]["needs"].append("unit-selected")
+    return {"not_gates": {"test.yml/test-summary": _entry()}}
+
+
+@pytest.mark.parametrize("pipefail", [False, True])
+def test_the_separate_summary_may_retry_each_download_once(pipefail):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.retried_summary(ci_reuse.summary_steps())
+    if pipefail:
+        steps = ci_reuse.pipefail_summary(steps)
+    config = _separate_summary(head, steps)
+    assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _TODAY, _POLICY) == []
+
+
+def test_the_retried_summary_waits_and_downloads_each_report_once_more():
+    from scripts import ci_reuse
+
+    checkout, durations, flakes, summarize = ci_reuse.summary_steps()
+    steps = ci_reuse.retried_summary([checkout, durations, flakes, summarize])
+    assert [step.get("name") for step in steps] == [
+        None,
+        "Download this run's test durations",
+        "Download this run's test durations, wait before attempt 2",
+        "Download this run's test durations, attempt 2",
+        "Download this run's test flakes",
+        "Download this run's test flakes, wait before attempt 2",
+        "Download this run's test flakes, attempt 2",
+        "Summarize this run's tests",
+    ]
+    assert steps[0] == checkout and steps[-1] == summarize
+    assert steps[1] == {**durations, "id": "download-this-runs-test-durations", "continue-on-error": True}
+    assert steps[4] == {**flakes, "id": "download-this-runs-test-flakes", "continue-on-error": True}
+    for first, wait, second in (steps[1:4], steps[4:7]):
+        retry = f"steps.{first['id']}.outcome == 'failure'"
+        assert wait == {
+            "name": f"{first['name']}, wait before attempt 2",
+            "if": retry,
+            "shell": "bash",
+            "run": f'echo "::warning::{first["name"]} failed, as an artifact service outage does; '
+            'retrying it once in 30 seconds."\nsleep 30\n',
+        }
+        assert second == {
+            "name": f"{first['name']}, attempt 2",
+            "if": retry,
+            "uses": first["uses"],
+            "with": first["with"],
+        }
+
+
+@pytest.mark.parametrize("change", ["second continues", "no wait", "first fails the job"])
+def test_a_separate_summary_cannot_weaken_its_download_retry(change):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.retried_summary(ci_reuse.summary_steps())
+    if change == "second continues":
+        steps[3] = {**steps[3], "continue-on-error": True}
+    elif change == "no wait":
+        del steps[2]
+    else:
+        steps[1] = {key: value for key, value in steps[1].items() if key != "continue-on-error"}
+    config = _separate_summary(head, steps)
+    problems = gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _TODAY, _POLICY)
+    assert "The test summary must use the reviewed reporting job." in problems
+
+
 @pytest.mark.parametrize("change", ["steps", "needs", "if", "runs-on", "timeout-minutes", "env"])
 @pytest.mark.parametrize("declared_on_base", [False, True])
 def test_a_separate_summary_cannot_change_its_reviewed_job(change, declared_on_base):

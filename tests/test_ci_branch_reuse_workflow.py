@@ -109,11 +109,13 @@ def test_the_planner_names_the_jobs_and_steps_the_workflow_runs():
 
 
 @pytest.mark.parametrize("job", LEG_JOBS)
-def test_both_uploads_use_the_upload_action_itself_and_the_names_the_grader_reads(job):
+def test_both_uploads_survive_a_cancel_and_carry_the_names_the_grader_reads(job):
     record = _step(job, "Upload this leg's branch record")
     coverage = _step(job, "Upload this leg's branch coverage")
     for upload in (record, coverage):
-        assert upload["uses"].startswith("actions/upload-artifact@")
+        assert upload["uses"] == "./.github/actions/retry-upload"
+        assert upload["with"]["after-cancel"] is True
+        assert upload["if"].startswith("always() && ")
         assert upload["with"]["retention-days"] == 7
     assert record["with"]["path"] == "branch-record/record.json"
     assert _name(record["with"]["name"]).startswith(PREFIX)
@@ -219,7 +221,9 @@ def _planner_repo(tmp_path: Path, branch_planner: bool) -> Path:
     return workspace
 
 
-def _plan(tmp_path: Path, event: str, reused: str = "0", branch_planner: bool = True) -> tuple[Path, str]:
+def _plan(
+    tmp_path: Path, event: str, reused: str = "0", branch_planner: bool = True, bash_env: str = ""
+) -> tuple[Path, str]:
     workspace = _planner_repo(tmp_path, branch_planner)
     runner, marks = tmp_path / "runner", tmp_path / "marks"
     runner.mkdir()
@@ -242,6 +246,9 @@ def _plan(tmp_path: Path, event: str, reused: str = "0", branch_planner: bool = 
         "FAKE_REUSED": reused,
         "MARKS": str(marks),
     }
+    if bash_env:
+        (tmp_path / "bash_env").write_text(bash_env)
+        env["BASH_ENV"] = str(tmp_path / "bash_env")
     run = _step("test-count", "Plan the tests whose inputs did not change")["run"]
     subprocess.run(["bash", "-e", "-c", run], cwd=workspace, env=env, check=True, capture_output=True)
     deadline = time.monotonic() + 30
@@ -284,6 +291,11 @@ def test_a_grader_without_the_branch_planner_reuses_nothing_from_earlier_runs(tm
     called, outputs = _plan(tmp_path, "pull_request", branch_planner=False)
     assert not called.exists()
     assert "The grader has no branch planner" in outputs
+
+
+def test_a_reader_never_sees_the_plan_status_before_its_writer_finishes(tmp_path):
+    slow_echo = 'echo() { [[ "${1:-}" =~ ^[0-9]+$ ]] && sleep 1; builtin echo "$@"; }\n'
+    _plan(tmp_path, "pull_request", bash_env=slow_echo)
 
 
 @pytest.mark.parametrize(

@@ -535,6 +535,7 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      # No checkout precedes this on workflow_dispatch, so the local retry-upload action cannot load here.
       - name: Republish the dispatched base's coverage baseline
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
@@ -636,7 +637,7 @@ jobs:
           cd "$RUNNER_TEMP/grader"
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/selection"
-          "$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 12 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
+          "$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 20 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
 
       # Job outputs are protected, so each leg reads its files from this artifact.
       - name: Upload the selected legs
@@ -824,7 +825,7 @@ jobs:
               --head-repo "$HEAD_REPO" --run "$GITHUB_RUN_ID" --created "$before" --environment "$ENVIRONMENT" \
               "${dev_plan[@]}" --root "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/reused-branch.json"
           }
-          ( (set -e; plan); echo "$?" > "$RUNNER_TEMP/plan.status" ) > "$RUNNER_TEMP/plan.log" 2>&1 &
+          ( (set -e; plan); echo "$?" > "$RUNNER_TEMP/plan.status.tmp"; mv "$RUNNER_TEMP/plan.status.tmp" "$RUNNER_TEMP/plan.status" ) > "$RUNNER_TEMP/plan.log" 2>&1 &
           echo "$!" > "$RUNNER_TEMP/plan.pid"
 
       # The base revision's copy grades, so a pull request cannot loosen its own floor.
@@ -1483,11 +1484,10 @@ jobs:
             --commit "$GITHUB_SHA" --head "$HEAD_SHA" --pull "$PULL" --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --leg "$LEG" --environment "$ENVIRONMENT" --out branch-record/record.json
 
-      # The upload action itself, not retry-upload: a composite's inner steps skip once the job is cancelled.
       - &upload-branch-coverage
         name: Upload this leg's branch coverage
         if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('branch-record/record.json') != ''
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: branch-coverage-${{ matrix.python-version }}-${{ env.LEG }}-${{ github.run_attempt }}
           path: |
@@ -1498,18 +1498,18 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
       - &upload-record
         name: Upload this leg's branch record
         if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('branch-record/record.json') != ''
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: branch-record-${{ matrix.python-version }}-${{ env.LEG }}-${{ github.run_attempt }}
           path: branch-record/record.json
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
@@ -1602,7 +1602,7 @@ jobs:
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.select.result == 'success' && needs.select.outputs.scope == 'selected' }}
     needs: [select]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
-    timeout-minutes: 15
+    timeout-minutes: 22
     permissions:
       contents: read
     env:
@@ -1622,8 +1622,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
-          filter: blob:none
+          fetch-depth: 1
+
+      - name: Start the pinned nats server download
+        id: nats-download
+        continue-on-error: true
+        run: |
+          action=.github/actions/nats-server/action.yml
+          release=$(sed -n 's/^ *NATS_SERVER_RELEASE: \(v[0-9][0-9.]*\)$/\1/p' "$action")
+          sha=$(sed -n 's/^ *NATS_SERVER_SHA256_AMD64: \([0-9a-f]\{64\}\)$/\1/p' "$action")
+          [[ "$(uname -m)" == x86_64 && -n "$release" && -n "$sha" ]]
+          export NATS_SERVER_RELEASE="$release" NATS_SERVER_SHA256="$sha" NATS_SERVER_NAME="nats-server-${release}-linux-amd64"
+          mkdir -p "$RUNNER_TEMP/nats-bg"
+          nohup bash -c '
+            archive="$RUNNER_TEMP/nats-bg/$NATS_SERVER_NAME.tar.gz"
+            status=0
+            {
+              curl -fsSL --connect-timeout 10 --max-time 25 --retry 3 --retry-delay 3 --retry-connrefused -o "$archive" "https://github.com/nats-io/nats-server/releases/download/$NATS_SERVER_RELEASE/$NATS_SERVER_NAME.tar.gz" &&
+                sha256sum --check --strict <<< "$NATS_SERVER_SHA256  $archive" &&
+                tar -xzf "$archive" -C "$RUNNER_TEMP/nats-bg" --strip-components=1 "$NATS_SERVER_NAME/nats-server" &&
+                "$RUNNER_TEMP/nats-bg/nats-server" --version
+            } || status=$?
+            echo "$status" > "$RUNNER_TEMP/nats-bg.status.tmp"
+            mv "$RUNNER_TEMP/nats-bg.status.tmp" "$RUNNER_TEMP/nats-bg.status"
+          ' > "$RUNNER_TEMP/nats-bg.log" 2>&1 < /dev/null &
+          echo "$!" > "$RUNNER_TEMP/nats-bg.pid"
 
       - name: Download the selected legs
         id: download-the-selected-legs
@@ -1711,7 +1734,21 @@ jobs:
           echo "$HOME/codex" >> "$GITHUB_PATH"
           echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"
 
+      - name: Use the pinned nats server download
+        id: nats
+        if: steps.nats-download.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          pid=$(cat "$RUNNER_TEMP/nats-bg.pid")
+          for _ in $(seq 150); do [[ -f "$RUNNER_TEMP/nats-bg.status" ]] || ! kill -0 "$pid" 2>/dev/null && break; sleep 1; done
+          cat "$RUNNER_TEMP/nats-bg.log"
+          [[ "$(cat "$RUNNER_TEMP/nats-bg.status")" == 0 ]]
+          echo "$RUNNER_TEMP/nats-bg" >> "$GITHUB_PATH"
+          echo "NATS_SERVER_REQUIRED=1" >> "$GITHUB_ENV"
+
       - name: Install the pinned nats server for the bus backend tests
+        if: steps.nats.outcome != 'success'
         timeout-minutes: 3
         uses: ./.github/actions/nats-server
 
@@ -1728,6 +1765,10 @@ jobs:
         uses: ./.github/actions/await-download
         with:
           name: early-collected-${{ matrix.python-version }}
+
+      - name: Fetch the protected grader's dev head
+        if: steps.collection.outcome == 'success'
+        run: git fetch --no-tags --depth=1 origin +refs/heads/dev:refs/remotes/origin/dev
 
       # Grader code decides and grades the reuse, but head code shares this runner, so a hostile head can still forge it.
       - name: Adopt the reused tests from the protected grader
@@ -1754,7 +1795,7 @@ jobs:
 
       - name: Run the selected tests
         id: tests
-        timeout-minutes: 7
+        timeout-minutes: 12
         env:
           PYTHONUNBUFFERED: "1"
           PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini -p tests.browser_coverage', github.workspace) || '-p no:pytest_cov' }}
@@ -1791,7 +1832,7 @@ jobs:
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.leg }}
           path: |
@@ -1800,7 +1841,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       - name: Upload selected test durations
         if: ${{ !cancelled() && hashFiles('durations.json') != '' }}
@@ -2290,7 +2330,7 @@ jobs:
 
       - name: Upload coverage and analysis evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: sonar-report
           path: |
@@ -2301,7 +2341,7 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
       # Sonar refuses an analysis dated before the dev branch's latest one; that revision ends superseded, ungraded and never promoted.
       - name: SonarQube Quality Gate
@@ -2940,12 +2980,12 @@ jobs:
 
       - name: Upload the coverage ratchet report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: coverage-ratchet
           path: coverage-ratchet/report.txt
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
@@ -3323,13 +3363,12 @@ jobs:
           key: coverage-baseline-${{ steps.tree.outputs.tree }}
 
       - name: Publish the passed dev coverage baseline
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: coverage-baseline
           path: ~/coverage-baseline
           if-no-files-found: error
           retention-days: 90
-          overwrite: true
 
       - name: Download the test dependency manifest
         if: needs.gate-required.result == 'success'

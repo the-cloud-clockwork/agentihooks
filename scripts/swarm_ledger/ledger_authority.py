@@ -122,7 +122,14 @@ def hive_member(credential):
 
 
 def hive_agent(member: str, slug: str, name: str) -> bool:
-    return any(agent.name == name and agent.hive == member for agent in ports.swarm().store.connect().agents(slug))
+    from scripts.doctor.priming import doctor_slug
+
+    store = ports.swarm().store.connect()
+    return any(
+        agent.name == name and agent.hive == member
+        for ledger in (slug, doctor_slug(slug))
+        for agent in store.agents(ledger)
+    )
 
 
 def hive_agent_token(member: str, slug: str, name: str) -> str:
