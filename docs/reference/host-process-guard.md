@@ -168,8 +168,9 @@ guard that is already installed:
 | Drift otherwise, for example hand copies with no schedule and no enabled timer | `[--] Host guard linked in <home> from <repo>; agentihooks host-guard install schedules it` | Relinks only |
 
 A disabled systemd timer, or hand copies with no entry, end up linked but
-unscheduled after that `init`. The next `init` finds both files are links and
-schedules the guard, so remove the links to keep a guard off.
+unscheduled after that `init`. Since [#6311](https://github.com/the-cloud-clockwork/agentihooks/pull/6311)
+the next `init` finds both files are links and schedules the guard. To keep a
+guard off, remove both home files.
 
 ### Example
 
@@ -195,8 +196,7 @@ log on each 60 second pass.
 ### After the swarm Redis moves
 
 The guard entry lives on the Redis the scheduler used when the guard was
-installed. Unless a saved hive membership picks another endpoint, that Redis
-is the first of these that applies:
+installed. That Redis is the first of these that applies:
 
 1. `AGENTIHOOKS_HIVE_REDIS_URL`, outside ledger local mode
 2. `AGENTIHOOKS_SWARM_REDIS_URL`
@@ -242,8 +242,8 @@ agentihooks host-guard install   # link and schedule, whatever the home holds
 
 `agentihooks init` refuses to run in a rendered profile home or with
 `AGENTIHOOKS_SWARM` or `AGENTIHOOKS_PROFILE` set, so an agent session cannot
-run it. The operator runs it once from a plain shell. When the home has
-drift, both commands then:
+run it. The operator runs it once from a plain shell. `install` always runs
+these steps, and `init` runs them only when the home has drift:
 
 1. Cancel every live guard entry on `redis://127.0.0.1:6379/0` whose payload
    names this home's `guard-daemon.sh`. Entries for other homes stay.
