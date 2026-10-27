@@ -8,11 +8,15 @@ pytestmark = pytest.mark.unit
 WRAPPER = Path(__file__).resolve().parents[2] / "deploy" / "worker" / "gh"
 BODY = "x" * 20
 PRINTED = "ghs_" + BODY
+CLASSIC = "ab" * 20
 
 
 def wrapper_with_fake_gh(tmp_path, status):
     fake = tmp_path / "gh-real"
-    fake.write_text(f'#!/usr/bin/env bash\necho "  - Token: {PRINTED}***" >&2\necho "args: $*"\nexit {status}\n')
+    fake.write_text(
+        f'#!/usr/bin/env bash\necho "  - Token: {PRINTED}***" >&2\necho "  - Token: {CLASSIC}" >&2\n'
+        f'echo "args: $*"\nexit {status}\n'
+    )
     fake.chmod(0o755)
     wrapper = tmp_path / "gh"
     wrapper.write_text(WRAPPER.read_text().replace("/usr/bin/gh", str(fake)))
@@ -31,6 +35,7 @@ def test_auth_status_hides_the_token_and_keeps_the_exit_status(tmp_path, status,
     result = run(wrapper_with_fake_gh(tmp_path, status), tmp_path, *args)
 
     assert BODY not in result.stdout + result.stderr
+    assert CLASSIC not in result.stdout + result.stderr
     assert "Token: " in result.stdout + result.stderr
     assert "args: " + " ".join(args) in result.stdout
     assert result.returncode == status

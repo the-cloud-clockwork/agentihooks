@@ -360,6 +360,8 @@ GH_TOKEN_RENDERERS = [
     "bash -c 'gh auth status'",
     "ssh hive-002 gh auth status",
     "docker exec worker gh auth status",
+    "kubectl exec pod-0 -- gh auth status",
+    "gh -R owner/repo auth token",
 ]
 
 GH_LEAK_FREE = [
