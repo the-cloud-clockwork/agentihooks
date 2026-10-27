@@ -55,11 +55,12 @@ def test_ui_roles_keep_their_ui_host_rule(role):
 
 def hybrid(setup, monkeypatch, deployment="hybrid"):
     from scripts.hive import registry
-    from scripts.swarm import controller
+    from scripts.swarm import controller, local_slots
     from scripts.swarm_v2.runtime.base import RuntimeRouter
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
     monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: True)
+    monkeypatch.setattr(local_slots, "live", set)
     workstation(monkeypatch, 10)
     setup.store.redis.delete(registry.key("remote"))
     setup.store.redis.srem(registry.INDEX, "remote")

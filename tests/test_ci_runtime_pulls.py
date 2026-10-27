@@ -398,6 +398,55 @@ def test_kind_proof_pulls_every_dockerfile_base_through_the_bounded_pull_before_
         assert script.index(pull) < build
 
 
+@pytest.mark.parametrize(
+    "failures,source",
+    [
+        (0, "mirror.gcr.io/kindest/node:v1.37.0@sha256:node"),
+        (1, "docker.io/kindest/node:v1.37.0@sha256:node"),
+        (2, "mirror.gcr.io/kindest/node:v1.37.0@sha256:node"),
+        (3, ""),
+    ],
+)
+def test_kind_proof_retries_the_node_image_pull_before_creating_the_cluster(tmp_path, failures, source):
+    script = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh").read_text()
+    start = script.index("pull_node() {")
+    function = script[start : script.index("\n}\n", start) + 3]
+    create = '{ node="$(pull_node)" && kind create cluster --name "$cluster" --image "$node"; } &'
+    assert create in script
+    assert script.index(function) < script.index(create)
+    tools = tools_with(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$PULL_LOG"
+(( $(wc -l < "$PULL_LOG") > FAILURES ))
+""",
+    )
+    log, waits = tmp_path / "docker.log", tmp_path / "waits.log"
+    result = subprocess.run(
+        ["bash", "-c", f"{function}pull_node"],
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "PULL_LOG": str(log),
+            "WAITS": str(waits),
+            "FAILURES": str(failures),
+            "KIND_NODE_IMAGE": "mirror.gcr.io/kindest/node:v1.37.0@sha256:node",
+        },
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    returncode = result.returncode
+    assert returncode == (1 if failures == 3 else 0), result.stderr
+    assert result.stdout.strip() == source
+    pulls = log.read_text().splitlines()
+    assert len(pulls) == min(failures + 1, 3)
+    assert all(pull.startswith("pull -q ") for pull in pulls)
+    assert result.stderr.count("failed on attempt") == failures
+    assert (waits.read_text().splitlines() if waits.exists() else []) == ["10"] * min(failures, 2)
+
+
 def test_hive_join_pulls_its_images_through_the_bounded_pull_before_starting_them():
     script = (ROOT / "scripts/packaging/hive-join-smoke.sh").read_text()
     build = script.index('docker build --progress=plain -t "$image" .')
