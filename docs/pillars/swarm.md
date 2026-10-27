@@ -5123,7 +5123,9 @@ A pass treats the lane as held by the cap, and clears the stall clock, when both
 With one local slot free the hold does not apply, and the clock keeps running; ten minutes of that still raise the
 finding. A refusal from an earlier pass, or one recorded for another machine whose slots have since freed, holds
 nothing. The swarm keeps only its latest local cap refusal, so each new refusal replaces the one before. On a swarm's
-first observation there is no previous pass, and any stored refusal counts. The fix shipped in [pull request 6322](https://github.com/the-cloud-clockwork/agentihooks/pull/6322). Before
+first observation there is no previous pass, and any stored refusal counts.
+
+The fix shipped in [pull request 6322](https://github.com/the-cloud-clockwork/agentihooks/pull/6322). Before
 it, a full cap shared by two swarms on the operator's machine raised spawn stall on each of them, and masters closed
 the finding by hand.
 
