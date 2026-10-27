@@ -82,7 +82,10 @@ def _aggregator_problems(
     postgres = any(
         marker in str(step.get("run"))
         for step in base_job.get("steps") or []
-        for marker in (ci_reuse.POSTGRES_REQUIRED[1], ci_reuse.POSTGRES_REQUIRED[1].replace(*ci_reuse.TEST_ONLY_SONAR[0]))
+        for marker in (
+            ci_reuse.POSTGRES_REQUIRED[1],
+            ci_reuse.POSTGRES_REQUIRED[1].replace(*ci_reuse.TEST_ONLY_SONAR[0]),
+        )
     )
     requirements = (ci_reuse.postgres_required,) if postgres else (list, ci_reuse.postgres_required)
     return problems + [
