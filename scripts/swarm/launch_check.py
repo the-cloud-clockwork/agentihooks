@@ -230,7 +230,10 @@ def ledger_held(store: RedisStore, slug: str, agent: AgentRecord, found: dict, n
     if "held_at" not in entry:
         store.redis.hset(store.key(slug, "launch-checks"), agent.name, json.dumps({**entry, "held_at": now_ms}))
         return True
-    return now_ms - entry["held_at"] < DEADLINE_MS
+    from scripts.swarm import outage
+
+    open_outage = outage.read(slug).get("ledger", {}).get("ended_at", 0) is None
+    return now_ms - entry["held_at"] < (outage.HOLD_LIMIT_MS if open_outage else DEADLINE_MS)
 
 
 def record(

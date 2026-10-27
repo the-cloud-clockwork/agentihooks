@@ -283,7 +283,7 @@ def test_a_join_refused_during_a_ledger_outage_holds_and_passes_once_the_outage_
     outage.observe("sw", "ledger", ["Ledger health probe failed"], launch.start + 5_000)
     outage.observe("sw", "ledger", [], launch.start + 50_000)
     due = launch.start + launch_check.DEADLINE_MS + 10_000
-    assert launch.tick(due) == [f"{launch.agent.name} launch check held: the ledger refused its join"]
+    assert launch.tick(due) == [f"{launch.agent.name} launch check held: the ledger was unavailable for its join"]
     assert launch.retired == []
     assert launch.agent.name in launch_check.pending(launch.store, "sw")
     recovered = {**launch.checks, "ledger_join": True}
@@ -305,6 +305,20 @@ def test_a_refused_join_that_persists_past_the_regrade_retires(monkeypatch, tmp_
     action = launch.tick(due + launch_check.DEADLINE_MS)
     assert action == [f"retired {launch.agent.name} after its hive join failed dropped"]
     assert launch.retired == [due + launch_check.DEADLINE_MS]
+
+
+def test_a_join_timeout_during_an_open_ledger_outage_holds_until_the_outage_limit(monkeypatch, tmp_path):
+    from scripts.swarm import launch_check, outage
+
+    launch = _ledger_refused_launch(monkeypatch, tmp_path, "ledger sw: TimeoutError: timed out")
+    outage.observe("sw", "ledger", ["Ledger health probe failed"], launch.start + 5_000)
+    due = launch.start + launch_check.DEADLINE_MS
+    launch.tick(due)
+    launch.tick(due + outage.HOLD_LIMIT_MS - 1)
+    assert launch.retired == []
+    assert launch.tick(due + outage.HOLD_LIMIT_MS) == [
+        f"retired {launch.agent.name} after its hive join failed dropped"
+    ]
 
 
 def test_a_ledger_join_denied_by_the_server_retires_without_a_hold(monkeypatch, tmp_path):
