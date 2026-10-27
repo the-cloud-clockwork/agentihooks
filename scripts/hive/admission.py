@@ -1,5 +1,5 @@
 """Admit each launch by the measured headroom of the machine it lands on; a pending reservation counts against the room
-for fifteen minutes, three five minute load windows, and for two minutes after the hive reports the launch live."""
+for fifteen minutes, three five minute load windows, and for one load window after the hive reports the launch live."""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -18,7 +18,7 @@ SWARM_PERCENT = 40
 AGENT_CPU = 0.5
 AGENT_MB = MEMORY_PER_AGENT_MB
 PENDING_MS = 900_000
-SETTLE_MS = 120_000
+SETTLE_MS = 300_000
 NO_READING = "no fresh headroom reading"
 # cpus/load5 shipped with the first headroom reading; a hive daemon still on an older image before total_mb
 # joined the schema still publishes them, so a reading missing only the RAM fields is read, not refused.

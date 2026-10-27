@@ -190,6 +190,7 @@ def test_settling_a_reservation_only_shortens_one_that_is_held(redis):
     admission.settle(redis, "anton", "s/absent")
     now = time.time() * 1000
     assert now < redis.zscore(admission.key("anton"), "s/one") <= now + admission.SETTLE_MS
+    assert redis.zscore(admission.key("anton"), "s/one").is_integer()
     assert redis.zscore(admission.key("anton"), "s/two") <= now + 1000
     assert redis.zscore(admission.key("anton"), "s/absent") is None
 
