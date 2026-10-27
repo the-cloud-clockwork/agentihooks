@@ -32,6 +32,23 @@ def per_agent(ledger, slug, agents):
         print(agent, len(rows))
 
 
+def poll_rows(ledger, slug, task_id):
+    # ruleid: full-task-list-for-one-task
+    while True:
+        for row in ledger.tasks(slug):
+            if row["id"] == task_id and row["state"] == "done":
+                return
+        time.sleep(5)
+
+
+def rows_per_agent(ledger, slug, agents):
+    # ruleid: full-task-list-for-one-task
+    for agent in agents:
+        # ruleid: full-task-list-for-one-task
+        for row in ledger.tasks(slug):
+            print(agent, row)
+
+
 def one_read(ledger, slug, agent):
     # ok: full-task-list-for-one-task
     return ledger.task(slug, agent.task) or {}
