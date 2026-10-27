@@ -340,10 +340,10 @@ the member's own keys.
 
 ### Limitations
 
-- The controller's wake and escalation pass, swarm status, handoff mailbox and swarm removal read only the
-  controller inbox. Mail held for an agent a member runs gets no wake or escalation, and the controller's seen marks
-  for such agents stay in the controller keys. The exit sweep reads every reachable member inbox: it settles a
-  departed agent's mail there and runs the [seat mail move](#seat-mail-follows-its-occupant).
+- The controller's wake and escalation pass, exit sweep, swarm status, handoff mailbox and swarm removal read every
+  joined member's inbox as well as the controller's. Mail sent to a seat while it was empty still waits in the
+  controller keys until the next tick's [seat mail move](#seat-mail-follows-its-occupant), and master seat mail
+  never moves.
 - A member-hosted agent cannot yet complete a life: its agent record writes, such as order consumer binding, take
   master, done, handoff and seat exits, sit outside its keys and are refused.
 - A member's master pool, filled while every live master sat on that member, drains only on the next send there.
