@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts import master_claude_login as login
-from scripts import master_logins
+from scripts import master_logins, terminate_agent
 from scripts.feature_checks import front_door_login as check
 
 
@@ -14,6 +14,11 @@ def ah(tmp_path, monkeypatch):
     monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "ah"))
     monkeypatch.delenv(login.SLOT_ENV, raising=False)
     monkeypatch.delenv(login.ORDER_ENV, raising=False)
+    monkeypatch.setattr(
+        terminate_agent,
+        "sessions",
+        lambda: [SimpleNamespace(name=name) for name in ("master@rig-1", "master@doctor-1", "master@token")],
+    )
     return tmp_path / "ah"
 
 
@@ -34,11 +39,15 @@ def _agent(name, seat="", lane="master", state="working", account=""):
 
 
 class Store:
-    def __init__(self, swarms):
+    def __init__(self, swarms, state="running"):
         self.swarms = swarms
+        self.state = state
 
     def slugs(self):
         return sorted(self.swarms)
+
+    def config(self, slug):
+        return SimpleNamespace(state=self.state)
 
     def agents(self, slug):
         return self.swarms[slug]
@@ -110,6 +119,23 @@ def test_live_routes_keep_the_swarm_front_door_and_account(monkeypatch):
     assert check.front_doors(Store({"rig": [_agent("master@token", account="route")]})) == [
         check.FrontDoor("rig", "master@token", "", "route")
     ]
+
+@pytest.mark.parametrize("state", ["stopped", "paused"])
+def test_front_doors_excludes_swarms_that_are_not_running(state, monkeypatch):
+    _stored(1, "one@example.com")
+    _room(monkeypatch, oneatexample_com=60)
+    current = Store({"rig": [_agent("master@rig-1", account="token")]}, state=state)
+    assert check.front_doors(current) == []
+    assert check.main(current) == 0
+
+
+def test_front_doors_excludes_a_working_master_whose_session_is_gone(monkeypatch):
+    _stored(1, "one@example.com")
+    _room(monkeypatch, oneatexample_com=60)
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    current = Store({"rig": [_agent("master@rig-1", account="token")]})
+    assert check.front_doors(current) == []
+    assert check.main(current) == 0
 
 
 def test_login_order_uses_preference_then_room_then_slot(monkeypatch):
