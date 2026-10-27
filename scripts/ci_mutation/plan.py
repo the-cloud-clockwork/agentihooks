@@ -92,10 +92,15 @@ def estimate(
                 raise SystemExit(f"{path}: not mutated, no matching or importing test modules")
             continue
         tests.update(chosen)
-        _, mutations = changed_mutations(path, (root / path).read_text(), lines)
-        # mutmut emits only mutants inside a function or method.
-        mutants += sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
+        mutants += mutant_count(path, (root / path).read_text(), frozenset(lines))
     return mutants * MUTANT_SECONDS, mutants, sorted(tests)
+
+
+@cache
+def mutant_count(path: str, source: str, lines: frozenset[int]) -> int:
+    _, mutations = changed_mutations(path, source, lines)
+    # mutmut emits only mutants inside a function or method.
+    return sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
 
 
 def every_test(root: Path) -> list[str]:
@@ -624,8 +629,9 @@ def main() -> int:
         if args.repository and not changes:
             print("No change remains to mutate, so the recorded dev coverage is not read.")
         elif args.repository:
-            for path in changes:
+            for path, lines in changes.items():
                 select_tests(root, Path(path))
+                mutant_count(path, (root / path).read_text(), frozenset(lines))
             found, failure = record.result()
             if failure:
                 print(
