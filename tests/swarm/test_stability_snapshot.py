@@ -119,3 +119,17 @@ def test_the_probe_command_reports_the_snapshot_invariants():
     ]
     assert [item.name for item in found] == PROBES
     assert list(SNAPSHOT["probes"]["invariants"]) == PROBES
+
+
+def test_the_window_baseline_is_seven_samples_with_each_invariant_pass_count():
+    window = SNAPSHOT["probes"]["window"]
+    assert (window["start"], window["end"], window["samples"]) == ("2026-10-27T16:33:06Z", "2026-10-27T17:45:38Z", 7)
+    assert {name: found["passed"] for name, found in SNAPSHOT["probes"]["invariants"].items()} == {
+        "every hive live": 7,
+        "every hive agent joins and writes the ledger": 0,
+        "launch success": 0,
+        "full task list reads per minute": 0,
+        "workstation agents at or under the root cap": 0,
+        "merge queue groups moving": 7,
+        "release age": 7,
+    }
