@@ -34,6 +34,8 @@ def complete():
         "stage-budget",
         "reuse",
     ]
+    if "install-smoke" in ci_gate_queue.SKIPPED:
+        skipped.append("install-smoke")
     return [
         {"id": index, "name": name, "status": "completed", "conclusion": result}
         for index, (name, result) in enumerate(
@@ -147,6 +149,8 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
             }
         }
     }
+    if "install-smoke" in ci_gate_queue.SKIPPED:
+        workflow["test.yml"]["jobs"]["gate-required"]["needs"].append("install-smoke")
     normalized = ci_gate_queue.normalize(workflow)
     assert normalized["test.yml"]["jobs"]["gate-required"]["name"] == "Gate — Required"
     assert normalized["test.yml"]["jobs"]["queue-fail-fast"]["name"] == "queue-fail-fast"

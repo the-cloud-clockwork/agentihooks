@@ -173,6 +173,8 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
     }
     if (_ROOT / ".github/workflows/count-record.yml").exists():
         expected.remove("count-record")
+    if "install-smoke" in jobs:
+        expected.add("install-smoke")
     assert push_only == expected
     assert queued <= _gate_needs(jobs)
 
