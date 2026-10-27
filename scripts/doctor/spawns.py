@@ -5,13 +5,9 @@ from scripts.swarm.health.findings import Finding
 
 TICK_MS = 60_000
 FAILURE = re.compile(r"^(?:spawn failed for ([^\s,]+).*?|master spawn failed): (.+)$")
-REFUSED_COUNT = re.compile(r"\bsessions=(\d+) cap=(\d+)\b")
 
 
-def _reservation_room(snapshot: dict, reason: str) -> bool:
-    counted = REFUSED_COUNT.search(reason)
-    if counted:
-        return int(counted[1]) < int(counted[2])
+def _reservation_room(snapshot: dict) -> bool:
     return any(
         row["harness"] == snapshot.get("harness")
         and row["state"] == "OPEN"
@@ -37,7 +33,7 @@ def failed(record: dict) -> list[Finding]:
         if match:
             subject = match[1] or "master"
             snapshot = capacity.pop(subject, {})
-            if "account reservation is full" in match[2] and not _reservation_room(snapshot, match[2]):
+            if "account reservation is full" in match[2] and not _reservation_room(snapshot):
                 continue
             failures.setdefault(subject, []).append(match[2])
     return [

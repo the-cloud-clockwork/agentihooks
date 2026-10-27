@@ -104,8 +104,8 @@ def test_a_full_account_refusal_is_judged_by_the_count_it_reports(sessions, coun
     )
     record["actions"] = [
         f"{slug}: spawn capacity for dt2: {json.dumps(snapshot)}",
-        f"{slug}: spawn failed for dt2, task dt2 reopened: {refusal}",
-        f"{slug}: spawn failed for dt2, task dt2 reopened: no hive for ci has room: h1 missing telemetry: no fresh headroom reading",
+        f"{slug}: spawn failed for dt2: {refusal}",
+        f"{slug}: spawn failed for dt2: no hive for ci has room: h1 missing telemetry: no fresh headroom reading",
     ]
     [found] = spawns.failed(record)
     assert found.measure == 1 + count
