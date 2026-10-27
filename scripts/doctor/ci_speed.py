@@ -342,7 +342,7 @@ def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int)
 
 
 def raisable(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int) -> dict:
-    """Unjudged, returned or past the judged bar inside the cooldown, each with the verdict it came back after."""
+    """Unjudged, returned or inside the cooldown, each with the verdict it came back after."""
     raised = {}
     for finding in found:
         record = json.loads(records[finding.id])
