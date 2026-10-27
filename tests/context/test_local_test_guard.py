@@ -404,6 +404,8 @@ PLANNER_WRAPPER = (
         'cd /w && timeout 400 ~/.venv/bin/python "$S/run_main.py" --base abc > "$S/log" 2>&1',
         f"cat <<'EOF' > probe.py\n{PLANNER_WRAPPER}EOF\npython3 -X faulthandler probe.py",
         "tee profile2.py >/dev/null <<EOF\nimport pytest\npytest.main()\nEOF\npython profile2.py",
+        f"cd /w\ncat > probe.py <<'EOF'\n{PLANNER_WRAPPER}EOF\npython probe.py",
+        f"cat > notes.py <<-EOF\n\tprint(1)\n\tEOF\ncat > probe.py <<'EOF'\n{PLANNER_WRAPPER}EOF\npython probe.py",
     ],
 )
 def test_a_wrapper_script_written_by_a_heredoc_is_judged_by_its_source(command, monkeypatch):
@@ -431,12 +433,34 @@ def test_a_wrapper_script_on_disk_is_judged_by_its_source(tmp_path, monkeypatch)
     check_local_tests({"tool_name": "Bash", "tool_input": {"command": f"python {tmp_path}/report.py"}})
 
 
+def test_a_wrapper_script_is_read_from_the_payload_folder_up_to_its_size_limit(tmp_path, monkeypatch):
+    from hooks.context import local_test_guard
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    monkeypatch.chdir(tmp_path)
+    folder = tmp_path / "work"
+    folder.mkdir()
+    (folder / "profile2.py").write_text(PLANNER_WRAPPER)
+    (folder / "notes.py").write_bytes(b"print('\xff')\n")
+    monkeypatch.setattr(local_test_guard, "_SCRIPT_BYTES", len(PLANNER_WRAPPER.encode()))
+    for command in ["python profile2.py", "python3@3.12 profile2.py"]:
+        with pytest.raises(BlockAction, match="draft pull request"):
+            local_test_guard.check_local_tests(
+                {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(folder)}
+            )
+    local_test_guard.check_local_tests(
+        {"tool_name": "Bash", "tool_input": {"command": "python notes.py"}, "cwd": str(folder)}
+    )
+
+
 @pytest.mark.parametrize(
     "command",
     [
         'cat > "$S/report.py" <<\'EOF\'\nimport json\nprint(json.dumps({}))\nEOF\npython "$S/report.py"',
         f"cat > notes.md <<'EOF'\n{PLANNER_WRAPPER}EOF\npython report.py",
         "python missing_script.py",
+        "cat > read_runner.py <<'EOF'\nimport inspect\nimport mutmut.__main__ as runner\n"
+        "print(inspect.getsource(runner))\nEOF\npython3 read_runner.py",
     ],
 )
 def test_wrapper_scripts_that_run_no_tests_pass(command, monkeypatch):

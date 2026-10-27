@@ -265,7 +265,7 @@ def _heredoc_scripts(command: str) -> dict[str, str]:
             continue
         body = []
         for content in lines:
-            if content.rstrip("\r\n").lstrip("\t") == marker["end"]:
+            if content.strip() == marker["end"]:
                 break
             body.append(content)
         written.update((Path(name).name, "".join(body)) for name in _SCRIPT_NAME.findall(line))
