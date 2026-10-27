@@ -421,6 +421,46 @@ def test_a_selection_over_its_leg_budget_runs_the_full_suite(heavy):
     assert decide(heavy, ["hooks/sample.py"], durations) == ("full", [])
 
 
+def suite(selected, total):
+    return {**selected, **seconds(test_other=total - sum(selected.values()))}
+
+
+def test_a_selection_over_its_leg_budget_spreads_one_full_shard_per_leg(heavy):
+    durations = suite(
+        seconds(test_sample=50.0, test_heavy1=200.0, test_heavy2=200.0, test_heavy3=200.0),
+        300.0 * ci_select.FULL_SHARDS,
+    )
+    scope, legs = decide(heavy, ["hooks/sample.py"], durations)
+    assert scope == "selected"
+    assert len(legs) == 3
+    assert sorted(file for leg in legs for file in leg) == [
+        "tests/test_heavy1.py",
+        "tests/test_heavy2.py",
+        "tests/test_heavy3.py",
+        "tests/test_sample.py",
+    ]
+
+
+def test_a_selection_at_one_full_shard_per_leg_still_runs_selected(heavy):
+    durations = suite(
+        seconds(test_sample=0.5, test_heavy1=300.0, test_heavy2=300.0, test_heavy3=299.5),
+        300.0 * ci_select.FULL_SHARDS,
+    )
+    assert decide(heavy, ["hooks/sample.py"], durations)[0] == "selected"
+
+
+def test_a_selection_over_one_full_shard_per_leg_runs_the_full_suite(heavy):
+    durations = suite(
+        seconds(test_sample=1.0, test_heavy1=300.0, test_heavy2=300.0, test_heavy3=299.5),
+        300.0 * ci_select.FULL_SHARDS,
+    )
+    assert decide(heavy, ["hooks/sample.py"], durations) == ("full", [])
+
+
+def test_the_full_shard_count_is_the_workflow_unit_shard_count():
+    assert len(jobs()["unit"]["strategy"]["matrix"]["shard"]) == ci_select.FULL_SHARDS
+
+
 @pytest.mark.parametrize(("total", "count"), [(1.0, 1), (180.0, 1), (180.5, 2), (360.0, 2), (360.5, 3)])
 def test_a_selection_uses_one_leg_per_leg_budget_of_stored_time(heavy, total, count):
     durations = seconds(test_sample=total / 4, test_heavy1=total / 4, test_heavy2=total / 4, test_heavy3=total / 4)
