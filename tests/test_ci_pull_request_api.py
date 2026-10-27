@@ -199,6 +199,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/locked_tests.py",
         "scripts/size_limits.py",
         "scripts/swallowed_exceptions.py",
+        "scripts/threshold_pins.py",
         "scripts/swarm_ledger/artifact_sanity.py",
         "scripts/swarm_ledger/ledger_server.py",
         "tests/chart_examples.py",
