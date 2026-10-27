@@ -1,5 +1,6 @@
-"""The HOME resource monitor: agents by harness, live hives with their summed headroom, and running swarms."""
+"""The HOME resource monitor: agent processes and summed headroom from each live hive's heartbeat, and running swarms."""
 
+import json
 import time
 
 from redis import RedisError
@@ -26,23 +27,31 @@ def capacity(measured: dict) -> tuple[float, float, int, int]:
     return used, cores, max(total - available, 0), total
 
 
+def processes(store: object, hive: str) -> dict[str, int]:
+    """Agent processes one hive counted on its last heartbeat, by harness; its interactive slots are among them."""
+    sessions = json.loads(store.redis.get(f"{ports.hive().registry.key(hive)}:sessions") or "{}")
+    counts = dict.fromkeys(HARNESSES, 0)
+    for slot, count in sessions.items():
+        harness = slot.split(":")[0]
+        if harness in counts:
+            counts[harness] += count
+    return counts
+
+
 def view(store: object, now_ms: int) -> dict:
     registry, headroom = ports.hive().registry, ports.hive().headroom
-    agents = dict.fromkeys(HARNESSES, 0)
-    running = total = 0
-    for slug in store.slugs():
-        running += store.config(slug).state == "running"
-        for agent in store.agents(slug):
-            total += 1
-            if agent.harness in agents:
-                agents[agent.harness] += 1
+    running = sum(store.config(slug).state == "running" for slug in store.slugs())
     live = [hive for hive in registry.hives(store.redis) if registry.live(hive, now_ms)]
+    agents = dict.fromkeys(HARNESSES, 0)
+    for hive in live:
+        for harness, count in processes(store, hive["id"]).items():
+            agents[harness] += count
     measured = [m for m in (headroom.read(store.redis, hive["id"], now_ms) for hive in live) if m is not None]
     used, cores, used_mb, total_mb = (
         (sum(column) for column in zip(*map(capacity, measured))) if measured else (0, 0, 0, 0)
     )
     return {
-        "agents": {"total": total, **agents},
+        "agents": {"total": sum(agents.values()), **agents},
         "swarms": {"running": running},
         "hives": {"live": len(live), "measured": len(measured)},
         "cpu": {"used": round(used, 1), "cores": round(cores, 1)},

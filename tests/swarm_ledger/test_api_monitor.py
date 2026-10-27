@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest import mock
 
@@ -22,24 +23,31 @@ POD = {
 }
 
 
-class Store:
-    redis = object()
+class Redis:
+    def __init__(self, sessions):
+        self.sessions = sessions
 
-    def __init__(self, swarms):
+    def get(self, key):
+        hive = key.removeprefix("hive:").removesuffix(":sessions")
+        return json.dumps(self.sessions[hive]) if hive in self.sessions else None
+
+
+class Store:
+    def __init__(self, swarms, sessions=None):
         self.swarms = swarms
+        self.redis = Redis(sessions or {})
 
     def slugs(self):
         return list(self.swarms)
 
     def config(self, slug):
-        return SimpleNamespace(state=self.swarms[slug][0])
-
-    def agents(self, slug):
-        return [SimpleNamespace(harness=harness) for harness in self.swarms[slug][1]]
+        return SimpleNamespace(state=self.swarms[slug])
 
 
 def hive_port(hives, readings):
-    registry = SimpleNamespace(hives=lambda redis: hives, live=lambda hive, now: hive["live"])
+    registry = SimpleNamespace(
+        hives=lambda redis: hives, live=lambda hive, now: hive["live"], key=lambda hive: f"hive:{hive}"
+    )
     headroom = SimpleNamespace(read=lambda redis, hive, now: readings.get(hive))
     return SimpleNamespace(registry=registry, headroom=headroom)
 
@@ -56,20 +64,25 @@ def test_load_over_the_core_count_reads_as_every_core_busy():
     assert monitor.capacity({**HOST, "load5": 40.0})[0] == 16
 
 
-def test_view_counts_agents_by_harness_swarms_running_and_live_hives_only():
-    store = Store(
-        {
-            "a": ("running", ["claude", "claude", "codex"]),
-            "b": ("stopped", ["codex", ""]),
-            "c": ("running", []),
-        }
-    )
+def test_view_counts_agent_processes_on_live_hives_and_swarms_running():
+    sessions = {
+        "root": {
+            "claude:a": 3,
+            "claude:b": 1,
+            "codex:c": 2,
+            "interactive:claude:a": 1,
+            "_executions": {"codex:c": ["x"]},
+        },
+        "pod": {"claude:a": 2, "codex:c": 0, "other:z": 4},
+        "gone": {"claude:a": 9},
+    }
+    store = Store({"a": "running", "b": "stopped", "c": "running"}, sessions)
     hives = [{"id": "root", "live": True}, {"id": "pod", "live": True}, {"id": "gone", "live": False}]
     port = hive_port(hives, {"root": HOST, "pod": POD, "gone": HOST})
     with mock.patch.object(monitor.ports, "hive", return_value=port):
         data = monitor.view(store, NOW)
     assert data == {
-        "agents": {"total": 5, "claude": 2, "codex": 2},
+        "agents": {"total": 8, "claude": 6, "codex": 2},
         "swarms": {"running": 2},
         "hives": {"live": 2, "measured": 2},
         "cpu": {"used": 7.5, "cores": 20.0},
@@ -81,6 +94,7 @@ def test_a_live_hive_without_a_reading_is_counted_but_adds_no_load():
     port = hive_port([{"id": "root", "live": True}], {})
     with mock.patch.object(monitor.ports, "hive", return_value=port):
         data = monitor.view(Store({}), NOW)
+    assert data["agents"] == {"total": 0, "claude": 0, "codex": 0}
     assert data["hives"] == {"live": 1, "measured": 0}
     assert data["cpu"] == {"used": 0, "cores": 0}
     assert data["memory"] == {"used_mb": 0, "total_mb": 0}
