@@ -42,10 +42,13 @@ class Hive(Protocol):
     registry: Any
     launch: Any
     reports: Any
+    headroom: Any
+    herdr_stats: Any
 
 
 @runtime_checkable
 class Hooks(Protocol):
+    account_sessions: Any
     config: Any
     conditions: Any
     filters: Any
