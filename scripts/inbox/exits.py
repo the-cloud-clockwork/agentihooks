@@ -323,9 +323,7 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
                 agent.seat,
                 owner or None,
             ):
-                inbox.send(
-                    BY, notice_address(inbox, item), _told(item, owner, exit_text), fyi=True
-                )
+                inbox.send(BY, notice_address(inbox, item), _told(item, owner, exit_text), fyi=True)
 
 
 def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
