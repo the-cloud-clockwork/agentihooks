@@ -57,7 +57,7 @@ def is_test(path: str) -> bool:
 
 
 def needs_full_suite(changed: list[str]) -> bool:
-    return any(path in HARNESS or Path(path).name == CONFTEST for path in changed)
+    return any(Path(path).name == CONFTEST or path in HARNESS for path in changed)
 
 
 def is_doc(path: str) -> bool:
