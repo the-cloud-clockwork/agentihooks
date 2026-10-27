@@ -167,6 +167,15 @@ def test_every_next_outcome_makes_its_target_reachable(outcome):
     assert list(schema.parse(block(doc)).stages) == ["build", "verdict", "polish"]
 
 
+def test_a_next_target_that_is_not_text_is_refused_without_reaching_anything():
+    errors = refused(block(document(stages__build__next={"pass": ["verdict"]}))).splitlines()
+
+    assert errors == [
+        "stages.verdict: not reachable from the head build",
+        "stages.build.next.pass: ['verdict'] is not a stage, exit or null",
+    ]
+
+
 def test_an_input_naming_an_unknown_stage_is_refused():
     errors = refused(block(document(stages__build__input=["case", "plan"])))
 
