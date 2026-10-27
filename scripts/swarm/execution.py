@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import functools
 import json
+import threading
 import time
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING
@@ -13,6 +15,16 @@ WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
 PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control", "desired_route_kind")
 ARCHIVE = "executions-archive"
+WRITES = threading.RLock()
+
+
+def _serialized(method):
+    @functools.wraps(method)
+    def locked(*args, **kwargs):
+        with WRITES:
+            return method(*args, **kwargs)
+
+    return locked
 
 
 if TYPE_CHECKING:
@@ -191,6 +203,7 @@ class ExecutionRegistry:
             result.append(AgentRecord(**row))
         return result
 
+    @_serialized
     def put(self, slug: str, agent: AgentRecord) -> None:
         from redis.exceptions import WatchError
 
@@ -238,6 +251,7 @@ class ExecutionRegistry:
             self.conflict(slug, "execution seat does not belong to the swarm")
         _validate_target(agent.runtime_backend, agent.runtime_target, lambda message: self.conflict(slug, message))
 
+    @_serialized
     def start(self, slug: str, agent: AgentRecord, previous_execution_id: str) -> AgentRecord:
         from redis.exceptions import WatchError
 
@@ -326,6 +340,7 @@ class ExecutionRegistry:
         ):
             self.conflict(slug, "Pod UID already belongs to another execution")
 
+    @_serialized
     def update(self, slug: str, agent: AgentRecord) -> None:
         from redis.exceptions import WatchError
 
@@ -355,6 +370,7 @@ class ExecutionRegistry:
                     continue
         raise SwarmError("execution history kept changing; update was not committed")
 
+    @_serialized
     def set_pane(self, slug: str, execution_id: str, pane_id: str) -> None:
         from redis.exceptions import WatchError
 
