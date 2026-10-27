@@ -480,7 +480,7 @@ def test_discovery_fetches_each_base_diff_in_one_request_before_reading_files(tm
     check_output = scope.subprocess.check_output
 
     def recorded(command, **kwargs):
-        calls.append(command)
+        calls.append((command, kwargs))
         return check_output(command, **kwargs)
 
     monkeypatch.setattr(scope.subprocess, "check_output", recorded)
@@ -488,8 +488,8 @@ def test_discovery_fetches_each_base_diff_in_one_request_before_reading_files(tm
     scope.discover_changes(tmp_path, [first, second], "HEAD")
     paths = ["--", "hooks/", "scripts/", "tests"]
     assert calls[:2] == [
-        ["git", "diff", "--no-renames", "--numstat", first, "HEAD", *paths],
-        ["git", "diff", "--no-renames", "--numstat", second, "HEAD", *paths],
+        (["git", "diff", "--no-renames", "--numstat", first, "HEAD", *paths], {"cwd": tmp_path}),
+        (["git", "diff", "--no-renames", "--numstat", second, "HEAD", *paths], {"cwd": tmp_path}),
     ]
 
 
