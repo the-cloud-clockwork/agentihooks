@@ -72,7 +72,7 @@ _PYTHON_TEST = re.compile(
 )
 _MUTATION_PATH = re.compile(r"(?:^|/)scripts/ci_mutation(?!/clearances\.py$)(?:/|$)")
 _HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(?P<q>['\"]?)(?P<end>\w+)(?P=q)")
-_SCRIPT_NAME = re.compile(r"[^\s'\"<>|;&]+\.py\b")
+_WRITTEN_SCRIPT = re.compile(r"(?:>>?|\btee(?:\s+-\w+)*)\s*['\"]?([^\s'\"<>|;&]+\.py)\b")
 _SCRIPT_BYTES = 1_000_000
 _NODE_TEST = re.compile(r"\b(?:jest|vitest|mocha)\b|node:test")
 _LITERAL = (
@@ -268,12 +268,13 @@ def _heredoc_scripts(command: str) -> dict[str, str]:
             if content.strip() == marker["end"]:
                 break
             body.append(content)
-        written.update((Path(name).name, "".join(body)) for name in _SCRIPT_NAME.findall(line))
+        for name in _WRITTEN_SCRIPT.findall(line):
+            written[Path(name).name] = "".join(body)
     return written
 
 
 def _expanded(path: str) -> Path:
-    return Path(os.path.expanduser(os.path.expandvars(path)))
+    return Path(os.path.expandvars(path)).expanduser()
 
 
 def _script_on_disk(script: str, folders: list[str], cwd: str) -> str | None:
@@ -290,10 +291,8 @@ def _script_runs_tests(tokens: list[str], folders: list[str], written: dict[str,
     script = _python_script(tokens[1:])
     if script is None:
         return False
-    source = written.get(Path(script).name)
-    if source is None:
-        source = _script_on_disk(script, folders, cwd)
-    return source is not None and _python_code_runs_tests(source)
+    sources = (written.get(Path(script).name), _script_on_disk(script, folders, cwd))
+    return any(_python_code_runs_tests(source) for source in sources if source)
 
 
 def check_local_tests(payload: dict) -> None:

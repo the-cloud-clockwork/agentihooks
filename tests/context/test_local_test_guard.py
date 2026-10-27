@@ -442,15 +442,22 @@ def test_a_wrapper_script_is_read_from_the_payload_folder_up_to_its_size_limit(t
     folder.mkdir()
     (folder / "profile2.py").write_text(PLANNER_WRAPPER)
     (folder / "notes.py").write_bytes(b"print('\xff')\n")
+    (folder / "padded.py").write_text(PLANNER_WRAPPER + "#")
     monkeypatch.setattr(local_test_guard, "_SCRIPT_BYTES", len(PLANNER_WRAPPER.encode()))
-    for command in ["python profile2.py", "python3@3.12 profile2.py"]:
+    for command in [
+        "python profile2.py",
+        "python3@3.12 profile2.py",
+        "python profile2.py <<'EOF'\nEOF",
+        "cat > /elsewhere/profile2.py <<'EOF'\nprint(1)\nEOF\npython profile2.py",
+    ]:
         with pytest.raises(BlockAction, match="draft pull request"):
             local_test_guard.check_local_tests(
                 {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(folder)}
             )
-    local_test_guard.check_local_tests(
-        {"tool_name": "Bash", "tool_input": {"command": "python notes.py"}, "cwd": str(folder)}
-    )
+    for command in ["python notes.py", "python padded.py"]:
+        local_test_guard.check_local_tests(
+            {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(folder)}
+        )
 
 
 @pytest.mark.parametrize(
