@@ -22,3 +22,9 @@ class Hive:
         from scripts.hive import reports
 
         return reports
+
+    @property
+    def headroom(self):
+        from scripts.hive import headroom
+
+        return headroom

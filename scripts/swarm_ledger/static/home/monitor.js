@@ -1,0 +1,78 @@
+import { readMonitor } from "../js/api.js";
+
+const EVERY_MS = 10000;
+const GIB = 1024;
+const ROWS = [
+  ["agents", "Agents"], ["claude", "Claude", "sub"], ["codex", "Codex", "sub"],
+  ["hives", "Hives"], ["swarms", "Swarms"], ["cpu", "CPU", "gauge"], ["memory", "Memory", "gauge"],
+];
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+  el.append(...kids);
+  return el;
+}
+
+function share(used, total) {
+  return total > 0 ? Math.min(used / total, 1) : 0;
+}
+
+function level(part) {
+  return part >= 0.9 ? "high" : part >= 0.75 ? "warm" : "ok";
+}
+
+function gauge(row, detail, part) {
+  row.querySelector("dd").textContent = `${Math.round(part * 100)}%`;
+  row.querySelector(".detail").textContent = detail;
+  row.style.setProperty("--part", part.toFixed(3));
+  row.dataset.level = level(part);
+  row.querySelector(".bar").setAttribute("aria-valuenow", String(Math.round(part * 100)));
+}
+
+function paint(box, d) {
+  const cell = (key) => box.querySelector(`[data-key="${key}"]`);
+  const set = (key, text) => { cell(key).querySelector("dd").textContent = text; };
+  set("agents", String(d.agents.total));
+  set("claude", String(d.agents.claude));
+  set("codex", String(d.agents.codex));
+  set("hives", String(d.hives.live));
+  set("swarms", `${d.swarms.running} running`);
+  cell("swarms").dataset.on = d.swarms.running ? "yes" : "no";
+  gauge(cell("cpu"), `${d.cpu.used.toFixed(1)} of ${d.cpu.cores} cores`, share(d.cpu.used, d.cpu.cores));
+  const gb = (mb) => (mb / GIB).toFixed(1);
+  gauge(cell("memory"), `${gb(d.memory.used_mb)} of ${gb(d.memory.total_mb)} GB`, share(d.memory.used_mb, d.memory.total_mb));
+  const partial = d.hives.measured < d.hives.live;
+  cell("cpu").title = cell("memory").title = partial
+    ? `${d.hives.measured} of ${d.hives.live} hives reported their load; the rest are not counted`
+    : `Summed across ${d.hives.live} live hive${d.hives.live === 1 ? "" : "s"}, five minute load`;
+}
+
+export function monitor() {
+  const list = h("dl", {});
+  for (const [key, label, kind] of ROWS) {
+    const row = h("div", { class: `fm${kind ? ` ${kind}` : ""}`, "data-key": key }, h("dt", {}, label), h("dd", {}, "—"));
+    if (kind === "gauge") row.append(h("span", { class: "detail" }, "—"), h("span", { class: "bar", role: "meter", "aria-label": `${label} in use`, "aria-valuemin": "0", "aria-valuemax": "100" }));
+    list.append(row);
+  }
+  const state = h("span", { class: "monitor-state", "data-state": "wait" }, "reading");
+  const box = h("aside", { class: "monitor", "aria-labelledby": "monitor-title" },
+    h("div", { class: "monitor-head" }, h("h2", { id: "monitor-title" }, "Resource Monitor"), state), list);
+  const read = async () => {
+    try {
+      const resp = await readMonitor();
+      if (!resp.ok) throw new Error(String(resp.status));
+      paint(box, (await resp.json()).data);
+      state.dataset.state = "live";
+      state.textContent = "live";
+      state.title = `Read ${new Date().toLocaleTimeString()}`;
+    } catch (error) {
+      state.dataset.state = "lost";
+      state.textContent = "offline";
+      state.title = `The resources could not be read (${error.message}); the figures are the last ones read`;
+    }
+  };
+  read();
+  setInterval(read, EVERY_MS);
+  return box;
+}

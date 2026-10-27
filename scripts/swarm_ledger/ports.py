@@ -42,6 +42,7 @@ class Hive(Protocol):
     registry: Any
     launch: Any
     reports: Any
+    headroom: Any
 
 
 @runtime_checkable
