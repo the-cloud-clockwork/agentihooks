@@ -811,7 +811,13 @@ def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, m
 
 @pytest.mark.parametrize(
     "changed, touched",
-    [("scripts/sample.py", True), ("hooks/sample.py", True), ("scripts/notes.txt", False), ("tests/test_x.py", False)],
+    [
+        ("scripts/sample.py", True),
+        ("hooks/sample.py", True),
+        ("scripts/caf\u00e9.py", True),
+        ("scripts/notes.txt", False),
+        ("tests/test_x.py", False),
+    ],
 )
 def test_touches_code_names_only_hooks_or_scripts_python_changes(tmp_path, changed, touched):
     _git(tmp_path, "init", "-q")

@@ -103,7 +103,7 @@ def every_test(root: Path) -> list[str]:
 
 
 def touches_code(root: Path, base: str, head: str) -> bool:
-    names = _git(root, "diff", "--name-only", f"{base}...{head}", "--", "hooks/", "scripts/").splitlines()
+    names = _git(root, "diff", "--name-only", "-z", f"{base}...{head}", "--", "hooks/", "scripts/").split("\0")
     return any(name.endswith(".py") for name in names)
 
 
