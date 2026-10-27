@@ -8,6 +8,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 CONTEXT = "context.sha"
+# A restored cache of about 1 GB compressed held 3 GB of records and outran the planner's five minute job.
+CACHE_BYTES = 512 * 1024 * 1024
+
+
+def records_within(folder: Path) -> tuple[list[Path], list[Path]]:
+    sized = sorted(((path.stat(), path) for path in folder.glob("*.json")), key=lambda item: -item[0].st_mtime)
+    kept, dropped, total = [], [], 0
+    for stat, path in sized:
+        total += stat.st_size
+        (kept if total <= CACHE_BYTES else dropped).append(path)
+    return kept, dropped
+
+
+def cap(folder: Path) -> int:
+    dropped = records_within(folder)[1]
+    for path in dropped:
+        path.unlink()
+    return len(dropped)
 
 
 def source_path(filename: str, work: Path, root: Path, tracked: set[str] | None = None) -> str | None:
@@ -90,6 +108,7 @@ class StoredStats:
             return None
 
     def prune(self) -> None:
+        cap(self.folder)
         for record_file in self.folder.glob("*.json"):
             self.read(record_file)
 

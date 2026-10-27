@@ -3861,17 +3861,21 @@ jobs:
         uses: actions/download-artifact@v4
         with: *mutation-download-every-parts-test-stats-cache
 
+      - uses: actions/setup-python@v5
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Cap the merged test stats
+        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
+        run: python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap; print(f"Mutation stats cache: dropped {cap(Path(sys.argv[1]))} records past the cap")' .mutation-stats-cache
+
       - name: Save the merged test stats
         if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.mutation-stats-cache/**') != ''
         uses: actions/cache/save@v4
         with:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - uses: actions/setup-python@v5
-        if: needs.mutation-plan.outputs.forwarded != 'true'
-        with:
-          python-version: "3.12"
 
       - uses: astral-sh/setup-uv@v10.2.0
         if: needs.mutation-plan.outputs.forwarded != 'true'

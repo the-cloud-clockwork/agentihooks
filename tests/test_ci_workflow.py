@@ -2049,8 +2049,18 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     assert merged["uses"] == "actions/cache/save@v4"
     assert merged["if"] == f"{first} && hashFiles('.mutation-stats-cache/**') != ''"
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
+    capped = mutation[mutation_names.index("Cap the merged test stats")]
+    assert capped["if"] == first
+    assert "import cap; " in capped["run"] and capped["run"].endswith("' .mutation-stats-cache")
     assert mutation_names.index(base["name"]) == 1
-    order = [base["name"], download["name"], merged["name"], "Install dependencies", "Mutate changed Python files"]
+    order = [
+        base["name"],
+        download["name"],
+        capped["name"],
+        merged["name"],
+        "Install dependencies",
+        "Mutate changed Python files",
+    ]
     assert [mutation_names.index(name) for name in order] == sorted(mutation_names.index(name) for name in order)
 
 

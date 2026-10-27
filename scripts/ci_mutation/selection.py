@@ -21,6 +21,7 @@ from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
 from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.scope import selects, test_file
 from scripts.ci_mutation.stats import write_part
+from scripts.ci_mutation.stats_dependencies import records_within
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 # This group only loads fakeredis once per xdist worker; it guards no shared resource.
@@ -95,7 +96,7 @@ def unit_records(root: Path) -> list[dict[str, float]]:
 
 def traced_records(root: Path) -> list[dict[str, float]]:
     folder = Path(os.environ.get("MUTATION_STATS_CACHE", root / ".mutation-stats-cache"))
-    records = [json.loads(path.read_text()) for path in folder.glob("*.json")]
+    records = (json.loads(path.read_text()) for path in records_within(folder)[0])
     return [record["durations"] for record in records if record["status"] == 0]
 
 

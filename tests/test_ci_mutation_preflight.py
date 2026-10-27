@@ -367,6 +367,11 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     }
     merged = refine_steps[refine_names.index("Save the merged test stats")]
     assert merged["uses"] == "actions/cache/save@v4"
+    capped = refine_steps[refine_names.index("Cap the merged test stats")]
+    assert "import cap; " in capped["run"] and capped["run"].endswith("' .mutation-stats-cache")
+    assert (
+        refine_names.index(download["name"]) < refine_names.index(capped["name"]) < refine_names.index(merged["name"])
+    )
     assert merged["if"] in {
         "success() && hashFiles('.mutation-stats-cache/**') != ''",
         "success() && steps.merged-stats.outputs.found == 'true'",

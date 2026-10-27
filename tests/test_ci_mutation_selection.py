@@ -734,6 +734,51 @@ def test_statistics_timings_keep_maxima_and_normalize_groups_from_each_cache_loc
     }
 
 
+def test_sizing_reads_only_the_newest_records_within_the_cache_cap(tmp_path, monkeypatch):
+    import os
+
+    from scripts.ci_mutation import stats_dependencies
+    from scripts.ci_mutation.selection import file_seconds
+
+    test = "tests/test_sample.py::test_value"
+    cache = tmp_path / ".mutation-stats-cache"
+    cache.mkdir()
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    for age, seconds in enumerate([2, 50]):
+        path = cache / f"{seconds}.json"
+        path.write_text(json.dumps({"status": 0, "durations": {test: seconds}}))
+        os.utime(path, (1000 - age, 1000 - age))
+    monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", (cache / "2.json").stat().st_size)
+    assert file_seconds(tmp_path, [test]) == {test: 2.01}
+
+
+@pytest.mark.wall_clock
+def test_sizing_against_a_stats_cache_of_the_observed_shape_finishes_in_seconds(tmp_path, monkeypatch):
+    import time
+
+    from scripts.ci_mutation import stats_dependencies
+    from scripts.ci_mutation.plan import stats_part_count
+
+    (tmp_path / "tests").mkdir()
+    files = [f"tests/test_{index}.py" for index in range(40)]
+    for path in files:
+        (tmp_path / path).write_text("def test_one():\n    pass\n")
+    cache = tmp_path / ".mutation-stats-cache"
+    cache.mkdir()
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    # Each stored record of 27 October held about 150 KB of input digests beside a few durations.
+    inputs = {f"scripts/module_{index}.py": "0" * 64 for index in range(1800)}
+    for index in range(200):
+        durations = {f"{files[index % 40]}::test_{case}": 0.5 for case in range(20)}
+        (cache / f"{index}.json").write_text(json.dumps({"status": 0, "durations": durations, "inputs": inputs}))
+    monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", 4 * 1024 * 1024)
+    started = time.monotonic()
+    parts, slowest = stats_part_count(tmp_path, files, 60, 10)
+    assert time.monotonic() - started < 20
+    assert 1 <= parts <= 10
+    assert slowest > 0
+
+
 def test_statistics_parts_partition_every_test_when_each_part_restores_a_different_cache(tmp_path, monkeypatch):
     from scripts.ci_mutation.selection import part_files
 
