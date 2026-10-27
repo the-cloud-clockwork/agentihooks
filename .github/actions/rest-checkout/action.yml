@@ -1,0 +1,58 @@
+name: REST sparse checkout
+description: Read selected files from one repository revision without Git transport
+inputs:
+  repository:
+    required: true
+    description: Repository owner and name
+  ref:
+    required: true
+    description: Protected source revision
+  path:
+    required: true
+    description: Destination directory
+  token:
+    required: true
+    description: App token with contents read
+  sparse-checkout:
+    required: true
+    description: File paths and directory prefixes ending in a slash
+  persist-credentials:
+    default: 'false'
+    description: Must remain false
+  sparse-checkout-cone-mode:
+    default: 'false'
+    description: Must remain false
+outputs:
+  revision:
+    description: Source commit read by the archive request
+    value: ${{ steps.fetch.outputs.revision }}
+runs:
+  using: composite
+  steps:
+    - id: fetch
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPOSITORY: ${{ inputs.repository }}
+        REF: ${{ inputs.ref }}
+        DESTINATION: ${{ inputs.path }}
+        SELECTED_PATHS: ${{ inputs.sparse-checkout }}
+        PERSIST_CREDENTIALS: ${{ inputs.persist-credentials }}
+        CONE_MODE: ${{ inputs.sparse-checkout-cone-mode }}
+      run: |
+        set -euo pipefail
+        [[ "$PERSIST_CREDENTIALS" == false && "$CONE_MODE" == false ]]
+        revision=$(gh api "repos/$REPOSITORY/commits/$REF" --jq .sha)
+        patterns=()
+        while IFS= read -r selected; do
+          [[ -n "$selected" ]] || continue
+          if [[ "$selected" == */ ]]; then
+            patterns+=("*/$selected*")
+          else
+            patterns+=("*/$selected")
+          fi
+        done <<< "$SELECTED_PATHS"
+        [[ ${#patterns[@]} -gt 0 ]]
+        mkdir -p "$DESTINATION"
+        gh api "repos/$REPOSITORY/tarball/$revision" | tar -xz --strip-components=1 --wildcards -C "$DESTINATION" "${patterns[@]}"
+        echo "revision=$revision" >> "$GITHUB_OUTPUT"

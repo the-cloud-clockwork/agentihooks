@@ -2382,8 +2382,9 @@ jobs:
 
       # antoncore dev owns the dashboard, its checker and the swarm NATS users, so the pull request head is only the data they grade.
       - name: Check out the antoncore dashboard column checker
+        id: antoncore-checkout
         if: ${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}
-        uses: actions/checkout@v4
+        uses: ./.github/actions/rest-checkout
         with:
           repository: the-cloud-clockwork/antoncore
           ref: dev
@@ -2402,11 +2403,12 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           CLICKHOUSE: swarm-columns-${{ github.run_id }}-${{ github.run_attempt }}
+          ANTONCORE_REVISION: ${{ steps.antoncore-checkout.outputs.revision }}
         run: |
           set -euo pipefail
           trap 'docker rm -f "$CLICKHOUSE" >/dev/null 2>&1 || true' EXIT
           [[ -f .antoncore/scripts/swarm_dashboard_columns.py ]] || { echo "::error::The antoncore dashboard column checker could not be checked out."; exit 1; }
-          git -C .antoncore rev-parse HEAD
+          echo "$ANTONCORE_REVISION"
           for _ in $(seq 180); do
             [[ -s "$RUNNER_TEMP/columns-venv.status" && -s "$RUNNER_TEMP/clickhouse.status" ]] && break
             sleep 1
