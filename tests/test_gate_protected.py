@@ -1044,7 +1044,7 @@ def test_the_tests_gate_may_start_requiring_the_postgres_scenario_on_pull_reques
     head = copy.deepcopy(base)
     gate = head["test.yml"]["jobs"]["gate-required"]
     gate["steps"] = ci_reuse.postgres_required(gate["steps"])
-    assert '"writer-lock"]' in gate["steps"][0]["run"]
+    assert '"sonar", "writer-lock"]' in gate["steps"][0]["run"]
     config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
     assert gate_protected.grade(base, config, head, config, _TODAY, policy) == []
@@ -1226,8 +1226,9 @@ def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
     ("before", "after"),
     [
         ('then .value.result == "success"', 'then .value.result != "failure"'),
-        ('"semgrep", "writer-lock"]', '"semgrep"]'),
-        ('else ["sonar"] end', "else [] end"),
+        ('"semgrep", "sonar"', '"semgrep"'),
+        ('"sonar", "writer-lock"]', '"sonar"]'),
+        ('then ["sonar"] else [] end', 'then ["sonar"] else ["sonar"] end'),
         ("exit 1", "exit 0"),
     ],
 )
