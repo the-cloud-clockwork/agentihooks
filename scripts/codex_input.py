@@ -11,6 +11,7 @@ import tty
 # Remove this guard after herdr ships https://github.com/herdrdev/herdr/issues/5251.
 ESCAPE_WAIT_S = 1.0
 PASTE_END = b"\x1b[201~"
+FORWARDED = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
 class InputFramer:
@@ -122,6 +123,9 @@ def run(argv: list[str]) -> int:
     if pid == 0:
         termios.tcsetattr(0, termios.TCSANOW, saved)
         termios.tcsetwinsize(0, size)
+        for number in FORWARDED:
+            signal.signal(number, signal.SIG_DFL)
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, FORWARDED)
         os.execvp(argv[0], argv)
 
     def resize(number, frame):
@@ -130,8 +134,9 @@ def run(argv: list[str]) -> int:
     def forward(number, frame):
         os.killpg(pid, number)
 
-    previous = {number: signal.signal(number, forward) for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    previous = {number: signal.signal(number, forward) for number in FORWARDED}
     previous[signal.SIGWINCH] = signal.signal(signal.SIGWINCH, resize)
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, FORWARDED)
     try:
         tty.setraw(0)
         pump(master)
