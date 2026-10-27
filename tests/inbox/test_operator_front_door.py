@@ -96,11 +96,24 @@ def test_a_close_notice_for_an_operator_item_goes_to_the_front_door(inbox):
     assert any(asked.id in item.text and item.sender == exits.BY for item in inbox.open_mail(DOOR))
 
 
+def test_a_close_notice_for_a_minted_agent_operator_item_names_the_agent_at_the_front_door(inbox):
+    swarm = RedisStore(inbox.redis)
+    name = swarm.next_name(SLUG, "eng")
+    swarm.put_agent(SLUG, AgentRecord(name, "eng", "t2", pane_id="p2", seat=f"eng-2@{SLUG}"))
+    swarm.seats.occupy(f"eng-2@{SLUG}", name, 1)
+    asked = inbox.send("operator", name, "is the fix merged")
+    exits.settle(inbox, name, "", "finished its task and exited")
+    assert inbox.inbox("operator") == []
+    notices = [item.text for item in inbox.open_mail(DOOR) if item.sender == exits.BY]
+    assert notices == [exits._told(asked, name, "finished its task and exited")]
+
+
 def test_a_referred_answer_keeps_its_id_flag_and_replier(inbox):
     asked = inbox.send("operator", ENG.name, "is the fix merged")
     answer = inbox.reply(asked.id, ENG.name, "merged", fyi=True, answer_id="a1")
     assert (answer.id, answer.fyi, answer.address) == ("a1", True, DOOR)
-    assert inbox.history(asked.id)[-1]["by"] == ENG.name
+    last = inbox.history(asked.id)[-1]
+    assert (last["by"], last["reason"]) == (ENG.name, f"handed to {DOOR}: only the front door answers the operator")
 
 
 def test_a_referred_answer_retry_returns_the_first_answer(inbox):
