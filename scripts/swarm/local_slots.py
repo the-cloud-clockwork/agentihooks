@@ -100,5 +100,6 @@ def _local_worker(agent) -> bool:
         agent.runtime_backend == LOCAL
         and agent.hive in ("", hive_id())
         and agent.lane != "master"
-        and agent.state not in (STARTING, "finished", "ended")
+        and agent.state not in ("finished", "ended")
+        and (agent.state != STARTING or bool(agent.pane_id))
     )
