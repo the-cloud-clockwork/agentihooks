@@ -441,7 +441,7 @@ def test_terminal_relay_restores_state_and_forwards_controls(monkeypatch, status
 
 @pytest.mark.parametrize("terminal", [False, True])
 def test_exec_preserves_the_routed_argument_vector(monkeypatch, terminal):
-    from unittest.mock import Mock
+    from unittest.mock import Mock, call
 
     class Executed(Exception):
         pass
@@ -458,14 +458,19 @@ def test_exec_preserves_the_routed_argument_vector(monkeypatch, terminal):
     monkeypatch.setattr(codex_input.termios, "tcsetattr", setattrs)
     monkeypatch.setattr(codex_input.termios, "tcsetwinsize", setsize)
     monkeypatch.setattr(codex_input.pty, "fork", lambda: (0, 9))
-    monkeypatch.setattr(codex_input.signal, "signal", Mock())
-    monkeypatch.setattr(codex_input.signal, "pthread_sigmask", Mock())
+    install = Mock()
+    mask = Mock()
+    monkeypatch.setattr(codex_input.signal, "signal", install)
+    monkeypatch.setattr(codex_input.signal, "pthread_sigmask", mask)
     with pytest.raises(Executed):
         codex_input.run(argv)
     execvp.assert_called_once_with("codex", argv)
     if terminal:
         setattrs.assert_called_once_with(0, termios.TCSANOW, saved)
         setsize.assert_called_once_with(0, (55, 160))
+        forwarded = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+        assert install.call_args_list[-3:] == [call(number, signal.SIG_DFL) for number in forwarded]
+        assert mask.call_args_list[-1] == call(signal.SIG_UNBLOCK, forwarded)
     else:
         setattrs.assert_not_called()
         setsize.assert_not_called()
