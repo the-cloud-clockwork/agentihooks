@@ -16,6 +16,7 @@ task.
 """
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 from functools import partial
 
@@ -114,8 +115,8 @@ def _waiters(doc):
     return waiters
 
 
-def ordered(doc: dict, named: str, scores: dict) -> list[str]:
-    lane, depth, focus = LANES.get(named), chains(doc), _focus_order(doc)
+def ordered(doc: dict, named: str, scores: dict, caps: dict | None = None, weight: int = 50) -> list[str]:
+    lane, depth, focus = LANES.get(named), chains(doc), _focus_order(doc, caps, weight)
     position = {t["id"]: index for index, t in enumerate(doc["tasks"])}
     rows = [t for t in doc["tasks"] if t["id"] in depth and t.get("state") == "open" and not t.get("merged_into")]
     return [
@@ -133,9 +134,14 @@ def ordered(doc: dict, named: str, scores: dict) -> list[str]:
     ]
 
 
-def queue(doc: dict, fix: str) -> list[str]:
+def queue(doc: dict, fix: str, caps: dict | None = None, weight: int = 50) -> list[str]:
     fixed, guard, known = _banded(doc), guarded(doc, fix), {t["id"]: t for t in doc["tasks"]}
-    return sorted(ordered(doc, None, leverage(doc)), key=lambda task_id: _band(known[task_id], fixed, guard))
+    lined = ordered(doc, None, leverage(doc), caps, weight)
+    return sorted(lined, key=lambda task_id: _band(known[task_id], fixed, guard))
+
+
+def lane_caps(config) -> dict[str, int]:
+    return {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan}
 
 
 def claim_key(config, doc):
@@ -143,14 +149,14 @@ def claim_key(config, doc):
         return None
     fix = freeze.fix_phase(config)
     fixed, guard = _banded(doc), guarded(doc, fix)
-    lined = queue(doc, fix)
+    lined = queue(doc, fix, lane_caps(config), config.focus_weight)
     position = {task_id: index for index, task_id in enumerate(lined)}
     return lambda task: (_band(task, fixed, guard), position.get(task["id"], len(lined)))
 
 
 def guarded(doc: dict, fix: str) -> set[str]:
     graph, known, deferred = hierarchy.project(doc)[0], {t["id"]: t for t in doc["tasks"]}, _deferred(doc)
-    depth = chains({**doc, "tasks": [t for t in doc["tasks"] if not freeze.held(t, doc, graph, fix)]})
+    depth = chains({**doc, "tasks": [t for t in doc["tasks"] if not freeze.claim_gate(t, doc, graph, fix)]})
     longest = depth and max(depth.values())
     return {
         task_id
@@ -205,7 +211,8 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
     scores, fixed = leverage(doc), _fixed(doc)
     if config.autonomy in APPLIES:
         before, banded = _saved_heads(store, slug), _banded(doc)
-        leading = [t for t in queue(doc, fix) if t in claimable and (scores[t] or t in banded)]
+        lined_queue = queue(doc, fix, lane_caps(config), config.focus_weight)
+        leading = [t for t in lined_queue if t in claimable and (scores[t] or t in banded)]
         heads = _heads(store, slug, config, leading, known, before)
         landed = {
             lane: [t for t in before.get(lane, []) if t in head or known.get(t, {}).get("state") == "open"]
@@ -215,7 +222,8 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
         standing = {task_id: task_id in led for task_id in claimable}
         steps = _head_steps(slug, ledger, doc, before, heads, standing, landed)
     else:
-        lined = [t for t in ordered(doc, named, scores) if t in claimable and scores[t]]
+        lined_order = ordered(doc, named, scores, lane_caps(config), config.focus_weight)
+        lined = [t for t in lined_order if t in claimable and scores[t]]
         top = [t for t in lined if t not in fixed or known[t].get("rank") in WINDOW][:TOP]
         raises = [
             (known[t], _work(scores[t])) for t in top if known[t].get("rank") not in WINDOW[1:] and t not in fixed
@@ -393,13 +401,27 @@ def _downstream(task_id, waiters):
     return found
 
 
-def _focus_order(doc):
+HOLDING_STATES = ("claimed", "pr")
+
+
+def _focus_order(doc, caps=None, weight=50):
+    """Focused tasks sort first, except in a lane already at its focus-weight share of claimed/pr tasks."""
     targets = [row.get("target") for row in doc.get("freezes", []) if row.get("verb") == "focus"]
     nodes, _ = hierarchy.project(doc)
-    order = {}
-    for t in doc["tasks"]:
+    tasks = doc["tasks"]
+
+    def match(t):
         covers = {*_lineage(f"tasks/{t['id']}", nodes), f"lane:{t.get('lane')}", f"kind:{t.get('kind', 'code')}"}
-        order[t["id"]] = next((index for index, target in enumerate(targets) if target in covers), len(targets))
+        return next((index for index, target in enumerate(targets) if target in covers), None)
+
+    matched = {t["id"]: match(t) for t in tasks}
+    holding = Counter(t.get("lane") for t in tasks if t.get("state") in HOLDING_STATES and matched[t["id"]] is not None)
+    cap = {lane: (count * weight) // 100 for lane, count in (caps or {}).items()}
+    order = {}
+    for t in tasks:
+        index, lane = matched[t["id"]], t.get("lane")
+        over_cap = lane in cap and holding.get(lane, 0) >= cap[lane]
+        order[t["id"]] = len(targets) if index is None or over_cap else index
     return order
 
 
