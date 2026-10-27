@@ -402,6 +402,16 @@ def test_an_agent_limit_covering_every_ready_task_closes_a_raised_spawn_alert(st
     assert night_watch.read(store, SLUG).get("spawn") is None
 
 
+def test_a_wait_seen_exactly_at_the_freshness_edge_still_covers_its_task(store, monkeypatch):
+    rig = placed(store, monkeypatch)
+    plant(store, spawn=RAISED)
+    waits(store, NOW - placement_waits.FRESH_MS, {"t0": LOCAL_LIMIT, "t1": LOCAL_LIMIT})
+    spawn_stall.refuse_local(store, SLUG, "box", 6, 6, NOW)
+    run(store, rig, NOW, open_alert("spawn"))
+    ((alert, outcome),) = rig.ledger.closed
+    assert alert == "a1" and "local cap on box (6 of 6 agents)" in outcome
+
+
 def test_a_quota_hold_without_a_reason_says_no_lane_is_placed(store, monkeypatch):
     rig = Rig()
     held_master(store, rig.runtime)
