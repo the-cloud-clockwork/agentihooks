@@ -196,6 +196,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/packaging/swarm-smoke.sh",
         "scripts/packaging/swarm-smoke-parallel.sh",
         "scripts/dead_code.py",
+        "scripts/locked_tests.py",
         "scripts/size_limits.py",
         "scripts/swallowed_exceptions.py",
         "scripts/swarm_ledger/artifact_sanity.py",
