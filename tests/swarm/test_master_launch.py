@@ -439,6 +439,20 @@ def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(up, monk
     assert rt.masters == [] and [a.name for a in masters(store)] == [front.name]
 
 
+def test_a_live_front_door_in_a_one_seat_pool_gets_no_second_master(up, monkeypatch, capsys):
+    store, _, rt = up
+    front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="working", seat="master@sw", started_at=5)
+    store.put_agent("sw", front)
+    rt.live.add(front.name)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 1
+    assert (
+        "the front door master master@a1b2c3-0005 is working and every master seat is held (master seat count 1)"
+        in capsys.readouterr().err
+    )
+    assert rt.masters == [] and [a.name for a in masters(store)] == [front.name]
+
+
 def test_a_starting_front_door_with_a_free_counted_seat_gets_its_master_in_that_seat(up, monkeypatch, capsys):
     from scripts.swarm_v2 import masters as master_seats
 
