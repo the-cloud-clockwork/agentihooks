@@ -14,6 +14,13 @@ ANTON = "anton ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more 
 HIVE_FULL = f"{FULL}: {ANTON}"
 
 
+@pytest.fixture(autouse=True)
+def no_host_agents(monkeypatch):
+    from scripts.swarm import local_slots
+
+    monkeypatch.setattr(local_slots, "live", set)
+
+
 def capped(held, of, running, cpus=10):
     return (
         f"{HIVE_FULL}, and the local machine runs {held} of its {of} agents: cpu: {running} swarm agents at 0.5 CPU "
