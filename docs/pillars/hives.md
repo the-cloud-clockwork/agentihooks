@@ -340,7 +340,7 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 
 | Setting | Values | Default | Meaning |
 |---|---|---|---|
-| `name` | text | the hive id | Display name. |
+| `name` | text | the hive id | Display name. A hive with `ui=yes`, where the masters run, is always named `swarm-master`. |
 | `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. |
 | `ephemeral` | `yes`, `no` | `no` | The machine can disappear, such as a pod. Placement prefers lasting hives on a tie. |
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
