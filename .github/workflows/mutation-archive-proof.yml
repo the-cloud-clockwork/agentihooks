@@ -57,6 +57,7 @@ jobs:
           import os
           import subprocess
           import sys
+          import tomllib
           from pathlib import Path
           from scripts.ci_mutation.evidence import replay
 
@@ -80,8 +81,9 @@ jobs:
                   if row['status'] != 'survived':
                       selection = json.loads((bundle / group['name'] / 'changed-lines.json').read_text())
                       tests = sorted({test for change in selection.values() for test in change['tests']})
+                      config = tomllib.loads((work / 'pyproject.toml').read_text())['tool']['mutmut']
                       subprocess.run(
-                          [sys.executable, '-m', 'pytest', *tests, '-x', '-vv', '-o', 'addopts='],
+                          [sys.executable, '-m', 'pytest', *config['pytest_add_cli_args'], *tests, '-vv'],
                           cwd=work / 'mutants',
                           env=os.environ | manifest['env'] | {'MUTANT_UNDER_TEST': name},
                           check=True,
