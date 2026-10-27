@@ -88,7 +88,7 @@ def validate(args: argparse.Namespace) -> int:
 
 
 def run_folder(identifier: str) -> Path:
-    if not identifier or identifier in (".", "..") or Path(identifier).name != identifier:
+    if not identifier or identifier == ".." or Path(identifier).name != identifier:
         raise ValueError("run identifier must be a single name")
     return store.default_root() / identifier
 
@@ -100,7 +100,7 @@ def execute(folder: Path, state: dict) -> dict:
 
 
 def run_workflow(args: argparse.Namespace) -> dict:
-    found, errors = loader.resolve(Path.cwd())
+    found, errors = loader.resolve()
     if errors:
         raise ValueError("\n".join(errors))
     if args.name not in found:

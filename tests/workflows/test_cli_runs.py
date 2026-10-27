@@ -23,7 +23,7 @@ def setup_run(monkeypatch, tmp_path):
     case = tmp_path / "case.txt"
     case.write_text("Build the sample")
     monkeypatch.setattr(store, "default_root", lambda: root)
-    monkeypatch.setattr(loader, "resolve", lambda cwd: ({"pair": loader.Found("project", case, definition)}, []))
+    monkeypatch.setattr(loader, "resolve", lambda cwd=None: ({"pair": loader.Found("project", case, definition)}, []))
     launch = Mock(return_value=StageResult("pass", [{"verdict": "pass"}]))
     return root, case, launch
 
@@ -106,13 +106,13 @@ def test_missing_run_is_a_json_error(setup_run, capsys, action):
     assert json.loads(capsys.readouterr().out)["error"]
 
 
-@pytest.mark.parametrize("identifier", ["../escape", "/absolute", ".", "..", "nested/run"])
+@pytest.mark.parametrize("identifier", ["", "../escape", "/absolute", ".", "..", "nested/run"])
 def test_commands_refuse_run_paths(setup_run, capsys, identifier):
     _, case, _ = setup_run
     assert cli.main(["run", "pair", "--case", str(case), "--run-id", identifier]) == 1
-    assert json.loads(capsys.readouterr().out)["error"]
+    assert json.loads(capsys.readouterr().out) == {"error": "run identifier must be a single name"}
     assert cli.main(["status", identifier]) == 1
-    assert json.loads(capsys.readouterr().out)["error"]
+    assert json.loads(capsys.readouterr().out) == {"error": "run identifier must be a single name"}
 
 
 def test_run_refuses_unknown_workflow_as_json(setup_run, capsys):
@@ -143,9 +143,59 @@ def test_run_never_overwrites_an_existing_run(setup_run, monkeypatch, capsys):
 def test_run_reports_broken_workflow_layers_as_json(setup_run, monkeypatch, capsys):
     root, case, launch = setup_run
     errors = ["first workflow is invalid", "second workflow is invalid"]
-    monkeypatch.setattr(loader, "resolve", lambda cwd: ({}, errors))
+    monkeypatch.setattr(loader, "resolve", lambda cwd=None: ({}, errors))
     monkeypatch.setattr(cli, "HeadlessProfile", Mock(return_value=Mock(launch=launch)))
     assert cli.main(["run", "pair", "--case", str(case)]) == 1
     assert json.loads(capsys.readouterr().out) == {"error": "\n".join(errors)}
     assert not root.exists()
     launch.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["run", "pair"],
+        ["run", "pair", "--case", "case", "--harness", "unknown"],
+    ],
+)
+def test_run_requires_case_and_a_supported_harness(arguments):
+    with pytest.raises(SystemExit) as caught:
+        cli.parser().parse_args(arguments)
+    assert caught.value.code == 2
+
+
+def test_run_accepts_explicit_auto_harness():
+    args = cli.parser().parse_args(["run", "pair", "--case", "case", "--harness", "auto"])
+    assert args.harness == "auto"
+
+
+def test_run_uses_the_exit_check_for_workflow_verdicts(setup_run, monkeypatch, capsys):
+    _, case, launch = setup_run
+    document = {**DOCUMENT, "workflow": {**DOCUMENT["workflow"], "exit": "all stages accepted"}}
+    definition = schema.parse(yaml.safe_dump(document))
+    monkeypatch.setattr(loader, "resolve", lambda: ({"pair": loader.Found("project", case, definition)}, []))
+    judge = Mock(return_value=True)
+    monkeypatch.setattr(cli.exit_checks, "check", judge)
+    monkeypatch.setattr(cli, "HeadlessProfile", Mock(return_value=Mock(launch=launch)))
+    assert cli.main(["run", "pair", "--case", str(case)]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "passed"
+    judge.assert_called_once_with("all stages accepted", {"build": [{"verdict": "pass"}]})
+
+
+def test_exhausted_run_returns_failure_with_saved_json(setup_run, monkeypatch, capsys):
+    root, case, launch = setup_run
+    launch.return_value = StageResult("fail", [])
+    document = {
+        **DOCUMENT,
+        "stages": {
+            "build": {"profile": "engineer", "next": {"pass": "check", "fail": "exit"}},
+            "check": DOCUMENT["stages"]["check"],
+        },
+    }
+    definition = schema.parse(yaml.safe_dump(document))
+    monkeypatch.setattr(loader, "resolve", lambda: ({"pair": loader.Found("project", case, definition)}, []))
+    monkeypatch.setattr(cli, "HeadlessProfile", Mock(return_value=Mock(launch=launch)))
+    assert cli.main(["run", "pair", "--case", str(case)]) == 1
+    state = json.loads(capsys.readouterr().out)
+    assert state["status"] == "exhausted"
+    assert store.load(root / state["run"]) == state
