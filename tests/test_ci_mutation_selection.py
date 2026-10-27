@@ -513,6 +513,12 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
         < mutation_counts("scripts/sample.py", source, {18})[1]
     )
     assert mutation_counts("scripts/sample.py", source, {4, 11}) == (0, 0)
+    monkeypatch.setattr(
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[r"count \+ 1"], source_paths=[], max_stack_depth=-1),
+    )
+    assert mutation_counts("scripts/sample.py", source, {9, 13}) == (0, 2)
 
 
 @pytest.mark.parametrize("total", [1, 2, 3, 7])

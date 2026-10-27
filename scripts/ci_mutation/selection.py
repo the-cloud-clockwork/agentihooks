@@ -59,22 +59,23 @@ def created_mutations(filename: str, source: str) -> tuple[object, list, list]:
     from mutmut.mutation.pragma_handling import get_ignored_lines
 
     class Visitor(MutationVisitor):
-        def __init__(self, ignored, decorated: bool) -> None:
+        def __init__(self, ignored, allowed) -> None:
             super().__init__(mutation_operators, ignored)
-            self.decorated = decorated
+            self.allowed = allowed
 
         # mutmut 3.6.0 skips every decorated class, yet a dataclass keeps its methods, so their trampolines work.
         def _skip_node_and_children(self, node: cst.CSTNode) -> bool:
             skipped = super()._skip_node_and_children(node)
             if not skipped or not isinstance(node, cst.FunctionDef | cst.ClassDef) or not node.decorators:
                 return skipped
-            if not self.decorated and not (isinstance(node, cst.ClassDef) and all(map(is_dataclass, node.decorators))):
+            if not self.allowed(node):
                 return True
             return isinstance(node, cst.FunctionDef) and node.name.value in NEVER_MUTATE_FUNCTION_NAMES
 
     wrapper = MetadataWrapper(cst.parse_module(source))
     ignored = get_ignored_lines(filename, source, wrapper)
-    graded, possible = Visitor(ignored, False), Visitor(ignored, True)
+    graded = Visitor(ignored, lambda node: isinstance(node, cst.ClassDef) and all(map(is_dataclass, node.decorators)))
+    possible = Visitor(ignored, lambda node: True)
     module = wrapper.visit(graded)
     wrapper.visit(possible)
     return module, graded.mutations, possible.mutations
