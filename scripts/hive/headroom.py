@@ -56,7 +56,7 @@ def _total_mb(proc: Path) -> int:
     return int(line.split()[1]) // 1024
 
 
-# The same folder wt.sh new measures before it refuses a worktree below WT_MIN_FREE_GB.
+# The same folders wt.sh new measures before it refuses a worktree below WT_MIN_FREE_GB.
 def _free_gb(root: Path) -> int:
     while not root.is_dir():
         root = root.parent
