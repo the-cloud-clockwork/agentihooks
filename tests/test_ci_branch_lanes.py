@@ -687,6 +687,37 @@ def test_any_other_event_change_still_loses_the_base_trust(tmp_path, monkeypatch
     }
 
 
+@pytest.mark.parametrize("change", [None, "group", "queue", "cancel", "extra", "name", "events", "untrusted"])
+def test_tests_dispatch_concurrency_keeps_the_hosted_lane(change):
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "test.yml").read_text())
+    updated = copy.deepcopy(baseline)
+    updated["concurrency"]["group"] = (
+        "${{ github.event_name == 'workflow_dispatch' && "
+        "format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || "
+        "endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || "
+        "endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || "
+        "format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
+    )
+    block = updated["concurrency"]
+    if change == "group":
+        block["group"] = block["group"].replace("'workflow_dispatch'", "'push'")
+    elif change == "queue":
+        block["queue"] = "single"
+    elif change == "cancel":
+        block["cancel-in-progress"] = True
+    elif change == "extra":
+        block["extra"] = True
+    elif change == "name":
+        updated["name"] = "Other"
+    elif change == "events":
+        updated["on"]["schedule"] = [{"cron": "0 * * * *"}]
+    elif change == "untrusted":
+        baseline = None
+    assert bool(lanes.problems(updated, baseline)) == (change is not None)
+
+
 @pytest.mark.parametrize(("job", "stage", "index"), [("stats", "stats", "part"), ("mutation-shard", "shard", "shard")])
 @pytest.mark.parametrize("change", [None, "runs-on", "queue", "cancel", "stage", "index", "group", "untrusted"])
 def test_a_trusted_mutation_leg_may_move_to_a_group_of_its_own_run(job, stage, index, change):
