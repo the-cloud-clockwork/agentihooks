@@ -412,6 +412,12 @@ login. Each step that empties the list names its reason, and the launch waits wi
 Among the hives left, placement picks the lowest `prefer` rank for the role, then the most room, then a lasting
 hive over an ephemeral one, then the hive id.
 
+`agentihooks swarm <id> set placement-mode=round-robin placement-nodes=N` switches a swarm's worker launches from
+this default, `anton-first`, to round robin for load runs: placement keeps only the first `N` live hives by id,
+local or cloud (`placement-nodes=0`, the default, keeps every live hive), ignores `prefer`, and gives each agent to
+the kept hive running the fewest agents, counting launches already placed in the same tick. Masters keep
+`anton-first`. `placement-mode=anton-first` switches back on the next tick.
+
 `eng`, `ci`, `plan` and `dispatch` prefer headless hives, and `master`, `qa` and `frontend` prefer UI hives.
 Placement tries the preferred kind first and takes the other kind only when no preferred hive taking the role has
 room or none is live.
