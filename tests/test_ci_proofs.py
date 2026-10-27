@@ -238,7 +238,8 @@ def test_the_sandbox_proof_groups_share_the_suite_evenly():
     from pytest_split.algorithms import Algorithms
 
     durations = json.loads((_ROOT / ".test_durations").read_text())
-    items = [SimpleNamespace(nodeid=nodeid) for nodeid in durations]
+    untimed = [f"tests/test_untimed.py::test_{index}" for index in range(len(durations) // 20)]
+    items = [SimpleNamespace(nodeid=nodeid) for nodeid in [*durations, *untimed]]
     groups = Algorithms[SPLIT_ALGORITHM].value(8, items, durations)
     counts = [len(group.selected) for group in groups]
     seconds = [group.duration for group in groups]
