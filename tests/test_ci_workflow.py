@@ -2060,3 +2060,75 @@ def test_a_head_that_predates_the_local_actions_gets_them_from_the_workflow_revi
         if step.get("uses", "").startswith("./."):
             assert (tmp_path / step["uses"] / "action.yml").read_text() == f"name: {Path(step['uses']).name}\n"
     assert git("status", "--porcelain", "--", ".github") == ""
+
+
+@pytest.mark.parametrize("failure", ["", "revision", "archive"])
+def test_antoncore_archive_fallback_retains_checker_inputs_and_fails_closed(tmp_path, failure):
+    source = tmp_path / "source"
+    inputs = {
+        "scripts/swarm_dashboard_columns.py": "checker",
+        "stacks/observability/provisioning/dashboards/Swarm/dashboard.json": "dashboard",
+        "k8s/values-overlays/agentihooks-swarm-nats/values.yaml": "values",
+        "k8s/values-overlays/agentihooks-swarm-nats/users.yaml": "users",
+        "k8s/values-overlays/agentihooks-swarm-nats/trust.yaml": "trust",
+    }
+    for path, value in inputs.items():
+        target = source / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(value)
+    archive = tmp_path / "source.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(source, arcname="antoncore-revision")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    gh = tools / "gh"
+    gh.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        '[[ "$GH_TOKEN" == fixture-app ]]\n'
+        'echo "$*" >> "$CALLS"\n'
+        'case "$*" in\n'
+        '  *commits/dev*) [[ "$FAILURE" != revision ]]; echo trusted-revision ;;\n'
+        '  *tarball/trusted-revision*) [[ "$FAILURE" != archive ]]; cat "$ARCHIVE" ;;\n'
+        "  *) exit 1 ;;\n"
+        "esac\n"
+    )
+    gh.chmod(0o755)
+    calls = tmp_path / "calls"
+    result = subprocess.run(
+        ["bash", str(_ROOT / ".github/scripts/antoncore-read.sh")],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "GH_TOKEN": "fixture-app",
+            "RUNNER_TEMP": str(tmp_path),
+            "CALLS": str(calls),
+            "ARCHIVE": str(archive),
+            "FAILURE": failure,
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) == (not failure), result.stderr
+    if not failure:
+        for path, value in inputs.items():
+            assert (tmp_path / ".antoncore" / path).read_text() == value
+        assert (tmp_path / ".antoncore/.archive-revision").read_text() == "trusted-revision\n"
+        assert calls.read_text().splitlines() == [
+            "api repos/the-cloud-clockwork/antoncore/commits/dev --jq .sha",
+            "api repos/the-cloud-clockwork/antoncore/tarball/trusted-revision",
+        ]
+    assert not list(tmp_path.glob("antoncore.*.tar.gz"))
+
+
+def test_lint_falls_back_only_after_git_refusal_with_the_same_antoncore_app():
+    steps = _workflow()["jobs"]["lint"]["steps"]
+    checkout = next(s for s in steps if s.get("name") == "Check out the antoncore dashboard column checker")
+    assert checkout["continue-on-error"] is True
+    assert checkout["id"] == "antoncore-checkout"
+    fallback = next(s for s in steps if s.get("name") == "Read antoncore through the REST archive after Git refusal")
+    assert "steps.antoncore-checkout.outcome == 'failure'" in fallback["if"]
+    assert "steps.antoncore-token.outputs.token" in fallback["env"]["GH_TOKEN"]
+    assert fallback["run"] == "bash .github/scripts/antoncore-read.sh"
+    check = next(s for s in steps if s.get("name", "").startswith("Run every Swarm Ledger dashboard query"))
+    assert ".archive-revision" in check["run"]
