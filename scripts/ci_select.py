@@ -53,7 +53,7 @@ def changed_files(root: Path, base: str, head: str) -> list[str]:
 
 
 def is_test(path: str) -> bool:
-    return path.startswith(f"{TESTS}/") and Path(path).name.startswith("test_") and path.endswith(".py")
+    return path.endswith(".py") and path.startswith(f"{TESTS}/") and Path(path).name.startswith("test_")
 
 
 def needs_full_suite(changed: list[str]) -> bool:
