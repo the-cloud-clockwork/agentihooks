@@ -168,6 +168,32 @@ def test_publishes_fenced_order_after_host_admission(setup, monkeypatch):
     )
 
 
+def test_refuses_an_order_the_hive_queue_cannot_serve_before_its_deadline(setup):
+    from scripts.hive import admission
+    from scripts.hive.orders import Orders
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import SpawnRequest, Status
+
+    store, slug = setup.store, setup.config.slug
+    name = store.next_name(slug, "eng")
+    record = AgentRecord(name, "eng", "task", seat=f"eng-1@{slug}", state="starting")
+    store.put_agent(slug, record)
+    store.seats.occupy(record.seat, name, 0)
+    stream = Orders(store.redis).stream("remote")
+    for _ in range(4):
+        store.redis.xadd(stream, {"order": "{}"})
+    task = {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch}
+    outcome = setup.launcher.spawn(SpawnRequest(setup.config, "eng", name, task))
+    assert outcome.status is Status.UNAVAILABLE
+    assert outcome.detail == (
+        "no hive for eng has room: remote holds 4 queued launches, "
+        "the most its 300 second launch deadline serves at 75 seconds each"
+    )
+    assert store.redis.xlen(stream) == 4
+    assert setup.launcher.orders_for("task") is None
+    assert admission.reserve(store.redis, "remote", f"{slug}/{name}", 1) == (True, 0)
+
+
 def test_local_mode_keeps_the_original_spawn_call(setup):
     from scripts.swarm.controller import FencedRuntime
 
