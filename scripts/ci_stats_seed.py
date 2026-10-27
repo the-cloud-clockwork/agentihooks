@@ -36,7 +36,7 @@ def harvest(number: int, folder: Path) -> int:
     try:
         sha = api(f"pulls/{number}")["head"]["sha"]
     except subprocess.CalledProcessError as error:
-        if b"HTTP 404" not in (error.stderr or b""):
+        if b"HTTP 404" not in error.stderr:
             raise
         print(f"Mutation stats seed: #{number} is not a readable pull request")
         return 0
