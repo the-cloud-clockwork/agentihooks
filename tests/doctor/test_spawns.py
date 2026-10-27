@@ -52,7 +52,7 @@ def test_a_refusal_is_judged_by_the_session_count_taken_at_the_refusal(sessions,
         f"{slug}: spawn failed for dt2: account reservation is full: account=claude:a "
         f"sessions={sessions} cap=6 five_left=80 week_left=40",
     ]
-    assert len(spawns.failed(record)) == count
+    assert [finding.subject for finding in spawns.failed(record)] == ["dt2"] * count
 
 
 @pytest.mark.parametrize(
