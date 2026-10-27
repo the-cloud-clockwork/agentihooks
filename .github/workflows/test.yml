@@ -1595,6 +1595,9 @@ jobs:
     permissions:
       contents: read
     env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
       CODEX_RELEASE: rust-v0.160.0
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
       UNIT_SOURCE: ""
@@ -1986,6 +1989,9 @@ jobs:
     outputs:
       analysis: ${{ steps.gate.outputs.analysis }}
     env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
       SONAR_SCANNER_VERSION: 7.2.0.5079
       SONAR_SCANNER_SHA256: da9f4e64a3d555f08ce38b5469ebd91fe2b311af473f7001a5ee5c1fd58b004b
     permissions:
