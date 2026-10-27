@@ -228,12 +228,10 @@ def retry_pending(
             continue
         row = json.loads(pending.read_text())
         if row["status"] == "pending" and swarm in (None, row["swarm"]) and row.get("retry_at", 0) <= now:
-            if until is not None and time.time() >= until:
+            if retried == limit or until is not None and time.time() >= until:
                 break
             process(pending, now)
             retried += 1
-            if retried == limit:
-                break
 
 
 def retry() -> None:
