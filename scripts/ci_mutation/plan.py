@@ -610,7 +610,7 @@ def main() -> int:
     if args.repository and not changes:
         print("No change remains to mutate, so the recorded dev coverage is not read.")
     elif args.repository:
-        with ThreadPoolExecutor(max_workers=1) as pool:
+        with ThreadPoolExecutor() as pool:
             record = pool.submit(read_record, args.repository)
             # The import scan parses every test module once, while the record downloads.
             for path in changes:

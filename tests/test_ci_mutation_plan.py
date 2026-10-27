@@ -1035,3 +1035,12 @@ def test_narrowing_keeps_the_covering_tests_of_a_fully_recorded_file_and_whole_o
         "tests/test_stale.py",
     ]
     assert plan.narrow(tmp_path, ["tests/test_recorded.py"], set(), recorded, set()) == ["tests/test_recorded.py"]
+
+
+def test_defined_tests_name_test_functions_and_methods_but_not_their_nested_helpers(tmp_path):
+    path = tmp_path / "test_sample.py"
+    path.write_text(
+        "def test_one():\n    def helper():\n        pass\n"
+        "class TestGroup:\n    def test_two(self):\n        pass\n    def setup(self):\n        pass\n"
+    )
+    assert plan.defined_tests(path) == {"test_one", "TestGroup.test_two"}
