@@ -2,8 +2,6 @@ import hashlib
 import json
 import re
 
-from scripts.gates.brain import bind
-
 OPS = ("brain_policy", "brain_learning", "brain_emergency")
 SCOPE = frozenset({"purpose", "task", "revision", "generation", "brain"})
 KINDS = ("lesson", "decision", "no_new_learning")
@@ -66,6 +64,8 @@ def check(op: dict) -> None:
 
 
 def current(task: dict) -> dict:
+    from scripts.gates.brain import bind
+
     return bind(task["id"], task, task.get("brain_policy", {}).get("brain", ""))
 
 
