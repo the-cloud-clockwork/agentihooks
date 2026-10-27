@@ -236,6 +236,15 @@ class HiveLaunch:
                     hive["room"] -= 1
         return selected
 
+    def _withdraw(self, request: SpawnRequest, selected: Selection, refused: str) -> placement.Wait:
+        waited = placement.Wait(refused, ROLE_PROFILES.get(selected.profile.profile, selected.profile.profile))
+        if self.placement_cache is not None:
+            self.placement_cache[(request.lane, request.task["id"])] = waited
+            for hive in self.hives():
+                if hive["id"] == selected.hive:
+                    hive["room"] = 0
+        return waited
+
     def _select(self, config: SwarmConfig, lane: str, task: dict) -> Selection | placement.Wait:
         chosen = config.lanes.get(lane, {})
         saved = task.get("launch_assignment") or profile_choice.transfer(task)
@@ -393,7 +402,7 @@ class HiveLaunch:
             self.opening(named),
         )
         if refused := self.reserve_room(request, selected):
-            self._record_wait(request.lane, request.task, placement.Wait(refused))
+            self._record_wait(request.lane, request.task, self._withdraw(request, selected, refused))
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
         try:
             return self.send_order(request, selected, task)
