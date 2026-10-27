@@ -155,13 +155,13 @@ the tick never held (an empty harness, profile, model, effort or account) is not
 
 ### Stalled master recycle
 
-Each tick checks the live master of a running swarm. A master whose pane reads `working` while it has made no tool
-call for `AGENTIHOOKS_HEALTH_STALLED_MINUTES` (default **10**) is stalled: the tick sends it an inbox item asking
-for a Handoff v2, waits up to `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5), then recycles it in its seat
-with a recovery handoff and the reason `busy with no tool call for <n> minutes`. A master that resumes tool calls
-once the stall no longer holds (it makes a tool call, its pane leaves `working` or it declares a wait) has its
-request withdrawn with `the master resumed work`. A stalled master of a proof swarm whose
-parent task is blocked stops the proof swarm instead.
+Each tick checks the live master of a running swarm. A master whose pane reads `working` while it has made no tool call
+for `AGENTIHOOKS_HEALTH_STALLED_MINUTES` (default **10**) is stalled: the tick sends it an inbox item asking for a
+Handoff v2, waits up to `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5), then recycles it in its seat with a
+recovery handoff and the reason `busy with no tool call for <n> minutes`. When the stall ends before the deadline
+(it makes a tool call, its pane leaves `working` or it declares a wait), the request is withdrawn
+with `the master resumed work`. A stalled master of a proof swarm whose parent task is blocked stops the proof swarm
+instead.
 
 The quiet time counts from the master's last finished tool call, or from its session start when that is later.
 The check does not count while:
@@ -192,8 +192,8 @@ block ends the call there: an error inside the hook itself leaves it open. A cal
 carries no tool use id; the session's turn end, an unblocked Stop, clears every open call it left.
 
 The records live under `$AGENTIHOOKS_HOME/swarm-activity/<slug>/` (default `~/.agentihooks/swarm-activity`):
-`<name>.last` holds the time the last call began, `<name>.done` the time the last call ended, and `<name>.open/` one entry per call
-still running. To see why a master is or is not counted as stalled:
+`<name>.last` holds the time the last call began, `<name>.done` the time the last call ended, and `<name>.open/` one
+entry per call still running. To see why a master is or is not counted as stalled:
 
 ```bash
 A=~/.agentihooks/swarm-activity/<slug>
