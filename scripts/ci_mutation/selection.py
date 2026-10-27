@@ -455,6 +455,30 @@ def run_unit(
     return run_tests(runner, mutant_name=mutant_name, tests=memory.prepare(mutant_name, chosen))
 
 
+class OwnChildren:
+    """The os mutmut's parent sees: it reaps only the mutant workers it forked, never a process a test left behind."""
+
+    def __init__(self, system=os) -> None:
+        self.system = system
+        self.forked: set[int] = set()
+
+    def __getattr__(self, name):
+        return getattr(self.system, name)
+
+    def fork(self) -> int:
+        pid = self.system.fork()
+        if pid:
+            self.forked.add(pid)
+        return pid
+
+    def wait(self) -> tuple[int, int]:
+        while True:
+            pid, status = self.system.wait()
+            if pid in self.forked:
+                self.forked.discard(pid)
+                return pid, status
+
+
 def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
     from mutmut import __main__ as runner
 
@@ -535,6 +559,7 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     runner.PytestRunner.execute_pytest = memory.wrap(runner.PytestRunner.execute_pytest)
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
     runner.write_all_mutants_to_file = write_selected
+    runner.os = OwnChildren()
     for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
         sys.modules.pop(name)
     runner.cli(["run", "--max-children", str(worker_count(os.cpu_count()))])
