@@ -134,11 +134,15 @@ def test_a_reply_from_an_agent_that_already_left_the_swarm_is_still_shown(store)
     box = InboxStore(store.redis)
     gone = store.names.next("sw", "eng")
     reply = box.send(gone, "operator", "handed off before any branch existed")
-    other = box.send(store.names.next("sw", "eng"), "operator", "from a live agent")
+    live = AgentRecord(store.names.next("sw", "eng"), "eng", "t")
+    other = box.send(live.name, "operator", "from a live agent")
+    store.create(SwarmConfig("elsewhere", "/repo", 1, 1))
+    foreign = box.send(store.names.next("elsewhere", "eng"), "operator", "from another swarm")
     ledger = PageLedger()
-    assert delivery.relay_to_page(box, "sw", [], ledger) == 2
+    assert delivery.relay_to_page(box, "sw", [live], ledger) == 2
     assert ledger.said == [("handed off before any branch existed", gone), ("from a live agent", other.sender)]
     assert box.get(reply.id).state == "done"
+    assert box.get(foreign.id).state == "pending"
 
 
 def test_a_refused_page_post_closes_that_item_alone_and_tells_its_sender(store):
