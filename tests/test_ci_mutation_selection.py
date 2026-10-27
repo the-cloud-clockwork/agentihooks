@@ -1182,7 +1182,7 @@ def test_clean_and_fault_controls_skip_tests_that_reach_no_selected_mutant(tmp_p
     ],
 )
 def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, ci, requested, quota, expected, capsys):
-    from scripts.ci_mutation.selection import run_selected
+    from scripts.ci_mutation.selection import ForkedChildren, run_selected
 
     monkeypatch.setattr("scripts.ci_mutation.selection.quota_cpus", lambda: quota)
     if ci is None:
@@ -1211,6 +1211,7 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
 
     def cli(args):
         assert args == ["run", "--max-children", str(expected)]
+        assert isinstance(runner.os, ForkedChildren)
         runner.collect_or_load_stats(object())
 
     runner.cli = cli
@@ -1223,3 +1224,21 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
     assert counts == [expected]
     output = capsys.readouterr().out
     assert output == ("" if ci else "Local mutation worker cap: 2 (mutation and stats)\n")
+
+
+def test_mutmut_wait_skips_a_child_a_test_left_and_returns_the_forked_mutant():
+    from scripts.ci_mutation.selection import ForkedChildren
+
+    children = ForkedChildren()
+    assert children.environ is os.environ
+    stray = subprocess.Popen([sys.executable, "-c", ""])
+    os.waitid(os.P_PID, stray.pid, os.WEXITED | os.WNOWAIT)
+    pid = children.fork()
+    if pid == 0:
+        os._exit(7)
+    assert children.pids == {pid}
+    waited, status = children.wait()
+    assert (waited, os.waitstatus_to_exitcode(status)) == (pid, 7)
+    assert children.pids == set()
+    with pytest.raises(ChildProcessError):
+        os.waitpid(stray.pid, 0)
