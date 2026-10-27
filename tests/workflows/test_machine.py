@@ -43,10 +43,10 @@ def tiny(**stage) -> schema.Workflow:
 
 
 def test_start_puts_the_head_stage_first_with_nothing_counted():
-    state = machine.start(simple())
+    state = machine.start(loader.read(loader.PACKAGE_WORKFLOWS / "simple-workflow.yaml"))
 
     assert state == {
-        "stage": "build",
+        "stage": "scout",
         "status": "running",
         "iterations": 0,
         "visit": 0,
