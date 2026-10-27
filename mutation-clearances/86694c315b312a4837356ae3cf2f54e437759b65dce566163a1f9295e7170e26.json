@@ -1,0 +1,6 @@
+{
+  "scripts/locked_tests.py:scripts.locked_tests.x__returns_early__mutmut_4:748142c7fc589df078fe24d81e910af8d07d9af2c2fffc321034c3cb0f0dd445": {
+    "reader": "Independent Standards",
+    "reason": "A return ends at its last token and a check starts at its own first token; a check inside the return value starts before the value ends, and a later check on the same line sits after a semicolon, so the end never equals a check start and less than and at most agree on every valid input."
+  }
+}
