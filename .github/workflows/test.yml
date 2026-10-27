@@ -793,6 +793,7 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           ENVIRONMENT: ${{ steps.venv.outputs.cache-primary-key }}
+          PYTHONUNBUFFERED: "1"
         run: |
           git worktree add --detach "$RUNNER_TEMP/planner" "$GRADER"
           export GITHUB_OUTPUT="$RUNNER_TEMP/plan-outputs.txt"
@@ -860,8 +861,8 @@ jobs:
         run: |
           while [[ ! -f "$RUNNER_TEMP/plan.status" ]] && kill -0 "$(cat "$RUNNER_TEMP/plan.pid")" 2>/dev/null; do
             sleep 1
-          done
-          cat "$RUNNER_TEMP/plan.log"
+          done &
+          tail -n +1 -f --pid="$!" "$RUNNER_TEMP/plan.log"
           if [[ ! -f "$RUNNER_TEMP/plan.status" ]]; then
             echo "::error::The test planner exited without reporting a status."
             exit 1
