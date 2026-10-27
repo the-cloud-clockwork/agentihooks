@@ -1906,7 +1906,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     setup = [
         step
         for step in setup
-        if not str(step.get("name", "")).startswith(downloads)
+        if not str(step.get("name", "")).startswith((*downloads, "Cap the merged test stats"))
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
     ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]

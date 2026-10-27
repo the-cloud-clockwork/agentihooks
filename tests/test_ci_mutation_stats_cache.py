@@ -1478,13 +1478,15 @@ def test_cap_keeps_the_newest_records_up_to_the_byte_limit_and_drops_the_rest(tm
     from scripts.ci_mutation import stats_dependencies
 
     monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", 30)
+    cache = tmp_path / "cache"
+    cache.mkdir()
     for age, name in enumerate(["new", "middle", "old", "older"]):
-        path = tmp_path / f"{name}.json"
+        path = cache / f"{name}.json"
         path.write_text("x" * 10)
         os.utime(path, (1000 - age, 1000 - age))
-    (tmp_path / "new.index").write_text("x" * 100)
-    assert stats_dependencies.cap(tmp_path) == 1
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["middle.json", "new.index", "new.json", "old.json"]
+    (cache / "new.index").write_text("x" * 100)
+    assert stats_dependencies.cap(cache) == 1
+    assert sorted(path.name for path in cache.iterdir()) == ["middle.json", "new.index", "new.json", "old.json"]
 
 
 def test_prune_caps_the_cache_before_reading_its_records(tmp_path, monkeypatch):
@@ -1493,15 +1495,17 @@ def test_prune_caps_the_cache_before_reading_its_records(tmp_path, monkeypatch):
     from scripts.ci_mutation import stats_dependencies
 
     monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", 10)
+    cache = tmp_path / "cache"
+    cache.mkdir()
     for age, name in enumerate(["new", "old"]):
-        path = tmp_path / f"{name}.json"
+        path = cache / f"{name}.json"
         path.write_text('{"a": 1}')
         os.utime(path, (1000 - age, 1000 - age))
     read = []
     monkeypatch.setattr(stats_dependencies.StoredStats, "read", staticmethod(read.append))
-    stats_dependencies.StoredStats(tmp_path, tmp_path, {}, {}).prune()
-    assert read == [tmp_path / "new.json"]
-    assert [path.name for path in tmp_path.iterdir()] == ["new.json"]
+    stats_dependencies.StoredStats(cache, cache, {}, {}).prune()
+    assert read == [cache / "new.json"]
+    assert [path.name for path in cache.iterdir()] == ["new.json"]
 
 
 def test_collected_stats_are_capped_before_the_cache_is_saved(tmp_path, monkeypatch):
