@@ -53,5 +53,5 @@ def test_smoke_steps_after_the_build_run_only_when_the_build_and_redis_pulls_suc
     assert all("if" not in step for step in steps[: build + 1])
     gated = "${{ !cancelled() && steps.build.outcome == 'success' }}"
     after = steps[build + 1 :]
-    assert [step["if"] for step in after if "cancelled()" in step.get("if", "")] == [gated] * 4
+    assert [step["if"] for step in after if "cancelled()" in step.get("if", "")] == [gated] * 3
     assert all(step.get("if") == gated or "()" not in step.get("if", "") for step in after)
