@@ -534,6 +534,7 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      # No checkout precedes this on workflow_dispatch, so the local retry-upload action cannot load here.
       - name: Republish the dispatched base's coverage baseline
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
@@ -1491,13 +1492,13 @@ jobs:
       - &upload-record
         name: Upload this leg's branch record
         if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('branch-record/record.json') != ''
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: branch-record-${{ matrix.python-version }}-${{ env.LEG }}-${{ github.run_attempt }}
           path: branch-record/record.json
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}

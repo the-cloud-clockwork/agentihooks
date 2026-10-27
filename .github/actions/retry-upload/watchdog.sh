@@ -19,6 +19,7 @@ case "$1" in
     ;;
   disarm)
     if [[ -f "$state.pid" ]]; then
+      pkill -P "$(cat "$state.pid")" 2> /dev/null || true
       kill "$(cat "$state.pid")" 2> /dev/null || true
       rm -f "$state.pid"
     fi

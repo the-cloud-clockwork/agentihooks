@@ -6,7 +6,9 @@ shopt -s globstar nullglob
 [[ "$INCLUDE_HIDDEN" == true ]] && shopt -s dotglob
 
 visible() {
-  [[ "$INCLUDE_HIDDEN" == true || "$(basename "$1")" != .* ]]
+  local name
+  name="$(basename "$1")"
+  [[ "$1" == "$2" || ("$name" != . && "$name" != ..) ]] && [[ "$INCLUDE_HIDDEN" == true || "$name" != .* ]]
 }
 
 holds_a_file() {
@@ -23,10 +25,14 @@ holds_a_file() {
 
 found=false
 while read -r pattern; do
-  [[ -z "$pattern" || "$pattern" == '!'* ]] && continue
+  [[ -z "$pattern" ]] && continue
+  if [[ "$pattern" == '!'* ]]; then
+    found=true
+    break
+  fi
   [[ "$pattern" == '~'* ]] && pattern="$HOME${pattern:1}"
   for match in $pattern; do
-    if visible "$match" && holds_a_file "$match"; then
+    if visible "$match" "$pattern" && holds_a_file "$match"; then
       found=true
       break 2
     fi

@@ -115,7 +115,6 @@ runs:
         sleep 20
         bash "$GITHUB_ACTION_PATH/watchdog.sh" arm
     - name: Upload, attempt 3
-      id: third
       if: steps.second.outcome == 'failure' && (inputs.after-cancel == 'true' || !cancelled())
       uses: actions/upload-artifact@v4
       with:

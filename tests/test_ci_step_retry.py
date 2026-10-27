@@ -255,7 +255,20 @@ def test_a_path_matching_nothing_ends_before_any_attempt(tmp_path, mode, code, s
         ({"work/empty/": None}, "empty/\n", "true", False),
         ({"coverage-baseline/baseline.json": "x"}, "~/coverage-baseline\n", "false", True),
         ({"work/reports/deep/report.txt": "x"}, "reports/**/*.txt\n", "false", True),
-        ({"work/kept.txt": "x"}, "!kept.txt\n", "false", False),
+        ({"work/cov/skip.txt": "x"}, "cov/*\n!cov/skip.txt\n", "false", True),
+        ({"work/empty/": None}, "empty/*\n", "true", False),
+    ],
+    ids=[
+        "hidden",
+        "hidden-excluded",
+        "folder",
+        "folder-hidden",
+        "folder-hidden-kept",
+        "empty",
+        "home",
+        "deep",
+        "exclusion",
+        "dot-entries",
     ],
 )
 def test_the_path_is_resolved_as_the_upload_resolves_it(tmp_path, layout, paths, hidden, found):
@@ -307,14 +320,18 @@ def test_a_stalled_upload_attempt_is_ended_at_its_bound(tmp_path):
 def test_an_attempt_that_ends_in_time_releases_its_watchdog_quietly(tmp_path):
     assert _watchdog(tmp_path, "arm", 300).returncode == 0
     [pid] = [int(p.read_text()) for p in tmp_path.glob("retry-upload-*-1.pid")]
+    deadline = time.monotonic() + 10
+    while not (children := Path(f"/proc/{pid}/task/{pid}/children").read_text().split()):
+        assert time.monotonic() < deadline
+        time.sleep(0.05)
     released = _watchdog(tmp_path, "disarm", 300)
     assert released.returncode == 0
     assert released.stdout == ""
     assert not list(tmp_path.glob("retry-upload-*"))
     deadline = time.monotonic() + 10
-    while _alive(pid) and time.monotonic() < deadline:
+    while any(map(_alive, [pid, *map(int, children)])) and time.monotonic() < deadline:
         time.sleep(0.05)
-    assert not _alive(pid)
+    assert not any(map(_alive, [pid, *map(int, children)]))
 
 
 def _alive(pid):
