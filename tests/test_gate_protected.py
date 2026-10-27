@@ -1405,11 +1405,8 @@ def test_the_retried_summary_waits_and_downloads_each_report_once_more():
         "Summarize this run's tests",
     ]
     assert steps[0] == checkout and steps[-1] == summarize
-    for first, (original, slug) in zip(
-        (steps[1], steps[4]),
-        ((durations, "download-this-runs-test-durations"), (flakes, "download-this-runs-test-flakes")),
-    ):
-        assert first == {**original, "id": slug, "continue-on-error": True}
+    assert steps[1] == {**durations, "id": "download-this-runs-test-durations", "continue-on-error": True}
+    assert steps[4] == {**flakes, "id": "download-this-runs-test-flakes", "continue-on-error": True}
     for first, wait, second in (steps[1:4], steps[4:7]):
         retry = f"steps.{first['id']}.outcome == 'failure'"
         assert wait == {
