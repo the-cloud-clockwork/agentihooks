@@ -42,8 +42,10 @@ def default_run_dir(environ: Mapping[str, str]) -> Path:
 
 
 def read_input(value: str) -> str:
-    path = Path(value)
-    return path.read_text() if path.is_file() else value
+    try:
+        return Path(value).read_text()
+    except OSError:
+        return value
 
 
 def read_schema(path: Path) -> dict:
@@ -63,7 +65,14 @@ def run(args: argparse.Namespace) -> int:
         return 1
     run_dir = args.out or default_run_dir(os.environ)
     request = profile_run.ProfileRun(
-        args.profile, args.harness, read_input(args.input), schema, args.tier, args.effort, args.timeout, run_dir
+        profile=args.profile,
+        harness=args.harness,
+        input=read_input(args.input),
+        schema=schema,
+        tier=args.tier,
+        effort=args.effort,
+        timeout=args.timeout,
+        run_dir=run_dir,
     )
     result = profile_run.run_profile(request)
     report = {

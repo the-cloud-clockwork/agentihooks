@@ -102,6 +102,15 @@ def test_run_reads_the_input_from_a_file_when_the_value_names_one(captured, tmp_
     assert runs[0].input == "from a file\n"
 
 
+def test_run_keeps_a_prompt_longer_than_a_file_name_as_text(captured):
+    runs, _ = captured
+    prompt = "word " * 100
+
+    cli.main(["run", "engineer", "--input", prompt])
+
+    assert runs[0].input == prompt
+
+
 def test_run_keeps_a_directory_value_as_text(captured, tmp_path):
     runs, _ = captured
 
@@ -152,15 +161,16 @@ def test_run_refuses_a_missing_schema_file(captured, tmp_path, capsys):
     assert capsys.readouterr().err == f"agentihooks headless: no schema file {missing}\n"
 
 
-def test_run_requires_an_input(captured):
+def test_run_requires_an_input(captured, capsys):
     with pytest.raises(SystemExit) as exit_info:
         cli.main(["run", "engineer"])
 
     assert exit_info.value.code == 2
+    assert "the following arguments are required: --input" in capsys.readouterr().err
 
 
 def test_default_home_falls_back_to_the_user_home(monkeypatch, tmp_path):
-    monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", "")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
     assert cli.default_run_dir({}).parent == tmp_path / ".agentihooks" / "headless"
