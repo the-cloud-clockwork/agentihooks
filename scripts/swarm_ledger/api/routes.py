@@ -135,6 +135,16 @@ def workspace(services: Services, slug: str, task_id: str) -> dict:
     return {"data": tails, "revision": resources.revision(tails)}
 
 
+def global_read(services: Services, name: str) -> dict:
+    if name == "tips":
+        from scripts.swarm_ledger import page_tips
+
+        return {"data": page_tips.values()}
+    from . import monitor
+
+    return monitor.route(services)
+
+
 def global_resource(handler: object, services: Services, parts: list) -> dict:
     from . import admin, routing
 
@@ -148,10 +158,8 @@ def global_resource(handler: object, services: Services, parts: list) -> dict:
         from . import hives
 
         return hives.route(handler, services, parts, body)
-    if parts == ["tips"] and handler.command == "GET":
-        from scripts.swarm_ledger import page_tips
-
-        return {"data": page_tips.values()}
+    if parts in (["tips"], ["monitor"]) and handler.command == "GET":
+        return global_read(services, parts[0])
     if parts == ["layout"]:
         return admin.layout(handler, services, None if handler.command == "GET" else body(handler, services))
     if handler.command == "GET" and parts[0] in ("ledgers", "bin"):
