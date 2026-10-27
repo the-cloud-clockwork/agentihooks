@@ -81,11 +81,11 @@ def _texts(checks: list[ast.AST]) -> list[str]:
     return sorted(hashlib.sha256(ast.dump(node).encode()).hexdigest()[:16] for node in checks)
 
 
-def _returns_early(statements: list[ast.stmt], before: int | None = None) -> bool:
+def _returns_early(statements: list[ast.stmt], before: tuple[int, int] | None = None) -> bool:
     pending: list[ast.AST] = list(statements)
     while pending:
         node = pending.pop()
-        if isinstance(node, ast.Return) and (before is None or node.lineno < before):
+        if isinstance(node, ast.Return) and (before is None or (node.lineno, node.col_offset) < before):
             return True
         if not isinstance(node, (*DEFINITIONS, ast.Lambda)):
             pending.extend(ast.iter_child_nodes(node))
@@ -170,7 +170,7 @@ def measure(tree: Path) -> dict[str, dict]:
                     not cases or _disables([*bodies[key], *_nodes(context)], skippers) or _returns_early(function.body)
                 )
                 if test
-                else _returns_early(function.body, max(node.lineno for node in checks)),
+                else _returns_early(function.body, max((node.lineno, node.col_offset) for node in checks)),
             }
     return measured
 

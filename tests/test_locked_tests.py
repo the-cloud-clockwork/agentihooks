@@ -143,6 +143,7 @@ def test_the_head_defaults_to_the_working_directory(tmp_path, capsys, monkeypatc
         GUARD.replace("        str(1)\n", "        return\n        str(1)\n"),
         GUARD.replace("        str(1)\n", "        if str(1):\n            return\n"),
         GUARD.replace("    assert command\n", "    if command:\n        return\n    assert command\n"),
+        GUARD.replace("    assert command\n", "    return; assert command\n"),
     ],
     ids=[
         "skip",
@@ -167,6 +168,7 @@ def test_the_head_defaults_to_the_working_directory(tmp_path, capsys, monkeypatc
         "early return",
         "nested return",
         "helper early return",
+        "helper return on the assertion line",
     ],
 )
 def test_a_skipped_or_xfailed_locked_test_is_red(tmp_path, capsys, planted):
