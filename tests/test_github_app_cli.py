@@ -201,8 +201,10 @@ def renewal(monkeypatch, tmp_path, mode="app", key=True):
         monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "pem")
     else:
         monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    monkeypatch.setattr(github_app_cli, "_AUTH", Mock(get_token=Mock(return_value="cached")))
     mint = Mock(return_value="fresh")
-    monkeypatch.setattr(github_app_cli, "token", mint)
+    factory = Mock(return_value=Mock(get_token=mint))
+    monkeypatch.setattr(github_app_cli, "GitHubAppAuth", factory)
     return tmp_path / "github-token", mint
 
 
