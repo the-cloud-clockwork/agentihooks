@@ -132,8 +132,9 @@ def test_resume_after_a_crash_continues_from_the_saved_stage(tmp_path):
     crashy = ScriptedLauncher(StageResult("pass", {"diff": 1}), RuntimeError("boom"))
     run = Runner(definition(), crashy, never)
 
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(RuntimeError) as crash:
         run.run(folder)
+    assert str(crash.value) == "boom"
 
     saved = store.load(folder)
     assert saved["stage"] == "verdict"

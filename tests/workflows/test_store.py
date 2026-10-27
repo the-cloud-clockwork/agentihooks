@@ -66,8 +66,9 @@ def test_a_failed_replace_leaves_the_previous_state_intact(tmp_path, monkeypatch
 
     monkeypatch.setattr(store.os, "replace", boom)
 
-    with pytest.raises(OSError, match="disk full"):
+    with pytest.raises(OSError) as failure:
         store.save(folder, {**first, "visit": 9})
+    assert str(failure.value) == "disk full"
 
     assert store.load(folder) == first
 

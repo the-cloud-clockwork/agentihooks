@@ -1,4 +1,4 @@
-"""The run folder: workflow.json plus outputs/, saved so a crash never leaves a partial file."""
+"""The run folder: workflow.json plus outputs/, saved so a process crash never leaves a partial file."""
 
 from __future__ import annotations
 
