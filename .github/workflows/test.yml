@@ -3124,7 +3124,7 @@ jobs:
         id: download-this-runs-test-durations
         continue-on-error: true
         uses: actions/download-artifact@v4
-        with: &summary-download-this-runs-test-durations
+        with: &test-summary-download-this-runs-test-durations
           pattern: durations-3.*
           path: test-reports
 
@@ -3138,14 +3138,14 @@ jobs:
       - name: Download this run's test durations, attempt 2
         if: steps.download-this-runs-test-durations.outcome == 'failure'
         uses: actions/download-artifact@v4
-        with: *summary-download-this-runs-test-durations
+        with: *test-summary-download-this-runs-test-durations
 
       - name: Download this run's test flakes
         if: ${{ always() }}
         id: download-this-runs-test-flakes
         continue-on-error: true
         uses: actions/download-artifact@v4
-        with: &summary-download-this-runs-test-flakes
+        with: &test-summary-download-this-runs-test-flakes
           pattern: flakes-3.*
           path: test-reports
 
@@ -3159,7 +3159,7 @@ jobs:
       - name: Download this run's test flakes, attempt 2
         if: steps.download-this-runs-test-flakes.outcome == 'failure'
         uses: actions/download-artifact@v4
-        with: *summary-download-this-runs-test-flakes
+        with: *test-summary-download-this-runs-test-flakes
 
       - name: Summarize this run's tests
         if: ${{ always() }}
