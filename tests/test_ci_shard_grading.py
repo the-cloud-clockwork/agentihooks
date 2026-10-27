@@ -84,7 +84,7 @@ def test_shard_grading_keeps_head_data_separate_from_base_modules():
     assert commands == [
         "python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED",
         'python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \\\n'
-        '  --collected collected-data/collected.json --plan "$PLAN" --flakes shard-flakes/*/flakes.jsonl'
+        '  --collected collected-data/collected.json --plan "$PLAN" --flakes shard-flakes/*/flakes.jsonl $BRANCH_PLAN'
         ' | tee -a "$GITHUB_STEP_SUMMARY"\n',
         "python -m tests.shard_budget $REPORT shard-durations/*/durations.json",
     ]
@@ -160,7 +160,13 @@ def test_grouped_download_preserves_shard_integrity_without_installed_dependenci
         {"pattern": "{collected,reused-tests}-${{ matrix.python-version }}", "path": "shard-data"},
         {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
         {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
+        {"name": "reused-branch-${{ matrix.python-version }}", "path": "branch-plan"},
+        {"name": "reused-branch-${{ matrix.python-version }}", "path": "branch-plan"},
     ]
+    branch, branch_retry = downloads[4], downloads[5]
+    assert branch["if"] == "needs.split.outputs.branch != '' && needs.split.outputs.branch != '0'"
+    assert branch["continue-on-error"] is True
+    assert branch_retry["if"] == steps[steps.index(branch_retry) - 1]["if"] == "steps.branch-plan.outcome == 'failure'"
     for first, retry in ((downloads[0], downloads[1]), (downloads[2], downloads[3])):
         assert first["continue-on-error"] is True
         assert retry["if"] == f"steps.{first['id']}.outcome == 'failure'"

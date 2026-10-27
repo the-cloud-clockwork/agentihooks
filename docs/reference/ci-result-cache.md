@@ -8,7 +8,7 @@ nav_order: 5
 
 One CI algorithm for every repo and workflow: a check whose real inputs did not change reuses its last green result, and a check that fails is retried in place a bounded number of times inside the same job. No run is ever restarted from zero because one test flaked.
 
-Status: slices 1 to 6 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered), [Slice 3 as delivered](#slice-3-as-delivered), [Slice 4 as delivered](#slice-4-as-delivered), [Slice 5 as delivered](#slice-5-as-delivered) and [Slice 6 as delivered](#slice-6-as-delivered)), with full scope pull request reuse added to slice 5 (see [Full scope pull request reuse as delivered](#full-scope-pull-request-reuse-as-delivered)); slice 7 is design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
+Status: slices 1 to 6 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered), [Slice 3 as delivered](#slice-3-as-delivered), [Slice 4 as delivered](#slice-4-as-delivered), [Slice 5 as delivered](#slice-5-as-delivered) and [Slice 6 as delivered](#slice-6-as-delivered)), with full scope pull request reuse added to slice 5 (see [Full scope pull request reuse as delivered](#full-scope-pull-request-reuse-as-delivered)) and reuse of a pull request's own earlier runs added after it (see [Pull request branch reuse as delivered](#pull-request-branch-reuse-as-delivered)); slice 7 is design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
 
 ## Before numbers
 
@@ -54,6 +54,7 @@ These two tests stay unfixed until slice 1 lands, so they keep proving the retry
 | Durations and coverage baselines: `durations-merged-<sha>`, `coverage-baseline-<tree>` | data | commit or tree | not results |
 | Mutation reuse of the preflight result: `own_bases` and `graded_green` in `scripts/ci_mutation/scope.py` | mutation scope | ancestor commit whose preflight `mutation` job passed | per commit, not per input |
 | Helm kind chart proof: `kind-due` and `helm-kind` | one job | job input key | none: `kind-due` looks up the `helm-kind` key |
+| Pull request branch reuse: `tests/branch_record.py` on each 3.12 leg, `scripts/ci_branch_plan.py` in `test-count` | test | the earlier run's commit, its per test dependency manifest, the venv cache key | same-repo pull requests into dev only; a dev change to `.github/` or `pyproject.toml` between pushes voids every record |
 | Dev push | whole run | none | always runs everything; `ci_reuse.py` decides reuse only for `merge_group`, so the dev push reuse named in the task does not exist yet |
 
 Before slice 1 nothing retried. A failed test failed its shard, the shard failed `Gate — Required`, and the only recovery was a rerun of failed jobs on a pull request or a new queue entry.
@@ -550,6 +551,98 @@ gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused|fell bac
 - A page capture with no test is kept whenever any test is reused, so it can carry coverage from tests that ran on the dev record but run again here.
 - The download of the dev shard's coverage has no fallback: if the artifact cannot be downloaded, the shard fails instead of running every test. An unusable downloaded database also fails the shard; see [Unusable coverage databases](#unusable-coverage-databases).
 - A dev record whose coverage artifacts expired, after 7 days, is never chosen, so a quiet dev plans no reuse until its next push.
+
+## Pull request branch reuse as delivered
+
+A Tests run of a pull request into dev from a branch of this repository skips every test that passed on an earlier Tests run of the same pull request, at any earlier head and including runs a newer push cancelled, when nothing the test depended on changed between that earlier run's commit and the current head. The dependencies are measured at the earlier run's own commit, not taken from the dev record, because the pull request may have changed what the test calls. Both scopes take part: the selected legs of a narrowed run and the twenty unit shards of a full scope run. Issue [#7644](https://github.com/the-cloud-clockwork/agentihooks/issues/7644).
+
+### What runs where
+
+| Job | Step | Code from | Does |
+|---|---|---|---|
+| `unit`, `unit-selected` | `Run tests`, `Run the selected tests` | head | Runs pytest with `--cov-context=test -p tests.dep_inputs -p tests.pass_record` on the command line, `DEP_INPUTS_DIR=dep-inputs` and `CI_RESULTS=ci-results` |
+| `unit`, `unit-selected` | `Record this leg's passed tests` | head | Builds `branch-record/record.json` with `python -m tests.branch_record` |
+| `unit`, `unit-selected` | `Upload this leg's branch record`, `Upload this leg's branch coverage` | none | Publish `branch-record-3.12-<leg>-<attempt>` and `branch-coverage-3.12-<leg>-<attempt>` |
+| `test-count` | `Plan the tests whose inputs did not change` | grader, `origin/dev` | Runs `scripts.ci_branch_plan` after `scripts.ci_test_plan` |
+| `test-count` | `Upload the pull request runs' test plan` | none | Publishes `reused-branch-3.12` when the plan reuses at least one test |
+| `test-count` | `Deselect the reused tests` | grader | Deselects the dev plan and the branch plan together |
+| `unit-selected` | `Wait for the early collection`, `Adopt the reused tests from the protected grader` | grader | Hands the leg the deselected tests as `CI_REUSED` |
+| `unit-selected` | `Check every selected test ran once or was reused` | grader | Grades the leg |
+| `shard-check` | `Download the pull request runs' test plan` and the check and summary steps | base | Grades the full scope shards against both plans |
+| `sonar` | `Carry the pull request runs' coverage of the reused tests` | the pull request's base commit | Carries the reused tests' coverage from the earlier runs |
+
+### Record
+
+`CI_RESULTS` is set only on 3.12 legs of a pull request into dev from this repository. `tests.pass_record` then writes one fsynced line per test attempt as it starts and as it finishes into `ci-results/<pid>.jsonl`, and switches the coverage context after each test so its teardown arcs reach the worker's data file. `tests.dep_inputs` writes each test's opened files as the test ends, not only at session end, so a killed worker keeps them.
+
+`Record this leg's passed tests` runs with `always()` whenever `ci-results/` holds a line, so a run cancelled by a newer push still records. `tests.branch_record` reads the leg's coverage, dependency inputs, result lines and `flakes.jsonl`:
+
+- Coverage is complete when `elapsed.json` exists and `.coverage` is intact. Otherwise each surviving `.coverage.*pid<n>*` worker file is read, and a passed test counts only if its worker's file survived.
+- A test counts as passed only with its dependency line written. A test that started and never finished counts as failed. A test that passed after a retry counts as flaky.
+- The record holds the run, attempt, leg, `github.sha`, the pull request head and number, the venv cache key, the manifest measured at `github.sha`, and the passed, failed and flaky tests.
+
+Both uploads run with `always()` and keep 7 days. They use `actions/upload-artifact` directly: the inner steps of `retry-upload` are skipped once the job is cancelled. The leg is the unit shard number or the selected leg number, always plain digits. The coverage artifact holds `.coverage`, surviving `.coverage.*` worker files, `elapsed.json` and `js-coverage/`.
+
+### Plan
+
+The plan step runs `scripts.ci_branch_plan` from the grader after `scripts.ci_test_plan`, only on a `pull_request` event and only when the grader has the script; otherwise it prints `The grader has no branch planner` and nothing is reused from earlier runs. The planner:
+
+1. Lists up to 8 earlier Tests runs of this pull request: same head branch and head repository, created before this run, any conclusion.
+2. Downloads each run's `branch-record-3.12-*` artifacts and rejects a record whose run, head, pull request, venv cache key, artifact name or manifest commit differs from what the API reports. A run it cannot fully read is a barrier: neither it nor any older run is reused.
+3. Fetches each record's commit into the head checkout and invalidates the record's manifest with the diff from that commit to the head.
+4. Reuses a test that passed and stays valid in some record, unless any record has it failed or flaky while valid. Tests the dev plan already reuses stay attributed to dev.
+
+It writes `$RUNNER_TEMP/reused-branch.json` and `branch=<n>` and `branch_runs=<ids>` to the step output, and never fails the step. `reused-branch-3.12` is uploaded only when `branch` is not 0.
+
+### Deselect
+
+`tests.dep_manifest deselect` takes `--plan` once for each plan that reuses a test and adds a `branch` list of the tests only the branch plan reused. The output is `reused-3.12` and part of `early-collected-3.12`.
+
+- Full scope shards download `reused-3.12` when either plan reuses a test, and `conftest` deselects it as before.
+- Selected legs wait for `early-collected-3.12` with `await-download`, then add `origin/dev` as the grader. If the grader lacks `scripts/ci_branch_plan.py`, the leg prints the `No reuse on a selected leg` notice and runs every selected test. Otherwise it passes `reused.json` as `CI_REUSED` when the early collection's plan outputs report reuse. Selected legs therefore also skip tests the dev plan reuses.
+
+### Grade
+
+- Each selected leg ends with `Check every selected test ran once or was reused`, which runs the grader's `tests.shard_check` on the leg's `durations.json` with `--within <the leg's files>` and `--reused reused.json`. It prints `Leg <n>: ran <a>, reused <d> from dev, <b> from pull request runs`.
+- `shard-check` downloads `reused-branch-3.12` when `split` reports `branch` above 0 and passes it as a second `--reused`. Its summary prints `Python 3.12: ran <n>, reused <m> from dev run <R>, reused <b> from pull request runs <ids>, flaky <k>`.
+
+### Coverage
+
+On a pull request run from this repository that is not test only, `sonar` mints the CI App token with `actions: read`, downloads `reused-branch-3.12` and `reused-3.12`, adds the pull request's base commit as the grader and runs `python -m scripts.ci_branch_coverage` before `Merge shard coverage`. For each run and attempt the plan names, it downloads only that attempt's `branch-coverage-3.12-*` artifacts, keeps the contexts of the reused tests the deselect output attributes to pull request runs, moves their arcs by line diff onto the head as `tests/reused_coverage.py` does for dev, and writes them under `.coverage-shards/branch-<run>/<leg>-<attempt>/`. `.github/coverage/combine.sh` adds every non-empty `.coverage-shards/branch-*/*/.coverage*`, and `tests/js_lcov.py` finds the carried page captures by its recursive search.
+
+### Trust
+
+- The planner, the deselect, the selected leg's check and the coverage carry run from protected code: `origin/dev`, or in `sonar`, where no step may read the dev head, the pull request's base commit. The head supplies only records, and the planner checks each against the API's view of its run.
+- Merge group, push and dispatch runs never run the branch planner: the plan step checks the event, and `ci_branch_plan` returns an empty plan for any other event. Fork pull requests write no records, and the planner refuses a head repository other than this one.
+- `scripts/ci_reuse.py` and `scripts/ci_dev_reuse.py` refuse any run that published a `reused-branch-` artifact, so neither queue reuse nor dev unit reuse adopts a run that skipped tests on branch records.
+
+### Reading it on a run
+
+```bash
+RUN=<tests run id>
+# Records each leg wrote
+gh run view "$RUN" --log | grep "Branch record for leg"
+# Planner decision in test-count
+gh run view "$RUN" --log | grep -E "Pull request run [0-9]+ on [0-9a-f]+: [0-9]+ reused|No branch record|Unusable branch record"
+# Tests deselected because an earlier run passed them
+gh run view "$RUN" --log | grep "passed on earlier runs of this pull request"
+# Per leg counts on a narrowed run, and the full scope summary
+gh run view "$RUN" --log | grep -E "Leg [0-9]+: ran [0-9]+, reused|from pull request runs"
+# Coverage carried into Sonar
+gh run view "$RUN" --log | grep -E "Pull request run [0-9]+ attempt [0-9]+ on [0-9a-f]+: kept the coverage"
+# Artifacts the run published
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$RUN/artifacts?per_page=100" --jq '.artifacts[].name' | grep -E "^(branch-record|branch-coverage|reused-branch)-"
+```
+
+### Known limits
+
+- Open evidence: the scratch pull request that shows head 2 reusing tests that passed on head 1, and head 3 reusing from a cancelled head 2.
+- Hypotheses not yet observed: the arcs flushed at each context switch survive a killed worker, the record step finishes inside GitHub's cancellation window, and an earlier `refs/pull/<n>/merge` commit can still be fetched by its sha. A commit that cannot be fetched is a barrier for its run and every older one.
+- A dev change to `.github/`, `pyproject.toml` or `uv.lock` between two pushes invalidates every record; 75 of 460 dev commits over 3 days touched them.
+- The venv cache key carries the UTC day, so a record from an earlier day never matches. Records expire after 7 days.
+- Selected legs now wait for `test-count`'s early collection before running tests.
+- Selected legs carry no dev coverage for tests the dev plan reuses. Those tests depend on no changed unit, so coverage on changed lines is unaffected; the run's overall coverage figure drops.
+- A selected leg's grader is `origin/dev` when the leg checks out, which can be newer than the planner's.
 
 ## A crashed xdist worker and coverage data
 
