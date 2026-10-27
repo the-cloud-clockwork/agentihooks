@@ -1928,7 +1928,8 @@ jobs:
             python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep --data-file="$RUNNER_TEMP/dep-manifest/.coverage" \
               .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage || status=$?
             [[ "$status" != 0 ]] || python -m tests.dep_manifest build --coverage "$RUNNER_TEMP/dep-manifest/.coverage" --inputs .coverage-shards --root . \
-              --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out "$RUNNER_TEMP/dep-manifest/manifest.json" || status=$?
+              --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out "$RUNNER_TEMP/dep-manifest/manifest.json" \
+              --packed "$RUNNER_TEMP/dep-manifest/packed.json" || status=$?
             echo "$status" > "$RUNNER_TEMP/manifest.next"
             mv "$RUNNER_TEMP/manifest.next" "$RUNNER_TEMP/manifest.status"
           ) < /dev/null > "$RUNNER_TEMP/manifest.log" 2>&1 &
@@ -2055,6 +2056,16 @@ jobs:
         with:
           name: dep-manifest
           path: ${{ runner.temp }}/dep-manifest/manifest.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      - name: Upload the packed test dependency manifest
+        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dep-manifest-packed
+          path: ${{ runner.temp }}/dep-manifest/packed.json
           if-no-files-found: error
           retention-days: 7
           overwrite: true

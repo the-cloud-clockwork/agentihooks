@@ -969,3 +969,46 @@ def test_mutation_lane_cli_requires_capacity_width_and_run(missing, monkeypatch)
     with pytest.raises(SystemExit) as error:
         main()
     assert error.value.code == 2
+
+
+def test_the_import_scan_finds_imports_nested_in_every_statement_body():
+    source = """
+import a
+from . import sibling
+def f():
+    import b
+class C:
+    from c import d
+if x:
+    import e
+else:
+    import f2
+for i in y:
+    pass
+else:
+    import g
+while z:
+    import h
+try:
+    import i
+except E:
+    import j
+else:
+    import k
+finally:
+    import l
+with m:
+    import n
+match v:
+    case 1:
+        import o
+async def q():
+    async with r:
+        import s
+value = lambda: __import__("t")
+"""
+    names = plan._imported("scripts/pkg/mod.py", source)
+    imported = {"a", "b", "e", "f2", "g", "h", "i", "j", "k", "l", "n", "o", "s"}
+    assert set(names) == imported | {"scripts.pkg", "scripts.pkg.sibling", "c", "c.d"}
+    assert len(names) == len(imported) + 4
+    assert plan._imported("scripts/x.py", "def broken(:\n") == []

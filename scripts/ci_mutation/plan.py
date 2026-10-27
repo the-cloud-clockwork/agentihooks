@@ -7,6 +7,7 @@ import re
 import subprocess
 import time
 import zipfile
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
@@ -36,6 +37,7 @@ from tests.dep_manifest import changes as recorded_changes
 MUTANT_SECONDS = 5.6
 WORKERS = 4
 RECORD_RETRY_SECONDS = 10
+STATEMENT_BODIES = ("body", "orelse", "finalbody", "handlers", "cases")
 TEST_WORKFLOW = ".github/workflows/test.yml"
 COLLECTING_JOBS = {
     TEST_WORKFLOW: ("unit", "unit-selected", "mutation-stats"),
@@ -230,15 +232,23 @@ def _imported(path: str, source: str) -> list[str]:
         return []
     package = path.removesuffix(".py").replace("/", ".").split(".")
     names = []
-    for found in ast.walk(tree):
+    for found in _import_statements(tree.body):
         if isinstance(found, ast.Import):
             names.extend(alias.name for alias in found.names)
-        elif isinstance(found, ast.ImportFrom):
+        else:
             parent = package[: len(package) - found.level] if found.level else []
             base = ".".join([*parent, *filter(None, [found.module])])
             names.append(base)
             names.extend(f"{base}.{alias.name}" if base else alias.name for alias in found.names)
     return names
+
+
+def _import_statements(statements: list) -> Iterator[ast.Import | ast.ImportFrom]:
+    for statement in statements:
+        if isinstance(statement, ast.Import | ast.ImportFrom):
+            yield statement
+        for field in STATEMENT_BODIES:
+            yield from _import_statements(getattr(statement, field, ()))
 
 
 def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[set[int], set[str]]:
