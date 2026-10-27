@@ -1,10 +1,10 @@
 import argparse
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 from .runner import prepare_workspace
 
