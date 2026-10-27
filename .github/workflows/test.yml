@@ -3426,14 +3426,13 @@ jobs:
 
       - name: Upload mutation stats part
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/upload-artifact@v4
+        uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-stats-${{ matrix.part }}
           path: .mutation-stats/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
-          overwrite: true
 
       - name: Upload stats evidence
         if: failure()
@@ -3453,14 +3452,13 @@ jobs:
 
       - name: Upload this part's test stats cache
         if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/upload-artifact@v4
+        uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-test-stats-cache-${{ matrix.part }}
           path: .mutation-stats-fresh/
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 1
-          overwrite: true
 
       - name: Mutate the only shard in the statistics job
         id: mutate
