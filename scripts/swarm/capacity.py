@@ -614,6 +614,22 @@ def _prepared(store, slug: str, task: dict) -> dict:
     }
 
 
+def _placement_ready(store, slug: str, ready: dict, now_ms: int) -> tuple[dict, list[str]]:
+    from scripts.hive import placement_waits
+
+    refused = placement_waits.read(store, slug)
+    eligible, actions = {}, []
+    for lane, tasks in ready.items():
+        eligible[lane] = []
+        for task in tasks:
+            wait = refused.get(task["id"])
+            if wait and wait["lane"] == lane and now_ms - wait["seen_at"] < placement_waits.FRESH_MS:
+                actions.append(f"capacity skipped {lane} task {task['id']}: fresh placement refusal: {wait['reason']}")
+            else:
+                eligible[lane].append(task)
+    return eligible, actions
+
+
 def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     reader = getattr(runtime, "quota_capacity", None)
     if reader is None:
@@ -622,6 +638,7 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     from scripts.swarm.tick import _ended
 
     rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
+    ready, skipped = _placement_ready(store, slug, ready, now_ms)
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     requirements = None
     if hasattr(runtime, "quota_requirements"):
@@ -652,4 +669,4 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
                 ledger.comment(slug, task["id"], text, by="swarm")
         except LedgerRefused as exc:
             print(f"swarm notice dropped, the ledger refused it: {exc}", file=sys.stderr)
-    return [text] if changed else []
+    return skipped + ([text] if changed else [])

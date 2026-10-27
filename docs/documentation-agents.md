@@ -92,11 +92,9 @@ documentation follow-up with no rank, such as one generated before tasks carried
 rank low, sorts as low too. The task depends on its source task when that id
 is a task on the ledger.
 
-Classifier or ledger failures retain a pending request. Later bound session
-completions retry a bounded number of requests from the same swarm, oldest
-attempt first so retained requests do not starve later work. Documentation
-tasks do not queue more documentation tasks. Session teardown continues while
-the background worker performs this work.
+Classifier or ledger failures retain a pending request. Documentation tasks do
+not queue more documentation tasks. Session teardown continues while the
+background worker performs this work.
 
 Standalone sessions create no ledger, swarm or documentation task. They record
 the verdict in the session log. When documentation is needed, the detached
@@ -107,6 +105,85 @@ documentation agent; the notice is then marked shown.
 The classifier follows the existing definition precedence: package defaults,
 bundle classifier definition, then runtime classifier definition. Use the
 standard classifier override mechanism to adjust its prompts or thresholds.
+
+## Pending request retries
+
+A request stays `pending` when the classifier cannot decide, or when evidence
+collection, the classifier or the ledger raises an error. Each request carries
+its own retry schedule, so it is retried even when no other session of its swarm
+ever ends.
+
+Every pass of the host swarm tick, which the scheduler runs every 60 seconds,
+starts a detached `documentation-retry` worker when the
+`~/.agentihooks/documentation/` folder exists. The worker takes the
+non-blocking `retry.lock` in that folder; a pass that finds the lock held skips
+its turn. It processes up to three pending requests whose `retry_at` time has
+passed, from every swarm and from standalone sessions, oldest write first.
+Its timeout is 180 seconds.
+
+Each attempt is counted and schedules the next one before the classifier runs:
+
+| Attempt | Run by | Next retry due after |
+| --- | --- | --- |
+| 1 | The session's own SessionEnd worker | 5 minutes |
+| 2 | Retry worker, or a SessionEnd worker of the same swarm | 15 minutes |
+| 3 | Retry worker, or a SessionEnd worker of the same swarm | 30 minutes |
+| 4 | Retry worker, or a SessionEnd worker of the same swarm | 60 minutes |
+| 5 | Retry worker, or a SessionEnd worker of the same swarm | 120 minutes |
+
+SessionEnd marks the request `pending` with a `retry_at` 180 seconds ahead, the
+SessionEnd worker's timeout, so the timer leaves the first attempt to that
+worker. That worker also retries up to three other due requests of the same
+swarm. A SessionEnd that finds its request already `pending` dispatches nothing
+and leaves it to the timer.
+
+The first retry due after the fifth attempt's delay ends the request without
+another classifier call. Its status becomes `abandoned` and its `outcome` names
+the bound and the last failure:
+
+```text
+gave up after 5 attempts: classifier undecided
+gave up after 5 attempts: RuntimeError
+gave up after 5 attempts: unknown
+```
+
+`classifier undecided` means neither the yes nor the no rule reached its
+threshold; an exception class name means the worker raised it; `unknown` means
+no reason was recorded. The hook log records `documentation request abandoned`
+with the outcome and session. An abandoned request is never retried or
+dispatched again.
+
+A successful retry finishes the request as `queued`, with exactly one
+documentation task added, or `complete` when no documentation is needed. A
+standalone request that needs documentation ends `complete` with a repository
+notice. The stable documentation task identifier keeps a repeated retry from
+adding a second task.
+
+Request records live in `~/.agentihooks/documentation/`, one JSON file per
+session named by the SHA-256 of the session id. List requests still pending
+with their attempt count, due time and last reason:
+
+```bash
+jq -r 'select(.status == "pending")
+  | [.swarm, .attempts // 0, (.retry_at // 0 | floor | todate), .reason // "-"] | @tsv' \
+  ~/.agentihooks/documentation/*.json
+```
+
+Pending requests normally wait up to two hours between attempts. Count those
+whose retry is more than one hour overdue; a record without `retry_at`, written
+before timed retries, counts as overdue:
+
+```bash
+jq -r 'select(.status == "pending" and (.retry_at // 0) < now - 3600) | .session' \
+  ~/.agentihooks/documentation/*.json | wc -l
+```
+
+List abandoned requests with their outcome:
+
+```bash
+jq -r 'select(.status == "abandoned") | [.swarm, .outcome] | @tsv' \
+  ~/.agentihooks/documentation/*.json
+```
 
 ## Sessions that file no documentation task
 
@@ -207,4 +284,6 @@ after this records the `no changes` verdict without a model call.
 | A master or seat session left no documentation task | Expected when `AGENTIHOOKS_SWARM_TASK` is set to an id the ledger does not hold. Its request record under `~/.agentihooks/documentation/`, named by the SHA-256 of the session id, has status `complete` and verdict source `no ledger task`. With an empty value the session is classified and can queue a task with no dependency. |
 | A session that only pulled `dev` reported no changes | Expected. No pulled `origin/dev` commit has a `commit` entry in the checkout's HEAD reflog, so the evidence base moved to the merge base with `origin/dev`. |
 | Delivered commits were missed | The commits were created outside this checkout, for example in another worktree, so this checkout's reflog holds no `commit` entry for them. Document the change from its own task. |
+| A request stays `pending` past its `retry_at` | No host swarm tick runs on this machine, or a retry pass holds `retry.lock`. Each pass handles at most three due requests, and a pass runs only while no earlier pass holds the lock. |
+| A request ended `abandoned` | Five attempts failed. Its `outcome` names the last reason; document the change from its source task by hand if it still needs documentation. |
 | A session that committed to `dev` and also pulled reports pulled changes | Expected. One of its commits is on `origin/dev`, so the baseline is kept and the full diff from it is counted. |
