@@ -1,14 +1,10 @@
-"""Idempotent backfill of legacy session history into the session corpus, one durable batch checkpoint at a time.
-
-Each session imports from its highest fidelity surviving source under a corpus and installation namespace. The batch
-checkpoint advances only by compare and set, so a stale runner cannot move it, and every imported session is tagged
-with the migration run that wrote it, so its projection can be deactivated without deleting catalog events or sources.
-"""
+"""Idempotent backfill of legacy session history into the session corpus, one durable batch checkpoint at a time."""
 
 import argparse
 import json
 import sqlite3
 from collections.abc import Mapping
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -196,7 +192,7 @@ def _legacy_rows(source: dict, found: dict) -> list[dict]:
             "kind": "meta",
             "text": row["text_preview"],
             "legacy_chunk_idx": row["chunk_idx"],
-            "source_time": row["timestamp"],
+            "source_time": row["timestamp"] or None,
         }
         for row in sorted(source["vectors"], key=lambda row: row["chunk_idx"])
     ]
@@ -391,10 +387,9 @@ def main(argv: list[str] | None = None) -> int:
     ledger = BackfillLedger(args.ledger)
     try:
         if args.command == "run":
-            catalog = Catalog(args.catalog)
             grant = Grant(args.principal, args.corpus, frozenset(args.project))
-            result = backfill(catalog, ledger, grant, load_plan(args.plan), args.run_id, args.limit)
-            catalog.close()
+            with closing(Catalog(args.catalog)) as catalog:
+                result = backfill(catalog, ledger, grant, load_plan(args.plan), args.run_id, args.limit)
         elif args.command == "deactivate":
             result = {"run_id": args.run_id, "deactivated": ledger.deactivate(args.run_id)}
         else:

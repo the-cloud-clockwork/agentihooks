@@ -60,7 +60,7 @@ def tables(root: Path) -> dict[str, list]:
     for name in ("catalog.db", "backfill.db"):
         db = sqlite3.connect(root / name)
         names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        found |= {table: sorted(db.execute(f"SELECT * FROM {table}").fetchall()) for table in TABLES if table in names}  # noqa: S608
+        found |= {table: sorted(db.execute(f"SELECT * FROM {table}").fetchall()) for table in TABLES if table in names}
         db.close()
     return found
 
