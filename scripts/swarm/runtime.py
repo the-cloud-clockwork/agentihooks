@@ -650,6 +650,12 @@ class HerdrRuntime:
             )
         return row
 
+    def _route_account(self, agent, saved, task_id, lane, admitted):
+        if admitted:
+            return None, self._admitted_account(agent, saved["account"], lane, dict(os.environ))
+        account = self._claim_account(agent, saved.get("account") or self.planned_account(task_id, agent), lane)
+        return account, account
+
     @contextmanager
     def _seat_returned_on_failure(self, account, lane, agent):
         try:
@@ -799,11 +805,9 @@ class HerdrRuntime:
         )
         rc = remote_control.decision(lane, agent, route_kind, config.slug, login) if front else {}
         account = None
-        if admitted and route_kind != "interactive" and (quota_transfer or hasattr(self, "_quota_accounts")):
-            route = ["--route", self._admitted_account(agent, saved["account"], lane, environ).name]
-        elif hasattr(self, "_quota_accounts") and route_kind != "interactive":
-            account = self._claim_account(agent, saved.get("account") or self.planned_account(task["id"], agent), lane)
-            route = ["--route", account.name]
+        if route_kind != "interactive" and (hasattr(self, "_quota_accounts") or (admitted and quota_transfer)):
+            account, routed = self._route_account(agent, saved, task["id"], lane, admitted)
+            route = ["--route", routed.name]
         with self._seat_returned_on_failure(account, lane, agent):
             placed = self._account_launch(
                 config,
