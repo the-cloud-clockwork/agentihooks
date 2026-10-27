@@ -3,8 +3,8 @@ import { readMonitor } from "../js/api.js";
 const EVERY_MS = 10000;
 const GIB = 1024;
 const ROWS = [
-  ["agents", "Agents"], ["claude", "Claude", "sub"], ["codex", "Codex", "sub"],
-  ["hives", "Hives"], ["swarms", "Swarms"], ["cpu", "CPU", "gauge"], ["memory", "Memory", "gauge"],
+  ["swarms", "Swarms"], ["agents", "Agents"], ["claude", "Claude", "sub"], ["codex", "Codex", "sub end"],
+  ["hives", "Hives"], ["cpu", "CPU", "gauge"], ["memory", "Memory", "gauge"],
 ];
 
 function h(tag, attrs, ...kids) {
@@ -37,6 +37,7 @@ function paint(box, d) {
   set("claude", String(d.agents.claude));
   set("codex", String(d.agents.codex));
   set("hives", String(d.hives.live));
+  hiveRows(cell("hives"), d.hives.rows);
   const silent = d.agents.of - d.agents.reporting, where = d.agents.source === "herdr" ? "herdr machine" : "live hive";
   cell("agents").dataset.silent = silent ? "yes" : "no";
   cell("agents").title = silent
@@ -53,6 +54,17 @@ function paint(box, d) {
   cell("cpu").title = cell("memory").title = partial
     ? `${d.hives.measured} of ${d.hives.live} hives reported their load; the rest are not counted`
     : `Summed across ${d.hives.live} live hive${d.hives.live === 1 ? "" : "s"}, five minute load`;
+}
+
+function hiveRows(head, rows) {
+  for (const old of head.parentElement.querySelectorAll(".fm[data-hive]")) old.remove();
+  const made = rows.map((row, i) => {
+    const el = h("div", { class: `fm sub${i === rows.length - 1 ? " end" : ""}`, "data-hive": row.name, "data-silent": row.agents === null ? "yes" : "no" },
+      h("dt", {}, row.name), h("dd", {}, row.agents === null ? "—" : String(row.agents)));
+    if (row.agents === null) el.title = `${row.name} did not answer; its agents are not counted`;
+    return el;
+  });
+  head.after(...made);
 }
 
 export function monitor() {

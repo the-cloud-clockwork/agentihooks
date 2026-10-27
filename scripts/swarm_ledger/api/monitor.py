@@ -14,6 +14,7 @@ from .services import Services
 
 SwarmError = ports.swarm().store.SwarmError
 HARNESSES = ("claude", "codex")
+LOCAL = "local"
 
 
 def capacity(measured: dict) -> tuple[float, float, int, int]:
@@ -48,25 +49,33 @@ def processes(store: object, hive: str, measured: dict | None) -> dict[str, int]
     return {harness: int(found.get(harness, 0)) for harness in HARNESSES}
 
 
-def herdr_agents(redis: object, now_ms: int) -> dict | None:
-    published = ports.hive().herdr_stats.read(redis, now_ms)
+def herdr_machines(redis: object, now_ms: int) -> list[tuple[str, dict | None]] | None:
+    """Each machine the master herdr client last counted, by name, with None for one that did not answer."""
+    stats = ports.hive().herdr_stats
+    published = stats.read(redis, now_ms)
     if published is None:
         return None
-    machines = published["machines"].values()
-    totals = {harness: sum(counts.get(harness, 0) for counts in machines) for harness in HARNESSES}
-    return {"source": "herdr", "reporting": len(machines), "of": len(machines) + len(published["silent"]), **totals}
+    counted = [(LOCAL if name == stats.MASTER else name, counts) for name, counts in published["machines"].items()]
+    return counted + [(name, None) for name in published["silent"]]
 
 
-def hive_agents(store: object, readings: dict) -> dict:
-    agents, reporting = dict.fromkeys(HARNESSES, 0), 0
-    for hive_id, reading in readings.items():
-        counts = processes(store, hive_id, reading)
-        if counts is None:
-            continue
-        reporting += 1
-        for harness, count in counts.items():
-            agents[harness] += count
-    return {"source": "hives", "reporting": reporting, "of": len(readings), **agents}
+def hive_machines(store: object, live: list[dict], readings: dict) -> list[tuple[str, dict | None]]:
+    return [
+        (LOCAL if hive.get("ui") == "yes" else hive["name"], processes(store, hive["id"], readings[hive["id"]]))
+        for hive in live
+    ]
+
+
+def tally(source: str, machines: list[tuple[str, dict | None]]) -> tuple[dict, list[dict]]:
+    """Agent totals by harness and one row per machine with its agents, None where the machine did not answer."""
+    found = [counts for _, counts in machines if counts is not None]
+    totals = {harness: sum(counts.get(harness, 0) for counts in found) for harness in HARNESSES}
+    agents = {"total": sum(totals.values()), "source": source, "reporting": len(found), "of": len(machines), **totals}
+    rows = [
+        {"name": name, "agents": None if counts is None else sum(counts.get(harness, 0) for harness in HARNESSES)}
+        for name, counts in machines
+    ]
+    return agents, sorted(rows, key=lambda row: (row["name"] != LOCAL, row["name"]))
 
 
 def view(store: object, now_ms: int) -> dict:
@@ -75,14 +84,18 @@ def view(store: object, now_ms: int) -> dict:
     live = [hive for hive in registry.hives(store.redis) if registry.live(hive, now_ms)]
     readings = {hive["id"]: headroom.read(store.redis, hive["id"], now_ms) for hive in live}
     measured = [reading for reading in readings.values() if reading is not None]
-    agents = herdr_agents(store.redis, now_ms) or hive_agents(store, readings)
+    machines = herdr_machines(store.redis, now_ms)
+    if machines is None:
+        agents, rows = tally("hives", hive_machines(store, live, readings))
+    else:
+        agents, rows = tally("herdr", machines)
     used, cores, used_mb, total_mb = (
         (sum(column) for column in zip(*map(capacity, measured))) if measured else (0, 0, 0, 0)
     )
     return {
-        "agents": {"total": sum(agents[harness] for harness in HARNESSES), **agents},
+        "agents": agents,
         "swarms": {"running": running},
-        "hives": {"live": len(live), "measured": len(measured)},
+        "hives": {"live": len(live), "measured": len(measured), "rows": rows},
         "cpu": {"used": round(used, 1), "cores": round(cores, 1)},
         "memory": {"used_mb": used_mb, "total_mb": total_mb},
     }

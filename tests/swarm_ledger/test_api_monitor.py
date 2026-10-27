@@ -49,7 +49,7 @@ def ports_for(hives, readings, here="", local=None, published=None):
         hives=lambda redis: hives, live=lambda hive, now: hive["live"], key=lambda hive: f"hive:{hive}"
     )
     headroom = SimpleNamespace(read=lambda redis, hive, now: readings.get(hive))
-    herdr_stats = SimpleNamespace(read=lambda redis, now: published)
+    herdr_stats = SimpleNamespace(read=lambda redis, now: published, MASTER="master")
     hooks = SimpleNamespace(account_sessions=SimpleNamespace(local_processes=lambda: local or {}))
     swarm = SimpleNamespace(commands=SimpleNamespace(hive_id=lambda: here))
     return (
@@ -80,9 +80,13 @@ def test_load_over_the_core_count_reads_as_every_core_busy():
     assert monitor.capacity({**HOST, "load5": 40.0})[0] == 16
 
 
+ROOT = {"id": "root", "name": "root", "ui": "yes", "live": True}
+POD_HIVE = {"id": "pod", "name": "swarm-hive-001", "ui": "no", "live": True}
+
+
 def test_agents_come_from_this_hosts_process_table_and_each_other_hives_headroom_reading():
     store = Store({"a": "running", "b": "stopped", "c": "running"})
-    hives = [{"id": "root", "live": True}, {"id": "pod", "live": True}, {"id": "gone", "live": False}]
+    hives = [POD_HIVE, ROOT, {"id": "gone", "name": "gone", "live": False}]
     readings = {
         "root": {**HOST, "agents": {"claude": 99, "codex": 99}},
         "pod": {**POD, "agents": {"claude": 4, "codex": 1}},
@@ -93,25 +97,29 @@ def test_agents_come_from_this_hosts_process_table_and_each_other_hives_headroom
     assert data == {
         "agents": {"total": 9, "source": "hives", "reporting": 2, "of": 2, "claude": 7, "codex": 2},
         "swarms": {"running": 2},
-        "hives": {"live": 2, "measured": 2},
+        "hives": {
+            "live": 2,
+            "measured": 2,
+            "rows": [{"name": "local", "agents": 4}, {"name": "swarm-hive-001", "agents": 5}],
+        },
         "cpu": {"used": 7.5, "cores": 20.0},
         "memory": {"used_mb": 24000, "total_mb": 48000},
     }
 
 
 def test_a_hive_without_a_fresh_reading_is_left_out_never_counted_as_zero():
-    hives = [{"id": "root", "live": True}, {"id": "pod", "live": True}]
     readings = {"root": {**HOST, "agents": {"claude": 2, "codex": 0}}}
-    data = viewed(Store({}), *ports_for(hives, readings))
+    data = viewed(Store({}), *ports_for([ROOT, POD_HIVE], readings))
     assert data["agents"] == {"total": 2, "source": "hives", "reporting": 1, "of": 2, "claude": 2, "codex": 0}
-    assert data["hives"] == {"live": 2, "measured": 1}
+    assert data["hives"]["rows"] == [{"name": "local", "agents": 2}, {"name": "swarm-hive-001", "agents": None}]
+    assert data["hives"]["measured"] == 1
 
 
 def test_a_hive_that_predates_the_agent_reading_falls_back_to_its_session_report():
     sessions = {"pod": {"claude:a": 3, "codex:b": 1, "interactive:claude:a": 1, "_executions": {"codex:b": ["x"]}}}
-    data = viewed(Store({}, sessions), *ports_for([{"id": "pod", "live": True}], {"pod": HOST}))
+    data = viewed(Store({}, sessions), *ports_for([POD_HIVE], {"pod": HOST}))
     assert data["agents"] == {"total": 4, "source": "hives", "reporting": 1, "of": 1, "claude": 3, "codex": 1}
-    assert data["hives"] == {"live": 1, "measured": 1}
+    assert data["hives"] == {"live": 1, "measured": 1, "rows": [{"name": "swarm-hive-001", "agents": 4}]}
 
 
 def test_an_unreachable_store_answers_503():
@@ -129,6 +137,11 @@ def test_agents_are_the_panes_the_master_herdr_client_published_for_itself_and_i
         "silent": ["hive-2"],
         "measured_at": NOW,
     }
-    hives = [{"id": "root", "live": True}]
-    data = viewed(Store({}), *ports_for(hives, {"root": {**HOST, "agents": {"claude": 1}}}, published=published))
+    data = viewed(Store({}), *ports_for([ROOT], {"root": {**HOST, "agents": {"claude": 1}}}, published=published))
     assert data["agents"] == {"total": 27, "source": "herdr", "reporting": 2, "of": 3, "claude": 21, "codex": 6}
+
+    assert data["hives"]["rows"] == [
+        {"name": "local", "agents": 13},
+        {"name": "hive-1", "agents": 14},
+        {"name": "hive-2", "agents": None},
+    ]
