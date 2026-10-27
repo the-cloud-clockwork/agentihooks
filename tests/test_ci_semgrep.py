@@ -40,8 +40,16 @@ def test_scan_grades_new_findings_against_the_caller_base():
     assert _jobs()["scan"]["with"]["base"] == "${{ inputs.base }}"
 
 
-def test_scan_runs_the_registry_packs_for_ci_secrets_and_python():
-    assert set(_jobs()["scan"]["with"]["configs"].split()) == {"p/ci", "p/secrets", "p/python"}
+def test_scan_runs_the_registry_packs_and_the_outage_rules():
+    assert set(_jobs()["scan"]["with"]["configs"].split()) == {"p/ci", "p/secrets", "p/python", ".semgrep-incidents"}
+
+
+def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step():
+    assert ".semgrep-incidents" in _jobs()["scan"]["with"]["configs"].split()
+    assert any(_ROOT.glob(".semgrep-incidents/*.yml"))
+    runs = [step.get("run") for step in _jobs()["feature-tests"]["steps"]]
+    assert "semgrep --metrics off --test .semgrep-incidents" in runs
+    assert ".semgrep-incidents/" in (_ROOT / ".semgrepignore").read_text().splitlines()
 
 
 def test_scan_excludes_only_the_mutable_action_tag_rule():

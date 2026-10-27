@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import zlib
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -443,11 +444,29 @@ def ledger_port():
         yield hold.getsockname()[1]
 
 
+@contextmanager
+def memory_folder(settle_s=5.0):
+    folder = tempfile.TemporaryDirectory(dir="/dev/shm")
+    try:
+        yield Path(folder.name)
+    finally:
+        # Children a test started can still write into its home while the folder is removed.
+        deadline = time.monotonic() + settle_s
+        while True:
+            try:
+                folder.cleanup()
+                break
+            except OSError as error:
+                if error.errno != errno.ENOTEMPTY or time.monotonic() > deadline:
+                    raise
+                time.sleep(0.05)
+
+
 @pytest.fixture
 def memory_path():
     """A scratch folder on tmpfs, so a ledger database there commits without waiting on runner disk fsync."""
-    with tempfile.TemporaryDirectory(dir="/dev/shm") as path:
-        yield Path(path)
+    with memory_folder() as path:
+        yield path
 
 
 @pytest.fixture(autouse=True)
