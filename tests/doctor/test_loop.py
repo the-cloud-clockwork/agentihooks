@@ -148,16 +148,24 @@ def finding_of(kind):
     ],
 )
 def test_a_finding_read_from_workstation_only_sources_gives_a_workstation_cause_task(kind):
-    cause, fixed = loop.fix_tasks(WATCHED, *finding_of(kind), "code", ())
+    cause, _ = loop.fix_tasks(WATCHED, *finding_of(kind), "code", ())
     assert cause["workstation"] is True
-    assert "workstation" not in fixed
     ledger_kinds.check(cause)
+
+
+@pytest.mark.parametrize("fix", ["code", "tune"])
+def test_a_journal_measured_finding_gives_a_workstation_fix_task(fix):
+    _, fixed = loop.fix_tasks(WATCHED, *finding_of("failed spawn"), fix, ())
+    assert fixed["workstation"] is True
+    assert "measure failed-spawn/gc1" in fixed["contract"]["check"]
+    ledger_kinds.check(fixed)
 
 
 @pytest.mark.parametrize("kind", ["ci tier wall time", "stale claim"])
 def test_a_finding_read_from_github_or_the_ledger_gives_a_cause_task_any_agent_can_take(kind):
-    cause, _ = loop.fix_tasks(WATCHED, *finding_of(kind), "code", ())
+    cause, fixed = loop.fix_tasks(WATCHED, *finding_of(kind), "code", ())
     assert "workstation" not in cause
+    assert "workstation" not in fixed
 
 
 def step(store, at, found=(), closed=None, environ=None):
