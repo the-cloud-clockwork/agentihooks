@@ -210,11 +210,11 @@ def test_rest_checkout_reads_selected_files_from_one_revision_and_fails_closed(t
     gh.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
         'case "$2" in\n'
-        '  repos/owner/repo/commits/dev) echo source-revision ;;\n'
-        '  repos/owner/repo/tarball/source-revision)\n'
+        "  repos/owner/repo/commits/dev) echo source-revision ;;\n"
+        "  repos/owner/repo/tarball/source-revision)\n"
         '    [[ "$FAILURE" != api ]] || exit 19\n'
         '    cat "$ARCHIVE" ;;\n'
-        '  *) exit 17 ;;\n'
+        "  *) exit 17 ;;\n"
         "esac\n"
     )
     gh.chmod(0o755)
