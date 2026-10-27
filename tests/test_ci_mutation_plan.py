@@ -1,5 +1,6 @@
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -785,20 +786,24 @@ def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, m
         calls.append(("discover", root, bases, head))
         return changed
 
+    started = threading.Event()
+
     def record(repository):
-        calls.append(("record", repository))
+        started.set()
         return None, ""
+
+    def bases(*args):
+        # The record read is already running while the bases are worked out.
+        assert not changed or started.wait(10)
+        return ["base"]
 
     monkeypatch.setattr(plan, "read_record", record)
     monkeypatch.setattr(plan, "touches_code", lambda *args: calls.append(("touches", *args)) or bool(changed))
-    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "own_bases", bases)
     monkeypatch.setattr(plan, "discover_changes", discover)
     assert plan.main() == 0
-    assert calls == [
-        ("touches", tmp_path, "base", "HEAD"),
-        *[("record", "owner/repo")] * bool(changed),
-        ("discover", tmp_path, ["base"], "HEAD"),
-    ]
+    assert calls == [("touches", tmp_path, "base", "HEAD"), ("discover", tmp_path, ["base"], "HEAD")]
+    assert started.is_set() is bool(changed)
     assert f"changed={len(changed)}\n" in (tmp_path / "github-output").read_text()
     if not changed:
         assert "No change remains to mutate, so the recorded dev coverage is not read.\n" in capsys.readouterr().out
@@ -808,7 +813,7 @@ def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, m
     "changed, touched",
     [("scripts/sample.py", True), ("hooks/sample.py", True), ("scripts/notes.txt", False), ("tests/test_x.py", False)],
 )
-def test_the_record_read_starts_early_only_when_a_mutated_module_changed(tmp_path, changed, touched):
+def test_touches_code_names_only_hooks_or_scripts_python_changes(tmp_path, changed, touched):
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "base")
     _git(tmp_path, "branch", "base")
