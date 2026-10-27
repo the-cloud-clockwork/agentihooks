@@ -187,6 +187,19 @@ def test_stored_exports_are_per_server_and_ledger():
     home = {"AGENTIHOOKS_HOME": "/h"}
     names = {api.export_file(base, slug, home) for base in ("http://a", "http://b") for slug in "st"}
     assert len(names) == 4
+    assert {len(name.name) for name in names} == {len("0" * 32 + ".json")}
+    assert api.export_file("http://a", "s", {}).parent == api.Path.home() / ".agentihooks" / "ledger-exports"
+
+
+def test_unfit_changes_read_the_export_whole_outside_kept_exports(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    broken = {"generation": 6, "changes": {"lists": {"tasks": {"order": ["x"], "items": {}}}, "set": [], "drop": []}}
+    client, server = reader(monkeypatch, broken, {"generation": 7, "data": {"tasks": []}})
+    api.store_export(api.export_file("http://a", "s"), 5, {"tasks": []})
+    assert client.stored_export("s") == {"tasks": []}
+    assert [payload for *_, payload in server.sent] == [{"since": 5}, {"since": 0}]
+    assert api.stored_export(api.export_file("http://a", "s")) == (7, {"tasks": []})
+    assert api.KEPT is None
 
 
 def test_an_unreadable_stored_export_reads_it_whole(monkeypatch, tmp_path):
