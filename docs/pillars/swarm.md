@@ -3532,6 +3532,25 @@ head <sha> failed its last merge group run (Tests https://github.com/<owner>/<re
 
 When those runs cannot all be listed it refuses with `could not list every merge group run since head <sha> landed`. A head with no own merge group run passes. The merge pass's own requeue does not run this check; it judges only the runs since it last queued the pull request.
 
+The check runs only when the pull request is outside the queue, after the staged compatibility check and the queue intent gate, and before the required checks reading; a refusal enqueues nothing. A group is the set of own runs that share one merge group commit (`head_sha`), and the newest group is the one holding the most recently created run:
+
+| Own runs since the head commit | `merge queue` |
+|---|---|
+| None | Queues. |
+| Newest group finished clean, an older group failed | Queues; only the newest group counts. |
+| Newest group still running, an older group failed | Queues; a running run is not judged. |
+| Newest group has one finished run that failed while another still runs | Refuses, naming the failed run. |
+| Newest group has a run cancelled after a job of its own failed | Refuses, naming that run. |
+| Runs of another pull request failed | Queues; they are not own runs. |
+
+To clear a refusal, read the named run's failed job, fix it with a new commit on the pull request branch, wait for the pull request checks and queue again. Runs created before the new head's committer time are not read, so a group run of the old head stops counting once a commit made after it lands. To see which runs the check reads, take the head's committer time and list the own runs created since then:
+
+```bash
+gh api "repos/<owner>/<repo>/commits/<head sha>" --jq '.commit.committer.date'
+gh api "repos/<owner>/<repo>/actions/runs?event=merge_group&created=>=<committer date>&per_page=100" \
+  --jq '.workflow_runs[] | select(.head_branch | test("/pr-<number>-[0-9a-f]+$")) | [.created_at, .head_sha, .name, .conclusion, .html_url] | @tsv'
+```
+
 A red exit skips that read because the failure is already on the pull request's own checks. The reopen comment reads `Reopened by the swarm: its pull request <url> left the merge queue without merging. The next engineer continues it from the handoff its engineer left.` The next engineer fixes the failing check with a new commit, waits for the pull request checks and queues it with `agentihooks swarm <id> merge queue <url>`.
 
 To see why a released task reopened or was queued again, read the swarm's comment on the task in the ledger page, then the pull request's checks and its queue state:
