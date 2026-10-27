@@ -349,6 +349,10 @@ jobs:
     outputs:
       shards: ${{ steps.refine.outputs.shards }}
     steps:
+      - name: Record refinement start
+        id: refinement-start
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -418,11 +422,20 @@ jobs:
       - name: Check for merged test stats
         id: merged-stats
         timeout-minutes: 1
+        continue-on-error: true
         run: if [[ -n "$(find .mutation-stats-cache -type f -print -quit 2>/dev/null)" ]]; then echo found=true >> "$GITHUB_OUTPUT"; fi
+
+      - name: Check cache transfer budget
+        id: cache-budget
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          REFINEMENT_STARTED_AT: ${{ steps.refinement-start.outputs.started }}
+        run: if (( $(date +%s) - REFINEMENT_STARTED_AT < 120 )); then echo available=true >> "$GITHUB_OUTPUT"; fi
 
       - name: Save the merged test stats
         id: save-merged-stats
-        if: success() && steps.merged-stats.outputs.found == 'true'
+        if: success() && steps.merged-stats.outputs.found == 'true' && steps.cache-budget.outputs.available == 'true'
         timeout-minutes: 1
         continue-on-error: true
         uses: actions/cache/save@v4
