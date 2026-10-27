@@ -433,7 +433,7 @@ def test_a_wrapper_script_on_disk_is_judged_by_its_source(tmp_path, monkeypatch)
     check_local_tests({"tool_name": "Bash", "tool_input": {"command": f"python {tmp_path}/report.py"}})
 
 
-def test_a_wrapper_script_is_read_from_the_payload_folder_up_to_its_size_limit(tmp_path, monkeypatch):
+def test_a_wrapper_script_is_read_from_the_payload_folder(tmp_path, monkeypatch):
     from hooks.context import local_test_guard
 
     monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
@@ -442,8 +442,6 @@ def test_a_wrapper_script_is_read_from_the_payload_folder_up_to_its_size_limit(t
     folder.mkdir()
     (folder / "profile2.py").write_text(PLANNER_WRAPPER)
     (folder / "notes.py").write_bytes(b"print('\xff')\n")
-    (folder / "padded.py").write_text(PLANNER_WRAPPER + "#")
-    monkeypatch.setattr(local_test_guard, "_SCRIPT_BYTES", len(PLANNER_WRAPPER.encode()))
     for command in [
         "python profile2.py",
         "python3@3.12 profile2.py",

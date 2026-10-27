@@ -73,7 +73,6 @@ _PYTHON_TEST = re.compile(
 _MUTATION_PATH = re.compile(r"(?:^|/)scripts/ci_mutation(?!/clearances\.py$)(?:/|$)")
 _HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(?P<q>['\"]?)(?P<end>\w+)(?P=q)")
 _WRITTEN_SCRIPT = re.compile(r"(?:>>?|\btee(?:\s+-\w+)*)\s*['\"]?([^\s'\"<>|;&]+\.py)\b")
-_SCRIPT_BYTES = 1_000_000
 _NODE_TEST = re.compile(r"\b(?:jest|vitest|mocha)\b|node:test")
 _LITERAL = (
     r"(?P<module>\b(?:require|import)\s*\(\s*|\b(?:from|import)\s*)?"
@@ -280,7 +279,7 @@ def _expanded(path: str) -> Path:
 def _script_on_disk(script: str, folders: list[str], cwd: str) -> str | None:
     path = Path(cwd).joinpath(*(_expanded(folder) for folder in folders), _expanded(script))
     try:
-        return path.read_text(errors="ignore") if path.stat().st_size <= _SCRIPT_BYTES else None
+        return path.read_text(errors="ignore")
     except OSError:
         return None
 
