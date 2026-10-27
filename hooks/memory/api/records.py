@@ -10,7 +10,7 @@ import json
 import sqlite3
 from datetime import datetime
 
-from hooks.memory import archive
+from hooks.memory import archive, metrics
 from hooks.memory import search as core
 from hooks.memory.api import search as search_api
 from hooks.memory.api.ingest import SCHEMA_VERSION, Grant, Rejected, digest
@@ -238,7 +238,16 @@ class SessionTools:
 
     def session_get(self, grant: Grant, request: dict, now: float) -> dict:
         _envelope(request, GET_FIELDS)
-        return {"session": self._resolve(grant, self._allowed(grant, request), request["session_uid"])}
+        projects = self._allowed(grant, request)
+        session = self._resolve(grant, projects, request["session_uid"])
+        scoped = Grant(grant.principal, grant.corpus, frozenset(projects))
+        coverage = [
+            metrics.Metrics(self.catalog).status(
+                scoped, metrics.Scope(grant.corpus, session["session_uid"], source["source_generation"]), now
+            )
+            for source in session["sources"]
+        ]
+        return {"session": session, "coverage": coverage}
 
     def _chunk(self, domain: str, result: dict) -> dict:
         row = self.catalog.db.execute(CHUNK, (domain, result["session_uid"], result["chunk_id"])).fetchone()

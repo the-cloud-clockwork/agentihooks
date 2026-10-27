@@ -269,7 +269,7 @@ def test_the_largest_bounds_are_accepted(inputs, corpus):
 
 def test_the_answer_shape_and_session_grouping(inputs, corpus):
     plain = corpus.searcher.search(grant(inputs), query(inputs, projects=(inputs["project"],)), embedder(inputs))
-    assert set(plain) == {"mode", "vector", "fusion", "query", "results"}
+    assert set(plain) == {"mode", "vector", "fusion", "query", "results", "coverage"}
     assert plain["mode"] == "hybrid"
     assert plain["vector"] == {
         "state": "used",

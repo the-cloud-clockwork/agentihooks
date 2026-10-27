@@ -173,3 +173,81 @@ def test_search_project_narrowing_and_unknown_sources_do_not_claim_complete(capt
         "state": "unknown",
         "sources": [],
     }
+
+
+@pytest.mark.parametrize("run", [0, 1])
+def test_real_capture_archive_and_embedding_boundaries(captured, tmp_path, run):
+    from tests.sv2_obs02_cases import run_case
+
+    report = run_case(tmp_path / str(run))
+    assert report["archive_failed"]["alerts"] == ["archive_stale"]
+    assert report["archive_failed"]["archive_lag_seconds"] == 40.0
+    assert report["embedding_failed"]["archive_lag_seconds"] == 0.0
+    assert report["embedding_failed"]["embedding_lag_seconds"] == 35.0
+    assert report["embedding_failed"]["alerts"] == ["embedding_stale", "extraction_stale"]
+    assert report["extraction_delayed"]["embedding_lag_seconds"] == 0.0
+    assert report["extraction_delayed"]["extraction_lag_seconds"] == 45.0
+    assert report["extraction_delayed"]["alerts"] == ["extraction_stale"]
+    assert report["recovered"]["coverage"] == "complete"
+    assert report["recovered"]["alerts"] == []
+    print("SV2-OBS-02 " + json.dumps(report, sort_keys=True))
+
+
+@pytest.mark.parametrize("threshold", [0.0, -1.0, float("inf"), float("nan")])
+def test_invalid_stale_thresholds_are_refused(captured, threshold):
+    _, meter, scope = captured
+    with pytest.raises(ValueError, match="threshold"):
+        meter.status(GRANT, scope, 200.0, stale_after=threshold)
+
+
+def test_unknown_generation_is_refused_and_project_narrowing_cannot_expand_grant(captured):
+    _, meter, scope = captured
+    unknown = metrics.Scope(scope.access_domain, scope.session_uid, "missing")
+    with pytest.raises(EvidenceRefused):
+        meter.advance(GRANT, unknown, "local_spool", 1, 100.0)
+    with pytest.raises(EvidenceRefused):
+        meter.coverage(GRANT, ["other-project"], 200.0)
+
+
+def test_zero_clock_and_empty_acknowledgements_are_observed(captured):
+    _, meter, scope = captured
+    for stage in metrics.STAGES:
+        assert advance(meter, scope, stage, 0, 0.0) is True
+    status = meter.status(GRANT, scope, 0.0)
+    assert status["coverage"] == "complete"
+    assert all(stage["through"] == 0 and stage["updated_at"] == 0.0 for stage in status["stages"].values())
+    assert status["alerts"] == []
+
+
+def test_backlog_uses_first_unacknowledged_point_and_exact_stale_threshold(captured):
+    _, meter, scope = captured
+    for stage in metrics.STAGES:
+        advance(meter, scope, stage, 1, 90.0)
+    advance(meter, scope, "local_spool", 2, 100.0)
+    advance(meter, scope, "local_spool", 3, 150.0)
+    advance(meter, scope, "archive", 2, 160.0)
+    status = meter.status(GRANT, scope, 180.0, stale_after=30.0)
+    assert status["archive_lag_seconds"] == 30.0
+    assert status["stages"]["archive"] == {
+        "through": 2,
+        "updated_at": 160.0,
+        "age_seconds": 20.0,
+        "backlog": 1,
+        "lag_seconds": 30.0,
+        "state": "stale",
+    }
+    assert status["alerts"] == ["archive_stale"]
+    assert meter.status(GRANT, scope, 179.0, stale_after=30.0)["stages"]["archive"]["state"] == "lagging"
+
+
+def test_session_inspection_displays_partial_coverage_without_changing_summary(captured, tmp_path):
+    from hooks.memory.api.records import SessionTools
+    from hooks.memory.archive import ObjectStore
+
+    catalog, meter, scope = captured
+    advance(meter, scope, "local_spool", 2, 100.0)
+    tools = SessionTools(catalog, ObjectStore(tmp_path / "objects"))
+    answer = tools.session_get(GRANT, {"access_domain": GRANT.corpus, "session_uid": scope.session_uid}, 200.0)
+    assert answer["session"]["session_uid"] == scope.session_uid
+    assert answer["coverage"][0]["coverage"] == "partial"
+    assert answer["coverage"][0]["archive_lag_seconds"] == 100.0

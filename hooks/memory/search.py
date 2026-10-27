@@ -5,7 +5,7 @@ import math
 import re
 from dataclasses import dataclass
 
-from hooks.memory import embeddings
+from hooks.memory import embeddings, metrics
 from hooks.memory.api.ingest import Grant
 from hooks.memory.catalog import COUNT, COUNTER, Catalog, Conflict
 from hooks.memory.chunking import locator
@@ -214,6 +214,7 @@ class SessionSearch:
             "fusion": {"method": "reciprocal_rank", "k": RRF_K},
             "query": {"phrases": phrases, "terms": terms},
             "results": results,
+            "coverage": metrics.Metrics(self.catalog).coverage(grant, allowed),
         }
         return {**answer, "sessions": grouped(results)} if query.group_sessions else answer
 
