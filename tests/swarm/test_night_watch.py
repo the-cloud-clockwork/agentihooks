@@ -4,8 +4,8 @@ import subprocess
 import pytest
 
 from scripts.gates import catalog
-from scripts.hive import placement_waits
 from scripts.gates import log as gate_log
+from scripts.hive import placement_waits
 from scripts.swarm import capacity, operator_email, status, tick
 from scripts.swarm.health import merge_stall, night_watch, spawn_stall
 from scripts.swarm.health.findings import Finding
