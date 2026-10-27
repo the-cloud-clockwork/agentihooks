@@ -952,9 +952,11 @@ def test_all_successful_finished_blocked_collections_are_counted_in_one_pass(set
     assert all(store.claims(slug, worker.task) == 1 for worker in workers)
 
 
-@pytest.mark.parametrize("receipt", ["missing", "failed"])
-def test_a_finished_blocked_worker_without_a_successful_receipt_is_refused(setup, receipt):
-    from scripts.hive.launch import GONE
+@pytest.mark.parametrize(
+    ("receipt", "detail"),
+    [("missing", "the hive launch order ended before its acknowledgement"), ("failed", "hive launch failed: identity")],
+)
+def test_a_finished_blocked_worker_without_a_successful_receipt_is_refused(setup, receipt, detail):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
     request, order, ack = live_order(setup)
@@ -967,7 +969,7 @@ def test_a_finished_blocked_worker_without_a_successful_receipt_is_refused(setup
         setup.store.redis.hset(
             setup.launcher.orders.receipt(order), "ack", replace(ack, status="failed", failure="identity").encode()
         )
-    assert setup.launcher.collect(request) == Outcome("spawn", Status.REFUSED, "hive", detail=GONE)
+    assert setup.launcher.collect(request) == Outcome("spawn", Status.REFUSED, "hive", detail=detail)
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "finished"
 
 
