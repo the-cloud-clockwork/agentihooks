@@ -72,7 +72,8 @@ def test_a_the_agentihooks_target_passes_every_conformance_case(tmp_path):
     assert _failed(report) == {}
     assert report["contract_cases_passed"] == len(MATRIX["cases"])
     assert report["contract_cases_failed"] == 0
-    published = conformance.publish(report, "agentihooks", "0" * 40, SCHEMAS, MATRIX_PATH)
+    commit = os.environ.get("GITHUB_SHA") or "0" * 40
+    published = conformance.publish(report, "agentihooks", commit, SCHEMAS, MATRIX_PATH)
     assert published["schemas_sha256"] == conformance.digest(SCHEMAS)
     report_dir = os.environ.get("PROOF_REPORT_DIR")
     if report_dir:
