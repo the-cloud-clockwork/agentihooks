@@ -902,7 +902,7 @@ refusal: hive <host> refused retire: runtime target names no process
 On the Doctor swarm the finding for one ci agent reached 25 failing ticks and came back after a resolved verdict
 because the count kept growing.
 
-#### Troubleshooting
+### Troubleshooting
 
 | Symptom | Check | Fix |
 |---|---|---|
