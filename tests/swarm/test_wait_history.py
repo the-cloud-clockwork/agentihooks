@@ -111,9 +111,10 @@ def test_doctor_reads_ended_wait_history_for_historical_agents(redis, monkeypatc
         assert slug == "sw"
         return []
 
-    from scripts.swarm.store import AgentRecord, RedisStore
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
     store = RedisStore(redis)
+    store.create(SwarmConfig("sw", "agentihooks", 1, 0))
     name = store.next_name("sw", "eng")
     store.start_execution("sw", AgentRecord(name, "eng", "task", hive=hive, seat="eng-1@sw"))
     record["traces"][0]["tags"] = [f"agent:{name}"]
