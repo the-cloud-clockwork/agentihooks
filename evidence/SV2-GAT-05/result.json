@@ -1,0 +1,22 @@
+{
+  "package": "SV2-GAT-05",
+  "integration_gate": "G6",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7688",
+  "interfaces": ["brain_policy", "brain_learning", "brain_emergency", "BrainGate", "task completion"],
+  "protocol": "Additive ledger operations; existing consultation receipt fields unchanged",
+  "observed": {
+    "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40482205075",
+    "red_commit": "e43d45f8847cc1046fee454d1d9b10ad6636d902",
+    "red_result": "18 acceptance failures from absent outcome implementation",
+    "green_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40483892948",
+    "tested_commit": "c5db4149f459c252e131b8cb0da3385841553baf",
+    "green_result": "Focused acceptance and preceding consultation tests passed in CI"
+  },
+  "accepted": "Outcome records are attributed submissions with proof and source references; acceptance does not certify the lesson as independent truth",
+  "committed": "Implementation and acceptance tests committed; final persistence proof and required checks pending",
+  "externally_verified": false,
+  "test_environment": "Mocked brain outage and authenticated API boundary; local isolated SQLite persistence fixture in CI. No live brain or deployment claim",
+  "metrics": ["learning_outcomes_by_kind", "brain_bypass_total"],
+  "rollback": "Authenticated operator sends brain_policy with observe mode; genuine outcome records, emergency history and counters remain",
+  "limitations": ["Original evidence references are retained, not independently fetched or certified by this package", "Live rollout verification belongs to the applicable integration gate"]
+}

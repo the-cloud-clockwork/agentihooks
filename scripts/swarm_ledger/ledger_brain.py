@@ -11,11 +11,11 @@ KINDS = frozenset({"lesson", "decision", "no_new_learning"})
 MAX_BYPASS_SECONDS = 300
 
 
-def text(value, limit):
+def text(value: object, limit: int) -> bool:
     return isinstance(value, str) and bool(value.strip()) and len(value) <= limit
 
 
-def check_binding(value):
+def check_binding(value: object) -> None:
     if (
         not isinstance(value, dict)
         or set(value) != SCOPE
@@ -30,7 +30,7 @@ def check_binding(value):
         raise ValueError("brain operation needs the current task binding")
 
 
-def check_learning(value):
+def check_learning(value: object) -> None:
     if not isinstance(value, dict) or set(value) != {"kind", "content", "sources"}:
         raise ValueError("learning needs kind, content and sources")
     if value["kind"] not in KINDS or not text(value["content"], 4096):
@@ -42,7 +42,7 @@ def check_learning(value):
         raise ValueError("a lesson or decision needs source evidence")
 
 
-def check(op):
+def check(op: dict) -> None:
     common = {"op", "id", "item"}
     fields = {
         "brain_policy": {"mode", "brain"},
@@ -66,17 +66,17 @@ def check(op):
         raise ValueError("emergency action needs expiry and reason")
 
 
-def current(task):
+def current(task: dict) -> dict:
     return bind(task["id"], task, task.get("brain_policy", {}).get("brain", ""))
 
 
-def bypassed(record, scope, now):
+def bypassed(record: dict | None, scope: dict, now: float) -> bool:
     return bool(
         record and record.get("binding") == {key: scope[key] for key in SCOPE} and record.get("expires", 0) > now
     )
 
 
-def completion(task):
+def completion(task: dict) -> str | None:
     if task.get("brain_policy", {}).get("mode") != "required":
         return None
     scope = current(task)
@@ -88,7 +88,7 @@ def completion(task):
     return "task needs a current learning outcome or explicit no new learning linked to its proof"
 
 
-def refusal(op, task, at):
+def refusal(op: dict, task: dict, at: float) -> str:
     if op["op"] == "brain_policy":
         return "" if "by" not in op else "brain policy needs authenticated operator authority"
     if op.get("binding") != current(task):
@@ -101,7 +101,7 @@ def refusal(op, task, at):
     return ""
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict, op: dict, ctx: object) -> bool:
     task = next((row for row in doc.get("tasks", []) if f"tasks/{row['id']}" == op["item"]), None)
     if task is None:
         ctx.refused.append("brain operation task is absent")
