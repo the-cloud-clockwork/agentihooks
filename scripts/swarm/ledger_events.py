@@ -355,9 +355,10 @@ def head(url, run=subprocess.run):
     try:
         owner, repo, _, number = url.split("/")[-4:]
         path = f"repos/{owner}/{repo}/pulls/{number}"
-        read = github_reads.snapshot(
-            f"head {path}", time.time(), lambda: {"sha": merge_queue.rest(path, run)["head"]["sha"]}
-        )
+        with github_reads.calling("swarm.head"):
+            read = github_reads.snapshot(
+                f"head {path}", time.time(), lambda: {"sha": merge_queue.rest(path, run)["head"]["sha"]}
+            )
         return read["sha"]
     except SwarmError as error:
         return None if mutation_wait.rate_limited(str(error)) else ""

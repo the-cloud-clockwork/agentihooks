@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from scripts.swarm import github_reads, github_sampler, ledger_events, merge_queue, queue_priority
+from scripts.swarm import github_reads, github_sampler, ledger_events, merge_queue
 
 pytestmark = pytest.mark.unit
 PR = "https://github.com/org/repo/pull/7"
@@ -36,13 +36,16 @@ def charged():
     return [json.loads(line) for line in (github_reads.home() / "charged.jsonl").read_text().splitlines()]
 
 
-def test_every_rest_read_charges_the_module_that_asked(github):
+def test_every_rest_read_charges_the_caller_it_runs_under(github):
     api, _ = github
     merge_queue.rest(PULL, api)
-    queue_priority.merge_queue.rest(PULL, api, "swarm.dispatcher")
+    with github_reads.calling("swarm.dispatcher"):
+        merge_queue.rest(PULL, api)
+    merge_queue.rest(PULL, api)
     assert [(row["caller"], row["endpoint"]) for row in charged()] == [
-        ("tests.swarm.test_github_rest_callers", PULL),
+        ("swarm.rest", PULL),
         ("swarm.dispatcher", PULL),
+        ("swarm.rest", PULL),
     ]
 
 
@@ -51,7 +54,7 @@ def test_pull_request_heads_are_read_once_per_interval_across_readers(github):
     assert ledger_events.head(PR, api) == "first"
     assert ledger_events.head(PR, api) == "first"
     assert asked == [PULL]
-    assert [row["caller"] for row in charged()] == ["scripts.swarm.ledger_events"]
+    assert [row["caller"] for row in charged()] == ["swarm.head"]
 
 
 def test_required_check_rules_are_read_once_per_interval_across_pull_requests(github, monkeypatch):
@@ -64,7 +67,7 @@ def test_required_check_rules_are_read_once_per_interval_across_pull_requests(gi
     merge_queue.required_view("https://github.com/org/repo/pull/8", api)
     assert asked == [RULES]
     assert seen == [{"Gate": None}, {"Gate": None}]
-    assert [row["caller"] for row in charged()] == ["scripts.swarm.merge_queue"]
+    assert [row["caller"] for row in charged()] == ["swarm.checks.rules"]
 
 
 def test_the_sampler_counts_used_calls_across_a_window_reset():
