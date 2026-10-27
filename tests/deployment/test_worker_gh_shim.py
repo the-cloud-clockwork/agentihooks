@@ -1,4 +1,5 @@
 import os
+import site
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +19,7 @@ def test_gh_shim_hands_gh_the_renewed_token_file_over_an_expired_launch_token(tm
     shim.write_text(
         (ROOT / "deploy" / "worker" / "gh")
         .read_text()
-        .replace("/opt/venv/bin/python3", sys.executable)
+        .replace("/opt/venv/bin/python3", f"{sys.executable} -S")
         .replace("/usr/bin/gh", str(gh))
     )
     home = tmp_path / "agentihooks"
@@ -35,7 +36,7 @@ def test_gh_shim_hands_gh_the_renewed_token_file_over_an_expired_launch_token(tm
         "AGENTIHOOKS_HOME": str(home),
         "GH_TOKEN": "expired",
         "GITHUB_TOKEN": "expired",
-        "PYTHONPATH": os.pathsep.join((str(ROOT), os.environ.get("PYTHONPATH", ""))),
+        "PYTHONPATH": os.pathsep.join((str(ROOT), *site.getsitepackages())),
     }
     result = subprocess.run(
         ["bash", str(shim), "pr", "list"], cwd=checkout, env=env, capture_output=True, text=True, timeout=30
