@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from scripts.ci_branch_coverage import ARTIFACT
-from scripts.ci_branch_plan import LEG, PREFIX
+from scripts.ci_branch_plan import LEG, LEG_JOB, PREFIX, TEST_STEPS
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,10 +67,45 @@ def test_the_record_and_its_uploads_run_after_a_cancel_on_same_repo_pull_request
     assert step["if"].startswith("always() && ")
     assert "cancelled()" not in step["if"]
     condition = re.sub(r" && hashFiles\('[^']+'\) != ''$", "", step["if"].removeprefix("always() && "))
-    assert _evaluate(condition, SAME_REPO)
+    ran = {**SAME_REPO, "steps.tests.outcome": "cancelled"}
+    assert _evaluate(condition, ran)
     for event in ("merge_group", "push", "workflow_dispatch"):
-        assert not _evaluate(condition, {**SAME_REPO, "github.event_name": event})
-    assert not _evaluate(condition, {**SAME_REPO, "github.event.pull_request.head.repo.full_name": "fork/r"})
+        assert not _evaluate(condition, {**ran, "github.event_name": event})
+    assert not _evaluate(condition, {**ran, "github.event.pull_request.head.repo.full_name": "fork/r"})
+
+
+@pytest.mark.parametrize("job", LEG_JOBS)
+@pytest.mark.parametrize(("outcome", "recorded"), [("success", True), ("failure", True), ("cancelled", True)])
+def test_a_leg_records_whenever_its_test_step_ran_even_before_its_first_result(job, outcome, recorded):
+    step = _step(job, "Record this leg's passed tests")
+    assert "hashFiles" not in step["if"]
+    tests = next(item for item in _jobs()[job]["steps"] if item.get("id") == "tests")
+    assert tests["name"] in TEST_STEPS
+    condition = step["if"].removeprefix("always() && ")
+    assert _evaluate(condition, {**SAME_REPO, "steps.tests.outcome": outcome}) is recorded
+    assert not _evaluate(condition, {**SAME_REPO, "steps.tests.outcome": "skipped"})
+
+
+@pytest.mark.parametrize("job", LEG_JOBS)
+def test_a_leg_uploads_its_coverage_before_the_record_that_points_at_it(job):
+    names = [step.get("name") for step in _jobs()[job]["steps"]]
+    assert (
+        names.index("Record this leg's passed tests")
+        < names.index("Upload this leg's branch coverage")
+        < names.index("Upload this leg's branch record")
+    )
+
+
+def test_the_planner_names_the_jobs_and_steps_the_workflow_runs():
+    jobs = _jobs()
+    unit = jobs["unit"]["name"].replace("${{ matrix.python-version }}", "3.12").replace("${{ matrix.shard }}", "4")
+    assert LEG_JOB.fullmatch(unit)
+    assert "name" not in jobs["unit-selected"]
+    assert list(jobs["unit-selected"]["strategy"]["matrix"]) == ["python-version", "leg"]
+    assert LEG_JOB.fullmatch("unit-selected (3.12, 4)")
+    assert {_step("unit", "Run tests")["name"], _step("unit-selected", "Run the selected tests")["name"]} == set(
+        TEST_STEPS
+    )
 
 
 @pytest.mark.parametrize("job", LEG_JOBS)
@@ -114,16 +149,20 @@ def test_the_writer_plugins_load_on_the_command_line_with_their_folders(job):
         assert run["env"]["CI_REUSED"] == "${{ steps.reuse.outputs.reused }}"
 
 
-def test_the_record_step_passes_every_flag_the_writer_parses(tmp_path):
+@pytest.mark.parametrize("started", [True, False], ids=["results", "cancelled-before-the-first-test"])
+def test_the_record_step_passes_every_flag_the_writer_parses(tmp_path, started):
     step = _step("unit", "Record this leg's passed tests")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "python").write_text(f'#!/usr/bin/env bash\nexec {sys.executable} "$@"\n')
     (bin_dir / "python").chmod(0o755)
     leg = tmp_path / "leg"
-    (leg / "ci-results").mkdir(parents=True)
-    (leg / "dep-inputs").mkdir()
-    (leg / "ci-results/1.jsonl").write_text(json.dumps({"test": "tests/test_a.py::t", "outcome": "passed", "pid": 1}))
+    leg.mkdir()
+    if started:
+        (leg / "ci-results").mkdir()
+        (leg / "dep-inputs").mkdir()
+        line = {"test": "tests/test_a.py::t", "outcome": "passed", "pid": 1}
+        (leg / "ci-results/1.jsonl").write_text(json.dumps(line))
     env = {
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -305,7 +344,7 @@ def test_a_dev_plan_file_in_the_head_is_ignored_when_the_dev_planner_reused_noth
     assert chosen["tests"] == chosen["branch"] == ["tests/test_b.py::one"]
 
 
-def _adopt(tmp_path: Path, planner: bool, outputs: str) -> dict:
+def _adopt(tmp_path: Path, planner: bool, outputs: str, collection: str = "success") -> dict:
     workspace = tmp_path / "workspace"
     (workspace / "scripts").mkdir(parents=True)
     if planner:
@@ -321,7 +360,13 @@ def _adopt(tmp_path: Path, planner: bool, outputs: str) -> dict:
     runner.mkdir()
     output = tmp_path / "output"
     output.write_text("")
-    env = {**os.environ, "RUNNER_TEMP": str(runner), "GITHUB_WORKSPACE": str(workspace), "GITHUB_OUTPUT": str(output)}
+    env = {
+        **os.environ,
+        "RUNNER_TEMP": str(runner),
+        "GITHUB_WORKSPACE": str(workspace),
+        "GITHUB_OUTPUT": str(output),
+        "COLLECTION": collection,
+    }
     run = _step("unit-selected", "Adopt the reused tests from the protected grader")["run"]
     result = subprocess.run(["bash", "-e", "-c", run], cwd=workspace, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -347,12 +392,26 @@ def test_a_selected_leg_waits_for_the_early_collection_before_it_runs():
     wait = _step("unit-selected", "Wait for the early collection")
     assert wait["uses"] == "./.github/actions/await-download"
     assert wait["with"] == {"name": "early-collected-${{ matrix.python-version }}"}
-    assert wait["if"] == _step("unit-selected", "Adopt the reused tests from the protected grader")["if"]
+    adopt = _step("unit-selected", "Adopt the reused tests from the protected grader")
+    assert wait["if"] == adopt["if"]
+    assert adopt["env"]["COLLECTION"] == f"${{{{ steps.{wait['id']}.outcome }}}}"
     assert (
         names.index("Wait for the early collection")
         < names.index("Adopt the reused tests from the protected grader")
         < names.index("Run the selected tests")
     )
+
+
+def test_a_selected_leg_stops_waiting_for_the_collection_well_inside_its_timeout():
+    wait = _step("unit-selected", "Wait for the early collection")
+    run = _step("unit-selected", "Run the selected tests")
+    assert wait["continue-on-error"] is True
+    assert wait["timeout-minutes"] + run["timeout-minutes"] < _jobs()["unit-selected"]["timeout-minutes"]
+
+
+@pytest.mark.parametrize("collection", ["failure", "cancelled", ""])
+def test_a_selected_leg_whose_collection_never_landed_runs_everything_ungraded(tmp_path, collection):
+    assert _adopt(tmp_path, planner=True, outputs="reused=3\nbranch=4\n", collection=collection) == {}
 
 
 @pytest.mark.parametrize("reused", ["", "/w/reused.json"])

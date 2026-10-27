@@ -1285,6 +1285,7 @@ jobs:
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
       - name: Run tests
+        id: tests
         if: needs.split.outputs.source == ''
         timeout-minutes: 12
         env:
@@ -1349,7 +1350,7 @@ jobs:
 
       - &record-leg
         name: Record this leg's passed tests
-        if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('ci-results/*.jsonl') != ''
+        if: always() && (steps.tests.outcome == 'success' || steps.tests.outcome == 'failure' || steps.tests.outcome == 'cancelled') && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PULL: ${{ github.event.pull_request.number }}
@@ -1360,17 +1361,6 @@ jobs:
             --leg "$LEG" --environment "$ENVIRONMENT" --out branch-record/record.json
 
       # The upload action itself, not retry-upload: a composite's inner steps skip once the job is cancelled.
-      - &upload-record
-        name: Upload this leg's branch record
-        if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('branch-record/record.json') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: branch-record-${{ matrix.python-version }}-${{ env.LEG }}-${{ github.run_attempt }}
-          path: branch-record/record.json
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
-
       - &upload-branch-coverage
         name: Upload this leg's branch coverage
         if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('branch-record/record.json') != ''
@@ -1384,6 +1374,17 @@ jobs:
             js-coverage/
           include-hidden-files: true
           if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
+
+      - &upload-record
+        name: Upload this leg's branch record
+        if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('branch-record/record.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-record-${{ matrix.python-version }}-${{ env.LEG }}-${{ github.run_attempt }}
+          path: branch-record/record.json
+          if-no-files-found: error
           retention-days: 7
           overwrite: true
 
@@ -1580,16 +1581,25 @@ jobs:
         uses: ./.github/actions/browser-cache
 
       - name: Wait for the early collection
+        id: collection
         if: &leg-reuse matrix.python-version == '3.12' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        timeout-minutes: 4
         uses: ./.github/actions/await-download
         with:
           name: early-collected-${{ matrix.python-version }}
 
-      # The protected copy grades the leg, so a pull request cannot widen what it may skip.
+      # Grader code decides and grades the reuse, but head code shares this runner, so a hostile head can still forge it.
       - name: Adopt the reused tests from the protected grader
         id: reuse
         if: *leg-reuse
+        env:
+          COLLECTION: ${{ steps.collection.outcome }}
         run: |
+          if [[ "$COLLECTION" != success ]]; then
+            echo "::notice title=No reuse on a selected leg::The early collection never landed; every selected test runs and the leg is not graded."
+            exit 0
+          fi
           git worktree add --detach "$RUNNER_TEMP/grader" origin/dev
           if [[ ! -f "$RUNNER_TEMP/grader/scripts/ci_branch_plan.py" ]]; then
             echo "::notice title=No reuse on a selected leg::The grader cannot grade reused tests on a selected leg; every selected test runs."
@@ -1603,6 +1613,7 @@ jobs:
           fi
 
       - name: Run the selected tests
+        id: tests
         timeout-minutes: 7
         env:
           PYTHONUNBUFFERED: "1"
@@ -1624,9 +1635,9 @@ jobs:
 
       - *record-leg
 
-      - *upload-record
-
       - *upload-branch-coverage
+
+      - *upload-record
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}

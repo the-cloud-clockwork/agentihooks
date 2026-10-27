@@ -575,20 +575,20 @@ A Tests run of a pull request into dev from a branch of this repository skips ev
 
 `CI_RESULTS` is set only on 3.12 legs of a pull request into dev from this repository. `tests.pass_record` then writes one fsynced line per test attempt as it starts and as it finishes into `ci-results/<pid>.jsonl`, and switches the coverage context after each test so its teardown arcs reach the worker's data file. `tests.dep_inputs` writes each test's opened files as the test ends, not only at session end, so a killed worker keeps them.
 
-`Record this leg's passed tests` runs with `always()` whenever `ci-results/` holds a line, so a run cancelled by a newer push still records. `tests.branch_record` reads the leg's coverage, dependency inputs, result lines and `flakes.jsonl`:
+`Record this leg's passed tests` runs with `always()` whenever the leg's test step ran at all, passed, failed or cancelled, so a run cancelled by a newer push still records, and a leg cancelled before its first test finished writes an empty record rather than none. `tests.branch_record` reads the leg's coverage, dependency inputs, result lines and `flakes.jsonl`:
 
 - Coverage is complete when `elapsed.json` exists and `.coverage` is intact. Otherwise each surviving `.coverage.*pid<n>*` worker file is read, and a passed test counts only if its worker's file survived.
 - A test counts as passed only with its dependency line written. A test that started and never finished counts as failed. A test that passed after a retry counts as flaky.
 - The record holds the run, attempt, leg, `github.sha`, the pull request head and number, the venv cache key, the manifest measured at `github.sha`, and the passed, failed and flaky tests.
 
-Both uploads run with `always()` and keep 7 days. They use `actions/upload-artifact` directly: the inner steps of `retry-upload` are skipped once the job is cancelled. The leg is the unit shard number or the selected leg number, always plain digits. The coverage artifact holds `.coverage`, surviving `.coverage.*` worker files, `elapsed.json` and `js-coverage/`.
+Both uploads run with `always()` and keep 7 days, the coverage first, so a cancel between them never leaves a record without its coverage. They use `actions/upload-artifact` directly: the inner steps of `retry-upload` are skipped once the job is cancelled. The leg is the unit shard number or the selected leg number, always plain digits. The coverage artifact holds `.coverage`, surviving `.coverage.*` worker files, `elapsed.json` and `js-coverage/`.
 
 ### Plan
 
 The plan step runs `scripts.ci_branch_plan` from the grader after `scripts.ci_test_plan`, only on a `pull_request` event and only when the grader has the script; otherwise it prints `The grader has no branch planner` and nothing is reused from earlier runs. The planner:
 
 1. Lists up to 8 earlier Tests runs of this pull request: same head branch and head repository, created before this run, any conclusion.
-2. Downloads each run's `branch-record-3.12-*` artifacts and rejects a record whose run, head, pull request, venv cache key, artifact name or manifest commit differs from what the API reports. A run it cannot fully read is a barrier: neither it nor any older run is reused.
+2. Downloads each run's `branch-record-3.12-*` artifacts and rejects a record whose run, head, pull request, venv cache key, artifact name or manifest commit differs from what the API reports. A run it cannot fully read is a barrier: neither it nor any older run is reused. That includes a run with a `unit (3.12, <n>)` or `unit-selected (3.12, <n>)` job whose `Run tests` or `Run the selected tests` step started but which kept no `branch-record-3.12-<n>-<attempt>`.
 3. Fetches each record's commit into the head checkout and invalidates the record's manifest with the diff from that commit to the head.
 4. Reuses a test that passed and stays valid in some record, unless any record has it failed or flaky while valid. Tests the dev plan already reuses stay attributed to dev.
 
@@ -599,7 +599,7 @@ It writes `$RUNNER_TEMP/reused-branch.json` and `branch=<n>` and `branch_runs=<i
 `tests.dep_manifest deselect` takes `--plan` once for each plan that reuses a test and adds a `branch` list of the tests only the branch plan reused. The output is `reused-3.12` and part of `early-collected-3.12`.
 
 - Full scope shards download `reused-3.12` when either plan reuses a test, and `conftest` deselects it as before.
-- Selected legs wait for `early-collected-3.12` with `await-download`, then add `origin/dev` as the grader. If the grader lacks `scripts/ci_branch_plan.py`, the leg prints the `No reuse on a selected leg` notice and runs every selected test. Otherwise it passes `reused.json` as `CI_REUSED` when the early collection's plan outputs report reuse. Selected legs therefore also skip tests the dev plan reuses.
+- Selected legs wait up to 4 minutes for `early-collected-3.12` with `await-download`. If it never lands, the leg prints a notice, runs every selected test and skips its check; `test-count` failing still fails the gate. Otherwise the leg adds `origin/dev` as the grader. If the grader lacks `scripts/ci_branch_plan.py`, the leg prints the `No reuse on a selected leg` notice and runs every selected test. Otherwise it passes `reused.json` as `CI_REUSED` when the early collection's plan outputs report reuse. Selected legs therefore also skip tests the dev plan reuses.
 
 ### Grade
 
@@ -613,6 +613,7 @@ On a pull request run from this repository that is not test only, `sonar` mints 
 ### Trust
 
 - The planner, the deselect, the selected leg's check and the coverage carry run from protected code: `origin/dev`, or in `sonar`, where no step may read the dev head, the pull request's base commit. The head supplies only records, and the planner checks each against the API's view of its run.
+- The planner cannot tell a forged record from a real one. Head code writes the records and runs on the same runner as the grader steps, so a pull request can make its own later runs skip tests at the pull request tier. The merge queue never reads records and runs the unit suite in full, so it is unaffected.
 - Merge group, push and dispatch runs never run the branch planner: the plan step checks the event, and `ci_branch_plan` returns an empty plan for any other event. Fork pull requests write no records, and the planner refuses a head repository other than this one.
 - `scripts/ci_reuse.py` and `scripts/ci_dev_reuse.py` refuse any run that published a `reused-branch-` artifact, so neither queue reuse nor dev unit reuse adopts a run that skipped tests on branch records.
 
@@ -629,7 +630,7 @@ gh run view "$RUN" --log | grep "passed on earlier runs of this pull request"
 # Per leg counts on a narrowed run, and the full scope summary
 gh run view "$RUN" --log | grep -E "Leg [0-9]+: ran [0-9]+, reused|from pull request runs"
 # Coverage carried into Sonar
-gh run view "$RUN" --log | grep -E "Pull request run [0-9]+ attempt [0-9]+ on [0-9a-f]+: kept the coverage"
+gh run view "$RUN" --log | grep -E "Pull request run [0-9]+ attempt [0-9]+ on [0-9a-f]+: [0-9]+ reused tests, [0-9]+ page captures carried"
 # Artifacts the run published
 gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$RUN/artifacts?per_page=100" --jq '.artifacts[].name' | grep -E "^(branch-record|branch-coverage|reused-branch)-"
 ```
@@ -638,9 +639,9 @@ gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$RUN/artifacts?per_pa
 
 - Open evidence: the scratch pull request that shows head 2 reusing tests that passed on head 1, and head 3 reusing from a cancelled head 2.
 - Hypotheses not yet observed: the arcs flushed at each context switch survive a killed worker, the record step finishes inside GitHub's cancellation window, and an earlier `refs/pull/<n>/merge` commit can still be fetched by its sha. A commit that cannot be fetched is a barrier for its run and every older one.
-- A dev change to `.github/`, `pyproject.toml` or `uv.lock` between two pushes invalidates every record; 75 of 460 dev commits over 3 days touched them.
+- A change to a global input between a record's commit and the head invalidates every record, as `dep_manifest.global_input` decides: anything under `.github/` except, for these version 2 manifests, workflow files other than `test.yml` and `test.yml` changes that leave the unit jobs' execution unchanged; `pyproject.toml`; `uv.lock`; any path starting `.test_durations`; and any `.py` file outside `hooks/`, `scripts/` and `tests/`. 75 of 460 dev commits over 3 days touched `.github/`, `pyproject.toml` or `uv.lock`.
 - The venv cache key carries the UTC day, so a record from an earlier day never matches. Records expire after 7 days.
-- Selected legs now wait for `test-count`'s early collection before running tests.
+- Selected legs now wait for `test-count`'s early collection, up to 4 minutes, before running tests.
 - Selected legs carry no dev coverage for tests the dev plan reuses. Those tests depend on no changed unit, so coverage on changed lines is unaffected; the run's overall coverage figure drops.
 - A selected leg's grader is `origin/dev` when the leg checks out, which can be newer than the planner's.
 
