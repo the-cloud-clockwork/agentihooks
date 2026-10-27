@@ -1244,18 +1244,32 @@ def test_mutmut_wait_skips_a_child_a_test_left_and_returns_the_forked_mutant(mon
 
 
 @pytest.mark.parametrize(
-    "version, kept, restored",
-    [((9, 2), False, True), ((9, 1, 1), False, False), ((10, 0, 0), True, False)],
+    "version, kept, expected",
+    [
+        ((9, 2, 0), None, "tests/test_a.py::test_a"),
+        ((9, 1, 99), None, None),
+        ((10, 0, 0), "kept", "kept"),
+    ],
 )
-def test_node_ids_reach_mutmut_only_where_pytest_dropped_them(monkeypatch, version, kept, restored):
+def test_node_ids_reach_mutmut_only_where_pytest_dropped_them(monkeypatch, version, kept, expected):
     from scripts.ci_mutation import selection
 
     class Item:
         nodeid = "tests/test_a.py::test_a"
 
     if kept:
-        Item._nodeid = "kept"
+        Item._nodeid = kept
     monkeypatch.setattr(selection.pytest, "version_tuple", version)
     monkeypatch.setattr(selection.pytest, "Item", Item)
     selection.keep_node_ids()
-    assert getattr(Item(), "_nodeid", None) == ("kept" if kept else Item.nodeid if restored else None)
+    assert getattr(Item(), "_nodeid", None) == expected
+
+
+def test_mutation_worker_restores_node_ids_before_it_reads_the_selection(monkeypatch, tmp_path):
+    from scripts.ci_mutation import selection
+
+    calls = []
+    monkeypatch.setattr(selection, "keep_node_ids", lambda: calls.append(True))
+    with pytest.raises(FileNotFoundError):
+        selection.run_selected(tmp_path / "missing.json", (0, 1))
+    assert calls == [True]

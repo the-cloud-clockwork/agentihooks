@@ -485,7 +485,7 @@ def forked_children():
 
 def keep_node_ids() -> None:
     # mutmut's stats plugin reads Item._nodeid, which pytest 9.2 removed in favour of nodeid.
-    if pytest.version_tuple >= (9, 2) and not hasattr(pytest.Item, "_nodeid"):
+    if pytest.version_tuple >= (9, 2, 0) and not hasattr(pytest.Item, "_nodeid"):
         pytest.Item._nodeid = property(lambda item: item.nodeid)
 
 
