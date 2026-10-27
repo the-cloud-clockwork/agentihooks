@@ -683,7 +683,7 @@ class HerdrRuntime:
 
     def _route_kind(self, lane, harness, task, slug):
         if master_claude_login.enabled(slug, task.get("seat", ""), lane, harness or "claude"):
-            return "interactive"
+            return "subscription" if self._master_account_spent() else "interactive"
         explicit = task.get("route_kind")
         if explicit or lane != MASTER or harness not in ("", "claude"):
             return explicit or "subscription"
@@ -696,7 +696,8 @@ class HerdrRuntime:
     def _master_account_spent(self):
         from redis.exceptions import RedisError
 
-        from scripts.routing import master_account, reservation
+        from scripts.routing import master_account
+        from scripts.swarm import quota_handoff
 
         if not hasattr(self, "_quota_accounts"):
             return False
@@ -708,7 +709,8 @@ class HerdrRuntime:
             (row for row in self._quota_accounts if declared and (row.harness, row.name) == ("claude", declared.slug)),
             None,
         )
-        if own is None or own.week_left is None or 100 - own.week_left < reservation.MASTER_LEAVES:
+        thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
+        if own is None or not quota_handoff.trigger(replace(own, reserved=""), thresholds):
             return False
         return any(row.kind != "api" and row.name != own.name for row in self._quota_eligible("claude", MASTER))
 
@@ -801,8 +803,9 @@ class HerdrRuntime:
         picked = replace(picked, effort=saved["effort"]) if saved.get("effort") else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
-        login = master_claude_login.enabled(config.slug, task.get("seat", ""), lane, agent)
-        route_kind = "interactive" if login else route_kind
+        login = route_kind == "interactive" and master_claude_login.enabled(
+            config.slug, task.get("seat", ""), lane, agent
+        )
         route = master_claude_login.route(login) or (
             ["--route", "interactive"]
             if route_kind == "interactive"
