@@ -1,5 +1,7 @@
+import io
 import json
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -25,6 +27,18 @@ def _tree(root: Path, files: dict[str, str]) -> Path:
         path.write_text(text)
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     subprocess.run(["git", "-C", str(root), "add", "-f", *files], check=True)
+    return root
+
+
+@pytest.fixture(scope="module")
+def committed(tmp_path_factory) -> Path:
+    # Mutation runs rewrite this module's source in place, so the repository checks read the commit.
+    root = tmp_path_factory.mktemp("committed")
+    archive = subprocess.run(["git", "-C", str(_ROOT), "archive", "HEAD"], capture_output=True, check=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        tar.extractall(root, filter="data")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
     return root
 
 
@@ -169,16 +183,16 @@ def test_the_check_requires_both_trees():
         threshold_pins.main(["--base", str(_ROOT)])
 
 
-def test_an_unchanged_repository_is_green(capsys):
-    assert threshold_pins.main(["--base", str(_ROOT), "--head", str(_ROOT)]) == 0
+def test_an_unchanged_repository_is_green(committed, capsys):
+    assert threshold_pins.main(["--base", str(committed), "--head", str(committed)]) == 0
     pins, allowlists = len(threshold_pins.PINS), len(threshold_pins.SHRINK_ONLY)
     assert f"{pins} thresholds compared, {allowlists} allowlists compared, 0 errors" in capsys.readouterr().out
 
 
-def test_a_rebound_pin_fails_the_check(tmp_path, capsys):
-    rebound = (_ROOT / "scripts/size_limits.py").read_text() + "FUNCTION_LINES = 400\n"
+def test_a_rebound_pin_fails_the_check(committed, tmp_path, capsys):
+    rebound = (committed / "scripts/size_limits.py").read_text() + "FUNCTION_LINES = 400\n"
     head = _tree(tmp_path / "head", {"scripts/size_limits.py": rebound})
-    assert threshold_pins.main(["--base", str(_ROOT), "--head", str(head)]) == 1
+    assert threshold_pins.main(["--base", str(committed), "--head", str(head)]) == 1
     assert "::error::scripts/size_limits.py must bind FUNCTION_LINES once" in capsys.readouterr().out
 
 
@@ -220,19 +234,19 @@ def test_an_unregistered_floor_or_allowlist_is_red(tmp_path):
     ]
 
 
-def test_every_pin_and_allowlist_names_a_real_literal_in_this_repository():
-    assert threshold_pins.pin_errors(_ROOT, _ROOT) == ([], len(threshold_pins.PINS))
-    assert threshold_pins.allowlist_errors(_ROOT, _ROOT) == ([], len(threshold_pins.SHRINK_ONLY))
-    assert threshold_pins.registry_errors(_ROOT) == []
+def test_every_pin_and_allowlist_names_a_real_literal_in_this_repository(committed):
+    assert threshold_pins.pin_errors(committed, committed) == ([], len(threshold_pins.PINS))
+    assert threshold_pins.allowlist_errors(committed, committed) == ([], len(threshold_pins.SHRINK_ONLY))
+    assert threshold_pins.registry_errors(committed) == []
     for path in threshold_pins.SHRINK_ONLY:
-        assert (_ROOT / path).is_file(), path
+        assert (committed / path).is_file(), path
     for path, module in threshold_pins.GRADED_BY:
-        assert (_ROOT / path).is_file(), path
-        assert (_ROOT / (module.replace(".", "/") + ".py")).is_file(), module
+        assert (committed / path).is_file(), path
+        assert (committed / (module.replace(".", "/") + ".py")).is_file(), module
 
 
-def test_the_size_plant_turns_the_check_red(tmp_path, capsys):
-    planted = (_ROOT / "scripts/size_limits.py").read_text().replace("FUNCTION_LINES = 300", "FUNCTION_LINES = 400")
+def test_the_size_plant_turns_the_check_red(committed, tmp_path, capsys):
+    planted = (committed / "scripts/size_limits.py").read_text().replace("FUNCTION_LINES = 300", "FUNCTION_LINES = 400")
     head = _tree(tmp_path / "head", {"scripts/size_limits.py": planted})
-    assert threshold_pins.main(["--base", str(_ROOT), "--head", str(head)]) == 1
+    assert threshold_pins.main(["--base", str(committed), "--head", str(head)]) == 1
     assert "scripts/size_limits.py FUNCTION_LINES rose from 300 to 400" in capsys.readouterr().out
