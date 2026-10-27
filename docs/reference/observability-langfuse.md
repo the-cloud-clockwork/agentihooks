@@ -471,6 +471,7 @@ Each scan joins it with:
 | `telemetry never exported` | no trace for the binding's session past the grace, once the agent has completed a turn (a recorded Stop or session end, or a second prompt in the exporter cursor) or has worked past the first turn bound |
 | `exporter backlog` | observations queued in the cursor, or a pending cap overflow, and the oldest unaccepted source event older than the threshold |
 | `telemetry stale` | generated progress unaccepted past the threshold while nothing is queued, even with the exporter process alive; or the exporter recorded more accepted observations than Langfuse holds past the threshold since its last acceptance |
+| `telemetry count drift` | Langfuse was read for the binding and the exporter cursor's accepted aggregate (accepted identities plus paged spans) differs from the accepted observation identities rebuilt from the transcript up to the accepted offset; any difference raises it, its id is the agent's life and its number is the size of the difference |
 | `telemetry misattributed` | a trace tagged with the agent carries another life, seat, task, harness or resolved profile, or the session was accepted with no trace under the agent |
 | `trace reader unavailable` | the trace listing or any active read failed or ran out of its budget |
 | `trace coverage partial` | the historical backfill has not read every listed trace's observations yet; see [Trace coverage](#trace-coverage) |
