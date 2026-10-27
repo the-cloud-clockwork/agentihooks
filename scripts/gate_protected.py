@@ -338,7 +338,7 @@ def _dev_parent_form(steps: list[dict]) -> list[dict]:
         if settings.get("path") == "base":
             settings["ref"] = EQUIVALENCE_DEV_PARENT_REF
         if settings.get("path") == "head":
-            settings["fetch-depth"] = 2
+            settings["fetch-depth"] = 0
             form.insert(index + 1, EQUIVALENCE_DEV_PARENT)
     return form
 
