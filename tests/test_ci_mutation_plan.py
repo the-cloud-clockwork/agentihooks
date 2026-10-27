@@ -971,27 +971,44 @@ def test_mutation_lane_cli_requires_capacity_width_and_run(missing, monkeypatch)
     assert error.value.code == 2
 
 
-def test_the_importer_scan_maps_every_reach_key_of_every_tracked_file_to_that_file(tmp_path):
-    sources = {
-        "scripts/b.py": "VALUE = 1\n",
-        "scripts/a.py": "from scripts import b\n",
-        "tests/test_a.py": "import scripts.a\nPATH = 'scripts/b.py'\n",
-        "docs/skip.py": "import scripts.b\n",
-    }
-    for path, source in sources.items():
-        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / path).write_text(source)
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
-    plan._importers.cache_clear()
-    found = plan._importers(tmp_path)
-    plan._importers.cache_clear()
-    tracked = ["scripts/a.py", "scripts/b.py", "tests/test_a.py"]
-    expected = {"*": set(tracked)}
-    for path in tracked:
-        assert plan._path_keys(path, tmp_path) == plan._reach_keys(path, sources[path])
-        for key in plan._reach_keys(path, sources[path]):
-            expected.setdefault(key, set()).add(path)
-    assert found == expected
-    assert found["scripts.b"] == {"scripts/a.py"}
-    assert found["b.py"] == {"tests/test_a.py"}
+def test_the_import_scan_finds_imports_nested_in_every_statement_body():
+    source = """
+import a
+from . import sibling
+def f():
+    import b
+class C:
+    from c import d
+if x:
+    import e
+else:
+    import f2
+for i in y:
+    pass
+else:
+    import g
+while z:
+    import h
+try:
+    import i
+except E:
+    import j
+else:
+    import k
+finally:
+    import l
+with m:
+    import n
+match v:
+    case 1:
+        import o
+async def q():
+    async with r:
+        import s
+value = lambda: __import__("t")
+"""
+    names = plan._imported("scripts/pkg/mod.py", source)
+    imported = {"a", "b", "e", "f2", "g", "h", "i", "j", "k", "l", "n", "o", "s"}
+    assert set(names) == imported | {"scripts.pkg", "scripts.pkg.sibling", "c", "c.d"}
+    assert len(names) == len(imported) + 4
+    assert plan._imported("scripts/x.py", "def broken(:\n") == []

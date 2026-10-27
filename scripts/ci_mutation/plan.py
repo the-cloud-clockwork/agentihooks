@@ -2,17 +2,16 @@ import argparse
 import ast
 import json
 import math
-import multiprocessing
 import os
 import re
 import subprocess
 import time
 import zipfile
-from concurrent.futures import ProcessPoolExecutor
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
-from itertools import accumulate, repeat
+from itertools import accumulate
 from pathlib import Path
 
 import yaml
@@ -38,7 +37,7 @@ from tests.dep_manifest import changes as recorded_changes
 MUTANT_SECONDS = 5.6
 WORKERS = 4
 RECORD_RETRY_SECONDS = 10
-IMPORTER_CHUNK = 64
+STATEMENT_BODIES = ("body", "orelse", "finalbody", "handlers", "cases")
 TEST_WORKFLOW = ".github/workflows/test.yml"
 COLLECTING_JOBS = {
     TEST_WORKFLOW: ("unit", "unit-selected", "mutation-stats"),
@@ -208,18 +207,12 @@ def helper_tests(root: Path, path: str) -> set[str] | None:
 
 @cache
 def _importers(root: Path) -> dict[str, set[str]]:
-    paths = _git(root, "ls-files", "--", "hooks/*.py", "scripts/*.py", "tests/*.py").splitlines()
-    found = {"*": set(paths)}
-    # Forking after the recorded coverage is loaded would copy gigabytes into every worker.
-    with ProcessPoolExecutor(mp_context=multiprocessing.get_context("forkserver")) as pool:
-        for path, keys in zip(paths, pool.map(_path_keys, paths, repeat(root), chunksize=IMPORTER_CHUNK)):
-            for key in keys:
-                found.setdefault(key, set()).add(path)
+    found = {"*": set()}
+    for path in _git(root, "ls-files", "--", "hooks/*.py", "scripts/*.py", "tests/*.py").splitlines():
+        found["*"].add(path)
+        for key in _reach_keys(path, (root / path).read_text(errors="replace")):
+            found.setdefault(key, set()).add(path)
     return found
-
-
-def _path_keys(path: str, root: Path) -> set[str]:
-    return _reach_keys(path, (root / path).read_text(errors="replace"))
 
 
 def _reach_keys(path: str, source: str) -> set[str]:
@@ -239,15 +232,24 @@ def _imported(path: str, source: str) -> list[str]:
         return []
     package = path.removesuffix(".py").replace("/", ".").split(".")
     names = []
-    for found in ast.walk(tree):
+    for found in _import_statements(tree.body):
         if isinstance(found, ast.Import):
             names.extend(alias.name for alias in found.names)
-        elif isinstance(found, ast.ImportFrom):
+        else:
             parent = package[: len(package) - found.level] if found.level else []
             base = ".".join([*parent, *filter(None, [found.module])])
             names.append(base)
             names.extend(f"{base}.{alias.name}" if base else alias.name for alias in found.names)
     return names
+
+
+def _import_statements(statements: list) -> Iterator[ast.Import | ast.ImportFrom]:
+    # An import is a statement, so only statement bodies can hold one; skipping expressions skips most nodes.
+    for statement in statements:
+        if isinstance(statement, ast.Import | ast.ImportFrom):
+            yield statement
+        for field in STATEMENT_BODIES:
+            yield from _import_statements(getattr(statement, field, ()))
 
 
 def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[set[int], set[str]]:
