@@ -35,11 +35,11 @@ def test_documentation_validation_cannot_configure_upload_or_deploy_pages():
     assert "environment" not in build
     actions = [step["uses"] for step in build["steps"] if "uses" in step]
     assert actions in (
-        ["actions/checkout@v4", "actions/jekyll-build-pages@v1", "actions/upload-artifact@v4"],
-        ["actions/checkout@v4", "actions/upload-artifact@v4"],
+        ["actions/checkout@v4", "actions/jekyll-build-pages@v1", "./.github/actions/retry-upload"],
+        ["actions/checkout@v4", "./.github/actions/retry-upload"],
     )
     assert build["steps"][0]["with"]["persist-credentials"] is False
-    artifact = next(step for step in build["steps"] if step.get("uses") == "actions/upload-artifact@v4")
+    artifact = next(step for step in build["steps"] if step.get("uses") == "./.github/actions/retry-upload")
     assert artifact["with"] == {
         "name": "documentation-site",
         "path": "_site/",
