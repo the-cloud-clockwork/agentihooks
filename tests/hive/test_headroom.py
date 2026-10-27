@@ -48,10 +48,12 @@ def disk(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("WORKTREE_ROOT", raising=False)
     monkeypatch.delenv("WT_MIN_FREE_GB", raising=False)
+    monkeypatch.setattr(headroom, "WINDOWS", tmp_path / "no-windows")
 
     def usage(path):
         probed.append(Path(path))
-        return SimpleNamespace(total=100 * 2**30, used=90 * 2**30, free=int(9.9 * 2**30))
+        free = 3 * 2**30 if Path(path) == headroom.WINDOWS else int(9.9 * 2**30)
+        return SimpleNamespace(total=100 * 2**30, used=90 * 2**30, free=free)
 
     monkeypatch.setattr(shutil, "disk_usage", usage)
     return probed
@@ -93,6 +95,14 @@ def test_measure_follows_the_worktree_root_and_floor_the_hive_sets(proc, disk, t
     monkeypatch.setenv("WT_MIN_FREE_GB", "80")
     measured = headroom.measure(0, 1, proc)
     assert (measured["disk_free_gb"], measured["disk_floor_gb"], disk) == (9, 80, [tmp_path])
+
+
+def test_measure_takes_the_smaller_of_the_worktree_root_and_the_windows_drive_like_wt_sh(
+    proc, disk, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(headroom, "WINDOWS", tmp_path)
+    assert headroom.measure(0, 1, proc)["disk_free_gb"] == 3
+    assert disk == [tmp_path / "home", tmp_path]
 
 
 def test_measure_reads_an_empty_worktree_root_or_floor_as_unset_like_wt_sh(proc, disk, tmp_path, monkeypatch):

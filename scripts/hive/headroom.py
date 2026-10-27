@@ -20,6 +20,7 @@ MISSING = "headroom=missing"
 # cgroup v2 mounts the pod's own limits here; on a bare host the root cgroup carries no memory.max or cpu.max.
 CGROUP = Path("/sys/fs/cgroup")
 MIB = 1024 * 1024
+WINDOWS = Path("/mnt/c")
 
 
 def key(hive: str) -> str:
@@ -59,7 +60,7 @@ def _total_mb(proc: Path) -> int:
 def _free_gb(root: Path) -> int:
     while not root.is_dir():
         root = root.parent
-    return shutil.disk_usage(root).free // 2**30
+    return min(shutil.disk_usage(target).free for target in (root, WINDOWS) if target.is_dir()) // 2**30
 
 
 def _pod(cgroup: Path, now_ms: int, previous: dict | None) -> dict:
