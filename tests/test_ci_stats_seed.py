@@ -4,6 +4,7 @@ import os
 import subprocess
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -200,7 +201,7 @@ def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder,
         seed, "api", lambda path, binary=False: archives[int(path.split("/")[2])] if binary else responses[path]
     )
 
-    assert seed.harvest(7, folder) == 5
+    assert seed.harvest(7, folder, set()) == 5
     assert (folder / "x.index").read_text() == "new"
     assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", CONTEXT, "x.index", "x.json"]
 
@@ -211,7 +212,7 @@ def test_harvest_skips_a_number_that_is_not_a_pull_request(tmp_path, monkeypatch
 
     monkeypatch.setattr(seed, "api", missing)
 
-    assert seed.harvest(7, tmp_path) == 0
+    assert seed.harvest(7, tmp_path, set()) == 0
     assert capsys.readouterr().out == "Mutation stats seed: #7 is not a readable pull request\n"
 
 
@@ -222,7 +223,7 @@ def test_harvest_fails_when_github_cannot_answer(tmp_path, monkeypatch):
     monkeypatch.setattr(seed, "api", unavailable)
 
     with pytest.raises(subprocess.CalledProcessError):
-        seed.harvest(7, tmp_path)
+        seed.harvest(7, tmp_path, set())
 
 
 def test_harvest_without_stats_artifacts_writes_nothing(tmp_path, monkeypatch):
@@ -232,7 +233,7 @@ def test_harvest_without_stats_artifacts_writes_nothing(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(seed, "api", lambda path, binary=False: responses[path])
 
-    assert seed.harvest(7, tmp_path) == 0
+    assert seed.harvest(7, tmp_path, set()) == 0
 
 
 def test_main_seeds_prunes_and_records_the_head(tmp_path, monkeypatch, capsys):
@@ -263,13 +264,13 @@ def test_main_seeds_prunes_and_records_the_head(tmp_path, monkeypatch, capsys):
     after = sum(path.stat().st_size for path in folder.iterdir() if path.name != seed.SEEDED)
     assert capsys.readouterr().out == (
         f"Mutation stats seed: 5 files from pull requests [3], none skipped; kept 2 records; "
-        f"{after + 2} bytes before the prune, {after} after\n"
+        f"{after + len('{}')} bytes before the prune, {after} after\n"
     )
 
 
 def test_main_harvests_newest_first_and_skips_pulls_past_the_budget(folder, monkeypatch, capsys):
     clock = iter([0.0, 1.0, 2.0, 400.0])
-    monkeypatch.setattr(seed.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(seed, "time", SimpleNamespace(monotonic=lambda: next(clock)))
     monkeypatch.setattr(seed, "merged_pulls", lambda found, head, before: [1, 2, 3])
     harvested = []
 

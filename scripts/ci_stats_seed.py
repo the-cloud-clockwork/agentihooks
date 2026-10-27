@@ -40,8 +40,7 @@ def merged_pulls(folder: Path, head: str, before: str) -> list[int]:
     return [int(match.group(1)) for subject in subjects if (match := MERGED.search(subject))]
 
 
-def harvest(number: int, folder: Path, taken: set[str] | None = None, deadline: float = math.inf) -> int:
-    taken = set() if taken is None else taken
+def harvest(number: int, folder: Path, taken: set[str], deadline: float = math.inf) -> int:
     try:
         sha = api(f"pulls/{number}")["head"]["sha"]
     except subprocess.CalledProcessError as error:
@@ -116,19 +115,20 @@ def main(argv: list[str] | None = None) -> int:
     written, skipped = 0, []
     for number in reversed(pulls):
         if time.monotonic() >= deadline:
-            skipped.insert(0, number)
+            skipped.append(number)
             continue
         try:
             written += harvest(number, args.folder, taken, deadline)
         except subprocess.TimeoutExpired:
-            skipped.insert(0, number)
+            skipped.append(number)
+    note = f"skipped {sorted(skipped)} past the budget" if skipped else "none skipped"
     before = size(args.folder)
     kept = prune(args.folder)
     after = size(args.folder)
     (args.folder / SEEDED).write_text(f"{args.head}\n")
     print(
         f"Mutation stats seed: {written} files from pull requests {pulls}, "
-        f"{f'skipped {skipped} past the budget' if skipped else 'none skipped'}; kept {kept} records; "
+        f"{note}; kept {kept} records; "
         f"{before} bytes before the prune, {after} after"
     )
     return 0
