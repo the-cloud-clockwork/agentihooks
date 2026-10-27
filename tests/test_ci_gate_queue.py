@@ -42,6 +42,36 @@ def complete():
     ]
 
 
+@pytest.mark.parametrize("status", ["queued", "in_progress", "completed"])
+def test_preliminary_verification_exempts_only_its_running_self(status):
+    jobs = complete()
+    checker = next(job for job in jobs if job["name"] == "shard-check (3.12)")
+    checker.update(status=status, conclusion=None)
+    if status == "completed":
+        with pytest.raises(ValueError, match="Unexpected queue result"):
+            ci_gate_queue.verify(jobs, [2, 7], preliminary=True)
+    else:
+        assert ci_gate_queue.verify(jobs, [2, 7], preliminary=True) is (status == "in_progress")
+        assert ci_gate_queue.verify(jobs, [2, 7]) is False
+
+
+@pytest.mark.parametrize("name", ["select", "test-count", "unit (3.12, 2)", "lint"])
+def test_preliminary_verification_still_rejects_other_terminal_failures(name):
+    jobs = complete()
+    next(job for job in jobs if job["name"] == "shard-check (3.12)").update(status="in_progress", conclusion=None)
+    next(job for job in jobs if job["name"] == name)["conclusion"] = "failure"
+    with pytest.raises(ValueError):
+        ci_gate_queue.verify(jobs, [2, 7], preliminary=True)
+
+
+def test_preliminary_verification_requires_its_self_and_keeps_inventory_validation():
+    jobs = [job for job in complete() if job["name"] != "shard-check (3.12)"]
+    assert ci_gate_queue.verify(jobs, [2, 7], preliminary=True) is False
+    jobs.extend([{"name": "shard-check (3.11)", "status": "in_progress"}])
+    with pytest.raises(ValueError, match="Unexpected shard checker"):
+        ci_gate_queue.verify(jobs, [2, 7], preliminary=True)
+
+
 def test_complete_queue_waits_for_the_shard_judge_and_every_inventory_row():
     jobs = complete()
     assert ci_gate_queue.verify(jobs, [2, 7])

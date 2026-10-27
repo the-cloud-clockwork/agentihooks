@@ -183,6 +183,41 @@ def test_wait_polls_only_the_jobs_page_until_every_shard_passes():
     sleep.assert_called_once_with(15)
 
 
+def test_queue_poll_checks_identity_and_full_inventory_without_reading_jobs_twice():
+    from scripts import ci_gate_queue
+
+    jobs = [{"name": "unit (3.12, 1)", "conclusion": "success"}]
+    with (
+        patch.object(ci_gate_shards, "api", return_value=[{"jobs": jobs}]) as api,
+        patch.object(ci_gate_queue, "current") as current,
+        patch.object(ci_gate_queue, "verify", side_effect=[False, True]) as verify,
+        patch.object(ci_gate_queue, "logged_loss", return_value=True) as lost,
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
+    ):
+        ci_gate_shards.watch("org/repo", "123", "2", [1], queue=("refs/heads/queue", "head"))
+        assert api.call_count == 2
+        assert current.call_args_list == [(("org/repo", "refs/heads/queue", "head"),)] * 3
+        assert [call.args for call in verify.call_args_list] == [(jobs, [1])] * 2
+        assert all(call.kwargs["preliminary"] is True for call in verify.call_args_list)
+        assert verify.call_args.kwargs["lost"](jobs[0]) is True
+        lost.assert_called_once_with("org/repo", jobs[0], {})
+        sleep.assert_called_once_with(15)
+
+
+def test_queue_poll_rejects_a_red_inventory_before_successful_units_return():
+    from scripts import ci_gate_queue
+
+    with (
+        patch.object(ci_gate_shards, "api", return_value=[{"jobs": []}]),
+        patch.object(ci_gate_queue, "current"),
+        patch.object(ci_gate_queue, "verify", side_effect=ValueError("red group")),
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
+    ):
+        with pytest.raises(ValueError, match="red group"):
+            ci_gate_shards.watch("org/repo", "123", "2", [1], queue=("queue", "head"))
+        sleep.assert_not_called()
+
+
 @pytest.mark.parametrize("name", ["unit (3.12, 1)", "unit rerun (3.12, 1)"])
 def test_runner_queue_wait_never_counts_against_the_watch_deadline(name):
     queued = {"name": name, "status": "queued", "conclusion": None}
