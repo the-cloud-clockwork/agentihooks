@@ -120,8 +120,8 @@ def _marks(rule: Path, text: str | None) -> int:
     return 0 if text is None else text.count(f"ruleid: {rule.stem}")
 
 
-def marked_cases(base: str, rule_files: list[Path]) -> tuple[list[str], set[str]]:
-    errors, grown = [], set()
+def marked_cases(base: str, rule_files: list[Path]) -> tuple[list[str], dict[str, int]]:
+    errors, grown = [], {}
     for rule in rule_files:
         red = rule.with_suffix(".red.py")
         before = _marks(rule, at_base(base, red))
@@ -129,12 +129,12 @@ def marked_cases(base: str, rule_files: list[Path]) -> tuple[list[str], set[str]
         if now < before:
             errors.append(f"{rule.stem}: {red.name} marks {now} cases, {before} at the base; fixtures only grow")
         elif now > before:
-            grown.add(rule.stem)
+            grown[rule.stem] = now - before
     return errors, grown
 
 
 def floor_errors(
-    floors: dict[str, int], base: dict[str, int], rule_files: list[Path], changed: set[str], grown: set[str]
+    floors: dict[str, int], base: dict[str, int], rule_files: list[Path], changed: set[str], grown: dict[str, int]
 ) -> list[str]:
     names = {rule.stem for rule in rule_files}
     errors = [f"{name}: floor without a rule file" for name in sorted(set(floors) - names)]
@@ -149,6 +149,10 @@ def floor_errors(
             errors.append(
                 f"{name}: floor rose from {was} to {floors[name]}; "
                 "a floor rises only with a rule change that adds red fixture cases"
+            )
+        elif floors[name] - was > grown.get(name, 0):
+            errors.append(
+                f"{name}: floor rose by {floors[name] - was} but added only {grown.get(name, 0)} red fixture cases"
             )
         if floors[name] < was and name in changed:
             errors.append(
