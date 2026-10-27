@@ -38,6 +38,14 @@ def parse(report: str) -> tuple[set[Finding], set[str]]:
     return found, skipped
 
 
+def audited(requirements: Path) -> tuple[set[Finding], set[str]]:
+    try:
+        return parse(audit(requirements))
+    except AuditError as error:
+        print(f"::warning::{error}; auditing {requirements.name} once more")
+        return parse(audit(requirements))
+
+
 def new_findings(head: set[Finding], base: set[Finding]) -> list[Finding]:
     known = {(name, vuln) for name, _, vuln in base}
     return sorted(f for f in head if (f[0], f[2]) not in known)
@@ -49,8 +57,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", type=Path, required=True)
     args = parser.parse_args(argv)
     with tempfile.TemporaryDirectory() as folder:
-        head, head_skipped = parse(audit(resolve(args.head, Path(folder, "head"))))
-        base, base_skipped = parse(audit(resolve(args.base, Path(folder, "base"))))
+        head, head_skipped = audited(resolve(args.head, Path(folder, "head")))
+        base, base_skipped = audited(resolve(args.base, Path(folder, "base")))
     new = new_findings(head, base)
     unaudited = sorted(head_skipped - base_skipped)
     print(f"{len(head)} known vulnerabilities on head, {len(base)} on base, {len(new)} new.")
