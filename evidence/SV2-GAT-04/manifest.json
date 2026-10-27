@@ -1,0 +1,15 @@
+{
+  "cases": [
+    "T-SV2-GAT-04-A",
+    "T-SV2-GAT-04-B",
+    "T-SV2-GAT-04-C"
+  ],
+  "evidence_class": "mocked",
+  "inputs": {
+    "tests/fixtures/swarm_v2/consultation-gates.json": "c6d1d560a5bc254786323168b8bddc662b7bae991051412fc4666cef3c0c2c05"
+  },
+  "package": "SV2-GAT-04",
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40415890504",
+  "tested_commit": "df5f12feb68aad912e50fc5fa94467d707fa876e",
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40417667842"
+}

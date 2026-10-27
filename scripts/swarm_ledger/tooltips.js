@@ -42,6 +42,7 @@
     ['[data-gate-name="reruns"]', "Counts CI reruns per pull request head against the limit of {reruns} reruns; jobs cancelled before reaching a runner are exempt."],
     ['[data-gate-name="build"]', "Checks edits and commits against the traced plan, its validity and task territory."],
     ['[data-gate-name="one-push"]', "Checks both reviews closed and work is on origin before a pull request opens, and no push lands while checks run unless one is red."],
+    ['[data-gate-name="brain"]', "Checks code edits for a current brain consultation receipt bound to the task spec, claim and brain."],
     ['[data-gate-name="quiet"]', "Checks claimed tasks for {quiet_minutes} minutes without progress; ledger commands remain available."],
     ['[data-gate-name="trace-plan"]', "Checks plan pieces against task, phase and project intent and the size of one pull request."],
     ['[data-gate-name="stall"]', "Stalled pull requests."],
