@@ -141,6 +141,36 @@ def test_observed_mutant_execution_costs_drive_balanced_existing_workers(tmp_pat
     assert measured_costs(names[:1], changed, memory) == {names[0]: 8.1}
 
 
+def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_path, monkeypatch):
+    from scripts.ci_mutation import killers, measured
+    from scripts.ci_mutation.mutant_shards import unit_cost, unit_count
+
+    function = "scripts.sample.x_f"
+    names = [f"{function}__mutmut_{index}" for index in range(3)]
+    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0]}
+    memory = killers.KillMemory(tmp_path)
+    ticks = iter([0.0, 9.0, 20.0, 21.0, 30.0, 39.0, 40.0, 41.0])
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(measured, "measured_splits", lambda *args: {function: split})
+    for name in names[:2]:
+        for tests in [["fast", "left"], ["fast", "right"]]:
+            memory.prepare(name, tests)
+            assert memory.wrap(lambda *args, **kwargs: 0)(object(), tests) == 0
+        assert memory.cost(name, ["left", "fast"]) == 9.0
+        assert memory.cost(name, ["fast", "right"]) == 1.0
+    results = [{"tests": {function: ["fast", "left", "right"]}, "durations": {"fast": 1.0, "left": 100.0, "right": 100.0}}]
+    plan = measured.measured_plan([(names, results)], memory, limit=2)
+    assert plan["shards"] == 2
+    assert unit_count(plan) == 6
+    assert plan["unit_costs"] == {names[0]: [9.0, 1.0], names[1]: [9.0, 1.0], names[2]: [100.0, 100.0]}
+    assert plan["shard_worker_seconds"] == [110.0, 110.0]
+    for name, assignment in plan["assignments"].items():
+        assert sorted(assignment) == [0, 1]
+        for position, index in enumerate(assignment):
+            assert unit_cost(plan, name, index) == plan["unit_costs"][name][position]
+    assert measured.measured_plan([(list(reversed(names)), results)], memory, limit=2) == plan
+
+
 def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_its_traced_sum(tmp_path):
     from types import SimpleNamespace
 
