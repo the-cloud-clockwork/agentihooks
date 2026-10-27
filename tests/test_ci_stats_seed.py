@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import subprocess
 import zipfile
 from pathlib import Path
@@ -82,11 +83,50 @@ def test_merged_pulls_falls_back_to_the_push_before_without_a_seeded_head(tmp_pa
     assert seed.merged_pulls(tmp_path, shas[0], shas[2]) == [10, 11]
 
 
-def test_merged_pulls_takes_only_the_head_when_the_start_is_unknown(tmp_path, monkeypatch):
+def test_merged_pulls_takes_only_the_head_when_the_start_is_unknown(tmp_path, monkeypatch, capfd):
     shas = _repo(tmp_path, ["Fix one (#10)", "Fix two (#11)"])
     monkeypatch.chdir(tmp_path)
 
     assert seed.merged_pulls(tmp_path, shas[0], "0" * 40) == [11]
+    assert capfd.readouterr() == ("", "")
+
+
+def test_merged_pulls_reads_only_subjects_and_at_most_the_depth(tmp_path, monkeypatch):
+    shas = _repo(tmp_path, ["Fix one (#10)", "Fix two (#11)\n\nFollows (#9)"])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(seed, "DEPTH", 1)
+
+    assert seed.merged_pulls(tmp_path, shas[0], shas[2]) == [11]
+
+
+def test_git_fails_when_the_command_fails(tmp_path, monkeypatch):
+    _repo(tmp_path, [])
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        seed.git("rev-parse", "--verify", "no-such-ref")
+
+
+def _fake_gh(tmp_path, monkeypatch, body):
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    (folder / "gh").write_text(f"#!/usr/bin/env bash\n{body}\n")
+    (folder / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{folder}:{os.environ['PATH']}")
+
+
+def test_api_asks_gh_for_the_repository_path(tmp_path, monkeypatch):
+    _fake_gh(tmp_path, monkeypatch, 'printf \'{"args": "%s"}\' "$*"')
+
+    assert seed.api("pulls/7") == {"args": "api repos/{owner}/{repo}/pulls/7"}
+    assert seed.api("pulls/7", binary=True) == b'{"args": "api repos/{owner}/{repo}/pulls/7"}'
+
+
+def test_api_fails_when_gh_fails(tmp_path, monkeypatch):
+    _fake_gh(tmp_path, monkeypatch, "echo '{}'; exit 1")
+
+    with pytest.raises(subprocess.CalledProcessError):
+        seed.api("pulls/7")
 
 
 def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder, monkeypatch):
@@ -148,10 +188,13 @@ def test_harvest_without_stats_artifacts_writes_nothing(tmp_path, monkeypatch):
 
 
 def test_main_seeds_prunes_and_records_the_head(tmp_path, monkeypatch, capsys):
-    folder = tmp_path / "cache"
-    monkeypatch.setattr(seed, "merged_pulls", lambda found, head, before: [3])
+    folder = tmp_path / "a" / "cache"
+    monkeypatch.setattr(
+        seed, "merged_pulls", lambda found, head, before: [3] if (found, head, before) == (folder, "h", "b") else []
+    )
 
     def harvest(number, found):
+        assert (number, found) == (3, folder)
         _record(found, "p1", KEEP, {})
         _record(found, "p2", SCOPED, {"hooks/a.py": [1]})
         return 4
@@ -163,6 +206,19 @@ def test_main_seeds_prunes_and_records_the_head(tmp_path, monkeypatch, capsys):
     assert (folder / seed.SEEDED).read_text() == "h\n"
     assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", "p1.index", seed.SEEDED]
     assert capsys.readouterr().out == "Mutation stats seed: 4 files from pull requests [3]; kept 1 records\n"
+
+
+def test_main_reuses_an_existing_folder(folder, monkeypatch):
+    monkeypatch.setattr(seed, "merged_pulls", lambda found, head, before: [])
+
+    assert seed.main([str(folder), "--head", "h", "--before", "b"]) == 0
+    assert (folder / seed.SEEDED).read_text() == "h\n"
+
+
+@pytest.mark.parametrize("given", [["--head", "h"], ["--before", "b"]])
+def test_main_requires_the_head_and_the_push_before(folder, given):
+    with pytest.raises(SystemExit):
+        seed.main([str(folder), *given])
 
 
 def test_dev_pushes_save_the_stats_cache_pull_request_runs_restore():
