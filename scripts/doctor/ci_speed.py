@@ -341,6 +341,17 @@ def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int)
     ]
 
 
+def raisable(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int) -> dict:
+    """The recorded findings a run notice may raise, with the verdict a returned one came back after."""
+    raised = {}
+    for finding in found:
+        record = json.loads(records[finding.id])
+        verdict = record["verdict"]
+        if not verdict or record["returned"] or now_ms < verdict["at"] + cooldown_ms:
+            raised[finding.id] = {k: verdict[k] for k in ("value", "note", "by", "at")} if verdict else None
+    return raised
+
+
 def notice_key(finding: Finding, records: dict) -> str:
     prior = records.get(finding.id)
     verdict = json.loads(prior)["verdict"] if prior is not None else None
