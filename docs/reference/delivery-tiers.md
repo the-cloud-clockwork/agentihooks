@@ -525,10 +525,10 @@ python -m tests.shard_budget shard-durations/*/durations.json
 The first line names the slowest shard and the limit of its own step; one line per shard follows, slowest first:
 
 ```text
-2 shards, slowest 431.0 s of test time against the 7 minute Run the selected tests deadline of 420 s
-durations-3.12-1 431.0 s over budget
+2 shards, slowest 731.0 s of test time against the 12 minute Run the selected tests deadline of 720 s
+durations-3.12-1 731.0 s over budget
 durations-3.12-2 120.0 s
-::error::1 of 2 shards passed the 420 s budget.
+::error::1 of 2 shards passed the 720 s budget.
 ```
 
 When shards over budget have different limits, the last line joins them, for example `passed the 420 or 720 s budget`. `--budget <seconds>` replaces every step limit with one number, and the first line then reads `against a budget of <seconds> s`.
