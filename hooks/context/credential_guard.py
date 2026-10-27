@@ -538,6 +538,31 @@ def renderer_verdict(command):
     return None
 
 
+GH_TOKEN_SUBCOMMANDS = {"status", "token"}
+
+
+def prints_gh_token(toks):
+    for i, tok in enumerate(toks):
+        if " " in tok and (toks[i - 1 : i] == ["-c"] or verb_of(toks) in WRAPPERS) and prints_gh_token(tokens_of(tok)):
+            return True
+        if tok.split("/")[-1] == "gh":
+            args = [t for t in toks[i + 1 :] if not t.startswith("-")]
+            if args[:1] == ["auth"] and args[1:2] and args[1] in GH_TOKEN_SUBCOMMANDS:
+                return True
+    return False
+
+
+def gh_token_verdict(command):
+    inner = [next(g for g in m.groups() if g is not None) for m in SUBSTITUTION.finditer(command)]
+    if any(prints_gh_token(tokens_of(text)) for text in split_stages(command) + inner):
+        return (
+            block("printing the GitHub token (gh auth status or gh auth token)", KIND_ENVIRONMENT)
+            + '\nTo test whether the token is set:  test -n "${GH_TOKEN:-}" && echo set || echo unset'
+            + "\nTo test whether it works:  gh api rate_limit --jq .rate.remaining"
+        )
+    return None
+
+
 # --- operand-aware reader detection ------------------------------------------
 
 
@@ -859,7 +884,7 @@ def decide_bash(tool_input, ctx=None):
         seg = parts[i]
         if not seg.strip():
             continue
-        for check in (env_dump_verdict, echo_secret_verdict, renderer_verdict):
+        for check in (env_dump_verdict, echo_secret_verdict, renderer_verdict, gh_token_verdict):
             reason = check(seg)
             if reason:
                 return Verdict(block=reason)

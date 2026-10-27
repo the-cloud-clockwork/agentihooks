@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+run=(/usr/bin/gh)
 if [[ -n "${HIVE_GITHUB_AUTH_MODE:-}" || -s "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/github-token" ]]; then
-  exec /opt/venv/bin/python3 -m scripts.github_app_cli exec /usr/bin/gh "$@"
+  run=(/opt/venv/bin/python3 -m scripts.github_app_cli exec /usr/bin/gh)
 fi
-exec /usr/bin/gh "$@"
+if [[ "${1:-}" == auth && "${2:-}" == status ]]; then
+  "${run[@]}" "$@" 2>&1 | sed -E 's/(gh[opsur]_|github_pat_)[A-Za-z0-9_*]+/<hidden>/g'
+  exit "${PIPESTATUS[0]}"
+fi
+exec "${run[@]}" "$@"
