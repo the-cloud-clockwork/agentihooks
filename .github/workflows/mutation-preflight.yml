@@ -106,7 +106,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MUTATION_SHARD_CPU_QUOTA: "3"
-        run: GIT_TRACE_PERFORMANCE=$RUNNER_TEMP/gitperf.log python -u -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"; sort -t: -k5 "$RUNNER_TEMP/gitperf.log" | grep -c performance; grep performance "$RUNNER_TEMP/gitperf.log" | sort -k4 -g -r | head -40
+        run: |
+          GIT_TRACE_PERFORMANCE=$RUNNER_TEMP/gitperf.log python -u -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
+          grep -c performance "$RUNNER_TEMP/gitperf.log"
+          grep performance "$RUNNER_TEMP/gitperf.log" | sort -k4 -g -r | head -40
 
       - name: Upload planned mutation test selection
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
