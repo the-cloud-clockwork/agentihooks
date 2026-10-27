@@ -531,7 +531,7 @@ durations-3.12-2 120.0 s
 ::error::1 of 2 shards passed the 720 s budget.
 ```
 
-When shards over budget have different limits, the last line joins them, for example `passed the 420 or 720 s budget`. `--budget <seconds>` replaces every step limit with one number, and the first line then reads `against a budget of <seconds> s`.
+When shards over budget have different limits, the last line joins them with `or`. `--budget <seconds>` replaces every step limit with one number, and the first line then reads `against a budget of <seconds> s`.
 
 ### Tests that pin the limits
 
