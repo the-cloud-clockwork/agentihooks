@@ -244,7 +244,8 @@ agentihooks host-guard install   # link and schedule, whatever the home holds
 `agentihooks init` refuses to run in a rendered profile home or with
 `AGENTIHOOKS_SWARM` or `AGENTIHOOKS_PROFILE` set, so an agent session cannot
 run it. The operator runs it once from a plain shell. `install` always runs
-these steps, and `init` runs them only when the home has drift:
+these steps. `init` runs them only when the home has drift and has both links,
+a live guard entry or an enabled old systemd timer:
 
 1. Cancel every live guard entry on `redis://127.0.0.1:6379/0` whose payload
    names this home's `guard-daemon.sh`. Entries for other homes stay.
@@ -270,8 +271,8 @@ second row of the `install` table above. Run
 entry there cannot run the guard a second time if that Redis gets a runner
 again.
 
-A home with only one of the two links, or with hand copies and no live entry,
-is relinked but not scheduled by the first `init`, as the table above shows.
+A home with only one of the two links, or with hand copies, with no live entry
+and no enabled old timer, is relinked but not scheduled by the first `init`, as the table above shows.
 The next `init` sees both links and schedules it, and
 `agentihooks host-guard install` schedules it at once.
 
