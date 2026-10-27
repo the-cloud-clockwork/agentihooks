@@ -21,7 +21,9 @@ def captured(tmp_path):
     catalog.register(SessionSource(*scope.key(), "claude", "fixture", "retain-until-deleted"))
     event = StoredEvent("event-one", 1, 0, 1, "agentihooks", {"kind": "user_text", "text": "private"}, "hash")
     catalog.commit(
-        BatchCommit(GRANT.corpus, "batch-one", "digest", scope.session_uid, scope.source_generation, [event], [], "1.0")
+        BatchCommit(
+            GRANT.corpus, "batch-one", "digest", scope.session_uid, scope.source_generation, [event], [], SCHEMA_VERSION
+        )
     )
     yield catalog, metrics.Metrics(catalog), scope
     catalog.close()
@@ -256,7 +258,9 @@ def test_session_inspection_displays_partial_coverage_without_changing_summary(c
     advance(meter, scope, "local_spool", 2, 100.0)
     tools = SessionTools(catalog, ObjectStore(tmp_path / "objects"))
     answer = tools.session_get(
-        GRANT, {"schema_version": SCHEMA_VERSION, "access_domain": GRANT.corpus, "session_uid": scope.session_uid}, 200.0
+        GRANT,
+        {"schema_version": SCHEMA_VERSION, "access_domain": GRANT.corpus, "session_uid": scope.session_uid},
+        200.0,
     )
     assert answer["session"]["session_uid"] == scope.session_uid
     assert answer["coverage"][0]["coverage"] == "partial"

@@ -1,7 +1,10 @@
 {
   "package": "SV2-OBS-02",
   "integration_gate": "G10",
-  "dependencies": ["SV2-OBS-01", "SV2-IDX-03"],
+  "dependencies": [
+    "SV2-OBS-01",
+    "SV2-IDX-03"
+  ],
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7988",
   "package_complete": false,
   "status": "awaiting CI qualification",
@@ -11,11 +14,14 @@
     "Metrics.advance records a monotonic contiguous normalized record cursor for one source generation and stage. Downstream cursors cannot exceed their own upstream; duplicate observations retain their original time.",
     "Metrics.status and Metrics.coverage return independent stage cursors, age, record backlog, lag and stale or unknown alerts. Coverage is complete only when every observed stage reaches the captured tail. Authorization reads metadata, never transcript bodies.",
     "Recorder implements the spool progress protocol. Durable append records capture; only a returning durable uploader records archive progress. Pending batches replay observations idempotently on attach or restart.",
-    "IndexWorker.drain records indexed progress only for chunk generations whose current hashes all have vectors in that index generation, using their built through cursors rather than a newer catalog tail.",
+    "IndexWorker.drain records indexed progress only for the active search index generation and fully covered current chunk hashes, using built through cursors rather than a newer catalog tail. IndexWorker.activate refreshes progress after committing cutover.",
     "Recorder.consume invokes a caller supplied extractor and advances brain progress only after a matching committed cursor receipt. A repeated cursor does not invoke extraction again.",
     "SessionSearch.search exposes coverage even when its hit list is empty. SessionTools.session_get exposes source coverage beside its existing summary. No ledger page files are changed."
   ],
-  "supported_versions": {"protocol": "additive fields on session API version 1.0", "storage": "additive SQLite tables beside the existing catalog"},
+  "supported_versions": {
+    "protocol": "additive fields on session API version 2.0",
+    "storage": "additive SQLite tables beside the existing catalog"
+  },
   "measurements": {
     "archive_lag_seconds": "Age of the earliest captured checkpoint beyond the archive acknowledgement, zero after it catches up.",
     "embedding_lag_seconds": "Age of the earliest archive checkpoint beyond the fully indexed cursor, independent of archive transport delay.",
