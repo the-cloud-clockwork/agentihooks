@@ -79,7 +79,7 @@ def _operator_file(found: Path) -> dict:
     return doc
 
 
-def _credential(doc: dict, kind: str) -> dict:
+def credential(doc: dict, kind: str) -> dict:
     spec = (doc.get("credentials") or {}).get(kind)
     if not isinstance(spec, dict):
         raise Refused(f"the binding names no {kind} credential")
@@ -107,7 +107,7 @@ def resolve(environ: Mapping[str, str], credentials: Mapping[str, str] | None = 
         raise Refused("the API and MCP endpoints share one origin")
     bound = {"status": BOUND, "instance": str(doc.get("instance") or ""), "site": where, "api": api, "mcp": mcp}
     for kind in KINDS:
-        bound.update(_credential(doc, kind))
+        bound.update(credential(doc, kind))
     if (bound["api_header"].lower(), bound["api_scheme"]) != ("authorization", "Bearer"):
         raise Refused("the API credential must be an Authorization Bearer token")
     held = environ if credentials is None else credentials

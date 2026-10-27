@@ -168,6 +168,12 @@ def test_place_reports_a_refused_decision_with_its_reason(home):
         ),
         (lambda doc: None, {}, f"OpenBao {RECORD} lacks BRAIN_HTTP_TOKEN, MCP_API_KEY"),
         (lambda doc: None, {RECORD: {"BRAIN_HTTP_TOKEN": API_FIXTURE}}, f"OpenBao {RECORD} lacks MCP_API_KEY"),
+        (
+            lambda doc: None,
+            {RECORD: {"BRAIN_HTTP_TOKEN": 7, "MCP_API_KEY": {"k": "v"}}},
+            f"OpenBao {RECORD} lacks BRAIN_HTTP_TOKEN, MCP_API_KEY",
+        ),
+        (lambda doc: doc["credentials"].update(mcp="x"), {}, "the binding names no mcp property"),
     ],
 )
 def test_place_refuses_and_writes_nothing(home, change, records, reason):
@@ -256,6 +262,31 @@ def test_main_refuses_an_unreadable_configmap(home, monkeypatch, code, stdout):
     assert brain_place.main([], environ, out, StubStore({})) == 1
 
     assert out.getvalue() == "brain-place: the swarm-brain-binding ConfigMap could not be read; nothing was written\n"
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError("kubectl"), brain_place.subprocess.TimeoutExpired("kubectl", 30)])
+def test_main_refuses_when_kubectl_cannot_run(home, monkeypatch, error):
+    def run(argv, **kwargs):
+        raise error
+
+    monkeypatch.setattr(brain_place.subprocess, "run", run)
+    environ = {**_environ(home), "OPENBAO_URL": "https://bao.example.test", "OPENBAO_TOKEN": "t"}
+    out = io.StringIO()
+
+    assert brain_place.main([], environ, out, StubStore({})) == 1
+
+    assert out.getvalue() == "brain-place: the swarm-brain-binding ConfigMap could not be read; nothing was written\n"
+
+
+def test_main_refuses_a_binding_file_that_is_not_text(home, tmp_path):
+    source = tmp_path / "binding.json"
+    source.write_bytes(b"\xff\xfe\xfa")
+    environ = {**_environ(home), "OPENBAO_URL": "https://bao.example.test", "OPENBAO_TOKEN": "t"}
+    out = io.StringIO()
+
+    assert brain_place.main(["--binding", str(source)], environ, out, StubStore({})) == 1
+
+    assert out.getvalue() == "brain-place: the binding file could not be read; nothing was written\n"
 
 
 def test_main_refuses_a_missing_binding_file(home, tmp_path):
