@@ -8,7 +8,7 @@ import zipfile
 import zlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 from scripts.ci_budget import rate_limit
 from scripts.ci_test_plan import UnusableRecord, _api, _strings, _valid_test
@@ -17,11 +17,13 @@ from tests import dep_manifest
 PREFIX = "branch-record-3.12-"
 RUNS = 8
 LISTED = 30
-ARTIFACT_PAGE = 100
+PAGE_SIZE = 100
 PAGES = 5
 REQUESTS = 100
 COMMIT = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 LEG = re.compile(r"\d+", re.ASCII)
+LEG_JOB = re.compile(rf"(?:unit|unit-selected) \(3\.12, ({LEG.pattern})\)", re.ASCII)
+TEST_STEPS = ("Run the selected tests", "Run tests")
 UNUSABLE = (subprocess.SubprocessError, OSError, KeyError, TypeError, ValueError, AttributeError)
 
 
@@ -37,30 +39,45 @@ def _earlier(run: dict, args: argparse.Namespace) -> bool:
         and run["event"] == "pull_request"
         and run["path"] == ".github/workflows/test.yml"
         and run["head_branch"] == args.head_ref
-        and (run["head_repository"] or {}).get("full_name", "").lower() == args.head_repo.lower()
+        and run["head_repository"]
+        and run["head_repository"]["full_name"].lower() == args.head_repo.lower()
         and any(pull.get("number") == args.pull for pull in run["pull_requests"])
         and run["created_at"] < args.created
     )
 
 
 def _runs(actions: str, args: argparse.Namespace) -> list[dict]:
-    branch = quote(args.head_ref, safe="")
-    listed = json.loads(
-        _api(f"{actions}/workflows/test.yml/runs?branch={branch}&event=pull_request&per_page={LISTED}")
-    )["workflow_runs"]
+    query = urlencode({"branch": args.head_ref, "event": "pull_request", "per_page": LISTED})
+    listed = json.loads(_api(f"{actions}/workflows/test.yml/runs?{query}"))["workflow_runs"]
     return [run for run in listed if _earlier(run, args)][:RUNS]
 
 
-def _artifacts(actions: str, run: dict) -> tuple[list[dict], int]:
+def _paged(endpoint: str, key: str) -> tuple[list[dict], int]:
     found = []
     for page in range(1, PAGES + 1):
-        listed = json.loads(_api(f"{actions}/runs/{run['id']}/artifacts?per_page={ARTIFACT_PAGE}&page={page}"))[
-            "artifacts"
-        ]
-        found += [item for item in listed if item["name"].startswith(PREFIX) and not item["expired"]]
-        if len(listed) < ARTIFACT_PAGE:
+        listed = json.loads(_api(f"{endpoint}?per_page={PAGE_SIZE}&page={page}"))[key]
+        found += listed
+        if len(listed) < PAGE_SIZE:
             return found, page
-    raise Barrier(f"it lists more than {PAGES} pages of artifacts")
+    raise Barrier(f"it lists more than {PAGES} pages of {key}")
+
+
+def _started(job: dict) -> bool:
+    return any(
+        step["name"] in TEST_STEPS and (step["status"] == "in_progress" or step["conclusion"] not in (None, "skipped"))
+        for step in job["steps"]
+    )
+
+
+def _listing(actions: str, run: dict) -> tuple[list[dict], set[str], int]:
+    listed, pages = _paged(f"{actions}/runs/{run['id']}/artifacts", "artifacts")
+    required = set()
+    for attempt in range(1, run["run_attempt"] + 1):
+        jobs, more = _paged(f"{actions}/runs/{run['id']}/attempts/{attempt}/jobs", "jobs")
+        pages += more
+        legs = [(LEG_JOB.fullmatch(job["name"]), job) for job in jobs]
+        required |= {f"{PREFIX}{leg[1]}-{job['run_attempt']}" for leg, job in legs if leg and _started(job)}
+    return [item for item in listed if item["name"] in required and not item["expired"]], required, pages
 
 
 def _schema(record: object) -> bool:
@@ -83,11 +100,7 @@ def _invalid(record: object, name: str, run: dict, args: argparse.Namespace) -> 
     expected = {"run": run["id"], "head": run["head_sha"], "pull": args.pull, "environment": args.environment}
     if differed := [key for key, value in expected.items() if record[key] != value]:
         return f"{', '.join(differed)} differed from its run"
-    if (
-        not LEG.fullmatch(record["leg"])
-        or not 1 <= record["attempt"] <= run["run_attempt"]
-        or name != f"{PREFIX}{record['leg']}-{record['attempt']}"
-    ):
+    if not 1 <= record["attempt"] <= run["run_attempt"] or name != f"{PREFIX}{record['leg']}-{record['attempt']}":
         return "its leg and attempt do not match the artifact"
     if not COMMIT.fullmatch(record["commit"]) or record["manifest"].get("commit") != record["commit"]:
         return "its manifest does not describe its commit"
@@ -106,10 +119,7 @@ def _record(data: bytes, name: str, run: dict, args: argparse.Namespace) -> dict
 
 
 def _present(root: Path, commit: str) -> bool:
-    for command in (["cat-file", "-e", f"{commit}^{{commit}}"], ["fetch", "--no-tags", "origin", commit]):
-        if subprocess.run(["git", "-C", str(root), *command], capture_output=True).returncode == 0:
-            return True
-    return False
+    return subprocess.run(["git", "-C", str(root), "fetch", "--no-tags", "origin", commit]).returncode == 0
 
 
 def _changes(root: Path, commit: str, cache: dict) -> list | None:
@@ -169,13 +179,15 @@ def _warn(run: dict, reason: object) -> None:
 def considered(args: argparse.Namespace) -> tuple[list[tuple[dict, set[str], set[str]]], set[str]]:
     actions = f"repos/{args.repository}/actions"
     found, cache = [], {}
-    with ThreadPoolExecutor(max_workers=RUNS) as pool:
+    with ThreadPoolExecutor() as pool:
         runs = _runs(actions, args)
-        listings = [pool.submit(_artifacts, actions, run) for run in runs]
-        requests = 1 + sum(listing.result()[1] for listing in listings if listing.exception() is None)
+        listings = [pool.submit(_listing, actions, run) for run in runs]
+        requests = 1 + sum(listing.result()[2] for listing in listings if listing.exception() is None)
         for run, listing in zip(runs, listings):
             try:
-                items = listing.result()[0]
+                items, required, _ = listing.result()
+                if missing := sorted(required - {item["name"] for item in items}):
+                    raise Barrier(f"started test legs left no {', '.join(missing)}")
                 if requests + len(items) > REQUESTS:
                     print(f"Stopped at pull request run {run['id']}: its records would pass {REQUESTS} GitHub requests")
                     break
@@ -246,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run", type=int, required=True)
     parser.add_argument("--created", required=True)
     parser.add_argument("--environment", required=True)
-    parser.add_argument("--event", default=os.environ.get("GITHUB_EVENT_NAME", ""))
+    parser.add_argument("--event", default=os.environ.get("GITHUB_EVENT_NAME"))
     parser.add_argument("--dev-plan", type=Path)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)

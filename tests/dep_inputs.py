@@ -33,7 +33,7 @@ class DepInputs:
         self.finished = folder / "finished" / f"{os.getpid()}.jsonl"
         self.own = str(folder) + os.sep
         self.shared_key = None
-        self.shared_files = set()
+        self.shared_files = {}
 
     def site_file(self) -> Path:
         name = hashlib.sha256(str(self.children).encode()).hexdigest()[:16]
@@ -151,19 +151,20 @@ class DepInputs:
             self.current = self.shared
             self.finish(item.nodeid)
 
-    def relative(self, opened: set[str]) -> list[str]:
-        kept = set()
+    def kept(self, opened: set[str]) -> dict[str, str]:
+        kept = {}
         for full in opened:
             if not full.startswith(self.root):
                 continue
             relative = full[len(self.root) :]
             if relative.endswith((".py", ".pyc")) or relative.startswith(SKIPPED) or "__pycache__" in relative:
                 continue
-            if Path(full).is_relative_to(self.folder):
-                continue
-            if os.path.isfile(full):
-                kept.add(relative)
-        return sorted(kept)
+            if not Path(full).is_relative_to(self.folder):
+                kept[full] = relative
+        return kept
+
+    def relative(self, opened: set[str]) -> list[str]:
+        return sorted({relative for full, relative in self.kept(opened).items() if os.path.isfile(full)})
 
     def line(self, test: str, shared: set[str]) -> str:
         opened, escapes = self.tests[test]
@@ -178,8 +179,9 @@ class DepInputs:
             size = 0
         if (len(self.shared[0]), size) != self.shared_key:
             self.shared_key = (len(self.shared[0]), size)
-            self.shared_files = set(self.relative(self.shared[0] | self.child_reads(log)))
-        return self.shared_files
+            self.shared_files = self.kept(self.shared[0] | self.child_reads(log))
+        # A shared path read before its file existed counts once the file appears, as it does at session end.
+        return {relative for full, relative in self.shared_files.items() if os.path.isfile(full)}
 
     def finish(self, test: str) -> None:
         self.tests[test][0].update(self.child_reads(self.logs[test]))

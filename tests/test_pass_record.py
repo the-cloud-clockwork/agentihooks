@@ -140,8 +140,8 @@ def test_each_inputs_line_reuses_the_shared_files_and_never_records_the_plugins_
     plugin.children.mkdir(parents=True)
     plugin.shared[0].add(str(tmp_path / "shared.txt"))
     measured = []
-    relative = plugin.relative
-    monkeypatch.setattr(plugin, "relative", lambda opened: measured.append(set(opened)) or relative(opened))
+    kept = plugin.kept
+    monkeypatch.setattr(plugin, "kept", lambda opened: measured.append(set(opened)) or kept(opened))
     tests = ["t.py::a", "t.py::b", "t.py::c"]
     for number, test in enumerate(tests):
         plugin.tests[test] = [{str(tmp_path / "own.txt")}, False]
@@ -157,6 +157,20 @@ def test_each_inputs_line_reuses_the_shared_files_and_never_records_the_plugins_
     plugin.pytest_sessionfinish(None)
     [session] = (tmp_path / "inputs").glob("*.jsonl")
     assert [json.loads(line) for line in session.read_text().splitlines()] == expected
+
+
+def test_a_shared_file_created_between_two_tests_is_in_the_later_tests_inputs_line(tmp_path):
+    plugin = dep_inputs.DepInputs(tmp_path / "inputs", tmp_path)
+    plugin.children.mkdir(parents=True)
+    plugin.shared[0].add(str(tmp_path / "late.txt"))
+    for number, test in enumerate(["t.py::a", "t.py::b"]):
+        plugin.tests[test] = [set(), False]
+        plugin.fixtures[test] = set()
+        plugin.logs[test] = plugin.children / f"{os.getpid()}-{number}"
+        plugin.finish(test)
+        (tmp_path / "late.txt").write_text("x")
+    lines = [json.loads(line)["files"] for line in plugin.finished.read_text().splitlines()]
+    assert lines == [[], ["late.txt"]]
 
 
 def test_a_killed_run_keeps_the_teardown_coverage_and_inputs_of_every_test_it_recorded(tmp_path):
