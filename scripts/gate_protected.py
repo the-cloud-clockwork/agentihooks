@@ -255,10 +255,11 @@ def grade(
                 "if": "${{ always() }}",
                 "runs-on": runner,
                 "timeout-minutes": 5,
-                "steps": finish(ci_reuse.summary_steps()),
+                "steps": finish(retry(ci_reuse.summary_steps())),
             }
             for runner in runners(policy)
             for finish in (list, ci_reuse.pipefail_summary)
+            for retry in (list, ci_reuse.retried_summary)
         ]
         if summary not in canonical:
             problems.append("The test summary must use the reviewed reporting job.")
