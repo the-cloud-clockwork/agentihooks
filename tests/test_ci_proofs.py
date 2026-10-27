@@ -245,3 +245,27 @@ def test_the_sandbox_proof_groups_share_the_suite_evenly():
     seconds = [group.duration for group in groups]
     assert max(counts) <= 1.5 * min(counts), counts
     assert max(seconds) <= 1.1 * sum(seconds) / len(seconds), seconds
+
+
+def test_an_untimed_test_counts_as_its_own_file_mean():
+    from tests.split_fallback import file_mean_durations
+
+    durations = {
+        "tests/test_slow.py::test_a": 30.0,
+        "tests/test_slow.py::test_b": 50.0,
+        "tests/test_fast.py::test_a": 0.1,
+    }
+    nodeids = [*durations, "tests/test_slow.py::test_new", "tests/test_other.py::test_new"]
+    filled = file_mean_durations(nodeids, durations)
+    assert filled["tests/test_slow.py::test_new"] == 40.0
+    assert "tests/test_other.py::test_new" not in filled
+    assert {nodeid: filled[nodeid] for nodeid in durations} == durations
+
+
+def test_the_sandbox_proof_loads_the_file_mean_fallback():
+    import inspect
+
+    from tests import mutation_sandbox_input_proof
+
+    source = inspect.getsource(mutation_sandbox_input_proof.test_full_selection_reads_the_same_repository_inputs)
+    assert '"-p",\n            "tests.split_fallback",' in source
