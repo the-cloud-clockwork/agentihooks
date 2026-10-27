@@ -7,10 +7,12 @@ import argparse
 import json
 import subprocess
 import time
+from collections import Counter
 
 from scripts.swarm import github_reads
 
 DOCTOR = "doctor."
+GRAPHQL = "graphql"
 
 
 def core(run=subprocess.run) -> tuple[int, int]:
@@ -34,7 +36,7 @@ def sample(minutes: int, interval: int = 60, run=subprocess.run, sleep=time.slee
         samples.append(core(run))
     until = clock()
     calls = spent(samples)
-    callers = github_reads.counts(since, until)
+    callers = rest_counts(since, until)
     doctor = sum(count for caller, count in callers.items() if caller.startswith(DOCTOR))
     hours = (until - since) / 3600 or 1
     return {
@@ -43,8 +45,25 @@ def sample(minutes: int, interval: int = 60, run=subprocess.run, sleep=time.slee
         "calls": calls,
         "per_hour": round(calls / hours),
         "outside_doctor_per_hour": round(max(0, calls - doctor) / hours),
+        "unattributed_per_hour": round(max(0, calls - sum(callers.values())) / hours),
         "callers": dict(sorted(callers.items(), key=lambda item: -item[1])),
     }
+
+
+def rest_counts(since: float, until: float) -> dict[str, int]:
+    try:
+        lines = (github_reads.home() / "charged.jsonl").read_text().splitlines()
+    except OSError:
+        return {}
+    login, tally = github_reads.source(), Counter()
+    for line in lines:
+        try:
+            row = json.loads(line)
+            if since <= row["at"] < until and row["source"] == login and row["endpoint"] != GRAPHQL:
+                tally[row["caller"]] += 1
+        except (ValueError, KeyError, TypeError):
+            continue
+    return dict(tally)
 
 
 def main(argv: list[str] | None = None) -> int:

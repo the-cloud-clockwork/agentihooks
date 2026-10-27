@@ -82,8 +82,13 @@ def test_the_sampler_reports_calls_an_hour_and_the_spend_outside_the_doctor(gith
 
     for caller in ("doctor.ci", "doctor.ci", "swarm.head"):
         github_reads.charge(caller, PULL, 10.0)
+    github_reads.charge("swarm.checks", "graphql", 10.0)
+    monkeypatch.setenv("GH_TOKEN", "another_login")
+    github_reads.charge("swarm.head", PULL, 10.0)
+    monkeypatch.delenv("GH_TOKEN")
     found = github_sampler.sample(120, 3600, run=rate_limit, sleep=lambda pause: None, clock=lambda: next(clock))
     assert found["calls"] == 1200
     assert found["per_hour"] == 600
     assert found["outside_doctor_per_hour"] == 599
+    assert found["unattributed_per_hour"] == 598
     assert found["callers"] == {"doctor.ci": 2, "swarm.head": 1}
