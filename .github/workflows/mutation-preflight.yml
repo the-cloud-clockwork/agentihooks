@@ -125,7 +125,7 @@ jobs:
                       e = time.perf_counter()
                       print(f"PHASE {name} {threading.current_thread().name} {s - t0:.2f} to {e - t0:.2f} = {e - s:.2f}", flush=True)
               setattr(module, name, wrapper)
-          for name in ("read_record", "touches_code", "own_bases", "discover_changes", "select_tests", "record_drift", "estimate", "validate_tests", "stats_part_count", "changed_mutations", "line_covering_tests", "narrow"):
+          for name in ("read_record", "touches_code", "own_bases", "discover_changes", "select_tests", "record_drift", "estimate", "validate_tests", "stats_part_count", "changed_mutations", "line_covering_tests", "narrow", "mutant_count"):
               if hasattr(plan, name):
                   timed(plan, name)
           for name in ("_api", "_manifest", "_valid_manifest", "find_record"):
