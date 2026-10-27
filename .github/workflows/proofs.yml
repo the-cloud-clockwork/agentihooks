@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: tests
-        options: [tests, mutation, mutation-deadlines, mutation-replay, mutation-archive, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
+        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
       base:
         description: Base revision for mutation or Semgrep scope
         required: true
@@ -39,13 +39,6 @@ permissions:
   actions: read
 
 jobs:
-  mutation-archive:
-    if: inputs.proof == 'mutation-archive'
-    uses: ./.github/workflows/mutation-archive-proof.yml
-    with:
-      run: ${{ inputs.base }}
-      artifact: ${{ inputs.tests }}
-
   mutation-deadlines:
     if: inputs.proof == 'mutation-deadlines'
     uses: ./.github/workflows/mutation-deadline-proof.yml
