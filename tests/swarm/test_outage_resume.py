@@ -716,9 +716,9 @@ def test_a_pending_recovery_stops_once_its_attempts_are_spent(store, tmp_path, m
     assert not resume.recovery_pending(store, "sw", agents[0])
 
 
-@pytest.mark.parametrize("outage_state", ["closed", "open"])
+@pytest.mark.parametrize("control", ["closed", "open", "typed", "wait"])
 def test_a_pending_recovery_after_its_outage_closes_retires_an_idle_holder_while_paused(
-    store, tmp_path, monkeypatch, outage_state
+    store, tmp_path, monkeypatch, control
 ):
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
@@ -728,12 +728,16 @@ def test_a_pending_recovery_after_its_outage_closes_retires_an_idle_holder_while
     store.put_agent("sw", replace(holder, idle_ticks=IDLE_KILL_TICKS - 1))
     for agent in agents[1:]:
         runtime.statuses[agent.name] = "working"
-    if outage_state == "open":
+    if control == "open":
         outage.observe("sw", "provider", ["provider unavailable"], 10 * MINUTE)
+    elif control == "typed":
+        runtime.inputs[holder.name] = "half typed reply"
+    elif control == "wait":
+        idle.declare_wait(store.redis, "sw", holder.name, 60 * MINUTE, "checks", 10 * MINUTE)
     assert store.config("sw").state == "paused"
     assert resume.recovery_pending(store, "sw", holder)
     actions = tick("sw", store, ledger, runtime, 40 * MINUTE)
-    if outage_state == "open":
+    if control != "closed":
         assert holder.name not in runtime.killed
         assert store.claimant("sw", holder.task) == holder.name
         return
@@ -743,16 +747,22 @@ def test_a_pending_recovery_after_its_outage_closes_retires_an_idle_holder_while
     assert stalled and "outage recovery could not proceed" in stalled[0], actions
 
 
-def test_a_pending_recovery_still_holds_an_idle_holder_just_after_its_outage_closes(store, tmp_path, monkeypatch):
+def test_a_pending_recovery_holds_an_idle_holder_only_until_its_window_after_closure_ends(store, tmp_path, monkeypatch):
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
     monkeypatch.setattr(resume, "recover_outages", lambda *args: [])
     holder = agents[0]
     store.put_agent("sw", replace(holder, idle_ticks=IDLE_KILL_TICKS - 1))
-    tick("sw", store, ledger, runtime, 10 * MINUTE)
+    closed = 9 * MINUTE
+    tick("sw", store, ledger, runtime, closed + resume.RECOVERY_HOLD_MS - MINUTE)
     assert holder.name not in runtime.killed
     assert store.claimant("sw", holder.task) == holder.name
+    actions = tick("sw", store, ledger, runtime, closed + resume.RECOVERY_HOLD_MS)
+    assert holder.name in runtime.killed
+    assert ledger.rows[holder.task]["state"] == "open"
+    stalled = [action for action in actions if action.startswith(f"stalled {holder.name}")]
+    assert stalled and stalled[0].endswith(f"0 of {resume.RECOVERY_ATTEMPTS} resume attempts made"), actions
 
 
 def test_an_owner_holding_its_task_authority_is_recovered(store, tmp_path, monkeypatch):
