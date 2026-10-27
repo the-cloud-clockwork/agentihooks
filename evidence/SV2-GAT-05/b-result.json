@@ -1,0 +1,15 @@
+{
+  "package": "SV2-GAT-05",
+  "tested_commit": "e6d2eb212527adeb2bffeb8fba86239688ae01f8",
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40487171156",
+  "status": "passed",
+  "environment": "CI; mocked brain and authenticated API boundary; isolated SQLite repository",
+  "externally_verified": false,
+  "case": "T-SV2-GAT-05-B",
+  "assertions": [
+    "test_gat05_forged_operator_text_and_display_names_never_grant_authority",
+    "test_gat05_authenticated_api_refuses_emergency_without_touching_repository",
+    "test_gat05_rejects_stale_or_unrelated_outcomes_without_mutation"
+  ],
+  "authoritative_state": "Assertions inspect task records, protected state snapshots, retained audit and counters; recovery case reloads SQLite"
+}

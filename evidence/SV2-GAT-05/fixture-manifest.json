@@ -1,0 +1,16 @@
+{
+  "package": "SV2-GAT-05",
+  "tested_commit": "e6d2eb212527adeb2bffeb8fba86239688ae01f8",
+  "inputs": [
+    {
+      "fixture": "learning-outcomes.json",
+      "sha256": "656112414ea5a12af11c523b8c1055404c56e9693ae7c79c0c202f5083f17968"
+    }
+  ],
+  "clock": {
+    "now_seconds": 100,
+    "grant_expiry_seconds": 160,
+    "expiry_and_generation": "fake clock and explicit fixture generations"
+  },
+  "repeat": "Separate pytest fixtures isolate each parametrized case; SQLite replay reopens the repository"
+}
