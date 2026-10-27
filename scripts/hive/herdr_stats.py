@@ -7,10 +7,11 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
+from scripts.hive import registry
+
 if TYPE_CHECKING:
     from redis import Redis
 
-KEY = "swarm:herdr:panes"
 EVERY_S = 10
 STALE_MS = 30_000
 TIMEOUT_S = 8
@@ -48,14 +49,19 @@ def measure(binary: str) -> dict:
     return {"machines": machines, "silent": [name for (name, _), counts in zip(targets, counted) if counts is None]}
 
 
-def publish(redis: "Redis", now_ms: int, binary: str | None = None) -> None:
+def key(hive: str) -> str:
+    """Kept under the publishing hive's own record, which every reader of hive records may read."""
+    return f"{registry.key(hive)}:herdr"
+
+
+def publish(redis: "Redis", hive: str, now_ms: int, binary: str | None = None) -> None:
     binary = binary or shutil.which("herdr")
     if binary is not None:
-        redis.set(KEY, json.dumps({**measure(binary), "measured_at": now_ms}), px=STALE_MS)
+        redis.set(key(hive), json.dumps({**measure(binary), "measured_at": now_ms}), px=STALE_MS)
 
 
-def read(redis: "Redis", now_ms: int) -> dict | None:
-    raw = redis.get(KEY)
+def read(redis: "Redis", hive: str, now_ms: int) -> dict | None:
+    raw = redis.get(key(hive))
     if raw is None:
         return None
     measured = json.loads(raw)

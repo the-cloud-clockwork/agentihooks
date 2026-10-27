@@ -54,9 +54,9 @@ def ports_for(hives, readings, here="", local=None, published=None, reads=None):
         read=lambda redis, hive, now: readings.get(hive) if isinstance(redis, Redis) and now == NOW else None
     )
 
-    def read(redis, now):
-        (reads if reads is not None else []).append((redis, now))
-        return published if isinstance(redis, Redis) else None
+    def read(redis, hive, now):
+        (reads if reads is not None else []).append((redis, hive, now))
+        return published if isinstance(redis, Redis) and hive == "root" and now == NOW else None
 
     herdr_stats = SimpleNamespace(read=read, MASTER="master")
     hooks = SimpleNamespace(account_sessions=SimpleNamespace(local_processes=lambda: local or {}))
@@ -208,15 +208,22 @@ def test_a_hive_reading_without_a_harness_counts_it_as_zero():
 
 def test_a_published_machine_without_a_harness_counts_it_as_zero():
     published = {"machines": {"master": {"claude": 2}}, "silent": [], "measured_at": NOW}
-    data = viewed(Store({}), *ports_for([], {}, published=published))
+    data = viewed(Store({}), *ports_for([ROOT], {}, published=published))
     assert data["agents"] == {"total": 2, "source": "herdr", "reporting": 1, "of": 1, "claude": 2, "codex": 0}
     assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 2}]
 
 
-def test_the_bridge_is_read_from_the_store_redis_at_the_request_time():
+def test_the_bridge_is_read_from_each_live_interface_hive_in_the_store_redis_at_the_request_time():
     store, reads = Store({}), []
-    viewed(store, *ports_for([], {}, reads=reads))
-    assert reads == [(store.redis, NOW)]
+    second = {**ROOT, "id": "desk", "name": "desk"}
+    viewed(store, *ports_for([POD_HIVE, second, ROOT, {**ROOT, "id": "gone", "live": False}], {}, reads=reads))
+    assert reads == [(store.redis, "desk", NOW), (store.redis, "root", NOW)]
+
+
+def test_a_reading_on_a_headless_hive_is_not_the_bridge():
+    published = {"machines": {"master": {"claude": 2}}, "silent": [], "measured_at": NOW}
+    data = viewed(Store({}), *ports_for([{**POD_HIVE, "id": "root"}], {}, published=published))
+    assert data["agents"]["source"] == "hives"
 
 
 def test_route_reads_the_view_at_the_current_millisecond(monkeypatch):
