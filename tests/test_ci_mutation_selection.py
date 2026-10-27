@@ -507,11 +507,9 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
     assert mutation_counts("scripts/sample.py", source, {9}) == (2, 2)
     assert selected_mutants("scripts/sample.py", source, {13, 18})[1] == []
     assert mutation_counts("scripts/sample.py", source, {13}) == (0, 2)
-    assert (
-        mutation_counts("scripts/sample.py", source, {18})[0]
-        == 0
-        < mutation_counts("scripts/sample.py", source, {18})[1]
-    )
+    found, in_body = mutation_counts("scripts/sample.py", source, {18})
+    assert found == 0
+    assert in_body > 0
     assert mutation_counts("scripts/sample.py", source, {4, 11}) == (0, 0)
     monkeypatch.setattr(
         Config,
