@@ -673,10 +673,7 @@ def test_the_failure_text_is_exact():
 def gone(pid):
     status = Path(f"/proc/{pid}/status")
     for _ in range(40):
-        try:
-            if "State:\tZ" in status.read_text():
-                return True
-        except FileNotFoundError:
+        if not status.exists() or "State:\tZ" in status.read_text():
             return True
         time.sleep(0.05)
     return False
