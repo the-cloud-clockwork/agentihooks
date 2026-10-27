@@ -236,8 +236,10 @@ def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: th
     while not stop.is_set():
         try:
             scheduled_wait(herdr_stats.EVERY_S, redis=waiter, timeout=herdr_stats.EVERY_S + WAKE_SLACK_S)
-        except (ConnectionError, TimeoutError):
-            return
+        except (ConnectionError, TimeoutError) as exc:
+            print(f"hive herdr stats wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+            if isinstance(exc, ConnectionError) and stop.wait(herdr_stats.EVERY_S):
+                return
         if stop.is_set():
             return
         try:
