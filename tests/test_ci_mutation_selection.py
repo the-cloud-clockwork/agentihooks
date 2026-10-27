@@ -1241,3 +1241,21 @@ def test_mutmut_wait_skips_a_child_a_test_left_and_returns_the_forked_mutant(mon
     assert children.pids == {12}
     assert children.wait() == (12, 7 << 8)
     assert (children.pids, exits) == (set(), [])
+
+
+@pytest.mark.parametrize(
+    "version, kept, restored",
+    [((9, 2, 0), False, True), ((9, 1, 1), False, False), ((10, 0, 0), True, False)],
+)
+def test_node_ids_reach_mutmut_only_where_pytest_dropped_them(monkeypatch, version, kept, restored):
+    from scripts.ci_mutation import selection
+
+    class Item:
+        nodeid = "tests/test_a.py::test_a"
+
+    if kept:
+        Item._nodeid = "kept"
+    monkeypatch.setattr(selection.pytest, "version_tuple", version)
+    monkeypatch.setattr(selection.pytest, "Item", Item)
+    selection.keep_node_ids()
+    assert getattr(Item(), "_nodeid", None) == ("kept" if kept else Item.nodeid if restored else None)

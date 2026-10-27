@@ -483,9 +483,16 @@ def forked_children():
     return ForkedChildren()
 
 
+def keep_node_ids() -> None:
+    # mutmut's stats plugin reads Item._nodeid, which pytest 9.2 removed in favour of nodeid.
+    if pytest.version_tuple >= (9, 2) and not hasattr(pytest.Item, "_nodeid"):
+        pytest.Item._nodeid = property(lambda item: item.nodeid)
+
+
 def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
     from mutmut import __main__ as runner
 
+    keep_node_ids()
     if not os.environ.get("CI"):
         print("Local mutation worker cap: 2 (mutation and stats)")
     changes = json.loads(selection.read_text())
