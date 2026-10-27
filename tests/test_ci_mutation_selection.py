@@ -1245,7 +1245,7 @@ def test_mutmut_wait_skips_a_child_a_test_left_and_returns_the_forked_mutant(mon
 
 @pytest.mark.parametrize(
     "version, kept, restored",
-    [((9, 2, 0), False, True), ((9, 1, 1), False, False), ((10, 0, 0), True, False)],
+    [((9, 2), False, True), ((9, 1, 1), False, False), ((10, 0, 0), True, False)],
 )
 def test_node_ids_reach_mutmut_only_where_pytest_dropped_them(monkeypatch, version, kept, restored):
     from scripts.ci_mutation import selection
