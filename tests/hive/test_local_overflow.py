@@ -235,6 +235,22 @@ def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch,
     fenced.runtime.hive_launch.spawn.assert_not_called()
 
 
+def test_an_agent_live_on_the_host_leaves_the_eight_agent_cap_count_unchanged(setup, monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts import terminate_agent
+    from scripts.swarm.store import SwarmConfig
+
+    monkeypatch.setattr(terminate_agent, "sessions", lambda *args, **kwargs: [SimpleNamespace(name="host-agent")])
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    workstation(monkeypatch, 40)
+    setup.store.create(SwarmConfig("other-swarm", "agentihooks", 1, 1))
+    local_agents(setup, 8, slug="other-swarm", harness="codex")
+    task = {"id": "task", "seat": "eng-1@fixture", "launch_assignment": {"harness": "codex"}}
+    assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal("eng", task)
+
+
 @pytest.mark.parametrize("profile", ["qa", "frontend"])
 def test_ui_role_work_keeps_waiting_for_its_ui_host(setup, monkeypatch, profile):
     from scripts.swarm.profile_choice import ProfileDecision
