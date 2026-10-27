@@ -4,8 +4,6 @@ import re
 
 
 def check(profile: str, name: str, args: list[str], harness: str = "claude") -> list[str]:
-    if profile == "semgrep-plant":
-        return ["CLAUDE_CODE_OAUTH_TOKEN"]
     if harness != "claude" or profile != "master" or re.fullmatch(r"master 1 · \S+", name) is None:
         return args
     kept = []
