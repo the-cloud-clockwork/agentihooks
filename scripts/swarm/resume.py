@@ -328,17 +328,15 @@ def recovery_exhausted(store: RedisStore, slug: str, agent: AgentRecord) -> bool
 
 
 def recovery_holds(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> bool:
-    if not recovery_pending(store, slug, agent):
-        return False
-    records = outage.read(slug).values()
-    if any(record["ended_at"] is None for record in records):
-        return True
-    return now_ms - max((record["ended_at"] for record in records), default=0) < RECOVERY_HOLD_MS
+    return recovery_pending(store, slug, agent) and any(
+        record["ended_at"] is None or now_ms - record["ended_at"] < RECOVERY_HOLD_MS
+        for record in outage.read(slug).values()
+    )
 
 
 def recovery_blocker(store: RedisStore, slug: str, agent: AgentRecord) -> str:
     record = _recovery_record(store, slug, agent)
-    return record.get("blocked") or f"{record.get('attempts', 0)} of {RECOVERY_ATTEMPTS} resume attempts made"
+    return record.get("blocked") or f"{record['attempts']} of {RECOVERY_ATTEMPTS} resume attempts made"
 
 
 def _recovery_current(store, slug, agent, context):

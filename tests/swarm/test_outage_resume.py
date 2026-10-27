@@ -628,6 +628,44 @@ def test_a_recovery_held_by_pane_input_names_why_until_the_input_clears(store, t
     assert resume.recovery_blocker(store, "sw", holder) == f"1 of {resume.RECOVERY_ATTEMPTS} resume attempts made"
 
 
+def test_a_recovery_whose_task_moved_since_the_tick_read_names_the_ownership_change(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    holder = agents[0]
+    rows = {task: dict(row) for task, row in rows_of(ledger).items()}
+    ledger.rows[holder.task]["claimed_by"] = "successor"
+    resume.recover_outages("sw", store, ledger, runtime, rows, 9 * MINUTE)
+    assert holder.name not in runtime.nudged
+    assert resume.recovery_blocker(store, "sw", holder) == "its task ownership changed"
+
+
+def test_a_working_owner_with_typed_text_completes_its_recovery(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    runtime.statuses[agents[0].name] = "working"
+    runtime.inputs[agents[0].name] = "half typed reply"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert agents[0].name not in runtime.nudged
+    assert recovery_state(store, agents[0].name) == "done"
+
+
+def test_a_dead_owner_whose_pane_reads_unknown_is_still_resumed(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    dead = agents[2]
+    runtime.live.remove(dead.name)
+    runtime.statuses[dead.name] = "unknown"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert [name for name, _, _ in runtime.resumed] == [dead.name]
+
+
+def test_a_pending_recovery_holds_while_an_outage_is_open_and_its_window_after_closure(store, tmp_path, monkeypatch):
+    _, _, agents = pending_owners(store, tmp_path, monkeypatch)
+    holder = agents[0]
+    outage.observe("sw", "provider", ["provider unavailable"], 10 * MINUTE)
+    assert resume.recovery_holds(store, "sw", holder, 10 * MINUTE + 2 * resume.RECOVERY_HOLD_MS)
+    outage.observe("sw", "provider", [], 11 * MINUTE)
+    assert resume.recovery_holds(store, "sw", holder, 11 * MINUTE + resume.RECOVERY_HOLD_MS - 1)
+    assert not resume.recovery_holds(store, "sw", holder, 11 * MINUTE + resume.RECOVERY_HOLD_MS)
+
+
 def test_a_reopened_conversation_records_the_placement_it_reports(store, tmp_path, monkeypatch):
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
     dead = agents[2]
