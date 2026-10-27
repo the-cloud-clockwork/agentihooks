@@ -11,7 +11,7 @@ When `AGENTIHOOKS_SWARM_DATABASE_URL` is set, every ledger server and swarm proc
 Postgres database through `PostgresLedgerRepository`. Writers take turns through one writer lock. Every connection
 asks the server to end a session that stalls, so a client that dies or gives up while it holds or waits for that lock
 cannot stop ledger writes for every swarm on the database. The database also stores the oldest writer version it
-allows, and refuses writes from ledger servers on code older than that.
+allows, and refuses ledger writes from older code that would make every replica rebuild a whole ledger.
 
 1. TOC
 {:toc}
@@ -145,11 +145,12 @@ minutes.
 Every write to a ledger on the shared database raises that ledger's `generation`. A current writer also records the
 rows it changed in `row_changes` under the new generation, and every other ledger server reading the same database
 (a replica) refreshes only those rows. A writer that bumps the generation without recording changed rows makes every
-replica rebuild the whole ledger after each of its writes. On 22 October one workstation ledger server on old code did
-this, and every hosted replica rebuilt the 26 MB ledger after each write it made. Nothing reported it; reads only
-slowed down.
+replica rebuild the whole ledger after each of its writes. Ledger task t690 found one workstation ledger server on old
+code doing this until it was replaced on 22 October: every hosted replica rebuilt the 26 MB ledger after each write it
+made. Nothing reported it; reads only slowed down.
 
-The writer floor stops such a writer at the database, names it, and raises a ledger alert.
+The writer floor refuses such a write at the database. While the refused writer stays connected, the next allowed
+write names it in a ledger alert for the master.
 
 ### How it works
 
@@ -177,8 +178,8 @@ ledger writer version 0 is below version 1, the oldest the shared database allow
 
 The first number is the refused writer's version, the second the stored floor. The trigger raises it with SQLSTATE
 `LW001`. In current code the error reaches the caller as `postgres.Refused`, a subclass of `sqlite3.DatabaseError`, so
-existing handlers of database errors still catch it. Code older than the floor sees the same text in its own database
-error.
+existing handlers of database errors still catch it. Code older than the floor gets a database error whose text
+contains the same message, after the driver's `ERROR:` prefix.
 
 The refused transaction rolls back: the ledger's generation, rows and events stay as they were, and no replica
 rebuilds anything because of it.
@@ -200,8 +201,9 @@ A session with no client address, such as one on a local socket, shows as `an un
 
 - The alert lands on the next ledger written by an allowed writer, which may be a different ledger from the one the
   refused writer tried to change. Each ledger written while the refused session stays connected gets its own alert.
-- An open alert with the same text is not raised twice. A closed one is not raised again on that ledger while the
-  same text still applies; a different address, version or floor makes a new alert.
+- An open alert with the same text is not raised twice. A closed one is not raised again on that ledger while it
+  stays in the ledger's alert list; a different address, version or floor makes a new alert. Once closed alerts beyond
+  the kept 200 are dropped from the list, the same refusal can raise a new alert.
 - Once the refused writer's connection closes, its advisory lock is released and no further alert is raised.
 
 ### Inspect the floor and refused writers
@@ -227,11 +229,26 @@ WHERE l.locktype = 'advisory' AND l.classid = 1280788050 AND l.objsubid = 2
 
 No rows means no refused writer is connected.
 
-Count unrecorded generation bumps, the figure the floor keeps at zero. A bump is unrecorded when a ledger's
-`generation` advances and `row_changes` holds no row for that ledger and generation. On 23 October, sampling the
-hosted database for one hour before and one hour after the floor reached it gave 286 and 344 bumps, none
-unrecorded. The old workstation writer had already been replaced on 22 October, so the floor guards against its
-return rather than moving a live count.
+A generation bump is unrecorded when a ledger's `generation` advances and `row_changes` holds no row for that ledger
+and generation. The floor refuses these from writers below it; a writer at or above the floor is trusted to record its
+rows. Sample the newest generation of every ledger for unrecorded bumps over a window:
+
+```bash
+while sleep 5; do
+  psql -At "$AGENTIHOOKS_SWARM_DATABASE_URL" -c "
+  SELECT now(), l.slug, l.generation FROM ledgers l
+  WHERE NOT EXISTS (SELECT 1 FROM row_changes r WHERE r.slug = l.slug AND r.generation = l.generation)"
+done | tee -a unrecorded-bumps.log
+```
+
+Each new `slug|generation` pair in the log is an unrecorded bump. A sample sees only each ledger's newest generation,
+so bumps between samples go uncounted; a ledger nobody has written since it was created can show once and is not a
+bump.
+
+Ledger task t691 recorded this figure with its generation poll probe on 23 October: 286 bumps in the hour before the
+floor reached the hosted ledger server and 344 in the hour after, none unrecorded in either. The old workstation
+writer had already been replaced on 22 October, so the floor guards against its return rather than moving a live
+count.
 
 ### Raise the floor
 
