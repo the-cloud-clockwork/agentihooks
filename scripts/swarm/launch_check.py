@@ -210,32 +210,34 @@ def due(agent: AgentRecord, found: dict, now_ms: int) -> bool:
     return now_ms - session_started_at(agent) >= deadline
 
 
-def _ledger_refused(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> bool:
-    from scripts.swarm import outage
-
+def _ledger_refused(store: RedisStore, agent: AgentRecord, outage_record: dict, now_ms: int) -> bool:
     reasons = join_report.graded(join_report.read(store.redis, agent))["misses"]
     failures = [reasons.get(name, {}).get("reason", {}) for name in join_report.LEDGER_CHECKS]
+    if any(400 <= (failure.get("status") or 0) < 500 for failure in failures):
+        return False
     if any(REFUSED.search(f"{failure.get('error')} {failure.get('message')}") for failure in failures):
         return True
-    record = outage.read(slug).get("ledger", {})
-    spans = [*record.get("past", []), [record["started_at"], record["ended_at"]]] if record else []
+    started, ended = outage_record.get("started_at"), outage_record.get("ended_at")
+    spans = [*outage_record.get("past", []), [started, ended]] if outage_record else []
     return any(end is None or end > session_started_at(agent) for start, end in spans if start <= now_ms)
 
 
 def ledger_held(store: RedisStore, slug: str, agent: AgentRecord, found: dict, now_ms: int) -> bool:
+    from scripts.swarm import outage
+
     enforced = set(found) - REPORT_ONLY
-    if not enforced or not enforced <= LEDGER_MISSES or not _ledger_refused(store, slug, agent, now_ms):
+    if not enforced or not enforced <= LEDGER_MISSES:
+        return False
+    outage_record = outage.read(slug).get("ledger", {})
+    if not _ledger_refused(store, agent, outage_record, now_ms):
         return False
     entry = pending(store, slug).get(agent.name, {})
     if "held_at" not in entry:
         store.redis.hset(store.key(slug, "launch-checks"), agent.name, json.dumps({**entry, "held_at": now_ms}))
         return True
-    from scripts.swarm import outage
-
-    record = outage.read(slug).get("ledger", {})
-    if record and record["ended_at"] is None:
+    if outage_record and outage_record["ended_at"] is None:
         return now_ms - entry["held_at"] < outage.HOLD_LIMIT_MS
-    return now_ms - max(entry["held_at"], record.get("ended_at") or 0) < DEADLINE_MS
+    return now_ms - max(entry["held_at"], outage_record.get("ended_at") or 0) < DEADLINE_MS
 
 
 def record(

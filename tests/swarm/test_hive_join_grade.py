@@ -2,6 +2,10 @@ from dataclasses import replace
 
 import pytest
 
+REFUSED_JOIN = (
+    "ledger sw: ledger server not answering on https://ledger:8765: <urlopen error [Errno 111] Connection refused>"
+)
+
 
 def test_hive_launch_uses_report_and_keeps_brain_optional():
     from fakeredis import FakeRedis
@@ -229,12 +233,7 @@ def test_status_text_prints_each_hive_agent_join_grade(monkeypatch, capsys):
     assert line in capsys.readouterr().out.splitlines()
 
 
-REFUSED = (
-    "ledger sw: ledger server not answering on https://ledger:8765: <urlopen error [Errno 111] Connection refused>"
-)
-
-
-def _ledger_refused_launch(monkeypatch, tmp_path, message):
+def _ledger_refused_launch(monkeypatch, tmp_path, message, status=None):
     import importlib
     from types import SimpleNamespace
 
@@ -264,7 +263,7 @@ def _ledger_refused_launch(monkeypatch, tmp_path, message):
     start = launch_check.session_started_at(agent)
     checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
     checks["ledger_join"] = False
-    checks["errors"] = {"ledger_join": {"error": "SwarmError", "status": None, "message": message}}
+    checks["errors"] = {"ledger_join": {"error": "SwarmError", "status": status, "message": message}}
     join_report.start(store.redis, "sw", agent, "session", checks, {}, start)
     launch_check.begin(store, "sw", agent, start, relaunch=False)
     runtime = SimpleNamespace(bindings=lambda agents: {}, live_names=lambda: {agent.name})
@@ -279,7 +278,7 @@ def test_a_join_refused_during_a_ledger_outage_holds_and_passes_once_the_outage_
     from scripts.hive import join_report
     from scripts.swarm import launch_check, outage
 
-    launch = _ledger_refused_launch(monkeypatch, tmp_path, REFUSED)
+    launch = _ledger_refused_launch(monkeypatch, tmp_path, REFUSED_JOIN)
     outage.observe("sw", "ledger", ["Ledger health probe failed"], launch.start + 5_000)
     outage.observe("sw", "ledger", [], launch.start + 50_000)
     due = launch.start + launch_check.DEADLINE_MS + 10_000
@@ -297,7 +296,7 @@ def test_a_join_refused_during_a_ledger_outage_holds_and_passes_once_the_outage_
 def test_a_refused_join_that_persists_past_the_regrade_retires(monkeypatch, tmp_path):
     from scripts.swarm import launch_check
 
-    launch = _ledger_refused_launch(monkeypatch, tmp_path, REFUSED)
+    launch = _ledger_refused_launch(monkeypatch, tmp_path, REFUSED_JOIN)
     due = launch.start + launch_check.DEADLINE_MS + 10_000
     launch.tick(due)
     launch.tick(due + launch_check.DEADLINE_MS - 1)
@@ -324,7 +323,7 @@ def test_a_join_timeout_during_an_open_ledger_outage_holds_until_the_outage_limi
 def test_the_regrade_window_starts_when_a_held_outage_closes(monkeypatch, tmp_path):
     from scripts.swarm import launch_check, outage
 
-    launch = _ledger_refused_launch(monkeypatch, tmp_path, REFUSED)
+    launch = _ledger_refused_launch(monkeypatch, tmp_path, REFUSED_JOIN)
     outage.observe("sw", "ledger", ["Ledger health probe failed"], launch.start + 5_000)
     due = launch.start + launch_check.DEADLINE_MS
     launch.tick(due)
@@ -336,10 +335,13 @@ def test_the_regrade_window_starts_when_a_held_outage_closes(monkeypatch, tmp_pa
     assert launch.retired == [closed + launch_check.DEADLINE_MS]
 
 
-def test_a_ledger_join_denied_by_the_server_retires_without_a_hold(monkeypatch, tmp_path):
-    from scripts.swarm import launch_check
+@pytest.mark.parametrize("during_outage", [False, True])
+def test_a_ledger_join_denied_by_the_server_retires_without_a_hold(monkeypatch, tmp_path, during_outage):
+    from scripts.swarm import launch_check, outage
 
-    launch = _ledger_refused_launch(monkeypatch, tmp_path, "ledger sw: server refused: 403 forbidden")
+    launch = _ledger_refused_launch(monkeypatch, tmp_path, "ledger sw: server refused: 403 forbidden", 403)
+    if during_outage:
+        outage.observe("sw", "ledger", ["Ledger health probe failed"], launch.start + 5_000)
     due = launch.start + launch_check.DEADLINE_MS
     assert launch.tick(due) == [f"retired {launch.agent.name} after its hive join failed dropped"]
     assert launch.retired == [due]
