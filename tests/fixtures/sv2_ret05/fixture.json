@@ -1,0 +1,37 @@
+{
+  "grant": {"principal": "gc-fixture", "corpus": "swarm-fixture", "projects": ["github.com/the-cloud-clockwork/agentihooks"]},
+  "foreign_corpus": "personal-corpus",
+  "provider": "claude",
+  "retention": "retain-until-deleted",
+  "session": {
+    "session_uid": "swarm-fixture:claude:worker-a:committed",
+    "source_generation": "device-1:inode-10:anchor-0",
+    "origin": "worker-a:projects/agentihooks/committed.jsonl",
+    "turns": [
+      [
+        {"kind": "user_text", "text": "which uploads may garbage collection delete"},
+        {"kind": "assistant_text", "text": "Only abandoned uploads whose reservation expired past grace."}
+      ],
+      [
+        {"kind": "user_text", "text": "and the search index"},
+        {"kind": "assistant_text", "text": "Only a retired generation, never the active one."}
+      ]
+    ]
+  },
+  "uploads": {
+    "abandoned": "bytes of an upload whose worker died before committing its archive entry",
+    "checkpoint": "bytes an abandoned upload left that a later checkpoint references",
+    "live": "bytes of a new attempt whose reservation has not expired",
+    "foreign": "bytes of another domain's abandoned upload in the shared object store"
+  },
+  "never_landed": "bytes reserved by an attempt that died before writing them",
+  "lookalike": "bytes another system wrote into a managed shard under their own digest",
+  "stray": "a temporary file another tool left in the object store root",
+  "altered": {"reserved": "bytes the attempt reserved", "written": "different bytes found under the reserved name"},
+  "checkpoint": {"task_id": "fixture-task", "material": "fixture branch bundle for fixture-task"},
+  "policy": {"version": "gc-turn-v1", "max_chars": 1200},
+  "generations": {"retired": "fixture-embed-v1", "active": "fixture-embed-v2"},
+  "model": {"model": "fixture-hash-embedder-4", "dimension": 4},
+  "clock": {"reserved": 1000.0, "expired": 1100.0, "live_until": 5000.0, "indexed": 1200.0, "retired": 1300.0, "collect": 2000.0, "early": 1350.0},
+  "grace": 300.0
+}
