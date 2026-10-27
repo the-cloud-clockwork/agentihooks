@@ -1758,7 +1758,7 @@ def test_the_required_grader_refuses_a_head_that_rewrites_the_equivalence_gradin
         'name=GITHUB_E""NV; echo x >> "${!name}"',
         'echo x >> "$(printenv GITHUB_E""NV)"',
         'echo x >> "`printenv GITHUB_E""NV`"',
-        'echo x >> "${{ env[format(\'GITHUB_{0}\', \'ENV\')] }}"',
+        "echo x >> \"${{ env[format('GITHUB_{0}', 'ENV')] }}\"",
     ],
 )
 def test_equivalence_grading_refuses_later_indirect_environment_references(repo, capsys, command):
