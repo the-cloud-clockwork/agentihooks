@@ -1697,8 +1697,10 @@ def test_status_text_logs_a_base_miss_as_enforced_with_a_finding(env, capsys):
     out = capsys.readouterr().out.splitlines()
     assert "launch  engineer@a1b2c3-0001  failed  60000ms" in out
     assert "  base  enforced  expected package:engineer; observed engineer" in out
-    assert (
-        "finding  launch check  engineer@a1b2c3-0001/base: engineer@a1b2c3-0001 failed its launch check on base" in out
+    assert any(
+        line.startswith("finding  launch check  base/19700101T00-")
+        and line.endswith(": engineer@a1b2c3-0001 failed the launch check on base")
+        for line in out
     )
 
 
@@ -1715,8 +1717,10 @@ def test_status_text_logs_enforced_and_passed_launch_checks(env, capsys):
     assert "launch  engineer@a1b2c3-0001  failed  60000ms" in out
     assert "  name  enforced  expected a; observed b" in out
     assert "launch  engineer@a1b2c3-0002  passed  2000ms" in out
-    assert (
-        "finding  launch check  engineer@a1b2c3-0001/name: engineer@a1b2c3-0001 failed its launch check on name" in out
+    assert any(
+        line.startswith("finding  launch check  name/19700101T00-")
+        and line.endswith(": engineer@a1b2c3-0001 failed the launch check on name")
+        for line in out
     )
 
 

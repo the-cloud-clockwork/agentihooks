@@ -3,7 +3,10 @@ profile, hooks, model and effort, sits on its package base role and carries a pa
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -15,6 +18,7 @@ from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import AgentRecord, RedisStore
 
 DEADLINE_MS = 60 * 1000
+WINDOW_MS = 60 * 60 * 1000
 STAMP = ".agentihooks-render.json"
 HOST_OVERLAYS = "host_overlays"
 SETTINGS = ("hooks", "model", "effort")
@@ -164,8 +168,8 @@ def misses(
         if not report:
             return {"hive_join": {"expected": "session join report", "actual": "missing"}}
         return {
-            f"hive_{name}": {"expected": "available", "actual": "missing"}
-            for name in join_report.graded(report)["misses"]
+            f"hive_{name}": {"expected": "available", "actual": "missing", **_reason(miss)}
+            for name, miss in join_report.graded(report)["misses"].items()
         }
     found = _joined(store, agent, doc, session_started_at(agent))
     if not facts or facts.get("process", True) is not True:
@@ -255,20 +259,48 @@ def told(found: dict, outcome: str) -> str:
 
 
 def findings(store: RedisStore, slug: str) -> list[Finding]:
-    result = []
+    groups: dict[str, dict] = {}
     for raw in store.redis.hgetall(store.key(slug, "launch-check-reports")).values():
         found = json.loads(raw)
         for field, values in found["misses"].items():
             if field in REPORT_ONLY:
                 continue
-            result.append(
-                Finding(
-                    "launch check",
-                    f"{found['agent']}/{field}",
-                    f"{found['agent']} failed its launch check on {field}",
-                    (f"expected {values['expected']}; observed {values['actual']}",),
-                    "a launch must pass within sixty seconds",
-                    1,
-                )
-            )
-    return result
+            observed = _observed(values)
+            error = _error_class(values, found)
+            window = time.strftime("%Y%m%dT%H", time.gmtime(found["at"] // WINDOW_MS * WINDOW_MS / 1000))
+            subject = f"{field}/{window}-{hashlib.sha1(error.encode()).hexdigest()[:8]}"
+            group = groups.setdefault(subject, {"field": field, "observed": observed, "agents": []})
+            group["agents"].append(found["agent"])
+    return [
+        Finding(
+            "launch check",
+            subject,
+            f"{', '.join(group['agents'])} failed the launch check on {group['field']}",
+            (f"agents {', '.join(sorted(group['agents']))}", group["observed"]),
+            "a launch must pass within sixty seconds",
+            1,
+        )
+        for subject, group in groups.items()
+    ]
+
+
+def _reason(miss: dict) -> dict:
+    return {"reason": miss["reason"]} if "reason" in miss else {}
+
+
+def _observed(values: dict) -> str:
+    observed = f"expected {values['expected']}; observed {values['actual']}"
+    if reason := values.get("reason"):
+        observed += (
+            " (" + " ".join(str(part) for part in (reason["error"], reason["status"], reason["message"]) if part) + ")"
+        )
+    return observed
+
+
+def _error_class(values: dict, found: dict) -> str:
+    text = _observed({key: value for key, value in values.items() if key != "reason"})
+    reason = values.get("reason", {})
+    text += f" {reason.get('error')} {reason.get('message')}" if reason else ""
+    for name in (found["agent"], found["task"]):
+        text = text.replace(name, "<agent>")
+    return re.sub(r"\d+", "#", text) + (f" status {reason['status']}" if reason.get("status") else "")
