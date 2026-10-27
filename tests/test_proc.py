@@ -55,25 +55,51 @@ def test_target_detects_claude_and_codex():
     assert _target(item(comm="bash", argv=("bash", "-c", "claude"))) == ""
 
 
-def test_no_test_check_reads_the_process_table_twice():
+def _names_a_process(node):
+    return any(
+        isinstance(part, ast.Constant)
+        and isinstance(part.value, str)
+        and part.value.startswith("/proc/")
+        and not part.value.startswith("/proc/self")
+        for part in ast.walk(node)
+    )
+
+
+def _process_table_reads(check, process_paths):
+    count = 0
+    for call in ast.walk(check):
+        if not isinstance(call, ast.Call):
+            continue
+        func = call.func
+        if getattr(func, "id", getattr(func, "attr", None)) in {"processes", "_process"}:
+            count += 1
+        elif isinstance(func, ast.Attribute) and func.attr in {"exists", "is_file", "read_text", "read_bytes", "open"}:
+            receiver = func.value
+            count += (isinstance(receiver, ast.Name) and receiver.id in process_paths) or _names_a_process(receiver)
+    return count
+
+
+def test_no_check_reads_the_process_table_twice_in_one_statement():
     tests = Path(__file__).resolve().parent
     found = []
     for path in sorted(tests.rglob("*.py")):
         for function in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if not isinstance(function, ast.FunctionDef) or not function.name.startswith("test"):
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            for node in ast.walk(function):
-                if isinstance(node, (ast.If, ast.While)):
-                    check = node.test
-                elif isinstance(node, (ast.Assert, ast.Expr, ast.Return, ast.Assign)):
-                    check = node
+            process_paths = {
+                target.id
+                for assign in ast.walk(function)
+                if isinstance(assign, ast.Assign) and _names_a_process(assign.value)
+                for target in assign.targets
+                if isinstance(target, ast.Name)
+            }
+            for statement in ast.walk(function):
+                if isinstance(statement, (ast.If, ast.While)):
+                    check = statement.test
+                elif isinstance(statement, (ast.Assert, ast.Expr, ast.Return, ast.Assign)):
+                    check = statement
                 else:
                     continue
-                reads = [
-                    call
-                    for call in ast.walk(check)
-                    if isinstance(call, ast.Call) and getattr(call.func, "id", None) in {"processes", "_process"}
-                ]
-                if len(reads) > 1:
-                    found.append(f"{path.relative_to(tests)}:{node.lineno}")
-    assert found == []
+                if _process_table_reads(check, process_paths) > 1:
+                    found.append(f"{path.relative_to(tests)}:{statement.lineno}")
+    assert sorted(set(found)) == []
