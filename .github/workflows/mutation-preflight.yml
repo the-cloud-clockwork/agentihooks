@@ -397,8 +397,12 @@ jobs:
       - name: Cap the merged test stats
         run: python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap; print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")' .mutation-stats-cache
 
+      - name: Check for merged test stats
+        id: merged-stats
+        run: if [[ -n "$(find .mutation-stats-cache -type f -print -quit 2>/dev/null)" ]]; then echo found=true >> "$GITHUB_OUTPUT"; fi
+
       - name: Save the merged test stats
-        if: success() && hashFiles('.mutation-stats-cache/**') != ''
+        if: success() && steps.merged-stats.outputs.found == 'true'
         uses: actions/cache/save@v4
         with:
           path: .mutation-stats-cache
