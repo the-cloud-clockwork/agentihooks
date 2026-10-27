@@ -3178,6 +3178,46 @@ jobs:
           path: ~/durations-samples
           key: durations-samples-${{ github.sha }}
 
+  # Pull request caches stay on their own ref, so dev carries the merged pull requests' records for first runs to restore.
+  mutation-stats-seed:
+    if: ${{ !cancelled() && github.event_name == 'push' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore the dev test stats
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-test-stats-v2-${{ runner.os }}-
+
+      - name: Add the merged pull requests' test stats
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+        run: python -m scripts.ci_stats_seed .mutation-stats-cache --head "$GITHUB_SHA" --before "$BEFORE"
+
+      - name: Save the dev test stats
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
   flake-budget:
     needs: [unit]
     if: ${{ !cancelled() && github.event_name == 'push' }}
@@ -3652,13 +3692,13 @@ jobs:
           overwrite: true
 
       - name: Keep only the test stats this part wrote
-        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         env:
           PART: ${{ matrix.part }}
         run: mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \;
 
       - name: Upload this part's test stats cache
-        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-test-stats-cache-${{ matrix.part }}

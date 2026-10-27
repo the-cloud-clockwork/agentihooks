@@ -31,6 +31,7 @@ BUDGETS = {
     "queue-fail-fast": 60,
     "mutation-plan": 60,
     "mutation-stats": 210,
+    "mutation-stats-seed": 120,
     "mutation": 480,
     "worker-image": 300,
     "swarm-image": 180,
