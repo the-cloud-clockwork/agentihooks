@@ -4,7 +4,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -1227,24 +1226,18 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
     assert output == ("" if ci else "Local mutation worker cap: 2 (mutation and stats)\n")
 
 
-def test_mutmut_wait_skips_a_child_a_test_left_and_returns_the_forked_mutant():
-    from scripts.ci_mutation.selection import ForkedChildren
+def test_mutmut_wait_skips_a_child_a_test_left_and_returns_the_forked_mutant(monkeypatch):
+    from scripts.ci_mutation import selection
 
-    children = ForkedChildren()
+    forks = [12, 0]
+    exits = [(11, 0), (12, 7 << 8)]
+    real = SimpleNamespace(environ=os.environ, fork=forks.pop, wait=lambda: exits.pop(0))
+    monkeypatch.setattr(selection, "os", real)
+    children = selection.ForkedChildren()
     assert children.environ is os.environ
-    stray = subprocess.Popen([sys.executable, "-c", ""])
-    os.waitid(os.P_PID, stray.pid, os.WEXITED | os.WNOWAIT)
-    pid = children.fork()
-    if pid == 0:
-        # Exit only once the parent's wait has reaped the stray, so the stray is always returned first.
-        for _ in range(1000):
-            if not Path(f"/proc/{stray.pid}").exists():
-                os._exit(7)
-            time.sleep(0.01)
-        os._exit(9)
-    assert children.pids == {pid}
-    waited, status = children.wait()
-    assert (waited, os.waitstatus_to_exitcode(status)) == (pid, 7)
+    assert children.fork() == 0
     assert children.pids == set()
-    with pytest.raises(ChildProcessError):
-        os.waitpid(stray.pid, 0)
+    assert children.fork() == 12
+    assert children.pids == {12}
+    assert children.wait() == (12, 7 << 8)
+    assert (children.pids, exits) == (set(), [])
