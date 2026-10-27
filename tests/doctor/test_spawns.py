@@ -91,6 +91,27 @@ def test_capacity_evidence_is_consumed_by_one_failure_and_other_errors_remain():
     assert found["master"].evidence == ("boom",)
 
 
+@pytest.mark.parametrize(("sessions", "count"), [(8, 0), (6, 0), (5, 1)])
+def test_a_full_account_refusal_is_judged_by_the_count_it_reports(sessions, count):
+    record = load("spawns")
+    slug = record["slug"]
+    snapshot = {
+        "harness": "codex",
+        "accounts": [{"harness": "codex", "state": "OPEN", "sessions": 1, "cap": 6}],
+    }
+    refusal = (
+        f"account reservation is full: account=codex:personal sessions={sessions} cap=6 five_left=None week_left=83.0"
+    )
+    record["actions"] = [
+        f"{slug}: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: {refusal}",
+        f"{slug}: spawn failed for dt2: no hive for ci has room: h1 missing telemetry: no fresh headroom reading",
+    ]
+    [found] = spawns.failed(record)
+    assert found.measure == 1 + count
+    assert found.evidence[-1].endswith("no fresh headroom reading")
+
+
 def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     import os
     import subprocess
