@@ -107,13 +107,15 @@ def test_promotion_reuses_the_release_environment_and_never_dispatches_or_publis
 def test_promotion_publishes_the_verified_tag_through_the_same_app_rest_token():
     workflow = yaml.safe_load((ROOT / ".github/workflows/promote.yml").read_text())
     step = next(
-        step for step in workflow["jobs"]["promote"]["steps"] if step.get("name") == "Tag and verify the promoted package"
+        step
+        for step in workflow["jobs"]["promote"]["steps"]
+        if step.get("name") == "Tag and verify the promoted package"
     )
     assert step["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     commands = step["run"]
     assert commands.index("ci_release.sh tag") < commands.index("ci_release.sh verify") < commands.index("gh api")
     assert '"repos/$GITHUB_REPOSITORY/git/refs"' in commands
-    assert '--method POST' in commands
+    assert "--method POST" in commands
     assert '-f "ref=refs/tags/v$NEXT"' in commands
     assert '-f "sha=$RELEASE_SHA"' in commands
     assert "git push" not in commands
