@@ -148,6 +148,25 @@ def test_a_head_that_is_not_a_stage_is_refused():
     assert "workflow.head: scout is not a stage" in errors
 
 
+def test_a_stage_unreachable_from_the_head_is_refused():
+    doc = document()
+    doc["stages"]["scout"] = {"profile": "scouter", "next": {"pass": "build"}}
+    doc["stages"]["plan"] = {"profile": "planner", "next": {"pass": "scout"}}
+
+    assert refused(block(doc)).splitlines() == [
+        "stages.scout: not reachable from the head build",
+        "stages.plan: not reachable from the head build",
+    ]
+
+
+@pytest.mark.parametrize("outcome", ["pass", "retry", "enhance"])
+def test_every_next_outcome_makes_its_target_reachable(outcome):
+    doc = document(stages__verdict__next={"pass": "exit", outcome: "polish"})
+    doc["stages"]["polish"] = {"profile": "engineer", "next": {"pass": "verdict"}}
+
+    assert list(schema.parse(block(doc)).stages) == ["build", "verdict", "polish"]
+
+
 def test_an_input_naming_an_unknown_stage_is_refused():
     errors = refused(block(document(stages__build__input=["case", "plan"])))
 
