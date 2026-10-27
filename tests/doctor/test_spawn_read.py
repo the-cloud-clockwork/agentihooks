@@ -1,6 +1,8 @@
 import subprocess
 from dataclasses import asdict
 
+import pytest
+
 from scripts.doctor import spawn_read, spawns
 from tests.doctor.recorded import load
 
@@ -57,6 +59,25 @@ def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
     assert {f.kind for f in spawns.findings(record)} == {"failed spawn"}
     assert spawns.failed(record)[0].subject == "dt2"
     assert store.export(slug) == before
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [FileNotFoundError(2, "No such file or directory", "journalctl"), subprocess.CalledProcessError(1, "journalctl")],
+)
+def test_spawn_reader_refuses_when_the_tick_journal_cannot_be_read(failure):
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("fixture", "/repo", 1, 0))
+
+    def journal(argv, **kwargs):
+        raise failure
+
+    with pytest.raises(SwarmError, match="tick journal unavailable"):
+        spawn_read.records(store, "fixture", 5, run=journal)
 
 
 def test_spawn_reader_passes_an_explicit_upper_journal_bound(monkeypatch):
