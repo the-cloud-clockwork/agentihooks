@@ -247,6 +247,7 @@ def touch(redis: "Redis", hive_id: str, now_ms: int) -> None:
         if pipe.hexists(hash_key, "heartbeat_at"):
             pipe.multi()
             pipe.hset(hash_key, "heartbeat_at", now_ms)
+            pipe.pexpire(f"{hash_key}:sessions", LIVE_MS)
 
     redis.transaction(refresh, hash_key)
 
