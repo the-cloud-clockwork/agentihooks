@@ -54,6 +54,10 @@ def test_a_job_that_never_started_or_finished_costs_nothing():
     assert ci_minutes.seconds(job(1, "x", 187)) == 187.0
 
 
+def test_a_job_that_completed_before_it_started_costs_nothing():
+    assert ci_minutes.seconds({"started_at": "2026-10-24T10:05:00Z", "completed_at": "2026-10-24T10:00:00Z"}) == 0.0
+
+
 def test_only_anton_labels_count_as_anton():
     assert ci_minutes.on_anton(job(1, "x", 1, labels=("anton-oss-light",)))
     assert not ci_minutes.on_anton(job(1, "x", 1, labels=("ubuntu-latest",)))
