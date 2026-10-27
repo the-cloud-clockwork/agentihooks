@@ -68,8 +68,9 @@ def test_a_live_hive_keeps_its_session_report_counted_until_its_heartbeat_goes_s
     redis.hset(registry.key("h1"), "heartbeat_at", int(clock[0] * 1000))
     redis.set(f"{registry.key('h1')}:sessions", json.dumps({"codex:one": 6}), ex=45)
     slots = reservation.LaunchSlots(redis)
-    clock[0] += 50
-    registry.touch(redis, "h1", int(clock[0] * 1000))
+    for _ in range(6):
+        clock[0] += 10
+        registry.touch(redis, "h1", int(clock[0] * 1000))
     assert slots.reserve_reading("codex:one", "late", 6, 1000) == reservation.SlotReading(False, 6)
     clock[0] += registry.LIVE_MS / 1000 + 1
     assert slots.reserve_reading("codex:one", "late", 6, 1000) == reservation.SlotReading(True, 0)
