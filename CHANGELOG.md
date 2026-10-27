@@ -11,7 +11,6 @@ release assembles them into its release notes. See `changelog.d/README.md`.
 
 ### Added
 
-- The swarm chart's `hiveStorage` setting gives each node its hive home and `/tmp` host folders; `workers.node` places a hive on it, a hook Job makes its folders only on the mounted data disk, and the hive home folder DaemonSet reads the same setting (#8050).
 - `agentihooks terminate-agent <agent|thread> --stand-down [--swarm <slug>] [--dry-run]`
   stands down one managed Codex conversation without a signal: it fences the
   conversation from new inbox turns and interrupts its active turn, leaving the

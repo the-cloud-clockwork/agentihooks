@@ -33,12 +33,15 @@
 {{- end }}
 {{- $node := toString ($workers.node | default "") }}
 {{- $storage := dict }}
-{{- $tmpVolume := dict "emptyDir" dict }}
-{{- $folder := printf "%s%s" $root.Release.Name $suffix }}
+{{- $tmpVolume := dict "emptyDir" (dict) }}
+{{- $folder := $root.Release.Name }}
+{{- if $suffix }}
+{{- $folder = printf "%s_%s" $folder (trimPrefix "-" $suffix) }}
+{{- end }}
 {{- if $node }}
 {{- $storage = dig "nodes" $node ($root.Values.hiveStorage.default | default dict) $root.Values.hiveStorage }}
 {{- if not $storage.homes }}
-{{- fail (printf "workers.node %s has no hiveStorage.nodes entry with homes and hiveStorage.default sets none" $node) }}
+{{- fail (printf "workers.node %s has no homes: set hiveStorage.nodes.%s.homes, or hiveStorage.default.homes when the node has no entry" $node $node) }}
 {{- end }}
 {{- $_ := set $workers "homeVolume" (dict "hostPath" (dict "path" (printf "%s/%s" $storage.homes $folder) "type" "Directory")) }}
 {{- if $storage.tmp }}
@@ -217,8 +220,8 @@ spec:
 {{- end }}
 {{- $folders := list }}
 {{- if $mount.path }}
-{{- if not $mount.fsType }}
-{{- fail (printf "hiveStorage for node %s names a mount without its fsType" $node) }}
+{{- if not (and $mount.fsType $mount.marker) }}
+{{- fail (printf "hiveStorage for node %s names a mount without its fsType and marker" $node) }}
 {{- end }}
 {{- range $roots }}
 {{- if not (hasPrefix (printf "%s/" $mount.path) .) }}
@@ -227,7 +230,7 @@ spec:
 {{- $folders = append $folders (printf "/storage%s/%s" (trimPrefix $mount.path .) $folder) }}
 {{- end }}
 {{- else }}
-{{- range $index, $path := $roots }}
+{{- range $index, $_ := $roots }}
 {{- $folders = append $folders (printf "/storage/%d/%s" $index $folder) }}
 {{- end }}
 {{- end }}
@@ -266,9 +269,9 @@ spec:
             - -ec
             - |
               {{- if $mount.path }}
-              awk '$2 == "/storage" && $3 == {{ $mount.fsType | quote }} { found = 1 } END { exit !found }' /proc/mounts || { echo "{{ $mount.path }} on {{ $node }} is not {{ $mount.fsType }}, so its data disk is not mounted" >&2; exit 1; }
+              awk '$2 == "/storage" && $3 == {{ $mount.fsType | quote }} { found = 1 } END { exit !found }' /proc/mounts && [ -e {{ printf "/storage/%s" $mount.marker | quote }} ] || { echo {{ printf "%s on %s is not the %s disk holding %s, so its data disk is not mounted" $mount.path $node $mount.fsType $mount.marker | quote }} >&2; exit 1; }
               {{- end }}
-              for folder in {{ join " " $folders }}; do
+              for folder in{{ range $folders }} {{ . | quote }}{{ end }}; do
                 mkdir -p "$folder"
                 chown 10001:10001 "$folder"
                 chmod 0750 "$folder"
@@ -290,7 +293,7 @@ spec:
             - name: storage
               mountPath: /storage
             {{- else }}
-            {{- range $index, $path := $roots }}
+            {{- range $index, $_ := $roots }}
             - name: storage-{{ $index }}
               mountPath: /storage/{{ $index }}
             {{- end }}
@@ -299,13 +302,13 @@ spec:
         {{- if $mount.path }}
         - name: storage
           hostPath:
-            path: {{ $mount.path }}
+            path: {{ $mount.path | quote }}
             type: Directory
         {{- else }}
         {{- range $index, $path := $roots }}
         - name: storage-{{ $index }}
           hostPath:
-            path: {{ $path }}
+            path: {{ $path | quote }}
             type: DirectoryOrCreate
         {{- end }}
         {{- end }}

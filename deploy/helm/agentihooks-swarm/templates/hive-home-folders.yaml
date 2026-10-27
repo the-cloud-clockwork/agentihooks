@@ -78,6 +78,6 @@ spec:
       volumes:
         - name: homes
           hostPath:
-            path: {{ $homes }}
+            path: {{ $homes | quote }}
             type: DirectoryOrCreate
 {{- end }}

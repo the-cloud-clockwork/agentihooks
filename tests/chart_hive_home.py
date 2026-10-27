@@ -289,7 +289,7 @@ STORAGE = {
             "data-node": {
                 "homes": "/mnt/data/hive/homes",
                 "tmp": "/mnt/data/hive/tmp",
-                "mount": {"path": "/mnt/data", "fsType": "xfs"},
+                "mount": {"path": "/mnt/data", "fsType": "xfs", "marker": "disk-id"},
             }
         },
         "homeFolders": {"hives": ["legacy-hive"], "nodeSelector": {"pool": "swarm"}},
@@ -339,9 +339,9 @@ def folder_job_problems(job: dict | None) -> list[str]:
         found.append(f"the folder Job runs on {pod.get('nodeSelector')}, expected data-node")
     if pod["volumes"] != [{"name": "storage", "hostPath": {"path": "/mnt/data", "type": "Directory"}}]:
         found.append(f"the folder Job mounts {pod['volumes']}, expected the existing data mount")
-    if '$3 == "xfs"' not in script or "exit 1" not in script:
-        found.append("the folder Job does not refuse when the data filesystem is not mounted")
-    if "/storage/hive/homes/fixture /storage/hive/tmp/fixture" not in script:
+    if '$3 == "xfs"' not in script or '[ -e "/storage/disk-id" ]' not in script or "exit 1" not in script:
+        found.append("the folder Job does not refuse when the data disk, its filesystem and marker, is not mounted")
+    if '"/storage/hive/homes/fixture" "/storage/hive/tmp/fixture"' not in script:
         found.append("the folder Job does not make the hive home and tmp folders")
     return found
 
@@ -372,7 +372,8 @@ def node_storage_problems(chart: str) -> list[str]:
     documents = storage_documents(rendered.stdout)
     found = storage_problems(documents)
     planted = yaml.safe_load(yaml.safe_dump(documents))
-    planted["Deployment"]["spec"]["template"]["spec"]["volumes"][-1] = {"name": "tmp", "emptyDir": {}}
+    volumes = planted["Deployment"]["spec"]["template"]["spec"]["volumes"]
+    volumes[:] = [{"name": "tmp", "emptyDir": {}} if v["name"] == "tmp" else v for v in volumes]
     if not storage_problems(planted):
         found.append("the check passed a hive on data-node whose tmp is an emptyDir")
     planted = yaml.safe_load(yaml.safe_dump(documents))
@@ -387,15 +388,31 @@ def node_storage_problems(chart: str) -> list[str]:
     )
     if home != {"name": "home", "hostPath": {"path": "/var/lib/hive-homes/fixture", "type": "Directory"}}:
         found.append(f"a hive on a node with no entry has home {home}, expected its folder under default.homes")
+    pooled = template(
+        chart,
+        {
+            "hiveStorage": STORAGE["hiveStorage"],
+            "workers": {
+                **STORAGE["workers"],
+                "hives": [{"name": "pool-1", "credentialSecret": {"name": "p", "key": "c"}}],
+            },
+        },
+    )
+    pool = hive_pods(pooled.stdout).get("-pool-1") if pooled.returncode == 0 else None
+    home = pool and next(v for v in pool["spec"]["template"]["spec"]["volumes"] if v["name"] == "home")
+    if home != {"name": "home", "hostPath": {"path": "/mnt/data/hive/homes/fixture_pool-1", "type": "Directory"}}:
+        found.append(f"a workers.hives entry on data-node has home {home}, expected the release_name folder")
     nodes = STORAGE["hiveStorage"]["nodes"]
     refusals = {
-        "has no hiveStorage.nodes entry": {"workers": {"node": "data-node"}},
+        "has no homes": {"workers": {"node": "data-node"}},
         "is not under its mount": {
             "hiveStorage": {"nodes": {"data-node": {**nodes["data-node"], "tmp": "/var/tmp/hive"}}},
             "workers": {"node": "data-node"},
         },
-        "without its fsType": {
-            "hiveStorage": {"nodes": {"data-node": {**nodes["data-node"], "mount": {"path": "/mnt/data"}}}},
+        "without its fsType and marker": {
+            "hiveStorage": {
+                "nodes": {"data-node": {**nodes["data-node"], "mount": {"path": "/mnt/data", "fsType": "xfs"}}}
+            },
             "workers": {"node": "data-node"},
         },
         "needs hiveStorage.default.homes": {"hiveStorage": {"homeFolders": {"hives": ["legacy-hive"]}}},
