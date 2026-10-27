@@ -263,9 +263,14 @@ def test_an_untimed_test_counts_as_its_own_file_mean():
 
 
 def test_the_sandbox_proof_loads_the_file_mean_fallback():
-    import inspect
+    import ast
 
-    from tests import mutation_sandbox_input_proof
-
-    source = inspect.getsource(mutation_sandbox_input_proof.test_full_selection_reads_the_same_repository_inputs)
-    assert '"-p",\n            "tests.split_fallback",' in source
+    tree = ast.parse((_ROOT / "tests/mutation_sandbox_input_proof.py").read_text())
+    pairs = {
+        (first.value, second.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.List)
+        for first, second in zip(node.elts, node.elts[1:])
+        if isinstance(first, ast.Constant) and isinstance(second, ast.Constant)
+    }
+    assert ("-p", "tests.split_fallback") in pairs
