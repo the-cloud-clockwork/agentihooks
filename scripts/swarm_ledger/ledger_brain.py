@@ -1,13 +1,12 @@
 import hashlib
 import json
-import math
 import re
 
 from scripts.gates.brain import bind
 
 OPS = ("brain_policy", "brain_learning", "brain_emergency")
 SCOPE = frozenset({"purpose", "task", "revision", "generation", "brain"})
-KINDS = frozenset({"lesson", "decision", "no_new_learning"})
+KINDS = ("lesson", "decision", "no_new_learning")
 MAX_BYPASS_SECONDS = 300
 
 
@@ -62,7 +61,7 @@ def check(op: dict) -> None:
         check_learning(op["learning"])
         if not text(op["by"], 64) or not isinstance(op["proof"], dict) or not op["proof"]:
             raise ValueError("learning needs an author and task proof")
-    elif type(op["expires"]) not in (int, float) or not math.isfinite(op["expires"]) or not text(op["reason"], 1000):
+    elif type(op["expires"]) not in (int, float) or not text(op["reason"], 1000):
         raise ValueError("emergency action needs expiry and reason")
 
 

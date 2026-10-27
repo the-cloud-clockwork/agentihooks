@@ -250,3 +250,122 @@ def test_gat05_repository_reloads_outcomes_and_audit_without_replaying_effects(f
     assert rejected == []
     assert replayed["_meta"]["brain_metrics"] == persisted["_meta"]["brain_metrics"]
     assert replayed["_meta"]["brain_audit"] == persisted["_meta"]["brain_audit"]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("purpose", "search"),
+        ("task", ""),
+        ("task", "x" * 201),
+        ("brain", ""),
+        ("brain", "x" * 201),
+        ("revision", None),
+        ("revision", "z" * 64),
+        ("generation", True),
+        ("generation", -1),
+        ("generation", 1.5),
+    ],
+)
+def test_gat05_validates_binding_input(fixture, field, value):
+    from scripts.swarm_ledger import ledger_brain
+
+    _, task, _, scope, _ = fixture
+    op = operation(
+        "brain_learning",
+        {**scope, field: value},
+        by="engineer",
+        proof=task["proof"],
+        learning=inputs()["learning"]["lesson"],
+    )
+    with pytest.raises(ValueError):
+        ledger_brain.check(op)
+
+
+@pytest.mark.parametrize("scope", [None, {}, {"unknown": "value"}])
+def test_gat05_requires_a_complete_binding(fixture, scope):
+    from scripts.swarm_ledger import ledger_brain
+
+    _, task, _, _, _ = fixture
+    with pytest.raises(ValueError):
+        ledger_brain.check(
+            operation(
+                "brain_learning", scope, by="engineer", proof=task["proof"], learning=inputs()["learning"]["lesson"]
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("kind", []),
+        ("kind", None),
+        ("content", " "),
+        ("content", None),
+        ("content", "x" * 4097),
+        ("sources", "session:one"),
+        ("sources", ["session:one"] * 21),
+        ("sources", [""]),
+        ("sources", [None]),
+        ("sources", ["x" * 1001]),
+    ],
+)
+def test_gat05_validates_learning_content_and_source_bounds(fixture, field, value):
+    from scripts.swarm_ledger import ledger_brain
+
+    _, task, _, scope, _ = fixture
+    learning = {**inputs()["learning"]["lesson"], field: value}
+    with pytest.raises(ValueError):
+        ledger_brain.check(operation("brain_learning", scope, by="engineer", proof=task["proof"], learning=learning))
+
+
+@pytest.mark.parametrize("mode,brain", [("off", "swarm-brain"), ("required", ""), ("observe", "x" * 201)])
+def test_gat05_rejects_invalid_operator_policy(mode, brain):
+    from scripts.swarm_ledger import ledger_brain
+
+    with pytest.raises(ValueError):
+        ledger_brain.check({"op": "brain_policy", "id": "policy", "item": "tasks/work", "mode": mode, "brain": brain})
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("item", "phases/work"),
+        ("by", ""),
+        ("by", "x" * 65),
+        ("proof", {}),
+        ("proof", []),
+        ("learning", {}),
+        ("learning", None),
+    ],
+)
+def test_gat05_rejects_malformed_outcome_operations(fixture, field, value):
+    from scripts.swarm_ledger import ledger_brain
+
+    _, task, _, scope, _ = fixture
+    op = operation("brain_learning", scope, by="engineer", proof=task["proof"], learning=inputs()["learning"]["lesson"])
+    with pytest.raises(ValueError):
+        ledger_brain.check({**op, field: value})
+
+
+@pytest.mark.parametrize("field,value", [("expires", True), ("expires", "160"), ("reason", ""), ("reason", "x" * 1001)])
+def test_gat05_validates_emergency_operation(fixture, field, value):
+    from scripts.swarm_ledger import ledger_brain
+
+    _, _, _, scope, _ = fixture
+    op = operation("brain_emergency", scope, **inputs()["emergency"])
+    with pytest.raises(ValueError):
+        ledger_brain.check({**op, field: value})
+
+
+@pytest.mark.parametrize(
+    "field,value", [("by", "another"), ("proof", {"command": "unrelated", "output": "unverified"})]
+)
+def test_gat05_requires_the_claimant_and_exact_proof(fixture, field, value):
+    from scripts.swarm_ledger import ledger_brain
+
+    doc, task, ctx, scope, _ = fixture
+    op = operation("brain_learning", scope, by="engineer", proof=task["proof"], learning=inputs()["learning"]["lesson"])
+    before = copy.deepcopy(doc)
+    assert not ledger_brain.apply(doc, {**op, field: value}, ctx)
+    assert doc == before
