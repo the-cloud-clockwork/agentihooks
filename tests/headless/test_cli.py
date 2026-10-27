@@ -117,7 +117,12 @@ def test_run_exits_one_when_the_run_is_not_ok(captured, tmp_path, capsys, status
 
     assert cli.main(["run", "engineer", "--input", "x", "--out", str(tmp_path / "o")]) == 1
     printed = json.loads(capsys.readouterr().out)
-    assert (printed["status"], printed["output"], printed["session"], printed["exit_code"]) == (status, None, None, None)
+    assert (printed["status"], printed["output"], printed["session"], printed["exit_code"]) == (
+        status,
+        None,
+        None,
+        None,
+    )
 
 
 def test_run_refuses_an_unknown_harness(captured, capsys):
