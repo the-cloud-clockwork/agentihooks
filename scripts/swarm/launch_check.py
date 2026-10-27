@@ -4,6 +4,7 @@ profile, hooks, model and effort, sits on its package base role and carries a pa
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -30,6 +31,8 @@ WORDS = {
     "canary": "its mounted profile canary",
 }
 REPORT_ONLY = frozenset({"late", *(f"hive_{name}" for name in join_report.OPTIONAL)})
+LEDGER_MISSES = frozenset(f"hive_{name}" for name in join_report.LEDGER_CHECKS)
+REFUSED = re.compile(r"not answering|connection refused|errno 111|incompleteread", re.IGNORECASE)
 OUTCOMES = {
     "relaunch": "It is being retired and relaunched once.",
     "spent": "Its one automatic relaunch is spent; operator action is required.",
@@ -205,6 +208,29 @@ def due(agent: AgentRecord, found: dict, now_ms: int) -> bool:
         waited = agent.profile_decision.get("validation", {}).get("deadline_ms", DEADLINE_MS)
         deadline = max(int(CANARY_TIMEOUT_S[agent.harness] * 1000), waited)
     return now_ms - session_started_at(agent) >= deadline
+
+
+def _ledger_refused(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> bool:
+    from scripts.swarm import outage
+
+    reasons = join_report.graded(join_report.read(store.redis, agent))["misses"]
+    failures = [reasons.get(name, {}).get("reason", {}) for name in join_report.LEDGER_CHECKS]
+    if any(REFUSED.search(f"{failure.get('error')} {failure.get('message')}") for failure in failures):
+        return True
+    record = outage.read(slug).get("ledger", {})
+    spans = [*record.get("past", []), [record["started_at"], record["ended_at"]]] if record else []
+    return any(end is None or end > session_started_at(agent) for start, end in spans if start <= now_ms)
+
+
+def ledger_held(store: RedisStore, slug: str, agent: AgentRecord, found: dict, now_ms: int) -> bool:
+    enforced = set(found) - REPORT_ONLY
+    if not enforced or not enforced <= LEDGER_MISSES or not _ledger_refused(store, slug, agent, now_ms):
+        return False
+    entry = pending(store, slug).get(agent.name, {})
+    if "held_at" not in entry:
+        store.redis.hset(store.key(slug, "launch-checks"), agent.name, json.dumps({**entry, "held_at": now_ms}))
+        return True
+    return now_ms - entry["held_at"] < DEADLINE_MS
 
 
 def record(

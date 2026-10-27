@@ -496,6 +496,9 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
         found.update(canaries[agent.name])
         if found and not launch_check.due(agent, found, now_ms):
             continue
+        if found and launch_check.ledger_held(store, slug, agent, found, now_ms):
+            actions.append(f"{agent.name} launch check held: the ledger refused its join")
+            continue
         if found:
             miss = launch_check.Miss(agent, found, waiting[agent.name]["relaunch"])
             actions.append(_failed_launch(slug, store, ledger, runtime, rows, miss, now_ms))

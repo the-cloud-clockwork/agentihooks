@@ -229,7 +229,9 @@ def test_status_text_prints_each_hive_agent_join_grade(monkeypatch, capsys):
     assert line in capsys.readouterr().out.splitlines()
 
 
-REFUSED = "ledger sw: <urlopen error [Errno 111] Connection refused>"
+REFUSED = (
+    "ledger sw: ledger server not answering on https://ledger:8765: <urlopen error [Errno 111] Connection refused>"
+)
 
 
 def _ledger_refused_launch(monkeypatch, tmp_path, message):
@@ -255,7 +257,9 @@ def _ledger_refused_launch(monkeypatch, tmp_path, message):
     )
     store = RedisStore(FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, state="running"))
-    record = AgentRecord(store.next_name("sw", "eng", 1001), "eng", "task", hive="worker", started_at=1000)
+    record = AgentRecord(
+        store.next_name("sw", "eng", 1001), "eng", "task", seat="eng-1@sw", hive="worker", started_at=1000
+    )
     agent = store.start_execution("sw", record)
     start = launch_check.session_started_at(agent)
     checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
