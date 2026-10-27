@@ -1487,7 +1487,7 @@ def test_selected_legs_download_the_nats_server_while_setup_runs_and_fall_back_t
     start = _selected_step("Start the pinned nats server download")
     use = _selected_step("Use the pinned nats server download")
     fallback = _selected_step("Install the pinned nats server for the bus backend tests")
-    assert names.index(start["name"]) < names.index("Set up Python ${{ matrix.python-version }}")
+    assert names.index(start["name"]) == 1
     assert names.index("Adopt latest dev durations") < names.index(use["name"]) < names.index(fallback["name"])
     assert names.index(fallback["name"]) < names.index("Run the selected tests")
     assert start["continue-on-error"] is True and use["continue-on-error"] is True
