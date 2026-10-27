@@ -362,6 +362,18 @@ def _recovery_text(slug, agent, task):
     )
 
 
+def _recovery_blocker(store, slug, agent, context, live, observed):
+    if not _recovery_current(store, slug, agent, context):
+        return "its task ownership changed"
+    if not live or (not observed.provider_error and observed.state == idle.WORKING):
+        return ""
+    if observed.typed or observed.prompt_title:
+        return "its pane holds input"
+    if observed.state not in {idle.IDLE, idle.WORKING} and not observed.provider_error:
+        return f"its pane reads {observed.state}"
+    return ""
+
+
 def recover_outages(
     slug: str, store: RedisStore, ledger: "Ledger", runtime: "Runtime", rows: dict, now_ms: int
 ) -> list[str]:
@@ -377,23 +389,11 @@ def recover_outages(
         observed = runtime.observe(agent)
         if record["last_at"] == now_ms:
             continue
-        if not _recovery_current(store, slug, agent, context):
-            store.redis.hset(key, agent.name, json.dumps({**record, "blocked": "its task ownership changed"}))
+        if held := _recovery_blocker(store, slug, agent, context, agent.name in live, observed):
+            store.redis.hset(key, agent.name, json.dumps({**record, "blocked": held}))
             continue
         if agent.name in live and not observed.provider_error and observed.state == idle.WORKING:
             record["state"] = "done"
-        elif agent.name in live and (
-            observed.typed
-            or observed.prompt_title
-            or (observed.state not in {idle.IDLE, idle.WORKING} and not observed.provider_error)
-        ):
-            held = (
-                "its pane holds input"
-                if observed.typed or observed.prompt_title
-                else f"its pane reads {observed.state}"
-            )
-            store.redis.hset(key, agent.name, json.dumps({**record, "blocked": held}))
-            continue
         else:
             record["attempts"] += 1
             record["last_at"] = now_ms
