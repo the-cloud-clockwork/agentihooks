@@ -23,7 +23,9 @@ reports nothing. The map arrives with the feature map validation pull request
 ([issue 7271](https://github.com/the-cloud-clockwork/agentihooks/issues/7271));
 until that file is on `dev`, every pass of the `feature` detector is empty.
 
-The file holds one object with a `features` list. Each entry:
+The file holds one object with a `features` list. No map entry runs the
+front door login check yet; it is added by its own task. An entry that wires it
+looks like this:
 
 ```json
 {
@@ -51,6 +53,9 @@ The file holds one object with a `features` list. Each entry:
 | `behaviour` | Yes | One sentence naming the behaviour the check protects, used in the summary |
 | `live_check` | Yes | The command as an argument list, run without a shell |
 | `semgrep_rule`, `behaviour_test` | No | The feature's Semgrep rule and behaviour test, read by the map's CI validation |
+
+The map on the validation branch holds one entry, `semgrep-feature-tests`, whose
+live check is `["bash", "scripts/feature_checks/semgrep-feature-tests.sh"]`.
 
 Every field the detector uses is required. A file that is not valid JSON or has
 no `features` key, or an entry without `live_check`, fails the whole detector
@@ -112,7 +117,7 @@ agentihooks doctor rig-grade-swarm measure feature-regressed/front-door-login
 It runs the detectors once and prints `feature-regressed/front-door-login 1`
 while the check fails. Once the check passes it prints `0`, provided the Doctor
 saw the finding earlier; an id never seen is refused with
-`no finding feature-regressed/<id> has been seen`.
+`no finding feature-regressed/<id> has been seen; measure the class feature-regressed to read every live target`.
 
 Judge it and file the fix:
 
