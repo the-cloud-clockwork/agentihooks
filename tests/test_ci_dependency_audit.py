@@ -191,13 +191,10 @@ def _audits(monkeypatch, *reports):
 
 
 def test_an_empty_report_is_audited_once_more_and_the_second_report_grades(monkeypatch, capsys):
-    calls = _audits(monkeypatch, "", _report(_dep("urllib3", "1.26.4", "PYSEC-1")))
+    calls = _audits(monkeypatch, "\n", _report(_dep("urllib3", "1.26.4", "PYSEC-1")))
     assert audit.audited(Path("head")) == ({("urllib3", "1.26.4", "PYSEC-1")}, set())
     assert calls == [Path("head"), Path("head")]
-    assert capsys.readouterr().out == (
-        "::warning::pip-audit produced no report: JSONDecodeError('Expecting value: line 1 column 1 (char 0)')"
-        "; auditing head once more\n"
-    )
+    assert capsys.readouterr().out == "::warning::pip-audit produced an empty report; auditing head once more\n"
 
 
 def test_a_second_empty_report_is_an_error(monkeypatch):
@@ -207,11 +204,18 @@ def test_a_second_empty_report_is_an_error(monkeypatch):
     assert len(calls) == 2
 
 
-def test_a_report_with_a_finding_grades_without_a_second_audit(monkeypatch, capsys):
-    calls = _audits(monkeypatch, _report(_dep("urllib3", "1.26.4", "PYSEC-1")), "")
+def test_a_report_that_is_not_empty_grades_without_a_second_audit(monkeypatch, capsys):
+    calls = _audits(monkeypatch, _report(_dep("urllib3", "1.26.4", "PYSEC-1")))
     assert audit.audited(Path("head")) == ({("urllib3", "1.26.4", "PYSEC-1")}, set())
     assert calls == [Path("head")]
     assert capsys.readouterr().out == ""
+
+
+def test_a_malformed_report_is_an_error_without_a_second_audit(monkeypatch):
+    calls = _audits(monkeypatch, "Traceback", _report())
+    with pytest.raises(audit.AuditError):
+        audit.audited(Path("head"))
+    assert calls == [Path("head")]
 
 
 def test_main_grades_after_one_empty_report(monkeypatch, capsys):

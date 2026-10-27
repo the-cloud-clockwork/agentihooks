@@ -39,11 +39,11 @@ def parse(report: str) -> tuple[set[Finding], set[str]]:
 
 
 def audited(requirements: Path) -> tuple[set[Finding], set[str]]:
-    try:
-        return parse(audit(requirements))
-    except AuditError as error:
-        print(f"::warning::{error}; auditing {requirements.name} once more")
-        return parse(audit(requirements))
+    report = audit(requirements)
+    if not report.strip():
+        print(f"::warning::pip-audit produced an empty report; auditing {requirements.name} once more")
+        report = audit(requirements)
+    return parse(report)
 
 
 def new_findings(head: set[Finding], base: set[Finding]) -> list[Finding]:
