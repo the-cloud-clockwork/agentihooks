@@ -181,6 +181,8 @@ def test_hive_launch_failures_raise_one_finding_per_check_and_error_class():
     found = launch_check.findings(store, "sw")
     assert len(found) == 2
     assert finding.id in [f.id for f in found]
+    fail(5, {**token, "status": 403})
+    assert len(launch_check.findings(store, "sw")) == 3
 
 
 def test_failed_hive_launch_retires_records_and_drops_that_agent(monkeypatch):

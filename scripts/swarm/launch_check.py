@@ -168,7 +168,11 @@ def misses(
         if not report:
             return {"hive_join": {"expected": "session join report", "actual": "missing"}}
         return {
-            f"hive_{name}": {"expected": "available", "actual": "missing", **_reason(miss)}
+            f"hive_{name}": {
+                "expected": "available",
+                "actual": "missing",
+                **({"reason": miss["reason"]} if "reason" in miss else {}),
+            }
             for name, miss in join_report.graded(report)["misses"].items()
         }
     found = _joined(store, agent, doc, session_started_at(agent))
@@ -284,10 +288,6 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
     ]
 
 
-def _reason(miss: dict) -> dict:
-    return {"reason": miss["reason"]} if "reason" in miss else {}
-
-
 def _observed(values: dict) -> str:
     observed = f"expected {values['expected']}; observed {values['actual']}"
     if reason := values.get("reason"):
@@ -298,9 +298,7 @@ def _observed(values: dict) -> str:
 
 
 def _error_class(values: dict, found: dict) -> str:
-    text = _observed({key: value for key, value in values.items() if key != "reason"})
     reason = values.get("reason", {})
+    text = _observed({key: value for key, value in values.items() if key != "reason"})
     text += f" {reason.get('error')} {reason.get('message')}" if reason else ""
-    for name in (found["agent"], found["task"]):
-        text = text.replace(name, "<agent>")
-    return re.sub(r"\d+", "#", text) + (f" status {reason['status']}" if reason.get("status") else "")
+    return re.sub(r"\d+", "#", text.replace(found["agent"], "<agent>")) + f" status {reason.get('status')}"
