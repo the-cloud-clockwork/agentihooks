@@ -53,7 +53,10 @@ def hub():
 
 
 def test_lane_work_asks_the_hub_to_admit_it_and_spawns_the_admitted_task(hub):
-    configs = Mock(return_value="rig config")
+    from scripts.swarm.store import SwarmConfig
+
+    config = SwarmConfig("rig", "/repo", 1, 1)
+    configs = Mock(return_value=config)
     request = lanes.LaneTasks(hub.bus, "hive-a", configs).request(offer())
 
     assert hub.hub.seen == [
@@ -61,7 +64,7 @@ def test_lane_work_asks_the_hub_to_admit_it_and_spawns_the_admitted_task(hub):
     ]
     configs.assert_called_once_with("rig")
     assert (request.config, request.lane, request.name, request.task) == (
-        "rig config",
+        config,
         "eng",
         "eng@rig-0001",
         hub.admitted["task"],
@@ -97,8 +100,10 @@ def test_a_hive_runs_every_lane_spoke_it_does_not_exclude(excluded, taken):
 
 
 def configs(engines):
+    from scripts.swarm.store import SwarmConfig
+
     return SimpleNamespace(
-        slugs=lambda: list(engines), config=lambda slug: SimpleNamespace(slug=slug, engine=engines[slug])
+        slugs=lambda: list(engines), config=lambda slug: SwarmConfig(slug, "/repo", 1, 1, engine=engines[slug])
     )
 
 
