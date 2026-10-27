@@ -1,8 +1,10 @@
 import io
 import json
 import stat
+import subprocess
 import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -219,14 +221,18 @@ def test_main_reads_a_binding_file(home, tmp_path):
     assert out.getvalue().endswith("brain binding bound\n")
 
 
+def _kubectl(monkeypatch, run):
+    monkeypatch.setattr(brain_place, "subprocess", SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired))
+
+
 def test_main_reads_the_cluster_configmap_by_default(home, monkeypatch):
     calls = []
 
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
-        return brain_place.subprocess.CompletedProcess(argv, 0, json.dumps(BINDING), "")
+        return subprocess.CompletedProcess(argv, 0, json.dumps(BINDING), "")
 
-    monkeypatch.setattr(brain_place.subprocess, "run", run)
+    _kubectl(monkeypatch, run)
     store = StubStore({RECORD: {"BRAIN_HTTP_TOKEN": API_FIXTURE, "MCP_API_KEY": MCP_FIXTURE}})
     environ = {**_environ(home), "OPENBAO_URL": "https://bao.example.test", "OPENBAO_TOKEN": "t"}
 
@@ -251,11 +257,7 @@ def test_main_reads_the_cluster_configmap_by_default(home, monkeypatch):
 
 @pytest.mark.parametrize(("code", "stdout"), [(1, json.dumps(BINDING)), (0, "  \n")])
 def test_main_refuses_an_unreadable_configmap(home, monkeypatch, code, stdout):
-    monkeypatch.setattr(
-        brain_place.subprocess,
-        "run",
-        lambda argv, **kw: brain_place.subprocess.CompletedProcess(argv, code, stdout, ""),
-    )
+    _kubectl(monkeypatch, lambda argv, **kw: subprocess.CompletedProcess(argv, code, stdout, ""))
     environ = {**_environ(home), "OPENBAO_URL": "https://bao.example.test", "OPENBAO_TOKEN": "t"}
     out = io.StringIO()
 
@@ -264,12 +266,12 @@ def test_main_refuses_an_unreadable_configmap(home, monkeypatch, code, stdout):
     assert out.getvalue() == "brain-place: the swarm-brain-binding ConfigMap could not be read; nothing was written\n"
 
 
-@pytest.mark.parametrize("error", [FileNotFoundError("kubectl"), brain_place.subprocess.TimeoutExpired("kubectl", 30)])
+@pytest.mark.parametrize("error", [FileNotFoundError("kubectl"), subprocess.TimeoutExpired("kubectl", 30)])
 def test_main_refuses_when_kubectl_cannot_run(home, monkeypatch, error):
     def run(argv, **kwargs):
         raise error
 
-    monkeypatch.setattr(brain_place.subprocess, "run", run)
+    _kubectl(monkeypatch, run)
     environ = {**_environ(home), "OPENBAO_URL": "https://bao.example.test", "OPENBAO_TOKEN": "t"}
     out = io.StringIO()
 
