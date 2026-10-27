@@ -170,7 +170,8 @@ guard that is already installed:
 A disabled systemd timer, or hand copies with no entry, end up linked but
 unscheduled after that `init`. Since [#6311](https://github.com/the-cloud-clockwork/agentihooks/pull/6311)
 the next `init` finds both files are links and schedules the guard. To keep a
-guard off, remove both home files.
+guard off, remove both home files. With only one removed, `init` relinks it
+and the `init` after that schedules the guard.
 
 ### Example
 
