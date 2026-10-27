@@ -1756,12 +1756,11 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         ' --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"'
     )
     upload = stats_steps[len(setup) + 1]
-    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["uses"] == "./.workflow-revision/.github/actions/retry-upload"
     assert upload["with"]["name"] == "mutation-stats-${{ matrix.part }}"
     assert upload["with"]["path"] == ".mutation-stats/"
     assert upload["with"]["include-hidden-files"] is True
     assert upload["with"]["if-no-files-found"] == "error"
-    assert upload["with"]["overwrite"] is True
     evidence = stats_steps[len(setup) + 2]
     assert evidence["if"] == "failure()"
     assert evidence["with"]["name"] == "mutation-evidence-stats-${{ matrix.part }}"
@@ -1828,15 +1827,27 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     )
     part = steps[names.index("Upload this part's test stats cache")]
     assert part["if"] == f"strategy.job-total != 1 && {skipped}"
-    assert part["uses"] == "actions/upload-artifact@v4"
+    assert part["uses"] == "./.workflow-revision/.github/actions/retry-upload"
     assert part["with"] == {
         "name": "mutation-test-stats-cache-${{ matrix.part }}",
         "path": ".mutation-stats-fresh/",
         "include-hidden-files": True,
         "if-no-files-found": "ignore",
         "retention-days": 1,
-        "overwrite": True,
     }
+    stats_part = steps[names.index("Upload mutation stats part")]
+    assert stats_part["if"] == skipped
+    assert stats_part["uses"] == part["uses"]
+    assert stats_part["with"] == {
+        "name": "mutation-stats-${{ matrix.part }}",
+        "path": ".mutation-stats/",
+        "include-hidden-files": True,
+        "if-no-files-found": "error",
+        "retention-days": 1,
+    }
+    actions = steps[names.index("Take the local actions from the workflow revision")]
+    assert actions["if"] == skipped
+    assert names.index(actions["name"]) < names.index(stats_part["name"])
     order = [
         restore["name"],
         "Collect one stats part for every mutation shard",
@@ -2024,7 +2035,7 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         assert {step["uses"] for step in local[name]} == {
             "./.workflow-revision/.github/actions/nats-server",
             "./.workflow-revision/.github/actions/browser-cache",
-        }
+        } | ({"./.workflow-revision/.github/actions/retry-upload"} if name == "mutation-stats" else set())
         assert all(steps.index(take) < steps.index(step) for step in local[name])
         assert all("hashFiles" not in step.get("if", "") for step in local[name])
 
@@ -2042,7 +2053,7 @@ def test_a_head_that_predates_the_local_actions_gets_them_from_the_workflow_revi
     git("add", ".")
     git("commit", "-qm", "head without the actions")
     head = git("rev-parse", "HEAD").strip()
-    for action in ("nats-server", "browser-cache"):
+    for action in ("nats-server", "browser-cache", "retry-upload"):
         (tmp_path / ".github/actions" / action).mkdir(parents=True)
         (tmp_path / ".github/actions" / action / "action.yml").write_text(f"name: {action}\n")
     git("add", ".")
