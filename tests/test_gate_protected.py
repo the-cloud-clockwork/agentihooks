@@ -1075,9 +1075,8 @@ def test_a_base_skipping_sonar_on_test_only_changes_still_refuses_a_head_that_dr
     from scripts import ci_reuse
 
     base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
-    base["test.yml"]["jobs"]["select"]["outputs"]["sonar"] = "${{ steps.select.outputs.sonar }}"
     gate = base["test.yml"]["jobs"]["gate-required"]
-    gate["steps"] = ci_reuse.test_only_sonar(gate["steps"])
+    assert ci_reuse.TEST_ONLY_SONAR[0][1] in gate["steps"][0]["run"]
     assert ci_reuse.POSTGRES_REQUIRED[1] in gate["steps"][0]["run"]
     head = copy.deepcopy(base)
     step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
