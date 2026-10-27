@@ -352,3 +352,25 @@ def test_revoked_source_binding_cannot_be_recreated_or_resurrected(captured):
     assert meter.snapshot() == before
     catalog.db.execute("DELETE FROM session_record WHERE access_domain = ? AND session_uid = ?", scope.key()[:2])
     assert meter.coverage(GRANT, [], 200.0)["sources"] == []
+
+
+def test_a_quarantined_batch_keeps_the_archive_prefix_incomplete(tmp_path):
+    catalog = Catalog(tmp_path / "catalog.sqlite")
+    scope = metrics.Scope(GRANT.corpus, "gap-session", "source")
+    recorder = progress.Recorder(catalog, GRANT, scope, "agentihooks", clock=lambda: 150.0)
+    queue = spool.Spool(spool.SpoolConfig(tmp_path / "spool", 1000000, 800000), clock=lambda: 100.0, progress=recorder)
+    queue.append("lost-first", [{"text": "first"}])
+    queue.append("retained-second", [{"text": "second"}])
+    sorted(queue.batches.glob("*.json"))[0].write_bytes(b"corrupt")
+    result = queue.flush(lambda entry: None)
+    assert result.lost == [1] and result.uploaded == [2]
+    assert queue.status().pending == []
+    status = recorder.meter.status(GRANT, scope, 200.0, stale_after=30.0)
+    assert status["stages"]["archive"]["through"] == 0
+    assert status["stages"]["archive"]["backlog"] == 2
+    assert status["archive_lag_seconds"] == 100.0
+    assert status["alerts"] == ["archive_stale"]
+    assert status["coverage"] == "partial"
+    reopened = progress.Recorder(catalog, GRANT, scope, "agentihooks")
+    assert reopened.meter.status(GRANT, scope, 200.0)["stages"]["archive"]["through"] == 0
+    catalog.close()

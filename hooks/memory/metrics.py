@@ -23,8 +23,8 @@ BINDINGS = """CREATE TABLE IF NOT EXISTS memory_progress_source (
     project_id TEXT NOT NULL, PRIMARY KEY (access_domain, session_uid, source_generation))"""
 CAPTURES = """CREATE TABLE IF NOT EXISTS memory_progress_batch (
     access_domain TEXT NOT NULL, session_uid TEXT NOT NULL, source_generation TEXT NOT NULL,
-    identity TEXT NOT NULL, through INTEGER NOT NULL,
-    PRIMARY KEY (access_domain, session_uid, source_generation, identity))"""
+    identity TEXT NOT NULL, previous_through INTEGER NOT NULL, through INTEGER NOT NULL,
+    archived INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (access_domain, session_uid, source_generation, identity))"""
 SOURCES = """SELECT s.session_uid, s.source_generation FROM (
     SELECT access_domain, session_uid, source_generation FROM session_source UNION
     SELECT access_domain, session_uid, source_generation FROM memory_progress_source) s

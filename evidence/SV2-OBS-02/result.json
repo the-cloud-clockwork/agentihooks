@@ -1,0 +1,44 @@
+{
+  "package": "SV2-OBS-02",
+  "integration_gate": "G10",
+  "dependencies": ["SV2-OBS-01", "SV2-IDX-03"],
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7988",
+  "package_complete": false,
+  "status": "awaiting CI qualification",
+  "evidence_class": "Mocked transport, embedder and extractor; real local SQLite catalog, durable spool, content addressed archive objects and index worker. No deployed service or brain is claimed.",
+  "interfaces": [
+    "Metrics.bind registers an immutable source generation and project under the caller grant before its first upload. Retention state, project authorization and revocation tombstones remain authoritative.",
+    "Metrics.advance records a monotonic contiguous normalized record cursor for one source generation and stage. Downstream cursors cannot exceed their own upstream; duplicate observations retain their original time.",
+    "Metrics.status and Metrics.coverage return independent stage cursors, age, record backlog, lag and stale or unknown alerts. Coverage is complete only when every observed stage reaches the captured tail. Authorization reads metadata, never transcript bodies.",
+    "Recorder implements the spool progress protocol. Durable append records capture; only a returning durable uploader records archive progress. Pending batches replay observations idempotently on attach or restart.",
+    "IndexWorker.drain records indexed progress only for chunk generations whose current hashes all have vectors in that index generation, using their built through cursors rather than a newer catalog tail.",
+    "Recorder.consume invokes a caller supplied extractor and advances brain progress only after a matching committed cursor receipt. A repeated cursor does not invoke extraction again.",
+    "SessionSearch.search exposes coverage even when its hit list is empty. SessionTools.session_get exposes source coverage beside its existing summary. No ledger page files are changed."
+  ],
+  "supported_versions": {"protocol": "additive fields on session API version 1.0", "storage": "additive SQLite tables beside the existing catalog"},
+  "measurements": {
+    "archive_lag_seconds": "Age of the earliest captured checkpoint beyond the archive acknowledgement, zero after it catches up.",
+    "embedding_lag_seconds": "Age of the earliest archive checkpoint beyond the fully indexed cursor, independent of archive transport delay.",
+    "extraction_lag_seconds": "Age of the earliest archive checkpoint beyond the brain committed cursor, independent of embedding progress.",
+    "unknown": "A missing observation has a null watermark and lag, an unknown alert and partial coverage; empty query results never imply complete history."
+  },
+  "compatibility": "Default spool construction keeps its preceding behavior. Existing lexical and vector selection remain unchanged. The preceding search, session tool, spool and index worker fixture suites are included in qualification.",
+  "authority": "Source registration and producer observations use authenticated grants and explicit project attribution, not display names. Query project filters can narrow the grant only. Revoked sources and foreign projects are excluded before aggregation.",
+  "states": {
+    "observed": "CI qualification pending for the producer fix.",
+    "accepted": "Source grants and producer acknowledgements are accepted only after scope and cursor checks.",
+    "committed": "Stage observations and batch identity mappings persist in SQLite transactions; the spool remains durable until upload and progress acknowledgement return.",
+    "externally_verified": "None. A deployed session service and brain extraction canary remain part of G10."
+  },
+  "rollback_rehearsal": {
+    "action": "Pause the optional indexing producer or remove the coverage presentation while retaining memory_stage_progress, memory_progress_source and memory_progress_batch.",
+    "authoritative_objects": "Original session events, source identities and archive objects are preserved separately from index projections. Persisted progress and replay mappings must not be treated as disposable presentation caches.",
+    "proof": "The fixture compares all progress tables across restart and across pausing the index worker. CI result pending."
+  },
+  "remaining_limitations": [
+    "The canonical collector, index worker and extraction interface are caller driven components; the fixture does not deploy or schedule them.",
+    "Indexed cursors conservatively advance after a whole chunk generation is covered, so partially embedded generations retain a lower cursor.",
+    "The extractor callback contract requires durable and idempotent committed cursor receipts; no external brain implementation is changed in this package.",
+    "Live G10 evidence remains outstanding."
+  ]
+}

@@ -8,7 +8,7 @@ from hooks.memory.catalog import Catalog, Conflict
 from hooks.memory.metrics import KEY, STAGES, Metrics, Scope
 from hooks.memory.spool import Entry
 
-CAPTURED = f"SELECT through FROM memory_progress_batch WHERE {KEY} AND identity = ?"
+CAPTURED = f"SELECT previous_through, through, archived FROM memory_progress_batch WHERE {KEY} AND identity = ?"
 BOUND = """SELECT b.session_uid, b.source_generation FROM memory_progress_source b
     JOIN session_record r USING (access_domain, session_uid)
     WHERE b.access_domain = ? AND r.state = 'retained'"""
@@ -43,14 +43,33 @@ class Recorder:
             if not points:
                 for stage in STAGES[1:]:
                     self.meter._advance(self.scope, stage, 0, 0.0)
-            self.meter.catalog.db.execute("INSERT INTO memory_progress_batch VALUES (?, ?, ?, ?, ?)", (*key, through))
+            self.meter.catalog.db.execute(
+                "INSERT INTO memory_progress_batch (access_domain, session_uid, source_generation, identity, previous_through, through) VALUES (?, ?, ?, ?, ?, ?)",
+                (*key, previous, through),
+            )
 
     def archived(self, entry: Entry) -> None:
+        self.meter._authorize(self.grant, self.scope)
         identity = hashlib.sha256(entry.identity.encode()).hexdigest()
-        row = self.meter.catalog.db.execute(CAPTURED, (*self.scope.key(), identity)).fetchone()
-        if row is None:
-            raise Conflict("archive acknowledgement has no captured batch")
-        self.meter.advance(self.grant, self.scope, "archive", row[0], self.clock())
+        with self.meter.catalog._transaction():
+            key = (*self.scope.key(), identity)
+            if self.meter.catalog.db.execute(CAPTURED, key).fetchone() is None:
+                raise Conflict("archive acknowledgement has no captured batch")
+            self.meter.catalog.db.execute(
+                f"UPDATE memory_progress_batch SET archived = 1 WHERE {KEY} AND identity = ?", key
+            )
+            current = self.meter._points(self.scope)["archive"][-1][0]
+            through = current
+            rows = self.meter.catalog.db.execute(
+                f"SELECT previous_through, through, archived FROM memory_progress_batch WHERE {KEY} AND through > ? ORDER BY through",
+                (*self.scope.key(), current),
+            )
+            for previous, end, acknowledged in rows:
+                if not acknowledged or previous != through:
+                    break
+                through = end
+            if through > current:
+                self.meter._advance(self.scope, "archive", through, self.clock())
 
     def consume(self, through: int, commit: Callable[[Scope, int], dict]) -> dict:
         """The extractor returns a committed cursor only after its synthesized output is durable."""
