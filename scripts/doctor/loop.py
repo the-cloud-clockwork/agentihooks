@@ -25,6 +25,16 @@ FIXES = ("code", "tune")
 FIX_PHASE = "p2"
 SENDER = "doctor-timer"
 IDLE = ("stopped", "stopping")
+WORKSTATION_KINDS = (
+    "failed spawn",
+    "fresh restore",
+    "scheduled tick",
+    "master launch failed",
+    "master launch evidence unavailable",
+    "master waiting on input",
+    "ci reruns",
+    "runtime storage",
+)
 
 
 def verdicts(store, doctor):
@@ -328,6 +338,8 @@ def fix_tasks(watched, finding, verdict, fix, tasks):
             "judge": "the Standards reader",
         },
     }
+    if kind in WORKSTATION_KINDS:
+        cause["workstation"] = True
     fixed = {
         "task": f"{stem}-{fix}",
         "title": f"Move the number behind the {kind} finding",
