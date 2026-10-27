@@ -156,11 +156,11 @@ the tick never held (an empty harness, profile, model, effort or account) is not
 ### Stalled master recycle
 
 Each tick checks the live master of a running swarm. A master whose pane reads `working` while it has made no tool
-call for `AGENTIHOOKS_HEALTH_STALLED_MINUTES` (default **10**) is stalled: the tick sends it an inbox item asking
-for a Handoff v2, waits up to `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5), then recycles it in its seat
-with a recovery handoff and the reason `busy with no tool call for <n> minutes`. When the stall ends before the
-deadline (it makes a tool call, its pane leaves `working` or it declares a wait), the request is withdrawn with `the
-master resumed work`. A stalled master of a proof swarm whose parent task is blocked stops the proof swarm instead.
+call for `AGENTIHOOKS_HEALTH_STALLED_MINUTES` (default **10**) is stalled: the tick sends it an inbox item asking for
+a Handoff v2, waits up to `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5), then recycles it in its seat with a
+recovery handoff and the reason `busy with no tool call for <n> minutes`. When the stall ends before the deadline (the
+master makes a tool call, its pane leaves `working` or it declares a wait), the request is withdrawn with `the master
+resumed work`. A stalled master of a proof swarm whose parent task is blocked stops the proof swarm instead.
 
 The quiet time counts from the master's last finished tool call, or from its session start when that is later.
 The check does not count while:
