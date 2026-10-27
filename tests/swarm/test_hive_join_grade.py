@@ -234,7 +234,7 @@ def test_status_text_prints_each_hive_agent_join_grade(monkeypatch, capsys):
     assert line in capsys.readouterr().out.splitlines()
 
 
-def _ledger_refused_launch(monkeypatch, tmp_path, message, status=None):
+def _ledger_refused_launch(monkeypatch, tmp_path, message, status=None, error="SwarmError", failed=("ledger_join",)):
     import importlib
     from types import SimpleNamespace
 
@@ -263,8 +263,8 @@ def _ledger_refused_launch(monkeypatch, tmp_path, message, status=None):
     agent = store.start_execution("sw", record)
     start = launch_check.session_started_at(agent)
     checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
-    checks["ledger_join"] = False
-    checks["errors"] = {"ledger_join": {"error": "SwarmError", "status": status, "message": message}}
+    checks.update(dict.fromkeys(failed, False))
+    checks["errors"] = {name: {"error": error, "status": status, "message": message} for name in failed}
     join_report.start(store.redis, "sw", agent, "session", checks, {}, start)
     launch_check.begin(store, "sw", agent, start, relaunch=False)
     runtime = SimpleNamespace(bindings=lambda agents: {}, live_names=lambda: {agent.name})
@@ -346,3 +346,42 @@ def test_a_ledger_join_denied_by_the_server_retires_without_a_hold(monkeypatch, 
     due = launch.start + launch_check.DEADLINE_MS
     assert launch.tick(due) == [f"retired {launch.agent.name} after its hive join failed dropped"]
     assert launch.retired == [due]
+
+
+@pytest.mark.parametrize("status", [400, 499])
+def test_a_client_error_status_retires_even_when_the_message_reads_refused(monkeypatch, tmp_path, status):
+    from scripts.swarm import launch_check
+
+    launch = _ledger_refused_launch(monkeypatch, tmp_path, REFUSED_JOIN, status)
+    due = launch.start + launch_check.DEADLINE_MS
+    assert launch.tick(due) == [f"retired {launch.agent.name} after its hive join failed dropped"]
+
+
+@pytest.mark.parametrize(
+    ("message", "status", "error", "failed"),
+    [
+        (REFUSED_JOIN, 500, "SwarmError", ("ledger_join",)),
+        ("ledger sw: join failed", None, "IncompleteRead", ("ledger_join",)),
+        (REFUSED_JOIN, None, "SwarmError", ("ledger_join", "ledger_write")),
+    ],
+)
+def test_a_ledger_left_unanswered_holds_without_a_recorded_outage(
+    monkeypatch, tmp_path, message, status, error, failed
+):
+    from scripts.swarm import launch_check
+
+    launch = _ledger_refused_launch(monkeypatch, tmp_path, message, status, error, failed)
+    due = launch.start + launch_check.DEADLINE_MS
+    assert launch.tick(due) == [f"{launch.agent.name} launch check held: the ledger was unavailable for its join"]
+
+
+@pytest.mark.parametrize("outage_ended_at", [None, 0])
+def test_a_join_timeout_outside_any_ledger_outage_retires(monkeypatch, tmp_path, outage_ended_at):
+    from scripts.swarm import launch_check, outage
+
+    launch = _ledger_refused_launch(monkeypatch, tmp_path, "ledger sw: TimeoutError: timed out")
+    if outage_ended_at is not None:
+        outage.observe("sw", "ledger", ["Ledger health probe failed"], launch.start - 500)
+        outage.observe("sw", "ledger", [], launch.start + outage_ended_at)
+    due = launch.start + launch_check.DEADLINE_MS
+    assert launch.tick(due) == [f"retired {launch.agent.name} after its hive join failed dropped"]
