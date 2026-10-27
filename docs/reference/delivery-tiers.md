@@ -1298,7 +1298,7 @@ On 19 October the earlier counter, which read only the red job names, reported f
 | `GitHub API rate limit reached; waiting <n> seconds for the reset` on stderr | The counter waits for the reset and continues; the JSON prints when it finishes |
 | A traceback and no JSON | A `gh api` read failed, or rate limit waits passed their 900 second budget; check `gh auth status` and rerun |
 | A run is missing from both lists | It has another red job, or `Gate — Required` passed; read its jobs with the commands above |
-| Fewer runs than the day held | [The runs endpoint](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-workflow) returns up to 1,000 results for each search filtered by `created` or `event`. Run `python -m scripts.ci_watcher_drops '2026-10-19T00:00:00Z..2026-10-19T11:59:59Z'` once per smaller range and join the `drops` and `rebuilds` lists |
+| Fewer runs than the day held | [The runs endpoint](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-workflow) returns up to 1,000 results for each search filtered by `created` or `event`. Run `python -m scripts.ci_watcher_drops` for `2026-10-19T00:00:00Z..2026-10-19T11:59:59Z` and again for `2026-10-19T12:00:00Z..2026-10-19T23:59:59Z`, then join the `drops` and `rebuilds` lists |
 
 ### Measurement limits
 
