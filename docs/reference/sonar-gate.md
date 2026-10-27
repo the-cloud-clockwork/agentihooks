@@ -80,7 +80,7 @@ On pull request 7852, which changed only test files, run 40542648681 printed `so
 
 ### Test only delivery evidence
 
-[Pull request #7580](https://github.com/the-cloud-clockwork/agentihooks/pull/7580) delivered the workflow change. Before it, [#7572](https://github.com/the-cloud-clockwork/agentihooks/pull/7572) announced the grader blob and [#7568](https://github.com/the-cloud-clockwork/agentihooks/pull/7568) merged the grader change; [issue #7567](https://github.com/the-cloud-clockwork/agentihooks/issues/7567) names the seams. Before the change, tests to required gate on test only pull requests had a median of 52 seconds with none of 12 runs under 40 seconds, over 25 October 17:21 to 26 October 15:49 UTC.
+[Pull request #7580](https://github.com/the-cloud-clockwork/agentihooks/pull/7580) delivered the workflow change. Before it, [#7572](https://github.com/the-cloud-clockwork/agentihooks/pull/7572) announced the grader and [#7568](https://github.com/the-cloud-clockwork/agentihooks/pull/7568) merged the grader change; [issue #7567](https://github.com/the-cloud-clockwork/agentihooks/issues/7567) names the seams. Before the change, tests to required gate on test only pull requests had a median of 52 seconds with none of 12 runs under 40 seconds, over 25 October 17:21 to 26 October 15:49 UTC.
 
 The first three test only runs after the merge skipped Sonar and passed `Gate â€” Required`:
 
@@ -88,7 +88,7 @@ The first three test only runs after the merge skipped Sonar and passed `Gate â€
 |---|---|---|---|---|---|
 | 40539354877 | 7899 | full | 16:31:29 `shard-check (3.12)` | 16:34:23 | 174 s |
 | 40540834415 | 7847 | selected | 16:32:51 `unit-selected (3.12, 1)` | 16:35:38 | 167 s |
-| 40542648681 | 7852 | selected | 16:42:59 skipped `sonar` | 16:45:21 | 142 s |
+| 40542648681 | 7852 | selected | 16:42:58 `unit-selected (3.12, 1)` | 16:45:21 | 143 s |
 
 No required job finished inside those gaps, so on these samples the 40 second target was not met and the remaining wait is gate pickup. A median over a full window has not been recorded yet.
 
