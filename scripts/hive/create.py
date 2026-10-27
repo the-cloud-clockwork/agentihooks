@@ -114,8 +114,9 @@ def _named(tools: Tools, options: Options) -> str:
     present = create_github.tree(tools.run, options.repo, options.base)
 
     def holders(name: str) -> list[str]:
-        files = sorted(create_render.paths(template, name) & present)
-        return [*(["a hive"] if name in held else []), *(f"the {options.repo} file {path}" for path in files)]
+        found = ["a hive"] if name in held else []
+        found += [f"the {options.repo} file {path}" for path in sorted(create_render.paths(template, name) & present)]
+        return found
 
     name = options.name or next(
         machine.hive_name(ordinal) for ordinal in itertools.count(1) if not holders(machine.hive_name(ordinal))
@@ -123,7 +124,7 @@ def _named(tools: Tools, options: Options) -> str:
     found = holders(name)
     if found:
         raise auth.HiveError(
-            f"hive create refuses {name}: {' and '.join(found)} already hold it; "
+            f"hive create refuses {name}: it is already held by {' and '.join(found)}; "
             "pass --name with an unused hive name, or leave it out to take the next one"
         )
     return name

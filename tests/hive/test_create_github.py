@@ -127,8 +127,8 @@ def _tree_run(answer):
 
 
 def test_tree_lists_every_path_of_the_base():
-    run = _tree_run("k8s/a.yaml\nk8s/b/c.yaml\n")
-    assert create_github.tree(run, "o/r", "dev") == {"k8s/a.yaml", "k8s/b/c.yaml"}
+    run = _tree_run("truncated.md\nk8s/a.yaml\nk8s/b/c.yaml\n")
+    assert create_github.tree(run, "o/r", "dev") == {"truncated.md", "k8s/a.yaml", "k8s/b/c.yaml"}
     assert run.calls == [["gh", "api", "repos/o/r/git/trees/dev?recursive=1", "--jq", create_github.TREE]]
     assert create_github.TREE == 'if .truncated then "truncated" else .tree[].path end'
 

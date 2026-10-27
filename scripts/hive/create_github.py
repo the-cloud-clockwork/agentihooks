@@ -43,7 +43,7 @@ def read(run: Run, repo: str, path: str, ref: str, cwd: str | None = None) -> st
 
 def tree(run: Run, repo: str, ref: str) -> set[str]:
     listed = gh(run, ["api", f"repos/{repo}/git/trees/{ref}?recursive=1", "--jq", TREE])
-    if listed.startswith(TRUNCATED):
+    if listed == TRUNCATED:
         raise auth.HiveError(f"the {repo} {ref} tree is too large to list, so hive create cannot see its hive files")
     return set(listed.splitlines())
 

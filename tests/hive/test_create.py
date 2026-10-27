@@ -766,7 +766,8 @@ def test_an_explicit_name_of_a_live_hive_with_an_antoncore_overlay_is_refused(wo
         create.create(world.tools, create.Options(name=NAME, dry_run=True))
 
     assert str(refused.value) == (
-        f"hive create refuses {NAME}: a hive and the {REPO} file k8s/manifests/{NAME}/ssh-lan.yaml already hold it; "
+        f"hive create refuses {NAME}: it is already held by a hive and the {REPO} file "
+        f"k8s/manifests/{NAME}/ssh-lan.yaml; "
         "pass --name with an unused hive name, or leave it out to take the next one"
     )
     assert not world.run.named("kubectl")
@@ -776,14 +777,14 @@ def test_an_explicit_name_of_a_live_hive_with_an_antoncore_overlay_is_refused(wo
 def test_an_explicit_name_held_only_by_an_antoncore_overlay_is_refused(world):
     world.run.tree = ["k8s/manifests/swarm-hive-007/ssh-lan.yaml"]
 
-    with pytest.raises(auth.HiveError, match=r"^hive create refuses swarm-hive-007: the "):
+    with pytest.raises(auth.HiveError, match=r"^hive create refuses swarm-hive-007: it is already held by the "):
         create.create(world.tools, create.Options(name="swarm-hive-007", dry_run=True))
 
 
 def test_an_explicit_name_held_only_by_a_hive_is_refused(world):
     auth.mint(world.tools.redis, "swarm-hive-007", "redis://hive.example:6380/2")
 
-    with pytest.raises(auth.HiveError, match=r"^hive create refuses swarm-hive-007: a hive already hold it; "):
+    with pytest.raises(auth.HiveError, match=r"^hive create refuses swarm-hive-007: it is already held by a hive; "):
         create.create(world.tools, create.Options(name="swarm-hive-007", dry_run=True))
 
 
@@ -797,6 +798,14 @@ def test_an_unused_explicit_name_is_created(world):
 
 def test_a_name_only_an_antoncore_overlay_holds_is_skipped(world):
     world.run.tree = [f"k8s/manifests/{NAME}/ssh-lan.yaml"]
+
+    done = create.create(world.tools, create.Options(dry_run=True))
+
+    assert done == "dry run of hive create swarm-hive-002: nothing written"
+
+
+def test_a_name_only_the_machine_map_holds_is_skipped(world):
+    world.tools.redis.hset(machine.MACHINES, "worker-009", NAME)
 
     done = create.create(world.tools, create.Options(dry_run=True))
 
