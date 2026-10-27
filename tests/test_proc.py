@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 from hooks.proc import Process, _process, _target, processes
@@ -52,3 +53,27 @@ def test_target_detects_claude_and_codex():
     assert _target(item(argv=("/usr/bin/codex",))) == "codex"
     assert _target(item(comm="codex-linux-x64")) == "codex"
     assert _target(item(comm="bash", argv=("bash", "-c", "claude"))) == ""
+
+
+def test_no_test_check_reads_the_process_table_twice():
+    tests = Path(__file__).resolve().parent
+    found = []
+    for path in sorted(tests.rglob("*.py")):
+        for function in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(function, ast.FunctionDef) or not function.name.startswith("test"):
+                continue
+            for node in ast.walk(function):
+                if isinstance(node, (ast.If, ast.While)):
+                    check = node.test
+                elif isinstance(node, (ast.Assert, ast.Expr, ast.Return, ast.Assign)):
+                    check = node
+                else:
+                    continue
+                reads = [
+                    call
+                    for call in ast.walk(check)
+                    if isinstance(call, ast.Call) and getattr(call.func, "id", None) in {"processes", "_process"}
+                ]
+                if len(reads) > 1:
+                    found.append(f"{path.relative_to(tests)}:{node.lineno}")
+    assert found == []
