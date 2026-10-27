@@ -1159,9 +1159,9 @@ An empty result means no swarm tooling on this machine changed the queue while t
 
 ### The removed rebuild cause reader
 
-The old `queue-fail-fast` watch loop wrote a `queue-rebuild-<run>-<attempt>` record whenever it found its group stale, and `scripts.ci_queue_rebuild` linked that record to a cause. [Pull request 5706](https://github.com/the-cloud-clockwork/agentihooks/pull/5706) taught it to read the entry ahead: it took the parent of the stale group's commit, found the merge group run built at that parent, read the pull request number from its `gh-readonly-queue/dev/pr-<number>-<sha>` branch, and recorded `removed_ahead` with that pull request, actor, reason and event when the pull request left the queue while the stale group ran. The group's own dequeue or requeue still ranked first. Over the 72 records of 19 October, replaying the reader moved 26 of 65 `unknown` causes to `removed_ahead`.
+The old `queue-fail-fast` watch loop wrote a `queue-rebuild-<run>-<attempt>` record whenever it found its group stale, until [pull request 6984](https://github.com/the-cloud-clockwork/agentihooks/pull/6984) removed that call, and `scripts.ci_queue_rebuild` linked that record to a cause. [Pull request 5706](https://github.com/the-cloud-clockwork/agentihooks/pull/5706) taught it to read the entry ahead: it took the parent of the stale group's commit, found the merge group run built at that parent, read the pull request number from its `gh-readonly-queue/dev/pr-<number>-<sha>` branch, and recorded `removed_ahead` with that pull request, actor, reason and event when the pull request left the queue while the stale group ran. The group's own dequeue or requeue still ranked first. Over the 72 records of 19 October, replaying the reader moved 26 of 65 `unknown` causes to `removed_ahead`.
 
-[Pull request 7136](https://github.com/the-cloud-clockwork/agentihooks/pull/7136) deleted the record and the reader when the early `Gate — Required` verifier replaced the watch loop. The verifier rejects a stale group with `::error::queue group is no longer current` and writes no record; see [What the watcher reports](#what-the-watcher-reports). Name the entry ahead of a stale group by hand the same way:
+[Pull request 7136](https://github.com/the-cloud-clockwork/agentihooks/pull/7136) then deleted the record and the reader, since the early `Gate — Required` verifier had replaced the watch loop. The verifier rejects a stale group with `::error::queue group is no longer current` and writes no record; see [What the watcher reports](#what-the-watcher-reports). Name the entry ahead of a stale group by hand with these commands:
 
 ```bash
 R=repos/the-cloud-clockwork/agentihooks
@@ -1170,7 +1170,7 @@ PARENT=$(gh api "$R/git/commits/$HEAD_SHA" --jq '.parents[0].sha')
 gh api "$R/actions/runs?event=merge_group&head_sha=$PARENT" --jq '.workflow_runs[].head_branch'
 ```
 
-A `gh-readonly-queue/dev/pr-<number>-<sha>` branch names the pull request ahead; read its removal events with the timeline query under [Repeat the measurement](#repeat-the-measurement) and keep the removal inside the stale run's window. A plain `dev` branch means the parent was `dev` itself, so no entry was ahead. An enqueue ahead, a base push or a ruleset change still leaves no event that names it.
+A `gh-readonly-queue/dev/pr-<number>-<sha>` branch names the pull request ahead; read its removal events with the timeline query under [Repeat the measurement](#repeat-the-measurement) and keep the removal inside the stale run's window. When no `gh-readonly-queue/` branch is listed, no queue run was built at the parent and no entry ahead can be named this way. An enqueue ahead, a base push or a ruleset change leaves no removal event; search the [queue journal](#the-queue-journal) for an enqueue inside the run's window.
 
 ## Merge queue churn measurement
 
@@ -1285,18 +1285,20 @@ The argument is passed to GitHub's `created` filter, so a `YYYY-MM-DD` day count
 
 1. It lists every `merge_group` run of the Tests workflow created that day, all pages, and keeps the runs whose conclusion is not `success`.
 2. For each run it reads all jobs and treats a job as red when its conclusion is anything but `success` or `skipped`, an unfinished job included.
-3. A run with a `Queue gate summary` job uses the current workflow: it counts only when `Gate — Required` is red and no job other than `Gate — Required` and `Queue gate summary` is red. A run without that job uses the old workflow: its red jobs must be exactly `queue-fail-fast` and `Gate — Required`.
+3. A run with a `Queue gate summary` job uses the current workflow, in place since [pull request 6984](https://github.com/the-cloud-clockwork/agentihooks/pull/6984) on 25 October: it counts only when `Gate — Required` is red and no job other than `Gate — Required` and `Queue gate summary` is red. An earlier run has no such job and uses the old workflow: its red jobs must be exactly `queue-fail-fast` and `Gate — Required`.
 4. A counted run reads the annotations of its watcher job, `Gate — Required` in the current workflow and `queue-fail-fast` in the old one. An annotation containing `queue group is no longer current` lists the run under `rebuilds`; otherwise it is listed under `drops`.
 
 A run with any other red job, such as a failed unit shard, is in neither list: that is the entry's own failure. A `drops` run is the one to inspect for runner loss, as in [Checking a watcher run](#checking-a-watcher-run).
 
-On 19 October the earlier counter, which read only the red job names, reported four drops. Two of them, [run 39342371515](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39342371515) and run 39276078948, carried the stale group report and are rebuilds, so the misread drops went from two to none.
+On 19 October the earlier counter, which read only the red job names, reported four drops. Two of them, [run 39342371515](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39342371515) and run 39276078948, carried the stale group report and are rebuilds. This counter reports two drops and two rebuilds for that day, so its misread drops fell from two to none.
 
 | Symptom | Action |
 |---|---|
-| Both lists empty on a busy day | Check that the day is UTC. A failed `gh api` read exits with an error instead of printing, and a rate limit prints `GitHub API rate limit reached; waiting <n> seconds for the reset` and continues |
+| Both lists empty on a busy day | Check that the day is UTC and that the runs were Tests merge group runs |
+| `GitHub API rate limit reached; waiting <n> seconds for the reset` on stderr | The counter waits for the reset and continues; the JSON prints when it finishes |
+| A traceback and no JSON | A `gh api` read failed, or rate limit waits passed their 900 second budget; check `gh auth status` and rerun |
 | A run is missing from both lists | It has another red job, or `Gate — Required` passed; read its jobs with the commands above |
-| Fewer runs than the day held | The runs endpoint returns at most 1000 results per query; count a busier day in smaller `created` ranges |
+| Fewer runs than the day held | [The runs endpoint](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-workflow) returns at most 1000 results for a query filtered by `created` or `event`; pass a smaller range such as `2026-10-19T00:00:00Z..2026-10-19T11:59:59Z` and add the counts |
 
 ### Measurement limits
 
