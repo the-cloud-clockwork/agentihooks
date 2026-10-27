@@ -20,11 +20,17 @@ from dataclasses import asdict
 from hooks.context.conditions import INBOX_SEND
 from hooks.filters import check as filters
 from scripts.inbox import links, outbox
-from scripts.inbox.store import DuplicateItem, InboxError, InboxStore, Unreachable, close_reason, connect
+from scripts.inbox.store import (
+    OPERATOR,
+    DuplicateItem,
+    InboxError,
+    InboxStore,
+    Unreachable,
+    close_reason,
+    connect,
+)
 from scripts.swarm_ledger import ledger_comments
 from scripts.swarm_v2 import master_fence
-
-OPERATOR = "operator"
 
 SWARM = "swarm"
 

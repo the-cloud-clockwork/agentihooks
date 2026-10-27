@@ -652,7 +652,8 @@ class InboxStore:
         sender = self.names.resolve(sender)
         door = master_of(sender, self.names)
         held = sender if is_seat(sender) else self.seats.seat_of(sender)
-        return door, bool(door) and (held == door or (not held and lane_of(sender) == MASTER))
+        unseated = not held and lane_of(sender) == MASTER
+        return door, bool(door) and (held == door or (unseated and self.seats.occupant(door).occupant in ("", sender)))
 
     def _refer(self, item: "Item", replier: str, door: str, text: str, fyi: bool, answer_id: str) -> "Item":
         """Only the front door answers the operator: another agent's answer and his item go to it."""
@@ -674,6 +675,8 @@ class InboxStore:
             raise InboxError("a reply needs text")
         door, holds = self.front_door_of(replier)
         if item.sender == OPERATOR and door and not holds:
+            if item.state in CLOSED:
+                raise InboxError(f"message {item_id} is closed: {item.reason}")
             return self._refer(item, replier, door, text, fyi, answer_id)
         key = self.key("item", item_id)
         field = f"reply:{replier}"

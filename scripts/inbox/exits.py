@@ -142,7 +142,7 @@ def _close_world(inbox: "InboxStore", slug: str) -> None:
                 inbox.withdraw(item.id, BY, f"cancelled: swarm closed; {address} has no further work", address)
 
 
-def notice_address(inbox: "InboxStore", sender: str, receiver: str = "") -> str:
+def notice_address(inbox: "InboxStore", sender: str, receiver: str) -> str:
     from scripts.inbox.seats import is_seat, master_of
     from scripts.inbox.store import OPERATOR
     from scripts.swarm.store import RedisStore
