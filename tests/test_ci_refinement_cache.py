@@ -19,8 +19,7 @@ def test_optional_refinement_cache_retries_fit_inside_the_job_budget():
     assert retry["if"] == f"!cancelled() && steps.{first['id']}.outcome == 'failure'"
     assert "success()" in first["if"]
     assert first["if"] == (
-        "success() && steps.merged-stats.outputs.found == 'true'"
-        " && steps.cache-budget.outputs.available == 'true'"
+        "success() && steps.merged-stats.outputs.found == 'true' && steps.cache-budget.outputs.available == 'true'"
     )
     assert not any("hashFiles" in step.get("if", "") for step in saves)
     check = next(step for step in steps if step.get("id") == "merged-stats")
@@ -44,7 +43,7 @@ def test_refinement_skips_cache_without_time_for_both_attempts(tmp_path, elapsed
     job = yaml.safe_load(workflow.read_text())["jobs"]["refine"]
     start = next(step for step in job["steps"] if step.get("id") == "refinement-start")
     assert job["steps"][0] == start
-    assert 'started=$(date +%s)' in start["run"]
+    assert "started=$(date +%s)" in start["run"]
     budget = next(step for step in job["steps"] if step.get("id") == "cache-budget")
     assert budget["env"] == {"REFINEMENT_STARTED_AT": "${{ steps.refinement-start.outputs.started }}"}
     clock = tmp_path / "date"
@@ -53,7 +52,12 @@ def test_refinement_skips_cache_without_time_for_both_attempts(tmp_path, elapsed
     output = tmp_path / "output"
     subprocess.run(
         ["bash", "-e", "-c", budget["run"]],
-        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "REFINEMENT_STARTED_AT": str(1000 - elapsed), "GITHUB_OUTPUT": str(output)},
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "REFINEMENT_STARTED_AT": str(1000 - elapsed),
+            "GITHUB_OUTPUT": str(output),
+        },
         check=True,
         timeout=2,
     )
