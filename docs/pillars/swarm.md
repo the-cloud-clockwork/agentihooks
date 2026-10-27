@@ -143,8 +143,9 @@ follow up, question, blocked task and done task, each phase it ticks or reopens,
 
 The master recycles like any agent: at `AGENTIHOOKS_COMPACT_LIMIT` it writes a handoff document and runs
 `agentihooks swarm <id> handoff <doc>`. The next tick retires it and spawns the next master with the document,
-so one master is always online. `issue`, `pr`, `done` and `block` refuse the master. The swarm panel on the
-ledger page shows the master as the first card.
+so one master is always online. A master busy with no tool call past the stall threshold is recycled the same
+way without its own document: see [Stalled master recycle](#stalled-master-recycle). `issue`, `pr`, `done` and
+`block` refuse the master. The swarm panel on the ledger page shows the master as the first card.
 
 Before the tick retires a live master that reported its hook, for any reason (a live binding mismatch, a failed
 launch check, the idle limit or a stopping swarm), it sends that master an inbox item asking for a Handoff v2 and
@@ -152,6 +153,60 @@ waits up to `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5; 0 retires at
 retired and its successor starts from the document; one that does not is retired at the deadline. A record field
 the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
 `swarm status` flags it as a live binding finding, and it never retires the agent.
+
+### Stalled master recycle
+
+Each tick checks the live master of a running swarm. A master whose pane reads `working` while it has made no tool
+call for `AGENTIHOOKS_HEALTH_STALLED_MINUTES` (default **10**) is stalled: the tick sends it an inbox item asking for
+a Handoff v2, waits up to `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5), then recycles it in its seat with a
+recovery handoff and the reason `busy with no tool call for <n> minutes`. When the stall ends before the deadline (the
+master makes a tool call, its pane leaves `working` or it declares a wait), the request is withdrawn with `the master
+resumed work`. A stalled master of a proof swarm whose parent task is blocked stops the proof swarm instead.
+
+The quiet time counts from the master's last finished tool call, or from its session start when that is later.
+The check does not count while:
+
+| Condition | Why |
+|---|---|
+| The pane is not `working` | An idle master is waiting for input, not stalled. |
+| The master declared a wait | `swarm <slug> wait` names what it waits on. |
+| It started under six minutes ago | Startup grace. |
+| It has no recorded tool call, or none has finished since the last one began | It is inside a tool call. |
+| A tool call is still open | A long command or a subagent's `Agent` call is running. |
+
+The PreToolUse hook records each call as open under its tool use id, and the hook that ends a call closes it and
+writes the finished time. A call denied by an early PreToolUse guard, before the call is recorded, only gets its
+finished time. Three events end a call:
+
+| Event | What happened to the call |
+|---|---|
+| `PostToolUse` | It ran and succeeded. |
+| `PostToolUseFailure` | It ran and failed. |
+| A PreToolUse hook block | A guard or gate denied it, so it never ran and no post tool event follows. The hook closes it before it returns the block. |
+
+A failed or denied call therefore ends the call for the stall check exactly like a successful one, and a master that
+stalls right after one is recycled on time. Before
+[pull request 7569](https://github.com/the-cloud-clockwork/agentihooks/pull/7569), a call denied by the PreToolUse
+hook stayed open, so a master that stalled right after one read as mid tool and was never recycled. Only a hook
+block ends the call there: an error inside the hook itself leaves it open. A call refused at the permission prompt
+carries no tool use id; the session's turn end, an unblocked Stop, clears every open call it left.
+
+The records live under `$AGENTIHOOKS_HOME/swarm-activity/<slug>/` (default `~/.agentihooks/swarm-activity`):
+`<name>.last` holds the time the last call began, `<name>.done` the time the last call ended, and `<name>.open/` one
+entry per call still running. To see why a master is or is not counted as stalled:
+
+```bash
+A=~/.agentihooks/swarm-activity/<slug>
+cat "$A/master@<code>-<n>.last" "$A/master@<code>-<n>.done"   # millisecond timestamps
+ls "$A/master@<code>-<n>.open"                                # empty: no call in flight
+agentihooks swarm <slug> status --json                        # the stalled finding and its minutes
+```
+
+An entry left in `.open/` while the master sits stalled names the call that never ended; compare it with the
+master's last tool call before raising a finding. Change the threshold through the environment of the process that
+runs the tick, as described in [Configure the threshold](#configure-the-threshold). The same variable sets the
+`stalled` health finding, which counts from the last call start and ignores open calls, so a master inside a long
+call can show the finding while the recycle does not fire.
 
 ### Adopting a live master with no agent record
 
@@ -414,6 +469,35 @@ other item, and one whose owner seat has no live master, reaches the lead. Every
 claimant takes reaches the lead, the front door, whatever phase or hive it is about, and so does page chat naming a
 backend master; only a sync order and the `@swarm` information copy reach every live agent. The lead hands work to
 backend masters over the masters channel. While the lead seat is empty the lowest numbered live master answers.
+
+#### A new master beside a starting front door
+
+`master up --new`, and the new master offered when `master up` cannot resume the last one, never seat a master
+beyond the master seat count while the front door master is still coming up. The front door is coming up when a
+master record holding the lead seat (`master@<id>`, or no seat recorded) is in state `starting` or `suspect`, live
+or not. The launcher then takes the lowest free master seat, `master-2@<id>` and up; a seat is held by any agent
+record on it that is not `finished`, or a `finished` one whose session still runs. When that seat number is above
+the count from `set masters=N` (default 1), nothing starts and the command exits non zero with:
+
+```text
+the front door master <name> is starting and every master seat is held (master seat count 1), so no other master starts; the tick binds or replaces it, or run master up --replace to retire it first
+```
+
+When the free seat is within the count, the new master takes it beside the starting front door, as for a live
+front door. A front door that is live and past `starting` and `suspect` does not apply the count: the new master
+takes the next free seat beside it. `--replace` skips the check: it retires a live front door first and the new
+master takes `master@<id>`. With the default count of 1, a second master started while the front door comes up
+would hold a backend seat that owns no phase.
+
+```bash
+# Who holds each master seat and in what state
+agentihooks swarm <id> status
+# Wait for the tick to bind or replace the starting front door, or raise the count for a second master
+agentihooks swarm <id> set masters=2
+agentihooks swarm <id> master up --new
+# Or retire the front door and start a fresh one on master@<id>
+agentihooks swarm <id> master up --replace
+```
 
 ### Master pool
 
@@ -898,7 +982,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> close [--note TEXT] [--now]` | Close the ledger, with open tasks, follow ups or questions left or not: write a Summary section into the ledger overview, built from the ledger (merged tasks with their pull request links, tasks still open, follow ups still open, questions unanswered, phases done out of total, `--note` as a plain words paragraph on top), take a snapshot, retire every agent with the master last, put claimed tasks back to open, mark the ledger closed with `closed_at` and leave the swarm stopped. Settings, culture, seats and learned notes stay. While a master is live, `close` (and the ledger page's Close button, which runs the same command) hands the close to it as an inbox item instead; the master writes its paragraph and runs `close --note`. Without a live master, run by the master itself or with `--now`, it closes at once. The page then shows a Closed banner and HOME lists the ledger under Closed. |
 | `agentihooks swarm <id> reopen` | Reopen a closed ledger, retaining its Summary as history and running with the kept settings. A removed swarm is recreated from its newest snapshot. The tick starts a fresh master in the master seat; its prompt carries the summary and asks it to name that summary in its first ledger chat line. Engineers start only for eligible open tasks. The Closed banner and closed HOME card both run this command. A master still retiring must exit first. With no task left to start, the swarm drains and the master stays online. |
 | `agentihooks swarm <id> take-master [--replace]` | Run inside any Claude or Codex session to make it the swarm's master; the `take-master` skill runs it when the operator types "you are the master of ledger <id>". Refuses while another master is live; `--replace` retires that master first, and a dead master record is dropped. A session without `AGENTIHOOKS_AGENT_NAME` is named `master@<code>-<n>` on its session registry record, so `terminate-agent`, the tick and the inbox see it under that name. The session occupies the `master@<id>` seat and its agent record keeps the tick from spawning a second master. A closed ledger is reopened and a stopped or stopping swarm set running. Prints the full master priming: seat handoff, culture, recaps, learned notes, ledger summary and standing duties. |
-| `agentihooks swarm <id> master up [--last\|--new\|--replace]` | Run from a plain terminal to bring a master online. Without a flag it shows the last master (name, harness, when it last ran) and asks one question: 1 brings back the last master by reopening its own Claude or Codex conversation (`init-agent --resume`) in the `master@<id>` seat; 2 starts a new master through the tick's launch path, primed with the seat handoff, culture, recaps and learned notes. The last master is the newest master, from the agent registry or the swarm history. When it cannot be resumed (still running, no conversation id, harness not recorded, swarm repo gone, account out of quota, resume did not start) it says why and offers the new master; it never switches silently. An unclear answer is asked again, three tries in all. `--last` and `--new` answer without a prompt; `--last` that cannot resume exits non zero. A saved launch assignment or handoff launch missing a profile, harness, model or effort takes it from the swarm config: the master lane profile (default `master`), the master affinity harness (default claude) and the frontier model at an effort inside the swarm range. A live front door master does not stop it: the new master takes the lowest free master seat (`master-<n>@<id>`) and its own title `master <n> · <id>`, so two masters run side by side on distinct seats. A master seated this way holds no phase until the master seat count reaches its seat. `--replace` (exclusive with `--last` and `--new`) retires the live front door master first and the new one takes `master@<id>`; a front door that will not retire starts nothing. `--last` never resumes onto a live front door: it says why and offers the new master. The master joins the ledger as orchestrator; a closed ledger is reopened and a stopped swarm set paused. Prints the master, pane, seat and choice as JSON; a failed launch prints the reason and exits non zero. |
+| `agentihooks swarm <id> master up [--last\|--new\|--replace]` | Run from a plain terminal to bring a master online. Without a flag it shows the last master (name, harness, when it last ran) and asks one question: 1 brings back the last master by reopening its own Claude or Codex conversation (`init-agent --resume`) in the `master@<id>` seat; 2 starts a new master through the tick's launch path, primed with the seat handoff, culture, recaps and learned notes. The last master is the newest master, from the agent registry or the swarm history. When it cannot be resumed (still running, no conversation id, harness not recorded, swarm repo gone, account out of quota, resume did not start) it says why and offers the new master; it never switches silently. An unclear answer is asked again, three tries in all. `--last` and `--new` answer without a prompt; `--last` that cannot resume exits non zero. A saved launch assignment or handoff launch missing a profile, harness, model or effort takes it from the swarm config: the master lane profile (default `master`), the master affinity harness (default claude) and the frontier model at an effort inside the swarm range. A live front door master does not stop it: the new master takes the lowest free master seat (`master-<n>@<id>`) and its own title `master <n> · <id>`, so two masters run side by side on distinct seats. A master seated this way holds no phase until the master seat count reaches its seat. A front door still `starting` or `suspect` is different: a new master starts only in a free seat within the master seat count, else the command exits non zero naming the front door ([A new master beside a starting front door](#a-new-master-beside-a-starting-front-door)). `--replace` (exclusive with `--last` and `--new`) retires the live front door master first and the new one takes `master@<id>`; a front door that will not retire starts nothing. `--last` never resumes onto a live front door: it says why and offers the new master. The master joins the ledger as orchestrator; a closed ledger is reopened and a stopped swarm set paused. Prints the master, pane, seat and choice as JSON; a failed launch prints the reason and exits non zero. |
 | `agentihooks swarm <id> <profile> up` | Run from a plain terminal to open any role or overlay profile for yourself: a base role (`planner`, `engineer`, `qa`, `cicd`) or an installed overlay whose chain resolves to one, such as `frontend`. `master` is refused (use `master up`), as is a profile that is not installed or has no base role. It opens a quota routed Claude session in a pane of the swarm's herdr space with that profile, the inbox channel loaded, the frontier model, and `AGENTIHOOKS_SWARM` bound with lane `operator` and no task. The name comes from the swarm name registry by the role's kind (`planner@<code>-<n>`, `engineer@…`, `ci@…`) and its registry entry is marked as an operator launch. It is never put in the agent registry: it claims no task, takes no lane slot, and the tick neither nudges nor retires it; the context recycle gate skips it. It answers to you in its pane. A planner plans with you and, on your accept, appends the plan as manual phases (`ledger plan phases`), publishes it (`ledger publish-plan`), adds tasks to those phases, tells the master by inbox and ends with `swarm <id> exit`. The ledger records who appended each phase (`added_by`), and a planner holding no plan task may add tasks only to phases it appended. Other roles work with you and exit when you say so. Prints the name, pane, profile and role as JSON; a failed launch retires the name, prints the reason and exits non zero. |
 | `agentihooks swarm <id> agent-up <profile>` | The same launch as `<id> <profile> up`, in its parser form. |
 | `agentihooks swarm <id> exit` | An agent launched with `<profile> up` retires its own name and ends its session. Any other name is refused. |
@@ -1092,6 +1176,9 @@ agentihooks ledger \
   "Remove the size allowance while fixing the size gate." \
   --quote "Remove the size allowance too."
 ```
+
+The ledger checks the quote against the operator's recorded words; a hosted ledger reads them from the shared swarm
+Redis. See [Relayed operator words](../reference/hosted-ledger-auth.md#relayed-operator-words).
 
 ### Retrace and inspect the result
 
@@ -2832,6 +2919,98 @@ reads `timed out`, `gave no answer` or `answered with a server error`) and one
 `hive_samples` row per registered hive (`hive`, `name`, `live`,
 `heartbeat_age_s`, -1 when the hive never beat). A hive recovery is a
 `hive_samples` row with `live` 1 after one with `live` 0 for the same hive.
+
+### Spawn holds in the stage report
+
+A host sample with held spawns records who holds them. The stage report and
+the bottleneck remedy read that record.
+
+**Who holds the spawns.** Each collector pass picks the first match:
+
+| Condition | `held_by` | `held_harness` | `reason` |
+|---|---|---|---|
+| The tick holds spawns for host room | `host` | empty | The tick's hold, for example `host memory room 0` |
+| A lane with held spawns has an open hive placement wait | `host` | empty | `hive placement: <wait reason>`, for example `hive placement: no hive for eng has room` |
+| Neither | `quota` | The harness every held lane is pinned to, else empty | The capacity reason, then one note per held lane pinned to a harness |
+
+A pin note reads `<count> <lane> spawn held on the <lane> lane pinned to
+<harness>`, plural `spawns` above one, in lane name order and joined with
+`; `. A lane set to `auto` gets no note. Example:
+
+```text
+accounts have quota; 2 eng spawns held on the eng lane pinned to codex
+```
+
+That reason says accounts have quota and the lane pin holds the spawns. A
+`host` reason says host or hive room holds them, so no harness change helps.
+
+**How a hold is charged.** The `top stages` line charges each second of a
+hold span to at most as many waiting tasks as the sample held spawns. The
+tasks that became ready earliest are charged first. Their other claim wait
+seconds, and every second of the remaining waiting tasks, stay claim wait and
+are reported as seat wait or queue wait. Two held spawns over one wall hour
+therefore read at most 2.0 task hours of `quota hold`, however many tasks
+wait. The hold count is one total per sample across lanes, so a hold can be
+charged to a waiting task on a lane that held nothing.
+
+**When the remedy moves a pinned lane.** A standing `quota_hold` or
+`launch_failure` finding over its threshold runs the bottleneck remedy at
+autonomy `delegate` or `full`, once per stage per window:
+
+1. The stuck harness is the one the finding names. A `quota_hold` finding
+   that names both harnesses resolves to the one an `eng` or `ci` lane is
+   pinned to; with both or neither pinned, the remedy proposes a task with
+   `the finding names no single stuck harness`.
+2. No `eng` or `ci` lane pinned to that harness: `no lane is pinned to
+   <harness>`.
+3. For `quota_hold`, accounts of the stuck harness with placeable room keep
+   the pin: `<harness> accounts still have room`.
+4. Under hive placement, a move to Claude needs a live hive that hosts the
+   lane's role and profiles (neither excluded), is not draining and reports room above 0. Without one, or
+   for any move to Codex, the workstation must run the hybrid deployment with
+   a herdr server, host the lane and fit the lane cap within
+   `local-max-agents`. Otherwise the remedy proposes a task with `no eligible
+   host places <target> for the <lane> lane`. Free Claude quota seats alone
+   never move the lane.
+5. The lane moves to the other harness with model `auto`, and the remedy
+   records `Moved the <lane> lane from <source> to <target> after <stage> at
+   <value> <unit>, over its <threshold> threshold.`
+
+Without hive placement the room check passes. Below autonomy `delegate`, every
+step is replaced by a proposal to the master.
+
+**Inspect.** Read the two lines from the status command, and the recorded
+holds from the ClickHouse `swarm.host_samples` table:
+
+```bash
+agentihooks swarm example-swarm status | grep -E "bottleneck|top stages"
+```
+
+```sql
+SELECT ts_ms, held_spawns, held_by, held_harness, reason
+FROM swarm.host_samples
+WHERE ledger = 'example-swarm' AND held_spawns > 0
+ORDER BY ts_ms DESC LIMIT 20
+```
+
+The bottleneck line reports `host held spawns` and `quota held spawns` as
+percent shares. The remedy's last action shows on the status line that starts
+`Top bottleneck`.
+
+**Measured effect.** Delivered by pull request
+[6030](https://github.com/the-cloud-clockwork/agentihooks/pull/6030) for issue
+[6026](https://github.com/the-cloud-clockwork/agentihooks/issues/6026). On the
+`rig-grade-swarm` swarm, `quota hold on codex` read 71.2 task hours over four
+hours before the fix (21:46 UTC, 22 October 2026) and 114.3 when the fix
+landed with quota held spawns at 26 percent. At 04:50 UTC on 23 October, with
+the whole window after the fix, it was below the third top stage at 13.5 task
+hours and quota held spawns read 0 percent.
+
+| Symptom | Cause and action |
+|---|---|
+| `quota hold on codex` leads while Claude accounts have quota | Read `reason` on the held samples. A pin note means the lane pin holds the spawns; the remedy moves the lane once a hive or the workstation has room for Claude. |
+| Remedy proposes `no eligible host places claude for the eng lane` | No live hive hosting the lane has room and the workstation cannot take the lane. Free hive room or end idle agents; the remedy retries in the next window. |
+| A hold reads `hive placement: …` | Hive room, not account quota, holds the spawns. Read the hive placement waits and the hive room before changing lane pins. |
 
 ### Troubleshooting
 
@@ -4632,8 +4811,8 @@ A detection pass reads:
 - **The watched tasks, once.** The CI detector and the trace detector share one read of the watched ledger's tasks.
 - **Every detector side by side.** Each detector runs in its own thread and is still timed as its own
   `doctor.<name>` step: `runtime storage`, `scheduled tick`, `health`, `inbox`, `handoff`, `spawn`,
-  `master launch`, `startup`, `context overrun`, `master prompt`, `ci`, `dev workflow` and, with telemetry on,
-  `trace`. A detector that raises is reported as `the <name> detector failed: <error type>: <message>` while the
+  `master launch`, `startup`, `context overrun`, `master prompt`, `ci`, `dev workflow`,
+  [`feature`](../reference/feature-live-checks.md) and, with telemetry on, `trace`. A detector that raises is reported as `the <name> detector failed: <error type>: <message>` while the
   others still report.
 - **Pull requests side by side.** The CI detector reads each open pull request of the watched tasks in a thread pool.
 - **Traces inside their budgets.** The trace detector reads active bindings and the historical backfill side by side,
@@ -5080,7 +5259,8 @@ Compare the finding with recent tool calls and the agent's progress. Inbox
 messages and task changes can show that work continued, but successful commands
 alone do not establish that the hook retained the identity needed to record
 activity. A finding is evidence to investigate; the master or operator judges
-it with `verdict`.
+it with `verdict`. For a master the same threshold also triggers the
+[stalled master recycle](#stalled-master-recycle).
 
 #### Wrapper loss and swarm identity
 
@@ -5141,6 +5321,102 @@ A verdict suppresses the finding under the existing cooldown rules; it does
 not update the activity clock. See the `verdict` command above for recurrence
 behavior and [Outage holds and recovery](#outage-holds-and-recovery) for provider
 or Redis outages, which have their own hold and resume behavior.
+
+### Stalled master recycle
+
+A master that shows busy with no tool call past the stall threshold is recycled by its swarm's tick through a
+recovery handoff in the same seat, so a stalled master never waits on the operator to stop it. A proof swarm's
+controls accept only the operator and its own master, so no other agent can stop a stalled proof master.
+
+Every tick of a swarm that is not stopping or stopped checks the swarm's live master. Its stall clock runs only
+when all of these hold:
+
+| Clock runs only when | Reason |
+|---|---|
+| The master's pane reports `working` | An idle or waiting pane is not stalled. |
+| The master has no declared wait (`swarm <id> wait`) | A declared wait is work in progress. |
+| The master has recorded at least one tool call and its end | A master whose first call is still running is inside a tool call. |
+| No tool call it began is still open | A long Bash, Monitor or Agent call, including an Agent call whose subagent runs its own tools, is never interrupted. |
+| Its session started more than six minutes ago | The startup grace covers launch. |
+
+The quiet time counts from the later of the last tool call's end and the session start. Once it reaches
+`AGENTIHOOKS_HEALTH_STALLED_MINUTES` (default 10, the same threshold as the [stalled finding](#stalled-activity-findings)),
+the tick acts in this order:
+
+1. **Proof swarm with a blocked parent task.** When the swarm is a proof swarm (`proof-<code>-<task>-<n>`) whose
+   creating task in its parent swarm is blocked, the tick sets the swarm to `stopping` instead of recycling the master.
+   The task id is compared without case or punctuation, so `t1199` and `T-1199` match. The tick journal line is
+   `stopped proof swarm <id>: its parent task is blocked and its master <name> stalled`.
+2. **Ask for a handoff.** A live master gets the same inbox item every master retire sends, asking it to write a
+   Handoff v2 and submit it with `agentihooks swarm <id> handoff <doc>`, and the tick waits up to
+   `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5). The journal lines are `asked <name> for a handoff before
+   retiring it: busy with no tool call for <n> minutes`, then `waiting on <name>'s handoff ...` on each later tick.
+   A master that hands off is replaced from its own document, as in [The master](#the-master).
+3. **Recycle.** At the deadline, or at once when the wait is 0 or the master is not live, the tick stores a recovery
+   handoff for the master seat, records a transfer with reason `stalled`, and marks the master `finished`. It never
+   kills the process here. The next master starts in the same seat from that handoff. The journal line is
+   `recycled master <name> in its seat after <n> minutes busy with no tool call`.
+
+While the ask is pending, the tick withdraws it as soon as the clock stops or falls back under the threshold: the
+master starts or finishes a tool call, declares a wait, or its pane leaves `working`. It closes the ask item as done
+with `the master resumed work` in every one of these cases, including a pane that went idle. Retire requests raised
+for other reasons are left alone.
+
+The recovery handoff is runtime written. Its envelope carries reason `recycle`, the master's name and seat and the
+ledger; its body marks Done, Stopped at and Decisions and promises as `unknown`, because the stalled master reported
+nothing, and its Next tells the successor to re-read the ledger and the master inbox. The successor reads the master
+inbox first.
+
+#### How the hooks feed the stall clock
+
+The clock reads the per agent activity records under `~/.agentihooks/swarm-activity/<id>/`, written by the swarm
+session's hooks:
+
+| Hook | Record |
+|---|---|
+| `PreToolUse` | The call's time (`<name>.last`) and an open marker named by its `tool_use_id` (`<name>.open/<id>`). |
+| `PostToolUse` and `PostToolUseFailure` | The call's end time (`<name>.done`), and removes its open marker. Claude reports failed calls only through `PostToolUseFailure`, which the base settings wire to the same hook. |
+| A `PreToolUse` the hook denies | Ends the call the same way, since a denied call gets neither post hook. |
+| `Stop` (heartbeat turns idle) | Drops every open marker left over at turn end. |
+
+A call id that is not 1 to 128 letters, digits, `_` or `-` records no open marker. An installation that predates the
+`PostToolUseFailure` entry needs `agentihooks init` again to install it; without it a failed call's marker stays until
+turn end.
+
+#### Configure
+
+The threshold and handoff wait are read by the process that runs the tick. For normal operation set them in the
+swarm timer's or controller's managed environment, as in [Configure the threshold](#configure-the-threshold), since
+the timer starts each tick as its own child process. A prefix on a manual tick affects only that invocation:
+
+```bash
+# Manual tick: recycle after 20 quiet minutes and give the master 3 minutes to hand off
+AGENTIHOOKS_HEALTH_STALLED_MINUTES=20 AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES=3 agentihooks swarm tick
+```
+
+`AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES=0` recycles without asking. There is no separate switch: raising the
+threshold delays the recycle.
+
+#### Check a recycle
+
+```bash
+# Ask, wait, recycle and proof swarm stop lines from the tick journal
+journalctl --user -t agentihooks-swarm --since "-1 day" --no-pager \
+  | grep -E "busy with no tool call|stopped proof swarm"
+
+# Recorded transfers; a stalled master recycle has reason "stalled"
+agentihooks swarm <id> status --json | jq '.transfers[] | select(.reason == "stalled")'
+
+# Tool calls the master still has open; an entry here holds the clock
+ls ~/.agentihooks/swarm-activity/<id>/<master name>.open/
+```
+
+| Symptom | Cause and check |
+|---|---|
+| A master busy for longer than the threshold is not recycled | A tool call is still open, it declared a wait, its pane does not read `working`, or the swarm is stopping. List its open markers; a leftover one from a failed call means the `PostToolUseFailure` hook is not installed. |
+| The ask arrives but the master keeps working | Expected: its next tool call withdraws the ask as resumed. |
+| A proof swarm stopped instead of recycling its master | Its parent task is blocked. Nothing restarts the proof swarm when the parent task is unblocked; run `agentihooks swarm <id> start` to continue the proof. |
+| The successor starts with unknown Done and Stopped at | Expected for a recovery handoff; it rebuilds its state from the ledger and the master inbox. |
 
 ### Spawn stall findings
 
@@ -5562,6 +5838,8 @@ The special measurement rule applies only to `tune` tasks measuring `code` or
 `ci` dependencies. Dependencies of other kinds follow the usual dependency
 rules. There is no separate enable flag or measurement delay setting.
 
+To count Doctor verdicts over a window, including repeated judgments of one finding, use `agentihooks doctor <slug> verdict-log`; see [Doctor verdict history](../reference/doctor-verdicts.md).
+
 ### Configure and inspect a measurement task
 
 For example, a master can create an after window task for an existing fix
@@ -5769,6 +6047,26 @@ writers above or `task set`.
   time; set `contract.after_at` or clear the field with `task set ID awaiting=`.
 - **No label appears.** Check the task's `state`: a `done` task never shows one. Otherwise set the field with
   `task set`, never by writing the ledger database.
+
+## Stability probes
+
+`agentihooks swarm <id> probe` reads the live swarm and prints one tab separated line per invariant: `pass` or
+`fail`, the invariant and its measured number.
+
+| Invariant | Pass when |
+|---|---|
+| every hive live | at least one hive is registered and every registered hive heartbeat is fresh |
+| every hive agent joins and writes the ledger | each running agent of the swarm placed on a hive other than `root` has a join report that passed ledger join and ledger write |
+| launch success hive H harness N | started launches over started and failed ones in the window reach the minimum rate; a window with no launches passes as `launch success` and says so |
+| full task list reads per minute | timed full task list reads from the swarm's ledger reach the minimum rate |
+| workstation agents at or under the root cap | the tick's whole machine worker count fits the `root` hive's max agents; the swarm local limit is shown beside it. Counted only when the probe runs on `root` |
+| merge queue groups moving | the dev merge queue is empty or merged inside the stall window; a queue with no merge observed fails |
+| release age | the latest GitHub release is no older than the maximum |
+
+Thresholds live in `scripts.swarm.probe.Thresholds`. A reader that fails prints `fail` with `unread:` and the
+error. Run off `root`, the root cap line prints `fail` with `unread: SwarmError: counted only on the root hive`
+because the tick's count scans the processes of the host it runs on; that line is not an over cap result. The
+command exits zero whatever the lines say.
 
 ## Agent status comments
 

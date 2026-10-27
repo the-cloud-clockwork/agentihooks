@@ -177,6 +177,8 @@ def _show(repo: Path, revision: str, path: str) -> str | None:
 
 def changes(repo: Path, base: str, head: str) -> list[tuple[str, str | None, str | None]]:
     paths = _git(repo, "diff", "--no-renames", "--name-only", base, head).splitlines()
+    # A numstat diff fetches every missing blob of a blobless clone in one request; each show would fetch its own.
+    _git(repo, "diff", "--no-renames", "--numstat", base, head, "--", "*.py")
     found = []
     for path in paths:
         if path.endswith(".py"):
