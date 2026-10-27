@@ -231,7 +231,7 @@ class HiveLaunch:
 
     def _spend(self, selected: Selection | placement.Wait) -> Selection | placement.Wait:
         if isinstance(selected, Selection) and selected.master_placement is None:
-            for hive in self.hives():
+            for hive in self._pass_hives[1]:
                 if hive["id"] == selected.hive:
                     hive["room"] -= 1
         return selected
