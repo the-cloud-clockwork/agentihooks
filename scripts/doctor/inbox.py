@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from scripts.doctor.words import gist, plural
 from scripts.inbox.seats import is_seat
-from scripts.inbox.store import CLOSED
+from scripts.inbox.store import CLOSED, OPERATOR
 from scripts.inbox.wake import TO_MASTER, TO_OPERATOR, WOKEN
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 
@@ -45,6 +45,8 @@ def _route(item):
 
 
 def _recipient(item, receivers):
+    if item["address"] == OPERATOR:
+        return "shown by the ledger page relay"
     receiver = (receivers or {}).get(item["address"])
     if receiver is None:
         return "recipient state unavailable"
@@ -91,11 +93,12 @@ def past_window(items, now_ms, window_ms, receivers=None):
             continue
         minutes = waited // MINUTE_MS
         mismatch = _task_mismatch(item, receivers)
-        category = (
-            "task ownership mismatch"
-            if mismatch
-            else ("unread delivery" if item["state"] == "pending" else "delivered backlog")
-        )
+        if mismatch:
+            category = "task ownership mismatch"
+        elif item["state"] != "pending":
+            category = "delivered backlog"
+        else:
+            category = "page relay missed" if item["address"] == OPERATOR else "unread delivery"
         found.append(
             Finding(
                 "inbox past window",
