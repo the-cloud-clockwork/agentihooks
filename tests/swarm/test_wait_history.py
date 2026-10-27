@@ -114,22 +114,24 @@ def test_doctor_reads_ended_wait_history_for_historical_agents(redis, monkeypatc
     from scripts.swarm.store import AgentRecord, RedisStore
 
     store = RedisStore(redis)
-    store.start_execution("sw", AgentRecord("engineer", "eng", "task", hive=hive, seat="eng-1@sw"))
+    name = store.next_name("sw", "eng")
+    store.start_execution("sw", AgentRecord(name, "eng", "task", hive=hive, seat="eng-1@sw"))
+    record["traces"][0]["tags"] = [f"agent:{name}"]
     ledger = SimpleNamespace(tasks=rows)
     from scripts.hive import remove, scope
 
     monkeypatch.setattr(scope, "member", lambda: hive)
-    idle.declare_wait(redis, "sw", "engineer", until, "proof", 60_000)
-    idle.end_wait(redis, "sw", "engineer", until)
+    idle.declare_wait(redis, "sw", name, until, "proof", 60_000)
+    idle.end_wait(redis, "sw", name, until)
     history = [{"at": 60_000, "until": until, "reason": "proof"}]
-    assert idle.wait_history(redis, "sw", "engineer") == history
+    assert idle.wait_history(redis, "sw", name) == history
     monkeypatch.setattr(scope, "joined", lambda redis: [hive] if hive else [])
     monkeypatch.setattr(scope, "member", lambda: "")
-    assert idle.wait_history(redis, "sw", "engineer") == history
+    assert idle.wait_history(redis, "sw", name) == history
     if hive == "removed-hive":
         remove.forget(redis, hive)
-    assert store.drop_agent("sw", "engineer", at=3_800_000)
-    assert idle.wait_history(redis, "sw", "engineer") == history
+    assert store.drop_agent("sw", name, at=3_800_000)
+    assert idle.wait_history(redis, "sw", name) == history
     found = detect.readers(store, ledger, "sw", 4_000_000, environ={})["trace"]()
     assert [f.id for f in found if f.kind == "turn gap"] == expected
 
