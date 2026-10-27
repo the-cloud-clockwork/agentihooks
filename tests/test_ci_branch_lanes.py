@@ -716,7 +716,22 @@ def test_a_trusted_mutation_leg_may_move_to_a_group_of_its_own_run(job, stage, i
     assert bool(found) == (change is not None)
 
 
-@pytest.mark.parametrize("change", [None, "group", "queue", "cancel", "name", "events", "job", "untrusted"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        None,
+        "group",
+        "queue",
+        "cancel",
+        "name",
+        "events",
+        "job",
+        "untrusted",
+        "trusted-name",
+        "trusted-events",
+        "extra-job",
+    ],
+)
 def test_only_the_trusted_chart_release_may_leave_the_shared_proof_lane(change):
     import copy
 
@@ -737,6 +752,12 @@ def test_only_the_trusted_chart_release_may_leave_the_shared_proof_lane(change):
         updated["jobs"]["publish"]["runs-on"] = "ubuntu-latest"
     elif change == "untrusted":
         baseline = None
+    elif change == "trusted-name":
+        baseline["name"] = updated["name"] = "Other release"
+    elif change == "trusted-events":
+        baseline[True] = updated[True] = {"workflow_dispatch": None}
+    elif change == "extra-job":
+        baseline["jobs"]["other"] = updated["jobs"]["other"] = {"runs-on": "ubuntu-latest"}
     found = lanes.problems(updated, baseline)
     assert bool(found) == (change is not None)
 
