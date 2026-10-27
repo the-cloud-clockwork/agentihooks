@@ -12,7 +12,7 @@ from scripts.ci_cpu_quota import quota_cpus, worker_count
 from scripts.ci_mutation.runner import prepare_workspace
 
 REPORT_ARTIFACT = "proof-reports"
-SPLIT_ALGORITHM = "duration_based_chunks"
+SPLIT_ALGORITHM = "least_duration"
 
 
 def nested_report(result: subprocess.CompletedProcess, junit: Path) -> str:
