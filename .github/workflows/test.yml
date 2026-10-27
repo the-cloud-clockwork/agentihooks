@@ -625,7 +625,7 @@ jobs:
           cd "$RUNNER_TEMP/grader"
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/selection"
-          "$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 12 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
+          "$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 20 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
 
       # Job outputs are protected, so each leg reads its files from this artifact.
       - name: Upload the selected legs

@@ -197,8 +197,8 @@ On a pull request, the `select` job in `.github/workflows/test.yml` runs `script
 
 | Scope | When | What runs |
 |---|---|---|
-| `full` | The change touches a harness file or a `conftest.py`, the selected tests would need more than twelve legs, or no test was selected and the change is not documentation only | `split`, `unit` and `shard-check`, the whole suite |
-| `selected` | One or more tests were selected and fit in twelve legs | `unit-selected`, one job per leg of about 180 stored seconds, on the `files_<leg>` line of the `selection` artifact the `select` job uploads |
+| `full` | The change touches a harness file or a `conftest.py`, or no test was selected and the change is not documentation only | `split`, `unit` and `shard-check`, the whole suite |
+| `selected` | One or more tests were selected | `unit-selected`, one job per leg of about 180 stored seconds, at most twenty legs, the full suite's unit shard count, with a larger selection balanced over twenty, on the `files_<leg>` line of the `selection` artifact the `select` job uploads |
 | `none` | Every changed file is documentation (`docs/` or a `.md` file) | no unit tests |
 
 The merge queue always runs the whole suite. `tests/test_suite_speed.py` holds two whole suite checks that read every test module mentioning `fakeredis`:
