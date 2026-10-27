@@ -334,7 +334,7 @@ def _pane_state(redis, slug, herdr, agent, now_ms, quiet):
 
 def _beat_state(redis, slug, agent):
     beat = idle.heartbeat(redis, slug, agent.name)
-    return idle.IDLE if beat and beat.get("state") != idle.WORKING else "unknown"
+    return idle.IDLE if beat and beat.get("state") != idle.WORKING else idle.WORKING
 
 
 def _typing(herdr, agent):
@@ -362,7 +362,7 @@ def _hive_wake(redis, host, agent):
     from scripts.hive.orders import CommandOrder, Orders
 
     order_id = f"wake:{agent.execution_id}:{agent.generation}:{uuid.uuid4().hex}"
-    slug = agent.seat.rpartition("@")[2]
+    slug = agent.seat.split("@")[-1]
     order = CommandOrder(order_id, "nudge", slug, agent.name, agent.execution_id, agent.generation, WAKE_TEXT)
     Orders(redis).command(host, order)
 

@@ -93,6 +93,7 @@ def test_the_wake_pass_orders_the_hive_to_wake_its_idle_legacy_codex_pane(redis,
     [order] = hive_wakes(redis)
     assert (order.action, order.slug, order.name, order.text) == ("nudge", "sw", remote.name, wake.WAKE_TEXT)
     assert (order.execution_id, order.generation) == (remote.execution_id, remote.generation)
+    assert order.id.startswith(f"wake:{remote.execution_id}:{remote.generation}:")
     assert wake.WOKEN in [e.get("event") for e in member.history(item.id)]
 
 
