@@ -13,6 +13,7 @@ SCENARIOS = [
     "scripts/packaging/compose-hive-smoke.sh",
     "scripts/packaging/compose-task-smoke.sh",
     "scripts/packaging/compose-recovery-drill.sh",
+    "scripts/packaging/swarm-init-smoke.sh",
 ]
 
 
@@ -95,6 +96,24 @@ def test_the_swarm_image_job_runs_every_scenario_in_one_parallel_step_on_the_bui
     assert job["env"]["SWARM_SMOKE_IMAGE"] == image
     for scenario in SCENARIOS:
         assert not any(step.get("run") == f"bash {scenario}" for step in steps)
+    python = next(i for i, step in enumerate(steps) if step.get("uses", "").startswith("actions/setup-python@"))
+    assert python < parallel[0]
+    assert steps[python]["with"]["python-version"] == "3.12"
+
+
+def test_the_compose_install_scenario_leaves_the_default_ports_to_swarm_init():
+    script = (ROOT / "scripts/packaging/swarm-smoke.sh").read_text()
+    compose = (ROOT / "compose.yaml").read_text()
+    taken = set()
+    for other in ("compose-hive-smoke.sh", "compose-task-smoke.sh", "compose-recovery-drill.sh"):
+        taken |= set(
+            re.findall(r'SWARM_\w*PORT="\$\{SWARM_\w*PORT:-(\d+)\}"', (ROOT / "scripts/packaging" / other).read_text())
+        )
+    for name, default in (("SWARM_PORT", "8765"), ("SWARM_REDIS_PORT", "6379")):
+        assert f"${{{name}:-{default}}}" in compose
+        bound = re.search(rf'{name}="\$\{{{name}:-(\d+)\}}"', script)
+        assert bound and bound.group(1) != default and bound.group(1) not in taken
+    assert re.search(r"^export [^\n]*\bSWARM_PORT\b[^\n]*\bSWARM_REDIS_PORT\b", script, re.MULTILINE)
 
 
 def test_the_two_compose_scenarios_bind_different_host_ports():
