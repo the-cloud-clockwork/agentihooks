@@ -862,7 +862,7 @@ def test_swarm_launch_replaces_only_the_inherited_gateway_key(monkeypatch, tmp_p
     assert all(value not in launcher for value in (managed, inherited, other))
 
 
-def _master_launch(tmp_path, companion: str, extra: dict[str, str]) -> dict[str, str]:
+def _master_launch(tmp_path, companion, extra):
     state = tmp_path / ".agentihooks"
     state.mkdir()
     (state / ".env").write_text("OTHER_KEY=file-other\n")
@@ -891,6 +891,7 @@ def test_a_master_launch_without_the_gateway_key_gets_the_named_email_refusal(tm
     launched = _master_launch(tmp_path, "UNRELATED=x\n", mail)
     assert "MCP_KEY_GATEWAY" not in launched
     sent = []
+    monkeypatch.setattr(mailer.EmailClient, "_instance", None)
     monkeypatch.setattr(mailer.EmailClient, "reachable", lambda self, timeout=3.0: False)
     monkeypatch.setattr(operator_email, "gateway_send", lambda *a: sent.append(a) or {"status": "sent"})
     assert operator_email.send("S", "T", launched, str(tmp_path)) == (
