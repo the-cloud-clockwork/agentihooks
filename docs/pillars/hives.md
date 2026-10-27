@@ -445,7 +445,7 @@ this default, `anton-first`, to round robin for load runs: placement keeps only 
 that list the swarm's repo, local or cloud (`placement-nodes=0`, the default, keeps every such hive), ignores
 `prefer`, and gives each agent to the kept hive running the fewest agents, counting launches already placed in the
 same tick. When every kept hive is full the launch waits rather than use another hive. The UI roles, `master`, `qa`
-and `frontend`, keep `anton-first`. `placement-mode=anton-first` switches back on the next tick.
+and `frontend`, and tasks pinned to a hive or to the workstation keep `anton-first`. `placement-mode=anton-first` switches back on the next tick.
 
 `eng`, `ci`, `plan` and `dispatch` prefer headless hives, and `master`, `qa` and `frontend` prefer UI hives.
 Placement tries the preferred kind first and takes the other kind only when no preferred hive taking the role has

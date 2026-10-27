@@ -55,3 +55,11 @@ def test_round_robin_leaves_ui_roles_on_their_ranked_hive(setup):  # noqa: F811
     config = replace(setup.config, placement_mode="round-robin", placement_nodes=1)
 
     assert setup.launcher.select(config, "eng", {"id": "task"}).hive == "ranked"
+
+
+def test_round_robin_keeps_a_task_pinned_to_a_hive_outside_the_node_limit(setup):  # noqa: F811
+    write_hive(setup, id="a")
+    write_hive(setup, id="b")
+    config = replace(setup.config, placement_mode="round-robin", placement_nodes=2)
+
+    assert setup.launcher.select(config, "eng", {"id": "task", "hive": "remote"}).hive == "remote"

@@ -153,8 +153,8 @@ def _pinned(hives: list[dict], task: dict, role: str) -> tuple[list[dict], place
     return kept, None if kept else placement.Wait(placement.NEEDS_WORKSTATION, role)
 
 
-def _by_mode(config: SwarmConfig, hives: list[dict], role: str, now: int) -> list[dict]:
-    if config.placement_mode != ROUND_ROBIN or role in registry.UI_ROLES:
+def _by_mode(config: SwarmConfig, hives: list[dict], task: dict, role: str, now: int) -> list[dict]:
+    if config.placement_mode != ROUND_ROBIN or role in registry.UI_ROLES or task.get("hive") or task.get("workstation"):
         return hives
     return placement.round_robin(hives, config.placement_nodes, config.repo, now)
 
@@ -281,7 +281,7 @@ class HiveLaunch:
         from scripts.swarm import local_slots
         from scripts.swarm.commands import hive_id
 
-        hives = _by_mode(config, hives, role, now)
+        hives = _by_mode(config, hives, task, role, now)
         if lane != placement.MASTER:
             for index, hive in enumerate(hives):
                 if hive["id"] == hive_id():
