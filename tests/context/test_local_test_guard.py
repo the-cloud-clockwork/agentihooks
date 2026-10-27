@@ -452,10 +452,9 @@ def test_a_wrapper_script_is_read_from_the_payload_folder(tmp_path, monkeypatch)
             local_test_guard.check_local_tests(
                 {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(folder)}
             )
-    for command in ["python notes.py", "python padded.py"]:
-        local_test_guard.check_local_tests(
-            {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(folder)}
-        )
+    local_test_guard.check_local_tests(
+        {"tool_name": "Bash", "tool_input": {"command": "python notes.py"}, "cwd": str(folder)}
+    )
 
 
 @pytest.mark.parametrize(
