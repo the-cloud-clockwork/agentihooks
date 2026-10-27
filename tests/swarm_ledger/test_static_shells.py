@@ -213,10 +213,10 @@ def test_the_asset_list_names_every_page_file_by_its_served_path():
     static = core.MODULES.parent
     assets = core.static_assets()
     assert (assets["palette.css"], assets["tooltips.js"]) == (core.PALETTE, core.TOOLTIPS)
-    assert {name for name in assets if name.startswith("home/")} == {"home/home.js"}
+    assert {name for name in assets if name.startswith("home/")} == {"home/home.js", "home/monitor.js"}
     assert {name for name in assets if name.startswith("css/")} == {f"css/{p.name}" for p in static.glob("css/*.css")}
     assert {name for name in assets if name.startswith("js/")} == {f"js/{p.name}" for p in core.MODULES.glob("*.js")}
-    assert len(assets) == 2 + len(list(static.glob("css/*.css"))) + len(list(core.MODULES.glob("*.js"))) + 1
+    assert len(assets) == 2 + len(list(static.glob("css/*.css"))) + len(list(core.MODULES.glob("*.js"))) + 2
 
 
 def test_the_page_version_separates_each_asset_name_from_its_bytes():

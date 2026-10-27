@@ -1,4 +1,5 @@
 import json
+import threading
 from unittest.mock import Mock
 
 import pytest
@@ -10,6 +11,7 @@ from scripts.hive import account_slots, daemon, registry
 pytestmark = pytest.mark.unit
 
 PUBLISH_HEADROOM = daemon.publish_headroom
+PUBLISH_HERDR_STATS = daemon.publish_herdr_stats
 
 
 @pytest.fixture
@@ -512,7 +514,7 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     backed_off = []
     monkeypatch.setattr(
-        daemon, "_back_off", lambda exc, failures: backed_off.append([t.args[3].is_set() for t in threads])
+        daemon, "_back_off", lambda exc, failures: backed_off.append([t.args[-1].is_set() for t in threads])
     )
     first, second, first_waiter, second_waiter = object(), object(), object(), object()
     threads = []
@@ -522,7 +524,7 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
             self.target, self.args, self.daemon = target, args, daemon
 
         def start(self):
-            assert all(thread.args[3].is_set() for thread in threads)
+            assert all(thread.args[-1].is_set() for thread in threads if thread.args[0] is not self.args[0])
             threads.append(self)
 
     beats = []
@@ -538,12 +540,65 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
     with pytest.raises(KeyboardInterrupt):
         daemon.run(Mock(side_effect=[(first, first_waiter), (second, second_waiter)]))
     assert beats == [first, second]
-    assert [(thread.target, thread.args[:3], thread.daemon) for thread in threads] == [
+    assert [(thread.target, thread.args[:-1], thread.daemon) for thread in threads] == [
         (daemon.publish_headroom, (first, first_waiter, "local"), True),
+        (daemon.publish_herdr_stats, (first, first_waiter, "local"), True),
         (daemon.publish_headroom, (second, second_waiter, "local"), True),
+        (daemon.publish_herdr_stats, (second, second_waiter, "local"), True),
     ]
-    assert backed_off == [[True]]
-    assert threads[1].args[3].is_set()
+    assert backed_off == [[True, True]]
+    assert threads[2].args[-1].is_set() and threads[3].args[-1].is_set()
+
+
+def ticks(monkeypatch, count):
+    """A scheduler wait that returns `count` times, then sets the stop event."""
+    stop, waits = threading.Event(), []
+
+    def wait(seconds, redis, timeout):
+        waits.append((seconds, redis, timeout))
+        if len(waits) > count:
+            stop.set()
+
+    monkeypatch.setattr(daemon, "scheduled_wait", wait)
+    return stop, waits
+
+
+@pytest.mark.parametrize(("ui", "published"), [("yes", 2), ("no", 0)])
+def test_herdr_stats_publish_on_the_scheduler_cadence_from_the_interface_hive_only(redis, monkeypatch, ui, published):
+    from scripts.hive import herdr_stats
+
+    redis.hset(registry.key("machine"), mapping={"name": "machine", "ui": ui, "heartbeat_at": "1"})
+    calls = []
+    monkeypatch.setattr(herdr_stats, "publish", lambda redis, now_ms: calls.append((redis, now_ms)))
+    monkeypatch.setattr(daemon.time, "time", lambda: 12.3456)
+    stop, waits = ticks(monkeypatch, 2)
+    PUBLISH_HERDR_STATS(redis, "waiter", "machine", stop)
+    assert waits == [(herdr_stats.EVERY_S, "waiter", herdr_stats.EVERY_S + daemon.WAKE_SLACK_S)] * 3
+    assert calls == [(redis, 12_345)] * published
+
+
+def test_herdr_stats_keep_their_cadence_through_a_failed_publish(redis, monkeypatch, capsys):
+    from redis.exceptions import RedisError
+
+    from scripts.hive import herdr_stats
+
+    redis.hset(registry.key("machine"), mapping={"name": "machine", "ui": "yes", "heartbeat_at": "1"})
+    monkeypatch.setattr(herdr_stats, "publish", Mock(side_effect=RedisError("down")))
+    stop, waits = ticks(monkeypatch, 2)
+    PUBLISH_HERDR_STATS(redis, "waiter", "machine", stop)
+    assert len(waits) == 3
+    assert capsys.readouterr().err.count("hive herdr stats publish failed (RedisError: down)") == 2
+
+
+def test_herdr_stats_end_when_their_wait_loses_the_connection(monkeypatch):
+    from redis.exceptions import ConnectionError
+
+    from scripts.hive import herdr_stats
+
+    monkeypatch.setattr(daemon, "scheduled_wait", Mock(side_effect=ConnectionError("lost")))
+    monkeypatch.setattr(herdr_stats, "publish", Mock())
+    PUBLISH_HERDR_STATS(object(), "waiter", "machine", threading.Event())
+    herdr_stats.publish.assert_not_called()
 
 
 def test_install_writes_the_service_and_enables_it(tmp_path):
