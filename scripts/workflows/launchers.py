@@ -34,7 +34,7 @@ class HeadlessProfile:
             )
             for index in range(stage.count)
         ]
-        with ThreadPoolExecutor(max_workers=None) as pool:
+        with ThreadPoolExecutor(max_workers=stage.count) as pool:
             results = list(pool.map(run_profile, requests))
         outcome = "pass" if all(result.status == "ok" for result in results) else "retry"
         return StageResult(outcome, [result.output for result in results])
