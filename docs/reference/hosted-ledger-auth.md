@@ -262,7 +262,7 @@ The `agentihooks ledger relay` command runs the same check on the master's machi
 `relay refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded`
 when it fails there.
 
-### Configuration
+### Relay configuration
 
 The workstation hooks and the hosted server must resolve the same Redis. Both use the swarm Redis client:
 
@@ -275,7 +275,7 @@ The workstation hooks and the hosted server must resolve the same Redis. Both us
 The Redis URL carries the credential that authenticates the read and the write. Keep it in `~/.agentihooks/.env` or
 the server's secret, never in code or a committed file.
 
-### Usage
+### Relay usage
 
 Relay a decision the operator typed in the master pane, quoting at least three of his words:
 
