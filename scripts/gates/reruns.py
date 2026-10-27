@@ -1,6 +1,7 @@
 """The CI rerun budget: at most two reruns per pull request head; a rerun of jobs cancelled before a runner took them is free."""
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -14,6 +15,9 @@ PASSED = frozenset({"success", "skipped", "neutral"})
 VALUE_FLAGS = {"-j": "job", "--job": "job", "-R": "repo", "--repo": "repo"}
 GH_TIMEOUT_SEC = 8
 RERUN_CAP = 2
+REST_RERUN = re.compile(
+    r"(?:^|/)repos/(?P<repo>[^/]+/[^/]+)/actions/(?P<kind>runs|jobs)/(?P<id>\d+)/rerun(?:-failed-jobs)?$"
+)
 
 
 @dataclass(frozen=True)
@@ -34,15 +38,25 @@ def _target(args):
     return Target(**found)
 
 
+def _rest_target(args):
+    for word in args:
+        found = REST_RERUN.search(word)
+        if found:
+            return Target(**{found["kind"][:-1]: found["id"], "repo": found["repo"]})
+    return None
+
+
 def targets(command):
     for words in simple_commands(command):
         index = program_index(words)
-        if (
-            index is not None
-            and PurePosixPath(words[index]).name == "gh"
-            and words[index + 1 : index + 3] == ["run", "rerun"]
-        ):
+        if index is None or PurePosixPath(words[index]).name != "gh":
+            continue
+        if words[index + 1 : index + 3] == ["run", "rerun"]:
             yield _target(words[index + 3 :])
+        elif words[index + 1 : index + 2] == ["api"]:
+            found = _rest_target(words[index + 2 :])
+            if found:
+                yield found
 
 
 def _api(path, run):
