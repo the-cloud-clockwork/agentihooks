@@ -2,7 +2,8 @@
   "scripts/gate_protected.py": [
     "83bc84176ac9882b9cc69deb41f95e27a3e54faf",
     "eb647d68d10805f68a7bb9ac7d495010a76840b9",
-    "1435b89cc781f9db3b1f954e78397eb0eb749f67"
+    "1435b89cc781f9db3b1f954e78397eb0eb749f67",
+    "63ddcdb32bf298bd81b39688d74b240997a43921"
   ],
   ".github/workflows/gate-protected.yml": [
     "d794eee5a317a353e437e19ff2c64498a86d6c5f"
