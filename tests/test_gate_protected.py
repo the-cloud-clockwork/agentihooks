@@ -1751,6 +1751,27 @@ def test_the_required_grader_refuses_a_head_that_rewrites_the_equivalence_gradin
     )
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo x >> "$output"',
+        'name=GITHUB_E""NV; echo x >> "${!name}"',
+        'echo x >> "$(printenv GITHUB_E""NV)"',
+        'echo x >> "`printenv GITHUB_E""NV`"',
+        'echo x >> "${{ env[format(\'GITHUB_{0}\', \'ENV\')] }}"',
+    ],
+)
+def test_equivalence_grading_refuses_later_indirect_environment_references(repo, capsys, command):
+    _commit_equivalence(repo, _equivalence(), "base grader")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _equivalence()
+    _after_page(command)(head)
+    planted = _commit_equivalence(repo, head, "indirect environment reference")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    assert "The head changes the ledger equivalence grading" in capsys.readouterr().out
+
+
 def test_the_required_grader_passes_equivalence_edits_outside_the_grading(repo, capsys):
     _commit_equivalence(repo, _equivalence(), "base grader")
     _git(repo, "checkout", "-q", "-b", "pr")
