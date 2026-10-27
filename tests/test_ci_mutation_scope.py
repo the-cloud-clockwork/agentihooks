@@ -486,7 +486,7 @@ def test_discovery_fetches_each_base_diff_in_one_request_before_reading_files(tm
     monkeypatch.setattr(scope.subprocess, "check_output", recorded)
     monkeypatch.setattr(scope, "select_tests", lambda root, path: [])
     scope.discover_changes(tmp_path, [first, second], "HEAD")
-    paths = ["--", "hooks/", "scripts/", "tests"]
+    paths = ["--", "hooks/*.py", "scripts/*.py", "tests/*.py"]
     assert calls[:2] == [
         (["git", "diff", "--no-renames", "--numstat", first, "HEAD", *paths], {"cwd": tmp_path}),
         (["git", "diff", "--no-renames", "--numstat", second, "HEAD", *paths], {"cwd": tmp_path}),

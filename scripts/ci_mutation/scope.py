@@ -64,9 +64,10 @@ def graded_green(sha: str) -> bool:
 def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, set[int]]:
     bases = own_bases(root, base, head) if isinstance(base, str) else base
     for own in bases:
-        # A numstat diff fetches every missing blob of a blobless clone in one request; each diff or show would fetch its own.
+        # One numstat diff fetches the missing blobs of a blobless clone; each diff or show would fetch its own.
         subprocess.check_output(
-            ["git", "diff", "--no-renames", "--numstat", own, head, "--", "hooks/", "scripts/", "tests"], cwd=root
+            ["git", "diff", "--no-renames", "--numstat", own, head, "--", "hooks/*.py", "scripts/*.py", "tests/*.py"],
+            cwd=root,
         )
     given, *newer = [changes_since(root, own, head) for own in bases]
     weak = [weakened_tests(root, own, head) for own in bases[1:]]
