@@ -94,6 +94,30 @@ def test_show_json_and_explicit_package_role(catalogue, capsys):
     }
 
 
+def test_output_is_indented_json(catalogue, capsys):
+    catalogue("bundle", "engineer", "Custom", ["code"])
+    assert cli().main(["show", "engineer"]) == 0
+    assert capsys.readouterr().out == (
+        '{\n  "name": "engineer",\n  "description": "Custom",\n  "capabilities": [\n    "code"\n  ]\n}\n'
+    )
+
+
+def _help(capsys, args):
+    with pytest.raises(SystemExit) as exc:
+        cli().main(args)
+    assert exc.value.code == 0
+    return " ".join(capsys.readouterr().out.split())
+
+
+def test_help_names_the_commands(capsys):
+    text = _help(capsys, ["--help"])
+    assert text.startswith("usage: agentihooks agents [-h] {list,show} ...")
+    assert "list List profile cards as JSON show Show one profile card as JSON" in text
+    text = _help(capsys, ["list", "--help"])
+    assert text.startswith("usage: agentihooks agents list [-h] [--capability CAPABILITY]")
+    assert "--capability CAPABILITY Require this declared capability" in text
+
+
 def test_missing_and_malformed_cards_are_errors(catalogue, capsys):
     with pytest.raises(ValueError, match="^Unknown agent profile: absent$"):
         cli().show_card("absent")
