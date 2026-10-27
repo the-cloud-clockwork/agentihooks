@@ -11,6 +11,8 @@ from dataclasses import dataclass, replace
 from scripts.gates import modes
 from scripts.gates.base import Who
 from scripts.gates.enforcement import NIGHT_WATCH
+from scripts.hive import placement_waits
+from scripts.hive.placement import HAS_ROOM, LOCAL_FULL
 from scripts.swarm import capacity, operator_email, redis_budget, tick_master, timing
 from scripts.swarm.health import merge_stall, spawn_stall
 from scripts.swarm.health.findings import MINUTE_MS, Finding
@@ -25,6 +27,7 @@ BUDGET_S = 30
 SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
 SOURCES = (SEAT, SPAWN, MERGE)
 HOST, QUOTA, CAP, SLEEP, TICK, UNNAMED = "host room", "quota", "cap", "sleep", "tick", "no named hold"
+LIMIT = "agent limit"
 SLEEPING = "the master retired with no new tasks, so the tick spawns nothing until a task is added"
 SEAT_ALERT = "The front door master seat of swarm {slug} has been empty for {minutes} minutes: {why}"
 SPAWN_ALERT = (
@@ -180,7 +183,23 @@ def held(watch, ready) -> tuple[str, str]:
         return QUOTA, decision.get("reason") or "no lane has a quota placement"
     if held_by := spawn_holds(watch.store, watch.slug):
         return TICK, held_by[0]
+    if limit := _agent_limit(watch, ready):
+        return LIMIT, limit
     return UNNAMED, decision.get("reason", "no quota decision")
+
+
+def _agent_limit(watch, ready) -> str:
+    since = watch.now_ms - placement_waits.FRESH_MS
+    waits = {
+        task: row
+        for task, row in placement_waits.read(watch.store, watch.slug).items()
+        if row["seen_at"] >= since and (f" {HAS_ROOM}" in row["reason"] or LOCAL_FULL in row["reason"])
+    }
+    covered = {(row["lane"], task) for task, row in waits.items()}
+    if any((lane, task["id"]) not in covered for lane, tasks in ready.items() for task in tasks):
+        return ""
+    local = json.loads(watch.store.redis.get(watch.store.key(watch.slug, spawn_stall.LOCAL_REFUSAL)) or "{}")
+    return spawn_stall.refusals(waits, local, since)
 
 
 def _spawn(watch, state):
@@ -198,6 +217,8 @@ def _spawn(watch, state):
     if watch.now_ms - episode["since"] < SPAWN_MS:
         return []
     hold, why = held(watch, ready)
+    if hold == LIMIT:
+        return _clear(watch, state, SPAWN, CLEARED.format(what=f"every ready task waits on an agent limit: {why}"))
     minutes = _minutes(watch, episode["since"])
     episode.update(hold=hold, why=why, waiting=waiting, minutes=minutes)
     text = SPAWN_ALERT.format(slug=watch.slug, waiting=waiting, minutes=minutes, hold=hold, why=why)

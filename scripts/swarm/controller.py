@@ -153,7 +153,7 @@ class FencedRuntime:
     def _local_refusal(self, lane: str, task: dict, name: str) -> str:
         if lane == "master":
             return ""
-        from scripts.hive import admission, registry
+        from scripts.hive import admission, placement_waits, registry
         from scripts.hive.placement import LOCAL_FULL, equipped, needs_refusal
         from scripts.swarm.commands import hive_id
 
@@ -165,7 +165,9 @@ class FencedRuntime:
         taken = local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum) if name else held
         if taken >= maximum:
             self._local_full(machine, taken, maximum)
-            return f"{LOCAL_FULL}{taken} of its {maximum} agents: {found.reason}: {found.detail}"
+            refused = f"{LOCAL_FULL}{taken} of its {maximum} agents: {found.reason}: {found.detail}"
+            placement_waits.observe(self.store, self.slug, lane, task["id"], refused, lease.now_ms(self.store))
+            return refused
         if name:
             admission.record(self.store.redis, machine, f"{self.slug}/{name}")
         return ""
