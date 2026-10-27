@@ -328,8 +328,7 @@ def recovery_exhausted(store: RedisStore, slug: str, agent: AgentRecord) -> bool
 
 
 def recovery_holds(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> bool:
-    """A pending recovery holds idle retirement while an outage is open and for a bounded window after the last one
-    closes, so a recovery that cannot proceed never keeps an idle holder past its retire line."""
+    """A pending recovery holds idle retirement only while an outage is open or closed under RECOVERY_HOLD_MS ago."""
     if not recovery_pending(store, slug, agent):
         return False
     records = outage.read(slug).values()
@@ -362,7 +361,7 @@ def _recovery_text(slug, agent, task):
     )
 
 
-def _recovery_blocker(store, slug, agent, context, live, observed):
+def _hold_reason(store, slug, agent, context, live, observed):
     if not _recovery_current(store, slug, agent, context):
         return "its task ownership changed"
     if not live or (not observed.provider_error and observed.state == idle.WORKING):
@@ -389,9 +388,10 @@ def recover_outages(
         observed = runtime.observe(agent)
         if record["last_at"] == now_ms:
             continue
-        if held := _recovery_blocker(store, slug, agent, context, agent.name in live, observed):
+        if held := _hold_reason(store, slug, agent, context, agent.name in live, observed):
             store.redis.hset(key, agent.name, json.dumps({**record, "blocked": held}))
             continue
+        record.pop("blocked", None)
         if agent.name in live and not observed.provider_error and observed.state == idle.WORKING:
             record["state"] = "done"
         else:

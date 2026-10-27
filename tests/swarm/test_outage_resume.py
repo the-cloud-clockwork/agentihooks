@@ -616,6 +616,18 @@ def test_an_owner_with_pending_input_is_not_prompted(store, tmp_path, monkeypatc
     assert resume.recovery_pending(store, "sw", agents[0])
 
 
+def test_a_recovery_held_by_pane_input_names_why_until_the_input_clears(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    holder = agents[0]
+    runtime.inputs[holder.name] = "half typed reply"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert resume.recovery_blocker(store, "sw", holder) == "its pane holds input"
+    runtime.inputs.pop(holder.name)
+    runtime.nudge_refusals[holder.name] = "pane busy"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 10 * MINUTE)
+    assert resume.recovery_blocker(store, "sw", holder) == f"1 of {resume.RECOVERY_ATTEMPTS} resume attempts made"
+
+
 def test_a_reopened_conversation_records_the_placement_it_reports(store, tmp_path, monkeypatch):
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
     dead = agents[2]
