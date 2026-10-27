@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from tests import branch_record, pass_record
+from tests import branch_record, dep_inputs, pass_record
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -80,14 +80,19 @@ def test_only_each_final_attempt_is_recorded_and_ci_results_never_reaches_the_te
     )
     assert run.returncode == 1, run.stdout + run.stderr
     rows = _results(results)
-    assert {row["test"]: row["outcome"] for row in rows} == {
+    finals = [row for row in rows if row["outcome"] != "started"]
+    assert {row["test"]: row["outcome"] for row in finals} == {
         "test_sample.py::test_env": "passed",
         "test_sample.py::test_retried": "flaky",
         "test_sample.py::test_skipped": "skipped",
         "test_sample.py::test_teardown_error": "failed",
         "test_sample.py::test_fails": "failed",
     }
-    assert len(rows) == 5
+    assert len(finals) == 5
+    starts = [row["test"].rsplit("::", 1)[1] for row in rows if row["outcome"] == "started"]
+    assert sorted(starts) == sorted(
+        ["test_env", "test_skipped", *["test_retried", "test_teardown_error", "test_fails"] * 2]
+    )
     assert all(row["pid"] == int(row["file"]) for row in rows)
 
 
@@ -128,6 +133,32 @@ KILLED = {
 }
 
 
+def test_each_inputs_line_reuses_the_shared_files_and_never_records_the_plugins_own_reads(tmp_path, monkeypatch):
+    for name in ("shared.txt", "own.txt", "child.txt"):
+        (tmp_path / name).write_text("x")
+    plugin = dep_inputs.DepInputs(tmp_path / "inputs", tmp_path)
+    plugin.children.mkdir(parents=True)
+    plugin.shared[0].add(str(tmp_path / "shared.txt"))
+    measured = []
+    relative = plugin.relative
+    monkeypatch.setattr(plugin, "relative", lambda opened: measured.append(set(opened)) or relative(opened))
+    tests = ["t.py::a", "t.py::b", "t.py::c"]
+    for number, test in enumerate(tests):
+        plugin.tests[test] = [{str(tmp_path / "own.txt")}, False]
+        plugin.fixtures[test] = set()
+        plugin.logs[test] = plugin.children / f"{os.getpid()}-{number}"
+        plugin.logs[test].write_text(str(tmp_path / "child.txt") + "\n")
+        plugin.audit("open", (str(plugin.logs[test]), "r"))
+        plugin.finish(test)
+    assert plugin.shared[0] == {str(tmp_path / "shared.txt")}
+    assert measured.count({str(tmp_path / "shared.txt")}) == 1
+    expected = [{"test": test, "files": ["child.txt", "own.txt", "shared.txt"], "escapes": False} for test in tests]
+    assert [json.loads(line) for line in plugin.finished.read_text().splitlines()] == expected
+    plugin.pytest_sessionfinish(None)
+    [session] = (tmp_path / "inputs").glob("*.jsonl")
+    assert [json.loads(line) for line in session.read_text().splitlines()] == expected
+
+
 def test_a_killed_run_keeps_the_teardown_coverage_and_inputs_of_every_test_it_recorded(tmp_path):
     for name, text in KILLED.items():
         (tmp_path / name).write_text(text)
@@ -164,6 +195,7 @@ def test_a_killed_run_keeps_the_teardown_coverage_and_inputs_of_every_test_it_re
     assert branch_record.main(argv) == 0
     found = json.loads(out.read_text())
     assert found["passed"] == ["test_one.py::test_a"]
+    assert found["failed"] == ["test_one.py::test_b"]
     manifest = found["manifest"]
     units = {manifest["units"][number] for number in manifest["tests"]["test_one.py::test_a"]["units"]}
     assert "sample.py::tidy" in units

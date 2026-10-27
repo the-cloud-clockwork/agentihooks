@@ -364,6 +364,8 @@ def test_runs_that_are_not_earlier_tests_runs_of_this_pull_request_are_never_rea
         ({"attempt": 2}, None, "its leg and attempt do not match the artifact"),
         ({"leg": "2"}, "branch-record-3.12-1-1", "its leg and attempt do not match the artifact"),
         ({"attempt": 0}, "branch-record-3.12-1-0", "its leg and attempt do not match the artifact"),
+        ({"leg": "x"}, None, "its leg and attempt do not match the artifact"),
+        ({"leg": "١"}, None, "its leg and attempt do not match the artifact"),
         ({"version": 2}, None, "the record schema is invalid"),
         ({"version": True}, None, "the record schema is invalid"),
         ({"run": "101"}, None, "the record schema is invalid"),
@@ -380,7 +382,7 @@ def test_a_record_that_disagrees_with_its_run_is_unusable(tmp_path, monkeypatch,
     name = name or f"branch-record-3.12-{record['leg']}-{record['attempt']}"
     _github(monkeypatch, [run], {101: [(name, record)]})
     assert _plan(tmp_path, root) == EMPTY
-    assert f"::warning title=Unusable branch record::Pull request run 101 {name}: {reason};" in capsys.readouterr().out
+    assert f"::warning title=Unusable branch record::Pull request run 101: {name}: {reason};" in capsys.readouterr().out
 
 
 def test_a_record_whose_manifest_describes_another_commit_is_unusable(tmp_path, monkeypatch, repo, capsys):
@@ -419,17 +421,92 @@ def test_an_unusable_download_is_warned_about_and_exits_zero(tmp_path, monkeypat
     _github(monkeypatch, [_run(101)], {101: [("branch-record-3.12-1-1", payload)]})
     assert _plan(tmp_path, root) == EMPTY
     out = capsys.readouterr().out
-    assert "::warning title=Unusable branch record::Pull request run 101 branch-record-3.12-1-1: " in out
+    assert "::warning title=Unusable branch record::Pull request run 101: branch-record-3.12-1-1: " in out
     assert "::notice title=No branch record::" in out
 
 
-def test_an_unusable_record_does_not_hide_a_usable_one(tmp_path, monkeypatch, repo, capsys):
+def _raise(error):
+    raise error
+
+
+def _break(monkeypatch, cause, broken, artifacts, commit):
+    api, changes, invalidated = ci_branch_plan._api, dep_manifest.changes, dep_manifest.invalidated
+    failing = {"download": f"{ACTIONS}/artifacts/1/zip", "listing": f"{ACTIONS}/runs/{broken}/artifacts?"}.get(cause)
+
+    def fetch(endpoint):
+        if failing and endpoint.startswith(failing):
+            raise subprocess.CalledProcessError(1, ["gh", "api", endpoint])
+        return api(endpoint)
+
+    monkeypatch.setattr(ci_branch_plan, "_api", fetch)
+    if cause == "pages":
+        artifacts[broken][:0] = [{"id": 1000 + n, "name": f"other-{n}", "expired": False} for n in range(500)]
+    if cause == "diff":
+        error = subprocess.CalledProcessError(128, ["git", "diff"])
+        monkeypatch.setattr(
+            dep_manifest,
+            "changes",
+            lambda root, base, tip: _raise(error) if base == commit else changes(root, base, tip),
+        )
+    if cause == "invalidated":
+        monkeypatch.setattr(
+            dep_manifest,
+            "invalidated",
+            lambda manifest, changed: (
+                _raise(KeyError(9)) if manifest["commit"] == commit else invalidated(manifest, changed)
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "cause", ["unreadable", "invalid", "download", "listing", "pages", "unfetchable", "diff", "invalidated"]
+)
+@pytest.mark.parametrize("broken", [102, 101])
+def test_a_run_that_cannot_be_fully_read_hides_itself_and_every_older_run(
+    tmp_path, monkeypatch, repo, capsys, cause, broken
+):
     root, commits = repo
-    run = _run(101)
-    good = _record(run, commits["record"], passed=["test_h"], leg="2")
-    _github(monkeypatch, [run], {101: [("branch-record-3.12-1-1", b"broken"), good]})
-    assert _plan(tmp_path, root)["tests"] == _ids("test_h")
-    assert "Unusable branch record::Pull request run 101 branch-record-3.12-1-1" in capsys.readouterr().out
+    runs = {102: _run(102), 101: _run(101)}
+    good = runs[203 - broken]
+    defect = _record(runs[broken], "e" * 40 if cause == "unfetchable" else commits["head"], passed=["test_h"])
+    payload = {"unreadable": ("branch-record-3.12-1-1", b"broken"), "invalid": {**defect, "head": "f" * 40}}
+    records = {broken: [payload.get(cause, defect)], good["id"]: [_record(good, commits["record"], passed=["test_h"])]}
+    _, artifacts = _github(monkeypatch, list(runs.values()), records)
+    _break(monkeypatch, cause, broken, artifacts, commits["head"])
+    plan = _plan(tmp_path, root)
+    assert [entry["run"] for entry in plan["runs"]] == ([] if broken == 102 else [102])
+    assert plan["tests"] == ([] if broken == 102 else _ids("test_h"))
+    assert f"::warning title=Unusable branch record::Pull request run {broken}: " in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("outcome", ["failed", "flaky"])
+def test_a_run_whose_commit_cannot_be_fetched_still_vetoes_its_failures(tmp_path, monkeypatch, repo, outcome):
+    root, commits = repo
+    newer, unfetched = _run(103), _run(102)
+    records = {
+        103: [_record(newer, commits["record"], passed=["test_h"])],
+        102: [_record(unfetched, "e" * 40, **{outcome: ["test_h"]})],
+    }
+    _github(monkeypatch, [newer, unfetched], records)
+    assert _plan(tmp_path, root) == EMPTY
+
+
+@pytest.mark.parametrize(("head_repo", "reused"), [("someone/agentihooks", []), (REPOSITORY.upper(), _ids("test_h"))])
+def test_only_a_pull_request_from_this_repository_reuses_its_earlier_runs(
+    tmp_path, monkeypatch, repo, capsys, head_repo, reused
+):
+    root, commits = repo
+    run = _run(101, head_repository={"full_name": head_repo})
+    calls, _ = _github(monkeypatch, [run], {101: [_record(run, commits["record"], passed=["test_h"])]})
+    args = _args(tmp_path, root)
+    args[args.index("--head-repo") + 1] = head_repo
+    assert ci_branch_plan.main(args) == 0
+    assert json.loads((tmp_path / "reused-branch.json").read_text())["tests"] == reused
+    assert (calls == []) == (not reused)
+    refusal = (
+        f"::notice title=No branch record::Pull request {PULL} comes from {head_repo}, so it reuses no earlier run."
+    )
+    assert (refusal in capsys.readouterr().out) == (not reused)
 
 
 @pytest.mark.parametrize("failing", ["/workflows/test.yml/runs?", "/artifacts?per_page", "/zip"])
@@ -449,7 +526,9 @@ def test_an_api_failure_still_exits_zero_with_an_empty_plan(tmp_path, monkeypatc
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert _plan(tmp_path, root) == EMPTY
     assert output.read_text() == "branch=0\nbranch_runs=\n"
-    assert "::warning title=Unusable branch record::CalledProcessError: " in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "::warning title=Unusable branch record::" in out
+    assert "returned non-zero exit status 1" in out
 
 
 @pytest.mark.parametrize(
@@ -475,7 +554,7 @@ def test_a_record_commit_the_checkout_cannot_fetch_is_skipped(tmp_path, monkeypa
     _github(monkeypatch, [run], {101: [_record(run, "e" * 40, passed=["test_h"])]})
     assert _plan(tmp_path, root) == EMPTY
     out = capsys.readouterr().out
-    assert f"Pull request run 101: commit {'e' * 40} could not be fetched; its results are not reused." in out
+    assert f"Pull request run 101: commit {'e' * 40} could not be fetched; neither it nor any older run" in out
     assert "::notice title=No branch record::" in out
 
 
@@ -528,7 +607,7 @@ def test_a_run_listing_more_than_five_artifact_pages_is_skipped(tmp_path, monkey
     artifacts[101][:0] = [{"id": 1000 + n, "name": f"other-{n}", "expired": False} for n in range(others)]
     assert _plan(tmp_path, root)["tests"] == reused
     assert len([endpoint for endpoint in calls if "/artifacts?" in endpoint]) == 5
-    assert ("Pull request run 101 lists too many artifacts" in capsys.readouterr().out) == (not reused)
+    assert ("Pull request run 101: it lists more than 5 pages of artifacts" in capsys.readouterr().out) == (not reused)
 
 
 def test_only_the_newest_eight_earlier_runs_are_read(tmp_path, monkeypatch, repo):

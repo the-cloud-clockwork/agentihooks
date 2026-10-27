@@ -31,6 +31,9 @@ class DepInputs:
         self.children = folder / "children"
         self.logs = {}
         self.finished = folder / "finished" / f"{os.getpid()}.jsonl"
+        self.own = str(folder) + os.sep
+        self.shared_key = None
+        self.shared_files = set()
 
     def site_file(self) -> Path:
         name = hashlib.sha256(str(self.children).encode()).hexdigest()[:16]
@@ -70,9 +73,11 @@ class DepInputs:
                 path = os.fspath(path)
             if isinstance(path, (str, bytes)) and (mode is None or not set(str(mode)) & set("wax")):
                 try:
-                    test[0].add(os.path.abspath(os.fsdecode(path)))
+                    opened = os.path.abspath(os.fsdecode(path))
                 except OSError:
-                    pass
+                    return
+                if not opened.startswith(self.own):
+                    test[0].add(opened)
         elif event in ESCAPES and test is not self.shared:
             test[1] = True
             self.escaping.update(self.setting_up)
@@ -163,20 +168,30 @@ class DepInputs:
     def line(self, test: str, shared: set[str]) -> str:
         opened, escapes = self.tests[test]
         escapes = escapes or bool(self.fixtures[test] & self.escaping)
-        return json.dumps({"test": test, "files": self.relative(opened | shared), "escapes": escapes})
+        return json.dumps({"test": test, "files": sorted(shared.union(self.relative(opened))), "escapes": escapes})
+
+    def shared_relative(self) -> set[str]:
+        log = self.children / f"{os.getpid()}-shared"
+        try:
+            size = log.stat().st_size
+        except FileNotFoundError:
+            size = 0
+        if (len(self.shared[0]), size) != self.shared_key:
+            self.shared_key = (len(self.shared[0]), size)
+            self.shared_files = set(self.relative(self.shared[0] | self.child_reads(log)))
+        return self.shared_files
 
     def finish(self, test: str) -> None:
         self.tests[test][0].update(self.child_reads(self.logs[test]))
-        shared = self.shared[0] | self.child_reads(self.children / f"{os.getpid()}-shared")
         self.finished.parent.mkdir(parents=True, exist_ok=True)
         with self.finished.open("a") as finished:
-            finished.write(self.line(test, shared) + "\n")
+            finished.write(self.line(test, self.shared_relative()) + "\n")
 
     def pytest_sessionfinish(self, session):
         if not self.tests:
             return
         self.folder.mkdir(parents=True, exist_ok=True)
-        shared = self.shared[0] | self.child_reads(self.children / f"{os.getpid()}-shared")
+        shared = set(self.relative(self.shared[0] | self.child_reads(self.children / f"{os.getpid()}-shared")))
         for test, log in self.logs.items():
             self.tests[test][0].update(self.child_reads(log))
         lines = [self.line(test, shared) for test in self.tests]

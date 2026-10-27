@@ -16,42 +16,84 @@ from pathlib import Path
 from tests import dep_manifest
 
 RANK = {"skipped": 0, "passed": 1, "flaky": 2, "failed": 3}
+OUTCOMES = {"started", *RANK}
 WORKER = re.compile(r"\.pid(\d+)\.")
-RESULT = {"test": str, "outcome": str}
-INPUT = {"test": str, "files": list, "escapes": bool}
 
 
 def _text(value) -> bool:
     return isinstance(value, str)
 
 
-def _rows(paths: list[Path], fields: dict[str, type]) -> list[dict]:
-    rows = []
+def _texts(value) -> bool:
+    return isinstance(value, list) and all(map(_text, value))
+
+
+def _pid(value) -> bool:
+    return type(value) is int
+
+
+def _flag(value) -> bool:
+    return type(value) is bool
+
+
+def _known(value) -> bool:
+    return isinstance(value, str) and value in OUTCOMES
+
+
+def _ranked(value) -> bool:
+    return isinstance(value, str) and value in RANK
+
+
+RESULT = {"test": _text, "outcome": _known, "pid": _pid}
+FLAKE = {"test": _text, "outcome": _ranked}
+INPUT = {"test": _text, "files": _texts, "escapes": _flag}
+
+
+def _row(line: str, fields: dict) -> dict | None:
+    try:
+        row = json.loads(line)
+    except ValueError:
+        return None
+    if isinstance(row, dict) and all(check(row.get(key)) for key, check in fields.items()):
+        return row
+    return None
+
+
+def _rows(paths: list[Path], fields: dict) -> tuple[list[dict], bool]:
+    rows, readable = [], True
     for path in paths:
         try:
-            lines = path.read_text().splitlines()
-        except (OSError, UnicodeDecodeError):
+            *lines, tail = path.read_text().split("\n")
+        except FileNotFoundError:
             continue
-        for line in lines:
-            try:
-                row = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(row, dict) and all(isinstance(row.get(key), kind) for key, kind in fields.items()):
-                rows.append(row)
-    return rows
+        except (OSError, UnicodeDecodeError):
+            readable = False
+            continue
+        found = [_row(line, fields) for line in lines]
+        readable = readable and None not in found
+        # A writer killed mid line leaves only its last line cut short; any other unreadable line is damage.
+        rows += [row for row in [*found, _row(tail, fields) if tail else None] if row is not None]
+    return rows, readable
+
+
+def _rank(outcomes: dict[str, str], test: str, outcome: str) -> None:
+    if RANK[outcome] > RANK.get(outcomes.get(test), -1):
+        outcomes[test] = outcome
 
 
 def _outcomes(rows: list[dict]) -> tuple[dict[str, str], dict[str, set[int]]]:
-    outcomes, pids = {}, {}
+    outcomes, pids, started, ended = {}, {}, set(), set()
     for row in rows:
-        test, outcome = dep_manifest.node(row["test"]), row["outcome"]
-        if outcome not in RANK:
+        test, outcome, pid = dep_manifest.node(row["test"]), row["outcome"], row.get("pid")
+        if outcome == "started":
+            started.add((test, pid))
             continue
-        if RANK[outcome] > RANK.get(outcomes.get(test), -1):
-            outcomes[test] = outcome
-        if outcome == "passed" and isinstance(row.get("pid"), int):
-            pids.setdefault(test, set()).add(row["pid"])
+        ended.add((test, pid))
+        _rank(outcomes, test, outcome)
+        if outcome == "passed":
+            pids.setdefault(test, set()).add(pid)
+    for test, _ in started - ended:
+        _rank(outcomes, test, "failed")
     return outcomes, pids
 
 
@@ -102,12 +144,15 @@ def _manifest(coverage: Path, inputs: list[dict], args: argparse.Namespace, scra
 
 
 def record(args: argparse.Namespace) -> tuple[dict, str]:
-    outcomes, pids = _outcomes(_rows(sorted(args.results.glob("*.jsonl")), RESULT) + _rows([args.flakes], RESULT))
-    inputs = [row for row in _rows(sorted(args.inputs.rglob("*.jsonl")), INPUT) if all(map(_text, row["files"]))]
+    results, readable = _rows(sorted(args.results.glob("*.jsonl")), RESULT)
+    flakes, flakes_readable = _rows([args.flakes], FLAKE)
+    outcomes, pids = _outcomes(results + flakes)
+    inputs = _rows(sorted(args.inputs.rglob("*.jsonl")), INPUT)[0]
     with tempfile.TemporaryDirectory() as scratch:
         coverage, surviving, state = _coverage(args.coverage_dir, Path(scratch))
         manifest = _manifest(coverage, inputs, args, Path(scratch))
-    measured = {dep_manifest.node(row["test"]) for row in inputs} if manifest else set()
+    provable = manifest is not None and readable and flakes_readable
+    measured = {dep_manifest.node(row["test"]) for row in inputs} if provable else set()
     candidates = sorted(test for test, outcome in outcomes.items() if outcome == "passed")
     passed = [
         test for test in candidates if test in measured and (surviving is None or pids.get(test, set()) & surviving)
@@ -127,9 +172,10 @@ def record(args: argparse.Namespace) -> tuple[dict, str]:
         "failed": sorted(test for test, outcome in outcomes.items() if outcome == "failed"),
         "flaky": sorted(test for test, outcome in outcomes.items() if outcome == "flaky"),
     }
+    damage = "" if readable and flakes_readable else "; a damaged results or flake line keeps every pass out"
     note = (
         f"Branch record for leg {args.leg}: kept {len(passed)} of {len(candidates)} passed tests with their dependencies,"
-        f" {len(found['failed'])} failed, {len(found['flaky'])} flaky; coverage {state}"
+        f" {len(found['failed'])} failed, {len(found['flaky'])} flaky; coverage {state}{damage}"
     )
     return found, note
 

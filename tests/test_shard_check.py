@@ -318,6 +318,14 @@ def test_a_leg_whose_files_hold_no_collected_test_is_red(tmp_path):
     assert "::error::No collected test is in tests/test_gone.py" in result.stdout
 
 
+def test_a_leg_file_given_with_a_leading_dot_slash_still_names_its_tests(tmp_path):
+    dev = _plan(tmp_path, [LEG[0], LEG[1]])
+    args = ["--reused", str(dev), "--within", "./tests/test_a.py", "--leg", "1"]
+    result = _grade(tmp_path, [[LEG[2]]], *args, collected=LEG, hashed=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Leg 1: ran 1, reused 2 from dev, 0 from pull request runs" in result.stdout
+
+
 def test_a_deselect_output_counts_its_branch_tests_as_reused_from_pull_request_runs(tmp_path):
     deselected = tmp_path / "reused.json"
     deselected.write_text(json.dumps({"tests": [LEG[0], LEG[1]], "files": [], "branch": [LEG[1]]}))

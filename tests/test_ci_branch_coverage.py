@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from coverage import CoverageData
 
-from scripts import ci_branch_coverage
+from scripts import ci_branch_coverage, ci_test_plan
 
 pytestmark = pytest.mark.unit
 
@@ -32,13 +32,13 @@ def _repo(tmp_path):
     return repo, commit
 
 
-def _coverage(tmp_path):
-    path = tmp_path / "recorded" / ".coverage"
+def _coverage(tmp_path, reused=((-1, 2), (2, -1)), name="recorded"):
+    path = tmp_path / name / ".coverage"
     path.parent.mkdir(exist_ok=True)
     data = CoverageData(basename=str(path))
     for context, arcs in {
         "": [(-1, 1), (1, -1)],
-        f"{REUSED}@grp|run": [(-1, 2), (2, -1)],
+        f"{REUSED}@grp|run": list(reused),
         f"{RAN}|run": [(-5, 5), (5, -5)],
     }.items():
         data.set_context(context)
@@ -71,9 +71,9 @@ def _github(monkeypatch, artifacts):
     monkeypatch.setattr(ci_branch_coverage, "_api", api)
 
 
-def _carry(tmp_path, repo, commit, tests=(REUSED,), branch=(REUSED,), run_tests=(REUSED, RAN)):
+def _carry(tmp_path, repo, commit, tests=(REUSED,), branch=(REUSED,), attempt=1):
     plan = tmp_path / "reused-branch.json"
-    run = {"run": 5, "attempt": 1, "commit": commit, "head": "d" * 40, "tests": list(run_tests)}
+    run = {"run": 5, "attempt": attempt, "commit": commit, "head": "d" * 40, "tests": [REUSED, RAN]}
     plan.write_text(json.dumps({"version": 1, "runs": [run], "tests": list(tests)}))
     deselected = tmp_path / "reused.json"
     deselected.write_text(json.dumps({"tests": list(tests), "files": [], "branch": list(branch)}))
@@ -91,27 +91,38 @@ def _arcs(path: Path) -> dict[str, set[tuple[int, int]]]:
 def test_only_tests_reused_from_a_run_and_skipped_here_are_carried():
     plan = {
         "runs": [
-            {"run": 5, "commit": "a" * 40, "tests": ["t::x", "t::y", "t::z"]},
-            {"run": 6, "commit": "b" * 40, "tests": ["t::w"]},
-            {"run": 7, "commit": "c" * 40, "tests": ["t::y"]},
+            {"run": 5, "attempt": 1, "commit": "a" * 40, "tests": ["t::x", "t::y", "t::z"]},
+            {"run": 6, "attempt": 2, "commit": "b" * 64, "tests": ["t::w"]},
+            {"run": 7, "attempt": 1, "commit": "c" * 40, "tests": ["t::y"]},
         ],
         "tests": ["t::x", "t::y", "t::w"],
     }
     deselected = {"tests": ["t::x", "t::w", "t::d"], "files": [], "branch": ["t::x", "t::w", "t::q"]}
-    assert ci_branch_coverage.contributions(plan, deselected) == {5: ("a" * 40, {"t::x"}), 6: ("b" * 40, {"t::w"})}
+    assert ci_branch_coverage.contributions(plan, deselected) == {
+        (5, 1): ("a" * 40, {"t::x"}),
+        (6, 2): ("b" * 64, {"t::w"}),
+    }
 
 
 def test_a_deselect_without_pull_request_tests_carries_nothing():
-    plan = {"runs": [{"run": 5, "commit": "a" * 40, "tests": ["t::x"]}], "tests": ["t::x"]}
+    plan = {"runs": [{"run": 5, "attempt": 1, "commit": "a" * 40, "tests": ["t::x"]}], "tests": ["t::x"]}
     assert ci_branch_coverage.contributions(plan, {"tests": ["t::x"], "files": []}) == {}
+
+
+def test_the_carry_reads_github_through_the_planner_helper_that_retries_server_errors():
+    assert ci_branch_coverage._api is ci_test_plan._api
 
 
 @pytest.mark.parametrize(
     "runs",
     [
-        [{"run": "5", "commit": "a" * 40, "tests": []}],
-        [{"run": 5, "commit": "--upload-pack=x", "tests": []}],
-        [{"run": 5, "commit": "a" * 40, "tests": []}, {"run": 5, "commit": "b" * 40, "tests": []}],
+        [{"run": "5", "attempt": 1, "commit": "a" * 40, "tests": []}],
+        [{"run": 5, "commit": "a" * 40, "tests": []}],
+        [{"run": 5, "attempt": 1, "commit": "--upload-pack=x", "tests": []}],
+        [
+            {"run": 5, "attempt": 1, "commit": "a" * 40, "tests": []},
+            {"run": 5, "attempt": 1, "commit": "b" * 40, "tests": []},
+        ],
     ],
 )
 def test_a_malformed_plan_is_unusable(runs):
@@ -129,9 +140,22 @@ def test_the_reused_tests_coverage_and_captures_are_carried_onto_this_heads_line
     assert sorted(path.name for path in (carried / "js-coverage").glob("capture-*.json")) == ["capture-browser-1.json"]
     assert sorted(path.name for path in (carried / "js-coverage" / "sources").iterdir()) == ["kept.js"]
     assert (
-        f"Pull request run 5 on {commit}: kept the coverage of 1 of 1 reused tests and 1 page captures"
+        f"Pull request run 5 attempt 1 on {commit}: kept the coverage of 1 of 1 reused tests and 1 page captures"
         " from 1 of 1 artifacts; 1 changed files remapped"
     ) in capsys.readouterr().out
+
+
+def test_only_the_planned_attempts_coverage_is_carried_from_a_rerun(tmp_path, monkeypatch, capsys):
+    repo, commit = _repo(tmp_path)
+    failed = _artifact(_coverage(tmp_path, reused=((-5, 5), (5, -5)), name="failed"), captures=False)
+    passed = _artifact(_coverage(tmp_path, name="passed"))
+    artifacts = [(11, "branch-coverage-3.12-2-1", failed, False), (12, "branch-coverage-3.12-2-2", passed, False)]
+    _github(monkeypatch, {5: artifacts})
+    status, out = _carry(tmp_path, repo, commit, attempt=2)
+    assert status == 0
+    assert sorted(path.name for path in (out / "branch-5").iterdir()) == ["2-2"]
+    assert _arcs(out / "branch-5" / "2-2" / ".coverage") == {"hooks/a.py": {(-4, 4), (4, -4), (-4, 5), (5, -4)}}
+    assert "from 1 of 1 artifacts" in capsys.readouterr().out
 
 
 def test_a_test_reused_from_the_run_but_not_skipped_here_keeps_no_coverage(tmp_path, monkeypatch):
@@ -150,7 +174,8 @@ def test_a_run_without_coverage_artifacts_is_warned_and_carries_nothing(tmp_path
     assert status == 0
     assert not (out / "branch-5").exists()
     assert (
-        "::warning title=Unusable branch coverage::Pull request run 5: it kept no unexpired" in capsys.readouterr().out
+        "::warning title=Unusable branch coverage::Pull request run 5 attempt 1: it kept no unexpired"
+        in capsys.readouterr().out
     )
 
 
@@ -167,7 +192,10 @@ def test_an_unusable_artifact_is_warned_and_the_others_still_carry(tmp_path, mon
     assert status == 0
     assert (out / "branch-5" / "2-1" / ".coverage").is_file()
     assert not (out / "branch-5" / "3-1").exists()
-    assert "::warning title=Unusable branch coverage::Pull request run 5: branch-coverage-3.12-3-1: .coverage" in output
+    assert (
+        "::warning title=Unusable branch coverage::Pull request run 5 attempt 1: branch-coverage-3.12-3-1: .coverage"
+        in output
+    )
     assert "from 1 of 2 artifacts" in output
 
 
@@ -181,7 +209,7 @@ def test_a_commit_that_cannot_be_fetched_skips_its_run(tmp_path, monkeypatch, ca
     status, out = _carry(tmp_path, repo, "e" * 40)
     assert status == 0
     assert not out.exists()
-    assert "::warning title=Unusable branch coverage::Pull request run 5:" in capsys.readouterr().out
+    assert "::warning title=Unusable branch coverage::Pull request run 5 attempt 1:" in capsys.readouterr().out
 
 
 def test_a_malformed_plan_warns_and_passes(tmp_path, capsys):

@@ -1,4 +1,5 @@
-"""Write one fsynced JSON line per finished test to a file per worker in the folder CI_RESULTS names.
+"""Write fsynced JSON lines, one as each test attempt starts and one per finished test, to a file per worker in the
+folder CI_RESULTS names.
 
 Loaded with `-p tests.pass_record`. The controller takes CI_RESULTS out of the environment and hands it to its
 workers, so pytest runs that tests start never record into it. pytest-rerunfailures wraps every attempt in its own
@@ -50,6 +51,14 @@ class PassRecord:
         outcome = _outcome(outcomes, nodeid in self.retried)
         self.retried.discard(nodeid)
         self.flush(nodeid)
+        self.write(nodeid, outcome)
+
+    # A worker killed during a test leaves only this line, and the record counts that as a failure.
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_runtest_logstart(self, nodeid):
+        self.write(nodeid, "started")
+
+    def write(self, nodeid: str, outcome: str) -> None:
         with self.path.open("a") as results:
             results.write(json.dumps({"test": nodeid, "outcome": outcome, "pid": os.getpid()}) + "\n")
             results.flush()

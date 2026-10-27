@@ -12,13 +12,13 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
 
+from scripts.ci_branch_plan import COMMIT, LEG
 from scripts.ci_budget import rate_limit
-from scripts.ci_budget.rate_limit import gh_api
+from scripts.ci_test_plan import _api, _strings
 from tests import coverage_check, reused_coverage
 from tests.dep_manifest import node
 
-ARTIFACT = re.compile(r"branch-coverage-3\.12-(\d+-\d+)")
-COMMIT = re.compile(r"[0-9a-f]{40}")
+ARTIFACT = re.compile(rf"branch-coverage-3\.12-({LEG.pattern})-(\d+)", re.ASCII)
 PAGE = 100
 PAGES = 5
 WORKERS = 8
@@ -29,47 +29,43 @@ class Unusable(ValueError):
     pass
 
 
-def _api(endpoint: str) -> bytes:
-    return gh_api([endpoint], timeout=300).stdout
-
-
-def _ids(value: object) -> bool:
-    return isinstance(value, list) and all(isinstance(item, str) for item in value)
-
-
 def _run_entry(entry: object) -> bool:
     return (
         isinstance(entry, dict)
         and type(entry.get("run")) is int
+        and type(entry.get("attempt")) is int
         and isinstance(entry.get("commit"), str)
         and bool(COMMIT.fullmatch(entry["commit"]))
-        and _ids(entry.get("tests"))
+        and _strings(entry.get("tests"))
     )
 
 
-def contributions(plan: object, deselected: object) -> dict[int, tuple[str, set[str]]]:
-    if not isinstance(plan, dict) or not isinstance(plan.get("runs"), list) or not _ids(plan.get("tests")):
+def contributions(plan: object, deselected: object) -> dict[tuple[int, int], tuple[str, set[str]]]:
+    if not isinstance(plan, dict) or not isinstance(plan.get("runs"), list) or not _strings(plan.get("tests")):
         raise Unusable("the branch plan has no runs and tests lists")
-    if not isinstance(deselected, dict) or not _ids(deselected.get("branch", [])):
+    if not isinstance(deselected, dict) or not _strings(deselected.get("branch", [])):
         raise Unusable("the deselected tests hold no valid branch list")
     carried = set(plan["tests"]).intersection(deselected.get("branch", []))
-    runs: dict[int, tuple[str, set[str]]] = {}
+    runs: dict[tuple[int, int], tuple[str, set[str]]] = {}
     for entry in plan["runs"]:
         if not _run_entry(entry):
             raise Unusable(f"the branch plan holds a malformed run {json.dumps(entry)[:200]}")
-        commit, tests = runs.setdefault(entry["run"], (entry["commit"], set()))
+        commit, tests = runs.setdefault((entry["run"], entry["attempt"]), (entry["commit"], set()))
         if commit != entry["commit"]:
             raise Unusable(f"pull request run {entry['run']} names two commits")
         tests.update(carried.intersection(entry["tests"]))
-    return {run: found for run, found in runs.items() if found[1]}
+    return {key: found for key, found in runs.items() if found[1]}
 
 
-def artifacts(repository: str, run: int) -> list[dict]:
+def artifacts(repository: str, run: int, attempt: int) -> list[dict]:
     found = []
     for page in range(1, PAGES + 1):
         endpoint = f"repos/{repository}/actions/runs/{run}/artifacts?per_page={PAGE}&page={page}"
         listed = json.loads(_api(endpoint))["artifacts"]
-        found += [item for item in listed if ARTIFACT.fullmatch(item["name"]) and not item["expired"]]
+        for item in listed:
+            named = ARTIFACT.fullmatch(item["name"])
+            if named and int(named[2]) == attempt and not item["expired"]:
+                found.append(item)
         if len(listed) < PAGE:
             break
     return found
@@ -121,44 +117,51 @@ def _reason(error: Exception) -> str:
     return f"{error} {detail.strip()}".strip()
 
 
-def _warn(run: int, reason: str) -> None:
-    print(f"::warning title=Unusable branch coverage::Pull request run {run}: {reason}; that coverage is not carried.")
+def _warn(key: tuple[int, int], reason: str) -> None:
+    run, attempt = key
+    print(
+        f"::warning title=Unusable branch coverage::Pull request run {run} attempt {attempt}: {reason};"
+        " that coverage is not carried."
+    )
 
 
 def _start(
-    pool: ThreadPoolExecutor, args: argparse.Namespace, run: int, commit: str, tests: set[str]
+    pool: ThreadPoolExecutor, args: argparse.Namespace, key: tuple[int, int], commit: str, tests: set[str]
 ) -> tuple[dict, list[tuple[str, Future]]] | None:
+    run, attempt = key
     try:
         moved = _moved(args.repo, commit, args.head)
-        listed = artifacts(args.repository, run)
+        listed = artifacts(args.repository, run, attempt)
     except ERRORS as error:
-        _warn(run, _reason(error))
+        _warn(key, _reason(error))
         return None
     if not listed:
-        _warn(run, "it kept no unexpired branch-coverage-3.12 artifact")
+        _warn(key, "it kept no unexpired branch-coverage-3.12 artifact")
         return None
     started = []
     for item in listed:
-        out = args.out / f"branch-{run}" / ARTIFACT.fullmatch(item["name"])[1]
+        leg, _ = ARTIFACT.fullmatch(item["name"]).groups()
+        out = args.out / f"branch-{run}" / f"{leg}-{attempt}"
         started.append((item["name"], pool.submit(carry, args.repository, item, tests, moved, out)))
     return moved, started
 
 
-def _finish(run: int, commit: str, tests: set[str], moved: dict, started: list[tuple[str, Future]]) -> None:
+def _finish(key: tuple[int, int], commit: str, tests: set[str], moved: dict, started: list[tuple[str, Future]]) -> None:
     kept: set[str] = set()
     captures = used = 0
     for name, future in started:
         try:
             found, count = future.result()
         except ERRORS as error:
-            _warn(run, f"{name}: {_reason(error)}")
+            _warn(key, f"{name}: {_reason(error)}")
             continue
         kept |= found
         captures += count
         used += 1
     print(
-        f"Pull request run {run} on {commit}: kept the coverage of {len(kept)} of {len(tests)} reused tests and"
-        f" {captures} page captures from {used} of {len(started)} artifacts; {len(moved)} changed files remapped"
+        f"Pull request run {key[0]} attempt {key[1]} on {commit}: kept the coverage of {len(kept)} of {len(tests)}"
+        f" reused tests and {captures} page captures from {used} of {len(started)} artifacts;"
+        f" {len(moved)} changed files remapped"
     )
 
 
@@ -183,12 +186,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         started = [
-            (run, commit, tests, _start(pool, args, run, commit, tests))
-            for run, (commit, tests) in sorted(runs.items())
+            (key, commit, tests, _start(pool, args, key, commit, tests))
+            for key, (commit, tests) in sorted(runs.items())
         ]
-        for run, commit, tests, begun in started:
+        for key, commit, tests, begun in started:
             if begun is not None:
-                _finish(run, commit, tests, *begun)
+                _finish(key, commit, tests, *begun)
     rate_limit.report("The branch coverage carry")
     return 0
 

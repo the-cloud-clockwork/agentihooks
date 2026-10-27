@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from coverage import CoverageData
 
 from tests import branch_record
@@ -143,6 +144,54 @@ def test_a_retry_or_a_crash_in_the_flake_ledger_outranks_a_pass(tmp_path):
     assert found["failed"] == ["tests/test_x.py::test_f"]
 
 
+def test_a_test_left_unfinished_on_a_worker_is_failed_even_after_it_passed_elsewhere(tmp_path):
+    leg = _leg(tmp_path)
+    (leg / "elapsed.json").write_text("{}")
+    _coverage(leg / ".coverage", {f"tests/test_x.py::test_{name}|run": FIRST for name in "akrz"})
+    test = "tests/test_x.py::test_{}".format
+    _lines(
+        tmp_path / "results" / "41.jsonl",
+        [
+            *({"test": test(name), "outcome": "started", "pid": 41} for name in "akrrz"),
+            {"test": test("a"), "outcome": "passed", "pid": 41},
+            {"test": test("r"), "outcome": "flaky", "pid": 41},
+        ],
+    )
+    _lines(
+        tmp_path / "results" / "42.jsonl",
+        [{"test": test("z"), "outcome": "started", "pid": 42}, {"test": test("z"), "outcome": "passed", "pid": 42}],
+    )
+    _inputs(tmp_path, *map(test, "akrz"))
+    found = _record(tmp_path)
+    assert found["passed"] == [test("a")]
+    assert found["failed"] == [test("k"), test("z")]
+    assert found["flaky"] == [test("r")]
+
+
+@pytest.mark.parametrize("damaged", ["results", "flakes"])
+def test_a_damaged_line_before_the_last_keeps_every_pass_out_and_still_records_failures(tmp_path, damaged, capsys):
+    leg = _leg(tmp_path)
+    (leg / "elapsed.json").write_text("{}")
+    _coverage(leg / ".coverage", {f"tests/test_x.py::test_{name}|run": FIRST for name in "afh"})
+    passed = json.dumps({"test": "tests/test_x.py::test_a", "outcome": "passed", "pid": 9})
+    failed = json.dumps({"test": "tests/test_x.py::test_f", "outcome": "failed", "pid": 9})
+    flaky = json.dumps({"test": "tests/test_x.py::test_h", "outcome": "flaky", "attempts": 2})
+    garbage = '{"test": "tests/test_x.py::test_a", "outc'
+    (tmp_path / "results").mkdir()
+    lines = [passed, garbage, failed] if damaged == "results" else [passed, failed]
+    (tmp_path / "results" / "9.jsonl").write_text("".join(line + "\n" for line in lines))
+    lines = [garbage, flaky] if damaged == "flakes" else [flaky]
+    (tmp_path / "flakes.jsonl").write_text("".join(line + "\n" for line in lines))
+    _inputs(tmp_path, "tests/test_x.py::test_a", "tests/test_x.py::test_f", "tests/test_x.py::test_h")
+    found = _record(tmp_path)
+    assert (found["passed"], found["failed"], found["flaky"]) == (
+        [],
+        ["tests/test_x.py::test_f"],
+        ["tests/test_x.py::test_h"],
+    )
+    assert "a damaged results or flake line keeps every pass out" in capsys.readouterr().out
+
+
 def test_a_partial_folder_never_crashes_and_keeps_only_what_it_can_prove(tmp_path):
     leg = _leg(tmp_path)
     (leg / "elapsed.json").write_text("{}")
@@ -153,7 +202,7 @@ def test_a_partial_folder_never_crashes_and_keeps_only_what_it_can_prove(tmp_pat
     results.mkdir()
     (results / "41.jsonl").write_text(
         json.dumps({"test": "tests/test_x.py::test_a", "outcome": "passed", "pid": 41})
-        + "\n[1, 2]\n"
+        + "\n"
         + json.dumps({"test": "tests/test_x.py::test_k", "outcome": "passed", "pid": 43})
         + '\n{"test": "tests/test_x.py::test_m", "outc'
     )

@@ -1,9 +1,8 @@
 import argparse
 import json
-import os
 import re
 from collections import Counter
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -55,8 +54,8 @@ def _read_collected(path: Path) -> list[str] | None:
 
 
 def within(collected: list[str], files: list[str]) -> list[str]:
-    paths = {os.path.normpath(path) for path in files}
-    return [nodeid for nodeid in collected if os.path.normpath(nodeid.split("::", 1)[0]) in paths]
+    paths = {PurePosixPath(path) for path in files}
+    return [nodeid for nodeid in collected if PurePosixPath(nodeid.split("::", 1)[0]) in paths]
 
 
 def _scope(args: argparse.Namespace) -> list[str] | None:
