@@ -170,6 +170,36 @@ def test_tests_workflow_cache_restores_bound_download_timeout():
         assert step.get("env", {}).get("SEGMENT_DOWNLOAD_TIMEOUT_MINS") == "1", step.get("name", step["with"]["path"])
 
 
+def test_every_delivery_upload_uses_the_bounded_retry_action():
+    action = yaml.safe_load((_ROOT / ".github/actions/retry-upload/action.yml").read_text())
+    default = int(action["inputs"]["attempt-seconds"]["default"])
+    assert 0 < default <= 120
+    pending = [_ROOT / ".github/workflows/test.yml"]
+    seen = set()
+    plain = []
+    uploads = []
+    while pending:
+        path = pending.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        workflow = yaml.safe_load(path.read_text())
+        for name, job in workflow["jobs"].items():
+            uses = job.get("uses", "")
+            if uses.startswith("./.github/workflows/"):
+                pending.append(_ROOT / uses)
+            for step in job.get("steps", []):
+                uses = step.get("uses", "")
+                if uses.lower().startswith("actions/upload-artifact@"):
+                    plain.append((path.name, name, step.get("name")))
+                if uses.endswith("/.github/actions/retry-upload"):
+                    uploads.append(step)
+    assert not plain, plain
+    assert uploads
+    for step in uploads:
+        assert 0 < int(step.get("with", {}).get("attempt-seconds", default)) <= 120
+
+
 def test_nats_server_download_retries_fit_inside_every_step_timeout():
     action = yaml.safe_load((_ROOT / ".github/actions/nats-server/action.yml").read_text())
     lines = [line for step in action["runs"]["steps"] for line in step.get("run", "").splitlines()]
