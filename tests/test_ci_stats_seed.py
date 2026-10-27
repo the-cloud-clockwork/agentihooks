@@ -198,7 +198,9 @@ def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder,
         },
     }
     monkeypatch.setattr(
-        seed, "api", lambda path, binary=False: archives[int(path.split("/")[2])] if binary else responses[path]
+        seed,
+        "api",
+        lambda path, binary=False, deadline=None: archives[int(path.split("/")[2])] if binary else responses[path],
     )
 
     assert seed.harvest(7, folder, set()) == 5
@@ -207,7 +209,7 @@ def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder,
 
 
 def test_harvest_skips_a_number_that_is_not_a_pull_request(tmp_path, monkeypatch, capsys):
-    def missing(path, binary=False):
+    def missing(path, binary=False, deadline=None):
         raise subprocess.CalledProcessError(1, ["gh", "api", path], stderr=b"gh: Not Found (HTTP 404)\n")
 
     monkeypatch.setattr(seed, "api", missing)
@@ -217,7 +219,7 @@ def test_harvest_skips_a_number_that_is_not_a_pull_request(tmp_path, monkeypatch
 
 
 def test_harvest_fails_when_github_cannot_answer(tmp_path, monkeypatch):
-    def unavailable(path, binary=False):
+    def unavailable(path, binary=False, deadline=None):
         raise subprocess.CalledProcessError(1, ["gh", "api", path], stderr=b"gh: Service Unavailable (HTTP 503)\n")
 
     monkeypatch.setattr(seed, "api", unavailable)
@@ -231,7 +233,7 @@ def test_harvest_without_stats_artifacts_writes_nothing(tmp_path, monkeypatch):
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": []},
     }
-    monkeypatch.setattr(seed, "api", lambda path, binary=False: responses[path])
+    monkeypatch.setattr(seed, "api", lambda path, binary=False, deadline=None: responses[path])
 
     assert seed.harvest(7, tmp_path, set()) == 0
 
@@ -269,22 +271,25 @@ def test_main_seeds_prunes_and_records_the_head(tmp_path, monkeypatch, capsys):
 
 
 def test_main_harvests_newest_first_and_skips_pulls_past_the_budget(folder, monkeypatch, capsys):
-    clock = iter([0.0, 1.0, 2.0, 400.0])
-    monkeypatch.setattr(seed, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    monkeypatch.setattr(seed, "time", SimpleNamespace(monotonic=lambda: 7.0))
     monkeypatch.setattr(seed, "merged_pulls", lambda found, head, before: [1, 2, 3])
     harvested = []
 
     def harvest(number, found, taken, deadline):
         harvested.append(number)
-        assert deadline == seed.BUDGET
+        assert deadline == 7.0 + seed.BUDGET
+        if number < 3:
+            raise subprocess.TimeoutExpired(["gh"], 0)
         return 1
 
     monkeypatch.setattr(seed, "harvest", harvest)
 
     assert seed.main([str(folder), "--head", "h", "--before", "b"]) == 0
 
-    assert harvested == [3, 2]
-    assert "2 files from pull requests [1, 2, 3], skipped [1] past the budget;" in capsys.readouterr().out
+    assert harvested == [3, 2, 1]
+    assert "1 files from pull requests [1, 2, 3], skipped [1, 2] past the budget, never retried;" in (
+        capsys.readouterr().out
+    )
     assert (folder / seed.SEEDED).read_text() == "h\n"
 
 
@@ -300,7 +305,7 @@ def test_main_skips_a_pull_whose_github_call_timed_out(folder, monkeypatch, caps
 
     assert seed.main([str(folder), "--head", "h", "--before", "b"]) == 0
 
-    assert "1 files from pull requests [1, 2], skipped [2] past the budget;" in capsys.readouterr().out
+    assert "1 files from pull requests [1, 2], skipped [2] past the budget, never retried;" in capsys.readouterr().out
 
 
 def test_harvest_keeps_pointers_a_newer_pull_request_already_wrote(folder, monkeypatch):
@@ -312,7 +317,7 @@ def test_harvest_keeps_pointers_a_newer_pull_request_already_wrote(folder, monke
         },
     }
     archive = _archive({"x.index": "old", "y.index": "old", f"{KEEP}.json": "{}"})
-    monkeypatch.setattr(seed, "api", lambda path, binary=False: archive if binary else responses[path])
+    monkeypatch.setattr(seed, "api", lambda path, binary=False, deadline=None: archive if binary else responses[path])
     (folder / "x.index").write_text("new")
     taken = {"x.index"}
 
@@ -323,7 +328,7 @@ def test_harvest_keeps_pointers_a_newer_pull_request_already_wrote(folder, monke
     assert taken == {"x.index", "y.index"}
 
 
-def test_harvest_stops_downloading_at_the_deadline(folder, monkeypatch):
+def test_harvest_passes_the_deadline_to_every_github_call(folder, monkeypatch):
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
@@ -331,15 +336,67 @@ def test_harvest_stops_downloading_at_the_deadline(folder, monkeypatch):
             "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
         },
     }
+    deadlines = []
 
-    def api(path, binary=False):
-        assert not binary
-        return responses[path]
+    def api(path, binary=False, deadline=None):
+        deadlines.append(deadline)
+        return _archive({"x.index": "k"}) if binary else responses[path]
 
     monkeypatch.setattr(seed, "api", api)
 
-    assert seed.harvest(7, folder, set(), seed.time.monotonic()) == 0
-    assert list(folder.iterdir()) == []
+    assert seed.harvest(7, folder, set(), 42.0) == 1
+    assert deadlines == [42.0] * 4
+
+
+def test_harvest_keeps_pointers_it_wrote_before_a_timeout(folder, monkeypatch):
+    responses = {
+        "pulls/7": {"head": {"sha": "abc"}},
+        f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
+        "actions/runs/1/artifacts?per_page=100": {
+            "artifacts": [
+                {"id": 5, "name": "mutation-test-stats-cache-0", "expired": False},
+                {"id": 6, "name": "mutation-test-stats-cache-1", "expired": False},
+            ]
+        },
+    }
+
+    def api(path, binary=False, deadline=None):
+        if path == "actions/artifacts/6/zip":
+            raise subprocess.TimeoutExpired(["gh"], 0)
+        return _archive({"x.index": "k"}) if binary else responses[path]
+
+    monkeypatch.setattr(seed, "api", api)
+    taken = set()
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        seed.harvest(7, folder, taken)
+
+    assert taken == {"x.index"}
+
+
+def test_api_waits_at_most_until_the_deadline(monkeypatch):
+    seen = {}
+
+    def run(command, **options):
+        seen.update(options)
+        return subprocess.CompletedProcess(command, 0, b"{}")
+
+    monkeypatch.setattr(seed.subprocess, "run", run)
+    monkeypatch.setattr(seed, "time", SimpleNamespace(monotonic=lambda: 100.0))
+
+    assert seed.api("pulls/7", deadline=150.0) == {}
+    assert seen["timeout"] == 50.0
+
+
+@pytest.mark.parametrize("deadline", [100.0, 90.0])
+def test_api_refuses_a_call_at_or_past_the_deadline(monkeypatch, deadline):
+    monkeypatch.setattr(seed.subprocess, "run", lambda *args, **options: pytest.fail("gh ran"))
+    monkeypatch.setattr(seed, "time", SimpleNamespace(monotonic=lambda: 100.0))
+
+    with pytest.raises(subprocess.TimeoutExpired) as error:
+        seed.api("pulls/7", deadline=deadline)
+
+    assert (error.value.cmd, error.value.timeout) == (["gh", "api", "pulls/7"], 0)
 
 
 def test_api_gives_each_gh_call_a_timeout(monkeypatch):
