@@ -72,6 +72,29 @@ def test_preliminary_verification_requires_its_self_and_keeps_inventory_validati
         ci_gate_queue.verify(jobs, [2, 7], preliminary=True)
 
 
+def test_queue_monitor_reuses_the_protected_anton_shard_runner_and_defers_final_verification():
+    from pathlib import Path
+
+    from scripts import ci_wiring
+
+    jobs = ci_wiring.load(Path(__file__).resolve().parents[1])["test.yml"]["jobs"]
+    assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(jobs["gate-required"]["runs-on"], deferred=True)
+    checker = jobs["shard-check"]
+    assert checker["runs-on"] == jobs["queue-fail-fast"]["runs-on"]
+    checkout = checker["steps"][0]
+    assert "github.event.merge_group.base_sha" in checkout["with"]["ref"]
+    assert checkout["with"]["persist-credentials"] is False
+    token = next(step for step in checker["steps"] if step.get("id") == "app-token")
+    assert token["with"]["permission-actions"] == "${{ github.event_name == 'merge_group' && 'write' || 'read' }}"
+    assert token["with"]["permission-contents"] == "read"
+    assert checker["steps"][-1] == {
+        "name": "Cancel a rejected queue run",
+        "if": "failure() && github.event_name == 'merge_group'",
+        "env": {"GH_TOKEN": "${{ steps.app-token.outputs.token }}"},
+        "run": 'gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"',
+    }
+
+
 def test_complete_queue_waits_for_the_shard_judge_and_every_inventory_row():
     jobs = complete()
     assert ci_gate_queue.verify(jobs, [2, 7])

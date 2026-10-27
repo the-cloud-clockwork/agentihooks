@@ -127,13 +127,18 @@ def test_the_workflow_waits_for_recovery_only_in_the_queue(event):
                 "GITHUB_REPOSITORY": "org/repo",
                 "GITHUB_RUN_ID": "123",
                 "GITHUB_RUN_ATTEMPT": "2",
+                "GITHUB_REF": "refs/heads/queue",
+                "GITHUB_SHA": "head",
                 "SHARDS": "[1]",
             },
         ),
         patch.object(ci_gate_shards, "watch") as watch,
     ):
         ci_gate_shards.main()
-    assert watch.call_args.kwargs == {"recover": event == "merge_group"}
+    assert watch.call_args.kwargs == {
+        "recover": event == "merge_group",
+        "queue": ("refs/heads/queue", "head") if event == "merge_group" else None,
+    }
 
 
 def test_nonqueue_prefetch_waits_for_pending_units_ignores_other_jobs_and_accepts_success(tmp_path):
@@ -215,6 +220,28 @@ def test_queue_poll_rejects_a_red_inventory_before_successful_units_return():
     ):
         with pytest.raises(ValueError, match="red group"):
             ci_gate_shards.watch("org/repo", "123", "2", [1], queue=("queue", "head"))
+        sleep.assert_not_called()
+
+
+@pytest.mark.parametrize("final", [False, True])
+def test_queue_poll_checks_identity_before_listing_and_after_verification(final):
+    from scripts import ci_gate_queue
+
+    with (
+        patch.object(ci_gate_shards, "api", return_value=[{"jobs": []}]) as api,
+        patch.object(
+            ci_gate_queue,
+            "current",
+            side_effect=[None, ValueError("stale group")] if final else ValueError("stale group"),
+        ) as current,
+        patch.object(ci_gate_queue, "verify", return_value=True) as verify,
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
+    ):
+        with pytest.raises(ValueError, match="stale group"):
+            ci_gate_shards.watch("org/repo", "123", "2", [1], queue=("queue", "head"))
+        assert api.call_count == int(final)
+        assert verify.call_count == int(final)
+        assert current.call_count == 1 + int(final)
         sleep.assert_not_called()
 
 

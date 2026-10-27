@@ -99,12 +99,22 @@ def recovery(groups: dict[str, dict], recovered: set[str]) -> bool:
     return classified and recovered == reruns and all(passed)
 
 
-def verify(jobs: list[dict], shards: list[int], lost: Callable[[dict], bool] = lambda job: False) -> bool:
+def verify(
+    jobs: list[dict],
+    shards: list[int],
+    lost: Callable[[dict], bool] = lambda job: False,
+    *,
+    preliminary: bool = False,
+) -> bool:
     if not shards or any(type(shard) is not int or shard < 1 for shard in shards) or len(shards) != len(set(shards)):
         raise ValueError("The queue needs a nonempty unique positive shard plan")
     expected = {f"unit (3.12, {shard})" for shard in shards}
     groups = inventory(jobs, expected)
-    finished = [checked(groups.get(name), "success" if name in REQUIRED else "skipped") for name in REQUIRED | SKIPPED]
+    finished = [
+        bool(preliminary and name == "shard-check" and groups.get(name, {}).get("status") == "in_progress")
+        or checked(groups.get(name), "success" if name in REQUIRED else "skipped")
+        for name in REQUIRED | SKIPPED
+    ]
     recovered, originals_finished = originals(groups, expected, lost)
     recovery_finished = recovery(groups, recovered) if originals_finished else False
     return all(finished) and originals_finished and recovery_finished
