@@ -2,6 +2,7 @@ import argparse
 import ast
 import json
 import math
+import multiprocessing
 import os
 import re
 import subprocess
@@ -209,7 +210,8 @@ def helper_tests(root: Path, path: str) -> set[str] | None:
 def _importers(root: Path) -> dict[str, set[str]]:
     paths = _git(root, "ls-files", "--", "hooks/*.py", "scripts/*.py", "tests/*.py").splitlines()
     found = {"*": set(paths)}
-    with ProcessPoolExecutor() as pool:
+    # Forking after the recorded coverage is loaded would copy gigabytes into every worker.
+    with ProcessPoolExecutor(mp_context=multiprocessing.get_context("forkserver")) as pool:
         for path, keys in zip(paths, pool.map(_path_keys, paths, repeat(root), chunksize=IMPORTER_CHUNK)):
             for key in keys:
                 found.setdefault(key, set()).add(path)
