@@ -163,8 +163,8 @@ events = loop.verdicts(store, "rig-grade-swarm-doctor").events(since, until, swa
   rig-grade-swarm Doctor that was 2026-10-25T00:11:55Z, the Doctor `pull-dev`
   time written in the APPLIED note of task t749 on the
   `rig-grade-swarm-doctor` ledger (`agentihooks ledger --slug
-  rig-grade-swarm-doctor get tasks/t749`). The task carries no `applied_at`
-  field, so that note is the only record of the time. A window spanning that transition has incomplete
+  rig-grade-swarm-doctor get tasks/t749`). Its `applied_at` field is unset, so
+  that note is the only record of the time. A window spanning that transition has incomplete
   event counts.
 - An empty log does not prove that no judgments occurred before collection
   began.
