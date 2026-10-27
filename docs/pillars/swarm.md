@@ -5638,7 +5638,9 @@ writers above or `task set`.
 | release age | the latest GitHub release is no older than the maximum |
 
 Thresholds live in `scripts.swarm.probe.Thresholds`. A reader that fails prints `fail` with `unread:` and the
-error. The command exits zero whatever the lines say.
+error. Run off `root`, the root cap line prints `fail` with `unread: SwarmError: counted only on the root hive`
+because the tick's count scans the processes of the host it runs on; that line is not an over cap result. The
+command exits zero whatever the lines say.
 
 ## Agent status comments
 
