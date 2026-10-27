@@ -129,6 +129,25 @@ def test_the_pair_texts_name_the_finding_stem_evidence_and_earlier_pair_exactly(
     assert str(refused.value) == f"finding {STALE.id} already has tasks {stem}-cause and {stem}-code still open"
 
 
+def finding_of(kind):
+    found = Finding(kind, "gc1", f"{kind} seen", ("evidence one",), "at least one", 2)
+    return {**found.as_dict(), "id": found.id, "measure": found.measure}, judged("established")[1]
+
+
+@pytest.mark.parametrize("kind", ["failed spawn", "ci reruns", "scheduled tick", "master launch failed"])
+def test_a_finding_read_from_workstation_only_sources_gives_a_workstation_cause_task(kind):
+    cause, fixed = loop.fix_tasks(WATCHED, *finding_of(kind), "code", ())
+    assert cause["workstation"] is True
+    assert "workstation" not in fixed
+    ledger_kinds.check(cause)
+
+
+@pytest.mark.parametrize("kind", ["ci tier wall time", "stale claim"])
+def test_a_finding_read_from_github_or_the_ledger_gives_a_cause_task_any_agent_can_take(kind):
+    cause, _ = loop.fix_tasks(WATCHED, *finding_of(kind), "code", ())
+    assert "workstation" not in cause
+
+
 def step(store, at, found=(), closed=None, environ=None):
     seen = []
 
