@@ -47,10 +47,12 @@ class Store:
 def ports_for(hives, readings, here="", local=None, published=None, reads=None):
     registry = SimpleNamespace(
         hives=lambda redis: hives if isinstance(redis, Redis) else [],
-        live=lambda hive, now: hive["live"],
+        live=lambda hive, now: hive["live"] and now == NOW,
         key=lambda hive: f"hive:{hive}",
     )
-    headroom = SimpleNamespace(read=lambda redis, hive, now: readings.get(hive) if isinstance(redis, Redis) else None)
+    headroom = SimpleNamespace(
+        read=lambda redis, hive, now: readings.get(hive) if isinstance(redis, Redis) and now == NOW else None
+    )
 
     def read(redis, now):
         (reads if reads is not None else []).append((redis, now))
@@ -208,6 +210,7 @@ def test_a_published_machine_without_a_harness_counts_it_as_zero():
     published = {"machines": {"master": {"claude": 2}}, "silent": [], "measured_at": NOW}
     data = viewed(Store({}), *ports_for([], {}, published=published))
     assert data["agents"] == {"total": 2, "source": "herdr", "reporting": 1, "of": 1, "claude": 2, "codex": 0}
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 2}]
 
 
 def test_the_bridge_is_read_from_the_store_redis_at_the_request_time():
