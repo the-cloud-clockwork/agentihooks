@@ -33,8 +33,8 @@ the assertion of `test_bright_shifts_a_colour_to_its_bright_code`:
 
 | Run | Assertion | Mutation result | Gate — Required |
 |---|---|---|---|
-| [Green 40419695070](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40419695070), head `13dae34` | `colors.bright("31") == "91"` | 4 killed | GREEN_RESULT |
-| [Red 40419698727](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40419698727), head `25a8fe4` | `colors.bright("31")` (truthiness only) | 3 survived, 1 killed on the changed line | RED_RESULT |
+| [Green 40460927967](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40460927967), head `461504b` | `colors.bright("31") == "91"` | 4 killed | success |
+| [Red 40460931731](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40460931731), head `a4a1bb2` | `colors.bright("31")` (truthiness only) | 3 survived, 1 killed on the changed line | failure, `mutation-stats` the only red need |
 
 ### Red rate split
 
