@@ -382,6 +382,15 @@ def _differs(expected, actual, prefix=""):
     return keys
 
 
+def _published(artifacts, run):
+    if any(item["name"].startswith("reused-branch-") for item in artifacts):
+        return "it reused tests from earlier runs of its pull request"
+    name = f"required-tree-{run['run_attempt']}"
+    if len([item for item in artifacts if item["name"] == name and not item["expired"]]) != 1:
+        return f"not exactly one {name} artifact"
+    return None
+
+
 def _refusal(args, current, workflow, run):
     for key, value in (("event", "pull_request"), ("status", "completed"), ("conclusion", "success")):
         if run[key] != value:
@@ -395,9 +404,8 @@ def _refusal(args, current, workflow, run):
     if workflow_files != current["inputs"]["workflow"]:
         return "workflow files differ at its head"
     artifacts = _lines(folder / "artifacts.jsonl")
-    name = f"required-tree-{run['run_attempt']}"
-    if len([item for item in artifacts if item["name"] == name and not item["expired"]]) != 1:
-        return f"not exactly one {name} artifact"
+    if reason := _published(artifacts, run):
+        return reason
     record = _proof(folder / "proof.zip")
     expected = {
         "version": 1,

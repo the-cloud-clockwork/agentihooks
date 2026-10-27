@@ -34,10 +34,10 @@ class UnusableRecord(ValueError):
     pass
 
 
-def _api(endpoint: str) -> bytes:
+def _api(endpoint: str, timeout: int = 60) -> bytes:
     for attempt in range(SERVER_ATTEMPTS):
         try:
-            return gh_api([endpoint], timeout=60).stdout
+            return gh_api([endpoint], timeout=timeout).stdout
         except subprocess.CalledProcessError as error:
             stderr = error.stderr.decode()
             print(stderr, file=sys.stderr)
