@@ -3124,6 +3124,45 @@ seen merged is not read again.
 `--must`, `--check` and `--judge` on `task add` store a proof contract (what must be true, how it is
 checked, who judges it) that the agent's prompt carries.
 
+### Changing the kind of an existing task
+
+The master or the Doctor changes a task's kind when the proof the work needs turns out different from the
+one it was filed with, for example a `code` repair whose real proof is a measurement:
+
+```bash
+agentihooks ledger --slug <id> --as <name> task set <task> kind=tune
+```
+
+`task set` sends one `task_update` operation to the ledger API. A valid kind is stored on the same task and
+nothing else moves: its id, state, claimant, proof contract and comments stay as they were, so a claimed task
+stays with its owner. The next `done` then needs the new kind's proof from the table above. A `plan` task
+changed to another kind moves to the `eng` lane, because the plan lane accepts only plan tasks.
+
+A kind change also rewrites `steering.md` in the task's work folder so it shows the new kind. On a hosted ledger
+the work folder lives on the agent's host, not the ledger server; when the folder is absent on the server the
+rewrite is skipped and the kind still changes. The next spawn writes the steering notes on the host that runs
+the task.
+
+An unknown kind is refused before anything is stored. The API answers `400` with code `schema_invalid` and a
+message naming the accepted kinds, and the task reads exactly as it did before:
+
+```json
+{"error": {"code": "schema_invalid", "message": "Operation does not match its domain schema: kind must be one of ('code', 'ci', 'ops', 'troubleshoot', 'tune', 'research', 'plan', 'workflow')"}}
+```
+
+| Symptom | Cause and action |
+|---|---|
+| `task set <task> kind=<kind>` answers `500 storage_error` `Resource could not be read or written`, while other fields on the same task update | The hosted ledger runs a release from before pull request [#5696](https://github.com/the-cloud-clockwork/agentihooks/pull/5696), which wrote `steering.md` even when the work folder was absent on the server. Wait for the promotion that carries #5696 to reach the hosted ledger, then run the same `task set` again. |
+| `schema_invalid` with `kind must be one of` | The kind is misspelt or unknown. Use one of the listed kinds; the task was not changed. |
+| `500 storage_error` on a kind change on a release that carries #5696 | The work folder exists on the server but cannot be written, a permission or disk fault. Read the ledger server log line `Ledger API storage failure` for the cause. |
+
+`test_an_owned_task_changes_kind_over_http_and_an_invalid_kind_changes_nothing` in
+`tests/swarm_ledger/test_api_v1.py` pins this over the live HTTP API, added by pull request
+[#5719](https://github.com/the-cloud-clockwork/agentihooks/pull/5719). It failed against the rewrite from before
+#5696 in [run 39719415326](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39719415326) with the
+hosted `500` and passed with the fix in
+[run 39719418457](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39719418457).
+
 ### Shared areas in the opening prompt
 
 When the tick claims a task, it compares the task's territory with the territory of every other task in `claimed`
@@ -3531,6 +3570,27 @@ head <sha> failed its last merge group run (Tests https://github.com/<owner>/<re
 ```
 
 When those runs cannot all be listed it refuses with `could not list every merge group run since head <sha> landed`. A head with no own merge group run passes. The merge pass's own requeue does not run this check; it judges only the runs since it last queued the pull request.
+
+The check runs only when the pull request is outside the queue, after the staged compatibility check and the queue intent gate, and before the required checks reading; a refusal enqueues nothing. A group is the set of own runs that share one merge group commit (`head_sha`), and the newest group is the one holding the most recently created run:
+
+| Own runs since the head commit | `merge queue` |
+|---|---|
+| None | Queues. |
+| Newest group finished clean, an older group failed | Queues; only the newest group counts. |
+| Newest group still running, an older group failed | Queues; a running run is not judged. |
+| Newest group has one finished run that failed while another still runs | Refuses, naming the failed run. |
+| Newest group has a finished run that failed: a conclusion other than `success`, `skipped`, `neutral` or `cancelled`, or a cancelled run with a failed job or jobs that could not all be listed | Refuses, naming that run. |
+| Runs of another pull request failed | Queues; they are not own runs. |
+
+To clear a refusal, read the named run's failed job, fix it with a new commit on the pull request branch, wait for the pull request checks and queue again. Runs created before the new head's committer time are not read, so a group run of the old head stops counting once a commit made after it lands. To see which runs the check reads, take the head's committer time and list the own runs created since then:
+
+```bash
+gh api "repos/<owner>/<repo>/commits/<head sha>" --jq '.commit.committer.date'
+gh api "repos/<owner>/<repo>/actions/runs?event=merge_group&created=>=<committer date>&per_page=100&page=1" \
+  --jq '.workflow_runs[] | select(.head_branch | test("^gh-readonly-queue/.+/pr-<number>-[0-9a-f]+$")) | [.created_at, .head_sha, .name, .conclusion, .html_url] | @tsv'
+```
+
+Raise `page` until the pages cover the listing's `total_count`. The check reads at most five pages of 100 runs and refuses when more exist.
 
 A red exit skips that read because the failure is already on the pull request's own checks. The reopen comment reads `Reopened by the swarm: its pull request <url> left the merge queue without merging. The next engineer continues it from the handoff its engineer left.` The next engineer fixes the failing check with a new commit, waits for the pull request checks and queues it with `agentihooks swarm <id> merge queue <url>`.
 

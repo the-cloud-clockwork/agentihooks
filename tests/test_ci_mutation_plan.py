@@ -1,5 +1,6 @@
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,65 @@ def test_measured_costs_merge_mappings_keep_slowest_durations_and_cover_missing_
     ]
     assert measured_costs(names, results) == pytest.approx({names[0]: 18.4125, names[1]: 80.6, names[2]: 5.9125})
     assert measured_costs([names[1]], []) == {names[1]: 80.6}
+
+
+def test_observed_mutant_execution_costs_drive_balanced_existing_workers(tmp_path, monkeypatch):
+    from scripts.ci_mutation import killers
+    from scripts.ci_mutation.measured import measured_costs, plan_shards
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
+    memory = killers.KillMemory(tmp_path)
+    names = [f"scripts.sample.x_f__mutmut_{index}" for index in range(8)]
+    observations = [20.0, 20.0, 20.0, 20.0, 1.0, 1.0, 1.0, 1.0]
+    ticks = iter(value for seconds in observations for value in [100.0, 100.0 + seconds])
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    for name in names:
+        memory.prepare(name, ["test"])
+        assert memory.wrap(lambda *args, **kwargs: 0)(object(), ["test"]) == 0
+    results = [{"tests": {"scripts.sample.x_f": ["test"]}, "durations": {"test": 100.0}}]
+    costs = measured_costs(names, results, memory)
+    assert costs == dict(zip(names, observations, strict=True))
+    plan = plan_shards(costs, target=1, limit=4)
+    assert plan["shards"] == 4
+    assert plan["shard_worker_seconds"] == [21.0] * 4
+    assert set(plan["assignments"]) == set(names)
+    assert plan == plan_shards(dict(reversed(list(costs.items()))), target=1, limit=4)
+    assert measured_costs(names[:1], results) == {names[0]: 130.6}
+    assert measured_costs(names[:1], [], memory) == {names[0]: 80.6}
+    changed = [{"tests": {"scripts.sample.x_f": ["different"]}, "durations": {"different": 2.0}}]
+    assert measured_costs(names[:1], changed, memory) == {names[0]: 8.1}
+
+
+def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_path, monkeypatch):
+    from scripts.ci_mutation import killers, measured
+    from scripts.ci_mutation.mutant_shards import unit_cost, unit_count
+
+    function = "scripts.sample.x_f"
+    names = [f"{function}__mutmut_{index}" for index in range(3)]
+    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0]}
+    memory = killers.KillMemory(tmp_path)
+    ticks = iter([0.0, 9.0, 20.0, 21.0, 30.0, 39.0, 40.0, 41.0])
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(measured, "measured_splits", lambda *args: {function: split})
+    for name in names[:2]:
+        for tests in [["fast", "left"], ["fast", "right"]]:
+            memory.prepare(name, tests)
+            assert memory.wrap(lambda *args, **kwargs: 0)(object(), tests) == 0
+        assert memory.cost(name, ["left", "fast"]) == 9.0
+        assert memory.cost(name, ["fast", "right"]) == 1.0
+    results = [
+        {"tests": {function: ["fast", "left", "right"]}, "durations": {"fast": 1.0, "left": 100.0, "right": 100.0}}
+    ]
+    plan = measured.measured_plan([(names, results)], memory, limit=2)
+    assert plan["shards"] == 2
+    assert unit_count(plan) == 6
+    assert plan["unit_costs"] == {names[0]: [9.0, 1.0], names[1]: [9.0, 1.0], names[2]: [100.0, 100.0]}
+    assert plan["shard_worker_seconds"] == [110.0, 110.0]
+    for name, assignment in plan["assignments"].items():
+        assert sorted(assignment) == [0, 1]
+        for position, index in enumerate(assignment):
+            assert unit_cost(plan, name, index) == plan["unit_costs"][name][position]
+    assert measured.measured_plan([(list(reversed(names)), results)], memory, limit=2) == plan
 
 
 def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_its_traced_sum(tmp_path):
@@ -785,18 +845,48 @@ def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, m
         calls.append(("discover", root, bases, head))
         return changed
 
+    started = threading.Event()
+
     def record(repository):
-        calls.append(("record", repository))
+        started.set()
         return None, ""
 
+    def bases(*args):
+        # The record read is already running while the bases are worked out.
+        assert not changed or started.wait(10)
+        return ["base"]
+
     monkeypatch.setattr(plan, "read_record", record)
-    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "touches_code", lambda *args: calls.append(("touches", *args)) or bool(changed))
+    monkeypatch.setattr(plan, "own_bases", bases)
     monkeypatch.setattr(plan, "discover_changes", discover)
     assert plan.main() == 0
-    assert calls == [("discover", tmp_path, ["base"], "HEAD"), *[("record", "owner/repo")] * bool(changed)]
+    assert calls == [("touches", tmp_path, "base", "HEAD"), ("discover", tmp_path, ["base"], "HEAD")]
+    assert started.is_set() is bool(changed)
     assert f"changed={len(changed)}\n" in (tmp_path / "github-output").read_text()
     if not changed:
         assert "No change remains to mutate, so the recorded dev coverage is not read.\n" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "changed, touched",
+    [
+        ("scripts/sample.py", True),
+        ("hooks/sample.py", True),
+        ("scripts/caf\u00e9.py", True),
+        ("scripts/notes.txt", False),
+        ("tests/test_x.py", False),
+    ],
+)
+def test_touches_code_names_only_hooks_or_scripts_python_changes(tmp_path, changed, touched):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "base")
+    _git(tmp_path, "branch", "base")
+    (tmp_path / changed).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / changed).write_text("VALUE = 1\n")
+    _git(tmp_path, "add", changed)
+    _git(tmp_path, "commit", "-qm", "change")
+    assert plan.touches_code(tmp_path, "base", "HEAD") is touched
 
 
 @pytest.mark.parametrize("source, matched", [("sample", False), ("sample", True), ("plain", False)])
@@ -856,6 +946,46 @@ def test_planning_checks_selected_test_collection_and_worker_contracts(
     else:
         assert plan.main() == 0
         assert "stats_parts=" in output.read_text()
+
+
+def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_path, monkeypatch):
+    from tests import test_collection_imports as contracts
+
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/lazy.py").write_text("def load():\n    import mcp\n")
+    group = 'pytestmark = pytest.mark.xdist_group("mcp-sdk")\n'
+    (tmp_path / "tests/test_a.py").write_text("from scripts.lazy import load\n" + group)
+    (tmp_path / "tests/test_b.py").write_text("from scripts.lazy import load\n")
+    plan.validate_tests(tmp_path, ["tests/test_a.py::test_one"])
+    with pytest.raises(SystemExit, match="tests/test_b.py: loads the MCP SDK without the mcp-sdk worker group"):
+        plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
+
+
+def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(tmp_path, monkeypatch):
+    from tests import test_collection_imports as contracts
+
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/leaf.py").write_text("")
+    (tmp_path / "scripts/clean.py").write_text("def run():\n    import scripts.leaf\n")
+    (tmp_path / "tests/test_a.py").write_text("from scripts.clean import run\n")
+    (tmp_path / "tests/test_b.py").write_text("from scripts.clean import run\n")
+    walks = []
+    loads_heavy = contracts.loads_heavy
+
+    def counted(name, seen):
+        if name not in seen:
+            walks.append(name)
+        return loads_heavy(name, seen)
+
+    monkeypatch.setattr(contracts, "loads_heavy", counted)
+    plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
+    assert walks.count("scripts.leaf") == 1
 
 
 def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):

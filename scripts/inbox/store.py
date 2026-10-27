@@ -28,6 +28,7 @@ RECLAIMED = "returned to the master pool: its master is gone"
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
 CLOSE_KINDS = {"done": "done", "handoff": "handed_off", "blocked": "blocked", "cancel": "cancelled"}
 NEEDS_DETAIL = {"handoff": "the address the work went to", "blocked": "what it is blocked on"}
+OPERATOR = "operator"
 POOL_HOLDER = "pool_holder"
 POOL_SKIP = "pool_skip"
 
@@ -642,6 +643,23 @@ class InboxStore:
             except WatchError:
                 return None
 
+    def front_door_of(self, sender: str) -> tuple[str, bool]:
+        """The front door master seat of sender's swarm, '' outside a swarm, and whether sender holds it: only its
+        holder writes to the operator."""
+        sender = self.names.resolve(sender)
+        door = master_of(sender, self.names)
+        held = sender if is_seat(sender) else self.seats.seat_of(sender)
+        return door, bool(door) and held == door
+
+    def _refer(self, item: "Item", replier: str, door: str, text: str, fyi: bool, answer_id: str) -> "Item":
+        """Only the front door answers the operator: another agent's answer and his item go to it."""
+        try:
+            answer = self.send(replier, door, text, ref=item.id, fyi=fyi, item_id=answer_id)
+        except DuplicateItem:
+            answer = self.get(answer_id)
+        self.redirect(item.id, replier, door, f"handed to {door}: only the front door answers the operator")
+        return answer
+
     def reply(self, item_id: str, replier: str, text: str, fyi: bool = False, answer_id: str = "") -> Item:
         from redis.exceptions import WatchError
 
@@ -651,6 +669,11 @@ class InboxStore:
             raise InboxError(f"message {item_id} belongs to {item.address}, not {replier}")
         if not text.strip():
             raise InboxError("a reply needs text")
+        door, holds = self.front_door_of(replier)
+        if item.sender == OPERATOR and door and not holds:
+            if item.state in CLOSED:
+                raise InboxError(f"message {item_id} is closed: {item.reason}")
+            return self._refer(item, replier, door, text, fyi, answer_id)
         key = self.key("item", item_id)
         field = f"reply:{replier}"
         legacy = answer_id and (item.state, item.reason) == close_reason("done", replied(answer_id))

@@ -45,7 +45,8 @@ def unit_cost(plan: dict, name: str, index: int) -> float:
     assignment = plan["assignments"][name]
     if not isinstance(assignment, list):
         return plan["costs"][name]
-    return plan["splits"][function_name(name)]["costs"][assignment.index(index)]
+    costs = plan.get("unit_costs", {}).get(name, plan["splits"][function_name(name)]["costs"])
+    return costs[assignment.index(index)]
 
 
 def shard_tests(tests: list[str], name: str | None, index: int) -> list[str]:

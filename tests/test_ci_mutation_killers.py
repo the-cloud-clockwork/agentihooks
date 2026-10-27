@@ -148,3 +148,47 @@ def test_the_selection_runner_orders_by_kills_and_records_them_only_for_mutants(
     assert (tmp_path / "killers" / _digest("scripts.a.x_f")).read_text() == "tests/test_c.py::slow"
     assert not list((tmp_path / "killers").glob(f"*.{os.getpid()}"))
     assert Path.cwd() == tmp_path
+
+
+def test_completed_mutant_cost_survives_a_kill_and_cache_reload(tmp_path, monkeypatch):
+    memory = killers.KillMemory(tmp_path / "killers")
+    mutant = "scripts.a.x_f__mutmut_1"
+    memory.prepare(mutant, TESTS)
+    ticks = iter([10.0, 13.5])
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+
+    def execute(runner, params, **kwargs):
+        memory.pytest_runtest_logreport(_report(TESTS[0]))
+        return 1
+
+    assert memory.wrap(execute)(object(), TESTS) == 1
+    restored = killers.KillMemory(memory.folder)
+    assert restored.cost(mutant, reversed(TESTS)) == 3.5
+    assert restored.killer(mutant) == TESTS[0]
+    assert restored.cost(mutant, TESTS[:1]) is None
+    assert restored.cost("scripts.a.x_f__mutmut_2", TESTS) is None
+    assert not list(memory.folder.glob(f"*.{os.getpid()}"))
+
+
+def test_only_completed_mutant_tests_record_cost(tmp_path, monkeypatch):
+    import pytest
+
+    memory = killers.KillMemory(tmp_path / "missing" / "killers")
+    ticks = iter(range(20))
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    for status in [0, 1, 2, 3, 4, 5]:
+        mutant = f"scripts.a.x_f__mutmut_{status}"
+        memory.prepare(mutant, TESTS)
+        assert memory.wrap(lambda *args, **kwargs: status)(object(), TESTS) == status
+        assert memory.cost(mutant, TESTS) == (1.0 if status in [0, 1] else None)
+    memory.prepare(None, TESTS)
+    assert memory.wrap(lambda *args, **kwargs: 1)(object(), TESTS) == 1
+
+    def failed(*args, **kwargs):
+        raise RuntimeError("runner failed")
+
+    mutant = "scripts.a.x_f__mutmut_99"
+    memory.prepare(mutant, TESTS)
+    with pytest.raises(RuntimeError, match="runner failed"):
+        memory.wrap(failed)(object(), TESTS)
+    assert memory.cost(mutant, TESTS) is None

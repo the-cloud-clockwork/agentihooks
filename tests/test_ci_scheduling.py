@@ -10,9 +10,12 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 def test_push_concurrency_is_one_promotion_group_and_other_runs_keep_their_own():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
-    assert workflow["concurrency"]["group"].endswith(
+    suffix = " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
+    group = workflow["concurrency"]["group"]
+    assert group.endswith(suffix)
+    prefix = group.removesuffix(suffix)
+    assert "github.event_name == 'push'" not in prefix or prefix.endswith(
         "|| github.event_name == 'push' && 'promotion-dev'"
-        " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
     )
 
 
