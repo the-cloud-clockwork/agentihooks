@@ -47,13 +47,20 @@ def _rearms_hung_test_dump(fixture: ast.FunctionDef) -> bool:
     )
 
 
-def _slowest_committed_test(skip_rearmed: bool = True) -> float:
+def _slowest_committed_test(skip_rearmed: bool = True, skip_own_timeout: bool = False) -> float:
     rearmed = {
         path.relative_to(_ROOT).as_posix()
         for path in (_ROOT / "tests").rglob("test_*.py")
         if skip_rearmed
         and any(
             isinstance(node, ast.FunctionDef) and _rearms_hung_test_dump(node)
+            for node in ast.parse(path.read_text()).body
+        )
+        or skip_own_timeout
+        and any(
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "pytestmark" for target in node.targets)
+            and any(isinstance(call, ast.Attribute) and call.attr == "timeout" for call in ast.walk(node.value))
             for node in ast.parse(path.read_text()).body
         )
     }
@@ -501,7 +508,9 @@ def test_a_hung_unit_test_dumps_every_thread_stack_within_a_minute():
     slowest_test = _slowest_committed_test()
     timeout = int(re.search(r"-o faulthandler_timeout=(\d+)", command).group(1))
     assert slowest_test < timeout <= 60
-    assert _slowest_committed_test(skip_rearmed=False) < int(re.search(r"--timeout=(\d+)", command).group(1))
+    assert _slowest_committed_test(skip_rearmed=False, skip_own_timeout=True) < int(
+        re.search(r"--timeout=(\d+)", command).group(1)
+    )
     assert "no:faulthandler" not in command
     assert "faulthandler_exit_on_timeout" not in command
 
@@ -538,6 +547,25 @@ def test_the_hung_test_bound_skips_a_file_that_rearms_its_own_dump(tmp_path, mon
     assert _slowest_committed_test() == 1.0
     (tmp_path / "tests/test_slow.py").write_text("def test_slow():\n    pass\n")
     assert _slowest_committed_test() == 90.0
+
+
+def test_the_timeout_bound_skips_only_a_file_that_sets_its_own_timeout(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_a.py").write_text("def test_a():\n    pass\n")
+    (tmp_path / "tests/test_slow.py").write_text("pytestmark = pytest.mark.timeout(250)\n")
+    durations = {"tests/test_a.py::test_a": 1.0, "tests/test_slow.py::test_slow": 90.0}
+    for name in (".test_durations", ".test_durations-3.12"):
+        (tmp_path / name).write_text(json.dumps(durations))
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "d"], check=True
+    )
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    assert _slowest_committed_test(skip_rearmed=False, skip_own_timeout=True) == 1.0
+    assert _slowest_committed_test(skip_rearmed=False) == 90.0
+    (tmp_path / "tests/test_slow.py").write_text("@pytest.mark.timeout(250)\ndef test_other():\n    pass\n")
+    assert _slowest_committed_test(skip_rearmed=False, skip_own_timeout=True) == 90.0
 
 
 def test_tests_keep_dev_pull_request_and_integration_triggers():
@@ -1435,6 +1463,148 @@ def test_selected_legs_upload_elapsed_time_beside_their_durations():
     steps = _workflow()["jobs"]["unit-selected"]["steps"]
     upload = next(step for step in steps if step.get("name") == "Upload selected test durations")
     assert upload["with"]["path"].split() == ["durations.json", "elapsed.json"]
+
+
+def _selected_step(name: str) -> dict:
+    return next(step for step in _workflow()["jobs"]["unit-selected"]["steps"] if step.get("name") == name)
+
+
+def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_only_for_the_grader():
+    steps = _workflow()["jobs"]["unit-selected"]["steps"]
+    checkouts = [step for step in steps if step.get("uses", "").startswith("actions/checkout")]
+    assert [checkout["with"] for checkout in checkouts] == [{"ref": "${{ github.sha }}", "fetch-depth": 1}]
+    fetch = _selected_step("Fetch the protected grader's dev head")
+    assert fetch["if"] == "steps.collection.outcome == 'success'"
+    names = [step.get("name") for step in steps]
+    assert (
+        names.index("Wait for the early collection")
+        < names.index(fetch["name"])
+        < names.index("Adopt the reused tests from the protected grader")
+    )
+
+
+def test_the_grader_fetch_gives_a_shallow_leg_the_dev_head(tmp_path):
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "protocol.file.allow=always"]
+    upstream = tmp_path / "upstream"
+    subprocess.run([*git, "init", "-q", "-b", "dev", str(upstream)], check=True)
+    for message in ("one", "two"):
+        subprocess.run([*git, "-C", str(upstream), "commit", "-q", "--allow-empty", "-m", message], check=True)
+    subprocess.run([*git, "-C", str(upstream), "branch", "head"], check=True)
+    leg = tmp_path / "leg"
+    url = upstream.as_uri()
+    subprocess.run(
+        [*git, "clone", "-q", "--depth=1", "--no-tags", "-b", "head", "--single-branch", url, str(leg)], check=True
+    )
+    run = _selected_step("Fetch the protected grader's dev head")["run"]
+    subprocess.run(["bash", "-e", "-c", run], cwd=leg, check=True, capture_output=True)
+    rev = ["git", "-C", str(leg), "rev-parse"]
+    dev = subprocess.run([*rev, "origin/dev"], check=True, capture_output=True, text=True).stdout
+    assert (
+        dev
+        == subprocess.run(
+            ["git", "-C", str(upstream), "rev-parse", "dev"], check=True, capture_output=True, text=True
+        ).stdout
+    )
+    assert (
+        subprocess.run([*rev, "--is-shallow-repository"], check=True, capture_output=True, text=True).stdout == "true\n"
+    )
+
+
+def test_selected_legs_download_the_nats_server_while_setup_runs_and_fall_back_to_the_action():
+    names = [step.get("name") for step in _workflow()["jobs"]["unit-selected"]["steps"]]
+    start = _selected_step("Start the pinned nats server download")
+    use = _selected_step("Use the pinned nats server download")
+    fallback = _selected_step("Install the pinned nats server for the bus backend tests")
+    assert names.index(start["name"]) == 1
+    assert names.index("Adopt latest dev durations") < names.index(use["name"]) < names.index(fallback["name"])
+    assert names.index(fallback["name"]) < names.index("Run the selected tests")
+    assert start["continue-on-error"] is True and use["continue-on-error"] is True
+    assert use["if"] == f"steps.{start['id']}.outcome == 'success'"
+    assert fallback["if"] == f"steps.{use['id']}.outcome != 'success'"
+    assert fallback["uses"] == "./.github/actions/nats-server"
+    assert fallback["timeout-minutes"] == 3
+    assert use["timeout-minutes"] == 3
+
+
+def _run_background_nats(tmp_path: Path, curl_works: bool) -> subprocess.CompletedProcess:
+    name = "nats-server-v0-linux-amd64"
+    binary = tmp_path / "src" / name / "nats-server"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\necho nats-server: v0\n")
+    binary.chmod(0o755)
+    good = tmp_path / "good.tar.gz"
+    with tarfile.open(good, "w:gz") as tar:
+        tar.add(binary.parent, arcname=name)
+    action = (_ROOT / ".github/actions/nats-server/action.yml").read_text()
+    action = re.sub(r"NATS_SERVER_RELEASE: v[0-9.]+", "NATS_SERVER_RELEASE: v0", action)
+    action = re.sub(
+        r"NATS_SERVER_SHA256_AMD64: [0-9a-f]{64}",
+        f"NATS_SERVER_SHA256_AMD64: {hashlib.sha256(good.read_bytes()).hexdigest()}",
+        action,
+    )
+    workspace = tmp_path / "workspace"
+    (workspace / ".github/actions/nats-server").mkdir(parents=True)
+    (workspace / ".github/actions/nats-server/action.yml").write_text(action)
+    stub = tmp_path / "bin" / "curl"
+    stub.parent.mkdir()
+    copy = 'while [[ $# -gt 0 ]]; do [[ "$1" == -o ]] && cp "$GOOD" "$2"; shift; done\n' if curl_works else "exit 22\n"
+    stub.write_text(f'#!/usr/bin/env bash\necho "$@" >> "$CURL_LOG"\n{copy}')
+    stub.chmod(0o755)
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    env = {
+        **os.environ,
+        "PATH": f"{stub.parent}:{os.environ['PATH']}",
+        "CURL_LOG": str(tmp_path / "curl.log"),
+        "GOOD": str(good),
+        "RUNNER_TEMP": str(runner),
+        "GITHUB_PATH": str(tmp_path / "path"),
+        "GITHUB_ENV": str(tmp_path / "env"),
+    }
+    for step in ("Start the pinned nats server download", "Use the pinned nats server download"):
+        result = subprocess.run(
+            ["bash", "-e", "-c", _selected_step(step)["run"]], cwd=workspace, env=env, capture_output=True, text=True
+        )
+        if result.returncode:
+            return result
+    return result
+
+
+def test_the_background_nats_download_puts_the_verified_pinned_server_on_the_path(tmp_path):
+    result = _run_background_nats(tmp_path, curl_works=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    server = tmp_path / "runner/nats-bg/nats-server"
+    assert (
+        subprocess.run([str(server), "--version"], check=True, capture_output=True, text=True).stdout
+        == "nats-server: v0\n"
+    )
+    assert (tmp_path / "path").read_text() == f"{server.parent}\n"
+    assert (tmp_path / "env").read_text() == "NATS_SERVER_REQUIRED=1\n"
+    assert "releases/download/v0/nats-server-v0-linux-amd64.tar.gz" in (tmp_path / "curl.log").read_text()
+
+
+def test_a_failed_background_nats_download_leaves_the_install_to_the_action(tmp_path):
+    result = _run_background_nats(tmp_path, curl_works=False)
+    assert result.returncode != 0
+    assert not (tmp_path / "path").exists()
+    assert not (tmp_path / "env").exists()
+
+
+def test_the_nats_wait_stops_at_once_when_the_background_download_died_without_a_status(tmp_path):
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    (tmp_path / "nats-bg.pid").write_text(f"{dead.pid}\n")
+    (tmp_path / "nats-bg.log").write_text("")
+    env = {
+        **os.environ,
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_PATH": str(tmp_path / "path"),
+        "GITHUB_ENV": str(tmp_path / "env"),
+    }
+    run = _selected_step("Use the pinned nats server download")["run"]
+    result = subprocess.run(["bash", "-e", "-c", run], env=env, capture_output=True, text=True, timeout=20)
+    assert result.returncode != 0
+    assert not (tmp_path / "path").exists()
 
 
 def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
