@@ -1611,8 +1611,30 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
-          filter: blob:none
+          fetch-depth: 1
+
+      - name: Start the pinned nats server download
+        id: nats-download
+        continue-on-error: true
+        run: |
+          action=.github/actions/nats-server/action.yml
+          release=$(sed -n 's/^ *NATS_SERVER_RELEASE: \(v[0-9][0-9.]*\)$/\1/p' "$action")
+          sha=$(sed -n 's/^ *NATS_SERVER_SHA256_AMD64: \([0-9a-f]\{64\}\)$/\1/p' "$action")
+          [[ "$(uname -m)" == x86_64 && -n "$release" && -n "$sha" ]]
+          export NATS_SERVER_RELEASE="$release" NATS_SERVER_SHA256="$sha" NATS_SERVER_NAME="nats-server-${release}-linux-amd64"
+          mkdir -p "$RUNNER_TEMP/nats-bg"
+          nohup bash -c '
+            archive="$RUNNER_TEMP/nats-bg/$NATS_SERVER_NAME.tar.gz"
+            status=0
+            {
+              curl -fsSL --connect-timeout 10 --max-time 25 --retry 3 --retry-delay 3 --retry-connrefused -o "$archive" "https://github.com/nats-io/nats-server/releases/download/$NATS_SERVER_RELEASE/$NATS_SERVER_NAME.tar.gz" &&
+                sha256sum --check --strict <<< "$NATS_SERVER_SHA256  $archive" &&
+                tar -xzf "$archive" -C "$RUNNER_TEMP/nats-bg" --strip-components=1 "$NATS_SERVER_NAME/nats-server" &&
+                "$RUNNER_TEMP/nats-bg/nats-server" --version
+            } || status=$?
+            echo "$status" > "$RUNNER_TEMP/nats-bg.status.tmp"
+            mv "$RUNNER_TEMP/nats-bg.status.tmp" "$RUNNER_TEMP/nats-bg.status"
+          ' > "$RUNNER_TEMP/nats-bg.log" 2>&1 < /dev/null &
 
       - name: Download the selected legs
         id: download-the-selected-legs
@@ -1700,7 +1722,20 @@ jobs:
           echo "$HOME/codex" >> "$GITHUB_PATH"
           echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"
 
+      - name: Use the pinned nats server download
+        id: nats
+        if: steps.nats-download.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          for _ in $(seq 150); do [[ -f "$RUNNER_TEMP/nats-bg.status" ]] && break; sleep 1; done
+          cat "$RUNNER_TEMP/nats-bg.log"
+          [[ "$(cat "$RUNNER_TEMP/nats-bg.status")" == 0 ]]
+          echo "$RUNNER_TEMP/nats-bg" >> "$GITHUB_PATH"
+          echo "NATS_SERVER_REQUIRED=1" >> "$GITHUB_ENV"
+
       - name: Install the pinned nats server for the bus backend tests
+        if: steps.nats.outcome != 'success'
         timeout-minutes: 3
         uses: ./.github/actions/nats-server
 
@@ -1717,6 +1752,10 @@ jobs:
         uses: ./.github/actions/await-download
         with:
           name: early-collected-${{ matrix.python-version }}
+
+      - name: Fetch the protected grader's dev head
+        if: steps.collection.outcome == 'success'
+        run: git fetch --no-tags --depth=1 origin +refs/heads/dev:refs/remotes/origin/dev
 
       # Grader code decides and grades the reuse, but head code shares this runner, so a hostile head can still forge it.
       - name: Adopt the reused tests from the protected grader
