@@ -384,6 +384,7 @@ def _app_server_command(
         spec.seat,
         *[f"--overlay={overlay}" for overlay in spec.overlays],
         *([f"--bundle-revision={spec.bundle_revision}"] if spec.bundle_revision else []),
+        *([f"--home={spec.home}"] if spec.home else []),
         *(["--exclude", spec.exclude] if spec.exclude else []),
         "--report",
         str(report),
@@ -601,7 +602,7 @@ def _plain_codex_handoff(flags: list[str], session_id: str) -> list[str]:
 
 def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], environ: dict[str, str]) -> list[str]:
     from scripts.profiles import binding
-    from scripts.select_profile import BUNDLE_REVISION, OVERLAYS, RECORDED_HOME, prepare
+    from scripts.select_profile import BUNDLE_REVISION, OVERLAYS, PUSH, RECORDED_HOME, prepare
 
     continuing = args.handoff or args.resume or "--resume" in flags or (agent == "codex" and flags[:1] == ["resume"])
     if not args.profile and continuing:
@@ -618,7 +619,8 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
         flags = binding.continuation(flags, agent, environ)
     environ[BUNDLE_REVISION] = args.bundle_revision
     environ.pop(RECORDED_HOME, None)
-    profile_env, flags = prepare(args.profile, agent, "", "", flags, environ, args.overlay)
+    pushed = {PUSH: "1"} if agent == "codex" and args.codex_transport == APP_SERVER else {}
+    profile_env, flags = prepare(args.profile, agent, "", "", flags, {**environ, **pushed}, args.overlay)
     environ.update(profile_env)
     return flags
 

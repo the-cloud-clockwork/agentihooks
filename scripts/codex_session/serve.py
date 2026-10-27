@@ -96,6 +96,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--seat", required=True)
     parser.add_argument("--overlay", action="append", default=[])
     parser.add_argument("--bundle-revision", default="")
+    parser.add_argument("--home", default="")
     parser.add_argument("--exclude", default="")
     parser.add_argument("--report", default="")
     parser.add_argument("--previous-execution", default="")
@@ -113,7 +114,7 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
     slug, lane, task, name = (environ[name] for name in IDENTITY_ENV)
     route, agent_args = take_route(agent_args)
     environ = {**environ, select_profile.BUNDLE_REVISION: args.bundle_revision}
-    pushed = {**environ, select_profile.PUSH: "1"}
+    pushed = {**environ, select_profile.PUSH: "1", select_profile.RECORDED_HOME: args.home}
     profile_env, flags = select_profile.prepare(args.profile, "codex", "", "", agent_args, pushed, args.overlay)
     model, effort, server_args = server_options(flags)
     environ.update(profile_env)
