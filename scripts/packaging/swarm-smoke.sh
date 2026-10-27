@@ -2,7 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
-export COMPOSE_PROJECT_NAME SWARM_PORT="${SWARM_PORT:-48765}" SWARM_REDIS_PORT="${SWARM_REDIS_PORT:-46379}"
+export COMPOSE_PROJECT_NAME SWARM_PORT="${SWARM_PORT:-12765}" SWARM_REDIS_PORT="${SWARM_REDIS_PORT:-12379}"
 COMPOSE_PROJECT_NAME="$(python3 -c 'import uuid; print("swarm-proof-" + uuid.uuid4().hex[:12])')"
 export SWARM_REDIS_PASSWORD
 SWARM_REDIS_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe())')"

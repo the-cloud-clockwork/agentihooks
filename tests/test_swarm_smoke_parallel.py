@@ -113,6 +113,7 @@ def test_the_compose_install_scenario_leaves_the_default_ports_to_swarm_init():
         assert f"${{{name}:-{default}}}" in compose
         bound = re.search(rf'{name}="\$\{{{name}:-(\d+)\}}"', script)
         assert bound and bound.group(1) != default and bound.group(1) not in taken
+        assert int(bound.group(1)) < 32768
     assert re.search(r"^export [^\n]*\bSWARM_PORT\b[^\n]*\bSWARM_REDIS_PORT\b", script, re.MULTILINE)
 
 
