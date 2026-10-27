@@ -238,15 +238,15 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
     for agent in agents:
         if agent.harness != "codex" or not typed_wake(inbox, agent) or outage.open_records(slug):
             continue
-        mail = inbox.pending_mail(agent.name)
+        mail = [(world, item) for world in inbox.worlds() for item in world.pending_mail(agent.name)]
         if not mail:
             continue
         state = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
-        due = [item for item in mail if _wake_due(inbox, item, state, (names, config), (now_ms, window, slug))]
+        due = [(w, i) for w, i in mail if _wake_due(w, i, state, (names, config), (now_ms, window, slug))]
         if not due or not _wake(inbox.redis, herdr, agent, set()):
             continue
-        for item in due:
-            inbox.note(item.id, WOKEN, BY, f"prompted {agent.name} to read its inbox", now_ms)
+        for world, item in due:
+            world.note(item.id, WOKEN, BY, f"prompted {agent.name} to read its inbox", now_ms)
             actions.append(f"woke {agent.name} for message {item.id}")
     return actions
 
