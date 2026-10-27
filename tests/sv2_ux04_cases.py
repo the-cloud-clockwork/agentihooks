@@ -25,9 +25,7 @@ def world(server=None) -> tuple[RedisStore, dict]:
 
     data = fixture()
     store = RedisStore(fakeredis.FakeRedis(server=server or fakeredis.FakeServer(), decode_responses=True))
-    cv.record(store, SLUG, data["task"], data["pack"])
-    for ref, evidence in data["evidence"].items():
-        cv.put_evidence(store, SLUG, ref, evidence)
+    cv.record(store, SLUG, data["task"], data["pack"], data["evidence"])
     return store, data
 
 
@@ -49,7 +47,7 @@ def outcome(store: RedisStore, task: str, ref: str) -> dict:
 
 def recordable(store: RedisStore, pack: dict) -> bool:
     try:
-        cv.record(store, SLUG, "copied", pack)
+        cv.record(store, SLUG, "copied", pack, {})
     except ValueError:
         return False
     return True

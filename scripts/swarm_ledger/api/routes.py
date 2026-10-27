@@ -93,8 +93,7 @@ def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
 
 
 def context_evidence(services: Services, slug: str, task: str, ref: str) -> dict:
-    from scripts.swarm import context_view
-
+    context_view = ports.swarm().context_view
     if not context_view.enabled(os.environ):
         raise APIError(404, "resource_missing", context_view.OFF)
     try:

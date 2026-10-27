@@ -34,10 +34,12 @@ def enabled(environ: Mapping[str, str]) -> bool:
     return str(environ.get(SWITCH)).strip().lower() not in OFF_VALUES
 
 
-def record(store: RedisStore, slug: str, task: str, pack: dict) -> None:
+def record(store: RedisStore, slug: str, task: str, pack: dict, evidence: Mapping[str, dict]) -> None:
     if not pack["brain"].startswith(SWARM_BRAIN):
         raise ValueError(NOT_SWARM)
     store.redis.hset(store.key(slug, PACKS), task, json.dumps(pack))
+    for ref, held in evidence.items():
+        put_evidence(store, slug, ref, held)
 
 
 def _held(pipe, key: str, ref: str) -> dict | None:

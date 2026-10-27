@@ -23,9 +23,7 @@ def store():
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, ".", 3, 0, state="running"))
-    cv.record(store, SLUG, TASK, FIXTURE["pack"])
-    for ref, evidence in FIXTURE["evidence"].items():
-        cv.put_evidence(store, SLUG, ref, evidence)
+    cv.record(store, SLUG, TASK, FIXTURE["pack"], FIXTURE["evidence"])
     return store
 
 
@@ -121,7 +119,7 @@ def test_an_unknown_task_and_a_missing_source_are_refused():
     with pytest.raises(cv.Refused) as refused:
         cv.expand(store, SLUG, "nope", "arc:merge-queue")
     assert refused.value.reason == "not_in_pack"
-    cv.record(store, SLUG, TASK, FIXTURE["pack"])
+    cv.record(store, SLUG, TASK, FIXTURE["pack"], {})
     with pytest.raises(cv.Refused) as refused:
         cv.expand(store, SLUG, TASK, "arc:merge-queue")
     assert (refused.value.status, refused.value.reason, str(refused.value)) == (410, "unavailable", cv.GONE)
@@ -226,8 +224,15 @@ def test_an_item_from_another_brain_keeps_its_successor_private():
 
 def test_a_ledger_records_only_swarm_brain_packs_and_never_expands_a_personal_one(store):
     with pytest.raises(ValueError, match=cv.NOT_SWARM):
-        cv.record(store, SLUG, "p1", {**FIXTURE["pack"], "brain": "personal:operator"})
+        cv.record(
+            store,
+            SLUG,
+            "p1",
+            {**FIXTURE["pack"], "brain": "personal:operator"},
+            {"arc:private": {"brain": "personal:operator", "kind": "arc", "state": "available"}},
+        )
     assert store.redis.hget(store.key(SLUG, cv.PACKS), "p1") is None
+    assert store.redis.hget(store.key(SLUG, cv.EVIDENCE), "arc:private") is None
     personal = {**FIXTURE["pack"], "brain": "personal:operator", "items": [FIXTURE["pack"]["items"][4]]}
     store.redis.hset(store.key(SLUG, cv.PACKS), "p1", json.dumps(personal))
     with pytest.raises(cv.Refused) as refused:
