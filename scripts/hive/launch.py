@@ -628,6 +628,7 @@ class HiveLaunch:
             self.end(agent, LATE)
             self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             return Outcome("spawn", Status.REFUSED, HIVE, detail=LATE)
+        admission.joined(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
         placed = Placed(
             agent.pane_id,
             agent.harness,
