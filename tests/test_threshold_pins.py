@@ -88,7 +88,12 @@ def test_an_allowlist_only_shrinks(tmp_path):
 def test_an_unregistered_floor_or_allowlist_is_red(tmp_path):
     head = _tree(
         tmp_path / "head",
-        {ALLOWLIST: "{}", "tests/NEW_ALLOWLIST.json": "{}", "x/floors.json": "{}", "tests/fixtures/A_ALLOWLIST.json": ""},
+        {
+            ALLOWLIST: "{}",
+            "tests/NEW_ALLOWLIST.json": "{}",
+            "x/floors.json": "{}",
+            "tests/fixtures/A_ALLOWLIST.json": "",
+        },
     )
     errors = threshold_pins.registry_errors(head, (ALLOWLIST,), ())
     assert errors == [

@@ -115,7 +115,9 @@ def registry_errors(head: Path, allowlists=SHRINK_ONLY, graded=GRADED_BY) -> lis
         if not name.startswith(("tests/fixtures/", "evidence/"))
         and any(fnmatch.fnmatch(Path(name).name, pattern) for pattern in REGISTERED)
     ]
-    return [f"{name} is a floor or allowlist the threshold pin does not register" for name in found if name not in known]
+    return [
+        f"{name} is a floor or allowlist the threshold pin does not register" for name in found if name not in known
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
