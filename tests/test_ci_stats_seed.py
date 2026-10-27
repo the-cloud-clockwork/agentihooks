@@ -28,7 +28,9 @@ def _record(folder, pointer, key, scope):
 
 
 def _repo(tmp_path, subjects):
-    run = lambda *args: subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True)
+    def run(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True)
+
     run("init", "-q")
     run("-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "start")
     for subject in subjects:
@@ -88,7 +90,9 @@ def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(tmp_pat
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 2}, {"id": 1}]},
-        "actions/runs/2/artifacts?per_page=100": {"artifacts": [{"id": 9, "name": "mutation-report-0", "expired": False}]},
+        "actions/runs/2/artifacts?per_page=100": {
+            "artifacts": [{"id": 9, "name": "mutation-report-0", "expired": False}]
+        },
         "actions/runs/1/artifacts?per_page=100": {
             "artifacts": [
                 {"id": 6, "name": "mutation-test-stats-cache-1", "expired": False},
