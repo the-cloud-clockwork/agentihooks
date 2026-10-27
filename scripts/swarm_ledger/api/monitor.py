@@ -14,7 +14,7 @@ from .services import Services
 
 SwarmError = ports.swarm().store.SwarmError
 HARNESSES = ("claude", "codex")
-LOCAL = "local"
+LOCAL = "swarm-master"
 
 
 def capacity(measured: dict) -> tuple[float, float, int, int]:
