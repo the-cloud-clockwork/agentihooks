@@ -770,6 +770,13 @@ def test_a_file_naming_only_the_last_part_of_a_module_is_not_parsed(tmp_path, mo
     assert parsed == ["from hooks.context import part_sample\n"]
 
 
+def test_a_text_naming_exactly_every_part_of_a_module_is_mentioned():
+    from scripts.ci_mutation import scope
+
+    assert scope.mentioned("hooks.exact_sample", [frozenset({"hooks", "exact_sample"})])
+    assert not scope.mentioned("hooks.other", [frozenset({"hooks", "exact_sample"})])
+
+
 def test_module_facts_names_every_import_and_nested_function_from_one_parse(monkeypatch):
     from scripts.ci_mutation import scope
 
