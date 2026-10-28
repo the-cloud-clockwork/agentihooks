@@ -37,10 +37,11 @@ def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario():
     run = steps[start]["run"]
     pull = run.index(f"bash scripts/packaging/pull-runtime-image.sh {image}\n")
     assert pull < run.index(
-        "docker run --pull never --rm -d --name writer-lock-postgres -p 5432:5432"
+        "docker run --pull never --rm -d --name writer-lock-postgres -p 127.0.0.1:5432:5432"
         f" -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=ledger {image}\n"
     )
-    assert "until docker exec writer-lock-postgres pg_isready" in run
+    assert "until docker exec writer-lock-postgres pg_isready -h 127.0.0.1 -p 5432 -d ledger" in run
+    assert scenario["timeout-minutes"] >= 15
     assert scenario["services"]["pgvector"]["image"] == "pgvector/pgvector:0.8.0-pg16"
     assert scenario["services"]["pgvector"]["ports"] == ["5433:5432"]
     assert scenario["env"]["MEMORY_TEST_POSTGRES_URL"] == "postgresql://postgres@127.0.0.1:5433/memory"

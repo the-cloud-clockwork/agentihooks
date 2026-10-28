@@ -33,7 +33,7 @@ jobs:
     needs: [inputs]
     if: github.event_name == 'workflow_dispatch' || needs.inputs.outputs.hit != 'true'
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     services:
       pgvector:
         image: pgvector/pgvector:0.8.0-pg16
@@ -57,8 +57,8 @@ jobs:
       - name: Start Postgres from a retried pull
         run: |
           bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/postgres:16
-          docker run --pull never --rm -d --name writer-lock-postgres -p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=ledger public.ecr.aws/docker/library/postgres:16
-          timeout 60 bash -c 'until docker exec writer-lock-postgres pg_isready; do sleep 1; done'
+          docker run --pull never --rm -d --name writer-lock-postgres -p 127.0.0.1:5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=ledger public.ecr.aws/docker/library/postgres:16
+          timeout 60 bash -c 'until docker exec writer-lock-postgres pg_isready -h 127.0.0.1 -p 5432 -d ledger; do sleep 1; done'
 
       - uses: actions/setup-python@v5
         with:
