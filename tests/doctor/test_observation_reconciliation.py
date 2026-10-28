@@ -407,7 +407,8 @@ def test_registry_passes_the_joined_session_harness_trace_and_cancellation(curso
     backend = Langfuse([_trace("tr", "sid")], [], total=0)
     checks = []
 
-    def reconcile(get, session, harness, trace, cancelled):
+    def reconcile(get, session, harness, trace, cancelled, listed):
+        assert listed(lambda: {"missing"}) == {"missing"}
         assert get is backend
         assert session == "sid"
         assert harness == "codex"
@@ -445,6 +446,8 @@ def test_an_unchanged_trace_reuses_its_identity_listing_and_a_changed_one_lists_
 
     [first], _ = registry.read("s", [agent], backend, state, 15, 50)
     assert listings() == 1
+    registry.save(cursors / "state.json", state)
+    state = registry.load(cursors / "state.json")
     [again], failures = registry.read("s", [agent], backend, state, 15, 50)
     assert failures == [] and listings() == 1
     assert again["remote"]["reconciliation"] == first["remote"]["reconciliation"]
