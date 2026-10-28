@@ -67,15 +67,18 @@ class ClosedAfterTheTickRead(FakeLedger):
 def test_the_exit_sweep_settles_from_the_live_task_state_not_the_tick_snapshot(redis):
     store, inbox = RedisStore(redis), InboxStore(redis)
     for _ in range(2):
-        store.create(SwarmConfig("sw", "/repo", 0, 0))
-        store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
-        item = inbox.send("sender", "sw-eng-1", "contract")
-        ledger = ClosedAfterTheTickRead([{"id": "t1", "state": "pr", "claimed_by": "sw-eng-1"}])
-        tick("sw", store, ledger, FakeRuntime(), 1_000)
-        assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("sw-eng-1", "cancelled")
-        assert inbox.mailbox("eng-1@sw") == []
-        [notice] = inbox.pending_items("sender")
-        assert item.id in notice.text
+        try:
+            store.create(SwarmConfig("sw", "/repo", 0, 0))
+            store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+            item = inbox.send("sender", "sw-eng-1", "contract")
+            ledger = ClosedAfterTheTickRead([{"id": "t1", "state": "pr", "claimed_by": "sw-eng-1"}])
+            tick("sw", store, ledger, FakeRuntime(), 1_000)
+            assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("sw-eng-1", "cancelled")
+            assert inbox.mailbox("eng-1@sw") == []
+            [notice] = inbox.pending_items("sender")
+            assert item.id in notice.text
+        finally:
+            redis.flushdb()
 
 
 def test_a_live_closed_task_withdraws_late_mail_even_after_an_exit_to_the_seat_was_recorded(redis):
