@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     since = until - timedelta(hours=args.hours)
     runs = read_runs(args.repo, since, until)
     cache = load_cache(args.cache)
-    within_budget(sum(str(run["id"]) not in cache for run in runs))
+    within_budget(sum(attempt(run) not in cache for run in runs))
     jobs = read_jobs(args.repo, runs, cache)
     save_cache(args.cache, cache, since)
     result = aggregate(runs, jobs, merged_count(args.repo, since, until))

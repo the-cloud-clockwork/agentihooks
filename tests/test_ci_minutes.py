@@ -382,6 +382,7 @@ def test_main_defaults_to_the_last_day_into_the_working_folder(monkeypatch, tmp_
 
     monkeypatch.setattr(ci_minutes, "rows", fake_rows)
     monkeypatch.setattr(ci_minutes, "datetime", Clock)
+    monkeypatch.setattr(ci_minutes, "within_budget", lambda reads: None)
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     monkeypatch.chdir(tmp_path)
     assert ci_minutes.main(["--repo", "o/r"]) == 0
