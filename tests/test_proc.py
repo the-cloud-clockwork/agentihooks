@@ -1,4 +1,5 @@
 import ast
+import types
 from pathlib import Path
 
 from hooks.proc import Process, _process, _target, processes
@@ -85,14 +86,20 @@ def _process_table_reads(check, process_paths):
     return count
 
 
+def _code_reads_the_process_table(code):
+    if READERS.intersection(code.co_names, code.co_varnames, code.co_cellvars, code.co_freevars):
+        return True
+    return any(
+        const == PROC_ROOT or (isinstance(const, types.CodeType) and _code_reads_the_process_table(const))
+        for const in code.co_consts
+    )
+
+
 def _process_table_violations(tests):
     found = []
     for path in sorted(tests.rglob("*.py")):
         source = path.read_text(encoding="utf-8")
-        if source.isascii() and not any(
-            marker in source
-            for marker in ("_process", "processes", "exists", "is_file", "read_text", "read_bytes", "open")
-        ):
+        if not _code_reads_the_process_table(compile(source, str(path), "exec", dont_inherit=True)):
             continue
         for function in ast.walk(ast.parse(source)):
             if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
