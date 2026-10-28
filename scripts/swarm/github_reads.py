@@ -188,7 +188,7 @@ def _rest_pages(
 ) -> str | bytes | None:
     if output is None:
         return output
-    pattern = rb"(?:\A|\r?\n)HTTP/[\d.]+ \d{3}[^\r\n]*\r?\n(?:[^\r\n]+:[^\r\n]*\r?\n)+\r?\n"
+    pattern = rb"(?:\A|(?<=\n))HTTP/[\d.]+ \d{3}[^\r\n]*\r?\n(?:[^\r\n]+:[^\r\n]*\r?\n)+\r?\n"
     cleaned, pages = re.subn(
         pattern.decode() if isinstance(output, str) else pattern, "" if isinstance(output, str) else b"", output
     )
@@ -202,7 +202,7 @@ def _rest_pages(
 
 
 def _not_modified(output: str | bytes | None) -> bool:
-    text = output.decode("utf-8", "replace") if isinstance(output, bytes) else output or ""
+    text = output[:64].decode("utf-8", "replace") if isinstance(output, bytes) else output or ""
     return bool(re.match(r"HTTP/\S+ 304\b", text))
 
 

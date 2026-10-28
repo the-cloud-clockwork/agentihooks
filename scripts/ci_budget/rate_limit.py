@@ -27,10 +27,10 @@ def reset_wait() -> float:
 
 def _run(args: list[str], timeout: float, text: bool) -> subprocess.CompletedProcess:
     from scripts import gh_audit
-    from scripts.swarm import github_reads
 
     global calls
     calls += 1
+    github_reads = gh_audit.reads()
     caller = github_reads.CALLER.get(None) or gh_audit.process_caller()
     return github_reads.rest(
         caller, ["api", *args], subprocess.run, capture_output=True, check=True, timeout=timeout, text=text

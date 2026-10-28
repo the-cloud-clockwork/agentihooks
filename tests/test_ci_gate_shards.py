@@ -50,7 +50,7 @@ def test_github_reads_paginate_metadata_and_preserve_zip_bytes(binary):
     assert value == (payload if binary else [{"jobs": []}, {"jobs": [{"name": "last"}]}])
     command = ["gh", "api", "repos/org/repo/actions"]
     if not binary:
-        command += ["--paginate", "--slurp"]
+        command += ["--paginate", "--slurp", "--include"]
     run.assert_called_once_with(command, check=True, capture_output=True, timeout=60, text=False)
 
 
