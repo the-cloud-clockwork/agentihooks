@@ -443,6 +443,38 @@ def test_main_pages_through_every_session_then_exits(prepared, provider, monkeyp
     assert capsys.readouterr().out == '{"after": "cursor", "pending": 1}\n{"after": "", "pending": 0}\n'
 
 
+def test_main_describes_its_single_bounded_pass(capsys):
+    from hooks.memory import embedding_process
+
+    with pytest.raises(SystemExit) as exit_info:
+        embedding_process.main(["--help"])
+    assert exit_info.value.code == 0
+    assert "Run one bounded session embedding pass." in capsys.readouterr().out.splitlines()
+
+
+def test_main_flushes_each_report_as_it_is_printed(prepared, provider, monkeypatch):
+    from hooks.memory import embedding_process
+
+    class Stream:
+        def __init__(self):
+            self.events = []
+
+        def write(self, text):
+            self.events.append(text)
+            return len(text)
+
+        def flush(self):
+            self.events.append(None)
+
+    for key, value in environment(prepared, provider).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(embedding_process, "cycle", lambda worker, settings, after: {"after": ""})
+    stream = Stream()
+    monkeypatch.setattr(sys, "stdout", stream)
+    assert embedding_process.main([]) == 0
+    assert stream.events == ['{"after": ""}', "\n", None]
+
+
 def test_scope_checks_touch_only_the_selected_bounded_batch(prepared, provider, monkeypatch):
     from dataclasses import replace
 
