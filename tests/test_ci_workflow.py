@@ -240,6 +240,47 @@ def _nats_server_steps() -> dict[str, dict]:
     return {step["name"]: step for step in action["runs"]["steps"]}
 
 
+@pytest.mark.parametrize("version", ["matching", "different", "broken", "missing"])
+def test_nats_server_reuses_only_the_exact_runner_version(tmp_path, version):
+    step = _nats_server_steps()["Resolve the pinned nats server"]
+    commands = tmp_path / "bin"
+    commands.mkdir()
+    (commands / "uname").symlink_to("/usr/bin/uname")
+    if version != "missing":
+        binary = commands / "nats-server"
+        expected = step["env"]["NATS_SERVER_RELEASE"] if version == "matching" else "v0.0.0"
+        binary.write_text(f"#!/bin/bash\necho 'nats-server: {expected}'\nexit {1 if version == 'broken' else 0}\n")
+        binary.chmod(0o755)
+    output = tmp_path / "output"
+    required = tmp_path / "env"
+    subprocess.run(
+        ["/bin/bash", "-euo", "pipefail", "-c", step["run"]],
+        env={
+            **step["env"],
+            "PATH": str(commands),
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_ENV": str(required),
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert values.get("installed", "false") == ("true" if version == "matching" else "false")
+    assert required.read_text() == "NATS_SERVER_REQUIRED=1\n" if version == "matching" else not required.exists()
+
+
+def test_nats_server_skips_archive_work_when_the_runner_version_matches():
+    steps = _nats_server_steps()
+    for name in (
+        "Restore the pinned nats server archive",
+        "Install the pinned nats server",
+        "Save the pinned nats server archive",
+    ):
+        assert "steps.pin.outputs.installed != 'true'" in steps[name]["if"]
+
+
 def test_nats_server_archive_is_cached_on_its_pinned_release_and_checksum():
     steps = _nats_server_steps()
     names = list(steps)
