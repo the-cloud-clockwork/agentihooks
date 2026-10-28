@@ -121,6 +121,19 @@ def link(bundle_dir: Path | None, user: bool = False) -> None:
     print("Run 'agentihooks init' to apply.")
 
 
+def _sweep_generated(root: Path) -> None:
+    _i = _install_module()
+    swept = []
+    for link, entry in _i._state_links().items():
+        path = Path(link)
+        generated = path.is_symlink() or (entry.get("kind") == "rules" and path.is_file())
+        if generated and Path(entry.get("target", "")).is_relative_to(root):
+            path.unlink()
+            swept.append(path)
+            _i._cprint(f"  [RM] Removed user bundle link: {path}")
+    _i._state_forget_links(swept)
+
+
 def unlink(user: bool = False) -> None:
     """Unlink the root bundle, or only the user bundle."""
     _i = _install_module()
@@ -141,6 +154,8 @@ def unlink(user: bool = False) -> None:
 
     del state[key]
     _i._save_state(state)
+    if user:
+        _sweep_generated(Path(bundle_path))
     _i._cprint(f"[OK] Unlinked {label}: {bundle_path}")
     print()
     print("Run 'agentihooks init' to remove bundle settings.")

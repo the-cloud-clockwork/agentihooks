@@ -1,0 +1,1 @@
+Skills, rules, agents, commands, shared directives, native settings and MCP servers from the user bundle apply after the root bundle on every harness; `bundle unlink --user` removes the links and rule copies it generated and never touches the root bundle or any bundle file. Render stamps record both bundle revisions.

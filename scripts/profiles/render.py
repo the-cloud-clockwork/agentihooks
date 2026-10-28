@@ -114,6 +114,17 @@ def _bundle() -> Path | None:
     return bundle
 
 
+def _user() -> Path | None:
+    _i = _install_module()
+    user = _i._get_user_bundle_path()
+    linked = (_i._load_state().get("user_bundle") or {}).get("path")
+    if user is None and linked:
+        raise ValueError(
+            f"linked user bundle {linked} is missing; relink it with agentihooks bundle link --user <path> before rendering"
+        )
+    return user
+
+
 def _base_digest() -> str:
     _i = _install_module()
     digest = hashlib.sha256()
@@ -136,14 +147,20 @@ def _profiles_digest(dirs: list[tuple[str, Path]]) -> str:
     return digest.hexdigest()
 
 
+def _commit(root: Path | None) -> str:
+    if root is None:
+        return ""
+    head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True)
+    return head.stdout.strip()
+
+
 def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
-    commit = ""
-    if bundle is not None:
-        head = subprocess.run(["git", "-C", str(bundle), "rev-parse", "HEAD"], capture_output=True, text=True)
-        commit = head.stdout.strip()
+    commit = _commit(bundle)
+    user = _user()
     chain = [n for n, _ in dirs]
     return {
         "bundle_commit": commit,
+        **({"user_bundle_commit": _commit(user)} if user is not None else {}),
         "base": _base_digest(),
         "profiles": _profiles_digest(dirs),
         "chain": chain,
@@ -163,7 +180,8 @@ def stamp(name: str) -> dict:
 
 
 def _roots(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
-    return ([bundle] if bundle is not None else []) + [d for _, d in dirs]
+    user = _user()
+    return ([bundle] if bundle is not None else []) + ([user] if user is not None else []) + [d for _, d in dirs]
 
 
 def _features(subdir: str, keep, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Path]:
@@ -328,9 +346,10 @@ def _link_commands(skills: Path, commands: Path) -> None:
 
 def _persona(root: Path, target: str, bundle: Path | None, dirs: list[tuple[str, Path]], chain: list[str]) -> str:
     items = _features("rules", _is_doc, bundle, dirs)
-    sources.write(sources.path(root.name, target, root.parent), sources.rows(bundle, dirs, items))
+    user = _user()
+    sources.write(sources.path(root.name, target, root.parent), sources.rows(bundle, dirs, items, user))
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
-    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER))
+    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER, user))
     ending = f"\n\n{FOOTER}\n"
     text = binding.persona(text.removesuffix(ending)) + ending
     if len(text) > 150_000:
@@ -666,9 +685,12 @@ def _seed_linked_profiles(out: Path) -> None:
 def _render_scratch(args: argparse.Namespace) -> int:
     bundle = args.bundle or _bundle()
     _seed_linked_profiles(args.out)
+    user = _user()
     env = {**os.environ, "AGENTIHOOKS_HOME": str(args.out.resolve())}
     if bundle is not None:
         env["AGENTIHOOKS_BUNDLE_PATH"] = str(bundle.resolve())
+    if user is not None:
+        env["AGENTIHOOKS_USER_BUNDLE_PATH"] = str(user.resolve())
     argv = [sys.executable, "-m", "scripts.profiles.render", "render", args.name, "--target", args.target]
     # The child resolves the agentihooks home, bundle and corrections store at import, so only a fresh process sees them.
     cwd = Path(__file__).resolve().parents[2]

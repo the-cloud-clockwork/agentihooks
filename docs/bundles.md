@@ -97,13 +97,14 @@ When `agentihooks init` runs, skills, agents, commands, rules, and MCP servers a
 |-------|--------|-------------|
 | 1 (base) | agentihooks `.claude/` | Built-in assets from the agentihooks repo |
 | 2 (bundle) | bundle `.claude/` | Bundle-global customizations |
+| 2b (user bundle) | user bundle `.claude/` | Personal customizations, applied after the root bundle |
 | 3 (profile) | `profiles/<name>/.claude/` | Profile-specific overrides |
 
 Later layers override earlier ones. This lets you start with the agentihooks base, add team customizations via the bundle, and fine-tune per profile.
 
-For settings, the merge order is: `_base/settings.base.json` -> profile `.claude/settings.overrides.json` -> OTEL.
+For settings, the merge order is: `_base/settings.base.json` -> bundle -> user bundle -> profile `.claude/settings.overrides.json` -> OTEL. Hook arrays append in that order.
 
-For MCP servers: agentihooks + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`.
+For MCP servers: agentihooks + bundle `.claude/.mcp.json` + user bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`.
 
 ## Shared `CLAUDE.md`
 
@@ -113,7 +114,7 @@ For MCP servers: agentihooks + bundle `.claude/.mcp.json` + profile `.claude/.mc
 [ bundle .claude/CLAUDE.md ]  ->  [ profile CLAUDE.md (one per chained profile) ]  ->  [ all enabled bundle manifestos ]
 ```
 
-An **optional** `<bundle>/.claude/CLAUDE.md` holds directives every profile should
+An **optional** `<bundle>/.claude/CLAUDE.md` (and the user bundle's, after it) holds directives every profile should
 share, so they are written once instead of duplicated into each profile. It is
 prepended exactly once per install — including for a chained
 `--profile a,b` — inside these markers:

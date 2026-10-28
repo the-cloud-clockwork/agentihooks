@@ -255,8 +255,9 @@ class ClaudeAdapter:
         profile_dirs: list[tuple[str, Path]],
         profile_chain: list[str],
         bundle_dir: Path | None,
+        user_dir: Path | None = None,
     ) -> None:
-        _install_module()._install_claude_persona(profile_dirs, profile_chain, bundle_dir)
+        _install_module()._install_claude_persona(profile_dirs, profile_chain, bundle_dir, user_dir)
 
     def register_hooks_utils(self, profile_name: str) -> None:
         _install_module()._install_user_mcp(profile_name)

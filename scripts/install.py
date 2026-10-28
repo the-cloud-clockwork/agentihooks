@@ -824,6 +824,14 @@ def _bundle_roots() -> list[tuple[str, Path]]:
     return bundle_roots({key: {"path": str(path)} for key, path in found if path})
 
 
+def _bundle_feature_layers(subdir: str, label: str) -> list[tuple[str, Path]]:
+    return [
+        (f"{'bundle' if kind == 'root' else 'user bundle'} {label}", root / _CLAUDE_SUBDIR / subdir)
+        for kind, root in _bundle_roots()
+        if (root / _CLAUDE_SUBDIR / subdir).is_dir()
+    ]
+
+
 def _bundle_profile_dir(profile_name: str) -> Path | None:
     for _kind, root in _bundle_roots():
         if (root / "profiles" / profile_name).is_dir():
@@ -2847,8 +2855,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     # --- 2 + 3. Personal-key merge, backup, and settings write (target-specific) ---
     existing_settings_path = adapter.write_settings(rendered)
 
-    # --- 4. Symlink skills/agents/commands/rules (layers: agentihooks → bundle → each profile in chain) ---
+    # --- 4. Symlink skills/agents/commands/rules (layers: agentihooks → bundle → user bundle → each profile in chain) ---
     bundle_dir = _get_bundle_path()
+    user_dir = _get_user_bundle_path()
 
     for subdir, label, filter_fn in [
         ("skills", "skill", _skill_dir_filter()),
@@ -2863,8 +2872,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         # emulated .claude tree — shipped in the wheel, unlike the old repo-root .claude/)
         layers.append((label, PACKAGE_FEATURES_DIR / subdir))
         # Layer 2: bundle top-level .claude/ (inherits to all profiles)
-        if bundle_dir and (bundle_dir / _CLAUDE_SUBDIR / subdir).is_dir():
-            layers.append((f"bundle {label}", bundle_dir / _CLAUDE_SUBDIR / subdir))
+        layers.extend(_bundle_feature_layers(subdir, label))
         # Layer 3+: each profile in chain (later profiles override earlier for same-name files)
         for pname, pdir in profile_dirs:
             if (pdir / _CLAUDE_SUBDIR / subdir).is_dir():
@@ -2873,7 +2881,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         adapter.install_features(subdir, layers, filter_fn)
 
     # --- 5 + 5a + 5b. Persona install (target-specific writer) ---
-    adapter.install_persona(profile_dirs, profile_chain, bundle_dir)
+    adapter.install_persona(profile_dirs, profile_chain, bundle_dir, user_dir)
 
     # --- 6. Install MCP servers (target-specific registration) ---
     # Layer 1: the agentihooks MCP server
@@ -2921,8 +2929,8 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             _cprint(f"  [WARN] Could not read {path}: {exc}")
 
     # Layer 2: bundle — always installed; profile MCPs layer on top (override per-name)
-    if bundle_dir:
-        _register_mcp_layer(bundle_dir, "Bundle")
+    for kind, root in _bundle_roots():
+        _register_mcp_layer(root, "Bundle" if kind == "root" else "User bundle")
 
     # Layer 3+: each profile (chained)
     for pname, pdir in profile_dirs:
@@ -2995,6 +3003,7 @@ def _install_claude_persona(
     profile_dirs: list[tuple[str, Path]],
     profile_chain: list[str],
     bundle_dir: Path | None,
+    user_dir: Path | None = None,
 ) -> None:
     """Steps 5/5a/5b of the Claude install: CLAUDE.md (single or chained),
     bundle shared prepend, CI-manifesto append. Bodies moved verbatim from
@@ -3062,7 +3071,7 @@ def _install_claude_persona(
     # --- 5a. Prepend bundle shared CLAUDE.md (cross-profile directives) ---
     # Runs once, outside the single-profile/chain branch, so a chained install gets
     # the shared block exactly once at the top rather than once per profile.
-    _prepend_bundle_claude_md(bundle_dir)
+    _prepend_bundle_claude_md(bundle_dir, user_dir)
 
     # --- 5b. Append CI manifesto to ~/.claude/CLAUDE.md (memory channel) ---
     _append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs)
@@ -3659,9 +3668,8 @@ def _reseed_managed_mcp_sources() -> None:
         except Exception as exc:
             _cprint(f"  [WARN] Could not reseed the agentihooks MCP server: {exc}")
 
-    # Layer 2: bundle .mcp.json
-    bundle_dir = _get_bundle_path()
-    if bundle_dir:
+    # Layer 2: bundle .mcp.json, root then user
+    for kind, bundle_dir in _bundle_roots():
         for candidate in (bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME):
             if candidate.exists():
                 try:
@@ -3669,7 +3677,7 @@ def _reseed_managed_mcp_sources() -> None:
                     if servers:
                         _merge_mcp_to_user_scope(servers)
                 except (json.JSONDecodeError, OSError) as exc:
-                    _cprint(f"  [WARN] Could not reseed bundle .mcp.json: {exc}")
+                    _cprint(f"  [WARN] Could not reseed {kind} bundle .mcp.json: {exc}")
                 break
 
     # Layer 3: active profile .mcp.json (full chain — see collector note)
@@ -4341,7 +4349,7 @@ def _same_content(a: str, b: str) -> bool:
     return norm(a) == norm(b)
 
 
-def _prepend_bundle_claude_md(bundle_dir: Path | None) -> None:
+def _prepend_bundle_claude_md(bundle_dir: Path | None, user_dir: Path | None = None) -> None:
     """Prepend the bundle's optional ``<bundle>/.claude/CLAUDE.md`` to ~/.claude/CLAUDE.md.
 
     Lets an operator write cross-profile directives once in the bundle instead of
@@ -4368,10 +4376,12 @@ def _prepend_bundle_claude_md(bundle_dir: Path | None) -> None:
     current = dst.read_text()
     had_block = _BUNDLE_CLAUDE_MD_BEGIN in current and _BUNDLE_CLAUDE_MD_END in current
 
-    bundle_md = (bundle_dir / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME) if bundle_dir else None
-    body = ""
-    if bundle_md and bundle_md.exists():
-        body = bundle_md.read_text().strip()
+    sections = []
+    for directory in (bundle_dir, user_dir):
+        bundle_md = (directory / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME) if directory else None
+        if bundle_md and bundle_md.exists() and (text := bundle_md.read_text().strip()):
+            sections.append((bundle_md, text))
+    body = "\n\n".join(text for _, text in sections)
 
     if not body:
         # Bundle unlinked, file removed, or emptied. Drop a previously-prepended
@@ -4387,15 +4397,17 @@ def _prepend_bundle_claude_md(bundle_dir: Path | None) -> None:
     # First-occurrence splices are used both here and by the manifesto appender,
     # so an embedded marker inside bundle prose would silently eat real content
     # or duplicate on every run. Refuse rather than corrupt.
-    for marker in _MANAGED_BLOCK_MARKERS:
-        if marker in body:
-            _cprint(
-                f"  [!!] Bundle {_CLAUDE_MD_NAME} contains the managed marker {marker!r} — "
-                f"skipping prepend. Remove it from {bundle_md} (quote it differently)."
-            )
-            return
+    for bundle_md, text in sections:
+        for marker in _MANAGED_BLOCK_MARKERS:
+            if marker in text:
+                _cprint(
+                    f"  [!!] Bundle {_CLAUDE_MD_NAME} contains the managed marker {marker!r} — "
+                    f"skipping prepend. Remove it from {bundle_md} (quote it differently)."
+                )
+                return
 
-    block = f"{_BUNDLE_CLAUDE_MD_BEGIN}\n<!-- Source: {bundle_md} -->\n\n{body}\n\n{_BUNDLE_CLAUDE_MD_END}\n\n"
+    shared = "\n\n".join(f"<!-- Source: {bundle_md} -->\n\n{text}" for bundle_md, text in sections)
+    block = f"{_BUNDLE_CLAUDE_MD_BEGIN}\n{shared}\n\n{_BUNDLE_CLAUDE_MD_END}\n\n"
 
     if had_block:
         after = current.split(_BUNDLE_CLAUDE_MD_END, 1)[1].lstrip("\n")
@@ -4413,7 +4425,8 @@ def _prepend_bundle_claude_md(bundle_dir: Path | None) -> None:
         return
 
     dst.write_text(new_content)
-    _cprint(f"  [OK] Prepended bundle {_CLAUDE_MD_NAME} ({len(body):,} bytes) from {bundle_md}")
+    sources = ", ".join(str(bundle_md) for bundle_md, _ in sections)
+    _cprint(f"  [OK] Prepended bundle {_CLAUDE_MD_NAME} ({len(body):,} bytes) from {sources}")
 
 
 def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
@@ -4577,9 +4590,8 @@ def _collect_all_managed_mcp_servers() -> dict:
     mcp_config = _build_mcp_config("all")
     merged.update(mcp_config["mcpServers"])
 
-    # --- 2. Bundle .mcp.json ---
-    bundle_dir = _get_bundle_path()
-    if bundle_dir:
+    # --- 2. Bundle .mcp.json, root then user ---
+    for _kind, bundle_dir in _bundle_roots():
         for candidate in [bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME]:
             if candidate.exists():
                 try:

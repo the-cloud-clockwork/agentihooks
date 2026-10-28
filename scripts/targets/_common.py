@@ -444,6 +444,15 @@ def clear_managed_mcp(target: str) -> None:
         _i._save_state(state)
 
 
+def shared_directive(bundle_dir: Path | None) -> str:
+    if not bundle_dir:
+        return ""
+    bundle_md = bundle_dir / ".claude" / "CLAUDE.md"
+    if not bundle_md.exists():
+        bundle_md = bundle_dir / "CLAUDE.md"
+    return bundle_md.read_text().strip() if bundle_md.exists() else ""
+
+
 def build_persona(
     profile_dirs: list[tuple[str, Path]],
     profile_chain: list[str],
@@ -451,6 +460,7 @@ def build_persona(
     pending_rules: list[tuple[str, str, str]],
     managed_header: str,
     managed_footer: str,
+    user_dir: Path | None = None,
 ) -> str:
     """Assemble the managed region of a compiled instruction file."""
     from hooks.context.profile_chain import inherited
@@ -458,14 +468,9 @@ def build_persona(
     parents = inherited(profile_dirs)
     parts: list[str] = [managed_header, identity_preamble([name for name in profile_chain if name not in parents])]
 
-    if bundle_dir:
-        bundle_md = bundle_dir / ".claude" / "CLAUDE.md"
-        if not bundle_md.exists():
-            bundle_md = bundle_dir / "CLAUDE.md"
-        if bundle_md.exists():
-            content = bundle_md.read_text().strip()
-            if content:
-                parts.append(f"<!-- bundle shared directives -->\n{content}")
+    for label, directory in (("bundle", bundle_dir), ("user bundle", user_dir)):
+        if content := shared_directive(directory):
+            parts.append(f"<!-- {label} shared directives -->\n{content}")
 
     for pname, pdir in profile_dirs:
         src = pdir / "CLAUDE.md"

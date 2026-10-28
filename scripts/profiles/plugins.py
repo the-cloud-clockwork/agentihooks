@@ -112,8 +112,7 @@ def claude_only(name: str) -> bool:
     resolved = _i._resolve_profile_chain(name)
     chain, roots = [n for n, _ in resolved], [root for _, root in resolved]
     plugins_dir = claude_home({k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}) / "plugins"
-    bundle = _i._get_bundle_path()
-    layer = layer_skills([*([bundle] if bundle else []), *roots])
+    layer = layer_skills([*(root for _, root in _i._bundle_roots()), *roots])
     for root in roots:
         path = _i._native_layer_path(root, "claude", _i._NATIVE_SETTINGS_NAME)
         layered = (_i._load_native_layer(path).get("enabledPlugins") or {}) if path else {}

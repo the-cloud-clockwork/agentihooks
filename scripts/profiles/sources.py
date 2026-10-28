@@ -49,20 +49,23 @@ def row(layer: str, file: Path) -> dict:
     }
 
 
-def doctrine_files(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
+def doctrine_files(bundle: Path | None, dirs: list[tuple[str, Path]], user: Path | None = None) -> list[Path]:
     from scripts.profiles import manifestos
 
     files = []
-    if bundle is not None:
-        shared = bundle / ".claude" / "CLAUDE.md"
-        files.append(shared if shared.exists() else bundle / "CLAUDE.md")
+    for root in (bundle, user):
+        if root is not None:
+            shared = root / ".claude" / "CLAUDE.md"
+            files.append(shared if shared.exists() else root / "CLAUDE.md")
     files += [directory / "CLAUDE.md" for _, directory in dirs]
     files += manifestos.paths(bundle, dirs)
     return [file for file in files if file.is_file() and file.read_text().strip()]
 
 
-def rows(bundle: Path | None, dirs: list[tuple[str, Path]], rules: dict[str, Path]) -> list[dict]:
-    return [row("doctrine", file) for file in doctrine_files(bundle, dirs)] + [
+def rows(
+    bundle: Path | None, dirs: list[tuple[str, Path]], rules: dict[str, Path], user: Path | None = None
+) -> list[dict]:
+    return [row("doctrine", file) for file in doctrine_files(bundle, dirs, user)] + [
         row("rule", file) for file in rules.values()
     ]
 
