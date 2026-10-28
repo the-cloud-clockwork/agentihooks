@@ -1,5 +1,4 @@
 import ast
-import functools
 import json
 import os
 import shutil
@@ -533,6 +532,7 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
     )
     source = (
         "import functools\n"
+        "from functools import cached_property\n"
         "\n"
         "class Shape:\n"
         "    def __init__(self, side):\n"
@@ -558,11 +558,11 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
         "    def twice(self):\n"
         "        return self.side + self.side\n"
     )
-    for line in (9, 13, 17, 21, 25):
+    for line in (10, 14, 18, 22, 26):
         found, ungraded = mutation_counts("scripts/sample.py", source, {line})
         assert found > 0
         assert ungraded == []
-    generated, names = selected_mutants("scripts/sample.py", source, {9, 13, 17, 21, 25})
+    generated, names = selected_mutants("scripts/sample.py", source, {10, 14, 18, 22, 26})
     assert {name.split("__mutmut_")[0] for name in names} == {
         "xǁShapeǁarea",
         "xǁShapeǁperimeter",
@@ -571,7 +571,7 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
         "xǁShapeǁtwice",
     }
     monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
-    namespace = {"__name__": "scripts.sample", "cached_property": functools.cached_property}
+    namespace = {"__name__": "scripts.sample"}
     exec(compile(generated, "scripts/sample.py", "exec"), namespace)
     shape = namespace["Shape"]
 
