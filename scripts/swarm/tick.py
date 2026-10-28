@@ -765,7 +765,8 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         return master_questions.dismiss(slug, store, ledger, runtime, waiting, now_ms) if agent.lane == MASTER else []
     if agent.input_prompt:
         input_wait.clear(store, slug, agent.name)
-        master_questions.drop(store, slug, agent.name)
+        if agent.lane == MASTER:
+            master_questions.drop(store, slug, agent.name)
     agent = replace(agent, input_prompt="", input_ticks=0)
     held = outage.held(store, slug, agent.name)
     exhausted = resume.recovery_exhausted(store, slug, agent)

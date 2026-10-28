@@ -146,7 +146,7 @@ def test_a_prompt_that_ends_drops_its_recorded_questions(store):
     assert master_questions.held(store, "sw", NAME) == []
 
 
-def test_an_opened_question_is_recorded_for_the_tick(master, store, tmp_path):
+def test_an_opened_question_is_recorded_for_the_tick(master, store):
     from tests.test_master_question import FOCUS, ask, typed_at
 
     typed_at(1_000.0)
