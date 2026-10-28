@@ -43,9 +43,11 @@ retryable dependency refusal. Successful persistence reports `indexed: false`: i
 ## Embedding process
 
 Run `python -m hooks.memory.embedding_process` from the same image on a schedule, such as a
-Kubernetes CronJob with `concurrencyPolicy: Forbid`; the schedule is the polling interval. Each run makes one
-bounded pass over every active session, one page of `AGENTIHOOKS_SESSION_EMBED_SESSION_LIMIT` sessions at a
-time, and exits zero when the pass completes, including a deferred provider outage. It prints one JSON report
+Kubernetes CronJob with `concurrencyPolicy: Forbid`; the deployment's schedule is the polling interval. Each run
+makes one pass over every active session, one page of `AGENTIHOOKS_SESSION_EMBED_SESSION_LIMIT` sessions at a
+time, and drains at most `AGENTIHOOKS_SESSION_EMBED_MAX_BATCHES` provider batches after each page, so a run grows
+with the corpus and a run longer than the schedule skips the next scheduled start. It exits zero when the pass
+completes, including a deferred provider outage. Provider requests honour the standard proxy variables. It prints one JSON report
 per page with the worker state, embedded and failed chunk identities, pending count, backlog age, skipped
 sessions and scan cursor.
 Configuration errors, model conflicts, invalid provider responses and queue entries outside its grant exit

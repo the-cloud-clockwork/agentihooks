@@ -39,6 +39,7 @@ def refuse_constant(_: str) -> float:
 def no_redirect_opener() -> urllib.request.OpenerDirector:
     opener = urllib.request.OpenerDirector()
     for handler in (
+        urllib.request.ProxyHandler(),
         urllib.request.HTTPHandler(),
         urllib.request.HTTPSHandler(),
         urllib.request.HTTPDefaultErrorHandler(),
