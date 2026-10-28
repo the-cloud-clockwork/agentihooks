@@ -86,7 +86,7 @@ def drain(request: BaseHTTPRequestHandler, length: int) -> None:
     while length > 0:
         if time.monotonic() > deadline:
             raise UnreadBody
-        chunk = request.rfile.read(min(length, DRAIN_CHUNK))
+        chunk = request.rfile.read1(min(length, DRAIN_CHUNK))
         if not chunk:
             return
         length -= len(chunk)

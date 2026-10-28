@@ -148,6 +148,8 @@ class Unread:
     def read(self, length):
         raise AssertionError(f"read {length} bytes of a refused body")
 
+    read1 = read
+
 
 class Posted:
     def __init__(self, length, rfile):
@@ -160,9 +162,9 @@ class Chunks(io.BytesIO):
         super().__init__(raw)
         self.sizes = []
 
-    def read(self, size=-1):
+    def read1(self, size=-1):
         self.sizes.append(size)
-        return super().read(size)
+        return super().read1(size)
 
 
 @pytest.mark.parametrize("length", [None, 0, 1])
@@ -190,10 +192,13 @@ def test_a_body_past_the_drain_limit_is_left_unread():
         service.read_body(Posted(service.DRAIN_LIMIT + 1, Unread()))
 
 
-def test_a_drain_past_its_deadline_stops_reading(monkeypatch):
-    monkeypatch.setattr(service, "READ_TIMEOUT", -1)
+def test_a_trickling_drain_stops_at_its_deadline_between_reads(monkeypatch):
+    ticks = iter([0.0, 0.0, service.READ_TIMEOUT + 1])
+    monkeypatch.setattr(service.time, "monotonic", lambda: next(ticks))
+    request = Posted(service.MAX_BODY + 1, Chunks(b"x" * (service.MAX_BODY + 1)))
     with pytest.raises(service.UnreadBody):
-        service.read_body(Posted(service.MAX_BODY + 1, Unread()))
+        service.read_body(request)
+    assert request.rfile.sizes == [service.DRAIN_CHUNK]
 
 
 def raw_post(base, length, body, timeout=10):
