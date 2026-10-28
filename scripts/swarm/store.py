@@ -297,7 +297,11 @@ class RedisStore:
         return self._if_holder(
             self.key(slug, "claim", task),
             None,
-            lambda pipe, key: (pipe.set(key, agent, nx=True, px=lease_ms), pipe.incr(f"{key}:generation")),
+            lambda pipe, key: (
+                pipe.set(key, agent, nx=True, px=lease_ms),
+                pipe.incr(f"{key}:generation"),
+                pipe.hdel(self.key(slug, "pending-lives"), task),
+            ),
             self._claim_guards(slug, task),
         )
 
