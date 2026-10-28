@@ -298,6 +298,9 @@ def test_the_notice_pass_reads_nothing_without_an_open_task_with_a_pull_request(
     assert fleet_red.notice_pass("sw", store, Ledger(), rows, NOW_MS, reader) == []
 
 
+@pytest.mark.parametrize(
+    "error", [fleet_red.ReadError("x"), OSError("x"), ValueError("x"), subprocess.SubprocessError()]
+)
 def test_the_notice_pass_declares_nothing_when_the_read_fails(store, error):
     def reader(repo):
         raise error
