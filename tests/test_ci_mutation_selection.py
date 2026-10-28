@@ -1225,8 +1225,12 @@ def test_a_mutant_that_renames_its_selected_test_ids_is_killed_within_the_budget
     _gate_tree(tmp_path, monkeypatch)
     (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n")
     (tmp_path / "tests/test_sample.py").write_text(
-        "import pytest\n\nfrom scripts.sample import value\n\n"
-        "@pytest.mark.parametrize('number', [value(1)])\n"
+        "import os\nimport threading\n\nimport pytest\n\nfrom scripts.sample import value\n\n"
+        "NUMBER = value(1)\n"
+        # A test server thread left running keeps a mutant child alive unless it leaves through os._exit.
+        "if '__mutmut_' in os.environ.get('MUTANT_UNDER_TEST', ''):\n"
+        "    threading.Thread(target=threading.Event().wait).start()\n\n"
+        "@pytest.mark.parametrize('number', [NUMBER])\n"
         "def test_value(number):\n    assert number == 2\n"
     )
     report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
