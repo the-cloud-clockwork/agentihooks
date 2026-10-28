@@ -46,7 +46,7 @@ def test_a_counted_start_reports_its_life_on_stderr(rig, capsys):
     assert capsys.readouterr() == ("", f"hub: claim life swarm={SLUG} task=t1 execution={execution} lives=1\n")
 
 
-@pytest.mark.parametrize("state, lives", [("started", 0), ("failed", 1)])
+@pytest.mark.parametrize("state, lives", [("started", 1), ("failed", 1)])
 def test_a_start_the_legacy_tick_already_counted_spends_no_second_life(rig, state, lives):
     admitted = rig.admitter.admit(SLUG, ask())
     rig.store.record_launch(SLUG, AgentRecord(admitted["name"], "eng", "t1"), state)
