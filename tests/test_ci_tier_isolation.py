@@ -20,6 +20,7 @@ def test_promotion_grades_new_heads_without_waiting_for_an_older_red_run():
     release = yaml.safe_load((_ROOT / ".github/workflows/promote.yml").read_text())
     assert release["jobs"]["promote"]["concurrency"] == {
         "group": "release-version",
+        "queue": "max",
         "cancel-in-progress": False,
     }
 
