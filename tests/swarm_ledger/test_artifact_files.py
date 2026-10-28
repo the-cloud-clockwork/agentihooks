@@ -119,6 +119,33 @@ def test_the_start_pass_keeps_an_image_the_database_already_holds(monkeypatch):
     assert media_files.ages("start-kept") == {media_id: 5}
 
 
+def test_the_start_pass_reads_nothing_the_database_already_holds(monkeypatch):
+    plan, image = test_plan_ranges.PLAN.encode(), png(6, 3)
+    plan_id, image_id = (f"{hashlib.sha256(data).hexdigest()}.{ext}" for data, ext in ((plan, "md"), (image, "png")))
+    for name, data in ((plan_id, plan), (image_id, image)):
+        _disk_only("start-held", name, data)
+    artifact_files.save("start-held", plan_id, plan)
+    artifact_files.save("start-held", image_id, image)
+    media_files.save("start-held", image_id, image, 5)
+    read = []
+    monkeypatch.setattr(type(ledger_artifacts.media.folder("start-held")), "read_bytes", lambda path: read.append(path))
+    monkeypatch.setattr(media_files, "load", lambda slug, media_id: pytest.fail(f"loaded {media_id}"))
+    ledger_artifacts.adopt_disk("start-held")
+    assert read == []
+    assert media_files.ages("start-held") == {image_id: 5}
+
+
+def test_the_start_pass_saves_an_image_only_the_media_store_lacks(monkeypatch):
+    data = png(2, 7)
+    media_id = f"{hashlib.sha256(data).hexdigest()}.png"
+    _disk_only("start-half", media_id, data)
+    artifact_files.save("start-half", media_id, data)
+    monkeypatch.setattr(ledger_artifacts.core, "now_ms", lambda: 9_000_000)
+    ledger_artifacts.adopt_disk("start-half")
+    assert media_files.ages("start-half") == {media_id: 9_000_000}
+    assert artifact_files.ids("start-half") == {media_id}
+
+
 def test_the_start_pass_skips_a_name_that_is_not_a_stored_id():
     _disk_only("start-skip", "notes.md", b"# notes\n")
     ledger_artifacts.adopt_disk("start-skip")
