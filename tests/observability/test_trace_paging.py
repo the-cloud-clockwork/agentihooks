@@ -207,6 +207,59 @@ def test_repeated_streamed_generations_page_without_lost_or_doubled_observations
     assert len(state["records"]) < len(records) / 4
 
 
+def test_repeated_metadata_records_resume_paging_past_the_paged_records(tmp_path, monkeypatch, quiet):
+    metadata = [{"type": "custom-title", "customTitle": "rig"}, {"type": "agent-name", "agentName": "master"}]
+
+    def call(uuid: str, message: str, tool: str, second: int) -> dict:
+        block = {"type": "tool_use", "id": tool, "name": "shell", "input": {"cmd": tool}}
+        content = {"id": message, "model": "model-0", "content": [block]}
+        return {"type": "assistant", "uuid": uuid, "timestamp": _stamp(second), "message": content}
+
+    def user(uuid: str, content, second: int) -> dict:
+        return {"type": "user", "uuid": uuid, "timestamp": _stamp(second), "message": {"content": content}}
+
+    result = [{"type": "tool_result", "tool_use_id": "t2", "content": "two"}]
+    first = [
+        *metadata,
+        user("p0", "ask 0", 1),
+        call("a1", "m1", "t1", 2),
+        *metadata,
+        call("a2", "m2", "t2", 3),
+        user("r2", result, 4),
+    ]
+    later = [*metadata, user("p1", "ask 1", 5)]
+    receiver, _, path = _run(tmp_path, monkeypatch, "paged", CAP, first, len(first))
+    assert agent_trace._cursor("session")["paged"]["boundary"]
+    with path.open("a") as handle:
+        handle.write("".join(_line(record) for record in later))
+    for _ in range(3):
+        agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+    state = agent_trace._cursor("session")
+    assert len(state["accepted"]) + state["paged"]["spans"] == len(receiver.observations)
+    assert state["source"]["records"] == len(first) + len(later)
+    assert set(state["records"]) == {"p1"}
+    assert set(state["source_points"]) <= set(state["records"])
+
+
+def test_paged_point_resumes_past_the_dropped_record_read_last():
+    state = {"source": {"device": 1, "inode": 2}, "source_points": {"a": [30, 40, 4, 1], "b": [10, 20, 2, 0]}}
+    earlier = {"device": 1, "inode": 2, "line": 0, "offset": 5, "records": 1, "unsupported": 0, "boundary": "z"}
+    point = {"device": 1, "inode": 2, "line": 30, "offset": 40, "records": 4, "unsupported": 1, "boundary": "a"}
+    assert agent_trace._paged_point(state, ["a", "b"], [0, 1], earlier) == ("a", point)
+
+
+@pytest.mark.parametrize("offset", [20, 40])
+def test_paged_point_never_moves_behind_the_earlier_paged_point(offset):
+    state = {"source": {"device": 1, "inode": 2}, "source_points": {"a": [0, 10, 1, 0], "b": [10, 20, 2, 0]}}
+    earlier = {"device": 1, "inode": 2, "line": 0, "offset": offset, "records": 4, "unsupported": 0, "boundary": "d"}
+    assert agent_trace._paged_point(state, ["a", "b", "c"], [0, 1], earlier) == ("d", earlier)
+
+
+def test_paged_point_without_every_position_keeps_the_earlier_point():
+    state = {"source": {}, "source_points": {"a": [0, 10, 1, 0]}}
+    assert agent_trace._paged_point(state, ["a", "b"], [0, 1], None) == ("b", None)
+
+
 @pytest.mark.parametrize("chunk", [1, 3])
 def test_streamed_generation_keeps_its_accepted_identity_after_tool_results(tmp_path, monkeypatch, quiet, chunk):
     records = _claude(1, 2)
