@@ -3309,8 +3309,9 @@ lines the swarm timer journal prints with the swarm's slug in front. It counts t
 Each failed task raises `failed-spawn/<task>`, and a failed master `failed-spawn/master`. The evidence lists every
 reason in journal order, the number is the count of failures, and the threshold is at least one failed spawn.
 
-The task id stops at the first space, comma or colon, and everything after the next `: ` is the reason, colons
-included. A reason from a hive or from `init-agent` usually holds several colons:
+The task id stops at the first space, comma or colon. An optional `, task <task> reopened` clause may follow it, and
+everything after the next `: ` is the reason, colons included. A reason from a hive or from `init-agent` usually
+holds several colons:
 
 ```text
 <slug>: spawn failed for dt2: hive launch failed: refused: agentihooks init-agent: canary timeout
@@ -3318,8 +3319,10 @@ included. A reason from a hive or from `init-agent` usually holds several colons
   evidence  hive launch failed: refused: agentihooks init-agent: canary timeout
 ```
 
-A failure whose reason says `account reservation is full` is skipped unless the last `spawn capacity for <task>`
-line the tick printed for that task shows an open account of the same harness with fewer sessions than its cap.
+A failure whose reason says `account reservation is full` counts only when the account had room at the refusal.
+When the reason carries `sessions=<n> cap=<m>`, as the hive's refusal does, it counts when `n` is below `m`.
+Otherwise it counts when the last `spawn capacity for <task>` line the tick printed for that task shows an open
+account of the same harness with fewer sessions than its cap.
 
 Measure one finding the same way before and after a fix. The reading counts the spawn journal over the window, so 0
 is a real reading for a task on the watched ledger or for the master:
