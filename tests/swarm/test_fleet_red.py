@@ -91,7 +91,7 @@ def test_the_checker_reads_open_pull_requests_once_and_only_for_an_open_task_wit
     assert admits(task("done", state="done", pr_url=MINE))
     assert reads == []
     assert not admits(task("red", pr_url=MINE))
-    assert admits(task("other", pr_url="https://github.com/o/r/pull/3"))
+    assert admits(task("other", pr_url="https://github.com/o/r/pull/99"))
     assert reads == ["/repo"]
 
 

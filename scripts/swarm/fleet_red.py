@@ -22,6 +22,10 @@ def failing(pull: dict) -> set[str]:
     }
 
 
+def own(pulls: list[dict], url: str) -> set[str]:
+    return next((failing(p) for p in pulls if p.get("url") == url), set())
+
+
 def read(repo: str, run: Callable = subprocess.run) -> list[dict]:
     found = run(
         ["gh", "pr", "list", "--state", "open", "--limit", "200", "--json", "url,statusCheckRollup"],
@@ -39,12 +43,11 @@ def shared(pulls: list[dict], url: str) -> set[str]:
     others = [failing(p) for p in pulls if p.get("url") != url and p.get("statusCheckRollup")]
     if len(others) < MIN_OTHERS:
         return set()
-    mine = next((failing(p) for p in pulls if p.get("url") == url), set())
-    return {name for name in mine if sum(name in other for other in others) * 2 > len(others)}
+    return {name for name in own(pulls, url) if sum(name in other for other in others) * 2 > len(others)}
 
 
 def held(pulls: list[dict], url: str) -> bool:
-    mine = next((failing(p) for p in pulls if p.get("url") == url), set())
+    mine = own(pulls, url)
     return bool(mine) and mine <= shared(pulls, url)
 
 
