@@ -60,15 +60,17 @@ def _recent(typed: float | None, now: float) -> bool:
 
 
 def _hold(slug: str, name: str, questions: list[dict], store) -> None:
+    import redis
+
     from scripts.swarm import master_questions
+    from scripts.swarm.store import Unreachable, connect
 
     if slug == "<slug>" or not questions:
         return
-    if store is None:
-        from scripts.swarm.store import connect
-
-        store = connect()
-    master_questions.hold(store, slug, name, [_text(q) for q in questions])
+    try:
+        master_questions.hold(store or connect(), slug, name, [_text(q) for q in questions])
+    except (Unreachable, redis.RedisError):
+        return
 
 
 def _ago(typed: float | None, now: float) -> str:
