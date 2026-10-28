@@ -50,3 +50,14 @@ def test_codex_install_skips_agents_with_its_message(tmp_path, monkeypatch, caps
         in out
     )
     assert sorted(p.name for p in home.rglob("scouter.md")) == []
+
+
+def test_copilot_install_translates_the_scouter_with_read_only_tools(tmp_path, monkeypatch):
+    import yaml
+
+    from scripts.targets.copilot_target import copilot_home
+
+    run_install(tmp_path, monkeypatch, "copilot")
+    head = yaml.safe_load((copilot_home() / "agents" / "scouter.md").read_text().split("---")[1])
+    assert head["name"] == "scouter"
+    assert head["tools"] == ["glob", "grep", "view", "web_fetch", "web_search"]
