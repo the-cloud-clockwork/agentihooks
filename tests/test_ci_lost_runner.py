@@ -278,7 +278,7 @@ def test_first_look_shares_job_pages_but_recovery_confirmation_reads_fresh(monke
         reads.append((caller, endpoint, fetch))
         return pages
 
-    monkeypatch.setattr(github_reads, "conditional_pages", conditional, raising=False)
+    monkeypatch.setattr(github_reads, "conditional_pages", conditional)
     api = Api({JOBS: lines(job("lint")), RUNNER_LIST: ""})
     monkeypatch.setattr(ci_lost_runner, "_api", api)
     assert ci_lost_runner.first_look("o/r", RUN, WORKFLOW, GRACE)["action"] == "none"
