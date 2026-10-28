@@ -8,14 +8,16 @@ on its merge while it sits in the merge queue, on its checks otherwise, so no ag
 import re
 from collections.abc import Callable
 
-from scripts.swarm import idle, merge_queue, publish_queue, waits
+from scripts.gates.progress import Progress
+from scripts.swarm import idle, merge_queue, waits
 from scripts.swarm.store import SwarmError
 
 TRIGGERS = re.compile(
     r"(?:^|[;&|(\n]\s*)(?:gh\s+pr\s+(?:create|ready)\b|agentihooks\s+swarm\s+\S+\s+(?:publish|merge\s+queue)\b)"
 )
+GITHUB = re.compile(r"(?:^|github\.com[:/])([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
 COVERS = ("checks", "merge")
-TTL_S = 24 * 60 * 60
+FIELDS = ("pushed_at", "pushed_repo", "pushed_branch", "looked")
 LOOKUP_MS = 5 * 60_000
 REASON = "set by the swarm from the push of the task branch"
 QUERY = """query($owner: String!, $name: String!, $branch: String!) {
@@ -30,25 +32,22 @@ def triggered(command: str | None) -> bool:
 
     if not command:
         return False
-    return bool(TRIGGERS.search(command)) or any(kind == "push" for kind, _, _ in actions(command, "."))
+    return bool(TRIGGERS.search(command)) or any(kind == "push" for kind, _, _ in actions(command, None))
 
 
-def key(redis, slug: str, agent: str) -> str:
-    from scripts.hive import scope
-
-    return f"{scope.readings(redis, slug, agent)}:{slug}:pushed:{agent}"
-
-
-def mark(redis, slug: str, agent: str, at: int, repo: str = "", branch: str = "") -> None:
-    name = key(redis, slug, agent)
-    redis.delete(name)
-    redis.hset(name, mapping={"at": at, "repo": repo, "branch": branch})
-    redis.expire(name, TTL_S)
+def mark(redis, slug: str, agent: str, at: int, repo: str, branch: str) -> None:
+    key = Progress(redis, slug).key(agent)
+    redis.hdel(key, "looked")
+    redis.hset(key, mapping={"pushed_at": at, "pushed_repo": repo, "pushed_branch": branch})
 
 
 def read(redis, slug: str, agent: str) -> dict | None:
-    raw = redis.hgetall(key(redis, slug, agent))
-    return raw if raw.get("at") else None
+    raw = redis.hgetall(Progress(redis, slug).key(agent))
+    return raw if raw.get("pushed_at") else None
+
+
+def clear(redis, slug: str, agent: str) -> None:
+    redis.hdel(Progress(redis, slug).key(agent), *FIELDS)
 
 
 def pushed_where(command: str, cwd: str) -> tuple[str, str]:
@@ -57,38 +56,29 @@ def pushed_where(command: str, cwd: str) -> tuple[str, str]:
 
     for kind, where, args in actions(command, cwd):
         if kind == "push":
-            branches = sorted(destinations(where, args) - {""})
+            branches = sorted(destinations(where, args))
             return repo_of(where, args), branches[0] if len(branches) == 1 else ""
     return "", ""
 
 
 def forge_pull(repo: str, branch: str) -> str:
     """The open pull request whose head is the branch, '' when there is none or the forge cannot say."""
-    if "://" in repo or "@" in repo:
-        try:
-            owner, name = publish_queue.github(repo) or ("", "")
-        except ValueError:
-            owner, name = "", ""
-    else:
-        owner, _, name = repo.partition("/")
-    if not (owner and name and branch):
+    found = GITHUB.search(repo)
+    if not (found and branch):
         return ""
     try:
-        data = merge_queue.graphql(QUERY, {"owner": owner, "name": name, "branch": branch})
+        data = merge_queue.graphql(QUERY, {"owner": found[1], "name": found[2], "branch": branch})
     except SwarmError:
         return ""
-    nodes = ((data.get("repository") or {}).get("pullRequests") or {}).get("nodes") or []
+    nodes = data["repository"]["pullRequests"]["nodes"] if data.get("repository") else []
     return nodes[0]["url"] if nodes else ""
 
 
 def pull_of(redis, slug, agent, pushed, task, now_ms, forge):
-    if task.get("pr_url"):
-        return task["pr_url"]
-    if pushed.get("looked") and now_ms - int(pushed["looked"]) < LOOKUP_MS:
-        return ""
-    redis.hset(key(redis, slug, agent), "looked", now_ms)
-    repo = task.get("branch_repo") or pushed.get("repo", "")
-    return forge(repo, task.get("branch") or pushed.get("branch", ""))
+    if task.get("pr_url") or (pushed.get("looked") and now_ms - int(pushed["looked"]) < LOOKUP_MS):
+        return task.get("pr_url")
+    redis.hset(Progress(redis, slug).key(agent), "looked", now_ms)
+    return forge(task.get("branch_repo") or pushed["pushed_repo"], task.get("branch") or pushed["pushed_branch"])
 
 
 def enforce_pass(
@@ -103,7 +93,7 @@ def enforce_pass(
         pull = github(url) if url and waits.PULL_URL.fullmatch(url) else None
         if pull is None:
             continue
-        store.redis.delete(key(store.redis, slug, agent.name))
+        clear(store.redis, slug, agent.name)
         held = idle.wait(store.redis, slug, agent.name) or {}
         on = held.get("on") or {}
         if pull.state != "OPEN" or (on.get("kind") in COVERS and on.get("target") == url and held["until"] > now_ms):
