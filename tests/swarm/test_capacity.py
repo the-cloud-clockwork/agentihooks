@@ -2449,7 +2449,10 @@ def test_aggregate_capacity_closes_a_claude_account_the_probe_reads_refused(monk
     }
 
 
-def test_aggregate_capacity_reopens_a_claude_account_whose_later_probe_is_allowed(monkeypatch):
+@pytest.mark.parametrize("revoked_at,cached_first", [(90, False), (95, True)])
+def test_aggregate_capacity_reopens_a_claude_account_whose_later_probe_is_allowed(
+    monkeypatch, revoked_at, cached_first
+):
     from scripts.routing import aggregate
 
     quota = {
@@ -2462,7 +2465,9 @@ def test_aggregate_capacity_reopens_a_claude_account_whose_later_probe_is_allowe
         "a", "allowed", "NORMAL", 90, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=0)
     )
     revoked = balancer.revoked_result("a", 100)
-    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(95, allowed), (90, revoked)])
+    readings = [(95, allowed), (revoked_at, revoked)]
+    readings = readings[::-1] if cached_first else readings
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: readings)
     monkeypatch.setattr(aggregate, "current", lambda now: {"claude:a": record})
     (row,) = capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100, refresh=False)
     assert (row.state, row.cap) == ("OPEN", 11)
