@@ -125,9 +125,9 @@ def test_process_table_scan_skips_irrelevant_files_and_refuses_double_reads(tmp_
         (tmp_path / name).write_text(source, encoding="utf-8")
     parse = ast.parse
 
-    def parse_relevant(source):
+    def parse_relevant(source, *args, **kwargs):
         assert source != "value = 1", "irrelevant files must not be parsed"
-        return parse(source)
+        return parse(source, *args, **kwargs)
 
     monkeypatch.setattr(ast, "parse", parse_relevant)
     assert _process_table_violations(tmp_path) == ["path.py:3", "process.py:2", "processes.py:2"]
