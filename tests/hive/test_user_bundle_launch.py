@@ -70,6 +70,8 @@ def test_a_seat_placed_on_another_hive_is_refused_while_a_user_bundle_is_registe
         "hive carries only the root bundle; run agentihooks bundle unlink --user to place it remotely"
     )
     assert sent == []
+    assert _published(setup) == 0
+    assert setup.launcher.orders_for("task") is None
 
 
 def test_a_registered_user_bundle_whose_directory_is_gone_still_refuses_the_remote_placement(
@@ -89,6 +91,8 @@ def test_a_registered_user_bundle_whose_directory_is_gone_still_refuses_the_remo
     assert outcome.status is Status.REFUSED
     assert "moved-away" in outcome.detail
     assert sent == []
+    assert _published(setup) == 0
+    assert setup.launcher.orders_for("task") is None
 
 
 def test_a_seat_placed_on_the_launching_hive_is_not_refused(setup, tmp_path, monkeypatch):  # noqa: F811
