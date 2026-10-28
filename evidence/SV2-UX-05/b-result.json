@@ -1,0 +1,84 @@
+{
+  "case": "T-SV2-UX-05-B",
+  "checks": {
+    "cached_page_refused_as_stale": true,
+    "correction_needs_a_new_request": true,
+    "destructive_tap_asks_with_its_scope": true,
+    "dismissed_tap_sent_nothing": true,
+    "every_control_names_its_agent_and_scope": true,
+    "every_control_visible_without_hover": true,
+    "no_page_errors": true,
+    "protected_state_unchanged": true,
+    "refusal_discloses_no_identity": true,
+    "successor_kept_working": true,
+    "swarm_wide_control_names_its_scope": true,
+    "touch_layout_without_hover": true
+  },
+  "evidence_class": "mocked: a fake Redis swarm store is the authoritative state; the tick, the worker Pod's heartbeat and the hub's terminal checks are writes to it; real Chromium pages at 1920 by 1080 and at a 390 by 844 touch viewport render the ledger page from the swarm view the ledger server projects from that store, and their control writes enter the ledger server's lifecycle control; the hive command runner consumes the queue with its terminal commands stubbed; no ledger HTTP server, worker Pod, herdr server or cluster runs",
+  "input_sha256": {
+    "context-evidence.json": "94f47557b84005cbf5bc5b98019dba4cc7467464b76b4de955a738eebf134a45",
+    "operator-workflow.json": "4022ebc6f0df88be4d96e8dcbe9e84279757f53096e894f8d955c1c8dc97388a"
+  },
+  "observed": {
+    "controls": [
+      {
+        "action": "attach",
+        "aria": "attach engineer@a1b2c3-0001",
+        "danger": false,
+        "disabled": false,
+        "opacity": "1",
+        "shown": true,
+        "text": "attach",
+        "title": "terminal view: Opens a terminal view of this agent; closing it leaves the agent running."
+      },
+      {
+        "action": "drain",
+        "aria": "drain engineer@a1b2c3-0001",
+        "danger": false,
+        "disabled": false,
+        "opacity": "1",
+        "shown": true,
+        "text": "drain",
+        "title": "one agent: This agent checkpoints and takes no more work; other agents keep working."
+      },
+      {
+        "action": "cancel",
+        "aria": "cancel engineer@a1b2c3-0001",
+        "danger": true,
+        "disabled": false,
+        "opacity": "1",
+        "shown": true,
+        "text": "cancel",
+        "title": "one agent: This agent checkpoints and stops; its task stays claimed for a new attempt."
+      },
+      {
+        "action": "force_stop",
+        "aria": "force stop engineer@a1b2c3-0001",
+        "danger": true,
+        "disabled": true,
+        "opacity": "1",
+        "shown": true,
+        "text": "force stop",
+        "title": "a kubernetes agent has no force stop"
+      }
+    ],
+    "dialogs": [
+      "cancel engineer@a1b2c3-0001? This agent checkpoints and stops; its task stays claimed for a new attempt.",
+      "cancel engineer@a1b2c3-0001? This agent checkpoints and stops; its task stays claimed for a new attempt."
+    ],
+    "pause_title": "one swarm: Pauses the whole swarm: no new agent starts, running agents keep working.",
+    "puts": [
+      "cancel"
+    ],
+    "refused_note": "Could not cancel: the page is stale: this agent was replaced, finished or moved task; wait for the next swarm view. Try again or ask the master.",
+    "touch": true
+  },
+  "operator_workflow_acceptance": {
+    "controls_checked": 4,
+    "refused_controls": 1,
+    "viewers_closed": 1,
+    "viewers_opened": 1
+  },
+  "package": "SV2-UX-05",
+  "state": "passed"
+}

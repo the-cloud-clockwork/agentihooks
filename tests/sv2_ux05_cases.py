@@ -366,7 +366,16 @@ def _case_a(browser, data: dict) -> tuple[dict, dict, Counter]:
         "no_page_errors": not launched["errors"] and not any(v["errors"] for v in views.values()),
         "second_fixture_matches_the_first": second == first,
     }
-    return checks, first, counts
+    return checks, {**first, "second_fixture_differs": differs(first, second)}, counts
+
+
+def differs(first, second, path: str = "") -> list[str]:
+    if isinstance(first, dict) and isinstance(second, dict):
+        keys = sorted(set(first) | set(second))
+        return [p for key in keys for p in differs(first.get(key), second.get(key), f"{path}/{key}")]
+    if isinstance(first, list) and isinstance(second, list) and len(first) == len(second):
+        return [p for i, pair in enumerate(zip(first, second)) for p in differs(*pair, f"{path}/{i}")]
+    return [] if first == second else [f"{path}: {first!r} != {second!r}"]
 
 
 def _phone_cancel(phone: Viewer, name: str, accept: bool) -> None:
