@@ -20,6 +20,16 @@ def test_recorded_spawns_and_planted_failed_spawn():
     assert record["actions"] == []
 
 
+@pytest.mark.parametrize("reopened", ["", ", task dt2 reopened"])
+def test_a_failure_reason_with_colons_keeps_its_subject_and_whole_text(reopened):
+    record = load("spawns")
+    reason = "hive launch failed: refused: agentihooks init-agent: canary timeout"
+    record["actions"] = [f"{record['slug']}: spawn failed for dt2{reopened}: {reason}"]
+    [found] = spawns.failed(record)
+    assert found.id == "failed-spawn/dt2"
+    assert found.evidence == (reason,)
+
+
 def test_reservation_refusals_require_recorded_free_sessions():
     record = load("spawns")
     slug = record["slug"]
