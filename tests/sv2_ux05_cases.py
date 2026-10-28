@@ -56,7 +56,7 @@ class Swarm:
         self.agent, self.heartbeat_ms = None, 0
         self.publish()
 
-    def control(self, body: dict) -> tuple[int, str]:
+    def control(self, body: dict, operator: bool = True) -> tuple[int, str]:
         if body.get("action") == "start":
             self.store.update(self.slug, state="running")
             return 200, ""
@@ -68,7 +68,7 @@ class Swarm:
             patch.object(ledger_server.repository, "read", return_value=self.stamps()),
         ):
             try:
-                ledger_server.lifecycle_control(self.slug, body, True)
+                ledger_server.lifecycle_control(self.slug, body, operator)
             except lifecycle.Refused as refused:
                 return refused.status, str(refused)
         return 200, ""
@@ -331,15 +331,17 @@ def _workflow(browser, data: dict) -> tuple[dict, Counter]:
     counts, swarm = Counter(), Swarm(data)
     launched = _launch_and_attach(browser, swarm, counts)
     closed = len(browser.contexts)
-    reopened = data["reopened_ms"]
+    reopened, closed_heartbeat = data["reopened_ms"], swarm.heartbeat_ms
     swarm.heartbeat(reopened - data["heartbeat_before_ms"])
     swarm.terminal(reopened - data["fresh_terminal_before_ms"])
+    advanced = swarm.heartbeat_ms - closed_heartbeat
     views = {
         size: _inspect(browser, swarm, data["viewports"][size], reopened, counts) for size in ("desktop", "mobile")
     }
     current = swarm.current()
     store = {"state": swarm.store.config(swarm.slug).state, "agent": current.state, "generation": current.generation}
-    return {"launched": launched, "viewers_left_open": closed, "reopened": views, "store": store}, counts
+    result = {"launched": launched, "viewers_left_open": closed, "heartbeat_advanced_ms": advanced}
+    return {**result, "reopened": views, "store": store}, counts
 
 
 def _case_a(browser, data: dict) -> tuple[dict, dict, Counter]:
@@ -356,6 +358,7 @@ def _case_a(browser, data: dict) -> tuple[dict, dict, Counter]:
         and launched["puts"][1]["control"] == "attach"
         and launched["note"] == "",
         "every_viewer_was_closed_during_execution": first["viewers_left_open"] == 0,
+        "store_advanced_while_closed": first["heartbeat_advanced_ms"] > 0,
         "reopened_views_show_the_current_observation": all(
             seen in " ".join(v["row"]) and "kubernetes · gen 1 · standard" in v["row"] for v in views.values()
         ),
@@ -412,6 +415,17 @@ def _case_b(browser, data: dict) -> tuple[dict, dict, Counter]:
     phone.wait_row(name, "gen 2")
     phone.tab.wait_for_timeout(1500)
     fresh = {c["action"]: c for c in phone.controls(name)}["cancel"]
+    sent_after_refusal = len(phone.puts)
+    before = swarm.snapshot()
+    unauthorized = swarm.control({**phone.puts[0], "op": data["ops"]["stale_cancel"]}, operator=False)
+    unauthorized_unchanged = swarm.snapshot() == before
+    _phone_cancel(phone, name, accept=True)
+    phone.tab.wait_for_timeout(1500)
+    accepted = swarm.snapshot() != before
+    queued = swarm.run_commands()
+    settled = swarm.snapshot()
+    replay = swarm.control(phone.puts[-1])
+    replayed = {"code": replay[0], "unchanged": swarm.snapshot() == settled, "queued": swarm.run_commands()}
     secrets = [swarm.agent.execution_id, data["worker"]["pod"], data["worker"]["successor_pod"], "uid-"]
     cancel = lifecycle.BY_ACTION["cancel"]
     checks = {
@@ -426,8 +440,11 @@ def _case_b(browser, data: dict) -> tuple[dict, dict, Counter]:
         "protected_state_unchanged": after == before,
         "successor_kept_working": (successor.state, successor.generation) == ("working", 2),
         "refusal_discloses_no_identity": not any(s in refused_note for s in secrets),
-        "correction_needs_a_new_request": len(phone.puts) == 1
+        "correction_needs_a_new_request": sent_after_refusal == 1
         and fresh["title"] == f"{cancel.scope}: {cancel.consequence}",
+        "non_operator_refused_without_change": unauthorized[0] == 403 and unauthorized_unchanged,
+        "new_request_accepted_once": len(phone.puts) == 2 and accepted and len(queued) == 1,
+        "same_operation_replay_adds_nothing": replayed == {"code": 200, "unchanged": True, "queued": []},
         "no_page_errors": phone.errors == [],
     }
     observed = {
@@ -437,6 +454,9 @@ def _case_b(browser, data: dict) -> tuple[dict, dict, Counter]:
         "dialogs": phone.dialogs,
         "refused_note": refused_note,
         "puts": [put["control"] for put in phone.puts],
+        "unauthorized": list(unauthorized),
+        "queued": queued,
+        "replayed": replayed,
     }
     phone.close()
     counts["viewers_closed"] += 1
@@ -494,6 +514,11 @@ def _case_c(browser, data: dict) -> tuple[dict, dict, Counter]:
         "reconnecting": cached.split("\n"),
         "lost": {**lost, "row": lost["row"].split("\n")},
         "restored": {**restored, "row": restored["row"].split("\n")},
+        "durability": {
+            "survived_the_outage": sorted(set(before) & set(during)),
+            "lost_in_the_outage": sorted(set(before) - set(during)),
+            "kept_by_the_page": "the last observed swarm view, marked not current",
+        },
     }
     viewer.close()
     counts["viewers_closed"] += 1
