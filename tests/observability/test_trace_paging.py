@@ -372,6 +372,41 @@ def test_lost_paged_boundary_moves_the_paged_point_past_the_paged_records(tmp_pa
     _assert_no_recount(receiver, path, "never exported")
 
 
+def test_paged_point_holds_past_the_boundary_between_passes(tmp_path, monkeypatch, quiet):
+    _, path, _ = _paged_session(tmp_path, monkeypatch)
+    offset = agent_trace._cursor("session")["paged"]["source"]["offset"]
+    assert offset > 0
+    assert _bytes_read_per_pass(monkeypatch, path) == [path.stat().st_size - offset] * 3
+
+
+def test_lost_boundary_moves_the_point_only_over_paged_records_before_a_staged_one(tmp_path):
+    def text(uuid: str, message: str, second: int) -> dict:
+        return _call(uuid, message, {"type": "text", "text": uuid}, second)
+
+    lines = ["not json", text("a1", "m1", 1), text("a2", "m2", 2), text("a3", "m3", 3), text("a4", "m4", 4)]
+    path = tmp_path / "transcript.jsonl"
+    path.write_text("".join(_line(record) for record in lines))
+    digest = agent_trace._paged_digest
+    paged = {
+        "boundary": "gone",
+        "keys": [digest("a1"), digest("a4")],
+        "messages": [digest(transcript.mask_value("m2"))],
+    }
+    start = {"device": 1, "inode": 2, "offset": 0, "records": 0, "unsupported": 0}
+    moved = agent_trace._scan_to(str(path), start, paged, {"a3": {}})
+    line, end = (len("".join(_line(record) for record in lines[:count]).encode()) for count in (2, 3))
+    assert moved == {
+        **start,
+        "line": line,
+        "offset": end,
+        "records": 2,
+        "unsupported": 1,
+        "record": "a2",
+        "boundary": "gone",
+    }
+    assert agent_trace._scan_to(str(path), start, {"boundary": "gone"}, {}) == {**start, "boundary": "gone"}
+
+
 @pytest.mark.parametrize("edited", ["codex-user-message", "claude-metadata"])
 def test_edited_record_without_native_id_never_changes_span_counts(tmp_path, monkeypatch, quiet, edited):
     if edited == "codex-user-message":

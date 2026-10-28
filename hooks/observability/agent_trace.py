@@ -718,7 +718,6 @@ def _scan_to(transcript_path: str, point: dict, paged: dict, merged: dict) -> di
                     "records": records,
                     "unsupported": unsupported,
                     "boundary": boundary,
-                    "record": boundary,
                 }
             history = history and key not in merged
             if history and _paged_out(known, key, record):
