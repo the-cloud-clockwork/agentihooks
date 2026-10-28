@@ -163,3 +163,92 @@ def test_a_first_read_refused_or_unfit_needs_nothing_kept(monkeypatch):
         assert client.export("s") == {}
         assert client.export("s") == {"chat": []}
     assert [payload for *_, payload in server.sent] == [{"since": 0}, {}, {"since": 0}, {"since": 0}]
+
+
+def test_a_command_reads_the_changes_since_the_export_the_last_command_stored(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    client, server = reader(
+        monkeypatch,
+        {"generation": 5, "data": {"chat": [1]}},
+        {"generation": 6, "changes": {"lists": {}, "set": [[["chat"], [2]]], "drop": []}},
+    )
+    first = client.stored_export("s")
+    first["chat"].append(9)
+    assert client.stored_export("s") == {"chat": [2]}
+    assert [payload for *_, payload in server.sent] == [{"since": 0}, {"since": 5}]
+    path = api.export_file("http://a", "s")
+    assert path.parent == tmp_path / "ledger-exports"
+    assert json.loads(path.read_text()) == {"generation": 6, "state": {"chat": [2]}}
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert [entry.name for entry in path.parent.iterdir()] == [path.name]
+
+
+def test_stored_exports_are_per_server_and_ledger():
+    home = {"AGENTIHOOKS_HOME": "/h"}
+    names = {api.export_file(base, slug, home) for base in ("http://a", "http://b") for slug in "st"}
+    assert len(names) == 4
+    assert {len(name.name) for name in names} == {len("0" * 32 + ".json")}
+    assert api.export_file("http://a", "s", {}).parent == api.Path.home() / ".agentihooks" / "ledger-exports"
+
+
+def test_unfit_changes_read_the_export_whole_outside_kept_exports(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    broken = {"generation": 6, "changes": {"lists": {"tasks": {"order": ["x"], "items": {}}}, "set": [], "drop": []}}
+    client, server = reader(monkeypatch, broken, {"generation": 7, "data": {"tasks": []}})
+    api.write_export_file(api.export_file("http://a", "s"), 5, {"tasks": []})
+    assert client.stored_export("s") == {"tasks": []}
+    assert [payload for *_, payload in server.sent] == [{"since": 5}, {"since": 0}]
+    assert api.read_export_file(api.export_file("http://a", "s")) == (7, {"tasks": []})
+    assert api.KEPT is None
+
+
+@pytest.mark.parametrize(
+    "stored", ['{"generation": 5}', "[1]", '{"generation": "5", "state": {}}', '{"generation": 5, "state": []}']
+)
+def test_an_unreadable_stored_export_reads_it_whole(monkeypatch, tmp_path, stored):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    client, server = reader(monkeypatch, {"generation": 7, "data": {"tasks": []}})
+    path = api.export_file("http://a", "s")
+    path.parent.mkdir()
+    path.write_text(stored)
+    assert client.stored_export("s") == {"tasks": []}
+    assert [payload for *_, payload in server.sent] == [{"since": 0}]
+    assert json.loads(path.read_text()) == {"generation": 7, "state": {"tasks": []}}
+
+
+def test_an_unchanged_export_is_not_stored_again(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    client, _ = reader(monkeypatch, {"generation": 6, "changes": {"lists": {}, "set": [], "drop": []}})
+    api.write_export_file(api.export_file("http://a", "s"), 6, {"chat": []})
+    monkeypatch.setattr(api, "write_export_file", lambda *args: pytest.fail("stored again"))
+    assert client.stored_export("s") == {"chat": []}
+
+
+def test_a_refused_store_leaves_no_partial_file(monkeypatch, tmp_path):
+    def full(*args):
+        raise OSError("full")
+
+    monkeypatch.setattr(api.os, "replace", full)
+    api.write_export_file(tmp_path / "exports" / "e.json", 1, {})
+    assert list((tmp_path / "exports").iterdir()) == []
+
+
+def test_a_home_that_refuses_writes_still_reads_the_export(monkeypatch, tmp_path):
+    def refused(*args, **kwargs):
+        raise PermissionError("read only")
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(home))
+    monkeypatch.setattr(api.Path, "mkdir", refused)
+    client, _ = reader(monkeypatch, {"generation": 5, "data": {"chat": []}})
+    assert client.stored_export("s") == {"chat": []}
+    assert list(home.iterdir()) == []
+
+
+def test_a_snapshot_outside_kept_exports_reads_the_stored_export(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    client, server = reader(monkeypatch, {"generation": 5, "data": {"_meta": {"members": {}}}})
+    assert "crew" in client.snapshot("s")["_meta"]
+    assert server.sent == [("http://a", "s", "export", {"since": 0})]
+    assert api.read_export_file(api.export_file("http://a", "s")) == (5, {"_meta": {"members": {}}})

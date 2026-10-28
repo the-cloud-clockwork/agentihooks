@@ -471,6 +471,54 @@ def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_
         selected_mutants("scripts/sample.py", "# pragma: no mutate end\n", {1})
 
 
+def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count_without_mutants(monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutants
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    source = (
+        "import dataclasses\n"
+        "import functools\n"
+        "\n"
+        "@dataclasses.dataclass(frozen=True)\n"
+        "class Launcher:\n"
+        "    count: int = 1\n"
+        "\n"
+        "    def launch(self):\n"
+        "        return self.count + 1\n"
+        "\n"
+        "@functools.lru_cache(maxsize=2)\n"
+        "def cached(value):\n"
+        "    return value - 1\n"
+        "\n"
+        "@functools.total_ordering\n"
+        "class Ordered:\n"
+        "    def __lt__(self, other):\n"
+        "        return self.count < other.count\n"
+    )
+    generated, names = selected_mutants("scripts/sample.py", source, {9})
+    assert len(names) == 2
+    assert all(name.startswith("xǁLauncherǁlaunch__mutmut_") for name in names)
+    assert "self.count - 1" in generated
+    compile(generated, "scripts/sample.py", "exec")
+    assert mutation_counts("scripts/sample.py", source, {9}) == (2, 2)
+    assert selected_mutants("scripts/sample.py", source, {13, 18})[1] == []
+    assert mutation_counts("scripts/sample.py", source, {13}) == (0, 2)
+    found, in_body = mutation_counts("scripts/sample.py", source, {18})
+    assert found == 0
+    assert in_body > 0
+    assert mutation_counts("scripts/sample.py", source, {4, 11}) == (0, 0)
+    monkeypatch.setattr(
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[r"count \+ 1"], source_paths=[], max_stack_depth=-1),
+    )
+    assert mutation_counts("scripts/sample.py", source, {9, 13}) == (0, 2)
+
+
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
 def test_shards_split_every_mutant_name_exactly_once_and_evenly(total):
     from scripts.ci_mutation.mutant_shards import shard_names

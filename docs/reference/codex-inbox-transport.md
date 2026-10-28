@@ -77,6 +77,7 @@ from the live thread without a typed wake.
 | Execution `degraded` | The pump hit a protocol or Redis failure. It reconnects to the recorded endpoint, resumes the thread and recovers its open receipts; items stay pending until accepted. |
 | Items pending on a connected execution | Open the viewer with `agentihooks swarm <id> terminal <execution-id>` and check the thread for an open approval or a stuck turn. |
 | A legacy pane got no wake | The pane was busy, held typed text or was inside the quiet window; the wake retries per `AGENTIHOOKS_INBOX_RETRY_WINDOW_S`, then climbs to the master. |
+| A legacy pane on another hive got no wake | The tick reads that agent's hook heartbeat and orders its hive to type the wake; see [Inbox wakes for Codex agents on another hive](../pillars/swarm.md#inbox-wakes-for-codex-agents-on-another-hive). |
 
 ## Roll back
 
