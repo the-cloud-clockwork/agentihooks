@@ -376,6 +376,26 @@ def test_the_front_door_master_is_ordered_on_the_hive_master_login_account(setup
     selected = setup.launcher.select(setup.config, "master", task)
     assert (selected.account.name, selected.route_kind, selected.account.cap) == expected
 
+@pytest.mark.parametrize("status", ["revoked", "rejected", "allowed", "error"])
+@pytest.mark.parametrize("front", [True, False])
+def test_master_placement_skips_a_private_login_rejected_by_the_probe(setup, monkeypatch, status, front):
+    from dataclasses import replace
+
+    from scripts import claude_quota_balancer as balancer
+    from scripts.hive import launch
+
+    task = {**master(setup), "seat": "master@fixture" if front else "master-2@fixture"}
+    master_login_hive(setup)
+    write_hive(setup, id="fallback", master_login={}, excluded=[], ui="yes")
+    result = replace(balancer.revoked_result("login", 100), provider_status=status)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **_: [(100, result)])
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert isinstance(selected, launch.Selection)
+    if front and status not in ("revoked", "rejected"):
+        assert (selected.hive, selected.account.name, selected.route_kind) == ("remote", "login", "master-login")
+    else:
+        assert (selected.hive, selected.account.name, selected.route_kind) == ("fallback", "account", "subscription")
+
 
 def test_a_master_login_without_a_hive_slot_holds_no_account_cap(setup):
     from scripts.swarm.capacity import Account
