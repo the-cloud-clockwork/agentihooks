@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def prepare(root: Path, baseline: Path) -> None:
-    from mutmut import get_mutant_name
+    from mutmut.utils.format_utils import get_mutant_name
 
     from scripts.ci_mutation.selection import selected_mutant_names
 

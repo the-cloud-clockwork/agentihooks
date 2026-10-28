@@ -262,7 +262,14 @@ def per_test_stats(
     if any("dependencies" in result for result in fresh) and not measured:
         return None, None
     tests = {
-        function: sorted({test for result in fresh for test in result["tests"].get(function, []) if test in durations})
+        function: sorted(
+            {
+                test
+                for result in fresh
+                for test in result["tests"].get(function, result["tests"].get(function.partition("__mutmut_")[0], []))
+                if test in durations
+            }
+        )
         for function in functions
     }
     result = {
@@ -304,6 +311,10 @@ def result_by_path(result: dict, paths: list[str], owners: dict[str, list[str]])
             for path in owners.get(test, ()):
                 parts[path][name][test] = value
     for function, tests in result["tests"].items():
+        if "__mutmut_" in function:
+            for test in result["tests"].get(function.partition("__mutmut_")[0], ()):
+                for path in owners.get(test, ()):
+                    parts[path]["tests"].setdefault(function, [])
         for test in tests:
             for path in owners.get(test, ()):
                 parts[path]["tests"].setdefault(function, []).append(test)

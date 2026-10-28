@@ -21,7 +21,9 @@ SLICE_SECONDS = 120.0
 
 
 def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, float], float]:
-    tests, durations = {}, {}
+    from scripts.ci_mutation.line_tests import merged_test_selections
+
+    tests, durations = merged_test_selections(results), {}
     timed = [result for result in results if result.get("cpu") and result["durations"]]
     # A cached entry per selected path can repeat a test another overlapping path also holds.
     walls = {}
@@ -32,8 +34,6 @@ def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, 
     # Stats fork a bucket per visible CPU onto a runner whose quota is smaller, so recorded walls wait on each other.
     contention = max(1.0, sum(walls.values()) / cpu) if cpu else 1.0
     for result in results:
-        for function, nodes in result["tests"].items():
-            tests.setdefault(function, set()).update(nodes)
         for node, seconds in result["durations"].items():
             durations[node] = max(durations.get(node, 0.0), seconds / contention)
     return tests, durations, max([MUTANT_SECONDS, *durations.values()])

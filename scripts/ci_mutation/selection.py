@@ -389,9 +389,11 @@ def run_stats_buckets(runner, test_runner, shards: list[list[str]], work: Path) 
 
 
 def apply_stats(runner, results: list[dict]) -> None:
+    from scripts.ci_mutation.line_tests import merged_test_selections
+
+    for function, tests in merged_test_selections(results).items():
+        runner.mutmut.tests_by_mangled_function_name[function].update(tests)
     for result in results:
-        for function, tests in result["tests"].items():
-            runner.mutmut.tests_by_mangled_function_name[function].update(tests)
         runner.mutmut.duration_by_test.update(result["durations"])
     if not any(runner.mutmut.tests_by_mangled_function_name.values()):
         print("failed to collect stats: no selected test reaches a mutated function", flush=True)
@@ -624,9 +626,10 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
             except runner.BadTestExecutionCommandsException:
                 # The stats shards proved these node ids collect, so a usage error here is the forced failure at import.
                 return 1
+        tests = list(tests)
         selected = runner.mutmut.tests_by_mangled_function_name.get(mutant_name, tests)
-        tests = [test for test in tests if test in selected]
-        return run_unit(run_tests, self, mutant_name, tests, shard_tests(tests, mutant_name, shard[0]), memory)
+        chosen = [test for test in tests if test in selected]
+        return run_unit(run_tests, self, mutant_name, tests, shard_tests(chosen, mutant_name, shard[0]), memory)
 
     memory = KillMemory(Path.cwd() / "killers")
 

@@ -74,6 +74,29 @@ def test_shared_or_absent_line_contexts_preserve_function_selection(tmp_path):
     assert covered_mutant_tests(tmp_path / "missing", root, tests) == {}
 
 
+def test_a_measured_bucket_with_no_hit_on_a_statement_contributes_no_tests(tmp_path):
+    from scripts.ci_mutation.line_tests import covered_mutant_tests
+
+    node = "tests/a.py::test_first"
+    filename, root = _coverage(tmp_path, {node + "|run": [1, 2, 3]})
+    tests = {"scripts.writer.x_write": {node}}
+    assert covered_mutant_tests(filename, root, tests) == {
+        "scripts.writer.x_write__mutmut_1": [node],
+        "scripts.writer.x_write__mutmut_2": [],
+    }
+
+
+def test_an_unrecognized_context_on_a_mutated_line_keeps_function_selection(tmp_path):
+    from scripts.ci_mutation.line_tests import covered_mutant_tests
+
+    first, second = "tests/a.py::test_first", "tests/a.py::test_second"
+    filename, root = _coverage(
+        tmp_path,
+        {first + "|run": [1, 2, 3], second + "|run": [1, 2, 4], "custom context": [3, 4]},
+    )
+    assert covered_mutant_tests(filename, root, {"scripts.writer.x_write": {first, second}}) == {}
+
+
 def test_statistics_cache_keeps_mutant_selection_and_planning_uses_its_cost():
     from scripts.ci_mutation.measured import measured_costs
     from scripts.ci_mutation.stats_cache import fresh_by_path, per_test_stats
