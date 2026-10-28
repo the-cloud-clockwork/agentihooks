@@ -363,3 +363,37 @@ def test_remote_heads_is_none_when_the_remote_cannot_be_read(failure):
         return _done(f"{HEAD}\trefs/heads/feature-x\n", code=128)
 
     assert remote_heads("/repo", run=run) is None
+
+
+def _git(*args, cwd=None):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def test_a_hive_handoff_envelope_carries_the_task_branch_and_its_remote_head(tmp_path, monkeypatch):
+    import fakeredis
+
+    for key, value in {"NAME": "hive", "EMAIL": "hive@example.com"}.items():
+        monkeypatch.setenv(f"GIT_AUTHOR_{key}", value)
+        monkeypatch.setenv(f"GIT_COMMITTER_{key}", value)
+    origin, checkout = tmp_path / "origin.git", tmp_path / "dev" / "agentihooks"
+    _git("init", "--bare", "-b", "dev", str(origin))
+    _git("clone", str(origin), str(checkout))
+    _git("commit", "--allow-empty", "-m", "base", cwd=checkout)
+    _git("push", "origin", "HEAD:dev", cwd=checkout)
+    worktree = tmp_path / "worktrees" / "engineer-a1b2c3-0000"
+    _git("worktree", "add", "-b", "engineer-a1b2c3-0000", str(worktree), cwd=checkout)
+    _git("commit", "--allow-empty", "-m", "task work", cwd=worktree)
+    _git("push", "-u", "origin", "engineer-a1b2c3-0000", cwd=worktree)
+    head = _git("rev-parse", "HEAD", cwd=worktree)
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "dev"))
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", str(tmp_path / "workstation" / "agentihooks"), 1, 1))
+    rows = [{"id": "t1", "phase": "p7", "branch": "engineer-a1b2c3-0000"}]
+    envelope = build(store, "sw", _agent(), "operator", rows, 0)
+    assert {key: envelope[key] for key in ("worktree", "branch", "remote_branch", "remote_head", "continue_from")} == {
+        "worktree": str(worktree),
+        "branch": "engineer-a1b2c3-0000",
+        "remote_branch": "engineer-a1b2c3-0000",
+        "remote_head": head,
+        "continue_from": "origin/engineer-a1b2c3-0000",
+    }
