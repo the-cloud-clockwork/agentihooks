@@ -30,6 +30,7 @@ from scripts.gates.verdicts import Verdicts
 from scripts.gates.watch import WatchBudget
 
 LIFTED = "lifted by the operator: "
+FAILED_OPEN = Decision()
 
 GATES = {
     gate.name: gate
@@ -61,9 +62,6 @@ def main(argv=None, stdin=None, environ=None, home=None):
     payload = json.loads((stdin or sys.stdin).read() or "{}")
     call = Call.from_payload(payload)
     return evaluate(gate, call, environ, home)
-
-
-FAILED_OPEN = Decision()
 
 
 def _brain_metric(gate, call, who, result):

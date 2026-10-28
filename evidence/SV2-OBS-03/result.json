@@ -1,12 +1,25 @@
 {
   "package": "SV2-OBS-03",
-  "dependencies": ["SV2-OBS-02", "SV2-GAT-04", "SV2-OBS-01"],
+  "dependencies": [
+    "SV2-OBS-02",
+    "SV2-GAT-04",
+    "SV2-OBS-01"
+  ],
   "integration_gate": "G10",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/8122",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/8209",
   "tested_commit": "15d12e02b76666efd32baad4b8a3bc442c100f72",
   "package_complete": false,
-  "fixture": {"path": "tests/fixtures/swarm_v2/consultation-effectiveness.json", "sha256": "7f8a5c3c7d228feee73074f718c4e036e7467dadc4a082ed50ae1a73f86a528e", "cases": ["useful", "irrelevant", "missing", "override"]},
+  "fixture": {
+    "path": "tests/fixtures/swarm_v2/consultation-effectiveness.json",
+    "sha256": "7f8a5c3c7d228feee73074f718c4e036e7467dadc4a082ed50ae1a73f86a528e",
+    "cases": [
+      "useful",
+      "irrelevant",
+      "missing",
+      "override"
+    ]
+  },
   "evidence_class": "mocked: isolated hook state, fixture brain packs, fake clock and gate lifts; no live target qualification claimed",
   "interfaces": [
     "Metrics.record accepts a preauthenticated Grant, immutable operation identity and fixed-schema delivery, gate or reference metadata. Scope comes from the grant corpus and project membership; runtime observations derive that scope from the existing project resolver and selected brain.",
@@ -15,16 +28,23 @@
     "task_context.offer records supported delivery, deduplication, missing context, disabled delivery and unsupported events without storing pack text. A rendered service failure remains a retrieval failure even when its diagnostic notice is delivered.",
     "The gate dispatcher records effective allow, deny, observe, off, lifted and fail-open outcomes for the brain gate. Receipt age is an observed metadata value; no metric claims comprehension."
   ],
-  "supported_versions": {"python": ">=3.12", "targets": ["claude", "codex", "copilot"]},
+  "supported_versions": {
+    "python": ">=3.12",
+    "targets": [
+      "claude",
+      "codex",
+      "copilot"
+    ]
+  },
   "states": {
-    "observed": "Red baseline at 5a10d8803ca5336f214e39bc7640f6fce4c3f731 failed collecting the new acceptance tests because the consultation module did not exist. At the tested commit the 53 acceptance tests for cases A, B and C passed in mutation preflight 40634144163; the existing task context and gate compatibility tests passed in Proofs 40632393339 at a1833a3a17b60fed55031553d0c21b9db5845b64, after which only tests and mutation clearances changed.",
+    "observed": "Red baseline at 5a10d8803ca5336f214e39bc7640f6fce4c3f731 failed collecting the new acceptance tests because the consultation module did not exist. At the tested commit 15d12e02b76666efd32baad4b8a3bc442c100f72 the 53 acceptance tests for cases A, B and C passed in mutation preflight 40648292118; the existing task context and gate compatibility tests passed in Proofs 40632393339 at a1833a3a17b60fed55031553d0c21b9db5845b64.",
     "accepted": "Fixed-schema observations authorized for the selected brain and project, references tied to delivered context and separately authorized operator assessments.",
-    "committed": "SQLite stores immutable observations and reviews under the agentihooks brain state home. Receipts and existing gate logs retain their preceding contracts.",
+    "committed": "SQLite stores immutable observations and reviews under the agentihooks brain state home. Receipts and non-brain gate logs retain their preceding contracts; a crashed brain gate now logs a fixed fail-open detail instead of its exception text, so no memory or secret content reaches the gate log.",
     "externally_verified": "None. Live G10 verification remains outstanding."
   },
   "metrics": {
     "brain_gate_false_block_rate": "Operator-reviewed false denials divided by operator-reviewed denials; null when no denial has been reviewed. An operator lift alone is not a false-block ruling.",
-    "context_delivery_failures": "Observed missing, disabled or unsupported delivery outcomes. A successful retrieval response is not a target delivery observation.",
+    "context_delivery_failures": "Observed missing, disabled or unsupported delivery outcomes. A successful retrieval response is not a target delivery observation. Delivered means the context notice reached the target; an empty retrieval that reached the target counts as delivered and is classified separately in retrieval outcomes.",
     "context_service_failures": "Historical retrieval failures remain visible after successful recovery; the degraded flag describes the latest observation for each session.",
     "usefulness": "Delivered context, explicitly referenced context and operator-reviewed useful or irrelevant context remain distinct. References and reviews do not store prompt text."
   },
@@ -34,8 +54,8 @@
     "implementation_commit": "a1833a3a17b60fed55031553d0c21b9db5845b64",
     "first_focused_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40629869547 at e8606930d5e7646721d6fb47b7e9e492127c4045: 1 failed, 141 passed; the receipt age KeyError in observe rollback compatibility was fixed by the telemetry failure boundary",
     "focused_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40632393339 at a1833a3a17b60fed55031553d0c21b9db5845b64: 42 passed covering effectiveness, task context and consultation gate compatibility",
-    "acceptance_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40634144163 touched tests at the tested commit: 53 passed",
-    "mutation": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40648292118 at the tested commit: every job green; https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40634144163 at 09af0343e00c727a66fb57d5134befec363378b5: 6 shards complete, 638 graded, 629 killed, 9 survivors each cleared by an individual Standards ruling, no untouched survivors; preflight 40630666144 had 146 failing entries, killed by boundary tests or cleared individually",
+    "acceptance_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40648292118 touched tests at 15d12e02b76666efd32baad4b8a3bc442c100f72: 53 passed",
+    "mutation": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40648292118 at 15d12e02b76666efd32baad4b8a3bc442c100f72: every job green; https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40634144163 at 09af0343e00c727a66fb57d5134befec363378b5: 6 shards complete, 638 graded, 629 killed, 9 survivors each cleared by an individual Standards ruling, no untouched survivors; preflight 40630666144 had 146 failing entries, killed by boundary tests or cleared individually",
     "lint": "ruff check, ruff format and size passed through the committed HEAD prepush gate",
     "outcome": "passed"
   },
@@ -47,6 +67,9 @@
   "remaining_limitations": [
     "Live G10 target qualification is separate from mocked acceptance fixtures and remains outstanding.",
     "Operator review and reference submission are library interfaces for authenticated adapters; no new user interface or unauthenticated network endpoint is added.",
-    "The preceding local consultation receipt is not a cryptographic boundary against a process that controls its own hook state. Metrics preserve that compatibility contract."
+    "The preceding local consultation receipt is not a cryptographic boundary against a process that controls its own hook state. Metrics preserve that compatibility contract.",
+    "Runtime observations derive their grant from the existing project resolver and selected brain in the same process; preauthenticated grants from adapters apply to Metrics.record callers outside the hook path.",
+    "Runtime delivery and gate observations use a fresh operation identity per hook event, so the replay guard deduplicates only callers that supply a stable identity.",
+    "Runtime observations record the task transition purpose only; search and refresh purposes are accepted by the schema but not yet emitted."
   ]
 }
