@@ -118,16 +118,17 @@ def test_an_open_panel_follows_its_icon_when_the_page_resizes_or_the_strip_scrol
 
 
 def test_a_window_resize_keeps_the_strip_scroll_and_the_focused_icon(tab):
-    strip, scroll = tab.locator("#icon-strip"), 0
-    if tab.viewport_size["width"] >= 1024:
+    strip = tab.locator("#icon-strip")
+    desktop = tab.viewport_size["width"] >= 1024
+    if desktop:
         tab.set_viewport_size({"width": 1280, "height": 320})
         assert strip.evaluate("el => el.scrollHeight > el.clientHeight")
-        scroll = 40
     tab.locator("#bell").click()
-    strip.evaluate(f"el => {{ el.scrollTop = {scroll}; }}")
+    if desktop:
+        strip.evaluate("el => { el.scrollTop = 40; }")
     tab.evaluate("() => window.dispatchEvent(new Event('resize'))")
     assert tab.evaluate("document.activeElement.id") == "bell"
-    assert strip.evaluate("el => el.scrollTop") == scroll
+    assert strip.evaluate("el => el.scrollTop") == (40 if desktop else 0)
 
 
 @pytest.mark.parametrize("icon, panel, rows", PANELS)
