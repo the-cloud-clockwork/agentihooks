@@ -391,6 +391,18 @@ test('a late older green run replacing the newest pending run releases only the 
   assert.equal(f.outputs.main, 'rebased');
 });
 
+test('never reads the jobs of a newer first attempt run still queued', async () => {
+  const f = batchFixture({ candidate: { status: 'queued', run_attempt: 1 } });
+  const paginate = f.github.paginate;
+  f.github.paginate = async (method, args) => {
+    assert.ok(!(method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43));
+    return paginate(method, args);
+  };
+  await promote(f);
+  assert.equal(f.outputs.graded, f.context.sha);
+  assert.equal(f.outputs.superseded, undefined);
+});
+
 test('verifies the running job separately from its selected newer grade during self wait', async () => {
   const f = batchFixture({ unstable: true });
   await promote(f);
