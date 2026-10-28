@@ -433,3 +433,71 @@ def test_a_metrics_interval_outside_positive_finite_minutes_is_reported(spool, s
     assert metrics.record_pass("sw", NOW, 1, environ, swarm) == [
         "metrics outbox failed: metrics collectors need a positive interval in minutes"
     ]
+
+
+def test_the_metrics_interval_is_claimed_on_the_bus_state_store(spool, sent, monkeypatch):
+    import fakeredis
+
+    from scripts.events import factory, memory
+    from scripts.events.config import BusConfig
+
+    bus = memory.open_bus(BusConfig())
+    monkeypatch.setattr(factory, "open_bus", lambda config: bus)
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    before = set(store.redis.keys("*"))
+    runs = []
+    monkeypatch.setattr(metrics, "_collect", lambda *args: runs.append(len(runs)))
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    environ = {**ON, "AGENTIHOOKS_STATE_BACKEND": "bus", "AGENTIHOOKS_BUS": "memory"}
+    assert metrics.record_pass("sw", NOW, 0, environ, swarm) == []
+    assert metrics.record_pass("sw", NOW + 60_000, 0, environ, swarm) == []
+    assert metrics.record_pass("sw", NOW + 600_000, 0, environ, swarm) == []
+    assert runs == [0, 1]
+    assert set(store.redis.keys("*")) == before
+    assert bus.state(metrics.BUCKET).get("sw") is not None
+
+
+def test_a_failed_bus_pass_reopens_the_interval(spool, sent, monkeypatch):
+    import fakeredis
+
+    from scripts.events import factory, memory
+    from scripts.events.config import BusConfig
+
+    bus = memory.open_bus(BusConfig())
+    monkeypatch.setattr(factory, "open_bus", lambda config: bus)
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    runs = []
+
+    def collect(*args):
+        runs.append(len(runs))
+        if len(runs) == 1:
+            raise ValueError("bad swarm row")
+
+    monkeypatch.setattr(metrics, "_collect", collect)
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    environ = {**ON, "AGENTIHOOKS_STATE_BACKEND": "bus", "AGENTIHOOKS_BUS": "memory"}
+    assert metrics.record_pass("sw", NOW, 0, environ, swarm) == ["metrics outbox failed: bad swarm row"]
+    assert metrics.record_pass("sw", NOW + 60_000, 0, environ, swarm) == []
+    assert runs == [0, 1]
+
+
+def test_a_metrics_interval_raced_by_another_controller_is_skipped(spool, sent, monkeypatch):
+    import fakeredis
+
+    from scripts.events.bus import StateConflict
+    from scripts.events.redis_state import RedisStateStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+
+    def raced(self, key, value):
+        raise StateConflict("taken")
+
+    monkeypatch.setattr(RedisStateStore, "create", raced)
+    runs = []
+    monkeypatch.setattr(metrics, "_collect", lambda *args: runs.append(len(runs)))
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
+    assert runs == []
