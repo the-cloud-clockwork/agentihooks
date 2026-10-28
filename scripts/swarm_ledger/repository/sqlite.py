@@ -573,7 +573,7 @@ class SQLiteLedgerRepository:
 
     def export_since(self, slug: str, since: int, view, changes) -> tuple[int, str | bytes]:
         """(generation, text) of the stored ledger: changes(state, paths) when the database recorded every row
-        change after generation since, else view(state) as encoded_view builds it."""
+        change after generation since, else view(fragments) of the stored ledger, built as encoded_view builds."""
         self._adopt(slug)
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
@@ -589,7 +589,7 @@ class SQLiteLedgerRepository:
         if view not in entry.views:
             with VIEW_BUILD:
                 if view not in entry.views:
-                    entry.views[view] = view(entry.state)
+                    entry.views[view] = view(entry.fragments)
                     heap.release()
         return entry.generation, entry.views[view]
 
