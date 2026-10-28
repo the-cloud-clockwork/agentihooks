@@ -325,12 +325,33 @@ workers:
   worktreeMinFreeGb: 50
   worktreeMaxPerRepo: 60
   worktreeStaleDays: 7
+  # Node whose hiveStorage entry (else hiveStorage.default) gives this hive its home and /tmp host folders,
+  # <homes>/<folder> and <tmp>/<folder>, where folder is the release name, or <release>_<name> for a workers.hives
+  # entry; it pins the hive to that node and replaces homeVolume. workers.hives entries inherit it. Empty keeps homeVolume.
+  node: ""
   nodeSelector: {}
   affinity: {}
   tolerations: []
   # More hives in this release, one pod each, so an entry never sets replicas. Every entry needs a name and its own credentialSecret; its other
   # top level keys replace the workers keys above whole, so a hive with a homeVolume sets the complete source.
   hives: []
+
+# Host folders for hive homes and hive /tmp, by node name, read by every hive whose workers.node is set and by the
+# hive home DaemonSet. An entry has homes, an optional tmp (else /tmp is an emptyDir) and an optional mount
+# {path, fsType, marker}: both folders must sit under that path, and the hive's folder Job refuses unless the path
+# is that filesystem and holds marker, a path that exists only on the data disk, so a node whose data disk did not
+# mount never gets hive folders on its system drive. An entry without tmp gives the hive an emptyDir /tmp. default
+# serves nodes with no entry.
+hiveStorage:
+  image: alpine:3.20
+  default: {}
+  nodes: {}
+  # Hives whose homeVolume is set by hand under default.homes: one DaemonSet makes their folders on every node
+  # it selects outside hiveStorage.nodes.
+  homeFolders:
+    hives: []
+    nodeSelector: {}
+    tolerations: []
 
 worker:
   enabled: false

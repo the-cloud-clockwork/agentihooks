@@ -28,7 +28,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/swarm-smoke-layers
-          key: swarm-smoke-layers-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          key: swarm-smoke-layers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile', 'pyproject.toml', 'README.md', 'docker/swarm/requirements.lock', 'docker/swarm-node/versions.lock', 'docker/swarm-node/requirements.lock', 'scripts/swarm_v2/worker_image.py') }}
           restore-keys: swarm-smoke-layers-${{ runner.os }}-${{ runner.arch }}-
       - name: Build the swarm image
         id: build
