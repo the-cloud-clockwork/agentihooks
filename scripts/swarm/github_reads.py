@@ -16,10 +16,13 @@ import subprocess
 import time
 from collections import Counter
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from scripts.swarm.lost_runner import home as _agentihooks_home
 
+CALLER = ContextVar("github_caller", default="swarm.rest")
 RUN_TTL_S = 60
 TERMINAL = "completed"
 TOKENS = ("GH_TOKEN", "GITHUB_TOKEN")
@@ -120,6 +123,15 @@ def _write(path, body):
         staged.replace(path)
     except OSError:
         pass
+
+
+@contextmanager
+def calling(caller: str):
+    token = CALLER.set(caller)
+    try:
+        yield
+    finally:
+        CALLER.reset(token)
 
 
 def charge(caller: str, endpoint: str, now: float) -> None:

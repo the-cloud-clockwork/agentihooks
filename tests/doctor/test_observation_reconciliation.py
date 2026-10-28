@@ -86,10 +86,14 @@ def test_remote_identity_pages_are_all_read(cursors):
 
 
 @pytest.mark.parametrize(
-    "total,rows",
-    [(101, [{"id": "one"}]), (201, [{"id": "one"}, {"id": "one"}]), (2, [{"id": "one"}, {"id": "one"}])],
+    "total,rows,expected",
+    [
+        (101, [{"id": "one"}], [1, 2, 1, 2, 1, 2]),
+        (201, [{"id": "one"}, {"id": "one"}], [1, 1, 1]),
+        (2, [{"id": "one"}, {"id": "one"}], [1, 1, 1]),
+    ],
 )
-def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows):
+def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows, expected):
     from scripts.doctor import observation_reconciliation
 
     _session(cursors, "sid", [], 0, accepted={"one": "rev"})
@@ -98,13 +102,35 @@ def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows):
 
     def get(path, params):
         assert path == "observations"
-        assert params == {"traceId": "tr", "limit": 100, "page": 1}
+        assert params == {"traceId": "tr", "limit": 100, "page": expected[len(calls)]}
         calls.append(params["page"])
         return {"data": rows, "meta": {"totalItems": total}}
 
     with pytest.raises(ValueError, match="^observation identity listing is incomplete$"):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
-    assert calls == [1, 1, 1]
+    assert calls == expected
+
+
+@pytest.mark.parametrize("pages,total", [([100, 99], 201), ([42], 103), ([100, 100, 98], 301)])
+def test_short_page_before_an_overcounted_total_completes_listing_when_the_next_page_is_empty(cursors, pages, total):
+    from scripts.doctor import observation_reconciliation
+
+    rows = [[{"id": f"{page}-{i}"} for i in range(size)] for page, size in enumerate(pages, 1)] + [[]]
+    accepted = {row["id"]: "rev" for page in rows for row in page}
+    _session(cursors, "sid", [], 0, accepted={**accepted, "lost": "rev"})
+    calls = []
+
+    def get(path, params):
+        assert path == "observations" and params == {"traceId": "tr", "limit": 100, "page": len(calls) + 1}
+        calls.append(params["page"])
+        return {"data": rows[params["page"] - 1], "meta": {"totalItems": total}}
+
+    assert observation_reconciliation.reconcile(get, "sid", "claude", "tr") == {
+        "accepted": len(accepted) + 1,
+        "missing": ["lost"],
+        "drift": 0,
+    }
+    assert calls == list(range(1, len(pages) + 2))
 
 
 @pytest.mark.parametrize("repeat_page", [1, 2])

@@ -240,6 +240,47 @@ def _nats_server_steps() -> dict[str, dict]:
     return {step["name"]: step for step in action["runs"]["steps"]}
 
 
+@pytest.mark.parametrize("version", ["matching", "different", "broken", "missing"])
+def test_nats_server_reuses_only_the_exact_runner_version(tmp_path, version):
+    step = _nats_server_steps()["Resolve the pinned nats server"]
+    commands = tmp_path / "bin"
+    commands.mkdir()
+    (commands / "uname").symlink_to("/usr/bin/uname")
+    if version != "missing":
+        binary = commands / "nats-server"
+        expected = step["env"]["NATS_SERVER_RELEASE"] if version in {"matching", "broken"} else "v0.0.0"
+        binary.write_text(f"#!/bin/bash\necho 'nats-server: {expected}'\nexit {1 if version == 'broken' else 0}\n")
+        binary.chmod(0o755)
+    output = tmp_path / "output"
+    required = tmp_path / "env"
+    subprocess.run(
+        ["/bin/bash", "-euo", "pipefail", "-c", step["run"]],
+        env={
+            **step["env"],
+            "PATH": str(commands),
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_ENV": str(required),
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert values.get("installed", "false") == ("true" if version == "matching" else "false")
+    assert required.read_text() == "NATS_SERVER_REQUIRED=1\n" if version == "matching" else not required.exists()
+
+
+def test_nats_server_skips_archive_work_when_the_runner_version_matches():
+    steps = _nats_server_steps()
+    for name in (
+        "Restore the pinned nats server archive",
+        "Install the pinned nats server",
+        "Save the pinned nats server archive",
+    ):
+        assert "steps.pin.outputs.installed != 'true'" in steps[name]["if"]
+
+
 def test_nats_server_archive_is_cached_on_its_pinned_release_and_checksum():
     steps = _nats_server_steps()
     names = list(steps)
@@ -255,7 +296,10 @@ def test_nats_server_archive_is_cached_on_its_pinned_release_and_checksum():
     }
     assert install["env"]["CACHE_HIT"] == "${{ steps.cache.outputs.cache-hit }}"
     assert save["uses"] == "actions/cache/save@v4"
-    assert save["if"] == "steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'"
+    assert (
+        save["if"]
+        == "steps.pin.outputs.installed != 'true' && steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'"
+    )
     assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.cache.outputs.cache-primary-key }}"}
 
 
@@ -333,9 +377,9 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     assert install["env"] == {"PYTHON_PATH": "${{ steps.python.outputs.python-path }}"}
     assert install["run"].strip().splitlines() == [
         'uv venv --python "$PYTHON_PATH" "$HOME/venv"',
-        'uv pip install --offline --no-index --find-links /opt/wheelhouse --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
+        'uv pip install --offline --no-index --find-links /opt/wheelhouse --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
         'echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"',
-        'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
+        'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
     ]
 
 
@@ -347,6 +391,7 @@ def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
     assert "${{ runner.os }}" in key
     assert f"${{{{ steps.{python['id']}.outputs.python-version }}}}" in key
     assert "${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}" in key
+    assert "${{ hashFiles('.github/test-requirements.lock') }}" in key
     _, day = _unit_step_index(lambda s: s.get("id") == "day")
     assert day["run"] == 'echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"'
     assert "${{ steps.day.outputs.date }}" in key
@@ -438,7 +483,11 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
 
 def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs():
     workflow = _workflow()
-    assert (_ROOT / ".github/test-constraints.txt").read_text().split() == ["playwright==1.63.0", "pytest<9.2"]
+    assert (_ROOT / ".github/test-constraints.txt").read_text().splitlines() == [
+        "playwright==1.63.0",
+        "pytest<9.2",
+        "--constraint test-requirements.lock",
+    ]
     for job in ("test-count", "split", "unit"):
         assert workflow["jobs"][job]["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
         cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
@@ -1484,6 +1533,10 @@ def test_unit_shards_upload_elapsed_time_after_failed_pytest():
 def test_selected_legs_record_elapsed_time_and_their_job_and_preserve_pytest_status(tmp_path, status):
     steps = _workflow()["jobs"]["unit-selected"]["steps"]
     step = next(item for item in steps if item.get("name") == "Run the selected tests")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "__init__.py").touch()
+    (scripts / "ci_cpu_quota.py").write_text("print(1)\n")
     (tmp_path / "pytest.py").write_text(
         f"def main(args):\n    open('durations.json', 'w').write('{{}}')\n    return {status}\n"
     )
@@ -1508,6 +1561,13 @@ def test_selected_legs_upload_elapsed_time_beside_their_durations():
 
 def _selected_step(name: str) -> dict:
     return next(step for step in _workflow()["jobs"]["unit-selected"]["steps"] if step.get("name") == name)
+
+
+def test_selected_legs_size_workers_by_the_container_cpu_quota():
+    run = _selected_step("Run the selected tests")["run"]
+    assert "workers=$(python -m scripts.ci_cpu_quota)" in run
+    assert '-n "$workers"' in run
+    assert "-n auto" not in run
 
 
 def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_only_for_the_grader():
@@ -1877,6 +1937,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         "BASE": "${{ inputs.base || 'origin/dev' }}",
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
         "MUTATION_SHARD_CPU_QUOTA": "3",
+        "PYTHONUNBUFFERED": "1",
     }
     names = [item.get("id") for item in plan["steps"]]
     mint = plan["steps"][names.index("app-token")]
@@ -1946,7 +2007,9 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     setup = [
         step
         for step in setup
-        if not str(step.get("name", "")).startswith(downloads)
+        if not str(step.get("name", "")).startswith(
+            (*downloads, "Cap the merged test stats", "Check for merged test stats")
+        )
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
     ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
@@ -2088,10 +2151,23 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     }
     merged = mutation[mutation_names.index("Save the merged test stats")]
     assert merged["uses"] == "actions/cache/save@v4"
-    assert merged["if"] == f"{first} && hashFiles('.mutation-stats-cache/**') != ''"
+    assert merged["if"] == f"{first} && steps.merged-stats.outputs.found == 'true'"
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
+    capped = mutation[mutation_names.index("Cap the merged test stats")]
+    assert capped["if"] == first
+    assert capped["run"] == (
+        "python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap;"
+        ' print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")\' .mutation-stats-cache'
+    )
     assert mutation_names.index(base["name"]) == 1
-    order = [base["name"], download["name"], merged["name"], "Install dependencies", "Mutate changed Python files"]
+    order = [
+        base["name"],
+        download["name"],
+        capped["name"],
+        merged["name"],
+        "Install dependencies",
+        "Mutate changed Python files",
+    ]
     assert [mutation_names.index(name) for name in order] == sorted(mutation_names.index(name) for name in order)
 
 
@@ -2147,7 +2223,7 @@ def test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pin
     specs = [declared[name] for name in sorted(PLANNER_PACKAGES)]
     assert (
         install["run"]
-        == 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system '
+        == 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock '
         + " ".join(f'"{spec}"' for spec in specs)
     )
     assert _planner_third_party() == set(PLANNER_PACKAGES.values())
@@ -2206,7 +2282,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"strategy.job-total != 1 && {skipped}",
         f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}",
         f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}"
-        " && hashFiles('.mutation-stats-cache/**') != ''",
+        " && steps.merged-stats.outputs.found == 'true'",
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
     )

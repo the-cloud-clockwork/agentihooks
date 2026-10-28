@@ -504,19 +504,20 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
     assert all(name.startswith("xǁLauncherǁlaunch__mutmut_") for name in names)
     assert "self.count - 1" in generated
     compile(generated, "scripts/sample.py", "exec")
-    assert mutation_counts("scripts/sample.py", source, {9}) == (2, 2)
+    assert mutation_counts("scripts/sample.py", source, {9}) == (2, [])
+    assert mutation_counts("scripts/sample.py", source, {6}) == (0, [])
+    assert mutation_counts("scripts/sample.py", source, {6, 9}) == (2, [])
     assert selected_mutants("scripts/sample.py", source, {13, 18})[1] == []
-    assert mutation_counts("scripts/sample.py", source, {13}) == (0, 2)
-    found, in_body = mutation_counts("scripts/sample.py", source, {18})
-    assert found == 0
-    assert in_body > 0
-    assert mutation_counts("scripts/sample.py", source, {4, 11}) == (0, 0)
+    assert mutation_counts("scripts/sample.py", source, {13}) == (0, ["cached"])
+    assert mutation_counts("scripts/sample.py", source, {18}) == (0, ["__lt__"])
+    assert mutation_counts("scripts/sample.py", source, {9, 13, 18}) == (2, ["cached", "__lt__"])
+    assert mutation_counts("scripts/sample.py", source, {4, 11}) == (0, [])
     monkeypatch.setattr(
         Config,
         "get",
         lambda: SimpleNamespace(do_not_mutate_patterns=[r"count \+ 1"], source_paths=[], max_stack_depth=-1),
     )
-    assert mutation_counts("scripts/sample.py", source, {9, 13}) == (0, 2)
+    assert mutation_counts("scripts/sample.py", source, {9, 13}) == (0, ["cached"])
 
 
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
@@ -780,6 +781,51 @@ def test_statistics_timings_keep_maxima_and_normalize_groups_from_each_cache_loc
         test: 0.76,
         "tests/test_new.py": 0.01,
     }
+
+
+def test_sizing_reads_only_the_newest_records_within_the_cache_cap(tmp_path, monkeypatch):
+    import os
+
+    from scripts.ci_mutation import stats_dependencies
+    from scripts.ci_mutation.selection import file_seconds
+
+    test = "tests/test_sample.py::test_value"
+    cache = tmp_path / ".mutation-stats-cache"
+    cache.mkdir()
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    for age, seconds in enumerate([2, 50]):
+        path = cache / f"{seconds}.json"
+        path.write_text(json.dumps({"status": 0, "durations": {test: seconds}}))
+        os.utime(path, (1000 - age, 1000 - age))
+    monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", (cache / "2.json").stat().st_size)
+    assert file_seconds(tmp_path, [test]) == {test: 2.01}
+
+
+@pytest.mark.wall_clock
+def test_sizing_against_a_stats_cache_of_the_observed_shape_finishes_in_seconds(tmp_path, monkeypatch):
+    import time
+
+    from scripts.ci_mutation import stats_dependencies
+    from scripts.ci_mutation.plan import stats_part_count
+
+    (tmp_path / "tests").mkdir()
+    files = [f"tests/test_{index}.py" for index in range(40)]
+    for path in files:
+        (tmp_path / path).write_text("def test_one():\n    pass\n")
+    cache = tmp_path / ".mutation-stats-cache"
+    cache.mkdir()
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    # Each stored record of 27 October held about 150 KB of input digests beside a few durations.
+    inputs = {f"scripts/module_{index}.py": "0" * 64 for index in range(1800)}
+    for index in range(200):
+        durations = {f"{files[index % 40]}::test_{case}": 0.5 for case in range(20)}
+        (cache / f"{index}.json").write_text(json.dumps({"status": 0, "durations": durations, "inputs": inputs}))
+    monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", 4 * 1024 * 1024)
+    started = time.monotonic()
+    parts, slowest = stats_part_count(tmp_path, files, 60, 10)
+    assert time.monotonic() - started < 20
+    assert 1 <= parts <= 10
+    assert slowest > 0
 
 
 def test_statistics_parts_partition_every_test_when_each_part_restores_a_different_cache(tmp_path, monkeypatch):
@@ -1289,3 +1335,35 @@ def test_mutmut_wait_skips_a_child_a_test_left_and_returns_the_forked_mutant(mon
     assert children.pids == {12}
     assert children.wait() == (12, 7 << 8)
     assert (children.pids, exits) == (set(), [])
+
+
+@pytest.mark.parametrize(
+    "version, preset, expected",
+    [
+        ((9, 2, 0), None, "tests/test_a.py::test_a"),
+        ((9, 1, 99), None, None),
+        ((10, 0, 0), "kept", "kept"),
+    ],
+)
+def test_node_ids_reach_mutmut_only_where_pytest_dropped_them(monkeypatch, version, preset, expected):
+    from scripts.ci_mutation import selection
+
+    class Item:
+        nodeid = "tests/test_a.py::test_a"
+
+    if preset:
+        Item._nodeid = preset
+    monkeypatch.setattr(selection.pytest, "version_tuple", version)
+    monkeypatch.setattr(selection.pytest, "Item", Item)
+    selection.keep_node_ids()
+    assert getattr(Item(), "_nodeid", None) == expected
+
+
+def test_mutation_worker_restores_node_ids_before_it_reads_the_selection(monkeypatch, tmp_path):
+    from scripts.ci_mutation import selection
+
+    calls = []
+    monkeypatch.setattr(selection, "keep_node_ids", lambda: calls.append(True))
+    with pytest.raises(FileNotFoundError):
+        selection.run_selected(tmp_path / "missing.json", (0, 1))
+    assert calls == [True]
