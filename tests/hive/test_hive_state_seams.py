@@ -157,10 +157,14 @@ def test_bus_controller_and_service_credentials_expire_by_their_recorded_time(bu
 def test_redis_credentials_stay_outside_the_member_readable_keyspace(on_redis, client):
     grant = auth.mint(client, "laptop", PUBLIC)
 
+    from scripts.events.redis_state import RedisStateStore
+
     digest = auth._digest(grant["ledger_credential"])
-    holding = [key for key in client.keys("*") if digest in (client.dump(key) or b"").decode("latin-1")]
-    assert holding
-    assert all(key.startswith(f"{auth.PREFIX}:") for key in holding)
+    assert RedisStateStore(client, "credentials", auth.PREFIX).get(f"ledger.{digest}") is not None
+    index = f"{ROOT}:swarm:state:hive-{hive_state.INDEX}:"
+    outside = {key for key in client.keys("*") if not key.startswith((f"{auth.PREFIX}:", index))}
+    assert outside == {auth.INDEX}
+    assert client.smembers(auth.INDEX) == {grant["id"]}
 
 
 def test_a_legacy_redis_member_still_authenticates(on_redis, client):

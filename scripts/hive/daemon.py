@@ -58,17 +58,15 @@ def beat(redis: "Redis", local_id: str) -> None:
     # them. A member misdetected as the controller gets ACL's NoPermissionError on that write; it is never fatal,
     # since the hub already indexes the member at join, refresh and revoke.
     member = local_id == os.environ.get("AGENTIHOOKS_HIVE_ID")
-    registry.migrate(redis, local_id)
     if not member:
         _index_hive(redis, local_id)
+    fields = {name: report[name] for name in ("slots", "interactive", "repos")}
+    fields["master_login"] = {"claude": master_claude_login.signed_in()}
+    fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
+    beat_ms = int(time.time() * 1000)
+    fields["heartbeat_at"] = beat_ms
+    registry.beat(redis, local_id, fields)
     with redis.pipeline() as pipe:
-        registry.seed(pipe, local_id)
-        fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
-        fields["master_login"] = json.dumps({"claude": master_claude_login.signed_in()})
-        fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
-        beat_ms = int(time.time() * 1000)
-        fields["heartbeat_at"] = str(beat_ms)
-        pipe.hset(key, mapping=fields)
         for field in ("sessions", "quota"):
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
         pipe.execute()
@@ -126,8 +124,10 @@ def fill_operator_env() -> None:
 def _index_hive(redis: "Redis", local_id: str) -> None:
     from redis.exceptions import NoPermissionError
 
+    from scripts.hive import hive_state
+
     try:
-        redis.sadd(registry.INDEX, local_id)
+        hive_state.indexed(redis, local_id, True)
     except NoPermissionError:
         pass
 
@@ -155,7 +155,7 @@ def _slot_errors() -> tuple[type[Exception], ...]:
 def adopt_capabilities(redis: "Redis", local_id: str) -> None:
     """Launches inherit the daemon environment, so a render sees the capabilities this hive's record declares."""
     os.environ.pop(profile_chain.HIVE_CAPABILITIES, None)
-    declared = json.loads(redis.hget(registry.key(local_id), "capabilities") or "[]")
+    declared = (registry.show(redis, local_id) or {}).get("capabilities", [])
     os.environ[profile_chain.HIVE_CAPABILITIES] = ",".join(declared)
 
 

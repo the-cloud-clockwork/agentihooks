@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.hive import auth, create, create_github, machine, nats_grant, registry
+from scripts.hive import auth, create, create_github, hive_state, machine, nats_grant, registry
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -63,7 +63,7 @@ class Host:
 
 
 def resolve(redis: "Redis", given: str) -> tuple[str, str]:
-    if name := redis.hget(member_key(given), "name"):
+    if name := (auth.member(redis, given) or {}).get("name"):
         return _sole(redis, given, name), name
     if member := machine.named_member(redis, given):
         return _sole(redis, member, given), given
@@ -73,9 +73,8 @@ def resolve(redis: "Redis", given: str) -> tuple[str, str]:
 
 
 def _sole(redis: "Redis", hive: str, name: str) -> str:
-    for key in redis.scan_iter(match=member_key("*")):
-        other = key.removeprefix(member_key(""))
-        if other != hive and redis.hget(key, "name") == name:
+    for other, found in auth.members(redis).items():
+        if other != hive and found["name"] == name:
             raise auth.HiveError(
                 f"hive {hive} is named {name}, a name hive {other} also holds, so its herdr machine "
                 "could be the other hive's; pass --label"
@@ -144,7 +143,7 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
 
 
 def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None, dry_run: bool = False) -> list[str]:
-    if not redis.exists(member_key(hive)):
+    if auth.member(redis, hive) is None:
         return [f"{hive} holds no member credential"]
     if dry_run:
         bus = [f"would revoke the NATS credential of {hive}"] if signer is not None else []
@@ -196,8 +195,11 @@ def forget(redis: "Redis", hive: str) -> list[str]:
         for target, history in histories.items():
             pipe.hset(target, mapping=history)
         pipe.delete(*keys)
-        pipe.srem(registry.INDEX, hive)
-        deleted, _ = pipe.execute()[-2:]
+        deleted = pipe.execute()[-1]
+    if registry.show(redis, hive) is not None:
+        registry.forget(redis, hive)
+        deleted += 1
+    hive_state.indexed(redis, hive, False)
     return [f"deleted {deleted} registry records of {hive}"]
 
 
