@@ -179,10 +179,13 @@ class RedisStore:
 
     def gate_lift(self, slug: str, scope: str, subject: str, gate: str) -> dict:
         raw = self.redis.hget(self.key(slug, "gate-lifts", scope, subject), gate)
-        return json.loads(raw) if raw else {}
+        record = json.loads(raw) if raw else {}
+        dropped = self.redis.hget(self.key(slug, "gate-lift-drops"), subject) if scope == "tasks" else None
+        return {} if dropped and record.get("at", 0) <= float(dropped) else record
 
     def drop_task_lifts(self, slug: str, task: str) -> None:
-        self.redis.delete(self.key(slug, "gate-lifts", "tasks", task))
+        seconds, micros = self.redis.time()
+        self.redis.hset(self.key(slug, "gate-lift-drops"), task, f"{seconds}.{micros:06d}")
 
     @property
     def operation_journal(self) -> "OperationJournal":
