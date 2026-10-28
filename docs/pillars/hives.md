@@ -337,9 +337,8 @@ publisher, every 10 seconds, moves the hive's `heartbeat_at` forward and extends
 90 second live window. While the headroom publisher runs, a sessions report therefore counts for as long as its
 hive reads live: while the beat stalls, for example while it waits inside a launch, the hive keeps its last report
 and its sessions still count against the cap. Once both the beat and the headroom publisher stop, the heartbeat
-goes stale ninety seconds after the last write, and the report expires 45 seconds after it when that write was a
-beat or ninety seconds after it when it was a headroom touch, so the hive's sessions stop counting and free the
-slots.
+goes stale ninety seconds after the last write, and the report expires 45 seconds after a last beat or ninety
+seconds after a last headroom publisher write, so the hive's sessions stop counting and free the slots.
 
 A beat stalled during a launch therefore holds the cap at the last reported count until the next beat refreshes it,
 which can count a session the hive has since lost. Before this, the report expired 45 seconds after the last beat
