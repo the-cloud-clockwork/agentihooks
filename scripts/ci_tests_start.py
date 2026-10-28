@@ -10,7 +10,7 @@ def _api(endpoint: str) -> dict:
     )
 
 
-def verify(repository: str, head: str, attempts: int = 12, interval: float = 5, event: str = "pull_request") -> str:
+def verify(repository: str, head: str, attempts: int = 36, interval: float = 5, event: str = "pull_request") -> str:
     problem = "Tests run is missing for this head."
     for attempt in range(attempts):
         runs = _api(f"repos/{repository}/actions/workflows/test.yml/runs?head_sha={head}&event={event}&per_page=1")[
