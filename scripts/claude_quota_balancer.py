@@ -39,6 +39,7 @@ MASTERS_ONLY = "MASTERS"
 REVOKED = "revoked"
 REVOKED_ERROR = "the provider revoked or rejects this token"
 AUTH_REJECTED = frozenset({401})
+AUTH_FAILED = "authentication_failed"
 
 
 @dataclass(frozen=True)
@@ -690,7 +691,9 @@ def auth_rejected(output: str) -> bool:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(event, dict) and event.get("api_error_status") in AUTH_REJECTED:
+        if isinstance(event, dict) and (
+            event.get("api_error_status") in AUTH_REJECTED or event.get("error") == AUTH_FAILED
+        ):
             return True
     return False
 

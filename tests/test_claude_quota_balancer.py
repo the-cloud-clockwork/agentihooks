@@ -292,11 +292,17 @@ def test_the_cli_probe_reads_a_revoked_token_as_revoked(monkeypatch, returncode)
         json.dumps({"type": "result", "api_error_status": 500}),
         json.dumps({"type": "result", "api_error_status": 403}),
         json.dumps({"type": "system", "error_status": 401}),
+        json.dumps({"type": "assistant", "error": "rate_limit"}),
     ],
 )
 def test_only_a_401_api_error_reads_as_rejected(output):
     assert not balancer.auth_rejected(output)
     assert balancer.auth_rejected(output + "\n" + json.dumps({"api_error_status": 401}))
+
+
+def test_a_revoked_login_with_no_api_status_reads_as_rejected():
+    revoked = json.dumps({"type": "assistant", "error": "authentication_failed", "api_error_status": None})
+    assert balancer.auth_rejected(revoked)
 
 
 def test_corrupt_cache_is_replaced(monkeypatch, tmp_path):
