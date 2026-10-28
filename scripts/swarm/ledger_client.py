@@ -22,10 +22,16 @@ class LedgerRefused(SwarmError):
 
 
 class LedgerUnreachable(SwarmError):
-    """The ledger server timed out, failed or was down: the write may land on a retry."""
+    pass
 
 
-UNREACHABLE = ("ledger server not answering", "server refused: 5")
+UNREACHABLE = (
+    "ledger server not answering",
+    "server refused: 5",
+    "unauthenticated:",
+    "ledger talk queued while the server was down",
+    "the local inbox outbox is full",
+)
 
 
 def _accepted(slug, state):

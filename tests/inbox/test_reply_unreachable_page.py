@@ -36,9 +36,11 @@ def test_a_reply_to_the_operator_waits_out_a_timing_out_ledger_page_and_lands_on
 
     def request(slug, ops=None, service=False, timeout=None):
         attempts.append(ops)
-        if len(attempts) <= 2:
+        if len(attempts) == 1:
             raise TimeoutError("timed out")
         state, rejected = repository.apply_ops(slug, ops=ops)
+        if len(attempts) == 2:
+            raise TimeoutError("timed out")
         return {**state, "rejected": rejected}
 
     monkeypatch.setattr(ledger.ledger_link, "remote", lambda *args, **kwargs: True)
@@ -102,6 +104,9 @@ def test_an_unreachable_page_stops_the_pass_and_alerts_the_front_door():
     [
         ("ledger server not answering on http://ledger.test: timed out", LedgerUnreachable),
         ("server refused: 503 busy", LedgerUnreachable),
+        ("unauthenticated: the ledger server refused the credential", LedgerUnreachable),
+        ("ledger talk queued while the server was down still waits in outbox; retry once it lands", LedgerUnreachable),
+        ("the local inbox outbox is full (9 of 8 bytes)", LedgerUnreachable),
         ("server refused: 409 conflict", LedgerRefused),
         ("rejected: chat clock time", SwarmError),
     ],
