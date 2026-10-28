@@ -1344,6 +1344,7 @@ def test_prepare_redacts_each_exported_field_once(export, tmp_path, monkeypatch)
     assert [seen[output] for output in outputs] == [1] * 6
 
 
+@pytest.mark.wall_clock
 def test_prepare_of_a_large_session_state_leaves_the_flush_attempt_room(export, tmp_path):
     import time
 
