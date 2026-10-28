@@ -224,7 +224,7 @@ def test_a_reading_where_no_machine_answers_falls_back_to_hive_counts():
 def test_a_silent_master_entry_keeps_the_swarm_master_name():
     published = {"machines": {"hive-1": {"claude": 1}}, "silent": ["master"], "measured_at": NOW}
     data = viewed(Store({}), *ports_for([ROOT], {}, published=published))
-    assert data["hives"]["rows"] == [{"name": "hive-1", "agents": 1}, {"name": "swarm-master", "agents": None}]
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": None}, {"name": "hive-1", "agents": 1}]
 
 
 def test_the_bridge_is_read_from_each_live_interface_hive_in_the_store_redis_at_the_request_time():
