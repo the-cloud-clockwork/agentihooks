@@ -71,12 +71,18 @@ swarm-hive-003 swarm-hive-003-agentihooks-swarm-worker-hive-576c897c7b-6nhf7   9
 Reading:
 - Ledger pods moved from 2.17.453 to 2.17.458 and started 22:06:01Z and 22:06:31Z, zero restarts, ready.
 - Hive worker pods were replaced between the two observations (new UIDs, started 19:26:41Z,
-  19:26:45Z and 21:43:49Z) by other worker rollouts. Every one started before the ledger roll
-  at 22:06Z and none restarted, so the ledger roll restarted no worker.
+  19:26:45Z and 21:43:49Z). Every one started before the ledger roll at 22:06Z and shows zero restarts, so the ledger roll restarted no worker.
 - Swarm store: the store took writes during the window (ledgers 67 to 68, registry 64 to 65,
-  work_nodes 6378 to 6410), so it was not frozen. Every other table holds equal or more rows. Two tables are lower:
-  outbox and outbox_sent both 5 to 1, which drain as rows relay; events 15623 to 14534, which the
-  events repository trims on every write to the newest EVENTS_KEPT (2000) per ledger within the
-  retention window. These counts were taken 3h43m apart and carry no per ledger event split, so the
-  events drop is attributed to retention, not proven; the observer now records events per ledger
+  work_nodes 6378 to 6410), so it was not frozen. Every other table holds equal or more rows. Three tables are lower:
+  outbox and outbox_sent, both 5 to 1, and events, 15623 to 14534. Hypothesis for outbox: relayed
+  rows are pruned after sending. Hypothesis for events: the retention trim in
+  scripts/swarm_ledger/repository/events.py (retained(), keeping ledger_core.EVENTS_KEPT = 2000 per
+  ledger within EVENTS_WINDOW_MS) runs on each ledger write. These counts were taken 3h43m apart and carry no per ledger event split, so neither
+  drop is proven; the observer now records events per ledger
   for later passes.
+
+Named gaps in this rollback pass:
+- Worker identity across the roll itself is not bracketed: the baseline is 3h43m before the roll and
+  the workers changed identity in between, before the roll. The restore pass brackets its roll with
+  observations taken minutes apart so worker UIDs can be compared directly.
+- The events drop is not attributed per ledger (see Reading). The restore pass records events per ledger.
