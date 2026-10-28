@@ -213,8 +213,7 @@ def emit(session: str, operation: str, event: dict) -> None:
     Metrics(Path(AGENTIHOOKS_HOME) / "brain/consultation.sqlite3", namespace).record(grant, operation, event)
 
 
-@_best_effort
-def delivery(session: str, pack: str | None, outcome: str, purpose: str) -> None:
+def _delivery(session: str, pack: str | None, outcome: str, purpose: str) -> None:
     from hooks.context import task_context
 
     task = os.environ.get("AGENTIHOOKS_SWARM_TASK")
@@ -265,8 +264,7 @@ def _delivered_event(
     )
 
 
-@_best_effort
-def search(payload: dict) -> None:
+def _search(payload: dict) -> None:
     server, _, name = str(payload.get("tool_name")).rpartition("__")
     if not server.startswith("mcp__") or name not in SEARCH_TOOLS:
         return
@@ -287,6 +285,10 @@ def search(payload: dict) -> None:
         outcome="delivered",
         retrieval="delivered" if response else "empty",
     )
+
+
+delivery = _best_effort(_delivery)
+search = _best_effort(_search)
 
 
 @_best_effort
