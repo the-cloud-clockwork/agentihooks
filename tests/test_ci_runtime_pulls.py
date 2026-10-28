@@ -269,6 +269,50 @@ fi
     assert calls[-1].endswith(f" tag mirror.gcr.io/library/redis:7@sha256:runtime {image}")
 
 
+def test_runtime_pull_falls_back_to_public_ecr_when_the_mirror_lacks_a_layer(tmp_path):
+    image = "mirror.gcr.io/library/python:3.12-slim-bookworm"
+    log = tmp_path / "docker.log"
+    tools = tools_with(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$PULL_LOG"
+if [[ "$1" == manifest ]]; then
+  printf '%s\\n' '{"manifests":[{"digest":"sha256:runtime","platform":{"os":"linux","architecture":"amd64"}}]}'
+  exit 0
+fi
+if [[ "$1" == --host ]]; then shift 2; fi
+if [[ "$1" == pull && "$2" == mirror.gcr.io/* ]]; then
+  echo 'could not fetch content descriptor sha256:layer from remote: not found' >&2
+  exit 1
+fi
+""",
+    )
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts/packaging/pull-runtime-image.sh"), image],
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "PULL_LOG": str(log),
+            "WAITS": str(tmp_path / "waits.log"),
+            "PULL_ATTEMPT_SECONDS": "1",
+        },
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    calls = log.read_text().splitlines()
+    assert [call.split()[-1] for call in calls if call.startswith("manifest inspect ")] == [
+        image,
+        "public.ecr.aws/docker/library/python:3.12-slim-bookworm",
+    ]
+    assert [call for call in calls if " pull " in f" {call} "][-1].endswith(
+        " pull public.ecr.aws/docker/library/python:3.12-slim-bookworm@sha256:runtime"
+    )
+    assert calls[-1].endswith(f" tag public.ecr.aws/docker/library/python:3.12-slim-bookworm@sha256:runtime {image}")
+
+
 @pytest.mark.parametrize(
     "image,architecture,expected",
     [

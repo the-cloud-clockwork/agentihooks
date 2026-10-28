@@ -9,7 +9,7 @@ import { doc, queue } from "./sync.js";
 import { tips } from "./state.js";
 import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
-import { quotaCount, renderHives } from "./hives.js";
+import { renderHives } from "./hives.js";
 import { agentCellTips, joinCell } from "./agent_cells.js";
 import { capacityShown, liveAgents, renderRoles } from "./roles.js";
 import { renderHandoffs, renderRecovery } from "./recovery.js";
@@ -257,7 +257,6 @@ export function renderQuota(sw, now, force) {
   if (!sw || (!force && $("swarm-quota").contains(document.activeElement))) return;
   loadRouting();
   const quota = quotaRows(sw, now);
-  $("quota-count").textContent = quotaCount(sw, quota.length, now);
   $("swarm-quota").replaceChildren(...(quota.length ? quota.map(quotaRow) : [emptyRow(13, "No quota observed yet.")]));
 }
 

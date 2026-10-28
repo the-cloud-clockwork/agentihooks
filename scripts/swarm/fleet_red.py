@@ -1,6 +1,7 @@
 """Hold the claim of a task whose pull request is red only from checks failing on most other open pull requests."""
 
 import json
+import re
 import subprocess
 import sys
 import time
@@ -9,6 +10,7 @@ from collections.abc import Callable
 from scripts.swarm.ledger_events import RED, iso_ms
 
 MIN_OTHERS = 3
+PULL = re.compile(r"https://github\.com/([^/]+/[^/]+)/pull/\d+")
 WINDOW_MS = 6 * 3_600_000
 ERRORS = (OSError, ValueError, subprocess.SubprocessError)
 NOTICE = (
@@ -38,10 +40,14 @@ def recent(pull: dict, now_ms: int) -> bool:
     return any(iso_ms(mark) >= now_ms - WINDOW_MS for mark in marks if mark)
 
 
+def repository(url: str) -> str:
+    found = PULL.match(url)
+    return found.group(1) if found else ""
+
+
 def read(repo: str, run: Callable = subprocess.run) -> list[dict]:
     found = run(
-        ["gh", "pr", "list", "--state", "open", "--limit", "200", "--json", "url,statusCheckRollup"],
-        cwd=repo,
+        ["gh", "pr", "list", "--repo", repo, "--state", "open", "--limit", "200", "--json", "url,statusCheckRollup"],
         capture_output=True,
         text=True,
         timeout=60,
@@ -63,26 +69,26 @@ def held(pulls: list[dict], url: str, now_ms: int) -> bool:
     return bool(mine) and mine <= shared(pulls, url, now_ms)
 
 
-def checker(repo: str, reader: Callable | None = None, clock: Callable = time.time) -> Callable[[dict], bool]:
-    known: list[dict] | None = None
+def checker(reader: Callable | None = None, clock: Callable = time.time) -> Callable[[dict], bool]:
+    known: dict[str, list[dict]] = {}
 
     def admits(task: dict) -> bool:
-        nonlocal known
-        url = task.get("pr_url")
-        if task.get("state") != "open" or not url:
+        url = task.get("pr_url") or ""
+        repo = repository(url)
+        if task.get("state") != "open" or not repo:
             return True
-        if known is None:
+        if repo not in known:
             try:
-                known = (reader or read)(repo)
+                known[repo] = (reader or read)(repo)
             except (ReadError, *ERRORS) as exc:
                 print(f"fleet red hold skipped, listing open pull requests failed: {exc}", file=sys.stderr)
-                known = []
-        return not held(known, url, int(clock() * 1000))
+                known[repo] = []
+        return not held(known[repo], url, int(clock() * 1000))
 
     return admits
 
 
-def notice_pass(slug, config, store, ledger, rows, now_ms, reader: Callable | None = None) -> list[str]:
+def notice_pass(slug, store, ledger, rows, now_ms, reader: Callable | None = None) -> list[str]:
     waiting = []
     for task in rows.values():
         key = store.key(slug, f"fleet-red:{task['id']}")
@@ -91,15 +97,19 @@ def notice_pass(slug, config, store, ledger, rows, now_ms, reader: Callable | No
             waiting.append((task, key))
         else:
             store.redis.delete(key)
-    if not waiting:
-        return []
-    try:
-        pulls = (reader or read)(config.repo)
-    except (ReadError, *ERRORS):
-        return []
+    listings: dict[str, list[dict] | None] = {}
     actions = []
     for task, key in waiting:
         task_id, url = task["id"], task["pr_url"]
+        repo = repository(url)
+        if repo not in listings:
+            try:
+                listings[repo] = (reader or read)(repo) if repo else []
+            except (ReadError, *ERRORS):
+                listings[repo] = None
+        pulls = listings[repo]
+        if pulls is None:
+            continue
         if not held(pulls, url, now_ms):
             store.redis.delete(key)
             continue

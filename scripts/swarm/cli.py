@@ -1046,6 +1046,17 @@ def config_value(key, value):
     return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
 
 
+def _engine_origin(config, changes):
+    if changes.get("engine") != "events" or config.repo_origin:
+        return changes
+    from scripts.hive.daemon import origin
+
+    identity = origin(Path(config.repo))
+    if not identity:
+        raise SwarmError("events engine requires a checkout with a Git origin or a stored repository origin")
+    return {**changes, "repo_origin": identity}
+
+
 def on_off(value):
     if value not in ON_OFF:
         raise SwarmError("hive-placement takes on or off")
@@ -1128,6 +1139,7 @@ def cmd_set(store, args):
                 f"or {', '.join(LANE_KEYS)}=<value>, engine=legacy|events"
             )
         changes[SETTABLE[key]] = int(value)
+    changes = _engine_origin(store.config(args.slug), changes)
     config = ledger_cutover.settings(store, args.slug, {**changes, **_pinned(changes)})
     _store_master_counts(store, args.slug, counts, hives)
     _store_master_rules(store, args.slug, rules)

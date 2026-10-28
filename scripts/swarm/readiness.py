@@ -10,7 +10,7 @@ from scripts.events import subjects
 from scripts.events.bus import Bus, Delivery, WorkQueue
 from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
-from scripts.swarm import apply_wait, claim_hold, freeze, release_wait
+from scripts.swarm import apply_wait, claim_hold, fleet_red, freeze, release_wait
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmError, connect
 from scripts.swarm_ledger.repository import hierarchy
@@ -63,6 +63,7 @@ class Source:
         owned = {agent.task for agent in self._store.agents(slug) if agent.state != "finished"}
         released = release_wait.checker(config.repo)
         applied = apply_wait.checker(config, rows)
+        unshared = fleet_red.checker()
         return Snapshot(
             slug,
             rows,
@@ -70,7 +71,7 @@ class Source:
             hierarchy.project(doc)[0],
             freeze.fix_phase(config),
             lambda task_id: task_id in owned or self._store.claimant(slug, task_id) is not None,
-            lambda task: config.state == "running" and released(task) and applied(task),
+            lambda task: config.state == "running" and released(task) and applied(task) and unshared(task),
         )
 
 

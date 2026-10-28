@@ -2223,7 +2223,7 @@ def test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pin
     specs = [declared[name] for name in sorted(PLANNER_PACKAGES)]
     assert (
         install["run"]
-        == 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock '
+        == 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" '
         + " ".join(f'"{spec}"' for spec in specs)
     )
     assert _planner_third_party() == set(PLANNER_PACKAGES.values())

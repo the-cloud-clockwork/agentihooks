@@ -36,6 +36,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-metadata: read
           permission-actions: read
+          permission-statuses: write
           permission-contents: write
           permission-pull-requests: write
           permission-workflows: write

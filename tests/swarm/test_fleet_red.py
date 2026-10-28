@@ -104,19 +104,48 @@ def test_a_green_or_unlisted_pull_request_is_not_held():
 def test_the_checker_reads_open_pull_requests_once_and_only_for_an_open_task_with_a_pull_request():
     reads = []
     pulls = fleet([run("Tests", "FAILURE")], *[[run("Tests", "FAILURE")]] * 3)
-    admits = fleet_red.checker("/repo", lambda repo: reads.append(repo) or pulls, lambda: NOW_MS / 1000)
+    admits = fleet_red.checker(lambda repo: reads.append(repo) or pulls, lambda: NOW_MS / 1000)
     assert admits(task("plain"))
     assert admits(task("done", state="done", pr_url=MINE))
+    assert admits(task("unparsed", pr_url="not a pull request"))
     assert reads == []
     assert not admits(task("red", pr_url=MINE))
     assert admits(task("other", pr_url="https://github.com/o/r/pull/99"))
-    assert reads == ["/repo"]
+    assert reads == ["o/r"]
+
+
+def test_the_checker_judges_each_pull_request_against_its_own_repository_read_once():
+    reads = []
+    elsewhere = [
+        {"url": f"https://github.com/x/y/pull/{n}", "statusCheckRollup": [run("Tests", "FAILURE")]} for n in range(1, 5)
+    ]
+    green = fleet([run("Tests", "FAILURE")], *[[run("Tests", "SUCCESS")]] * 3)
+    listings = {"o/r": green, "x/y": elsewhere}
+    admits = fleet_red.checker(lambda repo: reads.append(repo) or listings[repo], lambda: NOW_MS / 1000)
+    assert admits(task("home", pr_url=MINE))
+    assert not admits(task("away", pr_url="https://github.com/x/y/pull/1"))
+    assert not admits(task("again", pr_url="https://github.com/x/y/pull/2"))
+    assert reads == ["o/r", "x/y"]
+
+
+@pytest.mark.parametrize(
+    ("url", "repo"),
+    [
+        ("https://github.com/o/r/pull/1", "o/r"),
+        ("https://github.com/The-Org/some.repo/pull/12", "The-Org/some.repo"),
+        ("https://gitlab.com/o/r/pull/1", ""),
+        ("https://github.com/o/r/issues/1", ""),
+        ("", ""),
+    ],
+)
+def test_repository_names_the_owner_and_name_of_a_github_pull_request_url(url, repo):
+    assert fleet_red.repository(url) == repo
 
 
 def test_the_checker_judges_the_window_at_its_clock():
     pulls = fleet([run("Tests", "FAILURE")], *[[run("Tests", "FAILURE")]] * 3)
     later = (NOW_MS + fleet_red.WINDOW_MS + 1000) / 1000
-    assert fleet_red.checker("/repo", lambda repo: pulls, lambda: later)(task("red", pr_url=MINE))
+    assert fleet_red.checker(lambda repo: pulls, lambda: later)(task("red", pr_url=MINE))
 
 
 @pytest.mark.parametrize(
@@ -135,10 +164,10 @@ def test_a_failed_read_admits_every_task_and_says_why(error, capsys):
         reads.append(repo)
         raise error
 
-    admits = fleet_red.checker("/repo", broken)
+    admits = fleet_red.checker(broken)
     assert admits(task("red", pr_url=MINE))
     assert admits(task("again", pr_url=MINE))
-    assert reads == ["/repo"]
+    assert reads == ["o/r"]
     assert capsys.readouterr().err == f"fleet red hold skipped, listing open pull requests failed: {error}\n"
 
 
@@ -148,11 +177,13 @@ def test_read_lists_open_pull_requests_with_their_check_rollup():
     class Done:
         returncode, stdout, stderr = 0, '[{"url": "u", "statusCheckRollup": []}]', ""
 
-    found = fleet_red.read("/repo", lambda *args, **kwargs: calls.append((args, kwargs)) or Done())
+    found = fleet_red.read("o/r", lambda *args, **kwargs: calls.append((args, kwargs)) or Done())
     assert found == [{"url": "u", "statusCheckRollup": []}]
     ((args, kwargs),) = calls
-    assert args == (["gh", "pr", "list", "--state", "open", "--limit", "200", "--json", "url,statusCheckRollup"],)
-    assert kwargs == {"cwd": "/repo", "capture_output": True, "text": True, "timeout": 60}
+    assert args == (
+        ["gh", "pr", "list", "--repo", "o/r", "--state", "open", "--limit", "200", "--json", "url,statusCheckRollup"],
+    )
+    assert kwargs == {"capture_output": True, "text": True, "timeout": 60}
 
 
 @pytest.mark.parametrize(("stderr", "why"), [(" no auth\n", "^no auth$"), ("", "^gh pr list exited 4$")])
@@ -162,7 +193,7 @@ def test_read_raises_a_read_error_on_a_failed_listing(stderr, why):
 
     Failed.stderr = stderr
     with pytest.raises(fleet_red.ReadError, match=why):
-        fleet_red.read("/repo", lambda *args, **kwargs: Failed())
+        fleet_red.read("o/r", lambda *args, **kwargs: Failed())
 
 
 @pytest.fixture
@@ -192,41 +223,71 @@ def test_the_notice_pass_declares_each_hold_once_and_again_after_it_lifts(store)
         reads.append(repo)
         return red
 
-    config = store.config("sw")
-    actions = fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, reader)
+    actions = fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, reader)
     assert actions == [f"task red held unclaimed, {MINE} is red only from Semgrep, Tests"]
     assert ledger.notices == [("sw", "red", fleet_red.NOTICE.format(url=MINE, checks="Semgrep, Tests"))]
-    assert reads == [config.repo]
+    assert reads == ["o/r"]
     assert store.redis.get(store.key("sw", "fleet-red:red")) == MINE
-    assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, reader) == []
+    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, reader) == []
     assert len(ledger.notices) == 1
     green = fleet([run("Tests", "FAILURE")], *[[run("Tests", "SUCCESS")]] * 3)
-    assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, lambda repo: green) == []
+    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, lambda repo: green) == []
     assert store.redis.get(store.key("sw", "fleet-red:red")) is None
-    assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, reader) == actions
+    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, reader) == actions
     assert len(ledger.notices) == 2
 
 
 def test_the_notice_pass_skips_claimed_tasks_and_forgets_a_hold_once_its_task_leaves_open(store):
     both = [run("Tests", "FAILURE")]
     red = fleet(both, *[both] * 3)
-    ledger, config = Ledger(), store.config("sw")
+    ledger = Ledger()
     rows = {"red": task("red", pr_url=MINE)}
-    assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, lambda repo: red)
+    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, lambda repo: red)
     key = store.key("sw", "fleet-red:red")
     for moved in ({"state": "pr"}, {"claimed_by": "engineer@a"}, {"pr_url": ""}):
         store.redis.set(key, MINE)
         rows = {"red": {**task("red", pr_url=MINE), **moved}}
-        assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, lambda repo: red) == []
+        assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, lambda repo: red) == []
         assert store.redis.get(key) is None
     store.redis.set(key, MINE)
     store.redis.set(store.key("sw", "claim", "red"), "engineer@b")
     rows = {"red": task("red", pr_url=MINE)}
-    assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, lambda repo: red) == []
+    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, lambda repo: red) == []
     assert store.redis.get(key) is None
     store.redis.delete(store.key("sw", "claim", "red"))
-    assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, lambda repo: red)
+    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, lambda repo: red)
     assert len(ledger.notices) == 2
+
+
+def test_the_notice_pass_reads_each_repository_once_and_judges_each_task_against_its_own(store):
+    away = "https://github.com/x/y/pull/1"
+    elsewhere = [
+        {"url": f"https://github.com/x/y/pull/{n}", "statusCheckRollup": [run("Tests", "FAILURE")]} for n in range(1, 5)
+    ]
+    green = fleet([run("Tests", "FAILURE")], *[[run("Tests", "SUCCESS")]] * 3)
+    listings, reads, ledger = {"o/r": green, "x/y": elsewhere}, [], Ledger()
+    rows = {t["id"]: t for t in [task("home", pr_url=MINE), task("away", pr_url=away), task("odd", pr_url="x")]}
+    actions = fleet_red.notice_pass(
+        "sw", store, ledger, rows, NOW_MS, lambda repo: reads.append(repo) or listings[repo]
+    )
+    assert actions == [f"task away held unclaimed, {away} is red only from Tests"]
+    assert sorted(reads) == ["o/r", "x/y"]
+
+
+def test_the_notice_pass_still_judges_a_repository_whose_neighbour_failed_to_read(store):
+    away = "https://github.com/x/y/pull/1"
+    elsewhere = [
+        {"url": f"https://github.com/x/y/pull/{n}", "statusCheckRollup": [run("Tests", "FAILURE")]} for n in range(1, 5)
+    ]
+
+    def reader(repo):
+        if repo == "o/r":
+            raise fleet_red.ReadError("no auth")
+        return elsewhere
+
+    rows = {t["id"]: t for t in [task("home", pr_url=MINE), task("away", pr_url=away)]}
+    actions = fleet_red.notice_pass("sw", store, Ledger(), rows, NOW_MS, reader)
+    assert actions == [f"task away held unclaimed, {away} is red only from Tests"]
 
 
 def test_the_notice_pass_reads_nothing_without_an_open_task_with_a_pull_request(store):
@@ -234,7 +295,7 @@ def test_the_notice_pass_reads_nothing_without_an_open_task_with_a_pull_request(
         raise AssertionError("read")
 
     rows = {"plain": task("plain"), "gone": task("gone", state="done", pr_url=MINE)}
-    assert fleet_red.notice_pass("sw", store.config("sw"), store, Ledger(), rows, NOW_MS, reader) == []
+    assert fleet_red.notice_pass("sw", store, Ledger(), rows, NOW_MS, reader) == []
 
 
 @pytest.mark.parametrize(
@@ -246,8 +307,11 @@ def test_the_notice_pass_declares_nothing_when_the_read_fails(store, error):
 
     ledger = Ledger()
     rows = {"red": task("red", pr_url=MINE)}
-    assert fleet_red.notice_pass("sw", store.config("sw"), store, ledger, rows, NOW_MS, reader) == []
+    key = store.key("sw", "fleet-red:red")
+    store.redis.set(key, MINE)
+    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, reader) == []
     assert ledger.notices == []
+    assert store.redis.get(key) == MINE
 
 
 def test_the_tick_holds_a_task_red_only_from_a_shared_check_and_releases_it_once_the_check_passes(store, monkeypatch):
@@ -270,16 +334,16 @@ def test_the_notice_pass_declares_a_hold_listed_after_a_task_that_is_not_held(st
     both = [run("Tests", "FAILURE")]
     red = fleet(both, *[both] * 3)
     rows = {t["id"]: t for t in [task("green", pr_url="https://github.com/o/r/pull/99"), task("red", pr_url=MINE)]}
-    actions = fleet_red.notice_pass("sw", store.config("sw"), store, Ledger(), rows, NOW_MS, lambda repo: red)
+    actions = fleet_red.notice_pass("sw", store, Ledger(), rows, NOW_MS, lambda repo: red)
     assert actions == [f"task red held unclaimed, {MINE} is red only from Tests"]
 
 
-def test_the_claim_view_lists_open_pull_requests_in_the_swarm_repo(store, monkeypatch):
+def test_the_claim_view_lists_open_pull_requests_in_the_task_pull_request_repo(store, monkeypatch):
     reads = []
     monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or [])
     rows = {"red": task("red", pr_url=MINE, awaiting="fix")}
     _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng")
-    assert reads == [store.config("sw").repo]
+    assert reads == ["o/r"]
 
 
 def test_the_tick_hands_the_notice_pass_its_store_ledger_rows_and_clock(store, monkeypatch):
@@ -290,6 +354,6 @@ def test_the_tick_hands_the_notice_pass_its_store_ledger_rows_and_clock(store, m
     monkeypatch.setattr(fleet_red, "notice_pass", lambda *args: seen.append(args) or ["noticed"])
     ledger = FakeLedger([{"id": "a"}])
     actions = tick.tick("sw", store, ledger, FakeRuntime(), now_ms=4_321)
-    [(slug, config, got_store, got_ledger, rows, now_ms)] = seen
-    assert (slug, config.slug, got_store, got_ledger, list(rows), now_ms) == ("sw", "sw", store, ledger, ["a"], 4_321)
+    [(slug, got_store, got_ledger, rows, now_ms)] = seen
+    assert (slug, got_store, got_ledger, list(rows), now_ms) == ("sw", store, ledger, ["a"], 4_321)
     assert "noticed" in actions
