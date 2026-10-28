@@ -37,7 +37,7 @@ def write_until(path, stop):
 def test_concurrent_agent_processes_each_land_every_write(tmp_path):
     path = tmp_path / "ledgers" / sqlite.DATABASE
     SQLiteLedgerRepository(path).create("processes", CONTENT)
-    context = multiprocessing.get_context("fork")
+    context = multiprocessing.get_context("spawn")
     workers = [context.Process(target=join, args=(path, index)) for index in range(4)]
     stop = threading.Event()
     busy = threading.Thread(target=write_until, args=(tmp_path / "other" / sqlite.DATABASE, stop))
@@ -64,7 +64,7 @@ def test_a_process_that_dies_mid_write_leaves_the_last_committed_state(tmp_path)
     repo = SQLiteLedgerRepository(path)
     repo.create("processes", CONTENT)
     before = repo.get_document("processes")
-    worker = multiprocessing.get_context("fork").Process(target=crash, args=(path,))
+    worker = multiprocessing.get_context("spawn").Process(target=crash, args=(path,))
     worker.start()
     worker.join(30)
     assert worker.exitcode == 7
