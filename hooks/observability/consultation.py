@@ -30,6 +30,7 @@ CHOICES = {
     "gate_result": {"allow", "deny", "observe", "lifted", "fail-open", "off"},
 }
 OPAQUE = {"session", "task", "context", "lesson", "incident"}
+SEARCH_TOOLS = {"kb_search", "kb_brief", "brain_search_arcs"}
 LOG = logging.getLogger(__name__)
 
 
@@ -212,10 +213,8 @@ def emit(session: str, operation: str, event: dict) -> None:
     Metrics(Path(AGENTIHOOKS_HOME) / "brain/consultation.sqlite3", namespace).record(grant, operation, event)
 
 
-@_best_effort
-def delivery(session: str, pack: str | None, outcome: str) -> None:
+def _delivery(session: str, pack: str | None, outcome: str, purpose: str) -> None:
     from hooks.context import task_context
-    from hooks.targets import current_target
 
     task = os.environ.get("AGENTIHOOKS_SWARM_TASK")
     swarm = os.environ.get("AGENTIHOOKS_SWARM")
@@ -228,6 +227,22 @@ def delivery(session: str, pack: str | None, outcome: str) -> None:
         bound = task_context.binding(swarm, task)
         if not bound or (receipt and not check(receipt, bound, time.time())):
             return
+    _delivered_event(
+        session,
+        task,
+        receipt,
+        purpose,
+        pack_bytes=len((pack or "").encode()),
+        outcome=outcome,
+        retrieval=task_context.classify(pack) if pack else "missing",
+    )
+
+
+def _delivered_event(
+    session: str, task: str, receipt: dict, purpose: str, *, pack_bytes: int, outcome: str, retrieval: str
+) -> None:
+    from hooks.targets import current_target
+
     context = json.dumps(
         [task, receipt.get("generation"), receipt.get("revision"), receipt.get("digest"), receipt.get("at")]
     )
@@ -239,14 +254,41 @@ def delivery(session: str, pack: str | None, outcome: str) -> None:
             "session": session,
             "task": task,
             "context": context,
-            "purpose": "task_transition",
+            "purpose": purpose,
             "target": current_target(),
-            "pack_bytes": len((pack or "").encode()),
+            "pack_bytes": pack_bytes,
             "delivery": outcome,
-            "retrieval": task_context.classify(pack) if pack else "missing",
+            "retrieval": retrieval,
             "receipt_age_seconds": max(0, time.time() - receipt["at"]) if receipt else None,
         },
     )
+
+
+def _search(payload: dict) -> None:
+    server, _, name = str(payload.get("tool_name")).rpartition("__")
+    if not server.startswith("mcp__") or name not in SEARCH_TOOLS:
+        return
+    from hooks.context import task_context
+
+    task = os.environ.get("AGENTIHOOKS_SWARM_TASK")
+    if not (os.environ.get("AGENTIHOOKS_SWARM") and task):
+        return
+    session = payload["session_id"]
+    response = payload.get("tool_response", payload.get("tool_output"))
+    text = response if isinstance(response, str) else json.dumps(response)
+    _delivered_event(
+        session,
+        task,
+        task_context.consultation(session),
+        "search",
+        pack_bytes=len(text.encode()),
+        outcome="delivered",
+        retrieval="delivered" if response else "empty",
+    )
+
+
+delivery = _best_effort(_delivery)
+search = _best_effort(_search)
 
 
 @_best_effort

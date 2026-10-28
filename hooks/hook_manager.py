@@ -1163,7 +1163,9 @@ def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None
 def _swarm_outcome(payload: dict) -> None:
     try:
         from hooks.context.swarm_heartbeat import outcome
+        from hooks.observability.consultation import search
 
+        search(payload)
         outcome(payload)
     except Exception as e:
         log("swarm outcome record failed", {"error": str(e)})
