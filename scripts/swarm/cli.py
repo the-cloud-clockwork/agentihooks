@@ -537,6 +537,8 @@ def run_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
     from scripts.swarm import commands, lease
     from scripts.swarm_ledger import authority_context
 
+    if ledger_link.remote(slug=slug) and not authority_context.tick_headers(slug):
+        return []
     held = lease.acquire(store, slug, commands.hive_id())
     if held is None:
         return []
@@ -544,8 +546,6 @@ def run_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
         agent.state != "finished" and (idle.wait(store.redis, slug, agent.name) or {}).get("on")
         for agent in store.agents(slug)
     ):
-        return []
-    if ledger_link.remote(slug=slug) and not authority_context.tick_headers(slug):
         return []
     ledger = ledger or LedgerClient()
     doc = ledger.state(slug)

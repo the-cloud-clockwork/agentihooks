@@ -167,8 +167,9 @@ def test_timer_prechecks_and_waits_resolve_the_selected_route(store, monkeypatch
     assert seen == [("selected", "https://hosted.example"), ("other", ledger.BASE or ledger_link.base())]
     seen.clear()
     monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: seen.append((slug, ledger.base())))
-    assert cli.run_waits(store, "selected") == []
-    assert cli.run_waits(store, "other") == []
+    with authority_context.bound("trusted-tick-fixture"):
+        assert cli.run_waits(store, "selected") == []
+        assert cli.run_waits(store, "other") == []
     assert seen == [("selected", "https://hosted.example"), ("other", ledger.BASE or ledger_link.base())]
 
 
