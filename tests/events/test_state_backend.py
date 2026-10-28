@@ -6,7 +6,7 @@ import pytest
 from scripts.events import memory, state
 from scripts.events.bus import StateConflict, StateStore
 from scripts.events.config import BusConfig
-from scripts.events.redis_state import RedisStateStore
+from scripts.events.redis_state import WRITE_TRIES, RedisStateStore
 
 from . import nats_server
 
@@ -142,6 +142,40 @@ def test_redis_state_retries_a_write_raced_on_another_key(monkeypatch):
     assert raced and store.get("key").value == b"mine"
     assert store.get("key").revision == revision
     assert store.get("other").value == b"raced"
+
+
+def test_redis_state_conflicts_name_the_key_and_revision():
+    import fakeredis
+
+    store = RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "work")
+    revision = store.create("key", b"one")
+    with pytest.raises(StateConflict) as exists:
+        store.create("key", b"two")
+    assert str(exists.value) == "state key 'key' exists"
+    with pytest.raises(StateConflict) as stale:
+        store.update("key", b"two", revision + 1)
+    assert str(stale.value) == f"state key 'key' is not at revision {revision + 1}"
+
+
+def test_redis_state_gives_up_on_a_key_that_keeps_changing(monkeypatch):
+    import fakeredis
+
+    client = fakeredis.FakeRedis(decode_responses=True)
+    store = RedisStateStore(client, "work")
+    incr = client.incr
+    races = []
+
+    def racing(name, amount=1):
+        races.append(name)
+        client.hset(store._current, "other", "{}")
+        return incr(name, amount)
+
+    monkeypatch.setattr(client, "incr", racing)
+    with pytest.raises(StateConflict) as changing:
+        store.create("key", b"mine")
+    assert str(changing.value) == "state key 'key' kept changing"
+    assert len(races) == WRITE_TRIES
+    assert store.get("key") is None
 
 
 def test_the_process_environment_opens_the_default_redis_client(monkeypatch):

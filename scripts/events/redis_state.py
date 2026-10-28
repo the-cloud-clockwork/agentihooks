@@ -45,8 +45,8 @@ class RedisStateStore:
             with self.redis.pipeline() as pipe:
                 try:
                     pipe.watch(self._current)
-                    found = _entry(key, pipe.hget(self._current, key))
-                    if (None if found is None else found.revision) != revision:
+                    found = pipe.hget(self._current, key)
+                    if (None if found is None else json.loads(found)["revision"]) != revision:
                         raise StateConflict(conflict)
                     written = self.redis.incr(self._revision)
                     row = json.dumps({"revision": written, "value": base64.b64encode(value).decode()})

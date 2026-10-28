@@ -841,6 +841,63 @@ def test_legacy_sorted_rows_merge_with_state_rows_and_forget_drops_both(shared, 
     ]
 
 
+def test_forget_drops_every_legacy_sorted_row_and_every_list_copy_of_the_swarm(shared):
+    from scripts.swarm.store import PREFIX
+
+    key = f"{PREFIX}:operator-words:master@a1-1"
+    shared.sadd(f"{PREFIX}:operator-words", "master@a1-1")
+    other = json.dumps({"swarm": "other", "at": 90, "words": "Other sorted words"})
+    shared.zadd(f"{key}:entries", {other: 90})
+    for at in (100, 101, 102):
+        shared.zadd(f"{key}:entries", {json.dumps({"swarm": "demo", "at": at, "words": f"Sorted {at}"}): at})
+    listed = json.dumps({"swarm": "demo", "at": 103, "words": "Listed twice"})
+    shared.rpush(key, listed, listed)
+    operator_words.forget("demo")
+    assert shared.zrange(f"{key}:entries", 0, -1) == [other]
+    assert shared.lrange(key, 0, -1) == []
+
+
+def test_swarm_rows_live_under_the_hashed_name_key(shared):
+    import hashlib
+
+    assert operator_words.record("master@a1-1", "Hashed key words", now=100, swarm="demo")
+    stored = operator_words._shared().get("name." + hashlib.sha256(b"master@a1-1").hexdigest())
+    assert json.loads(stored.value) == [{"swarm": "demo", "at": 100.0, "words": "Hashed key words"}]
+
+
+class _Conflicting:
+    def __init__(self, conflicts):
+        self.conflicts = conflicts
+        self.writes = []
+
+    def get(self, key):
+        return None
+
+    def create(self, key, value):
+        from scripts.events.bus import StateConflict
+
+        self.writes.append((key, value))
+        if len(self.writes) <= self.conflicts:
+            raise StateConflict("raced")
+        return len(self.writes)
+
+
+def test_amend_retries_a_conflicting_write_until_it_lands():
+    store = _Conflicting(conflicts=2)
+    assert operator_words._amend(store, "k", lambda rows: [*rows, 1]) is True
+    assert store.writes == [("k", b"[1]")] * 3
+
+
+def test_amend_gives_up_after_its_tries_and_names_the_key():
+    from scripts.events.bus import StateConflict
+
+    store = _Conflicting(conflicts=operator_words.AMEND_TRIES)
+    with pytest.raises(StateConflict) as changing:
+        operator_words._amend(store, "k", lambda rows: rows)
+    assert str(changing.value) == "state key 'k' kept changing"
+    assert len(store.writes) == operator_words.AMEND_TRIES
+
+
 @contextmanager
 def _memory_bus(tmp_path):
     yield {"AGENTIHOOKS_BUS": "memory"}
