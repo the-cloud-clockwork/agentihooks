@@ -241,7 +241,7 @@ def test_header_names_the_swarm_state_tick_controls_and_autonomy(open_page):
         "#swarm-modes button", "bs => bs.map(b => [b.textContent, b.getAttribute('aria-pressed')])"
     )
     assert modes == [["manual", "false"], ["assist", "false"], ["delegate", "true"], ["full", "false"]]
-    page.tab.get_by_role("button", name="manual").click()
+    page.tab.get_by_role("group", name="Autonomy").get_by_role("button", name="manual").click()
     page.tab.wait_for_function("() => !document.querySelector('#swarm-modes button').disabled")
     assert page.puts == [{"action": "set", "autonomy": "manual"}]
 
