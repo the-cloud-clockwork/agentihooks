@@ -1,4 +1,5 @@
 import ast
+import functools
 import json
 import os
 import shutil
@@ -552,31 +553,40 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
         "    @classmethod\n"
         "    def unit(cls):\n"
         "        return cls(1 + 1)\n"
+        "\n"
+        "    @cached_property\n"
+        "    def twice(self):\n"
+        "        return self.side + self.side\n"
     )
-    for line in (9, 13, 17, 21):
+    for line in (9, 13, 17, 21, 25):
         found, ungraded = mutation_counts("scripts/sample.py", source, {line})
         assert found > 0
         assert ungraded == []
-    generated, names = selected_mutants("scripts/sample.py", source, {9, 13, 17, 21})
+    generated, names = selected_mutants("scripts/sample.py", source, {9, 13, 17, 21, 25})
     assert {name.split("__mutmut_")[0] for name in names} == {
         "xǁShapeǁarea",
         "xǁShapeǁperimeter",
         "xǁShapeǁdouble",
         "xǁShapeǁunit",
+        "xǁShapeǁtwice",
     }
     monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
-    namespace = {"__name__": "scripts.sample"}
+    namespace = {"__name__": "scripts.sample", "cached_property": functools.cached_property}
     exec(compile(generated, "scripts/sample.py", "exec"), namespace)
     shape = namespace["Shape"]
-    assert (shape(3).area, shape(3).perimeter, shape.double(3), shape.unit().side) == (9, 12, 6, 2)
+
+    def measure():
+        return shape(3).area, shape(3).perimeter, shape.double(3), shape.unit().side, shape(3).twice
+
+    assert measure() == (9, 12, 6, 2, 6)
     outcomes = set()
     for name in names:
         monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
         try:
-            outcomes.add((shape(3).area, shape(3).perimeter, shape.double(3), shape.unit().side))
+            outcomes.add(measure())
         except TypeError:
             outcomes.add(name)
-    assert (9, 12, 6, 2) not in outcomes
+    assert (9, 12, 6, 2, 6) not in outcomes
 
 
 @pytest.mark.parametrize("total", [1, 2, 3, 7])

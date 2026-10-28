@@ -86,19 +86,21 @@ def created_mutations(filename: str, source: str) -> tuple[object, list, list]:
 
 
 def is_dataclass(decorator) -> bool:
-    return decorator_name(decorator) == "dataclass"
-
-
-def decorator_name(decorator) -> str | None:
     import libcst as cst
 
     target = decorator.decorator.func if isinstance(decorator.decorator, cst.Call) else decorator.decorator
     name = target.attr if isinstance(target, cst.Attribute) else target
-    return name.value if isinstance(name, cst.Name) else None
+    return isinstance(name, cst.Name) and name.value == "dataclass"
 
 
 def is_property(node) -> bool:
-    return len(node.decorators) == 1 and decorator_name(node.decorators[0]) in {"property", "cached_property"}
+    import libcst as cst
+
+    return len(node.decorators) == 1 and cst.Module([]).code_for_node(node.decorators[0].decorator) in {
+        "property",
+        "cached_property",
+        "functools.cached_property",
+    }
 
 
 def plain_copies(code: str) -> str:
