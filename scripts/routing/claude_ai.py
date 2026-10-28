@@ -76,6 +76,8 @@ def _front(environ: Mapping[str, str], cwd: Path) -> tuple[dict[str, str], str, 
     child = login.child(environ, target, found)
     try:
         native_login.check(child, found)
+        if native_login.rejected(child, found):
+            raise native_login.LoginError(native_login.EXPIRED)
     except native_login.LoginError as exc:
         login.release(target, environ)
         raise login.LoginRefused(str(exc)) from exc
