@@ -78,6 +78,28 @@ def test_promotion_template_refuses_superseded_head(tmp_path, monkeypatch, order
     diverged = git("rev-parse", "HEAD")
     graded = {"behind": older, "identical": promoted, "ahead": newer, "diverged": diverged}[order]
     (repo / "delivery.yaml").write_text("promote:\n  - touch adopter-ran\n")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    gh = tools / "gh"
+    gh.write_text(
+        f"#!{sys.executable}\n"
+        "import json, subprocess, sys\n"
+        "def git(*args):\n"
+        "    return subprocess.check_output(['git', *args], text=True).strip()\n"
+        "endpoint = sys.argv[2]\n"
+        "if endpoint.endswith('/commits/main'):\n"
+        "    print(json.dumps({'sha': git('rev-parse', 'main'), "
+        "'commit': {'message': git('show', '-s', '--format=%B', 'main')}}))\n"
+        "else:\n"
+        "    base, head = endpoint.split('/compare/')[1].split('...')\n"
+        "    ancestor = git('merge-base', base, head)\n"
+        "    status = ('identical' if base == head else 'ahead' if ancestor == base "
+        "else 'behind' if ancestor == head else 'diverged')\n"
+        "    print(json.dumps({'status': status}))\n"
+    )
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tools}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "fixture/repository")
     monkeypatch.setenv("GITHUB_SHA", graded)
     workflow = yaml.safe_load((TEMPLATES / "promotion.yml").read_text())
     command = next(

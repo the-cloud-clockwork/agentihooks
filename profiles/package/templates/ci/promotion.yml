@@ -64,9 +64,20 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          import json
+          import os
+          import re
           import subprocess
           from pathlib import Path
           import yaml
+          repository = os.environ['GITHUB_REPOSITORY']
+          graded = os.environ['GITHUB_SHA']
+          main = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/commits/main'], text=True))
+          recorded = re.search(r'^Graded dev revision: ([0-9a-f]{40})$', main['commit']['message'], re.MULTILINE)
+          released = recorded[1] if recorded else main['sha']
+          comparison = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/compare/{released}...{graded}'], text=True))
+          if comparison['status'] != 'ahead':
+              raise SystemExit('Graded head is not newer than the released dev revision')
           commands = yaml.safe_load(Path('delivery.yaml').read_text())['promote']
           for command in commands:
               subprocess.run(['bash', '-euo', 'pipefail', '-c', command], check=True)
