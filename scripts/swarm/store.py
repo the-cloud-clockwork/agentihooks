@@ -779,3 +779,9 @@ def connect(environ=None):
         return RedisStore(redis_client(environ))
     except redis.RedisError as exc:
         raise Unreachable(f"Redis is unreachable ({exc}); the swarm refuses to run without it") from exc
+
+
+def store_errors() -> tuple[type[BaseException], ...]:
+    import redis
+
+    return (redis.RedisError,)
