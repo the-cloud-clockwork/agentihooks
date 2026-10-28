@@ -105,11 +105,23 @@ def binding_decorators(node) -> list:
 
 def plain_copies(code: str) -> str:
     import libcst as cst
+    import libcst.matchers as m
 
     # Wrappers belong on the trampoline once; copied implementations retain only method binding.
     def plain(node):
         if isinstance(node, cst.FunctionDef) and "__mutmut_" in node.name.value:
             return node.with_changes(decorators=binding_decorators(node))
+        if (
+            isinstance(node, cst.FunctionDef)
+            and node.decorators
+            and m.matches(node.decorators[-1].decorator, m.Call(func=m.Name("_mutmut_mutated"), args=[m.DoNotCare()]))
+            and any(m.matches(decorator.decorator, m.Name("classmethod")) for decorator in node.decorators)
+        ):
+            # mutmut flags a class method trampoline only when classmethod is its sole decorator.
+            *outer, trampoline = node.decorators
+            flag = cst.Arg(cst.Name("True"), keyword=cst.Name("is_classmethod"))
+            call = trampoline.decorator.with_changes(args=[*trampoline.decorator.args, flag])
+            return node.with_changes(decorators=[*outer, trampoline.with_changes(decorator=call)])
         return node
 
     module = cst.parse_module(code)
