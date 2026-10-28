@@ -1,5 +1,5 @@
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
@@ -257,3 +257,49 @@ def test_b_telemetry_failure_does_not_change_context_delivery(world, monkeypatch
     assert task_context.offer(grant.principal, "PreToolUse", "context", injectable=True) == "context"
     assert "consultation metrics unavailable" in caplog.text
     assert "private error contents" not in caplog.text
+
+
+@pytest.mark.parametrize("damaged", [{"purpose": "task"}, {"at": "private corrupt value"}])
+def test_b_damaged_receipt_metrics_never_change_delivery_or_gate_decisions(world, monkeypatch, caplog, damaged):
+    _, grant, _, _, _, _ = world
+    monkeypatch.setattr(task_context, "consultation", lambda _: damaged)
+    assert task_context.offer(grant.principal, "PreToolUse", "context", injectable=True) == "context"
+    who = Who(swarm="fixture-swarm", task="fixture-task")
+    monkeypatch.setattr(entry.Who, "from_env", lambda env: who)
+    monkeypatch.setattr(entry.modes, "swarm_gates", lambda *args: {})
+    monkeypatch.setattr(entry.modes, "mode", lambda *args: "enforce")
+    monkeypatch.setattr(entry.lift, "lifted", lambda *args: False)
+    monkeypatch.setattr(entry.lift, "held", lambda *args, **kwargs: False)
+    monkeypatch.setattr(entry, "_record", lambda *args: None)
+    assert (
+        entry.evaluate(brain.BrainGate(receipts=lambda _: {}), Call("Write", session=grant.principal), environ={}) == 2
+    )
+    assert caplog.text.count("consultation metrics unavailable") == 2
+    assert "private corrupt value" not in caplog.text
+
+
+def test_b_gate_exceptions_keep_fail_open_outcome_without_private_details(world, monkeypatch):
+    metrics, grant, _, _, _, _ = world
+    who = Who(swarm="fixture-swarm", task="fixture-task")
+    monkeypatch.setattr(entry.Who, "from_env", lambda env: who)
+    monkeypatch.setattr(entry.modes, "swarm_gates", lambda *args: {})
+    monkeypatch.setattr(entry.modes, "mode", lambda *args: "enforce")
+    logs = []
+    monkeypatch.setattr(entry, "_record", lambda who, row, home: logs.append(asdict(row)))
+    gate = brain.BrainGate()
+
+    def unavailable(*args):
+        raise RuntimeError("private exception contents")
+
+    monkeypatch.setattr(gate, "decide", unavailable)
+    assert entry.evaluate(gate, Call("Write", session=grant.principal), environ={}) == 0
+    assert metrics.report(grant)["gate_results"] == {"fail-open": 1}
+    assert "private exception contents" not in json.dumps(logs)
+
+
+def test_c_absent_refresh_after_a_current_delivery_is_not_a_failure(world):
+    metrics, grant, _, _, _, _ = world
+    assert task_context.offer(grant.principal, "PreToolUse", "context", injectable=True)
+    assert task_context.offer(grant.principal, "PreToolUse", None, injectable=True) is None
+    assert metrics.report(grant)["context_delivery_failures"] == 0
+    assert metrics.report(grant)["degraded"] is False

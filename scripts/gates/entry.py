@@ -112,7 +112,8 @@ def _decide(gate, call, who, home, mode="enforce"):
             return gate.decide(call, who, state, mode)
         return gate.decide(call, who, state)
     except Exception as exc:  # a crashed gate lets the call through, counted in the gate log
-        _record(who, log.Row.of(gate.name, "fail-open", who, call.tool, f"{type(exc).__name__}: {exc}"), home)
+        detail = "gate evaluation failed" if gate.name == "brain" else f"{type(exc).__name__}: {exc}"
+        _record(who, log.Row.of(gate.name, "fail-open", who, call.tool, detail), home)
         return Decision(reason="gate evaluation failed") if gate.name == "brain" else Decision()
 
 

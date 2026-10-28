@@ -107,7 +107,7 @@ def offer(session_id: str, event: str, pack: str | None, injectable: bool | None
         from hooks.observability import consultation as metrics
 
         bound = binding(os.environ.get("AGENTIHOOKS_SWARM"), os.environ.get("AGENTIHOOKS_SWARM_TASK"))
-        if not consultation(session_id) or not _consulted(session_id, bound):
+        if bound and (not consultation(session_id) or not _consulted(session_id, bound)):
             metrics.delivery(session_id, pack, "missing")
         return None
     target = current_target()

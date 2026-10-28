@@ -6,11 +6,13 @@ import sqlite3
 import time
 from collections import Counter
 from dataclasses import replace
+from functools import wraps
 from pathlib import Path
 from uuid import uuid4
 
 from hooks.context import project_cache
 from hooks.memory.api.ingest import Grant
+from scripts.gates.base import Call, Who
 from scripts.swarm_v2.keyspace import Namespace, key
 
 SCHEMA = "CREATE TABLE IF NOT EXISTS consultation_event (scope TEXT, id TEXT, data TEXT, PRIMARY KEY(scope, id))"
@@ -179,19 +181,28 @@ def runtime_namespace() -> Namespace:
     return replace(project_cache.namespace(), project=identity.project_id if identity else "unknown")
 
 
+def _best_effort(function):
+    @wraps(function)
+    def observe(*args, **kwargs):
+        try:
+            function(*args, **kwargs)
+        except Exception:
+            LOG.warning("consultation metrics unavailable")
+
+    return observe
+
+
 def emit(session: str, operation: str, event: dict) -> None:
-    try:
-        from hooks.config import AGENTIHOOKS_HOME
+    from hooks.config import AGENTIHOOKS_HOME
 
-        namespace = runtime_namespace()
-        if namespace.project in {"", "unknown"}:
-            return
-        grant = Grant(session, namespace.brain, frozenset({namespace.project}))
-        Metrics(Path(AGENTIHOOKS_HOME) / "brain/consultation.sqlite3", namespace).record(grant, operation, event)
-    except (OSError, sqlite3.Error, ValueError, PermissionError):
-        LOG.warning("consultation metrics unavailable")
+    namespace = runtime_namespace()
+    if namespace.project in {"", "unknown"}:
+        return
+    grant = Grant(session, namespace.brain, frozenset({namespace.project}))
+    Metrics(Path(AGENTIHOOKS_HOME) / "brain/consultation.sqlite3", namespace).record(grant, operation, event)
 
 
+@_best_effort
 def delivery(session: str, pack: str | None, outcome: str) -> None:
     from hooks.context import task_context
     from hooks.targets import current_target
@@ -221,7 +232,8 @@ def delivery(session: str, pack: str | None, outcome: str) -> None:
     )
 
 
-def gate(call, who, result: str) -> None:
+@_best_effort
+def gate(call: Call, who: Who, result: str) -> None:
     from hooks.context import task_context
 
     if not (who.swarm and who.task):

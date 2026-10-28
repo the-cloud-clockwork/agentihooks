@@ -1,0 +1,47 @@
+{
+  "package": "SV2-OBS-03",
+  "dependencies": ["SV2-OBS-02", "SV2-GAT-04", "SV2-OBS-01"],
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/8122",
+  "pull_request": "",
+  "package_complete": false,
+  "evidence_class": "mocked: isolated hook state, fixture brain packs, fake clock and gate lifts; no live target qualification claimed",
+  "interfaces": [
+    "Metrics.record accepts a preauthenticated Grant, immutable operation identity and fixed-schema delivery, gate or reference metadata. Scope comes from the grant corpus and project membership; runtime observations derive that scope from the existing project resolver and selected brain.",
+    "Metrics.events and Metrics.report authorize brain and project before reading the persistent store. Session, task, context, incident, lesson and operation identifiers are pseudonymous within the installation, brain and project namespace.",
+    "Metrics.review accepts only a principal in trusted adapter operator configuration with a matching scope grant. A request cannot set its own operator role. Reviews are immutable and do not infer usefulness from deliveries, references, tool counts or overrides.",
+    "task_context.offer records supported delivery, deduplication, missing context, disabled delivery and unsupported events without storing pack text. A rendered service failure remains a retrieval failure even when its diagnostic notice is delivered.",
+    "The gate dispatcher records effective allow, deny, observe, off, lifted and fail-open outcomes for the brain gate. Receipt age is an observed metadata value; no metric claims comprehension."
+  ],
+  "supported_versions": {"python": ">=3.12", "targets": ["claude", "codex", "copilot"]},
+  "states": {
+    "observed": "Red baseline at 5a10d8803ca5336f214e39bc7640f6fce4c3f731 failed collecting the new acceptance tests because the consultation module did not exist. Green validation remains pending.",
+    "accepted": "Fixed-schema observations authorized for the selected brain and project, references tied to delivered context and separately authorized operator assessments.",
+    "committed": "SQLite stores immutable observations and reviews under the agentihooks brain state home. Receipts and existing gate logs retain their preceding contracts.",
+    "externally_verified": "None. Live G10 verification remains outstanding."
+  },
+  "metrics": {
+    "brain_gate_false_block_rate": "Operator-reviewed false denials divided by operator-reviewed denials; null when no denial has been reviewed. An operator lift alone is not a false-block ruling.",
+    "context_delivery_failures": "Observed missing, disabled or unsupported delivery outcomes. A successful retrieval response is not a target delivery observation.",
+    "context_service_failures": "Historical retrieval failures remain visible after successful recovery; the degraded flag describes the latest observation for each session.",
+    "usefulness": "Delivered context, explicitly referenced context and operator-reviewed useful or irrelevant context remain distinct. References and reviews do not store prompt text."
+  },
+  "validation": {
+    "red_commit": "5a10d8803ca5336f214e39bc7640f6fce4c3f731",
+    "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40628874700",
+    "implementation_commit": "e8606930d5e7646721d6fb47b7e9e492127c4045",
+    "focused_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40629869547",
+    "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40629760967",
+    "outcome": "pending"
+  },
+  "rollback_rehearsal": {
+    "action": "Return the brain gate to observe mode through the existing swarm gate configuration; retain consultation metrics, receipts and gate history.",
+    "authoritative_objects": "Task specifications, source evidence and brain memory are unchanged. Persistent observations and operator reviews survive observer restart and rollback.",
+    "proof": "CI acceptance cases exercise observe mode, service recovery and reopening the same persistent store; qualifying green output remains pending."
+  },
+  "remaining_limitations": [
+    "Live G10 target qualification is separate from mocked acceptance fixtures and remains outstanding.",
+    "Operator review and reference submission are library interfaces for authenticated adapters; no new user interface or unauthenticated network endpoint is added.",
+    "The preceding local consultation receipt is not a cryptographic boundary against a process that controls its own hook state. Metrics preserve that compatibility contract."
+  ]
+}
