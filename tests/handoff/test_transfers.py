@@ -102,6 +102,25 @@ def test_a_launched_successor_missing_from_the_live_names_is_absent(setup):
     assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "absent"
 
 
+def test_a_live_binding_is_kept_when_the_successor_later_leaves_the_live_names(setup):
+    from scripts.swarm.tick import observe_bindings
+
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2", state="working", launched_at=40)
+    store.put_agent("sw", new)
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    runtime = FakeRuntime()
+    runtime.live.add(new.name)
+    observe_bindings(store, "sw", runtime)
+    bound = transfers.get(store, "sw", transfer["id"])["binding"]
+    runtime.live.discard(new.name)
+    observe_bindings(store, "sw", runtime)
+    assert transfers.get(store, "sw", transfer["id"])["binding"] == bound
+    assert bound["state"] == "live"
+
+
 def test_detach_frees_only_the_waiting_spawns_unbound_transfers(setup):
     store, old = setup
     other = transfers.record(store, "sw", old, "recycle", DOC, 10)
