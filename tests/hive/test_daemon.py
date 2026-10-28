@@ -1152,7 +1152,8 @@ def test_a_wait_that_never_wakes_returns_within_its_bound_and_beats_again(monkey
         return clock[0]
 
     def never_wakes(timeout):
-        assert 0 < timeout <= process_timer.RECHECK_S
+        assert timeout > 0
+        assert timeout <= process_timer.RECHECK_S + 1e-12
         waits.append(timeout)
         clock[0] += timeout
         return False

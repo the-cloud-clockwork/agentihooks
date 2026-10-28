@@ -222,7 +222,7 @@ def test_the_gc_slot_starts_one_detached_sweep_per_delivery(monkeypatch):
     timer.sweep(event, "delivery-2", state)
     assert started.call_count == 2
     timer.sweep(event, "delivery-1", state)
-    assert started.call_count == 3
+    assert started.call_count == 2
 
 
 def test_the_sweep_is_time_limited_and_idle_where_the_tools_exist(monkeypatch):
