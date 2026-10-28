@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/github_reads.py:scripts.swarm.github_reads.x__conditional_page__mutmut_26:0d060a853fcf717e6e5a3a984d425ae30890b3347cd32d3de1819c61fe5dabf7": {
+    "reader": "standards_reader",
+    "reason": "Covered, not equivalent: response() ends headers with a blank line and test_conditional_pages_split_headers_from_pretty_json_at_the_first_blank_line sends a body with an interior blank line, so rpartition splits inside the JSON and json.loads fails; the branch Mutation preflight 40720690156 killed it on identical code. It survived only in the Tests tier run 40731161969, whose reused mutation stats omit that test."
+  }
+}
