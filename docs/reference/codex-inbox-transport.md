@@ -102,8 +102,10 @@ back to pending, releases no live server's quota slot and leaves `dev` alone.
    runs out, the command exits 1, the execution stays fenced from new inbox
    turns, and you run the stand-down again. A delivery receipt still `submitting`
    or `unknown` may have reached the thread. The pump's recovery pass turns
-   `submitting` into `unknown`; nothing resolves `unknown` automatically, so open
-   the thread with `agentihooks swarm <id> terminal <execution-id>` and check
+   `submitting` into `unknown`; a running pump settles each `unknown` receipt on
+   its next start against the thread, accepting one the thread carries and
+   rejecting the rest so they are submitted again. A stood down execution starts
+   no pump, so open the thread with `agentihooks swarm <id> terminal <execution-id>` and check
    whether the item arrived before moving it. Transfer only items with no
    receipt, a `rejected` one, or an `unknown` one the thread shows never arrived,
    through the seat and task rules:

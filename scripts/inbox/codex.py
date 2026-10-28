@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import sys
 import time
@@ -27,6 +28,8 @@ POLL_S = 0.2
 BACKOFF_S = 1.0
 BACKOFF_MAX_S = 15.0
 IN_PROGRESS = "inProgress"
+UNKNOWN = "unknown"
+UNSENT = "the thread never received it; submitted again"
 TURN_STARTED, TURN_COMPLETED, RESOLVED = "turn/started", "turn/completed", "serverRequest/resolved"
 LOST_OWNER = "{} no longer delivers for {}"
 HELD = "thread {} waits on {}; inbox delivery is held"
@@ -306,14 +309,14 @@ class Pump:
         binding.connection.listener = self.state.observe
         self.dispatcher.own(binding.recipient, binding.owner, ttl_s=self._lease_s())
         self.leased = True
-        self.receipts.recover(binding.recipient, binding.owner)
+        recovered = self.receipts.recover(binding.recipient, binding.owner)
         if self.feed is None:
             if self.subscription is not None:
                 self.subscription.close()
             self.subscription = self.store.redis.pubsub()
             self.subscription.subscribe(NOTIFY)
         protocol.resume_thread(binding.connection, binding.thread_id)
-        self._refresh()
+        self._settle(recovered, self._refresh())
         self.next_reconcile = self.timing.clock()
         binding.transport.mark(state=CONNECTED, last_error_class="")
 
@@ -367,8 +370,21 @@ class Pump:
         binding.transport.mark(last_reconcile_at=self.timing.now_ms(), active_turn_id=self.state.active_turn)
         self.next_reconcile = self.timing.clock() + self.timing.reconcile_s
 
-    def _refresh(self) -> None:
-        self.state.refresh(protocol.read_thread(self.binding.connection, self.binding.thread_id))
+    def _refresh(self) -> dict:
+        thread = protocol.read_thread(self.binding.connection, self.binding.thread_id)
+        self.state.refresh(thread)
+        return thread
+
+    def _settle(self, recovered: list[Delivery], thread: dict) -> None:
+        """Accept each unknown delivery the thread carries; reject the rest so the next scan submits them again."""
+        shown, owner = json.dumps(thread), self.binding.owner
+        for delivery in recovered:
+            if delivery.state != UNKNOWN:
+                continue
+            if delivery.id in shown:
+                self.receipts.accept(delivery.id, owner, delivery.digest)
+            else:
+                self.receipts.reject(delivery.id, owner, UNSENT)
 
     def _surface(self) -> None:
         pending = next(iter(self.state.requests.values()), "")
