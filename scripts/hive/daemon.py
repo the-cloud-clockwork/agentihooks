@@ -212,7 +212,8 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
     while not stop.is_set():
         try:
             scheduled_wait(HEADROOM_SECONDS, redis=waiter, timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
-        except (ConnectionError, TimeoutError):
+        except (ConnectionError, TimeoutError) as exc:
+            print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
             return
         if stop.is_set():
             return
@@ -223,6 +224,27 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
             orders.alive(redis, local_id)
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
+def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
+    """Only the hive that hosts the operator's interface runs the master herdr client, so only it publishes."""
+    from redis.exceptions import ConnectionError, RedisError, TimeoutError
+
+    from scripts.hive import herdr_stats
+
+    while not stop.is_set():
+        try:
+            scheduled_wait(herdr_stats.EVERY_S, redis=waiter, timeout=herdr_stats.EVERY_S + WAKE_SLACK_S)
+        except (ConnectionError, TimeoutError) as exc:
+            print(f"hive herdr stats wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+            return
+        if stop.is_set():
+            return
+        try:
+            if (registry.show(redis, local_id) or {}).get("ui") == "yes":
+                herdr_stats.publish(redis, local_id, int(time.time() * 1000))
+        except (RedisError, ValueError, KeyError) as exc:
+            print(f"hive herdr stats publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
 
 
 def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
@@ -239,9 +261,10 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
         try:
             redis, waiter = connect()
             local_id = hive_id()
-            threading.Thread(target=publish_headroom, args=(redis, waiter, local_id, stop), daemon=True).start()
+            helpers = {}
             while True:
                 started = time.monotonic()
+                _keep_helpers(helpers, (redis, waiter, local_id, stop))
                 worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
                 renewed = github_app_cli.renew(renewed, time.time())
                 beat(redis, local_id)
@@ -255,6 +278,13 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
             failures += 1
         finally:
             stop.set()
+
+
+def _keep_helpers(helpers: dict, args: tuple) -> None:
+    for target in (publish_headroom, publish_herdr_stats):
+        if target not in helpers or not helpers[target].is_alive():
+            helpers[target] = threading.Thread(target=target, args=args, daemon=True)
+            helpers[target].start()
 
 
 def _back_off(exc: Exception, failures: int) -> None:

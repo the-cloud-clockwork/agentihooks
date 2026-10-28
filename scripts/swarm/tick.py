@@ -157,6 +157,7 @@ class Placed:
     remote_control: dict = field(default_factory=dict)
     desired_route_kind: str | None = None
     conversation_id: str = ""
+    launch_job: dict = field(default_factory=dict)
 
 
 class Ledger(Protocol):
@@ -523,6 +524,13 @@ def _failed_hive_launch(slug, store, ledger, runtime, rows, miss, now_ms):
 def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
     agent, found = miss.agent, miss.found
     fields, elapsed = ", ".join(found), now_ms - launch_check.session_started_at(agent)
+    if (
+        idle_state.verdict(idle_state.IDLE, idle_state.heartbeat(store.redis, slug, agent.name), None, now_ms)
+        == idle_state.WORKING
+    ):
+        launch_check.record(store, slug, agent, found, now_ms, elapsed, held=True)
+        launch_check.forget(store, slug, agent.name)
+        return f"{agent.name} failed its launch check on {fields}; reported only while working"
     hive = bool(agent.hive or reports.host(agent))
     if (
         hive
@@ -1253,6 +1261,7 @@ def _prepare(run, lane, task, taken, failing, peers):
         primed_task = {
             **timing.timed(primed, store, slug, seat, task),
             ACK_LATER: True,
+            "detached_launch": True,
             **_steer(slug, store, task, failing),
         }
     except Exception as exc:
@@ -1267,6 +1276,8 @@ def _launch(run, launch):
     record = launch.record
     try:
         placed = timing.timed(run.runtime.spawn, run.config, record.lane, record.name, launch.primed)
+        if placed.launch_job:
+            return placed, None
         launched = timing.timed(codex.admit_legacy, run.store, run.slug, placed_record(record, placed), run.runtime)
         return placed, launched
     except Exception as exc:
@@ -1274,6 +1285,8 @@ def _launch(run, launch):
 
 
 def _launch_all(run, clock, batch):
+    from scripts.swarm import launch_job
+
     if not batch:
         return []
     at, contexts = time.monotonic(), [copy_context() for _ in batch]
@@ -1282,6 +1295,11 @@ def _launch_all(run, clock, batch):
     clock.charge(at, [error for _, error in outcomes if isinstance(error, Exception)], len(batch))
     actions = []
     for launch, (placed, launched) in zip(batch, outcomes):
+        if placed and placed.launch_job:
+            launched = launch_job.dispatch(run, launch, placed)
+            if isinstance(launched, str):
+                actions.append(launched)
+                continue
         if isinstance(launched, Exception):
             failed = Failed(launch.record, launch.task, launched)
             actions += timing.timed(
@@ -1360,7 +1378,7 @@ def _not_launched(slug, store, ledger, runtime, rows, failed, now_ms):
     if _acknowledging_error(failed.error):
         store.record_launch(slug, record, ACKNOWLEDGING)
         return [f"{record.name} waits for the hive acknowledgement of {task['id']}"]
-    if refused := _failed_room_wait(runtime, record.lane, task):
+    if refused := _failed_room_wait(runtime, record.lane, task) or _refused_reservation(task, failed.error):
         return [_room_refused(slug, store, ledger, runtime, rows, failed, refused)]
     return _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms)
 
@@ -1370,6 +1388,10 @@ def _failed_room_wait(runtime, lane, task):
         return _room_wait(runtime, lane, task)
     except SpawnError:
         return False
+
+
+def _refused_reservation(task, exc):
+    return f"task {task['id']} waits: {exc}" if seat_spawn.room_refused(exc) else ""
 
 
 def _room_refused(slug, store, ledger, runtime, rows, failed, refused):
@@ -1392,7 +1414,7 @@ def _acknowledging(slug, store, agent):
     if agent.lane == MASTER:
         return False
     raw = store.redis.hget(store.key(slug, "launches"), agent.name)
-    return bool(raw) and json.loads(raw).get("state") == ACKNOWLEDGING
+    return bool(raw) and json.loads(raw).get("state") in (ACKNOWLEDGING, "launching")
 
 
 def _expire_launch(config, runtime, agent, error):
@@ -1417,10 +1439,12 @@ def _finished_launch(slug, store, doc, agent):
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     if config.engine == EVENTS_ENGINE:
         return []
+    from scripts.swarm import launch_job
     from scripts.swarm_v2.runtime import codex
 
-    rows, actions = {t["id"]: t for t in doc["tasks"]}, []
-    for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
+    rows = {t["id"]: t for t in doc["tasks"]}
+    actions, pending = launch_job.collect(_Pass(slug, config, store, ledger, runtime, rows, doc, now_ms))
+    for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a) and a.name not in pending]:
         task = rows.get(agent.task) or {"id": agent.task}
         try:
             placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True})
@@ -1727,8 +1751,12 @@ def _master(slug, config, store, runtime, now_ms, past_host=False):
         record, placed = seat_spawn.place(slug, config, store, runtime, MASTER, now_ms, prepare)
     except seat_spawn.SeatFailed as spawn_failure:
         exc, record = spawn_failure.error, spawn_failure.record
-        transfers.failed(store, slug, record)
         store.drop_agent(slug, record.name)
+        if seat_spawn.room_refused(exc):
+            transfers.detach(store, slug, record)
+            master_start.withdraw(store, slug, pending)
+            return [f"the master waits: {exc}"]
+        transfers.failed(store, slug, record)
         affinity.failed(store, slug, str(exc))
         return master_start.failed(store, slug, f"master spawn failed: {exc}", now_ms)
     affinity.placed(store, slug, placed.harness)

@@ -14,7 +14,7 @@ AgentiHooks ships a package rule, `delivery-tiers`, that every installed profile
 |---|---|---|---|
 | **Pull request** | `pull_request` on each head push | lint, format, size and complexity, static analysis, coverage and mutation on changed lines, the tests the change touches | entry to the merge queue |
 | **Queue** | `merge_group` | the unit suite, once per merge group | the merge into the integration branch, usually `dev` |
-| **Promotion** | `push` to the integration branch, with `concurrency` preserving the running run and replacing only the pending run | whole module coverage and mutation, image builds and smoke tests, cluster and load tests, stage and shard time budget reports, then promotion | the release branch, usually `main`, and the release tag and images built from it |
+| **Promotion** | `push` to the integration branch, each push in its own `concurrency` group, so a red run never holds a newer green head | whole module coverage and mutation, image builds and smoke tests, cluster and load tests, stage and shard time budget reports, then promotion | the release branch, usually `main`, and the release tag and images built from it |
 
 Each tier has a wall time budget. A check that does not fit the pull request or queue budget moves to promotion.
 
@@ -46,11 +46,13 @@ its last promoted tree while ordinary pull requests keep merging into `dev`.
 
 ### Scheduling and runner isolation
 
-Tests uses the `promotion-dev` concurrency group for dev pushes, `queue: single`
-and `cancel-in-progress: false` for that event. A running run finishes; newer
-pushes replace only the pending run. Thus a burst grades the running head and
-the newest pending head, rather than every intermediate revision. A running
-proof is not cancelled merely because another pull request merges.
+Tests gives every dev push its own `tests-push-<run id>` concurrency group
+with `cancel-in-progress: false`. Each pushed head is graded at once and none
+waits behind an older run, so a red run never holds a newer green head. The
+promotion job's `release-version` group serializes the release writes, and a
+graded head that is not ahead of the last promoted revision is refused, so an
+older run cannot overwrite a newer `main`. A running proof is not cancelled
+merely because another pull request merges.
 
 When called by Tests, the proof uses `hierarchy-cpu-<caller run id>` as its own
 concurrency group, avoiding the caller's lock. A standalone dispatch uses one
@@ -88,7 +90,7 @@ The reusable proof accepts one optional string input, `base`, for both
 | Empty on a standalone dispatch | Merge base of HEAD and `origin/dev` | The same pinned revision |
 
 The hierarchy base on a push is the previous pushed head, which can differ
-from the last head promotion actually graded when pending runs were replaced.
+from the last head promotion actually graded when an earlier push run failed.
 To compare a branch normally, or to measure identical code on both sides:
 
 ```bash
@@ -148,7 +150,7 @@ completed before and after timing comparison or a ten minute runtime guarantee.
 | `Gate — Required` is green but `promote` is skipped | Read `hierarchy-cpu / grade` and all other promotion dependencies. The hierarchy proof must succeed independently of the gate |
 | A hierarchy pair or load pair fails before grading | Read the failing job's Redis readiness, dependency installation and probe logs; setup failure is not a measured CPU regression |
 | `grade` reports a CPU or response regression | Follow [hierarchy troubleshooting](ledger-load-gate.md#troubleshooting-a-hierarchy-red), retain pair artifacts and fix through a pull request into `dev` |
-| A dev push has no proof jobs | Check whether it was cancelled while pending in `promotion-dev`; inspect the running or newest admitted run. A pull request, merge group or Tests dispatch skips the proof by design |
+| A dev push has no proof jobs | Inspect that push's own `tests-push-<run id>` run. A pull request, merge group or Tests dispatch skips the proof by design |
 | Proof jobs queue while merge queue jobs run | Compare the returned labels and runner times. Batch jobs do not request queue runners; investigate the named pool's capacity before attributing the wait |
 
 A red promotion receives a fixer task under the [delivery tiers rule](#rules).
@@ -835,7 +837,7 @@ A merge group unit shard that loses its runner gets one recovery inside the same
 | `unit-rerun` | `unit rerun (<python>, <shard>)` | Runs each lost leg once using the original unit steps and queue plan |
 | `gate-required` | `Queue gate summary` | Later dependency summary; it does not own the required check name on this event |
 
-1. The early verifier reads this attempt's jobs with the App token. An original `unit (3.12, <shard>)` must succeed or end `failure` or `cancelled` with a log classified as runner loss. A nonzero process exit proving a real failure, without a runner loss signature, rejects the original; a timed out original also rejects it. Missing logs alone do not prove a test failure.
+1. The early verifier reads this attempt's jobs with the App token. An original `unit (3.12, <shard>)` must succeed or end `failure` or `cancelled` with a log classified as runner loss. A nonzero process exit proving a real failure, without a runner loss signature, rejects the original; a timed out original also rejects it. Missing logs alone do not prove a test failure. [The shared runner loss reader](#the-shared-runner-loss-reader) gives the full rule.
 2. `unit-lost` runs `Name the unit shards that lost their runner`, invoking `python3 -m scripts.ci_unit_rerun` against the attempt's jobs and the queue plan. A real failure, timed out original or lost leg outside that plan fails classification.
 3. `unit rerun (3.12, <shard>)` replaces each lost original once and overwrites its durations, flake and coverage artifacts. `shard-check (3.12)` grades completeness using the recovered results.
 4. With no lost originals, `unit-lost` and the unexpanded `unit rerun` matrix must be skipped. With lost originals, classification and every matching recovery must succeed. Duplicate, unplanned or extra recovery jobs reject the run; an incomplete inventory waits rather than passing. A failed recovery, including a second runner loss, rejects it. Queue retry refuses a failed `unit rerun` with `failed again on its in-run rerun`.
@@ -844,7 +846,7 @@ The early verifier also waits for the other required queue jobs, including `shar
 
 ## Lost fail fast watcher
 
-The workflow key remains `queue-fail-fast`, but its merge group Actions name is now `Gate — Required`. It starts after queue planning and holds a light runner while `Verify every queue gate while the units finish` runs `python3 -m scripts.ci_gate_queue`. The verifier checks the queue ref and this attempt's job inventory every five seconds, with a twenty minute verification deadline. It checks the ref again before accepting a complete inventory.
+The workflow key remains `queue-fail-fast`, but its merge group Actions name is now `Gate — Required`. It starts after queue planning and holds a light runner while `Verify every queue gate while the units finish` runs `python3 -m scripts.ci_gate_queue`. The verifier waits only for the required queue jobs and the planned unit shards, so a red check outside them never holds a green group. It checks the queue ref and this attempt's job inventory every five seconds, with a forty minute verification deadline. It checks the ref again before accepting a complete inventory.
 
 This job now owns the required status. A lost or cancelled early gate cannot authorize a merge even if every unit passed. The later `Queue gate summary` still permits a failed or cancelled watcher with an empty `failed` output when its graded dependencies passed; that summary does not replace a successful `Gate — Required` check.
 
@@ -858,9 +860,37 @@ A successful verification returns without a success message and skips `Cancel a 
 | `Unexpected queue result: <job>` | A completed job has the wrong conclusion. Check the named job, including classification and recovery jobs |
 | `Unplanned original shard`, `Unplanned recovery shard` or `Duplicate queue job` | The observed inventory disagrees with the queue plan. Inspect the plan and all job names |
 | `::error::queue group is no longer current` | The queue ref no longer matches the run's commit. This verifier rejects the stale group; it does not write the old queue rebuild record |
-| `Queue verification timed out before every expected job completed` | The twenty minute verification deadline expired. Find the missing or unfinished jobs |
+| `Queue verification timed out before every expected job completed` | The forty minute verification deadline expired. Find the missing or unfinished jobs |
 
 The old `Watch for the first failed graded job` step, fifteen second poll, ten read fallback and `<job> failed, so Gate Required cannot pass; cancelling this queue run.` line describe the replaced watcher. They are not the current early gate's output.
+
+### The shared runner loss reader
+
+`scripts.ci_queue_fail_fast` is no longer a job step. Since [pull request 7136](https://github.com/the-cloud-clockwork/agentihooks/pull/7136) it keeps `logged_loss`, which the early verifier and the rerun classifier share, plus two names that the module and the tests use:
+
+| Name | Use |
+|---|---|
+| `SELF` | The workflow job key `queue-fail-fast`. Contract tests pin `scripts.ci_reuse.WATCHER` and the tiers workflow to it |
+| `EXITED` | The pattern `##[error]Process completed with exit code <1 to 127>.` or a `##[error]` step timeout line, used only inside `logged_loss` |
+| `logged_loss(repo, job, seen)` | Answers whether a failed or cancelled job lost its runner |
+
+`scripts.ci_gate_queue` calls `logged_loss` on every poll for each completed original unit shard that concluded `failure` or `cancelled`; a `timed_out` original is rejected before any read. `scripts.ci_unit_rerun` calls it in `unit-lost` for each `failure` or `cancelled` unit shard, never for a `timed_out` one. Each caller passes one `seen` dictionary for its whole run.
+
+`logged_loss` reads the job's log and keeps only `##[error]` lines and pytest result lines. The job lost its runner when that text carries a runner loss signature with no failed pytest result and no step timeout. It also lost its runner when the text carries no failed pytest result and no `EXITED` line. The runner loss signatures are `The runner has received a shutdown signal`, `lost communication with the server`, `The job was not acquired by Runner` and `The job log could not be read`. Exit codes 128 and above, such as 137 or 143 from a killed process, prove nothing alone.
+
+| Log read | Annotations read | Answer | Cached in `seen` |
+|---|---|---|---|
+| succeeds | not read | the rule above on the log lines | yes, so the log is read once per job |
+| fails | succeeds | the same rule on the annotations, with the exit line matched anywhere in a message | no, read again on the next poll |
+| fails | fails | lost | no |
+
+A lost answer is not a pass: the verifier still requires a successful `unit rerun` for that shard, as [Lost unit shard rerun](#lost-unit-shard-rerun) describes. The module's old `failed`, `settled`, `verdict` and `main` are gone and it has no `__main__` block, so `python -m scripts.ci_queue_fail_fast` judges nothing and no workflow calls it. List the callers that remain:
+
+```bash
+git grep -n "ci_queue_fail_fast" -- '*.py' .github
+```
+
+The expected output is the `logged_loss` imports in `scripts/ci_gate_queue.py` and `scripts/ci_unit_rerun.py`, the module import in `tests/test_ci_queue_fail_fast.py`, the `SELF` import in `tests/contracts/ci_tiers/test_workflow.py`, and the module import, `ci_queue_fail_fast.SELF` comparison and `SELF` import in `tests/test_ci_reuse.py`. A hit under `.github` means a workflow runs the removed entry point again.
 
 ### Checking a watcher run
 
@@ -1227,7 +1257,7 @@ An empty result means no swarm tooling on this machine changed the queue while t
 
 The old `queue-fail-fast` watch loop wrote a `queue-rebuild-<run>-<attempt>` record whenever it found its group stale, until [pull request 6984](https://github.com/the-cloud-clockwork/agentihooks/pull/6984) removed that call, and `scripts.ci_queue_rebuild` linked that record to a cause. [Pull request 5706](https://github.com/the-cloud-clockwork/agentihooks/pull/5706) taught it to read the entry ahead: it took the parent of the stale group's commit, found the merge group run built at that parent, read the pull request number from its `gh-readonly-queue/dev/pr-<number>-<sha>` branch, and recorded `removed_ahead` with that pull request, actor, reason and event when the pull request left the queue while the stale group ran. The group's own dequeue or requeue still ranked first. Over the 72 records of 19 October, replaying the reader moved 26 of 65 `unknown` causes to `removed_ahead`.
 
-[Pull request 7136](https://github.com/the-cloud-clockwork/agentihooks/pull/7136) then deleted the record and the reader, since the early `Gate — Required` verifier had replaced the watch loop. The verifier rejects a stale group with `::error::queue group is no longer current` and writes no record; see [What the watcher reports](#what-the-watcher-reports). Name the entry ahead of a stale group by hand with these commands:
+[Pull request 7136](https://github.com/the-cloud-clockwork/agentihooks/pull/7136) then deleted the record and the reader, since the early `Gate — Required` verifier had replaced the watch loop: `scripts.ci_queue_rebuild`, its tests, the `tests/fixtures/ci_queue_legacy_watch.json` fixture and the fail fast module's own verdict code, leaving the [shared runner loss reader](#the-shared-runner-loss-reader). The record was not moved to the stale group path either, because the verifier fails that run from the queue ref alone and `Cancel a rejected queue run` takes no record input. `git grep "ci_queue_rebuild\|ci_queue_legacy_watch"` outside `changelog.d` and this page returns nothing. The verifier rejects a stale group with `::error::queue group is no longer current` and writes no record; see [What the watcher reports](#what-the-watcher-reports). Name the entry ahead of a stale group by hand with these commands:
 
 ```bash
 R=repos/the-cloud-clockwork/agentihooks
@@ -1250,7 +1280,7 @@ The window ran from 2026-10-20T02:00Z to 2026-10-21T02:00Z. It held 301 merge gr
 
 Every cancelled run falls into one of two kinds:
 
-- **Ejection of the entry itself.** A job of the run itself concluded `failure`, `timed_out` or `startup_failure`, and the run's `queue-fail-fast` job cancelled it; or the queue timed the entry out (`checks_timed_out`). This split is read from job conclusions, not from removal reasons: GitHub can give `failed_checks` even when every own run was cancelled clean. The fail fast job logs the failed job before cancelling: `<job> failed, so Gate Required cannot pass; cancelling this queue run.`
+- **Ejection of the entry itself.** A job of the run itself concluded `failure`, `timed_out` or `startup_failure`, and the run's `queue-fail-fast` job cancelled it; or the queue timed the entry out (`checks_timed_out`). This split is read from job conclusions, not from removal reasons: GitHub can give `failed_checks` even when every own run was cancelled clean. In that window's workflow the fail fast job logged the failed job before cancelling: `<job> failed, so Gate Required cannot pass; cancelling this queue run.` The current early verifier logs the errors listed under [What the watcher reports](#what-the-watcher-reports) instead.
 - **Rebuild caused by another entry.** No job of the run failed; GitHub rebuilt the group because an entry ahead of it left the queue, and cancelled the run building the old head. The trigger is the removal event of the entry ahead whose time falls inside the run: `failed_checks`, a removal by hand or a priority move (`manual`), or `checks_timed_out`.
 
 A cancelled run with no failed job and no removal ahead inside its window stays unattributed: an enqueue ahead, a base push or a ruleset change leaves no queue event that names it. Wall minutes are the run's own duration; runner minutes are the sum of its jobs' durations.

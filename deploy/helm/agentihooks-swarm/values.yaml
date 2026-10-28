@@ -273,6 +273,8 @@ workers:
   excluded: [master]
   # Swarms whose masters this hive takes although it excludes master; every other swarm still sees masters excluded.
   masterSwarms: []
+  # Placement rank per role, role:rank pairs such as eng:1,ci:1; the lowest rank takes a role's agents first while it has room.
+  prefer: ""
   image:
     repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
     tag: dev

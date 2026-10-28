@@ -10,7 +10,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from scripts.swarm_ledger import api
-from scripts.swarm_ledger.api import admin, architecture, hives, mutations, proofs, routes, routing
+from scripts.swarm_ledger.api import admin, architecture, hives, monitor, mutations, proofs, routes, routing
 from scripts.swarm_ledger.api.services import HttpPolicy, LedgerService, MediaService, Services, SwarmService
 from scripts.swarm_ledger.storage_migration import hosted
 
@@ -261,7 +261,7 @@ def test_the_composition_root_injects_the_repository_and_the_http_policy():
 
 
 def test_no_api_function_takes_the_server_module():
-    modules = (admin, architecture, hives, mutations, proofs, routes, routing, hosted)
+    modules = (admin, architecture, hives, monitor, mutations, proofs, routes, routing, hosted)
     taking = [
         f"{module.__name__}.{name}.{parameter.name}"
         for module in modules

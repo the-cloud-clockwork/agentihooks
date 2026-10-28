@@ -233,7 +233,7 @@ by Redis with `NOPERM`. So every piece of state a member process writes lives be
 | Launch order receipt and acknowledgement | `<root>:hive:<id>:...` | The controller, which records the execution as working. |
 | Inbox items, sequence counters, delivery owners, seen marks and the master pool | `<root>:hive:<id>:inbox:...` | The member's own agents; the controller routes sends to the member's agents there and relays mail out of it. |
 | Session readings: heartbeat, prompt, session model, progress, wait, waited, woke, wait history and stop blocks | `<root>:hive:<id>:swarm:...` | The controller's idle and wait checks, and the progress and stop gates, for agents placed on that member. |
-| Sessions report, including the executions it runs | `<root>:hive:<id>:sessions` | The controller's launch slot refresh. |
+| Sessions report, including the executions it runs | `<root>:hive:<id>:sessions` | The controller's launch slot refresh, and every launch reservation's account count; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
 
 ### Which keys a process uses
 
@@ -273,6 +273,32 @@ agentihooks msg reply <id> "thanks, take the next task"
 # The reply is written into the member's inbox keys, where the engineer reads it
 ```
 
+### Seat mail follows its occupant
+
+A send to a seat writes into the inbox of the agent occupying it at send time. A send to an empty seat, such as
+`dispatcher@<slug>` between two dispatchers, lands in the controller keys. When the next occupant starts on a
+member, its mail would sit in keys it never reads.
+
+Every swarm tick's exit sweep moves that mail. For each live agent that is the current occupant of a lane seat
+(`eng-N@<slug>`, `ci-N@<slug>`, `plan-N@<slug>`) or the dispatcher seat (`dispatcher@<slug>`), the sweep moves every
+open item addressed to the seat from any other reachable inbox into the inbox that holds the agent: the member keys
+of the hive it runs on, or the controller keys when it runs on the swarm host. A moved item:
+
+- keeps its id, sender, text, history and ledger entry;
+- turns pending at the same seat address, so the occupant's next inbox read delivers it;
+- gains a history entry by `swarm` with the reason `moved to hive <id>, where <agent> runs <seat>`, or
+  `moved to the controller, where <agent> runs <seat>`.
+
+Master seats never move: their mail stays with the master pool of its inbox. An inbox whose Redis times out or
+drops is skipped for that pass, and the sweep moves its mail on a later tick.
+
+To see a moved item, run on the hive where the occupant runs, as that occupant:
+
+```bash
+agentihooks msg inbox            # the item shows pending, with its original id
+agentihooks msg read <id>        # its history ends with the move and its reason
+```
+
 ### Launch slot rows
 
 Launch slot rows count how many executions hold each account slot. Only the controller writes them; a member never
@@ -289,6 +315,49 @@ member executions from what each member reports:
    ticks and the slot is free for the next launch.
 
 `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` sets the tick, and with it the refresh lifetime.
+
+### Sessions report and the account cap
+
+Every launch that takes an account slot reserves it against the account's cap in one Redis script. The script
+counts the account's sessions as:
+
+1. the sessions every live hive reports for the account in its sessions report, `<root>:hive:<id>:sessions`, where
+   live means a heartbeat no older than ninety seconds;
+2. plus every launch slot row for the account that is not exited and whose execution no hive report lists;
+3. minus every exited launch slot row whose execution a hive report still lists.
+
+When the count reaches the cap the launch is not started, and the launch reports
+
+```text
+account reservation is full: account=<harness>:<account> sessions=<count> cap=<cap> five_left=<pct> week_left=<pct>
+```
+
+The hive's beat writes the sessions report every 15 seconds with a 45 second expiry. Between beats the headroom
+publisher, every 10 seconds, moves the hive's `heartbeat_at` forward and extends the sessions report's expiry to the
+90 second live window. While the headroom publisher runs, a sessions report therefore counts for as long as its
+hive reads live: while the beat stalls, for example while it waits inside a launch, the hive keeps its last report
+and its sessions still count against the cap. Once both the beat and the headroom publisher stop, the heartbeat
+goes stale ninety seconds after the last write, and the report expires 45 seconds after that write if the beat made
+it, or ninety seconds after it if the headroom publisher made it, so the hive's sessions stop counting and free the slots.
+
+A beat stalled during a launch therefore holds the cap at the last reported count until the next beat refreshes it,
+which can count a session the hive has since lost. Before this, the report expired 45 seconds after the last beat
+while the headroom heartbeat kept the hive live, so the reservation counted none of that hive's sessions and
+admitted launches past the cap: Doctor finding `failed-spawn/t2015` recorded a Codex account at eight live sessions
+against a cap of six.
+
+Read a hive's report and its remaining lifetime on the swarm Redis:
+
+```bash
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:hive:lab-vm:sessions
+# {"codex:one": 6, "_executions": {"codex:one": ["...", "..."]}}
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" PTTL agentihooks:hive:lab-vm:sessions
+# up to 90000 while the hive is live
+```
+
+The ledger monitor reads the report only for live hives. The Hives panel reads it for every hive seen in the last 24
+hours whether or not the hive is live, so it shows a dead hive's counts for up to ninety seconds after its last
+heartbeat.
 
 ### Checking a member's scope
 
@@ -314,9 +383,10 @@ the member's own keys.
 
 ### Limitations
 
-- The controller's wake and escalation pass, exit sweep, swarm status, handoff mailbox and swarm removal read only
-  the controller inbox. Mail held for an agent a member runs gets no wake, escalation or exit settlement, and the
-  controller's seen marks for such agents stay in the controller keys.
+- The controller's wake and escalation pass, exit sweep, swarm status, handoff mailbox and swarm removal read every
+  joined member's inbox as well as the controller's. Mail sent to a seat while it was empty still waits in the
+  controller keys until the next tick's [seat mail move](#seat-mail-follows-its-occupant), and master seat mail
+  never moves.
 - A member-hosted agent cannot yet complete a life: its agent record writes, such as order consumer binding, take
   master, done, handoff and seat exits, sit outside its keys and are refused.
 - A member's master pool, filled while every live master sat on that member, drains only on the next send there.
@@ -331,7 +401,10 @@ the member's own keys.
 | A member item closes as `refused: the hive member that sent it does not run its sender` | The sender named on the item is not an agent placed on that member. | Send from the agent's own session on the member; the sender is the session, never an argument. |
 | A member process fails a write with `NOPERM` | The process writes outside its hive key, such as an agent record or a launch slot row. | Expected for agent record writes, see Limitations; anything else is a bug to file with the key named. |
 | The controller shows a member agent idle though it works | The agent's execution record names a hive with no member record, so the controller reads its readings from the controller keys. | Check `agentihooks hive show <id>` lists the hive and that it was added with `hive add`. |
+| A hive-run dispatcher or lane agent never sees mail sent to its seat while the seat was empty | The item waits in the controller keys until the next tick's exit sweep moves it. | Wait one tick, then run `agentihooks msg inbox` as the occupant on its hive. Mail to a master seat does not move. |
 | A slot stays taken after a member lost an agent | The member still reports the execution. | The row lapses within two ticks once the execution leaves the member's sessions report. |
+| An account runs more live sessions than its cap | A live hive's sessions report is missing: `redis-cli GET <root>:hive:<id>:sessions` returns nothing while `agentihooks hive list` shows the hive live. | Upgrade the hive to a release whose headroom heartbeat extends the report, then restart its hive service; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
+| Launches report `account reservation is full` though the account runs fewer sessions | A hive's beat is stalled and its last sessions report still counts. | The count corrects on the hive's next beat, or within ninety seconds after both its beat and its headroom publisher stop. |
 
 ## Settings
 
@@ -455,14 +528,22 @@ each limit, and the smallest limit wins.
 
 - **Every beat,** right after the heartbeat is written and before launch orders, herdr reports and execution reports,
   stamped with the heartbeat time. A beat that fails after the heartbeat still leaves a fresh reading.
-- **Every 10 seconds on its own thread,** started for each Redis connection. A launch inside a beat can run
-  `init-agent` for minutes; the thread keeps the reading fresh while it does, and also renews the daemon's order
-  consumer marker (45 seconds), so a launch it still holds is not taken for an orphan. The thread paces with the
-  scheduler process timer, like the beat. A Redis error, or a reading that cannot be parsed, prints
-  `hive headroom publish failed (<error>: <detail>)` to stderr and the thread keeps going. When its timer connection
-  is lost the thread ends, and the reconnect starts a new one. Any other error ends the thread with a traceback until
-  the next reconnect; the beat still publishes on its own path, but a launch longer than 30 seconds then lapses the
-  reading.
+- **Every 10 seconds on its own thread.** A launch inside a beat can run `init-agent` for minutes; the thread keeps
+  the reading fresh while it does, and also renews the daemon's order consumer marker (45 seconds), so a launch it
+  still holds is not taken for an orphan. The thread paces with the scheduler process timer, like the beat. A Redis
+  error, or a reading that cannot be parsed, prints `hive headroom publish failed (<error>: <detail>)` to stderr and
+  the thread keeps going. A lost or timed out timer wait prints `hive headroom wait failed (<error>: <detail>)` and
+  ends the thread; any other error ends it with a traceback.
+
+The daemon checks its helper threads, the headroom publisher and the herdr stats publisher, at the start of every
+beat and starts again each one that has ended, so a helper is back within one beat of ending without waiting for the
+beat loop's own Redis connection to drop. Each check starts at most one thread per helper, so a Redis that stays down
+cannot make the daemon spin. A reconnect starts both helpers fresh on the new connection. The herdr stats thread logs
+a lost wait the same way, as `hive herdr stats wait failed (<error>: <detail>)`.
+
+Between a helper ending and the next beat, only the beat path publishes. A beat that holds a launch longer than 30
+seconds, the reading's expiry, therefore still lapses the reading once, until that beat ends and the next one
+restarts the thread.
 
 `hive list` appends the reading to each hive's line, its fields separated by tabs (shown aligned here):
 
@@ -484,6 +565,7 @@ or roll its pod, to pick up the publisher.
 |---|---|---|
 | `hive list` shows `headroom=missing` on a `live` hive | `journalctl --user -u agentihooks-hive`, or the pod log, for `hive headroom publish failed` | Fix the error it names; a Redis error clears when the connection returns. |
 | A launch waits with `missing telemetry` while another launch runs on that hive | The hive's agentihooks version | Upgrade and restart the hive service so the 10 second publisher runs. |
+| `headroom=missing` comes and goes on a `live` hive, with readings only as often as its beats | The log for `hive headroom wait failed`, and the hive's agentihooks version: code from before the helper restart loses its headroom thread on the first failed wait until the beat loop reconnects | Upgrade and restart the hive service, or roll its pod. |
 | Room reads 0 with a fresh reading | The refusal detail: `cpu`, `ram` or `max agents` | The named limit is spent; wait for agents to finish or raise `max-agents` when the host has room. |
 
 ### Account caps on every hive
@@ -744,7 +826,7 @@ newer hive. Deploy the controller first, then the hives.
 
 | Clock | Value | Effect |
 |---|---|---|
-| Hive heartbeat | every 15 seconds | Sessions, quota and reports expire after 45 seconds without a beat. |
+| Hive heartbeat | every 15 seconds | Quota and the other reports expire after 45 seconds without a beat. The sessions report lives as long as the hive reads live; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
 | Headroom | every 10 seconds and every beat | A reading older than 30 seconds counts as missing and the hive's room reads 0; see [Headroom](#headroom). |
 | Live window | 90 seconds | A hive past it is stale and gets no new launches. |
 | Minute tick | 60 seconds (`AGENTIHOOKS_CONTROLLER_TICK_SECONDS`) | Each tick checks the master's hive. |
@@ -947,7 +1029,9 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
 5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
-   max-agents=<workers.maxAgents>`, by default `excluded=master master-swarms= max-agents=20`.
+   max-agents=<workers.maxAgents> prefer=<workers.prefer>`, by default `excluded=master master-swarms= max-agents=20
+   prefer=`. `workers.prefer` takes `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to
+   the lowest ranked hive while admission leaves it room.
 6. Runs `agentihooks hive run`.
 
 When the pod stops, for an image update, a rollout or a node drain, its preStop runs `agentihooks hive drain --wait

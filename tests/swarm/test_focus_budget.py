@@ -124,6 +124,20 @@ def test_unresolved_profiles_do_not_count_as_running_normal_work():
     assert selected == [{**plain, profile_first.UNRESOLVED: "unknown"}]
 
 
+def test_unresolved_profile_placement_stops_at_the_remaining_lane_room():
+    from scripts.swarm import focus_budget, profile_first
+
+    running = [work("running", state="claimed")]
+    waiting = [work(f"waiting{i}") for i in range(3)]
+
+    def locate(tasks, room):
+        return [{**task, profile_first.UNRESOLVED: "unknown"} for task in tasks[:room]], []
+
+    selected, notes = focus_budget.place(document(running + waiting), waiting, "eng", 3, 50, running, locate)
+    assert selected == [{**task, profile_first.UNRESOLVED: "unknown"} for task in waiting[:2]]
+    assert notes == []
+
+
 def test_unfocused_tasks_keep_their_existing_rank_order():
     from scripts.swarm import focus_budget
 
