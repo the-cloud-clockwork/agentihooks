@@ -822,6 +822,17 @@ def test_a_running_pump_resubmits_after_its_own_timeout_without_a_restart(rig, r
     assert rig.record().state == CONNECTED
 
 
+def test_settling_passes_over_receipts_that_are_not_unknown(rig, recovery_deadline):
+    rig.server.silent.add("turn/start")
+    item = rig.store.send("alice", ME, "behind")
+    assert rig.run(1) == codex.STOPPED
+    [unknown] = deliveries(rig, item.id)
+    settled = replace(unknown, id="settled-one", state="rejected")
+    rig.pump._settle([settled, unknown], {"turns": []})
+    assert Receipts(rig.store).get(unknown.id).state == "rejected"
+    assert Receipts(rig.store).get(unknown.id).reason == codex.UNSENT
+
+
 def test_an_unknown_delivery_the_thread_shows_is_accepted_without_a_second_turn(rig, recovery_deadline):
     rig.server.dropped.add("turn/start")
     item = rig.store.send("alice", ME, "arrived")
