@@ -574,6 +574,9 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
     namespace = {"__name__": "scripts.sample"}
     exec(compile(generated, "<sample>", "exec"), namespace)
     shape = namespace["Shape"]
+    copies = generated.split("def xǁShapeǁdouble__mutmut_")
+    assert len(copies) > 2
+    assert all(chunk.rstrip().endswith("@staticmethod") for chunk in copies[:-1])
 
     def measure():
         return shape(3).area, shape(3).perimeter, shape.double(3), shape.unit().side, shape(3).twice
