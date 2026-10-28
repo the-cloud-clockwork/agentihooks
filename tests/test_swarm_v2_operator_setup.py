@@ -1322,7 +1322,7 @@ def test_the_scheduled_setup_never_takes_openbao_settings_from_the_runner_shell(
 def test_a_refused_setup_before_the_hive_transport_alerts_the_swarms_of_the_machine_redis(tmp_path, monkeypatch):
     ledger, made = Ledger(), alarm_store(["hive-a", "hive-b"])
     monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
-    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.state.redis)
+    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.redis)
     monkeypatch.setattr("scripts.swarm.store.redis_client", operator_setup.redis_client)
     message = f"operator terminal setup refused: {MISSING_BAO}"
 
@@ -1371,7 +1371,7 @@ def test_a_hive_transport_failing_at_the_socket_falls_back_to_the_machine_redis(
     ledger, made = Ledger(), alarm_store(["hive-a"])
     monkeypatch.setattr(publications, "connect", broken)
     monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
-    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.state.redis)
+    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.redis)
     monkeypatch.setattr("scripts.swarm.store.redis_client", operator_setup.redis_client)
 
     assert run_main(["setup"], {}, Who(), tmp_path / "home")[0] == 1
