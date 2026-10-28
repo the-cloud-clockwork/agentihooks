@@ -53,13 +53,16 @@ FLUSH = """() => {
 FLUSHED = "() => window.__flushed"
 CAPTURE = """() => {
   const body = document.body.cloneNode(true);
+  const removed = window.__removed || [];
+  const kept = (el) => !removed.some((selector) => el.closest(selector));
   for (const s of body.querySelectorAll("script")) s.remove();
+  for (const selector of removed) for (const el of body.querySelectorAll(selector)) el.remove();
   for (const el of body.querySelectorAll('[class=""]')) el.removeAttribute("class");
   const storage = {};
   for (let i = 0; i < localStorage.length; i++) storage[localStorage.key(i)] = localStorage.getItem(localStorage.key(i));
-  const fields = [...document.querySelectorAll("input, textarea, select")].map((el) =>
+  const fields = [...document.querySelectorAll("input, textarea, select")].filter(kept).map((el) =>
     [el.id || el.dataset.focus || el.getAttribute("aria-label") || el.tagName, el.value, !!el.checked, !!el.disabled]);
-  const boxes = [...document.querySelectorAll("[id]")].filter((el) => el.tagName !== "SCRIPT").map((el) => {
+  const boxes = [...document.querySelectorAll("[id]")].filter((el) => el.tagName !== "SCRIPT" && kept(el)).map((el) => {
     const r = el.getBoundingClientRect();
     return [el.id, Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)];
   });
@@ -170,6 +173,49 @@ def settle(page, ms=0):
             return
         before = now
     raise TimeoutError("the page kept changing on each clock tick")
+
+
+def load_contract(path: Path) -> tuple[str, ...]:
+    contract = json.loads(path.read_text())
+    removed = contract.get("removed") if isinstance(contract, dict) else None
+    reviewers = contract.get("reviewed_by") if isinstance(contract, dict) else None
+    entries_ok = (
+        isinstance(removed, list)
+        and removed
+        and all(
+            isinstance(entry, dict)
+            and set(entry) == {"selector", "order"}
+            and all(isinstance(entry[key], str) and entry[key].strip() for key in entry)
+            for entry in removed
+        )
+    )
+    reviewers_ok = isinstance(reviewers, list) and reviewers and all(isinstance(r, str) and r.strip() for r in reviewers)
+    if not isinstance(contract, dict) or set(contract) != {"removed", "reviewed_by"} or not entries_ok or not reviewers_ok:
+        raise SystemExit(
+            f"{path}: an expected page change contract holds reviewed_by, a list of reviewers, and removed, "
+            "a list of entries with a selector and the operator order that removed it"
+        )
+    selectors = tuple(entry["selector"] for entry in removed)
+    if len(set(selectors)) != len(selectors):
+        raise SystemExit(f"{path}: each removed selector is named once")
+    return selectors
+
+
+def removal(selectors) -> str:
+    hidden = json.dumps(",".join(selectors) + "{display:none !important}")
+    return f"""(() => {{
+  window.__removed = {json.dumps(list(selectors))};
+  document.addEventListener("DOMContentLoaded", () => {{
+    const style = document.createElement("style");
+    style.textContent = {hidden};
+    document.head.append(style);
+  }});
+}})();"""
+
+
+def seen(page, selectors) -> set:
+    counts = page.evaluate("(all) => all.map((s) => document.querySelectorAll(s).length)", list(selectors))
+    return {selector for selector, count in zip(selectors, counts, strict=True) if count}
 
 
 def steps():
@@ -285,10 +331,11 @@ def serve(root: Path, folder: Path, stack: ExitStack):
     return f"http://{host}/{SLUG}"
 
 
-def record(root: Path, folder: Path) -> list:
+def record(root: Path, folder: Path, removed: tuple[str, ...] = ()) -> list:
     from playwright.sync_api import sync_playwright
 
     results = []
+    shown = set()
     with ExitStack() as stack:
         url = serve(root, folder, stack)
         pw = stack.enter_context(sync_playwright())
@@ -299,6 +346,8 @@ def record(root: Path, folder: Path) -> list:
 
         api = FakeApi(ledger_server.PAGE_LIMITS, ledger_server.ports.swarm().phase_state.status)
         context.add_init_script(DETERMINISTIC)
+        if removed:
+            context.add_init_script(removal(removed))
         context.route("**/media/**", api.media)
         context.route("**/artifacts/**", api.artifact)
         context.route("**/api/**", api.handle)
@@ -312,6 +361,7 @@ def record(root: Path, folder: Path) -> list:
         for name, act in steps():
             act(page)
             settle(page)
+            shown |= seen(page, removed)
             requests, dialogs = api.take()
             results.append(
                 {
@@ -323,6 +373,9 @@ def record(root: Path, folder: Path) -> list:
                 }
             )
             errors.clear()
+    unseen = [selector for selector in removed if selector not in shown]
+    if unseen:
+        raise SystemExit(f"the expected page change names elements the base page never shows: {', '.join(unseen)}")
     return results
 
 
@@ -331,8 +384,11 @@ def main() -> None:
     parser.add_argument("root", type=Path)
     parser.add_argument("folder", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--remove", type=Path)
     args = parser.parse_args()
-    args.output.write_text(json.dumps(record(args.root.resolve(), args.folder), indent=1, ensure_ascii=False) + "\n")
+    removed = load_contract(args.remove) if args.remove else ()
+    results = record(args.root.resolve(), args.folder, removed)
+    args.output.write_text(json.dumps(results, indent=1, ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":
