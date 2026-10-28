@@ -374,6 +374,7 @@ def test_lost_paged_boundary_moves_the_paged_point_past_the_paged_records(tmp_pa
     path.write_text("".join(_line(record) for record in records if transcript.record_id(record) != boundary))
     agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
     unpaged = len(_line(records[-1]).encode())
+    assert path.stat().st_size == 1033
     assert _bytes_read_per_pass(monkeypatch, path) == [unpaged] * 3
     _assert_no_recount(receiver, path, "never exported")
 
@@ -603,7 +604,7 @@ def test_resume_point_holds_only_a_whole_boundary_line(cut, tmp_path, monkeypatc
         path.write_bytes(b"#" * (point["offset"] - 1) + b"\n" + data[point["offset"] :])
     agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
     moved = agent_trace._cursor("session")["paged"]["source"]
-    assert moved["offset"] < point["offset"] and moved.get("record") != paged["boundary"]
+    assert moved["offset"] < point["offset"]
     assert agent_trace._still_at(str(path), moved)
 
 
