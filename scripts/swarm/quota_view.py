@@ -56,7 +56,7 @@ def scaling_line(decision: dict, counts: dict[str, int], scaling: str) -> str:
     line = f"scaling {scaling}, live of ceiling {lanes}"
     if seats:
         line += f", free quota seats claude {seats['claude']} and codex {seats['codex']}"
-    return line + (f", because {scaled['reason'].rstrip('.')}" if scaled else "")
+    return line + (f", because {scaled['reason'].removesuffix('.')}" if scaled else "")
 
 
 def lines(decision: dict, now_ms: int, counts: dict[str, int], scaling: str) -> list[str]:

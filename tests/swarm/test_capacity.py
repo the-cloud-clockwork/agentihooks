@@ -781,10 +781,11 @@ def test_status_command_prints_the_capacity_reason(monkeypatch, capsys):
     )
     monkeypatch.setattr(cli, "now_ms", lambda: 3 * 60_000)
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    out = capsys.readouterr().out.splitlines()
     assert (
-        "quota capacity eng 0 of 2, ci 0 of 1, plan 0 of 1, changed 3 minutes ago, because accounts are closed"
-        in capsys.readouterr().out.splitlines()
+        "quota capacity eng 0 of 2, ci 0 of 1, plan 0 of 1, changed 3 minutes ago, because accounts are closed" in out
     )
+    assert "scaling auto, live of ceiling eng 0 of 2, ci 0 of 1, plan 0 of 1" in out
 
 
 def test_unplaceable_first_task_does_not_block_other_ready_work(monkeypatch, tmp_path):
