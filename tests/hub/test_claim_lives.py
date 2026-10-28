@@ -4,7 +4,8 @@ from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hub import claims, registry
-from tests.hub.test_admission import SLUG, ask, rig as rig
+from tests.hub.test_admission import SLUG, ask
+from tests.hub.test_admission import rig as rig
 
 
 def started(admitted):
@@ -56,7 +57,7 @@ def test_failed_launches_and_events_without_spoke_claims_spend_no_life(rig):
 def test_default_hub_registers_the_started_life_counter():
     bus = open_bus(BusConfig())
     try:
-        reactor = registry.configured(bus).get("claim-lives")
+        reactor = next(item for item in registry.configured(bus) if item.name == "claim-lives")
         assert reactor.subject == "swarm.*.execution.started"
         assert reactor.singleton
     finally:
