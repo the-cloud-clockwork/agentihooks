@@ -670,6 +670,10 @@ def test_cached_static_and_class_method_bodies_keep_their_binding_when_mutated(m
         "    @functools.lru_cache(maxsize=2)\n"
         "    def tripled(cls, value):\n"
         "        return value * 3\n"
+        "    @classmethod\n"
+        "    @functools.lru_cache(4)\n"
+        "    def quadrupled(cls, value):\n"
+        "        return value * 4\n"
     )
     for line in (6, 10):
         found, ungraded = mutation_counts("scripts/sample.py", source, {line})
@@ -677,6 +681,7 @@ def test_cached_static_and_class_method_bodies_keep_their_binding_when_mutated(m
         assert ungraded == []
     generated, names = selected_mutants("scripts/sample.py", source, {6, 10})
     assert {name.split("__mutmut_")[0] for name in names} == {"xǁBoxǁdoubled", "xǁBoxǁtripled"}
+    assert generated.count("is_classmethod=True") == 1
     for copy, binding in (("doubled", "@staticmethod"), ("tripled", "@classmethod")):
         chunks = generated.split(f"def xǁBoxǁ{copy}__mutmut_")
         assert len(chunks) > 2
@@ -686,13 +691,13 @@ def test_cached_static_and_class_method_bodies_keep_their_binding_when_mutated(m
         namespace = {"__name__": "scripts.sample"}
         exec(compile(generated, "<sample>", "exec"), namespace)
         box = namespace["Box"]
-        return box.doubled(3), box().doubled(3), box.tripled(3), box().tripled(3)
+        return box.doubled(3), box().doubled(3), box.tripled(3), box().tripled(3), box.quadrupled(3)
 
     monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
-    assert measure() == (6, 6, 9, 9)
+    assert measure() == (6, 6, 9, 9, 12)
     for name in names:
         monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
-        assert measure() != (6, 6, 9, 9)
+        assert measure() != (6, 6, 9, 9, 12)
 
 
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
