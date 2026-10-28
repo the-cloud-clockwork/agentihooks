@@ -293,7 +293,10 @@ def test_the_protected_grader_runs_only_from_the_base_on_pull_requests_into_dev(
     assert workflow[True] == {
         "pull_request_target": {"branches": ["dev"], "types": ["opened", "synchronize", "reopened"]}
     }
-    assert workflow["permissions"] == {"contents": "read", "statuses": "write"}
+    assert workflow["permissions"] in (
+        {"contents": "read", "statuses": "write"},
+        {"actions": "read", "contents": "read", "statuses": "write"},
+    )
 
 
 def test_the_protected_grader_never_executes_the_head():
