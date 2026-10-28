@@ -467,6 +467,7 @@ class RedisStore:
                     executions = [a for a in self.execution_registry.occupants(slug, pipe).values() if a.name == name]
                     if expected is not None and expected.execution_id not in {a.execution_id for a in executions}:
                         return False
+                    lives = self.execution_registry.records(slug, pipe) if previous else []
                     pipe.multi()
                     if before is not None:
                         before(pipe)
@@ -477,7 +478,8 @@ class RedisStore:
                             reason = "handed off"
                         placement = {
                             field: getattr(agent, field)
-                            for agent in executions
+                            for agent in lives
+                            if (agent.name, agent.started_at) == (name, row.get("started_at"))
                             for field in ("execution_id", "hive", "runtime_backend")
                         }
                         pipe.rpush(

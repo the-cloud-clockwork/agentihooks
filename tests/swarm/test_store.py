@@ -479,7 +479,10 @@ def test_history_rows_carry_the_execution_placement_of_the_ended_life(store):
     for agent in (remote, local):
         store.put_agent("smoke", agent)
     run = replace(remote, execution_id="exe-1", generation=1, hive="h6", runtime_backend="kubernetes")
-    store.redis.hset(store.key("smoke", "executions"), run.execution_id, json.dumps(asdict(run)))
+    earlier = replace(run, execution_id="exe-0", started_at=2, hive="h8")
+    successor = replace(run, name="ci@next", execution_id="exe-2", generation=2, started_at=8, hive="h9")
+    for key, life in (("executions", run), ("executions-archive", earlier), ("executions", successor)):
+        store.redis.hset(store.key("smoke", key), life.execution_id, json.dumps(asdict(life)))
     store.drop_agent("smoke", remote.name, at=9)
     store.drop_agent("smoke", local.name, at=10)
     rows = {row["name"]: row for row in map(json.loads, store.redis.lrange(store.key("smoke", "history"), 0, -1))}
