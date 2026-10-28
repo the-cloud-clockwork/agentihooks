@@ -43,11 +43,12 @@ def test_promotion_template_does_not_hold_green_push_behind_red_run():
     assert "concurrency" not in workflow["jobs"]["checks"]
 
 
+@pytest.mark.parametrize("release_kind", ["recorded", "linear", "unrecorded"])
 @pytest.mark.parametrize(
     ("order", "allowed"),
     [("behind", False), ("identical", False), ("ahead", True), ("diverged", False)],
 )
-def test_promotion_template_refuses_superseded_head(tmp_path, monkeypatch, order, allowed):
+def test_promotion_template_refuses_superseded_head(tmp_path, monkeypatch, order, allowed, release_kind):
     import os
     import subprocess
     import sys
@@ -69,8 +70,12 @@ def test_promotion_template_refuses_superseded_head(tmp_path, monkeypatch, order
     promoted = git("rev-parse", "HEAD")
     git("commit", "--allow-empty", "-m", "Newer graded head")
     newer = git("rev-parse", "HEAD")
-    git("checkout", "-b", "main", initial)
-    git("commit", "--allow-empty", "-m", f"Release\n\nGraded dev revision: {promoted}")
+    git("checkout", "-b", "main", promoted if release_kind == "linear" else initial)
+    if release_kind != "linear":
+        message = f"Release\n\nGraded dev revision: {promoted}" if release_kind == "recorded" else "Release"
+        git("commit", "--allow-empty", "-m", message)
+    if release_kind == "unrecorded":
+        allowed = False
     main = git("rev-parse", "HEAD")
     git("remote", "add", "origin", str(repo))
     git("checkout", "--detach", initial)
@@ -119,6 +124,8 @@ def test_promotion_template_refuses_superseded_head(tmp_path, monkeypatch, order
     assert git("rev-parse", "main") == main
     if not allowed:
         assert "not newer than the released dev revision" in result.stderr
+    if release_kind == "unrecorded":
+        assert "establish the released Graded dev revision marker" in result.stderr
 
 
 def test_delivery_example_and_adoption_instructions():

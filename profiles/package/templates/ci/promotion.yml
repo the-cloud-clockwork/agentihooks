@@ -76,6 +76,8 @@ jobs:
           recorded = re.search(r'^Graded dev revision: ([0-9a-f]{40})$', main['commit']['message'], re.MULTILINE)
           released = recorded[1] if recorded else main['sha']
           comparison = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/compare/{released}...{graded}'], text=True))
+          if not recorded and comparison['status'] == 'diverged':
+              raise SystemExit('Graded head is not newer than the released dev revision: main lacks authoritative provenance; establish the released Graded dev revision marker before enabling promotion')
           if comparison['status'] != 'ahead':
               raise SystemExit('Graded head is not newer than the released dev revision')
           commands = yaml.safe_load(Path('delivery.yaml').read_text())['promote']
