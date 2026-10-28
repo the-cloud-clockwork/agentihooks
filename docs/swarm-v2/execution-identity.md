@@ -13,3 +13,43 @@ The preexisting local writer remains available for AgentRecord rows with default
 Rollback: stop distributed launches before reverting the writer. Keep executions and seat memory as authoritative data. Old local readers can project the preceding AgentRecord fields; current readers also accept records that lack the added fields. The isolated rollback rehearsal checks this projection and verifies export/restore preserves all three attempts. Revert code through Git; do not delete attempt records to simulate rollback.
 
 The agents hash remains a projection with the preceding record shape. New readers obtain additive identity from the executions hash in a consistent read transaction. This preserves the preceding strict dataclass decoder without requiring an old binary to understand the four added fields. Local writes watch both projection and execution history, so concurrent admission cannot be overwritten by an unadmitted legacy write.
+
+## Parallel launches in one process
+
+The swarm tick launches every engineer and CI seat of a pass at once, one thread per launch. Each launch admits its execution through `RedisStore.start_execution`, then binds its pane and updates its record. Each of these writes watches the swarm's `executions` hash and retries when another writer changes it first. A write gives up after five watched attempts (`WRITE_ATTEMPTS`).
+
+Before this change, the threads of one batch raced each other on the same hash. With six to eight launches in one pass, a launch could lose all five attempts to its siblings. Its spawn then failed, the tick reopened the task, and the Doctor reported a `failed-spawn/<task>` finding.
+
+`ExecutionRegistry` now holds one lock per swarm for each history write:
+
+| Method | Store entry point | Error when five attempts are lost |
+|---|---|---|
+| `start` | `RedisStore.start_execution` | `execution history kept changing; admission was not committed` |
+| `update` | `RedisStore.put_agent` for an admitted record | `execution history kept changing; update was not committed` |
+| `set_pane` | `ExecutionRegistry.set_pane` | `execution history kept changing; pane was not committed` |
+| `put` | `RedisStore.put_agent` | `agent registry kept changing; update was not committed` |
+
+- Writes for the same swarm in one process run one at a time. A sibling launch waits for an admission in flight instead of spending its attempts against it.
+- Writes for different swarms do not wait for each other. The lock is keyed by the swarm slug.
+- The lock is reentrant. `put` on an admitted record calls `update` while it holds the lock.
+- The lock lives in process memory. A writer in another process, such as a second tick or an `agentihooks swarm` command, still meets the watched transaction and its five attempts. The error can still appear when another process writes the same swarm's history that often.
+
+Nothing is configured: the lock applies to every swarm and every launch path that writes through `ExecutionRegistry`.
+
+### Reading a failed spawn
+
+A launch that still runs out of attempts appears in the tick journal as:
+
+```text
+<slug>: spawn failed for <task id>, task <task id> reopened: execution history kept changing; admission was not committed
+```
+
+```bash
+# Spawn failures from execution history contention in the last day
+journalctl --user -t agentihooks-swarm --since "1 day ago" \
+  | grep "spawn failed for" | grep "execution history kept changing"
+```
+
+After this change, a line like this means a writer outside the tick process changed the history during the launch. Look for a writer in another process before the failure time; the tick's own parallel launches no longer cause it. The reopened task launches again on a later pass. Never edit the `executions` hash by hand to clear a failure.
+
+The tests in `tests/swarm/test_execution_concurrency.py` cover this behavior. They check that a sibling admission, update and pane write wait for an admission in flight, that another swarm writes during it, and that each of the four writes holds the lock of its own swarm.
