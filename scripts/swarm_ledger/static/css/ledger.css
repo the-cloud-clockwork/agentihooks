@@ -500,6 +500,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-alert-count { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--destructive); }
 .sw-alert-count::before { content: ""; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 8px solid currentColor; }
 .sw-alert-kinds { letter-spacing: .06em; color: var(--warn); }
+.sw-alert-stale { display: flex; flex-wrap: wrap; gap: var(--space-tight) var(--space-row); color: var(--text); }
 .sw-live { display: flex; gap: var(--space-row); margin-left: auto; color: var(--text); }
 .sw-capacity { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: var(--space-tight) var(--space-row); }
 .sw-caps { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-row); }
