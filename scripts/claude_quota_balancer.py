@@ -38,7 +38,7 @@ NOT_APPLICABLE = "n/a"
 MASTERS_ONLY = "MASTERS"
 REVOKED = "revoked"
 REVOKED_ERROR = "the provider revoked or rejects this token"
-AUTH_REJECTED = frozenset({401, 403})
+AUTH_REJECTED = frozenset({401})
 
 
 @dataclass(frozen=True)

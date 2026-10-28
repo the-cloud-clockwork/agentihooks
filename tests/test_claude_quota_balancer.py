@@ -266,13 +266,12 @@ def _revoked_stream(status: int) -> str:
     return "\n".join(json.dumps(event) for event in events)
 
 
-@pytest.mark.parametrize("status", [401, 403])
 @pytest.mark.parametrize("returncode", [0, 1])
-def test_the_cli_probe_reads_a_revoked_token_as_revoked(monkeypatch, status, returncode):
+def test_the_cli_probe_reads_a_revoked_token_as_revoked(monkeypatch, returncode):
     monkeypatch.setattr(
         balancer.subprocess,
         "run",
-        lambda command, **kwargs: subprocess.CompletedProcess(command, returncode, _revoked_stream(status), ""),
+        lambda command, **kwargs: subprocess.CompletedProcess(command, returncode, _revoked_stream(401), ""),
     )
     credential = balancer.Credential("AH_CC_TOKEN_A", "tok-a")
     found = balancer.probe_credential(credential, "fable", 60, {}, include_fable=True)
@@ -291,12 +290,13 @@ def test_the_cli_probe_reads_a_revoked_token_as_revoked(monkeypatch, status, ret
         "",
         "not json\n[1, 2]",
         json.dumps({"type": "result", "api_error_status": 500}),
+        json.dumps({"type": "result", "api_error_status": 403}),
         json.dumps({"type": "system", "error_status": 401}),
     ],
 )
-def test_only_a_401_or_403_api_error_reads_as_rejected(output):
+def test_only_a_401_api_error_reads_as_rejected(output):
     assert not balancer.auth_rejected(output)
-    assert balancer.auth_rejected(output + "\n" + json.dumps({"api_error_status": 403}))
+    assert balancer.auth_rejected(output + "\n" + json.dumps({"api_error_status": 401}))
 
 
 def test_corrupt_cache_is_replaced(monkeypatch, tmp_path):

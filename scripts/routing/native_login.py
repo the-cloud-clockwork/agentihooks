@@ -13,7 +13,6 @@ STATUS_LINE = re.compile(r"Login method: Claude(?: \w+)? account")
 PROOF = {"command": "claude auth status --text", "status": STATUS}
 EXPIRED = "native Claude login is expired or missing; renew the native Claude login"
 UNAVAILABLE = "native Claude login could not be checked"
-REVOKED = "native Claude login was revoked or rejected by the provider; renew the native Claude login"
 PROBE_TIMEOUT_S = 60
 PROOF_NAME = "interactive-claude-status.json"
 

@@ -521,7 +521,7 @@ def record(row: Account) -> dict:
     dropped |= {"unreserved_cap"}
     dropped |= set() if row.reserved else {"reserved"}
     dropped |= set() if row.observed_at is not None else {"observed_at"}
-    dropped |= set() if row.revoked else {"revoked"}
+    dropped |= {"revoked"}
     return {key: value for key, value in row.__dict__.items() if key not in dropped}
 
 
@@ -589,7 +589,14 @@ def calculate(
         "accounts": [record(row) for row in observations],
         "allocation": allocation,
         "placements": placements,
+        **_revoked(observations),
     }
+
+
+def _revoked(observations: list[Account]) -> dict:
+    """Revoked accounts sit beside the rows, so a reader on an older release still builds every stored row."""
+    revoked = [[row.harness, row.name] for row in observations if row.revoked]
+    return {"revoked": revoked} if revoked else {}
 
 
 def read(store, slug: str) -> dict:

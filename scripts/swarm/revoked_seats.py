@@ -3,6 +3,7 @@ one at once and hands its seat on with a runtime handoff; the successor routes t
 
 from scripts.handoff import transfers
 from scripts.swarm import capacity, master_stall
+from scripts.swarm.store import AgentRecord, RedisStore
 
 REASON = "revoked"
 CAUSE = "the provider revoked the token of {harness} account {account}"
@@ -49,26 +50,25 @@ Re-read the ledger and the master inbox, then continue as master.
 """
 
 
-def accounts(store, slug: str) -> set[tuple[str, str]]:
-    rows = capacity.read(store, slug).get("accounts", [])
-    return {(row["harness"], row["name"]) for row in rows if row.get("revoked")}
+def accounts(store: RedisStore, slug: str) -> set[tuple[str, str]]:
+    return {(harness, name) for harness, name in capacity.read(store, slug).get("revoked", [])}
 
 
-def on_revoked(store, slug: str, agent) -> bool:
+def on_revoked(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
     return bool(agent.account) and (agent.harness, agent.account) in accounts(store, slug)
 
 
-def _cause(agent) -> str:
+def _cause(agent: AgentRecord) -> str:
     return CAUSE.format(harness=agent.harness, account=agent.account)
 
 
-def worker_handoff(store, slug: str, agent, now_ms: int) -> dict:
+def worker_handoff(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> dict:
     text = store.handoff(slug, agent.task) or WORKER.format(
         task=agent.task, cause=_cause(agent), account=agent.account, name=agent.name
     )
     return transfers.record(store, slug, agent, REASON, text, now_ms)
 
 
-def recycle_master(slug: str, store, ledger, agent, now_ms: int) -> None:
+def recycle_master(slug: str, store: RedisStore, ledger, agent: AgentRecord, now_ms: int) -> None:
     text = MASTER.format(slug=slug, cause=_cause(agent), account=agent.account, name=agent.name)
     master_stall.recycle(slug, store, ledger, agent, text, now_ms, REASON)

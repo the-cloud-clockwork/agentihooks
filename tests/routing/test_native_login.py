@@ -51,12 +51,11 @@ def test_status_is_redacted_and_uses_native_environment(monkeypatch, binary):
     )
 
 
-@pytest.mark.parametrize("status", [401, 403])
 @pytest.mark.parametrize("binary", ["/opt/claude", None])
-def test_a_login_the_provider_revokes_or_rejects_reads_as_rejected(monkeypatch, status, binary):
+def test_a_login_the_provider_revokes_or_rejects_reads_as_rejected(monkeypatch, binary):
     monkeypatch.setattr(native_login.shutil, "which", Mock(side_effect={"claude": binary}.get))
     source = {"HOME": "/native", "CLAUDE_CODE_OAUTH_TOKEN": "sentinel"}
-    answer = json.dumps({"type": "result", "is_error": True, "api_error_status": status})
+    answer = json.dumps({"type": "result", "is_error": True, "api_error_status": 401})
     run = Mock(return_value=SimpleNamespace(returncode=1, stdout=answer))
     assert REJECTED(source, "master", run) is True
     run.assert_called_once_with(
@@ -66,8 +65,6 @@ def test_a_login_the_provider_revokes_or_rejects_reads_as_rejected(monkeypatch, 
         text=True,
         timeout=native_login.PROBE_TIMEOUT_S,
     )
-    assert native_login.PROBE_TIMEOUT_S == 60
-    assert "revoked or rejected by the provider" in native_login.REVOKED
 
 
 @pytest.mark.parametrize(

@@ -25,11 +25,11 @@ def revoke(store, *accounts, harness="claude", flag=True):
             "five_left": None,
             "week_left": None,
             "cap": 0,
-            **({"revoked": True} if flag else {}),
         }
         for name in accounts
     ]
-    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"accounts": rows}))
+    revoked = [[harness, name] for name in accounts] if flag else []
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"accounts": rows, "revoked": revoked}))
 
 
 def test_the_revoked_accounts_are_read_from_the_capacity_rows(store):
