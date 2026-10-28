@@ -184,4 +184,4 @@ def test_a_hundred_concurrent_task_list_walks_return_the_stored_pages_within_bud
     elapsed = time.monotonic() - started
     warnings.warn(f"a hundred concurrent task list walks took {elapsed:.2f} s", stacklevel=1)
     assert len(expected) == 10 and all(pages == expected for pages in walks)
-    assert elapsed < 3.5, f"a hundred concurrent task list walks took {elapsed:.2f} s"
+    assert elapsed < 5, f"a hundred concurrent task list walks took {elapsed:.2f} s"

@@ -449,7 +449,6 @@ class SQLiteLedgerRepository:
         return path, connection
 
     def _reader(self):
-        """This thread's read connection, kept open so the reads of one request thread share one connection."""
         held = getattr(self._readers, "held", None)
         if held is None or held[0] != self.path:
             held = self._readers.held = self._open()
