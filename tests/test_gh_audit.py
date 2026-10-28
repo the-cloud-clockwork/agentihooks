@@ -13,7 +13,7 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def charged(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
-    for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR"):
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "AGENTIHOOKS_AGENT_NAME"):
         monkeypatch.delenv(name, raising=False)
 
     def rows():
@@ -68,17 +68,39 @@ def test_agent_shell_charges_each_rest_command_in_a_pipeline(charged):
     ]
 
 
+def test_agent_shell_charges_loops_and_nested_shells_to_the_named_agent(charged, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "ci@1-2")
+    command = "for n in 1 2; do gh api repos/a/b/runs/$n; done; bash -c 'gh label list'; echo x | xargs gh run view"
+    gh_audit.charge_command("Bash", {"command": command})
+    assert charged() == [
+        ("agent.ci@1-2", "repos/a/b/runs/$n"),
+        ("agent.ci@1-2", "gh label list"),
+        ("agent.ci@1-2", "gh run view"),
+    ]
+
+
 def test_process_requests_charge_their_named_caller_or_the_process(charged, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["/x/agentihooks", "swarm", "tick"])
     monkeypatch.setitem(sys.modules, "__main__", type(sys)("__main__"))
     gh_audit.audit("subprocess.Popen", ("gh", ["gh", "api", "repos/a/b/commits/1"], None, None))
     with github_reads.calling("swarm.head"):
         gh_audit.audit("subprocess.Popen", (None, ("gh", "run", "list"), None, None))
+    gh_audit.audit(
+        "subprocess.Popen", ("/bin/sh", ["/bin/sh", "-c", "gh api repos/a/b/tags && gh pr view"], None, None)
+    )
+    gh_audit.audit("os.exec", ("/usr/bin/gh", ["gh", "run", "watch", "4"], {}))
+    gh_audit.audit("os.posix_spawn", ("/usr/bin/gh", ["gh", "workflow", "list"], {}))
     gh_audit.audit("subprocess.Popen", ("gh", "gh api repos/a/b", None, None))
     gh_audit.audit("open", ("gh", ["gh", "api", "repos/a/b"], None, None))
     with gh_audit.uncharged():
         gh_audit.audit("subprocess.Popen", ("gh", ["gh", "api", "repos/a/b/commits/2"], None, None))
-    assert charged() == [("proc.agentihooks.swarm", "repos/a/b/commits/1"), ("swarm.head", "gh run list")]
+    assert charged() == [
+        ("proc.agentihooks.swarm", "repos/a/b/commits/1"),
+        ("swarm.head", "gh run list"),
+        ("proc.agentihooks.swarm", "repos/a/b/tags"),
+        ("proc.agentihooks.swarm", "gh run watch"),
+        ("proc.agentihooks.swarm", "gh workflow list"),
+    ]
 
 
 def test_process_caller_prefers_the_main_module(monkeypatch):

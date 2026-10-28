@@ -3,6 +3,7 @@
 GraphQL commands are left out: they draw on a separate limit from the core one the sampler measures.
 """
 
+import os
 import re
 import shlex
 import sys
@@ -11,11 +12,13 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
-REST_GROUPS = frozenset({"cache", "release", "run", "secret", "variable", "workflow"})
+REST_GROUPS = frozenset({"cache", "label", "release", "ruleset", "run", "secret", "variable", "workflow"})
 REST_PULL = frozenset({"diff"})
 UNCHARGED = ContextVar("gh_uncharged", default=False)
 SEPARATORS = frozenset("|&;()")
-WRAPPERS = frozenset({"command", "env", "exec", "nice", "sudo", "time", "timeout"})
+WRAPPERS = frozenset({"command", "do", "else", "env", "exec", "nice", "sudo", "then", "time", "timeout", "xargs"})
+SHELLS = frozenset({"bash", "sh", "zsh"})
+SPAWNS = frozenset({"os.exec", "os.posix_spawn", "subprocess.Popen"})
 PREFIX = re.compile(r"^(?:[A-Za-z_]\w*=.*|-.*|\d+[smhd]?)$")
 FREE = frozenset({"graphql", "rate_limit"})
 VALUED = frozenset(
@@ -70,14 +73,24 @@ def uncharged():
         UNCHARGED.reset(token)
 
 
+def endpoints(argv) -> list[str]:
+    words = [str(word) for word in argv]
+    if len(words) > 2 and Path(words[0]).name in SHELLS and words[1] == "-c":
+        return [path for command in commands(words[2]) for path in endpoints(command)]
+    path = endpoint(words)
+    return [path] if path else []
+
+
 def audit(event: str, args: tuple) -> None:
-    if event != "subprocess.Popen" or UNCHARGED.get():
+    if event not in SPAWNS or UNCHARGED.get():
         return
-    path = endpoint(args[1] if isinstance(args[1], list | tuple) else [args[0] or ""])
-    if path:
+    paths = endpoints(args[1] if isinstance(args[1], list | tuple) else [args[0] or ""])
+    if paths:
         from scripts.swarm import github_reads
 
-        charge(github_reads.CALLER.get(None) or process_caller(), path)
+        caller = github_reads.CALLER.get(None) or process_caller()
+        for path in paths:
+            charge(caller, path)
 
 
 def commands(text: str) -> list[list[str]]:
@@ -100,10 +113,10 @@ def commands(text: str) -> list[list[str]]:
 def charge_command(tool_name: str, tool_input) -> None:
     if tool_name != "Bash" or not isinstance(tool_input, dict):
         return
+    caller = f"agent.{os.environ.get('AGENTIHOOKS_AGENT_NAME') or 'bash'}"
     for command in commands(str(tool_input.get("command") or "")):
-        path = endpoint(command)
-        if path:
-            charge("agent.bash", path)
+        for path in endpoints(command):
+            charge(caller, path)
 
 
 def install() -> None:
