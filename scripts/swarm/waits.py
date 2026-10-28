@@ -204,7 +204,9 @@ def resolution(held, rows, inbox, github, reread, fresh, verdicts=None):
 
 
 def end_pass(store, slug, rows, inbox, github, now_ms, reread):
-    ended, verdicts = [], Verdicts(slug, intent.NAME)
+    from scripts.swarm import pr_wait
+
+    ended, verdicts = pr_wait.enforce_pass(store, slug, rows, github, now_ms), Verdicts(slug, intent.NAME)
     for agent in store.agents(slug):
         held = idle.wait(store.redis, slug, agent.name)
         if agent.state == "finished" or not (held and held.get("on")):

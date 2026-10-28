@@ -191,7 +191,10 @@ def test_an_agent_that_never_runs_swarm_wait_is_woken_on_merge(store):
     inbox = InboxStore(store.redis)
     rows = {"t1": {"id": "t1", "pr_url": URL}}
     assert swarm_heartbeat.outcome(shell("git push -u origin HEAD"), ENV, store.redis, 100) is True
-    enforce(store, rows, {URL: QUEUED})
+    queued = {URL: QUEUED}
+    assert waits.end_pass(store, "sw", rows, inbox, queued.get, 5_000, queued.get) == [
+        f"set the wait of {ME} on merge of {URL} from its push"
+    ]
     assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "merge", "target": URL}
     pulls = {URL: MERGED}
     assert waits.end_pass(store, "sw", rows, inbox, pulls.get, 6_000, pulls.get) == [
