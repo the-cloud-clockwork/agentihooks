@@ -130,6 +130,7 @@ def test_the_start_pass_reads_nothing_the_database_already_holds(monkeypatch):
     read = []
     monkeypatch.setattr(type(ledger_artifacts.media.folder("start-held")), "read_bytes", lambda path: read.append(path))
     monkeypatch.setattr(media_files, "load", lambda slug, media_id: pytest.fail(f"loaded {media_id}"))
+    monkeypatch.setattr(artifact_files, "load", lambda slug, file_id: pytest.fail(f"loaded {file_id}"))
     ledger_artifacts.adopt_disk("start-held")
     assert read == []
     assert media_files.ages("start-held") == {image_id: 5}
