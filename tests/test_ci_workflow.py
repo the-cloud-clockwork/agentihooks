@@ -296,7 +296,10 @@ def test_nats_server_archive_is_cached_on_its_pinned_release_and_checksum():
     }
     assert install["env"]["CACHE_HIT"] == "${{ steps.cache.outputs.cache-hit }}"
     assert save["uses"] == "actions/cache/save@v4"
-    assert save["if"] == "steps.pin.outputs.installed != 'true' && steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'"
+    assert (
+        save["if"]
+        == "steps.pin.outputs.installed != 'true' && steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'"
+    )
     assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.cache.outputs.cache-primary-key }}"}
 
 
