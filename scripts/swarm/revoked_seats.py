@@ -1,8 +1,9 @@
 """Agents on an account whose token the provider revoked or rejects: no turn can run there, so the tick retires each
 one at once and hands its seat on with a runtime handoff; the successor routes to an open account."""
 
+from scripts import claude_quota_balancer as balancer
 from scripts.handoff import transfers
-from scripts.swarm import capacity, master_stall
+from scripts.swarm import master_stall
 from scripts.swarm.store import AgentRecord, RedisStore
 
 REASON = "revoked"
@@ -50,12 +51,16 @@ Re-read the ledger and the master inbox, then continue as master.
 """
 
 
-def accounts(store: RedisStore, slug: str) -> set[tuple[str, str]]:
-    return {(harness, name) for harness, name in capacity.read(store, slug).get("revoked", [])}
+def accounts() -> set[tuple[str, str]]:
+    return {
+        (balancer.HARNESS, result.account)
+        for _, result in balancer.cached_observations()
+        if result.provider_status == balancer.REVOKED
+    }
 
 
-def on_revoked(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
-    return bool(agent.account) and (agent.harness, agent.account) in accounts(store, slug)
+def on_revoked(agent: AgentRecord) -> bool:
+    return bool(agent.account) and (agent.harness, agent.account) in accounts()
 
 
 def _cause(agent: AgentRecord) -> str:

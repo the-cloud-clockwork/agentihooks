@@ -780,7 +780,7 @@ def _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms):
 
 
 def _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms):
-    if revoked_seats.on_revoked(store, slug, agent):
+    if revoked_seats.on_revoked(agent):
         return _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms)
     return _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
 

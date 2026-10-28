@@ -36,7 +36,6 @@ class Account:
     reserved: str = ""
     observed_at: float | None = field(default=None, compare=False)
     unreserved_cap: int | None = None
-    revoked: bool = False
 
 
 def _left(window: balancer.QuotaWindow, now: float) -> float | None:
@@ -105,7 +104,6 @@ def _claude(environ: dict, now: float) -> list[Account]:
                 reset,
                 five_resets_at=five_reset,
                 observed_at=at,
-                revoked=result.provider_status == balancer.REVOKED,
             )
         )
     rows += [
@@ -521,7 +519,6 @@ def record(row: Account) -> dict:
     dropped |= {"unreserved_cap"}
     dropped |= set() if row.reserved else {"reserved"}
     dropped |= set() if row.observed_at is not None else {"observed_at"}
-    dropped |= {"revoked"}
     return {key: value for key, value in row.__dict__.items() if key not in dropped}
 
 
@@ -589,14 +586,7 @@ def calculate(
         "accounts": [record(row) for row in observations],
         "allocation": allocation,
         "placements": placements,
-        **_revoked(observations),
     }
-
-
-def _revoked(observations: list[Account]) -> dict:
-    """Revoked accounts sit beside the rows, so a reader on an older release still builds every stored row."""
-    revoked = [[row.harness, row.name] for row in observations if row.revoked]
-    return {"revoked": revoked} if revoked else {}
 
 
 def read(store, slug: str) -> dict:

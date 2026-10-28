@@ -1,8 +1,8 @@
-import json
 from dataclasses import replace
 
 import pytest
 
+from scripts import claude_quota_balancer as balancer
 from scripts.handoff import transfers
 from scripts.swarm import revoked_seats
 from scripts.swarm.store import MASTER
@@ -11,42 +11,35 @@ from tests.swarm.test_master_stall import START, SlugLedger, master
 from tests.swarm.test_outage_resume import three_owners
 from tests.swarm.test_outage_seat_release import executing
 from tests.swarm.test_tick import store as store
+from tests.test_claude_quota_balancer import _stream
 
 pytestmark = pytest.mark.unit
 
 
-def revoke(store, *accounts, harness="claude", flag=True):
-    rows = [
-        {
-            "harness": harness,
-            "name": name,
-            "state": "CLOSED",
-            "sessions": 1,
-            "five_left": None,
-            "week_left": None,
-            "cap": 0,
-        }
-        for name in accounts
-    ]
-    revoked = [[harness, name] for name in accounts] if flag else []
-    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"accounts": rows, "revoked": revoked}))
+def revoke(monkeypatch, *accounts, open_accounts=()):
+    readings = [(1.0, balancer.revoked_result(name, 1)) for name in accounts]
+    readings += [(1.0, balancer.parse_probe(name, _stream(0.2, 0.3), 1)) for name in open_accounts]
+    monkeypatch.setattr(balancer, "cached_observations", lambda **_: readings)
 
 
-def test_the_revoked_accounts_are_read_from_the_capacity_rows(store):
-    assert revoked_seats.accounts(store, "sw") == set()
-    revoke(store, "gone", "lost")
+def test_the_revoked_accounts_are_read_from_the_probe_cache(monkeypatch):
+    revoke(monkeypatch)
+    assert revoked_seats.accounts() == set()
+    revoke(monkeypatch, "gone", "lost", open_accounts=("open",))
+    assert revoked_seats.accounts() == {("claude", "gone"), ("claude", "lost")}
+    revoke(monkeypatch, "gone", "lost")
     assert revoked_seats.accounts(store, "sw") == {("claude", "gone"), ("claude", "lost")}
-    revoke(store, "closed", flag=False)
+    revoke(monkeypatch, "closed", flag=False)
     assert revoked_seats.accounts(store, "sw") == set()
 
 
-def test_every_worker_on_a_revoked_account_is_retired_and_its_task_reopened(store):
+def test_every_worker_on_a_revoked_account_is_retired_and_its_task_reopened(store, monkeypatch):
     ledger, runtime, agents = three_owners(store)
     gone = [executing(store, replace(agent, account="gone")) for agent in agents[:2]]
     kept = executing(store, replace(agents[2], account="gone", harness="codex"))
     runtime.statuses[kept.name] = "working"
     claims = {agent.task: store.claims("sw", agent.task) for agent in gone}
-    revoke(store, "gone")
+    revoke(monkeypatch, "gone")
     actions = tick("sw", store, ledger, runtime, 2_000)
     assert sorted(runtime.killed) == sorted(agent.name for agent in gone)
     rows = {row["predecessor"]: row for row in transfers.list_transfers(store, "sw")}
@@ -66,12 +59,12 @@ def test_every_worker_on_a_revoked_account_is_retired_and_its_task_reopened(stor
     assert set(rows) == {agent.name for agent in gone}
 
 
-def test_a_worker_that_will_not_retire_keeps_its_claim_until_the_next_tick(store):
+def test_a_worker_that_will_not_retire_keeps_its_claim_until_the_next_tick(store, monkeypatch):
     ledger, runtime, agents = three_owners(store)
     owner = executing(store, replace(agents[0], account="gone"))
     for agent in agents[1:]:
         runtime.statuses[agent.name] = "working"
-    revoke(store, "gone")
+    revoke(monkeypatch, "gone")
     runtime.stuck.add(owner.name)
     actions = tick("sw", store, ledger, runtime, 2_000)
     assert f"could not retire {owner.name} on revoked claude account gone, retrying next tick" in actions
@@ -92,17 +85,19 @@ def test_an_existing_handoff_carries_over_to_the_successor(store):
     assert (row["reason"], row["handoff"], row["at"]) == ("revoked", text, 5_000)
 
 
-def test_an_agent_without_an_account_is_never_on_a_revoked_one(store):
-    revoke(store, "")
+def test_an_agent_without_an_account_is_never_on_a_revoked_one(store, monkeypatch):
+    revoke(monkeypatch, "", "gone")
     agent, _ = master(store)
-    assert not revoked_seats.on_revoked(store, "sw", agent)
+    assert not revoked_seats.on_revoked(agent)
+    assert not revoked_seats.on_revoked(replace(agent, account="gone", harness="codex"))
+    assert revoked_seats.on_revoked(replace(agent, account="gone", harness="claude"))
 
 
-def test_a_master_on_a_revoked_account_is_recycled_in_its_seat(store):
+def test_a_master_on_a_revoked_account_is_recycled_in_its_seat(store, monkeypatch):
     agent, runtime = master(store)
     agent = replace(agent, account="gone", harness="claude")
     store.put_agent("sw", agent)
-    revoke(store, "gone")
+    revoke(monkeypatch, "gone")
     found = _watch_agent("sw", store, SlugLedger([]), runtime, {}, agent, START + 60_000)
     assert found == [f"recycled master {agent.name} in its seat: claude account gone was revoked"]
     assert [a.state for a in store.agents("sw")] == ["finished"]

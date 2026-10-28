@@ -149,20 +149,14 @@ def test_a_stale_claude_reading_gets_no_seat(monkeypatch):
     assert seen == [capacity.Account("claude", "a", "UNKNOWN", 0, 90, 100, None)]
 
 
-def test_a_revoked_claude_account_is_closed_with_no_seat_and_marked_revoked(monkeypatch):
+def test_a_revoked_claude_account_is_closed_with_no_seat(monkeypatch):
     result = balancer.revoked_result("a", 100)
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, result)])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {"a": 4})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     (row,) = capacity.accounts({"AH_CC_TOKEN_a": "fake"}, 100)
-    assert (row.state, row.cap, row.sessions, row.revoked) == ("CLOSED", 0, 4, True)
+    assert (row.state, row.cap, row.sessions) == ("CLOSED", 0, 4)
     assert capacity.free_seats(row) == 0
-    assert capacity.Account(**capacity.record(row)) == replace(row, revoked=False)
-    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
-    decision = capacity.calculate(config, [row, account("open")], [])
-    assert decision["revoked"] == [["claude", "a"]]
-    assert all("revoked" not in stored for stored in decision["accounts"])
-    assert "revoked" not in capacity.calculate(config, [account("open")], [])
 
 
 def test_a_fresh_codex_reading_with_only_the_week_gets_the_top_band(monkeypatch):
