@@ -812,11 +812,12 @@ def test_a_trace_whose_update_time_moved_is_read_again(cursors):
 def test_the_update_time_is_taken_from_the_binding_own_trace_not_a_newer_sibling(cursors):
     sibling = {**_trace("tr-new", "sid-new"), "updatedAt": "2026-10-28T17:00:00.000Z"}
     own = {**_trace("tr-own", "sid-own"), "updatedAt": "2026-10-28T17:00:00.000Z"}
-    langfuse = Langfuse([sibling, own], [{"startTime": "2026-10-28T17:00:00.000Z", "endTime": None}])
+    older = {**_trace("tr-old", "sid-old"), "updatedAt": "2026-10-28T17:00:00.000Z"}
+    langfuse = Langfuse([sibling, own, older], [{"startTime": "2026-10-28T17:00:00.000Z", "endTime": None}])
     state = {}
     registry.read("s", [{**AGENT, "conversation_id": "sid-own"}], langfuse, state, 15, 50)
     langfuse.calls.clear()
-    langfuse.traces = [sibling, {**own, "updatedAt": "2026-10-28T17:00:09.000Z"}]
+    langfuse.traces = [sibling, {**own, "updatedAt": "2026-10-28T17:00:09.000Z"}, older]
     [found], _ = registry.read("s", [{**AGENT, "conversation_id": "sid-own"}], langfuse, state, 15, 50)
     assert [p.get("traceId") for _, p in langfuse.calls] == [None, "tr-own", "tr-own"]
     assert found["remote"]["trace"] == "tr-own"
