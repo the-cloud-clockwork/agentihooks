@@ -240,14 +240,6 @@ def test_ask_model_posts_chat_completion_with_the_key_reference():
     assert seen["body"] == {"model": "sonnet", "messages": rc.prompt(_change()), "max_tokens": 400}
 
 
-@pytest.mark.parametrize(
-    ("error", "message"),
-    [
-        (HTTPError("u", 401, "no", Message(), io.BytesIO(b"secret k1")), "^sonnet: HTTP 401$"),
-        (URLError("down"), "^sonnet: URLError$"),
-        (TimeoutError(), "^sonnet: TimeoutError$"),
-    ],
-)
 def test_gateway_headers_carry_the_key_and_the_access_pair_by_name():
     env = {rc.KEY_VAR: "k", "CF_ACCESS_CLIENT_ID": "i", "CF_ACCESS_CLIENT_SECRET": "s", "OTHER": "o"}
     assert rc.gateway_headers(env) == {
@@ -257,6 +249,14 @@ def test_gateway_headers_carry_the_key_and_the_access_pair_by_name():
     }
 
 
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (HTTPError("u", 401, "no", Message(), io.BytesIO(b"secret k1")), "^sonnet: HTTP 401$"),
+        (URLError("down"), "^sonnet: URLError$"),
+        (TimeoutError(), "^sonnet: TimeoutError$"),
+    ],
+)
 def test_ask_model_reports_transport_failures_without_the_key(error, message):
     def opener(request, timeout):
         raise error
