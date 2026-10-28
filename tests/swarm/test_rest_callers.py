@@ -46,3 +46,18 @@ def test_rest_callers_charge_the_shared_log(tmp_path, monkeypatch, caller, faile
     rows = [json.loads(line) for line in (github_reads.home() / "charged.jsonl").read_text().splitlines()]
     assert [row["endpoint"] for row in rows] == [endpoint]
     assert run.call_args.kwargs["cwd"] == str(tmp_path)
+    if caller == "swarm.merge_stall":
+        assert run.call_args.kwargs["timeout"] == 20
+
+
+def test_failing_test_log_read_is_charged_to_promotion_watch(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    log = "FAILED tests/test_example.py::test_case - AssertionError\n"
+    run = Mock(return_value=subprocess.CompletedProcess([], 0, log, ""))
+    job = {
+        "id": 7,
+        "name": f"{promotion_watch.SHARD_JOB} (3.12, 1)",
+        "steps": [{"name": promotion_watch.TEST_STEP, "conclusion": "failure"}],
+    }
+    assert promotion_watch.failing_tests(str(tmp_path), job, run) == {"tests/test_example.py::test_case"}
+    assert github_reads.counts(0, float("inf")) == {"swarm.promotion_watch": 1}

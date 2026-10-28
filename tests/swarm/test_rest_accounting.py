@@ -1,9 +1,14 @@
+import json
 import subprocess
 from unittest.mock import Mock
 
 import pytest
 
 from scripts.swarm import github_reads
+
+
+def charged_endpoints():
+    return [json.loads(line)["endpoint"] for line in (github_reads.home() / "charged.jsonl").read_text().splitlines()]
 
 
 @pytest.mark.parametrize("failed", [False, True])
@@ -27,8 +32,9 @@ def test_paginated_responses_charge_each_page(tmp_path, monkeypatch, failed):
         assert observed is result
         assert observed.stdout == '{"id":1}\n{"id":2}\n'
         assert observed.stderr == "diagnostic"
-    assert "--include" in run.call_args.args[0]
+    assert run.call_args.args[0] == ["gh", *args, "--include"]
     assert github_reads.counts(0, float("inf")) == {"caller": 2}
+    assert charged_endpoints() == [endpoint, endpoint]
 
 
 @pytest.mark.parametrize(
@@ -57,7 +63,8 @@ def test_paginated_timeout_preserves_partial_bytes(tmp_path, monkeypatch, includ
     assert error.value.stdout == (output if include else b'{"id":1}\n{"id":2}\n')
     assert error.value.stderr == b"timeout"
     assert github_reads.counts(0, float("inf")) == {"caller": 2}
-    assert run.call_args.args[0].count("--include") == 1
+    assert run.call_args.args[0] == (["gh", *args] if include else ["gh", *args, "--include"])
+    assert charged_endpoints() == [args[1], args[1]]
 
 
 @pytest.mark.parametrize("body", [b'{"id":1}\n', b""])
@@ -73,3 +80,38 @@ def test_timeout_before_next_page_headers_charges_attempt(tmp_path, monkeypatch,
         github_reads.rest("caller", args, run, capture_output=True, text=True)
     assert error.value.stdout == (output if include else body)
     assert github_reads.counts(0, float("inf")) == {"caller": 2}
+    assert charged_endpoints() == [args[1], args[1]]
+
+
+def test_single_rest_request_runs_gh_once_and_charges_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    result = subprocess.CompletedProcess([], 0, "{}", "")
+    run = Mock(return_value=result)
+    args = ["api", "repos/example/project/pulls/1"]
+    assert github_reads.rest("caller", args, run, capture_output=True, text=True) is result
+    run.assert_called_once_with(["gh", *args], capture_output=True, text=True)
+    assert charged_endpoints() == [args[1]]
+
+
+@pytest.mark.parametrize("include", [False, True])
+def test_completed_pagination_keeps_a_trailing_blank_line(tmp_path, monkeypatch, include):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    output = 'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n{"id":1}\n\n'
+    run = Mock(return_value=subprocess.CompletedProcess([], 0, output, ""))
+    args = ["api", "repos/example/project/actions/jobs", "--paginate"]
+    if include:
+        args.append("--include")
+    observed = github_reads.rest("caller", args, run, capture_output=True, text=True)
+    assert observed.stdout == (output if include else '{"id":1}\n\n')
+    assert charged_endpoints() == [args[1]]
+
+
+def test_failed_text_pagination_charges_the_pending_page(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    output = 'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n{"id":1}\n\n'
+    run = Mock(side_effect=subprocess.CalledProcessError(1, [], output=output))
+    args = ["api", "repos/example/project/actions/jobs", "--paginate"]
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        github_reads.rest("caller", args, run, capture_output=True, text=True)
+    assert error.value.stdout == '{"id":1}\n'
+    assert charged_endpoints() == [args[1], args[1]]
