@@ -47,6 +47,40 @@ def ask(**fields):
     return {"hive": "hive-a", "task": "t1", "lane": "eng", "generation": 0, **fields}
 
 
+@pytest.mark.parametrize("lives", [3, 4])
+def test_events_admission_blocks_spent_claim_lives_before_creating_an_execution(rig, lives):
+    from scripts.gates.claims import refusal
+
+    rig.ledger.comments = []
+    rig.ledger.comment = lambda *args, **kwargs: rig.ledger.comments.append((args, kwargs))
+    for _ in range(lives):
+        rig.store.count_claim(SLUG, "t1")
+    rig.store.put_handoff(SLUG, "t1", "handoff", envelope={"reason": "recycle"})
+
+    assert rig.admitter.admit(SLUG, ask()) is None
+
+    assert rig.rows["t1"]["state"] == "blocked"
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert rig.store.claims(SLUG, "t1") == 0
+    assert rig.ledger.comments == [
+        ((SLUG, "t1", refusal(lives, "recycle", "none", SLUG, "t1")), {"by": "swarm"})
+    ]
+
+
+@pytest.mark.parametrize("lives, mode", [(2, "enforce"), (3, "observe"), (3, "off")])
+def test_events_admission_preserves_the_third_life_and_nonblocking_gate_modes(rig, lives, mode):
+    rig.store.update(SLUG, gates={"claims": mode})
+    for _ in range(lives):
+        rig.store.count_claim(SLUG, "t1")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert rig.rows["t1"]["state"] == "claimed"
+    assert rig.store.claims(SLUG, "t1") == lives
+
+
 def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_claimed(rig):
     admitted = rig.admitter.admit(SLUG, ask())
 
