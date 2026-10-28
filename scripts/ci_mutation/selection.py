@@ -19,6 +19,7 @@ from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.line_tests import merged_test_selections
 from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
+from scripts.ci_mutation.probe import probe_results
 from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.scope import selects, test_file
 from scripts.ci_mutation.stats import write_part
@@ -567,6 +568,9 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     changes = json.loads(selection.read_text())
     tests_by_prefix = {get_mutant_name(Path(path), ""): set(change["tests"]) for path, change in changes.items()}
     related = set()
+    early, _ = (
+        probe_results(json.loads(Path("shard-plan.json").read_text())) if Path("shard-plan.json").is_file() else ({}, 0)
+    )
 
     def write_selected(*, out, source, filename):
         code, names = selected_mutants(str(filename), source, set(changes[str(filename)]["lines"]))
@@ -615,6 +619,8 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     run_tests = runner.PytestRunner.run_tests
 
     def run_related_tests(self, *, mutant_name, tests):
+        if mutant_name is not None and early.get(mutant_name) == "killed":
+            return 1
         if mutant_name is None and not tests and related:
             # The stats shards already passed every selected test, which is all mutmut's clean run repeats.
             if not os.environ.get("MUTANT_UNDER_TEST"):

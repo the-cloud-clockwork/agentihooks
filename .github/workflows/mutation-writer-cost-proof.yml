@@ -2,6 +2,11 @@ name: Writer mutation cost proof
 
 on:
   workflow_dispatch:
+    inputs:
+      stats_run:
+        description: Completed statistics run for the identical preserved sample, or blank to collect fresh
+        type: string
+        default: ''
   push:
     branches: [ci-323133-3205]
     paths:
@@ -30,6 +35,7 @@ env:
 
 jobs:
   stats:
+    if: inputs.stats_run == ''
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     strategy:
@@ -77,8 +83,9 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
-  mutation:
+  probe:
     needs: stats
+    if: ${{ !cancelled() && (needs.stats.result == 'success' || needs.stats.result == 'skipped') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     strategy:
@@ -118,9 +125,75 @@ jobs:
       - uses: ./candidate/.github/actions/browser-cache
       - uses: actions/download-artifact@v4
         with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.stats_run || github.run_id }}
           pattern: writer-stats-*
           path: sample/.mutation-stats/
           merge-multiple: true
+      - name: Run each early mutation test group once
+        run: python -m scripts.ci_mutation.probe --bases bf34c36d6192679442454b4a8e73118e6641b35d --budget 1080 --stats .mutation-stats --shard ${{ matrix.shard }} --shards 10
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: writer-probe-${{ matrix.shard }}
+          path: sample/.mutation-stats/probe-${{ matrix.shard }}.json
+          include-hidden-files: true
+          if-no-files-found: error
+
+  mutation:
+    needs: [stats, probe]
+    if: ${{ !cancelled() && needs.probe.result == 'success' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
+    timeout-minutes: 26
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+      - uses: actions/checkout@v4
+        with:
+          ref: 859b8526d233e56ec95946bd9d17a192e2e4b57e
+          fetch-depth: 0
+          path: sample
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          enable-cache: false
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 40666320874
+          name: mutation-preflight-shard-0
+          path: baseline
+      - name: Install the sample dependencies with current pins
+        run: uv pip install --system --constraint ../candidate/.github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
+      - name: Apply only the candidate mutation engine
+        run: |
+          cp -a ../candidate/scripts/ci_mutation/. scripts/ci_mutation/
+          cp ../candidate/tests/writer_mutation_cost_proof.py tests/writer_mutation_cost_proof.py
+          python -m tests.writer_mutation_cost_proof prepare ../baseline
+      - uses: ./candidate/.github/actions/nats-server
+      - uses: ./candidate/.github/actions/browser-cache
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.stats_run || github.run_id }}
+          pattern: writer-stats-*
+          path: sample/.mutation-stats/
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: writer-probe-*
+          path: sample/.mutation-stats/
+          merge-multiple: true
+      - name: Validate every early result and charge its elapsed time
+        run: python -m scripts.ci_mutation.probe --stats .mutation-stats --merge
       - name: Grade the same mutants within the original shard budget
         run: python -m scripts.ci_mutation --base bf34c36d6192679442454b4a8e73118e6641b35d --budget 1080 --stats .mutation-stats --shard ${{ matrix.shard }} --shards 10
       - uses: actions/upload-artifact@v4

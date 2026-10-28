@@ -13,6 +13,7 @@ import tomlkit
 
 from scripts.ci_mutation.clearances import load_clearances
 from scripts.ci_mutation.mutant_shards import holds, split_names, unit_cost
+from scripts.ci_mutation.probe import probe_results
 from scripts.ci_mutation.report import evaluate, survivor_text
 from scripts.ci_mutation.scope import select_tests
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
@@ -306,6 +307,7 @@ def seed_measured_shard(stats: SharedStats, key: str, work: Path) -> str:
     plan_path = stats.folder.parent / "plan.json"
     if plan_path.is_file():
         plan = json.loads(plan_path.read_text())
+        probe_results(plan)
         if plan["head"] != stats.head or key not in plan["keys"]:
             return "measured mutation plan stale for this commit or selection"
         shutil.copy(plan_path, work / "shard-plan.json")
@@ -369,7 +371,14 @@ def mutate_files(
         return {}, "over budget"
     if status != 0:
         return {}, f"report failed with exit {status}; see {work / 'report.log'}"
-    return json.loads(result_path.read_text()), ""
+    results = json.loads(result_path.read_text())
+    if (plan_path := work / "shard-plan.json").is_file():
+        early, _ = probe_results(json.loads(plan_path.read_text()))
+        for values in results.values():
+            for row in values:
+                if early.get(row["name"]) == "killed":
+                    row["reused_early_kill"] = True
+    return results, ""
 
 
 def record_shard_measurement(
@@ -429,6 +438,9 @@ def run_gate(
 ) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
+    if stats and stats.part is None and (plan_path := stats.folder / "plan.json").is_file():
+        _, elapsed = probe_results(json.loads(plan_path.read_text()))
+        started -= elapsed
     deadline = started + budget
     cleared = load_clearances(root)
     selection_path = root / ".mutation-selection.json"
