@@ -27,7 +27,7 @@ def test_the_cache_sits_next_to_the_decision_log():
     assert answer_cache.cache_path() == config.AGENTIHOOKS_HOME / "classifier" / "answers.json"
 
 
-def test_the_key_is_a_hash_of_intent_question_finding_and_models():
+def test_the_key_is_a_hash_of_intent_question_finding_reason_context_and_models():
     assert _key() == "9210d518bc4f8cf61fcb9fd2a9ffdb40a86b92d726d5a150c0f0a3728450d958"
 
 
