@@ -27,10 +27,11 @@ JOBS_JQ = ".jobs[] | {name, conclusion} | @json"
 PULL = f"{ROOT}:doctor:ci-pull:"
 PULL_TTL_S = 24 * 3600
 FULL_READS = 8
+STATE_CHUNK = 20
 STATE = (
     "pullRequest(number: %d) { headRefOid commits(last: 1) { nodes { commit { checkSuites(first: 50) { nodes {"
-    " databaseId status conclusion checkRuns(first: 100) { totalCount nodes { databaseId status conclusion } } } } } } }"
-    " }"
+    " databaseId status conclusion checkRuns(first: 100) { totalCount nodes { databaseId status conclusion startedAt }"
+    " } } } } } } }"
 )
 
 
@@ -45,7 +46,7 @@ def test_results(log: str, job: str = "") -> list[dict]:
     return tests
 
 
-def _gh(args, run):
+def _gh(args, run, shared=True):
     endpoint = args[1]
 
     def fetch():
@@ -53,13 +54,13 @@ def _gh(args, run):
         github_reads.charge(caller, endpoint, time.time())
         return run(["gh", *args], capture_output=True, text=True, check=True, timeout=60).stdout
 
-    if "/check-runs?" in endpoint or "/actions/runs?" in endpoint:
+    if shared and ("/check-runs?" in endpoint or "/actions/runs?" in endpoint):
         return github_reads.snapshot(json.dumps(args), time.time(), lambda: {"stdout": fetch()})["stdout"]
     return fetch()
 
 
-def _pages(endpoint, field, run):
-    output = _gh(["api", endpoint, "--paginate", "--jq", f".{field}[] | @json"], run)
+def _pages(endpoint, field, run, shared=True):
+    output = _gh(["api", endpoint, "--paginate", "--jq", f".{field}[] | @json"], run, shared)
     return [json.loads(line) for line in output.splitlines()]
 
 
@@ -123,12 +124,14 @@ def _effective_checks(checks: list[dict], runs: list[dict]) -> list[dict]:
     return [c for c in checks if c.get("check_suite", {}).get("id") not in superseded]
 
 
-def pull_request(repo: str, number: int, run: Callable = subprocess.run, cache: Redis | None = None) -> dict:
+def pull_request(
+    repo: str, number: int, run: Callable = subprocess.run, cache: Redis | None = None, shared: bool = True
+) -> dict:
     root = f"repos/{repo}"
     pr = json.loads(_gh(["api", f"{root}/pulls/{number}"], run))
     sha = pr["head"]["sha"]
-    checks = _pages(f"{root}/commits/{sha}/check-runs?per_page=100", "check_runs", run)
-    workflows = _pages(f"{root}/actions/runs?head_sha={sha}&per_page=100", "workflow_runs", run)
+    checks = _pages(f"{root}/commits/{sha}/check-runs?per_page=100", "check_runs", run, shared)
+    workflows = _pages(f"{root}/actions/runs?head_sha={sha}&per_page=100", "workflow_runs", run, shared)
     checks = _effective_checks(checks, workflows)
     runs = [r for r in workflows if _belongs(r, pr)]
     return {
@@ -140,12 +143,17 @@ def pull_request(repo: str, number: int, run: Callable = subprocess.run, cache: 
 
 
 def _states(pulls, run):
-    fields = []
-    for i, (repo, number) in enumerate(pulls):
-        owner, name = repo.split("/")
-        fields.append(f"p{i}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{ {STATE % number} }}")
-    data = json.loads(_gh(["api", "graphql", "-f", f"query={{ {' '.join(fields)} }}"], run))["data"]
-    return [json.dumps(data[f"p{i}"], sort_keys=True) for i in range(len(pulls))]
+    states = []
+    for start in range(0, len(pulls), STATE_CHUNK):
+        fields = []
+        for i, (repo, number) in enumerate(pulls[start : start + STATE_CHUNK], start):
+            owner, name = repo.split("/")
+            fields.append(
+                f"p{i}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{ {STATE % number} }}"
+            )
+        data = json.loads(_gh(["api", "graphql", "-f", f"query={{ {' '.join(fields)} }}"], run))["data"]
+        states.extend(json.dumps(data[f"p{i}"], sort_keys=True) for i in range(start, start + len(fields)))
+    return states
 
 
 def pull_requests(
@@ -159,7 +167,13 @@ def pull_requests(
     stale = [i for i, kept in enumerate(saved) if kept is None or kept["state"] != states[i]]
     stale = sorted(stale, key=lambda i: saved[i] is not None and saved[i]["at"])[:full_reads]
     with ThreadPoolExecutor() as pool:
-        fresh = dict(zip(stale, pool.map(lambda i: pull_request(*pulls[i], run=run, cache=cache), stale), strict=True))
+        fresh = dict(
+            zip(
+                stale,
+                pool.map(lambda i: pull_request(*pulls[i], run=run, cache=cache, shared=False), stale),
+                strict=True,
+            )
+        )
     now = time.time()
     for i, record in fresh.items():
         cache.set(keys[i], ci_cache.encode({"state": states[i], "at": now, "record": record}), ex=PULL_TTL_S)

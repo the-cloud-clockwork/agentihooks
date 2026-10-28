@@ -446,6 +446,7 @@ def _pulls_world(monkeypatch, tmp_path, numbers):
         "calls": [],
         "cache": fakeredis.FakeRedis(decode_responses=True),
         "on_pull": lambda: None,
+        "fixture": fixture,
     }
 
     def gh(argv, **kwargs):
@@ -473,7 +474,7 @@ def _pulls_world(monkeypatch, tmp_path, numbers):
 
     def read_pass(**kwargs):
         world["calls"].clear()
-        clock[0] += ci_read.github_reads.RUN_TTL_S
+        clock[0] += 1
         return ci_read.pull_requests([("o/r", n) for n in numbers], run=gh, cache=world["cache"], **kwargs)
 
     return world, read_pass
@@ -507,8 +508,17 @@ def test_a_changed_check_state_on_the_same_head_reads_in_full(monkeypatch, tmp_p
     world, read_pass = _pulls_world(monkeypatch, tmp_path, [4])
     read_pass()
     world["checks"][4] = "FAILURE"
-    read_pass()
+    world["fixture"]["checks"][0]["conclusion"] = "failure"
+    [record] = read_pass()
     assert world["calls"][:2] == ["graphql", "repos/o/r/pulls/4"]
+    assert record["checks"][0]["conclusion"] == "failure"
+
+
+def test_state_reads_beyond_twenty_pull_requests_split_into_more_queries(monkeypatch, tmp_path):
+    numbers = list(range(1, 22))
+    world, read_pass = _pulls_world(monkeypatch, tmp_path, numbers)
+    read_pass(full_reads=0)
+    assert world["calls"] == ["graphql", "graphql"]
 
 
 def test_full_reads_per_pass_stop_at_the_bound_and_the_rest_wait_for_the_next_pass(monkeypatch, tmp_path):
@@ -554,7 +564,7 @@ def test_the_state_read_asks_each_pull_request_head_and_check_states_in_one_quer
     assert states == ['{"pullRequest": null}', '{"pullRequest": null}']
     state = (
         "{ headRefOid commits(last: 1) { nodes { commit { checkSuites(first: 50) { nodes { databaseId status"
-        " conclusion checkRuns(first: 100) { totalCount nodes { databaseId status conclusion } } } } } } } }"
+        " conclusion checkRuns(first: 100) { totalCount nodes { databaseId status conclusion startedAt } } } } } } } }"
     )
     assert queries == [
         f'query={{ p0: repository(owner: "o", name: "r") {{ pullRequest(number: 4) {state} }}'
