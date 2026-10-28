@@ -71,3 +71,67 @@ def test_api_failure_cannot_pass(monkeypatch):
     monkeypatch.setattr(ci_tests_start.subprocess, "run", failed)
     with pytest.raises(subprocess.CalledProcessError):
         ci_tests_start.verify("owner/repo", "head", attempts=1, interval=0)
+
+
+@pytest.mark.parametrize(
+    "problem,code,output", [("", 0, "Tests startup verified for this head.\n"), ("missing", 1, "::error::missing\n")]
+)
+def test_command_reports_startup_result(monkeypatch, capsys, problem, code, output):
+    from scripts import ci_tests_start
+
+    calls = []
+    monkeypatch.setattr(ci_tests_start, "verify", lambda *args: calls.append(args) or problem)
+    assert ci_tests_start.main(["--repository", "owner/repo", "--head", "head"]) == code
+    assert calls == [("owner/repo", "head")]
+    assert capsys.readouterr().out == output
+
+
+def test_waits_for_a_run_and_its_first_job(monkeypatch):
+    from scripts import ci_tests_start
+
+    replies = iter(
+        [
+            {"workflow_runs": []},
+            {"workflow_runs": [{"id": 11, "head_sha": "head", "status": "queued", "conclusion": None}]},
+            {"total_count": 0},
+            {"workflow_runs": [{"id": 11, "head_sha": "head", "status": "in_progress", "conclusion": None}]},
+            {"total_count": 1},
+        ]
+    )
+    sleeps = []
+    monkeypatch.setattr(
+        ci_tests_start.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, json.dumps(next(replies)), ""),
+    )
+    monkeypatch.setattr(ci_tests_start.time, "sleep", sleeps.append)
+    assert ci_tests_start.verify("owner/repo", "head", attempts=3, interval=2) == ""
+    assert sleeps == [2, 2]
+
+
+def test_does_not_sleep_after_final_attempt(monkeypatch):
+    from scripts import ci_tests_start
+
+    monkeypatch.setattr(
+        ci_tests_start.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, '{"workflow_runs": []}', ""),
+    )
+    monkeypatch.setattr(ci_tests_start.time, "sleep", lambda _: pytest.fail("slept after final attempt"))
+    assert ci_tests_start.verify("owner/repo", "head", attempts=1) == "Tests run is missing for this head."
+
+
+def test_api_uses_checked_bounded_json_request(monkeypatch):
+    from scripts import ci_tests_start
+
+    calls = []
+
+    def request(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, '{"key": "value"}', "")
+
+    monkeypatch.setattr(ci_tests_start.subprocess, "run", request)
+    assert ci_tests_start._api("endpoint") == {"key": "value"}
+    assert calls == [
+        ((["gh", "api", "endpoint"],), {"check": True, "capture_output": True, "text": True, "timeout": 30})
+    ]
