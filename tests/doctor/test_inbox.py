@@ -70,8 +70,13 @@ def test_past_window_names_a_pending_operator_item_a_missed_page_relay():
     receivers = {"operator": inbox.Receiver()}
     [missed] = inbox.past_window([row], 9 * MIN, WINDOW, receivers)
     assert missed.summary == "page relay missed; sent 8 minutes ago"
-    assert "shown by the ledger page relay" in missed.evidence
+    relay = "addressed to the operator, reached only through the ledger page relay"
+    assert relay in missed.evidence
     assert "recipient has no live occupant" not in missed.evidence
+    row.update(state="cancelled", reason="cancelled")
+    [closed] = inbox.no_outcome([row], receivers)
+    assert relay in closed.evidence
+    row.update(state="pending", reason="")
     row["address"] = "engineer@x-1"
     [unread] = inbox.past_window([row], 9 * MIN, WINDOW, {"engineer@x-1": inbox.Receiver()})
     assert unread.summary == "unread delivery; sent 8 minutes ago"

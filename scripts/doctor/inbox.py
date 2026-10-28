@@ -46,7 +46,7 @@ def _route(item):
 
 def _recipient(item, receivers):
     if item["address"] == OPERATOR:
-        return "shown by the ledger page relay"
+        return "addressed to the operator, reached only through the ledger page relay"
     receiver = (receivers or {}).get(item["address"])
     if receiver is None:
         return "recipient state unavailable"
