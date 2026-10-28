@@ -792,7 +792,7 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):
         return _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms)
     claimant = rows.get(agent.task, {}).get("claimed_by") == agent.name
-    nudged = _stale_nudge(slug, store, agent, observed, pending, now_ms) if claimant else []
+    nudged = []
     if agent.lane == MASTER or (held and not exhausted):
         store.put_agent(slug, agent)
         return nudged
