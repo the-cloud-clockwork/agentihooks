@@ -3,7 +3,12 @@ from .fragments import Fragment, document
 
 
 def written(state: dict, previous: Fragment | None) -> tuple[Fragment, dict]:
-    return detached(document(state, previous), previous, state)
+    fragment, writer = detached(document(state, previous), previous, state)
+    meta = fragment.parts.get("_meta")
+    stamps = meta.parts.get("stamps") if meta is not None and isinstance(meta.parts, dict) else None
+    if stamps is not None and isinstance(stamps.parts, dict):
+        writer["_meta"]["stamps"] = dict(stamps.value)
+    return fragment, writer
 
 
 def detached(fragment: Fragment, previous: Fragment | None, value: object) -> tuple[Fragment, object]:

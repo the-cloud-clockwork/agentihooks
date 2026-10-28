@@ -51,6 +51,8 @@
     ['[data-gate-name="nightwatch"]', "Watches the front door master seat, ready work without a launch and dev merges every tick."],
     ['[data-gate-name="reset"]', "Recycles a master held on a question, permission or interrupted prompt while operator items wait fifteen minutes."],
     ["#quota-refresh", "Probe every Claude and Codex account now and redraw the quota table."],
+    ['[data-scaling="auto"]', "Auto scaling. The swarm sets each lane ceiling from live quota and host room."],
+    ['[data-scaling="manual"]', "Manual scaling. Lane ceilings stay at the values you set."],
     ['[data-gate-mode="enforce"]', "When the check fails, refuse the call and log the denial."],
     ['[data-gate-mode="observe"]', "When the check fails, let the call through and log a would be denial."],
     ['[data-gate-mode="off"]', "Skip the check. It does not run or log a decision."],

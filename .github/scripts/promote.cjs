@@ -83,7 +83,8 @@ async function newerGreenGrade(github, context, api) {
     created: `>=${current.created_at}`, per_page: 100,
   });
   for (const run of runs.filter(run => run.run_number > current.run_number &&
-      run.event === 'push' && run.head_branch === 'dev').sort((a, b) => b.run_number - a.run_number)) {
+      run.event === 'push' && run.head_branch === 'dev' && !(run.run_attempt === 1 && run.status === 'queued'))
+    .sort((a, b) => b.run_number - a.run_number)) {
     const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
       ...api, run_id: run.id, filter: 'latest', per_page: 100,
     });
