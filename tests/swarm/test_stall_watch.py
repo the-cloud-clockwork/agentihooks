@@ -475,6 +475,24 @@ def test_a_registered_owner_that_is_not_live_is_reopened_without_a_retire():
     assert [a.name for a in swarm.store.agents(SLUG) if a.state != "finished"] == []
 
 
+@pytest.mark.parametrize("age", [0, 179_999, 180_000, 180_001])
+def test_owner_liveness_uses_the_hive_join_heartbeat_window(age):
+    from scripts.hive import join_report
+
+    swarm = Swarm(RUNNING, live=False)
+    owner = replace(swarm.store.agents(SLUG)[0], hive="w7", execution_id="execution", generation=1)
+    swarm.store.put_agent(SLUG, owner)
+    for at in (START, START + 10 * MINUTE):
+        join_report.start(swarm.store.redis, SLUG, owner, str(at), {}, {}, at - age)
+        swarm.tick(at)
+    expired = age >= join_report.HEARTBEAT_MS
+    assert bool(_reopened(swarm)) == expired
+    assert bool(swarm.inbox()) == expired
+    if expired:
+        assert "owner not live for 10 minutes" in swarm.inbox()[0].text
+    assert swarm.retired == []
+
+
 def test_an_outage_holds_the_reopen(monkeypatch):
     monkeypatch.setattr(stall_watch.outage, "held", lambda store, slug, name: "ledger health probe failed")
     swarm = Swarm(GREEN)
