@@ -94,10 +94,10 @@ def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int, probe
             waiting.add(task["id"])
             if task["id"] not in seen or _pending(asked, task["id"], now_ms):
                 continue
-            if _refused(refused.get(task["id"]), lane, now_ms) or probe(lane, task):
+            if _refused(refused.get(task["id"]), lane, now_ms):
                 continue
             victim = _victim([a for a in holders if a.name not in asked], rows, doc, graph)
-            if victim is not None:
+            if victim is not None and not probe(lane, task):
                 asked[victim.name] = json.dumps([task["id"], now_ms])
                 redis.hset(store.key(slug, ASKED), victim.name, asked[victim.name])
                 redis.hset(store.key(slug, VICTIMS), victim.name, task["id"])
