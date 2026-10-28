@@ -11,7 +11,9 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import subprocess
+import time
 from collections import Counter
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -139,6 +141,42 @@ def charge(caller: str, endpoint: str, now: float) -> None:
             log.write(json.dumps({"at": now, "caller": caller, "source": source(), "endpoint": endpoint}) + "\n")
     except OSError:
         pass
+
+
+def _rest_pages(
+    caller: str, endpoint: str, output: str | bytes | None, include: bool, incomplete: bool = False
+) -> str | bytes | None:
+    if output is None:
+        return output
+    pattern = rb"(?:\A|\r?\n)HTTP/[\d.]+ \d{3}[^\r\n]*\r?\n(?:[^\r\n]+:[^\r\n]*\r?\n)+\r?\n"
+    cleaned, pages = re.subn(
+        pattern.decode() if isinstance(output, str) else pattern, "" if isinstance(output, str) else b"", output
+    )
+    for _ in range(max(0, pages - 1)):
+        charge(caller, endpoint, time.time())
+    newline = "\n" if isinstance(cleaned, str) else b"\n"
+    if incomplete and (cleaned == newline or cleaned.endswith(newline * 2)):
+        cleaned = cleaned[:-1]
+        charge(caller, endpoint, time.time())
+    return output if include else cleaned
+
+
+def rest(caller: str, args: list[str], run: Callable = subprocess.run, **options) -> subprocess.CompletedProcess:
+    if args[0] != "api" or args[1] == "graphql":
+        return run(["gh", *args], **options)
+    endpoint = args[1]
+    charge(caller, endpoint, time.time())
+    if "--paginate" not in args:
+        return run(["gh", *args], **options)
+    include = "--include" in args or "-i" in args
+    command = ["gh", *args] if include else ["gh", *args, "--include"]
+    try:
+        result = run(command, **options)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        exc.stdout = _rest_pages(caller, endpoint, exc.stdout, include, incomplete=True)
+        raise
+    result.stdout = _rest_pages(caller, endpoint, result.stdout, include)
+    return result
 
 
 def counts(since: float, until: float) -> dict[str, int]:
