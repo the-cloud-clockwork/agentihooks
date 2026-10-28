@@ -85,6 +85,7 @@ from scripts.swarm import (
     agent_up,
     bottleneck,
     bottleneck_status,
+    claim_lost,
     clearance,
     control_notifications,
     default_models,
@@ -953,12 +954,20 @@ def cmd_agent_up(store, args):
 def cmd_exit(store, args):
     name = store.names.resolve(args.name or Who.from_env().name)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
-    if agent and agent.lane != MASTER and store.claimant(args.slug, agent.task) != name:
+    if agent and agent.lane != MASTER and _claimless(store, args.slug, agent):
         _retire(store, args.slug, agent, "finished its session without a claim")
     else:
         agent_up.retire(store, args.slug, name, now_ms())
     print(json.dumps({"exited": name}), flush=True)
     HerdrRuntime().reap_name(name)
+
+
+def _claimless(store, slug, agent):
+    from scripts.hive import scope
+
+    if store.claimant(slug, agent.task) != agent.name:
+        return True
+    return claim_lost.lost(agent.name, LedgerClient().task(slug, agent.task), bool(scope.member()))
 
 
 def gate_mode(key, value):

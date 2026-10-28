@@ -1477,6 +1477,16 @@ def on_pre_tool_use(payload: dict) -> None:
     if _recycle_block:
         raise BlockAction(_recycle_block)
 
+    _claim_block = None
+    try:
+        from hooks.context.claim_watch import check as _claim_check
+
+        _claim_block = _claim_check()
+    except Exception as e:
+        log("claim watch failed", {"error": str(e)})
+    if _claim_block:
+        raise BlockAction(_claim_block)
+
     from hooks.lifecycle.guard import pretool as _lifecycle_pretool
 
     _lifecycle_block = _lifecycle_pretool(payload)
