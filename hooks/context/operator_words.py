@@ -143,6 +143,7 @@ def _read(shared, key):
 def _amend(shared, key, change):
     from scripts.events.bus import StateConflict
 
+    raced = None
     for _ in range(AMEND_TRIES):
         entry = shared.get(key)
         value = json.dumps(change([] if entry is None else json.loads(entry.value))).encode()
@@ -152,9 +153,9 @@ def _amend(shared, key, change):
             else:
                 shared.update(key, value, entry.revision)
             return True
-        except StateConflict:
-            continue
-    raise StateConflict(f"state key {key!r} kept changing")
+        except StateConflict as conflict:
+            raced = conflict
+    raise StateConflict(f"state key {key!r} kept changing") from raced
 
 
 def _mirror(swarm, name, at, words):

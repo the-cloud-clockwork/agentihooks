@@ -895,6 +895,7 @@ def test_amend_gives_up_after_its_tries_and_names_the_key():
     with pytest.raises(StateConflict) as changing:
         operator_words._amend(store, "k", lambda rows: rows)
     assert str(changing.value) == "state key 'k' kept changing"
+    assert str(changing.value.__cause__) == "raced"
     assert len(store.writes) == operator_words.AMEND_TRIES
 
 
