@@ -240,7 +240,7 @@ def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: th
             return
         try:
             if (registry.show(redis, local_id) or {}).get("ui") == "yes":
-                herdr_stats.publish(redis, int(time.time() * 1000))
+                herdr_stats.publish(redis, local_id, int(time.time() * 1000))
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive herdr stats publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
 

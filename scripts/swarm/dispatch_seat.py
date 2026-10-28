@@ -232,6 +232,8 @@ def _spawn(slug, config, store, runtime, found, now_ms):
         store.drop_agent(slug, failed.record.name)
         if isinstance(failed.error, _NoTriggers):
             return []
+        if seat_spawn.room_refused(failed.error):
+            return [f"the dispatcher waits: {failed.error}"]
         return [f"dispatcher spawn failed: {failed.error}"]
     store.put_agent(slug, tick.placed_record(record, placed))
     _sent(store, slug, found)

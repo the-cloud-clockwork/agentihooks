@@ -18,6 +18,9 @@ permissions:
   pull-requests: read
   actions: read
 
+env:
+  PYTHONNOUSERSITE: "1"
+
 jobs:
   plan:
     if: ${{ github.event_name != 'push' || !github.event.deleted }}
@@ -349,6 +352,10 @@ jobs:
     outputs:
       shards: ${{ steps.refine.outputs.shards }}
     steps:
+      - name: Record refinement start
+        id: refinement-start
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -394,17 +401,6 @@ jobs:
           path: .mutation-stats-cache
           merge-multiple: true
 
-      - name: Check for merged test stats
-        id: merged-stats
-        run: if [[ -n "$(find .mutation-stats-cache -type f -print -quit 2>/dev/null)" ]]; then echo found=true >> "$GITHUB_OUTPUT"; fi
-
-      - name: Save the merged test stats
-        if: success() && steps.merged-stats.outputs.found == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .mutation-stats-cache
-          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
-
       - name: Download planned mutation test selection
         uses: actions/download-artifact@v4
         with:
@@ -425,6 +421,46 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      - name: Check cache preparation budget
+        id: cache-preparation-budget
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          REFINEMENT_STARTED_AT: ${{ steps.refinement-start.outputs.started }}
+        run: if (( $(date +%s) - REFINEMENT_STARTED_AT < 180 )); then echo available=true >> "$GITHUB_OUTPUT"; fi
+
+      - name: Check for merged test stats
+        id: merged-stats
+        if: steps.cache-preparation-budget.outputs.available == 'true'
+        timeout-minutes: 1
+        continue-on-error: true
+        run: if [[ -n "$(find .mutation-stats-cache -type f -print -quit 2>/dev/null)" ]]; then echo found=true >> "$GITHUB_OUTPUT"; fi
+
+      - name: Check cache transfer budget
+        id: cache-budget
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          REFINEMENT_STARTED_AT: ${{ steps.refinement-start.outputs.started }}
+        run: if (( $(date +%s) - REFINEMENT_STARTED_AT < 120 )); then echo available=true >> "$GITHUB_OUTPUT"; fi
+
+      - name: Save the merged test stats
+        id: save-merged-stats
+        if: success() && steps.merged-stats.outputs.found == 'true' && steps.cache-budget.outputs.available == 'true'
+        timeout-minutes: 1
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with: &refinement-test-stats-cache
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save the merged test stats, attempt 2
+        if: "!cancelled() && steps.save-merged-stats.outcome == 'failure'"
+        timeout-minutes: 1
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with: *refinement-test-stats-cache
 
   mutation-shard:
     needs: [plan, stats, refine]
