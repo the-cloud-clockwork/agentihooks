@@ -17,6 +17,7 @@ from scripts import openbao_kv, operator_env
 from scripts.swarm import brain_binding, stack_env
 
 ENV_FILE = "swarm-brain.env"
+NOT_OBJECT = "the binding is not a JSON object"
 CONFIGMAP = [
     "kubectl",
     "get",
@@ -69,9 +70,9 @@ def _staged(binding_text: str, bao: openbao_kv.OpenBao) -> tuple[dict, dict[str,
     try:
         doc = json.loads(binding_text)
     except ValueError:
-        doc = None
+        raise brain_binding.Refused(NOT_OBJECT) from None
     if not isinstance(doc, dict):
-        raise brain_binding.Refused("the binding is not a JSON object")
+        raise brain_binding.Refused(NOT_OBJECT)
     record, wanted = _references(doc)
     found, _ = openbao_kv.read(bao, record)
     missing = [prop for prop in wanted.values() if not isinstance(found.get(prop), str) or not found[prop]]
@@ -87,7 +88,7 @@ def place(environ: Mapping[str, str], bao: openbao_kv.OpenBao, binding_text: str
         print(f"brain-place: {exc}; nothing was written", file=out)
         return 1
     binding_file, env_file = brain_binding.path(environ), _home(environ) / ENV_FILE
-    _write(binding_file, json.dumps(doc, indent=2, sort_keys=True) + "\n")
+    _write(binding_file, binding_text)
     _write(env_file, "".join(f"{name}={shlex.quote(value)}\n" for name, value in values.items()))
     for written in (binding_file, env_file):
         print(f"{written.name} {written.stat().st_mode & 0o777:04o}", file=out)
@@ -103,7 +104,7 @@ def main(
     out: TextIO | None = None,
     opener: Callable | None = None,
 ) -> int:
-    parser = argparse.ArgumentParser(prog="agentihooks swarm brain-place", description=__doc__)
+    parser = argparse.ArgumentParser(prog="agentihooks swarm brain-place")
     parser.add_argument("--binding", type=Path, help="binding JSON file instead of the swarm-brain-binding ConfigMap")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ

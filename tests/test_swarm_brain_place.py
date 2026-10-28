@@ -58,7 +58,7 @@ class StubStore:
 
 @pytest.fixture
 def home(tmp_path):
-    state = tmp_path / ".agentihooks"
+    state = tmp_path / "state"
     state.mkdir()
     (state / ".env").write_text("AGENTIHOOKS_PLACE_FIXTURE=1\n")
     return state
@@ -84,7 +84,7 @@ def test_place_writes_the_binding_and_both_credentials_owner_only_and_reports_bo
 
     binding_file = home / "swarm" / "brain-binding.json"
     env_file = home / "swarm-brain.env"
-    assert json.loads(binding_file.read_text()) == BINDING
+    assert binding_file.read_text() == json.dumps(BINDING)
     assert env_file.read_text() == f"SWARM_BRAIN_API_TOKEN={API_FIXTURE}\nSWARM_BRAIN_MCP_KEY={MCP_FIXTURE}\n"
     assert _mode(binding_file) == _mode(env_file) == 0o600
     assert _mode(binding_file.parent) == 0o700
@@ -118,6 +118,43 @@ def test_place_never_prints_a_password_held_in_a_binding_origin(home):
     expected = "endpoint https://swarm-brain-api-internal.example.test is not a plain origin"
     assert out.getvalue().endswith(f"brain binding refused: {expected}\n")
     assert "fxpw-place" not in out.getvalue()
+
+
+def test_place_defaults_the_home_to_dot_agentihooks_under_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
+    state = tmp_path / ".agentihooks"
+    state.mkdir()
+    (state / ".env").write_text("AGENTIHOOKS_PLACE_FIXTURE=1\n")
+    store = StubStore({RECORD: {"BRAIN_HTTP_TOKEN": API_FIXTURE, "MCP_API_KEY": MCP_FIXTURE}})
+    environ = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"}
+
+    assert brain_place.place(environ, _bao(store), json.dumps(BINDING), io.StringIO()) == 0
+
+    assert sorted(path.name for path in state.iterdir()) == [".env", "swarm", "swarm-brain.env"]
+    assert (state / "swarm" / "brain-binding.json").read_text() == json.dumps(BINDING)
+
+
+def test_place_writes_and_decides_on_the_binding_file_variable(home, tmp_path):
+    target = tmp_path / "bindings" / "deep" / "swarm.json"
+    environ = {**_environ(home), brain_binding.FILE_VARIABLE: str(target)}
+    store = StubStore({RECORD: {"BRAIN_HTTP_TOKEN": API_FIXTURE, "MCP_API_KEY": MCP_FIXTURE}})
+    out = io.StringIO()
+
+    assert brain_place.place(environ, _bao(store), json.dumps(BINDING), out) == 0
+
+    assert target.read_text() == json.dumps(BINDING)
+    assert out.getvalue() == "swarm.json 0600\nswarm-brain.env 0600\nbrain binding bound\n"
+
+
+def test_main_help_names_the_command_and_its_binding_option(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "1000")
+
+    with pytest.raises(SystemExit):
+        brain_place.main(["--help"], {}, io.StringIO())
+
+    printed = capsys.readouterr().out
+    assert printed.startswith("usage: agentihooks swarm brain-place [-h] [--binding BINDING]\n")
+    assert " binding JSON file instead of the swarm-brain-binding ConfigMap\n" in printed
 
 
 def test_place_honours_the_binding_variable_names_and_quotes_values(home):
@@ -161,6 +198,8 @@ def test_place_reports_a_refused_decision_with_its_reason(home):
     [
         (lambda doc: doc.pop("credentials"), {}, "the binding names no OpenBao record"),
         (lambda doc: doc["credentials"].pop("record"), {}, "the binding names no OpenBao record"),
+        (lambda doc: doc["credentials"].update(record=""), {}, "the binding names no OpenBao record"),
+        (lambda doc: doc["credentials"]["api"].update(property=""), {}, "the binding names no api property"),
         (lambda doc: doc["credentials"]["mcp"].pop("property"), {}, "the binding names no mcp property"),
         (lambda doc: doc["credentials"]["api"].pop("property"), {}, "the binding names no api property"),
         (
