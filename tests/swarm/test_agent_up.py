@@ -70,10 +70,11 @@ class OperatorRuntime:
     def __init__(self, fail=""):
         self.launched, self.reaped, self.fail = [], [], fail
 
-    def operator(self, config, name, profile, text):
+    def operator(self, config, name, profile, text, agent=""):
         if self.fail:
             raise RuntimeError(self.fail)
         self.launched.append((config.slug, name, profile, text))
+        self.agents = [*getattr(self, "agents", []), agent]
         return Placed(pane_id="w1:p7", harness="claude")
 
     def reap_name(self, name):
@@ -125,6 +126,16 @@ def test_cli_profile_up_launches_and_prints_the_launch(swarm, monkeypatch, capsy
         '{"name": "planner@a1b2c3-0001", "pane": "w1:p7", "profile": "planner", "role": "planner"}'
     )
     assert rt.launched[0][1] == "planner@a1b2c3-0001"
+
+
+@pytest.mark.parametrize(("argv", "agent"), [((), ""), (("--agent", "codex"), "codex")])
+def test_cli_profile_up_passes_a_named_harness_to_the_launch(swarm, monkeypatch, argv, agent):
+    from scripts.swarm import cli
+
+    rt = OperatorRuntime()
+    monkeypatch.setattr(cli, "HerdrRuntime", lambda: rt)
+    assert run("sw", "planner", "up", *argv) == 0
+    assert rt.agents == [agent]
 
 
 def test_cli_master_up_still_brings_the_master(swarm, monkeypatch):
