@@ -29,6 +29,17 @@ The gate refuses to run outside GitHub Actions:
 the ledger load gate runs in CI only: it loads the machine for a minute and a half
 ```
 
+## Redis acquisition
+
+The `load` and `compare` jobs start Redis in a step, never as a service
+container. The runner pulls a service image from one registry before any step
+runs, so a public ECR rate limit or a `mirror.gcr.io` cache that lacks the
+image's attestation manifest failed the job at Initialize containers. The
+step pulls `public.ecr.aws/docker/library/redis:7-alpine` through
+`scripts/packaging/pull-runtime-image.sh`, which retries three times,
+alternates with `mirror.gcr.io` and pulls the amd64 manifest by digest, then
+runs it on port 6379 and waits for `redis-cli ping`.
+
 ## Hierarchy CPU Redis acquisition
 
 The `Hierarchy CPU proof` also needs Redis before it can compare the base and
