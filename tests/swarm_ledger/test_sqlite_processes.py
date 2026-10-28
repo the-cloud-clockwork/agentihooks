@@ -1,5 +1,10 @@
+import contextlib
+import gc
 import multiprocessing
 import os
+import threading
+
+import pytest
 
 from scripts.swarm_ledger.repository import sqlite
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
@@ -51,3 +56,31 @@ def test_a_process_that_dies_mid_write_leaves_the_last_committed_state(tmp_path)
     assert SQLiteLedgerRepository(path).get_document("processes") == before
     state, _ = repo.apply_ops("processes", ops=[{"op": "add", "id": "after", "thread": "chat", "text": "ok"}])
     assert [m["id"] for m in state["chat"]] == ["after"]
+
+
+def open_files(directory):
+    names = []
+    for fd in os.listdir("/proc/self/fd"):
+        with contextlib.suppress(OSError):
+            names.append(os.readlink(f"/proc/self/fd/{fd}"))
+    return [name for name in names if name.startswith(str(directory))]
+
+
+@pytest.mark.parametrize("reader", ["same thread", "other thread"])
+def test_a_released_store_leaves_no_connection_for_a_forked_child_to_close(tmp_path, reader):
+    path = tmp_path / "ledgers" / sqlite.DATABASE
+    collecting = gc.isenabled()
+    gc.disable()
+    try:
+        repo = SQLiteLedgerRepository(path)
+        repo.create("processes", CONTENT)
+        if reader == "other thread":
+            thread = threading.Thread(target=repo.exists, args=("processes",))
+            thread.start()
+            thread.join()
+        assert open_files(path.parent)
+        del repo
+        assert open_files(path.parent) == []
+    finally:
+        if collecting:
+            gc.enable()
