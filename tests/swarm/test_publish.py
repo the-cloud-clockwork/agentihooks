@@ -1622,7 +1622,9 @@ def test_publish_refuses_unverified_or_diverged_retained_delivery(publication, m
 
 
 @pytest.mark.parametrize("command", ["prepare", "publish"])
-def test_missing_pull_request_never_authorizes_retained_delivery(publication, monkeypatch, command):
+def test_missing_pull_request_publishes_the_successor_branch_and_keeps_the_retained_one(
+    publication, monkeypatch, command
+):
     from scripts.swarm import publish
 
     p = publication
@@ -1650,7 +1652,11 @@ def test_hive_successor_publishes_its_own_branch_over_the_predecessor_hive_key(p
     p = publication
     git(p.root, "push", "origin", "HEAD:predecessor")
     hive_key = f"/hive/predecessor/{p.repo.name}"
-    p.task.update(branch="predecessor", repository_branches={hive_key: "predecessor", "/hive/bundle": "kept"})
+    older = f"/hive/older/{p.repo.name}"
+    p.task.update(
+        branch="predecessor",
+        repository_branches={hive_key: "predecessor", older: "older-task", "/hive/bundle": "kept"},
+    )
     monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "")
     monkeypatch.chdir(p.root)
 

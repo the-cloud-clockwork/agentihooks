@@ -77,16 +77,10 @@ def checkout_fields(root: Path) -> dict:
 
 
 def branch_record(fields: dict, repository: Path, task: dict) -> dict:
-    name = repository_name(str(repository))
-    branches = {
-        key: value
-        for key, value in task.get("repository_branches", {}).items()
-        if repository_name(key) != name or value != task.get("branch")
-    }
     return {
         "branch": fields["branch"],
         "branch_repo": fields["branch_repo"],
-        "repository_branches": {**branches, str(repository): fields["branch"]},
+        "repository_branches": {**task.get("repository_branches", {}), str(repository): fields["branch"]},
     }
 
 
@@ -349,20 +343,28 @@ def delivery_branch(root: Path, task: dict, branch: str) -> str:
     recorded = task.get("branch")
     if recorded and branch != recorded:
         remote = git(root, "remote", "get-url", "origin")
-        delivered = publish_queue.open_head(remote, task.get("pr_url", ""))
-        if delivered == recorded and descends(root, recorded):
+        if publish_queue.open_head(remote, task.get("pr_url", "")) == recorded and descends(root, recorded):
             return recorded
-        if not delivered and succeeds(root, recorded):
+        if not task.get("pr_url") and cut_from(root, recorded):
             return branch
         raise SwarmError(f"current worktree {root} branch {branch} differs from registered branch {recorded}")
     return branch
 
 
-def succeeds(root: Path, recorded: str) -> bool:
+def cut_from(root: Path, recorded: str) -> bool:
     if not remote_head(root, recorded):
         return False
     git(root, "fetch", "origin", recorded)
     return descends(root, recorded)
+
+
+def unmapped(task: dict, repository: Path) -> dict:
+    name = repository_name(str(repository))
+    branches = task.get("repository_branches", {})
+    return {
+        **task,
+        "repository_branches": {key: value for key, value in branches.items() if repository_name(key) != name},
+    }
 
 
 def gate_python(repo: Path) -> str:
@@ -417,7 +419,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
         selected = selected_files(root, files)
         retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
         fields["branch"] = delivery_branch(root, scoped, fields["branch"])
-        ledger.update_task(slug, agent.task, branch_record(fields, primary, task), by=agent.name)
+        ledger.update_task(slug, agent.task, branch_record(fields, primary, unmapped(task, primary)), by=agent.name)
         stage_files(root, selected)
         changed = bool(git(root, "diff", "--cached", "--name-only", "-z"))
         if changed:
