@@ -165,7 +165,11 @@ def _parser() -> argparse.ArgumentParser:
     fresh.add_argument("dir")
     fresh.add_argument("--user", action="store_true", help="Link it as the user bundle and keep the root link")
     overlay = sub.add_parser("overlay").add_subparsers(dest="action", required=True)
-    new = overlay.add_parser("new", help="Write an overlay profile skeleton into the linked bundle")
+    new = overlay.add_parser(
+        "new",
+        help="Write an overlay profile skeleton into the linked bundle",
+        usage="%(prog)s [-h] --wears WEARS name [--dest {root,user}]",
+    )
     new.add_argument("name")
     new.add_argument("--wears", required=True, help="Comma separated base roles the overlay sits on")
     new.add_argument(
