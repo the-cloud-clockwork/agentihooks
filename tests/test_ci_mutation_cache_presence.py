@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 _ROOT = Path(__file__).resolve().parents[1]
 
 
