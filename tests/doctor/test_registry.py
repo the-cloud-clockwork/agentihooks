@@ -759,3 +759,61 @@ def test_a_full_read_drops_roots_of_traces_no_longer_listed_and_a_failed_read_ke
 
     registry.read("s", [AGENT], down, state, 15, 50)
     assert list(state["roots"]) == ["tr-1"]
+
+
+class Timed:
+    def __init__(self, changed, seconds=0.0):
+        self.changed, self.seconds, self.calls, self.scan = changed, seconds, [], 0
+
+    def __call__(self, path, params):
+        time.sleep(self.seconds)
+        self.calls.append(path)
+        if path == "traces":
+            agent = params["tags"][1].removeprefix("agent:")
+            stamp = self.scan if agent in self.changed else 0
+            row = {"id": f"tr-{agent}", "sessionId": "", "updatedAt": f"2026-10-28T17:00:{stamp:02d}.000Z"}
+            return {"data": [row], "meta": {}}
+        if params.get("type") == "AGENT":
+            return {"data": [{"metadata": _trace("x", "")["metadata"]}], "meta": {}}
+        row = {"startTime": f"2026-10-28T17:00:{self.scan:02d}.000Z", "endTime": None}
+        return {"data": [row], "meta": {"totalItems": 10 + self.scan}}
+
+
+def _fleet(count):
+    return [{**AGENT, "name": f"engineer@1-{n:04d}"} for n in range(count)]
+
+
+def test_a_rescan_of_a_trace_with_an_unchanged_update_time_costs_one_request(cursors):
+    langfuse = Timed(changed=set())
+    state = {}
+    [first], _ = registry.read("s", _fleet(1), langfuse, state, 15, 50)
+    langfuse.calls.clear()
+    langfuse.scan = 1
+    [again], failures = registry.read("s", _fleet(1), langfuse, state, 15, 50)
+    assert failures == [] and langfuse.calls == ["traces"]
+    assert (
+        again["remote"]
+        == first["remote"]
+        == {"trace": "tr-engineer@1-0000", "fresh_ms": 1793206800000, "observations": 10}
+    )
+
+
+def test_a_trace_whose_update_time_moved_is_read_again(cursors):
+    langfuse = Timed(changed={"engineer@1-0000"})
+    state = {}
+    registry.read("s", _fleet(1), langfuse, state, 15, 50)
+    langfuse.calls.clear()
+    langfuse.scan = 1
+    [again], _ = registry.read("s", _fleet(1), langfuse, state, 15, 50)
+    assert langfuse.calls == ["traces", "observations", "observations"]
+    assert again["remote"]["observations"] == 11 and again["remote"]["fresh_ms"] == 1793206801000
+
+
+def test_recorded_latencies_of_a_missed_pass_fit_the_budget_when_unchanged_traces_are_not_read_again(cursors):
+    fleet = _fleet(24)
+    langfuse = Timed(changed={b["name"] for b in fleet[:8]})
+    state = {}
+    registry.read("s", fleet, langfuse, state, 15, 50)
+    langfuse.scan, langfuse.seconds = 1, 0.056
+    found, failures = registry.read("s", fleet, langfuse, state, 0.6, 50)
+    assert failures == [] and all(b["read"] for b in found)
