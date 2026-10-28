@@ -68,6 +68,7 @@ def test_registered_worker_cannot_upload_a_foreign_task_generation(registered):
 
 
 def test_a_worker_checkpoint_pointer_becomes_the_controller_fleet_reading(registered):
+    from scripts.events import state
     from scripts.swarm import lease, metrics_fleet
     from tests.test_swarm_v2_control_service import SLUG
 
@@ -78,6 +79,7 @@ def test_a_worker_checkpoint_pointer_becomes_the_controller_fleet_reading(regist
     data = json.dumps({"execution_id": scope.execution_id, "generation": scope.generation}).encode()
     store.backend.write(key, data)
     redis_store = service.tasks.store
-    found = json.loads(redis_store.redis.get(redis_store.key(SLUG, metrics_fleet.CHECKPOINTS, agent.execution_id)))
+    saved = state.for_store(redis_store, metrics_fleet.CHECKPOINTS).get(SLUG)
+    found = json.loads(saved.value)[agent.execution_id]["checkpoint"]
     assert (found["execution_id"], found["seat"]) == (agent.execution_id, agent.seat)
     assert 0 <= lease.now_ms(redis_store) - found["taken_at_ms"] < 60_000
