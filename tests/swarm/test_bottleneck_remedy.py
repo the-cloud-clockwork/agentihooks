@@ -41,6 +41,15 @@ def store():
     return saved
 
 
+@pytest.fixture(autouse=True, params=[(), ("runner-eng", "runner-ci")], ids=["no-runner-agents", "runner-agents"])
+def runner_agents(request, monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts import terminate_agent
+
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [SimpleNamespace(name=name) for name in request.param])
+
+
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
