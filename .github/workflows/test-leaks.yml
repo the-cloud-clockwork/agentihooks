@@ -43,7 +43,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv pip install --constraint .github/test-requirements.lock --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Run the whole suite in one process
         id: suite
