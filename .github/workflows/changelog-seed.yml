@@ -1,0 +1,57 @@
+name: Changelog seed
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Days of merges into dev to seed
+        default: '30'
+
+concurrency:
+  group: changelog-branch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check out the changelog branch
+        run: |
+          if git ls-remote --exit-code --heads origin changelog >/dev/null; then
+            git worktree add "$RUNNER_TEMP/changelog" origin/changelog --detach
+          else
+            git worktree add --orphan -b changelog "$RUNNER_TEMP/changelog"
+          fi
+
+      - name: Seed one entry per change merged into dev in the window
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANGELOG_LITELLM_KEY: ${{ secrets.CHANGELOG_LITELLM_KEY }}
+          CHANGELOG_LITELLM_URL: ${{ vars.CHANGELOG_LITELLM_URL }}
+          CHANGELOG_MODEL: ${{ vars.CHANGELOG_MODEL }}
+          DAYS: ${{ inputs.days }}
+        run: |
+          python -m scripts.release_changelog_seed "$RUNNER_TEMP/changelog/RELEASES.md" --days "$DAYS" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the seeded changelog
+        working-directory: ${{ runner.temp }}/changelog
+        run: |
+          git add RELEASES.md
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -m "Seed the release changelog with the last ${{ inputs.days }} days of merges into dev"
+          git push origin HEAD:refs/heads/changelog
