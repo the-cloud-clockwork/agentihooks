@@ -25,23 +25,26 @@ def records(
     *,
     until: str | None = None,
 ) -> dict:
-    journal = run(
-        [
-            "journalctl",
-            "--user",
-            *TICK_JOURNAL,
-            "--since",
-            since,
-            *(["--until", until] if until is not None else []),
-            "-o",
-            "cat",
-            "--no-pager",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
-    )
+    try:
+        journal = run(
+            [
+                "journalctl",
+                "--user",
+                *TICK_JOURNAL,
+                "--since",
+                since,
+                *(["--until", until] if until is not None else []),
+                "-o",
+                "cat",
+                "--no-pager",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SwarmError(f"tick journal unavailable: {type(exc).__name__}: {exc}") from exc
     return {
         "slug": slug,
         "now": now_ms,

@@ -569,6 +569,18 @@ def test_status_without_a_doctor_says_so(env, capsys):
     assert "no Doctor" in capsys.readouterr().err
 
 
+def test_failed_spawn_measure_refuses_through_the_cli_when_the_tick_journal_is_missing(
+    env, monkeypatch, tmp_path, capsys
+):
+    doctor.main([WATCHED, "start"])
+    capsys.readouterr()
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert doctor.main([WATCHED, "measure", "failed-spawn/t1"]) == 1
+    captured = capsys.readouterr()
+    assert captured.err.startswith("doctor: tick journal unavailable: FileNotFoundError: ")
+    assert "Traceback" not in captured.err and captured.out == ""
+
+
 def test_swarm_status_json_names_the_peer_for_the_page(env, capsys):
     doctor.main([WATCHED, "start"])
     capsys.readouterr()
@@ -744,6 +756,7 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "slot census",
         "startup",
         "headroom",
+        "hive pool",
         "context overrun",
         "master prompt",
         "ci",

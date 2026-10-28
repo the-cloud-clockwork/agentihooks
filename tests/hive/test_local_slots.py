@@ -139,3 +139,84 @@ def test_the_claim_line_is_flushed_so_the_journal_keeps_it_at_the_claim(setup, m
     monkeypatch.setattr(local_slots, "print", lambda *args, **kwargs: printed.append(kwargs), raising=False)
     local_slots.claim(setup.store, "workstation", setup.config.slug, "task", "new", 6)
     assert printed == [{"flush": True}]
+
+
+def test_a_hive_at_its_cap_launches_nothing_when_its_session_report_misses_recorded_agents(setup, monkeypatch):
+    import json
+
+    from scripts.hive import launch, placement, registry
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    setup.store.create(SwarmConfig("doctor", "agentihooks", 1, 1))
+    rows = [
+        (setup.config.slug, "eng", "pinned", "working"),
+        (setup.config.slug, "ci", "free", "starting"),
+        ("doctor", "eng", "other", "retiring"),
+        ("doctor", "master", "master", "working"),
+        ("doctor", "eng", "gone", "ended"),
+    ]
+    started = [
+        setup.store.start_execution(
+            slug,
+            AgentRecord(
+                setup.store.next_name(slug, lane),
+                lane,
+                task,
+                seat=f"{lane}-{index + 1}@{slug}",
+                state=state,
+                harness="claude",
+                account="account",
+                hive="remote",
+                runtime_target={"host_id": "remote"},
+            ),
+        )
+        for index, (slug, lane, task, state) in enumerate(rows)
+    ]
+    seen = [agent.execution_id for agent in started[:2]]
+    report = {"claude:account": 3, "interactive:claude:account": 3, "_executions": {"claude:account": seen}}
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", json.dumps(report))
+    remote = next(hive for hive in launch.loaded_hives(setup.store) if hive["id"] == "remote")
+    assert remote["agents"] == 3
+    assert remote["room"] == 0
+    assert "max agents" in remote["refusal"]
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == placement.Wait(
+        "no hive for eng has room: remote max agents: 3 of 3 agents on the hive, fits 0 more"
+    )
+
+
+def _remote_agents(setup, monkeypatch, states, report):
+    import json
+
+    from scripts.hive import launch, registry
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    for index, state in enumerate(states):
+        setup.store.start_execution(
+            setup.config.slug,
+            AgentRecord(
+                setup.store.next_name(setup.config.slug, "eng"),
+                "eng",
+                f"task-{index}",
+                seat=f"eng-{index + 1}@{setup.config.slug}",
+                state=state,
+                harness="claude",
+                account="account",
+                hive="remote",
+                runtime_target={"host_id": "remote"},
+            ),
+        )
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", json.dumps(report))
+    return next(hive for hive in launch.loaded_hives(setup.store) if hive["id"] == "remote")["agents"]
+
+
+def test_finished_and_ended_agents_do_not_count_on_their_hive(setup, monkeypatch):
+    assert _remote_agents(setup, monkeypatch, ["working", "finished", "ended"], {}) == 1
+
+
+def test_each_unreported_live_agent_adds_to_the_processes_its_hive_reports(setup, monkeypatch):
+    states = ["launching", "working", "suspect", "retiring"]
+    assert _remote_agents(setup, monkeypatch, states, {"codex:other": 2}) == 5
