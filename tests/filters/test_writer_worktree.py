@@ -190,6 +190,13 @@ def test_a_worktree_on_chat_or_a_question_is_ignored(server_elsewhere):
     assert ledger_agent_ops.check(question) is None
 
 
+def test_only_an_agent_comment_reads_its_worktree(server_elsewhere):
+    chat = {**_comment("relative/path"), "thread": "chat"}
+    operator_comment = {key: value for key, value in _comment("relative/path").items() if key != "by"}
+    assert ledger_core.check_op(chat) is None
+    assert ledger_core.check_op(operator_comment) is None
+
+
 def test_a_worktree_outside_any_repository_gets_no_project_layer(server_elsewhere, tmp_path):
     assert ledger_core.check_op(_comment(str(tmp_path / "server"))) is None
     assert ledger_agent_ops.check(_followup(str(tmp_path / "server"))) is None
