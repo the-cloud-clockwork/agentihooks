@@ -157,6 +157,7 @@ class Placed:
     remote_control: dict = field(default_factory=dict)
     desired_route_kind: str | None = None
     conversation_id: str = ""
+    launch_job: dict = field(default_factory=dict)
 
 
 class Ledger(Protocol):
@@ -1260,6 +1261,7 @@ def _prepare(run, lane, task, taken, failing, peers):
         primed_task = {
             **timing.timed(primed, store, slug, seat, task),
             ACK_LATER: True,
+            "detached_launch": True,
             **_steer(slug, store, task, failing),
         }
     except Exception as exc:
@@ -1274,6 +1276,8 @@ def _launch(run, launch):
     record = launch.record
     try:
         placed = timing.timed(run.runtime.spawn, run.config, record.lane, record.name, launch.primed)
+        if placed.launch_job:
+            return placed, None
         launched = timing.timed(codex.admit_legacy, run.store, run.slug, placed_record(record, placed), run.runtime)
         return placed, launched
     except Exception as exc:
@@ -1281,6 +1285,8 @@ def _launch(run, launch):
 
 
 def _launch_all(run, clock, batch):
+    from scripts.swarm import launch_job
+
     if not batch:
         return []
     at, contexts = time.monotonic(), [copy_context() for _ in batch]
@@ -1289,6 +1295,11 @@ def _launch_all(run, clock, batch):
     clock.charge(at, [error for _, error in outcomes if isinstance(error, Exception)], len(batch))
     actions = []
     for launch, (placed, launched) in zip(batch, outcomes):
+        if placed and placed.launch_job:
+            launched = launch_job.dispatch(run, launch, placed)
+            if isinstance(launched, str):
+                actions.append(launched)
+                continue
         if isinstance(launched, Exception):
             failed = Failed(launch.record, launch.task, launched)
             actions += timing.timed(
@@ -1403,7 +1414,7 @@ def _acknowledging(slug, store, agent):
     if agent.lane == MASTER:
         return False
     raw = store.redis.hget(store.key(slug, "launches"), agent.name)
-    return bool(raw) and json.loads(raw).get("state") == ACKNOWLEDGING
+    return bool(raw) and json.loads(raw).get("state") in (ACKNOWLEDGING, "launching")
 
 
 def _expire_launch(config, runtime, agent, error):
@@ -1428,10 +1439,12 @@ def _finished_launch(slug, store, doc, agent):
 def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     if config.engine == EVENTS_ENGINE:
         return []
+    from scripts.swarm import launch_job
     from scripts.swarm_v2.runtime import codex
 
-    rows, actions = {t["id"]: t for t in doc["tasks"]}, []
-    for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
+    rows = {t["id"]: t for t in doc["tasks"]}
+    actions, pending = launch_job.collect(_Pass(slug, config, store, ledger, runtime, rows, doc, now_ms))
+    for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a) and a.name not in pending]:
         task = rows.get(agent.task) or {"id": agent.task}
         try:
             placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True})
