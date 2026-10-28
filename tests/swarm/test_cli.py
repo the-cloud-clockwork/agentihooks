@@ -45,6 +45,7 @@ def env(monkeypatch, tmp_path):
     ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
     rt = FakeRuntime()
     monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(cli, "HerdrRuntime", lambda: rt)
     monkeypatch.setattr(cli.timer, "ensure", lambda binary: True)
