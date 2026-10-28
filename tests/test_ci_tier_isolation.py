@@ -12,11 +12,10 @@ pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_promotion_grades_new_heads_without_waiting_for_an_older_red_run():
+def test_promotion_keeps_one_pending_head_and_serializes_release_writes():
     first = _concurrency("push", 1000)
     second = _concurrency("push", 1061)
-    assert first == {"group": "tests-push-1000", "queue": "single", "cancel-in-progress": False}
-    assert second == {"group": "tests-push-1061", "queue": "single", "cancel-in-progress": False}
+    assert first == second == {"group": "tests-push-dev", "queue": "single", "cancel-in-progress": False}
     release = yaml.safe_load((_ROOT / ".github/workflows/promote.yml").read_text())
     assert release["jobs"]["promote"]["concurrency"] == {
         "group": "release-version",

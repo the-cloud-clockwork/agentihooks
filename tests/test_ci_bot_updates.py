@@ -40,12 +40,12 @@ def test_dev_push_publishes_merged_durations_with_read_permissions():
     assert upload["with"]["include-hidden-files"] is True
 
 
-def test_a_newer_dev_push_never_waits_behind_or_replaces_an_older_dev_push_run():
+def test_a_newer_dev_push_replaces_only_the_pending_dev_push_run():
     concurrency = _workflow("test.yml")["concurrency"]
     assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
     assert concurrency["queue"] == "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}"
     group = concurrency["group"]
-    assert "github.event_name == 'push'" not in group
+    assert "github.event_name == 'push' && format('tests-push-{0}', github.ref_name)" in group
     assert "format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id)" in group
 
 

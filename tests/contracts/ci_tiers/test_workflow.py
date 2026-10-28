@@ -194,17 +194,21 @@ def test_the_shard_time_budget_grades_pull_requests_and_reports_on_promotion():
     )
 
 
-def _concurrency(event, run_id, number=None):
+def _concurrency(event, run_id, number=None, ref_name="dev"):
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     return _resolve(
-        workflow["concurrency"], event_name=event, run_id=run_id, event={"pull_request": {"number": number}}
+        workflow["concurrency"],
+        event_name=event,
+        run_id=run_id,
+        ref_name=ref_name,
+        event={"pull_request": {"number": number}},
     )
 
 
-def test_each_dev_push_grades_in_its_own_group_without_cancelling_another():
+def test_dev_pushes_share_one_group_so_the_running_run_finishes_and_a_newer_push_replaces_the_pending_one():
     first, second = _concurrency("push", 1000), _concurrency("push", 1061)
-    expected = {"queue": "single", "cancel-in-progress": False}
-    assert (first, second) == (dict(expected, group="tests-push-1000"), dict(expected, group="tests-push-1061"))
+    expected = {"group": "tests-push-dev", "queue": "single", "cancel-in-progress": False}
+    assert (first, second) == (expected, expected)
 
 
 @pytest.mark.parametrize("event,number", [("merge_group", None), ("pull_request", 7)])
