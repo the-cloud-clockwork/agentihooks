@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -15,6 +18,14 @@ RECORD = """() => {
   new MutationObserver((m) => rec("mut:" + m.map((x) => x.type + ":" + (x.target.id || x.target.className)).join(","))).observe(s, {childList: true, subtree: true, attributes: true});
   window.__rec = rec;
 }"""
+
+
+@pytest.fixture(scope="module", autouse=True)
+def busy():
+    procs = [subprocess.Popen([sys.executable, "-c", "while True: pass"]) for _ in range(2 * (os.cpu_count() or 2))]
+    yield
+    for proc in procs:
+        proc.kill()
 
 
 @pytest.mark.parametrize("rep", range(40))
@@ -43,5 +54,5 @@ def test_probe(tab, rep):  # noqa: F811
     got = bell.bounding_box()["y"]
     tab.evaluate("() => __rec('read')")
     log = tab.evaluate("() => __log")
-    if got != pytest.approx(moved - 40, abs=0.5):
+    if rep == 0 or got != pytest.approx(moved - 40, abs=0.5):
         pytest.fail(f"PROBE start={start} moved={moved} got={got} log={json.dumps(log)[:6000]}")
