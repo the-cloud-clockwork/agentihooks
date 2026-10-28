@@ -477,7 +477,10 @@ def test_one_thread_reads_existence_credential_and_task_rows_through_one_connect
     request()
     reads = len(opened)
     writer.apply_ops("ledger", ops=[chat(1)])
+    statements = []
+    repo.trace = statements.append
     request()
+    assert any(statement.startswith("SELECT token FROM ledgers") for statement in statements), statements
     worker = threading.Thread(target=request)
     worker.start()
     worker.join(5)
