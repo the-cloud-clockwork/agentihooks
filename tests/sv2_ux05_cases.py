@@ -346,6 +346,8 @@ def _case_a(browser, data: dict) -> tuple[dict, dict, Counter]:
     first, counts = _workflow(browser, data)
     second, _ = _workflow(browser, data)
     views, launched = first["reopened"], first["launched"]
+    names = (second["launched"]["puts"][1]["agent"], launched["puts"][1]["agent"])
+    second = json.loads(json.dumps(second).replace(*names))
     seen = "seen 0m ago"
     checks = {
         "launched_from_the_ledger": launched["puts"][0] == {"action": "start"} and first["store"]["state"] == "running",
