@@ -186,7 +186,17 @@ def _best_effort(function):
     def observe(*args, **kwargs):
         try:
             function(*args, **kwargs)
-        except (AttributeError, LookupError, OSError, TypeError, ValueError, sqlite3.Error):
+        except (
+            ArithmeticError,
+            AttributeError,
+            ImportError,
+            LookupError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            sqlite3.Error,
+        ):
             LOG.warning("consultation metrics unavailable")
 
     return observe

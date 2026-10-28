@@ -247,11 +247,12 @@ def test_b_routine_metrics_reject_private_content_and_keep_opaque_correlations(w
         metrics.record(grant, "private", {**delivery(), "prompt": "entire transcript"})
 
 
-def test_b_telemetry_failure_does_not_change_context_delivery(world, monkeypatch, caplog):
+@pytest.mark.parametrize("failure", [OSError, RuntimeError, ImportError, ZeroDivisionError])
+def test_b_telemetry_failure_does_not_change_context_delivery(world, monkeypatch, caplog, failure):
     _, grant, _, _, _, _ = world
 
     def unavailable(*args, **kwargs):
-        raise OSError("private error contents")
+        raise failure("private error contents")
 
     monkeypatch.setattr(consultation.Metrics, "record", unavailable)
     assert task_context.offer(grant.principal, "PreToolUse", "context", injectable=True) == "context"
