@@ -156,4 +156,6 @@ def test_a_hive_at_its_cap_launches_nothing_when_its_session_report_misses_recor
     assert remote["agents"] == 3
     assert remote["room"] == 0
     assert "max agents" in remote["refusal"]
-    assert isinstance(setup.launcher.select(setup.config, "eng", {"id": "task"}), placement.Wait)
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == placement.Wait(
+        "no hive for eng has room: remote max agents: 3 of 3 agents on the hive, fits 0 more"
+    )
