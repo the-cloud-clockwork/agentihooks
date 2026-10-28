@@ -109,3 +109,9 @@ def test_an_unreadable_cache_answers_nothing(content, monkeypatch):
 def test_storing_nothing_writes_nothing():
     answer_cache.store({})
     assert not answer_cache.cache_path().exists()
+
+
+def test_storing_creates_the_missing_runtime_folders(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path / "fresh" / "home")
+    answer_cache.store({"a": True})
+    assert answer_cache.lookup(["a"]) == {"a": True}

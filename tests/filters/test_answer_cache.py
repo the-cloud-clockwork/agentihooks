@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 import pytest
 
 from hooks.classifier import ClassifierError, answer_cache
 from hooks.context import conditions
+from hooks.filters import runner
 
 pytestmark = pytest.mark.unit
 
@@ -127,3 +130,28 @@ def test_cached_yes_answers_still_flag_while_the_classifier_is_down(filters_dir,
     effect = conditions.pre_effect(_write_call("waiting on task flt1\nthen task flt2"))
     assert len(fake.calls) == 1
     assert effect.contexts == ['[condition pre-write-ids.filter.yaml]\nfilter flagged:\n- "task flt1": names a task id']
+
+
+def _confirm(question="Q?", intent="no ids", reason="an id", context="waiting on t1"):
+    spec = SimpleNamespace(mode="classifier", intent_from=None, intent=intent, question=question)
+    findings = [runner.Finding((), 0, 2, "t1", reason, context)]
+    return runner.confirm({"file": "f.filter.yaml", "path": "f"}, spec, {"tool_input": {}}, findings)
+
+
+def test_an_identical_confirm_reuses_the_stored_answer(filters_dir, stub):
+    fake = stub(yes=True)
+    first = _confirm()
+    second = _confirm()
+    assert len(fake.calls) == 1
+    assert second == first == [runner.Finding((), 0, 2, "t1", "an id", "waiting on t1")]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"question": "Other?"}, {"intent": "no names"}, {"reason": "a name"}, {"context": "blocked on t1"}],
+)
+def test_each_part_of_a_confirm_keys_its_answer(filters_dir, stub, change):
+    fake = stub(yes=True)
+    _confirm()
+    _confirm(**change)
+    assert len(fake.calls) == 2
