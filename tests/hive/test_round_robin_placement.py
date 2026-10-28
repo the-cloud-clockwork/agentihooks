@@ -25,6 +25,21 @@ def test_one_placement_pass_spreads_agents_over_the_chosen_hives(setup, nodes, e
     assert selected(setup, config, 6) == expected
 
 
+def test_one_placement_pass_counts_each_placed_agent_once(setup):  # noqa: F811
+    from scripts.hive import placement
+
+    for name in ("b", "a"):
+        write_hive(setup, id=name)
+    config = replace(setup.config, placement_mode="round-robin", placement_nodes=0)
+
+    assert selected(setup, config, 4) == ["a", "b", "remote", "a"]
+    assert {hive["id"]: hive.get(placement.PLACED) for hive in setup.launcher.hives()} == {
+        "a": 2,
+        "b": 1,
+        "remote": 1,
+    }
+
+
 def test_round_robin_counts_only_hives_that_list_the_swarm_repo(setup):  # noqa: F811
     write_hive(setup, id="a", repos=["other"])
     write_hive(setup, id="b")
