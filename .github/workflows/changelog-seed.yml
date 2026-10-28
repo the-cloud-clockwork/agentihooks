@@ -48,12 +48,26 @@ jobs:
           CHANGELOG_LITELLM_URL: ${{ vars.CHANGELOG_LITELLM_URL }}
           CHANGELOG_MODEL: ${{ vars.CHANGELOG_MODEL }}
           DAYS: ${{ inputs.days }}
+        shell: bash
         run: |
           python -m scripts.release_changelog_seed "$RUNNER_TEMP/changelog/RELEASES.md" --days "$DAYS" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Publish the seeded changelog
         working-directory: ${{ runner.temp }}/changelog
+        env:
+          DAYS: ${{ inputs.days }}
         run: |
           git add RELEASES.md
-          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -m "Seed the release changelog with the last ${{ inputs.days }} days of merges into dev"
-          git push origin HEAD:refs/heads/changelog
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -m "Seed the release changelog with the last $DAYS days of merges into dev"
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:refs/heads/changelog; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+            git fetch origin changelog
+            git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com rebase origin/changelog
+          done
+          exit 1

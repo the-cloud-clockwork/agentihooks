@@ -2,6 +2,7 @@ import argparse
 import os
 import re
 import sys
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from pathlib import Path
@@ -11,11 +12,11 @@ from scripts import release_changelog as rc
 
 WORKERS = 8
 DAYS = 30
-STABLE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
+Release = tuple[str, list[rc.Change]]
 
 
 def stable_tags(tags: list[str]) -> list[str]:
-    return sorted((t for t in tags if STABLE.fullmatch(t)), key=lambda t: tuple(map(int, STABLE.fullmatch(t).groups())))
+    return sorted((t for t in tags if rc.STABLE.fullmatch(t)), key=rc.version)
 
 
 def dev_trees(ref: str) -> dict[str, str]:
@@ -41,7 +42,7 @@ def release_revision(tag: str, trees: dict[str, str]) -> str:
         return trees[tree]
 
 
-def window_releases(tags: list[str], trees: dict[str, str], since: str) -> list[tuple[str, list[rc.Change]]]:
+def window_releases(tags: list[str], trees: dict[str, str], since: str) -> list[Release]:
     ordered = stable_tags(tags)
     releases = []
     for index in range(len(ordered) - 1, -1, -1):
@@ -54,7 +55,17 @@ def window_releases(tags: list[str], trees: dict[str, str], since: str) -> list[
     return releases
 
 
-def write_sections(releases, ask, graphql, repository: str, workers: int = WORKERS) -> list[str]:
+def written_tags(changelog: str) -> set[str]:
+    return set(re.findall(r"^## (\S+)", changelog, flags=re.M))
+
+
+def write_sections(
+    releases: list[Release],
+    ask: Callable[[rc.Change], str],
+    graphql: Callable[[str], dict],
+    repository: str,
+    workers: int = WORKERS,
+) -> list[str]:
     changes = [c for _, kept in releases for c in kept]
     rc.fetch_pull_requests(changes, repository, graphql)
     with ThreadPoolExecutor(workers) as pool:
@@ -93,10 +104,14 @@ def main(argv: list[str] | None = None) -> int:
     url = os.environ.get(rc.URL_VAR) or rc.DEFAULT_URL
     model = os.environ.get(rc.MODEL_VAR) or rc.DEFAULT_MODEL
     access = rc.gateway_headers(dict(os.environ))
-    sections = write_sections(
-        releases, lambda c: rc.ask_model(c, url, access, model, urlopen), rc.gh_graphql, repository
-    )
     existing = args.changelog.read_text() if args.changelog.exists() else ""
+    written = written_tags(existing)
+    sections = write_sections(
+        [release for release in releases if release[0] not in written],
+        lambda c: rc.ask_model(c, url, access, model, urlopen),
+        rc.gh_graphql,
+        repository,
+    )
     args.changelog.write_text(merge_changelog(existing, sections))
     changes = [c for _, kept in releases for c in kept]
     pulls = sum(c.number is not None for c in changes)
