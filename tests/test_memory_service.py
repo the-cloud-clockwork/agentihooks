@@ -146,6 +146,33 @@ def test_http_ingest_persists_and_replays_without_claiming_indexing(served, bank
     assert replay["indexed"] is False
 
 
+def test_http_ingest_refuses_a_changed_batch_under_a_reused_identity(served, bank, inputs):
+    payload = ingest_body(inputs)
+    assert call(served, "/v2/sessions/ingest", payload, TOKEN)[2]["state"] == "committed"
+    payload["events"][0]["record"]["text"] = "changed under the same batch"
+    before = bank.tools.catalog.snapshot()
+    status, _, result = call(served, "/v2/sessions/ingest", payload, TOKEN)
+    assert status == 200
+    assert result["state"] == "rejected"
+    assert result["error"]["class"] == "revision_conflict"
+    assert bank.tools.catalog.snapshot() == before
+
+
+def test_http_ingest_reports_a_catalog_outage_as_a_safe_retry(served, bank, inputs, monkeypatch):
+    def unavailable(_):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(bank.tools.catalog, "commit", unavailable)
+    status, _, result = call(served, "/v2/sessions/ingest", ingest_body(inputs), TOKEN)
+    assert status == 200
+    assert result["state"] == "rejected"
+    assert result["error"] == {
+        "class": "dependency_unavailable",
+        "retry": "same_batch",
+        "detail": "the catalog failed before acknowledging; retrying the same batch is safe",
+    }
+
+
 @pytest.mark.parametrize("token", [None, "unknown"])
 def test_http_ingest_authenticates_before_reading_the_body(served, bank, token, monkeypatch):
     def unread(_):

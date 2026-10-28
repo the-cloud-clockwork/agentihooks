@@ -572,8 +572,12 @@ def test_configure_accepts_secure_or_loopback_provider_urls(prepared, provider, 
             "embedding provider returned invalid indices",
         ),
         (b"x" * ((2 << 20) + 1), "embedding response exceeds 2 MiB"),
+        (
+            b'{"model":"fixture-hash-embedder-4","data":[{"index":0,"embedding":[NaN,0,0,0]}]}',
+            "embedding provider returned a non finite value",
+        ),
     ],
-    ids=["other-model", "invalid-index", "oversized"],
+    ids=["other-model", "invalid-index", "oversized", "non-finite"],
 )
 def test_provider_response_refusals_are_explicit(prepared, provider, body, message):
     from hooks.memory.embedding_process import configure
@@ -616,8 +620,9 @@ def test_provider_bounds_its_response_read_and_network_timeout(monkeypatch):
     assert requests == [("POST", "application/json", 30)]
 
 
-@pytest.mark.parametrize("failure", ["url", "timeout"])
+@pytest.mark.parametrize("failure", ["url", "timeout", "reset", "incomplete"])
 def test_provider_connection_failures_defer_without_details(monkeypatch, failure):
+    from http.client import IncompleteRead
     from types import SimpleNamespace
     from urllib.error import URLError
 
@@ -625,7 +630,12 @@ def test_provider_connection_failures_defer_without_details(monkeypatch, failure
     from hooks.memory.embeddings import EmbeddingModel, TransientEmbeddingError
 
     def open_request(*args, **kwargs):
-        raise URLError("private detail") if failure == "url" else TimeoutError("private detail")
+        raise {
+            "url": URLError("private detail"),
+            "timeout": TimeoutError("private detail"),
+            "reset": ConnectionResetError("private detail"),
+            "incomplete": IncompleteRead(b"private detail"),
+        }[failure]
 
     monkeypatch.setattr(
         embedding_process.urllib.request,

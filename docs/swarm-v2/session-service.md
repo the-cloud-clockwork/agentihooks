@@ -46,8 +46,12 @@ Run `python -m hooks.memory.embedding_process` as a separate supervised process 
 Run `python -m hooks.memory.embedding_process --once` for one bounded pass; it exits zero on a
 completed pass, including a deferred provider outage. Each pass prints one JSON report with the
 worker state, embedded and failed chunk identities, pending count, backlog age, skipped sessions and scan cursor.
-A supervisor should restart a failed process; configuration errors, model conflicts, invalid provider responses
-and queue entries outside its grant exit nonzero. Reports and errors omit the provider credential.
+Configuration errors, model conflicts, invalid provider responses and queue entries outside its grant exit
+nonzero. These faults persist across restarts, so a supervisor restarts with growing backoff and alerts
+instead of retrying at once. Reports and errors omit the provider credential.
+SIGTERM and SIGINT stop the process after the current pass. A pass drains at most
+`AGENTIHOOKS_SESSION_EMBED_MAX_BATCHES` provider requests of up to thirty seconds each, four minutes at the
+defaults, so give the process a termination grace period longer than that.
 
 | Variable | Required | Default | Meaning |
 |---|---|---|---|

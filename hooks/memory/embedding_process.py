@@ -1,4 +1,5 @@
 import argparse
+import http.client
 import json
 import math
 import os
@@ -34,6 +35,10 @@ ACTIVE_SESSIONS = (
 )
 
 
+def refuse_constant(_: str) -> float:
+    raise ValueError("embedding provider returned a non finite value")
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *_):
         return None
@@ -60,11 +65,11 @@ class Provider:
             if error.code != 429 and error.code < 500:
                 raise ValueError("embedding provider refused the request") from None
             raise TransientEmbeddingError("embedding provider unavailable") from None
-        except (urllib.error.URLError, TimeoutError):
+        except (OSError, http.client.HTTPException):
             raise TransientEmbeddingError("embedding provider unavailable") from None
         if len(data) > 2 << 20:
             raise ValueError("embedding response exceeds 2 MiB")
-        body = json.loads(data)
+        body = json.loads(data, parse_constant=refuse_constant)
         if body["model"] != self.model.model:
             raise ValueError("embedding provider returned another model")
         rows = sorted(body["data"], key=lambda item: item["index"])
