@@ -913,6 +913,24 @@ def test_statistics_parts_partition_every_test_when_each_part_restores_a_differe
     assert parts == [[tests[0]], tests[1:]]
 
 
+def test_statistics_parts_split_on_other_timings_carry_another_split_key(tmp_path):
+    from scripts.ci_mutation.selection import split_files
+    from scripts.ci_mutation.stats import split_key
+
+    tests = [f"tests/test_github_reads.py::test_{name}" for name in "abcdefgh"]
+    first, second = tmp_path / "first", tmp_path / "second"
+    for root, seconds in ((first, range(8)), (second, reversed(range(8)))):
+        root.mkdir()
+        (root / ".test_durations").write_text(json.dumps(dict(zip(tests, seconds))))
+    one, other = split_files(first, tests, 3), split_files(second, tests, 3)
+    assert sorted(test for part in one for test in part) == tests
+    assert sorted(test for part in other for test in part) == tests
+    mixed = [one[0], other[1], one[2]]
+    assert sorted(test for part in mixed for test in part) != tests
+    assert split_key(one) != split_key(other)
+    assert split_key(one) == split_key(split_files(first, list(reversed(tests)), 3))
+
+
 def test_statistics_collection_sets_the_mutmut_mode_and_preserves_runner_options(tmp_path, monkeypatch):
     from scripts.ci_mutation.selection import collect_test_ids
 
