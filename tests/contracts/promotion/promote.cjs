@@ -15,10 +15,10 @@ function fixture(options = {}) {
   const commit = (sha, tree, message = '') => ({ sha, commit: { tree: { sha: tree }, message } });
   const pull = { number: 7, head: { sha: options.pullHead || 'snapshot', repo: { full_name: 'owner/repo' } },
     base: { ref: 'main' }, html_url: 'https://github.com/owner/repo/pull/7' };
-  const runUrl = 'https://github.com/owner/repo/actions/runs/42';
-  const jobs = [{ id: 71, run_id: 42, name: 'promote / promote', status: 'in_progress',
+  const runUrl = `https://github.com/owner/repo/actions/runs/${context.runId}`;
+  const jobs = [{ id: 71, run_id: context.runId, name: 'promote / promote', status: 'in_progress',
     check_run_url: 'https://api.github.com/repos/owner/repo/check-runs/900' },
-    { id: 72, run_id: 42, name: 'Gate — Required', status: 'completed', conclusion: 'success' }];
+    { id: 72, run_id: context.runId, name: 'Gate — Required', status: 'completed', conclusion: 'success' }];
   const checks = [
     { id: 901, name: 'Gate — Required', status: 'completed', conclusion: 'success', details_url: `${runUrl}/job/72` },
     { id: 900, name: 'promote / promote', status: 'in_progress', conclusion: null,
@@ -33,7 +33,7 @@ function fixture(options = {}) {
   let mainReads = 0;
   const github = { rest: {
     actions: {
-      getWorkflowRun: async () => ({ data: { workflow_id: 10, run_number: 42, created_at: '2026-10-28T01:00:00Z' } }),
+      getWorkflowRun: async () => ({ data: { workflow_id: 10, run_number: context.runId, created_at: '2026-10-28T01:00:00Z' } }),
       listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
       listJobsForWorkflowRun: async () => ({ data: { jobs: jobs.slice(0, 100) } }),
     },
