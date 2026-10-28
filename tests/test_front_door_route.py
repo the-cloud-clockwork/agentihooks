@@ -111,3 +111,75 @@ def test_front_door_without_login_refuses_and_never_executes(tmp_path, monkeypat
         )
     assert str(refused.value) == login.NO_LOGIN
     assert executed == []
+
+
+@pytest.mark.parametrize("flags", [["--name", "master 1 · rig"], ["--profile", "master"]])
+def test_launch_check_requires_both_identity_fields(flags):
+    from scripts import front_door_route
+
+    with pytest.raises(SystemExit) as refused:
+        front_door_route.main(flags)
+    assert refused.value.code == 2
+
+
+def test_launch_check_removes_a_trailing_route_flag():
+    from scripts import front_door_route
+
+    assert front_door_route.check("master", "master 1 · rig", ["--model", "opus", "--route"]) == [
+        "--route",
+        "claude-ai",
+        "--model",
+        "opus",
+    ]
+
+
+@pytest.mark.parametrize("expired", [False, True])
+def test_front_login_checks_the_claim_and_releases_it_on_auth_failure(tmp_path, monkeypatch, expired):
+    from unittest.mock import Mock
+
+    environ = {"AGENTIHOOKS_AGENT_NAME": "master@next"}
+    target = tmp_path / "two"
+    child = {"CLAUDE_CONFIG_DIR": str(target), "AH_ROUTE_INTERACTIVE_two": "1"}
+    prepare = Mock(return_value=(target, "two"))
+    build = Mock(return_value=child)
+    authenticate = Mock(side_effect=native_login.LoginError("expired login") if expired else None)
+    release = Mock()
+    monkeypatch.setattr(login, "prepare", prepare)
+    monkeypatch.setattr(login, "child", build)
+    monkeypatch.setattr(native_login, "check", authenticate)
+    monkeypatch.setattr(login, "release", release)
+    monkeypatch.setattr(login, "numbers", lambda: [1, 2])
+    monkeypatch.setattr(login, "home", lambda number: tmp_path / {1: "one", 2: "two"}[number])
+    if expired:
+        with pytest.raises(login.LoginRefused) as refused:
+            claude_ai._front(environ, tmp_path)
+        assert str(refused.value) == "expired login"
+        release.assert_called_once_with(target, environ)
+    else:
+        assert claude_ai._front(environ, tmp_path) == (child, "two", 2)
+        release.assert_not_called()
+    prepare.assert_called_once_with(environ, tmp_path)
+    build.assert_called_once_with(environ, target, "two")
+    authenticate.assert_called_once_with(child, "two")
+
+
+@pytest.mark.parametrize("named", [False, True])
+def test_front_launch_classifies_the_title_after_other_flags(monkeypatch, named):
+    from unittest.mock import Mock
+
+    from scripts import install
+
+    environ = {"AGENTIHOOKS_PROFILE": "master"}
+    args = ["--model", "opus", *(["--name", "master 1 · rig"] if named else [])]
+    front = Mock(return_value=(environ, "shared", 2))
+    standalone = Mock(return_value=(environ, "standalone", 1))
+    execute = Mock()
+    monkeypatch.setattr(claude_ai, "_front", front)
+    monkeypatch.setattr(claude_ai, "prepare", standalone)
+    monkeypatch.setattr("scripts.hive.account_slots.execute", execute)
+    monkeypatch.setattr(install, "_write_route_report", Mock())
+    claude_ai.launch_claude("claude", args, environ, "")
+    selected, other = (front, standalone) if named else (standalone, front)
+    selected.assert_called_once_with(environ, Path.cwd())
+    other.assert_not_called()
+    assert execute.call_args.args[:3] == ("claude", "shared" if named else "standalone", environ)
