@@ -105,6 +105,14 @@ def _starts(store, slug, now_ms):
     return spawns.silent_starts(agents, activity.first_events(slug), now_ms, beats, pending)
 
 
+def _headroom(store, now_ms):
+    from scripts.hive import headroom, registry
+
+    hives = registry.hives(store.redis)
+    readings = {hive["id"]: headroom.read(store.redis, hive["id"], now_ms) for hive in hives}
+    return spawns.missing_headroom(hives, readings, now_ms)
+
+
 def _once(load):
     lock = Lock()
     kept = cache(load)
@@ -140,6 +148,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         "spawn": lambda: spawns.findings(spawn_read.records(store, slug, now_ms)),
         "master launch": lambda: master_launches.findings(spawn_read.master_records(store, slug)),
         "startup": lambda: _starts(store, slug, now_ms),
+        "headroom": lambda: _headroom(store, now_ms),
         "context overrun": lambda: _overruns(store, slug),
         "master prompt": lambda: _master_prompts(store, slug, now_ms),
         "ci": lambda: _ci(store, tasks(), now_ms),
