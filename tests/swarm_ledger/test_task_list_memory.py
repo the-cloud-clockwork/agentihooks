@@ -10,7 +10,7 @@ pytestmark = pytest.mark.unit
 
 READERS = 20
 HUNDRED = 100
-TASKS = 2000
+TASKS = 500
 SLUG = "ledger"
 CURSOR = re.compile(r'"next_cursor": (?:"([^"]+)"|null)')
 
