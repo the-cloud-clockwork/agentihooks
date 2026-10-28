@@ -180,10 +180,10 @@ def test_a_question_left_unheld_by_an_unreachable_store_is_logged(master, monkey
         raise Unreachable("down")
 
     rows = []
-    monkeypatch.setattr(log, "append", lambda slug, row: rows.append((slug, row.reason)))
+    monkeypatch.setattr(log, "append", lambda slug, row: rows.append((slug, row.kind, row.agent, row.reason)))
     monkeypatch.setattr(master_questions, "hold", unreachable)
     master_question._hold("sw", NAME, [{"question": PROMPT}], object())
-    assert rows == [("sw", "opened but not held for the tick: the swarm store was unreachable")]
+    assert rows == [("sw", "count", NAME, "opened but not held for the tick: the swarm store was unreachable")]
 
 
 def test_a_prompt_that_ends_drops_its_recorded_questions(store):
