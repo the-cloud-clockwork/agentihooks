@@ -479,6 +479,84 @@
   "cases": 15,
   "texts": []
  },
+ "tests/swarm/test_stability_snapshot.py::test_health_limits_match_the_snapshot": {
+  "assertions": 2,
+  "calls": 4,
+  "cases": 1,
+  "texts": [
+   "991e365c9a39daed",
+   "c5680b88106cd04a"
+  ]
+ },
+ "tests/swarm/test_stability_snapshot.py::test_hive_settings_are_the_desired_state_and_name_hive_settings": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1,
+  "texts": [
+   "29f1a1cad0e0f90d",
+   "2d891e6a03ec763d"
+  ]
+ },
+ "tests/swarm/test_stability_snapshot.py::test_probe_thresholds_match_the_snapshot": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1,
+  "texts": [
+   "51ce989abfd5e4a4",
+   "d7ae9ff93a21f949"
+  ]
+ },
+ "tests/swarm/test_stability_snapshot.py::test_session_caps_and_hive_liveness_match_the_snapshot": {
+  "assertions": 6,
+  "calls": 1,
+  "cases": 1,
+  "texts": [
+   "50cbfe713c28281c",
+   "55f9197931dc5d82",
+   "7bc01b3eea0c23ba",
+   "bbc064998bb4c8e5",
+   "d056895cb4b267ea",
+   "d3c76618040adf3e"
+  ]
+ },
+ "tests/swarm/test_stability_snapshot.py::test_swarm_caps_are_the_desired_state_and_name_swarm_settings": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 1,
+  "texts": [
+   "5ce6af9f5d347e46",
+   "8e4ec0cdfa04d9f5"
+  ]
+ },
+ "tests/swarm/test_stability_snapshot.py::test_the_probe_command_reports_the_snapshot_invariants": {
+  "assertions": 3,
+  "calls": 14,
+  "cases": 1,
+  "texts": [
+   "379bcedccef49941",
+   "4045ba49abe2c91e",
+   "7ab7ef4579532a40"
+  ]
+ },
+ "tests/swarm/test_stability_snapshot.py::test_the_snapshot_is_version_one_of_rig_grade_swarm": {
+  "assertions": 4,
+  "calls": 1,
+  "cases": 1,
+  "texts": [
+   "173c709b4a92150c",
+   "4b2d57a489225974",
+   "79539b0f2c4513ae",
+   "d285924461e7dadf"
+  ]
+ },
+ "tests/swarm/test_stability_snapshot.py::test_the_window_baseline_is_seven_samples_with_each_invariant_pass_count": {
+  "assertions": 1,
+  "calls": 0,
+  "cases": 1,
+  "texts": [
+   "5536f96e7796a79a"
+  ]
+ },
  "tests/test_credential_guard.py::TestEnvironmentNames::test_block_message_gives_the_safe_form": {
   "assertions": 2,
   "calls": 2,
