@@ -139,7 +139,7 @@ def test_enforcements_merge_root_then_user_then_profile_by_id(layers_world, monk
 
     _write(layers_world["root"] / "enforcements.json", _store(_entry("a", "root a"), _entry("b", "root b")))
     _write(layers_world["user"] / "enforcements.json", _store(_entry("b", "user b"), _entry("c", "user c")))
-    _write(layers_world["user"] / "profiles" / "alpha" / "enforcements.json", _store(_entry("c", "profile c")))
+    _write(layers_world["root"] / "profiles" / "alpha" / "enforcements.json", _store(_entry("c", "profile c")))
     _bundle_state(bundle=layers_world["root"], user_bundle=layers_world["user"])
     monkeypatch.setattr(enforcement, "_load_store", lambda: [])
     monkeypatch.setattr(enforcement, "_load_local_enforcements", lambda cwd: [])
