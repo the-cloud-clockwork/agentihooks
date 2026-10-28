@@ -1,0 +1,73 @@
+name: Changelog
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to explain, such as v2.17.438
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-changelog
+  cancel-in-progress: false
+
+jobs:
+  changelog:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Read the changelog branch
+        run: |
+          if git ls-remote --exit-code origin refs/heads/changelog >/dev/null; then
+            git show origin/changelog:RELEASES.md > "$RUNNER_TEMP/RELEASES.md"
+          fi
+
+      - name: Explain every change of the release in 20 to 100 words
+        env:
+          CHANGELOG_LITELLM_KEY: ${{ secrets.CHANGELOG_LITELLM_KEY }}
+          CHANGELOG_LITELLM_URL: ${{ vars.CHANGELOG_LITELLM_URL }}
+          CHANGELOG_MODEL: ${{ vars.CHANGELOG_MODEL }}
+        run: python -m scripts.release_changelog "$TAG" "$RUNNER_TEMP/RELEASES.md" "$RUNNER_TEMP/section.md"
+
+      - name: Commit the changelog to its branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git ls-remote --exit-code origin refs/heads/changelog >/dev/null; then
+            git switch --quiet -C changelog origin/changelog
+          else
+            git switch --quiet --orphan changelog
+          fi
+          cp "$RUNNER_TEMP/RELEASES.md" RELEASES.md
+          git add RELEASES.md
+          if ! git diff --cached --quiet; then
+            git commit --quiet -m "Explain the changes of $TAG"
+            git push origin changelog
+          fi
+
+      - name: Add the explanations to the release notes
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          if ! grep -qx '## Change explanations' "$RUNNER_TEMP/notes.md"; then
+            { printf '\n## Change explanations\n\n'; tail -n +2 "$RUNNER_TEMP/section.md"; } >> "$RUNNER_TEMP/notes.md"
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
