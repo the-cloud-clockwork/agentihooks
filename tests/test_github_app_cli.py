@@ -256,6 +256,7 @@ READS = [
     ["api", "-X", "GET", "search/issues", "-f", "q=repo:o/r"],
     ["api", "--method=get", "repos/o/r/pulls"],
     ["api", "graphql", "-f", "query=query { viewer { login } }"],
+    ["api", "graphql", "-f", 'query=query { user(login: "a@b.c") { id } }'],
     ["run", "list"],
     ["run", "download", "123"],
     ["pr", "view", "8"],

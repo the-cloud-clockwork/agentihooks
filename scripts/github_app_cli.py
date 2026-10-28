@@ -97,7 +97,10 @@ def _api_read(arguments: list[str]) -> bool:
     if method is not None:
         return method.upper() == "GET"
     if "graphql" in arguments:
-        return not any("mutation" in value or "@" in value or value.startswith("--input") for value in arguments)
+        return not any(
+            "mutation" in value or value.split("=", 1)[-1].startswith("@") or value.startswith("--input")
+            for value in arguments
+        )
     return not any(value.startswith(WRITE_FIELDS) for value in arguments)
 
 
