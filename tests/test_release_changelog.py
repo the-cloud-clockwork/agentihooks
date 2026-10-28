@@ -85,7 +85,7 @@ def test_write_entry_returns_the_first_valid_answer_without_retry():
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("first", [rc.WordCountError, rc.ModelError])
+@pytest.mark.parametrize("first", [rc.WordCountError, rc.MarkupError, rc.ModelError])
 def test_write_entry_retries_once_after_a_failure(first, capsys):
     answers = iter([first, _words(25)])
 
@@ -117,8 +117,26 @@ def test_previous_tag_orders_by_version_and_ignores_prereleases():
 
 def test_graded_revision_reads_the_promotion_commit(repo):
     graded = _commit(repo, "One (#1)")
-    _promote(repo, graded, "v1.0.1")
+    promoted = _promote(repo, graded, "v1.0.1")
+    _git(repo, "tag", "-a", "-m", "annotated", "v1.0.2", promoted)
     assert rc.graded_revision("v1.0.1") == graded
+    assert rc.graded_revision("v1.0.2") == graded
+
+
+@pytest.mark.parametrize("text", ["# Heading", "a <b> tag", "a [link](x)", "a `code` span"])
+def test_check_words_refuses_markup(text):
+    with pytest.raises(rc.MarkupError, match="^markup in the explanation$"):
+        rc.check_words(f"{text} {_words(25)}")
+
+
+def test_check_words_accepts_a_pull_request_mention_inside_the_text():
+    assert rc.check_words(f"Fixes #8338 {_words(25)}") == f"Fixes #8338 {_words(25)}"
+
+
+@pytest.mark.parametrize("tag", ["latest", "v1.0", "v1.0.1rc1"])
+def test_version_refuses_a_tag_that_is_not_a_stable_release(tag):
+    with pytest.raises(ValueError, match=f"^{tag} is not a stable release tag$"):
+        rc.version(tag)
 
 
 def test_graded_revision_refuses_a_commit_without_one_even_above_a_promotion(repo):
@@ -148,6 +166,7 @@ def test_collect_changes_lists_first_parent_changes_newest_first(repo):
         (first, 12, "Add a thing", "2026-10-27"),
     ]
     assert changes[0].stat == "1 file changed, 1 insertion(+)"
+    assert {c.author for c in changes} == {"a"}
     assert rc.collect_changes(second, "HEAD")[0].title == "Later"
 
 
@@ -165,13 +184,13 @@ def test_fetch_pull_requests_batches_and_fills_author_and_body(monkeypatch):
         queries.append(query)
         return {"repository": {"p1": {"author": {"login": "ann"}, "body": "why"}, "p2": {"author": None, "body": None}}}
 
-    changes = [_change(1), _change(None), _change(2), _change(3)]
+    changes = [_change(1), _change(None, author="git"), _change(2), _change(3, author="git")]
     rc.fetch_pull_requests(changes, "org/repo", graphql)
-    assert [(c.author, c.body) for c in changes] == [("ann", "why"), ("", ""), ("ghost", ""), ("ghost", "")]
+    assert [(c.author, c.body) for c in changes] == [("ann", "why"), ("git", ""), ("ghost", ""), ("git", "")]
+    field = "p{0}: issueOrPullRequest(number: {0}) {{ ... on PullRequest {{ author {{ login }} body }} }}"
     assert queries == [
-        '{ repository(owner: "org", name: "repo") { p1: pullRequest(number: 1) { author { login } body } '
-        "p2: pullRequest(number: 2) { author { login } body } } }",
-        '{ repository(owner: "org", name: "repo") { p3: pullRequest(number: 3) { author { login } body } } }',
+        f'{{ repository(owner: "org", name: "repo") {{ {field.format(1)} {field.format(2)} }} }}',
+        f'{{ repository(owner: "org", name: "repo") {{ {field.format(3)} }} }}',
     ]
 
 
@@ -231,18 +250,24 @@ def test_ask_model_reports_transport_failures_without_the_key(error, message):
         rc.ask_model(_change(), "http://gw", "k1", "sonnet", opener)
 
 
-@pytest.mark.parametrize("payload", [b"not json", b"{}", b'{"choices": []}', b'{"choices": [null]}'])
+@pytest.mark.parametrize(
+    "payload",
+    [b"not json", b"{}", b'{"choices": []}', b'{"choices": [null]}', b'{"choices": [{"message": {"content": null}}]}'],
+)
 def test_ask_model_refuses_an_unreadable_answer(payload):
     with pytest.raises(rc.ModelError, match="^sonnet: unreadable response$"):
         rc.ask_model(_change(), "http://gw", "k1", "sonnet", lambda request, timeout: _Response(payload))
 
 
 def test_render_release_names_date_hash_pull_request_and_author():
-    entries = [(_change(8338, author="bot"), "Explains it."), (_change(None, sha="b" * 40, title="Fix"), "Other.")]
+    entries = [
+        (_change(8338, author="bot"), "Explains it."),
+        (_change(None, sha="b" * 40, title="Fix", author="Ann"), "Other."),
+    ]
     assert rc.render_release("v1.2.3", "2026-10-28", entries) == (
         "## v1.2.3 · 2026-10-28\n\n"
         "### 2026-10-28 · aaaaaaaaaaaa · #8338 · @bot\n\n**Do it**\n\nExplains it.\n\n"
-        "### 2026-10-28 · bbbbbbbbbbbb · direct commit · @unknown\n\n**Fix**\n\nOther.\n"
+        "### 2026-10-28 · bbbbbbbbbbbb · direct commit · @Ann\n\n**Fix**\n\nOther.\n"
     )
 
 
@@ -321,6 +346,13 @@ def test_main_explain_writes_the_section_for_a_tag(repo, monkeypatch, tmp_path):
         f"**Add the changelog**\n\n{_words(22)}\n"
     )
     assert asked == [(rc.DEFAULT_URL + "/v1/chat/completions", "Bearer k2", rc.DEFAULT_MODEL)]
+
+
+def test_main_explain_refuses_a_tag_that_is_not_a_stable_release(repo, monkeypatch, tmp_path):
+    _promote(repo, _commit(repo, "Start (#1)"), "v1.0.1")
+    _git(repo, "tag", "latest", "v1.0.1")
+    with pytest.raises(ValueError, match="^latest is not a stable release tag$"):
+        _explain(monkeypatch, tmp_path, "latest", {})
 
 
 def test_main_explain_covers_the_whole_history_for_the_first_release(repo, monkeypatch, tmp_path):

@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -36,13 +37,22 @@ GRADED = re.compile(r"^Graded dev revision: ([0-9a-f]{40})$", re.MULTILINE)
 NUMBER = re.compile(r"\(#(\d+)\)$")
 STABLE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
 FIELD = "\x1f"
-LOG_FORMAT = "--format=%H%x1f%cs%x1f%s"
+LOG_FORMAT = "--format=%H%x1f%cs%x1f%an%x1f%s"
+MARKUP = re.compile(r"^#|<|\]\(|`")
 CONTENT_TYPE = "Content-Type"
 AUTHORIZATION = "Authorization"
 JSON = "application/json"
 
 
-class WordCountError(ValueError):
+class EntryError(ValueError):
+    pass
+
+
+class WordCountError(EntryError):
+    pass
+
+
+class MarkupError(EntryError):
     pass
 
 
@@ -70,14 +80,17 @@ def git(*args: str) -> str:
 
 
 def graded_revision(ref: str) -> str:
-    match = GRADED.search(git("cat-file", "commit", ref))
+    match = GRADED.search(git("cat-file", "commit", f"{ref}^{{commit}}"))
     if not match:
         raise ValueError(f"{ref} records no graded dev revision")
     return match.group(1)
 
 
 def version(tag: str) -> tuple[int, ...]:
-    return tuple(map(int, STABLE.fullmatch(tag).groups()))
+    match = STABLE.fullmatch(tag)
+    if not match:
+        raise ValueError(f"{tag} is not a stable release tag")
+    return tuple(map(int, match.groups()))
 
 
 def previous_tag(tag: str, tags: list[str]) -> str:
@@ -89,11 +102,11 @@ def collect_changes(previous: str, current: str) -> list[Change]:
     span = f"{previous}..{current}" if previous else current
     changes = []
     for record in git("log", "--first-parent", LOG_FORMAT, span).splitlines():
-        sha, date, subject = record.split(FIELD)
+        sha, date, author, subject = record.split(FIELD)
         match = NUMBER.search(subject)
         title = subject[: match.start()].rstrip() if match else subject
         stat = git("show", "--shortstat", "--format=", sha).strip()
-        changes.append(Change(sha, int(match.group(1)) if match else None, title, date, stat))
+        changes.append(Change(sha, int(match.group(1)) if match else None, title, date, stat, author))
     return changes
 
 
@@ -101,16 +114,20 @@ def gh_graphql(query: str) -> dict:
     return json.loads(run("gh", "api", "graphql", "-f", f"query={query}"))["data"]
 
 
-def fetch_pull_requests(changes: list[Change], repository: str, graphql=gh_graphql) -> None:
+def fetch_pull_requests(changes: list[Change], repository: str, graphql: Callable[[str], dict] = gh_graphql) -> None:
     owner, name = repository.split("/")
     numbered = [change for change in changes if change.number is not None]
     for start in range(0, len(numbered), BATCH):
         batch = numbered[start : start + BATCH]
-        fields = " ".join(f"p{c.number}: pullRequest(number: {c.number}) {{ author {{ login }} body }}" for c in batch)
+        fields = " ".join(
+            f"p{c.number}: issueOrPullRequest(number: {c.number}) {{ ... on PullRequest {{ author {{ login }} body }} }}"
+            for c in batch
+        )
         found = graphql(f'{{ repository(owner: "{owner}", name: "{name}") {{ {fields} }} }}')["repository"]
         for change in batch:
             pull = found.get(f"p{change.number}") or {}
-            change.author = (pull.get("author") or {}).get("login", "ghost")
+            if "author" in pull:
+                change.author = (pull["author"] or {}).get("login", "ghost")
             change.body = pull.get("body") or ""
 
 
@@ -122,7 +139,10 @@ def check_words(text: str) -> str:
     count = word_count(text)
     if not WORDS_MIN <= count <= WORDS_MAX:
         raise WordCountError(f"{count} words, need {WORDS_MIN} to {WORDS_MAX}")
-    return " ".join(text.split())
+    flat = " ".join(text.split())
+    if MARKUP.search(flat):
+        raise MarkupError("markup in the explanation")
+    return flat
 
 
 def prompt(change: Change) -> list[dict]:
@@ -133,14 +153,17 @@ def prompt(change: Change) -> list[dict]:
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]
 
 
-def ask_model(change: Change, url: str, key: str, model: str, opener=urlopen) -> str:
+def ask_model(change: Change, url: str, key: str, model: str, opener: Callable = urlopen) -> str:
     body = json.dumps({"model": model, "messages": prompt(change), "max_tokens": 400}).encode()
     headers = {CONTENT_TYPE: JSON, AUTHORIZATION: f"Bearer {key}"}
     try:
         with opener(
             Request(url.removesuffix("/") + "/v1/chat/completions", data=body, headers=headers), timeout=TIMEOUT_S
         ) as response:
-            return json.loads(response.read())["choices"][0]["message"]["content"]
+            content = json.loads(response.read())["choices"][0]["message"]["content"]
+            if not isinstance(content, str):
+                raise TypeError
+            return content
     except HTTPError as error:
         raise ModelError(f"{model}: HTTP {error.code}") from None
     except (URLError, OSError) as error:
@@ -149,11 +172,11 @@ def ask_model(change: Change, url: str, key: str, model: str, opener=urlopen) ->
         raise ModelError(f"{model}: unreadable response") from None
 
 
-def write_entry(change: Change, ask) -> str:
+def write_entry(change: Change, ask: Callable[[Change], str]) -> str:
     for attempt in range(ATTEMPTS):
         try:
             return check_words(ask(change))
-        except (WordCountError, ModelError) as error:
+        except (EntryError, ModelError) as error:
             failure = error
             print(f"#{change.number} attempt {attempt + 1}: {error}", file=sys.stderr)
     raise failure
@@ -164,7 +187,7 @@ def render_release(tag: str, date: str, entries: list[tuple[Change, str]]) -> st
     for change, text in entries:
         pull = f"#{change.number}" if change.number is not None else "direct commit"
         lines += [
-            f"### {change.date} · {change.sha[:12]} · {pull} · @{change.author or 'unknown'}",
+            f"### {change.date} · {change.sha[:12]} · {pull} · @{change.author}",
             "",
             f"**{change.title}**",
             "",
@@ -184,7 +207,10 @@ def insert_release(existing: str, section: str) -> str:
     return f"{TITLE}\n\n{INTRO}\n\n" + "\n".join(ordered)
 
 
-def release_section(tag: str, repository: str, ask, graphql=gh_graphql) -> str:
+def release_section(
+    tag: str, repository: str, ask: Callable[[Change], str], graphql: Callable[[str], dict] = gh_graphql
+) -> str:
+    version(tag)
     tags = git("tag").split()
     previous = previous_tag(tag, tags)
     current = graded_revision(tag)

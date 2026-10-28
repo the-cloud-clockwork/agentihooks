@@ -20,7 +20,7 @@ concurrency:
 jobs:
   changelog:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: write
     env:
@@ -30,6 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -51,7 +52,9 @@ jobs:
             : > "$RUNNER_TEMP/RELEASES.md"
             if git fetch --quiet origin +refs/heads/changelog:refs/remotes/origin/changelog 2>/dev/null; then
               parent=(-p origin/changelog)
-              git show origin/changelog:RELEASES.md > "$RUNNER_TEMP/RELEASES.md"
+              if git cat-file -e origin/changelog:RELEASES.md 2>/dev/null; then
+                git show origin/changelog:RELEASES.md > "$RUNNER_TEMP/RELEASES.md"
+              fi
             fi
             python -m scripts.release_changelog insert "$RUNNER_TEMP/section.md" "$RUNNER_TEMP/RELEASES.md"
             blob=$(git hash-object -w "$RUNNER_TEMP/RELEASES.md")
@@ -60,7 +63,7 @@ jobs:
               exit 0
             fi
             commit=$(git commit-tree "$tree" "${parent[@]}" -m "Explain the changes of $TAG")
-            if git push --quiet origin "$commit:refs/heads/changelog"; then
+            if git push --quiet "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$commit:refs/heads/changelog"; then
               exit 0
             fi
             sleep $((attempt * 5))
