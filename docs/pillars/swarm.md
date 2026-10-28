@@ -5439,7 +5439,7 @@ Leaving the prompt, or the last operator item closing, resets it. The `reset` ga
 | `deny` | The master retire handoff ask goes to the master's inbox, and a `deny` row with tool `wake` is logged; journal `asked <name> for a handoff before retiring it: held on ...` | The tick stores a recovery handoff in the master seat, records a `stalled` transfer, marks the master `finished` and logs a `deny` row with tool `recycle`. The next tick retires the process, which dismisses an open question panel, and the respawn starts a fresh master in the seat. Journal `recycled master <name> in its seat after <n> minutes held on <prompt> with operator items waiting`. |
 | `skip` | Nothing | Nothing |
 
-The recycle never comes before 15 minutes held, whatever `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` says. Leaving
+The recycle comes at 15 minutes held, whatever `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` says, and closes a pending ask as `the swarm recycled the master after fifteen minutes on the prompt`. Leaving
 the prompt before then withdraws the ask as `the master left the prompt`. The operator items stay open on the seat, so
 the fresh master receives them; its recovery handoff tells it to answer them first.
 

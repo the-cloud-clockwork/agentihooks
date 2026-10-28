@@ -108,6 +108,18 @@ def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(st
     ]
 
 
+def test_recycle_comes_at_fifteen_minutes_whatever_the_handoff_wait(store, monkeypatch):
+    monkeypatch.setenv(master_retire.MINUTES, "30")
+    agent, runtime = master(store)
+    operator_says(store, START)
+    run(store, runtime, START)
+    run(store, runtime, START + 10 * MINUTE)
+    [ask] = InboxStore(store.redis).pending_items(agent.name)
+    assert run(store, runtime, START + 15 * MINUTE)[0].startswith(f"recycled master {agent.name}")
+    assert InboxStore(store.redis).get(ask.id).reason == f"done: {master_prompt_stall.RECYCLED}"
+    assert master_retire.reason(store, "sw", agent.name) == ""
+
+
 def test_held_on_names_the_prompt():
     assert master_prompt_stall.held_on(QUESTION) == "the prompt Which task first?"
     assert master_prompt_stall.held_on(PaneObservation("waiting")) == "the prompt waiting on input"
@@ -250,9 +262,9 @@ def test_tick_recycles_a_master_on_a_question_and_a_fresh_master_answers_the_ope
     fresh = store.seats.occupant(agent.seat).occupant
     assert fresh and fresh != agent.name and fresh in runtime.live
     inbox = InboxStore(store.redis)
-    assert item.id in [i.id for i in inbox.open_items(agent.seat)]
+    assert item.id in [i.id for i in inbox.open_mail(fresh)]
     inbox.reply(item.id, fresh, "here, working your list")
-    assert inbox.get(item.id).state not in ("pending", "delivered", "confirmed")
+    assert (inbox.get(item.id).state, item.id in [i.id for i in inbox.open_mail(fresh)]) == ("done", False)
 
 
 @pytest.mark.parametrize(

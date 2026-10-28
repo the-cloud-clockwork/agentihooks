@@ -20,6 +20,7 @@ OPERATOR = "operator"
 HELD = "held on "
 REASON = HELD + "{prompt} with operator items waiting for {minutes} minutes"
 RESUMED = "the master left the prompt"
+RECYCLED = "the swarm recycled the master after fifteen minutes on the prompt"
 RECOVERY = """## Intent
 Continue as the master of {slug}; {name} sat {minutes} minutes on {prompt} while operator items waited, and the swarm recycled it.
 
@@ -101,12 +102,12 @@ def run(slug, config, store, ledger, runtime, now_ms):
     held_for = master_retire.reason(store, slug, master.name)
     if held_for and not held_for.startswith(HELD):
         return []
-    if held := master_retire.hold(store, slug, master, held_for or reason, True, now_ms):
-        if not held_for:
-            GATE.allows(store, who, "wake", reason, now_ms)
-        return [held]
     if minutes < RESET_MINUTES:
-        return []
+        held = master_retire.hold(store, slug, master, held_for or reason, True, now_ms)
+        if held and not held_for:
+            GATE.allows(store, who, "wake", reason, now_ms)
+        return [held] if held else []
+    master_retire.forget(store, slug, master.name, RECYCLED)
     GATE.allows(store, who, "recycle", reason, now_ms)
     text = RECOVERY.format(slug=slug, name=master.name, minutes=minutes, prompt=prompt)
     master_stall.recycle(slug, store, ledger, master, text, now_ms)
