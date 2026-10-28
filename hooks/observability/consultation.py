@@ -207,10 +207,17 @@ def delivery(session: str, pack: str | None, outcome: str) -> None:
     from hooks.context import task_context
     from hooks.targets import current_target
 
-    receipt = task_context.consultation(session)
     task = os.environ.get("AGENTIHOOKS_SWARM_TASK")
-    if not task:
+    swarm = os.environ.get("AGENTIHOOKS_SWARM")
+    if not (swarm and task):
         return
+    receipt = task_context.consultation(session)
+    if outcome == "missing":
+        from scripts.gates.brain import check
+
+        bound = task_context.binding(swarm, task)
+        if not bound or (receipt and not check(receipt, bound, time.time())):
+            return
     context = json.dumps(
         [task, receipt.get("generation"), receipt.get("revision"), receipt.get("digest"), receipt.get("at")]
     )
