@@ -1,9 +1,10 @@
 import json
 import subprocess
+from unittest.mock import MagicMock
 
 import pytest
 
-from scripts.doctor import slot_census, spawn_read
+from scripts.doctor import detect, slot_census, spawn_read
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
@@ -234,14 +235,10 @@ def test_an_unreadable_journal_fails_the_unclaimed_launch_detector():
 
 
 def test_the_doctor_runs_the_unclaimed_launch_detector_over_the_slot_claim_read(monkeypatch):
-    from scripts.doctor import detect
-
     read = record([], [life("engineer@a-1", started=SINCE, hive="root"), life("older", started=SINCE - 1)])
     reads = []
     monkeypatch.setattr(spawn_read, "slot_claims", lambda store, slug: reads.append(slug) or read)
     monkeypatch.setattr(detect.commands, "hive_id", lambda: "root")
-    from unittest.mock import MagicMock
-
     found = detect.readers(MagicMock(), None, "sw", AT, environ={}, telemetry=False)
     [unclaimed] = found["unclaimed launch"]()
     assert (unclaimed.kind, unclaimed.measure) == (slot_census.UNCLAIMED, 1)

@@ -80,7 +80,6 @@ def _launched(life, slug, machine, since_ms):
 
 
 def unclaimed(record: dict, machine: str, since_ms: int) -> list[Finding]:
-    """Local launches on `machine` of the watched swarm since `since_ms` whose name no claim line of that swarm carries."""
     if record["claims"] is None:
         raise SwarmError(f"local slot claims unavailable: {record['journal_error']}")
     slug = record["slug"]
