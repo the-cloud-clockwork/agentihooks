@@ -110,10 +110,18 @@ def test_closure_names_an_api_side_closed_by_settings(monkeypatch):
 
     monkeypatch.setattr(place, "policy", invalid)
     found = [Slot("codex", "api", 0, 0, kind=API, provider="openai-key")]
-    assert place.closure(_Source(found), "codex", {"K": "v"}, NOW) == [
+    asked = []
+
+    class Recording(_Source):
+        def slots(self, environ, now):
+            asked.append((environ, now))
+            return self.found
+
+    assert place.closure(Recording(found), "codex", {"K": "v"}, NOW) == [
         "api side closed: routing setting codex-api-weight is invalid"
     ]
     assert seen == [("codex", {"K": "v"})]
+    assert asked == [({"K": "v"}, NOW)]
 
 
 def test_closure_is_empty_without_an_api_slot_or_with_readable_settings(monkeypatch):
