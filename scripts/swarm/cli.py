@@ -942,7 +942,6 @@ def cmd_master(store, args):
     if store.config(args.slug).state in ("stopped", "stopping"):
         store.update(args.slug, state="paused")
         timer.ensure(timer.entry_point())
-    ledger.join(args.slug, launched.master, "orchestrator")
     print(json.dumps(asdict(launched)))
 
 
@@ -1710,7 +1709,7 @@ def cmd_pr(store, args):
     fields.update(scoped)
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
     if not keeps_main and row.get("pr_url") != args.url:
-        lift.drop_task(args.slug, agent.task)
+        lift.drop_task(args.slug, agent.task, store=store)
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
 
