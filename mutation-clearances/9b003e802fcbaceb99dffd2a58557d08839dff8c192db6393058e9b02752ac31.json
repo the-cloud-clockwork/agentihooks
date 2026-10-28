@@ -1,0 +1,6 @@
+{
+  "hooks/memory/embedding_process.py:hooks.memory.embedding_process.x\u01c1Provider\u01c1embed__mutmut_15:8369abed73e38f4c560c76483b087bc929e330b68f7f48b46c4ec2cec4a30553": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: omitting method makes urllib.request.Request choose POST because Provider.embed always supplies nonempty JSON bytes as data. Independently verified with a stdlib Request probe; request method and payload are unchanged. Reviewed complete mutation report 40690289708."
+  }
+}

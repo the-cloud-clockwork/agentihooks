@@ -1,0 +1,6 @@
+{
+  "hooks/memory/embedding_process.py:hooks.memory.embedding_process.x\u01c1Provider\u01c1embed__mutmut_18:cdf1a48c8af581c7cae8a056f4a6ded2069d0049092d7af3c2d9f39f6a3e626d": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: urllib.request.Request normalizes AUTHORIZATION to Authorization, preserving the bearer value and transmitted header. Independently verified identical Request.header_items output. Reviewed complete mutation report 40690289708."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "hooks/memory/embedding_process.py:hooks.memory.embedding_process.x\u01c1Provider\u01c1embed__mutmut_21:bb9a67f58c75868a58852a3dd5cbd8379cf37f370e7acd804a99259db31e9772": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: urllib.request.Request normalizes CONTENT-TYPE to Content-type, exactly as Content-Type, preserving application/json and the transmitted header. Independently verified identical Request.header_items output. Reviewed complete mutation report 40690289708."
+  }
+}
