@@ -369,6 +369,36 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
     assert seen == [(tasks, [True, False, False], {"eng": 0, "ci": 0, "plan": 1})]
 
 
+@pytest.mark.parametrize("failure", ["RuntimeError", "StateConflict"])
+def test_a_bus_checkpoint_outage_is_reported_as_a_fleet_failure_and_service_metrics_still_run(
+    spool, sent, monkeypatch, failure
+):
+    import fakeredis
+
+    from scripts.events import memory, state
+    from scripts.events.bus import StateConflict
+    from scripts.events.config import BusConfig
+
+    saved = memory.open_bus(BusConfig()).state(metrics.BUCKET)
+    monkeypatch.setattr(state, "for_store", lambda *args: saved)
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    errors = {"RuntimeError": RuntimeError, "StateConflict": StateConflict}
+    service = []
+
+    def unavailable(*args, **kwargs):
+        raise errors[failure]("checkpoints unavailable")
+
+    monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", lambda box, now_ms, swarm: {})
+    monkeypatch.setattr(metrics.metrics_swarm, "record_pass", lambda *args: None)
+    monkeypatch.setattr(metrics.metrics_fleet, "record", unavailable)
+    monkeypatch.setattr(metrics.metrics_service, "record", lambda box, store, slug, now_ms: service.append(slug))
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    environ = {**ON, "AGENTIHOOKS_STATE_BACKEND": "bus"}
+    assert metrics.record_pass("sw", NOW, 0, environ, swarm) == ["fleet metrics failed: checkpoints unavailable"]
+    assert service == ["sw"]
+
+
 @pytest.mark.parametrize("minutes,collected", [(None, [NOW, NOW + 600_000]), ("5", [NOW, NOW + 360_000])])
 def test_ledger_and_swarm_collectors_run_once_per_interval_while_every_pass_writes_its_tick_row(
     spool, sent, monkeypatch, minutes, collected

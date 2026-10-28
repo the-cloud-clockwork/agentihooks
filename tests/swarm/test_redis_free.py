@@ -6,7 +6,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-MOVED = ("scripts.swarm.metrics",)
+MOVED = ("scripts.swarm.metrics", "scripts.swarm.metrics_fleet")
 
 
 def _imported(module):
