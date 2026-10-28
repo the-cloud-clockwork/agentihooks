@@ -18,9 +18,6 @@ permissions:
   pull-requests: read
   actions: read
 
-env:
-  PYTHONNOUSERSITE: "1"
-
 jobs:
   plan:
     if: ${{ github.event_name != 'push' || !github.event.deleted }}
@@ -400,6 +397,9 @@ jobs:
           pattern: mutation-test-stats-cache-*
           path: .mutation-stats-cache
           merge-multiple: true
+
+      - name: Cap the merged test stats
+        run: python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap; print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")' .mutation-stats-cache
 
       - name: Download planned mutation test selection
         uses: actions/download-artifact@v4

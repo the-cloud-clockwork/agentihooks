@@ -72,6 +72,18 @@ def test_a_machine_without_cpu_or_load_refuses_on_missing_telemetry(measured):
     assert admission.refusal(found) == "missing telemetry: no fresh headroom reading"
 
 
+def test_a_hive_below_its_worktree_floor_refuses_on_disk():
+    found = admission.room(reading(disk_free_gb=9, disk_floor_gb=50), 0, 0, 6)
+    assert found == admission.Room(0, admission.DISK, "9 GB free on the agent home, below the 50 GB worktree floor")
+    assert admission.refusal(found) == "disk: 9 GB free on the agent home, below the 50 GB worktree floor"
+    assert admission.category(f"no hive for eng has room: anton {admission.refusal(found)}") == admission.DISK
+
+
+def test_a_hive_at_its_worktree_floor_or_without_a_disk_reading_keeps_its_room():
+    assert admission.room(reading(disk_free_gb=50, disk_floor_gb=50)) == admission.room(reading())
+    assert admission.room(reading(disk_free_gb=9)).room == admission.room(reading(disk_floor_gb=50)).room == 25
+
+
 def test_a_reading_from_a_hive_not_yet_republishing_total_mb_is_read_on_cpu_alone():
     found = admission.room({"cpus": 4, "load5": 0.0, "available_mb": 1000})
     assert (found.room, found.reason) == (6, admission.CPU)
@@ -236,7 +248,16 @@ def test_status_counts_refusals_by_reason_in_a_fixed_order():
     }
     assert admission.status_lines(waits) == ["admission refusals  cpu 2  ram 1  quota 1"]
     assert admission.status_lines({}) == []
-    assert admission.REASONS == ("cpu", "ram", "quota", "placement", "node cap", "max agents", "missing telemetry")
+    assert admission.REASONS == (
+        "cpu",
+        "ram",
+        "disk",
+        "quota",
+        "placement",
+        "node cap",
+        "max agents",
+        "missing telemetry",
+    )
 
 
 def test_status_report_carries_refusal_counts_for_the_ledger_page(env):

@@ -1888,6 +1888,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         "BASE": "${{ inputs.base || 'origin/dev' }}",
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
         "MUTATION_SHARD_CPU_QUOTA": "3",
+        "PYTHONUNBUFFERED": "1",
     }
     names = [item.get("id") for item in plan["steps"]]
     mint = plan["steps"][names.index("app-token")]
@@ -1957,7 +1958,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     setup = [
         step
         for step in setup
-        if not str(step.get("name", "")).startswith(downloads)
+        if not str(step.get("name", "")).startswith((*downloads, "Cap the merged test stats"))
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
     ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
@@ -2101,8 +2102,21 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     assert merged["uses"] == "actions/cache/save@v4"
     assert merged["if"] == f"{first} && hashFiles('.mutation-stats-cache/**') != ''"
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
+    capped = mutation[mutation_names.index("Cap the merged test stats")]
+    assert capped["if"] == first
+    assert capped["run"] == (
+        "python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap;"
+        ' print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")\' .mutation-stats-cache'
+    )
     assert mutation_names.index(base["name"]) == 1
-    order = [base["name"], download["name"], merged["name"], "Install dependencies", "Mutate changed Python files"]
+    order = [
+        base["name"],
+        download["name"],
+        capped["name"],
+        merged["name"],
+        "Install dependencies",
+        "Mutate changed Python files",
+    ]
     assert [mutation_names.index(name) for name in order] == sorted(mutation_names.index(name) for name in order)
 
 

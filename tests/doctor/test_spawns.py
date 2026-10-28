@@ -49,6 +49,22 @@ def test_reservation_refusals_require_recorded_free_sessions():
     assert found.evidence == ("account reservation is full",)
 
 
+@pytest.mark.parametrize(("sessions", "count"), [(6, 0), (7, 0), (5, 1)])
+def test_a_refusal_is_judged_by_the_session_count_taken_at_the_refusal(sessions, count):
+    record = load("spawns")
+    slug = record["slug"]
+    snapshot = {
+        "harness": "claude",
+        "accounts": [{"harness": "claude", "state": "OPEN", "sessions": 0, "cap": 6}],
+    }
+    record["actions"] = [
+        f"{slug}: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: account reservation is full: account=claude:a "
+        f"sessions={sessions} cap=6 five_left=80 week_left=40",
+    ]
+    assert [finding.subject for finding in spawns.failed(record)] == ["dt2"] * count
+
+
 @pytest.mark.parametrize(
     ("harness", "state", "sessions", "cap", "count"),
     [
