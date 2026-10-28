@@ -236,6 +236,7 @@ def test_job_is_recoverable_before_dispatch_and_dispatch_failure_reopens_claim(s
     assert not store.redis.hgetall(store.key("sw", launch_job.KEY))
     assert store.launch_failure("sw", "t1") == "cannot start worker"
     assert store.failed_harness("sw", "t1") == "claude"
+    assert [row["state"] for row in store.launches("sw")] == ["failed"]
 
 
 def test_every_placed_task_in_a_pass_starts_its_own_job(store, tmp_path, monkeypatch):
@@ -432,11 +433,12 @@ def test_failed_and_expired_jobs_use_spawn_failure_accounting(store, tmp_path, r
     assert ledger.rows["t1"]["state"] == "open"
     assert store.claimant("sw", "t1") is None
     assert store.launches("sw")[0]["state"] == "failed"
-    assert store.launch_failures("sw")["t1"]
+    message = "bad launch" if result else "workstation launch job timed out"
+    assert store.launch_failure("sw", "t1") == message
     from scripts.gates import claims
 
     previous = {"task": "t1", "state": "started", "at": 0}
-    assert claims.launch_failure(1, [previous, *store.launches("sw")], "t1") != "none"
+    assert claims.launch_failure(1, [previous, *store.launches("sw")], "t1").endswith(f": {message}")
     from scripts.swarm import failed_panes
 
     assert ("w:p2" if result else "w:p3") in store.redis.hgetall(store.key("sw", failed_panes.HELD))
