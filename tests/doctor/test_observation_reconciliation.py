@@ -86,14 +86,14 @@ def test_remote_identity_pages_are_all_read(cursors):
 
 
 @pytest.mark.parametrize(
-    "total,rows,expected",
+    "total,rows,expected,detail",
     [
-        (101, [{"id": "one"}], [1, 2, 1, 2, 1, 2]),
-        (201, [{"id": "one"}, {"id": "one"}], [1, 1, 1]),
-        (2, [{"id": "one"}, {"id": "one"}], [1, 1, 1]),
+        (101, [{"id": "one"}], [1, 2, 1, 2, 1, 2], "1 rows with 1 distinct ids against 101 reported"),
+        (201, [{"id": "one"}, {"id": "one"}], [1, 1, 1], "2 rows with 1 distinct ids against 201 reported"),
+        (2, [{"id": "one"}, {"id": "one"}], [1, 1, 1], "2 rows with 1 distinct ids against 2 reported"),
     ],
 )
-def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows, expected):
+def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows, expected, detail):
     from scripts.doctor import observation_reconciliation
 
     _session(cursors, "sid", [], 0, accepted={"one": "rev"})
@@ -106,7 +106,7 @@ def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows, exp
         calls.append(params["page"])
         return {"data": rows, "meta": {"totalItems": total}}
 
-    with pytest.raises(ValueError, match="^observation identity listing is incomplete$"):
+    with pytest.raises(ValueError, match=f"^observation identity listing of trace tr is incomplete: {detail}$"):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
     assert calls == expected
 
@@ -133,8 +133,8 @@ def test_short_page_before_an_overcounted_total_completes_listing_when_the_next_
     assert calls == list(range(1, len(pages) + 2))
 
 
-@pytest.mark.parametrize("repeat_page", [1, 2])
-def test_repeated_remote_identities_are_unknown(cursors, repeat_page):
+@pytest.mark.parametrize("repeat_page,detail", [(1, "100 rows with 99 distinct"), (2, "101 rows with 100 distinct")])
+def test_repeated_remote_identities_are_unknown(cursors, repeat_page, detail):
     from scripts.doctor import observation_reconciliation
 
     _session(cursors, "sid", [], 0, accepted={"one": "rev"})
@@ -144,7 +144,9 @@ def test_repeated_remote_identities_are_unknown(cursors, repeat_page):
     def get(path, params):
         return {"data": pages[params["page"] - 1], "meta": {"totalItems": 101}}
 
-    with pytest.raises(ValueError, match="^observation identity listing is incomplete$"):
+    with pytest.raises(
+        ValueError, match=f"^observation identity listing of trace tr is incomplete: {detail} ids against 101 reported$"
+    ):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
 
 
