@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 import subprocess
 
 import pytest
@@ -458,9 +459,10 @@ def _pulls_world(monkeypatch, tmp_path, numbers):
         if endpoint == "graphql":
             assert argv[3] == "-f"
             assert argv[4].startswith("query=")
+            asked = re.findall(r'(p\d+): repository\(owner: "o", name: "r"\) \{ pullRequest\(number: (\d+)\)', argv[4])
             data = {
-                f"p{i}": {"pullRequest": {"headRefOid": world["heads"][n], "state": world["checks"][n]}}
-                for i, n in enumerate(numbers)
+                alias: {"pullRequest": {"headRefOid": world["heads"][int(n)], "state": world["checks"][int(n)]}}
+                for alias, n in asked
             }
             output = json.dumps({"data": data})
         elif "/pulls/" in endpoint:
@@ -469,7 +471,11 @@ def _pulls_world(monkeypatch, tmp_path, numbers):
             head = {**fixture["pr"]["head"], "sha": world["heads"][number]}
             output = json.dumps({**fixture["pr"], "number": number, "head": head})
         else:
-            rows = fixture["checks"] if "/check-runs?" in endpoint else fixture["runs"]
+            field = (
+                "jobs" if "/attempts/" in endpoint else "check_runs" if "/check-runs?" in endpoint else "workflow_runs"
+            )
+            assert argv[3:] == ["--paginate", "--jq", f".{field}[] | @json"]
+            rows = {"jobs": [], "check_runs": fixture["checks"], "workflow_runs": fixture["runs"]}[field]
             output = "\n".join(json.dumps(row) for row in rows)
         return subprocess.CompletedProcess(argv, 0, output, "")
 
@@ -605,3 +611,27 @@ def test_a_failed_read_keeps_the_other_reads_of_its_pass(monkeypatch, tmp_path):
     world["on_pull"] = lambda endpoint: None
     read_pass()
     assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/5"]
+
+
+def test_a_full_read_keeps_each_retried_attempt_in_the_cache(monkeypatch, tmp_path):
+    world, read_pass = _pulls_world(monkeypatch, tmp_path, [4])
+    run = world["fixture"]["runs"][0]
+    run["run_attempt"] = 2
+    read_pass()
+    attempts = [c for c in world["calls"] if "/attempts/" in c]
+    assert attempts == [f"repos/o/r/actions/runs/{run['id']}/attempts/1/jobs?per_page=100"]
+    assert world["cache"].exists(f"{ci_read.ROOT}:doctor:ci-attempt:o/r:{run['id']}:1")
+
+
+def test_attempt_jobs_read_without_a_cache_are_never_shared(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    calls = []
+
+    def gh(argv, **kwargs):
+        calls.append(argv[2])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    workflow = {"id": 42, "head_sha": "head"}
+    for _ in range(2):
+        assert ci_read._attempt("o/r", workflow, 1, gh, None)["tests"] == []
+    assert calls == ["repos/o/r/actions/runs/42/attempts/1/jobs?per_page=100"] * 2

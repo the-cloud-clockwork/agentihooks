@@ -46,7 +46,7 @@ def test_results(log: str, job: str = "") -> list[dict]:
     return tests
 
 
-def _gh(args, run, shared=True):
+def _gh(args, run, shared=False):
     endpoint = args[1]
 
     def fetch():
@@ -54,12 +54,12 @@ def _gh(args, run, shared=True):
         github_reads.charge(caller, endpoint, time.time())
         return run(["gh", *args], capture_output=True, text=True, check=True, timeout=60).stdout
 
-    if shared and ("/check-runs?" in endpoint or "/actions/runs?" in endpoint):
+    if shared:
         return github_reads.snapshot(json.dumps(args), time.time(), lambda: {"stdout": fetch()})["stdout"]
     return fetch()
 
 
-def _pages(endpoint, field, run, shared=True):
+def _pages(endpoint, field, run, shared=False):
     output = _gh(["api", endpoint, "--paginate", "--jq", f".{field}[] | @json"], run, shared)
     return [json.loads(line) for line in output.splitlines()]
 
@@ -125,9 +125,10 @@ def _effective_checks(checks: list[dict], runs: list[dict]) -> list[dict]:
 
 
 def pull_request(
-    repo: str, number: int, run: Callable = subprocess.run, cache: Redis | None = None, shared: bool = True
+    repo: str, number: int, run: Callable = subprocess.run, cache: Redis | None = None, fresh: bool = False
 ) -> dict:
     root = f"repos/{repo}"
+    shared = not fresh
     pr = json.loads(_gh(["api", f"{root}/pulls/{number}"], run))
     sha = pr["head"]["sha"]
     checks = _pages(f"{root}/commits/{sha}/check-runs?per_page=100", "check_runs", run, shared)
@@ -168,12 +169,12 @@ def pull_requests(
     stale = sorted(stale, key=lambda i: saved[i] is not None and saved[i]["at"])[:full_reads]
 
     def read(i):
-        record = pull_request(*pulls[i], run=run, cache=cache, shared=False)
+        record = pull_request(*pulls[i], run=run, cache=cache, fresh=True)
         cache.set(keys[i], ci_cache.encode({"state": states[i], "at": time.time(), "record": record}), ex=PULL_TTL_S)
-        return record
+        return i, record
 
     with ThreadPoolExecutor() as pool:
-        fresh = dict(zip(stale, pool.map(read, stale), strict=True))
+        fresh = dict(pool.map(read, stale))
     return [fresh[i] if i in fresh else saved[i]["record"] for i in range(len(pulls)) if i in fresh or saved[i]]
 
 
