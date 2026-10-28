@@ -121,8 +121,9 @@ its turn. It processes every pending request whose `retry_at` time had passed
 when the worker started, from every swarm and from standalone sessions, oldest
 write first. It starts no further request once 90 seconds have passed since it
 started; requests left over wait for the next pass. A request already running at
-that point finishes, and the worker's 180 second timeout bounds it. The 90
-seconds plus the slowest classifier call fit within that timeout. When the
+that point runs on until the worker's 180 second timeout. A request started
+near the 90 second mark can still reach that timeout, for example when every
+classifier backend times out and the command line fallback runs. When the
 timeout kills a request mid call, the request stays `pending` with the attempt
 already counted, so a later pass retries it.
 
@@ -289,6 +290,6 @@ after this records the `no changes` verdict without a model call.
 | A master or seat session left no documentation task | Expected when `AGENTIHOOKS_SWARM_TASK` is set to an id the ledger does not hold. Its request record under `~/.agentihooks/documentation/`, named by the SHA-256 of the session id, has status `complete` and verdict source `no ledger task`. With an empty value the session is classified and can queue a task with no dependency. |
 | A session that only pulled `dev` reported no changes | Expected. No pulled `origin/dev` commit has a `commit` entry in the checkout's HEAD reflog, so the evidence base moved to the merge base with `origin/dev`. |
 | Delivered commits were missed | The commits were created outside this checkout, for example in another worktree, so this checkout's reflog holds no `commit` entry for them. Document the change from its own task. |
-| A request stays `pending` past its `retry_at` | No host swarm tick runs on this machine, or a retry pass holds `retry.lock`. A pass runs only while no earlier pass holds the lock, and it stops starting requests 90 seconds in, so a large backlog drains over several passes. Count the overdue requests with the command under Pending request retries; the count falls with each tick while the timer runs. |
+| A request stays `pending` past its `retry_at` | No host swarm tick runs on this machine, or a retry pass holds `retry.lock`. A pass runs only while no earlier pass holds the lock, and it stops starting requests 90 seconds in, so a large backlog drains over several passes. Count the requests more than one hour overdue with the command under Pending request retries; the count falls with each tick while the timer runs. |
 | A request ended `abandoned` | Five attempts failed. Its `outcome` names the last reason; document the change from its source task by hand if it still needs documentation. |
 | A session that committed to `dev` and also pulled reports pulled changes | Expected. One of its commits is on `origin/dev`, so the baseline is kept and the full diff from it is counted. |
