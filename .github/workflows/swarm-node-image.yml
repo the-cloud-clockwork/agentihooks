@@ -184,8 +184,9 @@ jobs:
           key: ${{ steps.layers.outputs.cache-primary-key }}
       - name: Upload the attestation
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
+          after-cancel: true
           name: swarm-worker-image-attestation
           path: ${{ runner.temp }}/worker-image-attestation
           retention-days: 7

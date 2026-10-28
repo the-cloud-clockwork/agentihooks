@@ -273,6 +273,32 @@ agentihooks msg reply <id> "thanks, take the next task"
 # The reply is written into the member's inbox keys, where the engineer reads it
 ```
 
+### Seat mail follows its occupant
+
+A send to a seat writes into the inbox of the agent occupying it at send time. A send to an empty seat, such as
+`dispatcher@<slug>` between two dispatchers, lands in the controller keys. When the next occupant starts on a
+member, its mail would sit in keys it never reads.
+
+Every swarm tick's exit sweep moves that mail. For each live agent that is the current occupant of a lane seat
+(`eng-N@<slug>`, `ci-N@<slug>`, `plan-N@<slug>`) or the dispatcher seat (`dispatcher@<slug>`), the sweep moves every
+open item addressed to the seat from any other reachable inbox into the inbox that holds the agent: the member keys
+of the hive it runs on, or the controller keys when it runs on the swarm host. A moved item:
+
+- keeps its id, sender, text, history and ledger entry;
+- turns pending at the same seat address, so the occupant's next inbox read delivers it;
+- gains a history entry by `swarm` with the reason `moved to hive <id>, where <agent> runs <seat>`, or
+  `moved to the controller, where <agent> runs <seat>`.
+
+Master seats never move: their mail stays with the master pool of its inbox. An inbox whose Redis times out or
+drops is skipped for that pass, and the sweep moves its mail on a later tick.
+
+To see a moved item, run on the hive where the occupant runs, as that occupant:
+
+```bash
+agentihooks msg inbox            # the item shows pending, with its original id
+agentihooks msg read <id>        # its history ends with the move and its reason
+```
+
 ### Launch slot rows
 
 Launch slot rows count how many executions hold each account slot. Only the controller writes them; a member never
@@ -314,9 +340,10 @@ the member's own keys.
 
 ### Limitations
 
-- The controller's wake and escalation pass, exit sweep, swarm status, handoff mailbox and swarm removal read only
-  the controller inbox. Mail held for an agent a member runs gets no wake, escalation or exit settlement, and the
-  controller's seen marks for such agents stay in the controller keys.
+- The controller's wake and escalation pass, exit sweep, swarm status, handoff mailbox and swarm removal read every
+  joined member's inbox as well as the controller's. Mail sent to a seat while it was empty still waits in the
+  controller keys until the next tick's [seat mail move](#seat-mail-follows-its-occupant), and master seat mail
+  never moves.
 - A member-hosted agent cannot yet complete a life: its agent record writes, such as order consumer binding, take
   master, done, handoff and seat exits, sit outside its keys and are refused.
 - A member's master pool, filled while every live master sat on that member, drains only on the next send there.
@@ -331,6 +358,7 @@ the member's own keys.
 | A member item closes as `refused: the hive member that sent it does not run its sender` | The sender named on the item is not an agent placed on that member. | Send from the agent's own session on the member; the sender is the session, never an argument. |
 | A member process fails a write with `NOPERM` | The process writes outside its hive key, such as an agent record or a launch slot row. | Expected for agent record writes, see Limitations; anything else is a bug to file with the key named. |
 | The controller shows a member agent idle though it works | The agent's execution record names a hive with no member record, so the controller reads its readings from the controller keys. | Check `agentihooks hive show <id>` lists the hive and that it was added with `hive add`. |
+| A hive-run dispatcher or lane agent never sees mail sent to its seat while the seat was empty | The item waits in the controller keys until the next tick's exit sweep moves it. | Wait one tick, then run `agentihooks msg inbox` as the occupant on its hive. Mail to a master seat does not move. |
 | A slot stays taken after a member lost an agent | The member still reports the execution. | The row lapses within two ticks once the execution leaves the member's sessions report. |
 
 ## Settings

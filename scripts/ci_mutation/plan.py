@@ -102,6 +102,11 @@ def every_test(root: Path) -> list[str]:
     return sorted(path.relative_to(root).as_posix() for path in (root / "tests").rglob("test_*.py") if path.is_file())
 
 
+def touches_code(root: Path, base: str, head: str) -> bool:
+    names = _git(root, "diff", "--name-only", "-z", f"{base}...{head}", "--", "hooks/", "scripts/").split("\0")
+    return any(name.endswith(".py") for name in names)
+
+
 def record_failure(error: Exception) -> str:
     detail = getattr(error, "stderr", None)
     if isinstance(detail, bytes):
@@ -584,12 +589,17 @@ def stats_part_count(root: Path, tests: list[str], target: float, limit: int) ->
 def validate_tests(root: Path, tests: list[str]) -> None:
     from tests.test_collection_imports import SDK_GROUP, loads_heavy, loads_sdk_when_run
 
+    # A module a clean walk visited cannot reach the SDK, so later walks may skip it.
+    clean = set()
     for test in sorted({test_file(entry) for entry in tests}):
         path = root / test
-        if loads_heavy(test.removesuffix(".py").replace("/", "."), set()):
+        if loads_heavy(test.removesuffix(".py").replace("/", "."), clean):
             raise SystemExit(f"{test}: loads the MCP SDK while collecting")
         source = path.read_text()
-        if loads_sdk_when_run(source) and SDK_GROUP not in source:
+        walked = set(clean)
+        if not loads_sdk_when_run(source, walked):
+            clean = walked
+        elif SDK_GROUP not in source:
             raise SystemExit(f"{test}: loads the MCP SDK without the mcp-sdk worker group")
 
 
@@ -603,29 +613,30 @@ def main() -> int:
     parser.add_argument("--repository")
     args = parser.parse_args()
     root = Path.cwd()
-    bases = own_bases(root, args.base, args.head, graded_green)
-    print(f"Mutation bases: {' '.join(bases)}")
-    changes = discover_changes(root, bases, args.head)
     manifest, failure = None, ""
-    if args.repository and not changes:
-        print("No change remains to mutate, so the recorded dev coverage is not read.")
-    elif args.repository:
-        with ThreadPoolExecutor() as pool:
+    with ThreadPoolExecutor() as pool:
+        # The record downloads while the bases, changes and test imports are worked out.
+        if args.repository and touches_code(root, args.base, args.head):
             record = pool.submit(read_record, args.repository)
-            # The import scan parses every test module once, while the record downloads.
+        bases = own_bases(root, args.base, args.head, graded_green)
+        print(f"Mutation bases: {' '.join(bases)}")
+        changes = discover_changes(root, bases, args.head)
+        if args.repository and not changes:
+            print("No change remains to mutate, so the recorded dev coverage is not read.")
+        elif args.repository:
             for path in changes:
                 select_tests(root, Path(path))
             found, failure = record.result()
-        if failure:
-            print(
-                "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every"
-                f" test module is selected for each changed file: {failure}"
-            )
-        elif found is None:
-            print("No dev test dependency manifest found; tests are selected by import only.")
-        else:
-            run, manifest = found
-            print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
+            if failure:
+                print(
+                    "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so"
+                    f" every test module is selected for each changed file: {failure}"
+                )
+            elif found is None:
+                print("No dev test dependency manifest found; tests are selected by import only.")
+            else:
+                run, manifest = found
+                print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
     selection = {}
     seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure))
     validate_tests(root, tests)
