@@ -17,6 +17,7 @@ from mutmut.utils.format_utils import get_mutant_name
 from scripts.ci_cpu_quota import quota_cpus
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.killers import KillMemory
+from scripts.ci_mutation.line_tests import merged_test_selections
 from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
 from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.scope import selects, test_file
@@ -389,8 +390,6 @@ def run_stats_buckets(runner, test_runner, shards: list[list[str]], work: Path) 
 
 
 def apply_stats(runner, results: list[dict]) -> None:
-    from scripts.ci_mutation.line_tests import merged_test_selections
-
     for function, tests in merged_test_selections(results).items():
         runner.mutmut.tests_by_mangled_function_name[function].update(tests)
     for result in results:

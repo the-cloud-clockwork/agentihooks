@@ -9,6 +9,7 @@ from pathlib import Path
 from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_mutation.killers import KillMemory
+from scripts.ci_mutation.line_tests import merged_test_selections
 from scripts.ci_mutation.mutant_shards import function_name
 from scripts.ci_mutation.plan import MUTANT_SECONDS, shard_count, shard_workers
 from scripts.ci_mutation.scope import discover_changes, select_tests
@@ -21,8 +22,6 @@ SLICE_SECONDS = 120.0
 
 
 def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, float], float]:
-    from scripts.ci_mutation.line_tests import merged_test_selections
-
     tests, durations = merged_test_selections(results), {}
     timed = [result for result in results if result.get("cpu") and result["durations"]]
     # A cached entry per selected path can repeat a test another overlapping path also holds.
