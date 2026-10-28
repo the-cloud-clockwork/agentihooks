@@ -42,7 +42,7 @@ def test_promotion_template_does_not_hold_green_push_behind_red_run():
     promote = workflow["jobs"]["promote"]
     assert promote["needs"] == "checks"
     assert "if" not in promote
-    assert "concurrency" not in promote
+    assert promote["concurrency"] == {"group": "release-version", "cancel-in-progress": False}
     assert "concurrency" not in workflow["jobs"]["checks"]
 
 
