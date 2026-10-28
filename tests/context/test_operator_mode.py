@@ -152,7 +152,8 @@ def test_operator_off_ends_it_at_once():
     assert operator_mode.observe("s1", "operator off", True, now=110) == "off"
     assert not operator_mode.present("s1", SWARM, now=111)
     operator_mode.observe("s1", "keep going", True, now=112)
-    assert not operator_mode.present("s1", SWARM, now=113)
+    assert not operator_mode._heard("s1", SWARM)
+    assert operator_mode.present("s1", SWARM, now=113)
 
 
 def test_operator_on_keeps_questions_open_through_inbox_and_silence_until_off():
@@ -593,6 +594,7 @@ def test_a_typed_worker_turn_while_away_never_lifts_the_limit(monkeypatch):
 def test_master_pane_prompt_allows_long_reply_only_during_quiet_window(monkeypatch, capsys, prompt):
     monkeypatch.setenv("AGENTIHOOKS_INBOX_QUIET_S", "180")
     monkeypatch.setattr(operator_mode.time, "time", lambda: 100)
+    run_prompt(monkeypatch, capsys, "master-pane", "You are master@a1-1, the master of swarm demo")
     out = run_prompt(monkeypatch, capsys, "master-pane", prompt)
     assert REMINDER not in out
     payload = {"session_id": "master-pane", "last_assistant_message": "word " * 21}
@@ -610,6 +612,7 @@ def test_master_pane_prompt_allows_long_reply_only_during_quiet_window(monkeypat
 def test_automated_master_prompts_neither_grant_nor_renew_temporary_presence(monkeypatch, capsys, prompt):
     monkeypatch.setenv("AGENTIHOOKS_INBOX_QUIET_S", "10")
     monkeypatch.setattr(operator_mode.time, "time", lambda: 100)
+    run_prompt(monkeypatch, capsys, "pane", "You are master@a1-1, the master of swarm demo")
     run_prompt(monkeypatch, capsys, "pane", prompt)
     assert not operator_mode.present("pane", SWARM, now=100)
     run_prompt(monkeypatch, capsys, "pane", "Explain the work")
@@ -713,9 +716,10 @@ def test_the_reminder_stays_silent_while_on_unbound_or_without_a_session(ledgers
 def test_the_reminder_count_survives_a_typed_turn():
     assert operator_mode.reminder("s1", SWARM, now=100) == ""
     operator_mode.observe("s1", "Explain the result", True, now=101)
-    assert operator_mode.reminder("s1", SWARM, now=102) == REMINDER
+    assert operator_mode.reminder("s1", SWARM, now=102) == ""
     operator_mode.observe("s1", delivery.marked("continue"), False, now=103)
-    assert operator_mode.reminder("s1", SWARM, now=104) == ""
+    assert operator_mode.reminder("s1", SWARM, now=281) == REMINDER
+    assert operator_mode.reminder("s1", SWARM, now=282) == ""
 
 
 def test_the_pre_tool_hook_injects_the_reminder_uncompressed_and_unlogged(monkeypatch):
