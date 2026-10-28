@@ -23,7 +23,7 @@ def pretool(tool_name: str, tool_input: dict, session_id: str) -> str | None:
     for label, gate in GATES:
         try:
             block = gate(tool_name, tool_input, session_id)
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             log(f"{label} failed", {"error": str(e)})
             continue
         if block:

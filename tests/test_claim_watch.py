@@ -213,13 +213,14 @@ def test_the_swarm_gates_run_in_order_and_the_first_block_wins(monkeypatch):
     assert calls == [("recycle", "Bash", {}, "s1")]
 
 
-def test_a_failing_swarm_gate_is_logged_and_the_next_one_still_runs(monkeypatch):
+@pytest.mark.parametrize("error", [OSError, RuntimeError, ValueError])
+def test_a_failing_swarm_gate_is_logged_and_the_next_one_still_runs(monkeypatch, error):
     from hooks.context import context_recycle, swarm_gates
 
     logged = []
 
     def broken(*args):
-        raise RuntimeError("no transcript")
+        raise error("no transcript")
 
     monkeypatch.setattr(context_recycle, "gate", broken)
     monkeypatch.setattr(claim_watch, "check", lambda: None)
