@@ -5,12 +5,11 @@ from typing import TYPE_CHECKING
 
 from scripts import session_bands
 from scripts.routing import split
-from scripts.routing.settings import VALIDATORS, open_store
+from scripts.routing.settings import BUCKET, VALIDATORS, open_store
 from scripts.routing.slots import API_UNBOUNDED, Slot
 
 if TYPE_CHECKING:
-    from redis import Redis
-
+    from scripts.events.bus import StateStore
     from scripts.routing.slots import SlotSource
 
 
@@ -24,26 +23,24 @@ class ApiPolicy:
     cap: int = API_UNBOUNDED
 
 
-def _client(environ: Mapping[str, str]) -> "Redis | None":
-    from redis import RedisError
-
-    from scripts.swarm import store
+def _client(environ: Mapping[str, str]) -> "StateStore | None":
+    from scripts.events import state
 
     try:
-        return store.redis_client(environ)
-    except (RedisError, OSError):
+        return state.open_state(BUCKET, environ)
+    except state.unavailable(environ):
         return None
 
 
 def policy(harness: str, environ: Mapping[str, str]) -> ApiPolicy:
-    from redis import RedisError
+    from scripts.events import state
 
     cap_key, weight_key = f"{harness}-api-max-sessions", f"{harness}-api-weight"
     try:
         settings = open_store(_client(environ), environ)
         cap = settings.get(cap_key)
         weight = settings.get(weight_key)
-    except (RedisError, OSError, ValueError, KeyError, TypeError) as exc:
+    except (*state.unavailable(environ), ValueError, KeyError, TypeError) as exc:
         raise SettingsError(f"routing settings are unreadable: {type(exc).__name__}") from exc
     for key, value in ((cap_key, cap), (weight_key, weight)):
         if (value is not None or key == weight_key) and not VALIDATORS[key](value):

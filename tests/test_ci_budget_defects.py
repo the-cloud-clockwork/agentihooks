@@ -443,7 +443,7 @@ def test_a_failed_job_log_is_read_from_the_repository(swarm, sink):
     defects.refresh("sw", config, store, NOW_MS, run=run, environ=SINK)
     assert seen == [
         (
-            ["gh", "api", "repos/{owner}/{repo}/actions/jobs/211/logs"],
+            ["gh", "api", "repos/{owner}/{repo}/actions/jobs/211/logs", "--allow-escape-sequences"],
             {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60},
         )
     ]
