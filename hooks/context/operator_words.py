@@ -1,7 +1,7 @@
 """The operator's own words in an append only log, indexed by normalized line hashes.
 
 A relay to the ledger is accepted only when it quotes words recorded here for a master or planner of its swarm.
-Swarm entries are mirrored into the shared swarm Redis, where a hosted ledger server reads them.
+Swarm entries are mirrored into the shared swarm key value store, where a hosted ledger server reads them.
 """
 
 import hashlib
@@ -18,6 +18,9 @@ from hooks.context.swarm_heartbeat import is_operator_prompt
 
 TTL_SEC = 3600
 KEPT = 50
+BUCKET = "operator-words"
+NAMES_KEY = "names"
+AMEND_TRIES = 8
 _SHARED = []
 
 
@@ -80,16 +83,25 @@ def _append(connection, swarm, name, at, words):
 
 
 def _shared():
-    from redis.exceptions import RedisError
-
-    from scripts.swarm import store
+    from scripts.events import state
 
     if not _SHARED:
         try:
-            _SHARED.append(store.redis_client())
-        except (RedisError, OSError):
+            errors = state.unavailable()
+        except ValueError:
+            return None
+        try:
+            _SHARED.append(state.open_state(BUCKET))
+        except errors:
             return None
     return _SHARED[0]
+
+
+def _legacy():
+    from scripts.events.redis_state import RedisStateStore
+
+    shared = _shared()
+    return shared.redis if isinstance(shared, RedisStateStore) else None
 
 
 def _shared_key(*parts):
@@ -99,9 +111,21 @@ def _shared_key(*parts):
 
 
 def _shared_call(action, default):
+    from scripts.events import state
+
+    shared = _shared()
+    if shared is None:
+        return default
+    try:
+        return action(shared)
+    except state.unavailable():
+        return default
+
+
+def _legacy_call(action, default):
     from redis.exceptions import RedisError
 
-    redis = _shared()
+    redis = _legacy()
     if redis is None:
         return default
     try:
@@ -110,12 +134,36 @@ def _shared_call(action, default):
         return default
 
 
+def _rows_key(name):
+    return "name." + hashlib.sha256(name.encode()).hexdigest()
+
+
+def _read(shared, key):
+    entry = shared.get(key)
+    return [] if entry is None else json.loads(entry.value)
+
+
+def _amend(shared, key, change):
+    from scripts.events.bus import StateConflict
+
+    for _ in range(AMEND_TRIES):
+        entry = shared.get(key)
+        value = json.dumps(change([] if entry is None else json.loads(entry.value))).encode()
+        try:
+            if entry is None:
+                shared.create(key, value)
+            else:
+                shared.update(key, value, entry.revision)
+            return True
+        except StateConflict:
+            continue
+    raise StateConflict(f"state key {key!r} kept changing")
+
+
 def _mirror(swarm, name, at, words):
-    def push(redis):
-        row = json.dumps({"swarm": swarm, "at": at, "words": words})
-        with redis.pipeline() as pipe:
-            pipe.sadd(_shared_key(), name).zadd(_shared_key(name, "entries"), {row: at}).execute()
-        return True
+    def push(shared):
+        _amend(shared, NAMES_KEY, lambda names: names if name in names else [*names, name])
+        return _amend(shared, _rows_key(name), lambda rows: [*rows, {"swarm": swarm, "at": at, "words": words}])
 
     return _shared_call(push, False)
 
@@ -144,7 +192,8 @@ def _shared_rows(name):
             ]
         ]
 
-    return sorted(_shared_call(read, []), key=lambda row: row["at"], reverse=True)
+    rows = [*_shared_call(lambda shared: _read(shared, _rows_key(name)), []), *_legacy_call(read, [])]
+    return sorted(rows, key=lambda row: row["at"], reverse=True)
 
 
 def _shared_match(name, needle, since):
@@ -155,15 +204,22 @@ def _shared_match(name, needle, since):
 
 
 def _shared_forget(swarm):
-    def drop(redis):
+    def drop(shared):
+        for name in _read(shared, NAMES_KEY):
+            _amend(shared, _rows_key(name), lambda rows: [row for row in rows if row["swarm"] != swarm])
+
+    def drop_legacy(redis):
         for name in redis.smembers(_shared_key()):
-            for row in _shared_rows(name):
-                if row["swarm"] == swarm:
-                    encoded = json.dumps(row)
-                    redis.zrem(_shared_key(name, "entries"), encoded)
-                    redis.lrem(_shared_key(name), 0, encoded)
+            for raw in [
+                *redis.zrange(_shared_key(name, "entries"), 0, -1),
+                *redis.lrange(_shared_key(name), 0, -1),
+            ]:
+                if json.loads(raw)["swarm"] == swarm:
+                    redis.zrem(_shared_key(name, "entries"), raw)
+                    redis.lrem(_shared_key(name), 0, raw)
 
     _shared_call(drop, None)
+    _legacy_call(drop_legacy, None)
 
 
 def _offline_swarm(name):
@@ -242,7 +298,10 @@ def _load(name):
 def recorded(pattern: str) -> list[str]:
     with _store() as connection:
         names = connection.execute("SELECT DISTINCT name FROM entries").fetchall()
-    shared = _shared_call(lambda redis: redis.smembers(_shared_key()), set())
+    shared = {
+        *_shared_call(lambda state: _read(state, NAMES_KEY), []),
+        *_legacy_call(lambda redis: redis.smembers(_shared_key()), set()),
+    }
     return sorted(name for name in {name for (name,) in names} | shared if fnmatchcase(name, pattern))
 
 

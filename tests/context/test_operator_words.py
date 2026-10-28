@@ -595,10 +595,10 @@ def test_a_newer_recorded_quote_wins_over_older_migrated_words(tmp_path, monkeyp
 @pytest.fixture
 def shared(monkeypatch):
     import fakeredis
+
     from scripts.events.redis_state import RedisStateStore
 
     client = fakeredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr(operator_words, "_legacy", lambda: client)
     monkeypatch.setattr(operator_words, "_SHARED", [RedisStateStore(client, operator_words.BUCKET)])
     return client
 
@@ -615,7 +615,9 @@ def test_swarm_words_reach_a_server_without_the_local_store_and_unowned_words_st
         "Hold the release",
         "Scale the hive  up",
     ]
-    assert shared.keys("*operator-words:*") == []
+    from scripts.swarm.store import PREFIX
+
+    assert not shared.exists(f"{PREFIX}:operator-words", f"{PREFIX}:operator-words:master@a1-1:entries")
     _hosted(tmp_path, monkeypatch)
     assert operator_words.matching("master@a1-1", "scale the hive up", now=200) == "Scale the hive  up"
     assert operator_words.matching("master@a1-1", "hold the", now=200) == "Hold the release"
