@@ -209,7 +209,9 @@ def test_clearance_keeps_its_identity_across_an_unrelated_argument_edit(tmp_path
     legacy = f"hooks/sample.py:hooks.sample.x_value__mutmut_1:{survivor['fingerprint']}"
     legacy_cleared = {legacy: cleared[key]}
     assert len(evaluate("hooks/sample.py", list(base.values()), {3}, legacy_cleared)["cleared"]) == 1
-    assert evaluate("hooks/sample.py", list(edited.values()), {3}, legacy_cleared)["cleared"] == []
+    stale = f"hooks/sample.py:hooks.sample.x_value__mutmut_2:{survivor['fingerprint']}"
+    stale_cleared = {stale: cleared[key]}
+    assert evaluate("hooks/sample.py", list(edited.values()), {3}, stale_cleared)["cleared"] == []
 
 
 def test_survivor_text_prints_each_failure_with_its_diff_and_clearance_file():
