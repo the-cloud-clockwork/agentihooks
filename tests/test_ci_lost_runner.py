@@ -71,8 +71,14 @@ class Api:
         self.calls.append(args)
         if args[0] == "-X":
             return ""
-        value = self.pages[args if args[0] == "--paginate" else args[0]]
-        return value.pop(0) if isinstance(value, list) else value
+        included = "--include" in args
+        key = ("--paginate", args[0], "--jq", ".jobs[]") if included else args if args[0] == "--paginate" else args[0]
+        value = self.pages[key]
+        value = value.pop(0) if isinstance(value, list) else value
+        if included:
+            jobs = [json.loads(line) for line in value.splitlines()]
+            return "HTTP/2.0 200\nContent-Type: application/json\n\n" + json.dumps({"jobs": jobs})
+        return value
 
     def posts(self):
         return [call[1:] for call in self.calls if call[0] == "-X"]
@@ -256,8 +262,30 @@ def test_open_runs_lists_every_page_of_every_unfinished_status(monkeypatch):
 
 
 def test_jobs_of_reads_every_page_of_the_latest_jobs(monkeypatch):
-    monkeypatch.setattr(ci_lost_runner, "_api", Api({JOBS: lines({"name": "lint"}, {"name": "docs"})}))
+    api = Api({JOBS: lines({"name": "lint"}, {"name": "docs"})})
+    monkeypatch.setattr(ci_lost_runner, "_api", api)
     assert ci_lost_runner.jobs_of("o/r", 7) == [{"name": "lint"}, {"name": "docs"}]
+    assert api.calls == [JOBS]
+
+
+def test_first_look_shares_job_pages_but_recovery_confirmation_reads_fresh(monkeypatch, no_sleep):
+    from scripts.swarm import github_reads
+
+    reads = []
+    pages = [{"jobs": [job("lint")]}]
+
+    def conditional(caller, endpoint, fetch):
+        reads.append((caller, endpoint, fetch))
+        return pages
+
+    monkeypatch.setattr(github_reads, "conditional_pages", conditional)
+    api = Api({JOBS: lines(job("lint")), RUNNER_LIST: ""})
+    monkeypatch.setattr(ci_lost_runner, "_api", api)
+    assert ci_lost_runner.first_look("o/r", RUN, WORKFLOW, GRACE)["action"] == "none"
+    assert reads == [("lost_runner.jobs", "repos/o/r/actions/runs/7/jobs?filter=latest&per_page=100", api)]
+    assert JOBS not in api.calls
+    assert ci_lost_runner.watch("o/r", RUN, WORKFLOW, GRACE)["action"] == "none"
+    assert JOBS in api.calls
 
 
 def watched(monkeypatch, run, jobs, states):
@@ -562,7 +590,7 @@ def test_main_reports_a_refused_call_and_keeps_watching(monkeypatch, capsys, no_
     api = Api({RUNS: json.dumps(RUN), "repos/o/r/actions/runs/8": json.dumps(done)})
 
     def refusing(*args):
-        if args == JOBS:
+        if args == JOBS or args == (JOBS[1], "--include"):
             raise subprocess.CalledProcessError(1, ["gh", "api", "jobs"])
         return api(*args)
 
