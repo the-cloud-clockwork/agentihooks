@@ -189,8 +189,15 @@ def load_contract(path: Path) -> tuple[str, ...]:
             for entry in removed
         )
     )
-    reviewers_ok = isinstance(reviewers, list) and reviewers and all(isinstance(r, str) and r.strip() for r in reviewers)
-    if not isinstance(contract, dict) or set(contract) != {"removed", "reviewed_by"} or not entries_ok or not reviewers_ok:
+    reviewers_ok = (
+        isinstance(reviewers, list) and reviewers and all(isinstance(r, str) and r.strip() for r in reviewers)
+    )
+    if (
+        not isinstance(contract, dict)
+        or set(contract) != {"removed", "reviewed_by"}
+        or not entries_ok
+        or not reviewers_ok
+    ):
         raise SystemExit(
             f"{path}: an expected page change contract holds reviewed_by, a list of reviewers, and removed, "
             "a list of entries with a selector and the operator order that removed it"
