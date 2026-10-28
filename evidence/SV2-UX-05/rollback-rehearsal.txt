@@ -1,8 +1,10 @@
 Ledger page rollback rehearsal on Anton, issue 8385.
 
 Rollback: pull request 8460 reverts the page-only change of pull request 8268.
-Merged into dev as d9ef55c1abd8c3bda74a3521cd6ec021723872c3 at 2026-10-28T21:08:57Z.
-First release carrying it: v2.17.457 (2026-10-28T22:02:04Z); the ledger rolled to v2.17.458.
+Merged into dev as d9ef55c1abd8c3bda74a3521cd6ec021723872c3; gh pr view 8460 mergedAt 2026-10-28T21:08:57Z.
+Promotion: dev push Tests run 40769492318 graded d9ef55c1a green; promotion pull request 8509
+(head promotion/d9ef55c1a) released v2.17.457 at 2026-10-28T22:02:04Z. Promotion pull request 8510
+(Tests run 40771579115, graded 60523b8d0) released v2.17.458 at 2026-10-28T22:03:15Z; the ledger rolled to v2.17.458.
 Check: git rev-parse v2.17.458:scripts/swarm_ledger/static/js/layout.js = 4da63342bca19223e766cf4db385ff1c592951f5 (v2.17.456 = 03b6beccbc2e04e8f64fab08b7a3cf5f2a46b9e5).
 
 Observer: kubectl get pods per namespace (uid, start, restarts, image) and a read-only
@@ -68,8 +70,13 @@ swarm-hive-003 swarm-hive-003-agentihooks-swarm-worker-hive-576c897c7b-6nhf7   9
 
 Reading:
 - Ledger pods moved from 2.17.453 to 2.17.458 and started 22:06:01Z and 22:06:31Z, zero restarts, ready.
-- Hive worker pods were replaced between the two observations (19:26Z and 21:43Z) by other worker
-  rollouts; every worker start time precedes the ledger roll, so the ledger roll restarted none of them.
-- Swarm store: every table holds equal or more rows except events (15623 to 14534) and outbox
-  (5 to 1). The outbox drains as rows relay (outbox_sent tracks it). The events drop is
-  consistent with the ledger event retention trim (the events repository deletes rows past each ledger window), not with the roll; the restore pass below brackets one roll tightly.
+- Hive worker pods were replaced between the two observations (new UIDs, started 19:26:41Z,
+  19:26:45Z and 21:43:49Z) by other worker rollouts. Every one started before the ledger roll
+  at 22:06Z and none restarted, so the ledger roll restarted no worker.
+- Swarm store: the store took writes during the window (ledgers 67 to 68, registry 64 to 65,
+  work_nodes 6378 to 6410), so it was not frozen. Every other table holds equal or more rows. Two tables are lower:
+  outbox and outbox_sent both 5 to 1, which drain as rows relay; events 15623 to 14534, which the
+  events repository trims on every write to the newest EVENTS_KEPT (2000) per ledger within the
+  retention window. These counts were taken 3h43m apart and carry no per ledger event split, so the
+  events drop is attributed to retention, not proven; the observer now records events per ledger
+  for later passes.
