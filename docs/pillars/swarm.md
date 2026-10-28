@@ -3238,6 +3238,19 @@ as a failed spawn. The `headroom` detector reads every registered hive at the pa
 expiry. Its evidence names the hive, its last heartbeat and its version; its number is 1. The workstation measures its
 own room at each launch, so the interface hive is left out.
 
+### Doctor hive pool detector
+
+A release roll under the Recreate strategy drains every pod of a hive deployment at once, so launches meant for that
+kind of hive spill onto whatever hive is left, which then refuses them for room. The `hive pool` detector groups the
+worker hives into pools by their measured shape, CPUs and memory limit, as `<cpus>cpu-<mb>mb`, and remembers each
+hive's pool by its id so a hive that stops publishing headroom stays in it. A hive is ready when it is live, not
+draining and has a fresh headroom reading. Each Doctor pass keeps, in the watched swarm's `doctor-hive-pools` key,
+when each pool lost its last ready hive and every launch the tick refused for room in any swarm since then (a
+placement wait whose reason says `has room`). A pool down for ten minutes raises `hive-pool-down/<pool>`; its summary
+names the minutes down and the launches refused meanwhile, its evidence names the pool, the down start and its hives,
+and its number is the minutes down. A ready hive in the pool clears it, and a pool whose hives lost their records is
+forgotten.
+
 ### Doctor handoff detectors
 
 The Doctor's handoff detectors (`scripts.doctor.handoffs`) run with the other detectors on every Doctor detection
@@ -4829,7 +4842,7 @@ A detection pass reads:
 - **The watched tasks, once.** The CI detector and the trace detector share one read of the watched ledger's tasks.
 - **Every detector side by side.** Each detector runs in its own thread and is still timed as its own
   `doctor.<name>` step: `runtime storage`, `scheduled tick`, `health`, `inbox`, `handoff`, `spawn`,
-  `master launch`, `startup`, `headroom`, `context overrun`, `master prompt`, `ci`, `dev workflow`,
+  `master launch`, `startup`, `headroom`, `hive pool`, `context overrun`, `master prompt`, `ci`, `dev workflow`,
   [`feature`](../reference/feature-live-checks.md) and, with telemetry on, `trace`. A detector that raises is reported as `the <name> detector failed: <error type>: <message>` while the
   others still report.
 - **Pull requests side by side.** The CI detector reads each open pull request of the watched tasks in a thread pool.

@@ -142,3 +142,11 @@ def test_the_hive_pool_reader_keeps_its_state_and_counts_room_refusals_in_every_
     assert found.id == "hive-pool-down/8cpu-16800mb"
     assert found.summary.endswith("2 launches refused meanwhile")
     assert json.loads(redis.get("t:sw:doctor-hive-pools"))["down"]["8cpu-16800mb"]["refused"] == ["other/t2", "sw/t1"]
+
+
+def test_a_measured_hive_is_ready_only_while_it_beats_and_takes_launches():
+    reading = _oracle_reading(ROLL)
+    assert hive_pools.ready(_hive(ORACLE[0], ROLL), reading, ROLL)
+    assert not hive_pools.ready(_hive(ORACLE[0], ROLL, beating=False), reading, ROLL)
+    assert not hive_pools.ready(_hive(ORACLE[0], ROLL, "yes"), reading, ROLL)
+    assert not hive_pools.ready(_hive(ORACLE[0], ROLL), None, ROLL)
