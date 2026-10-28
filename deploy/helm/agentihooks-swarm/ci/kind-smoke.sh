@@ -28,6 +28,7 @@ python3 tests/chart_hive_home.py "$chart"
 python3 tests/chart_hive_only.py "$chart"
 python3 tests/chart_hub.py "$chart"
 python3 tests/chart_ledger_rollout.py "$chart"
+python3 tests/test_swarm_chart_additional_hosts.py "$chart"
 python3 tests/chart_nats.py "$chart"
 python3 tests/chart_scratch_swarms.py "$chart"
 
