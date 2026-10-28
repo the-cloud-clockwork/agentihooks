@@ -44,7 +44,12 @@ def test_a_local_pane_left_out_of_the_count_is_named():
     taskless = life("ci@b-3", slug="other", hive="workstation")
     del taskless["task"]
     lives = [life("engineer@a-1"), life("engineer@a-2", task="t2", started=AT), taskless]
-    assert slot_census.findings(record([line(message)], lives)) == [
+    claims = [
+        line("other: local slot claim new for t9 on workstation counted 0 of 6: "),
+        line("sw: local slot claim full for t9 on workstation counted 3 of 6: engineer@a-1, engineer@a-2, ci@b-3"),
+        line(message),
+    ]
+    assert slot_census.findings(record(claims, lives)) == [
         Finding(
             slot_census.KIND,
             f"new@{AT}",

@@ -89,6 +89,12 @@ def test_the_spawn_reader_reads_the_watched_swarm_at_the_pass_time(monkeypatch):
     store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
     assert detect.readers(store, None, "sw", 42, environ={})["spawn"]() == [STALE]
     assert seen == [(store, "sw", 42)]
+    from scripts.doctor import slot_census
+
+    monkeypatch.setattr(spawn_read, "slot_claims", lambda store, slug: seen.append((store, slug)) or "claims")
+    monkeypatch.setattr(slot_census, "findings", lambda record: [STALE] if record == "claims" else [])
+    assert detect.readers(store, None, "sw", 42, environ={})["slot census"]() == [STALE]
+    assert seen[1:] == [(store, "sw")]
 
 
 def test_the_master_launch_reader_reads_the_watched_swarm(monkeypatch):
@@ -101,19 +107,6 @@ def test_the_master_launch_reader_reads_the_watched_swarm(monkeypatch):
 
     store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
     assert detect.readers(store, None, "sw", 42, environ={})["master launch"]() == [STALE]
-    assert seen == [(store, "sw")]
-
-
-def test_the_slot_census_reader_reads_the_watched_swarm(monkeypatch):
-    from scripts.doctor import slot_census, spawn_read
-
-    seen = []
-    monkeypatch.setattr(spawn_read, "slot_claims", lambda store, slug: seen.append((store, slug)) or "rec")
-    monkeypatch.setattr(slot_census, "findings", lambda record: [STALE] if record == "rec" else [])
-    import fakeredis
-
-    store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
-    assert detect.readers(store, None, "sw", 42, environ={})["slot census"]() == [STALE]
     assert seen == [(store, "sw")]
 
 
