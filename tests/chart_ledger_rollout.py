@@ -28,10 +28,10 @@ def ledger_docs(text: str) -> dict:
     }
 
 
-def refused(chart: str, label: str, *extra: str) -> list[str]:
+def refused(chart: str, label: str, refusal: str, *extra: str) -> list[str]:
     result = render(chart, *extra)
-    if result.returncode == 0 or REFUSAL not in result.stderr:
-        return [f"{label} renders instead of failing with {REFUSAL!r}: {result.stderr.strip()}"]
+    if result.returncode == 0 or refusal not in result.stderr:
+        return [f"{label} renders instead of failing with {refusal!r}: {result.stderr.strip()}"]
     return []
 
 
@@ -58,8 +58,8 @@ def surge_problems(chart: str, label: str, *extra: str) -> list[str]:
 
 def problems(chart: str) -> list[str]:
     found = [
-        *refused(chart, "two folder ledgers", "--set", "ledger.replicas=2"),
-        *refused(chart, "zero ledgers", "--set", "ledger.replicas=0"),
+        *refused(chart, "two folder ledgers", REFUSAL, "--set", "ledger.replicas=2"),
+        *refused(chart, "zero ledgers", "ledger.replicas must be at least 1", "--set", "ledger.replicas=0"),
         *surge_problems(chart, "a ledger on the shared database secret", *SHARED),
         *surge_problems(chart, "a ledger on the shared database env", *SHARED_ENV),
     ]
