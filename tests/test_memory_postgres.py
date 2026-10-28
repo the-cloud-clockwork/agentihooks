@@ -34,6 +34,9 @@ class FakeRaw:
     def cursor(self):
         return FakeCursor(self)
 
+    def set_session(self, autocommit):
+        self.autocommit = autocommit
+
     def get_transaction_status(self):
         return self.status
 

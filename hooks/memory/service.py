@@ -5,6 +5,7 @@ the request; a missing or unknown token is refused before the catalog is read. R
 ``python -m hooks.memory.service``; ``AGENTIHOOKS_SESSION_CATALOG`` names a SQLite file or a Postgres URL.
 """
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -93,34 +94,38 @@ def post(tools: records.SessionTools, grants: dict[str, Grant], request: BaseHTT
     return 200, records.call(tools, request.path.removeprefix(TOOLS_PREFIX), grant, body, time.time())
 
 
+def answer(request: BaseHTTPRequestHandler, status: int, body: dict, headers: dict | None = None) -> None:
+    payload = json.dumps(body).encode()
+    request.send_response(status)
+    request.send_header("Content-Type", "application/json")
+    request.send_header("Content-Length", str(len(payload)))
+    for name, value in (headers or {}).items():
+        request.send_header(name, value)
+    request.end_headers()
+    request.wfile.write(payload)
+
+
+def get(tools: records.SessionTools, request: BaseHTTPRequestHandler) -> tuple:
+    if request.path != HEALTH_PATH:
+        return 404, _refusal("not_found", NOT_FOUND)
+    try:
+        tools.catalog.db.execute("SELECT 1").fetchone()
+    except sqlite3.OperationalError:
+        return 503, _refusal("dependency_unavailable", CATALOG_DOWN)
+    return 200, {"state": "ready"}
+
+
+def quiet(*_: object) -> None:
+    return None
+
+
 def handler(tools: records.SessionTools, grants: dict[str, Grant]) -> type[BaseHTTPRequestHandler]:
-    class Sessions(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path != HEALTH_PATH:
-                return self._answer(404, _refusal("not_found", NOT_FOUND))
-            try:
-                tools.catalog.db.execute("SELECT 1").fetchone()
-            except sqlite3.OperationalError:
-                return self._answer(503, _refusal("dependency_unavailable", CATALOG_DOWN))
-            return self._answer(200, {"state": "ready"})
-
-        def do_POST(self):
-            self._answer(*post(tools, grants, self))
-
-        def _answer(self, status: int, body: dict, headers: dict | None = None):
-            payload = json.dumps(body).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            for name, value in (headers or {}).items():
-                self.send_header(name, value)
-            self.end_headers()
-            self.wfile.write(payload)
-
-        def log_message(self, format, *args):
-            pass
-
-    return Sessions
+    routes = {
+        "do_GET": lambda request: answer(request, *get(tools, request)),
+        "do_POST": lambda request: answer(request, *post(tools, grants, request)),
+        "log_message": quiet,
+    }
+    return type("Sessions", (BaseHTTPRequestHandler,), routes)
 
 
 def build(environ: dict) -> HTTPServer:
@@ -136,9 +141,8 @@ def main() -> int:
     server = build(dict(os.environ))
     print(f"session memory service listening on {server.server_address[0]}:{server.server_port}", file=sys.stderr)
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        with contextlib.suppress(KeyboardInterrupt):
+            server.serve_forever()
     finally:
         server.server_close()
     return 0

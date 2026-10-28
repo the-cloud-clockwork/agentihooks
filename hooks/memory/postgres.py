@@ -86,7 +86,7 @@ def connect(url: str) -> Connection:
         raw = psycopg2.connect(url)
     except psycopg2.OperationalError as error:
         raise sqlite3.OperationalError(str(error)) from error
-    raw.autocommit = True
+    raw.set_session(autocommit=True)
     connection = Connection(raw)
     try:
         installed = connection.execute(VECTOR_INSTALLED).fetchone()

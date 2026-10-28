@@ -185,7 +185,7 @@ class Catalog:
             self.db = postgres.connect(path)
         else:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-            self.db = sqlite3.connect(path, isolation_level=None)
+            self.db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
         for statement in PRAGMAS + SCHEMA:
             self.db.execute(statement)
 
