@@ -102,5 +102,7 @@ def test_the_page_grader_hides_named_elements_only_in_the_base_replay_of_a_chang
     assert '! cmp -s "head/$contract" "base/$contract"' in page
     [base] = [line for line in page.splitlines() if line.strip().startswith("replay base-page ")]
     assert base.rstrip(" &").endswith('base-page.json "${remove[@]}"')
-    others = [line for line in page.splitlines() if line.strip().startswith(("replay head-page ", "replay fault-page "))]
+    others = [
+        line for line in page.splitlines() if line.strip().startswith(("replay head-page ", "replay fault-page "))
+    ]
     assert len(others) == 2 and all("remove" not in line for line in others)
