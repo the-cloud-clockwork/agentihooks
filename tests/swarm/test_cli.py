@@ -1214,7 +1214,6 @@ def test_the_waker_command_runs_the_waker_with_the_swarm_clock(monkeypatch):
 def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: 7.0)
     seen = []
-
     def fake_run(argv, **kw):
         seen.append(argv)
         return subprocess.CompletedProcess(
@@ -1238,6 +1237,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         "anchors": [],
         "overlays": [],
         "bundle_revision": "",
+        "automated": {"swarm": "sw", "seat": ""},
     }
     assert placed == runtime.Placed(
         "w3:p1",
@@ -1245,11 +1245,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         "acct",
         profile="cicd",
         model_source="lane-default",
-        profile_decision={
-            **decision,
-            "validation": placed.profile_decision["validation"],
-            "automated": {"swarm": "sw", "seat": ""},
-        },
+        profile_decision={**decision, "validation": placed.profile_decision["validation"]},
         choice="rotation",
         transport="legacy",
         launched_at=7_000,
