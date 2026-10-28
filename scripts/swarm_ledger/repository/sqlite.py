@@ -3,6 +3,7 @@ import re
 import secrets
 import sqlite3
 import threading
+import weakref
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
@@ -387,6 +388,13 @@ class Snapshot:
         return None if row is None else row[0]
 
 
+def close_all(connections: list) -> None:
+    """Close a released store's held readers: sqlite3 connections are cyclic, so an unclosed one outlives its store
+    until a collection, which in a forked child releases that child's locks on the database mid write."""
+    for connection in connections:
+        connection.close()
+
+
 class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
@@ -401,6 +409,8 @@ class SQLiteLedgerRepository:
         self._loads = {}
         self._guard = threading.Lock()
         self._readers = threading.local()
+        self._held = []
+        weakref.finalize(self, close_all, self._held)
 
     @property
     def domain(self):
@@ -435,10 +445,10 @@ class SQLiteLedgerRepository:
         finally:
             connection.close()
 
-    def _open(self) -> tuple:
+    def _open(self, **options) -> tuple:
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(path, timeout=30)
+        connection = sqlite3.connect(path, timeout=30, **options)
         try:
             connection.execute("PRAGMA foreign_keys=ON")
             if path not in self._ready:
@@ -453,7 +463,8 @@ class SQLiteLedgerRepository:
     def _reader(self):
         held = getattr(self._readers, "held", None)
         if held is None or held[0] != self.path:
-            held = self._readers.held = self._open()
+            held = self._readers.held = self._open(check_same_thread=False)
+            self._held.append(held[1])
         held[1].set_trace_callback(self.trace)
         yield held[1]
 
