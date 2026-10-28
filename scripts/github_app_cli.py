@@ -91,7 +91,7 @@ def _method(arguments: list[str]) -> str | None:
 
 
 def _api_read(arguments: list[str]) -> bool:
-    if any(value.lstrip("/") == "rate_limit" for value in arguments):
+    if "rate_limit" in arguments or "/rate_limit" in arguments:
         return False
     method = _method(arguments)
     if method is not None:
