@@ -60,8 +60,9 @@ def _check_text(op, kind, task_ids):
         raise ValueError("not_duplicate must say in plain words why the follow up differs from the item it resembles")
     if kind == "retext" and (not TEXT_ITEM_RE.match(str(op.get("item"))) or not _text(op.get("text"))):
         raise ValueError("retext needs item questions/<id> or followups/<id> and text")
+    worktree = ledger_comments.worktree(op, kind == "add_item" and op["list"] == "followups")
     if kind in ("add_item", "retext"):
-        op["text"] = _screened(op["text"])
+        op["text"] = _screened(op["text"], worktree)
         ledger_comments.check(op["text"], "item", task_ids=task_ids)
 
 
@@ -97,11 +98,11 @@ def check_task(op):
         raise ValueError("task needs a task id of up to 128 letters, digits, dots, underscores or hyphens")
 
 
-def _screened(text):
+def _screened(text, worktree=None):
     LEDGER_WRITE = ports.hooks().conditions.LEDGER_WRITE
     filters = ports.hooks().filters
 
-    return filters.screen(LEDGER_WRITE, text)
+    return filters.screen(LEDGER_WRITE, text, worktree)
 
 
 def _text(value):

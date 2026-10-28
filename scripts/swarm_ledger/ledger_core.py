@@ -484,13 +484,13 @@ def apply_op(doc, op, ctx):
     return True
 
 
-def _screened(op):
+def _screened(op, worktree=None):
     if not op["thread"].endswith("/comments"):
         return op["text"]
     LEDGER_WRITE = ports.hooks().conditions.LEDGER_WRITE
     filters = ports.hooks().filters
 
-    return filters.screen(LEDGER_WRITE, op["text"])
+    return filters.screen(LEDGER_WRITE, op["text"], worktree)
 
 
 def _check_chat_address(op, chat_add):
@@ -537,6 +537,7 @@ def check_op(op, task_ids=()):
     if "long" in op and not chat_add:
         raise ValueError("long is allowed only on an agent chat message")
     _check_chat_address(op, chat_add)
+    worktree = ledger_comments.worktree(op, op["op"] == "add" and "by" in op and op["thread"].endswith("/comments"))
     if "attachments" in op:
         import ledger_media
 
@@ -550,7 +551,7 @@ def check_op(op, task_ids=()):
         if not talks or not AUTHOR_RE.match(str(op["by"])) or op["by"] == "operator":
             raise ValueError("by is allowed only on agent chat and comment entries, as an agent name")
         if op["op"] in ("add", "edit"):
-            op["text"] = _screened(op)
+            op["text"] = _screened(op, worktree)
             ledger_comments.check(op["text"], kind_of(op["thread"]), op.get("long") is True, task_ids)
 
 

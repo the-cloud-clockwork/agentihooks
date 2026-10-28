@@ -63,8 +63,9 @@ PAGINATION = {
     },
 }
 
+WORKTREE_HEADER = "X-Ledger-Worktree"
 FIELDS = {
-    "add": "thread text by long attachments to reply_to outcome notice",
+    "add": "thread text by long attachments to reply_to outcome notice worktree",
     "edit": "thread text by",
     "delete": "thread by",
     "clear": "thread",
@@ -75,7 +76,7 @@ FIELDS = {
     "ack": "by rev",
     "claim": "by item status",
     "set": "by path value status",
-    "add_item": "by list text needs_operator hive task not_duplicate",
+    "add_item": "by list text needs_operator hive task not_duplicate worktree",
     "retext": "by item text",
     "gate_bypass": "by unhandled",
     "gate_lift": "by gate",

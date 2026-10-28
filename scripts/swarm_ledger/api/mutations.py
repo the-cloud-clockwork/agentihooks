@@ -72,9 +72,23 @@ class GuardedOperations:
         return accepted
 
 
-def apply(services: Services, slug: str, principal: str, payload: dict) -> dict:
+def stamped(payload: dict, worktree: str) -> dict:
+    if not worktree or not isinstance(payload.get("ops"), list):
+        return payload
+    ops = [
+        {**op, "worktree": worktree} if isinstance(op, dict) and op.get("op") in ("add", "add_item") else op
+        for op in payload["ops"]
+    ]
+    return {**payload, "ops": ops}
+
+
+def apply(services: Services, slug: str, principal: str, payload: dict, worktree: str = "") -> dict:
     doc = services.repository.current(slug).state
-    operations = schemas.check_operations(payload, services.ledger.core, tuple(t["id"] for t in doc.get("tasks", [])))
+    task_ids = tuple(t["id"] for t in doc.get("tasks", []))
+    operations = [
+        {key: value for key, value in op.items() if key != "worktree"}
+        for op in schemas.check_operations(stamped(payload, worktree), services.ledger.core, task_ids)
+    ]
     refusals = [reason for op in operations if (reason := services.ledger.authority.refusal(principal, op))]
     if principal and payload.get("changes"):
         raise APIError(403, "forbidden", "Checkbox changes need the operator")

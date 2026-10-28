@@ -46,8 +46,18 @@ def check(tool: str, tool_input: dict, cwd: str | None = None) -> FilterOutcome:
         return ALLOW
 
 
-def screen(tool: str, text: str) -> str:
-    outcome = check(tool, {"text": text})
+def writer_folder(worktree: str) -> str:
+    from hooks.config import CONDITIONS_ENABLED
+    from hooks.context import profile_chain
+
+    root = conditions.repo_root(worktree)
+    if CONDITIONS_ENABLED and root is not None and not conditions.directory_trust(root, profile_chain.read_state())[0]:
+        raise ValueError("the writer's worktree is outside the operator's trusted repositories")
+    return worktree
+
+
+def screen(tool: str, text: str, worktree: str | None = None) -> str:
+    outcome = check(tool, {"text": text}, writer_folder(worktree)) if worktree else check(tool, {"text": text})
     if outcome.decision == "deny":
         raise ValueError(outcome.reason)
     rewritten = outcome.tool_input.get("text") if outcome.decision == "rewrite" else None

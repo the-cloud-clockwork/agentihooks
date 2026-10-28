@@ -85,10 +85,11 @@ class ResourceClient:
         self.timeout = timeout
 
     def request(self, slug: str, path: str, payload: dict | None = None) -> dict:
+        writer = writer_folder() if path == "operations" else {}
         request = urllib.request.Request(
             f"{self.base}/api/v1/ledgers/{quote(slug, safe='')}/{path}",
             data=None if payload is None else json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json", **self.credentials},
+            headers={"Content-Type": "application/json", **self.credentials, **writer},
             method="GET" if payload is None else "POST",
         )
         with ledger_link.urlopen(request, self.timeout) as response:
@@ -214,6 +215,13 @@ def failure(exc: urllib.error.HTTPError) -> tuple[urllib.error.HTTPError, dict]:
     except (ValueError, KeyError, TypeError):
         return replay, {}
     return replay, error if isinstance(error, dict) else {}
+
+
+def writer_folder() -> dict:
+    try:
+        return {schemas.WORKTREE_HEADER: quote(os.getcwd())}
+    except FileNotFoundError:
+        return {}
 
 
 def retryable(replay: urllib.error.HTTPError, error: dict, fetched: set) -> bool:

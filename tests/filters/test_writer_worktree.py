@@ -1,13 +1,15 @@
+import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 
-from scripts.swarm_ledger import ledger, ledger_agent_ops, ledger_core  # noqa: E402
-from scripts.swarm_ledger.api import schemas  # noqa: E402
+from scripts.swarm_ledger import ledger_agent_ops, ledger_core, ledger_link  # noqa: E402
+from scripts.swarm_ledger.api import client, mutations, schemas  # noqa: E402
 from scripts.swarm_ledger.api.errors import APIError  # noqa: E402
 
 FILTER = """mode: finders
@@ -32,6 +34,16 @@ def server_elsewhere(project_filters, tmp_path, monkeypatch):
     return str(project_filters.parent.parent)
 
 
+@pytest.fixture
+def stranger(tmp_path, monkeypatch):
+    monkeypatch.setattr("hooks.config.CONDITIONS_TRUSTED_OWNERS", "")
+    repo = tmp_path / "stranger"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "git@github.com:stranger/x.git"], cwd=repo, check=True)
+    return str(repo)
+
+
 def _comment(worktree, text=TEXT):
     return {"op": "add", "id": "c1", "thread": "phases/p1/comments", "text": text, "by": "eng", "worktree": worktree}
 
@@ -40,36 +52,86 @@ def _followup(worktree, text=TEXT):
     return {"op": "add_item", "id": "f1", "list": "followups", "text": text, "by": "eng", "worktree": worktree}
 
 
-def test_a_project_filter_refuses_a_comment_written_from_its_repo_while_the_server_runs_elsewhere(server_elsewhere):
-    with pytest.raises(ValueError) as refused:
-        ledger_core.check_op(_comment(server_elsewhere))
-    assert str(refused.value) == SENT_BACK
+def _bare(op):
+    return {key: value for key, value in op.items() if key != "worktree"}
 
 
-def test_a_project_filter_refuses_a_follow_up_written_from_a_subfolder_of_its_repo(server_elsewhere):
+class Applied(Exception):
+    pass
+
+
+def _services(seen):
+    def resolve(slug, operations):
+        seen.extend(operations)
+        raise Applied
+
+    return SimpleNamespace(
+        repository=SimpleNamespace(current=lambda slug: SimpleNamespace(state={"tasks": [], "_meta": {}})),
+        ledger=SimpleNamespace(core=ledger_core, authority=SimpleNamespace(refusal=lambda principal, op: None)),
+        media=SimpleNamespace(resolve_media=resolve),
+    )
+
+
+def _payload(*ops):
+    return {"operation_id": "o1", "ops": [_bare(op) for op in ops], "guards": {}}
+
+
+def test_the_server_refuses_a_comment_by_the_project_filter_of_the_writers_repo_while_it_runs_elsewhere(
+    server_elsewhere,
+):
+    with pytest.raises(APIError) as refused:
+        mutations.apply(_services([]), "demo", "", _payload(_comment("")), server_elsewhere)
+    assert (refused.value.status, str(refused.value)) == (
+        400,
+        f"Operation does not match its domain schema: {SENT_BACK}",
+    )
+
+
+def test_the_server_refuses_a_follow_up_written_from_a_subfolder_of_the_filtered_repo(server_elsewhere):
     inner = Path(server_elsewhere) / "src"
     inner.mkdir()
-    with pytest.raises(ValueError) as refused:
-        ledger_agent_ops.check(_followup(str(inner)))
-    assert str(refused.value) == SENT_BACK
+    with pytest.raises(APIError) as refused:
+        mutations.apply(_services([]), "demo", "", _payload(_followup("")), str(inner))
+    assert str(refused.value) == f"Operation does not match its domain schema: {SENT_BACK}"
 
 
-def test_the_server_folder_layer_no_longer_applies_without_the_writer_worktree(server_elsewhere):
-    assert ledger_core.check_op({k: v for k, v in _comment(server_elsewhere).items() if k != "worktree"}) is None
-    assert ledger_core.check_op(_comment(server_elsewhere, "The capacity line changed")) is None
-    assert ledger_agent_ops.check(_followup(server_elsewhere, "The capacity line changed")) is None
+def test_without_the_writers_folder_the_server_folder_decides_and_the_write_passes(server_elsewhere):
+    seen = []
+    with pytest.raises(Applied):
+        mutations.apply(_services(seen), "demo", "", _payload(_comment(""), _followup("")))
+    assert seen == [_bare(_comment("")), _bare(_followup(""))]
 
 
-def test_a_worktree_in_a_repository_the_operator_does_not_trust_is_refused(server_elsewhere, tmp_path, monkeypatch):
-    monkeypatch.setattr("hooks.config.CONDITIONS_TRUSTED_OWNERS", "")
-    stranger = tmp_path / "stranger"
-    stranger.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=stranger, check=True)
-    subprocess.run(["git", "remote", "add", "origin", "git@github.com:stranger/x.git"], cwd=stranger, check=True)
+def test_a_passing_write_reaches_the_ledger_without_the_folder(server_elsewhere):
+    seen = []
+    plain = "The capacity line changed"
+    with pytest.raises(Applied):
+        mutations.apply(
+            _services(seen), "demo", "", _payload(_comment("", plain), _followup("", plain)), server_elsewhere
+        )
+    assert seen == [_bare(_comment("", plain)), _bare(_followup("", plain))]
+
+
+def test_the_server_stamps_the_folder_only_on_adds():
+    claim = {"op": "claim", "id": "k1", "by": "eng", "item": "phases/p1"}
+    payload = _payload(_comment(""), _followup(""), claim)
+    assert mutations.stamped(payload, "/w")["ops"] == [_comment("/w"), _followup("/w"), claim]
+    assert mutations.stamped(payload, "") is payload
+    assert mutations.stamped({"ops": "bad"}, "/w") == {"ops": "bad"}
+    assert mutations.stamped({"ops": [5]}, "/w") == {"ops": [5]}
+
+
+def test_a_comment_or_follow_up_from_an_untrusted_repository_is_refused(server_elsewhere, stranger):
     for check, op in ((ledger_core.check_op, _comment), (ledger_agent_ops.check, _followup)):
         with pytest.raises(ValueError) as refused:
-            check(op(str(stranger), "A plain line"))
+            check(op(stranger, "A plain line"))
         assert str(refused.value) == UNTRUSTED
+
+
+def test_with_conditions_off_an_untrusted_worktree_passes(server_elsewhere, stranger, monkeypatch):
+    monkeypatch.setattr("hooks.config.CONDITIONS_ENABLED", False)
+    assert ledger_core.check_op(_comment(stranger)) is None
+    assert ledger_agent_ops.check(_followup(stranger)) is None
 
 
 @pytest.mark.parametrize("worktree", ["relative/path", "", 7])
@@ -80,32 +142,49 @@ def test_a_worktree_must_be_an_absolute_path(server_elsewhere, worktree):
         assert str(refused.value) == "worktree must be the writer's absolute folder path"
 
 
-def test_a_worktree_rides_only_on_an_agent_comment_or_follow_up(server_elsewhere):
-    chat = {**_comment(server_elsewhere, "A plain line"), "thread": "chat"}
-    question = {**_followup(server_elsewhere, "A plain line"), "list": "questions"}
-    for check, op in ((ledger_core.check_op, chat), (ledger_agent_ops.check, question)):
-        with pytest.raises(ValueError) as refused:
-            check(op)
-        assert str(refused.value) == "worktree rides only on an agent comment or follow up"
+def test_a_worktree_on_chat_or_a_question_is_ignored(server_elsewhere):
+    chat = {**_comment(server_elsewhere), "thread": "chat"}
+    question = {**_followup(server_elsewhere), "list": "questions"}
+    assert ledger_core.check_op(chat) is None
+    assert ledger_agent_ops.check(question) is None
 
 
-def test_the_api_schema_takes_the_worktree_and_screens_with_it(server_elsewhere):
-    for op in (_comment(server_elsewhere), _followup(server_elsewhere)):
-        assert schemas.mismatched_field(schemas.operation_schema(op["op"]), op) is None
-        with pytest.raises(APIError) as refused:
-            schemas.check_operations({"operation_id": "o1", "ops": [op], "guards": {}}, ledger_core, ())
-        assert (refused.value.status, str(refused.value)) == (
-            400,
-            f"Operation does not match its domain schema: {SENT_BACK}",
-        )
+def test_a_worktree_outside_any_repository_gets_no_project_layer(server_elsewhere, tmp_path):
+    assert ledger_core.check_op(_comment(str(tmp_path / "server"))) is None
+    assert ledger_agent_ops.check(_followup(str(tmp_path / "server"))) is None
 
 
-def test_the_comment_and_follow_up_commands_send_the_writers_folder(tmp_path, monkeypatch, capsys):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+def test_the_client_names_its_folder_only_on_operation_writes(tmp_path, monkeypatch):
+    folder = tmp_path / "a b"
+    folder.mkdir()
+    monkeypatch.chdir(folder)
     sent = []
-    monkeypatch.setattr(ledger, "call", lambda slug, ops: sent.extend(ops) or {})
-    base = ["--slug", "demo", "--as", "eng"]
-    ledger.cmd_comment(ledger.build_parser().parse_args([*base, "comment", "tasks/t1", "Done."]))
-    ledger.cmd_followup(ledger.build_parser().parse_args([*base, "followup", "add", "Retry the build"]))
-    assert [op["worktree"] for op in sent] == [str(tmp_path), str(tmp_path)]
+
+    class Reply:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return json.dumps({"revision": "r"}).encode()
+
+    def urlopen(request, timeout):
+        sent.append((request.full_url.rsplit("/", 1)[1], request.get_header("X-ledger-worktree")))
+        return Reply()
+
+    monkeypatch.setattr(ledger_link, "urlopen", urlopen)
+    resources = client.ResourceClient("http://ledger", {})
+    resources.request("demo", "phases")
+    resources.request("demo", "operations", {"ops": []})
+    assert sent == [("phases", None), ("operations", str(folder).replace(" ", "%20"))]
+    assert schemas.WORKTREE_HEADER == "X-Ledger-Worktree"
+
+
+def test_the_client_sends_no_folder_when_its_folder_is_gone(monkeypatch):
+    def gone():
+        raise FileNotFoundError
+
+    monkeypatch.setattr(client.os, "getcwd", gone)
+    assert client.writer_folder() == {}
