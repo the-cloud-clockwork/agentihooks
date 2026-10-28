@@ -46,6 +46,8 @@ def test_an_unchanged_or_tightened_gate_holds(tmp_path):
     base = _tree(tmp_path / "base", {"scripts/gate.py": GATE})
     tighter = GATE.replace("LINES = 300", "LINES = 250").replace('"hooks/", ', '"hooks/", "tests/", ')
     tighter += "def other():\n    global OTHER\n"
+    tighter += "OTHER = 1\ndel OTHER\nprint((lambda: 1)())\n"
+    tighter += 'match {"a": 1}:\n    case {"a": 1, **rest}:\n        pass\n    case {"a": 2}:\n        pass\n'
     head = _tree(tmp_path / "head", {"scripts/gate.py": tighter})
     assert threshold_pins.pin_errors(base, base, PINS) == ([], 3)
     assert threshold_pins.pin_errors(base, head, PINS) == ([], 3)
@@ -101,6 +103,10 @@ def test_a_removed_gate_or_constant_is_red(tmp_path):
         'vars()["LINES"] = 400\n',
         'setattr(__import__(__name__), "LINES", 400)\n',
         'locals()["LINES"] = 400\n',
+        "globals().update(LINES=400)\n",
+        "vars().update(LINES=400)\n",
+        "locals().update(LINES=400)\n",
+        'namespace = {}\nnamespace["LINES"] = 400\n',
         'exec("LINES = 400")\n',
         'eval("400")\n',
         'compile("LINES = 400", "", "exec")\n',
