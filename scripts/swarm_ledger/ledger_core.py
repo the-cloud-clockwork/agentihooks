@@ -537,7 +537,9 @@ def check_op(op, task_ids=()):
     if "long" in op and not chat_add:
         raise ValueError("long is allowed only on an agent chat message")
     _check_chat_address(op, chat_add)
-    worktree = ledger_comments.worktree(op, op["op"] == "add" and "by" in op and op["thread"].endswith("/comments"))
+    worktree = ledger_comments.worktree(
+        op, op["op"] in ("add", "edit") and "by" in op and op["thread"].endswith("/comments")
+    )
     if "attachments" in op:
         import ledger_media
 

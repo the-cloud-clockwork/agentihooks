@@ -57,7 +57,7 @@ def writer_folder(worktree: str) -> str:
 
 
 def screen(tool: str, text: str, worktree: str | None = None) -> str:
-    outcome = check(tool, {"text": text}, writer_folder(worktree)) if worktree else check(tool, {"text": text})
+    outcome = check(tool, {"text": text}, writer_folder(worktree) if worktree else None)
     if outcome.decision == "deny":
         raise ValueError(outcome.reason)
     rewritten = outcome.tool_input.get("text") if outcome.decision == "rewrite" else None

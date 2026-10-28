@@ -112,13 +112,44 @@ def test_a_passing_write_reaches_the_ledger_without_the_folder(server_elsewhere)
     assert seen == [_bare(_comment("", plain)), _bare(_followup("", plain))]
 
 
-def test_the_server_stamps_the_folder_only_on_adds():
-    claim = {"op": "claim", "id": "k1", "by": "eng", "item": "phases/p1"}
-    payload = _payload(_comment(""), _followup(""), claim)
-    assert mutations.stamped(payload, "/w")["ops"] == [_comment("/w"), _followup("/w"), claim]
-    assert mutations.stamped(payload, "") is payload
+def test_the_server_stamps_the_header_folder_on_every_screened_write_and_drops_a_body_folder():
+    claim = {"op": "claim", "id": "k1", "by": "eng", "item": "phases/p1", "worktree": "/body"}
+    edit = {"op": "edit", "id": "c1", "thread": "phases/p1/comments", "text": TEXT, "by": "eng"}
+    retext = {"op": "retext", "id": "r1", "item": "followups/f1", "text": TEXT, "by": "eng"}
+    ops = [_comment("/body"), _followup(""), edit, retext, claim]
+    assert mutations.stamped({"ops": ops}, "/w")["ops"] == [
+        _comment("/w"),
+        _followup("/w"),
+        {**edit, "worktree": "/w"},
+        {**retext, "worktree": "/w"},
+        claim,
+    ]
+    assert mutations.stamped({"ops": ops}, "")["ops"] == [
+        _bare(_comment("")),
+        _bare(_followup("")),
+        edit,
+        retext,
+        claim,
+    ]
     assert mutations.stamped({"ops": "bad"}, "/w") == {"ops": "bad"}
     assert mutations.stamped({"ops": [5]}, "/w") == {"ops": [5]}
+
+
+def test_the_server_reads_the_quoted_folder_header():
+    assert mutations.writer({"X-Ledger-Worktree": "/home/a%20b/repo"}) == "/home/a b/repo"
+    assert mutations.writer({}) == ""
+
+
+def test_comment_edits_and_follow_up_retexts_screen_with_the_writers_folder(server_elsewhere):
+    edit = {"op": "edit", "id": "c1", "thread": "phases/p1/comments", "text": TEXT, "by": "eng"}
+    retext = {"op": "retext", "id": "r1", "item": "followups/f1", "text": TEXT, "by": "eng"}
+    for check, op in ((ledger_core.check_op, edit), (ledger_agent_ops.check, retext)):
+        assert check(dict(op)) is None
+        with pytest.raises(ValueError) as refused:
+            check({**op, "worktree": server_elsewhere})
+        assert str(refused.value) == SENT_BACK
+    question = {**retext, "item": "questions/q1", "worktree": server_elsewhere}
+    assert ledger_agent_ops.check(question) is None
 
 
 def test_a_comment_or_follow_up_from_an_untrusted_repository_is_refused(server_elsewhere, stranger):
@@ -187,4 +218,4 @@ def test_the_client_sends_no_folder_when_its_folder_is_gone(monkeypatch):
         raise FileNotFoundError
 
     monkeypatch.setattr(client.os, "getcwd", gone)
-    assert client.writer_folder() == {}
+    assert client.writer_header() == {}

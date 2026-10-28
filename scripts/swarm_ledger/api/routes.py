@@ -201,9 +201,7 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
     if path in ("export", "swarm/export"):
         return export(handler, services, slug, path, payload)
     if path == "operations":
-        return mutations.apply(
-            services, slug, principal, payload, unquote(handler.headers.get(schemas.WORKTREE_HEADER, ""))
-        )
+        return mutations.apply(services, slug, principal, payload, mutations.writer(handler.headers))
     if path == "architecture/actions":
         from . import architecture
 

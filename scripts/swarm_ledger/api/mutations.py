@@ -1,8 +1,12 @@
+from urllib.parse import unquote
+
 from scripts.swarm_ledger import ledger_task_duplicates, ports
 
 from . import receipts, resources, schemas
 from .errors import APIError
 from .services import LedgerCore, Services
+
+WRITES = ("add", "edit", "add_item", "retext")
 
 
 class GuardedOperations:
@@ -72,14 +76,21 @@ class GuardedOperations:
         return accepted
 
 
+def writer(headers) -> str:
+    return unquote(headers.get(schemas.WORKTREE_HEADER, ""))
+
+
+def _stamp(op, worktree: str):
+    if not isinstance(op, dict) or op.get("op") not in WRITES:
+        return op
+    bare = {key: value for key, value in op.items() if key != "worktree"}
+    return {**bare, "worktree": worktree} if worktree else bare
+
+
 def stamped(payload: dict, worktree: str) -> dict:
-    if not worktree or not isinstance(payload.get("ops"), list):
+    if not isinstance(payload.get("ops"), list):
         return payload
-    ops = [
-        {**op, "worktree": worktree} if isinstance(op, dict) and op.get("op") in ("add", "add_item") else op
-        for op in payload["ops"]
-    ]
-    return {**payload, "ops": ops}
+    return {**payload, "ops": [_stamp(op, worktree) for op in payload["ops"]]}
 
 
 def apply(services: Services, slug: str, principal: str, payload: dict, worktree: str = "") -> dict:
