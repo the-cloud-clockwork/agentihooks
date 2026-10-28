@@ -66,21 +66,44 @@ def open_files(directory):
     return [name for name in names if name.startswith(str(directory))]
 
 
-@pytest.mark.parametrize("reader", ["same thread", "other thread"])
-def test_a_released_store_leaves_no_connection_for_a_forked_child_to_close(tmp_path, reader):
-    path = tmp_path / "ledgers" / sqlite.DATABASE
+@contextlib.contextmanager
+def uncollected():
     collecting = gc.isenabled()
     gc.disable()
     try:
-        repo = SQLiteLedgerRepository(path)
-        repo.create("processes", CONTENT)
-        if reader == "other thread":
-            thread = threading.Thread(target=repo.exists, args=("processes",))
-            thread.start()
-            thread.join()
-        assert open_files(path.parent)
-        del repo
-        assert open_files(path.parent) == []
+        yield
     finally:
         if collecting:
             gc.enable()
+
+
+def read_on_a_thread(repo):
+    thread = threading.Thread(target=repo.exists, args=("processes",))
+    thread.start()
+    thread.join()
+
+
+@pytest.mark.parametrize("reader", ["same thread", "other thread"])
+def test_a_released_store_leaves_no_connection_for_a_forked_child_to_close(tmp_path, reader):
+    path = tmp_path / "ledgers" / sqlite.DATABASE
+    with uncollected():
+        repo = SQLiteLedgerRepository(path)
+        repo.create("processes", CONTENT)
+        if reader == "other thread":
+            read_on_a_thread(repo)
+        else:
+            repo.exists("processes")
+        assert open_files(path.parent)
+        del repo
+        assert open_files(path.parent) == []
+
+
+def test_a_reader_closes_when_its_thread_ends_while_the_store_lives(tmp_path):
+    path = tmp_path / "ledgers" / sqlite.DATABASE
+    with uncollected():
+        SQLiteLedgerRepository(path).create("processes", CONTENT)
+        assert open_files(path.parent) == []
+        repo = SQLiteLedgerRepository(path)
+        read_on_a_thread(repo)
+        assert open_files(path.parent) == []
+        assert repo.exists("processes")

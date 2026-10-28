@@ -388,11 +388,15 @@ class Snapshot:
         return None if row is None else row[0]
 
 
-def close_all(connections: list) -> None:
-    """Close a released store's held readers: sqlite3 connections are cyclic, so an unclosed one outlives its store
-    until a collection, which in a forked child releases that child's locks on the database mid write."""
-    for connection in connections:
-        connection.close()
+def release(held: dict, connection) -> None:
+    held.pop(connection, None)
+    connection.close()
+
+
+def close_all(held: dict) -> None:
+    """Close a released store's held reader connections."""
+    for closing in list(held.values()):
+        closing()
 
 
 class SQLiteLedgerRepository:
@@ -409,7 +413,7 @@ class SQLiteLedgerRepository:
         self._loads = {}
         self._guard = threading.Lock()
         self._readers = threading.local()
-        self._held = []
+        self._held = {}
         weakref.finalize(self, close_all, self._held)
 
     @property
@@ -463,7 +467,7 @@ class SQLiteLedgerRepository:
         held = getattr(self._readers, "held", None)
         if held is None or held[0] != self.path:
             held = self._readers.held = self._open(check_same_thread=False)
-            self._held.append(held[1])
+            self._held[held[1]] = weakref.finalize(threading.current_thread(), release, self._held, held[1])
         held[1].set_trace_callback(self.trace)
         return nullcontext(held[1])
 
