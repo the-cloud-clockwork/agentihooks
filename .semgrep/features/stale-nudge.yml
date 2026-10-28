@@ -14,7 +14,7 @@ rules:
               - pattern-not: |
                   def _watch_idle(...):
                     ...
-                    $NUDGED = _stale_nudge(...) if $CLAIMANT else []
+                    $NUDGED = _stale_nudge(...) if claimant else []
                     ...
           - patterns:
               - pattern: |
@@ -27,4 +27,23 @@ rules:
     paths:
       include:
         - /scripts/swarm/tick.py
+        - '*.test.py'
+  - id: feature-stale-nudge-recorded
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-10-28, the swarm health panel shows each stale claimant's last nudge: stale_nudge.nudge must record
+      the time of every nudge it sends under the LAST key.
+    patterns:
+      - pattern: |
+          def nudge(...):
+            ...
+      - pattern-not: |
+          def nudge(...):
+            ...
+            redis.set(idle.key($SLUG, LAST, $AGENT.name), $NOW, ...)
+            ...
+    paths:
+      include:
+        - /scripts/swarm/stale_nudge.py
         - '*.test.py'
