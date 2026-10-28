@@ -5629,7 +5629,7 @@ journalctl --user _SYSTEMD_USER_UNIT=agentihooks-swarm.service + SYSLOG_IDENTIFI
 rig-grade-swarm: local slot claim new for t9 on workstation counted 3 of 6: ci@cccccc-0001, doctor/pending, engineer@bbbbbb-0001
 ```
 
-The [Doctor slot census detector](#doctor-slot-census-detector) compares each line with the panes live at that instant.
+The [Doctor slot census detector](#doctor-slot-census-detector) compares each line with the recorded agents live at that instant.
 
 The fix shipped in [pull request 6322](https://github.com/the-cloud-clockwork/agentihooks/pull/6322). Before
 it, a full cap shared by two swarms on the operator's machine raised spawn stall on each of them, and masters closed
