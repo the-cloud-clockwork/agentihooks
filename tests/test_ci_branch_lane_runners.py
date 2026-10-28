@@ -17,7 +17,7 @@ ROUTED = "${{ contains(fromJSON('[\"nestorcolt\"]'), github.actor) && '%s' || 'u
         ("anton-light", "anton-light"),
         (["self-hosted", "anton-light"], "self-hosted, anton-light"),
         (ROUTED % "anton-light", "anton-light"),
-        ({"group": "Default", "labels": ["anton-light"]}, "anton-light"),
+        ({"group": "Default", "labels": ["anton-light"]}, "group Default, anton-light"),
         ("anton-heavy", "anton-heavy"),
         ("Anton-Light", "Anton-Light"),
         ("gpu-light", "gpu-light"),
