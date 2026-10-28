@@ -289,6 +289,42 @@ def test_an_entry_refreshed_without_a_held_copy_copies_on_write(tmp_path):
     assert [message["text"] for message in reader.get_document("ledger")["chat"]][-2:] == ["hello", "again"]
 
 
+@pytest.mark.parametrize("held, built", [({"held": 1}, {"built": 1}), (None, {"built": 1}), ({"held": 1}, None)])
+def test_refreshed_rebuilds_the_held_copy_by_the_same_paths_and_releases_it(monkeypatch, held, built):
+    calls = []
+
+    def fake(connection, slug, value, paths):
+        calls.append((connection, slug, value, paths))
+        return None if built is None else {**value, "paths": paths}
+
+    monkeypatch.setattr(writer_copy.refresh, "refreshed", fake)
+    cached = Entry(1, None, {"state": 1}, writer=held)
+    state, writer = writer_copy.refreshed("db", "ledger", cached, {"p"})
+    assert cached.writer is None
+    if built is None:
+        assert (state, writer) == (None, None)
+        assert calls == [("db", "ledger", {"state": 1}, {"p"})]
+    elif held is None:
+        assert (state, writer) == ({"state": 1, "paths": {"p"}}, None)
+        assert len(calls) == 1
+    else:
+        assert state == {"state": 1, "paths": {"p"}}
+        assert writer == {"held": 1, "paths": {"p"}}
+        assert calls[1] == ("db", "ledger", {"held": 1}, {"p"})
+
+
+def test_evented_gives_the_writer_its_own_copy_of_the_stored_events():
+    events = [{"rev": 1}]
+    writer = {"_meta": {"rev": 1}}
+    assert writer_copy.evented(writer, {"_meta": {"events": events}}) is writer
+    assert writer["_meta"]["events"] == events
+    assert writer["_meta"]["events"] is not events
+    assert writer["_meta"]["events"][0] is not events[0]
+    plain = {"_meta": {"rev": 1}}
+    assert writer_copy.evented(plain, {"_meta": {"rev": 1}}) == {"_meta": {"rev": 1}}
+    assert writer_copy.evented(None, {"_meta": {"events": events}}) is None
+
+
 def two_states():
     old = {
         "_meta": {"rev": 1, "stamps": {"a": {"at": 1}, "b": {"at": 2}}},

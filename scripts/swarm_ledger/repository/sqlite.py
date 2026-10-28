@@ -8,8 +8,8 @@ from pathlib import Path
 
 from scripts.swarm_ledger import request_metrics
 
-from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
-from .entry import Entry, thawed
+from . import artifact_files, heap, hierarchy, media_files, outbox, refresh, writer_copy
+from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
 from .rows import TABLES, assemble, diff, encode, flatten, load, read_rows, write_rows
@@ -491,12 +491,9 @@ class SQLiteLedgerRepository:
             if whole:
                 state = load(connection, slug)
             if "events" in state["_meta"]:
-                events = read_events(connection, slug)
-                state["_meta"] = {**state["_meta"], "events": events}
-                if writer is not None:
-                    writer["_meta"]["events"] = thawed(events)
+                state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
             fragments = document(state, None if whole else cached.fragments)
-            entry = Entry(row[0], None, fragments.value, fragments, writer)
+            entry = Entry(row[0], None, fragments.value, fragments, writer_copy.evented(writer, state))
             self._remember(slug, entry)
         if whole:
             heap.release()
@@ -504,13 +501,7 @@ class SQLiteLedgerRepository:
 
     def _refreshed(self, connection, slug: str, cached: Entry, generation: int) -> tuple[dict | None, dict | None]:
         paths = refresh.changed_paths(connection, slug, cached.generation, generation, CHANGES_KEPT)
-        if paths is None:
-            return None, None
-        state = refresh.refreshed(connection, slug, cached.state, paths)
-        writer, cached.writer = cached.writer, None
-        if state is None or writer is None:
-            return state, None
-        return state, refresh.refreshed(connection, slug, writer, paths)
+        return (None, None) if paths is None else writer_copy.refreshed(connection, slug, cached, paths)
 
     def _remember(self, slug: str, entry: Entry) -> None:
         with self._guard:
