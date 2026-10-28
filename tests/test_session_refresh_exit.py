@@ -58,6 +58,37 @@ def test_launcher_retains_native_exit_before_cleanup(tmp_path, monkeypatch, stat
     assert not launcher.exists()
 
 
+def test_launcher_keeps_a_failed_route_report_for_the_waiting_launch(tmp_path, monkeypatch):
+    from scripts import profile_telemetry
+
+    shell = tmp_path / "shell"
+    shell.write_text("#!/usr/bin/env bash\nexit 0\n")
+    shell.chmod(0o700)
+
+    def agent(spec, report, *args):
+        failed = f'printf "status=failed\\nerror=native Claude login is expired\\n" > "{report}"; exit 3'
+        return ["bash", "-c", failed], ""
+
+    monkeypatch.setattr(init_agent, "_agent_command", agent)
+    monkeypatch.setattr(init_agent, "LAUNCH_GRACE_S", 0)
+    monkeypatch.setattr(init_agent.operator_env, "source_line", lambda environ: "")
+    monkeypatch.setattr(profile_telemetry, "installed_langfuse_env", lambda agent: {})
+    environ = {
+        **os.environ,
+        "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+        "XDG_RUNTIME_DIR": str(tmp_path),
+        "SHELL": str(shell),
+    }
+    launcher, _ = init_agent._write_launcher(tmp_path, "route-test", "", [], environ)
+    route = init_agent._route_report(launcher)
+    subprocess.run(["bash", str(launcher)], env=environ, capture_output=True, text=True, timeout=30)
+    assert not launcher.exists()
+    assert init_agent._take_route_report(route)[0] == {
+        "status": "failed",
+        "error": "native Claude login is expired",
+    }
+
+
 def test_restart_retains_exit_evidence_before_relaunch(tmp_path, monkeypatch):
     record = tmp_path / "native.json"
     monkeypatch.setenv("AGENTIHOOKS_EXIT_RECORD", str(record))

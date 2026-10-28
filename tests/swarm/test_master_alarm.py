@@ -132,7 +132,9 @@ def test_the_alarm_state_is_saved_before_any_item(store, monkeypatch):  # noqa: 
 
     monkeypatch.setattr(InboxStore, "send", send)
     master_alarm.run("sw", store, runtime, "")
-    assert seen == [{"error": BROKEN, "at": 1, "doctor": DOCTOR, "told": [ENGINEER]}] * 2
+    assert seen == [
+        {"error": BROKEN, "at": 1, "failures": 1, "first_at": 1, "doctor": DOCTOR, "told": [ENGINEER]}
+    ] * 2
 
 
 def test_nothing_is_sent_without_a_recorded_failure(store):  # noqa: F811
@@ -301,3 +303,22 @@ def test_the_doctor_is_told_once_across_later_agents(store):  # noqa: F811
         agent(store, runtime, name)
         assert master_alarm.run("sw", store, runtime, "") == [f"told {name} the master is down"]
     assert len(mail(store, DOCTOR_MASTER)) == 1
+
+
+def test_each_failed_master_launch_is_counted_with_its_latest_reason(store):  # noqa: F811
+    master_alarm.failed(store, "sw", "native Claude login is expired or missing", 10)
+    master_alarm.failed(store, "sw", "no Claude account has a free session under its quota band", 20)
+    assert master_alarm.read(store, "sw") == {
+        "error": "no Claude account has a free session under its quota band",
+        "at": 20,
+        "failures": 2,
+        "first_at": 10,
+    }
+    master_alarm.drop(store, "sw")
+    master_alarm.failed(store, "sw", "the harness did not report its route within 90s", 30)
+    assert master_alarm.read(store, "sw") == {
+        "error": "the harness did not report its route within 90s",
+        "at": 30,
+        "failures": 1,
+        "first_at": 30,
+    }
