@@ -120,7 +120,7 @@ def test_exit_keeps_a_workstation_worker_whose_emptied_claim_the_tick_restores(e
 
 
 @pytest.mark.parametrize("hive", [True, False])
-def test_claimless_checks_the_exact_ledger_claimant_and_lookup(env, monkeypatch, hive):
+def test_claimless_checks_the_exact_ledger_claimant_and_lookup(env, monkeypatch, hive):  # noqa: F811
     from scripts.hive import scope
     from scripts.swarm import cli
 
