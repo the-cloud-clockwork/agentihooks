@@ -168,6 +168,12 @@ def test_a_replaced_stamp_record_is_checked_as_a_new_leaf():
     assert stamps["b"] is not old["b"] and type(stamps["b"].value["rev"]) is float
 
 
+@pytest.mark.parametrize("state", [{"title": "t"}, {"_meta": "scalar"}, {"_meta": {"stamps": "scalar"}}])
+def test_written_leaves_a_ledger_without_stamp_records_as_it_is(state):
+    published, writer = writer_copy.written(state, None)
+    assert published.value == writer == state
+
+
 def test_a_failed_write_drops_the_held_copy_and_the_next_write_copies_again(tmp_path, monkeypatch):
     repo = store(tmp_path)
     repo.apply_ops("ledger", ops=[CLAIM])
