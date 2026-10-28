@@ -1,0 +1,6 @@
+{
+  "scripts/ci_branch_lanes.py:scripts.ci_branch_lanes.x_refused__mutmut_27:d3c5905c8e69df85268db41c006f54b986f54ffa37c0d8cb228bcf3c87071084": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: removing '--' does not alter ls-tree parsing because the tree commit precedes a literal non-option '.github/workflows' pathspec."
+  }
+}

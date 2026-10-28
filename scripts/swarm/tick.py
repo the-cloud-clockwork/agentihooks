@@ -56,6 +56,7 @@ from scripts.swarm import (
     lost_runner,
     master_alarm,
     master_move,
+    master_questions,
     master_retire,
     master_stall,
     master_start,
@@ -186,6 +187,7 @@ class Runtime(Protocol):
     def status(self, agent: AgentRecord) -> str: ...
     def observe(self, agent: AgentRecord) -> PaneObservation: ...
     def nudge(self, agent: AgentRecord, text: str) -> str | None: ...
+    def dismiss(self, agent: AgentRecord) -> bool: ...
     def name_pane(self, agent: AgentRecord) -> bool: ...
     def conversations(self) -> dict[str, str] | None: ...
     def resume(self, config, agent: AgentRecord, text: str) -> Placed: ...
@@ -242,7 +244,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
-    actions += skip_refused(fleet_red.notice_pass, slug, config, store, ledger, rows, now_ms)
+    actions += skip_refused(fleet_red.notice_pass, slug, store, ledger, rows, now_ms)
     actions += skip_refused(run_window.step, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(claim_hold.verification_notices, slug, store, doc, now_ms)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
@@ -768,10 +770,13 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         same = agent.input_prompt == title
         ticks = agent.input_ticks + 1 if same else 1
         input_wait.mark(store, slug, agent.name, now_ms, same)
-        store.put_agent(slug, replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0))
-        return []
+        waiting = replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0)
+        store.put_agent(slug, waiting)
+        return master_questions.dismiss(slug, store, ledger, runtime, waiting, now_ms) if agent.lane == MASTER else []
     if agent.input_prompt:
         input_wait.clear(store, slug, agent.name)
+        if agent.lane == MASTER:
+            master_questions.drop(store, slug, agent.name)
     agent = replace(agent, input_prompt="", input_ticks=0)
     held = outage.held(store, slug, agent.name)
     exhausted = resume.recovery_exhausted(store, slug, agent)
@@ -935,7 +940,7 @@ def claim_view(slug, store, rows, doc, dispatched=None):
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
     released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
-    unshared = fleet_red.checker(config.repo)
+    unshared = fleet_red.checker()
     view = readiness.Snapshot(
         slug,
         rows,
@@ -976,8 +981,9 @@ def _stacked_dep(dep, row, repo):
 
 
 def _refund_parked(slug, store, rows, agent):
-    quota = (store.handoff_envelope(slug, agent.task) or {}).get("reason") == "quota"
-    if _parked(rows.get(agent.task, {}), rows) or quota:
+    reason = (store.handoff_envelope(slug, agent.task) or {}).get("reason")
+    preempted = preempt.take_victim(store, slug, agent.name)
+    if _parked(rows.get(agent.task, {}), rows) or reason == "quota" or (reason == "operator" and preempted):
         store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
 
 
