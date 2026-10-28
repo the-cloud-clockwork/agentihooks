@@ -8,6 +8,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
+from scripts import gh_audit
 from scripts.doctor import ci, ci_cache
 from scripts.swarm import github_reads
 from scripts.swarm.keyspace import ROOT
@@ -52,7 +53,8 @@ def _gh(args, run, shared=False):
     def fetch():
         caller = "doctor.ci.job_log" if endpoint.endswith("/logs") else "doctor.ci"
         github_reads.charge(caller, endpoint, time.time())
-        return run(["gh", *args], capture_output=True, text=True, check=True, timeout=60).stdout
+        with gh_audit.uncharged():
+            return run(["gh", *args], capture_output=True, text=True, check=True, timeout=60).stdout
 
     if shared:
         return github_reads.snapshot(json.dumps(args), time.time(), lambda: {"stdout": fetch()})["stdout"]

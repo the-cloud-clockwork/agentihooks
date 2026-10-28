@@ -88,3 +88,10 @@ def test_a_real_subprocess_is_charged_once_by_the_installed_hook(charged, tmp_pa
     with github_reads.calling("swarm.probe"):
         subprocess.run([str(fake), "api", "repos/a/b/pulls/3"], capture_output=True, check=True)
     assert charged() == [("swarm.probe", "repos/a/b/pulls/3")]
+
+
+def test_pre_tool_activity_charges_agent_shell_requests_outside_a_swarm(charged, tmp_path):
+    from scripts.swarm.health import activity
+
+    activity.record("Bash", {"command": "gh api repos/a/b/actions/runs/9"}, environ={}, root=tmp_path)
+    assert charged() == [("agent.bash", "repos/a/b/actions/runs/9")]
