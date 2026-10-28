@@ -231,3 +231,41 @@ def test_the_preferred_hive_takes_agents_until_its_node_memory_crosses_eighty_pe
     records[1]["room"] = admission.capped(admission.room(reading), 20, 28).room
 
     assert placement.choose("eng", "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice(expected)
+
+
+def test_round_robin_keeps_at_most_the_node_limit_of_live_hives_listing_the_repo_by_id():
+    from scripts.hive import placement
+
+    records = [
+        hive("c"),
+        hive("a"),
+        hive("d", heartbeat_at=NOW - registry.LIVE_MS - 1),
+        hive("aa", repos=["other"]),
+        hive("b"),
+    ]
+
+    assert [record["id"] for record in placement.round_robin(records, 2, REPO, NOW)] == ["a", "b"]
+    assert [record["id"] for record in placement.round_robin(records, 0, REPO, NOW)] == ["a", "b", "c"]
+    assert [record["id"] for record in placement.round_robin(records, 5, REPO, NOW)] == ["a", "b", "c"]
+
+
+def test_round_robin_gives_the_agent_to_the_chosen_hive_running_the_fewest_agents():
+    from scripts.hive import placement
+
+    records = [
+        hive("worker-one", ui="no", max_agents=28, agents=3, prefer={"eng": 1}),
+        hive("oracle", ui="no", max_agents=4, agents=2),
+        hive("zeta", ui="no", max_agents=4, agents=0),
+    ]
+
+    spread = placement.round_robin(records, 2, REPO, NOW)
+    assert [record[placement.SPREAD] for record in spread] == [2, 3]
+    assert placement.choose("eng", "claude", "acct", "subscription", REPO, spread, NOW) == placement.Choice("oracle")
+    assert placement.choose("eng", "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice(
+        "worker-one"
+    )
+    records[1][placement.PLACED] = 2
+    spread = placement.round_robin(records, 2, REPO, NOW)
+    assert placement.choose("eng", "claude", "acct", "subscription", REPO, spread, NOW) == placement.Choice(
+        "worker-one"
+    )

@@ -9,7 +9,7 @@ from scripts.hive import admission, headroom, orders, placement, placement_waits
 from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import ACK_LATER, Placed
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
@@ -153,6 +153,12 @@ def _pinned(hives: list[dict], task: dict, role: str) -> tuple[list[dict], place
     return kept, None if kept else placement.Wait(placement.NEEDS_WORKSTATION, role)
 
 
+def _by_mode(config: SwarmConfig, hives: list[dict], role: str, now: int) -> list[dict]:
+    if config.placement_mode != ROUND_ROBIN or role in registry.UI_ROLES:
+        return hives
+    return placement.round_robin(hives, config.placement_nodes, config.repo, now)
+
+
 def _matched_origin(hives: list[dict], hive: str, repo: str) -> str | placement.Wait:
     from scripts.hive.daemon import origin
 
@@ -235,6 +241,7 @@ class HiveLaunch:
             for hive in self._pass_hives[1]:
                 if hive["id"] == selected.hive:
                     hive["room"] -= 1
+                    hive[placement.PLACED] = hive.get(placement.PLACED, 0) + 1
         return selected
 
     def _withdraw(self, request: SpawnRequest, selected: Selection, refused: str) -> placement.Wait:
@@ -277,6 +284,7 @@ class HiveLaunch:
         from scripts.swarm import local_slots
         from scripts.swarm.commands import hive_id
 
+        hives = _by_mode(config, hives, role, now)
         if lane != placement.MASTER:
             for index, hive in enumerate(hives):
                 if hive["id"] == hive_id():
