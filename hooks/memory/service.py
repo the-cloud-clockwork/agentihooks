@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from hooks.memory import archive
+from hooks.memory.api import ingest as ingest_api
 from hooks.memory.api import records
 from hooks.memory.api import search as search_api
 from hooks.memory.api.ingest import SCHEMA_VERSION, Grant
@@ -33,6 +34,7 @@ MAX_BODY = 1 << 20
 LENGTH_HEADER = "Content-Length"
 AUTH_HEADER = "Authorization"
 PROBE = "SELECT 1"
+INGEST_PATH = "/v2/sessions/ingest"
 SEARCH_PATH = "/v2/sessions/search"
 TOOLS_PREFIX = "/v2/sessions/tools/"
 HEALTH_PATH = "/healthz"
@@ -84,7 +86,7 @@ def read_body(request: BaseHTTPRequestHandler) -> dict | None:
 
 
 def post(tools: records.SessionTools, grants: dict[str, Grant], request: BaseHTTPRequestHandler) -> tuple:
-    if request.path != SEARCH_PATH and not request.path.startswith(TOOLS_PREFIX):
+    if request.path not in (SEARCH_PATH, INGEST_PATH) and not request.path.startswith(TOOLS_PREFIX):
         return 404, _refusal("not_found", NOT_FOUND)
     grant = authenticate(grants, request.headers.get(AUTH_HEADER))
     if grant is None:
@@ -92,6 +94,8 @@ def post(tools: records.SessionTools, grants: dict[str, Grant], request: BaseHTT
     body = read_body(request)
     if body is None:
         return 400, _refusal("invalid_request", BAD_BODY)
+    if request.path == INGEST_PATH:
+        return 200, ingest_api.ingest(tools.catalog, grant, body)
     if request.path == SEARCH_PATH:
         return 200, search_api.search(tools.searcher, grant, body)
     return 200, records.call(tools, request.path.removeprefix(TOOLS_PREFIX), grant, body, time.time())
