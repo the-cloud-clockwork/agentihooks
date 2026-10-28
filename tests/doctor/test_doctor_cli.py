@@ -742,6 +742,7 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "spawn",
         "master launch",
         "startup",
+        "headroom",
         "context overrun",
         "master prompt",
         "ci",
