@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore
 
 SLUG = "proof-323133-t1701-2"
@@ -46,7 +46,7 @@ def sweep(world, at):
 
 def question(world):
     _, inbox, agent, _, _ = world
-    return inbox.inbox(agent.name)[-1]
+    return next(item for item in inbox.inbox(agent.name) if item.state not in CLOSED)
 
 
 def answer(world, text):
@@ -158,4 +158,98 @@ def test_busy_or_held_panes_are_not_probed(world, changed):
         **(dict(state="idle", typed=False, prompt_title="", provider_error="") | changed)
     )
     assert sweep(world, START + LIMIT) == []
+    runtime.retire.assert_not_called()
+
+
+@pytest.mark.parametrize("lane,seat", [("eng", "eng-1"), ("master", "master")])
+def test_real_automated_launch_persists_swarm_and_seat(tmp_path, lane, seat):
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.tick import placed_record
+    from tests.swarm.profile_fixture import validated
+
+    def launch(argv, **kwargs):
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=launch, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug=SLUG, repo=str(tmp_path), code="323133", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    address = f"{seat}@{SLUG}"
+    placed = runtime.spawn(config, lane, NAME, {"id": "t1", "title": "work", "seat": address})
+    record = placed_record(AgentRecord(NAME, lane, "t1", seat=address), placed)
+    assert record.profile_decision["automated"] == {"swarm": SLUG, "seat": address}
+
+
+def test_stopped_proof_swarm_still_collects_its_automated_master(world, monkeypatch):
+    from scripts.swarm import tick
+
+    store, inbox, agent, runtime, ledger = world
+    config = SimpleNamespace(state="stopped")
+    monkeypatch.setattr(store, "ensure_code", lambda _: config)
+    monkeypatch.setattr(tick, "_woken", lambda *_: False)
+    monkeypatch.setattr(tick, "_close_space", lambda *_: [])
+    monkeypatch.setattr(tick, "_bin_closed", lambda *_: [])
+    monkeypatch.setattr(tick.lifetime, "sleeping", lambda *_: False)
+    ledger.state.return_value = {"tasks": []}
+    for attempt in range(1, 4):
+        at = START + attempt * LIMIT
+        tick.tick(SLUG, store, ledger, runtime, at)
+        inbox.reply(question(world).id, agent.name, "nothing to do")
+        tick.tick(SLUG, store, ledger, runtime, at + 1)
+    runtime.retire.assert_called_once_with(agent)
+    assert store.agents(SLUG) == []
+    ledger.notify.assert_called_once()
+
+
+def test_tagged_worker_waits_for_explicit_idle_answers_instead_of_tick_limit(world, monkeypatch):
+    from scripts.swarm import tick
+
+    store, _, agent, runtime, ledger = world
+    agent = replace(agent, lane="eng", task="t1", idle_ticks=tick.IDLE_KILL_TICKS)
+    store.put_agent(SLUG, agent)
+    monkeypatch.setattr(tick, "_refusal_due", lambda *_: False)
+    monkeypatch.setattr(tick, "_stuck_on_provider", lambda *_: False)
+    monkeypatch.setattr(tick, "_operator_at_pane", lambda *_: False)
+    monkeypatch.setattr(tick.ledger_probe, "holding", lambda *_: False)
+    tick._watch_idle(SLUG, store, ledger, runtime, {}, agent, START + LIMIT)
+    runtime.retire.assert_not_called()
+
+
+def test_distributed_launch_tags_admitted_worker_before_handoff():
+    from scripts.swarm_v2.launch import DistributedLaunch
+
+    controller = Mock()
+    admitted = AgentRecord(NAME, "eng", "t1", seat=SEAT, profile_decision={"profile": "engineer"})
+    controller.admit.side_effect = lambda agent, previous: agent
+    launch = object.__new__(DistributedLaunch)
+    launch.controller = controller
+    launch.slug = SLUG
+    launch._place = Mock()
+    request, terms = Mock(), SimpleNamespace(account="account")
+    launch.spawn(request, admitted, terms, "", "opening")
+    record = controller.admit.call_args.args[0]
+    assert record.account == "account"
+    assert record.profile_decision == {"profile": "engineer", "automated": {"swarm": SLUG, "seat": SEAT}}
+    launch._place.assert_called_once_with(request, record, terms, launch.end_refused, "opening")
+
+
+def test_new_activity_and_named_wait_postpone_the_probe(world):
+    from scripts.swarm import idle
+
+    store, inbox, agent, runtime, _ = world
+    idle.beat(store.redis, SLUG, agent.name, "working", START + LIMIT)
+    assert sweep(world, START + LIMIT + 1) == []
+    assert inbox.inbox(agent.name) == []
+    runtime.retire.assert_not_called()
+
+
+def test_an_idle_reply_does_not_retire_a_now_busy_pane(world):
+    _, _, _, runtime, _ = world
+    for attempt in range(1, 4):
+        at = START + attempt * LIMIT
+        sweep(world, at)
+        answer(world, "nothing to do")
+        if attempt == 3:
+            runtime.observe.return_value.state = "working"
+        sweep(world, at + 1)
     runtime.retire.assert_not_called()

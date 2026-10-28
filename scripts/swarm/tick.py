@@ -199,14 +199,21 @@ class Runtime(Protocol):
 
 
 def tick(slug, store, ledger, runtime, now_ms):
+    from scripts.swarm import automated_gc
+
     config = store.ensure_code(slug)
     actions = []
     if config.state == "stopped":
         doc = timing.call(ledger.state, slug)
         rows = {t["id"]: t for t in doc["tasks"]}
+        actions += automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_drop, slug, store, ledger, rows))
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
         if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
-            return timing.call(_close_space, slug, config, store, runtime) + _bin_closed(slug, store, ledger, doc)
+            return (
+                actions
+                + timing.call(_close_space, slug, config, store, runtime)
+                + _bin_closed(slug, store, ledger, doc)
+            )
         config = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
     store.redis.delete(store.key(slug, SPAWN_HOLD))
@@ -216,6 +223,8 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
+    if config.state != "stopped":
+        actions += automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_drop, slug, store, ledger, rows))
     actions += skip_dropped(
         exits.sweep,
         InboxStore(store.redis),
@@ -801,6 +810,11 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         return nudged
     if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
         store.put_agent(slug, agent)
+        return nudged
+    from scripts.swarm import automated_gc
+
+    if automated_gc.owned(slug, agent):
+        store.put_agent(slug, replace(agent, idle_ticks=0))
         return nudged
     idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
     store.put_agent(slug, idle)
