@@ -57,10 +57,10 @@ def process_caller() -> str:
 
 
 def reads():
-    """The charged log module, imported on first charge so the scripts package import does not pull in the swarm tree."""
-    from scripts.swarm import github_reads
+    """The charged log module, loaded by name on first charge so neither the scripts package import nor its import graph pulls in the swarm tree."""
+    import importlib
 
-    return github_reads
+    return importlib.import_module("scripts.swarm.github_reads")
 
 
 def charge(caller: str, path: str) -> None:
