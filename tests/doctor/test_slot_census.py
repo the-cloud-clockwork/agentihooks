@@ -140,18 +140,22 @@ def test_the_reader_places_ended_lives_on_the_hive_their_execution_ran_on():
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", 1, 0))
-    for name in ("ci@remote", "ci@local"):
+    names = ("ci@archived", "ci@live", "ci@local")
+    for name in names:
         store.put_agent("sw", AgentRecord(name, "ci", "t2", pane_id="w2:pD", started_at=AT - 20))
-    remote = AgentRecord(
-        "ci@remote", "ci", "t2", pane_id="w2:pD", started_at=AT - 20, hive="h6", execution_id="exe-1", state="ended"
-    )
-    store.redis.hset(store.key("sw", "executions-archive"), "exe-1", json.dumps(asdict(remote)))
-    store.redis.hset(
-        store.key("sw", "executions"),
-        "exe-2",
-        json.dumps(asdict(replace(remote, started_at=AT - 90, hive="h7", execution_id="exe-2"))),
-    )
-    for name in ("ci@remote", "ci@local"):
+    base = AgentRecord("", "ci", "t2", pane_id="w2:pD", started_at=AT - 20, state="ended")
+    executions = {
+        "executions-archive": [replace(base, name="ci@archived", hive="h6", runtime_backend="kubernetes")],
+        "executions": [
+            replace(base, name="ci@live", hive="h7"),
+            replace(base, name="ci@archived", hive="h8", started_at=AT - 90),
+        ],
+    }
+    for key, records in executions.items():
+        for n, agent in enumerate(records):
+            agent = replace(agent, execution_id=f"exe-{key}-{n}")
+            store.redis.hset(store.key("sw", key), agent.execution_id, json.dumps(asdict(agent)))
+    for name in names:
         store.drop_agent("sw", name, at=AT + 5)
     message = "sw: local slot claim new for t9 on root counted 0 of 6: "
 
@@ -161,7 +165,8 @@ def test_the_reader_places_ended_lives_on_the_hive_their_execution_ran_on():
 
     read = spawn_read.slot_claims(store, "sw", run=journal)
     ended = {row["name"]: row for row in read["lives"] if row["ended_at"]}
-    assert (ended["ci@remote"]["hive"], ended["ci@remote"]["runtime_backend"]) == ("h6", "local")
+    assert (ended["ci@archived"]["hive"], ended["ci@archived"]["runtime_backend"]) == ("h6", "kubernetes")
+    assert (ended["ci@live"]["hive"], ended["ci@live"]["runtime_backend"]) == ("h7", "local")
     assert "hive" not in ended["ci@local"]
     [found] = slot_census.findings(read)
     assert found.summary.endswith("left 1 live local agents out: ci@local")
