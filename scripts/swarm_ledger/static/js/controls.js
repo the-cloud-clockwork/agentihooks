@@ -1,7 +1,7 @@
 import { $, h } from "./dom.js";
 import { readModels, writeSwarm } from "./api.js";
 import { setChatTo, showChat } from "./chat.js";
-import { capDraft, doctorOn, overlayChanges, pending, renderSwarm, saveRouting, swarm, swarmControl, toggleOverlay } from "./swarm.js";
+import { capDraft, doctorOn, laneCeilings, overlayChanges, pending, renderSwarm, saveRouting, swarm, swarmControl, toggleOverlay } from "./swarm.js";
 import { wireHives } from "./hives.js";
 import { lifecycleBody, sendLifecycle, unresolved } from "./lifecycle.js";
 import { meta } from "./sync.js";
@@ -11,6 +11,7 @@ const GATE_LABELS = { enforce: "deny", observe: "log only", off: "skip" };
 const STEPS = { eng: ["max_eng", 1], ci: ["max_ci", 1], plan: ["max_plan", 1], masters: ["masters_step", 1, "masters step"], compact: ["compact_limit", 50, "compact limit"], focus: ["focus_weight", 1, "focus weight"] };
 const EFFORT_CAPS = { effort_min: "effort floor", effort_max: "effort ceiling" };
 const MASTER_AGENTS = ["claude", "codex"];
+const LANE_STEP = /^(eng|ci|plan)_(up|down)$/;
 
 let noteError = false;
 let models = {};
@@ -126,7 +127,7 @@ function capBounds(values, limits) {
 }
 
 function opNote(phase, action, error) {
-  const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy", gate: "Set gate mode",
+  const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy", scaling: "Set scaling", gate: "Set gate mode",
     eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap", masters_down: "Lower masters step", masters_up: "Raise masters step",
     compact_down: "Lower compact limit", compact_up: "Raise compact limit",
     effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", overlays: "Apply overlays", lift: "Lift the gate", quota_refresh: "Refresh quota", routing: "Set routing", hive: "Set hive", master_move: "Move master",
@@ -152,17 +153,19 @@ function renderFocus(config) {
   const step = (up) => h("button", { class: "sw-btn sw-step", type: "button", "data-swarm": `focus_${up ? "up" : "down"}`, "aria-label": `${up ? "Raise" : "Lower"} focus weight`, text: up ? "+" : "−" });
   const row = h("div", { class: "sw-cap", "data-focus-weight": "" }, h("span", { class: "sw-cap-name", text: "focus weight" }), step(false),
     h("label", { class: "sw-field" }, h("input", { class: "sw-num", id: "cap-focus", type: "text", inputmode: "numeric", autocomplete: "off", "data-cap": "focus_weight", "aria-label": "Focus weight" }), h("span", { class: "sw-unit", text: "%" })), step(true));
-  $("capacity-caps").querySelector(".sw-break").after(row);
+  $("swarm-scaling").after(row);
 }
 
 export function renderControls() {
   const config = swarm ? swarm.config : {};
   renderFocus(config);
+  const auto = config.scaling === "auto", ceilings = swarm ? laneCeilings(swarm) : {};
+  if (auto) for (const key of Object.keys(ceilings)) delete capDraft[key];
   const changes = swarm ? capChanges(capValues(swarm), capDraft, pageLimits(), models) : { body: {}, bad: [] };
   const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent(), pageLimits()), apply: !unsent(changes.body) && !changes.bad.length } : swarmControls("");
   for (const btn of [...$("swarm-box").querySelectorAll("button[data-swarm]"), ...$("closed-banner").querySelectorAll("button[data-swarm]")]) {
     const action = btn.dataset.swarm;
-    btn.hidden = (action === "doctor_start" && doctorOn(swarm)) || (action === "doctor_stop" && !doctorOn(swarm));
+    btn.hidden = (action === "doctor_start" && doctorOn(swarm)) || (action === "doctor_stop" && !doctorOn(swarm)) || (auto && LANE_STEP.test(action));
     btn.disabled = !swarm || !!pending || !!off[action];
     btn.classList.toggle("sending", pending === action);
     btn.setAttribute("aria-busy", pending === action ? "true" : "false");
@@ -171,10 +174,16 @@ export function renderControls() {
     btn.setAttribute("aria-pressed", String(btn.dataset.autonomy === (config.autonomy || "delegate")));
     btn.disabled = !swarm || !!pending;
   }
+  for (const btn of $("swarm-scaling").querySelectorAll("button[data-scaling]")) {
+    btn.setAttribute("aria-pressed", String(btn.dataset.scaling === (auto ? "auto" : "manual")));
+    btn.disabled = !swarm || !!pending;
+  }
   for (const btn of $("swarm-gates").querySelectorAll("button[data-gate]")) btn.disabled = !swarm || !!pending;
   if (swarm) renderModels(capCurrent());
   for (const input of $("capacity-box").querySelectorAll("[data-cap]")) {
-    if (swarm && !(input.dataset.cap in capDraft)) input.value = capValues(swarm)[input.dataset.cap] ?? "";
+    input.readOnly = auto && input.dataset.cap in ceilings;
+    if (input.readOnly) input.value = ceilings[input.dataset.cap];
+    else if (swarm && !(input.dataset.cap in capDraft)) input.value = capValues(swarm)[input.dataset.cap] ?? "";
     input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }, pageLimits(), models).bad.length));
     input.disabled = !swarm || pending === "apply";
   }
@@ -194,6 +203,7 @@ function commandAction(command) {
   if (command.command === "doctor") return `doctor_${command.argv[0]}`;
   const action = command.argv[0] === "--as" ? command.argv[2] : command.argv[0];
   if (action === "set" && command.argv.some((pair) => pair.startsWith("autonomy="))) return "autonomy";
+  if (action === "set" && command.argv.some((pair) => pair.startsWith("scaling="))) return "scaling";
   return action === "stop" && command.argv.includes("--now") ? "stop_now" : action;
 }
 
@@ -262,6 +272,8 @@ export function wireSwarm() {
   $("swarm-box").addEventListener("click", (event) => {
     const mode = event.target.closest("button[data-autonomy]");
     if (mode && !mode.disabled) return swarmControl({ action: "set", autonomy: mode.dataset.autonomy }, "autonomy");
+    const scaling = event.target.closest("button[data-scaling]");
+    if (scaling && !scaling.disabled) return swarmControl({ action: "set", scaling: scaling.dataset.scaling }, "scaling");
     const gate = event.target.closest("button[data-gate]");
     if (gate && !gate.disabled) return swarmControl({ action: "set", gates: { [gate.dataset.gate]: gate.dataset.gateMode } }, "gate");
     const message = event.target.closest("button[data-message]");

@@ -241,7 +241,7 @@ def test_header_names_the_swarm_state_tick_controls_and_autonomy(open_page):
         "#swarm-modes button", "bs => bs.map(b => [b.textContent, b.getAttribute('aria-pressed')])"
     )
     assert modes == [["manual", "false"], ["assist", "false"], ["delegate", "true"], ["full", "false"]]
-    page.tab.get_by_role("button", name="manual").click()
+    page.tab.get_by_role("group", name="Autonomy").get_by_role("button", name="manual").click()
     page.tab.wait_for_function("() => !document.querySelector('#swarm-modes button').disabled")
     assert page.puts == [{"action": "set", "autonomy": "manual"}]
 
@@ -450,8 +450,8 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
           };
         }"""
     )
-    assert len(boxes["row"]) == 12
-    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][10:]
+    assert len(boxes["row"]) == 13
+    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][11:]
     middle = (caps[0][0] + caps[0][1]) / 2
     assert all(top <= middle <= bottom for top, bottom in caps)
     last = (affinity[0] + affinity[1]) / 2
@@ -893,7 +893,7 @@ def test_the_sessions_cell_reads_the_plain_session_count(open_page):
 def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_page):
     page = open_page()
     order = page.tab.eval_on_selector_all(
-        "#capacity-box .sw-cap:not(.sw-affinity):not(.sw-model)",
+        "#capacity-box .sw-cap:not(.sw-affinity):not(.sw-model):not(.sw-scaling)",
         """caps => caps.map(c => [c.querySelector('.sw-cap-name').innerText,
           [...c.children].slice(1).map(e => e.matches('.sw-field') ? e.querySelector('input').value + (e.querySelector('.sw-unit')?.innerText || '') : e.innerText)])""",
     )
