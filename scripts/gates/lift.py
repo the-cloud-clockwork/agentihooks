@@ -120,8 +120,8 @@ def head_lifted(slug, task, gate, home=None):
     return bool(_load(slug, "tasks", task, gate, home).get("url")) and task_lifted(slug, task, gate, home)
 
 
-def drop_task(slug, task, home=None):
-    store = _shared(home)
+def drop_task(slug, task, home=None, store=None):
+    store = _shared(home) if store is None else store
     if store is not None:
         store.drop_task_lifts(slug, task)
     for path in task_lifts_dir(slug, task, home).glob("*"):
