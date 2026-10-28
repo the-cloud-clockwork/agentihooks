@@ -76,7 +76,7 @@ def _redis(admin, env):
 
 
 def _members(admin):
-    return sorted(key.rsplit(":", 1)[1] for key in admin.keys(f"{auth.PREFIX}:member:*"))
+    return sorted(auth.members(admin))
 
 
 def test_the_default_record_is_named_after_the_label():

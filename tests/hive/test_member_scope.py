@@ -135,7 +135,7 @@ def test_the_controller_ends_a_member_agents_wait_below_its_member(redis, swarm,
     assert not redis.keys(f"{ROOT}:swarm:fixture:*:{name}")
 
 
-def test_members_checks_every_member_record_in_one_round_trip(redis, monkeypatch):
+def test_members_checks_every_member_record_through_the_store(redis, monkeypatch):
     from unittest.mock import Mock
 
     from scripts.hive import auth, scope
@@ -143,14 +143,14 @@ def test_members_checks_every_member_record_in_one_round_trip(redis, monkeypatch
     join(redis, "m2")
     join(redis, "m1")
     redis.sadd(auth.INDEX, "gone")
+    lookup = Mock(wraps=auth.member)
     direct = Mock(wraps=redis.exists)
-    pipeline = Mock(wraps=redis.pipeline)
+    monkeypatch.setattr(auth, "member", lookup)
     monkeypatch.setattr(redis, "exists", direct)
-    monkeypatch.setattr(redis, "pipeline", pipeline)
 
     assert scope.members(redis) == ["m1", "m2"]
     direct.assert_not_called()
-    pipeline.assert_called_once_with(transaction=False)
+    assert sorted(call.args[1] for call in lookup.call_args_list) == ["gone", "m1", "m2"]
 
 
 def test_members_of_an_empty_index_opens_no_pipeline(redis, monkeypatch):

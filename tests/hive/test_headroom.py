@@ -241,7 +241,7 @@ def test_beat_leaves_headroom_with_its_heartbeat_when_a_later_step_fails(redis, 
     monkeypatch.setattr(daemon, "execution_report", fails)
     with pytest.raises(RuntimeError, match="^herdr timed out$"):
         daemon.beat(redis, "machine")
-    assert redis.hget(registry.key("machine"), "heartbeat_at") == "12345"
+    assert registry.show(redis, "machine")["heartbeat_at"] == 12345
     assert json.loads(redis.get(headroom.key("machine")))["measured_at"] == 12_345
 
 

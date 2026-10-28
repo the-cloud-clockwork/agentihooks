@@ -128,7 +128,7 @@ def test_a_redis_refusal_during_refresh_is_reported(admin, redis_lib, monkeypatc
     def refuse(self, *args, **kwargs):
         raise redis_lib.exceptions.ResponseError("NOPERM")
 
-    monkeypatch.setattr(redis_lib.client.Pipeline, "execute", refuse)
+    monkeypatch.setattr(admin, "hget", refuse)
 
     with pytest.raises(auth.HiveError, match=r"^Redis refused the refreshed member \(NOPERM\)$"):
         auth.refresh(admin, grant["ledger_credential"], PUBLIC)

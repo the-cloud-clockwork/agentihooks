@@ -87,7 +87,7 @@ def test_a_refusal_with_another_cause_stays_a_403(port, monkeypatch):
 def test_any_redis_error_on_the_credential_lookup_is_a_refusal(admin, port, monkeypatch):
     from redis.exceptions import RedisError
 
-    monkeypatch.setattr(admin, "transaction", _raises(RedisError("unknown reply from the server")))
+    monkeypatch.setattr(admin, "hget", _raises(RedisError("unknown reply from the server")))
 
     assert _post(port, server.REFRESH_PATH, {"ledger_credential": "any"}) == (
         403,
@@ -99,7 +99,7 @@ def test_any_redis_error_on_the_credential_lookup_is_a_refusal(admin, port, monk
 def test_a_stalled_credential_lookup_stays_a_503(admin, port, kind, monkeypatch):
     from redis import exceptions
 
-    monkeypatch.setattr(admin, "transaction", _raises(getattr(exceptions, kind)("Timeout reading from socket")))
+    monkeypatch.setattr(admin, "hget", _raises(getattr(exceptions, kind)("Timeout reading from socket")))
 
     assert _post(port, server.REFRESH_PATH, {"ledger_credential": "any"}) == (503, {"error": server.REDIS_STALLED})
 

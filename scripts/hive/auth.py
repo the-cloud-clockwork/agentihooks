@@ -93,7 +93,7 @@ def _refusals() -> tuple[type[BaseException], ...]:
 
 
 def _refused(exc: BaseException, what: str) -> HiveError:
-    source = "Redis" if isinstance(exc, redis_acl.Refused) else "the hive state store"
+    source = "Redis" if hive_state.on_redis() else "the hive state store"
     return HiveError(f"{source} refused {what} ({exc})")
 
 
@@ -143,6 +143,11 @@ def refresh(redis, credential: str, redis_url: str) -> dict:
             raise HiveError("the ledger credential belongs to no hive member")
         hive_state.indexed(redis, member_id, True)
         _set_user(redis, member_id, password)
+        if ledger_member(redis, credential) != member_id:
+            hive_state.indexed(redis, member_id, False)
+            redis_acl.drop(redis, f"hive-{member_id}")
+            redis_acl.save(redis)
+            raise HiveError("the ledger credential belongs to no hive member")
         redis_acl.save(redis)
     except _refusals() as exc:
         raise _refused(exc, "the refreshed member") from exc

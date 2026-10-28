@@ -1,4 +1,5 @@
 import ast
+import json
 import time
 from pathlib import Path
 
@@ -193,3 +194,37 @@ def test_amend_gives_up_after_its_tries(bus):
 
     with pytest.raises(StateConflict):
         hive_state.amend(Always(), "k", lambda current: {"v": 1})
+
+
+def test_bus_registry_heartbeats_gate_launch_slots(client, bus):
+    import time
+
+    from scripts.routing.reservation import LaunchSlots
+
+    now = int(time.time() * 1000)
+    registry.beat(client, "worker", {"heartbeat_at": now})
+    hive_state.indexed(client, "worker", True)
+    client.set(f"{registry.key('worker')}:sessions", json.dumps({"claude:one": 1}))
+    assert not client.smembers(registry.INDEX)
+    slots = LaunchSlots(client)
+    assert not slots.reserve("claude:one", "first", 1, 1000)
+    registry.beat(client, "worker", {"heartbeat_at": now - registry.LIVE_MS - 1})
+    assert slots.reserve("claude:one", "first", 1, 1000)
+
+
+def test_bus_registry_index_keeps_reports_visible(client, bus):
+    from types import SimpleNamespace
+
+    from scripts.hive.reports import Reports
+
+    hive_state.indexed(client, "worker", True)
+    reports = Reports(client)
+    monkey_report = {"names": ["engineer"]}
+    from scripts.hive.reports import key
+
+    client.set(key("worker"), json.dumps(monkey_report))
+    assert reports.live() == {"worker": monkey_report}
+    client.delete(key("worker"))
+    agent = SimpleNamespace(state="finished", hive="worker", execution_id="execution", generation=1, runtime_target={})
+    assert not reports.removed(agent, 1000)
+    assert not reports.removed(agent, 1000 + registry.LIVE_MS)
