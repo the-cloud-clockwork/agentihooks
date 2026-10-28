@@ -41,7 +41,7 @@ def _accepted(session_id, harness, cancelled):
 
 
 def _remote_pass(get, trace_id, cancelled):
-    ids, rows, total = set(), 0, 0
+    ids, rows = set(), 0
     for page in range(1, MAX_PAGES + 1):
         if cancelled():
             raise TimeoutError("observation identity read cancelled")
