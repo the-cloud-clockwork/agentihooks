@@ -517,7 +517,9 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
   ten minutes running, and the cool off restarts whenever the count rises. Then every extra backend master is asked
   to hand off at once and the count falls from the top as they leave; an asked seat below a live higher seat retires
   as soon as it is empty. A retired seat's phases, with their tasks, and its handoff and open inbox items go to the front door
-  in the same step. The front door never retires by
+  in the same step, and stay there when the seat is filled again: a refilled seat takes its share only from phases
+  no retirement handed over. Each phase that changes owner sends the seats it moves between an inbox item naming
+  it. The front door never retires by
   scaling.
 - **Inbox pool.** With two or more live masters, items for the master seat from agents and the tick wait in one
   pool per swarm, first in first out, and each is claimed by exactly one live master in round robin seat order,

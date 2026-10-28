@@ -14,6 +14,7 @@ UNNUMBERED = 10_000
 HIVES = "hives"
 RETIRED = "retired"
 RETIRED_AT = "retired-at."
+HANDED = "handed"
 GONE = ("finished", "retiring")
 HIVE_KEY = "hive."
 HIVE_PAIR = f"a hive owner is set as {HIVE_KEY}<hive id>=<master seat>"
@@ -102,9 +103,12 @@ def held(redis, slug: str, agents: list) -> dict[str, str]:
     return dict(sorted(found.items(), key=lambda pair: (pair[0] != lead, _number(slug, pair[0]))))
 
 
-def assign(phases: list[str], seat_list: list[str], previous: dict[str, str], known: list[str]) -> dict[str, str]:
+def assign(
+    phases: list[str], seat_list: list[str], previous: dict[str, str], known: list[str], handed=frozenset()
+) -> dict[str, str]:
     """A phase keeps a seat that still exists; an unowned phase, in ledger order, goes to the seat owning fewest.
-    A seat not in known (added since the last save) then takes the busiest seats' last phases up to an even share."""
+    A seat not in known (added since the last save) then takes the busiest seats' last phases up to an even share,
+    never a phase a retirement handed to the front door."""
     owners = {p: previous[p] for p in phases if previous.get(p) in seat_list}
     rank = {s: i for i, s in enumerate(seat_list)}
     for phase in phases:
@@ -113,8 +117,11 @@ def assign(phases: list[str], seat_list: list[str], previous: dict[str, str], kn
     share = len(phases) // len(seat_list)
     for added in [s for s in seat_list if s not in known]:
         for _ in range(share - _load(owners, added)):
-            busiest = max(seat_list, key=lambda s: (_load(owners, s), -rank[s]))
-            owners[[p for p in phases if owners[p] == busiest][-1]] = added
+            movable = [p for p in phases if p not in handed and owners[p] != added]
+            if not movable:
+                break
+            busiest = max({owners[p] for p in movable}, key=lambda s: (_load(owners, s), -rank[s]))
+            owners[[p for p in movable if owners[p] == busiest][-1]] = added
     return {p: owners[p] for p in phases}
 
 
@@ -128,6 +135,20 @@ def _added(held: list[str], address: str) -> list[str]:
 
 def _handed(owned: dict[str, str], address: str, front: str) -> dict[str, str]:
     return {item: front if owner == address else owner for item, owner in owned.items()}
+
+
+def moves(before: dict[str, str], after: dict[str, str]) -> dict[str, tuple[str, str]]:
+    return {p: (before[p], after[p]) for p in after if before.get(p, after[p]) != after[p]}
+
+
+def tell(redis, slug: str, moved: dict[str, tuple[str, str]], current: list[str]) -> None:
+    """Every counted seat a phase moves from or to gets one inbox item naming each phase that changed owner."""
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm_v2.masters_channel import SWARM
+
+    text = "; ".join(f"{p} moved from {old} to {new}" for p, (old, new) in moved.items())
+    for address in sorted({s for pair in moved.values() for s in pair} & set(current)):
+        InboxStore(redis).send(SWARM, address, f"Master phase owners of swarm {slug} changed: {text}.")
 
 
 def count_of(text: str) -> int:
@@ -219,17 +240,21 @@ class MasterSeats:
                     saved = json.loads(pipe.hget(key, "owners") or "{}")
                     held = json.loads(pipe.hget(key, RETIRED) or "[]")
                     hives = json.loads(pipe.hget(key, HIVES) or "{}")
+                    handed = json.loads(pipe.hget(key, HANDED) or "[]")
+                    owners = _handed(saved, address, front)
                     pipe.multi()
                     pipe.hset(
                         key,
                         mapping={
-                            "owners": json.dumps(_handed(saved, address, front)),
+                            "owners": json.dumps(owners),
                             HIVES: json.dumps(_handed(hives, address, front)),
                             RETIRED: json.dumps(_added(held, address)),
+                            HANDED: json.dumps(sorted({*handed, *(p for p in saved if saved[p] == address)})),
                             f"{RETIRED_AT}{address}": at,
                         },
                     )
                     pipe.execute()
+                    tell(self.redis, slug, moves(saved, owners), [front])
                     return
                 except WatchError:
                     continue
@@ -273,13 +298,14 @@ class MasterSeats:
                     counted = seats(slug, int(pipe.hget(key, "count") or DEFAULT_COUNT))
                     current = [address for address in counted if address not in retired]
                     hives = hive_targets(pipe.hget(key, HIVES), current)
-                    owners = assign(phases, current, saved, known)
+                    owners = assign(phases, current, saved, known, set(json.loads(pipe.hget(key, HANDED) or "[]")))
                     if (owners, current) != (saved, known):
                         pipe.multi()
                         pipe.hset(
                             key, mapping={"owners": json.dumps(owners, sort_keys=True), "seats": json.dumps(current)}
                         )
                         pipe.execute()
+                        tell(self.redis, slug, moves(saved, owners), current)
                     return {**owners, **hives}
                 except WatchError:
                     continue
