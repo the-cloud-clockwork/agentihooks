@@ -559,6 +559,15 @@ listing, its observations since the watermark and its observation count) and
 gets two attempts. The active reads run beside the historical listing and
 backfill, which keep their own budget.
 
+The read pool starts bindings largest trace first, by the observation count each
+binding's trace reported at its last read. A master binding with no recorded
+count starts before every other binding, and any other binding with no recorded
+count starts last. When a binding's cursor holds accepted identities, its trace's
+observation identities are listed page by page for the
+`telemetry count drift` check. A later scan reuses that listing while the trace
+reports the same observation count and the same newest event, and lists again
+once either changes.
+
 | Limit | Value | Applies to |
 |---|---|---|
 | Active read budget | 15 seconds | every active binding together, from the start of the scan |
