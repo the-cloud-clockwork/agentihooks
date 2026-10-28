@@ -238,6 +238,25 @@ def test_repeated_metadata_records_resume_paging_past_the_paged_records(tmp_path
     assert len(state["accepted"]) + state["paged"]["spans"] == len(receiver.observations)
     assert state["source"]["records"] == len(first) + len(later)
     assert set(state["records"]) == {"p1"}
+    assert set(state["source_points"]) <= set(state["records"])
+
+
+def test_paged_point_resumes_past_the_dropped_record_read_last():
+    state = {"source": {"device": 1, "inode": 2}, "source_points": {"a": [30, 40, 4, 1], "b": [10, 20, 2, 0]}}
+    earlier = {"device": 1, "inode": 2, "line": 0, "offset": 5, "records": 1, "unsupported": 0, "boundary": "z"}
+    point = {"device": 1, "inode": 2, "line": 30, "offset": 40, "records": 4, "unsupported": 1, "boundary": "a"}
+    assert agent_trace._paged_point(state, ["a", "b"], [0, 1], earlier) == ("a", point)
+
+
+def test_paged_point_never_moves_behind_the_earlier_paged_point():
+    state = {"source": {"device": 1, "inode": 2}, "source_points": {"a": [0, 10, 1, 0], "b": [10, 20, 2, 0]}}
+    earlier = {"device": 1, "inode": 2, "line": 30, "offset": 40, "records": 4, "unsupported": 0, "boundary": "d"}
+    assert agent_trace._paged_point(state, ["a", "b", "c"], [0, 1], earlier) == ("d", earlier)
+
+
+def test_paged_point_without_every_position_keeps_the_earlier_point():
+    state = {"source": {}, "source_points": {"a": [0, 10, 1, 0]}}
+    assert agent_trace._paged_point(state, ["a", "b"], [0, 1], None) == ("b", None)
 
 
 @pytest.mark.parametrize("chunk", [1, 3])

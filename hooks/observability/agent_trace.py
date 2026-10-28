@@ -929,11 +929,13 @@ def _kept_records(values: list[dict], all_turns: list[list[dict]], cut: tuple[in
 
 def _paged_point(state: dict, keys: list, dropped: list[int], earlier: dict | None) -> tuple[str, dict | None]:
     """The dropped record read last and the source position just past it; record ids repeat in a transcript."""
-    points = state.get("source_points", {})
+    points = state["source_points"]
     if any(keys[index] not in points for index in dropped):
         return keys[dropped[-1]], earlier
-    last = keys[max(dropped, key=lambda index: points[keys[index]][1])]
+    last = keys[max(dropped, key=lambda index: points[keys[index]])]
     line, offset, records, unsupported = points[last]
+    if earlier and offset <= earlier["offset"]:
+        return earlier["boundary"], earlier
     source = state["source"]
     point = {"device": source["device"], "inode": source["inode"], "line": line, "offset": offset}
     return last, {**point, "records": records, "unsupported": unsupported, "boundary": last}
@@ -986,7 +988,7 @@ def _page_accepted(session_id: str, state: dict) -> None:
     for name in ("accepted_records", "pending_records"):
         state[name] = {key: value for key, value in state[name].items() if key in state["records"]}
     for name in ("source_revisions", "source_points"):
-        state[name] = {key: value for key, value in state.get(name, {}).items() if key in state["records"]}
+        state[name] = {key: value for key, value in state[name].items() if key in state["records"]}
     state["paged"] = target
 
 
