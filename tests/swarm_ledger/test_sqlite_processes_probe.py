@@ -1,6 +1,7 @@
 import json
 import multiprocessing
 import os
+import threading
 import traceback
 
 import pytest
@@ -11,6 +12,8 @@ from tests.swarm_ledger.test_sqlite import CONTENT
 
 
 def join(path, index, log):
+    descriptor = os.open(f"{log}.err", os.O_WRONLY | os.O_CREAT, 0o600)
+    os.dup2(descriptor, 2)
     try:
         repo = SQLiteLedgerRepository(path)
         lines = []
@@ -27,16 +30,32 @@ def join(path, index, log):
         os._exit(1)
 
 
+def busy(path, same, stop):
+    repo = SQLiteLedgerRepository(path if same else path.parent.parent / "other" / sqlite.DATABASE)
+    if not same:
+        repo.create("other", CONTENT)
+    turn = 0
+    while not stop.is_set():
+        turn += 1
+        if same:
+            repo.get_document("processes")
+            repo.exists("processes")
+        else:
+            repo.apply_ops("other", ops=[{"op": "add", "id": f"o{turn}", "thread": "chat", "text": "x"}])
+
+
 @pytest.mark.parametrize("method", ["fork", "spawn"])
-@pytest.mark.parametrize("case", range(3))
-def test_probe(tmp_path, case, method):
+@pytest.mark.parametrize("background", ["other", "same"])
+@pytest.mark.parametrize("case", range(2))
+def test_probe(tmp_path, case, background, method):
     failures = []
-    for attempt in range(40):
+    for attempt in range(30):
         base = tmp_path / str(attempt)
         path = base / "ledgers" / sqlite.DATABASE
-        creator = SQLiteLedgerRepository(path)
-        creator.create("processes", CONTENT)
-        assert creator.exists("processes")
+        SQLiteLedgerRepository(path).create("processes", CONTENT)
+        stop = threading.Event()
+        thread = threading.Thread(target=busy, args=(path, background == "same", stop), daemon=True)
+        thread.start()
         context = multiprocessing.get_context(method)
         logs = [base / f"child{index}.log" for index in range(4)]
         workers = [context.Process(target=join, args=(path, index, logs[index])) for index in range(4)]
@@ -44,7 +63,12 @@ def test_probe(tmp_path, case, method):
             worker.start()
         for worker in workers:
             worker.join(30)
+        stop.set()
+        thread.join(30)
         codes = [worker.exitcode for worker in workers]
+        for worker in workers:
+            if worker.exitcode is None:
+                worker.kill()
         state = SQLiteLedgerRepository(path).get_document("processes")
         members = sorted(state["_meta"]["members"])
         chat = sorted(m["id"] for m in state["chat"])
@@ -56,11 +80,13 @@ def test_probe(tmp_path, case, method):
                     "members": members,
                     "chat": chat,
                     "rev": state["_meta"]["rev"],
-                    "logs": [log.read_text() if log.exists() else None for log in logs],
+                    "logs": [log.read_text()[-3000:] if log.exists() else None for log in logs],
+                    "errs": [
+                        open(f"{log}.err").read()[-3000:] if os.path.exists(f"{log}.err") else None for log in logs
+                    ],
                 }
             )
-    print(f"PROBE method={method} case={case} failures={len(failures)}")
-    del creator
-    for failure in failures:
+    print(f"PROBE method={method} background={background} case={case} failures={len(failures)}")
+    for failure in failures[:3]:
         print("PROBE", json.dumps(failure))
     assert not failures
