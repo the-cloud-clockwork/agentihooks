@@ -185,8 +185,15 @@ def test_a_drain_stops_at_the_end_of_a_short_body():
     assert request.rfile.sizes == [service.DRAIN_CHUNK, service.DRAIN_CHUNK]
 
 
-def test_a_body_past_the_drain_limit_is_refused_without_reading():
-    assert service.read_body(Posted(service.DRAIN_LIMIT + 1, Unread())) is None
+def test_a_body_past_the_drain_limit_is_left_unread():
+    with pytest.raises(service.UnreadBody):
+        service.read_body(Posted(service.DRAIN_LIMIT + 1, Unread()))
+
+
+def test_a_drain_past_its_deadline_stops_reading(monkeypatch):
+    monkeypatch.setattr(service, "READ_TIMEOUT", -1)
+    with pytest.raises(service.UnreadBody):
+        service.read_body(Posted(service.MAX_BODY + 1, Unread()))
 
 
 def raw_post(base, length, body, timeout=10):
@@ -203,8 +210,9 @@ def raw_post(base, length, body, timeout=10):
 
 def test_a_client_writing_a_body_one_byte_over_the_bound_reads_the_refusal(served):
     length = service.MAX_BODY + 1
-    status, _, answer = raw_post(served, length, b"x" * length)
-    assert status == 400 and answer == refusal("invalid_request", service.BAD_BODY)
+    status, headers, answer = raw_post(served, length, b"x" * length)
+    assert status == 400 and "connection: close" not in headers
+    assert answer == refusal("invalid_request", service.BAD_BODY)
 
 
 def test_a_refusal_past_the_drain_limit_closes_the_connection(served):

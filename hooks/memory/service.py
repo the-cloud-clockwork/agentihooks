@@ -75,10 +75,17 @@ def _refusal(error_class: str, detail: str) -> dict:
     }
 
 
+class UnreadBody(Exception):
+    pass
+
+
 def drain(request: BaseHTTPRequestHandler, length: int) -> None:
     if length > DRAIN_LIMIT:
-        return
+        raise UnreadBody
+    deadline = time.monotonic() + READ_TIMEOUT
     while length > 0:
+        if time.monotonic() > deadline:
+            raise UnreadBody
         chunk = request.rfile.read(min(length, DRAIN_CHUNK))
         if not chunk:
             return
@@ -94,7 +101,7 @@ def read_body(request: BaseHTTPRequestHandler) -> dict | None:
         if length < 2:
             return None
         body = json.loads(request.rfile.read(length))
-    except (ValueError, TimeoutError):
+    except ValueError:
         return None
     return body if isinstance(body, dict) else None
 
@@ -105,9 +112,12 @@ def post(tools: records.SessionTools, grants: dict[str, Grant], request: BaseHTT
     grant = authenticate(grants, request.headers.get(AUTH_HEADER))
     if grant is None:
         return 401, _refusal("unauthenticated", UNAUTHENTICATED), {"WWW-Authenticate": "Bearer"}
-    body = read_body(request)
-    if body is None:
+    try:
+        body = read_body(request)
+    except (UnreadBody, TimeoutError):
         return 400, _refusal("invalid_request", BAD_BODY), {"Connection": "close"}
+    if body is None:
+        return 400, _refusal("invalid_request", BAD_BODY)
     if request.path == SEARCH_PATH:
         return 200, search_api.search(tools.searcher, grant, body)
     return 200, records.call(tools, request.path.removeprefix(TOOLS_PREFIX), grant, body, time.time())
