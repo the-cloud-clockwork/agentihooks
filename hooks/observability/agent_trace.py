@@ -248,7 +248,9 @@ def _persisted_result(entry: dict, result: dict) -> tuple[dict, int]:
     side = Path(str(persisted["persistedOutputPath"]))
     if side.parent.name == "tool-results":
         try:
-            return {**result, "content": side.read_bytes().decode(errors="replace")}, 0
+            from hooks.observability.transcript import mask_value
+
+            return {**result, "content": mask_value(side.read_bytes().decode(errors="replace"))}, 0
         except OSError:
             pass
     size = persisted.get("persistedOutputSize")
@@ -782,10 +784,11 @@ def _prepare_pending(session_id: str, state: dict, identity: Identity) -> None:
         previous_entries = [entry for turn in turns(entries)[: state["legacy_turns"]] for entry in turn]
         for spec in session_spans(previous_entries, identity):
             state["accepted"].setdefault(f"{spec.span_id:016x}", "legacy")
+    if spans:
+        spans[0].attributes = mask_value(spans[0].attributes)
     pending = []
     for spec in spans:
         spec.name = mask_value(spec.name)
-        spec.attributes = mask_value(spec.attributes)
         key = f"{spec.span_id:016x}"
         if state["accepted"].get(key) != _revision(spec):
             pending.append(asdict(spec))
@@ -868,18 +871,24 @@ def _send_pending(session_id: str, state: dict, exporter) -> None:
             state["accepted"][f"{spec.span_id:016x}"] = _revision(spec)
         state["pending"] = state["pending"][len(batch) :]
         state["accepted_at"] = datetime.now(timezone.utc).isoformat()
+        _accept_source(state)
         _save_progress(session_id, state)
         _collector_outcomes(session_id, new, "accepted", _truncated_fields(new))
         updated = [spec for spec in batch if spec not in new]
         if updated:
             _collector_outcomes(session_id, updated, "updated", _truncated_fields(updated))
     if not state["pending"] and state["accepted"]:
-        state.setdefault("accepted_records", {}).update(state.get("pending_records", {}))
-        accepted_source = state.get("pending_source", {})
-        state["source"]["accepted_bytes"] = accepted_source.get("buffered_bytes", 0)
-        state["turns"] = state.get("buffered_turns", 0)
         _page_accepted(session_id, state)
         _save_progress(session_id, state)
+
+
+def _accept_source(state: dict) -> None:
+    if state["pending"] or not state["accepted"]:
+        return
+    state.setdefault("accepted_records", {}).update(state.get("pending_records", {}))
+    accepted_source = state.get("pending_source", {})
+    state["source"]["accepted_bytes"] = accepted_source.get("buffered_bytes", 0)
+    state["turns"] = state.get("buffered_turns", 0)
 
 
 def _message_id(entry: dict) -> object:
@@ -1036,6 +1045,7 @@ def export_session(session_id: str, transcript_path: str, identity: Identity | N
             _stage_source(state, transcript_path)
             if not state["pending"]:
                 _prepare_pending(session_id, state, identity or identity_from_env(session_id))
+            _accept_source(state)
             _save_progress(session_id, state)
             _send_pending(session_id, state, exporter)
     except Exception as error:  # noqa: BLE001
