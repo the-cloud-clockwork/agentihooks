@@ -237,7 +237,9 @@ def select_tests(root: Path, source: Path) -> list[str]:
     reaching = {
         path
         for path, text in texts.items()
-        if (module in text and named.search(text)) or path.name == f"test_{source.stem}.py"
+        if (module in text and named.search(text))
+        or path.name == f"test_{source.stem}.py"
+        or source.suffix == ".js" and source.name in text
     } | importing({module})
     added = reaching
     while added:
