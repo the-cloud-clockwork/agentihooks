@@ -4,7 +4,6 @@ from pathlib import Path
 
 COMPLETED = ("passed", "failed", "xfailed", "xpassed")
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-COUNT = re.compile(r"(\d+) (\w+)")
 INTERNAL = re.compile(r"^(?:\[gw\d+\] )?INTERNALERROR>", re.M)
 
 
@@ -19,7 +18,8 @@ def verdict(log: str) -> str | None:
     if INTERNAL.search(log):
         return "pytest raised an internal error."
     summaries = [found for line in log.splitlines() if (found := summary(line))]
-    counts = {name: int(n) for n, name in COUNT.findall(summaries[-1])} if summaries else {}
+    parts = [part.partition(" ") for part in summaries[-1].split(", ")] if summaries else []
+    counts = {name: int(n) for n, _, name in parts if n.isdigit()}
     if not sum(counts.get(name, 0) for name in COMPLETED):
         return "No selected test completed."
     return None

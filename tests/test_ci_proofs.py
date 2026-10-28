@@ -140,6 +140,7 @@ def test_the_proof_outcome_names_why_a_run_proved_nothing(tmp_path, capsys):
         ("=== 2 passed in 1.20s ===", "2 passed"),
         ("  == 3 passed, 1 failed in 75.32s (0:01:15) ==  ", "3 passed, 1 failed"),
         ("=== 2 passed in a in 1.00s ===", "2 passed in a"),
+        ("=== XX in 1.00s ===", "XX"),
         ("=== 1 passed in tests/x ===", None),
         ("2 passed in 1.20s ===", None),
         ("=== 2 passed in 1.20s", None),
@@ -159,6 +160,7 @@ def test_the_proof_outcome_reads_only_pytest_summary_lines(line, head):
         ("\x1b[31mINTERNALERROR> boom\x1b[0m\n=== 2 passed in 1.20s ===\n", "pytest raised an internal error."),
         ("[gw3] INTERNALERROR> boom\n=== 2 passed in 1.20s ===\n", "pytest raised an internal error."),
         ("=== 1 passed in 1.00s ===\n=== no tests ran in 1.00s ===\n", "No selected test completed."),
+        ("=== 2 skipped, 1 passed in 1.00s ===\n", None),
     ],
 )
 def test_the_proof_outcome_reads_colored_and_worker_output(log, reason):
