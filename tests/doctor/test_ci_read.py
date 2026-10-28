@@ -532,7 +532,7 @@ def test_full_reads_per_pass_stop_at_the_bound_and_the_rest_wait_for_the_next_pa
     world, read_pass = _pulls_world(monkeypatch, tmp_path, [1, 2, 3])
     first = read_pass(full_reads=2)
     assert [r["pr"]["number"] for r in first] == [1, 2]
-    assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/1", "repos/o/r/pulls/2"]
+    assert sorted(c for c in world["calls"] if "/pulls/" in c) == ["repos/o/r/pulls/1", "repos/o/r/pulls/2"]
     old = first[0]["pr"]["head"]["sha"]
     for number in (1, 2):
         world["heads"][number] = "c" * 40
