@@ -3,7 +3,6 @@
 GraphQL commands are left out: they draw on a separate limit from the core one the sampler measures.
 """
 
-import importlib
 import os
 import re
 import shlex
@@ -58,8 +57,10 @@ def process_caller() -> str:
 
 
 def reads():
-    """The charged log module, loaded by name so the scripts package import does not pull in the swarm tree."""
-    return importlib.import_module("scripts.swarm.github_reads")
+    """The charged log module, imported on first charge so the scripts package import does not pull in the swarm tree."""
+    from scripts.swarm import github_reads
+
+    return github_reads
 
 
 def charge(caller: str, path: str) -> None:
