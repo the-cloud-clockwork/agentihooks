@@ -423,3 +423,44 @@ def test_registry_passes_the_joined_session_harness_trace_and_cancellation(curso
     assert failures == []
     assert checks == ["sid"]
     assert binding["remote"]["reconciliation"] == {"accepted": 1, "missing": ["missing"], "drift": 0}
+
+
+def test_an_unchanged_trace_reuses_its_identity_listing_and_a_changed_one_lists_again(cursors):
+    transcript = _session(
+        cursors,
+        "sid",
+        ["2026-10-07T08:00:00Z", "2026-10-07T08:00:01Z"],
+        1,
+        paged={"spans": 9},
+        accepted_at="2026-10-07T08:00:10Z",
+    )
+    records = [json.loads(line) for line in transcript.read_text().splitlines()]
+    ids = sorted(f"{span.span_id:016x}" for span in agent_trace.session_spans(records[:1], agent_trace.Identity("sid")))
+    rows = [{"id": key, "startTime": "2026-10-07T08:00:00Z", "endTime": "2026-10-07T08:00:00Z"} for key in ids[1:]]
+    backend = Langfuse([_trace("tr", "sid")], rows, total=len(rows))
+    agent, state = {**AGENT, "conversation_id": "sid"}, {}
+
+    def listings():
+        return sum(1 for path, params in backend.calls if path == "observations" and params["limit"] == 100)
+
+    [first], _ = registry.read("s", [agent], backend, state, 15, 50)
+    assert listings() == 1
+    [again], failures = registry.read("s", [agent], backend, state, 15, 50)
+    assert failures == [] and listings() == 1
+    assert again["remote"]["reconciliation"] == first["remote"]["reconciliation"]
+    assert again["remote"]["reconciliation"]["missing"] == ids[:1]
+    backend.observations = [{"id": ids[0], "startTime": "2026-10-07T08:00:05Z", "endTime": None}, *rows]
+    backend.total = len(backend.observations)
+    [changed], _ = registry.read("s", [agent], backend, state, 15, 50)
+    assert listings() == 2
+    assert changed["remote"]["reconciliation"]["missing"] == []
+
+
+def test_a_trace_whose_count_moved_without_a_newer_event_lists_again(cursors):
+    _session(cursors, "sid", [], 0, accepted={"a": "rev"})
+    backend = Langfuse([_trace("tr", "sid")], [{"id": "a", "startTime": "2026-10-07T08:00:00Z"}], total=1)
+    agent, state = {**AGENT, "conversation_id": "sid"}, {}
+    registry.read("s", [agent], backend, state, 15, 50)
+    backend.total = 2
+    registry.read("s", [agent], backend, state, 15, 50)
+    assert sum(1 for path, params in backend.calls if params.get("limit") == 100) == 2

@@ -652,3 +652,32 @@ def test_unreadable_exporter_progress_is_a_failure_line_not_a_crash(cursors, rea
     )
     assert failure.startswith(f"{reason} at {registry.__file__}:")
     assert failure.rpartition(":")[2].isdigit()
+
+
+def _read_order(monkeypatch, agents, state):
+    monkeypatch.setattr(registry, "READERS", 1)
+    langfuse = Langfuse([_trace("tr", "sid")], [])
+    found, failures = registry.read("s", agents, langfuse, state, 15, 50)
+    assert failures == []
+    return [params["tags"][1] for path, params in langfuse.calls if path == "traces"], found
+
+
+def test_bindings_are_read_largest_trace_first_and_reported_in_their_own_order(cursors, monkeypatch):
+    small, large = AGENT, {**AGENT, "name": "engineer@1-0002"}
+    state = {"sizes": {"engineer@1-0001": 31, "engineer@1-0002": 700}}
+    order, found = _read_order(monkeypatch, [small, large], state)
+    assert order == ["agent:engineer@1-0002", "agent:engineer@1-0001"]
+    assert [b["agent"] for b in found] == ["engineer@1-0001", "engineer@1-0002"]
+    assert state["sizes"] == {"engineer@1-0001": 40, "engineer@1-0002": 40}
+
+
+def test_a_master_with_no_known_size_is_read_first_and_other_unknown_bindings_last(cursors, monkeypatch):
+    known, master, unknown = AGENT, {**AGENT, "name": "master@1-0001"}, {**AGENT, "name": "engineer@1-0003"}
+    order, _ = _read_order(monkeypatch, [known, unknown, master], {"sizes": {"engineer@1-0001": 300, "gone": 9}})
+    assert order == ["agent:master@1-0001", "agent:engineer@1-0001", "agent:engineer@1-0003"]
+
+
+def test_an_unread_binding_keeps_its_last_known_size(cursors, read_clock):
+    state = {"sizes": {"engineer@1-0001": 700, "gone": 9}}
+    registry.read("s", [AGENT], Langfuse([], []), state, 0, 50)
+    assert state["sizes"] == {"engineer@1-0001": 700}
