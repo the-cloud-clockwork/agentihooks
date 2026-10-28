@@ -53,6 +53,7 @@ jobs:
           python -m scripts.release_changelog_seed "$RUNNER_TEMP/changelog/RELEASES.md" --days "$DAYS" --sections "$RUNNER_TEMP/sections" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Publish the seeded changelog
+        if: ${{ !cancelled() }}
         working-directory: ${{ runner.temp }}/changelog
         env:
           DAYS: ${{ inputs.days }}
