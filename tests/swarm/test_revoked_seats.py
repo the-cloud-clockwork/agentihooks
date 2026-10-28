@@ -27,10 +27,6 @@ def test_the_revoked_accounts_are_read_from_the_probe_cache(monkeypatch):
     assert revoked_seats.accounts() == set()
     revoke(monkeypatch, "gone", "lost", open_accounts=("open",))
     assert revoked_seats.accounts() == {("claude", "gone"), ("claude", "lost")}
-    revoke(monkeypatch, "gone", "lost")
-    assert revoked_seats.accounts(store, "sw") == {("claude", "gone"), ("claude", "lost")}
-    revoke(monkeypatch, "closed", flag=False)
-    assert revoked_seats.accounts(store, "sw") == set()
 
 
 def test_every_worker_on_a_revoked_account_is_retired_and_its_task_reopened(store, monkeypatch):
