@@ -114,6 +114,27 @@ def test_a_hive_without_a_reading_or_a_known_pool_and_the_interface_hive_join_no
     assert state == {"members": {}, "down": {}}
 
 
+def test_skipped_hives_listed_first_leave_the_later_pool_counted():
+    at = ROLL
+    hives = [{**_hive("ws", at), "ui": "yes"}, _hive("new", at), _hive(ORACLE[0], at, "yes")]
+    readings = {"ws": _oracle_reading(at), ORACLE[0]: _oracle_reading(at)}
+    state = hive_pools.observe({}, hives, readings, [], at)
+    assert state["members"] == {ORACLE[0]: "8cpu-16800mb"}
+    assert list(state["down"]) == ["8cpu-16800mb"]
+
+
+def test_a_pool_down_under_the_threshold_does_not_hide_a_later_pool_past_it():
+    at = ROLL
+    entry = {"hives": [], "refused": []}
+    state = {
+        "down": {
+            "16cpu-19600mb": {**entry, "since": at - MINUTE},
+            "8cpu-16800mb": {**entry, "since": at - 10 * MINUTE},
+        }
+    }
+    assert [f.id for f in hive_pools.findings(state, at)] == ["hive-pool-down/8cpu-16800mb"]
+
+
 def test_a_pool_whose_hives_lost_their_records_is_forgotten():
     at = ROLL
     state = hive_pools.observe({}, [_hive(ORACLE[0], at, "yes")], {ORACLE[0]: _oracle_reading(at)}, [], at)
