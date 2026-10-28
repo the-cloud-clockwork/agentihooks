@@ -33,6 +33,7 @@ from scripts.swarm import (
     retire_watch,
     review_rounds,
     snapshot,
+    stale_nudge,
     stall_watch,
     tick_master,
     timing,
@@ -161,11 +162,13 @@ def _health_rows(store, slug, agents, quiet, at):
         minutes = (at - max(last, started)) // health.MINUTE_MS if last is not None else None
         if at - started <= STARTUP_GRACE_MS or quiet_gate.declared_wait(store.redis, slug, agent.name, at):
             minutes = None
+        nudged = stale_nudge.last(store.redis, slug, agent.name)
         rows.append(
             {
                 **agent.__dict__,
                 "quiet_minutes": quiet.get(agent.name),
                 "tool_quiet_minutes": minutes,
+                "last_nudge_minutes": None if nudged is None else (at - nudged) // health.MINUTE_MS,
                 "pane_state": store.redis.get(store.key(slug, "pane-state", agent.name)),
                 "remote_control_failure": failed.get(agent.name),
             }
