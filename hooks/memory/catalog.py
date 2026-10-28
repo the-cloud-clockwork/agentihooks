@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from hooks.memory import postgres
+
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS session_event (
         access_domain TEXT NOT NULL, event_id TEXT NOT NULL, session_uid TEXT NOT NULL,
@@ -179,8 +181,11 @@ class ArchiveEntry:
 
 class Catalog:
     def __init__(self, path: str | Path):
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path, isolation_level=None)
+        if postgres.selected(path):
+            self.db = postgres.connect(path)
+        else:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self.db = sqlite3.connect(path, isolation_level=None)
         for statement in PRAGMAS + SCHEMA:
             self.db.execute(statement)
 
