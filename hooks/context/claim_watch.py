@@ -10,7 +10,6 @@ from hooks.context import worker_mode
 from scripts.swarm.claim_lost import lost
 
 WORKERS = frozenset({"eng", "ci"})
-EVERY_S = 30
 STOP = (
     "STOP: task {task} on swarm {slug} is no longer claimed by you; its claim names {owner}. This session is ending: "
     "run no other tool and end your turn now."
@@ -28,19 +27,12 @@ def check(
     from scripts.swarm_ledger import ledger_workspace
 
     env = os.environ if environ is None else environ
-    slug, name, task = (
-        env.get(k, "") for k in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM_TASK")
-    )
+    slug, name, task = (env.get(k) for k in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM_TASK"))
     if env.get("AGENTIHOOKS_SWARM_LANE") not in WORKERS or not (slug and name and task) or worker_mode.active(env):
         return None
     now = time.time() if now is None else now
     folder = ledger_workspace.folder(slug, task)
     folder.mkdir(parents=True, exist_ok=True)
-    stamp = folder / f".claim-check-{name}"
-    if stamp.exists() and now - stamp.stat().st_mtime < EVERY_S:
-        return None
-    stamp.touch()
-    os.utime(stamp, (now, now))
     if ledger is None:
         from scripts.swarm.ledger_client import LedgerClient
 

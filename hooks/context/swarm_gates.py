@@ -16,7 +16,7 @@ def _claim(tool_name: str, tool_input: dict, session_id: str) -> str | None:
     return check()
 
 
-GATES = (("context recycle gate", _recycle), ("claim watch", _claim))
+GATES = (("claim watch", _claim), ("context recycle gate", _recycle))
 
 
 def pretool(tool_name: str, tool_input: dict, session_id: str) -> str | None:
