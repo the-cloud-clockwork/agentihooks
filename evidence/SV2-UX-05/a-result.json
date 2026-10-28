@@ -1,0 +1,110 @@
+{
+  "case": "T-SV2-UX-05-A",
+  "checks": {
+    "desktop_and_mobile_agree": true,
+    "every_viewer_was_closed_during_execution": true,
+    "keyboard_reaches_and_fires_attach": true,
+    "launched_from_the_ledger": true,
+    "no_page_errors": true,
+    "page_matches_the_store": true,
+    "reopened_views_show_the_current_observation": true,
+    "reopened_views_show_the_task_and_its_evidence": true,
+    "second_fixture_matches_the_first": true
+  },
+  "evidence_class": "mocked: a fake Redis swarm store is the authoritative state; the tick, the worker Pod's heartbeat and the hub's terminal checks are writes to it; real Chromium pages at 1920 by 1080 and at a 390 by 844 touch viewport render the ledger page from the swarm view the ledger server projects from that store, and their control writes enter the ledger server's lifecycle control; the hive command runner consumes the queue with its terminal commands stubbed; no ledger HTTP server, worker Pod, herdr server or cluster runs",
+  "input_sha256": {
+    "context-evidence.json": "94f47557b84005cbf5bc5b98019dba4cc7467464b76b4de955a738eebf134a45",
+    "operator-workflow.json": "4022ebc6f0df88be4d96e8dcbe9e84279757f53096e894f8d955c1c8dc97388a"
+  },
+  "observed": {
+    "launched": {
+      "errors": [],
+      "keyboard_actions_opacity": "1",
+      "keyboard_focus": "attach engineer@a1b2c3-0001",
+      "note": "",
+      "puts": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "lifecycle",
+          "agent": "engineer@a1b2c3-0001",
+          "control": "attach",
+          "generation": 1,
+          "task_revision": 4
+        }
+      ],
+      "runner": [
+        "control lifecycle acknowledged"
+      ],
+      "terminal_commands": 1
+    },
+    "reopened": {
+      "desktop": {
+        "context_task": "pb10",
+        "errors": [],
+        "evidence": [
+          "SESSION",
+          "session:s-41",
+          "TRANSCRIPT EVIDENCE",
+          "hide",
+          "Engineer transcript where the queue refused a stale head",
+          "records 120 to 124 of session s-41",
+          "queue refused: head is stale",
+          "merged dev and pushed"
+        ],
+        "row": [
+          "engineer@a1b2c3-0001",
+          "\teng\tstandard\t\u2014\topus high\t\u2014\tpb10\tworking\tworking seen 0m ago",
+          "kubernetes \u00b7 gen 1 \u00b7 standard",
+          "\tlive\t10m\t",
+          "message",
+          "attach",
+          "drain",
+          "cancel",
+          "force stop"
+        ]
+      },
+      "mobile": {
+        "context_task": "pb10",
+        "errors": [],
+        "evidence": [
+          "SESSION",
+          "session:s-41",
+          "TRANSCRIPT EVIDENCE",
+          "hide",
+          "Engineer transcript where the queue refused a stale head",
+          "records 120 to 124 of session s-41",
+          "queue refused: head is stale",
+          "merged dev and pushed"
+        ],
+        "row": [
+          "engineer@a1b2c3-0001",
+          "\teng\tstandard\t\u2014\topus high\t\u2014\tpb10\tworking\tworking seen 0m ago",
+          "kubernetes \u00b7 gen 1 \u00b7 standard",
+          "\tlive\t10m\t",
+          "message",
+          "attach",
+          "drain",
+          "cancel",
+          "force stop"
+        ]
+      }
+    },
+    "second_fixture_differs": [],
+    "store": {
+      "agent": "working",
+      "generation": 1,
+      "state": "running"
+    },
+    "viewers_left_open": 0
+  },
+  "operator_workflow_acceptance": {
+    "evidence_opened": 2,
+    "keyboard_controls": 1,
+    "viewers_closed": 3,
+    "viewers_opened": 3
+  },
+  "package": "SV2-UX-05",
+  "state": "passed"
+}
