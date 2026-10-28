@@ -217,11 +217,7 @@ def _refused(environ: dict) -> set[tuple[str, str]]:
         result.account: result
         for _, result in sorted(balancer.cached_observations(environ=environ), key=lambda seen: seen[0])
     }
-    return {
-        (balancer.HARNESS, account)
-        for account, result in latest.items()
-        if result.provider_status in ("rejected", balancer.REVOKED)
-    }
+    return {(balancer.HARNESS, account) for account, result in latest.items() if balancer.refused(result)}
 
 
 def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:

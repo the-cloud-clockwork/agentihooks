@@ -2437,9 +2437,12 @@ def test_aggregate_capacity_closes_a_claude_account_the_probe_reads_refused(monk
     allowed = balancer.ProbeResult(
         "a", "allowed", "NORMAL", 90, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=0)
     )
-    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(90, allowed), (95, refused)])
+    env = {"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}
+    monkeypatch.setattr(
+        balancer, "cached_observations", lambda **kw: [(90, allowed), (95, refused)] if kw["environ"] is env else []
+    )
     monkeypatch.setattr(aggregate, "current", lambda now: records)
-    rows = capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100, refresh=False)
+    rows = capacity.accounts(env, 100, refresh=False)
     assert {row.harness: (row.state, row.cap, row.sessions, capacity.free_seats(row)) for row in rows} == {
         "claude": ("CLOSED", 0, 3, 0),
         "codex": ("OPEN", 6, 3, 3),
