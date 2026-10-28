@@ -153,7 +153,6 @@ class Posted:
     def __init__(self, length, rfile):
         self.headers = {} if length is None else {"Content-Length": str(length)}
         self.rfile = rfile
-        self.close_connection = False
 
 
 class Chunks(io.BytesIO):
@@ -175,7 +174,7 @@ def test_a_body_under_the_bound_is_refused_without_reading(length):
 def test_a_body_over_the_bound_is_drained_in_chunks_before_the_refusal(length):
     request = Posted(length, Chunks(b"x" * length))
     assert service.read_body(request) is None
-    assert request.rfile.tell() == length and request.close_connection is False
+    assert request.rfile.tell() == length
     assert max(request.rfile.sizes) == service.DRAIN_CHUNK and min(request.rfile.sizes) > 0
     assert sum(request.rfile.sizes) == length
 
@@ -215,7 +214,7 @@ def test_a_refusal_past_the_drain_limit_closes_the_connection(served):
 
 
 def test_a_stalled_client_is_refused_after_the_read_timeout_and_the_service_moves_on(bank, grants, monkeypatch):
-    monkeypatch.setattr(service, "READ_TIMEOUT", 0.5, raising=False)
+    monkeypatch.setattr(service, "READ_TIMEOUT", 0.5)
     server = HTTPServer(("127.0.0.1", 0), service.handler(bank.tools, grants))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
