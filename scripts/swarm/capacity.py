@@ -173,6 +173,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
 def _global(environ: dict, now: float) -> list[Account]:
     from scripts.routing import aggregate
 
+    refused = _refused(environ)
     rows = []
     for row in aggregate.current(now).values():
         quota = row["quota"]
@@ -189,6 +190,8 @@ def _global(environ: dict, now: float) -> list[Account]:
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)
             cap, weight = policy.cap, policy.weight
+        if (row["harness"], row["account"]) in refused:
+            cap = 0
         rows.append(
             Account(
                 row["harness"],
@@ -206,6 +209,19 @@ def _global(environ: dict, now: float) -> list[Account]:
             )
         )
     return rows
+
+
+def _refused(environ: dict) -> set[tuple[str, str]]:
+    """Claude accounts whose latest local probe the provider refused; hive quota reports carry no probe status."""
+    latest = {
+        result.account: result
+        for _, result in sorted(balancer.cached_observations(environ=environ), key=lambda seen: seen[0])
+    }
+    return {
+        (balancer.HARNESS, account)
+        for account, result in latest.items()
+        if result.provider_status in ("rejected", balancer.REVOKED)
+    }
 
 
 def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
