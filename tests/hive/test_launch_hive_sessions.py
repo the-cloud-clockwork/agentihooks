@@ -30,7 +30,7 @@ def test_an_account_the_hives_already_fill_has_no_open_seat():
 def test_an_outright_account_beats_an_earlier_fallback_and_the_first_fallback_is_kept():
     rows = _rows()
     picks = {
-        "full_on_hives": placement.Choice("anton", "no live UI hive takes master"),
+        "full_on_hives": placement.Choice("anton", "no live swarm-master takes master"),
         "room_left": placement.Choice("ws"),
         "other": placement.Choice("pc", "second fallback"),
         "last_seat": placement.Wait("no slot"),

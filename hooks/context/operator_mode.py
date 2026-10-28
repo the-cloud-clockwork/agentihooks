@@ -90,6 +90,10 @@ def observe(session_id, prompt, typed, now=None):
         if word or (typed and _on(state, now)):
             state.update(on=word != "off", at=now)
         state["turn_at"] = now if typed and word != "off" else None
+        if word == "off":
+            state.pop("pane_at", None)
+        elif typed:
+            state["pane_at"] = now
         operator_expiry.cancel(session_id, state)
     return word
 
@@ -103,6 +107,7 @@ def reset(payload: dict) -> None:
     with operator_expiry.state_lock(session_id):
         state = _load(session_id)
         state.update(on=False, turn_at=None)
+        state.pop("pane_at", None)
         operator_expiry.cancel(session_id, state)
 
 
@@ -110,16 +115,26 @@ def notice(payload, typed, now=None):
     session_id = payload.get("session_id")
     word = observe(session_id, payload.get("prompt"), typed, now)
     text = {"on": ON_NOTICE, "off": OFF_NOTICE}.get(word, "")
-    if _away(session_id, None):
+    if typed and not word and not _heard(session_id) and not _away(session_id, None, now):
+        return "Operator present in this pane during the quiet window. Answer his message."
+    if _away(session_id, None, now):
         return "\n".join(filter(None, (text, _reminder_text(None, session_id))))
     return text
 
 
 def present(session_id, environ=None, now=None):
+    from scripts.inbox.wake import quiet_ms
+
     env = os.environ if environ is None else environ
     if not _attached(env, session_id):
         return True
-    return _on(_load(session_id), time.time() if now is None else now)
+    state = _load(session_id)
+    now = time.time() if now is None else now
+    if _on(state, now):
+        return True
+    _, name = _binding(env, session_id)
+    at = state.get("pane_at")
+    return name.startswith("master@") and at is not None and 0 <= (now - at) * 1000 < quiet_ms(env)
 
 
 def _attached(env, session_id):
@@ -155,8 +170,8 @@ def _heard(session_id, environ=None):
     return not _attached(env, session_id) or (bool(session_id) and bool(_load(session_id).get("on")))
 
 
-def _away(session_id, environ):
-    return bool(session_id) and not present(session_id, environ)
+def _away(session_id, environ, now=None):
+    return bool(session_id) and not present(session_id, environ, now)
 
 
 def _limit(environ):
@@ -214,7 +229,7 @@ def reminder(session_id, environ=None, now=None):
     if not session_id:
         return ""
     with operator_expiry.state_lock(session_id):
-        if not _away(session_id, environ):
+        if not _away(session_id, environ, now):
             return ""
         state = _load(session_id)
         calls = state.get("calls", 0) + 1

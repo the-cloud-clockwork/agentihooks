@@ -16,6 +16,8 @@ fi
 fallback="$image"
 if [[ "$image" == public.ecr.aws/docker/library/* ]]; then
   fallback="mirror.gcr.io/library/${image#public.ecr.aws/docker/library/}"
+elif [[ "$image" == mirror.gcr.io/library/* ]]; then
+  fallback="public.ecr.aws/docker/library/${image#mirror.gcr.io/library/}"
 fi
 acquire() {
   manifest="$(timeout "$limit" docker manifest inspect "$@" "$source")" && digest="$(python3 -c '

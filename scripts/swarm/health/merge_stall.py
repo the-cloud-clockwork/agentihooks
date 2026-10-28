@@ -5,7 +5,7 @@ from collections import Counter
 from contextvars import ContextVar
 from datetime import datetime
 
-from scripts.swarm import timing
+from scripts.swarm import github_reads, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import SwarmError
 
@@ -34,7 +34,15 @@ def request(repo: str, args: list[str]) -> dict:
     if remaining <= 0:
         raise SwarmError("GitHub merge observation exhausted its read budget")
     with timing.step("scripts.swarm.health.merge_stall.github_read"):
-        result = subprocess.run(["gh", *args], cwd=repo, capture_output=True, text=True, timeout=min(20, remaining))
+        result = github_reads.rest(
+            "swarm.merge_stall",
+            args,
+            subprocess.run,
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=min(20, remaining),
+        )
     if result.returncode:
         raise SwarmError(result.stderr.strip() or "GitHub API failed")
     data = json.loads(result.stdout)

@@ -283,7 +283,7 @@ def test_jobs_are_read_as_runner_labels():
     gh = Gh([(0, '["anton-oss-queue"]\n["anton-oss-light", "x"]\n')])
     assert merge_path.read_jobs("/repo", 5, gh) == [["anton-oss-queue"], ["anton-oss-light", "x"]]
     path = "repos/{owner}/{repo}/actions/runs/5/jobs?per_page=30"
-    assert gh.calls == [(["gh", "api", path, "--paginate", "--jq", ".jobs[] | .labels | @json"], GH)]
+    assert gh.calls == [(["gh", "api", path, "--paginate", "--jq", ".jobs[] | .labels | @json", "--include"], GH)]
 
 
 def searched(*pages, total=3):
@@ -339,7 +339,7 @@ def test_collect_reads_runs_jobs_and_searches_with_these_calls():
     assert found["queue_runs_without_jobs"] == 0
     assert found["standard_jobs_per_queue_run"] == 0.5
     jobs = "repos/{owner}/{repo}/actions/runs/{}/jobs?per_page=30"
-    labels = ["--paginate", "--jq", ".jobs[] | .labels | @json"]
+    labels = ["--paginate", "--jq", ".jobs[] | .labels | @json", "--include"]
     updated = f"q=repo:o/r is:pr base:dev updated:>={stamp(0)}"
     ready = "q=repo:o/r is:pr is:open draft:false base:dev"
     search = ["--jq", ".data.search | @json"]
@@ -555,6 +555,7 @@ def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_windo
                 "--paginate",
                 "--jq",
                 query,
+                "--include",
             ],
             GH,
         )

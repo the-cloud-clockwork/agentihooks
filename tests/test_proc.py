@@ -1,4 +1,5 @@
 import ast
+import types
 from pathlib import Path
 
 from hooks.proc import Process, _process, _target, processes
@@ -85,14 +86,20 @@ def _process_table_reads(check, process_paths):
     return count
 
 
+def _code_reads_the_process_table(code):
+    if READERS & {*code.co_names, *code.co_varnames, *code.co_cellvars, *code.co_freevars}:
+        return True
+    return any(
+        const == PROC_ROOT or (isinstance(const, types.CodeType) and _code_reads_the_process_table(const))
+        for const in code.co_consts
+    )
+
+
 def _process_table_violations(tests):
     found = []
     for path in sorted(tests.rglob("*.py")):
         source = path.read_text(encoding="utf-8")
-        if source.isascii() and not any(
-            marker in source
-            for marker in ("_process", "processes", "exists", "is_file", "read_text", "read_bytes", "open")
-        ):
+        if not _code_reads_the_process_table(compile(source, str(path), "exec", dont_inherit=True, optimize=0)):
             continue
         for function in ast.walk(ast.parse(source)):
             if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -121,7 +128,8 @@ def test_no_check_reads_the_process_table_twice_in_one_statement():
 
 
 def test_process_table_scan_skips_irrelevant_files_and_refuses_double_reads(tmp_path, monkeypatch):
-    (tmp_path / "irrelevant.py").write_text("value = 1", encoding="utf-8")
+    irrelevant = "def check(path):\n    assert path.exists() and open(path).read() and path.is_file()\n"
+    (tmp_path / "irrelevant.py").write_text(irrelevant, encoding="utf-8")
     sources = {
         "processes.py": "def check():\n    assert 1 not in processes() or processes()[1].state == 'Z'\n",
         "process.py": "def check():\n    assert _process(1) == _process(1)\n",
@@ -136,7 +144,7 @@ def test_process_table_scan_skips_irrelevant_files_and_refuses_double_reads(tmp_
     parse = ast.parse
 
     def parse_relevant(source, *args, **kwargs):
-        assert source != "value = 1", "irrelevant files must not be parsed"
+        assert source != irrelevant, "irrelevant files must not be parsed"
         return parse(source, *args, **kwargs)
 
     monkeypatch.setattr(ast, "parse", parse_relevant)
