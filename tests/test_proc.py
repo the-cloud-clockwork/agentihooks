@@ -76,9 +76,7 @@ def _process_table_reads(check, process_paths):
             continue
         func = call.func
         if isinstance(func, ast.Name):
-            count += func.id in READERS or (
-                func.id == "open" and bool(call.args) and _names_a_process(call.args[0])
-            )
+            count += func.id in READERS or (func.id == "open" and bool(call.args) and _names_a_process(call.args[0]))
         elif isinstance(func, ast.Attribute) and func.attr in READERS:
             count += 1
         elif isinstance(func, ast.Attribute) and func.attr in {"exists", "is_file", "read_text", "read_bytes", "open"}:
