@@ -5,18 +5,21 @@ import socket
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, TypeVar
 
 from hooks._redis import redis_key
-from scripts.scheduler.lease import dispatch_lock, verify_lease
+from scripts.events.bus import StateConflict
+from scripts.scheduler.lease import Lease, dispatch_lock, verify_lease
 from scripts.scheduler.model import Schedule, next_due
 from scripts.scheduler.slots import CallableSlot, Slot, restore
 
 if TYPE_CHECKING:
-    from redis import Redis
-    from redis.lock import Lock
+    from scripts.events.bus import StateStore
 
 _log = logging.getLogger(__name__)
+BUCKET = "scheduler"
+WRITE_TRIES = 64
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -49,10 +52,10 @@ class Entry:
 
     @property
     def record(self) -> dict:
-        raw = self.scheduler.redis.hget(self.scheduler.key("entries"), self.id)
-        if raw is None:
+        entry = self.scheduler.document()["entries"].get(self.id)
+        if entry is None:
             raise KeyError(self.id)
-        return json.loads(raw)
+        return entry
 
     @property
     def state(self) -> str:
@@ -108,9 +111,17 @@ class Entry:
 
 
 class Scheduler:
-    def __init__(self, redis: "Redis", *, machine: str | None = None) -> None:
-        self.redis = redis
+    def __init__(self, state: "StateStore | None" = None, *, machine: str | None = None) -> None:
+        self._state = state
         self.machine = machine or socket.gethostname()
+
+    @property
+    def state(self) -> "StateStore":
+        if self._state is None:
+            from scripts.events.state import open_state
+
+            self._state = open_state(BUCKET)
+        return self._state
 
     def key(self, suffix: str) -> str:
         from scripts.swarm_ledger import ledger_link
@@ -123,48 +134,77 @@ class Scheduler:
             return f"{ROOT}:scheduler:{self.machine}:{suffix}"
         return redis_key("scheduler", f"{self.machine}:{suffix}")
 
+    def name(self, suffix: str) -> str:
+        return self.key(suffix).replace(":", ".")
+
+    def document(self) -> dict:
+        return self._read()[0]
+
+    def _read(self) -> tuple[dict, int | None]:
+        stored = self.state.get(self.name("entries"))
+        if stored is None:
+            return {"entries": {}, "retired": {}}, None
+        return json.loads(stored.value), stored.revision
+
+    def change(self, change: Callable[[dict], T], *, lease: Lease | None = None) -> T:
+        key = self.name("entries")
+        for _ in range(WRITE_TRIES):
+            if lease is not None:
+                verify_lease(self.state, lease)
+            document, revision = self._read()
+            before = json.dumps(document, sort_keys=True)
+            result = change(document)
+            after = json.dumps(document, sort_keys=True)
+            if after == before:
+                return result
+            try:
+                if revision is None:
+                    self.state.create(key, after.encode())
+                else:
+                    self.state.update(key, after.encode(), revision)
+                return result
+            except StateConflict:
+                continue
+        raise StateConflict(f"scheduler state {key!r} kept changing")
+
+    def read(self, suffix: str) -> str:
+        stored = self.state.get(self.name(suffix))
+        return "" if stored is None else stored.value.decode()
+
+    def put(self, suffix: str, value: str) -> None:
+        key = self.name(suffix)
+        for _ in range(WRITE_TRIES):
+            stored = self.state.get(key)
+            try:
+                if stored is None:
+                    self.state.create(key, value.encode())
+                else:
+                    self.state.update(key, value.encode(), stored.revision)
+                return
+            except StateConflict:
+                continue
+        raise StateConflict(f"scheduler state {key!r} kept changing")
+
     def get(self, entry_id: str) -> Entry:
         entry = Entry(self, entry_id)
         entry.record
         return entry
 
     def owned(self, owner: str) -> list[Entry]:
-        entries = self.redis.hgetall(self.key("entries"))
-        return [Entry(self, entry_id) for entry_id, raw in entries.items() if json.loads(raw)["owner"] == owner]
+        entries = self.document()["entries"]
+        return [Entry(self, entry_id) for entry_id, entry in entries.items() if entry["owner"] == owner]
 
     def records(self) -> list[dict]:
-        return [json.loads(raw) for raw in self.redis.hvals(self.key("entries"))]
+        return list(self.document()["entries"].values())
 
-    def update(self, entry_id: str, change: Callable[[dict], None], *, lease: "Lock | None" = None) -> None:
-        from redis.exceptions import WatchError
+    def update(self, entry_id: str, change: Callable[[dict], None], *, lease: Lease | None = None) -> None:
+        def apply(document):
+            entry = document["entries"].get(entry_id)
+            if entry is None:
+                raise KeyError(entry_id)
+            change(entry)
 
-        key = self.key("entries")
-        while True:
-            with self.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(key)
-                    if lease is not None:
-                        pipe.watch(lease.name)
-                        verify_lease(pipe, lease)
-                    raw = pipe.hget(key, entry_id)
-                    if raw is None:
-                        raise KeyError(entry_id)
-                    entry = json.loads(raw)
-                    change(entry)
-                    pipe.multi()
-                    pipe.hset(key, entry_id, json.dumps(entry))
-                    if entry["state"] == "active":
-                        pipe.zadd(self.key("due"), {entry_id: entry["due"]})
-                    else:
-                        pipe.zrem(self.key("due"), entry_id)
-                    if "pending" in entry:
-                        pipe.sadd(self.key("pending"), entry_id)
-                    else:
-                        pipe.srem(self.key("pending"), entry_id)
-                    pipe.execute()
-                    return
-                except WatchError:
-                    continue
+        self.change(apply, lease=lease)
 
     def timer(
         self, *, owner: str, payload: str, delay: float | None = None, at: float | None = None, now: float | None = None
@@ -208,44 +248,32 @@ class Scheduler:
             "signal": "limit_reached" if schedule.kind == "stopwatch" else "timeout",
             "slots": [],
         }
-        self.redis.hset(self.key("entries"), entry_id, json.dumps(entry))
+        self.change(lambda document: document["entries"].__setitem__(entry_id, entry))
         return Entry(self, entry_id)
 
-    def _claim(self, entry_id: str, now: float, lease: "Lock") -> dict | None:
-        from redis.exceptions import WatchError
+    @staticmethod
+    def _claim(document: dict, now: float) -> int:
+        fired = 0
+        for entry in document["entries"].values():
+            if entry["state"] != "active" or entry["due"] > now:
+                continue
+            entry["pending"] = {
+                "id": uuid.uuid4().hex,
+                "scheduled_at": entry["due"],
+                "fired_at": now,
+                "slots": [slot for slot in entry["slots"] if slot["signal"] == entry["signal"]],
+                "delivered": [],
+            }
+            entry["state"] = "pending"
+            fired += 1
+        return fired
 
-        key = self.key("entries")
-        with self.redis.pipeline() as pipe:
-            try:
-                pipe.watch(key, lease.name)
-                verify_lease(pipe, lease)
-                entry = json.loads(pipe.hget(key, entry_id))
-                if entry["state"] != "active" or entry["due"] > now:
-                    return None
-                entry["pending"] = {
-                    "id": uuid.uuid4().hex,
-                    "scheduled_at": entry["due"],
-                    "fired_at": now,
-                    "slots": [slot for slot in entry["slots"] if slot["signal"] == entry["signal"]],
-                    "delivered": [],
-                }
-                entry["state"] = "pending"
-                pipe.multi()
-                pipe.hset(key, entry_id, json.dumps(entry))
-                pipe.zrem(self.key("due"), entry_id)
-                pipe.sadd(self.key("pending"), entry_id)
-                pipe.execute()
-                return entry
-            except WatchError:
-                verify_lease(self.redis, lease)
-                return None
-
-    def _deliver(self, entry_id: str, now: float, lease: "Lock") -> None:
+    def _deliver(self, entry_id: str, now: float, lease: Lease) -> None:
         entry = self.get(entry_id).record
         pending = entry.get("pending")
         if pending is None:
             _log.warning("scheduler skipped stale pending entry %s: no pending details", entry_id)
-            self.update(entry_id, lambda current: None, lease=lease)
+            self.update(entry_id, lambda current: current.__setitem__("state", "fired"), lease=lease)
             return
         event = {
             **entry,
@@ -256,14 +284,14 @@ class Scheduler:
         for connection in pending["slots"]:
             if self.get(entry_id).state != "pending":
                 return
-            verify_lease(self.redis, lease)
+            verify_lease(self.state, lease)
             if connection["id"] in pending["delivered"]:
                 continue
             slot = dict(connection)
             connection_id = slot.pop("id")
             slot.pop("signal")
             try:
-                restore(slot).deliver(event, f"{pending['id']}:{connection_id}", self.redis)
+                restore(slot).deliver(event, f"{pending['id']}:{connection_id}", self.state)
             except Exception as exc:
                 failed.append(connection_id)
                 _log.warning("scheduler slot delivery failed: entry %s slot %s error %r", entry_id, slot, exc)
@@ -290,28 +318,23 @@ class Scheduler:
             entry["due"] = now + entry["delay"]
         entry.pop("pending")
 
-    def retire(self, entry_id: str, wake_key: str) -> None:
+    def retire(self, entry_id: str) -> None:
         self.get(entry_id).cancel()
-        self.redis.hset(self.key("retired"), entry_id, wake_key)
+        self.change(lambda document: document["retired"].__setitem__(entry_id, True))
 
-    def _reap(self, lease: "Lock") -> None:
-        for entry_id, wake_key in self.redis.hgetall(self.key("retired")).items():
-            verify_lease(self.redis, lease)
-            with self.redis.pipeline() as pipe:
-                pipe.hdel(self.key("entries"), entry_id)
-                pipe.delete(wake_key)
-                pipe.hdel(self.key("retired"), entry_id)
-                pipe.execute()
+    def _reap(self, lease: Lease) -> None:
+        def reap(document):
+            for entry_id in document["retired"]:
+                document["entries"].pop(entry_id, None)
+            document["retired"] = {}
+
+        self.change(reap, lease=lease)
 
     def run_due(self, *, now: float | None = None) -> int:
         now = time.time() if now is None else now
-        with dispatch_lock(self.redis, self.key("dispatch-lock")) as lease:
-            fired = 0
-            for entry_id in self.redis.zrangebyscore(self.key("due"), "-inf", now):
-                if self._claim(entry_id, now, lease) is not None:
-                    fired += 1
-            for entry_id in self.redis.smembers(self.key("pending")):
-                entry = self.get(entry_id).record
+        with dispatch_lock(self.state, self.name("dispatch-lock")) as lease:
+            fired = self.change(lambda document: self._claim(document, now), lease=lease)
+            for entry_id, entry in self.document()["entries"].items():
                 if entry["state"] == "pending":
                     self._deliver(entry_id, now, lease)
             self._reap(lease)
