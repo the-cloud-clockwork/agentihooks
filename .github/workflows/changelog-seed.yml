@@ -43,6 +43,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CHANGELOG_LITELLM_KEY: ${{ secrets.CHANGELOG_LITELLM_KEY }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           CHANGELOG_LITELLM_URL: ${{ vars.CHANGELOG_LITELLM_URL }}
           CHANGELOG_MODEL: ${{ vars.CHANGELOG_MODEL }}
           DAYS: ${{ inputs.days }}

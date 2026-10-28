@@ -65,17 +65,10 @@ def write_sections(releases, ask, graphql, repository: str, workers: int = WORKE
     ]
 
 
-def split_releases(text: str) -> list[str]:
-    return ["## " + part.strip("\n") + "\n" for part in re.split(r"^## ", text, flags=re.M)[1:]]
-
-
 def merge_changelog(existing: str, sections: list[str]) -> str:
-    releases = {s.split(" ", 2)[1]: s for s in sections}
-    releases.update({s.split(" ", 2)[1]: s for s in split_releases(existing)})
-    text = ""
-    for tag in stable_tags(list(releases)):
-        text = rc.prepend_release(text, releases[tag])
-    return text
+    for section in sections:
+        existing = rc.insert_release(existing, section)
+    return existing
 
 
 def merged_count(repository: str, since: str, until: str) -> int:
@@ -99,8 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     url = os.environ.get(rc.URL_VAR) or rc.DEFAULT_URL
     model = os.environ.get(rc.MODEL_VAR) or rc.DEFAULT_MODEL
-    key = os.environ[rc.KEY_VAR]
-    sections = write_sections(releases, lambda c: rc.ask_model(c, url, key, model, urlopen), rc.gh_graphql, repository)
+    access = rc.gateway_headers(dict(os.environ))
+    sections = write_sections(releases, lambda c: rc.ask_model(c, url, access, model, urlopen), rc.gh_graphql, repository)
     existing = args.changelog.read_text() if args.changelog.exists() else ""
     args.changelog.write_text(merge_changelog(existing, sections))
     changes = [c for _, kept in releases for c in kept]

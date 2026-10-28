@@ -120,7 +120,7 @@ def test_write_sections_renders_each_release_with_one_entry_per_change(repo):
 
 
 def test_merge_changelog_keeps_written_releases_and_puts_the_newest_first():
-    existing = rc.prepend_release("", "## v1.0.10 · d\n\nkept\n")
+    existing = rc.insert_release("", "## v1.0.10 · d\n\nkept\n")
     merged = seed.merge_changelog(existing, ["## v1.0.10 · d\n\nnew\n", "## v1.0.9 · c\n\nx\n", "## v1.0.2 · b\n\ny\n"])
     assert merged == (
         f"{rc.TITLE}\n\n{rc.INTRO}\n\n## v1.0.10 · d\n\nkept\n\n## v1.0.9 · c\n\nx\n\n## v1.0.2 · b\n\ny\n"
@@ -175,7 +175,8 @@ def _seed_repo(repo, monkeypatch):
     monkeypatch.setattr(
         rc, "gh_graphql", lambda query: {"repository": {"p5": {"author": {"login": "dev"}, "body": ""}}}
     )
-    monkeypatch.setenv(rc.KEY_VAR, "k")
+    for var in (rc.KEY_VAR, *rc.ACCESS_VARS):
+        monkeypatch.setenv(var, "k")
     monkeypatch.setenv("GITHUB_REPOSITORY", "org/repo")
     return graded
 
@@ -189,7 +190,7 @@ def test_main_seeds_the_window_and_reports_matching_counts(repo, monkeypatch, tm
     text = changelog.read_text()
     assert text.startswith(f"{rc.TITLE}\n\n{rc.INTRO}\n\n## v1.0.2 · 2026-10-20\n\n")
     assert f"· {graded[:12]} · #5 · @dev\n\n**Add the seed**\n\n{_words(30)}\n" in text
-    assert "· direct commit · @unknown\n\n**Direct fix**" in text
+    assert "· direct commit · @a\n\n**Direct fix**" in text
     assert "Old" not in text
     assert windows == [("org/repo", "2026-09-28", "2026-10-20T10:00:00+00:00")]
     out = capsys.readouterr().out
