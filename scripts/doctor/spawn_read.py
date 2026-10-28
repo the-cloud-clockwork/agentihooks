@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import asdict
 from typing import TYPE_CHECKING
@@ -112,7 +113,7 @@ def slot_claims(
             *_placed(store, swarm),
         )
     ]
-    return {"slug": slug, "claims": entries, "journal_error": error, "lives": lives}
+    return {"slug": slug, "claims": entries, "journal_error": error, "lives": lives, "now": int(time.time() * 1000)}
 
 
 def _placed(store: RedisStore, swarm: str) -> list[dict]:

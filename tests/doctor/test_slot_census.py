@@ -1,5 +1,6 @@
 import json
 import subprocess
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -30,8 +31,8 @@ def life(name, slug="sw", task="t1", started=AT - 60_000, ended=0, **fields):
     }
 
 
-def record(claims, lives):
-    return {"slug": "sw", "claims": claims, "journal_error": "", "lives": lives}
+def record(claims, lives, now=AT + 3_600_000):
+    return {"slug": "sw", "claims": claims, "journal_error": "", "lives": lives, "now": now}
 
 
 def test_a_claim_that_counted_every_local_pane_raises_nothing():
@@ -68,6 +69,9 @@ def test_a_life_without_start_or_end_times_counts_as_live_from_the_epoch():
     message = "sw: local slot claim new for t9 on workstation counted 0 of 6: "
     found = slot_census.findings(record([line(message, at=0), line(message)], [bare]))
     assert [f.subject for f in found] == ["new@0", f"new@{AT}"]
+    window = slot_census.SPAWN_WINDOW_MS
+    found = slot_census.findings(record([line(message, at=window)], [bare], now=window))
+    assert [f.subject for f in found] == [f"new@{window}"]
 
 
 def test_the_census_skips_masters_remote_hives_paneless_ended_and_unstarted_agents_and_the_claimed_task():
@@ -95,6 +99,59 @@ def test_only_the_watched_swarm_claims_are_judged():
     assert [f.subject for f in slot_census.findings(record(claims, [life("engineer@a-1")]))] == [f"late@{AT}"]
 
 
+WATCHED = 1_793_201_082_901
+WATCHED_LINE = (
+    "rig-grade-swarm: local slot claim ci@323133-3206 for t1781 on root counted 4 of 17: "
+    "ci@323133-3199, engineer@323133-4450, engineer@323133-4451, engineer@323133-4452"
+)
+OWN_LINE = (
+    "rig-grade-swarm-doctor: local slot claim engineer@d44a5a-2120 for fx-ee6bba9f-code on root counted 5 of 17: "
+    "rig-grade-swarm/ci@323133-3199, rig-grade-swarm/ci@323133-3206, rig-grade-swarm/engineer@323133-4450, "
+    "rig-grade-swarm/engineer@323133-4451, rig-grade-swarm/engineer@323133-4452"
+)
+
+
+def watched(own_at, now, started=WATCHED - 4_000, slug="rig-grade-swarm-doctor"):
+    counted = ["ci@323133-3199", "engineer@323133-4450", "engineer@323133-4451", "engineer@323133-4452"]
+    lives = [
+        *(life(name, slug="rig-grade-swarm", task=f"t{n}", hive="root") for n, name in enumerate(counted)),
+        life("engineer@d44a5a-2120", slug=slug, task="fx-ee6bba9f-code", hive="root", started=started),
+    ]
+    claims = [line(WATCHED_LINE, at=WATCHED), *([line(OWN_LINE, at=own_at)] if own_at is not None else [])]
+    return {"slug": "rig-grade-swarm", "claims": claims, "journal_error": "", "lives": lives, "now": now}
+
+
+def subjects(record):
+    return [f.subject for f in slot_census.findings(record)]
+
+
+def test_an_agent_whose_own_claim_lands_within_the_spawn_window_is_not_left_out():
+    assert subjects(watched(WATCHED + 9_800, WATCHED + 3_600_000)) == []
+    assert subjects(watched(WATCHED + slot_census.SPAWN_WINDOW_MS, WATCHED + 3_600_000)) == []
+
+
+def test_an_agent_with_no_own_claim_inside_the_spawn_window_is_left_out():
+    late = WATCHED + slot_census.SPAWN_WINDOW_MS + 1
+    for own_at in (None, WATCHED, WATCHED - 1, late):
+        assert subjects(watched(own_at, late)) == [f"ci@323133-3206@{WATCHED}"], own_at
+    other = watched(WATCHED + 9_800, late)
+    other["claims"][1]["message"] = OWN_LINE.replace("rig-grade-swarm-doctor:", "elsewhere:")
+    assert subjects(other) == [f"ci@323133-3206@{WATCHED}"]
+
+
+def test_a_claimless_fresh_spawn_is_held_until_its_spawn_window_has_passed():
+    window = slot_census.SPAWN_WINDOW_MS
+    assert subjects(watched(None, WATCHED + window - 1)) == []
+    assert subjects(watched(None, WATCHED + window - 1, started=WATCHED - window + 1)) == []
+    assert subjects(watched(None, WATCHED + window)) == [f"ci@323133-3206@{WATCHED}"]
+    assert subjects(watched(None, WATCHED + window - 1, started=WATCHED - window)) == [f"ci@323133-3206@{WATCHED}"]
+    unstamped = watched(None, WATCHED + window - 1)
+    del unstamped["lives"][-1]["started_at"]
+    assert subjects(unstamped) == [f"ci@323133-3206@{WATCHED}"]
+    [found] = slot_census.findings(watched(None, WATCHED + window))
+    assert found.summary.endswith("left 1 live local agents out: engineer@d44a5a-2120")
+
+
 def test_an_unreadable_journal_fails_the_detector():
     with pytest.raises(SwarmError, match="journalctl exit 1"):
         slot_census.findings({"slug": "sw", "claims": None, "journal_error": "journalctl exit 1: no", "lives": []})
@@ -119,7 +176,10 @@ def test_the_reader_joins_claim_lines_with_current_and_ended_lives_of_every_swar
         row = {"__REALTIME_TIMESTAMP": str(AT * 1000), "_PID": "97698", "MESSAGE": message}
         return subprocess.CompletedProcess(argv, 0, json.dumps(row) + "\n", "")
 
+    before = time.time() * 1000
     read = spawn_read.slot_claims(store, "sw", run=journal)
+    assert before <= read["now"] <= time.time() * 1000
+    assert isinstance(read["now"], int)
     assert read["claims"] == [line(message)]
     assert read["journal_error"] == ""
     assert calls[0][calls[0].index("--since") + 1] == "1 hour ago"
