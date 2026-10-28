@@ -380,6 +380,7 @@ def test_a_working_heartbeat_keeps_a_failed_launch(store, monkeypatch, scratch, 
     )
     assert report["misses"] == expected
     assert report["at"] == now
+    assert report["elapsed_ms"] == now - LAUNCH
 
 
 @pytest.mark.parametrize("hive,relaunch", [("", True), ("remote", True), ("remote", False)])
