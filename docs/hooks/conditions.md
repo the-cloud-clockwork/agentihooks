@@ -14,6 +14,7 @@ runs, replace the tool output the agent sees, or deny the call. A `stop` conditi
 runs when the agent stops and can keep it working. A `start` condition runs at
 SessionStart and can only add context. The filename is the whole configuration:
 `pre-bash.git-guard.sh` runs before every Bash call that runs `git`.
+A condition written in YAML as `.filter.yaml` is a [filter](../reference/filters.md).
 
 1. TOC
 {:toc}
