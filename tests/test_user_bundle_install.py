@@ -278,6 +278,27 @@ def test_unlinking_the_user_bundle_keeps_a_ledgered_link_that_now_points_elsewhe
     assert foreign.is_dir()
 
 
+def test_unlinking_the_user_bundle_still_removes_an_unchanged_link_whose_source_is_gone(world):
+    import shutil
+
+    _skill(world["root"], "shared-skill", "root")
+    _skill(world["user"], "personal-skill", "user")
+    _skill(world["user"], "vanished-skill", "user")
+    _link_both(world)
+    _install()
+    skills = world["home"] / ".claude" / "skills"
+    shutil.rmtree(world["user"] / ".claude" / "skills" / "vanished-skill")
+    dangling = skills / "vanished-skill"
+    assert dangling.is_symlink() and not dangling.exists()
+
+    bundles.unlink(user=True)
+
+    assert not dangling.is_symlink()
+    assert not (skills / "personal-skill").is_symlink()
+    assert (skills / "shared-skill").is_symlink()
+    assert "vanished-skill" not in {Path(link).name for link in install._state_links()}
+
+
 def test_unlinking_the_user_bundle_drops_its_directive_block_on_the_next_install(world):
     _write(world["root"] / ".claude" / "CLAUDE.md", "ROOT DIRECTIVE\n")
     _write(world["user"] / ".claude" / "CLAUDE.md", "USER DIRECTIVE\n")
