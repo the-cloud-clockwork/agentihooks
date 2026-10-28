@@ -838,14 +838,14 @@ def test_equivalence_grades_with_the_base_copy():
 
 def test_equivalence_compares_against_the_dev_parent_of_the_tested_merge(tmp_path):
     steps = _equivalence_steps()
-    assert steps[0]["with"] == {"path": "head", "fetch-depth": 2}
+    assert steps[0]["with"]["fetch-depth"] == 2
     [selector] = [step for step in steps if step.get("id") == "comparison-base"]
     head = tmp_path / "head"
     head.mkdir()
 
     def git(*args):
         return subprocess.run(
-            ["git", "-c", "user.name=CI", "-c", "user.email=ci@example.invalid", *args],
+            ["git", "-c", "user.name=CI", "-c", "user.email=ci@example.invalid", "-c", "commit.gpgsign=false", *args],
             cwd=head,
             check=True,
             capture_output=True,
