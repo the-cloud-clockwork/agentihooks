@@ -9,8 +9,9 @@ from tests.doctor.recorded import load
 
 
 @pytest.fixture(autouse=True)
-def _cache_identity(monkeypatch):
+def _cache_identity(monkeypatch, tmp_path):
     monkeypatch.setenv("GH_TOKEN", "doctor-reader-test")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
 
 
 def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs(monkeypatch):
