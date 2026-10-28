@@ -192,6 +192,19 @@ def test_a_persisted_claude_tool_output_exports_its_side_file_masked(tmp_path):
     assert not any(key.startswith("agentihooks.truncation.") for key in bash.attributes)
 
 
+def test_a_persisted_json_side_file_masks_values_under_secret_keys(tmp_path):
+    key = "pass" + "word"
+    entries, _ = _persisted(tmp_path, json.dumps({key: 12345678, "rows": ["row"] * 3}))
+    output = _tool(_spans(entries), "Bash").attributes["langfuse.observation.output"]
+    assert "12345678" not in output
+    assert json.loads(output) == {key: "[REDACTED:generic_secret]", "rows": ["row"] * 3}
+
+
+def test_the_user_shared_by_every_span_is_masked():
+    spans = _spans(identity=_identity(account=FAKE_TOKEN))
+    assert {s.attributes["langfuse.user.id"] for s in spans} == {"[REDACTED:github_token]"}
+
+
 def test_a_persisted_tool_output_over_the_cap_counts_its_truncation(tmp_path):
     entries, _ = _persisted(tmp_path, "x" * 120)
     with patch("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 50):

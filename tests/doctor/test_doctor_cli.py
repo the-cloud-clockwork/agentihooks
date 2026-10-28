@@ -753,6 +753,7 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "handoff",
         "spawn",
         "master launch",
+        "slot census",
         "startup",
         "headroom",
         "hive pool",

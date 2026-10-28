@@ -120,7 +120,7 @@ def _stage_evidence(redis, slug: str, item: dict, jobs: list[dict], now_ms: int)
 
 def _log(repo_dir: str, job_id: int, run: Callable) -> str:
     return run(
-        ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs"],
+        ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs", "--allow-escape-sequences"],
         cwd=repo_dir,
         capture_output=True,
         text=True,

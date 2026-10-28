@@ -849,7 +849,7 @@ def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(op
         ["luna", "claude", "SUBSCRIPTION", "—", "64%", "2h05m", "51%", "6d00h", "—", "1", "—", "4", "MASTER"],
         ["default", "codex", "SUBSCRIPTION", "—", "—", "—", "61%", "3d10h", "—", "0", "—", "—", ""],
     ]
-    assert page.text("#quota-count").lower() == "3 accounts · probed 2m ago"
+    assert page.text("#quota-fold > summary").strip().lower() == "quota"
 
 
 def test_the_quota_table_fits_its_box_at_1920(open_page):
@@ -903,10 +903,11 @@ def test_the_refresh_icon_beside_the_title_probes_every_account_and_redraws(open
     )
     assert look == [True, "rgba(0, 0, 0, 0)", "none"]
     fresh = status()
-    fresh["quota"] = {**fresh["quota"], "probed_at": NOW_S}
+    fresh["quota"]["rows"][0]["five_hour_left"] = 88
     page.payload = fresh
     button.click()
-    page.tab.wait_for_function("() => document.querySelector('#quota-count').textContent.includes('probed 0s ago')")
+    page.tab.wait_for_function("() => document.querySelector('#swarm-quota').textContent.includes('88%')")
+    assert page.tab.locator("#quota-fold").get_attribute("open") is not None
     assert page.puts == [{"action": "quota_refresh"}]
 
 

@@ -420,7 +420,7 @@ def master_headless(agents: list[dict]) -> list[Finding]:
                 agent.get("seat") or agent["name"],
                 "master runs on a headless hive",
                 (f"hive: {placed['hive']}", f"agent {agent['name']}"),
-                "the master has no UI hive",
+                "the master is not on swarm-master",
                 1,
             )
         )

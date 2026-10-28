@@ -56,6 +56,8 @@ from scripts.swarm import (
     lost_runner,
     master_alarm,
     master_move,
+    master_prompt_stall,
+    master_questions,
     master_retire,
     master_stall,
     master_start,
@@ -186,6 +188,7 @@ class Runtime(Protocol):
     def status(self, agent: AgentRecord) -> str: ...
     def observe(self, agent: AgentRecord) -> PaneObservation: ...
     def nudge(self, agent: AgentRecord, text: str) -> str | None: ...
+    def dismiss(self, agent: AgentRecord) -> bool: ...
     def name_pane(self, agent: AgentRecord) -> bool: ...
     def conversations(self) -> dict[str, str] | None: ...
     def resume(self, config, agent: AgentRecord, text: str) -> Placed: ...
@@ -203,7 +206,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         rows = {t["id"]: t for t in doc["tasks"]}
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
         if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
-            return timing.call(_close_space, slug, config, store, runtime) + _bin_closed(slug, store, ledger, doc)
+            return skip_refused(_close_space, slug, config, store, runtime) + _bin_closed(slug, store, ledger, doc)
         config = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
     store.redis.delete(store.key(slug, SPAWN_HOLD))
@@ -222,7 +225,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     )
     actions += skip_refused(master_start.observe, slug, config, store, ledger, runtime, now_ms)
     actions += skip_refused(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
-    timing.call(resume.track_outages, slug, store, runtime, rows, now_ms)
+    actions += skip_refused(resume.track_outages, slug, store, runtime, rows, now_ms) or []
     actions += skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(resume.recover_outages, slug, store, ledger, runtime, rows, now_ms)
@@ -232,6 +235,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
     actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(master_stall.run, slug, config, store, ledger, runtime, now_ms)
+    actions += skip_refused(master_prompt_stall.run, slug, config, store, ledger, runtime, now_ms)
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
@@ -242,7 +246,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
-    actions += skip_refused(fleet_red.notice_pass, slug, config, store, ledger, rows, now_ms)
+    actions += skip_refused(fleet_red.notice_pass, slug, store, ledger, rows, now_ms)
     actions += skip_refused(run_window.step, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(claim_hold.verification_notices, slug, store, doc, now_ms)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
@@ -273,31 +277,37 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
             actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
             if config.state == "running" and config.engine != EVENTS_ENGINE:
-                seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order)
+                placement = partial(preempt.probe, runtime)
+                seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order, placement)
                 actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
                 with _placement_pass(runtime):
                     actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
-    actions += timing.call(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
-    timing.call(_conversations, slug, store, runtime)
-    timing.call(_session_models, slug, store)
-    starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}
-    timing.call(transfers.observe, store, slug, runtime.live_names() - starting)
+    actions += skip_refused(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
+    actions += skip_refused(_conversations, slug, store, runtime) or []
+    actions += skip_refused(_session_models, slug, store) or []
+    actions += skip_refused(transfers.observe, store, slug, runtime.live_names()) or []
     return (
         actions
         + skip_refused(_settle, slug, config, store, ledger, rows, doc)
-        + timing.call(_close_space, slug, config, store, runtime)
+        + skip_refused(_close_space, slug, config, store, runtime)
     )
 
 
 def skip_refused(function, *args):
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
     try:
         return timing.call(function, *args)
     except LedgerRefused as exc:
         name = f"{function.__module__}.{function.__qualname__}"
         print(f"{name} skipped, the ledger refused its write: {exc}", file=sys.stderr)
         return [f"skipped {name}: the ledger refused its write"]
+    except RedisTimeoutError as exc:
+        name = f"{function.__module__}.{function.__qualname__}"
+        print(f"{name} skipped, its Redis read timed out: {exc}", file=sys.stderr)
+        return [f"skipped {name}: its Redis read timed out"]
 
 
 def skip_dropped(function, *args):
@@ -768,10 +778,13 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         same = agent.input_prompt == title
         ticks = agent.input_ticks + 1 if same else 1
         input_wait.mark(store, slug, agent.name, now_ms, same)
-        store.put_agent(slug, replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0))
-        return []
+        waiting = replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0)
+        store.put_agent(slug, waiting)
+        return master_questions.dismiss(slug, store, ledger, runtime, waiting, now_ms) if agent.lane == MASTER else []
     if agent.input_prompt:
         input_wait.clear(store, slug, agent.name)
+        if agent.lane == MASTER:
+            master_questions.drop(store, slug, agent.name)
     agent = replace(agent, input_prompt="", input_ticks=0)
     held = outage.held(store, slug, agent.name)
     exhausted = resume.recovery_exhausted(store, slug, agent)
@@ -935,7 +948,7 @@ def claim_view(slug, store, rows, doc, dispatched=None):
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
     released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
-    unshared = fleet_red.checker(config.repo)
+    unshared = fleet_red.checker()
     view = readiness.Snapshot(
         slug,
         rows,

@@ -20,6 +20,14 @@ async function gradeIsComplete(github, context, api) {
     [...latest.values()].every(state => state === 'success');
 }
 
+async function snapshotGradeComplete(github, context, api) {
+  const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
+    { ...api, run_id: context.runId, filter: 'latest', per_page: 100 });
+  const current = jobs.filter(job => job.run_id === context.runId && job.name === 'promote / promote' && job.status === 'in_progress');
+  return current.length === 1 && jobs.some(job => job.name === 'Gate — Required' && job.status === 'completed' && job.conclusion === 'success') &&
+    jobs.every(job => job === current[0] || job.status === 'completed' && ['success', 'skipped'].includes(job.conclusion));
+}
+
 async function snapshotChecksComplete(github, api, snapshot, number) {
   let cursor = null;
   let complete = true;
@@ -107,13 +115,25 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
     if (pull.head.sha !== snapshot || pull.head.repo.full_name !== repository || pull.base.ref !== 'main') {
       throw new Error('Promotion pull request does not match the snapshot commit');
     }
+    const status = { ...api, sha: snapshot, context: 'Gate — Required',
+      target_url: `${context.serverUrl}/${repository}/actions/runs/${context.runId}` };
+    await github.rest.repos.createCommitStatus({ ...status, state: 'pending', description: 'Verifying the integration grade for this snapshot.' });
+    let reported = false;
     let ready = false;
+    core.info('Waiting for the required snapshot grade and checks before merging.');
     const deadline = now() + 30 * 60 * 1000;
     while (now() < deadline) {
       const latest = (await github.rest.pulls.get({ ...api, pull_number: pull.number })).data;
       if (latest.head.sha !== snapshot) throw new Error('Promotion pull request moved away from the graded head');
       if (latest.mergeable === false) throw new Error('Promotion pull request has merge conflicts');
-      const complete = await snapshotChecksComplete(github, api, snapshot, pull.number);
+      if (!reported && await snapshotGradeComplete(github, context, api)) {
+        await github.rest.repos.createCommitStatus({ ...status, state: 'success', description: 'The integration grade passed for the verified snapshot tree.' });
+        reported = true;
+      }
+      const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef,
+        { ...api, ref: snapshot, per_page: 100 });
+      const visible = statuses.find(check => check.context === status.context)?.state === 'success';
+      const complete = reported && visible && await snapshotChecksComplete(github, api, snapshot, pull.number);
       if (complete && latest.mergeable === true && (latest.mergeable_state === 'clean' ||
           latest.mergeable_state === 'unstable' && await gradeIsComplete(github, context, api))) {
         ready = true;

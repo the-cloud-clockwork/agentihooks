@@ -43,15 +43,25 @@ def claim(store: RedisStore, machine: str, slug: str, task: str, name: str, loca
                 now = lease.now_ms(store)
                 taken, settled = _held(store, pipe.hgetall(key(machine)), f"{slug}/{task}", now)
                 if len(taken) >= local_max:
+                    _journal(slug, machine, task, name, local_max, taken)
                     return len(taken)
                 pipe.multi()
                 if settled:
                     pipe.hdel(key(machine), *settled)
                 pipe.hset(key(machine), f"{slug}/{name}", now)
                 pipe.execute()
+                _journal(slug, machine, task, name, local_max, taken)
                 return len(taken)
             except WatchError:
                 continue
+
+
+def _journal(slug: str, machine: str, task: str, name: str, local_max: int, taken: list[str]) -> None:
+    print(
+        f"{slug}: local slot claim {name} for {task} on {machine} counted {len(taken)} of {local_max}: "
+        + ", ".join(sorted(taken)),
+        flush=True,
+    )
 
 
 def release(store: RedisStore, machine: str, slug: str, name: str) -> None:

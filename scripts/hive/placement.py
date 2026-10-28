@@ -4,7 +4,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from scripts.hive.registry import UI_ROLES, live
+from scripts.hive.registry import MASTER_NAME, UI_ROLES, live
 from scripts.master_claude_login import ROUTE as MASTER_LOGIN
 
 MASTER = "master"
@@ -13,7 +13,7 @@ YES = "yes"
 NO_UI_HIVE = "no UI hive live"
 HIVE = "hive"
 HEADLESS = "headless hive"
-UI_HIVE = "UI hive"
+UI_HIVE = MASTER_NAME
 LOCAL_MACHINE = "local machine"
 LOCAL_FULL = ", and the local machine runs "
 HAS_ROOM = "has room"

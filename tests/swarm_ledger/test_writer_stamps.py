@@ -2,8 +2,9 @@ import copy
 
 import pytest
 
-from scripts.swarm_ledger.repository import sqlite
+from scripts.swarm_ledger.repository import sqlite, writer_copy
 from scripts.swarm_ledger.repository.entry import Entry
+from scripts.swarm_ledger.repository.fragments import document, encoded
 from tests.swarm_ledger.test_repository_outbox import CHAT, CLAIM, store
 
 
@@ -92,3 +93,184 @@ def test_atomic_refusal_restores_stamps_after_an_earlier_operation_wrote_one(tmp
     assert written["plans"] == before["plans"]
     assert written["_meta"]["stamps"] == before["_meta"]["stamps"]
     assert previous.state == before
+
+
+def containers(value: object, found: dict) -> dict:
+    if type(value) in (dict, list):
+        found[id(value)] = value
+        for item in value.values() if type(value) is dict else value:
+            containers(item, found)
+    return found
+
+
+def cached(repo):
+    with repo.connect() as connection:
+        return repo._entry(connection, "ledger")
+
+
+def test_a_write_holds_an_independent_writer_copy_for_the_next_write(tmp_path):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    repo.apply_ops("ledger", ops=[CHAT])
+    entry = cached(repo)
+    held = entry.writer
+    assert held == entry.state
+    assert list(held) == list(entry.state)
+    assert list(held["_meta"]) == list(entry.state["_meta"])
+    stamps = {id(record) for record in entry.state["_meta"]["stamps"].values()}
+    assert set(containers(held, {})) & set(containers(entry.state, {})) <= stamps
+    before = copy.deepcopy(entry.state)
+    for task in held["tasks"]:
+        task["title"] = "changed by the writer"
+    held["chat"].append({"id": "m9", "text": "writer only"})
+    held["_meta"]["events"].clear()
+    assert entry.state == before
+    assert entry.for_write() is held
+    assert entry.writer is None
+    assert entry.for_write() is not held
+
+
+def test_writes_through_held_copies_store_what_a_fresh_reader_loads(tmp_path):
+    repo = store(tmp_path)
+    for op in (CLAIM, CHAT, {**CHAT, "id": "m2", "text": "again"}):
+        repo.apply_ops("ledger", ops=[op])
+        entry = cached(repo)
+        assert entry.writer == entry.state
+        assert sqlite.SQLiteLedgerRepository(repo.path).get_document("ledger") == repo.get_document("ledger")
+    assert [message["text"] for message in repo.get_document("ledger")["chat"]][-2:] == ["hello", "again"]
+
+
+def test_a_failed_write_drops_the_held_copy_and_the_next_write_copies_again(tmp_path, monkeypatch):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    entry = cached(repo)
+    assert entry.writer is not None
+
+    def broken(slug, state):
+        raise RuntimeError("summary failed")
+
+    monkeypatch.setattr(sqlite, "summarize", broken)
+    with pytest.raises(RuntimeError, match="summary failed"):
+        repo.apply_ops("ledger", ops=[CHAT])
+    monkeypatch.undo()
+    assert cached(repo) is entry
+    assert entry.writer is None
+    _, rejected = repo.apply_ops("ledger", ops=[CHAT])
+    assert rejected == []
+    assert sqlite.SQLiteLedgerRepository(repo.path).get_document("ledger") == repo.get_document("ledger")
+
+
+def test_a_mutation_that_raises_drops_the_held_copy(tmp_path, monkeypatch):
+    import ledger_priorities
+
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    entry = cached(repo)
+    before = copy.deepcopy(entry.state)
+
+    def broken(doc, ctx):
+        doc["tasks"].clear()
+        raise RuntimeError("derive failed")
+
+    monkeypatch.setattr(ledger_priorities, "derive", broken)
+    with pytest.raises(RuntimeError, match="derive failed"):
+        repo.apply_ops("ledger", ops=[CHAT])
+    monkeypatch.undo()
+    assert entry.writer is None
+    assert entry.state == before
+    repo.apply_ops("ledger", ops=[CHAT])
+    assert repo.get_document("ledger")["tasks"] == before["tasks"]
+
+
+def test_a_write_through_the_held_copy_copies_only_the_leaves_it_changed(tmp_path, monkeypatch):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    tasks = [copy.deepcopy(task) for task in cached(repo).state["tasks"]]
+    assert tasks
+    copied = []
+    real = writer_copy.thawed
+
+    def counting(value):
+        copied.append(value)
+        return real(value)
+
+    monkeypatch.setattr(writer_copy, "thawed", counting)
+    published, _ = repo.apply_ops("ledger", ops=[CHAT], copy_state=False)
+    assert published["tasks"] == tasks
+    assert not [value for value in copied if isinstance(value, dict) and value in tasks]
+    assert [value for value in copied if isinstance(value, dict) and value.get("text") == "hello"]
+    published["chat"].clear()
+    assert cached(repo).writer["chat"]
+
+
+def test_a_reloaded_entry_holds_no_writer_copy_and_copies_on_write(tmp_path):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    reloaded = cached(sqlite.SQLiteLedgerRepository(repo.path))
+    assert reloaded.writer is None
+    writing = reloaded.for_write()
+    assert writing == reloaded.state
+    assert writing is not reloaded.state
+    assert writing["tasks"] is not reloaded.state["tasks"]
+
+
+def two_states():
+    old = {
+        "_meta": {"rev": 1, "stamps": {"a": {"at": 1}, "b": {"at": 2}}},
+        "tasks": [{"id": "t1"}, {"id": "t2"}],
+        "overview": {"text": "x"},
+        "chat": [{"id": "m1"}],
+        "notes": [{"x": 1}],
+    }
+    new = copy.deepcopy(old)
+    new["_meta"]["rev"] = 2
+    new["_meta"]["stamps"]["b"] = {"at": 3}
+    new["tasks"][1]["title"] = "changed"
+    new["tasks"].append({"id": "t3"})
+    new["overview"] = {"text": "y"}
+    new["chat"] = []
+    new["notes"] = {"x": 1}
+    return old, new
+
+
+def test_written_copies_changed_parts_apart_and_keeps_unchanged_parts():
+    old, new = two_states()
+    previous = document(old)
+    published, writer = writer_copy.written(new, previous)
+    fresh = document(new)
+    assert published.value == new
+    assert writer == new
+    assert list(published.value) == list(new)
+    assert list(writer["_meta"]) == list(new["_meta"])
+    assert encoded(published) == encoded(fresh)
+    tasks, before = published.parts["tasks"], previous.parts["tasks"]
+    assert tasks.parts[0] is before.parts[0]
+    assert writer["tasks"][0] is new["tasks"][0]
+    stamps = published.parts["_meta"].parts["stamps"]
+    assert stamps.parts["a"] is previous.parts["_meta"].parts["stamps"].parts["a"]
+    assert writer["_meta"]["stamps"]["a"] is new["_meta"]["stamps"]["a"]
+    for index in (1, 2):
+        assert tasks.parts[index].signature == fresh.parts["tasks"].parts[index].signature is not None
+        assert tasks.parts[index].value is not new["tasks"][index]
+        assert writer["tasks"][index] is not new["tasks"][index]
+        assert writer["tasks"][index] is not tasks.parts[index].value
+    assert stamps.parts["b"].signature == fresh.parts["_meta"].parts["stamps"].parts["b"].signature is not None
+    assert published.parts["overview"].value is not new["overview"]
+    assert writer["overview"] is not new["overview"]
+    assert published.parts["notes"].parts is None
+    assert writer["notes"] is not new["notes"]
+    assert set(containers(published.value, {})) & set(containers(writer, {})) == set()
+
+
+def test_written_without_a_previous_copies_everything_and_an_unchanged_state_is_returned_as_is():
+    _, new = two_states()
+    published, writer = writer_copy.written(new, None)
+    assert published.value == writer == new
+    assert encoded(published) == encoded(document(new))
+    assert set(containers(published.value, {})) & set(containers(new, {})) == set()
+    assert set(containers(writer, {})) & set(containers(new, {})) == set()
+    assert set(containers(published.value, {})) & set(containers(writer, {})) == set()
+    unchanged = document(new)
+    same, kept = writer_copy.written(new, unchanged)
+    assert same is unchanged
+    assert kept is new

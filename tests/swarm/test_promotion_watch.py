@@ -124,6 +124,7 @@ def sonar_run(message, extra_jobs=(), extra_steps=()):
                 "--paginate",
                 "--jq",
                 ".[] | {annotation_level, message} | @json",
+                "--include",
             ]
             body = [
                 {"annotation_level": "warning", "message": "Node.js 20 actions are deprecated."},
@@ -138,6 +139,7 @@ def sonar_run(message, extra_jobs=(), extra_steps=()):
                 "--paginate",
                 "--jq",
                 JOBS_JQ,
+                "--include",
             ]
             body = found
         else:
@@ -219,7 +221,15 @@ def test_jobs_reads_every_job_of_the_run():
     assert promotion_watch.jobs("/repo", 900, gh([], JOBS, calls)) == JOBS
     assert calls == [
         (
-            ["gh", "api", "repos/{owner}/{repo}/actions/runs/900/jobs?per_page=100", "--paginate", "--jq", JOBS_JQ],
+            [
+                "gh",
+                "api",
+                "repos/{owner}/{repo}/actions/runs/900/jobs?per_page=100",
+                "--paginate",
+                "--jq",
+                JOBS_JQ,
+                "--include",
+            ],
             {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60},
         )
     ]
@@ -249,7 +259,15 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
     assert calls == [
         (["gh", "api", RUNS, "--jq", ".workflow_runs[] | {id, conclusion, head_sha, html_url} | @json"], kwargs),
         (
-            ["gh", "api", "repos/{owner}/{repo}/actions/runs/900/jobs?per_page=100", "--paginate", "--jq", JOBS_JQ],
+            [
+                "gh",
+                "api",
+                "repos/{owner}/{repo}/actions/runs/900/jobs?per_page=100",
+                "--paginate",
+                "--jq",
+                JOBS_JQ,
+                "--include",
+            ],
             kwargs,
         ),
     ]
@@ -1090,7 +1108,12 @@ def recorded_test_failure(
     def run(argv, **kwargs):
         if argv[2].endswith("/logs"):
             job_id = argv[2].split("/jobs/")[1].split("/")[0]
-            assert argv == ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs"]
+            assert argv == [
+                "gh",
+                "api",
+                f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs",
+                "--allow-escape-sequences",
+            ]
             assert kwargs == {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
             output = "\n".join(f"2026-10-20T12:47:13Z FAILED {test} - AssertionError: failure" for test in tests)
             return subprocess.CompletedProcess(argv, 0, output, "")

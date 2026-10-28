@@ -21,7 +21,8 @@
     "6d49785b507ab1495a3608804a6f071b5fd99645"
   ],
   ".github/rulesets/main-prod-lockdown.json": [
-    "4f152605b994abd91961c4e6c1e55a9bbf5d3653"
+    "4f152605b994abd91961c4e6c1e55a9bbf5d3653",
+    "033653593f6ac35db2a5f0761ccbcd6a20c0e671"
   ],
   ".github/rulesets/version-tags.json": [
     "6ac0742c47fad096a715b6f9f0cef687b7c589c3"

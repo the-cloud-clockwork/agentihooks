@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from string import Template
 
+import pytest
 import yaml
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -638,3 +639,55 @@ def test_touched_tests_keep_one_xdist_group_on_one_worker(tmp_path):
     workers = [path.read_text() for path in sorted(out.iterdir())]
     assert len(workers) == 4, output
     assert len(set(workers)) == 1, (workers, output)
+
+
+@pytest.mark.parametrize("job", ["mutation-plan", "mutation-stats", "mutation"])
+def test_protected_mutation_jobs_install_with_no_branch_lock(tmp_path, job):
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    steps, names = _steps(workflow["jobs"][job])
+    export = steps[names.index("Take the helper scripts from the workflow revision")]["run"]
+    install = steps[names.index("Install dependencies")]["run"]
+    trusted = tmp_path / "workflow"
+    trusted.mkdir()
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_SHA="HEAD")
+    archive = next(line for line in export.splitlines() if line.strip().startswith("git archive"))
+    subprocess.run(["bash", "-euc", archive], cwd=_ROOT, env=env, check=True)
+    branch = tmp_path / "old-branch"
+    branch.mkdir()
+    probe = """
+uv() {
+    [[ "$1 $2 $3 $4" == "pip install --system --constraint" ]] || return 1
+    [[ "$5" == "$RUNNER_TEMP/workflow/.github/test-requirements.lock" ]] || return 1
+    [[ -s "$5" ]] || return 1
+    echo "Trusted dependency lock resolved without a branch lock"
+}
+export -f uv
+"""
+    result = subprocess.run(
+        ["bash", "-euc", probe + install], cwd=branch, env=env, capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Trusted dependency lock resolved without a branch lock" in result.stdout
+
+
+@pytest.mark.parametrize("job", ["mutation-stats", "mutation"])
+def test_mutation_jobs_keep_the_head_lock_when_the_head_has_one(tmp_path, job):
+    steps, names = _steps(yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"][job])
+    install = steps[names.index("Install dependencies")]["run"]
+    helper = tmp_path / "workflow/.github/scripts/pypi-retry.sh"
+    helper.parent.mkdir(parents=True)
+    helper.write_text('shift 2\n"$@"\n')
+    branch = tmp_path / "branch"
+    (branch / ".github").mkdir(parents=True)
+    (branch / ".github/test-requirements.lock").write_text("pytest==8.0\n")
+    probe = 'uv() { echo "constraint=$5"; }\nexport -f uv\n'
+    result = subprocess.run(
+        ["bash", "-euc", probe + install],
+        cwd=branch,
+        env=dict(os.environ, RUNNER_TEMP=str(tmp_path)),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "constraint=./.github/test-requirements.lock"
