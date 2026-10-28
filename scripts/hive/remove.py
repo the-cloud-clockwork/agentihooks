@@ -82,10 +82,6 @@ def _sole(redis: "Redis", hive: str, name: str) -> str:
     return hive
 
 
-def member_key(hive: str) -> str:
-    return f"{auth.PREFIX}:member:{hive}"
-
-
 def hosted(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
     return [
         (slug, agent)
