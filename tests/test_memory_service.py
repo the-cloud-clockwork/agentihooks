@@ -109,6 +109,7 @@ def test_search_answers_as_the_search_call(inputs, bank, served):
     assert status == 200 and answer == search_api.search(bank.tools.searcher, grant(inputs), request)
     assert answer["state"] == "answered" and answer["results"]
 
+
 def ingest_body(inputs):
     return {
         "schema_version": SCHEMA_VERSION,
@@ -116,11 +117,15 @@ def ingest_body(inputs):
         "access_domain": inputs["grant"]["corpus"],
         "session_uid": "http-session",
         "source_generation": "http-source",
-        "events": [{
-            "sequence": 1, "byte_start": 0, "byte_end": 10,
-            "project_id": inputs["grant"]["projects"][0],
-            "record": {"kind": "user_text", "text": "persisted over HTTP"},
-        }],
+        "events": [
+            {
+                "sequence": 1,
+                "byte_start": 0,
+                "byte_end": 10,
+                "project_id": inputs["grant"]["projects"][0],
+                "record": {"kind": "user_text", "text": "persisted over HTTP"},
+            }
+        ],
     }
 
 
