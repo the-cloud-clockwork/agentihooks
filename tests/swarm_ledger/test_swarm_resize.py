@@ -367,7 +367,16 @@ def test_home_columns_drag_and_step_and_keep_their_widths(browser, base):
     layout.path().unlink(missing_ok=True)
     context = browser.new_context(viewport={"width": 1920, "height": 1000})
     tab = context.new_page()
+    held = []
+
+    def hold_first_read(route):
+        if route.request.method == "GET" and not held:
+            held.append(route)
+        else:
+            route.continue_()
+
     try:
+        tab.route("**/api/v1/layout", hold_first_read)
         tab.goto(f"{base}/")
         grip = tab.locator(".row.head > *:nth-child(3) .col-grip")
         grip.wait_for()
@@ -385,6 +394,11 @@ def test_home_columns_drag_and_step_and_keep_their_widths(browser, base):
         tab.mouse.up()
         grip.focus()
         tab.keyboard.press("ArrowLeft")
+        deadline = time.monotonic() + 5
+        while not held and time.monotonic() < deadline:
+            tab.wait_for_timeout(50)
+        held[0].continue_()
+        tab.wait_for_function("() => document.documentElement.dataset.layout === 'ready'", timeout=5000)
         widths = saved_columns("home", settled=lambda found: abs(found[2] - (before[2] - 116)) <= 2)
         assert abs(widths[2] - (before[2] - 116)) <= 2
         assert widths[:2] == [round(w) for w in before[:2]]
