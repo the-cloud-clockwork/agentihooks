@@ -532,7 +532,8 @@ def test_a_changed_class_body_assignment_counts_as_unmutated(monkeypatch):
     assert selected_mutants("scripts/sample.py", source, {2})[1] == []
     assert selected_mutant_names("scripts/sample.py", source, {2}) == []
     found, in_body = mutation_counts("scripts/sample.py", source, {2, 5})
-    assert found == in_body > 0
+    assert found == in_body
+    assert in_body > 0
     assert mutation_counts("scripts/sample.py", source, {5}) == (found, in_body)
 
 

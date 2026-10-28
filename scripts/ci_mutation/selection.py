@@ -97,14 +97,16 @@ def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int,
     module, graded, possible = created_mutations(filename, source)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(PositionProvider)
     # mutmut emits only mutants inside a function or method; it also marks each class body statement as a top level node.
-    graded, possible = (
-        [
-            mutation
-            for mutation in on_changed_lines(module, mutations, changed)
-            if isinstance(mutation.contained_by_top_level_function, cst.FunctionDef)
-        ]
-        for mutations in (graded, possible)
-    )
+    graded = [
+        mutation
+        for mutation in on_changed_lines(module, graded, changed)
+        if isinstance(mutation.contained_by_top_level_function, cst.FunctionDef)
+    ]
+    possible = [
+        mutation
+        for mutation in on_changed_lines(module, possible, changed)
+        if isinstance(mutation.contained_by_top_level_function, cst.FunctionDef)
+    ]
     body = sum(
         positions[mutation.original_node].start.line
         >= positions[mutation.contained_by_top_level_function.body.body[0]].start.line
