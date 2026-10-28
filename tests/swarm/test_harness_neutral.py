@@ -283,6 +283,21 @@ def test_a_named_codex_operator_launch_of_a_claude_only_profile_is_refused(claud
     assert error.value.status == "unsupported"
 
 
+@pytest.mark.parametrize("agent", ["", "claude"])
+def test_the_operator_launch_of_a_claude_only_profile_opens_claude_on_a_claude_machine(claude_only, monkeypatch, agent):
+    monkeypatch.setattr(plugins, "claude_only", lambda profile: profile == "frontend")
+    placed, argv = _operator(claude_only, profile="frontend", agent=agent)
+    assert argv[argv.index("--agent") + 1] == "claude"
+    assert placed.harness == "claude"
+
+
+def test_the_operator_launch_with_no_account_anywhere_opens_claude(claude_only, monkeypatch):
+    monkeypatch.setattr(capacity, "_claude", lambda environ, now: [])
+    placed, argv = _operator(claude_only)
+    assert argv[argv.index("--agent") + 1] == "claude"
+    assert placed.harness == "claude"
+
+
 def test_a_claude_only_profile_on_an_unpinned_lane_with_no_claude_account_is_refused_in_plain_words(
     codex_only, monkeypatch
 ):

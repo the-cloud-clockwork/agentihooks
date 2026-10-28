@@ -138,6 +138,12 @@ def test_cli_profile_up_passes_a_named_harness_to_the_launch(swarm, monkeypatch,
     assert rt.agents == [agent]
 
 
+def test_up_with_no_harness_named_leaves_the_choice_to_the_launch(swarm):
+    rt = OperatorRuntime()
+    agent_up.up(swarm, "sw", rt, "planner", 1000)
+    assert rt.agents == [""]
+
+
 def test_cli_master_up_still_brings_the_master(swarm, monkeypatch):
     from scripts.swarm import cli
 
