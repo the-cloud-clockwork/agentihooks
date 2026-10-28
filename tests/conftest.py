@@ -1,6 +1,7 @@
 """Shared test fixtures for agentihooks."""
 
 import errno
+import importlib
 import json
 import os
 import re
@@ -137,6 +138,9 @@ def _shard_files(config) -> frozenset[str]:
 
 
 def pytest_configure(config):
+    # A cold import that a request thread interrupts drops redis.asyncio but keeps its submodules, breaking fakeredis.
+    importlib.import_module("redis.asyncio")
+    importlib.import_module("fakeredis")
     _reused(config)
     config.args.sort(key=lambda arg: (Path(arg.split("::", 1)[0]).parent.parts, arg))
     workers = getattr(config.option, "numprocesses", None)
@@ -427,6 +431,15 @@ def _no_runner_git_config(monkeypatch):
     # CI jobs export maintenance.auto through these; tests that build git config environments start from none.
     for name in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_item_node_id():
+    # The mutation worker's pytest 9.2 node id alias is process wide; a test that runs it in process takes it back.
+    added = "_nodeid" not in vars(pytest.Item)
+    yield
+    if added and "_nodeid" in vars(pytest.Item):
+        del pytest.Item._nodeid
 
 
 @pytest.fixture(autouse=True)

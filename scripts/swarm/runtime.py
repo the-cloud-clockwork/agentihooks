@@ -846,7 +846,7 @@ class HerdrRuntime:
                     *mode,
                 ],
             )
-        placed = codex.complete(config, name, placed, self._terminate)
+        placed = placed if placed.launch_job else codex.complete(config, name, placed, self._terminate)
         placed_kind = "api" if placed.account == "api" else route_kind
         return replace(
             placed,
@@ -955,6 +955,26 @@ class HerdrRuntime:
                 f"{EXECUTION_ENV}={task['execution_id']}",
                 *argv,
             ]
+        passed = argv[argv.index("--") + 1 :] if "--" in argv else []
+        ordered = lane == MASTER or (task.get("handoff_envelope") or {}).get("reason") == "quota"
+        ordered = ordered or passed[:2] in (["--route", "interactive"], ["--route", "master-login"])
+        if task.get("detached_launch") and not ordered and not task.get("admitted_execution_id"):
+            from scripts.swarm import launch_job
+
+            agent = argv[argv.index("--agent") + 1]
+            job = launch_job.start(
+                self.home,
+                config,
+                lane,
+                name,
+                {
+                    "task_id": task["id"],
+                    "argv": argv,
+                    "predecessor": _predecessor(task),
+                    "controller_epoch": task.get("controller_epoch"),
+                },
+            )
+            return Placed("", agent, launch_job=job)
         return timing.call(
             self._launch,
             config,
