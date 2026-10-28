@@ -156,6 +156,15 @@ def _woken(watch, task):
     return idle.woke(watch.store.redis, watch.slug, owner) if owner else 0
 
 
+def _owner_live(watch, task, agent):
+    from scripts.hive import join_report
+
+    if task.get("claimed_by") in watch.live:
+        return True
+    report = join_report.read(watch.store.redis, agent) if agent is not None else {}
+    return bool(report and watch.now_ms - report["heartbeat_at"] < join_report.HEARTBEAT_MS)
+
+
 def _stall(watch, task, pull, marks, seen, agent):
     tid, queued = task["id"], _key(watch, QUEUED)
     if pull.queued:
@@ -180,7 +189,7 @@ def _stall(watch, task, pull, marks, seen, agent):
         return None, None
     if pull.resolved and not pull.red and not pull.queued and not pull.draft:
         return "green", _since(watch, marks, seen, f"{tid}:green")
-    if task.get("claimed_by") not in watch.live:
+    if not _owner_live(watch, task, agent):
         return "owner", _since(watch, marks, seen, f"{tid}:owner")
     return None, None
 
