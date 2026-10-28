@@ -1,4 +1,5 @@
 import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from importlib import import_module
@@ -126,15 +127,12 @@ def restore(record: dict) -> Slot:
 def first_delivery(state: "StateStore", owner: str, delivery_id: str) -> bool:
     from scripts.events.bus import StateConflict
 
-    key = "delivered." + hashlib.sha256(owner.encode()).hexdigest()
-    entry = state.get(key)
-    if entry is not None and entry.value == delivery_id.encode():
-        return False
+    key = "delivered." + hashlib.sha256(json.dumps([owner, delivery_id]).encode()).hexdigest()
     try:
-        if entry is None:
-            state.create(key, delivery_id.encode())
-        else:
-            state.update(key, delivery_id.encode(), entry.revision)
+        state.create(key, delivery_id.encode())
     except StateConflict:
-        return False
+        entry = state.get(key)
+        if entry is not None and entry.value == delivery_id.encode():
+            return False
+        raise
     return True

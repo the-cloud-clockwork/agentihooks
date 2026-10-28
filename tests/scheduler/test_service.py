@@ -83,7 +83,7 @@ async def test_runner_survives_a_redis_that_does_not_answer_yet(monkeypatch, tmp
 
     await service.run(SimpleNamespace(run_due=drain), stop)
     assert passes == [1, 1]
-    assert capsys.readouterr().err == "scheduler pass skipped: Redis did not answer\n"
+    assert capsys.readouterr().err == "scheduler pass skipped: the state store did not answer\n"
 
 
 async def test_runner_still_stops_on_any_other_error(monkeypatch, tmp_path):

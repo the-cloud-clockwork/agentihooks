@@ -306,5 +306,5 @@ def test_connect_starts_the_runner_on_the_shared_redis(monkeypatch, scheduler):
     monkeypatch.setattr(store, "redis_client", lambda: scheduler.state.redis)
     monkeypatch.setattr(service, "ensure_running", lambda: started.append(True))
     connected = commands.connect()
-    assert connected.redis is scheduler.state.redis
+    assert connected.state.redis is scheduler.state.redis
     assert started == [True]

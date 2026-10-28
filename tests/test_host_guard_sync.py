@@ -245,7 +245,7 @@ def test_install_moves_a_live_systemd_guard_onto_the_scheduler(tmp_path, schedul
 
 
 def test_install_reports_an_unreachable_scheduler(tmp_path, unreachable, calls):
-    message = f"[!!] Host guard linked in {tmp_path}; Redis is unreachable, so the guard is not scheduled"
+    message = f"[!!] Host guard linked in {tmp_path}; the scheduler store is unreachable, so the guard is not scheduled"
     assert sync.install(tmp_path, enable=True) == message
     assert sync.run("install", tmp_path) == 1
     assert (tmp_path / "guard-config.json").readlink() == sync.REPO / "guard-config.json"
