@@ -1,5 +1,5 @@
-import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -7,23 +7,15 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_public_ledger_origin_preserves_explicit_private_hosts(tmp_path):
-    chart = tmp_path / "chart"
-    shutil.copytree(ROOT / "deploy/helm/agentihooks-swarm", chart)
-    metadata = chart / "Chart.yaml"
-    document = yaml.safe_load(metadata.read_text())
-    document.pop("dependencies")
-    metadata.write_text(yaml.safe_dump(document))
+def prove_hosts(chart):
     result = subprocess.run(
         [
             "helm",
             "template",
             "agentihooks-swarm",
-            str(chart),
+            chart,
             "--namespace",
             "agentihooks-swarm",
-            "--set",
-            "nats.enabled=false",
             "--set",
             "ledger.publicUrl=https://swarm.homeofanton.com",
             "--set",
@@ -44,3 +36,15 @@ def test_public_ledger_origin_preserves_explicit_private_hosts(tmp_path):
     assert next(item["value"] for item in env if item["name"] == "SWARM_PUBLIC_URL") == (
         "https://swarm.homeofanton.com"
     )
+
+
+def test_kind_smoke_proves_private_hosts_before_creating_a_cluster():
+    script = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh").read_text()
+    command = 'python3 tests/test_swarm_chart_additional_hosts.py "$chart"'
+    assert command in script
+    assert script.index(command) < script.index("kind create cluster")
+
+
+if __name__ == "__main__":
+    prove_hosts(sys.argv[1])
+    print("Public ledger origin retains private hosts in one allowed-host entry.")
