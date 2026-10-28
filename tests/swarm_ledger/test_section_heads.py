@@ -166,12 +166,21 @@ def test_sections_toggle_leaves_comments_and_outline_alone(tab):
     probe = """() => Object.fromEntries([...document.querySelectorAll("details[data-key], #outline details.fold")]
              .map((d) => [d.dataset.key || d.id, d.open]))"""
     before = tab.evaluate(probe)
+    tab.evaluate(
+        """() => {
+          const post = scheduler.postTask.bind(scheduler);
+          scheduler.postTask = (task, options) =>
+            new Promise((done) => setTimeout(done, 100)).then(() => post(task, options));
+        }"""
+    )
     tab.click("#sections-all")
+    tab.wait_for_timeout(150)
     tab.click("#sections-all")
     settle(tab)
     after = tab.evaluate(probe)
-    assert before.items() <= after.items()
-    assert all(v is False for k, v in after.items() if k not in before)
+    changed = {k: (v, after.get(k, "missing")) for k, v in before.items() if after.get(k, "missing") != v}
+    added = {k: v for k, v in after.items() if k not in before and v is not False}
+    assert not changed and not added, f"changed {changed} added {added}"
 
 
 def test_sections_state_survives_a_reload(tab):
