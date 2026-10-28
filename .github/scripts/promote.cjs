@@ -20,6 +20,36 @@ async function gradeIsComplete(github, context, api) {
     [...latest.values()].every(state => state === 'success');
 }
 
+async function snapshotChecksComplete(github, api, snapshot, number) {
+  let cursor = null;
+  let complete = true;
+  do {
+    const result = await github.graphql(`query($owner: String!, $repo: String!, $snapshot: GitObjectID!, $number: Int!, $cursor: String) {
+      repository(owner: $owner, name: $repo) {
+        object(oid: $snapshot) { ... on Commit { statusCheckRollup {
+          contexts(first: 100, after: $cursor) {
+            nodes {
+              ... on CheckRun { name status conclusion isRequired(pullRequestNumber: $number) }
+              ... on StatusContext { context state isRequired(pullRequestNumber: $number) }
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        } } }
+      }
+    }`, { ...api, snapshot, number, cursor });
+    const contexts = result.repository.object.statusCheckRollup?.contexts;
+    for (const check of contexts?.nodes || []) {
+      if (!check.isRequired) continue;
+      const pending = check.context ? check.state === 'PENDING' : check.status !== 'COMPLETED';
+      const passed = check.context ? check.state === 'SUCCESS' : ['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(check.conclusion);
+      if (!pending && !passed) throw new Error(`Required snapshot check failed: ${check.context || check.name}`);
+      if (pending) complete = false;
+    }
+    cursor = contexts?.pageInfo.hasNextPage ? contexts.pageInfo.endCursor : null;
+  } while (cursor);
+  return complete;
+}
+
 async function deleteSnapshot(github, api, ref) {
   try {
     await github.rest.git.deleteRef({ ...api, ref });
@@ -42,7 +72,7 @@ async function endSuperseded(core, graded, main, promoted) {
   ]).write();
 }
 
-module.exports = async ({ github, context, core, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }) => {
+module.exports = async ({ github, context, core, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), now = Date.now }) => {
   const { owner, repo } = context.repo;
   const repository = `${owner}/${repo}`;
   if (context.eventName !== 'push' || context.ref !== 'refs/heads/dev' ||
@@ -78,18 +108,20 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       throw new Error('Promotion pull request does not match the snapshot commit');
     }
     let ready = false;
-    for (let attempt = 0; attempt < 48; attempt++) {
+    const deadline = now() + 30 * 60 * 1000;
+    while (now() < deadline) {
       const latest = (await github.rest.pulls.get({ ...api, pull_number: pull.number })).data;
       if (latest.head.sha !== snapshot) throw new Error('Promotion pull request moved away from the graded head');
       if (latest.mergeable === false) throw new Error('Promotion pull request has merge conflicts');
-      if (latest.mergeable === true && (latest.mergeable_state === 'clean' ||
+      const complete = await snapshotChecksComplete(github, api, snapshot, pull.number);
+      if (complete && latest.mergeable === true && (latest.mergeable_state === 'clean' ||
           latest.mergeable_state === 'unstable' && await gradeIsComplete(github, context, api))) {
         ready = true;
         break;
       }
-      await sleep(5000);
+      await sleep(Math.min(5000, Math.max(0, deadline - now())));
     }
-    if (!ready) throw new Error('Promotion checks did not become mergeable within four minutes');
+    if (!ready) throw new Error('Promotion checks did not become mergeable within thirty minutes');
     const current = (await github.rest.repos.getCommit({ ...api, ref: 'main' })).data;
     if (current.sha !== main.sha) {
       promoted = await supersededBy(github, api, context.sha, current);

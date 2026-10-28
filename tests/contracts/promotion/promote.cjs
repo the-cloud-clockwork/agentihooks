@@ -122,6 +122,39 @@ test('stops pending snapshot checks at the thirty minute deadline', async () => 
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
 });
 
+test('waits for every required snapshot context even when mergeability reads clean', async () => {
+  const f = fixture();
+  const queries = [];
+  f.github.graphql = async (query, variables) => {
+    queries.push(variables);
+    assert.match(query, /isRequired\(pullRequestNumber: \$number\)/);
+    return { repository: { object: { statusCheckRollup: { contexts: {
+      nodes: variables.cursor ? [
+        { context: 'required status', isRequired: true, state: f.now() < 330000 ? 'PENDING' : 'SUCCESS' },
+        { name: 'optional check', isRequired: false, status: 'COMPLETED', conclusion: 'FAILURE' },
+      ] : [{ name: 'required check', isRequired: true, status: 'COMPLETED', conclusion: 'SUCCESS' }],
+      pageInfo: { hasNextPage: !variables.cursor, endCursor: variables.cursor ? null : 'next-page' },
+    } } } } };
+  };
+  await promote(f);
+  assert.equal(f.now(), 330000);
+  assert.equal(f.outputs.main, 'rebased');
+  assert.deepEqual(queries[0], { owner: 'owner', repo: 'repo', snapshot: 'snapshot', number: 7, cursor: null });
+  assert.equal(queries[1].cursor, 'next-page');
+});
+
+test('reads a required failure on a later page even while another check is pending', async () => {
+  const f = fixture({ pending: true });
+  f.github.graphql = async (query, { cursor }) => ({ repository: { object: { statusCheckRollup: { contexts: {
+    nodes: cursor ? [{ name: 'late failure', isRequired: true, status: 'COMPLETED', conclusion: 'CANCELLED' }] :
+      [{ name: 'queued check', isRequired: true, status: 'QUEUED', conclusion: null }],
+    pageInfo: { hasNextPage: !cursor, endCursor: cursor ? null : 'next-page' },
+  } } } } });
+  await assert.rejects(promote(f), /Required snapshot check failed: late failure/);
+  assert.equal(f.now(), 0);
+  assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+});
+
 test('promotes the graded tree as one commit on main and records both revisions', async () => {
   const f = fixture();
   await promote(f);
