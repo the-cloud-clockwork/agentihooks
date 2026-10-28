@@ -23,6 +23,20 @@ def _request(setup):  # noqa: F811
     return SpawnRequest(setup.config, "eng", name, task)
 
 
+def _unreserved(setup, monkeypatch):  # noqa: F811
+    from unittest.mock import Mock
+
+    spy = Mock(side_effect=AssertionError("a refused seat must not reserve room"))
+    monkeypatch.setattr(setup.launcher, "reserve_room", spy)
+    return spy
+
+
+def _published(setup) -> int:  # noqa: F811
+    from scripts.hive.orders import Orders
+
+    return setup.store.redis.xlen(Orders(setup.store.redis).stream("remote"))
+
+
 def _ordered(setup, monkeypatch) -> list:  # noqa: F811
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
@@ -44,9 +58,11 @@ def test_a_seat_placed_on_another_hive_is_refused_while_a_user_bundle_is_registe
     user.mkdir()
     _register(user)
     sent = _ordered(setup, monkeypatch)
+    reserved = _unreserved(setup, monkeypatch)
 
     outcome = setup.launcher.spawn(_request(setup))
 
+    reserved.assert_not_called()
     assert outcome.status is Status.REFUSED
     assert outcome.backend == launch.HIVE
     assert outcome.detail == (
@@ -65,9 +81,11 @@ def test_a_registered_user_bundle_whose_directory_is_gone_still_refuses_the_remo
 
     _register(tmp_path / "moved-away")
     sent = _ordered(setup, monkeypatch)
+    reserved = _unreserved(setup, monkeypatch)
 
     outcome = setup.launcher.spawn(_request(setup))
 
+    reserved.assert_not_called()
     assert outcome.status is Status.REFUSED
     assert "moved-away" in outcome.detail
     assert sent == []
@@ -118,3 +136,63 @@ def test_an_order_published_before_the_registration_is_answered_and_never_revoke
     assert setup.launcher.orders_for("task") == order
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "working"
     assert setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id) is None
+
+
+def test_an_environment_only_registration_refuses_the_remote_placement_before_any_reservation_or_order(
+    setup,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+):
+    from scripts.hive import launch
+    from scripts.swarm_v2.runtime.base import Status
+
+    user = tmp_path / "from-env"
+    user.mkdir()
+    monkeypatch.setenv("AGENTIHOOKS_USER_BUNDLE_PATH", str(user))
+    reserved = _unreserved(setup, monkeypatch)
+
+    outcome = setup.launcher.spawn(_request(setup))
+
+    reserved.assert_not_called()
+    assert outcome.status is Status.REFUSED
+    assert outcome.backend == launch.HIVE
+    assert f"the user bundle at {user} is registered on this host" in outcome.detail
+    assert _published(setup) == 0
+    assert setup.launcher.orders_for("task") is None
+
+
+def test_an_environment_only_registration_with_an_absent_path_still_refuses_the_remote_placement(
+    setup,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+):
+    from scripts.swarm_v2.runtime.base import Status
+
+    absent = tmp_path / "from-env-absent"
+    monkeypatch.setenv("AGENTIHOOKS_USER_BUNDLE_PATH", str(absent))
+    reserved = _unreserved(setup, monkeypatch)
+
+    outcome = setup.launcher.spawn(_request(setup))
+
+    reserved.assert_not_called()
+    assert outcome.status is Status.REFUSED
+    assert f"the user bundle at {absent} is registered on this host" in outcome.detail
+    assert _published(setup) == 0
+    assert setup.launcher.orders_for("task") is None
+
+
+def test_a_state_registration_refuses_without_publishing_when_the_order_path_is_left_real(
+    setup,  # noqa: F811
+    tmp_path,
+):
+    from scripts.swarm_v2.runtime.base import Status
+
+    user = tmp_path / "user-bundle"
+    user.mkdir()
+    _register(user)
+
+    outcome = setup.launcher.spawn(_request(setup))
+
+    assert outcome.status is Status.REFUSED
+    assert _published(setup) == 0
+    assert setup.launcher.orders_for("task") is None
