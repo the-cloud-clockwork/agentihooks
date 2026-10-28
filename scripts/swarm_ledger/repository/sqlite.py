@@ -9,11 +9,12 @@ from pathlib import Path
 from scripts.swarm_ledger import request_metrics
 
 from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
-from .entry import Entry, detached
+from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
 from .rows import TABLES, assemble, diff, encode, flatten, load, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
+from .writer_copy import written
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS registry (slug TEXT, path TEXT, value TEXT, PRIMARY KEY(slug,path));
@@ -661,7 +662,7 @@ class SQLiteLedgerRepository:
             if state.get("tasks", []) != entry.state.get("tasks", [])
             else previous.get("task_revision", previous["rev"])
         )
-        fragments, writer = detached(document(state, entry.fragments), entry.fragments, state)
+        fragments, writer = written(state, entry.fragments)
         state = fragments.value
         before, after = diff(*(without_events(value) for value in (entry.state, state)))
         paths = write_rows(connection, slug, before, after)

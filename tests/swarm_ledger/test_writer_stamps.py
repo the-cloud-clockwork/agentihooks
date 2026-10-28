@@ -2,9 +2,9 @@ import copy
 
 import pytest
 
-from scripts.swarm_ledger.repository import entry as entry_module
-from scripts.swarm_ledger.repository import sqlite
+from scripts.swarm_ledger.repository import sqlite, writer_copy
 from scripts.swarm_ledger.repository.entry import Entry
+from scripts.swarm_ledger.repository.fragments import document, encoded
 from tests.swarm_ledger.test_repository_outbox import CHAT, CLAIM, store
 
 
@@ -188,13 +188,13 @@ def test_a_write_through_the_held_copy_copies_only_the_leaves_it_changed(tmp_pat
     tasks = [copy.deepcopy(task) for task in cached(repo).state["tasks"]]
     assert tasks
     copied = []
-    real = entry_module.thawed
+    real = writer_copy.thawed
 
     def counting(value):
         copied.append(value)
         return real(value)
 
-    monkeypatch.setattr(entry_module, "thawed", counting)
+    monkeypatch.setattr(writer_copy, "thawed", counting)
     published, _ = repo.apply_ops("ledger", ops=[CHAT], copy_state=False)
     assert published["tasks"] == tasks
     assert not [value for value in copied if isinstance(value, dict) and value in tasks]
@@ -212,3 +212,65 @@ def test_a_reloaded_entry_holds_no_writer_copy_and_copies_on_write(tmp_path):
     assert writing == reloaded.state
     assert writing is not reloaded.state
     assert writing["tasks"] is not reloaded.state["tasks"]
+
+
+def two_states():
+    old = {
+        "_meta": {"rev": 1, "stamps": {"a": {"at": 1}, "b": {"at": 2}}},
+        "tasks": [{"id": "t1"}, {"id": "t2"}],
+        "overview": {"text": "x"},
+        "chat": [{"id": "m1"}],
+        "notes": [{"x": 1}],
+    }
+    new = copy.deepcopy(old)
+    new["_meta"]["rev"] = 2
+    new["_meta"]["stamps"]["b"] = {"at": 3}
+    new["tasks"][1]["title"] = "changed"
+    new["tasks"].append({"id": "t3"})
+    new["overview"] = {"text": "y"}
+    new["chat"] = []
+    new["notes"] = {"x": 1}
+    return old, new
+
+
+def test_written_copies_changed_parts_apart_and_keeps_unchanged_parts():
+    old, new = two_states()
+    previous = document(old)
+    published, writer = writer_copy.written(new, previous)
+    fresh = document(new)
+    assert published.value == new
+    assert writer == new
+    assert list(published.value) == list(new)
+    assert list(writer["_meta"]) == list(new["_meta"])
+    assert encoded(published) == encoded(fresh)
+    tasks, before = published.parts["tasks"], previous.parts["tasks"]
+    assert tasks.parts[0] is before.parts[0]
+    assert writer["tasks"][0] is new["tasks"][0]
+    stamps = published.parts["_meta"].parts["stamps"]
+    assert stamps.parts["a"] is previous.parts["_meta"].parts["stamps"].parts["a"]
+    assert writer["_meta"]["stamps"]["a"] is new["_meta"]["stamps"]["a"]
+    for index in (1, 2):
+        assert tasks.parts[index].signature == fresh.parts["tasks"].parts[index].signature is not None
+        assert tasks.parts[index].value is not new["tasks"][index]
+        assert writer["tasks"][index] is not new["tasks"][index]
+        assert writer["tasks"][index] is not tasks.parts[index].value
+    assert stamps.parts["b"].signature == fresh.parts["_meta"].parts["stamps"].parts["b"].signature is not None
+    assert published.parts["overview"].value is not new["overview"]
+    assert writer["overview"] is not new["overview"]
+    assert published.parts["notes"].parts is None
+    assert writer["notes"] is not new["notes"]
+    assert set(containers(published.value, {})) & set(containers(writer, {})) == set()
+
+
+def test_written_without_a_previous_copies_everything_and_an_unchanged_state_is_returned_as_is():
+    _, new = two_states()
+    published, writer = writer_copy.written(new, None)
+    assert published.value == writer == new
+    assert encoded(published) == encoded(document(new))
+    assert set(containers(published.value, {})) & set(containers(new, {})) == set()
+    assert set(containers(writer, {})) & set(containers(new, {})) == set()
+    assert set(containers(published.value, {})) & set(containers(writer, {})) == set()
+    unchanged = document(new)
+    same, kept = writer_copy.written(new, unchanged)
+    assert same is unchanged
+    assert kept is new
