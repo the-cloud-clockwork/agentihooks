@@ -257,6 +257,7 @@ READS = [
     ["api", "--method=get", "repos/o/r/pulls"],
     ["api", "graphql", "-f", "query=query { viewer { login } }"],
     ["api", "graphql", "-f", 'query=query { user(login: "a@b.c") { id } }'],
+    ["api", "graphql", "-f", 'query=query { search(query: "mutation", type: ISSUE) { issueCount } }'],
     ["run", "list"],
     ["run", "download", "123"],
     ["pr", "view", "8"],
