@@ -18,11 +18,11 @@ The agents hash remains a projection with the preceding record shape. New reader
 
 The swarm tick launches every engineer and CI seat of a pass at once, one thread per launch. Each launch admits its execution through `RedisStore.start_execution`, then binds its pane and updates its record. Each of these writes watches the swarm's `executions` hash and retries when another writer changes it first. A write gives up after five watched attempts (`WRITE_ATTEMPTS`).
 
-Before this change, the threads of one batch raced each other on the same hash. With six to eight launches in one pass, a launch could lose all five attempts to its siblings. Its spawn then failed, the tick reopened the task, and the Doctor reported a `failed-spawn/<task>` finding.
+Without the lock, the threads of one batch raced each other on the same hash. In a batch of several launches, a launch could lose all five attempts to its siblings. Its spawn then failed, the tick reopened the task when it still held it, and the Doctor reported a `failed-spawn/<task>` finding.
 
-`ExecutionRegistry` now holds one lock per swarm for each history write:
+`ExecutionRegistry` holds one lock per swarm for these four writes:
 
-| Method | Store entry point | Error when five attempts are lost |
+| Method | Entry point | Error when five attempts are lost |
 |---|---|---|
 | `start` | `RedisStore.start_execution` | `execution history kept changing; admission was not committed` |
 | `update` | `RedisStore.put_agent` for an admitted record | `execution history kept changing; update was not committed` |
@@ -34,15 +34,19 @@ Before this change, the threads of one batch raced each other on the same hash. 
 - The lock is reentrant. `put` on an admitted record calls `update` while it holds the lock.
 - The lock lives in process memory. A writer in another process, such as a second tick or an `agentihooks swarm` command, still meets the watched transaction and its five attempts. The error can still appear when another process writes the same swarm's history that often.
 
-Nothing is configured: the lock applies to every swarm and every launch path that writes through `ExecutionRegistry`.
+Nothing is configured: the lock applies to every swarm and every launch path that writes through these four methods. `ExecutionRegistry.archive` and `ExecutionRegistry.end_orphan` also write the history without the lock; the tick runs them one at a time, outside the parallel launch batch.
 
 ### Reading a failed spawn
 
-A launch that still runs out of attempts appears in the tick journal as:
+A launch that still runs out of attempts appears in the tick output as:
 
 ```text
 <slug>: spawn failed for <task id>, task <task id> reopened: execution history kept changing; admission was not committed
 ```
+
+The `, task <task id> reopened` part appears only when the tick still held the task and reopened it.
+
+When the scheduled tick runs under `systemd-cat -t agentihooks-swarm`, its output is in the user journal:
 
 ```bash
 # Spawn failures from execution history contention in the last day
@@ -50,6 +54,6 @@ journalctl --user -t agentihooks-swarm --since "1 day ago" \
   | grep "spawn failed for" | grep "execution history kept changing"
 ```
 
-After this change, a line like this means a writer outside the tick process changed the history during the launch. Look for a writer in another process before the failure time; the tick's own parallel launches no longer cause it. The reopened task launches again on a later pass. Never edit the `executions` hash by hand to clear a failure.
+A line like this means a writer that does not take the lock changed the history during the launch: another process, or the archive and orphan cleanup writes. Look for such a writer before the failure time; the tick's own parallel launches no longer cause it. A reopened task launches again on a later pass. Never edit the `executions` hash by hand to clear a failure.
 
 The tests in `tests/swarm/test_execution_concurrency.py` cover this behavior. They check that a sibling admission, update and pane write wait for an admission in flight, that another swarm writes during it, and that each of the four writes holds the lock of its own swarm.
