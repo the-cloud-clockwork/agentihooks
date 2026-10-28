@@ -46,11 +46,14 @@ def covered_mutant_tests(coverage_file: Path, root: Path, tests: dict[str, set[s
                 after = ast.get_source_segment(source, node).replace(mutant, name, 1)
                 lines = mutation_lines(before, after, original.lineno)
                 if not lines or any(
-                    line not in contexts and line not in statements or any(
+                    line not in contexts
+                    and line not in statements
+                    or any(
                         context.rpartition("|")[2] not in ("setup", "run", "teardown")
                         or context.rpartition("|")[0] not in allowed
                         for context in contexts.get(line, ())
-                    ) for line in lines
+                    )
+                    for line in lines
                 ):
                     continue
                 chosen = allowed - seen

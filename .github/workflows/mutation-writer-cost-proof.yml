@@ -137,6 +137,12 @@ jobs:
         with:
           pattern: writer-result-*
           path: results
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 40666320874
+          name: mutation-preflight-shard-0
+          path: baseline
       - name: Require complete grading within every original budget
         working-directory: .
-        run: python tests/writer_mutation_cost_proof.py verify results
+        run: python tests/writer_mutation_cost_proof.py verify results baseline
