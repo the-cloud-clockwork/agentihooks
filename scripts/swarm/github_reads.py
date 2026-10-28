@@ -10,8 +10,8 @@ the previous login's entry.
 import fcntl
 import hashlib
 import json
-import re
 import os
+import re
 import subprocess
 import time
 from collections import Counter
