@@ -112,12 +112,15 @@ def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(st
 
 def test_recycle_comes_at_fifteen_minutes_whatever_the_handoff_wait(store, monkeypatch):
     monkeypatch.setenv(master_retire.MINUTES, "30")
-    agent, runtime = master(store)
+    agent, runtime = master(store, PaneObservation("waiting"))
     operator_says(store, START)
     run(store, runtime, START)
     run(store, runtime, START + 10 * MINUTE)
     [ask] = InboxStore(store.redis).pending_items(agent.name)
-    assert run(store, runtime, START + 15 * MINUTE)[0].startswith(f"recycled master {agent.name}")
+    assert run(store, runtime, START + 15 * MINUTE) == [
+        f"recycled master {agent.name} in its seat after 15 minutes held on the prompt waiting on input"
+        " with operator items waiting"
+    ]
     assert InboxStore(store.redis).get(ask.id).reason == f"done: {master_prompt_stall.RECYCLED}"
     assert master_retire.reason(store, "sw", agent.name) == ""
 
@@ -230,6 +233,8 @@ def test_log_only_by_default_writes_would_be_rows_once_and_acts_on_nothing(store
         f"log only: would recycle {agent.name}, held on {held} with operator items waiting for 15 minutes"
     ]
     assert run(store, runtime, START + 60 * MINUTE) == []
+    store.update("sw", gates={"reset": "off"})
+    assert run(store, runtime, START + 61 * MINUTE) == []
     assert InboxStore(store.redis).pending_items(agent.name) == []
     assert store.agents("sw")[0].state != "finished"
     reasons = [master_prompt_stall.REASON.format(prompt=held, minutes=m) for m in (10, 15)]
@@ -253,8 +258,9 @@ def test_stopping_swarm_is_left_to_its_stop(store, state):
     agent, runtime = master(store)
     operator_says(store, START)
     run(store, runtime, START)
-    store.update("sw", state=state)
-    assert run(store, runtime, START + 60 * MINUTE) == []
+    for later in (state, "stopped"):
+        store.update("sw", state=later)
+        assert run(store, runtime, START + 60 * MINUTE) == []
     assert InboxStore(store.redis).pending_items(agent.name) == []
 
 
