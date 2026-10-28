@@ -1141,8 +1141,12 @@ def test_the_pod_start_time_is_process_one_start_after_boot(tmp_path, monkeypatc
     (tmp_path / "stat").write_text("cpu  1 2 3\nbtime 1700000000\nprocesses 9\n")
     (tmp_path / "1").mkdir()
     fields = ["S", *["0"] * 18, "250"]
-    (tmp_path / "1" / "stat").write_text(f"1 (init proc) {' '.join(fields)} 0 0\n")
-    monkeypatch.setattr(process.os, "sysconf", lambda name: 100 if name == "SC_CLK_TCK" else 0)
+    (tmp_path / "1" / "stat").write_text(
+        f"1 (init) 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 proc) {' '.join(fields)} 0 0\n"
+    )
+    monkeypatch.setattr(process.os, "sysconf", lambda name: 3 if name == "SC_CLK_TCK" else 0)
 
-    assert process.started_ms(tmp_path) == 1700000000 * 1000 + 2500
+    started = process.started_ms(tmp_path)
+    assert started == 1700000000 * 1000 + 83333
+    assert type(started) is int
     assert process.started_ms(tmp_path / "missing") == 0
