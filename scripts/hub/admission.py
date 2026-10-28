@@ -2,6 +2,7 @@
 or occupy a seat, and a remote hive makes no service ledger reads."""
 
 import json
+import logging
 from types import SimpleNamespace
 
 from scripts.hub import lease
@@ -43,6 +44,11 @@ class Admission:
         task_id, lane, generation = request["task"], request["lane"], request["generation"]
         view = self.source.snapshot(slug)
         if readiness.withdrawal(SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view):
+            return None
+        from scripts.swarm import tick
+
+        if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
+            logging.getLogger(__name__).warning("events claim cap swarm=%s task=%s: %s", slug, task_id, reason)
             return None
         return self._claim(slug, request, view.rows[task_id])
 
