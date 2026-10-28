@@ -49,7 +49,7 @@ def test_concurrent_agent_processes_each_land_every_write(tmp_path):
             worker.join(30)
     finally:
         stop.set()
-        busy.join()
+        busy.join(30)
         for worker in workers:
             if worker.pid is not None:
                 worker.kill()
