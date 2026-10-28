@@ -92,3 +92,66 @@ def test_atomic_refusal_restores_stamps_after_an_earlier_operation_wrote_one(tmp
     assert written["plans"] == before["plans"]
     assert written["_meta"]["stamps"] == before["_meta"]["stamps"]
     assert previous.state == before
+
+
+def containers(value: object, found: dict) -> dict:
+    if type(value) in (dict, list):
+        found[id(value)] = value
+        for item in value.values() if type(value) is dict else value:
+            containers(item, found)
+    return found
+
+
+def cached(repo):
+    with repo.connect() as connection:
+        return repo._entry(connection, "ledger")
+
+
+def test_a_write_holds_an_independent_writer_copy_for_the_next_write(tmp_path):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    repo.apply_ops("ledger", ops=[CHAT])
+    entry = cached(repo)
+    held = entry.writer
+    assert held == entry.state
+    stamps = {id(record) for record in entry.state["_meta"]["stamps"].values()}
+    assert set(containers(held, {})) & set(containers(entry.state, {})) <= stamps
+    before = copy.deepcopy(entry.state)
+    for task in held["tasks"]:
+        task["title"] = "changed by the writer"
+    held["chat"].append({"id": "m9", "text": "writer only"})
+    held["_meta"]["events"].clear()
+    assert entry.state == before
+    assert entry.for_write() is held
+    assert entry.writer is None
+    assert entry.for_write() is not held
+
+
+def test_writes_through_held_copies_store_what_a_fresh_reader_loads(tmp_path):
+    repo = store(tmp_path)
+    for op in (CLAIM, CHAT, {**CHAT, "id": "m2", "text": "again"}):
+        repo.apply_ops("ledger", ops=[op])
+        entry = cached(repo)
+        assert entry.writer == entry.state
+        assert sqlite.SQLiteLedgerRepository(repo.path).get_document("ledger") == repo.get_document("ledger")
+    assert [message["text"] for message in repo.get_document("ledger")["chat"]][-2:] == ["hello", "again"]
+
+
+def test_a_failed_write_drops_the_held_copy_and_the_next_write_copies_again(tmp_path, monkeypatch):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    entry = cached(repo)
+    assert entry.writer is not None
+
+    def broken(slug, state):
+        raise RuntimeError("summary failed")
+
+    monkeypatch.setattr(sqlite, "summarize", broken)
+    with pytest.raises(RuntimeError, match="summary failed"):
+        repo.apply_ops("ledger", ops=[CHAT])
+    monkeypatch.undo()
+    assert cached(repo) is entry
+    assert entry.writer is None
+    _, rejected = repo.apply_ops("ledger", ops=[CHAT])
+    assert rejected == []
+    assert sqlite.SQLiteLedgerRepository(repo.path).get_document("ledger") == repo.get_document("ledger")
