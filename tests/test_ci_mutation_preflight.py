@@ -655,9 +655,9 @@ def test_protected_mutation_planner_installs_with_no_branch_lock(tmp_path):
     branch.mkdir()
     probe = """
 uv() {
-    [[ "$1 $2 $3 $4" == "pip install --system --constraint" ]]
-    [[ "$5" == "$RUNNER_TEMP/workflow/.github/test-requirements.lock" ]]
-    [[ -s "$5" ]]
+    [[ "$1 $2 $3 $4" == "pip install --system --constraint" ]] || return 1
+    [[ "$5" == "$RUNNER_TEMP/workflow/.github/test-requirements.lock" ]] || return 1
+    [[ -s "$5" ]] || return 1
     echo "Trusted dependency lock resolved without a branch lock"
 }
 export -f uv
