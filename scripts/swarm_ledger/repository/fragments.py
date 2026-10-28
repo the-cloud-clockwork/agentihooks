@@ -70,11 +70,18 @@ def mapping(
     return Fragment({key: item.value for key, item in parts.items()}, parts)
 
 
+def stamp(key: str, value: object, previous: Fragment | None) -> Fragment:
+    """A stamp record is replaced, never changed in place, so the writer copy's shared record is still the one stored."""
+    if previous is not None and value is previous.value:
+        return previous
+    return leaf(value, previous)
+
+
 def meta_part(key: str, value: object, previous: Fragment | None) -> Fragment:
     if key == "events" and isinstance(value, list):
         return sequence(value, previous)
     if key == "stamps" and isinstance(value, dict):
-        return mapping(value, previous, lambda key, item, old: leaf(item, old))
+        return mapping(value, previous, stamp)
     return leaf(value, previous)
 
 

@@ -71,6 +71,8 @@ def _oauth_error(exc: urllib.error.HTTPError) -> str:
         error = json.loads(exc.read()).get("error")
     except (ValueError, AttributeError):
         return ""
+    if isinstance(error, dict):
+        error = error.get("code")
     return error if isinstance(error, str) else ""
 
 
