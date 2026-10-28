@@ -195,7 +195,7 @@ def test_main_seeds_the_window_and_reports_matching_counts(repo, monkeypatch, tm
     assert f"· {graded[:12]} · #5 · @dev\n\n**Add the seed**\n\n{_words(30)}\n" in text
     assert "· direct commit · @a\n\n**Direct fix**" in text
     assert "Old" not in text
-    assert windows == [("org/repo", "2026-09-28", "2026-10-20T10:00:00+00:00")]
+    assert windows == [("org/repo", "2026-09-28", _git(repo, "log", "-1", "--format=%cI", graded))]
     out = capsys.readouterr().out
     assert "entries: 2 (pull requests 1, direct commits 1)\n" in out
     assert "merged pull requests into dev in window: 1\n" in out
