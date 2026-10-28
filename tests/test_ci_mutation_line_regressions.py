@@ -100,3 +100,29 @@ def test_all_observed_killers_run_before_the_remaining_tests(tmp_path):
     assert restored.killer("scripts.writer.x_write__mutmut_3") == "tests/b.py::second"
     assert restored.order("scripts.writer.x_write__mutmut_3", tests) == [tests[2], tests[1], tests[0]]
     assert restored.order("scripts.writer.x_write__mutmut_3", tests[:1]) == tests[:1]
+
+
+def test_statistics_collection_records_real_line_selections_from_its_mutants_root(tmp_path, monkeypatch):
+    import json
+    import subprocess
+
+    from scripts.ci_mutation import selection, stats_dependencies
+
+    source = "def x_write__mutmut_orig():\n    return 1\ndef x_write__mutmut_1():\n    return 2\n"
+    test = "tests/a.py::first"
+    coverage, root = _measured(tmp_path, source, {test + "|run": [2]})
+    output = tmp_path / "stats.json"
+    coverage.rename(output.with_suffix(".coverage"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("MUTATION_STATS_ROOT", str(tmp_path))
+    monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: "scripts/writer.py\0")
+    monkeypatch.setattr(stats_dependencies, "measured_dependencies", lambda *args: {})
+    engine = SimpleNamespace(
+        tests_by_mangled_function_name={"scripts.writer.x_write": {test}},
+        duration_by_test={test: 1},
+    )
+    runner = SimpleNamespace(mutmut=engine)
+    test_runner = SimpleNamespace(_pytest_add_cli_args=[], run_stats=lambda **kwargs: 0)
+    selection.collect_shard_stats(runner, test_runner, [test], output, str(root / "temp"))
+    assert json.loads(output.read_text())["tests"]["scripts.writer.x_write__mutmut_1"] == [test]

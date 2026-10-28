@@ -18,11 +18,13 @@ class KillMemory:
 
     def killer(self, mutant: str) -> str | None:
         path = self._path(mutant)
-        return path.read_text() if path.is_file() else None
+        return path.read_text().splitlines()[0] if path.is_file() else None
 
     def order(self, mutant: str, tests: Iterable[str]) -> list[str]:
-        killer = self.killer(mutant)
-        return sorted(tests, key=lambda test: test != killer)
+        path = self._path(mutant)
+        observed = path.read_text().splitlines() if path.is_file() else []
+        rank = {test: index for index, test in enumerate(observed)}
+        return sorted(tests, key=lambda test: rank.get(test, len(rank)))
 
     def prepare(self, mutant: str | None, tests: Iterable[str]) -> Iterable[str]:
         self.mutant = mutant
@@ -53,5 +55,6 @@ class KillMemory:
         self.folder.mkdir(parents=True, exist_ok=True)
         # Children of one run write the same function concurrently; a rename never shows a partial name.
         partial = path.with_name(f"{path.name}.{os.getpid()}")
-        partial.write_text(report.nodeid)
+        previous = path.read_text().splitlines() if path.is_file() else []
+        partial.write_text("\n".join(dict.fromkeys([report.nodeid, *previous])))
         partial.replace(path)
