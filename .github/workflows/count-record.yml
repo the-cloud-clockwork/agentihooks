@@ -95,10 +95,9 @@ jobs:
 
         '
     - name: Upload the suite count record
-      uses: actions/upload-artifact@v4
+      uses: ./.github/actions/retry-upload
       with:
         name: count-record-${{ matrix.python-version }}
         path: ${{ runner.temp }}/count-record/record.json
         if-no-files-found: warn
         retention-days: 7
-        overwrite: true
