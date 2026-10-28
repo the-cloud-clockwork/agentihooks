@@ -3,7 +3,6 @@ import subprocess
 
 from scripts import gate_protected
 
-
 WORKFLOW = ".github/workflows/gate-protected.yml"
 CONTENT = "name: Reviewed café\r\non: push\r\n".encode()
 
