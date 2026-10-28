@@ -303,3 +303,25 @@ def test_a_lost_checkpoint_reading_never_fails_the_committed_pointer(storage, ca
     assert backend.size(pointer) == len(document)
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert {"event": "checkpoint_reading_lost", "error": "ConnectionError"} in events
+
+
+@pytest.mark.parametrize("backend_name,failure", [("redis", "StateConflict"), ("bus", "RuntimeError")])
+def test_a_state_store_outage_on_the_checkpoint_reading_never_fails_the_committed_pointer(
+    storage, capsys, monkeypatch, backend_name, failure
+):
+    from scripts.events.bus import StateConflict
+
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", backend_name)
+    _, backend, authority = storage
+    errors = {"StateConflict": StateConflict, "RuntimeError": RuntimeError}
+
+    def down(*args):
+        raise errors[failure]("checkpoints unavailable")
+
+    api = artifacts.ArtifactsAPI(backend, authority, down)
+    document = json.dumps({"execution_id": "execution", "generation": 7}).encode()
+    pointer = "swarm/task/pointers/0000000007/0000000001.json"
+    assert request(api, "write", key=pointer, data=encoded(document)) == (200, {})
+    assert backend.size(pointer) == len(document)
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert {"event": "checkpoint_reading_lost", "error": failure} in events
