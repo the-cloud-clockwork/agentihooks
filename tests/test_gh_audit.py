@@ -79,6 +79,14 @@ def test_agent_shell_charges_loops_and_nested_shells_to_the_named_agent(charged,
     ]
 
 
+def test_monitor_commands_charge_the_named_agent_like_shell_commands(charged, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "ci@1-2")
+    gh_audit.charge_command(
+        "Monitor", {"command": "until gh api repos/a/b/actions/runs/1 | grep done; do sleep 30; done"}
+    )
+    assert charged() == [("agent.ci@1-2", "repos/a/b/actions/runs/1")]
+
+
 def test_process_requests_charge_their_named_caller_or_the_process(charged, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["/x/agentihooks", "swarm", "tick"])
     monkeypatch.setitem(sys.modules, "__main__", type(sys)("__main__"))

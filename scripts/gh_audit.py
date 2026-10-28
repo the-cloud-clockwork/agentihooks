@@ -21,6 +21,7 @@ SHELLS = frozenset({"bash", "sh", "zsh"})
 SPAWNS = frozenset({"os.exec", "os.posix_spawn", "subprocess.Popen"})
 PREFIX = re.compile(r"^(?:[A-Za-z_]\w*=.*|-.*|\d+[smhd]?)$")
 FREE = frozenset({"graphql", "rate_limit"})
+SHELL_TOOLS = frozenset({"Bash", "Monitor"})
 VALUED = frozenset(
     {"-F", "-H", "-R", "-X", "-f", "-p", "-q", "-t", "--cache", "--field", "--header", "--hostname", "--input"}
     | {"--jq", "--method", "--preview", "--raw-field", "--repo", "--template"}
@@ -113,7 +114,7 @@ def commands(text: str) -> list[list[str]]:
 
 
 def charge_command(tool_name: str, tool_input) -> None:
-    if tool_name != "Bash" or not isinstance(tool_input, dict):
+    if tool_name not in SHELL_TOOLS or not isinstance(tool_input, dict):
         return
     caller = f"agent.{os.environ.get('AGENTIHOOKS_AGENT_NAME') or 'bash'}"
     for command in commands(str(tool_input.get("command"))):
