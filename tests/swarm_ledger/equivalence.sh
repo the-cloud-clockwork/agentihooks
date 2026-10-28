@@ -62,11 +62,13 @@ store() {
 page() {
   contract=scripts/swarm_ledger/expected_page_change.json
   remove=()
-  if [[ -f "head/$contract" ]] && ! cmp -s "head/$contract" "base/$contract"; then
+  if [[ -f "head/$contract" ]] && ! diff -q "head/$contract" "base/$contract" > /dev/null 2>&1; then
     remove=(--remove "$PWD/head/$contract")
-    echo "::notice::The head changes the expected page change contract; the base page replay hides the elements it names."
+    echo "::notice::The head changes the expected page change contract;" \
+      "the base page replay hides the elements it names."
   fi
-  replay base-page python -I "$replays/page_replay.py" "$PWD/base" "$RUNNER_TEMP/base-page" base-page.json "${remove[@]}" &
+  replay base-page python -I "$replays/page_replay.py" "$PWD/base" "$RUNNER_TEMP/base-page" base-page.json \
+    "${remove[@]}" &
   replay head-page python -I "$replays/page_replay.py" "$PWD/head" "$RUNNER_TEMP/head-page" head-page.json &
   replay fault-page python -I "$replays/page_replay.py" "$PWD/fault-chat" "$RUNNER_TEMP/fault-page" fault-page.json &
   settle
