@@ -16,10 +16,9 @@ DONE = ("fired", "cancelled", "stopped")
 
 
 def wake(event: dict, delivery_id: str, state: "StateStore") -> None:
-    key = json.loads(event["payload"])["key"]
-    from scripts.scheduler.slots import first_delivery
+    from scripts.events.scheduler_state import wake as wake_legacy
 
-    first_delivery(state, key, delivery_id)
+    wake_legacy(state, json.loads(event["payload"])["key"], delivery_id)
 
 
 def _recheck(deadline: float | None) -> float:
