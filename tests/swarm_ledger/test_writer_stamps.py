@@ -2,7 +2,7 @@ import copy
 
 import pytest
 
-from scripts.swarm_ledger.repository import sqlite, writer_copy
+from scripts.swarm_ledger.repository import fragments, sqlite, writer_copy
 from scripts.swarm_ledger.repository.entry import Entry
 from scripts.swarm_ledger.repository.fragments import document, encoded
 from tests.swarm_ledger.test_repository_outbox import CHAT, CLAIM, store
@@ -138,6 +138,34 @@ def test_writes_through_held_copies_store_what_a_fresh_reader_loads(tmp_path):
         assert entry.writer == entry.state
         assert sqlite.SQLiteLedgerRepository(repo.path).get_document("ledger") == repo.get_document("ledger")
     assert [message["text"] for message in repo.get_document("ledger")["chat"]][-2:] == ["hello", "again"]
+
+
+def test_the_held_copy_shares_stored_stamp_records_and_the_next_write_reuses_their_fragments(tmp_path, monkeypatch):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    entry = cached(repo)
+    stored = entry.fragments.parts["_meta"].parts["stamps"]
+    held = entry.writer["_meta"]["stamps"]
+    assert held is not entry.state["_meta"]["stamps"] and held == entry.state["_meta"]["stamps"]
+    assert all(held[key] is part.value for key, part in stored.parts.items())
+    dumped = []
+    dumps = fragments.orjson.dumps
+    monkeypatch.setattr(fragments.orjson, "dumps", lambda value: dumped.append(value) or dumps(value))
+    repo.apply_ops("ledger", ops=[CHAT])
+    kept = cached(repo).fragments.parts["_meta"].parts["stamps"]
+    assert stored.parts and all(kept.parts[key] is part for key, part in stored.parts.items())
+    assert not any(value in stored.value.values() for value in dumped)
+    assert sqlite.SQLiteLedgerRepository(repo.path).get_document("ledger") == repo.get_document("ledger")
+
+
+def test_a_replaced_stamp_record_is_checked_as_a_new_leaf():
+    previous = fragments.document({"_meta": {"stamps": {"a": {"rev": 1}, "b": {"rev": 1}}}})
+    records = previous.value["_meta"]["stamps"]
+    state = {"_meta": {"stamps": {"a": records["a"], "b": {"rev": 1.0}}}}
+    updated = fragments.document(state, previous)
+    stamps, old = updated.parts["_meta"].parts["stamps"].parts, previous.parts["_meta"].parts["stamps"].parts
+    assert stamps["a"] is old["a"]
+    assert stamps["b"] is not old["b"] and type(stamps["b"].value["rev"]) is float
 
 
 def test_a_failed_write_drops_the_held_copy_and_the_next_write_copies_again(tmp_path, monkeypatch):
