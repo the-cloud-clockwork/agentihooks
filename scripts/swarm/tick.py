@@ -769,6 +769,8 @@ def _free_refused(slug, store, ledger, runtime, rows, agent, now_ms):
 
 
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
+    from scripts.swarm import automated_gc
+
     observed = runtime.observe(agent)
     if _refusal_due(slug, store, rows, agent, observed, now_ms):
         return _free_refused(slug, store, ledger, runtime, rows, agent, now_ms)
@@ -808,13 +810,12 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if state in {idle_state.WAITING, idle_state.WORKING}:
         store.put_agent(slug, replace(agent, idle_ticks=0))
         return nudged
-    if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
+    if (
+        _operator_at_pane(slug, store, agent, observed, now_ms)
+        or ledger_probe.holding(store, slug)
+        or automated_gc.owned(slug, agent)
+    ):
         store.put_agent(slug, agent)
-        return nudged
-    from scripts.swarm import automated_gc
-
-    if automated_gc.owned(slug, agent):
-        store.put_agent(slug, replace(agent, idle_ticks=0))
         return nudged
     idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
     store.put_agent(slug, idle)
