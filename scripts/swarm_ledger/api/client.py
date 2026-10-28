@@ -85,13 +85,14 @@ class ResourceClient:
         self.timeout = timeout
 
     def request(self, slug: str, path: str, payload: dict | None = None) -> dict:
-        writer = writer_header() if path == "operations" else {}
         request = urllib.request.Request(
             f"{self.base}/api/v1/ledgers/{quote(slug, safe='')}/{path}",
             data=None if payload is None else json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json", **self.credentials, **writer},
+            headers={"Content-Type": "application/json", **self.credentials},
             method="GET" if payload is None else "POST",
         )
+        for name, value in (writer_header() if path == "operations" else {}).items():
+            request.add_header(name, value)
         with ledger_link.urlopen(request, self.timeout) as response:
             return json.loads(response.read())
 

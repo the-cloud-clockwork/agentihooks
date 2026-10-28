@@ -8,6 +8,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 
+import hooks.filters.check as filter_check  # noqa: E402
+import scripts.swarm_ledger.api.routes as api_routes  # noqa: E402
+import scripts.swarm_ledger.ledger_comments as ledger_comments  # noqa: E402
 from scripts.swarm_ledger import ledger_agent_ops, ledger_core, ledger_link  # noqa: E402
 from scripts.swarm_ledger.api import client, mutations, schemas  # noqa: E402
 from scripts.swarm_ledger.api.errors import APIError  # noqa: E402
@@ -226,3 +229,47 @@ def test_the_client_sends_no_folder_when_its_folder_is_gone(monkeypatch):
 
     monkeypatch.setattr(client.os, "getcwd", gone)
     assert client.writer_header() == {}
+
+
+def test_the_trust_check_refuses_only_an_untrusted_repository_with_project_conditions(
+    server_elsewhere, stranger, tmp_path
+):
+    with pytest.raises(ValueError) as refused:
+        filter_check.trusted_folder(stranger)
+    assert str(refused.value) == UNTRUSTED
+    assert filter_check.trusted_folder(server_elsewhere) == server_elsewhere
+    assert filter_check.trusted_folder(str(tmp_path / "server")) == str(tmp_path / "server")
+
+
+def test_the_trust_check_trusts_the_owner_of_the_operators_bundle(server_elsewhere, stranger, tmp_path):
+    bundle = tmp_path / "bundle"
+    subprocess.run(["git", "init", "-q"], cwd=bundle, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "git@github.com:stranger/bundle.git"], cwd=bundle, check=True)
+    assert filter_check.trusted_folder(stranger) == stranger
+
+
+def test_the_folder_check_validates_only_a_carried_folder():
+    assert ledger_comments.worktree({}, True) is None
+    assert ledger_comments.worktree({"worktree": 7}, False) is None
+    assert ledger_comments.worktree({"worktree": "/w"}, True) == "/w"
+    for folder in ("w", "", 7, None):
+        with pytest.raises(ValueError) as refused:
+            ledger_comments.worktree({"worktree": folder}, True)
+        assert str(refused.value) == "worktree must be the writer's absolute folder path"
+
+
+def test_the_operations_route_hands_the_header_folder_to_apply(monkeypatch):
+    from email.message import Message
+    from io import BytesIO
+
+    seen = []
+    monkeypatch.setattr(mutations, "apply", lambda *args: seen.append(args) or {"applied": []})
+    raw = json.dumps({"ops": []}).encode()
+    headers = Message()
+    headers["Content-Type"] = "application/json"
+    headers["Content-Length"] = str(len(raw))
+    headers["X-Ledger-Worktree"] = "/home/a%20b"
+    handler = SimpleNamespace(command="POST", headers=headers, rfile=BytesIO(raw))
+    services = SimpleNamespace(policy=SimpleNamespace(max_body=1000), ledger=SimpleNamespace(core=json))
+    assert api_routes.ledger_operation(handler, services, "demo", "operations", "eng") == {"applied": []}
+    assert seen == [(services, "demo", "eng", {"ops": []}, "/home/a b")]
