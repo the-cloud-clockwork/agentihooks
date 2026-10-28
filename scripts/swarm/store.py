@@ -467,7 +467,7 @@ class RedisStore:
                     executions = [a for a in self.execution_registry.occupants(slug, pipe).values() if a.name == name]
                     if expected is not None and expected.execution_id not in {a.execution_id for a in executions}:
                         return False
-                    lives = self.execution_registry.records(slug, pipe) if previous else []
+                    lives = self.execution_registry.records(slug) if previous else []
                     pipe.multi()
                     if before is not None:
                         before(pipe)
