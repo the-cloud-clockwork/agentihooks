@@ -54,6 +54,7 @@ def test_master_lift_reaches_another_host_and_expires_on_new_head(hosts, monkeyp
     ):
         cli.cmd_lift(master, SimpleNamespace(slug=SLUG, agent=AGENT, gate="subagents"))
     with patch("scripts.swarm.store.connect", return_value=hive):
+        assert lift.head_lifted(SLUG, TASK, "subagents", hive_home)
         assert check(hive_home) == 0
         assert check(hive_home, agent="engineer@1-2") == 0
         monkeypatch.setattr("scripts.gates.intent.pr_head", lambda url: "b2")
