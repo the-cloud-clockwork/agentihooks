@@ -499,7 +499,8 @@ def test_scoped_provider_refuses_unavailable_or_unauthorized_chunks(prepared, pr
     if change == "missing":
         chunk["session_uid"] = "missing"
     elif change == "restricted":
-        prepared.session.catalog.set_state(prepared.domain, chunk["session_uid"], "restricted", 0)
+        revision = prepared.session.catalog.session(prepared.domain, chunk["session_uid"])["revision"]
+        prepared.session.catalog.set_state(prepared.domain, chunk["session_uid"], "restricted", revision)
     elif change == "project":
         chunk["project_ids"] = ["outside"]
     else:
