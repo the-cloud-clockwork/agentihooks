@@ -244,6 +244,18 @@ class TestFrozenSplit:
         result = ledger_stats.calculate(d, [], NOW, {"slots": 1, "ci_minutes": 5})
         assert (result["remaining"], result["work"], result["frozen"], result["frozen_work"]) == (1, 15, 4, 105)
 
+    @pytest.mark.timeout(10)
+    def test_a_dependency_cycle_under_focused_work_is_counted_once(self):
+        d = doc(
+            task("a", "open", "S", depends_on=["b"]),
+            task("b", "open", "S", depends_on=["a"]),
+            task("c", "open", "S", depends_on=["a"]),
+            task("e", "open", "S"),
+        )
+        d["freezes"] = [{"verb": "focus", "target": "tasks/c"}]
+        result = ledger_stats.calculate(d, [], NOW, {"slots": 1, "ci_minutes": 5})
+        assert (result["remaining"], result["work"], result["frozen"], result["frozen_work"]) == (3, 45, 1, 15)
+
     def test_a_focus_that_holds_most_tasks_counts_only_its_work_and_names_the_rest(self):
         others = [task(f"o{n}", "open", "S") for n in range(40)]
         d = doc(
