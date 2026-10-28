@@ -2214,7 +2214,8 @@ no live task carries it. The next pass by the owner, or by a new owner after a h
 
 A run whose failed jobs all failed only at the `Check dev still points at this commit` step, with the annotation that
 `dev` advanced before Sonar analysis, is still reported as superseded and files nothing. Failed jobs that lost their
-runner share one [runner outage task](#runner-outage-runs).
+runner, or failed on another CI infrastructure fault, share one [infrastructure outage](#runner-outage-runs) that
+the alert names and that files no task.
 
 ### Held causes and the green run
 
@@ -2290,19 +2291,23 @@ The watched swarm's task blocked before the merge kept holding until the first g
 
 ### Runner outage runs
 
-A job that lost its runner has no code cause, so a fixer per job only adds work the master has to hold by hand. The
-watch files one runner outage task for all such jobs of a run and keeps a fixer for every job that failed on its own.
+A job that failed on CI infrastructure (a lost runner, a fetch timeout, a server outage) has no code cause, so a
+fixer for it only takes a ci seat the master has to cancel by hand. The watch folds all such jobs of a run into one
+infrastructure outage, names it in the promotion alert, files no task for it and keeps a fixer for every job that
+failed on its own.
 
 On 19 October cluster node `k8s-worker-1` went `NotReady` during dev push run 39226179257. Its unit jobs failed with
 the annotation `Failed to resolve action download info` and `Resource temporarily unavailable
 (launch.actions.githubusercontent.com:443)`. Twenty jobs failed besides `Gate — Required`, and intake filed seventeen
-urgent fixer tasks, `promo-39226179257-<n>` in the Doctor ledger, for one outage.
+urgent fixer tasks, `promo-39226179257-<n>` in the Doctor ledger, for one outage. On 28 October dev push run
+40713867099 filed three tasks for a unit shard checkout that failed with `RPC failed; HTTP 408`, and run 40728940569
+filed one for a Sonar report upload that got HTTP 504. The Doctor master cancelled all four.
 
 #### How a job is judged lost
 
 The watch reads the failed jobs of the run, leaving out `Gate — Required` unless it is the only failed job. For each
 job it builds a cause from the names of its failed steps and its failure annotations, without `Process completed with
-exit code 1.` and empty messages. The job lost its runner when any of these holds:
+exit code 1.` and empty messages. The job failed on infrastructure when any of these holds:
 
 | Sign | Example annotation or step state |
 |---|---|
@@ -2310,6 +2315,8 @@ exit code 1.` and empty messages. The job lost its runner when any of these hold
 | The cause contains `Failed to download action` or `Failed to download archive` | `Failed to download archive after 3 attempts.` |
 | The cause contains `lost communication with the server` | `The self-hosted runner: anton-x lost communication with the server.` |
 | The cause contains `The operation was canceled` | A spot drain or node loss stopped the job |
+| The cause contains `The requested URL returned error: ` with 408, 500, 502, 503 or 504 | `RPC failed; HTTP 408 curl 22 The requested URL returned error: 408` on checkout |
+| The cause contains `this is not a code verdict` | The Sonar or PyPI retry script gave up on a server that did not answer |
 | The `Set up job` step failed or timed out | The runner died before any workflow step ran |
 | The job has a `Run tests` step that neither passed nor failed, and no step of the job failed | `Run tests` ends `skipped`, `cancelled` or with no conclusion |
 
@@ -2322,36 +2329,35 @@ changes them.
 
 #### What the watch files
 
-When at least one failed job lost its runner, the lost jobs become one cause, `runner outage`. A failed job whose own
+When at least one failed job failed on infrastructure, those jobs become one cause, `infrastructure outage`. A
+failed job whose own
 error is the output a lost unit shard never produced joins that cause, as set out in
 [Jobs that failed for want of shard output](#jobs-that-failed-for-want-of-shard-output). Every other failed job keeps
 its own cause. The watch then files as for any red run:
 
-- One urgent `ci` task titled `Promotion red: runner outage`, in the `ci` lane, or `eng` while the `ci` lane has no
-  effective seats. Its id is `promo-<run id>-<n>` like any promotion task; it is `promo-<run id>-0` unless the run also
-  has failing unit tests, whose grouped fixers are numbered first.
-- Its description names the run, the commit, the run link, every lost job and every sign found. With no annotation
-  sign it reads `Set up job failed or Run tests never ran`. When consumer jobs joined, it adds `the jobs <names>
-  failed for want of their unit shard output`. It ends `No code change is due` instead of `Fix it on dev`.
+- No task for the infrastructure outage.
 - One fixer task per cause that failed on its own. Failing unit tests are grouped into one fixer per test.
-- One promotion alert for the run, replacing a live one, and one inbox item for the master naming the new tasks.
+- One promotion alert for the run, replacing a live one, that names the outage first and then every new fixer cause.
+  The outage names every infrastructure job and every sign found. With no annotation sign it reads `Set up job failed
+  or Run tests never ran`. When consumer jobs joined, it adds `the jobs <names> failed for want of their unit shard
+  output`. A run with only an outage raises the alert only when none is live, and the next green run clears it.
+- One inbox item for the master naming the new tasks, when there are any.
 
-For a run whose two unit jobs both failed on download resolution and cancellation, the task reads:
+For a run whose two unit jobs both failed on download resolution and cancellation, the alert reads:
 
 ```text
-The dev push run 900 of Tests lost its runner infrastructure at commit <sha>:
-https://github.com/<owner>/<repo>/actions/runs/900. Its cause: the jobs unit (3.11, 1), unit (3.11, 2) lost their
-runner infrastructure (Failed to resolve action download info; The operation was canceled). No code change is due;
-the swarm closes this task when a later dev push run passes.
+Dev promotion is red: push run 900 at commit <sha> failed in infrastructure outage: the jobs unit (3.11, 1),
+unit (3.11, 2) failed on CI infrastructure, so no code change is due (Failed to resolve action download info; The
+operation was canceled). https://github.com/<owner>/<repo>/actions/runs/900
 ```
 
 #### Jobs that failed for want of shard output
 
 Each unit shard job, `unit (<python>, <shard>)`, uploads coverage, durations and flake reports that later jobs of the
 run read. When a shard loses its runner, those readers fail on the missing input, not on code. On the recorded dev push
-run 39226179257, intake filed the outage task plus five fixers: `refresh-durations`, `shard-check (3.11)`,
-`shard-check (3.12)`, `sonar`, and the real test failure in `unit (3.12, 10)`. With the folding, the same run files the
-outage task, which names the four consumers, and the `unit (3.12, 10)` fixer.
+run 39226179257, intake filed an outage task plus five fixers: `refresh-durations`, `shard-check (3.11)`,
+`shard-check (3.12)`, `sonar`, and the real test failure in `unit (3.12, 10)`. With the folding, the same run files only
+the `unit (3.12, 10)` fixer, and its alert names the outage with the four consumers.
 
 In a run with at least one lost job, a failed job joins the outage cause in either case:
 
@@ -2372,26 +2378,25 @@ including a consumer whose error carries no sign, files its own fixer.
 | `head shard coverage missing: ` | `tests/coverage_ratchet.py` in `coverage-ratchet` | `The coverage ratchet cannot grade: head shard coverage missing: <path>` |
 | `baseline shard coverage missing: ` | `tests/coverage_baseline.py` in `coverage-baseline` | `Cannot record the coverage baseline: baseline shard coverage missing: <path>` |
 | `No flake reports under ` | `tests/flake_budget.py` in `flake-budget` | `No flake reports under <folder>` |
+| `Wait for every planned shard` | the failed step name in `shard-check`, where `scripts.ci_gate_shards` stops on a unit shard that did not succeed | the step fails with `Process completed with exit code 1.` |
 | `kept no samples from durations-` | `tests/refresh_durations.py` in `refresh-durations` | `refresh durations: ...; run 900 kept no samples from durations-3.11-2, durations-3.11-6` |
 
 The consumer names and signs are fixed in `scripts.swarm.promotion_watch` (`SHARD_JOB`, `SHARD_CONSUMERS`,
 `MISSING_SHARD_SIGNS`, `REFRESH_JOB`, `LOST_SAMPLES_SIGN`). No setting changes them. A consumer error that changes its
 wording stops folding until the sign in the watch changes with it.
 
-For the recorded run, the outage task reads:
+For the recorded run, the alert names the outage as:
 
 ```text
-The dev push run 39226179257 of Tests lost its runner infrastructure at commit <sha>:
-https://github.com/<owner>/<repo>/actions/runs/39226179257. Its cause: the jobs unit (3.11, 1), unit (3.11, 4),
-unit (3.11, 5), unit (3.12, 4), unit (3.12, 9) lost their runner infrastructure (Failed to resolve action download
-info); the jobs refresh-durations, shard-check (3.11), shard-check (3.12), sonar failed for want of their unit shard
-output. No code change is due; the swarm closes this task when a later dev push run passes.
+infrastructure outage: the jobs unit (3.11, 1), unit (3.11, 4), unit (3.11, 5), unit (3.12, 4), unit (3.12, 9)
+failed on CI infrastructure, so no code change is due (Failed to resolve action download info); the jobs
+refresh-durations, shard-check (3.11), shard-check (3.12), sonar failed for want of their unit shard output
 ```
 
 Limits:
 
 - A consumer whose own regression prints a missing shard sign beside a lost unit shard is folded. It files its fixer
-  on the next red run without a runner outage, because the outage task closes only on a green run.
+  on the next red run without an infrastructure outage.
 - `coverage-baseline` first compares the downloaded shard folders with the split. A missing folder fails there with
   `downloaded shard coverage [...] is not the <n> shards the run split`, which carries no sign, so that failure files
   its own fixer.
@@ -2406,21 +2411,20 @@ consumer failures in that same run:
 
 | Failed consumer | Its own failure | Tasks filed for this pair of jobs |
 |---|---|---|
-| `sonar (3.12)` | `Missing coverage for shard 1` | `Promotion red: runner outage`, naming Sonar among the jobs missing shard output |
-| `sonar` | `Quality gate failed: 1 new bug on new code` | `Promotion red: runner outage` and `Promotion red: sonar` |
-| `shard-check (3.11)` | `No shard durations at shard-durations/1/durations.json, so those shards cannot be graded.` | `Promotion red: runner outage`, naming the shard check among the jobs missing shard output |
-| `shard-check (3.12)` | `Shards split on different stored durations, so their test sets overlap or leave gaps: a: x, b: y` | `Promotion red: runner outage` and `Promotion red: shard check (3.12)` |
-| `stage-budget` | Failed `Grade` step with no failure annotation | `Promotion red: runner outage` and `Promotion red: stage budget` |
+| `sonar (3.12)` | `Missing coverage for shard 1` | None; the alert names Sonar among the jobs missing shard output |
+| `sonar` | `Quality gate failed: 1 new bug on new code` | `Promotion red: sonar` |
+| `shard-check (3.11)` | `No shard durations at shard-durations/1/durations.json, so those shards cannot be graded.` | None; the alert names the shard check among the jobs missing shard output |
+| `shard-check (3.12)` | `Shards split on different stored durations, so their test sets overlap or leave gaps: a: x, b: y` | `Promotion red: shard check (3.12)` |
+| `stage-budget` | Failed `Grade` step with no failure annotation | `Promotion red: stage budget` |
 
-These task counts assume no earlier task holds either cause. An unrelated Sonar or shard check failure is absent
-from the outage task's consumer list; its separate fixer carries its own failed step and annotation evidence. If
+These task counts assume no earlier task holds the consumer's cause. An unrelated Sonar or shard check failure is
+absent from the alert's consumer list; its separate fixer carries its own failed step and annotation evidence. If
 Sonar reports missing coverage but no job named exactly `unit` before ` (` lost its runner, Sonar keeps its own
 fixer too. A lost `unit-selected` job does not meet that prerequisite.
 
 To inspect the mixed failure case, use [Checking a run](#checking-a-run) to read both the lost unit job and each
 consumer's annotations, then compare the task titles with the table. A failed step with no useful annotation does
-not establish missing shard output. Fix a quality gate or shard split error through its own fixer even while the
-outage task remains open.
+not establish missing shard output. Fix a quality gate or shard split error through its own fixer.
 
 This behavior is automatic in promotion intake. There is no environment variable or swarm setting to enable
 folding, broaden it to every consumer, or add signatures. The configurable `AGENTIHOOKS_SWARM_KEY_PREFIX` in the
@@ -2431,12 +2435,10 @@ Changes to consumer names or failure wording require a matching code change and 
 
 #### Later outages and the green run
 
-The outage task holds the cause `runner outage` in `promotion:jobs`, without the run, job names or signs. While that
-task is not done in the owner's ledger or a former owner's ledger, a later red run that also lost runners files no
-second outage task, whichever jobs it lost. Its real failures are still filed. The next green dev push run closes an
-open or blocked outage task with the other promotion tasks and the alert, and releases its held cause, so the next
-outage files a new task. An outage task that is claimed or in `pr` stays open on green and keeps holding the cause
-until its holder finishes it.
+An outage holds no cause in `promotion:jobs`, because it files no task. While a promotion alert is live, a later red
+run with only an outage stays quiet; a later red run with a new code cause files its fixer and replaces the alert,
+naming both. The next green dev push run whose promote job succeeded clears the alert. An outage task filed before
+this change stays open until that green run closes it like any other promotion task.
 
 #### Checking a run
 
@@ -2454,20 +2456,20 @@ Run the commands from the swarm's `repo` checkout so `gh` resolves the repositor
 
 ```bash
 P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
-redis-cli HGETALL "$P:swarm:<id>:promotion:jobs"   # an outage task maps to the value runner outage
+redis-cli HGETALL "$P:swarm:<id>:promotion:jobs"   # an outage holds no entry
 agentihooks ledger --slug "<id>" show | jq -r --arg run "promo-$RUN-" \
   '.tasks[] | select(.id | startswith($run)) | [.id, .state, .title] | @tsv'
 ```
 
 | Symptom | Cause | Action |
 |---|---|---|
-| An outage run filed one fixer per job | No failed job carried a sign above, for example a new runner error text | Read the job annotations. A new runner error needs a code change to `OUTAGE_SIGNS` with a test |
-| A real failure was folded into the outage task | Its annotations contain a sign, for example a test that prints `The operation was canceled` | Read the cause in the task description. Fix the test output, or file the fixer by hand |
-| A red run with lost runners filed no outage task | An outage task that is not done already holds `runner outage` | Expected. A green dev push run closes it and the next outage files a new one |
+| An outage run filed one fixer per job | No failed job carried a sign above, for example a new runner or server error text | Read the job annotations. A new infrastructure error needs a code change to `OUTAGE_SIGNS` with a test |
+| A real failure was folded into the outage | Its annotations contain a sign, for example a test that prints `The operation was canceled` | Read the cause in the alert. Fix the test output, or file the fixer by hand |
+| A red run with an outage filed no task | Infrastructure outages file no task | Expected. The alert names the outage and a green dev push run clears it |
 | A skipped `Run tests` step still got a fixer | Another step of the job failed first | Expected. The failed step is the cause |
 | `sonar`, `shard-check` or another consumer got a fixer beside a lost unit shard | Its annotations carry no missing shard sign, or the lost job's name is not exactly `unit` before ` (` | Read its annotations. A real error stays a fixer; a reworded missing input message needs a matching change to `MISSING_SHARD_SIGNS` with a test |
 | `refresh-durations` got a fixer in an outage run | Its line has no `kept no samples from durations-`, so it failed on its own cause | Read its annotation and fix that cause |
-| A consumer's real regression sits inside the outage task | It printed a missing shard sign in the same run as a lost unit shard | Expected. Read the outage task's consumer list; the next red run without an outage files its fixer |
+| A consumer's real regression sits inside the outage | It printed a missing shard sign in the same run as a lost unit shard | Expected. Read the alert's consumer list; the next red run without an outage files its fixer |
 
 Delivered in [pull request 4829](https://github.com/the-cloud-clockwork/agentihooks/pull/4829), with
 [issue 4827](https://github.com/the-cloud-clockwork/agentihooks/issues/4827) as the spec. Its tests cover each sign,
@@ -2478,6 +2480,11 @@ download resolution, the code before the change filed seventeen tasks and the ch
 failed all seven new tests. Green: Tests run
 [39287821375](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39287821375) passed on the final head.
 No live dev outage run has been counted since the change.
+
+[Issue 8451](https://github.com/the-cloud-clockwork/agentihooks/issues/8451) stopped filing the outage task at all,
+and added fetch timeouts, server errors and the retry scripts' `this is not a code verdict` to the signs. The
+replays of dev push runs 40713867099 (HTTP 408 checkout) and 40728940569 (Sonar upload HTTP 504) filed four tasks
+before the change and none after.
 
 The shard output folding came in four pull requests:
 
