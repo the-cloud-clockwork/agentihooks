@@ -1,4 +1,5 @@
 import faulthandler
+import json
 import os
 import shutil
 import signal
@@ -62,20 +63,23 @@ def clean_mutation_children(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def untraced_workspace_copy(monkeypatch):
-    # Under the suite's coverage tracer the in-process checkout copy takes about 25 seconds against under one
-    # untraced; the runner tests cover prepare_workspace itself.
-    prepare = runner.prepare_workspace
+def workspace_copy_in_child(monkeypatch):
+    # The suite's coverage tracer and input audit hook fire on every file of the in-process checkout copy, which took
+    # ten to twenty five seconds in CI against under one in a plain child.
+    def prepare(root, work, paths, tests):
+        env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE", "COVERAGE"))}
+        code = (
+            "import json, sys; from pathlib import Path; from scripts.ci_mutation.runner import prepare_workspace; "
+            "prepare_workspace(Path(sys.argv[1]), Path(sys.argv[2]), *json.loads(sys.argv[3]))"
+        )
+        subprocess.run(
+            [sys.executable, "-c", code, str(root), str(work), json.dumps([paths, tests])],
+            cwd=ROOT,
+            env=env,
+            check=True,
+        )
 
-    def untraced(*args):
-        tracer = sys.gettrace()
-        sys.settrace(None)
-        try:
-            prepare(*args)
-        finally:
-            sys.settrace(tracer)
-
-    monkeypatch.setattr(runner, "prepare_workspace", untraced)
+    monkeypatch.setattr(runner, "prepare_workspace", prepare)
 
 
 def test_mutation_children_exit_when_the_watchdog_interrupts(monkeypatch):
