@@ -1,0 +1,9 @@
+- probe.py serial on rig-grade-swarm, 9 working bindings: 58 Langfuse requests, 16.0 s summed, identity listing 8.1 s of it; master 340 observations, 4 identity pages, 2.6 s. Output probe-1.json.
+- probe_pass.py, real registry.read beside history: active wall 2.34 s for 9 bindings with no local cursors on the hive; history ran 45 s of serial requests the whole time (126 to 134 requests, p50 0.33 to 0.38 s). Output pass-1.json, pass-2.json.
+- conn.py: fresh connection per request mean 0.026 s, kept connection 0.007 s on the projects call; connection setup is not the cost.
+- accepted.py: transcript identity rebuild 0.06 s CPU for a 1.5 MB transcript on this hive.
+- Doctor findings hash: misses at 16:33:44Z (10 of 21 unread), 17:03:55Z (5 of 17), 17:37:59Z (10 of 24), 18:29:29Z (2 of 21), 18:46:07Z (8 of 21); every unread line is budget spent, none a request failure.
+- ws_probe.py on this hive, two passes 30 s apart, 19 working bindings, no local cursors: all read, active wall 7.6 s then 7.2 s, 3 to 4 requests per binding at 0.3 to 0.9 s each under 6 workers plus history; history kept one more request stream busy for the whole 45 s. Output ws-hive.jsonl.
+- concurrency.py, 57 active read requests: 1 worker 4.9 per s, 3 workers 8.2, 6 workers 9.8, 9 workers 8.0, 12 workers 7.1; p50 latency 0.19 to 0.50 to 1.50 s. Langfuse saturates near ten requests per second, so more workers do not buy reads. Output concurrency.out.
+- Probe pushed for the workstation run on branch wip/fx-07dad8d8-probe; asked the Doctor master to run it read only.
+- unchanged.py, four scans 60 s apart on 18 working bindings: 9, 15, 15 and 13 bindings had the same current trace, updatedAt and observation count as the scan before; the active read still spends its listing, freshness and count requests on each of them every pass. Output unchanged.out.

@@ -1,0 +1,5 @@
+workers 1: 57 requests wall 11.68 s, 4.9 per s, p50 0.19 p90 0.32 max 0.89
+workers 3: 57 requests wall 6.92 s, 8.2 per s, p50 0.33 p90 0.58 max 0.76
+workers 6: 57 requests wall 5.81 s, 9.8 per s, p50 0.50 p90 0.92 max 1.08
+workers 9: 57 requests wall 7.10 s, 8.0 per s, p50 1.03 p90 1.64 max 1.80
+workers 12: 57 requests wall 8.02 s, 7.1 per s, p50 1.50 p90 2.06 max 2.63

@@ -1,0 +1,7 @@
+- Ledger join and task get refused with 403 for this hive credential; master told by inbox.
+- Read reader code on origin dev: active read runs 6 workers, concurrent with history listing and backfill, inside a process that runs every other detector at once.
+- Measured from this hive: Langfuse request p50 0.36 to 0.46 s, connection setup about 0.03 s, so latency is server time, not TLS.
+- Stored findings show every unread binding failed with budget spent and no request error: workers were busy or queued, never refused.
+- Wrote ws_probe.py: per binding requests, Langfuse seconds, identity pages, transcript rebuild seconds, listing reuse, on a scratch copy of the live state.
+- Concurrency curve measured; probe branch pushed; waiting on the workstation run from the Doctor master.
+- Measured unchanged share between scans; still waiting on the workstation probe.
