@@ -54,7 +54,7 @@ def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
     assert "!docker/swarm-node/requirements.lock" in ignored
     assert "COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/" in dockerfile
     assert 'worker_image.py install --tool herdr --architecture "$TARGETARCH"' in dockerfile
-    assert "COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr" in dockerfile
+    assert "COPY --link --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr" in dockerfile
     assert "herdrdev/herdr" not in dockerfile
     assert "sha256:" not in dockerfile.split("AS herdr")[1]
     bases = [line.split()[1] for line in dockerfile.splitlines() if line.startswith("FROM ")]

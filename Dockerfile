@@ -46,12 +46,12 @@ RUN --mount=type=bind,source=docker/swarm-node,target=/opt/swarm-node \
     && rm -r /var/lib/apt/lists/*
 RUN groupadd --gid 10001 swarm && useradd --uid 10001 --gid swarm --create-home swarm && mkdir /data && chown swarm:swarm /data \
     && python -m compileall -q -x /site-packages/ /usr/local/lib/python3.12
-COPY --from=dependencies /opt/venv /opt/venv
-COPY --from=build /opt/package/ /opt/venv/
-COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr
-COPY media/agentihooks-logo.png /opt/venv/lib/python3.12/site-packages/media/agentihooks-logo.png
-COPY docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/schemas/
-COPY docs/swarm-v2/architecture.json /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/architecture.json
+COPY --link --from=dependencies /opt/venv /opt/venv
+COPY --link --from=build /opt/package/ /opt/venv/
+COPY --link --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr
+COPY --link media/agentihooks-logo.png /opt/venv/lib/python3.12/site-packages/media/agentihooks-logo.png
+COPY --link docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/schemas/
+COPY --link docs/swarm-v2/architecture.json /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/architecture.json
 USER 10001:10001
 VOLUME /data
 EXPOSE 8765
