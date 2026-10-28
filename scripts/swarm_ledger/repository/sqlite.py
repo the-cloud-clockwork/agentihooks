@@ -9,7 +9,7 @@ from pathlib import Path
 from scripts.swarm_ledger import request_metrics
 
 from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
-from .entry import Entry
+from .entry import Entry, thawed
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
 from .rows import TABLES, assemble, diff, encode, flatten, load, read_rows, write_rows
@@ -486,22 +486,31 @@ class SQLiteLedgerRepository:
             cached = self._cache.get(self._key(slug))
             if cached is not None and cached.generation >= row[0]:
                 return cached
-            state = None if cached is None else self._refreshed(connection, slug, cached, row[0])
+            state, writer = (None, None) if cached is None else self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
                 state = load(connection, slug)
             if "events" in state["_meta"]:
-                state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
+                events = read_events(connection, slug)
+                state["_meta"] = {**state["_meta"], "events": events}
+                if writer is not None:
+                    writer["_meta"]["events"] = thawed(events)
             fragments = document(state, None if whole else cached.fragments)
-            entry = Entry(row[0], None, fragments.value, fragments)
+            entry = Entry(row[0], None, fragments.value, fragments, writer)
             self._remember(slug, entry)
         if whole:
             heap.release()
         return entry
 
-    def _refreshed(self, connection, slug: str, cached: Entry, generation: int) -> dict | None:
+    def _refreshed(self, connection, slug: str, cached: Entry, generation: int) -> tuple[dict | None, dict | None]:
         paths = refresh.changed_paths(connection, slug, cached.generation, generation, CHANGES_KEPT)
-        return None if paths is None else refresh.refreshed(connection, slug, cached.state, paths)
+        if paths is None:
+            return None, None
+        state = refresh.refreshed(connection, slug, cached.state, paths)
+        writer, cached.writer = cached.writer, None
+        if state is None or writer is None:
+            return state, None
+        return state, refresh.refreshed(connection, slug, writer, paths)
 
     def _remember(self, slug: str, entry: Entry) -> None:
         with self._guard:
