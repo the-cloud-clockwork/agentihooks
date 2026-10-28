@@ -188,7 +188,7 @@ def _rest_pages(
 ) -> str | bytes | None:
     if output is None:
         return output
-    pattern = rb"(?:\A|(?<=\n))HTTP/[\d.]+ \d{3}[^\r\n]*\r?\n(?:[^\r\n]+:[^\r\n]*\r?\n)+\r?\n"
+    pattern = rb"(?:\A|\r?\n)HTTP/[\d.]+ \d{3}[^\r\n]*\r?\n(?:[^\r\n]+:[^\r\n]*\r?\n)+\r?\n"
     cleaned, pages = re.subn(
         pattern.decode() if isinstance(output, str) else pattern, "" if isinstance(output, str) else b"", output
     )

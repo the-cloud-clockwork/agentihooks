@@ -384,7 +384,7 @@ def test_paginated_retry_helper_counts_every_page_without_audit_duplicates(monke
 
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     commands = []
-    raw = 'HTTP/2.0 200\r\nX-Page: 1\r\n\r\n{"jobs": [1]}\nHTTP/2.0 200\r\nX-Page: 2\r\n\r\n{"jobs": [2]}'
+    raw = 'HTTP/2.0 200\r\nX-Page: 1\r\n\r\n{"jobs": [1]}\n\nHTTP/2.0 200\r\nX-Page: 2\r\n\r\n{"jobs": [2]}'
 
     def run(command, **kwargs):
         commands.append(command)
