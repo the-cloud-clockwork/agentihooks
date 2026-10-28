@@ -61,3 +61,34 @@ def test_writes_leave_the_previous_cached_state_unchanged(tmp_path, monkeypatch,
         assert rejected == []
         assert written["_meta"]["rev"] > before["_meta"]["rev"]
     assert previous.state == before
+
+
+def test_atomic_refusal_restores_stamps_after_an_earlier_operation_replaced_one(tmp_path):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    with repo.connect() as connection:
+        previous = repo._entry(connection, "ledger")
+    before = copy.deepcopy(previous.state)
+    ops = [
+        {"op": "plan_add", "id": "plan", "by": "planner", "plan": "new", "title": "New plan"},
+        {
+            "op": "phase_update",
+            "id": "changed",
+            "by": "planner",
+            "item": "phases/p1",
+            "fields": {"title": "Changed"},
+        },
+        {
+            "op": "phase_update",
+            "id": "refused",
+            "by": "planner",
+            "item": "phases/missing",
+            "fields": {"title": "Missing"},
+        },
+    ]
+    written, rejected = repo.apply_ops("ledger", ops=ops)
+    assert rejected == ["plan", "changed", "refused"]
+    assert written["phases"] == before["phases"]
+    assert written["plans"] == before["plans"]
+    assert written["_meta"]["stamps"] == before["_meta"]["stamps"]
+    assert previous.state == before

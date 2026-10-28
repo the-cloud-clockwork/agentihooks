@@ -629,7 +629,7 @@ class SQLiteLedgerRepository:
             with connection:
                 request_metrics.begin(connection, BEGIN_IMMEDIATE)
                 entry = self._entry(connection, slug)
-                state = entry.mutable()
+                state = entry.for_write()
                 rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
                 written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
             artifact_files.drop(slug, ctx.unstored)
