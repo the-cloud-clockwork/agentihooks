@@ -61,3 +61,52 @@ def test_spill_does_not_bypass_hive_role_constraints(setup, monkeypatch):  # noq
     assert result.detail == refused
     assert reserve.call_count == 1
     assert launcher.orders_for(request.task["id"]) is None
+
+
+@pytest.mark.parametrize("in_pass", [False, True])
+def test_a_full_launch_queue_spills_without_reserving_the_refused_hive(setup, in_pass):  # noqa: F811
+    write_hive(setup, prefer={"engineer": 0})
+    write_hive(setup, id="spare", prefer={"engineer": 1})
+    launcher = setup.launcher
+    launcher.placement_cache = {} if in_pass else None
+    stream = launcher.orders.stream("remote")
+    for _ in range(4):
+        setup.store.redis.xadd(stream, {"order": "{}"})
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    result = launcher.spawn(request)
+    assert result.status is Status.PENDING
+    assert launcher.orders_for(request.task["id"]).hive == "spare"
+    assert setup.store.redis.xlen(stream) == 4
+    assert admission.pending(setup.store.redis, "remote") == 0
+
+
+@pytest.mark.parametrize("in_pass", [False, True])
+def test_all_refused_hives_are_tried_once_and_keep_the_last_refusal(setup, monkeypatch, in_pass):  # noqa: F811
+    write_hive(setup, prefer={"engineer": 0})
+    write_hive(setup, id="spare", prefer={"engineer": 1})
+    launcher = setup.launcher
+    launcher.placement_cache = {} if in_pass else None
+    reserve = Mock(side_effect=lambda request, selected: f"no hive for eng has room: {selected.hive} cpu: full")
+    monkeypatch.setattr(launcher, "reserve_room", reserve)
+    request = request_for(setup)
+    result = launcher.spawn(request)
+    assert result.status is Status.UNAVAILABLE
+    assert result.detail == "no hive for eng has room: spare cpu: full"
+    assert [call.args[1].hive for call in reserve.call_args_list] == ["remote", "spare"]
+    assert launcher.orders_for(request.task["id"]) is None
+
+
+def test_prompt_failure_releases_the_admission_selected_after_spill(setup, monkeypatch):  # noqa: F811
+    write_hive(setup, id="spare", prefer={"engineer": 1})
+    launcher = setup.launcher
+    reserve = launcher.reserve_room
+    monkeypatch.setattr(
+        launcher,
+        "reserve_room",
+        lambda request, selected: "remote cpu: full" if selected.hive == "remote" else reserve(request, selected),
+    )
+    launcher.opening = Mock(side_effect=RuntimeError("prompt failed"))
+    with pytest.raises(RuntimeError, match="prompt failed"):
+        launcher.spawn(request_for(setup))
+    assert admission.pending(setup.store.redis, "spare") == 0
