@@ -1214,6 +1214,7 @@ def test_the_waker_command_runs_the_waker_with_the_swarm_clock(monkeypatch):
 def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: 7.0)
     seen = []
+
     def fake_run(argv, **kw):
         seen.append(argv)
         return subprocess.CompletedProcess(
@@ -1237,8 +1238,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         "anchors": [],
         "overlays": [],
         "bundle_revision": "",
-        "automated": {"swarm": "sw", "seat": ""},
-    }
+    } | {"automated": {"swarm": "sw", "seat": ""}}
     assert placed == runtime.Placed(
         "w3:p1",
         "codex",
