@@ -1074,3 +1074,16 @@ def test_an_open_route_with_only_an_expiring_token_names_it(monkeypatch, tmp_pat
     assert (rc, seen) == (3, {})
     assert report.read_text() == f"status=failed\nerror={error}\n"
     assert capsys.readouterr().err == f"agentihooks codex: {error}\n"
+
+
+def test_a_forced_route_to_an_expiring_token_is_refused_by_name(monkeypatch, tmp_path, capsys):
+    environ = {"HOME": "/home/u", "AH_CX_TOKEN_alpha": _expiring_jwt(NOW + 60)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["--route", "alpha"], {"alpha": _quota(1.0)})
+    error = EXPIRING_MESSAGE.format(name="alpha", hours="6")
+    assert (rc, seen) == (3, {})
+    assert report.read_text() == f"status=failed\nerror={error}\n"
+    assert capsys.readouterr().err == f"agentihooks codex: {error}\n"
+    fresh = {**environ, "AH_CX_TOKEN_alpha": _expiring_jwt(NOW + 6 * 3600)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, fresh, ["--route", "alpha"], {"alpha": _quota(1.0)})
+    assert rc == 0
+    assert report.read_text() == "status=routed\naccount=alpha\nplacement=forced\n"

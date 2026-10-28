@@ -152,9 +152,13 @@ def refusal(account: CodexAccount, environ: Mapping[str, str]) -> str:
         credential_kind(account, environ)
     except RoutingError as exc:
         return str(exc)
-    if expiring(account, environ, time.time()):
-        return EXPIRING.format(env=account.env_name, hours=_min_life(environ) / HOUR_S, name=account.name)
-    return ""
+    return expiry_refusal(account, environ, time.time())
+
+
+def expiry_refusal(account: CodexAccount, environ: Mapping[str, str], now: float) -> str:
+    if not expiring(account, environ, now):
+        return ""
+    return EXPIRING.format(env=account.env_name, hours=_min_life(environ) / HOUR_S, name=account.name)
 
 
 def _min_life(environ: Mapping[str, str]) -> float:
@@ -554,6 +558,8 @@ def select(
             if account.name == route:
                 if not account.signed_in:
                     raise RoutingError(f"Codex account '{route}' is not signed in; run codex login")
+                if expired := expiry_refusal(account, environ or {}, now):
+                    raise RoutingError(expired)
                 return account, "forced", None
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")
