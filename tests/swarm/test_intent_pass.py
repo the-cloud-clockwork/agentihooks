@@ -34,17 +34,17 @@ def test_ready_intent_is_delivered_before_a_slow_runtime_launch(env, monkeypatch
 
     launch = runtime.spawn
 
-    def judged_by(deadline):
-        while time.monotonic() < deadline:
-            record = Verdicts("sw", "intent").read("t1")
-            if record and record["verdict"] != "pending":
+    def wait_for_verdict(deadline):
+        verdicts = Verdicts("sw", "intent")
+        while True:
+            record = verdicts.read("t1")
+            if record and record["verdict"] != "pending" or time.monotonic() >= deadline:
                 return record
             time.sleep(0.01)
-        return Verdicts("sw", "intent").read("t1")
 
     def slow_launch(*args, **kwargs):
         launching.set()
-        at_launch.append(judged_by(time.monotonic() + 10))
+        at_launch.append(wait_for_verdict(time.monotonic() + 10))
         clock[0] += 780_000
         return launch(*args, **kwargs)
 
