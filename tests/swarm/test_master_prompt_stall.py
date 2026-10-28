@@ -160,7 +160,7 @@ def test_master_off_the_prompt_stays_and_restarts_the_count(store, pane):
     agent, runtime = master(store)
     operator_says(store, START)
     run(store, runtime, START)
-    runtime.panes[agent.name] = pane
+    runtime.panes[agent.name], runtime.tails[agent.pane_id] = pane, "● Back to work\n❯ \n"
     assert run(store, runtime, START + 30 * MINUTE) == []
     runtime.panes[agent.name] = QUESTION
     assert run(store, runtime, START + 31 * MINUTE) == []
