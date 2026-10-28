@@ -68,8 +68,6 @@ def ledger(browser):
         if parts.path.startswith("/api/v1/ledgers/") and parts.path.endswith("/tasks"):
             query = {key: values[0] for key, values in parse_qs(parts.query).items()}
             reads.append(query)
-            if query.get("offset") == "10":
-                __import__("time").sleep(0.5)
             rows = done_rows(query)
             offset = int(query["offset"]) - (0 if "q" in query else 10)
             size = min(int(query["limit"]), 5) if "q" in query else int(query["limit"])
@@ -140,10 +138,10 @@ def test_remote_matches_page_until_every_match_is_listed(ledger):
     more.dblclick()
     page.wait_for_function(f"() => ({count})() >= 10")
     assert reads.count({"state": "done", "q": "old task", "offset": "5", "limit": "50"}) == 1
-    while more.count():
-        more.click()
-        page.wait_for_timeout(100)
+    assert more.text_content() == "Show more matches · 1 left"
+    more.click()
     page.wait_for_function(f"() => ({count})() === 11")
+    more.wait_for(state="detached")
     ids = shown(page)
     assert len(ids) == len(set(ids))
     assert sorted(ids) == sorted(t["id"] for t in HIDDEN_TASKS if t["id"] != "t5")
