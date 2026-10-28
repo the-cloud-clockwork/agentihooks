@@ -153,11 +153,55 @@ class Posted:
     def __init__(self, length, rfile):
         self.headers = {} if length is None else {"Content-Length": str(length)}
         self.rfile = rfile
+        self.close_connection = False
 
 
-@pytest.mark.parametrize("length", [None, 0, 1, service.MAX_BODY + 1])
-def test_a_body_outside_the_bound_is_refused_without_reading(length):
+class Chunks(io.BytesIO):
+    def __init__(self, raw):
+        super().__init__(raw)
+        self.sizes = []
+
+    def read(self, size=-1):
+        self.sizes.append(size)
+        return super().read(size)
+
+
+@pytest.mark.parametrize("length", [None, 0, 1])
+def test_a_body_under_the_bound_is_refused_without_reading(length):
     assert service.read_body(Posted(length, Unread())) is None
+
+
+@pytest.mark.parametrize("length", [service.MAX_BODY + 1, service.DRAIN_LIMIT])
+def test_a_body_over_the_bound_is_drained_in_chunks_before_the_refusal(length):
+    request = Posted(length, Chunks(b"x" * length))
+    assert service.read_body(request) is None
+    assert request.rfile.tell() == length and request.close_connection is False
+    assert max(request.rfile.sizes) == service.DRAIN_CHUNK
+    assert sum(request.rfile.sizes) == length
+
+
+def test_a_drain_stops_at_the_end_of_a_short_body():
+    request = Posted(service.MAX_BODY + 1, Chunks(b"x" * 10))
+    assert service.read_body(request) is None
+    assert request.rfile.sizes == [service.DRAIN_CHUNK, service.DRAIN_CHUNK]
+
+
+def test_a_body_past_the_drain_limit_closes_the_connection_without_reading():
+    request = Posted(service.DRAIN_LIMIT + 1, Unread())
+    assert service.read_body(request) is None and request.close_connection is True
+
+
+def test_a_client_writing_a_body_one_byte_over_the_bound_reads_the_refusal(served):
+    host, port = served.removeprefix("http://").split(":")
+    length = service.MAX_BODY + 1
+    head = f"POST {service.SEARCH_PATH} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {TOKEN}\r\n"
+    head += f"Content-Length: {length}\r\n\r\n"
+    with socket.create_connection((host, int(port)), timeout=10) as client:
+        client.sendall(head.encode() + b"x" * length)
+        reply = client.makefile("rb").read()
+    status_line, _, rest = reply.partition(b"\r\n")
+    assert status_line.split()[1] == b"400"
+    assert json.loads(rest.partition(b"\r\n\r\n")[2]) == refusal("invalid_request", service.BAD_BODY)
 
 
 def test_the_smallest_and_the_largest_object_bodies_are_read():
