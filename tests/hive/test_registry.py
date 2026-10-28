@@ -155,6 +155,9 @@ def test_a_declared_name_lands_on_a_new_record_and_survives_reregistration(redis
     registry.update(redis, "box", ["name=CustomDesk"])
     kept = registry.update(redis, "box", ["name=swarm-hive-002", "max-agents=9"], keep=True)
     assert kept["name"] == "CustomDesk"
+    registry.update(redis, "pod", ["max-agents=9"])
+    renamed = registry.update(redis, "pod", ["name=swarm-hive-003"], keep=True)
+    assert renamed["name"] == "swarm-hive-003"
 
 
 def test_empty_excluded_and_prefer_clear_them(redis):
