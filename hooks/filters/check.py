@@ -46,7 +46,7 @@ def check(tool: str, tool_input: dict, cwd: str | None = None) -> FilterOutcome:
         return ALLOW
 
 
-def writer_folder(worktree: str) -> str:
+def trusted_folder(worktree: str) -> str:
     from hooks.config import CONDITIONS_ENABLED
     from hooks.context import profile_chain
 
@@ -57,7 +57,7 @@ def writer_folder(worktree: str) -> str:
 
 
 def screen(tool: str, text: str, worktree: str | None = None) -> str:
-    outcome = check(tool, {"text": text}, writer_folder(worktree) if worktree else None)
+    outcome = check(tool, {"text": text}, trusted_folder(worktree) if worktree else None)
     if outcome.decision == "deny":
         raise ValueError(outcome.reason)
     rewritten = outcome.tool_input.get("text") if outcome.decision == "rewrite" else None
