@@ -130,19 +130,30 @@ def test_a_change_on_one_attempt_is_retried_and_reserves(bindings, monkeypatch):
     ],
 )
 def test_a_rerun_refuses_what_the_concurrent_launch_reserved(bindings, monkeypatch, concurrent, refusal):
-    pipeline = type(bindings.redis.pipeline())
-    checked = pipeline.hexists
-    launched = []
+    from redis.exceptions import WatchError
 
-    def raced(self, name, key):
+    pipeline = type(bindings.redis.pipeline())
+    began, executed = pipeline.multi, pipeline.execute
+    launched, conflicts = [], []
+
+    def raced(self):
         if not launched:
             launched.append(None)
             launched[0] = bindings.reserve(SLUG, concurrent)
-        return checked(self, name, key)
+        return began(self)
 
-    monkeypatch.setattr(pipeline, "hexists", raced)
+    def counted(self, *args, **kwargs):
+        try:
+            return executed(self, *args, **kwargs)
+        except WatchError:
+            conflicts.append(1)
+            raise
+
+    monkeypatch.setattr(pipeline, "multi", raced)
+    monkeypatch.setattr(pipeline, "execute", counted)
     with pytest.raises(BindingError, match=EXACT[refusal]):
         bindings.reserve(SLUG, record())
+    assert conflicts == [1]
     assert bindings.get(SLUG, concurrent.execution_id) == launched[0]
     assert bindings.redis.hget(bindings.store.key(SLUG, ENDPOINTS), concurrent.endpoint_ref) == concurrent.execution_id
 
