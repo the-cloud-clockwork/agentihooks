@@ -298,6 +298,34 @@ def test_the_operator_launch_with_no_account_anywhere_opens_claude(claude_only, 
     assert placed.harness == "claude"
 
 
+@pytest.mark.parametrize(("profile", "requested"), [("planner", ""), ("frontend", "claude")])
+def test_the_operator_launch_asks_the_open_seat_choice_with_the_environment(tmp_path, monkeypatch, profile, requested):
+    monkeypatch.setattr(plugins, "claude_only", lambda name: name == "frontend")
+    monkeypatch.setenv("AGENTIHOOKS_PROBE", "1")
+    asked, read = [], []
+
+    def choose(agent, environ):
+        asked.append((agent, environ.get("AGENTIHOOKS_PROBE")))
+        return "claude", "rotation"
+
+    def accounts(environ, now, refresh):
+        read.append((environ.get("AGENTIHOOKS_PROBE"), isinstance(now, float), refresh))
+        return [capacity.Account("claude", "cc", "OPEN", 0, 90, 90, 6)]
+
+    def run(argv, **kwargs):
+        out = "status=started\nroute_status=routed\npane_id=w1:p7\n"
+        return SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=choose)
+    runtime.quota_accounts = accounts
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    runtime.operator(config, "planner@a1b2c3-0001", profile, "hello")
+    assert asked == [(requested, "1")]
+    assert read == ([("1", True, False)] if requested else [])
+
+
 def test_a_claude_only_profile_on_an_unpinned_lane_with_no_claude_account_is_refused_in_plain_words(
     codex_only, monkeypatch
 ):

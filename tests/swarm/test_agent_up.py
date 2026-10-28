@@ -144,6 +144,16 @@ def test_up_with_no_harness_named_leaves_the_choice_to_the_launch(swarm):
     assert rt.agents == [""]
 
 
+def test_cli_profile_up_refuses_a_harness_outside_the_choices(swarm, monkeypatch):
+    from scripts.swarm import cli
+
+    rt = OperatorRuntime()
+    monkeypatch.setattr(cli, "HerdrRuntime", lambda: rt)
+    with pytest.raises(SystemExit):
+        run("sw", "planner", "up", "--agent", "copilot")
+    assert rt.launched == []
+
+
 def test_cli_master_up_still_brings_the_master(swarm, monkeypatch):
     from scripts.swarm import cli
 
