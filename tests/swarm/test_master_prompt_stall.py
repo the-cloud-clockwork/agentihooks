@@ -169,11 +169,24 @@ def test_leaving_the_prompt_after_the_ask_withdraws_it(store):
     assert store.agents("sw")[0].state != "finished"
 
 
-def test_other_retire_reasons_are_left_alone(store):
-    agent, runtime = master(store, PaneObservation("working"))
-    master_retire.hold(store, "sw", agent, "the swarm is stopping", True, START)
-    assert run(store, runtime, START + MINUTE) == []
-    assert master_retire.reason(store, "sw", agent.name) == "the swarm is stopping"
+@pytest.mark.parametrize("reason", ["the swarm is stopping", "busy with no tool call for 10 minutes"])
+def test_a_hold_for_another_reason_is_left_to_its_owner(store, reason):
+    agent, runtime = master(store)
+    operator_says(store, START)
+    master_retire.hold(store, "sw", agent, reason, True, START)
+    run(store, runtime, START)
+    assert run(store, runtime, START + 60 * MINUTE) == []
+    assert master_retire.reason(store, "sw", agent.name) == reason
+    assert store.agents("sw")[0].state != "finished"
+    assert rows() == []
+
+
+def test_the_held_count_expires_within_a_day(store):
+    agent, runtime = master(store)
+    operator_says(store, START)
+    run(store, runtime, START)
+    ttl = store.redis.ttl(store.key("sw", "master-prompt-stall", agent.name))
+    assert 0 < ttl <= master_prompt_stall.DAY_S
 
 
 def test_log_only_by_default_writes_would_be_rows_once_and_acts_on_nothing(store):

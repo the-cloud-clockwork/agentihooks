@@ -13,6 +13,7 @@ from scripts.swarm.pane import interrupted_prompt
 from scripts.swarm.store import MASTER
 
 TAIL_LINES = 40
+DAY_S = 86_400
 WAKE_MINUTES = 10
 RESET_MINUTES = 15
 OPERATOR = "operator"
@@ -55,7 +56,7 @@ def _prompt(runtime, master):
         return held_on(observed)
     try:
         tail = runtime.pane_tail(master.pane_id, TAIL_LINES)
-    except Exception:  # an unreadable pane reads as not held, like an unknown pane state
+    except Exception:
         tail = ""
     return held_on(observed, tail, master.harness)
 
@@ -77,11 +78,13 @@ def run(slug, config, store, ledger, runtime, now_ms):
     if master is None or master.lane != MASTER or config.state in {"stopping", "stopped"}:
         return []
     key = store.key(slug, "master-prompt-stall", master.name)
-    prompt = _prompt(runtime, master) if master.name in runtime.live_names() else ""
-    if not prompt or not _operator_waiting(store, slug, master):
+    live = master.name in runtime.live_names()
+    prompt = _prompt(runtime, master) if live and _operator_waiting(store, slug, master) else ""
+    if not prompt:
         _clear(store, slug, master, key)
         return []
     store.redis.hsetnx(key, "since", now_ms)
+    store.redis.expire(key, DAY_S)
     minutes = (now_ms - int(store.redis.hget(key, "since"))) // MINUTE_MS
     mode = modes.configured(GATE, config.gates)
     if minutes < WAKE_MINUTES or mode == "off":
@@ -96,6 +99,8 @@ def run(slug, config, store, ledger, runtime, now_ms):
         would = f"recycle {master.name}" if stage == "recycle" else f"ask {master.name} for a handoff"
         return [f"log only: would {would}, {reason}"]
     held_for = master_retire.reason(store, slug, master.name)
+    if held_for and not held_for.startswith(HELD):
+        return []
     if held := master_retire.hold(store, slug, master, held_for or reason, True, now_ms):
         if not held_for:
             GATE.allows(store, who, "wake", reason, now_ms)
