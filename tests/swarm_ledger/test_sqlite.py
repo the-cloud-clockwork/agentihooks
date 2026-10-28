@@ -456,9 +456,9 @@ def test_concurrent_first_connections_set_up_the_store_once(tmp_path, monkeypatc
 
 
 def test_one_thread_reads_existence_credential_and_task_rows_through_one_connection(tmp_path, monkeypatch):
-    repo = store(tmp_path)
-    repo.create("ledger", CONTENT)
     writer = store(tmp_path)
+    writer.create("ledger", CONTENT)
+    repo = store(tmp_path)
     opened, connect = [], sqlite3.connect
     monkeypatch.setattr(
         sqlite3, "connect", lambda *args, **kwargs: opened.append(threading.get_ident()) or connect(*args, **kwargs)
