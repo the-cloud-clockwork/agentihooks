@@ -321,7 +321,7 @@ def test_gh_graphql_refuses_any_other_error(monkeypatch):
 
 def test_run_returns_the_output_of_a_failing_command_when_unchecked(repo):
     assert rc.run("git", "rev-parse", "--verify", "--quiet", "no-such-ref", check=False) == ""
-    assert rc.run("git", "rev-parse", "--abbrev-ref", "HEAD", check=False) == "dev\n"
+    assert rc.run("git", "symbolic-ref", "--short", "HEAD", check=False) == "dev\n"
 
 
 @pytest.mark.parametrize("argv", [[], ["explain", "v1"], ["insert", "section"], ["other", "a", "b"]])
