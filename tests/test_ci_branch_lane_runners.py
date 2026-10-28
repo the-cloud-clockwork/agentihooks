@@ -25,6 +25,13 @@ ROUTED = "${{ contains(fromJSON('[\"nestorcolt\"]'), github.actor) && '%s' || 'u
         ({"group": "anton-oss", "labels": "anton-light"}, "anton-light"),
         ("${{ matrix.runner }}", "${{ matrix.runner }}"),
         ("${{ format('anton-{0}', 'light') }}", "${{ format('anton-{0}', 'light') }}"),
+        ("${{ cond && matrix.runner || 'anton-oss' }}", "${{ cond && matrix.runner || 'anton-oss' }}"),
+        ("${{ cond && 'anton-oss' || inputs.runner }}", "${{ cond && 'anton-oss' || inputs.runner }}"),
+        (
+            "${{ format('{0}', 'anton-light') || 'anton-oss' }}",
+            "${{ format('{0}', 'anton-light') || 'anton-oss' }}",
+        ),
+        ("${{ cond && 'anton-light' || 'anton-oss' }}", "anton-light"),
     ],
 )
 def test_a_private_runner_label_is_refused(runner, label):
@@ -46,6 +53,7 @@ def test_a_private_runner_label_is_refused(runner, label):
         {"labels": ["anton-oss-batch"]},
         {"group": "anton-oss", "labels": "anton-oss"},
         "Ubuntu-Latest",
+        "${{ 'anton-oss' }}",
         "windows-latest",
         "macos-14",
         None,

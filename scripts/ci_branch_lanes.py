@@ -10,7 +10,8 @@ import yaml
 WORKFLOWS = ".github/workflows"
 PUBLIC_RUNNER = re.compile(r"anton-oss(-[\w.-]+)?|(ubuntu|windows|macos)-[\w.-]+", re.IGNORECASE)
 PUBLIC_GROUPS = ("anton-oss",)
-SELECTED = re.compile(r"(?:&&|\|\|)\s*'((?:''|[^'])*)'")
+SELECTED = re.compile(r"(?:&&|\|\||\$\{\{)\s*'((?:''|[^'])*)'")
+UNRESOLVED = re.compile(r"\b(?:matrix|inputs|vars|env|steps|needs|jobs)\.|\b(?:format|join|toJSON)\(")
 LANE = (
     "format('hosted-lane-{0}', "
     "((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || "
@@ -198,7 +199,9 @@ def runner_labels(runner: object) -> list[str]:
         runner = [runner]
     found = []
     for item in runner if isinstance(runner, list) else []:
-        found += (SELECTED.findall(str(item)) or [str(item)]) if "${{" in str(item) else [str(item)]
+        text = str(item)
+        selected = SELECTED.findall(text) if "${{" in text and not UNRESOLVED.search(text) else []
+        found += selected or [text]
     return found
 
 
