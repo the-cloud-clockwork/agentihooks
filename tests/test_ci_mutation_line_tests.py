@@ -91,3 +91,28 @@ def test_statistics_cache_keeps_mutant_selection_and_planning_uses_its_cost():
     restored, _ = per_test_stats("tests/a.py", sliced["tests/a.py"], 1, set(tests))
     assert restored["tests"] == tests
     assert measured_costs([mutant], [restored])[mutant] < 10
+
+
+def test_buckets_without_line_metadata_keep_their_function_tests_after_merge_and_cache():
+    from collections import defaultdict
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.measured import function_tests
+    from scripts.ci_mutation.selection import apply_stats
+    from scripts.ci_mutation.stats_cache import fresh_by_path, per_test_stats
+
+    function = "scripts.writer.x_write"
+    mutant = function + "__mutmut_1"
+    fast, other, shared = (f"tests/a.py::test_{name}" for name in ("fast", "other", "shared"))
+    records = [
+        {"status": 0, "tests": {function: [fast, other], mutant: [fast]}, "durations": {fast: 1, other: 2}, "cpu": 3},
+        {"status": 0, "tests": {function: [shared]}, "durations": {shared: 3}, "cpu": 3},
+    ]
+    tests, _, _ = function_tests(records)
+    assert tests[mutant] == {fast, shared}
+    engine = SimpleNamespace(tests_by_mangled_function_name=defaultdict(set), duration_by_test={})
+    apply_stats(SimpleNamespace(mutmut=engine, save_stats=lambda: None), records)
+    assert engine.tests_by_mangled_function_name[mutant] == {fast, shared}
+    sliced = fresh_by_path(["tests/a.py"], records)
+    restored, _ = per_test_stats("tests/a.py", sliced["tests/a.py"], 1, {function, mutant})
+    assert set(restored["tests"][mutant]) == {fast, shared}
