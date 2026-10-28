@@ -44,7 +44,7 @@
   },
   "metrics": {
     "brain_gate_false_block_rate": "Operator-reviewed false denials divided by operator-reviewed denials; null when no denial has been reviewed. An operator lift alone is not a false-block ruling.",
-    "context_delivery_failures": "Observed missing, disabled or unsupported delivery outcomes. A successful retrieval response is not a target delivery observation. Delivered means the context notice reached the target; an empty retrieval that reached the target counts as delivered and is classified separately in retrieval outcomes.",
+    "context_delivery_failures": "Observed missing, disabled or unsupported delivery outcomes. A successful retrieval response is not a target delivery observation. Delivered means the context notice was handed to the target injector; target receipt is not confirmed. An empty retrieval handed to the injector counts as delivered and is classified separately in retrieval outcomes.",
     "context_service_failures": "Historical retrieval failures remain visible after successful recovery; the degraded flag describes the latest observation for each session.",
     "usefulness": "Delivered context, explicitly referenced context and operator-reviewed useful or irrelevant context remain distinct. References and reviews do not store prompt text."
   },
@@ -57,7 +57,8 @@
     "acceptance_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40648292118 touched tests at 15d12e02b76666efd32baad4b8a3bc442c100f72: 53 passed",
     "mutation": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40648292118 at 15d12e02b76666efd32baad4b8a3bc442c100f72: every job green; https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40634144163 at 09af0343e00c727a66fb57d5134befec363378b5: 6 shards complete, 638 graded, 629 killed, 9 survivors each cleared by an individual Standards ruling, no untouched survivors; preflight 40630666144 had 146 failing entries, killed by boundary tests or cleared individually",
     "lint": "ruff check, ruff format and size passed through the committed HEAD prepush gate",
-    "outcome": "passed"
+    "outcome": "passed",
+    "tested_commit_note": "The later commit moving the brain gate fail-open sentinel beside the gate constants changes no behaviour; the pull request records the preflight on its final head."
   },
   "rollback_rehearsal": {
     "action": "Return the brain gate to observe mode through the existing swarm gate configuration; retain consultation metrics, receipts and gate history.",
@@ -70,6 +71,7 @@
     "The preceding local consultation receipt is not a cryptographic boundary against a process that controls its own hook state. Metrics preserve that compatibility contract.",
     "Runtime observations derive their grant from the existing project resolver and selected brain in the same process; preauthenticated grants from adapters apply to Metrics.record callers outside the hook path.",
     "Runtime delivery and gate observations use a fresh operation identity per hook event, so the replay guard deduplicates only callers that supply a stable identity.",
-    "Runtime observations record the task transition purpose only; search and refresh purposes are accepted by the schema but not yet emitted."
+    "Runtime observations record the task transition purpose only; search and refresh purposes are accepted by the schema but not yet emitted.",
+    "Runtime grant scope comes from the project resolver rather than a fixture grant or operator role; that path awaits a ruling on the ledger."
   ]
 }
