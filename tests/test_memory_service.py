@@ -1,6 +1,7 @@
 """Tests for the hosted session memory service: bearer authentication, routes, configuration and its entrypoint."""
 
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -139,9 +140,18 @@ def test_an_empty_body_is_refused(served):
 
 
 def test_a_body_over_the_bound_is_refused(served):
-    raw = json.dumps({"query": "x" * service.MAX_BODY}).encode()
-    status, _, answer = call(served, service.SEARCH_PATH, token=TOKEN, raw=raw)
-    assert status == 400 and answer == refusal("invalid_request", service.BAD_BODY)
+    # Headers only: the service refuses on Content-Length without reading the body, and urllib would send one.
+    connection = http.client.HTTPConnection(served.removeprefix("http://"), timeout=10)
+    try:
+        connection.putrequest("POST", service.SEARCH_PATH)
+        connection.putheader("Authorization", f"Bearer {TOKEN}")
+        connection.putheader("Content-Length", str(service.MAX_BODY + 1))
+        connection.endheaders()
+        response = connection.getresponse()
+        answer = json.loads(response.read())
+    finally:
+        connection.close()
+    assert response.status == 400 and answer == refusal("invalid_request", service.BAD_BODY)
 
 
 class Unread:

@@ -166,7 +166,7 @@ def failing_tests(repo: str, job: dict, run: Callable) -> set[str]:
         return set()
     log = github_reads.rest(
         "swarm.promotion_watch",
-        ["api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job['id']}/logs"],
+        ["api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job['id']}/logs", "--allow-escape-sequences"],
         run,
         cwd=repo,
         capture_output=True,
