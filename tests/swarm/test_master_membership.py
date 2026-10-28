@@ -19,6 +19,7 @@ def test_master_joins_as_orchestrator_before_dispatch(monkeypatch, seat, handoff
     name = "master@a1b2c3-0002"
 
     def dispatch(request):
+        ledger_client.LedgerClient.assert_called_once_with(service=True)
         ledger.join.assert_called_once_with("sw", name, "orchestrator")
         assert request.task == {"id": "master", "seat": seat, "handoff": handoff}
         return Outcome("spawn", Status.OK, "local", "placed")
@@ -34,6 +35,7 @@ def test_master_resume_joins_before_recovery(monkeypatch):
     agent = AgentRecord("master@a1b2c3-0002", "master", "master", seat="master@sw")
 
     def recover(*args):
+        ledger_client.LedgerClient.assert_called_once_with(service=True)
         ledger.join.assert_called_once_with("sw", agent.name, "orchestrator")
         return Outcome("recover", Status.OK, "local", "resumed")
 
