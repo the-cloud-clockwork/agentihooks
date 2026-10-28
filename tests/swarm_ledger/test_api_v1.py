@@ -48,7 +48,6 @@ from scripts.swarm_ledger.api import errors as errors
 from scripts.swarm_ledger.api import mutations as mutations
 from scripts.swarm_ledger.api import receipts as receipts_store
 from scripts.swarm_ledger.api import routes as routes
-from scripts.swarm_ledger.repository.fragments import document
 
 
 def request(live, method, resource, body=None, **headers):
@@ -2131,11 +2130,6 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
     assert after == [after[0]] * 3 and after[0] != first
     assert json.loads(after[0]) == stored()
     assert "Written after the first export, café" in after[0].decode()
-
-
-def test_export_body_hides_seeds_and_receipts_and_keeps_text_unescaped():
-    state = {"title": "café", "_meta": {"seeds": [1], "api_operations": {"a": 1}, "members": ["m"]}}
-    assert routes.export_text(document(state)).decode("utf-8") == '{"data":{"title":"café","_meta":{"members":["m"]}}}'
 
 
 def test_raw_upload_headers_reject_invalid_lengths_and_names(live):

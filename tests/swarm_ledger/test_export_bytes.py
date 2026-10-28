@@ -25,8 +25,8 @@ def test_export_sends_the_cached_view_bytes_without_copying_them(live, monkeypat
     assert type(sent[0]) is bytes and sent[0] is sent[1]
 
 
-def test_export_text_is_the_utf8_export_body():
-    state = {"title": "café", "_meta": {"seeds": [1], "members": ["m"]}}
+def test_export_text_hides_seeds_and_receipts_and_keeps_text_unescaped():
+    state = {"title": "café", "_meta": {"seeds": [1], "api_operations": {"a": 1}, "members": ["m"]}}
     assert routes.export_text(document(state)) == '{"data":{"title":"café","_meta":{"members":["m"]}}}'.encode("utf-8")
     assert type(routes.export_text(document(state))) is bytes
 
