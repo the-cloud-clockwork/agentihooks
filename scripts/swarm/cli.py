@@ -1780,6 +1780,7 @@ def cmd_merge(store, args):
                 journal=queue_record.Journal(args.url),
                 attempts=merge_queue.ATTEMPTS,
             )
+            queue_priority.auto(store, args.slug, args.url)
         else:
             result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))
     print(json.dumps(result))

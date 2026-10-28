@@ -7,9 +7,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import merge_queue, queue_record, ready, staged_compatibility
+from scripts.swarm import merge_queue, preempt, queue_record, ready, staged_compatibility
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm_ledger.repository import hierarchy
 
 PENDING = "queue-priority"
 DISPLACED = "queue-priority-displaced"
@@ -205,6 +206,15 @@ def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dic
     if lift:
         journal.write("priority-lift", url, "", None, None)
     return apply(store, slug, url, sender, tasks, journal)
+
+
+def auto(store: RedisStore, slug: str, url: str) -> dict | None:
+    doc = LedgerClient().state(slug)
+    tasks = doc.get("tasks") or []
+    owner = next(iter(owners(tasks, [url])), None)
+    if owner is None or not preempt.preferred(owner, doc, hierarchy.project(doc)[0]):
+        return None
+    return request(store, slug, url, "swarm", tasks, lift=False)
 
 
 def drop_reason(url: str) -> str:
