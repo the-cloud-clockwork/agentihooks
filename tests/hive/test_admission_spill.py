@@ -21,7 +21,7 @@ from tests.hive.test_controller_launch import request_for, setup, write_hive  # 
     ],
     ids=["cpu", "memory", "disk"],
 )
-def test_resource_refusal_spills_to_the_next_ranked_hive(setup, monkeypatch, in_pass, reading, harness):  # noqa: F811
+def test_resource_refusal_spills_to_the_next_ranked_hive(setup, monkeypatch, in_pass, reading, harness, capsys):  # noqa: F811
     setup.config.lanes["eng"] = {"agent": harness}
     setup.herdr._quota_accounts = [replace(row, harness=harness) for row in setup.herdr._quota_accounts]
     slots = [{"harness": harness, "account": "account", "kind": "subscription"}]
@@ -55,6 +55,19 @@ def test_resource_refusal_spills_to_the_next_ranked_hive(setup, monkeypatch, in_
     selected = launcher.select(setup.config, "eng", request.task)
     assert selected.hive == "spare"
     assert selected.account.harness == harness
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    logged = json.loads(captured.err)
+    assert logged == {
+        "event": "hive_admission_refused",
+        "slug": "fixture",
+        "task": "task",
+        "name": request.name,
+        "hive": "remote",
+        "reason": logged["reason"],
+    }
+    assert logged["reason"].startswith("no hive for eng has room: remote ")
+    assert logged["reason"].split(": ", 2)[2]
 
 
 def test_spill_does_not_bypass_hive_role_constraints(setup, monkeypatch):  # noqa: F811
