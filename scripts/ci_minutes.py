@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -18,6 +19,10 @@ ANTON = "anton"
 MATRIX = re.compile(r" \(.*\)$")
 TIERS = {"pull_request": "pull request", "pull_request_target": "pull request", "merge_group": "queue"}
 TOP = 25
+CACHE = Path("ci-minutes-jobs.json")
+KEEP = timedelta(days=7)
+# Calls left for the other users of the token's hourly limit after the job reads.
+RESERVE = 1000
 
 
 def tier(run: dict) -> str:
@@ -125,12 +130,39 @@ def read_runs(repo: str, since: datetime, until: datetime) -> list[dict]:
     return list({run["id"]: run for run in found}.values())
 
 
-def read_jobs(repo: str, runs: list[dict]) -> list[dict]:
+def read_jobs(repo: str, runs: list[dict], cache: dict) -> list[dict]:
     def read(run):
         return rows(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100", "jobs")
 
+    unread = [run for run in runs if str(run["id"]) not in cache]
     with ThreadPoolExecutor() as pool:
-        return [job for listed in pool.map(read, runs) for job in listed]
+        fresh = dict(zip((str(run["id"]) for run in unread), pool.map(read, unread), strict=True))
+    for run in unread:
+        if run.get("status") == "completed":
+            cache[str(run["id"])] = {"created_at": run["created_at"], "jobs": fresh[str(run["id"])]}
+    return [
+        job for key in (str(run["id"]) for run in runs) for job in (fresh[key] if key in fresh else cache[key]["jobs"])
+    ]
+
+
+def load_cache(path: Path) -> dict:
+    return json.loads(path.read_text()) if path.is_file() else {}
+
+
+def save_cache(path: Path, cache: dict, since: datetime) -> None:
+    oldest = (since - KEEP).strftime(STAMP)
+    path.write_text(json.dumps({key: entry for key, entry in cache.items() if entry["created_at"] >= oldest}))
+
+
+def remaining() -> int:
+    done = subprocess.run(["gh", "api", "rate_limit"], capture_output=True, check=True, timeout=30, text=True)
+    return json.loads(done.stdout)["resources"]["core"]["remaining"]
+
+
+def within_budget(reads: int) -> None:
+    left = remaining()
+    if reads + RESERVE > left:
+        raise SystemExit(f"{reads} job reads would leave fewer than {RESERVE} of {left} API calls; refusing to start")
 
 
 def merged_count(repo: str, since: datetime, until: datetime) -> int:
@@ -144,11 +176,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--until")
     parser.add_argument("--hours", type=int, default=24)
     parser.add_argument("--out", type=Path, default=Path("ci-minutes.json"))
+    parser.add_argument("--cache", type=Path, default=CACHE)
     args = parser.parse_args(argv)
     until = datetime.strptime(args.until, STAMP) if args.until else datetime.now(UTC)
     since = until - timedelta(hours=args.hours)
     runs = read_runs(args.repo, since, until)
-    result = aggregate(runs, read_jobs(args.repo, runs), merged_count(args.repo, since, until))
+    cache = load_cache(args.cache)
+    within_budget(sum(str(run["id"]) not in cache for run in runs))
+    jobs = read_jobs(args.repo, runs, cache)
+    save_cache(args.cache, cache, since)
+    result = aggregate(runs, jobs, merged_count(args.repo, since, until))
     result.update(since=since.strftime(STAMP), until=until.strftime(STAMP))
     args.out.write_text(json.dumps(result, indent=2))
     report = render(result)
