@@ -981,8 +981,9 @@ def quota_master(monkeypatch, tmp_path, observed, store):
 def test_a_new_master_leaves_a_warned_account_or_refuses_naming_it(up, monkeypatch, tmp_path):
     store, _, _ = up
     rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("ok")], store)
-    direct(store, rt, master_launch.NEW)
+    launched, _ = direct(store, rt, master_launch.NEW)
     assert routes == ["ok"]
+    store.drop_agent("sw", launched.name)
     rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5)], store)
     refusal = "no claude or codex account has placeable quota seats: claude w is at its week quota warning"
     with pytest.raises(SwarmError, match=f"^the new master could not start: {refusal}$"):
