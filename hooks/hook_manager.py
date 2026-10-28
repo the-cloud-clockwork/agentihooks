@@ -1208,6 +1208,7 @@ def _swarm_after_tool(payload: dict) -> None:
     _swarm_tool_end(payload)
     _hive_join(payload, "tool")
     _swarm_ledger(payload)
+    _brain_search(payload)
 
 
 def _swarm_tool_end(payload: dict) -> None:
@@ -1999,7 +2000,6 @@ def on_post_tool_use(payload: dict) -> None:
     _trace_session_id = payload.get("session_id", "")
     _operator_words(payload)
     _swarm_after_tool(payload)
-    _brain_search(payload)
     _conditions = None
     try:
         from hooks.context.conditions import post_effect
