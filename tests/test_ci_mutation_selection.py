@@ -520,6 +520,63 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
     assert mutation_counts("scripts/sample.py", source, {9, 13}) == (0, ["cached"])
 
 
+def test_property_cached_property_static_and_class_method_bodies_are_graded_and_their_mutants_run(monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutants
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    source = (
+        "import functools\n"
+        "\n"
+        "class Shape:\n"
+        "    def __init__(self, side):\n"
+        "        self.side = side\n"
+        "\n"
+        "    @property\n"
+        "    def area(self):\n"
+        "        return self.side * self.side\n"
+        "\n"
+        "    @functools.cached_property\n"
+        "    def perimeter(self):\n"
+        "        return self.side * 4\n"
+        "\n"
+        "    @staticmethod\n"
+        "    def double(value):\n"
+        "        return value * 2\n"
+        "\n"
+        "    @classmethod\n"
+        "    def unit(cls):\n"
+        "        return cls(1 + 0)\n"
+    )
+    for line in (9, 13, 17, 21):
+        found, ungraded = mutation_counts("scripts/sample.py", source, {line})
+        assert found > 0
+        assert ungraded == []
+    generated, names = selected_mutants("scripts/sample.py", source, {9, 13, 17, 21})
+    assert {name.split("__mutmut_")[0] for name in names} == {
+        "xǁShapeǁarea",
+        "xǁShapeǁperimeter",
+        "xǁShapeǁdouble",
+        "xǁShapeǁunit",
+    }
+    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    namespace = {"__name__": "scripts.sample"}
+    exec(compile(generated, "scripts/sample.py", "exec"), namespace)
+    shape = namespace["Shape"]
+    assert (shape(3).area, shape(3).perimeter, shape.double(3), shape.unit().side) == (9, 12, 6, 1)
+    outcomes = set()
+    for name in names:
+        monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
+        try:
+            outcomes.add((shape(3).area, shape(3).perimeter, shape.double(3), shape.unit().side))
+        except TypeError:
+            outcomes.add(name)
+    assert (9, 12, 6, 1) not in outcomes
+
+
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
 def test_shards_split_every_mutant_name_exactly_once_and_evenly(total):
     from scripts.ci_mutation.mutant_shards import shard_names
