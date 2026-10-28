@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/fleet_red.py:scripts.swarm.fleet_red.x_checker__mutmut_7:f24ab6b4077a9a4a50ca96522826f19412181f3bef6a4b5abecf8ee948b30a8e": {
+    "reader": "standards_reader",
+    "reason": "Replaces the empty fallback for a task without a pull request url with the string XXXX. repository() matches only a github.com pull request url, so both strings yield an empty repository, the task is admitted before any read, and the url reaches no other expression. No output changes."
+  }
+}
