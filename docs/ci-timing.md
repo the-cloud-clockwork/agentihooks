@@ -1954,8 +1954,8 @@ Grouping per branch stays at the workflow level. A branch push run joins `mutati
 | Job | Runner label | Concurrency group |
 |---|---|---|
 | Whole run, branch push | per job, below | `mutation-preflight-refs/heads/<branch>`, newer push cancels the older run |
-| `plan`, `refine`, `mutation` | `anton-oss-light` | the run's group only |
-| `touched-tests` | `anton-oss` | the run's group only |
+| `refine`, `mutation` | `anton-oss-light` | the run's group only |
+| `plan`, `touched-tests` | `anton-oss` | the run's group only |
 | `stats` | `anton-oss-batch` | `mutation-preflight-job-<run id>-stats-<part>` |
 | `mutation-shard` | `anton-oss-batch` | `mutation-preflight-job-<run id>-shard-<shard>` |
 
