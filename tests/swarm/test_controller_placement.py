@@ -296,6 +296,12 @@ def test_placement_mode_is_anton_first_with_no_node_limit_by_default(store):
     assert (config.placement_mode, config.placement_nodes) == ("round-robin", 3)
 
 
+def test_a_swarm_saved_before_placement_modes_reads_anton_first_with_no_node_limit(store):
+    store.redis.hdel(store.key("sw", "config"), "placement_mode", "placement_nodes")
+    config = store.config("sw")
+    assert (config.placement_mode, config.placement_nodes) == ("anton-first", 0)
+
+
 @pytest.mark.parametrize("nodes", [-1, "2", 1.5])
 def test_swarm_config_refuses_a_node_limit_that_is_not_a_whole_number(nodes):
     from scripts.swarm.store import SwarmConfig, SwarmError
