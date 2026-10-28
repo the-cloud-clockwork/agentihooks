@@ -5,13 +5,14 @@
     "every_viewer_was_closed": true,
     "fresh_observation_clears_the_stale_mark": true,
     "fresh_terminal_shown_live_before_close": true,
+    "keyboard_reaches_cancel_and_asks_first": true,
     "lost_read_grants_no_control": true,
     "lost_read_keeps_the_cached_view_marked": true,
+    "new_connection_reads_the_same_view": true,
     "no_command_replayed": true,
     "no_page_errors": true,
     "outage_wrote_nothing": true,
-    "reconnecting_terminal_shown_stale": true,
-    "restart_reads_the_same_view": true
+    "reconnecting_terminal_shown_stale": true
   },
   "evidence_class": "mocked: a fake Redis swarm store is the authoritative state; the tick, the worker Pod's heartbeat and the hub's terminal checks are writes to it; real Chromium pages at 1920 by 1080 and at a 390 by 844 touch viewport render the ledger page from the swarm view the ledger server projects from that store, and their control writes enter the ledger server's lifecycle control; the hive command runner consumes the queue with its terminal commands stubbed; no ledger HTTP server, worker Pod, herdr server or cluster runs",
   "input_sha256": {
@@ -34,21 +35,27 @@
       "kept_by_the_page": "the last observed swarm view, marked not current",
       "lost_in_the_outage": [],
       "survived_the_outage": [
-        "agentihooks-test-ef396413824a:names:code-of",
-        "agentihooks-test-ef396413824a:names:codes",
-        "agentihooks-test-ef396413824a:names:name:engineer@a1b2c3-0001",
-        "agentihooks-test-ef396413824a:names:names:a1b2c3",
-        "agentihooks-test-ef396413824a:names:seq:a1b2c3",
-        "agentihooks-test-ef396413824a:swarm:index",
-        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:agents",
-        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:config",
-        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:context-evidence",
-        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:executions",
-        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:published",
-        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:state-since",
-        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:task-context-packs",
-        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:terminals"
+        "agentihooks-test-57de28775e3b:names:code-of",
+        "agentihooks-test-57de28775e3b:names:codes",
+        "agentihooks-test-57de28775e3b:names:name:engineer@a1b2c3-0001",
+        "agentihooks-test-57de28775e3b:names:names:a1b2c3",
+        "agentihooks-test-57de28775e3b:names:seq:a1b2c3",
+        "agentihooks-test-57de28775e3b:swarm:index",
+        "agentihooks-test-57de28775e3b:swarm:sv2-ux-05:agents",
+        "agentihooks-test-57de28775e3b:swarm:sv2-ux-05:config",
+        "agentihooks-test-57de28775e3b:swarm:sv2-ux-05:context-evidence",
+        "agentihooks-test-57de28775e3b:swarm:sv2-ux-05:executions",
+        "agentihooks-test-57de28775e3b:swarm:sv2-ux-05:published",
+        "agentihooks-test-57de28775e3b:swarm:sv2-ux-05:state-since",
+        "agentihooks-test-57de28775e3b:swarm:sv2-ux-05:task-context-packs",
+        "agentihooks-test-57de28775e3b:swarm:sv2-ux-05:terminals"
       ]
+    },
+    "keyboard": {
+      "dialogs": [
+        "cancel engineer@a1b2c3-0001? This agent checkpoints and stops; its task stays claimed for a new attempt."
+      ],
+      "focus": "cancel engineer@a1b2c3-0001"
     },
     "lost": {
       "controls": [
@@ -174,6 +181,7 @@
     }
   },
   "operator_workflow_acceptance": {
+    "keyboard_controls": 1,
     "stale_marks": 1,
     "stale_marks_cleared": 1,
     "viewers_closed": 2,

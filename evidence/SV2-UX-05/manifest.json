@@ -1,6 +1,6 @@
 {
   "case_runs": [
-    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40664080238"
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40669012713"
   ],
   "cases": [
     "T-SV2-UX-05-A",
@@ -15,5 +15,5 @@
   "red_runs": [
     "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40659191699"
   ],
-  "tested_commit": "ea13868a4"
+  "tested_commit": "17aa9b7da"
 }

@@ -39,6 +39,7 @@
         "viewers_opened": 1
       },
       "c": {
+        "keyboard_controls": 1,
         "stale_marks": 1,
         "stale_marks_cleared": 1,
         "viewers_closed": 2,
@@ -53,11 +54,11 @@
   "redaction": "The fixture is synthetic: its transcript lines, session, Pod and machine names are invented for this package and hold no operator or customer content; the refusal text is checked to name no execution, Pod or identity",
   "rollback": "Restore the previous ledger page build by reverting its pull request on dev and letting promotion republish the ledger server image; worker Pods are not restarted and the swarm store is not touched. AGENTIHOOKS_LIFECYCLE_DESTRUCTIVE=off on the ledger server withdraws only the destructive controls. This package changes no page build, so its own rollback is a revert of tests and docs.",
   "states": {
-    "accepted": "Standards and Spec reviews on pull request 8254; round one findings fixed in ea13868a4",
+    "accepted": "Standards review closed in round two with every finding fixed; Spec review round two closed all but the desktop keyboard path to a destructive control, added in 17aa9b7da",
     "committed": "Case records, manifest and result committed on the task branch; the change reaches dev only when its pull request merges",
     "externally_verified": "Not on Anton: no ledger page was driven against a live swarm on Anton compute; the evidence is mocked and labelled so",
-    "observed": "Cases A, B and C passed in focused Proofs run 40664080238 on ea13868a4 (evidence/SV2-UX-05/a-result.json, b-result.json, c-result.json); the cases failed before in Proofs run 40659191699 on f0184ec97"
+    "observed": "Cases A, B and C passed in focused Proofs run 40669012713 on 17aa9b7da, A and B matching their committed records (evidence/SV2-UX-05/a-result.json, b-result.json, c-result.json); the cases failed before in Proofs run 40659191699 on f0184ec97"
   },
   "status": "fixture-qualified: after every viewer closed, desktop and phone views read the same running remote agent, its task and its evidence from the store; every phone control is visible with its agent and scope, a destructive tap asks first and a stale tab is refused without changing state; a reconnecting terminal shows cached and stale until a fresh check, and a lost read disables every control; no Anton rollout has been observed",
-  "tested_commit": "ea13868a4"
+  "tested_commit": "17aa9b7da"
 }
