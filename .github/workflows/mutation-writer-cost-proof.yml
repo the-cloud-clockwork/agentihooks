@@ -7,11 +7,6 @@ on:
         description: Completed statistics run for the identical preserved sample, or blank to collect fresh
         type: string
         default: ''
-  push:
-    branches: [ci-323133-3205]
-    paths:
-      - .github/workflows/mutation-writer-cost-proof.yml
-      - tests/writer_mutation_cost_proof.py
 
 permissions:
   contents: read

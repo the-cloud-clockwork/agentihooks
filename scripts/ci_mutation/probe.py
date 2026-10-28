@@ -5,6 +5,7 @@ import math
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from scripts.ci_mutation.mutant_shards import function_name, holds
@@ -44,6 +45,32 @@ def probe_results(plan: dict) -> tuple[dict[str, str], float]:
     ):
         raise ValueError("early mutation results are stale, incomplete or invalid")
     return probe["results"], seconds
+
+
+def read_probe_results(path: Path) -> tuple[dict[str, str], float]:
+    return probe_results(json.loads(path.read_text())) if path.is_file() else ({}, 0)
+
+
+def probe_elapsed(stats: SharedStats | None) -> float:
+    return read_probe_results(stats.folder / "plan.json")[1] if stats and stats.part is None else 0
+
+
+def mark_probe_results(work: Path, results: dict) -> dict:
+    early, _ = read_probe_results(work / "shard-plan.json")
+    for values in results.values():
+        for row in values:
+            if early.get(row["name"]) == "killed":
+                row["reused_early_kill"] = True
+    return results
+
+
+def reuse_kills(run_tests: Callable[..., int], early: dict[str, str]) -> Callable[..., int]:
+    def run_cached(self, *, mutant_name, tests):
+        if mutant_name is not None and early.get(mutant_name) == "killed":
+            return 1
+        return run_tests(self, mutant_name=mutant_name, tests=tests)
+
+    return run_cached
 
 
 def merge_probes(plan: dict, records: list[dict]) -> dict:

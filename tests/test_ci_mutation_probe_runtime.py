@@ -150,3 +150,43 @@ def test_merge_command_validates_every_part_before_publishing_the_shared_plan(tm
     assert probe.main() == 0
     assert json.loads((stats.folder / "plan.json").read_text()) == probe.merge_probes(plan, _records(plan))
     assert capsys.readouterr().out == "Shared early mutations: 2; charged seconds: 9.000\n"
+
+
+def test_reused_kills_skip_only_proven_mutants_and_keep_baseline_controls_and_survivors():
+    calls = []
+    tests = ["tests/a.py::test_writer"]
+
+    def execute(worker, *, mutant_name, tests):
+        calls.append((worker, mutant_name, tests))
+        return 4
+
+    cached = probe.reuse_kills(execute, {"killed": "killed", "survived": "survived"})
+    assert cached("worker", mutant_name="killed", tests=tests) == 1
+    assert cached("worker", mutant_name="survived", tests=tests) == 4
+    assert cached("worker", mutant_name=None, tests=tests) == 4
+    assert calls == [("worker", "survived", tests), ("worker", None, tests)]
+
+
+def test_probe_provenance_marks_only_a_reused_kill_and_preserves_other_rows(tmp_path):
+    plan = _plan()
+    merged = probe.merge_probes(plan, _records(plan))
+    (tmp_path / "shard-plan.json").write_text(json.dumps(merged))
+    rows = {
+        "scripts/a.py": [
+            {"name": "scripts.a.x_f__mutmut_1", "status": "killed"},
+            {"name": "scripts.a.x_f__mutmut_2", "status": "survived"},
+            {"name": "scripts.a.x_g__mutmut_1", "status": "killed"},
+        ]
+    }
+    assert probe.mark_probe_results(tmp_path, rows) is rows
+    assert rows["scripts/a.py"] == [
+        {"name": "scripts.a.x_f__mutmut_1", "status": "killed", "reused_early_kill": True},
+        {"name": "scripts.a.x_f__mutmut_2", "status": "survived"},
+        {"name": "scripts.a.x_g__mutmut_1", "status": "killed"},
+    ]
+    shared = SharedStats(tmp_path, "revision")
+    assert probe.probe_elapsed(None) == 0
+    assert probe.probe_elapsed(shared) == 0
+    (tmp_path / "plan.json").write_text(json.dumps(merged))
+    assert probe.probe_elapsed(shared) == 9
+    assert probe.probe_elapsed(SharedStats(tmp_path, "revision", (0, 1))) == 0
