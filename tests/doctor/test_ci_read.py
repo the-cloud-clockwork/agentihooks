@@ -428,3 +428,114 @@ def test_dev_pushes_without_a_red_workflow_reads_only_the_run_list():
 
     assert ci_read.dev_pushes("/repo", gh) == {"runs": [], "green": {}, "jobs": {}}
     assert calls == [DEV_PUSHES]
+
+
+def _pulls_world(monkeypatch, tmp_path, numbers):
+    import time
+
+    import fakeredis
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    clock = [1_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    fixture = load("ci")
+    fixture["runs"][0]["run_attempt"] = 1
+    world = {
+        "heads": {n: fixture["pr"]["head"]["sha"] for n in numbers},
+        "checks": {n: "SUCCESS" for n in numbers},
+        "calls": [],
+        "cache": fakeredis.FakeRedis(decode_responses=True),
+        "on_pull": lambda: None,
+    }
+
+    def gh(argv, **kwargs):
+        assert argv[:2] == ["gh", "api"]
+        assert kwargs["check"] is True
+        endpoint = argv[2]
+        world["calls"].append(endpoint)
+        if endpoint == "graphql":
+            assert argv[3] == "-f"
+            assert argv[4].startswith("query=")
+            data = {
+                f"p{i}": {"pullRequest": {"headRefOid": world["heads"][n], "state": world["checks"][n]}}
+                for i, n in enumerate(numbers)
+            }
+            output = json.dumps({"data": data})
+        elif "/pulls/" in endpoint:
+            world["on_pull"]()
+            number = int(endpoint.rsplit("/", 1)[1])
+            head = {**fixture["pr"]["head"], "sha": world["heads"][number]}
+            output = json.dumps({**fixture["pr"], "number": number, "head": head})
+        else:
+            rows = fixture["checks"] if "/check-runs?" in endpoint else fixture["runs"]
+            output = "\n".join(json.dumps(row) for row in rows)
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+    def read_pass(**kwargs):
+        world["calls"].clear()
+        clock[0] += ci_read.github_reads.RUN_TTL_S
+        return ci_read.pull_requests([("o/r", n) for n in numbers], run=gh, cache=world["cache"], **kwargs)
+
+    return world, read_pass
+
+
+def test_an_unchanged_pull_request_costs_one_state_read_on_the_next_pass(monkeypatch, tmp_path):
+    world, read_pass = _pulls_world(monkeypatch, tmp_path, [4, 5])
+    first = read_pass()
+    assert world["calls"].count("graphql") == 1
+    assert [r["pr"]["number"] for r in first] == [4, 5]
+    assert read_pass() == first
+    assert world["calls"] == ["graphql"]
+
+
+def test_a_new_head_reads_the_pull_request_in_full(monkeypatch, tmp_path):
+    world, read_pass = _pulls_world(monkeypatch, tmp_path, [4, 5])
+    read_pass()
+    fresh = "b" * 40
+    world["heads"][5] = fresh
+    second = read_pass()
+    assert world["calls"] == [
+        "graphql",
+        "repos/o/r/pulls/5",
+        f"repos/o/r/commits/{fresh}/check-runs?per_page=100",
+        f"repos/o/r/actions/runs?head_sha={fresh}&per_page=100",
+    ]
+    assert second[1]["pr"]["head"]["sha"] == fresh
+
+
+def test_a_changed_check_state_on_the_same_head_reads_in_full(monkeypatch, tmp_path):
+    world, read_pass = _pulls_world(monkeypatch, tmp_path, [4])
+    read_pass()
+    world["checks"][4] = "FAILURE"
+    read_pass()
+    assert world["calls"][:2] == ["graphql", "repos/o/r/pulls/4"]
+
+
+def test_full_reads_per_pass_stop_at_the_bound_and_the_rest_wait_for_the_next_pass(monkeypatch, tmp_path):
+    world, read_pass = _pulls_world(monkeypatch, tmp_path, [1, 2, 3])
+    first = read_pass(full_reads=2)
+    assert [r["pr"]["number"] for r in first] == [1, 2]
+    assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/1", "repos/o/r/pulls/2"]
+    for number in (1, 2):
+        world["heads"][number] = "c" * 40
+    second = read_pass(full_reads=1)
+    assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/1"]
+    assert [(r["pr"]["number"], r["pr"]["head"]["sha"]) for r in second] == [
+        (1, "c" * 40),
+        (2, first[1]["pr"]["head"]["sha"]),
+    ]
+
+
+def test_full_reads_of_one_pass_run_side_by_side(monkeypatch, tmp_path):
+    import threading
+
+    world, read_pass = _pulls_world(monkeypatch, tmp_path, [4, 5])
+    world["on_pull"] = threading.Barrier(2, timeout=5).wait
+    assert [r["pr"]["number"] for r in read_pass()] == [4, 5]
+
+
+def test_no_open_pull_request_reads_nothing():
+    def gh(argv, **kwargs):
+        pytest.fail(f"read without an open pull request: {argv}")
+
+    assert ci_read.pull_requests([], run=gh, cache=None) == []
