@@ -62,14 +62,14 @@ def _rc(passed):
 
 def test_a_master_with_the_login_on_spawns_on_its_own_route_with_remote_control(tmp_path):
     passed, placed = _spawn(tmp_path, "master", "claude", "interactive")
-    assert passed[:6] == ["--route", "master-login", *RC]
+    assert passed[:6] == ["--route", "claude-ai", *RC]
     assert (placed.route_kind, placed.remote_control) == ("interactive", ON)
 
 
 @pytest.mark.parametrize("kind", ["subscription", "api"])
 def test_a_front_door_order_on_an_explicit_route_takes_the_login_and_remote_control(tmp_path, kind):
     passed, placed = _spawn(tmp_path, "master", "claude", kind)
-    assert passed[:6] == ["--route", "master-login", *RC]
+    assert passed[:6] == ["--route", "claude-ai", *RC]
     assert (placed.route_kind, placed.remote_control) == ("interactive", ON)
 
 
@@ -133,7 +133,7 @@ def test_a_backend_master_spawns_without_the_master_login_or_remote_control(tmp_
 
 def test_the_front_door_seat_spawns_with_remote_control(tmp_path):
     passed, placed = _spawn(tmp_path, "master", "claude", "interactive", seat="master@proof")
-    assert passed[:6] == ["--route", "master-login", *RC]
+    assert passed[:6] == ["--route", "claude-ai", *RC]
     assert placed.remote_control == ON
 
 
@@ -154,14 +154,14 @@ def test_a_backend_master_resumes_without_the_master_login_or_remote_control(tmp
 
 def test_the_front_door_seat_resumes_with_remote_control(tmp_path):
     passed, placed = _resumed(tmp_path, "master", "claude", "subscription", seat="master@proof")
-    assert passed[:6] == ["--route", "master-login", *RC]
+    assert passed[:6] == ["--route", "claude-ai", *RC]
     assert (placed.route_kind, placed.remote_control) == ("interactive", ON)
 
 
 @pytest.mark.parametrize("kind", ["interactive", "subscription", "api"])
 def test_a_master_with_the_login_on_resumes_on_its_own_route_with_remote_control(tmp_path, kind):
     passed, placed = _resumed(tmp_path, "master", "claude", kind)
-    assert passed[:6] == ["--route", "master-login", *RC]
+    assert passed[:6] == ["--route", "claude-ai", *RC]
     assert (placed.route_kind, placed.remote_control) == ("interactive", ON)
 
 

@@ -732,7 +732,7 @@ class HerdrRuntime:
             profile,
             masters.title(config.slug, task.get("seat", "")),
             [],
-            want or requested or saved.get("harness") or "claude",
+            want or requested or saved.get("harness", ""),
         )
         route_kind = self._route_kind(lane, want or requested or saved.get("harness", ""), task, config.slug, forced)
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
@@ -761,6 +761,8 @@ class HerdrRuntime:
         planned = getattr(self, "_quota_tasks", {}).get(task["id"])
         if planned and planned != avoid and not (requested or saved or want):
             agent, reason = planned, "fallthrough: quota reservation"
+        forced = front_door_route.check(profile, masters.title(config.slug, task.get("seat", "")), [], agent)
+        route_kind = "interactive" if forced else route_kind
         agent, reason = (
             (agent, reason)
             if route_kind == "interactive"
