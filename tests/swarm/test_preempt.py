@@ -110,6 +110,13 @@ def test_an_urgent_task_that_placement_refuses_asks_nobody_to_hand_off(store):
     assert len(preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1 + placement_waits.WAIT_MS)) == 1
 
 
+def test_a_refused_urgent_task_does_not_hold_back_the_next_waiting_one(store):
+    refuse(store, "t3", 1)
+    preempt.step(SLUG, store, ROWS, doc(), full("t3", "t4"), 1)
+    preempt.step(SLUG, store, ROWS, doc(), full("t3", "t4"), 2)
+    assert [item.text.split()[6] for item in asks(store, "e2")] == ["t4"]
+
+
 def test_a_placement_refusal_in_another_lane_still_asks_and_names_the_victim(store):
     refuse(store, "t3", 1, lane="ci")
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
