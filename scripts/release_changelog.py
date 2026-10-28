@@ -188,7 +188,7 @@ def write_entry(change: Change, ask: Callable[[Change], str]) -> str:
         except (EntryError, ModelError) as error:
             failures.append(error)
             print(f"#{change.number} attempt {attempt + 1}: {error}", file=sys.stderr)
-    raise failures[-1]
+    raise failures.pop()
 
 
 def render_release(tag: str, date: str, entries: list[tuple[Change, str]]) -> str:
