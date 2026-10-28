@@ -206,9 +206,10 @@ def test_the_grant_sizes_and_member_record(admin, redis_lib):
     int(grant["id"], 16)
     assert len(password) == 43
     assert len(grant["ledger_credential"]) == 43
-    assert admin.hgetall(f"{auth.PREFIX}:member:{grant['id']}") == {
+    assert auth.member(admin, grant["id"]) == {
         "name": "laptop",
         "ledger": hashlib.sha256(grant["ledger_credential"].encode()).hexdigest(),
+        "agents": {},
     }
     assert admin.acl_getuser(f"hive-{grant['id']}")["flags"] == ["on"]
 
@@ -222,19 +223,17 @@ def test_the_member_url_replaces_credentials_already_in_the_hive_url(admin):
 
 
 def test_a_refused_acl_user_leaves_no_member_records(admin, redis_lib, monkeypatch):
-    real = redis_lib.client.Pipeline.execute
-
-    def refuse(pipe, raise_on_error=True):
-        real(pipe, raise_on_error)
+    def refuse(*args, **kwargs):
         raise redis_lib.exceptions.ResponseError("ERR Error in ACL SETUSER modifier")
 
-    monkeypatch.setattr(redis_lib.client.Pipeline, "execute", refuse)
+    monkeypatch.setattr(admin, "acl_setuser", refuse)
 
     with pytest.raises(auth.HiveError) as refused:
         auth.mint(admin, "laptop", PUBLIC)
 
     assert str(refused.value) == "Redis refused the new member (ERR Error in ACL SETUSER modifier)"
-    assert admin.keys("*") == []
+    assert auth.members(admin) == {}
+    assert admin.smembers(auth.INDEX) == set()
     assert admin.acl_users() == ["default"]
 
 
@@ -285,7 +284,7 @@ def test_revoke_cuts_both_credentials(admin):
     auth.revoke(admin, grant["id"])
 
     assert auth.ledger_member(admin, grant["ledger_credential"]) is None
-    assert admin.keys(f"{auth.PREFIX}:member:*") == [f"{auth.PREFIX}:member:{other['id']}"]
+    assert sorted(auth.members(admin)) == [other["id"]]
     assert sorted(admin.acl_users()) == ["default", f"hive-{other['id']}"]
     assert auth.ledger_member(admin, other["ledger_credential"]) == other["id"]
     assert admin.smembers(auth.INDEX) == {other["id"]}
