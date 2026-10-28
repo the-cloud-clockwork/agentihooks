@@ -505,6 +505,8 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
     assert "self.count - 1" in generated
     compile(generated, "scripts/sample.py", "exec")
     assert mutation_counts("scripts/sample.py", source, {9}) == (2, [])
+    assert mutation_counts("scripts/sample.py", source, {6}) == (0, [])
+    assert mutation_counts("scripts/sample.py", source, {6, 9}) == (2, [])
     assert selected_mutants("scripts/sample.py", source, {13, 18})[1] == []
     assert mutation_counts("scripts/sample.py", source, {13}) == (0, ["cached"])
     assert mutation_counts("scripts/sample.py", source, {18}) == (0, ["__lt__"])
