@@ -78,12 +78,16 @@ def test_two_executions_cannot_share_one_endpoint(bindings):
 def test_a_concurrent_change_refuses_the_reservation(bindings, monkeypatch):
     from redis.exceptions import WatchError
 
+    attempts = []
+
     def interrupted(self):
+        attempts.append(self)
         raise WatchError("changed")
 
     monkeypatch.setattr(type(bindings.redis.pipeline()), "execute", interrupted)
     with pytest.raises(BindingError, match=EXACT["concurrent launch"]):
         bindings.reserve(SLUG, record())
+    assert len(attempts) == 5
 
 
 @pytest.mark.parametrize("watched", [RECORDS, ENDPOINTS])
@@ -99,6 +103,23 @@ def test_a_change_to_either_watched_key_during_the_reservation_refuses_it(bindin
     with pytest.raises(BindingError, match=EXACT["concurrent launch"]):
         bindings.reserve(SLUG, record())
     assert bindings.redis.hget(bindings.store.key(SLUG, RECORDS), "exe-one") is None
+
+
+def test_a_change_on_one_attempt_is_retried_and_reserves(bindings, monkeypatch):
+    pipeline = type(bindings.redis.pipeline())
+    checked = pipeline.hget
+    changes = []
+
+    def changed_once(self, name, key):
+        if not changes:
+            changes.append(key)
+            bindings.redis.hset(bindings.store.key(SLUG, RECORDS), "intruder", "exe-other")
+        return checked(self, name, key)
+
+    monkeypatch.setattr(pipeline, "hget", changed_once)
+    reserved = bindings.reserve(SLUG, record())
+    assert bindings.get(SLUG, "exe-one") == reserved
+    assert bindings.redis.hget(bindings.store.key(SLUG, ENDPOINTS), reserved.endpoint_ref) == "exe-one"
 
 
 def test_updates_keep_the_record_identity(bindings):

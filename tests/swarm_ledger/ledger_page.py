@@ -198,10 +198,15 @@ def page_source():
     return page
 
 
+class JoinedServer(ThreadingHTTPServer):
+    # Non daemon request threads are joined by server_close, so none outlives its test and imports a module mid flight.
+    daemon_threads = False
+
+
 @contextlib.contextmanager
 def served(server):
     """A live ledger server thread on a spare port, answering for the module the test patched."""
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd = JoinedServer(("127.0.0.1", 0), server.Handler)
     host = f"127.0.0.1:{httpd.server_port}"
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     with patch.object(server, "ALLOWED_HOSTS", {host}), patch.object(server, "ALLOWED_ORIGINS", {f"http://{host}"}):

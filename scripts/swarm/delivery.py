@@ -166,10 +166,16 @@ def post(inbox, item, write):
         if not may_cancel(inbox, item, refused):
             return False
         inbox.close(item.id, item.address, "cancel", f"refused by the ledger page: {refused}")
-        if item.sender != BY:
+        if item.sender != BY and not moved_on(inbox, item.sender):
             inbox.send(BY, item.sender, REFUSED.format(id=item.id, reason=refused))
         return False
     return True
+
+
+def moved_on(inbox, sender):
+    """A retired sender holding no seat: a notice to it lands with whoever took its seat, or with nobody."""
+    entry = inbox.names.entry(sender)
+    return bool(entry.get("retired_at")) and not inbox.seats.seat_of(sender)
 
 
 def may_cancel(inbox, item, refused):
