@@ -25,6 +25,7 @@ function fixture(options = {}) {
   ];
   const statuses = [];
   const pages = [];
+  let elapsed = 0;
   let reads = 0;
   let readiness = 0;
   let mainReads = 0;
@@ -76,8 +77,50 @@ function fixture(options = {}) {
   };
   const summary = { addHeading() { return this; }, addTable() { return this; }, async write() {} };
   const core = { setOutput: (key, value) => { outputs[key] = value; }, summary };
-  return { github, context, core, writes, refs, outputs, jobs, checks, statuses, pages, sleep: async () => {} };
+  github.graphql = async () => ({ repository: { object: { statusCheckRollup: { contexts: {
+    nodes: [], pageInfo: { hasNextPage: false, endCursor: null },
+  } } } } });
+  return { github, context, core, writes, refs, outputs, jobs, checks, statuses, pages,
+    now: () => elapsed, sleep: async ms => { elapsed += ms; } };
 }
+
+test('waits past four minutes for the snapshot required checks to turn green', async () => {
+  const f = fixture({ pending: true });
+  const get = f.github.rest.pulls.get;
+  f.github.rest.pulls.get = async args => {
+    const result = await get(args);
+    if (f.now() >= 327000) result.data.mergeable_state = 'clean';
+    return result;
+  };
+  await promote(f);
+  assert.equal(f.outputs.main, 'rebased');
+  assert.ok(f.now() >= 327000);
+  assert.ok(f.now() < 1800000);
+});
+
+for (const node of [
+  { __typename: 'CheckRun', name: 'measure', status: 'COMPLETED', conclusion: 'FAILURE' },
+  { __typename: 'StatusContext', context: 'measure', state: 'ERROR' },
+]) {
+  test(`fails immediately on a required snapshot failure ${node.__typename}`, async () => {
+    const f = fixture({ pending: true });
+    f.github.graphql = async () => ({ repository: { object: { statusCheckRollup: { contexts: {
+      nodes: [{ ...node, isRequired: true }], pageInfo: { hasNextPage: false, endCursor: null },
+    } } } } });
+    await assert.rejects(promote(f), /Required snapshot check failed: measure/);
+    assert.equal(f.now(), 0);
+    assert.equal(f.outputs.main, undefined);
+    assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+  });
+}
+
+test('stops pending snapshot checks at the thirty minute deadline', async () => {
+  const f = fixture({ pending: true });
+  await assert.rejects(promote(f), /thirty minutes/);
+  assert.equal(f.now(), 1800000);
+  assert.equal(f.outputs.main, undefined);
+  assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+});
 
 test('promotes the graded tree as one commit on main and records both revisions', async () => {
   const f = fixture();
