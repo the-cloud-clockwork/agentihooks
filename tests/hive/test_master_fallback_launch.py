@@ -376,6 +376,7 @@ def test_the_front_door_master_is_ordered_on_the_hive_master_login_account(setup
     selected = setup.launcher.select(setup.config, "master", task)
     assert (selected.account.name, selected.route_kind, selected.account.cap) == expected
 
+
 @pytest.mark.parametrize("status", ["revoked", "rejected", "allowed", "error"])
 @pytest.mark.parametrize("front", [True, False])
 def test_master_placement_skips_a_private_login_rejected_by_the_probe(setup, monkeypatch, status, front):
