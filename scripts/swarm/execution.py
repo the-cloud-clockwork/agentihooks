@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import json
 import threading
 import time
@@ -18,13 +17,8 @@ ARCHIVE = "executions-archive"
 WRITES: dict[str, threading.RLock] = {}
 
 
-def _serialized(method):
-    @functools.wraps(method)
-    def locked(self, slug, *args, **kwargs):
-        with WRITES.setdefault(slug, threading.RLock()):
-            return method(self, slug, *args, **kwargs)
-
-    return locked
+def _writes(slug: str) -> threading.RLock:
+    return WRITES.setdefault(slug, threading.RLock())
 
 
 if TYPE_CHECKING:
@@ -203,8 +197,11 @@ class ExecutionRegistry:
             result.append(AgentRecord(**row))
         return result
 
-    @_serialized
     def put(self, slug: str, agent: AgentRecord) -> None:
+        with _writes(slug):
+            self._put(slug, agent)
+
+    def _put(self, slug: str, agent: AgentRecord) -> None:
         from redis.exceptions import WatchError
 
         from scripts.swarm.store import SwarmError
@@ -251,8 +248,11 @@ class ExecutionRegistry:
             self.conflict(slug, "execution seat does not belong to the swarm")
         _validate_target(agent.runtime_backend, agent.runtime_target, lambda message: self.conflict(slug, message))
 
-    @_serialized
     def start(self, slug: str, agent: AgentRecord, previous_execution_id: str) -> AgentRecord:
+        with _writes(slug):
+            return self._start(slug, agent, previous_execution_id)
+
+    def _start(self, slug: str, agent: AgentRecord, previous_execution_id: str) -> AgentRecord:
         from redis.exceptions import WatchError
 
         from scripts.swarm.store import SwarmError
@@ -340,8 +340,11 @@ class ExecutionRegistry:
         ):
             self.conflict(slug, "Pod UID already belongs to another execution")
 
-    @_serialized
     def update(self, slug: str, agent: AgentRecord) -> None:
+        with _writes(slug):
+            self._update(slug, agent)
+
+    def _update(self, slug: str, agent: AgentRecord) -> None:
         from redis.exceptions import WatchError
 
         from scripts.swarm.store import SwarmError
@@ -370,8 +373,11 @@ class ExecutionRegistry:
                     continue
         raise SwarmError("execution history kept changing; update was not committed")
 
-    @_serialized
     def set_pane(self, slug: str, execution_id: str, pane_id: str) -> None:
+        with _writes(slug):
+            self._set_pane(slug, execution_id, pane_id)
+
+    def _set_pane(self, slug: str, execution_id: str, pane_id: str) -> None:
         from redis.exceptions import WatchError
 
         from scripts.swarm.store import AgentRecord, SwarmError
