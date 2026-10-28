@@ -1226,6 +1226,10 @@ jobs:
           - {python-version: *queue-floor, shard: 19}
           - {python-version: *queue-floor, shard: 20}
     steps: &unit-steps
+      - name: CPU probe start
+        run: |
+          echo "cpu.max $(cat /sys/fs/cgroup/cpu.max 2>/dev/null) nproc $(nproc) node ${RUNNER_NAME:-}"
+          nohup bash -c 'while :; do echo "$(date +%s%N) $(awk "/^usage_usec/{u=\$2}/^nr_throttled/{n=\$2}/^throttled_usec/{t=\$2}END{print u, n, t}" /sys/fs/cgroup/cpu.stat)"; sleep 5; done' > "$RUNNER_TEMP/cpu.log" 2>&1 &
       # The action retries git fetch but not the lazy blob fetch inside git checkout; a silent connection there held a shard ten minutes.
       - name: Check out the graded commit
         id: checkout
@@ -1561,6 +1565,16 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+      - name: CPU probe summary
+        if: always()
+        run: |
+          python3 - "$RUNNER_TEMP/cpu.log" <<'PY'
+          import json, sys
+          rows = [list(map(int, l.split())) for l in open(sys.argv[1]) if len(l.split()) == 4]
+          rates = sorted((b[1] - a[1]) / ((b[0] - a[0]) / 1000) for a, b in zip(rows, rows[1:]))
+          wall = (rows[-1][0] - rows[0][0]) / 1e9
+          print("CPU PROBE " + json.dumps({"samples": len(rates), "wall_s": round(wall), "cores_avg": round((rows[-1][1] - rows[0][1]) / 1e6 / wall, 2), "cores_p50": round(rates[len(rates) // 2], 2), "cores_p95": round(rates[int(len(rates) * 0.95)], 2), "cores_max": round(rates[-1], 2), "throttled_periods": rows[-1][2] - rows[0][2], "throttled_s": round((rows[-1][3] - rows[0][3]) / 1e6, 1)}))
+          PY
 
   unit-lost:
     if: ${{ !cancelled() && github.event_name == 'merge_group' && (needs.unit.result == 'failure' || needs.unit.result == 'cancelled') }}
