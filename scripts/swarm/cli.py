@@ -1295,7 +1295,7 @@ def cmd_status(store, args):
     from scripts.swarm import capacity, incidents, quota_view
     from scripts.swarm_ledger import ledger_freezes
 
-    quota = quota_view.lines(capacity.read(store, args.slug), now_ms(), quota_view.live(agents))
+    quota = quota_view.lines(capacity.read(store, args.slug), now_ms(), quota_view.live(agents), config.scaling)
     held = spawn_holds(store, args.slug) + failed_panes.status_lines(store, args.slug)
     held += incidents.status_lines(store, args.slug)
     from scripts.hive import admission, placement_waits

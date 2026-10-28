@@ -4,6 +4,7 @@ from scripts import quota_freshness, quota_state
 from scripts.routing.slots import API
 from scripts.swarm import capacity
 from scripts.swarm.health.findings import MINUTE_MS
+from scripts.swarm.store import AUTO_SCALING
 
 
 def routing_left(account: dict) -> float | None:
@@ -47,17 +48,17 @@ def live(agents: list) -> dict[str, int]:
     return {lane: sum(a.lane == lane and a.state != "finished" for a in agents) for lane in capacity.LANES}
 
 
-def scaling_line(decision: dict, counts: dict[str, int]) -> str:
-    scaled = decision.get("autoscale")
+def scaling_line(decision: dict, counts: dict[str, int], scaling: str) -> str:
+    scaled = decision.get("autoscale") if scaling == AUTO_SCALING else None
     ceilings = scaled["ceilings"] if scaled else decision["configured"]
     lanes = ", ".join(f"{lane} {counts[lane]} of {ceilings[lane]}" for lane in capacity.LANES)
     seats = decision["placeable"]
-    line = f"scaling {'auto' if scaled else 'manual'}, live of ceiling {lanes}, "
+    line = f"scaling {scaling}, live of ceiling {lanes}, "
     line += f"free quota seats claude {seats['claude']} and codex {seats['codex']}"
     return line + (f", because {scaled['reason'].rstrip('.')}" if scaled else "")
 
 
-def lines(decision: dict, now_ms: int, counts: dict[str, int]) -> list[str]:
+def lines(decision: dict, now_ms: int, counts: dict[str, int], scaling: str) -> list[str]:
     if not decision:
         return [capacity.status_line(decision)]
     caps = ", ".join(
@@ -66,7 +67,7 @@ def lines(decision: dict, now_ms: int, counts: dict[str, int]) -> list[str]:
     head = f"quota capacity {caps}, {_changed(decision['at'], now_ms)}, because {decision['reason']}"
     host = [host_line(decision["host"])] if "host" in decision else []
     accounts = [_account_line(row, decision["accounts"], now_ms) for row in decision["accounts"]]
-    return [head, scaling_line(decision, counts)] + host + accounts
+    return [head, scaling_line(decision, counts, scaling)] + host + accounts
 
 
 def host_line(host: dict) -> str:
