@@ -83,6 +83,12 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
             max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
+        recorded = sum(
+            1
+            for agent in agents
+            if agent.hive == hive["id"] and agent.lane != "master" and agent.state not in ("finished", "ended")
+        )
+        hive["agents"] = max(hive["agents"], recorded)
         from scripts.swarm import local_slots
         from scripts.swarm.commands import hive_id
 
