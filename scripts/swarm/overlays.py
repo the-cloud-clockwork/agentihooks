@@ -56,9 +56,18 @@ def available() -> list[dict]:
     return sorted(found.values(), key=lambda overlay: overlay["name"])
 
 
-def revision() -> str:
-    bundle = _install()._get_bundle_path()
-    if bundle is None:
-        return ""
+def _head(bundle) -> str:
     done = subprocess.run(["git", "-C", str(bundle), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
     return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def revision() -> str:
+    installer = _install()
+    bundle, user = installer._get_bundle_path(), installer._get_user_bundle_path()
+    if bundle is None:
+        return ""
+    root = _head(bundle)
+    if user is None or not root:
+        return root
+    mine = _head(user)
+    return f"{root}:{mine}" if mine else ""

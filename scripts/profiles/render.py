@@ -76,9 +76,9 @@ def _resolve(name: str) -> Path | None:
     local = _i.PROFILES_DIR / name
     if local.is_dir():
         return local
-    candidate = copy / "profiles" / name
-    if candidate.is_dir():
-        return candidate
+    for pinned in (copy, bundle_copy.current_user()):
+        if pinned is not None and (pinned / "profiles" / name).is_dir():
+            return pinned / "profiles" / name
     return _i._resolve_linked_profile_dir(name) or _i._package_role_dir(name)
 
 
@@ -115,6 +115,8 @@ def _bundle() -> Path | None:
 
 
 def _user() -> Path | None:
+    if bundle_copy.is_pinned():
+        return bundle_copy.current_user()
     _i = _install_module()
     user = _i._get_user_bundle_path()
     linked = (_i._load_state().get("user_bundle") or {}).get("path")
@@ -642,7 +644,14 @@ def render(
         raise ValueError(f"{target} per-run profiles are not supported")
     options = {"isolate": isolate, "push": push} if target == "codex" else {}
     if bundle_revision:
-        with bundle_copy.recorded(_bundle(), bundle_revision, rendered_root()):
+        root_revision, _, user_revision = bundle_revision.partition(":")
+        user = _user()
+        if user is not None and not user_revision:
+            raise ValueError(
+                f"the launch recorded bundle commit {root_revision} and no user bundle commit, but the user bundle "
+                f"at {user} is linked; launch again to record both"
+            )
+        with bundle_copy.recorded(_bundle(), root_revision, rendered_root(), user, user_revision):
             return renderers[target](name, force=force, overlays=overlays, **options)
     return renderers[target](name, force=force, overlays=overlays, **options)
 
@@ -685,7 +694,7 @@ def _seed_linked_profiles(out: Path) -> None:
 def _render_scratch(args: argparse.Namespace) -> int:
     bundle = args.bundle or _bundle()
     _seed_linked_profiles(args.out)
-    user = _user()
+    user = args.user_bundle or _user()
     env = {**os.environ, "AGENTIHOOKS_HOME": str(args.out.resolve())}
     if bundle is not None:
         env["AGENTIHOOKS_BUNDLE_PATH"] = str(bundle.resolve())
@@ -708,6 +717,7 @@ def main(argv: list[str] | None = None) -> int:
     render_cmd.add_argument("--overlay", action="append", default=[], help="Wear this overlay; repeat for up to three")
     render_cmd.add_argument("--out", type=Path, help="Render into this scratch agentihooks home, not the live one")
     render_cmd.add_argument("--bundle", type=Path, help="Bundle for --out (default: the linked bundle)")
+    render_cmd.add_argument("--user-bundle", type=Path, help="User bundle for --out (default: the linked user bundle)")
     from scripts.profiles import measure
 
     measure.add_arguments(commands.add_parser("measure", help="Print a profile's first turn input tokens"))
@@ -727,8 +737,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "measure":
         return measure.main(args)
-    if args.bundle is not None and args.out is None:
-        render_cmd.error("--bundle needs --out")
+    if (args.bundle is not None or args.user_bundle is not None) and args.out is None:
+        render_cmd.error("--bundle and --user-bundle need --out")
     try:
         if args.out is not None:
             return _render_scratch(args)

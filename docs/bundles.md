@@ -129,6 +129,8 @@ Because profile content is written *after* the shared block, a profile can still
 override shared guidance by restating it. Keep profile `CLAUDE.md` files to what
 is genuinely profile-specific.
 
+A pinned render (`--bundle-revision`, used by swarm overlay launches) rebuilds from the recorded root and user commits, copies both into the profile home and records both in its render stamp. It never reads the live user bundle, and refuses a revision that names no user commit while a user bundle is linked.
+
 Re-running `agentihooks init` replaces the block in place — it never stacks. If the
 bundle has no `.claude/CLAUDE.md`, or no profile in the chain has a `CLAUDE.md` to
 prepend onto, the step is a no-op.

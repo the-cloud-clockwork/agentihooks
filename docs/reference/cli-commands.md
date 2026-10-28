@@ -433,7 +433,7 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 | `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |
 | `--profile <name>` | Render this role profile once, record its home in the launch report and mount that home in the launched session; see [Profile launch home](profile-launch-home.md) |
 | `--overlay <name>` | Overlay the profile wears; repeat for up to three |
-| `--bundle-revision <commit>` | Render the profile only from this bundle commit |
+| `--bundle-revision <commit>` | Render the profile only from this bundle commit. With a user bundle linked the value is `<root commit>:<user commit>`, which the swarm records at launch; a root-only value is refused then rather than rendering the mutable user tree |
 
 Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
 `failed`, `pending`), `account`, `placement`, and `handoff=done|failed` with
@@ -483,7 +483,7 @@ agentihooks select-profile engineer --home="$HOME/.agentihooks/profiles/.homes/e
 | `--agent claude\|codex\|copilot` | Harness (default `claude`); per-run profiles support `claude` and `codex` |
 | `--model`, `--effort minimal\|low\|medium\|high\|xhigh\|max` | Model and effort; otherwise the profile's `profile.yml` defaults, then the harness defaults |
 | `--overlay <name>` | Wear this overlay; repeat for up to three |
-| `--bundle-revision <commit>` | Render only from this bundle commit |
+| `--bundle-revision <commit>` | Render only from this bundle commit; `<root commit>:<user commit>` when a user bundle is linked |
 | `--home <dir>` | Mount this rendered home instead of rendering; refused unless its binding matches the profile and harness and its persona and sources are unchanged |
 | `--dry-run` | Print the selected environment and `argv=` line without starting the harness |
 

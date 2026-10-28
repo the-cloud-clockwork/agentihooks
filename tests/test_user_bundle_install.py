@@ -373,7 +373,13 @@ def test_the_scratch_render_carries_the_registered_user_bundle(world, monkeypatc
     _link_both(world)
     monkeypatch.setattr(render.subprocess, "run", fake_run)
     args = argparse.Namespace(
-        bundle=None, out=tmp_path / "scratch", name="tiny", target="claude", overlay=[], force=False
+        bundle=None,
+        user_bundle=None,
+        out=tmp_path / "scratch",
+        name="tiny",
+        target="claude",
+        overlay=[],
+        force=False,
     )
     (tmp_path / "scratch").mkdir()
 
