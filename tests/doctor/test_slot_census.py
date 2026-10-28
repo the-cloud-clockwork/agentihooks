@@ -215,6 +215,16 @@ def test_local_launches_with_a_pane_and_no_claim_line_are_counted_for_the_watche
     ]
 
 
+def test_an_unclaimed_launch_starting_at_the_window_edge_counts_and_one_with_no_start_counts_from_the_epoch():
+    bare = life("engineer@a-1")
+    del bare["runtime_backend"], bare["hive"], bare["task"], bare["started_at"]
+    edge = life("engineer@a-2", started=SINCE)
+    [early] = slot_census.unclaimed(record([], [bare, edge]), "root", 0)
+    assert early.evidence[0] == "engineer@a-1 on task  started at 0 on the workstation"
+    [late] = slot_census.unclaimed(record([], [bare, edge]), "root", SINCE)
+    assert late.subject == "sw" and late.summary.endswith(": engineer@a-2")
+
+
 def test_an_unreadable_journal_fails_the_unclaimed_launch_detector():
     with pytest.raises(SwarmError, match="journalctl exit 1"):
         slot_census.unclaimed(
