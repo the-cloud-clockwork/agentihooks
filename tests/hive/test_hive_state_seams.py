@@ -192,7 +192,7 @@ def test_amend_gives_up_after_its_tries(bus):
         def create(self, key, value):
             raise StateConflict("always")
 
-    with pytest.raises(StateConflict):
+    with pytest.raises(StateConflict, match=r"^hive state key 'k' kept changing$"):
         hive_state.amend(Always(), "k", lambda current: {"v": 1})
 
 
@@ -235,3 +235,132 @@ def test_bus_registry_index_keeps_reports_visible(client, bus):
     )
     assert not reports.removed(agent, 1000)
     assert not reports.removed(agent, 1000 + registry.LIVE_MS)
+
+
+def test_a_redis_state_store_names_its_keys_by_prefix_and_bucket(client):
+    from scripts.events.redis_state import RedisStateStore
+
+    RedisStateStore(client, "box", "custom").create("k", b"1")
+    RedisStateStore(client, "box").create("k", b"2")
+
+    current = {key for key in client.keys("*") if key.endswith(":current")}
+    assert current == {"custom:state:box:current", f"{ROOT}:swarm:state:box:current"}
+
+
+def test_redis_hive_records_live_in_the_member_writable_store_of_their_hive(on_redis, client):
+    registry.update(client, "box", ["max-agents=4"])
+
+    assert client.hget(f"{ROOT}:swarm:state:hive-box:current", "box") is not None
+
+
+def test_bus_credentials_open_the_hive_credentials_bucket(bus, client):
+    grant = auth.mint(client, "laptop", PUBLIC)
+
+    assert bus.state(hive_state.CREDENTIALS).get(f"member.{grant['id']}") is not None
+
+
+def test_the_redis_index_reads_the_legacy_set_until_the_store_records_one(on_redis, client):
+    client.sadd(hive_state.LEGACY_INDEX, "y", "x")
+    assert hive_state.index(client) == ["x", "y"]
+
+    hive_state.indexed(client, "z", True)
+    client.srem(hive_state.LEGACY_INDEX, "z")
+    assert hive_state.index(client) == ["x", "y", "z"]
+
+
+def test_indexing_a_listed_hive_again_writes_nothing(bus, client):
+    hive_state.indexed(client, "a", True)
+    store = hive_state.records(client, hive_state.INDEX)
+    before = store.get(hive_state.INDEX).revision
+
+    hive_state.indexed(client, "a", True)
+
+    assert store.get(hive_state.INDEX).revision == before
+    assert hive_state.index(client) == ["a"]
+
+
+def test_a_forgotten_hive_leaves_the_index(bus, client):
+    registry.update(client, "box", ["max-agents=4"])
+
+    registry.forget(client, "box")
+
+    assert hive_state.index(client) == []
+    assert registry.show(client, "box") is None
+
+
+def test_a_legacy_member_hash_reads_as_a_whole_member_record(on_redis, client):
+    token = "hive.m1.secret"
+    client.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "old", "ledger": "digest"})
+    client.hset(f"{auth.PREFIX}:member:m2", f"agent:{auth._digest(token)}", '["alpha", "engineer@1"]')
+
+    assert auth.member(client, "m1") == {"name": "old", "ledger": "digest", "agents": {}}
+    assert auth.member(client, "m2") == {
+        "name": "",
+        "ledger": "",
+        "agents": {auth._digest(token): ["alpha", "engineer@1"]},
+    }
+
+
+def test_a_legacy_service_credential_authenticates_without_an_expiry(on_redis, client):
+    client.set(f"{auth.PREFIX}:controller:hub-a", auth._digest("hub-a.secret"))
+
+    assert auth.controller(client, "hub-a.secret")
+    assert not auth.controller(client, "hub-b.secret")
+
+
+def test_a_service_credential_expires_at_its_recorded_instant(bus, client, monkeypatch):
+    monkeypatch.setattr(auth.time, "time", lambda: 1000.0)
+    credential = auth.issue_service(client, "hub-a")
+    monkeypatch.setattr(auth.time, "time", lambda: 1000.0 + auth.SERVICE_TTL_S)
+
+    assert not auth.controller(client, credential)
+
+
+@pytest.mark.parametrize(("redis_backend", "source"), [(True, "Redis"), (False, "the hive state store")])
+def test_a_refusal_names_the_backend_that_refused(monkeypatch, redis_backend, source):
+    monkeypatch.setattr(hive_state, "on_redis", lambda: redis_backend)
+
+    assert str(auth._refused(RuntimeError("down"), "the new member")) == f"{source} refused the new member (down)"
+
+
+def test_a_refused_mint_forgets_every_record_it_wrote(on_redis, client, monkeypatch):
+    from scripts.hive import redis_acl
+
+    monkeypatch.setattr(auth.secrets, "token_hex", lambda size: "m1")
+    issued = iter(["password", "ledger"])
+    monkeypatch.setattr(auth.secrets, "token_urlsafe", lambda: next(issued))
+
+    def refused(redis):
+        raise redis_acl.Refused("no")
+
+    monkeypatch.setattr(auth.redis_acl, "save", refused)
+    with pytest.raises(auth.HiveError, match=r"^Redis refused the new member \(no\)$"):
+        auth.mint(client, "laptop", PUBLIC)
+
+    assert auth.ledger_member(client, "ledger") is None
+    assert auth.member(client, "m1") is None
+    assert hive_state.index(client) == []
+
+
+def test_a_refresh_that_loses_its_member_midway_leaves_it_unindexed(on_redis, client, monkeypatch):
+    grant = auth.mint(client, "laptop", PUBLIC)
+    owners = iter([grant["id"], None])
+    monkeypatch.setattr(auth, "ledger_member", lambda redis, credential: next(owners))
+
+    with pytest.raises(auth.HiveError, match=r"^the ledger credential belongs to no hive member$"):
+        auth.refresh(client, grant["ledger_credential"], PUBLIC)
+
+    assert grant["id"] not in hive_state.index(client)
+
+
+def test_agent_tokens_accumulate_on_a_member_record_without_agents(bus, client):
+    hive_state.amend(auth._store(client), "member.m1", lambda _: {"name": "n", "ledger": "d"})
+
+    first = auth.issue_agent(client, "m1", "alpha", "engineer@1")
+    second = auth.issue_agent(client, "m1", "alpha", "engineer@2")
+
+    assert auth.member(client, "m1") == {
+        "name": "n",
+        "ledger": "d",
+        "agents": {auth._digest(first): ["alpha", "engineer@1"], auth._digest(second): ["alpha", "engineer@2"]},
+    }

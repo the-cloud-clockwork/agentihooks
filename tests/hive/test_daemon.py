@@ -82,7 +82,7 @@ def test_an_unreadable_record_withdraws_the_exported_capabilities(redis, monkeyp
 
     monkeypatch.setenv(profile_chain.HIVE_CAPABILITIES, "headed")
     redis.hset(registry.key("machine"), "capabilities", "not json")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"^hive machine holds an unreadable capabilities: 'not json'$"):
         daemon.adopt_capabilities(redis, "machine")
     assert profile_chain.HIVE_CAPABILITIES not in daemon.os.environ
     redis.delete(registry.key("machine"))
