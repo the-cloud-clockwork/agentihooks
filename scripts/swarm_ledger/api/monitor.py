@@ -57,8 +57,8 @@ def herdr_machines(redis: object, live: list[dict], now_ms: int) -> list[tuple[s
     published = next((reading for reading in readings if reading is not None), None)
     if published is None:
         return None
-    counted = [(LOCAL if name == stats.MASTER else name, counts) for name, counts in published["machines"].items()]
-    return counted + [(name, None) for name in published["silent"]]
+    named = {**published["machines"], **dict.fromkeys(published["silent"])}
+    return [(LOCAL if name == stats.MASTER else name, counts) for name, counts in named.items()]
 
 
 def hive_machines(store: object, live: list[dict], readings: dict) -> list[tuple[str, dict | None]]:
@@ -87,7 +87,7 @@ def view(store: object, now_ms: int) -> dict:
     readings = {hive["id"]: headroom.read(store.redis, hive["id"], now_ms) for hive in live}
     measured = [reading for reading in readings.values() if reading is not None]
     machines = herdr_machines(store.redis, live, now_ms)
-    if machines is None:
+    if machines is None or all(counts is None for _, counts in machines):
         agents, rows = tally("hives", hive_machines(store, live, readings))
     else:
         agents, rows = tally("herdr", machines)
