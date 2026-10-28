@@ -276,7 +276,7 @@ def test_checkpoint_storage_uses_the_bus_and_expires_inactive_records(monkeypatc
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "bus")
     monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
     clock = [1000.0]
-    monkeypatch.setattr("time.time", lambda: clock[0])
+    monkeypatch.setattr(metrics_fleet.time, "time", lambda: clock[0])
     active = {"eng-1": SimpleNamespace(execution_id="first", started_at=100)}
     store = SimpleNamespace(execution_occupants=lambda slug: active)
     metrics_fleet.record_checkpoint(store, SLUG, "first", "eng-1", 200)
