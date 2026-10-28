@@ -632,7 +632,10 @@ def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts
         def update_task(self, slug, task, fields, by=None):
             updates.append((task, fields, by))
 
-    monkeypatch.setattr(cli, "connect", lambda: store.RedisStore(member))
+    swarm = store.RedisStore(member)
+    # The agent listing reads through a read only Lua pipeline that fakeredis checks without the %R~ grant.
+    swarm.agents = host.agents
+    monkeypatch.setattr(cli, "connect", lambda: swarm)
     monkeypatch.setattr(cli, "LedgerClient", Ledger)
     monkeypatch.setattr(cli, "pull_branch", lambda pull: ("", ""))
     monkeypatch.setattr("scripts.gates.intent.stamp_body", lambda *args, **kwargs: False)
