@@ -122,7 +122,7 @@ def view(store: object, now_ms: int) -> dict:
     return {
         "agents": agents,
         "swarms": {"running": running},
-        "hives": {"live": len(live), "measured": len(measured), "rows": rows},
+        "hives": {"live": len(rows), "measured": len(measured), "rows": rows},
         "cpu": {"used": round(used, 1), "cores": round(cores, 1)},
         "memory": {"used_mb": used_mb, "total_mb": total_mb},
     }
