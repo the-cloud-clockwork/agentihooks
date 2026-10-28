@@ -187,8 +187,12 @@ def test_configure_requires_each_setting(prepared, provider, setting):
 
     env = environment(prepared, provider)
     env.pop(f"AGENTIHOOKS_SESSION_{setting}")
-    with pytest.raises(SystemExit, match="required"):
+    with pytest.raises(SystemExit) as error:
         configure(env)
+    assert str(error.value) == (
+        "session embedding configuration is required: CATALOG, EMBED_CORPUS, EMBED_PROJECTS, "
+        "EMBED_GENERATION, EMBED_MODEL, EMBED_DIMENSION, EMBED_URL, EMBED_TOKEN"
+    )
 
 
 @pytest.mark.parametrize("projects", ["{}", "[]", '[""]', "[null]", "[1]"])
@@ -197,27 +201,32 @@ def test_configure_refuses_invalid_projects(prepared, provider, projects):
 
     env = environment(prepared, provider)
     env["AGENTIHOOKS_SESSION_EMBED_PROJECTS"] = projects
-    with pytest.raises(ValueError, match="projects"):
+    with pytest.raises(ValueError) as error:
         configure(env)
+    assert str(error.value) == "embedding projects must be a nonempty JSON array of project names"
 
 
 @pytest.mark.parametrize(
-    "url",
+    "url,message",
     [
-        "http://provider.example/embed",
-        "https:///embed",
-        "https://user@host/embed",
-        "https://host/embed?token=fixture",
-        "https://host/embed#fragment",
+        ("http://provider.example/embed", "embedding URL requires HTTPS or loopback HTTP"),
+        ("https:///embed", "embedding URL requires HTTPS or loopback HTTP"),
+        ("https://user@host/embed", "embedding URL must not carry credentials, query parameters or a fragment"),
+        (
+            "https://host/embed?token=fixture",
+            "embedding URL must not carry credentials, query parameters or a fragment",
+        ),
+        ("https://host/embed#fragment", "embedding URL must not carry credentials, query parameters or a fragment"),
     ],
 )
-def test_configure_refuses_unsafe_provider_urls(prepared, provider, url):
+def test_configure_refuses_unsafe_provider_urls(prepared, provider, url, message):
     from hooks.memory.embedding_process import configure
 
     env = environment(prepared, provider)
     env["AGENTIHOOKS_SESSION_EMBED_URL"] = url
-    with pytest.raises(ValueError, match="URL"):
+    with pytest.raises(ValueError) as error:
         configure(env)
+    assert str(error.value) == message
 
 
 @pytest.mark.parametrize(
@@ -237,8 +246,9 @@ def test_configure_refuses_invalid_bounds(prepared, provider, setting, value):
 
     env = environment(prepared, provider)
     env[f"AGENTIHOOKS_SESSION_{setting}"] = value
-    with pytest.raises(ValueError, match="positive"):
+    with pytest.raises(ValueError) as error:
         configure(env)
+    assert str(error.value) == "embedding bounds and interval must be positive and finite"
 
 
 def test_configure_preserves_all_runtime_settings(prepared, provider):
@@ -281,8 +291,9 @@ def test_provider_defers_retryable_http_errors(prepared, provider, status):
 
     provider[2]["status"] = status
     adapter = configure(environment(prepared, provider)).provider
-    with pytest.raises(TransientEmbeddingError, match="unavailable"):
+    with pytest.raises(TransientEmbeddingError) as error:
         adapter.embed(["text"])
+    assert str(error.value) == "embedding provider unavailable"
 
 
 @pytest.mark.parametrize("status", [301, 400, 401, 403])
@@ -291,8 +302,9 @@ def test_provider_refuses_permanent_http_errors(prepared, provider, status):
 
     provider[2]["status"] = status
     adapter = configure(environment(prepared, provider)).provider
-    with pytest.raises(ValueError, match="refused"):
+    with pytest.raises(ValueError) as error:
         adapter.embed(["text"])
+    assert str(error.value) == "embedding provider refused the request"
 
 
 def test_provider_posts_the_model_and_preserves_input_order(prepared, provider):
@@ -415,28 +427,56 @@ def test_cycle_defers_a_provider_outage_without_losing_work(prepared, provider):
     assert resumed["pending"] == 0
 
 
-def test_main_waits_between_passes_and_restores_signal_handlers(prepared, provider, monkeypatch, capsys):
+@pytest.mark.parametrize("shutdown", ["SIGTERM", "SIGINT"])
+def test_main_waits_between_passes_and_restores_signal_handlers(prepared, provider, monkeypatch, capsys, shutdown):
     import signal
+    from types import SimpleNamespace
 
     from hooks.memory import embedding_process
 
     for key, value in environment(prepared, provider).items():
         monkeypatch.setenv(key, value)
-    real_event = threading.Event
-    waits = []
+    monkeypatch.setenv("AGENTIHOOKS_SESSION_EMBED_BATCH_SIZE", "1")
+    stopped = threading.Event()
+    original = {sig: object() for sig in (signal.SIGTERM, signal.SIGINT)}
+    handlers = dict(original)
+    waits, cursors, limits, output = [], [], [], []
 
-    class StopAfterWait(real_event):
-        def wait(self, timeout=None):
-            waits.append(timeout)
-            signal.raise_signal(signal.SIGTERM)
-            return self.is_set()
+    def install(sig, handler):
+        previous = handlers[sig]
+        handlers[sig] = handler
+        return previous
 
-    previous = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
-    monkeypatch.setattr(embedding_process.threading, "Event", StopAfterWait)
+    def wait(timeout):
+        waits.append(timeout)
+        assert len(waits) <= 2
+        if len(waits) == 2:
+            handlers[getattr(signal, shutdown)](getattr(signal, shutdown), None)
+            assert stopped.is_set()
+
+    def cycle(worker, settings, after):
+        cursors.append(after)
+        limits.append(worker.limits.batch_size)
+        return {"after": "cursor", "pending": 0}
+
+    def emit(text, **kwargs):
+        output.append((json.loads(text), kwargs))
+
+    stopped.wait = wait
+    monkeypatch.setattr(embedding_process, "threading", SimpleNamespace(Event=lambda: stopped))
+    monkeypatch.setattr(
+        embedding_process,
+        "signal",
+        SimpleNamespace(SIGTERM=signal.SIGTERM, SIGINT=signal.SIGINT, signal=install),
+    )
+    monkeypatch.setattr(embedding_process, "cycle", cycle)
+    monkeypatch.setattr("builtins.print", emit)
     assert embedding_process.main([]) == 0
-    assert waits == [5.0]
-    assert json.loads(capsys.readouterr().out)["embedded"]
-    assert {sig: signal.getsignal(sig) for sig in previous} == previous
+    assert waits == [5.0, 5.0]
+    assert cursors == ["", "cursor"]
+    assert limits == [1, 1]
+    assert output == [({"after": "cursor", "pending": 0}, {"flush": True})] * 2
+    assert handlers == original
 
 
 def test_scope_checks_touch_only_the_selected_bounded_batch(prepared, provider, monkeypatch):
@@ -479,8 +519,9 @@ def test_scoped_provider_refuses_a_changed_batch(prepared, provider, monkeypatch
 
     settings = configure(environment(prepared, provider))
     monkeypatch.setattr(prepared.worker, "_batch", lambda *_: [])
-    with pytest.raises(EvidenceRefused, match="changed"):
+    with pytest.raises(EvidenceRefused) as error:
         ScopedProvider(prepared.worker, settings).embed(["not selected"])
+    assert str(error.value) == "embedding batch changed before authorization"
     assert not provider[1]
 
 
@@ -506,6 +547,108 @@ def test_scoped_provider_refuses_unavailable_or_unauthorized_chunks(prepared, pr
     else:
         chunk["access_domain"] = "outside"
     monkeypatch.setattr(prepared.worker, "_batch", lambda *_: [chunk])
-    with pytest.raises(EvidenceRefused, match="outside"):
+    with pytest.raises(EvidenceRefused) as error:
         ScopedProvider(prepared.worker, settings).embed(["private"])
+    assert str(error.value) == "embedding batch is outside the grant or no longer retained"
     assert not provider[1]
+
+
+@pytest.mark.parametrize("url", ["https://provider.example/embed", "http://localhost/embed", "http://[::1]/embed"])
+def test_configure_accepts_secure_or_loopback_provider_urls(prepared, provider, url):
+    from hooks.memory.embedding_process import configure
+
+    env = environment(prepared, provider)
+    env["AGENTIHOOKS_SESSION_EMBED_URL"] = url
+    assert configure(env).provider.url == url
+
+
+@pytest.mark.parametrize(
+    "body,message",
+    [
+        (b'{"model":"other","data":[]}', "embedding provider returned another model"),
+        (
+            b'{"model":"fixture-hash-embedder-4","data":[{"index":2,"embedding":[1,0,0,0]}]}',
+            "embedding provider returned invalid indices",
+        ),
+        (b"x" * ((2 << 20) + 1), "embedding response exceeds 2 MiB"),
+    ],
+)
+def test_provider_response_refusals_are_explicit(prepared, provider, body, message):
+    from hooks.memory.embedding_process import configure
+
+    provider[2]["body"] = body
+    with pytest.raises(ValueError) as error:
+        configure(environment(prepared, provider)).provider.embed(["text"])
+    assert str(error.value) == message
+
+
+def test_provider_bounds_its_response_read_and_network_timeout(monkeypatch):
+    import io
+    from types import SimpleNamespace
+
+    from hooks.memory import embedding_process
+    from hooks.memory.embeddings import EmbeddingModel
+
+    body = json.dumps({"model": "fixture-hash-embedder-4", "data": [{"index": 0, "embedding": [1, 0, 0, 0]}]}).encode()
+    reads, requests = [], []
+
+    class Response(io.BytesIO):
+        def read(self, size=-1):
+            reads.append(size)
+            return super().read(size)
+
+    def open_request(request, timeout=None):
+        requests.append((request.get_method(), request.get_header("Content-type"), timeout))
+        return Response(body + b" " * ((2 << 20) - len(body)))
+
+    monkeypatch.setattr(
+        embedding_process.urllib.request,
+        "build_opener",
+        lambda *_: SimpleNamespace(open=open_request),
+    )
+    adapter = embedding_process.Provider(
+        EmbeddingModel("fixture-hash-embedder-4", 4), "https://provider.example", "fixture"
+    )
+    assert adapter.embed(["text"]) == [[1, 0, 0, 0]]
+    assert reads == [(2 << 20) + 1]
+    assert requests == [("POST", "application/json", 30)]
+
+
+@pytest.mark.parametrize("failure", ["url", "timeout"])
+def test_provider_connection_failures_defer_without_details(monkeypatch, failure):
+    from types import SimpleNamespace
+    from urllib.error import URLError
+
+    from hooks.memory import embedding_process
+    from hooks.memory.embeddings import EmbeddingModel, TransientEmbeddingError
+
+    def open_request(*args, **kwargs):
+        raise URLError("private detail") if failure == "url" else TimeoutError("private detail")
+
+    monkeypatch.setattr(
+        embedding_process.urllib.request,
+        "build_opener",
+        lambda *_: SimpleNamespace(open=open_request),
+    )
+    adapter = embedding_process.Provider(
+        EmbeddingModel("fixture-hash-embedder-4", 4), "https://provider.example", "fixture"
+    )
+    with pytest.raises(TransientEmbeddingError) as error:
+        adapter.embed(["text"])
+    assert str(error.value) == "embedding provider unavailable"
+
+
+def test_cycle_counts_every_skipped_session(prepared, provider, monkeypatch):
+    from types import SimpleNamespace
+
+    from hooks.memory.archive import EvidenceRefused
+    from hooks.memory.embedding_process import configure, cycle
+
+    settings = configure(environment(prepared, provider))
+
+    def refuse(*args):
+        raise EvidenceRefused("outside grant")
+
+    db = SimpleNamespace(execute=lambda *_: SimpleNamespace(fetchall=lambda: [("one", "v"), ("two", "v")]))
+    worker = SimpleNamespace(catalog=SimpleNamespace(db=db), enqueue=refuse, drain=lambda *_: {})
+    assert cycle(worker, settings, "") == {"skipped": 2, "after": ""}
