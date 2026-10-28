@@ -61,6 +61,7 @@ Verify the effective rules and bypass lists:
 
 ```bash
 gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/dev
+gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/main
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/16090886 --jq .bypass_actors
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/25468405 --jq .bypass_actors
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 --jq .bypass_actors

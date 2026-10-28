@@ -84,16 +84,12 @@ def test_main_keeps_its_existing_branch_match_and_rules():
 
     assert ruleset["conditions"] == {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}
     rules = {rule["type"]: rule for rule in ruleset["rules"]}
-    assert set(rules) in (
-        {"deletion", "non_fast_forward", "required_linear_history", "pull_request"},
-        {"deletion", "non_fast_forward", "required_linear_history", "pull_request", "required_status_checks"},
-    )
-    if "required_status_checks" in rules:
-        assert rules["required_status_checks"]["parameters"] == {
-            "strict_required_status_checks_policy": False,
-            "do_not_enforce_on_create": False,
-            "required_status_checks": [{"context": "Gate — Required", "integration_id": 5243008}],
-        }
+    assert set(rules) == {"deletion", "non_fast_forward", "required_linear_history", "pull_request", "required_status_checks"}
+    assert rules["required_status_checks"]["parameters"] == {
+        "strict_required_status_checks_policy": False,
+        "do_not_enforce_on_create": False,
+        "required_status_checks": [{"context": "Gate — Required", "integration_id": 5243008}],
+    }
     assert rules["pull_request"]["parameters"] == {
         "required_approving_review_count": 0,
         "dismiss_stale_reviews_on_push": False,
