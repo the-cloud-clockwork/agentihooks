@@ -41,6 +41,7 @@ def stranger(tmp_path, monkeypatch):
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "remote", "add", "origin", "git@github.com:stranger/x.git"], cwd=repo, check=True)
+    (repo / ".agentihooks" / "conditions").mkdir(parents=True)
     return str(repo)
 
 
@@ -161,6 +162,12 @@ def test_a_comment_or_follow_up_from_an_untrusted_repository_is_refused(server_e
 
 def test_with_conditions_off_an_untrusted_worktree_passes(server_elsewhere, stranger, monkeypatch):
     monkeypatch.setattr("hooks.config.CONDITIONS_ENABLED", False)
+    assert ledger_core.check_op(_comment(stranger)) is None
+    assert ledger_agent_ops.check(_followup(stranger)) is None
+
+
+def test_an_untrusted_repository_without_project_conditions_passes(server_elsewhere, stranger):
+    (Path(stranger) / ".agentihooks" / "conditions").rmdir()
     assert ledger_core.check_op(_comment(stranger)) is None
     assert ledger_agent_ops.check(_followup(stranger)) is None
 

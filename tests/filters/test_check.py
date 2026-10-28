@@ -170,7 +170,7 @@ def test_screen_refuses_a_rewrite_that_leaves_no_text(monkeypatch):
 
 @pytest.mark.parametrize("patched", [{"text": 3}, {"case": "c"}])
 def test_screen_keeps_the_text_when_a_rewrite_carries_no_text(monkeypatch, patched):
-    monkeypatch.setattr(check, "check", lambda tool, tool_input: check.FilterOutcome("rewrite", "", patched))
+    monkeypatch.setattr(check, "check", lambda tool, tool_input, cwd: check.FilterOutcome("rewrite", "", patched))
     assert check.screen("ledger_write", TEXT) == TEXT
 
 

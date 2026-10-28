@@ -51,7 +51,8 @@ def trusted_folder(worktree: str) -> str:
     from hooks.context import profile_chain
 
     root = conditions.repo_root(worktree)
-    if CONDITIONS_ENABLED and root is not None and not conditions.directory_trust(root, profile_chain.read_state())[0]:
+    layered = root is not None and (root / ".agentihooks" / "conditions").is_dir()
+    if CONDITIONS_ENABLED and layered and not conditions.directory_trust(root, profile_chain.read_state())[0]:
         raise ValueError("the writer's worktree is outside the operator's trusted repositories")
     return worktree
 
