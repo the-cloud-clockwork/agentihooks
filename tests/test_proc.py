@@ -3,6 +3,9 @@ from pathlib import Path
 
 from hooks.proc import Process, _process, _target, processes
 
+READERS = {"processes", "_process"}
+PROC_ROOT = "/proc/"
+
 
 def fake_proc(root: Path, pid: int, *, comm="claude", argv=("claude",), ppid=1, start=4242, state="S") -> None:
     entry = root / str(pid)
@@ -60,7 +63,7 @@ def _names_a_process(node):
         isinstance(part, ast.JoinedStr)
         and len(part.values) > 1
         and isinstance(part.values[0], ast.Constant)
-        and part.values[0].value == "/proc/"
+        and part.values[0].value == PROC_ROOT
         and isinstance(part.values[1], ast.FormattedValue)
         for part in ast.walk(node)
     )
@@ -73,10 +76,8 @@ def _process_table_reads(check, process_paths):
             continue
         func = call.func
         if isinstance(func, ast.Name):
-            count += func.id in {"processes", "_process"} or (
-                func.id == "open" and bool(call.args) and _names_a_process(call.args[0])
-            )
-        elif isinstance(func, ast.Attribute) and func.attr in {"processes", "_process"}:
+            count += func.id in READERS or (func.id == "open" and bool(call.args) and _names_a_process(call.args[0]))
+        elif isinstance(func, ast.Attribute) and func.attr in READERS:
             count += 1
         elif isinstance(func, ast.Attribute) and func.attr in {"exists", "is_file", "read_text", "read_bytes", "open"}:
             receiver = func.value
@@ -88,7 +89,10 @@ def test_no_check_reads_the_process_table_twice_in_one_statement():
     tests = Path(__file__).resolve().parent
     found = []
     for path in sorted(tests.rglob("*.py")):
-        for function in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        source = path.read_text(encoding="utf-8")
+        if not any(name in source for name in (*READERS, PROC_ROOT)):
+            continue
+        for function in ast.walk(ast.parse(source)):
             if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             process_paths = {
