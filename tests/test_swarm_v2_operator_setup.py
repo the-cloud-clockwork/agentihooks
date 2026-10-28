@@ -1329,11 +1329,14 @@ def test_a_refused_setup_before_the_hive_transport_alerts_the_swarms_of_the_mach
     assert alarm == {"message": message, "raised": ["hive-a", "hive-b"]}
 
 
-def test_an_unreachable_machine_redis_leaves_a_refusal_in_the_journal_only(tmp_path, monkeypatch):
+@pytest.mark.parametrize("kind", ["redis", "socket", "swarm"])
+def test_an_unreachable_machine_redis_leaves_a_refusal_in_the_journal_only(tmp_path, monkeypatch, kind):
     from redis.exceptions import ConnectionError as RedisConnectionError
 
+    errors = {"redis": RedisConnectionError("gone"), "socket": OSError("no socket"), "swarm": SwarmError("refused")}
+
     def unreachable():
-        raise RedisConnectionError("gone")
+        raise errors[kind]
 
     def refuse():
         raise AssertionError("no ledger without a swarm to alert")
@@ -1343,6 +1346,21 @@ def test_an_unreachable_machine_redis_leaves_a_refusal_in_the_journal_only(tmp_p
 
     assert run_main(["setup"], {}, Who(), tmp_path / "home")[0] == 1
     assert not (tmp_path / "home" / "swarm-terminal" / "alarm").exists()
+
+
+def test_a_hive_transport_failing_at_the_socket_falls_back_to_the_machine_redis(tmp_path, monkeypatch):
+    from scripts.swarm_v2.herdr import publications
+
+    def broken(environ):
+        raise OSError("socket closed")
+
+    ledger, made = Ledger(), alarm_store(["hive-a"])
+    monkeypatch.setattr(publications, "connect", broken)
+    monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.redis)
+
+    assert run_main(["setup"], {}, Who(), tmp_path / "home")[0] == 1
+    assert [slug for slug, _, _ in ledger.alerts] == ["hive-a"]
 
 
 def test_a_clean_home_install_schedules_both_jobs_and_the_setup_job_places_the_files(tmp_path, monkeypatch):
