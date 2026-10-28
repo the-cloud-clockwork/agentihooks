@@ -415,6 +415,7 @@ def test_lost_boundary_moves_the_point_only_over_paged_records_before_a_staged_o
     found = agent_trace._scan_to(str(path), {**moved, "boundary": "earlier"}, {"boundary": "a3"}, {})
     assert found["record"] == found["boundary"] == "a3"
     assert agent_trace._still_at(str(path), found)
+    assert agent_trace._still_at(str(path), {key: value for key, value in found.items() if key != "record"})
 
 
 @pytest.mark.parametrize("edited", ["codex-user-message", "claude-metadata"])
