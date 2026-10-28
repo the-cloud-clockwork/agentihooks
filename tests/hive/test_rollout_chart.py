@@ -3,7 +3,6 @@ from pathlib import Path
 
 import yaml
 
-
 CHART = Path(__file__).resolve().parents[2] / "deploy/helm/agentihooks-swarm"
 
 
