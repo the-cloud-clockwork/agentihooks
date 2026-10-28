@@ -420,3 +420,36 @@ def test_the_controller_ticks_every_swarm_while_no_host_ticked_list_is_set(store
     monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
 
     assert controller.run_once(store) == {"XXXX": ["XXXX"]}
+
+
+def test_lease_lifecycle_uses_the_selected_state_store(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.events import memory, state
+    from scripts.events.config import BusConfig
+
+    bus = memory.open_bus(BusConfig())
+    saved = bus.state("controller-lease")
+    store = SimpleNamespace(key=lambda slug, part: f"{slug}:{part}")
+    clock = [1000]
+    monkeypatch.setattr(state, "for_store", lambda store, bucket: saved)
+    monkeypatch.setattr(lease, "_address", lambda slug: None)
+    monkeypatch.setattr(lease, "now_ms", lambda store: clock[0])
+    try:
+        first = lease.acquire(store, "sw", "home")
+        assert first == lease.Lease("home", 1, 181000)
+        assert lease.current(store, "sw") == first
+        assert lease.acquire(store, "sw", "other") is None
+        clock[0] = 2000
+        renewed = lease.renew(store, "sw", first)
+        assert renewed == lease.Lease("home", 1, 182000)
+        assert lease.release(store, "sw", first)
+        assert lease.current(store, "sw") is None
+        second = lease.acquire(store, "sw", "other")
+        assert second == lease.Lease("other", 2, 182000)
+        assert not lease.release(store, "sw", first)
+        clock[0] = 182000
+        third = lease.acquire(store, "sw", "home")
+        assert third == lease.Lease("home", 3, 362000)
+    finally:
+        bus.close()
