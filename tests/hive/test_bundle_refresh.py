@@ -98,10 +98,11 @@ def test_a_hive_without_a_repo_root_uses_the_start_script_default(tmp_path, monk
     home = tmp_path / "home"
     remote, bundle, environ = _hive(tmp_path, home / "dev")
     merged = _commit(remote, "deps.json", "wrapped gh")
-    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(bundle_refresh.Path, "home", lambda: home)
 
     assert bundle_refresh.refresh(0.0, 900.0, {**environ, "HIVE_REPO_ROOT": ""}) == 900.0
     assert _head(bundle) == merged
+    assert ensures == [ENSURE]
 
 
 def test_a_hive_without_a_bundle_url_or_checkout_never_runs_git(tmp_path, monkeypatch):
