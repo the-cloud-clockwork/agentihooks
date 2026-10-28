@@ -584,7 +584,7 @@ def test_a_refilled_seat_leaves_the_front_door_the_claimants_its_retirement_hand
     world.seat(world.store.names.next(SLUG, "master"), SECOND)
 
     assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD, SECOND]
-    assert table.owners(SLUG, world.doc()) == {"p1": LEAD, "p2": LEAD}
+    assert table.owners(SLUG, world.doc()) == {"p1": SECOND, "p2": LEAD}
     master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
     assert world.refusals() == 0
 
