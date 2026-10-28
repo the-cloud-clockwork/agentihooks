@@ -4,7 +4,7 @@ import socket
 
 import pytest
 
-from scripts.hive import cli, registry
+from scripts.hive import cli, hive_state, registry
 from scripts.hive.auth import HiveError
 from scripts.swarm import commands, lease
 from scripts.swarm.store import RedisStore
@@ -38,14 +38,18 @@ def redis():
     return fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
 
 
+def _record(client, hive_id: str) -> dict | None:
+    return hive_state.read(hive_state.records(client, hive_id), hive_id)
+
+
 def test_a_new_hive_gets_every_field_and_joins_the_index(redis):
     assert registry.update(redis, "box", ["max-agents=3"]) == {**DEFAULT, "max_agents": 3}
     assert registry.show(redis, "box") == {**DEFAULT, "max_agents": 3}
     assert redis.smembers(f"{registry.ROOT}:hives") == {"box"}
-    stored = redis.hgetall(f"{registry.ROOT}:hive:box")
+    stored = _record(redis, "box")
     assert "roles" not in stored and "excluded" not in stored
-    assert stored["interactive"] == '{"claude": "", "codex": ""}'
-    assert stored["max_agents"] == "3"
+    assert stored["interactive"] == {"claude": "", "codex": ""}
+    assert stored["max_agents"] == 3
 
 
 def test_a_member_updates_its_settings_without_writing_the_controller_index(redis, monkeypatch):
@@ -76,7 +80,7 @@ def test_hive_set_refused_the_index_write_still_settles_the_record(redis, monkey
 
 def test_settings_merge_onto_the_stored_record_and_keep_reported_fields(redis):
     registry.update(redis, "box", ["ui=yes", "excluded=qa", "prefer=master:1,eng:2"])
-    redis.hset(f"{registry.ROOT}:hive:box", mapping={"heartbeat_at": "500", "slots": '["a"]', "version": "2.4"})
+    registry.beat(redis, "box", {"heartbeat_at": 500, "slots": ["a"], "version": "2.4"})
     record = registry.update(redis, "box", ["name=Laptop", "ephemeral=yes", "max-agents=4"])
     expected = {
         **DEFAULT,
@@ -119,32 +123,32 @@ def test_a_restarted_registration_keeps_the_stored_settings(redis):
     expected = {**DEFAULT, "name": "Pod", "ephemeral": "yes", "excluded": ["qa"], "max_agents": 3}
     assert restarted == expected
     assert registry.show(redis, "box") == expected
-    assert redis.hget(registry.key("box"), "max_agents") == "3"
+    assert _record(redis, "box")["max_agents"] == 3
 
 
 def test_a_restarted_registration_keeps_a_stored_ui_and_ephemeral(redis):
     registry.update(redis, "box", ["ui=yes", "ephemeral=no"])
     restarted = registry.update(redis, "box", ["ui=no", "ephemeral=yes", "name=Pod"], keep=True)
     assert restarted == HEADED
-    assert redis.hmget(registry.key("box"), "ui", "ephemeral", "name") == ["yes", "no", "Pod"]
+    stored = _record(redis, "box")
+    assert (stored["ui"], stored["ephemeral"], stored["name"]) == ("yes", "no", "Pod")
 
 
 def test_a_registration_after_a_heartbeat_seed_takes_the_advertised_ui_and_ephemeral(redis):
-    with redis.pipeline() as pipe:
-        registry.seed(pipe, "box")
-        pipe.execute()
-    assert redis.hmget(registry.key("box"), "ui", "ephemeral", "max_agents", "excluded") == [None, None, None, None]
+    registry.beat(redis, "box", {})
+    assert not {"ui", "ephemeral", "max_agents", "excluded"} & set(_record(redis, "box"))
     registry.update(redis, "box", ["max-agents=3"])
     restarted = registry.update(redis, "box", ["ui=yes", "ephemeral=yes", "max-agents=9"], keep=True)
     assert restarted == {**HEADED, "ephemeral": "yes", "max_agents": 3}
-    assert redis.hmget(registry.key("box"), "ui", "ephemeral", "max_agents") == ["yes", "yes", "3"]
+    stored = _record(redis, "box")
+    assert (stored["ui"], stored["ephemeral"], stored["max_agents"]) == ("yes", "yes", 3)
 
 
 def test_a_restarted_registration_with_nothing_new_writes_nothing(redis):
     registry.update(redis, "box", ["max-agents=3"])
-    stored = redis.hgetall(registry.key("box"))
+    stored = _record(redis, "box")
     assert registry.update(redis, "box", ["max-agents=9"], keep=True) == {**DEFAULT, "max_agents": 3}
-    assert redis.hgetall(registry.key("box")) == stored
+    assert _record(redis, "box") == stored
 
 
 def test_empty_excluded_and_prefer_clear_them(redis):
@@ -156,29 +160,38 @@ def test_empty_excluded_and_prefer_clear_them(redis):
 
 
 def _race_once(monkeypatch, field, value):
-    read = registry._stored
-    pending = [(field, value)]
+    opened = hive_state.records
+    pending = [{field: value}]
 
-    def racing(client, hive_id):
-        record = read(client, hive_id)
-        if pending:
-            client.hset(registry.key(hive_id), *pending.pop())
-        return record
+    class Racing:
+        def __init__(self, store):
+            self.store = store
 
-    monkeypatch.setattr(registry, "_stored", racing)
-    return read
+        def get(self, key):
+            entry = self.store.get(key)
+            if pending:
+                written = pending.pop()
+                hive_state.amend(
+                    self.store, key, lambda current: {**registry._seeded(key), **(current or {}), **written}
+                )
+            return entry
+
+        def __getattr__(self, name):
+            return getattr(self.store, name)
+
+    monkeypatch.setattr(hive_state, "records", lambda client, hive_id: Racing(opened(client, hive_id)))
 
 
 def test_a_setting_keeps_a_heartbeat_written_while_it_was_checked(redis, monkeypatch):
     registry.update(redis, "box", ["ui=yes"])
-    _race_once(monkeypatch, "heartbeat_at", "900")
+    _race_once(monkeypatch, "heartbeat_at", 900)
     registry.update(redis, "box", ["name=Laptop"])
-    assert redis.hget(registry.key("box"), "heartbeat_at") == "900"
-    assert redis.hget(registry.key("box"), "name") == "Laptop"
+    assert _record(redis, "box")["heartbeat_at"] == 900
+    assert _record(redis, "box")["name"] == "Laptop"
 
 
 def test_a_new_hive_keeps_a_heartbeat_written_while_it_was_checked(redis, monkeypatch):
-    _race_once(monkeypatch, "heartbeat_at", "900")
+    _race_once(monkeypatch, "heartbeat_at", 900)
     assert registry.update(redis, "box", ["ui=yes"]) == {**HEADED, "heartbeat_at": 900}
     assert registry.show(redis, "box") == {**HEADED, "heartbeat_at": 900}
 
@@ -189,7 +202,7 @@ def test_a_setting_is_checked_again_against_a_concurrent_change(redis, monkeypat
     with pytest.raises(HiveError) as error:
         registry.update(redis, "box", ["prefer=master:1"])
     assert str(error.value) == "prefer names master, a role this hive excludes"
-    assert redis.hget(registry.key("box"), "prefer") == "{}"
+    assert _record(redis, "box")["prefer"] == {}
 
 
 @pytest.mark.parametrize(
@@ -297,7 +310,7 @@ def test_cli_set_show_and_list(redis, monkeypatch, capsys):
     assert printed["excluded"] == ["qa"]
     assert printed["max_agents"] == 3
     registry.update(redis, "pod", ["excluded=eng"])
-    redis.hset(f"{registry.ROOT}:hive:box", "heartbeat_at", "50000")
+    registry.beat(redis, "box", {"heartbeat_at": 50_000})
     assert cli.main(["show", "box"]) == 0
     assert json.loads(capsys.readouterr().out)["heartbeat_at"] == 50_000
     assert cli.main(["list"]) == 0

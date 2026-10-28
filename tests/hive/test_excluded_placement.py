@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.hive import cli, placement, registry
+from scripts.hive import cli, hive_state, placement, registry
 from scripts.hive.auth import HiveError
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_placement import NOW, REPO, hive
@@ -68,7 +68,7 @@ def test_a_hive_stored_with_roles_moves_to_the_new_rule_on_its_next_set(redis):
     redis.hset(registry.key("root"), mapping={"ui": "yes", "roles": '["master", "eng"]', "max_agents": "16"})
     record = registry.update(redis, "root", ["name=Root"])
     assert (record["max_agents"], record["excluded"]) == (10, [])
-    stored = redis.hgetall(registry.key("root"))
+    stored = hive_state.read(hive_state.records(redis, "root"), "root")
     assert "roles" not in stored and "max_agents" not in stored
     assert "roles" not in record
 
@@ -82,8 +82,8 @@ def test_a_hive_stored_with_roles_reads_under_the_new_rule_before_it_moves(redis
 
 def test_a_heartbeat_moves_a_hive_stored_with_roles_to_the_new_rule(redis):
     redis.hset(registry.key("anton"), mapping={"ui": "no", "roles": '["eng"]', "max_agents": "1", "name": "Anton"})
-    registry.migrate(redis, "anton")
-    stored = redis.hgetall(registry.key("anton"))
+    registry.beat(redis, "anton", {"heartbeat_at": 1})
+    stored = hive_state.read(hive_state.records(redis, "anton"), "anton")
     assert "roles" not in stored and "max_agents" not in stored
     assert stored["name"] == "Anton"
     assert registry.show(redis, "anton")["max_agents"] == 20
@@ -91,10 +91,7 @@ def test_a_heartbeat_moves_a_hive_stored_with_roles_to_the_new_rule(redis):
 
 def test_a_heartbeat_keeps_an_explicit_max_agents(redis):
     registry.update(redis, "anton", ["ui=no", "max-agents=4"])
-    registry.migrate(redis, "anton")
-    with redis.pipeline() as pipe:
-        registry.seed(pipe, "anton")
-        pipe.execute()
+    registry.beat(redis, "anton", {"heartbeat_at": 1})
     assert registry.show(redis, "anton")["max_agents"] == 4
 
 
