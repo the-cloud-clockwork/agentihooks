@@ -572,6 +572,51 @@ def test_checked_fails_when_the_recovered_login_is_still_refused(tmp_path, monke
     assert login.checked(_home(tmp_path), {}, "masteratexample_com") is False
 
 
+@pytest.mark.parametrize("recovered", [True, False])
+def test_checked_refuses_a_signed_in_login_the_provider_revoked(tmp_path, monkeypatch, recovered):
+    from scripts.routing import native_login
+
+    target = _home(tmp_path)
+    probed = []
+    monkeypatch.setattr(native_login, "check", lambda environ, account: dict(native_login.PROOF))
+
+    def rejected(environ, account):
+        probed.append((environ["CLAUDE_CONFIG_DIR"], account))
+        return True
+
+    monkeypatch.setattr(native_login, "rejected", rejected)
+    monkeypatch.setattr(login, "recover", lambda found, environ: recovered)
+    assert login.checked(target, {}, "masteratexample_com") is False
+    assert probed == [(str(target), "masteratexample_com")] * (2 if recovered else 1)
+
+
+def test_checked_passes_a_login_the_recovered_copy_restored(tmp_path, monkeypatch):
+    from scripts.routing import native_login
+
+    target = _home(tmp_path)
+    answers = iter([True, False])
+    monkeypatch.setattr(native_login, "check", lambda environ, account: dict(native_login.PROOF))
+    monkeypatch.setattr(native_login, "rejected", lambda environ, account: next(answers))
+    monkeypatch.setattr(login, "recover", lambda found, environ: True)
+    assert login.checked(target, {}, "masteratexample_com") is True
+
+
+def test_a_revoked_master_login_falls_back_to_the_token_route(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+    from scripts.swarm import operator_email
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.setattr(native_login, "check", lambda environ, account: dict(native_login.PROOF))
+    monkeypatch.setattr(native_login, "rejected", lambda environ, account: True)
+    monkeypatch.setattr(chain, "authorize", lambda *_: "failure", raising=False)
+    monkeypatch.setattr(operator_email, "send", lambda *_: "")
+    assert login.prepare_launch(_environ(rendered), tmp_path) is None
+    token_records = (login._token_folder(_environ(rendered)) / "login-notifications.jsonl").read_text()
+    assert [json.loads(line)["step"] for line in token_records.splitlines()] == ["token"]
+
+
 def test_stored_reads_the_swarm_copy_and_reports_an_outage(monkeypatch, capsys):
     FakeBao({"epoch": "3"}).install(monkeypatch)
     assert login.stored("bao") == {"epoch": "3"}
