@@ -28,6 +28,7 @@ def pool(label):
 
 
 MOVED = {
+    ("changelog.yml", "changelog"): LIGHT,
     ("chaos.yml", "chaos"): STANDARD,
     ("chart-release.yml", "publish"): LIGHT,
     ("mutation-line-selection-proof.yml", "compare"): BATCH,
