@@ -589,3 +589,60 @@ def test_a_member_credential_runs_a_checked_wait_and_a_cover_and_no_other_writes
     for forbidden in (f"{ROOT}:hive:m2:swarm:proof:wait:{agent.name}", swarm.key("proof", "config")):
         with pytest.raises(NoPermissionError):
             member.set(forbidden, "write")
+
+
+def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts(monkeypatch):
+    import fakeredis
+    from redis.exceptions import NoPermissionError
+
+    from scripts.swarm import cli
+
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    admin.acl_setuser(
+        "hive-m1",
+        enabled=True,
+        nopass=True,
+        categories=auth.ACL_CATEGORIES,
+        keys=auth._acl_keys("m1"),
+        channels=auth.ACL_PATTERNS,
+    )
+    reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "HVALS", "HMGET"}
+
+    # fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client.
+    class Member(fakeredis.FakeRedis):
+        def execute_command(self, *args, **options):
+            if str(args[0]).upper() in reads:
+                return admin.execute_command(*args, **options)
+            return super().execute_command(*args, **options)
+
+    member = Member(server=server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    host = store.RedisStore(admin)
+    host.create(store.SwarmConfig("proof", "/repo", 1, 0, "running"))
+    host.put_agent("proof", store.AgentRecord(name="engineer@0001-0001", lane="eng", task="t1"))
+    host.put_gate_lift("proof", "tasks", "t1", "subagents", {"at": 1.0})
+    url = "https://github.com/o/r/pull/3"
+    updates = []
+
+    class Ledger:
+        def state(self, slug):
+            return {"tasks": [{"id": "t1", "lane": "eng", "state": "claimed"}], "phases": []}
+
+        def update_task(self, slug, task, fields, by=None):
+            updates.append((task, fields, by))
+
+    monkeypatch.setattr(cli, "connect", lambda: store.RedisStore(member))
+    monkeypatch.setattr(cli, "LedgerClient", Ledger)
+    monkeypatch.setattr(cli, "pull_branch", lambda pull: ("", ""))
+    monkeypatch.setattr("scripts.gates.intent.stamp_body", lambda *args, **kwargs: False)
+
+    assert cli.main(["proof", "--as", "engineer@0001-0001", "pr", url]) == 0
+
+    assert updates == [("t1", {"state": "pr", "awaiting": "", "pr_url": url}, "engineer@0001-0001")]
+    assert host.gate_lift("proof", "tasks", "t1", "subagents") == {}
+    later = float(admin.hget(host.key("proof", "gate-lift-drops"), "t1")) + 1
+    host.put_gate_lift("proof", "tasks", "t1", "subagents", {"at": later})
+    assert host.gate_lift("proof", "tasks", "t1", "subagents") == {"at": later}
+    with pytest.raises(NoPermissionError):
+        member.hset(host.key("proof", "gate-lifts", "tasks", "t1"), "subagents", "{}")
