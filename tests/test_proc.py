@@ -87,7 +87,10 @@ def _process_table_reads(check, process_paths):
 def _process_table_violations(tests):
     found = []
     for path in sorted(tests.rglob("*.py")):
-        for function in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        source = path.read_text(encoding="utf-8")
+        if not any(marker in source for marker in ("_process", "processes", "/proc/")):
+            continue
+        for function in ast.walk(ast.parse(source)):
             if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             process_paths = {
