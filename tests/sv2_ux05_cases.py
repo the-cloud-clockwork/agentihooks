@@ -531,8 +531,8 @@ def _case_c(browser, data: dict) -> tuple[dict, dict, Counter]:
         "restored": {**restored, "row": restored["row"].split("\n")},
         "keyboard": {"focus": keyboard, "dialogs": viewer.dialogs},
         "durability": {
-            "survived_the_outage": sorted(set(before) & set(during)),
-            "lost_in_the_outage": sorted(set(before) - set(during)),
+            "survived_the_outage": sorted(key.partition(":")[2] for key in set(before) & set(during)),
+            "lost_in_the_outage": sorted(key.partition(":")[2] for key in set(before) - set(during)),
             "kept_by_the_page": "the last observed swarm view, marked not current",
         },
     }
