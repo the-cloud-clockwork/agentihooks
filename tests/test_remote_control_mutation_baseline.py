@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from _pytest.faulthandler import fault_handler_stderr_fd_key
 
+from scripts.ci_mutation import runner
 from scripts.ci_mutation.runner import mutate_files
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats import SharedStats
@@ -56,6 +57,23 @@ def mutation_children(monkeypatch):
 def clean_mutation_children(monkeypatch):
     with mutation_children(monkeypatch):
         yield
+
+
+@pytest.fixture(autouse=True)
+def untraced_workspace_copy(monkeypatch):
+    # Under the suite's coverage tracer the in-process checkout copy takes about 25 seconds against under one
+    # untraced; the runner tests cover prepare_workspace itself.
+    prepare = runner.prepare_workspace
+
+    def untraced(*args):
+        tracer = sys.gettrace()
+        sys.settrace(None)
+        try:
+            prepare(*args)
+        finally:
+            sys.settrace(tracer)
+
+    monkeypatch.setattr(runner, "prepare_workspace", untraced)
 
 
 def test_mutation_children_exit_when_the_watchdog_interrupts(monkeypatch):
