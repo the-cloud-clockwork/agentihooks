@@ -2,6 +2,7 @@ from scripts.hive import launch, placement, placement_waits
 from scripts.hive.placement import Wait
 from scripts.swarm import commands, local_slots
 from scripts.swarm_v2.runtime.base import LOCAL, Placement
+from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
 from tests.hive.test_local_overflow import hybrid
@@ -48,6 +49,7 @@ def test_a_hybrid_controller_claims_a_local_slot_for_a_workstation_task_on_the_w
 ):
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
     fenced = hybrid(setup, monkeypatch)
+    fenced.runtime.router.runtimes[LOCAL] = LocalHerdrRuntime(setup.herdr)
     write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=4)
     assert fenced.spawn(setup.config, "eng", "eng name", TASK) == "placed on the workstation"
     assert setup.store.redis.hkeys(local_slots.key("workstation")) == ["fixture/eng name"]
