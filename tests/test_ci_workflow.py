@@ -1484,6 +1484,10 @@ def test_unit_shards_upload_elapsed_time_after_failed_pytest():
 def test_selected_legs_record_elapsed_time_and_their_job_and_preserve_pytest_status(tmp_path, status):
     steps = _workflow()["jobs"]["unit-selected"]["steps"]
     step = next(item for item in steps if item.get("name") == "Run the selected tests")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "__init__.py").touch()
+    (scripts / "ci_cpu_quota.py").write_text("print(1)\n")
     (tmp_path / "pytest.py").write_text(
         f"def main(args):\n    open('durations.json', 'w').write('{{}}')\n    return {status}\n"
     )
@@ -1508,6 +1512,13 @@ def test_selected_legs_upload_elapsed_time_beside_their_durations():
 
 def _selected_step(name: str) -> dict:
     return next(step for step in _workflow()["jobs"]["unit-selected"]["steps"] if step.get("name") == name)
+
+
+def test_selected_legs_size_workers_by_the_container_cpu_quota():
+    run = _selected_step("Run the selected tests")["run"]
+    assert "workers=$(python -m scripts.ci_cpu_quota)" in run
+    assert '-n "$workers"' in run
+    assert "-n auto" not in run
 
 
 def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_only_for_the_grader():
