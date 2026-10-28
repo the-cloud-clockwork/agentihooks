@@ -514,11 +514,11 @@ def test_a_changed_check_state_on_the_same_head_reads_in_full(monkeypatch, tmp_p
     assert record["checks"][0]["conclusion"] == "failure"
 
 
-def test_state_reads_beyond_twenty_pull_requests_split_into_more_queries(monkeypatch, tmp_path):
-    numbers = list(range(1, 22))
-    world, read_pass = _pulls_world(monkeypatch, tmp_path, numbers)
+@pytest.mark.parametrize(("count", "queries"), [(20, 1), (21, 2)])
+def test_state_reads_beyond_twenty_pull_requests_split_into_more_queries(monkeypatch, tmp_path, count, queries):
+    world, read_pass = _pulls_world(monkeypatch, tmp_path, list(range(1, count + 1)))
     read_pass(full_reads=0)
-    assert world["calls"] == ["graphql", "graphql"]
+    assert world["calls"] == ["graphql"] * queries
 
 
 def test_full_reads_per_pass_stop_at_the_bound_and_the_rest_wait_for_the_next_pass(monkeypatch, tmp_path):
