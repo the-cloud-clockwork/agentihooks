@@ -1,4 +1,3 @@
-from dataclasses import replace
 from types import SimpleNamespace
 
 from scripts import terminate_agent
@@ -127,15 +126,31 @@ def test_a_hive_at_its_cap_launches_nothing_when_its_session_report_misses_recor
     monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
     setup.store.create(SwarmConfig("doctor", "agentihooks", 1, 1))
     rows = [
-        (setup.config.slug, AgentRecord("engineer@aaaaaa-0001", "eng", "pinned", hive="remote", execution_id="e1")),
-        (setup.config.slug, AgentRecord("ci@aaaaaa-0002", "ci", "free", hive="remote", execution_id="e2")),
-        ("doctor", AgentRecord("engineer@bbbbbb-0001", "eng", "other", hive="remote", execution_id="e3")),
-        ("doctor", AgentRecord("master@bbbbbb-0002", "master", "master", hive="remote", execution_id="e4")),
-        ("doctor", AgentRecord("engineer@bbbbbb-0003", "eng", "gone", hive="remote", state="ended")),
+        (setup.config.slug, "eng", "pinned", "working"),
+        (setup.config.slug, "ci", "free", "working"),
+        ("doctor", "eng", "other", "working"),
+        ("doctor", "master", "master", "working"),
+        ("doctor", "eng", "gone", "ended"),
     ]
-    for slug, record in rows:
-        setup.store.put_agent(slug, record if record.state == "ended" else replace(record, state="working"))
-    report = {"claude:account": 3, "interactive:claude:account": 3, "_executions": {"claude:account": ["e1", "e2"]}}
+    started = [
+        setup.store.start_execution(
+            slug,
+            AgentRecord(
+                setup.store.next_name(slug, lane),
+                lane,
+                task,
+                seat=f"{lane}-{index + 1}@{slug}",
+                state=state,
+                harness="claude",
+                account="account",
+                hive="remote",
+                runtime_target={"host_id": "remote"},
+            ),
+        )
+        for index, (slug, lane, task, state) in enumerate(rows)
+    ]
+    seen = [agent.execution_id for agent in started[:2]]
+    report = {"claude:account": 3, "interactive:claude:account": 3, "_executions": {"claude:account": seen}}
     setup.store.redis.set(f"{registry.key('remote')}:sessions", json.dumps(report))
     remote = next(hive for hive in launch.loaded_hives(setup.store) if hive["id"] == "remote")
     assert remote["agents"] == 3
