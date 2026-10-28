@@ -5,7 +5,7 @@ import os
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from scripts.swarm import lease
+from scripts.swarm import lease, ledger_client
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
@@ -35,6 +35,8 @@ class RoutedRuntime:
         return getattr(self.herdr_runtime, name)
 
     def spawn(self, config: Any, lane: str, name: str, task: dict) -> Placed:
+        if lane == MASTER:
+            ledger_client.LedgerClient(service=True).join(config.slug, name, "orchestrator")
         request = SpawnRequest(config, lane, name, task)
         placed = self.launch is not None and self.router.spawn_backend(request) != LOCAL
         outcome = self.launch(request) if placed else self.router.spawn(request)
@@ -69,6 +71,8 @@ class RoutedRuntime:
         return outcome.value if outcome.ok else Placed("", "")
 
     def resume(self, config: Any, agent: AgentRecord, text: str) -> Placed:
+        if agent.lane == MASTER:
+            ledger_client.LedgerClient(service=True).join(config.slug, agent.name, "orchestrator")
         outcome = self.router.recover(agent, Recovery.RESUME, config, text)
         if not outcome.ok:
             raise SpawnError(outcome.detail, outcome.status)

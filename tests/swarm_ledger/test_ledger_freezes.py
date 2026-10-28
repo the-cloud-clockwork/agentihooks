@@ -248,6 +248,26 @@ def test_a_masters_plain_join_preserves_its_orchestrator_role():
     assert targets(state) == [("focus", "plans/a")]
 
 
+def test_a_non_master_can_change_its_join_role():
+    write("join", by=ENGINEER, role="orchestrator")
+    state, rejected = write("join", by=ENGINEER, role="member")
+    assert not rejected
+    assert state["_meta"]["members"][ENGINEER]["role"] == "member"
+
+
+def test_a_missing_freeze_target_names_the_reason():
+    state, rejected = freeze("plans/missing", by=MASTER)
+    assert rejected
+    assert any("target plans/missing does not exist" in warning for warning in state["_meta"]["warnings"])
+
+
+def test_dispatcher_refusal_names_the_required_autonomy(monkeypatch):
+    monkeypatch.setattr(ledger_freezes, "resolve_name", lambda name: "dispatch@f2e3d4-0003")
+    state, rejected = freeze("plans/a", by="dispatch@f2e3d4-0003")
+    assert rejected
+    assert any("requires full autonomy" in warning for warning in state["_meta"]["warnings"])
+
+
 @pytest.mark.parametrize("verb", ["freeze", "focus"])
 def test_the_master_writes_freezes_without_a_quote_and_preserves_verified_words(verb):
     state, rejected = freeze("plans/a", verb=verb, by=MASTER, quote="freeze the swarm v2 plan")

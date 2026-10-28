@@ -118,6 +118,8 @@ def _join(doc, op, ctx):
     members = ctx.meta["members"]
     known = members.get(op["by"])
     role = op.get("role", known["role"] if known else "member")
+    if known and known["role"] == "orchestrator" and ports.swarm().naming.lane_of(op["by"]) == "master":
+        role = "orchestrator"
     members[op["by"]] = {
         "role": role,
         "joined_at": known["joined_at"] if known else ctx.at,

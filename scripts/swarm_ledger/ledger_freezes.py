@@ -62,8 +62,12 @@ def author(op, ctx) -> tuple[str, str] | None:
     if by is None:
         return "operator", op.get("quote")
     if ports.swarm().naming.lane_of(resolve_name(by)) == DISPATCH:
-        return (by, "") if autonomy(ctx.slug) == FULL else None
+        if autonomy(ctx.slug) == FULL:
+            return by, ""
+        ctx.refused.append(f"{op['op']} refused: dispatcher {by} requires full autonomy")
+        return None
     if ctx.meta["members"].get(by, {}).get("role") != "orchestrator":
+        ctx.refused.append(f"{op['op']} refused: {by} is not an orchestrator of this ledger")
         return None
     words = ledger_relay.verified(by, op["quote"]) if op.get("quote") else ""
     return by, words
@@ -72,6 +76,7 @@ def author(op, ctx) -> tuple[str, str] | None:
 def _set(doc, op, ctx, by, words):
     target = op["target"]
     if not selector(target) and target not in project(doc)[0]:
+        ctx.refused.append(f"{op['op']} refused: target {target} does not exist")
         return False
     rows = doc.setdefault("freezes", [])
     if any(row["verb"] == op["verb"] and row["target"] == target for row in rows):
