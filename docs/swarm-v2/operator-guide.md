@@ -5,7 +5,7 @@ The ledger page is a projection of the swarm store. Agents run in worker Pods on
 ## Workflow
 
 1. Open the ledger page, Swarm tab, and press **start**. The claimed task's agent runs in a worker Pod; its row shows the backend, generation and profile (`kubernetes · gen 1 · standard`).
-2. To watch its terminal, use **attach** on the agent row. Attach opens a terminal view through the Anton herdr server; closing the view leaves the agent running. The row controls are buttons in tab order: Tab moves from **message** to **attach**, Enter fires it, and keyboard focus makes the row's controls fully visible. The package cases fire attach this way; destructive controls are exercised by touch on a phone.
+2. To watch its terminal, use **attach** on the agent row. Attach opens a terminal view through the Anton herdr server; closing the view leaves the agent running. The row controls are buttons in tab order: Tab moves from **message** to **attach**, Enter fires it, and keyboard focus makes the row's controls fully visible. Tab from **drain** reaches **cancel**, and Enter on it asks the same confirmation a click does.
 3. Close every tab, terminal view and the personal computer. The agent keeps working; the worker heartbeat and the hub's terminal checks keep writing to the swarm store.
 4. Reopen the ledger page on any device. The agent row shows the current observation (`seen 0m ago`), the Brain context panel shows its task, and an evidence button opens the record range the task was given.
 

@@ -316,11 +316,19 @@ def _launch_and_attach(browser, swarm: Swarm, counts: Counter) -> dict:
     launcher.tab.keyboard.press("Enter")
     launcher.settled()
     counts["keyboard_controls"] += 1
+    launcher.button(name, "drain").focus()
+    launcher.tab.keyboard.press("Tab")
+    destructive_focus = launcher.tab.evaluate("() => document.activeElement.getAttribute('aria-label')")
+    launcher.tab.keyboard.press("Enter")
+    launcher.tab.wait_for_timeout(300)
+    counts["keyboard_controls"] += 1
     runner = swarm.run_commands()
     shown = {
         "puts": [{k: v for k, v in put.items() if k not in ("op", "incarnation")} for put in launcher.puts],
         "keyboard_focus": focused,
         "keyboard_actions_opacity": opacity,
+        "keyboard_destructive_focus": destructive_focus,
+        "keyboard_dialogs": launcher.dialogs,
         "note": launcher.note(),
         "runner": runner,
         "terminal_commands": len(swarm.ran),
@@ -355,13 +363,16 @@ def _case_a(browser, data: dict) -> tuple[dict, dict, Counter]:
     names = (second["launched"]["puts"][1]["agent"], launched["puts"][1]["agent"])
     only_names = all(names[0] in path for path in differs(first, second))
     second = json.loads(json.dumps(second).replace(*names))
-    seen = "seen 0m ago"
+    seen, cancel = "seen 0m ago", lifecycle.BY_ACTION["cancel"]
     checks = {
         "launched_from_the_ledger": launched["puts"][0] == {"action": "start"} and first["store"]["state"] == "running",
         "keyboard_reaches_and_fires_attach": launched["keyboard_focus"].startswith("attach ")
         and launched["keyboard_actions_opacity"] == "1"
         and launched["puts"][1]["control"] == "attach"
         and launched["note"] == "",
+        "keyboard_reaches_cancel_and_asks_first": launched["keyboard_destructive_focus"].startswith("cancel ")
+        and launched["keyboard_dialogs"] == [f"{launched['keyboard_destructive_focus']}? {cancel.consequence}"]
+        and len(launched["puts"]) == 2,
         "every_viewer_was_closed_during_execution": first["viewers_left_open"] == 0,
         "store_advanced_while_closed": first["heartbeat_advanced_ms"] > 0,
         "reopened_views_show_the_current_observation": all(
