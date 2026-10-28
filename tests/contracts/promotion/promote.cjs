@@ -403,6 +403,13 @@ test('never reads the jobs of a newer first attempt run still queued', async () 
   assert.equal(f.outputs.superseded, undefined);
 });
 
+test('still reads a queued rerun that keeps its finished readiness job', async () => {
+  const f = batchFixture({ candidate: { status: 'queued', run_attempt: 2 } });
+  await promote(f);
+  assert.equal(f.outputs.superseded, newer);
+  assert.equal(f.outputs.graded, newer);
+});
+
 test('verifies the running job separately from its selected newer grade during self wait', async () => {
   const f = batchFixture({ unstable: true });
   await promote(f);
