@@ -170,7 +170,8 @@ def _min_life(environ: Mapping[str, str]) -> float:
 
 def expiring(account: CodexAccount, environ: Mapping[str, str], now: float) -> bool:
     """A routed session holds only the bearer token and cannot refresh it, so it dies at the token's exp."""
-    exp = _claims(environ.get(account.env_name) or "").get("exp") if account.is_token else None
+    token = environ.get(account.env_name)
+    exp = _claims(token).get("exp") if token else None
     return isinstance(exp, int | float) and exp - now < _min_life(environ)
 
 
