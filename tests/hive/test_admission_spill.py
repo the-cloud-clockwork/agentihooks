@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
@@ -9,6 +10,7 @@ from scripts.swarm_v2.runtime.base import Status
 from tests.hive.test_controller_launch import request_for, setup, write_hive  # noqa: F401
 
 
+@pytest.mark.parametrize("harness", ["claude", "codex"])
 @pytest.mark.parametrize("in_pass", [False, True])
 @pytest.mark.parametrize(
     "reading",
@@ -19,9 +21,12 @@ from tests.hive.test_controller_launch import request_for, setup, write_hive  # 
     ],
     ids=["cpu", "memory", "disk"],
 )
-def test_resource_refusal_spills_to_the_next_ranked_hive(setup, monkeypatch, in_pass, reading):  # noqa: F811
-    write_hive(setup, prefer={"engineer": 0})
-    write_hive(setup, id="spare", prefer={"engineer": 1})
+def test_resource_refusal_spills_to_the_next_ranked_hive(setup, monkeypatch, in_pass, reading, harness):  # noqa: F811
+    setup.config.lanes["eng"] = {"agent": harness}
+    setup.herdr._quota_accounts = [replace(row, harness=harness) for row in setup.herdr._quota_accounts]
+    slots = [{"harness": harness, "account": "account", "kind": "subscription"}]
+    write_hive(setup, prefer={"engineer": 0}, slots=slots)
+    write_hive(setup, id="spare", prefer={"engineer": 1}, slots=slots)
     launcher = setup.launcher
     launcher.placement_cache = {} if in_pass else None
     request = request_for(setup)
@@ -47,6 +52,9 @@ def test_resource_refusal_spills_to_the_next_ranked_hive(setup, monkeypatch, in_
     assert setup.store.redis.xlen(launcher.orders.stream("remote")) == 0
     assert admission.pending(setup.store.redis, "remote") == 0
     assert admission.pending(setup.store.redis, "spare") == 1
+    selected = launcher.select(setup.config, "eng", request.task)
+    assert selected.hive == "spare"
+    assert selected.account.harness == harness
 
 
 def test_spill_does_not_bypass_hive_role_constraints(setup, monkeypatch):  # noqa: F811
