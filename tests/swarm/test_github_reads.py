@@ -268,10 +268,16 @@ def test_conditional_pages_share_reads_then_revalidate_without_charging_unchange
         ]
     )
 
-    def fetch(*args):
-        calls.append(args)
-        return next(outputs)
+    import subprocess
 
+    from scripts.ci_queue_retry import _api
+
+    def run(command, **options):
+        calls.append(tuple(command[2:]))
+        return subprocess.CompletedProcess(command, 0, stdout=next(outputs))
+
+    monkeypatch.setattr(subprocess, "run", run)
+    fetch = _api
     endpoint = "repos/o/r/actions/runs/7/jobs?per_page=100"
     assert github_reads.conditional_pages("lost_runner.jobs", endpoint, fetch) == [{"jobs": [{"id": 1}]}]
     now[0] += 59

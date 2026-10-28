@@ -116,8 +116,6 @@ def snapshot(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
 
 
 def _conditional_page(caller: str, endpoint: str, fetch: Callable) -> dict:
-    from scripts.gh_audit import uncharged
-
     entry = home() / f"{_key(f'etag {endpoint}')}.json"
     try:
         cached = json.loads(entry.read_text())
@@ -127,22 +125,17 @@ def _conditional_page(caller: str, endpoint: str, fetch: Callable) -> dict:
     if cached.get("etag"):
         args += ["-H", f"If-None-Match: {cached['etag']}"]
     try:
-        with uncharged():
+        with calling(caller):
             output = fetch(*args)
     except subprocess.CalledProcessError as error:
         output = error.stdout or ""
-        if not re.match(r"HTTP/\S+ 304\b", output):
-            charge(caller, endpoint, time.time())
+        if not _not_modified(output):
             raise
-    except subprocess.SubprocessError:
-        charge(caller, endpoint, time.time())
-        raise
     header, _, body = output.replace("\r\n", "\n").partition("\n\n")
     lines = header.splitlines()
     status = int(lines[0].split()[1])
     if status == 304:
         return cached
-    charge(caller, endpoint, time.time())
     if status != 200:
         raise subprocess.CalledProcessError(1, ["gh", "api", *args], output=output)
     headers = {key.lower(): value.strip() for key, _, value in (line.partition(":") for line in lines[1:])}
@@ -208,21 +201,34 @@ def _rest_pages(
     return output if include else cleaned
 
 
+def _not_modified(output: str | bytes | None) -> bool:
+    text = output.decode("utf-8", "replace") if isinstance(output, bytes) else output or ""
+    return bool(re.match(r"HTTP/\S+ 304\b", text))
+
+
 def rest(caller: str, args: list[str], run: Callable = subprocess.run, **options) -> subprocess.CompletedProcess:
-    if args[0] != "api" or args[1] == "graphql":
+    from scripts import gh_audit
+
+    path = gh_audit.endpoint(["gh", *args]) if args[0] == "api" else None
+    if path is None:
         return run(["gh", *args], **options)
-    endpoint = args[1]
-    charge(caller, endpoint, time.time())
-    if "--paginate" not in args:
-        return run(["gh", *args], **options)
+    endpoint = next(word for word in args[1:] if word.lstrip("/").split("?")[0] == path)
+    paginate = "--paginate" in args
     include = "--include" in args or "-i" in args
-    command = ["gh", *args] if include else ["gh", *args, "--include"]
+    command = ["gh", *args] if include or not paginate else ["gh", *args, "--include"]
     try:
-        result = run(command, **options)
+        with gh_audit.uncharged():
+            result = run(command, **options)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        exc.stdout = _rest_pages(caller, endpoint, exc.stdout, include, incomplete=True)
+        if not _not_modified(exc.stdout):
+            charge(caller, endpoint, time.time())
+        if paginate:
+            exc.stdout = _rest_pages(caller, endpoint, exc.stdout, include, incomplete=True)
         raise
-    result.stdout = _rest_pages(caller, endpoint, result.stdout, include)
+    if not _not_modified(result.stdout):
+        charge(caller, endpoint, time.time())
+    if paginate:
+        result.stdout = _rest_pages(caller, endpoint, result.stdout, include)
     return result
 
 
