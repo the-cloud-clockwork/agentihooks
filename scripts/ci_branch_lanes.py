@@ -11,7 +11,20 @@ WORKFLOWS = ".github/workflows"
 PUBLIC_RUNNER = re.compile(r"anton-oss(-[\w.-]+)?|(ubuntu|windows|macos)-[\w.-]+", re.IGNORECASE)
 PUBLIC_GROUPS = ("anton-oss",)
 SELECTED = re.compile(r"(?:&&|\|\||\$\{\{)\s*'((?:''|[^'])*)'")
-UNRESOLVED = re.compile(r"\b(?:matrix|inputs|vars|env|steps|needs|jobs)\.|\b(?:format|join|toJSON)\(")
+LITERAL = re.compile(r"'(?:''|[^'])*'")
+NAME = re.compile(r"[A-Za-z_][\w-]*(?:\.[\w-]+)*")
+FIXED_NAMES = frozenset(
+    {
+        "contains",
+        "fromJSON",
+        "github.actor",
+        "github.event.pull_request.head.repo.full_name",
+        "github.event_name",
+        "github.ref",
+        "github.repository",
+        "github.triggering_actor",
+    }
+)
 LANE = (
     "format('hosted-lane-{0}', "
     "((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || "
@@ -200,7 +213,9 @@ def runner_labels(runner: object) -> list[str]:
     found = []
     for item in runner if isinstance(runner, list) else []:
         text = str(item)
-        selected = SELECTED.findall(text) if "${{" in text and not UNRESOLVED.search(text) else []
+        bare = LITERAL.sub("", text)
+        fixed = "[" not in bare and set(NAME.findall(bare)) <= FIXED_NAMES
+        selected = SELECTED.findall(text) if "${{" in text and fixed else []
         found += selected or [text]
     return found
 

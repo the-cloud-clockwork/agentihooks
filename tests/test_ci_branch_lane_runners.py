@@ -25,13 +25,23 @@ ROUTED = "${{ contains(fromJSON('[\"nestorcolt\"]'), github.actor) && '%s' || 'u
         ({"group": "anton-oss", "labels": "anton-light"}, "anton-light"),
         ("${{ matrix.runner }}", "${{ matrix.runner }}"),
         ("${{ format('anton-{0}', 'light') }}", "${{ format('anton-{0}', 'light') }}"),
-        ("${{ cond && matrix.runner || 'anton-oss' }}", "${{ cond && matrix.runner || 'anton-oss' }}"),
-        ("${{ cond && 'anton-oss' || inputs.runner }}", "${{ cond && 'anton-oss' || inputs.runner }}"),
+        (
+            "${{ github.event_name == 'push' && matrix.runner || 'anton-oss' }}",
+            "${{ github.event_name == 'push' && matrix.runner || 'anton-oss' }}",
+        ),
+        (
+            "${{ github.event_name == 'push' && 'anton-oss' || inputs.runner }}",
+            "${{ github.event_name == 'push' && 'anton-oss' || inputs.runner }}",
+        ),
         (
             "${{ format('{0}', 'anton-light') || 'anton-oss' }}",
             "${{ format('{0}', 'anton-light') || 'anton-oss' }}",
         ),
-        ("${{ cond && 'anton-light' || 'anton-oss' }}", "anton-light"),
+        ("${{ github.event_name == 'push' && 'anton-light' || 'anton-oss' }}", "anton-light"),
+        ("${{ inputs.label || 'ubuntu-latest' }}", "${{ inputs.label || 'ubuntu-latest' }}"),
+        ("${{ github.ref_name || 'anton-oss' }}", "${{ github.ref_name || 'anton-oss' }}"),
+        ("${{ secrets.R || 'anton-oss' }}", "${{ secrets.R || 'anton-oss' }}"),
+        ("${{ matrix['runner'] || 'anton-oss' }}", "${{ matrix['runner'] || 'anton-oss' }}"),
     ],
 )
 def test_a_private_runner_label_is_refused(runner, label):
