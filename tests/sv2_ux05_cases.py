@@ -523,7 +523,7 @@ def _case_c(browser, data: dict) -> tuple[dict, dict, Counter]:
         "controls_return_after_a_fresh_read": any(not c["disabled"] for c in restored["controls"]),
         "no_command_replayed": viewer.puts == [] and swarm.run_commands() == [],
         "outage_wrote_nothing": during == before and swarm.conflicts() == {},
-        "restart_reads_the_same_view": reread["executions"] == swarm.view(reopened)["executions"],
+        "new_connection_reads_the_same_view": reread["executions"] == swarm.view(reopened)["executions"],
         "no_page_errors": viewer.errors == [] and first.errors == [],
     }
     observed = {
