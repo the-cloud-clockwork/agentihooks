@@ -519,6 +519,23 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
     assert mutation_counts("scripts/sample.py", source, {9, 13}) == (0, 2)
 
 
+def test_a_changed_class_body_assignment_counts_as_unmutated(monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutant_names, selected_mutants
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    source = "class Limits:\n    LIMIT = 1 + 2\n\n    def doubled(self):\n        return self.LIMIT * 2\n"
+    assert mutation_counts("scripts/sample.py", source, {2}) == (0, 0)
+    assert selected_mutants("scripts/sample.py", source, {2})[1] == []
+    assert selected_mutant_names("scripts/sample.py", source, {2}) == []
+    found, in_body = mutation_counts("scripts/sample.py", source, {2, 5})
+    assert found == in_body > 0
+    assert mutation_counts("scripts/sample.py", source, {5}) == (found, in_body)
+
+
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
 def test_shards_split_every_mutant_name_exactly_once_and_evenly(total):
     from scripts.ci_mutation.mutant_shards import shard_names
