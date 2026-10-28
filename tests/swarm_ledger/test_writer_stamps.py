@@ -276,7 +276,7 @@ def test_written_copies_changed_parts_apart_and_keeps_unchanged_parts():
     assert writer["tasks"][0] is new["tasks"][0]
     stamps = published.parts["_meta"].parts["stamps"]
     assert stamps.parts["a"] is previous.parts["_meta"].parts["stamps"].parts["a"]
-    assert writer["_meta"]["stamps"]["a"] is new["_meta"]["stamps"]["a"]
+    assert writer["_meta"]["stamps"]["a"] is stamps.parts["a"].value
     for index in (1, 2):
         assert tasks.parts[index].signature == fresh.parts["tasks"].parts[index].signature is not None
         assert tasks.parts[index].value is not new["tasks"][index]
@@ -287,7 +287,8 @@ def test_written_copies_changed_parts_apart_and_keeps_unchanged_parts():
     assert writer["overview"] is not new["overview"]
     assert published.parts["notes"].parts is None
     assert writer["notes"] is not new["notes"]
-    assert set(containers(published.value, {})) & set(containers(writer, {})) == set()
+    records = {id(record) for record in published.value["_meta"]["stamps"].values()}
+    assert set(containers(published.value, {})) & set(containers(writer, {})) == records
 
 
 def test_written_without_a_previous_copies_everything_and_an_unchanged_state_is_returned_as_is():
@@ -297,7 +298,8 @@ def test_written_without_a_previous_copies_everything_and_an_unchanged_state_is_
     assert encoded(published) == encoded(document(new))
     assert set(containers(published.value, {})) & set(containers(new, {})) == set()
     assert set(containers(writer, {})) & set(containers(new, {})) == set()
-    assert set(containers(published.value, {})) & set(containers(writer, {})) == set()
+    records = {id(record) for record in published.value["_meta"]["stamps"].values()}
+    assert set(containers(published.value, {})) & set(containers(writer, {})) == records
     unchanged = document(new)
     same, kept = writer_copy.written(new, unchanged)
     assert same is unchanged
