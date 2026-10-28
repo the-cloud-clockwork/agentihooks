@@ -1,9 +1,12 @@
 from dataclasses import replace
 
+import pytest
+
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hub import claims, registry
+from scripts.swarm.store import AgentRecord
 from tests.hub.test_admission import SLUG, ask
 from tests.hub.test_admission import rig as rig
 
@@ -32,6 +35,34 @@ def test_started_execution_counts_one_life_across_redelivery_and_reactor_restart
     rig.store.reset_claims(SLUG, "t1")
     claims.Claims(rig.store).handle(event)
     assert rig.store.claims(SLUG, "t1") == 0
+
+
+def test_a_counted_start_reports_its_life_on_stderr(rig, capsys):
+    admitted = rig.admitter.admit(SLUG, ask())
+    capsys.readouterr()
+    claims.Claims(rig.store).handle(started(admitted))
+
+    execution = admitted["task"]["execution_id"]
+    assert capsys.readouterr() == ("", f"hub: claim life swarm={SLUG} task=t1 execution={execution} lives=1\n")
+
+
+@pytest.mark.parametrize("state, lives", [("started", 0), ("failed", 1)])
+def test_a_start_the_legacy_tick_already_counted_spends_no_second_life(rig, state, lives):
+    admitted = rig.admitter.admit(SLUG, ask())
+    rig.store.record_launch(SLUG, AgentRecord(admitted["name"], "eng", "t1"), state)
+
+    claims.Claims(rig.store).handle(started(admitted))
+
+    assert rig.store.claims(SLUG, "t1") == lives
+
+
+def test_reset_clears_the_pending_life(rig):
+    rig.admitter.admit(SLUG, ask())
+    assert rig.store.redis.hget(rig.store.key(SLUG, "pending-lives"), "t1") is not None
+
+    rig.store.reset_claims(SLUG, "t1")
+
+    assert rig.store.redis.hget(rig.store.key(SLUG, "pending-lives"), "t1") is None
 
 
 def test_distinct_execution_generations_spend_distinct_lives(rig):

@@ -48,7 +48,7 @@ def ask(**fields):
 
 
 @pytest.mark.parametrize("lives", [3, 4])
-def test_events_admission_blocks_spent_claim_lives_before_creating_an_execution(rig, lives):
+def test_events_admission_blocks_spent_claim_lives_before_creating_an_execution(rig, lives, capsys):
     from scripts.gates.claims import refusal
 
     rig.ledger.comments = []
@@ -63,7 +63,9 @@ def test_events_admission_blocks_spent_claim_lives_before_creating_an_execution(
     assert rig.store.claimant(SLUG, "t1") is None
     assert rig.store.agents(SLUG) == []
     assert rig.store.claims(SLUG, "t1") == 0
-    assert rig.ledger.comments == [((SLUG, "t1", refusal(lives, "recycle", "none", SLUG, "t1")), {"by": "swarm"})]
+    reason = refusal(lives, "recycle", "none", SLUG, "t1")
+    assert rig.ledger.comments == [((SLUG, "t1", reason), {"by": "swarm"})]
+    assert f"hub: events claim cap swarm={SLUG} task=t1: blocked t1: {reason}" in capsys.readouterr().err.splitlines()
 
 
 @pytest.mark.parametrize("lives, mode", [(2, "enforce"), (3, "observe"), (3, "off")])
