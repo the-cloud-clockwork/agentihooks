@@ -62,13 +62,13 @@ process. The interface is `scripts.swarm_v2.ledger_writer`.
 
 A folder ledger runs one replica: `ledger.replicas` above 1 fails `helm template` with `ledger.replicas
 above 1 needs the shared database` unless `AGENTIHOOKS_SWARM_DATABASE_URL` is set in `ledger.secretEnv`
-or `ledger.env`. A replica forced past the chart onto one folder still meets the lease and exits.
+or non-empty in `ledger.env`. A replica forced past the chart onto one folder still meets the lease and exits.
 
 On the shared database each server skips the folder lease and follows the generations other servers
 write, so several replicas serve one ledger. With more than one, the chart adds a PodDisruptionBudget
 allowing one replica down, `minReadySeconds: 5` so a rollout moves on only after the new replica has
-served, and a five second preStop pause so the Service drops a stopping replica before its server
-ends. A rollout then replaces one replica at a time while the other answers. `ci/kind-smoke.sh` runs
+served, an eight second preStop pause so the Service drops a stopping replica before its server
+ends, and a twenty second grace period that leaves the server its drain after the pause. A rollout then replaces one replica at a time while the other answers. `ci/kind-smoke.sh` runs
 `tests/chart_ledger_rollout.py`, which checks both refusals and the rendered rollout.
 
 ## Snapshots and backups

@@ -7,7 +7,7 @@
 {{- range .Values.ledger.secretEnv }}
 {{- $secretNames = append $secretNames .name }}
 {{- end }}
-{{- $shared := or (hasKey (.Values.ledger.env | default dict) "AGENTIHOOKS_SWARM_DATABASE_URL") (has "AGENTIHOOKS_SWARM_DATABASE_URL" $secretNames) }}
+{{- $shared := or (not (empty (get (.Values.ledger.env | default dict) "AGENTIHOOKS_SWARM_DATABASE_URL"))) (has "AGENTIHOOKS_SWARM_DATABASE_URL" $secretNames) }}
 {{- if lt $replicas 1 }}
 {{- fail "ledger.replicas must be at least 1" }}
 {{- end }}
@@ -75,7 +75,7 @@ spec:
         app.kubernetes.io/component: ledger
     spec:
       {{- include "swarm.podSecurity" . | nindent 6 }}
-      terminationGracePeriodSeconds: 10
+      terminationGracePeriodSeconds: {{ ternary 20 10 (gt $replicas 1) }}
       {{- with .Values.ledger.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
@@ -121,7 +121,7 @@ spec:
           lifecycle:
             preStop:
               exec:
-                command: [python, -c, "import time; time.sleep(5)"]
+                command: [python, -c, "import time; time.sleep(8)"]
           {{- end }}
           readinessProbe:
             {{- include "swarm.healthz" . | nindent 12 }}
