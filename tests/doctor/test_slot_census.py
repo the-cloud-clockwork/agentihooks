@@ -68,6 +68,9 @@ def test_a_life_without_start_or_end_times_counts_as_live_from_the_epoch():
     message = "sw: local slot claim new for t9 on workstation counted 0 of 6: "
     found = slot_census.findings(record([line(message, at=0), line(message)], [bare]))
     assert [f.subject for f in found] == ["new@0", f"new@{AT}"]
+    window = slot_census.SPAWN_WINDOW_MS
+    found = slot_census.findings(record([line(message, at=window)], [bare], now=window))
+    assert [f.subject for f in found] == [f"new@{window}"]
 
 
 def test_the_census_skips_masters_remote_hives_paneless_ended_and_unstarted_agents_and_the_claimed_task():
