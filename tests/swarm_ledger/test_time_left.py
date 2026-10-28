@@ -234,6 +234,35 @@ class TestFrozenSplit:
         result = ledger_stats.calculate(d, [], NOW, {"slots": 1, "ci_minutes": 5})
         assert (result["remaining"], result["work"], result["frozen"], result["frozen_work"]) == (3, 45, 2, 75)
 
+    def test_a_focus_counts_the_unfinished_dependencies_of_focused_work(self):
+        result = ledger_stats.calculate(self.ledger(("focus", "tasks/c")), [], NOW, {"slots": 1, "ci_minutes": 5})
+        assert (result["remaining"], result["work"], result["chain"]) == (4, 105, 90)
+        assert (result["frozen"], result["frozen_work"]) == (1, 15)
+
+    def test_a_frozen_dependency_still_holds_the_focused_work_waiting_on_it(self):
+        d = self.ledger(("focus", "tasks/c"), ("freeze", "tasks/a"))
+        result = ledger_stats.calculate(d, [], NOW, {"slots": 1, "ci_minutes": 5})
+        assert (result["remaining"], result["work"], result["frozen"], result["frozen_work"]) == (1, 15, 4, 105)
+
+    def test_a_focus_that_holds_most_tasks_counts_only_its_work_and_names_the_rest(self):
+        others = [task(f"o{n}", "open", "S") for n in range(40)]
+        d = doc(
+            task("x", "open", "S"),
+            task("y", "open", "M", depends_on=["x"]),
+            task("w", "open", "S"),
+            task("z", "claimed", "S", depends_on=["w"]),
+            *others,
+        )
+        d["freezes"] = [{"verb": "focus", "target": "tasks/y"}]
+        result = ledger_stats.calculate(d, [], NOW, {"slots": 2, "ci_minutes": 5})
+        assert (result["minutes"], result["remaining"], result["work"], result["chain"]) == (45, 4, 75, 45)
+        assert (result["frozen"], result["frozen_work"]) == (40, 600)
+        assert ledger_stats.time_left_line(d, [], NOW, result) == (
+            "the page shows not set, computed 0h 45m as the larger of a 45m chain and 75m of work over 2 slots, "
+            "for 4 remaining tasks at S 10m, M 25m, L 40m and 5m of CI, "
+            "with 40 frozen tasks holding 600m of work left out, stale"
+        )
+
     def test_a_phase_freeze_holds_every_open_task_under_it(self):
         result = ledger_stats.calculate(self.ledger(("freeze", "phases/p1")), [], NOW, {"slots": 1, "ci_minutes": 5})
         assert (result["minutes"], result["remaining"], result["frozen"], result["frozen_work"]) == (15, 1, 4, 105)
