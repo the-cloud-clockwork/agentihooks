@@ -85,6 +85,17 @@ def test_disabled_rollouts_do_not_require_a_new_worker_image():
     assert yaml.safe_load((CHART / "values.yaml").read_text())["workers"]["rollout"]["enabled"] is False
 
 
+def test_storage_preparation_is_not_suppressed_by_native_rollout_hooks():
+    objects = render("workers.node=node-one", "hiveStorage.default.homes=/homes")
+    preparation = next(
+        item for item in objects if item["kind"] == "Job" and item["metadata"]["name"].endswith("-storage")
+    )
+    annotations = preparation["metadata"]["annotations"]
+    assert annotations["argocd.argoproj.io/hook"] == "PreSync"
+    assert int(annotations["argocd.argoproj.io/sync-wave"]) < -1
+    assert annotations["argocd.argoproj.io/hook-delete-policy"] == "BeforeHookCreation,HookSucceeded"
+
+
 def test_a_drain_that_consumes_the_rollout_budget_is_refused():
     try:
         render("workers.rollout.drainSeconds=600")
@@ -99,4 +110,5 @@ if __name__ == "__main__":
     test_hives_in_one_release_have_distinct_sync_waves()
     test_a_drain_that_consumes_the_rollout_budget_is_refused()
     test_disabled_rollouts_do_not_require_a_new_worker_image()
+    test_storage_preparation_is_not_suppressed_by_native_rollout_hooks()
     print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")
