@@ -227,8 +227,9 @@ def test_launch_failure_without_one_failing_harness_is_proposed(store, home, shi
 def hive_only(store, monkeypatch, excluded="eng", herdr=True, deployment="local"):
     from scripts import herdr_host
     from scripts.hive import registry
-    from scripts.swarm import commands
+    from scripts.swarm import commands, local_slots
 
+    monkeypatch.setattr(local_slots, "live", set)
     store.update(SLUG, hive_placement=True)
     if excluded:
         registry.update(store.redis, "ws", [f"excluded={excluded}"])
