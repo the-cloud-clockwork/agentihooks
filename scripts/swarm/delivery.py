@@ -122,7 +122,7 @@ def relay_to_page(inbox, slug, agents, ledger):
     shown = 0
     for item in inbox.inbox(OPERATOR):
         sender = inbox.names.resolve(item.sender)
-        if item.state != "pending" or sender not in names:
+        if item.state != "pending" or (sender not in names and inbox.names.slug_of(sender) != slug):
             continue
         if not post(
             inbox,
