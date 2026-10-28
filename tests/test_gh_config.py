@@ -74,6 +74,34 @@ def test_an_agentihooks_process_in_an_isolated_session_keeps_the_home_login(tmp_
     assert _home_login_kept(home, environ, [sys.executable, "-c", code])
 
 
+@pytest.mark.parametrize(("actions", "sparse"), [("true", True), ("true", False), ("false", False), (None, False)])
+def test_package_bootstrap_keeps_workflow_checkouts_independent_of_local_auditing(tmp_path, actions, sparse):
+    home, environ = _isolated(tmp_path)
+    checkout = tmp_path / "checkout"
+    package = checkout / "scripts"
+    package.mkdir(parents=True)
+    files = ["__init__.py", "gh_config.py"]
+    if not sparse:
+        files.append("gh_audit.py")
+    for name in files:
+        (package / name).write_text((REPO / "scripts" / name).read_text())
+    if actions is not None:
+        environ["GITHUB_ACTIONS"] = actions
+    code = (
+        "import subprocess, sys\n"
+        "hooks = []\n"
+        "sys.addaudithook = hooks.append\n"
+        "import scripts\n"
+        f"assert len(hooks) == {int(actions != 'true')}\n"
+        f"assert ('scripts.gh_audit' in sys.modules) is {actions != 'true'}\n"
+        "subprocess.run(['gh', 'run', 'cancel', '1'], check=True)\n"
+    )
+    if actions != "true":
+        code = code.replace("subprocess.run(['gh', 'run', 'cancel', '1'], check=True)\n", "")
+    result = subprocess.run([sys.executable, "-c", code], cwd=checkout, env=environ, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 def test_a_hook_hands_the_pin_to_the_session_shell_once(tmp_path):
     home, environ = _isolated(tmp_path)
     session_env = tmp_path / "session.env"

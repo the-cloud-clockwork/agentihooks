@@ -27,7 +27,6 @@ jobs:
             /.github/workflows/
             /scripts/__init__.py
             /scripts/gh_config.py
-            /scripts/gh_audit.py
             /scripts/ci_branch_lanes.py
           sparse-checkout-cone-mode: false
           persist-credentials: false
