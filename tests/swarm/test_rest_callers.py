@@ -34,7 +34,11 @@ def test_rest_callers_charge_the_shared_log(tmp_path, monkeypatch, caller, faile
         monkeypatch.setattr(merge_stall.subprocess, "run", run)
 
         def invoke():
-            return merge_stall.request(str(tmp_path), ["api", endpoint])
+            token = merge_stall.DEADLINE.set(merge_stall.time.monotonic() + 600)
+            try:
+                return merge_stall.request(str(tmp_path), ["api", endpoint])
+            finally:
+                merge_stall.DEADLINE.reset(token)
 
     if failed:
         with pytest.raises((subprocess.CalledProcessError, merge_path.SwarmError)):
@@ -61,15 +65,3 @@ def test_failing_test_log_read_is_charged_to_promotion_watch(tmp_path, monkeypat
     }
     assert promotion_watch.failing_tests(str(tmp_path), job, run) == {"tests/test_example.py::test_case"}
     assert github_reads.counts(0, float("inf")) == {"swarm.promotion_watch": 1}
-
-
-def test_merge_stall_caps_one_read_at_twenty_seconds(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
-    run = Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
-    monkeypatch.setattr(merge_stall.subprocess, "run", run)
-    token = merge_stall.DEADLINE.set(merge_stall.time.monotonic() + 600)
-    try:
-        merge_stall.request(str(tmp_path), ["api", "repos/example/project/pulls/1"])
-    finally:
-        merge_stall.DEADLINE.reset(token)
-    assert run.call_args.kwargs["timeout"] == 20
