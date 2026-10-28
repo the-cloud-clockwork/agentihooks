@@ -1221,6 +1221,20 @@ def test_gate_mutates_a_function_its_module_calls_at_import(tmp_path, monkeypatc
     assert report["files"][0]["counts"] == {"killed": 2}
 
 
+def test_a_mutant_that_renames_its_selected_test_ids_is_killed_within_the_budget(tmp_path, monkeypatch):
+    _gate_tree(tmp_path, monkeypatch)
+    (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n")
+    (tmp_path / "tests/test_sample.py").write_text(
+        "import pytest\n\nfrom scripts.sample import value\n\n"
+        "@pytest.mark.parametrize('number', [value(1)])\n"
+        "def test_value(number):\n    assert number == 2\n"
+    )
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
+    assert report["not_mutated"] == []
+    assert report["failed"] is False
+    assert report["files"][0]["counts"] == {"killed": 2}
+
+
 def test_a_subprocess_importing_a_mutated_module_skips_the_mutation_engine_and_still_kills(tmp_path, monkeypatch):
     _gate_tree(tmp_path, monkeypatch)
     (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n")
