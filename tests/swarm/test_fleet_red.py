@@ -214,9 +214,9 @@ def test_the_notice_pass_skips_claimed_tasks_and_forgets_a_hold_once_its_task_le
     rows = {"red": task("red", pr_url=MINE)}
     assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, lambda repo: red)
     key = store.key("sw", "fleet-red:red")
-    for moved in ({"state": "pr"}, {"claimed_by": "engineer@a"}):
+    for moved in ({"state": "pr"}, {"claimed_by": "engineer@a"}, {"pr_url": ""}):
         store.redis.set(key, MINE)
-        rows = {"red": task("red", pr_url=MINE, **moved)}
+        rows = {"red": {**task("red", pr_url=MINE), **moved}}
         assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, lambda repo: red) == []
         assert store.redis.get(key) is None
     store.redis.set(key, MINE)

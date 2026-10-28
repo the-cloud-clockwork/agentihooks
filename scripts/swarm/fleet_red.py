@@ -86,10 +86,11 @@ def notice_pass(slug, config, store, ledger, rows, now_ms, reader: Callable | No
     waiting = []
     for task in rows.values():
         key = store.key(slug, f"fleet-red:{task['id']}")
-        if task.get("state") != "open" or task.get("claimed_by") or store.claimant(slug, task["id"]):
-            store.redis.delete(key)
-        elif task.get("pr_url"):
+        claimed = task.get("claimed_by") or store.claimant(slug, task["id"])
+        if task.get("state") == "open" and task.get("pr_url") and not claimed:
             waiting.append((task, key))
+        else:
+            store.redis.delete(key)
     if not waiting:
         return []
     try:
