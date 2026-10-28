@@ -352,8 +352,9 @@ def test_a_working_heartbeat_keeps_a_failed_launch(store, monkeypatch, scratch, 
     ledger, runtime = checked(store, monkeypatch)
     runtime.profile = "anton"
     tick("sw", store, ledger, runtime, LAUNCH)
-    agent = replace(store.agents("sw")[0], hive=hive)
-    store.put_agent("sw", agent)
+    agent = store.agents("sw")[0]
+    monkeypatch.setattr("scripts.swarm.tick.reports.host", lambda observed: hive if observed.name == agent.name else "")
+    joined(ledger, runtime, LAUNCH + 1)
     launch_check.begin(store, "sw", agent, LAUNCH, relaunch=relaunch)
     runtime.statuses[agent.name] = "idle"
     now = LAUNCH + idle.STALE_MS + launch_check.DEADLINE_MS
@@ -384,8 +385,9 @@ def test_an_idle_or_stale_heartbeat_does_not_keep_a_failed_launch(store, monkeyp
     ledger, runtime = checked(store, monkeypatch)
     runtime.profile = "anton"
     tick("sw", store, ledger, runtime, LAUNCH)
-    agent = replace(store.agents("sw")[0], hive=hive)
-    store.put_agent("sw", agent)
+    agent = store.agents("sw")[0]
+    monkeypatch.setattr("scripts.swarm.tick.reports.host", lambda observed: hive if observed.name == agent.name else "")
+    joined(ledger, runtime, LAUNCH + 1)
     runtime.statuses[agent.name] = "idle"
     now = LAUNCH + idle.STALE_MS + launch_check.DEADLINE_MS
     idle.beat(store.redis, "sw", agent.name, state, now - age)
