@@ -45,7 +45,7 @@ def _unlocked_installs(root):
                     for index, token in enumerate(tokens)
                 )
                 constraint = environment.get("UV_CONSTRAINT", "")
-                if constraint.endswith(".github/test-constraints.txt"):
+                if re.search(r"\buv\s+pip\s+install\b", line) and constraint.endswith(".github/test-constraints.txt"):
                     constrained |= (
                         "--constraint test-requirements.lock"
                         in (root / ".github/test-constraints.txt").read_text().splitlines()
@@ -106,12 +106,13 @@ def test_historical_replays_use_the_current_checkouts_lock(workflow, job, checko
 
 
 @pytest.mark.parametrize("scope", ["workflow", "job", "step"])
-def test_inherited_constraints_must_include_the_generated_lock(tmp_path, scope):
+@pytest.mark.parametrize("installer", ["uv pip", "python -m pip"])
+def test_inherited_constraints_must_include_the_generated_lock(tmp_path, scope, installer):
     workflows = tmp_path / ".github/workflows"
     workflows.mkdir(parents=True)
     constraints = workflows.parent / "test-constraints.txt"
     constraints.write_text("pytest<9.2\n")
-    step = {"run": "uv pip install pytest mutmut"}
+    step = {"run": f"{installer} install pytest mutmut"}
     job = {"steps": [step]}
     workflow = {"jobs": {"plant": job}}
     {"workflow": workflow, "job": job, "step": step}[scope]["env"] = {
@@ -120,4 +121,4 @@ def test_inherited_constraints_must_include_the_generated_lock(tmp_path, scope):
     (workflows / "plant.yml").write_text(yaml.safe_dump(workflow))
     assert len(_unlocked_installs(tmp_path)) == 1
     constraints.write_text("pytest<9.2\n--constraint test-requirements.lock\n")
-    assert _unlocked_installs(tmp_path) == []
+    assert len(_unlocked_installs(tmp_path)) == (0 if installer == "uv pip" else 1)
