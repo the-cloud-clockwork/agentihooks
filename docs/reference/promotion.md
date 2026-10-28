@@ -202,7 +202,7 @@ Immediately after a green push run promotes, `main` carries the graded `dev` tre
 | `TCC_CI_CLIENT_ID`, `TCC_CI_APP_PRIVATE_KEY` | repository secrets, passed by `test.yml` | Mint the App token that creates and deletes the snapshot branch, opens and merges the promotion pull request, pushes the tag and creates the release |
 | `release` environment | `.github/environments/release.json` | Deployment only from `dev`; the promotion job and `release.yml` both use it |
 | `version-tags.json` ruleset | `.github/rulesets/` | A `v*` tag cannot be moved, force pushed or deleted |
-| `main-prod-lockdown` ruleset | `.github/rulesets/` | `main` needs a pull request and linear history, which the squash merge satisfies |
+| `main-prod-lockdown` ruleset | `.github/rulesets/` | `main` needs a pull request, linear history and `Gate — Required` from the `tcc-main-ci` App on the snapshot; the squash merge and the grade status satisfy them |
 | `promote` budget | `scripts/ci_budget` | Matches the job's ten minute timeout |
 
 The environment and ruleset payloads and how to apply them are in `.github/rulesets/README.md`.
