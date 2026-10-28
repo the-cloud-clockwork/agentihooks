@@ -78,17 +78,20 @@ def outcome(payload, environ=None, redis=None, now_ms=None):
     if not (slug and name):
         return False
     from scripts.gates.progress import Progress, outcome_of
+    from scripts.swarm import pr_wait
 
     command = (payload.get("tool_input") or {}).get("command") if payload.get("tool_name") == "Bash" else None
     kind = outcome_of(command)
-    if not kind:
+    if not (kind or pr_wait.triggered(command)):
         return False
     if redis is None:
         from scripts.swarm.store import redis_client
 
         redis = redis_client(env)
-    Progress(redis, slug).outcome(name, kind, now_ms)
-    return True
+    if kind:
+        Progress(redis, slug).outcome(name, kind, now_ms)
+    push_mark(payload, env, redis, now_ms)
+    return bool(kind)
 
 
 def push_mark(payload, environ=None, redis=None, now_ms=None):

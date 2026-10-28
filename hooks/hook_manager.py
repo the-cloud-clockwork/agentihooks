@@ -1167,12 +1167,6 @@ def _swarm_outcome(payload: dict) -> None:
         outcome(payload)
     except Exception as e:
         log("swarm outcome record failed", {"error": str(e)})
-    try:
-        from hooks.context.swarm_heartbeat import push_mark
-
-        push_mark(payload)
-    except Exception as e:
-        log("swarm push mark failed", {"error": str(e)})
 
 
 def _master_login_checkpoint() -> None:

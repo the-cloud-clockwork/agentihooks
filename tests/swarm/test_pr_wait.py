@@ -72,15 +72,25 @@ def test_other_calls_and_unpinned_sessions_mark_nothing(payload, env, store):
     assert pr_wait.read(store.redis, "sw", ME) is None
 
 
-def test_post_tool_use_marks_the_push_on_every_harness(monkeypatch):
+def test_a_normalized_codex_push_marks_through_the_post_tool_hook(monkeypatch, store):
     from hooks import hook_manager
+    from hooks.targets.normalizer import normalize_payload
 
-    seen = []
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
-    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
-    monkeypatch.setattr(swarm_heartbeat, "push_mark", lambda payload: seen.append(payload))
-    hook_manager.on_post_tool_use({"hook_event_name": "PostToolUse", "session_id": "s1", **shell("git push")})
-    assert [p["tool_input"] for p in seen] == [{"command": "git push"}]
+    for name, value in ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda env=None: store.redis)
+    raw = {"hook_event_name": "PostToolUse", "session_id": "s1", "tool_response": "ok"}
+    hook_manager._swarm_outcome(normalize_payload({**raw, **shell("agentihooks swarm sw publish -- a.py")}))
+    assert pr_wait.read(store.redis, "sw", ME)["branch"] == ""
+
+
+def test_a_push_records_both_the_progress_outcome_and_the_mark(store):
+    from scripts.gates.progress import Progress
+
+    assert swarm_heartbeat.outcome(shell("git push"), ENV, store.redis, 77) is True
+    assert Progress(store.redis, "sw").read(ME).outcome == "pushed"
+    assert pr_wait.read(store.redis, "sw", ME)["at"] == "77"
 
 
 def enforce(store, rows, pulls, now=5_000, forge=None):
