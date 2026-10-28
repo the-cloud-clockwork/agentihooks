@@ -1,4 +1,5 @@
 import threading
+import time
 
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
@@ -33,9 +34,17 @@ def test_ready_intent_is_delivered_before_a_slow_runtime_launch(env, monkeypatch
 
     launch = runtime.spawn
 
+    def judged_by(deadline):
+        while time.monotonic() < deadline:
+            record = Verdicts("sw", "intent").read("t1")
+            if record and record["verdict"] != "pending":
+                return record
+            time.sleep(0.01)
+        return Verdicts("sw", "intent").read("t1")
+
     def slow_launch(*args, **kwargs):
         launching.set()
-        at_launch.append(Verdicts("sw", "intent").read("t1"))
+        at_launch.append(judged_by(time.monotonic() + 10))
         clock[0] += 780_000
         return launch(*args, **kwargs)
 
