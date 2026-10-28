@@ -1372,6 +1372,36 @@ def test_a_pass_killed_after_its_last_batch_still_advances_the_accepted_point(ex
     assert cursor["turns"] == cursor["buffered_turns"] >= 1
 
 
+def test_a_pass_killed_mid_send_resumes_without_preparing_and_advances_the_accepted_point(
+    export, transcript, monkeypatch
+):
+    path, _ = transcript
+    monkeypatch.setattr(agent_trace, "BATCH_CHARS", 1)
+    send = export.export
+
+    def killed_on_second(spans):
+        if len(export.calls) == 1:
+            raise _Killed
+        return send(spans)
+
+    monkeypatch.setattr(export, "export", killed_on_second)
+    with pytest.raises(_Killed):
+        flush(path)
+    interrupted = agent_trace._cursor("session")
+    assert interrupted["pending"] and interrupted["source"]["accepted_bytes"] == 0
+
+    def no_prepare(*args):
+        raise AssertionError("a pass with pending observations must not prepare again")
+
+    monkeypatch.setattr(agent_trace, "_prepare_pending", no_prepare)
+    monkeypatch.setattr(export, "export", send)
+    flush(path)
+    cursor = agent_trace._cursor("session")
+    assert cursor["pending"] == []
+    assert cursor["source"]["accepted_bytes"] == path.stat().st_size
+    assert cursor["turns"] == cursor["buffered_turns"] >= 1
+
+
 def test_a_pass_with_nothing_to_send_saves_the_accepted_point_before_paging(export, transcript, monkeypatch):
     path, _ = transcript
     flush(path)
