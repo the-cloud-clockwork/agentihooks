@@ -561,7 +561,9 @@ def test_resume_point_holds_only_a_whole_boundary_line(cut, tmp_path, monkeypatc
     else:
         path.write_bytes(b"#" * (point["offset"] - 1) + b"\n" + data[point["offset"] :])
     agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
-    assert agent_trace._cursor("session")["paged"]["source"]["offset"] == 0
+    moved = agent_trace._cursor("session")["paged"]["source"]
+    assert moved["offset"] < point["offset"] and moved.get("record") != paged["boundary"]
+    assert agent_trace._still_at(str(path), moved)
 
 
 def test_kept_records_needs_both_the_cut_entry_and_its_prompt():

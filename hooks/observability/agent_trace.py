@@ -616,7 +616,6 @@ def _stage_source(state: dict, transcript_path: str) -> None:
     revisions = state.setdefault("source_revisions", {})
     points = state.setdefault("source_points", {})
     paged = {name: set((state.get("paged") or {}).get(name, ())) for name in ("keys", "messages")}
-    prefix = bool(paged["keys"] or paged["messages"])
     staged_bytes = 0
     state.pop("deferred_source", None)
     size = _pending_bytes(state, merged, state["pending"])
@@ -629,15 +628,11 @@ def _stage_source(state: dict, transcript_path: str) -> None:
             continue
         key = record_id(record)
         revision = _record_revisions({key: record})[key]
-        if key not in merged and _paged_out(paged, key, record):
-            if prefix:
-                past = {"line": position, "offset": end, "records": count + 1, "unsupported": unsupported}
-                state["paged"]["source"] = {**point, **past, "record": key}
-            position, count = end, count + 1
-            continue
-        prefix = False
         if key in merged and revisions.get(key) == revision:
             points[key] = [position, end, count + 1, unsupported]
+            position, count = end, count + 1
+            continue
+        if key not in merged and _paged_out(paged, key, record):
             position, count = end, count + 1
             continue
         if staged_bytes >= 256 * 1024:
@@ -682,7 +677,7 @@ def _resume_point(state: dict, transcript_path: str) -> dict:
         point = {"device": stat.st_dev, "inode": stat.st_ino, **start}
         state["source_points"] = {}
     if point.get("boundary") != paged["boundary"]:
-        point = _scan_to(transcript_path, point, paged["boundary"])
+        point = _scan_to(transcript_path, point, paged, state["records"])
     paged["source"] = point
     return point
 
@@ -701,16 +696,21 @@ def _still_at(transcript_path: str, point: dict) -> bool:
         return False
 
 
-def _scan_to(transcript_path: str, point: dict, boundary: str) -> dict:
+def _scan_to(transcript_path: str, point: dict, paged: dict, merged: dict) -> dict:
+    """Past the boundary, or when it is gone, past the last paged record before any unpaged record."""
     from hooks.observability.transcript import iter_complete_records, record_id
 
+    boundary = paged["boundary"]
     line, records, unsupported = point["offset"], point["records"], point["unsupported"]
+    known = {name: set(paged.get(name, ())) for name in ("keys", "messages")}
+    past, history = {}, True
     for record, end in iter_complete_records(transcript_path, point["offset"]):
         if record is None:
             unsupported += 1
         else:
             records += 1
-            if record_id(record) == boundary:
+            key = record_id(record)
+            if key == boundary:
                 return {
                     **point,
                     "line": line,
@@ -720,8 +720,11 @@ def _scan_to(transcript_path: str, point: dict, boundary: str) -> dict:
                     "boundary": boundary,
                     "record": boundary,
                 }
+            history = history and key not in merged
+            if history and _paged_out(known, key, record):
+                past = {"line": line, "offset": end, "records": records, "unsupported": unsupported, "record": key}
         line = end
-    return {**point, "boundary": boundary}
+    return {**point, **past, "boundary": boundary}
 
 
 def _revision(spec: SpanSpec) -> str:
