@@ -221,6 +221,20 @@ def test_clearance_keeps_its_identity_across_an_unrelated_argument_edit(tmp_path
     assert evaluate("hooks/sample.py", list(edited.values()), {3}, stale_cleared)["cleared"] == []
 
 
+def test_mutant_identity_separates_hunks_and_matches_repeated_lines_in_long_functions():
+    from scripts.ci_mutation.report import clearance_keys, mutant_identity
+
+    two = mutant_identity("def f(x):\n    a = 1\n    b = 2\n    c = 3", "def f(x):\n    a = 9\n    b = 2\n    c = 9")
+    assert two == hashlib.sha256(b"0\n-    a = 1\n+    a = 9\x000\n-    c = 3\n+    c = 9").hexdigest()
+    long = "def f(x):\n" + "    x += 1\n" * 250 + "    return x"
+    assert (
+        mutant_identity(long, long.replace("return x", "return None"))
+        == hashlib.sha256(b"0\n-    return x\n+    return None").hexdigest()
+    )
+    row = {"name": "m.x_f__mutmut_old__mutmut_3", "identity": "i", "fingerprint": "f"}
+    assert clearance_keys("p", row) == ["p:m.x_f__mutmut_old:i", "p:m.x_f__mutmut_old__mutmut_3:f"]
+
+
 def test_survivor_text_prints_each_failure_with_its_diff_and_clearance_file():
     from scripts.ci_mutation.report import survivor_text
 
