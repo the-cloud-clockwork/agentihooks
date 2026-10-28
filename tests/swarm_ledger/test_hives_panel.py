@@ -109,24 +109,25 @@ def save(page, hive_id, field, value, shown):
     )
 
 
-def test_each_hive_shows_liveness_tags_excluded_prefer_max_agents_and_master_without_slots(hives_page):
+def test_each_hive_shows_only_the_requested_columns(hives_page):
     page = hives_page()
     rows = page.table("swarm-hives")
     heads = [text.lower() for text in page.tab.locator("#hives-table th").all_text_contents()]
-    assert len(heads) == 10 and "slots" not in heads
+    assert heads == ["hive", "state", "ui", "ephemeral", "excluded", "max agents", "agents", "master", "actions"]
     assert [row[0] for row in rows] == ["desk", "pod", "lab"]
     assert [row[1] for row in rows] == ["LIVE", "LIVE", "QUIET"]
-    assert [row[7] for row in rows] == ["2/4", "0/2", "0/4"]
-    assert [row[8] for row in rows] == ["master@rig-1", "—", "—"]
+    assert all(len(row) == 9 for row in rows)
+    assert [row[6] for row in rows] == ["2/4", "0/2", "0/4"]
+    assert [row[7] for row in rows] == ["master@rig-1", "—", "—"]
+    assert [row[8] for row in rows] == ["move master"] * 3
     assert "luna" not in page.text("#swarm-hives")
     assert fields(page, "pod") == [
         ["ui", "no"],
         ["ephemeral", "no"],
         ["excluded", "master,qa"],
-        ["prefer", ""],
         ["max_agents", "2"],
     ]
-    assert fields(page, "desk")[3] == ["prefer", "eng:1"]
+    assert page.tab.locator("[data-hive-field=prefer]").count() == 0
     assert page.text("#hives-count").lower() == "2 live · 3 hives"
 
 
@@ -142,12 +143,14 @@ def test_a_failed_read_says_the_hives_could_not_be_read(browser):
         page.context.close()
 
 
-def test_the_quota_count_carries_no_hive_capacity(hives_page):
+def test_the_quota_header_has_only_its_title_and_refresh_control(hives_page):
     page = hives_page()
-    page.tab.locator("#swarm-hives tr#hive-desk").wait_for(timeout=3000)
-    page.tab.wait_for_function("() => document.querySelector('#quota-count').textContent.includes('account')")
-    count = page.text("#quota-count").lower()
-    assert not any(hive in count for hive in ("desk", "pod", "lab", "2/4", "0/2"))
+    header = page.tab.locator("#quota-fold > summary")
+    assert header.inner_text().strip().lower() == "quota"
+    assert header.locator("h3").all_text_contents() == ["Quota"]
+    assert header.locator("button").count() == 1
+    assert header.locator("#quota-refresh").get_attribute("aria-label") == "Refresh quota"
+    assert header.locator(".sw-count").count() == 0
 
 
 def test_editing_max_agents_writes_it_as_the_operator(hives_page):
@@ -157,17 +160,15 @@ def test_editing_max_agents_writes_it_as_the_operator(hives_page):
     box.press("Enter")
     wait_for(page, lambda: page.patches)
     assert page.patches == [("pod", {"max_agents": 5}, "__LEDGER_TOKEN__", "__LEDGER_SLUG__")]
-    page.tab.wait_for_function("() => document.querySelector('#hive-pod').cells[7].textContent === '0/5'")
+    page.tab.wait_for_function("() => document.querySelector('#hive-pod').cells[6].textContent === '0/5'")
 
 
-def test_excluded_prefer_and_flags_are_sent_in_their_api_shape(hives_page):
+def test_excluded_and_flags_are_sent_in_their_api_shape(hives_page):
     page = hives_page()
     save(page, "pod", "excluded", "master, qa,frontend", "master,qa,frontend")
-    save(page, "pod", "prefer", "eng:2, plan:1", "eng:2,plan:1")
     save(page, "lab", "ephemeral", "no", "no")
     assert [(hive_id, body) for hive_id, body, _, _ in page.patches] == [
         ("pod", {"excluded": ["master", "qa", "frontend"]}),
-        ("pod", {"prefer": {"eng": 2, "plan": 1}}),
         ("lab", {"ephemeral": "no"}),
     ]
 
@@ -200,7 +201,7 @@ def test_a_hive_without_a_name_excluded_prefer_or_slots_shows_its_id_and_empty_s
     try:
         page.tab.locator("#swarm-hives tr#hive-bare").wait_for(timeout=3000)
         assert page.table("swarm-hives")[0][0] == "bare"
-        assert fields(page, "bare")[2:4] == [["excluded", ""], ["prefer", ""]]
+        assert fields(page, "bare")[2:] == [["excluded", ""], ["max_agents", "3"]]
         assert page.errors == []
     finally:
         page.context.close()
