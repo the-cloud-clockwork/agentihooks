@@ -1,12 +1,8 @@
 import argparse
-import json
 import os
-import ssl
 import time
 from pathlib import Path
-from urllib.error import HTTPError
 from urllib.parse import quote
-from urllib.request import Request, urlopen
 
 
 class Conflict(Exception):
@@ -15,29 +11,19 @@ class Conflict(Exception):
 
 class Kubernetes:
     def __init__(self):
-        self.root = f"https://{os.environ['KUBERNETES_SERVICE_HOST']}:{os.environ['KUBERNETES_SERVICE_PORT']}"
-        self.credentials = Path("/var/run/secrets/kubernetes.io/serviceaccount")
-        self.context = ssl.create_default_context(cafile=str(self.credentials / "ca.crt"))
+        from scripts.swarm_v2.kubernetes.client import KubeHttp
+
+        self.api = KubeHttp.in_cluster(os.environ)
 
     def request(self, method: str, path: str, body: dict | None = None) -> dict | None:
-        request = Request(
-            self.root + path,
-            data=json.dumps(body).encode() if body is not None else None,
-            headers={
-                "Authorization": f"Bearer {(self.credentials / 'token').read_text().strip()}",
-                "Content-Type": "application/json",
-            },
-            method=method,
-        )
-        try:
-            with urlopen(request, context=self.context, timeout=10) as response:
-                return json.load(response)
-        except HTTPError as error:
-            if error.code == 409:
-                raise Conflict() from error
-            if error.code == 404 and method == "GET":
-                return None
-            raise
+        status, result = self.api.send(method, path, body)
+        if status == 409:
+            raise Conflict()
+        if status == 404 and method == "GET":
+            return None
+        if status not in (200, 201):
+            raise RuntimeError(f"Kubernetes refused rollout request: {status}")
+        return result
 
 
 def serving(deployment: dict) -> bool:
@@ -93,15 +79,21 @@ def release(api: Kubernetes, namespace: str, name: str, owner: str, hive_namespa
     api.request("PUT", path, lease)
 
 
+def ready(marker: Path, now: float) -> bool:
+    return marker.is_file() and 0 <= now - marker.stat().st_mtime < 60
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["acquire", "release"])
-    parser.add_argument("--namespace", required=True)
-    parser.add_argument("--name", required=True)
-    parser.add_argument("--owner", required=True)
+    parser.add_argument("action", choices=["acquire", "release", "ready"])
+    parser.add_argument("--namespace", default="default")
+    parser.add_argument("--name", default="agentihooks-hive-rollout")
+    parser.add_argument("--owner", default="")
     parser.add_argument("--hive-namespace", default="")
     parser.add_argument("--deployment", default="")
     args = parser.parse_args()
+    if args.action == "ready":
+        raise SystemExit(0 if ready(Path(os.environ["HIVE_READY_FILE"]), time.time()) else 1)
     api = Kubernetes()
     if args.action == "acquire":
         acquire(api, args.namespace, args.name, args.owner)

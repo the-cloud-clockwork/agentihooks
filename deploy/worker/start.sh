@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -n "${HIVE_READY_FILE:-}" ]]; then
+  rm -f -- "$HIVE_READY_FILE"
+fi
+
 if [[ -z "${HIVE_GITHUB_AUTH_MODE:-}" ]]; then
   if [[ -n "${GITHUB_APP_PRIVATE_KEY:-}" ]]; then
     HIVE_GITHUB_AUTH_MODE=app
