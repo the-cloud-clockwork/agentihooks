@@ -20,6 +20,10 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: write
+    env:
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: 'false'
     steps:
       - uses: actions/checkout@v4
         with:
