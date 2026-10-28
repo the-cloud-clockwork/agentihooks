@@ -526,7 +526,9 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
     from scripts.ci_mutation.selection import mutation_counts, selected_mutants
 
     monkeypatch.setattr(
-        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1, use_setproctitle=False),
     )
     source = (
         "import functools\n"
@@ -549,7 +551,7 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
         "\n"
         "    @classmethod\n"
         "    def unit(cls):\n"
-        "        return cls(1 + 0)\n"
+        "        return cls(1 + 1)\n"
     )
     for line in (9, 13, 17, 21):
         found, ungraded = mutation_counts("scripts/sample.py", source, {line})
@@ -566,7 +568,7 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
     namespace = {"__name__": "scripts.sample"}
     exec(compile(generated, "scripts/sample.py", "exec"), namespace)
     shape = namespace["Shape"]
-    assert (shape(3).area, shape(3).perimeter, shape.double(3), shape.unit().side) == (9, 12, 6, 1)
+    assert (shape(3).area, shape(3).perimeter, shape.double(3), shape.unit().side) == (9, 12, 6, 2)
     outcomes = set()
     for name in names:
         monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
@@ -574,7 +576,7 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
             outcomes.add((shape(3).area, shape(3).perimeter, shape.double(3), shape.unit().side))
         except TypeError:
             outcomes.add(name)
-    assert (9, 12, 6, 1) not in outcomes
+    assert (9, 12, 6, 2) not in outcomes
 
 
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
