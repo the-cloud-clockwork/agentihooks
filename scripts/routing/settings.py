@@ -1,14 +1,20 @@
 import fcntl
 import json
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from scripts.events.bus import StateConflict
 from scripts.swarm import keyspace
 
 if TYPE_CHECKING:
-    from redis import Redis
+    from scripts.events.bus import StateStore
+
+BUCKET = "routing"
+ENTRY = "settings"
+WRITE_TRIES = 8
+LEGACY = f"{keyspace.ROOT}:routing:settings"
 
 
 def _weight(value: object) -> bool:
@@ -79,32 +85,67 @@ class SettingsStore(ABC):
     def _write(self, key: str, value: object, entry: dict) -> None: ...
 
 
-class RedisSettings(SettingsStore):
-    def __init__(self, client: "Redis") -> None:
-        self.client = client
-        self.key = f"{keyspace.ROOT}:routing:settings"
-        self.history_key = f"{self.key}:history"
+def _apply(data: dict, key: str, value: object, entry: dict) -> None:
+    data["settings"].pop(key, None)
+    if value is not None:
+        data["settings"][key] = value
+    data["history"].append(entry)
+
+
+def _legacy(client: object) -> dict:
+    if client is None:
+        return {"settings": {}, "history": []}
+    return {
+        "settings": {key: json.loads(value) for key, value in client.hgetall(LEGACY).items()},
+        "history": [json.loads(row) for row in client.lrange(f"{LEGACY}:history", 0, -1)],
+    }
+
+
+class StateSettings(SettingsStore):
+    def __init__(self, state: "StateStore") -> None:
+        self.state = state
 
     def history(self) -> list[dict]:
-        return [json.loads(entry) for entry in self.client.lrange(self.history_key, 0, -1)]
+        return self._load()[0]["history"]
 
     def _read(self) -> dict[str, object]:
-        return {key: json.loads(value) for key, value in self.client.hgetall(self.key).items()}
+        return self._load()[0]["settings"]
+
+    def _load(self) -> tuple[dict, int | None]:
+        entry = self.state.get(ENTRY)
+        if entry is None:
+            return _legacy(getattr(self.state, "redis", None)), None
+        return json.loads(entry.value), entry.revision
+
+    def _commit(self, change: Callable[[dict], object]) -> object:
+        for attempt in range(1, WRITE_TRIES + 1):
+            data, revision = self._load()
+            held = change(data)
+            if held is not None:
+                return held
+            raw = json.dumps(data).encode()
+            try:
+                if revision is None:
+                    self.state.create(ENTRY, raw)
+                else:
+                    self.state.update(ENTRY, raw, revision)
+                return None
+            except StateConflict:
+                if attempt == WRITE_TRIES:
+                    raise
 
     def _write(self, key: str, value: object, entry: dict) -> None:
-        pipe = self.client.pipeline()
-        if value is None:
-            pipe.hdel(self.key, key)
-        else:
-            pipe.hset(self.key, key, json.dumps(value))
-        pipe.rpush(self.history_key, json.dumps(entry))
-        pipe.execute()
+        self._commit(lambda data: _apply(data, key, value, entry))
 
     def _claim(self, key: str, value: object, entry: dict) -> object:
-        if self.client.hsetnx(self.key, key, json.dumps(value)):
-            self.client.rpush(self.history_key, json.dumps(entry))
-            return value
-        return json.loads(self.client.hget(self.key, key))
+        def change(data: dict) -> object:
+            held = data["settings"].get(key)
+            if held is None:
+                _apply(data, key, value, entry)
+            return held
+
+        held = self._commit(change)
+        return value if held is None else held
 
 
 class FileSettings(SettingsStore):
@@ -124,10 +165,7 @@ class FileSettings(SettingsStore):
 
     def _write(self, key: str, value: object, entry: dict) -> None:
         data = self._load()
-        data["settings"] = {name: kept for name, kept in data["settings"].items() if name != key}
-        if value is not None:
-            data["settings"][key] = value
-        data["history"].append(entry)
+        _apply(data, key, value, entry)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.path.with_name(f"{self.path.name}.tmp")
         temp.write_text(json.dumps(data))
@@ -144,8 +182,8 @@ class FileSettings(SettingsStore):
         return value
 
 
-def open_store(client: "Redis | None", environ: Mapping[str, str]) -> SettingsStore:
+def open_store(client: "StateStore | None", environ: Mapping[str, str]) -> SettingsStore:
     if client is not None:
-        return RedisSettings(client)
+        return StateSettings(client)
     home = environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks"
     return FileSettings(Path(home) / "routing-settings.json")
