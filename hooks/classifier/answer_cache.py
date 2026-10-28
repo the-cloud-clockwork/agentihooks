@@ -19,8 +19,8 @@ def ttl_s() -> float:
     return float(os.environ.get("AGENTIHOOKS_FILTER_CACHE_TTL_S", DEFAULT_TTL_S))
 
 
-def key(intent: str, question: str, finding: str, models: tuple) -> str:
-    return hashlib.sha256(json.dumps([intent, question, finding, list(models)]).encode()).hexdigest()
+def key(intent: str, question: str, finding: str, reason: str, context: str, models: tuple) -> str:
+    return hashlib.sha256(json.dumps([intent, question, finding, reason, context, list(models)]).encode()).hexdigest()
 
 
 def _live() -> dict[str, dict]:

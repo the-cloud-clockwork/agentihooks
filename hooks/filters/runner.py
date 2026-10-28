@@ -94,7 +94,7 @@ def confirm(entry: dict, spec: schema.FilterSpec, payload: dict, findings: list[
     tool_input = payload.get("tool_input") or {}
     intent = _intent(spec, tool_input)
     models = classifier_settings.load().models
-    keys = [answer_cache.key(intent, spec.question, f.text, models) for f in findings]
+    keys = [answer_cache.key(intent, spec.question, f.text, f.reason, f.context, models) for f in findings]
     answers = answer_cache.lookup(keys)
     asked = [(f, k) for f, k in zip(findings, keys) if k not in answers]
     if asked:

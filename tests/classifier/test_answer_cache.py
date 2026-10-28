@@ -11,7 +11,14 @@ MODELS = ("liquid-d1", "jev-1.13")
 
 
 def _key(**changes) -> str:
-    fields = {"intent": "plain words", "question": "is it bad?", "finding": "task flt1", "models": MODELS}
+    fields = {
+        "intent": "plain words",
+        "question": "is it bad?",
+        "finding": "task flt1",
+        "reason": "names a task id",
+        "context": "waiting on task flt1",
+        "models": MODELS,
+    }
     fields.update(changes)
     return answer_cache.key(**fields)
 
@@ -21,7 +28,7 @@ def test_the_cache_sits_next_to_the_decision_log():
 
 
 def test_the_key_is_a_hash_of_intent_question_finding_and_models():
-    assert _key() == "0829a82775349e5a72e2507f536a0294dbb348492a10972df2e44c95a436c333"
+    assert _key() == "9210d518bc4f8cf61fcb9fd2a9ffdb40a86b92d726d5a150c0f0a3728450d958"
 
 
 @pytest.mark.parametrize(
@@ -30,6 +37,8 @@ def test_the_key_is_a_hash_of_intent_question_finding_and_models():
         {"intent": "other words"},
         {"question": "is it fine?"},
         {"finding": "task flt2"},
+        {"reason": "names an id"},
+        {"context": "# waiting on task flt1"},
         {"models": ("liquid-d1",)},
         {"models": ("jev-1.13", "liquid-d1")},
     ],

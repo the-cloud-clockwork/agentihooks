@@ -57,7 +57,7 @@ def test_a_repeat_asks_only_the_uncached_findings(filters_dir, stub):
     _install(filters_dir)
     fake = stub(yes=True)
     conditions.pre_effect(_write_call("waiting on task flt1"))
-    second = conditions.pre_effect(_write_call("task flt1 then task flt2"))
+    second = conditions.pre_effect(_write_call("waiting on task flt1\nthen task flt2"))
     assert len(fake.calls) == 2
     assert list(fake.calls[1]["questions"]) == ["finding_0"]
     assert _findings(fake.calls[1]) == ["Finding: task flt2"]
@@ -75,6 +75,14 @@ def test_a_change_of_intent_text_misses_the_cache(filters_dir, stub):
     conditions.pre_effect(_write_call("waiting on task flt1"))
     assert len(fake.calls) == 2
     assert fake.calls[1]["state"]["intent"] == "user facing text names no ids at all"
+
+
+def test_the_same_finding_in_other_lines_misses_the_cache(filters_dir, stub):
+    _install(filters_dir)
+    fake = stub(yes=True)
+    conditions.pre_effect(_write_call("waiting on task flt1"))
+    conditions.pre_effect(_write_call("blocked by task flt1"))
+    assert len(fake.calls) == 2
 
 
 def test_a_change_of_model_set_misses_the_cache(filters_dir, stub, monkeypatch):
@@ -116,6 +124,6 @@ def test_cached_yes_answers_still_flag_while_the_classifier_is_down(filters_dir,
     stub(yes=True)
     conditions.pre_effect(_write_call("waiting on task flt1"))
     fake = stub(error=ClassifierError("no decision backend answered"))
-    effect = conditions.pre_effect(_write_call("task flt1 then task flt2"))
+    effect = conditions.pre_effect(_write_call("waiting on task flt1\nthen task flt2"))
     assert len(fake.calls) == 1
     assert effect.contexts == ['[condition pre-write-ids.filter.yaml]\nfilter flagged:\n- "task flt1": names a task id']
