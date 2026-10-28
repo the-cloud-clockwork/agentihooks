@@ -160,7 +160,16 @@ def test_main_runs_in_process_and_closes_its_catalog(prepared, provider, monkeyp
 
     for key, value in environment(prepared, provider).items():
         monkeypatch.setenv(key, value)
+    real_cycle, cursors = embedding_process.cycle, []
+
+    def cycle(worker, settings, after):
+        cursors.append(after)
+        assert len(cursors) == 1
+        return real_cycle(worker, settings, after)
+
+    monkeypatch.setattr(embedding_process, "cycle", cycle)
     assert embedding_process.main([]) == 0
+    assert cursors == [""]
     report = json.loads(capsys.readouterr().out)
     assert report["state"] == "drained"
     assert report["pending"] == 0
