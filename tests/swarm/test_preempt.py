@@ -134,6 +134,22 @@ def test_an_urgent_task_whose_placement_stays_refused_asks_nobody_over_an_hour(s
     assert len(preempt.step(SLUG, store, ROWS, doc(), full("t3"), 61 * 60_000, lambda lane, task: "")) == 1
 
 
+def test_the_probe_returns_the_runtime_refusal_and_refuses_an_unresolved_profile():
+    from types import SimpleNamespace
+
+    from scripts.swarm.profile_choice import ProfileUnresolved
+
+    def unresolved(lane, task):
+        raise ProfileUnresolved(f"{lane} {task['id']} mixed")
+
+    placed = SimpleNamespace(placement_refusal=lambda lane, task: f"{lane} {task['id']} refused")
+    assert preempt.probe(placed, "eng", {"id": "t3"}) == "eng t3 refused"
+    assert preempt.probe(SimpleNamespace(), "eng", {"id": "t3"}) == ""
+    assert preempt.probe(SimpleNamespace(placement_refusal=unresolved), "eng", {"id": "t3"}) == (
+        "profile unresolved: eng t3 mixed"
+    )
+
+
 def test_an_ask_is_recorded_before_its_message_so_a_failed_tick_never_resends_it(store, monkeypatch):
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
 
