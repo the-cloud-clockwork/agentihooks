@@ -34,6 +34,18 @@ def test_workflow_template_contract(filename, event, tier):
         assert "promote" not in workflow["jobs"]
 
 
+def test_promotion_template_does_not_hold_green_push_behind_red_run():
+    workflow = yaml.safe_load((TEMPLATES / "promotion.yml").read_text())
+    concurrency = workflow["concurrency"]
+    assert concurrency["group"] == "promotion-dev-${{ github.run_id }}"
+    assert concurrency["cancel-in-progress"] is False
+    promote = workflow["jobs"]["promote"]
+    assert promote["needs"] == "checks"
+    assert "if" not in promote
+    assert "concurrency" not in promote
+    assert "concurrency" not in workflow["jobs"]["checks"]
+
+
 def test_delivery_example_and_adoption_instructions():
     delivery = yaml.safe_load((TEMPLATES / "delivery.yaml").read_text())
     assert set(delivery) == {"pull_request", "queue", "promotion", "promote"}
