@@ -141,6 +141,9 @@ def test_a_claimless_fresh_spawn_is_held_until_its_spawn_window_has_passed():
     assert subjects(watched(None, WATCHED + window - 1, started=WATCHED - window + 1)) == []
     assert subjects(watched(None, WATCHED + window)) == [f"ci@323133-3206@{WATCHED}"]
     assert subjects(watched(None, WATCHED + window - 1, started=WATCHED - window)) == [f"ci@323133-3206@{WATCHED}"]
+    unstamped = watched(None, WATCHED + window - 1)
+    del unstamped["lives"][-1]["started_at"]
+    assert subjects(unstamped) == [f"ci@323133-3206@{WATCHED}"]
     [found] = slot_census.findings(watched(None, WATCHED + window))
     assert found.summary.endswith("left 1 live local agents out: engineer@d44a5a-2120")
 
@@ -172,6 +175,7 @@ def test_the_reader_joins_claim_lines_with_current_and_ended_lives_of_every_swar
     before = time.time() * 1000
     read = spawn_read.slot_claims(store, "sw", run=journal)
     assert before <= read["now"] <= time.time() * 1000
+    assert isinstance(read["now"], int)
     assert read["claims"] == [line(message)]
     assert read["journal_error"] == ""
     assert calls[0][calls[0].index("--since") + 1] == "1 hour ago"
