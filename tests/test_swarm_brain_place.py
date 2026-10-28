@@ -228,10 +228,11 @@ def test_place_refuses_and_writes_nothing(home, change, records, reason):
     assert sorted(path.name for path in home.iterdir()) == [".env"]
 
 
-def test_place_refuses_a_binding_that_is_not_json(home):
+@pytest.mark.parametrize("text", ["not json", "[1]"])
+def test_place_refuses_a_binding_that_is_not_json(home, text):
     out = io.StringIO()
 
-    assert brain_place.place(_environ(home), _bao(StubStore({})), "not json", out) == 1
+    assert brain_place.place(_environ(home), _bao(StubStore({})), text, out) == 1
 
     assert out.getvalue() == "brain-place: the binding is not a JSON object; nothing was written\n"
 
