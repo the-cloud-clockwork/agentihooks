@@ -422,6 +422,20 @@ def test_conditional_pages_use_distinct_cache_entries_for_every_page(monkeypatch
     assert len(keys) == 2
 
 
+def test_conditional_pages_stop_at_a_next_link_already_read(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    outputs = iter(
+        [
+            response(200, '{"jobs": [1]}', Link='<second>; rel="next"'),
+            response(200, '{"jobs": [2]}', Link='<first>; rel="next"'),
+        ]
+    )
+    assert github_reads.conditional_pages("jobs", "first", lambda *args: next(outputs)) == [
+        {"jobs": [1]},
+        {"jobs": [2]},
+    ]
+
+
 @pytest.mark.parametrize(
     "output",
     [

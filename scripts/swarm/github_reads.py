@@ -139,20 +139,20 @@ def _conditional_page(caller: str, endpoint: str, fetch: Callable) -> dict:
     if status != 200:
         raise subprocess.CalledProcessError(1, ["gh", "api", *args], output=output)
     headers = {key.lower(): value.strip() for key, _, value in (line.partition(":") for line in lines[1:])}
-    links = re.findall(r'<([^>]+)>;\s*rel="next"', headers.get("link", ""))
+    links = re.findall(r'<([^>]+)>;\s*rel="next"', header)
     found = {"body": json.loads(body), "etag": headers.get("etag", ""), "next": links[0] if links else ""}
     _write(entry, found)
     return found
 
 
 def conditional_pages(caller: str, endpoint: str, fetch: Callable) -> list[dict]:
-    pages = []
-    while endpoint:
+    pages = {}
+    while endpoint and endpoint not in pages:
         current = endpoint
         page = snapshot(f"conditional {current}", time.time(), lambda: _conditional_page(caller, current, fetch))
-        pages.append(page["body"])
+        pages[current] = page["body"]
         endpoint = page["next"]
-    return pages
+    return list(pages.values())
 
 
 def _write(path, body):
@@ -214,7 +214,7 @@ def rest(caller: str, args: list[str], run: Callable = subprocess.run, **options
     path = gh_audit.endpoint(["gh", *args]) if args[0] == "api" else None
     if path is None:
         return run(["gh", *args], **options)
-    endpoint = next(word for word in args[1:] if word.lstrip("/").split("?")[0] == path)
+    endpoint = next(word for word in args[1:] if word.split("?")[0].removeprefix("/") == path)
     paginate = "--paginate" in args
     include = "--include" in args or "-i" in args
     command = ["gh", *args] if include or not paginate else ["gh", *args, "--include"]
