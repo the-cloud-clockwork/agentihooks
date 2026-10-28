@@ -15,7 +15,7 @@ from scripts.swarm_v2.runtime.routed import RoutedRuntime
 def test_master_joins_as_orchestrator_before_dispatch(monkeypatch, seat, handoff, remote):
     ledger = Mock()
     monkeypatch.setattr(ledger_client, "LedgerClient", Mock(return_value=ledger))
-    config = SwarmConfig("sw", "/repo")
+    config = SwarmConfig("sw", "/repo", max_eng=0, max_ci=0)
     name = "master@a1b2c3-0002"
 
     def dispatch(request):
@@ -38,7 +38,7 @@ def test_master_resume_joins_before_recovery(monkeypatch):
         return Outcome("recover", Status.OK, "local", "resumed")
 
     runtime = RoutedRuntime(Mock(), SimpleNamespace(recover=recover))
-    assert runtime.resume(SwarmConfig("sw", "/repo"), agent, "Continue") == "resumed"
+    assert runtime.resume(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0), agent, "Continue") == "resumed"
 
 
 def test_refused_master_join_starts_no_process(monkeypatch):
@@ -48,7 +48,7 @@ def test_refused_master_join_starts_no_process(monkeypatch):
     router = Mock()
     runtime = RoutedRuntime(Mock(), router)
     with pytest.raises(ledger_client.LedgerRefused, match="membership refused"):
-        runtime.spawn(SwarmConfig("sw", "/repo"), "master", "master@a1b2c3-0002", {"id": "master"})
+        runtime.spawn(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0), "master", "master@a1b2c3-0002", {"id": "master"})
     router.spawn.assert_not_called()
 
 
@@ -58,5 +58,8 @@ def test_worker_dispatch_does_not_request_orchestrator_membership(monkeypatch):
     router = Mock()
     router.spawn.return_value = Outcome("spawn", Status.OK, "local", "placed")
     runtime = RoutedRuntime(Mock(), router)
-    assert runtime.spawn(SwarmConfig("sw", "/repo"), "eng", "engineer@a1b2c3-0002", {"id": "task"}) == "placed"
+    assert (
+        runtime.spawn(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0), "eng", "engineer@a1b2c3-0002", {"id": "task"})
+        == "placed"
+    )
     client.assert_not_called()
