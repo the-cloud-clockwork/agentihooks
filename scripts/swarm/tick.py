@@ -244,7 +244,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
-    actions += skip_refused(fleet_red.notice_pass, slug, config, store, ledger, rows, now_ms)
+    actions += skip_refused(fleet_red.notice_pass, slug, store, ledger, rows, now_ms)
     actions += skip_refused(run_window.step, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(claim_hold.verification_notices, slug, store, doc, now_ms)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
@@ -940,7 +940,7 @@ def claim_view(slug, store, rows, doc, dispatched=None):
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
     released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
-    unshared = fleet_red.checker(config.repo)
+    unshared = fleet_red.checker()
     view = readiness.Snapshot(
         slug,
         rows,
