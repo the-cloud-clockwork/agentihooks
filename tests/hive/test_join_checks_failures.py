@@ -133,7 +133,7 @@ def test_refused_unreachable_and_credential_faults_report_distinct_reasons(monke
         "message": 'ledger sw: server refused: 403 {"error": "write refused"}',
     }
     assert reported["unreachable"] == {
-        "error": "SwarmError",
+        "error": "LedgerUnreachable",
         "status": None,
         "message": "ledger sw: ledger server not answering on http://ledger.example: "
         "<urlopen error [Errno 111] Connection refused>",
