@@ -89,9 +89,9 @@ def test_command_reports_startup_result(monkeypatch, capsys, problem, code, outp
     from scripts import ci_tests_start
 
     calls = []
-    monkeypatch.setattr(ci_tests_start, "verify", lambda *args: calls.append(args) or problem)
+    monkeypatch.setattr(ci_tests_start, "verify", lambda *args, **kwargs: calls.append((args, kwargs)) or problem)
     assert ci_tests_start.main(["--repository", "owner/repo", "--head", "head"]) == code
-    assert calls == [("owner/repo", "head")]
+    assert calls == [(("owner/repo", "head"), {"event": "pull_request"})]
     assert capsys.readouterr().out == output
 
 
@@ -170,3 +170,18 @@ def test_command_requires_repository_and_head(arguments):
     with pytest.raises(SystemExit) as stopped:
         ci_tests_start.main(arguments)
     assert stopped.value.code == 2
+
+
+def test_can_verify_the_push_event_used_by_the_ci_plant(monkeypatch, capsys):
+    from scripts import ci_tests_start
+
+    endpoints = []
+
+    def api(endpoint):
+        endpoints.append(endpoint)
+        return {"workflow_runs": [{"id": 11, "head_sha": "head", "status": "completed", "conclusion": "failure"}]}
+
+    monkeypatch.setattr(ci_tests_start, "_api", api)
+    assert ci_tests_start.main(["--repository", "owner/repo", "--head", "head", "--event", "push"]) == 1
+    assert endpoints == ["repos/owner/repo/actions/workflows/test.yml/runs?head_sha=head&event=push&per_page=1"]
+    assert capsys.readouterr().out == "::error::Tests run 11 ended with failure.\n"

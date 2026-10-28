@@ -10,12 +10,12 @@ def _api(endpoint: str) -> dict:
     )
 
 
-def verify(repository: str, head: str, attempts: int = 12, interval: float = 5) -> str:
+def verify(repository: str, head: str, attempts: int = 12, interval: float = 5, event: str = "pull_request") -> str:
     problem = "Tests run is missing for this head."
     for attempt in range(attempts):
-        runs = _api(
-            f"repos/{repository}/actions/workflows/test.yml/runs?head_sha={head}&event=pull_request&per_page=1"
-        )["workflow_runs"]
+        runs = _api(f"repos/{repository}/actions/workflows/test.yml/runs?head_sha={head}&event={event}&per_page=1")[
+            "workflow_runs"
+        ]
         matching = [run for run in runs if run["head_sha"] == head]
         if matching:
             run = matching[0]
@@ -34,8 +34,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repository", required=True)
     parser.add_argument("--head", required=True)
+    parser.add_argument("--event", default="pull_request")
     args = parser.parse_args(argv)
-    problem = verify(args.repository, args.head)
+    problem = verify(args.repository, args.head, event=args.event)
     if problem:
         print(f"::error::{problem}")
         return 1
