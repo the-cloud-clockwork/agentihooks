@@ -743,10 +743,39 @@ def test_estimate_refuses_changed_function_lines_that_produce_no_mutant(tmp_path
     if refused:
         with pytest.raises(SystemExit) as refusal:
             plan.estimate(tmp_path, {"scripts/cached.py": {line}})
-        assert str(refusal.value) == "scripts/cached.py: not mutated, changed function lines produce no mutants"
+        assert str(refusal.value) == "scripts/cached.py: not mutated, changed functions produce no mutants: doubled"
     else:
         assert plan.estimate(tmp_path, {"scripts/cached.py": {line}})[1] == 2
     assert plan.estimate(tmp_path, {"scripts/cached.py": {1}})[1] == 0
+
+
+@pytest.mark.parametrize("decorator, refused", [("@functools.cache\n", True), ("", False)])
+def test_estimate_refuses_an_ungraded_changed_function_beside_a_graded_one(tmp_path, monkeypatch, decorator, refused):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    source = f"import functools\n\n\ndef tripled(value):\n    return value * 3\n\n\n{decorator}def doubled(value):\n    return value * 2\n"
+    (tmp_path / "scripts/mixed.py").write_text(source)
+    (tmp_path / "tests/test_mixed.py").write_text("from scripts.mixed import doubled, tripled\n")
+    lines = {5, source.splitlines().index("    return value * 2") + 1}
+    if refused:
+        with pytest.raises(SystemExit) as refusal:
+            plan.estimate(tmp_path, {"scripts/mixed.py": lines})
+        assert str(refusal.value) == "scripts/mixed.py: not mutated, changed functions produce no mutants: doubled"
+    else:
+        assert plan.estimate(tmp_path, {"scripts/mixed.py": lines})[1] == 4
+
+
+def test_estimate_names_each_ungraded_function_in_source_order(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    source = "import functools\n\n\n@functools.cache\ndef tripled(value):\n    return value * 3\n\n\n@functools.cache\ndef doubled(value):\n    return value * 2\n"
+    (tmp_path / "scripts/mixed.py").write_text(source)
+    (tmp_path / "tests/test_mixed.py").write_text("from scripts.mixed import doubled, tripled\n")
+    with pytest.raises(SystemExit) as refusal:
+        plan.estimate(tmp_path, {"scripts/mixed.py": {6, 11}})
+    assert str(refusal.value) == "scripts/mixed.py: not mutated, changed functions produce no mutants: tripled, doubled"
 
 
 def _budget_project(tmp_path, monkeypatch, seconds, timed):
