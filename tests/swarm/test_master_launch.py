@@ -586,7 +586,8 @@ def test_a_failed_launch_prints_the_reason_and_exits_non_zero(up, monkeypatch, c
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 1
     assert "the new master could not start: herdr down" in capsys.readouterr().err
-    assert masters(store) == [] and ledger.joined == []
+    assert masters(store) == []
+    assert ledger.joined == [("sw", "master@a1b2c3-0001", "orchestrator")]
 
 
 def test_a_stopped_swarm_is_paused_so_the_tick_keeps_the_master(up, monkeypatch):

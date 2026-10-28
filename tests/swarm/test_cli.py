@@ -39,7 +39,7 @@ def env(monkeypatch, tmp_path):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
     ledger.said = []
-    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda service=False: ledger)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda _, *args: ledger.join(*args))
     ledger.say = lambda slug, text, by=None: ledger.said.append((text, by))
     ledger.relay = lambda slug, text, by, op_id="", reply_to="": ledger.said.append((text, by))
     ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
