@@ -36,6 +36,7 @@ class Account:
     reserved: str = ""
     observed_at: float | None = field(default=None, compare=False)
     unreserved_cap: int | None = None
+    revoked: bool = False
 
 
 def _left(window: balancer.QuotaWindow, now: float) -> float | None:
@@ -104,6 +105,7 @@ def _claude(environ: dict, now: float) -> list[Account]:
                 reset,
                 five_resets_at=five_reset,
                 observed_at=at,
+                revoked=result.provider_status == balancer.REVOKED,
             )
         )
     rows += [
@@ -519,6 +521,7 @@ def record(row: Account) -> dict:
     dropped |= {"unreserved_cap"}
     dropped |= set() if row.reserved else {"reserved"}
     dropped |= set() if row.observed_at is not None else {"observed_at"}
+    dropped |= set() if row.revoked else {"revoked"}
     return {key: value for key, value in row.__dict__.items() if key not in dropped}
 
 

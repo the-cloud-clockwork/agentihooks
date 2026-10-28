@@ -73,6 +73,7 @@ from scripts.swarm import (
     release_wait,
     resume,
     retire_watch,
+    revoked_seats,
     run_window,
     seat_spawn,
     session_model,
@@ -765,7 +766,22 @@ def _free_refused(slug, store, ledger, runtime, rows, agent, now_ms):
     ]
 
 
+def _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms):
+    account = f"{agent.harness} account {agent.account}"
+    if agent.lane == MASTER:
+        revoked_seats.recycle_master(slug, store, ledger, agent, now_ms)
+        return [f"recycled master {agent.name} in its seat: {account} was revoked"]
+    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+        return [f"could not retire {agent.name} on revoked {account}, retrying next tick"]
+    revoked_seats.worker_handoff(store, slug, agent, now_ms)
+    return [
+        f"freed the seat of {agent.name}: {account} was revoked" + _drop(slug, store, ledger, rows, agent, refund=True)
+    ]
+
+
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
+    if revoked_seats.on_revoked(store, slug, agent):
+        return _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms)
     observed = runtime.observe(agent)
     if _refusal_due(slug, store, rows, agent, observed, now_ms):
         return _free_refused(slug, store, ledger, runtime, rows, agent, now_ms)

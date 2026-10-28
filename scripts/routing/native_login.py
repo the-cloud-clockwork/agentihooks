@@ -13,6 +13,8 @@ STATUS_LINE = re.compile(r"Login method: Claude(?: \w+)? account")
 PROOF = {"command": "claude auth status --text", "status": STATUS}
 EXPIRED = "native Claude login is expired or missing; renew the native Claude login"
 UNAVAILABLE = "native Claude login could not be checked"
+REVOKED = "native Claude login was revoked or rejected by the provider; renew the native Claude login"
+PROBE_TIMEOUT_S = 60
 PROOF_NAME = "interactive-claude-status.json"
 
 
@@ -34,6 +36,22 @@ def check(environ: Mapping[str, str], account: str, run: Callable = subprocess.r
     if status.returncode or not any(STATUS_LINE.fullmatch(line.strip()) for line in status.stdout.splitlines()):
         raise LoginError(EXPIRED)
     return dict(PROOF)
+
+
+def rejected(environ: Mapping[str, str], account: str, run: Callable = subprocess.run) -> bool:
+    from scripts.claude_quota_balancer import _probe_command, auth_rejected
+
+    try:
+        probe = run(
+            _probe_command("haiku", shutil.which("claude") or "claude"),
+            env=envs.claude_interactive_child(environ, account),
+            capture_output=True,
+            text=True,
+            timeout=PROBE_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return auth_rejected(probe.stdout)
 
 
 def record(home: Path, slug: str, proof: dict) -> None:

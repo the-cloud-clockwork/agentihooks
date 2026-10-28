@@ -410,20 +410,23 @@ def recover(target: Path, environ: Mapping[str, str]) -> bool:
     return number is not None and restore(stored(openbao_kv.from_env(environ), number), target, force=True)
 
 
-def checked(target: Path, environ: Mapping[str, str], found: str) -> bool:
+def _usable(target: Path, environ: Mapping[str, str], found: str) -> bool:
     from scripts.routing import native_login
 
     try:
         native_login.check(child(environ, target), found)
     except native_login.LoginError:
-        with _locked(target.parent) as folder:
-            if len(holders(folder)) < 2 and not recover(target, environ):
-                return False
-        try:
-            native_login.check(child(environ, target), found)
-        except native_login.LoginError:
+        return False
+    return not native_login.rejected(child(environ, target), found)
+
+
+def checked(target: Path, environ: Mapping[str, str], found: str) -> bool:
+    if _usable(target, environ, found):
+        return True
+    with _locked(target.parent) as folder:
+        if len(holders(folder)) < 2 and not recover(target, environ):
             return False
-    return True
+    return _usable(target, environ, found)
 
 
 def stored(bao: openbao_kv.OpenBao | None, number: int | None = None) -> dict[str, str]:
