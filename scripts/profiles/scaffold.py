@@ -43,7 +43,7 @@ def _fail(message: str) -> int:
     return 1
 
 
-def bundle_new(target: Path) -> int:
+def bundle_new(target: Path, user: bool = False) -> int:
     if target.exists() and not target.is_dir():
         return _fail(f"{target} is a file; pick a new folder for the bundle")
     if target.exists() and any(target.iterdir()):
@@ -56,7 +56,7 @@ def bundle_new(target: Path) -> int:
         _keep(target / ".claude" / folder)
     _keep(target / "profiles")
     (target / "README.md").write_text(BUNDLE_README)
-    bundles.link(target)
+    bundles.link(target, user=user)
     return 0
 
 
@@ -111,15 +111,22 @@ def problems(folder: Path) -> list[str]:
     return found + _name_problems(folder.name)
 
 
-def _overlays_dir() -> Path | None:
+def _overlays_dir(dest: str = "") -> tuple[Path | None, str]:
+    user = install._get_user_bundle_path()
+    if dest == "user":
+        return (
+            user / "profiles" if user else None
+        ), "no user bundle linked; run agentihooks bundle new --user DIR first"
+    if user is not None and not dest:
+        return None, "a user bundle is linked; pass --dest root or --dest user"
     bundle = install._get_bundle_path()
-    return bundle / "profiles" if bundle else None
+    return (bundle / "profiles" if bundle else None), "no bundle linked; run agentihooks bundle new DIR first"
 
 
-def overlay_new(name: str, wears: str) -> int:
-    profiles = _overlays_dir()
+def overlay_new(name: str, wears: str, dest: str = "") -> int:
+    profiles, refusal = _overlays_dir(dest)
     if profiles is None:
-        return _fail("no bundle linked; run agentihooks bundle new DIR first")
+        return _fail(refusal)
     roles = [role.strip() for role in wears.split(",") if role.strip()]
     found = _name_problems(name) + _role_problems(roles)
     if found:
@@ -138,11 +145,11 @@ def overlay_new(name: str, wears: str) -> int:
     return 0
 
 
-def overlay_check(name: str) -> int:
-    profiles = _overlays_dir()
+def overlay_check(name: str, dest: str = "") -> int:
+    profiles, _refusal = _overlays_dir(dest or "root")
     folder = profiles / name if profiles and _plain(name) else None
     if folder is None or not folder.is_dir():
-        return _fail(f"overlay {name} not found in the linked bundle")
+        return _fail(f"overlay {name} not found in the linked {'user ' if dest == 'user' else ''}bundle")
     found = problems(folder)
     if found:
         return _fail(f"overlay {name}: " + "; ".join(found))
@@ -154,19 +161,26 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agentihooks")
     sub = parser.add_subparsers(dest="command", required=True)
     bundle = sub.add_parser("bundle").add_subparsers(dest="action", required=True)
-    bundle.add_parser("new", help="Lay out an empty bundle, git init it and link it").add_argument("dir")
+    fresh = bundle.add_parser("new", help="Lay out an empty bundle, git init it and link it")
+    fresh.add_argument("dir")
+    fresh.add_argument("--user", action="store_true", help="Link it as the user bundle and keep the root link")
     overlay = sub.add_parser("overlay").add_subparsers(dest="action", required=True)
     new = overlay.add_parser("new", help="Write an overlay profile skeleton into the linked bundle")
     new.add_argument("name")
     new.add_argument("--wears", required=True, help="Comma separated base roles the overlay sits on")
-    overlay.add_parser("check", help="Validate an overlay in the linked bundle").add_argument("name")
+    new.add_argument(
+        "--dest", choices=("root", "user"), default="", help="Bundle to write into (required with a user bundle)"
+    )
+    check = overlay.add_parser("check", help="Validate an overlay in the linked bundle")
+    check.add_argument("name")
+    check.add_argument("--dest", choices=("root", "user"), default="", help="Bundle to read (default: root)")
     return parser
 
 
 def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     if args.command == "bundle":
-        return bundle_new(Path(args.dir).expanduser().resolve())
+        return bundle_new(Path(args.dir).expanduser().resolve(), user=args.user)
     if args.action == "new":
-        return overlay_new(args.name, args.wears)
-    return overlay_check(args.name)
+        return overlay_new(args.name, args.wears, args.dest)
+    return overlay_check(args.name, args.dest)

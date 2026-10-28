@@ -6,8 +6,9 @@ Parallel to broadcast.py but semantically distinct:
 - Permanent until operator clears (runtime) or removed in git (bundle/profile).
 - Cadence-driven: each enforcement re-injects every N tool calls.
 
-Four-source resolution (priority: local > runtime > profile chain > bundle):
+Resolution (priority: local > runtime > profile chain > user bundle > bundle):
   1. <bundle_path>/enforcements.json                          → source: "bundle"
+     <user_bundle_path>/enforcements.json                     → source: "user_bundle"
   2. each active built-in, bundle, or linked profile            → source: "profile"
   3. ~/.agentihooks/enforcements.json                          → source: "runtime"
   4. <project>/.agentihooks/enforcements.json                  → source: "local"
@@ -156,6 +157,10 @@ def _get_bundle_path() -> Path | None:
     return profile_chain.bundle_path(profile_chain.read_state())
 
 
+def _get_user_bundle_path() -> Path | None:
+    return profile_chain.user_bundle_path(profile_chain.read_state())
+
+
 def _get_active_profile() -> str | None:
     return profile_chain.active_profile(profile_chain.read_state())
 
@@ -192,6 +197,13 @@ def _load_bundle_enforcements() -> list[dict]:
     return _load_json_enforcements(bp / "enforcements.json", "bundle")
 
 
+def _load_user_bundle_enforcements() -> list[dict]:
+    up = _get_user_bundle_path()
+    if not up:
+        return []
+    return _load_json_enforcements(up / "enforcements.json", "user_bundle")
+
+
 def _load_profile_enforcements() -> list[dict]:
     profile = _get_active_profile()
     if not profile:
@@ -199,7 +211,9 @@ def _load_profile_enforcements() -> list[dict]:
     home = {"claude": claude_home, "codex": codex_home, "copilot": copilot_home}[current_target()]()
     profile = ",".join([profile, *profile_chain.rendered_overlays(home)])
     entries = []
-    for _name, profile_dir in profile_chain.rendered_dirs(_get_bundle_path(), profile, _get_linked_profiles()):
+    for _name, profile_dir in profile_chain.rendered_dirs(
+        _get_bundle_path(), profile, _get_linked_profiles(), _get_user_bundle_path()
+    ):
         entries.extend(_load_json_enforcements(profile_dir / "enforcements.json", "profile"))
     return entries
 
@@ -220,9 +234,9 @@ def _load_local_enforcements(cwd: str | Path | None) -> list[dict]:
 
 
 def load_all_enforcements(cwd: str | Path | None = None) -> list[dict]:
-    """Merge bundle → profile → runtime → local."""
+    """Merge bundle → user bundle → profile → runtime → local."""
     by_id: dict[str, dict] = {}
-    for e in _load_bundle_enforcements():
+    for e in [*_load_bundle_enforcements(), *_load_user_bundle_enforcements()]:
         eid = e.get("id")
         if eid:
             by_id[eid] = e

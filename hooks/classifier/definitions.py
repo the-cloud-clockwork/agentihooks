@@ -190,9 +190,10 @@ def _paths(name: str) -> list[Path]:
     from hooks.config import AGENTIHOOKS_HOME
 
     paths = [profile_chain.BUILT_IN_PROFILES / "package" / "classifiers" / f"{name}.yaml"]
-    bundle = profile_chain.bundle_path(profile_chain.read_state())
-    if bundle is not None:
-        paths.append(bundle / ".claude" / "classifiers" / f"{name}.yaml")
+    paths.extend(
+        root / ".claude" / "classifiers" / f"{name}.yaml"
+        for _kind, root in profile_chain.bundle_roots(profile_chain.read_state())
+    )
     paths.append(AGENTIHOOKS_HOME / "classifiers" / f"{name}.yaml")
     return paths
 

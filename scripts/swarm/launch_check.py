@@ -71,8 +71,8 @@ def chain(home) -> list[str]:
 
 
 def bundled(profile: str) -> bool:
-    bundle = profile_chain.bundle_path(profile_chain.read_state())
-    return bool(bundle and profile and (bundle / "profiles" / profile).is_dir())
+    roots = profile_chain.bundle_roots(profile_chain.read_state())
+    return bool(profile and any((root / "profiles" / profile).is_dir() for _kind, root in roots))
 
 
 def declared(profile: str, overlays: Sequence[str] = ()) -> list[str]:

@@ -44,16 +44,16 @@ def chosen(profile: str, task: dict, defaults: dict) -> tuple[str, ...]:
 
 
 def available() -> list[dict]:
-    bundle = _install()._get_bundle_path()
-    found = []
-    for manifest in sorted((bundle / "profiles").glob("*/profile.yml")) if bundle else []:
-        try:
-            roles = profile_chain.wears(manifest.parent)
-        except (AttributeError, ValueError, yaml.YAMLError):
-            continue
-        if roles:
-            found.append({"name": manifest.parent.name, "wears": roles})
-    return found
+    found: dict[str, dict] = {}
+    for _kind, bundle in _install()._bundle_roots():
+        for manifest in sorted((bundle / "profiles").glob("*/profile.yml")):
+            try:
+                roles = profile_chain.wears(manifest.parent)
+            except (AttributeError, ValueError, yaml.YAMLError):
+                continue
+            if roles and manifest.parent.name not in found:
+                found[manifest.parent.name] = {"name": manifest.parent.name, "wears": roles}
+    return sorted(found.values(), key=lambda overlay: overlay["name"])
 
 
 def revision() -> str:
