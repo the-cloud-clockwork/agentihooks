@@ -24,6 +24,11 @@ def load(slug: str, file_id: str) -> bytes | None:
     return None if row is None else base64.b64decode(row[0])
 
 
+def ids(slug: str) -> set[str]:
+    with _repository().connect() as connection:
+        return {row[0] for row in connection.execute("SELECT id FROM artifact_files WHERE slug=?", (slug,)).fetchall()}
+
+
 def drop(slug: str, file_ids: set[str]) -> None:
     if not file_ids:
         return
