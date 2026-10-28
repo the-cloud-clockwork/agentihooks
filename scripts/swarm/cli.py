@@ -113,6 +113,7 @@ from scripts.swarm import (
     phase_state,
     phases,
     plan_review,
+    pr_wait,
     prerequisite_wait,
     priming_trace,
     prompt,
@@ -407,6 +408,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
             rows = {t["id"]: t for t in doc["tasks"]}
+            actions += skip_refused(pr_wait.enforce_pass, store, slug, rows, view, now_ms())
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
             actions += skip_refused(
                 ready.merge_pass, ready.Pass(store, slug, ledger, view, ledger_events.view, now_ms()), rows
