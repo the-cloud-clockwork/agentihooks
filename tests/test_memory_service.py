@@ -176,7 +176,7 @@ def test_a_body_over_the_bound_is_drained_in_chunks_before_the_refusal(length):
     request = Posted(length, Chunks(b"x" * length))
     assert service.read_body(request) is None
     assert request.rfile.tell() == length and request.close_connection is False
-    assert max(request.rfile.sizes) == service.DRAIN_CHUNK
+    assert max(request.rfile.sizes) == service.DRAIN_CHUNK and min(request.rfile.sizes) > 0
     assert sum(request.rfile.sizes) == length
 
 
@@ -186,22 +186,49 @@ def test_a_drain_stops_at_the_end_of_a_short_body():
     assert request.rfile.sizes == [service.DRAIN_CHUNK, service.DRAIN_CHUNK]
 
 
-def test_a_body_past_the_drain_limit_closes_the_connection_without_reading():
-    request = Posted(service.DRAIN_LIMIT + 1, Unread())
-    assert service.read_body(request) is None and request.close_connection is True
+def test_a_body_past_the_drain_limit_is_refused_without_reading():
+    assert service.read_body(Posted(service.DRAIN_LIMIT + 1, Unread())) is None
+
+
+def raw_post(base, length, body, timeout=10):
+    host, port = base.removeprefix("http://").split(":")
+    head = f"POST {service.SEARCH_PATH} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {TOKEN}\r\n"
+    head += f"Content-Length: {length}\r\n\r\n"
+    with socket.create_connection((host, int(port)), timeout=timeout) as client:
+        client.sendall(head.encode() + body)
+        reply = client.makefile("rb").read()
+    head, _, payload = reply.partition(b"\r\n\r\n")
+    status_line, _, headers = head.partition(b"\r\n")
+    return int(status_line.split()[1]), headers.decode().lower(), json.loads(payload)
 
 
 def test_a_client_writing_a_body_one_byte_over_the_bound_reads_the_refusal(served):
-    host, port = served.removeprefix("http://").split(":")
     length = service.MAX_BODY + 1
-    head = f"POST {service.SEARCH_PATH} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {TOKEN}\r\n"
-    head += f"Content-Length: {length}\r\n\r\n"
-    with socket.create_connection((host, int(port)), timeout=10) as client:
-        client.sendall(head.encode() + b"x" * length)
-        reply = client.makefile("rb").read()
-    status_line, _, rest = reply.partition(b"\r\n")
-    assert status_line.split()[1] == b"400"
-    assert json.loads(rest.partition(b"\r\n\r\n")[2]) == refusal("invalid_request", service.BAD_BODY)
+    status, _, answer = raw_post(served, length, b"x" * length)
+    assert status == 400 and answer == refusal("invalid_request", service.BAD_BODY)
+
+
+def test_a_refusal_past_the_drain_limit_closes_the_connection(served):
+    status, headers, answer = raw_post(served, service.DRAIN_LIMIT + 1, b"")
+    assert status == 400 and "connection: close" in headers
+    assert answer == refusal("invalid_request", service.BAD_BODY)
+
+
+def test_a_stalled_client_is_refused_after_the_read_timeout_and_the_service_moves_on(bank, grants, monkeypatch):
+    monkeypatch.setattr(service, "READ_TIMEOUT", 0.5, raising=False)
+    server = HTTPServer(("127.0.0.1", 0), service.handler(bank.tools, grants))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        status, headers, answer = raw_post(base, 100, b"{", timeout=5)
+        assert status == 400 and "connection: close" in headers
+        assert answer == refusal("invalid_request", service.BAD_BODY)
+        assert call(base, service.HEALTH_PATH, method="GET")[0] == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_the_smallest_and_the_largest_object_bodies_are_read():
