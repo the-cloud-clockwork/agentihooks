@@ -148,9 +148,10 @@ def imported_test_modules(root: Path, source: Path) -> set[Path]:
     if not source.is_file():
         return set()
     modules = {
-        node.module
+        name
         for node in ast.walk(ast.parse(source.read_text()))
         if isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] == "tests"
+        for name in (node.module, *(f"{node.module}.{alias.name}" for alias in node.names))
     }
     return {root / Path(*module.split(".")).with_suffix(".py") for module in modules}
 
