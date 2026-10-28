@@ -649,6 +649,51 @@ def test_wrapped_function_bodies_are_planned_and_their_mutants_run(monkeypatch, 
         assert measure() != expected
 
 
+def test_cached_static_and_class_method_bodies_keep_their_binding_when_mutated(monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutants
+
+    monkeypatch.setattr(
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1, use_setproctitle=False),
+    )
+    source = (
+        "import functools\n"
+        "class Box:\n"
+        "    @staticmethod\n"
+        "    @functools.cache\n"
+        "    def doubled(value):\n"
+        "        return value * 2\n"
+        "    @classmethod\n"
+        "    @functools.lru_cache(maxsize=2)\n"
+        "    def tripled(cls, value):\n"
+        "        return value * 3\n"
+    )
+    for line in (6, 10):
+        found, ungraded = mutation_counts("scripts/sample.py", source, {line})
+        assert found > 0
+        assert ungraded == []
+    generated, names = selected_mutants("scripts/sample.py", source, {6, 10})
+    assert {name.split("__mutmut_")[0] for name in names} == {"xǁBoxǁdoubled", "xǁBoxǁtripled"}
+
+    def measure():
+        namespace = {"__name__": "scripts.sample"}
+        exec(compile(generated, "<sample>", "exec"), namespace)
+        box = namespace["Box"]
+        return box.doubled(3), box().doubled(3), box.tripled(3), box().tripled(3)
+
+    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    assert measure() == (6, 6, 9, 9)
+    for name in names:
+        monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
+        try:
+            assert measure() != (6, 6, 9, 9)
+        except TypeError:
+            pass
+
+
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
 def test_shards_split_every_mutant_name_exactly_once_and_evenly(total):
     from scripts.ci_mutation.mutant_shards import shard_names
