@@ -1245,7 +1245,11 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         "acct",
         profile="cicd",
         model_source="lane-default",
-        profile_decision={**decision, "validation": placed.profile_decision["validation"]},
+        profile_decision={
+            **decision,
+            "validation": placed.profile_decision["validation"],
+            "automated": {"swarm": "sw", "seat": ""},
+        },
         choice="rotation",
         transport="legacy",
         launched_at=7_000,
