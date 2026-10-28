@@ -18,9 +18,10 @@ ATTEMPTS = 2
 BATCH = 50
 BODY_CHARS = 4000
 TIMEOUT_S = 120
-DEFAULT_URL = "http://litellm.anton-prod.svc.cluster.local:4000"
+DEFAULT_URL = "https://llm.homeofanton.com"
 DEFAULT_MODEL = "sonnet"
 KEY_VAR = "CHANGELOG_LITELLM_KEY"
+ACCESS_VARS = ("CF_ACCESS_CLIENT_ID", "CF_ACCESS_CLIENT_SECRET")
 URL_VAR = "CHANGELOG_LITELLM_URL"
 MODEL_VAR = "CHANGELOG_MODEL"
 TITLE = "# Releases"
@@ -156,33 +157,38 @@ def prompt(change: Change) -> list[dict]:
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]
 
 
-def ask_model(change: Change, url: str, key: str, model: str, opener: Callable = urlopen) -> str:
+def gateway_headers(env: dict[str, str]) -> dict[str, str]:
+    return {AUTHORIZATION: f"Bearer {env[KEY_VAR]}"} | {var.title().replace("_", "-"): env[var] for var in ACCESS_VARS}
+
+
+def ask_model(change: Change, url: str, access: dict[str, str], model: str, opener: Callable = urlopen) -> str:
     body = json.dumps({"model": model, "messages": prompt(change), "max_tokens": 400}).encode()
-    headers = {CONTENT_TYPE: JSON, AUTHORIZATION: f"Bearer {key}"}
+    headers = {CONTENT_TYPE: JSON, **access}
     try:
         with opener(
             Request(url.removesuffix("/") + "/v1/chat/completions", data=body, headers=headers), timeout=TIMEOUT_S
         ) as response:
             content = json.loads(response.read())["choices"][0]["message"]["content"]
-            if not isinstance(content, str):
-                raise TypeError
-            return content
     except HTTPError as error:
         raise ModelError(f"{model}: HTTP {error.code}") from None
     except (URLError, OSError) as error:
         raise ModelError(f"{model}: {type(error).__name__}") from None
     except (ValueError, KeyError, IndexError, TypeError):
         raise ModelError(f"{model}: unreadable response") from None
+    if not isinstance(content, str):
+        raise ModelError(f"{model}: unreadable response")
+    return content
 
 
 def write_entry(change: Change, ask: Callable[[Change], str]) -> str:
+    failures: list[Exception] = []
     for attempt in range(ATTEMPTS):
         try:
             return check_words(ask(change))
         except (EntryError, ModelError) as error:
-            failure = error
+            failures.append(error)
             print(f"#{change.number} attempt {attempt + 1}: {error}", file=sys.stderr)
-    raise failure
+    raise failures[-1]
 
 
 def render_release(tag: str, date: str, entries: list[tuple[Change, str]]) -> str:
@@ -238,11 +244,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     url = os.environ.get(URL_VAR) or DEFAULT_URL
     model = os.environ.get(MODEL_VAR) or DEFAULT_MODEL
-    key = os.environ[KEY_VAR]
+    access = gateway_headers(dict(os.environ))
     section = release_section(
         args.tag,
         os.environ["GITHUB_REPOSITORY"],
-        lambda change: ask_model(change, url, key, model, urlopen),
+        lambda change: ask_model(change, url, access, model, urlopen),
         gh_graphql,
     )
     args.section.write_text(section)

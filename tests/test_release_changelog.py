@@ -1,6 +1,7 @@
 import io
 import json
 import subprocess
+from email.message import Message
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -8,6 +9,8 @@ import pytest
 from scripts import release_changelog as rc
 
 pytestmark = pytest.mark.unit
+
+ACCESS = {"Authorization": "Bearer k1", "Cf-Access-Client-Id": "a1"}
 
 
 def _words(n: int) -> str:
@@ -221,15 +224,17 @@ def test_ask_model_posts_chat_completion_with_the_key_reference():
         seen.update(
             url=request.full_url,
             auth=request.get_header("Authorization"),
+            access=request.get_header("Cf-access-client-id"),
             type=request.get_header("Content-type"),
             body=json.loads(request.data),
             timeout=timeout,
         )
         return _Response(json.dumps({"choices": [{"message": {"content": "text"}}]}).encode())
 
-    assert rc.ask_model(_change(), "http://gw/", "k1", "sonnet", opener) == "text"
-    assert seen["url"] == "http://gw/v1/chat/completions"
+    assert rc.ask_model(_change(), "https://gw/", ACCESS, "sonnet", opener) == "text"
+    assert seen["url"] == "https://gw/v1/chat/completions"
     assert seen["auth"] == "Bearer k1"
+    assert seen["access"] == "a1"
     assert seen["type"] == "application/json"
     assert seen["timeout"] == rc.TIMEOUT_S
     assert seen["body"] == {"model": "sonnet", "messages": rc.prompt(_change()), "max_tokens": 400}
@@ -238,17 +243,26 @@ def test_ask_model_posts_chat_completion_with_the_key_reference():
 @pytest.mark.parametrize(
     ("error", "message"),
     [
-        (HTTPError("u", 401, "no", {}, io.BytesIO(b"secret k1")), "^sonnet: HTTP 401$"),
+        (HTTPError("u", 401, "no", Message(), io.BytesIO(b"secret k1")), "^sonnet: HTTP 401$"),
         (URLError("down"), "^sonnet: URLError$"),
         (TimeoutError(), "^sonnet: TimeoutError$"),
     ],
 )
+def test_gateway_headers_carry_the_key_and_the_access_pair_by_name():
+    env = {rc.KEY_VAR: "k", "CF_ACCESS_CLIENT_ID": "i", "CF_ACCESS_CLIENT_SECRET": "s", "OTHER": "o"}
+    assert rc.gateway_headers(env) == {
+        "Authorization": "Bearer k",
+        "Cf-Access-Client-Id": "i",
+        "Cf-Access-Client-Secret": "s",
+    }
+
+
 def test_ask_model_reports_transport_failures_without_the_key(error, message):
     def opener(request, timeout):
         raise error
 
     with pytest.raises(rc.ModelError, match=message):
-        rc.ask_model(_change(), "http://gw", "k1", "sonnet", opener)
+        rc.ask_model(_change(), "https://gw", ACCESS, "sonnet", opener)
 
 
 @pytest.mark.parametrize(
@@ -257,7 +271,7 @@ def test_ask_model_reports_transport_failures_without_the_key(error, message):
 )
 def test_ask_model_refuses_an_unreadable_answer(payload):
     with pytest.raises(rc.ModelError, match="^sonnet: unreadable response$"):
-        rc.ask_model(_change(), "http://gw", "k1", "sonnet", lambda request, timeout: _Response(payload))
+        rc.ask_model(_change(), "https://gw", ACCESS, "sonnet", lambda request, timeout: _Response(payload))
 
 
 def test_render_release_names_date_hash_pull_request_and_author():
@@ -342,12 +356,17 @@ def _explain(monkeypatch, tmp_path, tag, pulls):
     asked = []
 
     def opener(request, timeout):
-        asked.append((request.full_url, request.get_header("Authorization"), json.loads(request.data)["model"]))
+        headers = [
+            request.get_header(name) for name in ("Authorization", "Cf-access-client-id", "Cf-access-client-secret")
+        ]
+        asked.append((request.full_url, *headers, json.loads(request.data)["model"]))
         return _Response(json.dumps({"choices": [{"message": {"content": _words(22)}}]}).encode())
 
     monkeypatch.setattr(rc, "urlopen", opener)
     monkeypatch.setattr(rc, "gh_graphql", lambda query: {"repository": pulls})
     monkeypatch.setenv(rc.KEY_VAR, "k2")
+    monkeypatch.setenv("CF_ACCESS_CLIENT_ID", "id2")
+    monkeypatch.setenv("CF_ACCESS_CLIENT_SECRET", "s2")
     monkeypatch.delenv(rc.URL_VAR, raising=False)
     monkeypatch.setenv(rc.MODEL_VAR, "")
     monkeypatch.setenv("GITHUB_REPOSITORY", "org/repo")
@@ -366,7 +385,7 @@ def test_main_explain_writes_the_section_for_a_tag(repo, monkeypatch, tmp_path):
         f"## v1.0.2 · 2026-10-28\n\n### 2026-10-27 · {graded[:12]} · #5 · @dev\n\n"
         f"**Add the changelog**\n\n{_words(22)}\n"
     )
-    assert asked == [(rc.DEFAULT_URL + "/v1/chat/completions", "Bearer k2", rc.DEFAULT_MODEL)]
+    assert asked == [(rc.DEFAULT_URL + "/v1/chat/completions", "Bearer k2", "id2", "s2", rc.DEFAULT_MODEL)]
 
 
 def test_main_explain_refuses_a_tag_that_is_not_a_stable_release(repo, monkeypatch, tmp_path):
