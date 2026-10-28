@@ -448,7 +448,9 @@ def _scheduler() -> Scheduler:
     from scripts.events import state
 
     try:
-        return Scheduler()
+        scheduler = Scheduler()
+        scheduler.document()
+        return scheduler
     except state.unavailable() as error:
         raise SetupRefused(f"the scheduler store is unreachable: {type(error).__name__}") from None
 

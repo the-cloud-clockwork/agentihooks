@@ -128,9 +128,9 @@ class Scheduler:
     @property
     def state(self) -> "StateStore":
         if self._state is None:
-            from scripts.events.state import open_state
+            from scripts.events.scheduler_state import open_scheduler_state
 
-            self._state = open_state(bucket())
+            self._state = open_scheduler_state(bucket())
         return self._state
 
     def key(self, suffix: str) -> str:
@@ -151,7 +151,9 @@ class Scheduler:
         return self._read()[0]
 
     def _read(self) -> tuple[dict, int | None]:
-        stored = self.state.get(self.name("entries"))
+        from scripts.events.scheduler_state import read
+
+        stored = read(self.state, self.name("entries"), self.key("entries"))
         document = json.loads(stored.value) if stored is not None and stored.value else {}
         document.setdefault("entries", {})
         document.setdefault("retired", {})

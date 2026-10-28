@@ -33,6 +33,15 @@ def runtime_dir(environ: Mapping[str, str] | None = None) -> Path:
     from scripts.swarm_ledger import ledger_link
 
     env = os.environ if environ is None else environ
+    from scripts.events.state import backend
+
+    if backend(env) == "bus":
+        identity = tuple(
+            env.get(name, "")
+            for name in ("AGENTIHOOKS_BUS", "AGENTIHOOKS_BUS_URL", "AGENTIHOOKS_DEPLOYMENT", "AGENTIHOOKS_HIVE_ID")
+        )
+        directory = Path.home() / ".cache" / "agentihooks" / "scheduler"
+        return directory / hashlib.sha256(json.dumps(identity).encode()).hexdigest()
     url = urlsplit(redis_url(env))
     endpoint = (url.scheme, url.hostname, url.port or 6379, url.path or "/0")
     member = "" if ledger_link.local_mode(env) else env.get("AGENTIHOOKS_HIVE_ID")
@@ -175,8 +184,10 @@ def _spawn_env(active: Mapping[str, str]) -> dict[str, str]:
 
 
 def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
+    from scripts.events.state import backend
+
     active = dict(os.environ if environ is None else environ)
-    if not (
+    if backend(active) != "bus" and not (
         active.get("REDIS_URL") or active.get("AGENTIHOOKS_HIVE_REDIS_URL") or active.get("AGENTIHOOKS_SWARM_REDIS_URL")
     ):
         return False
