@@ -213,11 +213,7 @@ function columns() {
     const index = heads().indexOf(grip.parentElement);
     setColumns(measured().map((w, i) => (i === index ? Math.max(COLUMN_MIN, w + step * (ev.shiftKey ? 4 : 1)) : w)));
   });
-  readLayout()
-    .then((r) => (r.ok ? r.json() : {}))
-    .then((saved) => { if (!layoutSave) { layout = saved.data || {}; applyColumns(); } })
-    .catch(() => {})
-    .finally(() => { document.documentElement.dataset.layout = "ready"; });
+  readLayout().then((r) => (r.ok ? r.json() : {})).then((saved) => { layout = saved.data || {}; applyColumns(); }).catch(() => {});
 }
 
 async function start() {
