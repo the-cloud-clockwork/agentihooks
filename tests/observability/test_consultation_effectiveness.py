@@ -638,9 +638,22 @@ def test_b_other_tools_record_no_search_observation(world, monkeypatch, tool):
 def test_a_search_reads_tool_output_when_the_target_sends_no_tool_response(world, monkeypatch):
     metrics, grant, _, _, _, _ = world
     post_tool_use(
-        monkeypatch, {"session_id": grant.principal, "tool_name": "mcp__agentibrain__kb_search", "tool_output": "four"}
+        monkeypatch,
+        {"session_id": grant.principal, "tool_name": "mcp__agentibrain__kb_search", "tool_output": "eleven char"},
     )
-    assert [(row["purpose"], row["pack_bytes"]) for row in metrics.events(grant)] == [("search", 4)]
+    assert [(row["purpose"], row["pack_bytes"]) for row in metrics.events(grant)] == [("search", 11)]
+
+
+def test_a_search_after_a_delivery_carries_the_session_receipt(world, monkeypatch):
+    metrics, grant, _, _, _, _ = world
+    assert task_context.offer(grant.principal, "PreToolUse", "context", injectable=True) == "context"
+    post_tool_use(
+        monkeypatch, {"session_id": grant.principal, "tool_name": "mcp__agentibrain__kb_search", "tool_response": "hit"}
+    )
+    delivered, searched = metrics.events(grant)
+    assert searched["purpose"] == "search"
+    assert searched["context"] == delivered["context"]
+    assert searched["receipt_age_seconds"] == 0
 
 
 @pytest.mark.parametrize("unset", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK"])
