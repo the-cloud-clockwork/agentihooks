@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 
 from scripts import terminate_agent
@@ -114,3 +115,30 @@ def test_root_hive_room_includes_pending_claims_before_any_process_exists(setup,
     assert hives["workstation"]["agents"] == 0
     assert hives["workstation"]["room"] == 0
     assert hives["remote"]["room"] == 3
+
+
+def test_a_hive_at_its_cap_launches_nothing_when_its_session_report_misses_recorded_agents(setup, monkeypatch):
+    import json
+
+    from scripts.hive import launch, placement, registry
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    setup.store.create(SwarmConfig("doctor", "agentihooks", 1, 1))
+    rows = [
+        (setup.config.slug, AgentRecord("engineer@aaaaaa-0001", "eng", "pinned", hive="remote", execution_id="e1")),
+        (setup.config.slug, AgentRecord("ci@aaaaaa-0002", "ci", "free", hive="remote", execution_id="e2")),
+        ("doctor", AgentRecord("engineer@bbbbbb-0001", "eng", "other", hive="remote", execution_id="e3")),
+        ("doctor", AgentRecord("master@bbbbbb-0002", "master", "master", hive="remote", execution_id="e4")),
+        ("doctor", AgentRecord("engineer@bbbbbb-0003", "eng", "gone", hive="remote", state="ended")),
+    ]
+    for slug, record in rows:
+        setup.store.put_agent(slug, record if record.state == "ended" else replace(record, state="working"))
+    report = {"claude:account": 3, "interactive:claude:account": 3, "_executions": {"claude:account": ["e1", "e2"]}}
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", json.dumps(report))
+    remote = next(hive for hive in launch.loaded_hives(setup.store) if hive["id"] == "remote")
+    assert remote["agents"] == 3
+    assert remote["room"] == 0
+    assert "max agents" in remote["refusal"]
+    assert isinstance(setup.launcher.select(setup.config, "eng", {"id": "task"}), placement.Wait)
