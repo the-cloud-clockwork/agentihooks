@@ -7,6 +7,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from typing import NoReturn
 
 from hooks.memory import archive, embeddings
 from hooks.memory.api.ingest import Grant
@@ -32,7 +33,7 @@ ACTIVE_SESSIONS = (
 )
 
 
-def refuse_constant(_: str) -> float:
+def refuse_constant(_: str) -> NoReturn:
     raise ValueError("embedding provider returned a non finite value")
 
 
