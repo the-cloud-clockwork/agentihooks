@@ -264,6 +264,7 @@ def test_two_live_interface_hives_merge_into_one_swarm_master_row():
     }
     data = viewed(Store({}), *ports_for([ROOT, stale], readings))
     assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}]
+    assert data["hives"]["live"] == 1
     assert data["agents"] == {"total": 6, "source": "hives", "reporting": 1, "of": 1, "claude": 6, "codex": 0}
 
 
