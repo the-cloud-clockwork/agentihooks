@@ -158,7 +158,8 @@ def unregister(redis: "Redis", plan: Plan, home: Path) -> list[str]:
     state = home / create.STATE_FILE
     created = _created(state) == plan.label
     if plan.dry_run:
-        lines = [f"would delete {redis.exists(*_keys(redis, plan.hive))} registry records of {plan.hive}"]
+        held = redis.exists(*_keys(redis, plan.hive)) + _recorded(redis, plan.hive)
+        lines = [f"would delete {held} registry records of {plan.hive}"]
     else:
         lines = forget(redis, plan.hive)
         if nodes:
@@ -183,6 +184,10 @@ def _keys(redis: "Redis", hive: str) -> list[str]:
     return [registry.key(hive), *redis.scan_iter(match=f"{registry.key(hive)}:*")]
 
 
+def _recorded(redis: "Redis", hive: str) -> bool:
+    return hive_state.read(hive_state.records(redis, hive), hive) is not None
+
+
 def forget(redis: "Redis", hive: str) -> list[str]:
     keys = _keys(redis, hive)
     prefix = f"{registry.key(hive)}:swarm:"
@@ -196,7 +201,7 @@ def forget(redis: "Redis", hive: str) -> list[str]:
             pipe.hset(target, mapping=history)
         pipe.delete(*keys)
         deleted = pipe.execute()[-1]
-    if registry.show(redis, hive) is not None:
+    if _recorded(redis, hive):
         registry.forget(redis, hive)
         deleted += 1
     hive_state.indexed(redis, hive, False)

@@ -73,6 +73,7 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"%R~{ROOT}:*",
                     f"~{ROOT}:hive:m1",
                     f"~{ROOT}:hive:m1:*",
+                    f"~{ROOT}:swarm:state:hive-m1:*",
                     f"~{ROOT}:swarm:*:agents",
                     f"~{ROOT}:swarm:*:executions",
                     f"~{ROOT}:swarm:*:execution-publishing",
