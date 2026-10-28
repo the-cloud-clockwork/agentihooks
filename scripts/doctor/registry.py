@@ -227,7 +227,7 @@ def _read_binding(get, slug: str, binding: dict, known: Known, kept: dict, page:
     prior = known.marks.get(current["id"], {})
     updated = rows[found.index(current)].get("updatedAt")
     if updated and prior.get("updated_at") == updated:
-        mark, total = dict(prior), prior["observations"]
+        mark, total = prior, prior["observations"]
     else:
         mark = _freshness(get, current["id"], prior, page)
         total = get("observations", {"traceId": current["id"], "limit": 1, "page": 1})["meta"].get("totalItems") or 0

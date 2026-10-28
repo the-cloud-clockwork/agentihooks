@@ -809,11 +809,24 @@ def test_a_trace_whose_update_time_moved_is_read_again(cursors):
     assert again["remote"]["observations"] == 11 and again["remote"]["fresh_ms"] == 1793206801000
 
 
+def test_the_update_time_is_taken_from_the_binding_own_trace_not_a_newer_sibling(cursors):
+    sibling = {**_trace("tr-new", "sid-new"), "updatedAt": "2026-10-28T17:00:00.000Z"}
+    own = {**_trace("tr-own", "sid-own"), "updatedAt": "2026-10-28T17:00:00.000Z"}
+    langfuse = Langfuse([sibling, own], [{"startTime": "2026-10-28T17:00:00.000Z", "endTime": None}])
+    state = {}
+    registry.read("s", [{**AGENT, "conversation_id": "sid-own"}], langfuse, state, 15, 50)
+    langfuse.calls.clear()
+    langfuse.traces = [sibling, {**own, "updatedAt": "2026-10-28T17:00:09.000Z"}]
+    [found], _ = registry.read("s", [{**AGENT, "conversation_id": "sid-own"}], langfuse, state, 15, 50)
+    assert [p.get("traceId") for _, p in langfuse.calls] == [None, "tr-own", "tr-own"]
+    assert found["remote"]["trace"] == "tr-own"
+
+
 def test_recorded_latencies_of_a_missed_pass_fit_the_budget_when_unchanged_traces_are_not_read_again(cursors):
     fleet = _fleet(24)
     langfuse = Timed(changed={b["name"] for b in fleet[:8]})
     state = {}
     registry.read("s", fleet, langfuse, state, 15, 50)
-    langfuse.scan, langfuse.seconds = 1, 0.056
-    found, failures = registry.read("s", fleet, langfuse, state, 0.6, 50)
+    langfuse.scan, langfuse.seconds = 1, 0.1
+    found, failures = registry.read("s", fleet, langfuse, state, 15 * 0.1 / 1.4, 50)
     assert failures == [] and all(b["read"] for b in found)
