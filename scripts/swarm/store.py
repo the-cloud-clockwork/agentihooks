@@ -475,7 +475,15 @@ class RedisStore:
                         reason = "finished" if row["state"] == "finished" else "retired"
                         if self.handoff(slug, row["task"]):
                             reason = "handed off"
-                        pipe.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
+                        placement = {
+                            field: getattr(agent, field)
+                            for agent in executions
+                            for field in ("execution_id", "hive", "runtime_backend")
+                        }
+                        pipe.rpush(
+                            self.key(slug, "history"),
+                            json.dumps({**row, **placement, "ended_at": ended, "reason": reason}),
+                        )
                     for agent in executions:
                         if agent.state != "finished":
                             pipe.hset(
