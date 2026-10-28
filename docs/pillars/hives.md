@@ -233,7 +233,7 @@ by Redis with `NOPERM`. So every piece of state a member process writes lives be
 | Launch order receipt and acknowledgement | `<root>:hive:<id>:...` | The controller, which records the execution as working. |
 | Inbox items, sequence counters, delivery owners, seen marks and the master pool | `<root>:hive:<id>:inbox:...` | The member's own agents; the controller routes sends to the member's agents there and relays mail out of it. |
 | Session readings: heartbeat, prompt, session model, progress, wait, waited, woke, wait history and stop blocks | `<root>:hive:<id>:swarm:...` | The controller's idle and wait checks, and the progress and stop gates, for agents placed on that member. |
-| Sessions report, including the executions it runs | `<root>:hive:<id>:sessions` | The controller's launch slot refresh, and every launch reservation's account count; see [Sessions reports and the account cap](#sessions-reports-and-the-account-cap). |
+| Sessions report, including the executions it runs | `<root>:hive:<id>:sessions` | The controller's launch slot refresh, and every launch reservation's account count; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
 
 ### Which keys a process uses
 
@@ -316,14 +316,15 @@ member executions from what each member reports:
 
 `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` sets the tick, and with it the refresh lifetime.
 
-### Sessions reports and the account cap
+### Sessions report and the account cap
 
 Every launch that takes an account slot reserves it against the account's cap in one Redis script. The script
 counts the account's sessions as:
 
 1. the sessions every live hive reports for the account in its sessions report, `<root>:hive:<id>:sessions`, where
    live means a heartbeat no older than ninety seconds;
-2. plus every launch slot row for the account that is not exited and whose execution no hive report lists.
+2. plus every launch slot row for the account that is not exited and whose execution no hive report lists;
+3. minus every exited launch slot row whose execution a hive report still lists.
 
 When the count reaches the cap the launch is not started, and the launch reports
 
@@ -353,8 +354,9 @@ redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" PTTL agentihooks:hive:lab-vm:session
 # up to 90000 while the hive is live
 ```
 
-The ledger monitor and the Hives panel read the report without checking the heartbeat, so they show a dead hive's
-counts for up to ninety seconds after its last heartbeat.
+The ledger monitor reads the report only for live hives. The Hives panel reads it for every hive seen in the last 24
+hours whether or not the hive is live, so it shows a dead hive's counts for up to ninety seconds after its last
+heartbeat.
 
 ### Checking a member's scope
 
@@ -400,8 +402,8 @@ the member's own keys.
 | The controller shows a member agent idle though it works | The agent's execution record names a hive with no member record, so the controller reads its readings from the controller keys. | Check `agentihooks hive show <id>` lists the hive and that it was added with `hive add`. |
 | A hive-run dispatcher or lane agent never sees mail sent to its seat while the seat was empty | The item waits in the controller keys until the next tick's exit sweep moves it. | Wait one tick, then run `agentihooks msg inbox` as the occupant on its hive. Mail to a master seat does not move. |
 | A slot stays taken after a member lost an agent | The member still reports the execution. | The row lapses within two ticks once the execution leaves the member's sessions report. |
-| An account runs more live sessions than its cap | A live hive's sessions report is missing: `redis-cli GET <root>:hive:<id>:sessions` returns nothing while `agentihooks hive list` shows the hive live. | Upgrade the hive to a release whose headroom heartbeat extends the report, then restart its hive service; see [Sessions reports and the account cap](#sessions-reports-and-the-account-cap). |
-| Launches report `account reservation is full` though the account runs fewer sessions | A hive's beat is stalled and its last sessions report still counts. | The count corrects on the hive's next beat, or ninety seconds after its heartbeat stops. |
+| An account runs more live sessions than its cap | A live hive's sessions report is missing: `redis-cli GET <root>:hive:<id>:sessions` returns nothing while `agentihooks hive list` shows the hive live. | Upgrade the hive to a release whose headroom heartbeat extends the report, then restart its hive service; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
+| Launches report `account reservation is full` though the account runs fewer sessions | A hive's beat is stalled and its last sessions report still counts. | The count corrects on the hive's next beat, or ninety seconds after both its beat and its headroom publisher stop. |
 
 ## Settings
 
@@ -803,7 +805,7 @@ newer hive. Deploy the controller first, then the hives.
 
 | Clock | Value | Effect |
 |---|---|---|
-| Hive heartbeat | every 15 seconds | Quota and reports expire after 45 seconds without a beat. The sessions report lives as long as the hive reads live; see [Sessions reports and the account cap](#sessions-reports-and-the-account-cap). |
+| Hive heartbeat | every 15 seconds | Quota and the other reports expire after 45 seconds without a beat. The sessions report lives as long as the hive reads live; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
 | Headroom | every 10 seconds and every beat | A reading older than 30 seconds counts as missing and the hive's room reads 0; see [Headroom](#headroom). |
 | Live window | 90 seconds | A hive past it is stale and gets no new launches. |
 | Minute tick | 60 seconds (`AGENTIHOOKS_CONTROLLER_TICK_SECONDS`) | Each tick checks the master's hive. |
