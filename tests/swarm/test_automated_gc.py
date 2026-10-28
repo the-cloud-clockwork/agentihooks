@@ -8,7 +8,7 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore
 
 SLUG = "proof-323133-t1701-2"
-NAME = "master@323133-100"
+NAME = "master@323133-0100"
 SEAT = f"master@{SLUG}"
 START = 1000
 LIMIT = 30 * 60 * 1000
@@ -33,6 +33,7 @@ def world():
     runtime = Mock()
     runtime.observe.return_value = SimpleNamespace(state="idle", typed=False, prompt_title="", provider_error="")
     runtime.retire.return_value = True
+    runtime.nudge.return_value = None
     ledger = Mock()
     return store, inbox, agent, runtime, ledger
 
@@ -181,7 +182,7 @@ def test_real_automated_launch_persists_swarm_and_seat(tmp_path, lane, seat):
 
 
 def test_stopped_proof_swarm_still_collects_its_automated_master(world, monkeypatch):
-    from scripts.swarm import tick
+    from scripts.swarm import lifetime, tick
 
     store, inbox, agent, runtime, ledger = world
     config = SimpleNamespace(state="stopped")
@@ -189,15 +190,22 @@ def test_stopped_proof_swarm_still_collects_its_automated_master(world, monkeypa
     monkeypatch.setattr(tick, "_woken", lambda *_: False)
     monkeypatch.setattr(tick, "_close_space", lambda *_: [])
     monkeypatch.setattr(tick, "_bin_closed", lambda *_: [])
-    monkeypatch.setattr(tick.lifetime, "sleeping", lambda *_: False)
-    ledger.state.return_value = {"tasks": []}
+    ledger.state = lambda _: {"tasks": []}
+
+    def receive(actual, text):
+        assert actual == agent
+        assert question(world).id in text
+        inbox.reply(question(world).id, agent.name, "nothing to do")
+
+    runtime.nudge.side_effect = receive
     for attempt in range(1, 4):
         at = START + attempt * LIMIT
         tick.tick(SLUG, store, ledger, runtime, at)
-        inbox.reply(question(world).id, agent.name, "nothing to do")
         tick.tick(SLUG, store, ledger, runtime, at + 1)
     runtime.retire.assert_called_once_with(agent)
+    assert runtime.nudge.call_count == 3
     assert store.agents(SLUG) == []
+    assert lifetime.sleeping(SLUG, store, {})
     ledger.notify.assert_called_once()
 
 
@@ -253,3 +261,29 @@ def test_an_idle_reply_does_not_retire_a_now_busy_pane(world):
             runtime.observe.return_value.state = "working"
         sweep(world, at + 1)
     runtime.retire.assert_not_called()
+
+
+def test_failed_probe_delivery_retries_the_same_question(world):
+    _, inbox, agent, runtime, _ = world
+    runtime.nudge.return_value = "transport unavailable"
+    sweep(world, START + LIMIT)
+    request = question(world)
+    runtime.nudge.return_value = None
+    sweep(world, START + LIMIT + 1)
+    assert runtime.nudge.call_count == 2
+    assert question(world).id == request.id
+    assert len(inbox.inbox(agent.name)) == 1
+    sweep(world, START + LIMIT + 2)
+    assert runtime.nudge.call_count == 2
+
+
+def test_collected_master_sleeps_until_new_task_or_operator_inbox(world):
+    from scripts.swarm import lifetime, tick
+
+    store, inbox, agent, _, ledger = world
+    tick._collected(SLUG, store, ledger, {}, agent)
+    assert lifetime.sleeping(SLUG, store, {})
+    assert not lifetime.sleeping(SLUG, store, {"new-task": {}})
+    store.redis.set(store.key(SLUG, "master-retired-tasks"), "[]")
+    inbox.send("operator", agent.seat, "New work")
+    assert not lifetime.sleeping(SLUG, store, {})

@@ -62,6 +62,39 @@ def _ready(store, slug, runtime, agent, now_ms):
     )
 
 
+def _deliver(inbox, runtime, agent, record):
+    from scripts.inbox.dispatch import Dispatcher
+    from scripts.swarm import capabilities
+
+    if capabilities.of_agent(agent).push_inbox or Dispatcher(inbox).owner(agent.name):
+        return True
+    return (
+        runtime.nudge(
+            agent,
+            f"Read activity question {record['request']} with agentihooks msg read, then answer it with "
+            "agentihooks msg reply. Reply exactly nothing to do only when you have no work.",
+        )
+        is None
+    )
+
+
+def _probe(inbox, store, slug, runtime, agent, record, now_ms):
+    if not record["request"]:
+        beat = idle.heartbeat(store.redis, slug, agent.name) or {}
+        active = max(agent.started_at, beat.get("at", 0), idle.last_prompt(store.redis, slug, agent.name) or 0)
+        if now_ms - max(active, record["last_probe"]) < LIMIT_MS:
+            return []
+        item = inbox.send("swarm", agent.name, TEXT, ref="automated-activity", task=agent.task)
+        record.update(request=item.id, last_probe=now_ms, delivered=False)
+        _save(store, slug, agent, record)
+    if record.get("delivered"):
+        return []
+    if _deliver(inbox, runtime, agent, record):
+        record["delivered"] = True
+        _save(store, slug, agent, record)
+    return [f"asked automated agent {agent.name} what it is doing"]
+
+
 def run(slug: str, store, ledger, runtime, now_ms: int, release=None) -> list[str]:
     inbox, actions = InboxStore(store.redis), []
     for agent in store.agents(slug):
@@ -83,12 +116,5 @@ def run(slug: str, store, ledger, runtime, now_ms: int, release=None) -> list[st
                     release(agent)
                 actions.append(f"collected automated agent {agent.name} after three idle answers")
             continue
-        beat = idle.heartbeat(store.redis, slug, agent.name) or {}
-        active = max(agent.started_at, beat.get("at", 0), idle.last_prompt(store.redis, slug, agent.name) or 0)
-        if record["request"] or now_ms - max(active, record["last_probe"]) < LIMIT_MS:
-            continue
-        item = inbox.send("swarm", agent.name, TEXT, ref="automated-activity", task=agent.task)
-        record.update(request=item.id, last_probe=now_ms)
-        _save(store, slug, agent, record)
-        actions.append(f"asked automated agent {agent.name} what it is doing")
+        actions += _probe(inbox, store, slug, runtime, agent, record, now_ms)
     return actions
