@@ -1,7 +1,10 @@
 import json
+import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts import ci_minutes
 
@@ -149,6 +152,113 @@ def test_the_job_table_keeps_the_top_twenty_five():
     lines = ci_minutes.render(measured(26)).splitlines()
     assert f"| queue | {TEST} | j24 | 1.0 | 0.5 |" in lines
     assert f"| queue | {TEST} | j25 | 1.0 | 0.5 |" not in lines
+
+
+WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci-minutes.yml"
+
+
+def listed(id, status="completed", created="2026-10-24T10:00:00Z"):
+    return {**run(id, "pull_request"), "status": status, "created_at": created}
+
+
+def workflow_steps():
+    return yaml.safe_load(WORKFLOW.read_text())["jobs"]["measure"]["steps"]
+
+
+def test_the_runner_minutes_token_comes_from_an_app_the_swarm_does_not_spend():
+    token = next(step for step in workflow_steps() if step.get("id") == "app-token")
+    assert token["with"]["client-id"] == "${{ secrets.TCC_CI_CLIENT_ID }}"
+    assert token["with"]["private-key"] == "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}"
+    assert "AGENTICORE" not in WORKFLOW.read_text()
+
+
+def test_the_workflow_carries_the_jobs_cache_between_dispatches():
+    steps = workflow_steps()
+    restore = next(step for step in steps if step.get("uses", "").startswith("actions/cache/restore"))
+    save = next(step for step in steps if step.get("uses", "").startswith("actions/cache/save"))
+    assert restore["with"]["path"] == save["with"]["path"] == ci_minutes.CACHE.name
+    assert save["if"] == "${{ always() }}"
+    measure = next(step for step in steps if "python -m scripts.ci_minutes" in step.get("run", ""))
+    assert f"--cache {ci_minutes.CACHE.name}" in measure["run"]
+
+
+def test_completed_runs_already_cached_are_never_read_again(monkeypatch):
+    read = []
+
+    def rows(path, key):
+        assert key == "jobs"
+        read.append(path)
+        return [job(int(path.split("/")[-2]), "unit", 60)]
+
+    monkeypatch.setattr(ci_minutes, "rows", rows)
+    cache = {"1": {"created_at": "2026-10-24T10:00:00Z", "jobs": [job(1, "cached", 120)]}}
+    runs = [listed(1), listed(2), listed(3, status="in_progress")]
+    jobs = ci_minutes.read_jobs("o/r", runs, cache)
+    assert sorted(read) == [
+        "repos/o/r/actions/runs/2/jobs?filter=all&per_page=100",
+        "repos/o/r/actions/runs/3/jobs?filter=all&per_page=100",
+    ]
+    assert sorted(job["name"] for job in jobs) == ["cached", "unit", "unit"]
+    assert sorted(cache) == ["1", "2"]
+    assert cache["2"] == {"created_at": "2026-10-24T10:00:00Z", "jobs": [job(2, "unit", 60)]}
+
+
+def test_a_second_pass_over_the_same_completed_window_reads_no_jobs(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ci_minutes, "rows", lambda path, key: calls.append(path) or [job(7, "unit", 60)])
+    cache = {}
+    first = ci_minutes.read_jobs("o/r", [listed(7)], cache)
+    second = ci_minutes.read_jobs("o/r", [listed(7)], cache)
+    assert len(calls) == 1
+    assert first == second == [job(7, "unit", 60)]
+
+
+def test_the_cache_round_trips_and_drops_runs_older_than_the_kept_span(tmp_path):
+    path = tmp_path / "cache.json"
+    since = datetime(2026, 10, 24, tzinfo=UTC)
+    kept = since - ci_minutes.KEEP
+    cache = {
+        "1": {"created_at": "2026-10-23T23:00:00Z", "jobs": [job(1, "unit", 60)]},
+        "2": {"created_at": kept.strftime(ci_minutes.STAMP), "jobs": []},
+        "3": {"created_at": "2026-10-10T00:00:00Z", "jobs": []},
+    }
+    ci_minutes.save_cache(path, cache, since)
+    assert ci_minutes.load_cache(path) == {"1": cache["1"], "2": cache["2"]}
+    assert ci_minutes.load_cache(tmp_path / "missing.json") == {}
+
+
+def test_a_read_that_would_leave_less_than_the_reserve_is_refused(monkeypatch):
+    monkeypatch.setattr(ci_minutes, "remaining", lambda: ci_minutes.RESERVE + 10)
+    ci_minutes.within_budget(10)
+    with pytest.raises(SystemExit, match="11 job reads"):
+        ci_minutes.within_budget(11)
+
+
+def test_remaining_reads_the_core_limit_from_the_free_rate_limit_endpoint(monkeypatch):
+    def fake(args, **kwargs):
+        assert args == ["gh", "api", "rate_limit"]
+        assert kwargs["check"] is True
+        return subprocess.CompletedProcess(args, 0, json.dumps({"resources": {"core": {"remaining": 4321}}}), "")
+
+    monkeypatch.setattr(ci_minutes.subprocess, "run", fake)
+    assert ci_minutes.remaining() == 4321
+
+
+def test_main_reads_only_uncached_runs_and_keeps_the_cache(monkeypatch, tmp_path):
+    cache = tmp_path / "jobs.json"
+    cache.write_text(json.dumps({"1": {"created_at": "2026-10-24T10:00:00Z", "jobs": [job(1, "unit", 60)]}}))
+    monkeypatch.setattr(ci_minutes, "read_runs", lambda repo, since, until: [listed(1), listed(2)])
+    monkeypatch.setattr(ci_minutes, "merged_count", lambda repo, since, until: 1)
+    budgets = []
+    monkeypatch.setattr(ci_minutes, "within_budget", budgets.append)
+    monkeypatch.setattr(ci_minutes, "rows", lambda path, key: [job(2, "unit", 120)])
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    out = tmp_path / "out.json"
+    argv = ["--repo", "o/r", "--until", "2026-10-24T12:00:00Z", "--out", str(out), "--cache", str(cache)]
+    assert ci_minutes.main(argv) == 0
+    assert budgets == [1]
+    assert json.loads(out.read_text())["anton_minutes"] == 3.0
+    assert sorted(json.loads(cache.read_text())) == ["1", "2"]
 
 
 def test_runs_are_read_one_hour_at_a_time_and_kept_once(monkeypatch):
