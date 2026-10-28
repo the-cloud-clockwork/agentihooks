@@ -200,7 +200,11 @@ def update(client, hive_id: str, pairs: list[str], keep: bool = False) -> dict:
 
     def write(stored: dict | None) -> dict:
         stored = stored or {}
-        fields = {f: v for f, v in parsed.items() if not (keep and f in KEPT and f in stored)}
+        fields = {
+            f: v
+            for f, v in parsed.items()
+            if not (keep and f in stored and (f in KEPT or (f == "name" and stored[f] != hive_id)))
+        }
         _check(_settle(hive_id, {**stored, **fields}))
         return {**_seeded(hive_id), **stored, **fields}
 
