@@ -40,7 +40,7 @@ def test_a_second_identical_run_asks_the_classifier_nothing(filters_dir, stub):
     second = conditions.pre_effect(_write_call("waiting on task flt1"))
     assert len(fake.calls) == 1
     assert second.contexts == first.contexts
-    assert second.contexts == ['[condition pre-write-ids.filter.yaml] filter flagged:\n- "task flt1": names a task id']
+    assert second.contexts == ['[condition pre-write-ids.filter.yaml]\nfilter flagged:\n- "task flt1": names a task id']
 
 
 def test_a_cached_no_answer_lets_the_repeat_through_without_asking(filters_dir, stub):
@@ -62,7 +62,7 @@ def test_a_repeat_asks_only_the_uncached_findings(filters_dir, stub):
     assert list(fake.calls[1]["questions"]) == ["finding_0"]
     assert _findings(fake.calls[1]) == ["Finding: task flt2"]
     assert second.contexts == [
-        "[condition pre-write-ids.filter.yaml] filter flagged:\n"
+        "[condition pre-write-ids.filter.yaml]\nfilter flagged:\n"
         '- "task flt1": names a task id\n- "task flt2": names a task id'
     ]
 
@@ -108,7 +108,7 @@ def test_an_unavailable_classifier_caches_nothing(filters_dir, stub):
     fake = stub(yes=True)
     effect = conditions.pre_effect(_write_call("waiting on task flt1"))
     assert len(fake.calls) == 1
-    assert effect.contexts == ['[condition pre-write-ids.filter.yaml] filter flagged:\n- "task flt1": names a task id']
+    assert effect.contexts == ['[condition pre-write-ids.filter.yaml]\nfilter flagged:\n- "task flt1": names a task id']
 
 
 def test_cached_yes_answers_still_flag_while_the_classifier_is_down(filters_dir, stub):
@@ -118,4 +118,4 @@ def test_cached_yes_answers_still_flag_while_the_classifier_is_down(filters_dir,
     fake = stub(error=ClassifierError("no decision backend answered"))
     effect = conditions.pre_effect(_write_call("task flt1 then task flt2"))
     assert len(fake.calls) == 1
-    assert effect.contexts == ['[condition pre-write-ids.filter.yaml] filter flagged:\n- "task flt1": names a task id']
+    assert effect.contexts == ['[condition pre-write-ids.filter.yaml]\nfilter flagged:\n- "task flt1": names a task id']
