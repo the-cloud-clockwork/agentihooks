@@ -174,6 +174,16 @@ class RedisStore:
     def key(self, slug, *parts):
         return ":".join((PREFIX, slug, *parts))
 
+    def put_gate_lift(self, slug: str, scope: str, subject: str, gate: str, record: dict) -> None:
+        self.redis.hset(self.key(slug, "gate-lifts", scope, subject), gate, json.dumps(record))
+
+    def gate_lift(self, slug: str, scope: str, subject: str, gate: str) -> dict:
+        raw = self.redis.hget(self.key(slug, "gate-lifts", scope, subject), gate)
+        return json.loads(raw) if raw else {}
+
+    def drop_task_lifts(self, slug: str, task: str) -> None:
+        self.redis.delete(self.key(slug, "gate-lifts", "tasks", task))
+
     @property
     def operation_journal(self) -> "OperationJournal":
         from scripts.swarm_v2.runtime.operations import OperationJournal

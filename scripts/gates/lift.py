@@ -38,6 +38,48 @@ def lifted(slug, session_id, gate, home=None, now=None):
     return _fresh(lift_path(slug, session_id, gate, home), now)
 
 
+def _shared(home):
+    import redis
+
+    from scripts.swarm.store import SwarmError, connect
+
+    try:
+        return connect()
+    except (redis.RedisError, SwarmError):
+        if home is None:
+            raise
+        return None
+
+
+def _load(slug, scope, subject, gate, home):
+    import redis
+
+    from scripts.swarm.store import SwarmError
+
+    try:
+        store = _shared(home)
+        if store is not None:
+            return store.gate_lift(slug, scope, subject, gate)
+    except (redis.RedisError, SwarmError, ValueError):
+        return {}
+    path = (
+        agent_lift_path(slug, subject, gate, home) if scope == "agents" else task_lift_path(slug, subject, gate, home)
+    )
+    return _record(path)
+
+
+def _save(slug, scope, subject, gate, record, home):
+    store = _shared(home)
+    if store is not None:
+        store.put_gate_lift(slug, scope, subject, gate, record)
+        return
+    path = (
+        agent_lift_path(slug, subject, gate, home) if scope == "agents" else task_lift_path(slug, subject, gate, home)
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record))
+
+
 def agent_lift_path(slug, agent, gate, home=None):
     return log.gates_dir(slug, home) / "lifts" / "agents" / safe_name(agent) / safe_name(gate)
 
@@ -45,7 +87,7 @@ def agent_lift_path(slug, agent, gate, home=None):
 def agent_lifted(slug, agent, gate, home=None, now=None):
     if not (slug and agent):
         return False
-    return _fresh(agent_lift_path(slug, agent, gate, home), now)
+    return _alive(_load(slug, "agents", agent, gate, home), now)
 
 
 def task_lifts_dir(slug, task, home=None):
@@ -59,7 +101,7 @@ def task_lift_path(slug, task, gate, home=None):
 def task_lifted(slug, task, gate, home=None, now=None, command=""):
     if not (slug and task):
         return False
-    record = _record(task_lift_path(slug, task, gate, home))
+    record = _load(slug, "tasks", task, gate, home)
     if not record.get("url"):
         return _alive(record, now)
     from scripts.gates.identity import simple_commands
@@ -75,10 +117,13 @@ def task_lifted(slug, task, gate, home=None, now=None, command=""):
 
 
 def head_lifted(slug, task, gate, home=None):
-    return bool(_record(task_lift_path(slug, task, gate, home)).get("url")) and task_lifted(slug, task, gate, home)
+    return bool(_load(slug, "tasks", task, gate, home).get("url")) and task_lifted(slug, task, gate, home)
 
 
 def drop_task(slug, task, home=None):
+    store = _shared(home)
+    if store is not None:
+        store.drop_task_lifts(slug, task)
     for path in task_lifts_dir(slug, task, home).glob("*"):
         path.unlink()
 
@@ -91,13 +136,9 @@ def held(slug, agent, task, gate, home=None, command=""):
 
 def lift_agent(who, gate, home=None, now=None, pull=None):
     at = time.time() if now is None else now
-    path = agent_lift_path(who.swarm, who.name, gate, home)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"at": at}))
+    _save(who.swarm, "agents", who.name, gate, {"at": at}, home)
     if who.swarm and who.task and gate not in SERVER_GATES:
-        path = task_lift_path(who.swarm, who.task, gate, home)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"at": at, **(pull or {})}))
+        _save(who.swarm, "tasks", who.task, gate, {"at": at, **(pull or {})}, home)
     reason = HEAD_REASON if pull and gate not in SERVER_GATES else LIFT_REASON
     log.append(who.swarm, log.Row.of(gate, "lift", who, reason=reason), home)
 

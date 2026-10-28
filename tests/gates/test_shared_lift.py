@@ -86,3 +86,34 @@ def test_agent_lift_without_task_reaches_hive_and_keeps_time_limit(hosts):
         assert lift.agent_lifted(SLUG, AGENT, "talk", hive_home, now=101)
         assert not lift.agent_lifted(SLUG, "engineer@2-1", "talk", hive_home, now=101)
         assert not lift.agent_lifted(SLUG, AGENT, "talk", hive_home, now=100 + lift.LIFT_SECONDS)
+
+
+def test_shared_lifts_do_not_write_local_records_and_scope_gate_and_swarm(hosts):
+    master, hive, master_home, hive_home = hosts
+    with patch("scripts.swarm.store.connect", return_value=master):
+        lift.lift_agent(entry.Who(name=AGENT, swarm=SLUG, task=TASK), "subagents", master_home, now=100)
+    assert not lift.agent_lift_path(SLUG, AGENT, "subagents", master_home).exists()
+    assert not lift.task_lift_path(SLUG, TASK, "subagents", master_home).exists()
+    with patch("scripts.swarm.store.connect", return_value=hive):
+        assert lift.task_lifted(SLUG, TASK, "subagents", hive_home, now=101)
+        assert not lift.task_lifted(SLUG, TASK, "watch", hive_home, now=101)
+        assert not lift.task_lifted("other-swarm", TASK, "subagents", hive_home, now=101)
+        assert not lift.task_lifted(SLUG, TASK, "subagents", hive_home, now=100 + lift.LIFT_SECONDS)
+
+
+def test_production_lift_refuses_unavailable_shared_storage(hosts):
+    from scripts.swarm.store import Unreachable
+
+    with patch("scripts.swarm.store.connect", side_effect=Unreachable("offline")):
+        with pytest.raises(Unreachable, match="offline"):
+            lift.lift_agent(entry.Who(name=AGENT, swarm=SLUG, task=TASK), "subagents")
+        assert not lift.held(SLUG, AGENT, TASK, "subagents")
+
+
+def test_shared_revocation_does_not_fall_back_to_a_stale_local_lift(hosts):
+    master, hive, master_home, hive_home = hosts
+    path = lift.task_lift_path(SLUG, TASK, "subagents", hive_home)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"at": 100}))
+    with patch("scripts.swarm.store.connect", return_value=hive):
+        assert not lift.task_lifted(SLUG, TASK, "subagents", hive_home, now=101)
