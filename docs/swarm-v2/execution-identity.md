@@ -16,7 +16,7 @@ The agents hash remains a projection with the preceding record shape. New reader
 
 ## Parallel launches in one process
 
-The swarm tick launches every engineer and CI seat of a pass at once, one thread per launch. Each launch admits its execution through `RedisStore.start_execution`, then binds its pane and updates its record. Each of these writes watches the swarm's `executions` hash and retries when another writer changes it first. A write gives up after five watched attempts (`WRITE_ATTEMPTS`).
+The swarm tick launches the seats of a pass in batches sized by the runtime's launch room, one thread per launch in a batch. Each launch admits its execution through `RedisStore.start_execution`, then binds its pane and updates its record. Each of these writes watches the swarm's `executions` hash and retries when another writer changes it first. A write gives up after five watched attempts (`WRITE_ATTEMPTS`).
 
 Without the lock, the threads of one batch raced each other on the same hash. In a batch of several launches, a launch could lose all five attempts to its siblings. Its spawn then failed, the tick reopened the task when it still held it, and the Doctor reported a `failed-spawn/<task>` finding.
 
