@@ -1193,6 +1193,7 @@ def test_a_wait_that_never_wakes_returns_within_its_bound_and_beats_again(monkey
 
     import fakeredis
 
+    from scripts.events.redis_state import RedisStateStore
     from scripts.scheduler import process_timer
 
     silent = fakeredis.FakeRedis(decode_responses=True)
@@ -1201,11 +1202,11 @@ def test_a_wait_that_never_wakes_returns_within_its_bound_and_beats_again(monkey
     def monotonic():
         return clock[0]
 
-    def never_wakes(key, timeout):
+    def never_wakes(timeout):
         assert 0 < timeout <= process_timer.RECHECK_S
         waits.append(timeout)
         clock[0] += timeout
-        return None
+        return False
 
     def beat(redis, hive):
         beats.append(monotonic())
@@ -1217,8 +1218,9 @@ def test_a_wait_that_never_wakes_returns_within_its_bound_and_beats_again(monkey
 
     monkeypatch.setattr(daemon, "time", SimpleNamespace(monotonic=monotonic, time=time.time, sleep=Mock()))
     monkeypatch.setattr(daemon, "publish_headroom", Mock())
+    monkeypatch.setattr(daemon, "timer_state", lambda waiter: RedisStateStore(waiter, "scheduler"))
     monkeypatch.setattr(process_timer, "time", SimpleNamespace(monotonic=monotonic))
-    monkeypatch.setattr(silent, "blpop", never_wakes)
+    monkeypatch.setattr(process_timer, "Event", lambda: SimpleNamespace(is_set=lambda: False, wait=never_wakes))
     monkeypatch.setattr(process_timer, "RECHECK_S", 0.05)
     monkeypatch.setattr(process_timer.service, "ensure_running", scheduler_down)
     connects = []
