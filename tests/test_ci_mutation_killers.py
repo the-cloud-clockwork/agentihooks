@@ -53,7 +53,11 @@ def test_the_memory_folder_is_created_with_its_parents_and_reused(tmp_path):
         memory = killers.KillMemory(folder)
         memory.mutant = f"scripts.a.x_f__mutmut_{number}"
         memory.pytest_runtest_logreport(_report(f"tests/test_a.py::t{number}"))
-    assert (folder / _digest("scripts.a.x_f")).read_text() == "tests/test_a.py::t2"
+    assert (folder / _digest("scripts.a.x_f")).read_text().splitlines() == [
+        "tests/test_a.py::t2",
+        "tests/test_a.py::t1",
+    ]
+    assert memory.killer("scripts.a.x_f__mutmut_3") == "tests/test_a.py::t2"
 
 
 def test_a_function_is_named_by_the_text_before_the_first_mutant_marker(tmp_path):
