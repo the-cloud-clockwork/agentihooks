@@ -68,7 +68,7 @@ def test_the_recorded_roll_raises_one_finding_for_the_oracle_pool():
     assert [len(found) for found in raised] == [0, 0, 1, 1, 0]
     first, second = raised[2][0], raised[3][0]
     assert first.measure == 10
-    assert first.summary == "no hive in pool 8cpu-16800mb is ready for 10 minutes, 20 launches refused meanwhile"
+    assert first.summary == "no hive in pool 8cpu-16800mb is ready for 10 minutes, 20 tasks refused a launch meanwhile"
     assert first.threshold == "every hive in a pool not ready for ten minutes"
     assert first.evidence == (
         "pool 8cpu-16800mb",
@@ -77,7 +77,7 @@ def test_the_recorded_roll_raises_one_finding_for_the_oracle_pool():
         "hive be7b18c10eb79574",
     )
     assert second.measure == 20
-    assert second.summary == "no hive in pool 8cpu-16800mb is ready for 20 minutes, 40 launches refused meanwhile"
+    assert second.summary == "no hive in pool 8cpu-16800mb is ready for 20 minutes, 40 tasks refused a launch meanwhile"
     assert second.evidence == first.evidence
 
 
@@ -160,7 +160,7 @@ def test_the_hive_pool_reader_keeps_its_state_and_counts_room_refusals_in_every_
     assert detect.readers(store, None, "sw", at, environ={})["hive pool"]() == []
     [found] = detect.readers(store, None, "sw", at + 10 * MINUTE, environ={})["hive pool"]()
     assert found.id == "hive-pool-down/8cpu-16800mb"
-    assert found.summary.endswith("2 launches refused meanwhile")
+    assert found.summary.endswith("2 tasks refused a launch meanwhile")
     assert json.loads(redis.get("t:sw:doctor-hive-pools"))["down"]["8cpu-16800mb"]["refused"] == ["other/t2", "sw/t1"]
 
 

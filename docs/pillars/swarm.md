@@ -3248,7 +3248,7 @@ draining and has a fresh headroom reading. Each Doctor pass keeps, in the watche
 the first pass that found each pool with no ready hive and every task whose launch the tick refused for room in any
 swarm since then (a placement wait whose reason says `has room`), counted once per task however many ticks refuse it
 again. A pool down for ten minutes raises `hive-pool-down/<pool>`; its summary
-names the minutes down and the launches refused meanwhile, its evidence names the pool, the down start and its hives,
+names the minutes down and the tasks refused a launch meanwhile, its evidence names the pool, the down start and its hives,
 and its number is the minutes down. A ready hive in the pool clears it, and a pool whose hives lost their records is
 forgotten.
 

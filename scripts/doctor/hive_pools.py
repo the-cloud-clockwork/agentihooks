@@ -57,7 +57,7 @@ def findings(state: dict, now_ms: int) -> list[Finding]:
                 "hive pool down",
                 name,
                 f"no hive in pool {name} is ready for {minutes} minutes, "
-                f"{len(entry['refused'])} launches refused meanwhile",
+                f"{len(entry['refused'])} tasks refused a launch meanwhile",
                 (f"pool {name}", f"down since {entry['since']}", *(f"hive {hive_id}" for hive_id in entry["hives"])),
                 "every hive in a pool not ready for ten minutes",
                 minutes,
