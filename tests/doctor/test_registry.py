@@ -687,3 +687,46 @@ def test_an_unread_binding_keeps_its_last_known_size(cursors, read_clock):
     state = {"sizes": {"engineer@1-0001": 700, "gone": 9}}
     registry.read("s", [AGENT], Langfuse([], []), state, 0, 50)
     assert state["sizes"] == {"engineer@1-0001": 700}
+
+
+def _root_reads(langfuse):
+    return [params["traceId"] for path, params in langfuse.calls if params.get("type") == "AGENT"]
+
+
+def test_a_later_scan_reads_no_root_of_a_known_trace_and_reads_the_root_of_a_new_one(cursors):
+    langfuse = Langfuse([_trace("tr-new", "sid-new"), _trace("tr-old", "sid-old")], [])
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert _root_reads(langfuse) == ["tr-new", "tr-old"]
+    langfuse.calls.clear()
+    langfuse.traces = [_trace("tr-next", "sid-next", life="engineer@1-0001#2"), *langfuse.traces]
+    [found], failures = registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert failures == [] and _root_reads(langfuse) == ["tr-next"]
+    assert [(t["id"], t["session_id"], t["life"], t["profile"]) for t in found["traces"]] == [
+        ("tr-next", "sid-next", "engineer@1-0001#2", "engineer"),
+        ("tr-new", "sid-new", f"engineer@1-0001#{T0}", "engineer"),
+        ("tr-old", "sid-old", f"engineer@1-0001#{T0}", "engineer"),
+    ]
+    assert sorted(state["roots"]) == ["tr-new", "tr-next", "tr-old"]
+
+
+def test_a_trace_without_a_root_observation_is_read_again_at_the_next_scan(cursors):
+    langfuse = Langfuse([{"id": "tr-orphan", "sessionId": "sid"}], [])
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert _root_reads(langfuse) == ["tr-orphan", "tr-orphan"]
+    assert state["roots"] == {}
+
+
+def test_a_full_read_drops_roots_of_traces_no_longer_listed_and_a_failed_read_keeps_them(cursors, read_clock):
+    known = {"life": "x", "seat": "", "task": "", "harness": "", "profile": ""}
+    state = {"roots": {"gone": known}}
+    registry.read("s", [AGENT], Langfuse([_trace("tr-1", "sid")], []), state, 15, 50)
+    assert list(state["roots"]) == ["tr-1"]
+
+    def down(path, params):
+        raise ConnectionError("refused")
+
+    registry.read("s", [AGENT], down, state, 15, 50)
+    assert list(state["roots"]) == ["tr-1"]
