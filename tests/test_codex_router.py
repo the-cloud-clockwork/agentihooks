@@ -1000,3 +1000,68 @@ def test_login_without_a_slug_and_a_prompt_starting_with_refresh_still_go_to_cod
     rc, seen, _ = _launch(monkeypatch, tmp_path, ENV, argv, {"alpha": _quota(10.0), "beta": _quota(50.0)})
     assert rc == 0
     assert seen["cmd"][-len(argv) :] == argv
+
+
+def _expiring_jwt(exp, account_id="acct-1"):
+    return _jwt({"exp": exp, "https://api.openai.com/auth": {"chatgpt_account_id": account_id}})
+
+
+EXPIRING_MESSAGE = (
+    "AH_CX_TOKEN_{name} expires in under {hours} h; the refresh authority renews it, "
+    "else run agentihooks codex login {name}"
+)
+
+
+@pytest.mark.parametrize(
+    ("exp", "life", "refused"),
+    [
+        (NOW - 1, "", "6"),
+        (NOW + 6 * 3600 - 1, "", "6"),
+        (NOW + 6 * 3600, "", ""),
+        (NOW + 6 * 3600 - 1, "bad", "6"),
+        (NOW + 3600 - 1, "1", "1"),
+        (NOW + 3600, "1", ""),
+        (NOW + 1800 - 1, "0.5", "0.5"),
+        (float(NOW + 60), "", "6"),
+    ],
+)
+def test_a_token_that_expires_inside_the_minimum_life_is_refused_by_name(monkeypatch, exp, life, refused):
+    monkeypatch.setattr(router.time, "time", lambda: NOW)
+    environ = {"AH_CX_TOKEN_alpha": _expiring_jwt(exp), "AGENTIHOOKS_CODEX_TOKEN_MIN_LIFE_H": life}
+    expected = EXPIRING_MESSAGE.format(name="alpha", hours=refused) if refused else ""
+    assert router.refusal(_token("alpha"), environ) == expected
+    assert router.expiring(_token("alpha"), environ, NOW) is bool(refused)
+
+
+def test_a_token_without_an_expiry_claim_and_the_default_login_never_expire(monkeypatch):
+    monkeypatch.setattr(router.time, "time", lambda: NOW)
+    environ = {"AH_CX_TOKEN_alpha": OAUTH}
+    assert router.refusal(_token("alpha"), environ) == ""
+    assert router.expiring(router.CodexAccount("default"), environ, NOW) is False
+    assert router.expiring(_token("missing"), environ, NOW) is False
+
+
+def test_the_pool_drops_an_expiring_token_and_keeps_its_fresh_duplicate(monkeypatch):
+    monkeypatch.setattr(router.time, "time", lambda: NOW)
+    environ = {
+        "HOME": "/home/u",
+        "AH_CX_TOKEN_aaa": _expiring_jwt(NOW - 60),
+        "AH_CX_TOKEN_zzz": _expiring_jwt(NOW + 7 * 86400),
+    }
+    assert [account.name for account in router.CodexAccountSource().pool(environ)] == ["zzz"]
+    assert router.duplicates(router.token_accounts(environ), environ) == {"aaa": "zzz"}
+    fresh = {**environ, "AH_CX_TOKEN_aaa": _expiring_jwt(NOW + 7 * 86400 + 1)}
+    assert router.duplicates(router.token_accounts(fresh), fresh) == {"zzz": "aaa"}
+
+
+def test_an_open_route_with_only_an_expiring_token_names_it(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(router.time, "time", lambda: NOW)
+    environ = {"HOME": "/home/u", "AH_CX_TOKEN_alpha": _expiring_jwt(NOW - 60)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, environ, [], {"default": _quota(97.0), "alpha": _quota(1.0)})
+    error = (
+        "no signed in Codex account has a fresh reading and a free session under its quota band; "
+        + EXPIRING_MESSAGE.format(name="alpha", hours="6")
+    )
+    assert (rc, seen) == (3, {})
+    assert report.read_text() == f"status=failed\nerror={error}\n"
+    assert capsys.readouterr().err == f"agentihooks codex: {error}\n"
