@@ -78,7 +78,7 @@ def test_load_reads_through_the_connection_stream_when_it_has_one():
 
 
 def test_a_cold_ledger_read_never_holds_every_stored_row_at_once(tmp_path, monkeypatch):
-    from tests.swarm_ledger.test_task_list_memory import TASKS, document
+    from tests.swarm_ledger.test_task_list_memory import document
 
     path = tmp_path / "ledger.sqlite3"
     doc = document()
@@ -100,4 +100,4 @@ def test_a_cold_ledger_read_never_holds_every_stored_row_at_once(tmp_path, monke
     assert peak < 3 * held, (peak, held)
     with sqlite3.connect(path) as connection:
         assert state == assemble(read_rows(connection, SLUG))
-    assert len(state["tasks"]) == TASKS
+    assert len(state["tasks"]) == 2000
