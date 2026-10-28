@@ -63,7 +63,7 @@ def test_writes_leave_the_previous_cached_state_unchanged(tmp_path, monkeypatch,
     assert previous.state == before
 
 
-def test_atomic_refusal_restores_stamps_after_an_earlier_operation_replaced_one(tmp_path):
+def test_atomic_refusal_restores_stamps_after_an_earlier_operation_wrote_one(tmp_path):
     repo = store(tmp_path)
     repo.apply_ops("ledger", ops=[CLAIM])
     with repo.connect() as connection:
