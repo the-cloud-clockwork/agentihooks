@@ -445,7 +445,7 @@ def _pulls_world(monkeypatch, tmp_path, numbers):
         "checks": {n: "SUCCESS" for n in numbers},
         "calls": [],
         "cache": fakeredis.FakeRedis(decode_responses=True),
-        "on_pull": lambda: None,
+        "on_pull": lambda endpoint: None,
         "fixture": fixture,
     }
 
@@ -463,7 +463,7 @@ def _pulls_world(monkeypatch, tmp_path, numbers):
             }
             output = json.dumps({"data": data})
         elif "/pulls/" in endpoint:
-            world["on_pull"]()
+            world["on_pull"](endpoint)
             number = int(endpoint.rsplit("/", 1)[1])
             head = {**fixture["pr"]["head"], "sha": world["heads"][number]}
             output = json.dumps({**fixture["pr"], "number": number, "head": head})
@@ -540,7 +540,8 @@ def test_full_reads_of_one_pass_run_side_by_side(monkeypatch, tmp_path):
     import threading
 
     world, read_pass = _pulls_world(monkeypatch, tmp_path, [4, 5])
-    world["on_pull"] = threading.Barrier(2, timeout=5).wait
+    barrier = threading.Barrier(2, timeout=5)
+    world["on_pull"] = lambda endpoint: barrier.wait()
     assert [r["pr"]["number"] for r in read_pass()] == [4, 5]
 
 
@@ -577,3 +578,37 @@ def test_a_full_read_is_kept_for_a_day_and_the_default_bound_is_eight(monkeypatc
     world, read_pass = _pulls_world(monkeypatch, tmp_path, numbers)
     assert [r["pr"]["number"] for r in read_pass()] == numbers[:8]
     assert world["cache"].ttl(f"{ci_read.PULL}o/r:1") == 86_400
+
+
+def test_the_oldest_saved_read_is_refreshed_first(monkeypatch, tmp_path):
+    world, read_pass = _pulls_world(monkeypatch, tmp_path, [1, 2])
+    read_pass(full_reads=1)
+    read_pass(full_reads=1)
+    world["heads"][1] = "d" * 40
+    read_pass(full_reads=1)
+    world["heads"][1] = world["heads"][2] = "e" * 40
+    read_pass(full_reads=1)
+    assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/2"]
+
+
+def test_a_failed_read_keeps_the_other_reads_of_its_pass(monkeypatch, tmp_path):
+    world, read_pass = _pulls_world(monkeypatch, tmp_path, [4, 5])
+
+    def fail_five(endpoint):
+        if endpoint.endswith("/5"):
+            raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 502")
+
+    world["on_pull"] = fail_five
+    with pytest.raises(subprocess.CalledProcessError):
+        read_pass()
+    world["on_pull"] = lambda endpoint: None
+    read_pass()
+    assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/5"]
+
+
+def test_a_read_over_the_entry_cap_is_read_again_next_pass(monkeypatch, tmp_path):
+    world, read_pass = _pulls_world(monkeypatch, tmp_path, [4])
+    monkeypatch.setattr(ci_read.ci_cache, "ENTRY_BYTES", 10)
+    read_pass()
+    read_pass()
+    assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/4"]

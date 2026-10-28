@@ -193,7 +193,7 @@ def test_ci_reports_a_red_head_only_past_the_tick_red_window(monkeypatch):
     monkeypatch.setattr(
         detect.ci_read,
         "pull_requests",
-        lambda pulls, cache: [{((("o/r", 487),), store.redis): record}[(tuple(pulls), cache)]],
+        lambda pulls, cache: [record] if pulls == [("o/r", 487)] and cache is store.redis else [],
     )
     ledger = SimpleNamespace(tasks=lambda slug: [{"state": "pr", "pr_url": "https://github.com/o/r/pull/487"}])
     window = ledger_events.RED_QUIET_MS

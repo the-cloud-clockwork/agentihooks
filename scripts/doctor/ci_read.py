@@ -152,7 +152,7 @@ def _states(pulls, run):
                 f"p{i}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{ {STATE % number} }}"
             )
         data = json.loads(_gh(["api", "graphql", "-f", f"query={{ {' '.join(fields)} }}"], run))["data"]
-        states.extend(json.dumps(data[f"p{i}"], sort_keys=True) for i in range(start, start + len(fields)))
+        states.extend(json.dumps(data[f"p{i}"]) for i in range(start, start + len(fields)))
     return states
 
 
@@ -166,17 +166,16 @@ def pull_requests(
     saved = [ci_cache.read(cache, key) for key in keys]
     stale = [i for i, kept in enumerate(saved) if kept is None or kept["state"] != states[i]]
     stale = sorted(stale, key=lambda i: saved[i] is not None and saved[i]["at"])[:full_reads]
+
+    def read(i):
+        record = pull_request(*pulls[i], run=run, cache=cache, shared=False)
+        encoded = ci_cache.encode({"state": states[i], "at": time.time(), "record": record})
+        if len(encoded) <= ci_cache.ENTRY_BYTES:
+            cache.set(keys[i], encoded, ex=PULL_TTL_S)
+        return record
+
     with ThreadPoolExecutor() as pool:
-        fresh = dict(
-            zip(
-                stale,
-                pool.map(lambda i: pull_request(*pulls[i], run=run, cache=cache, shared=False), stale),
-                strict=True,
-            )
-        )
-    now = time.time()
-    for i, record in fresh.items():
-        cache.set(keys[i], ci_cache.encode({"state": states[i], "at": now, "record": record}), ex=PULL_TTL_S)
+        fresh = dict(zip(stale, pool.map(read, stale), strict=True))
     return [fresh[i] if i in fresh else saved[i]["record"] for i in range(len(pulls)) if i in fresh or saved[i]]
 
 
