@@ -974,6 +974,7 @@ def quota_master(monkeypatch, tmp_path, observed, store):
         return runtime.Placed("pane", argv[argv.index("--agent") + 1], route)
 
     monkeypatch.setattr(rt, "_launch", launch)
+    rt.quota_capacity(store.config("sw"), store.agents("sw"), AT / 1000)
     return rt, routes
 
 
