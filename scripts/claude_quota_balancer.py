@@ -793,6 +793,23 @@ def select_credential(
     )
 
 
+def select_master_credential(environ: Mapping[str, str], **options: Any) -> RouteDecision:
+    """The master takes a free seat, else the open account with the most room even when lane agents fill its cap."""
+    try:
+        return select_credential(environ, **options)
+    except RoutingError as exc:
+        timestamp = time.time() if options.get("now") is None else options["now"]
+        excluded = set(options.get("exclude", ()))
+        fable = options.get("include_fable", False)
+        open_results = [
+            result for result in exc.results if result.account not in excluded and is_routable(result, timestamp, fable)
+        ]
+        if not open_results:
+            raise
+        best = rank_results(open_results, fable)[0]
+        return RouteDecision(credential_for_slug(discover_credentials(environ), best.account), best, "master overflow")
+
+
 def _api_side(
     environ: Mapping[str, str], sessions: Mapping[str, int], excluded: set[str], now: float
 ) -> tuple[list[Slot], int]:

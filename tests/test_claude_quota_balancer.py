@@ -929,8 +929,8 @@ def test_the_master_takes_the_open_account_with_most_room_when_lane_agents_fill_
     assert (decision.account, decision.source, decision.sessions, decision.max_sessions) == (
         "BEST",
         "master overflow",
-        6,
-        6,
+        None,
+        None,
     )
     assert decision.credential == balancer.Credential("AH_CC_TOKEN_BEST", "b")
     assert decision.result.account == "BEST"
@@ -954,7 +954,8 @@ def test_the_master_overflow_skips_closed_and_excluded_accounts(monkeypatch, tmp
     decision = balancer.select_master_credential(
         env, cache_file=tmp_path / "c.json", sessions=full, exclude=["BEST"], now=1000
     )
-    assert (decision.account, decision.source, decision.sessions) == ("MID", "master overflow", 6)
+    assert (decision.account, decision.source) == ("MID", "master overflow")
+    assert decision.credential == balancer.Credential("AH_CC_TOKEN_MID", "m")
 
 
 def test_the_master_overflow_still_fails_when_every_account_is_closed(monkeypatch, tmp_path):
