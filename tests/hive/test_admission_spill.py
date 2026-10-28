@@ -50,7 +50,7 @@ def test_resource_refusal_spills_to_the_next_ranked_hive(setup, monkeypatch, in_
 
 
 def test_spill_does_not_bypass_hive_role_constraints(setup, monkeypatch):  # noqa: F811
-    write_hive(setup, id="spare", exclude=["engineer"])
+    write_hive(setup, id="spare", excluded=["engineer"])
     launcher = setup.launcher
     refused = "no hive for eng has room: remote cpu: no CPU available"
     reserve = Mock(return_value=refused)
@@ -98,6 +98,7 @@ def test_all_refused_hives_are_tried_once_and_keep_the_last_refusal(setup, monke
 
 
 def test_prompt_failure_releases_the_admission_selected_after_spill(setup, monkeypatch):  # noqa: F811
+    write_hive(setup, prefer={"engineer": 0})
     write_hive(setup, id="spare", prefer={"engineer": 1})
     launcher = setup.launcher
     reserve = launcher.reserve_room
