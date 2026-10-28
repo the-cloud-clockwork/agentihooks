@@ -221,6 +221,7 @@ def test_an_unclaimed_launch_starting_at_the_window_edge_counts_and_one_with_no_
     edge = life("engineer@a-2", started=SINCE)
     [early] = slot_census.unclaimed(record([], [bare, edge]), "root", 0)
     assert early.evidence[0] == "engineer@a-1 on task  started at 0 on the workstation"
+    assert slot_census.unclaimed(record([], [bare]), "root", 1) == []
     [late] = slot_census.unclaimed(record([], [bare, edge]), "root", SINCE)
     assert late.subject == "sw" and late.summary.endswith(": engineer@a-2")
 
