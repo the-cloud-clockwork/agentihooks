@@ -16,17 +16,18 @@ def backend(environ: Mapping[str, str] = os.environ) -> str:
     return chosen
 
 
-def open_state(bucket: str, environ: Mapping[str, str] = os.environ) -> StateStore:
-    if backend(environ) == "bus":
+def open_state(bucket: str, environ: Mapping[str, str] | None = None) -> StateStore:
+    env = os.environ if environ is None else environ
+    if backend(env) == "bus":
         from .config import BusConfig
         from .factory import open_bus
 
-        return open_bus(BusConfig.from_environ(environ)).state(bucket)
+        return open_bus(BusConfig.from_environ(env)).state(bucket)
     from scripts.swarm.store import redis_client
 
     from .redis_state import RedisStateStore
 
-    return RedisStateStore(redis_client(environ), bucket)
+    return RedisStateStore(redis_client() if environ is None else redis_client(environ), bucket)
 
 
 def unavailable(environ: Mapping[str, str] = os.environ) -> tuple[type[BaseException], ...]:

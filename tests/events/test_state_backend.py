@@ -144,6 +144,17 @@ def test_redis_state_retries_a_write_raced_on_another_key(monkeypatch):
     assert store.get("other").value == b"raced"
 
 
+def test_the_process_environment_opens_the_default_redis_client(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import store as swarm_store
+
+    client = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.delenv(state.BACKEND_ENV, raising=False)
+    monkeypatch.setattr(swarm_store, "redis_client", lambda: client)
+    assert state.open_state("work").redis is client
+
+
 def test_the_state_backend_defaults_to_redis(monkeypatch):
     import fakeredis
 
