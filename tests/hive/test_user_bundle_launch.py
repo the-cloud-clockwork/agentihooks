@@ -93,3 +93,28 @@ def test_a_seat_placed_on_another_hive_without_a_user_bundle_is_ordered_as_befor
 
     assert outcome.ok
     assert sent == ["remote"]
+
+
+def test_an_order_published_before_the_registration_is_answered_and_never_revoked(setup, tmp_path):  # noqa: F811
+    from dataclasses import replace
+    from unittest.mock import Mock
+
+    from scripts.hive.orders import Ack
+    from tests.hive.test_controller_launch import order_for, request_for
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(agent, state="working"))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("live", agent.runtime_target))
+    user = tmp_path / "user-bundle"
+    user.mkdir()
+    _register(user)
+    setup.launcher.wait = Mock(return_value="pending")
+
+    assert setup.launcher.spawn(request) == "pending"
+
+    assert setup.launcher.orders_for("task") == order
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "working"
+    assert setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id) is None
