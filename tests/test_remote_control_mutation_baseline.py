@@ -72,6 +72,34 @@ def test_mutation_children_exit_when_the_watchdog_interrupts(monkeypatch):
             child.wait()
 
 
+TIMELINE = []
+
+
+def timed(monkeypatch):
+    import scripts.ci_mutation.runner as runner
+
+    start = time.monotonic()
+    prepare = runner.prepare_workspace
+
+    def timed_prepare(*args):
+        prepare(*args)
+        TIMELINE.append(f"{time.monotonic() - start:7.1f} prepare_workspace done")
+
+    def timed_run(command, cwd, timeout, log):
+        TIMELINE.append(f"{time.monotonic() - start:7.1f} start {command[2:4]}")
+        process = subprocess.Popen(
+            command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True
+        )
+        with log.open("w") as out:
+            for line in process.stdout:
+                out.write(line)
+                TIMELINE.append(f"{time.monotonic() - start:7.1f} {line.rstrip()[:160]}")
+        return process.wait()
+
+    monkeypatch.setattr(runner, "prepare_workspace", timed_prepare)
+    monkeypatch.setattr(runner, "run_process", timed_run)
+
+
 @pytest.fixture(scope="module")
 def baseline_cache():
     return []
@@ -94,6 +122,7 @@ def baseline(baseline_cache, tmp_path_factory, monkeypatch):
         work = folder / "baseline"
         work.mkdir()
         monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+        timed(monkeypatch)
         results, error = mutate_files(ROOT, work, selected, time.monotonic() + DEADLINE, (0, 1), stats)
         baseline_cache.append((selected, stats, work, results, error))
     return baseline_cache[0]
@@ -103,6 +132,7 @@ def test_remote_control_statistics_baseline_collects_without_grading(baseline):
     _, _, work, results, error = baseline
     assert error == "", (work / "run.log").read_text()
     assert results == {SOURCE: []}
+    pytest.fail("PROFILE\n" + "\n".join(TIMELINE[-400:]))
 
 
 def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, tmp_path, monkeypatch):
@@ -112,9 +142,11 @@ def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, tmp_p
     grading = tmp_path / "grading"
     grading.mkdir()
     mutants = selected_mutant_names(SOURCE, (ROOT / SOURCE).read_text(), selected[SOURCE][0])
+    timed(monkeypatch)
     results, error = mutate_files(
         ROOT, grading, selected, time.monotonic() + DEADLINE, (0, len(mutants)), SharedStats(stats.folder, stats.head)
     )
     assert error == "", (grading / "run.log").read_text()
     assert len(results[SOURCE]) == 1, results
     assert any(row["status"] == "killed" for row in results[SOURCE]), results
+    pytest.fail("PROFILE\n" + "\n".join(TIMELINE[-400:]))
