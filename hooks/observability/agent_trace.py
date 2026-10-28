@@ -161,9 +161,9 @@ def _field(text: str) -> str:
 
 def _field_info(text: str) -> tuple[str, int]:
     from hooks import config
-    from hooks.secrets import redact
+    from hooks.observability.transcript import mask_value
 
-    text = redact(text, mode="strict")
+    text = mask_value(text)
     cap = config.LANGFUSE_FIELD_MAX_CHARS
     removed = max(0, len(text) - cap)
     return (f"{text[:cap]}…[truncated {removed} chars]" if removed else text), removed
@@ -248,9 +248,7 @@ def _persisted_result(entry: dict, result: dict) -> tuple[dict, int]:
     side = Path(str(persisted["persistedOutputPath"]))
     if side.parent.name == "tool-results":
         try:
-            from hooks.observability.transcript import mask_value
-
-            return {**result, "content": mask_value(side.read_bytes().decode(errors="replace"))}, 0
+            return {**result, "content": side.read_bytes().decode(errors="replace")}, 0
         except OSError:
             pass
     size = persisted.get("persistedOutputSize")
