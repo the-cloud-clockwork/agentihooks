@@ -1,6 +1,5 @@
 from coverage import CoverageData
 
-
 SOURCE = """\
 def x_write__mutmut_orig(first):
     if first:
