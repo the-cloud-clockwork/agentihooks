@@ -2,6 +2,7 @@ import pytest
 
 from scripts.handoff import transfers
 from scripts.swarm import tick as tick_module
+from scripts.swarm import timing
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import skip_refused, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
@@ -29,16 +30,25 @@ class TimingOutRuntime(FakeRuntime):
 
 
 def test_a_redis_timeout_in_the_conversations_step_lets_the_pass_finish(store, monkeypatch, capsys):
-    observed, models = [], []
+    observed, models, closed, failures = [], [], [], []
     monkeypatch.setattr(transfers, "observe", lambda *args: observed.append(args[1]))
     real_models = tick_module._session_models
     monkeypatch.setattr(tick_module, "_session_models", lambda *args: models.append(args) or real_models(*args))
+    real_close = tick_module._close_space
+    monkeypatch.setattr(tick_module, "_close_space", lambda *args: closed.append(args[0]) or real_close(*args))
     runtime = TimingOutRuntime()
-    actions = tick("sw", store, tasks(("t1", "eng")), runtime, 1)
+    token = timing.ON_FAILURE.set(lambda name, exc: failures.append((name, type(exc).__name__)))
+    try:
+        with timing.tick("sw"):
+            actions = tick("sw", store, tasks(("t1", "eng")), runtime, 1)
+    finally:
+        timing.ON_FAILURE.reset(token)
     assert runtime.reads == 1
     assert [task for _, _, task in runtime.spawned] == ["t1"]
     assert observed == ["sw"]
     assert len(models) == 1
+    assert closed == ["sw"]
+    assert failures == [("scripts.swarm.tick._conversations", "TimeoutError")]
     assert "skipped scripts.swarm.tick._conversations: its Redis read timed out" in actions
     assert (
         "scripts.swarm.tick._conversations skipped, its Redis read timed out: Timeout reading from socket"

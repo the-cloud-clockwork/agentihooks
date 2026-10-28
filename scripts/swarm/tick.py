@@ -206,7 +206,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         rows = {t["id"]: t for t in doc["tasks"]}
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
         if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
-            return timing.call(_close_space, slug, config, store, runtime) + _bin_closed(slug, store, ledger, doc)
+            return skip_refused(_close_space, slug, config, store, runtime) + _bin_closed(slug, store, ledger, doc)
         config = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
     store.redis.delete(store.key(slug, SPAWN_HOLD))
@@ -291,7 +291,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     return (
         actions
         + skip_refused(_settle, slug, config, store, ledger, rows, doc)
-        + timing.call(_close_space, slug, config, store, runtime)
+        + skip_refused(_close_space, slug, config, store, runtime)
     )
 
 
