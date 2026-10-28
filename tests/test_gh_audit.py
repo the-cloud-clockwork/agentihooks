@@ -35,6 +35,11 @@ def charged(monkeypatch, tmp_path):
         (["gh", "api", "--method=GET", "repos/o/r/pulls/7"], "repos/o/r/pulls/7"),
         (["gh", "api", "graphql", "-f", "query=x"], None),
         (["gh", "api", "rate_limit"], None),
+        (["gh", "api", "/rate_limit"], None),
+        (["gh", "api", "/repos/o/r/pulls/7"], "repos/o/r/pulls/7"),
+        (["GH_TOKEN=x", "timeout", "20", "gh", "api", "repos/o/r"], "repos/o/r"),
+        (["env", "A=1", "command", "gh", "run", "list"], "gh run list"),
+        (["echo", "gh", "api", "repos/o/r"], None),
         (["gh", "run", "view", "1", "--log"], "gh run view"),
         (["gh", "workflow", "run", "x.yml"], "gh workflow run"),
         (["gh", "pr", "diff", "7"], "gh pr diff"),
@@ -52,10 +57,15 @@ def test_endpoint_names_only_core_rest_requests(argv, expected):
 def test_agent_shell_charges_each_rest_command_in_a_pipeline(charged):
     command = 'cd x && gh run view 1 --log | grep y; gh api "repos/a/b/pulls/2" 2>&1; gh pr view 2; gh api graphql'
     gh_audit.charge_command("Bash", {"command": command})
+    gh_audit.charge_command("Bash", {"command": "cd /repo\ngh api repos/a/b/commits/1\ngit commit -m 'a\ngh api x'"})
     gh_audit.charge_command("Read", {"command": "gh api repos/a/b"})
     gh_audit.charge_command("Bash", {"command": "gh api 'unclosed"})
     gh_audit.charge_command("Bash", "gh api repos/a/b")
-    assert charged() == [("agent.bash", "gh run view"), ("agent.bash", "repos/a/b/pulls/2")]
+    assert charged() == [
+        ("agent.bash", "gh run view"),
+        ("agent.bash", "repos/a/b/pulls/2"),
+        ("agent.bash", "repos/a/b/commits/1"),
+    ]
 
 
 def test_process_requests_charge_their_named_caller_or_the_process(charged, monkeypatch):

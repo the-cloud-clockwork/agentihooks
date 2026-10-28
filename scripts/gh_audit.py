@@ -3,6 +3,7 @@
 GraphQL commands are left out: they draw on a separate limit from the core one the sampler measures.
 """
 
+import re
 import shlex
 import sys
 import time
@@ -14,6 +15,8 @@ REST_GROUPS = frozenset({"cache", "release", "run", "secret", "variable", "workf
 REST_PULL = frozenset({"diff"})
 UNCHARGED = ContextVar("gh_uncharged", default=False)
 SEPARATORS = frozenset("|&;()")
+WRAPPERS = frozenset({"command", "env", "exec", "nice", "sudo", "time", "timeout"})
+PREFIX = re.compile(r"^(?:[A-Za-z_]\w*=.*|-.*|\d+[smhd]?)$")
 FREE = frozenset({"graphql", "rate_limit"})
 VALUED = frozenset(
     {"-F", "-H", "-R", "-X", "-f", "-p", "-q", "-t", "--cache", "--field", "--header", "--hostname", "--input"}
@@ -23,6 +26,8 @@ VALUED = frozenset(
 
 def endpoint(argv) -> str | None:
     words = [str(word) for word in argv]
+    while words and Path(words[0]).name != "gh" and (words[0] in WRAPPERS or PREFIX.match(words[0])):
+        words = words[1:]
     if not words or Path(words[0]).name != "gh":
         return None
     rest, skip = [], False
@@ -34,7 +39,7 @@ def endpoint(argv) -> str | None:
         return None
     group, verb = rest[0], rest[1]
     if group == "api":
-        path = verb.split("?")[0]
+        path = verb.split("?")[0].lstrip("/")
         return None if path in FREE else path
     if group in REST_GROUPS or (group == "pr" and verb in REST_PULL):
         return f"gh {group} {verb}"
@@ -77,7 +82,7 @@ def audit(event: str, args: tuple) -> None:
 
 def commands(text: str) -> list[list[str]]:
     try:
-        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lexer = shlex.shlex(text.replace("\n", ";"), posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         words = list(lexer)
     except ValueError:
