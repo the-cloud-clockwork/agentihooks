@@ -57,9 +57,10 @@ def test_a_lease_taken_over_after_expiry_fails_verification(state):
 
     held = leases.acquire(state, "probe.dispatch-lock", now=100.0)
     taken = leases.acquire(state, "probe.dispatch-lock", now=100.0 + leases.LEASE_SECONDS + 1)
-    leases.verify_lease(state, taken)
+    later = 100.0 + leases.LEASE_SECONDS + 2
+    leases.verify_lease(state, taken, now=later)
     with pytest.raises(RuntimeError, match="lost its dispatch lock"):
-        leases.verify_lease(state, held)
+        leases.verify_lease(state, held, now=later)
 
 
 def record(event, delivery_id, state):

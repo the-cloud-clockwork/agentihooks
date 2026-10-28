@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.hive import auth, cli, registry, server
 from scripts.swarm import store
 
@@ -613,7 +614,7 @@ def test_a_daemon_first_start_keys_every_scheduler_key_under_its_redis_member(
     admin, hive, redis_lib, tmp_path, monkeypatch
 ):
     from scripts.hive import daemon
-    from scripts.scheduler.core import Scheduler
+    from scripts.scheduler.core import Scheduler, bucket
     from scripts.swarm.keyspace import ROOT
 
     left = auth.mint(admin, "pod-before-recreate", PUBLIC)
@@ -629,9 +630,10 @@ def test_a_daemon_first_start_keys_every_scheduler_key_under_its_redis_member(
     started = []
 
     def beat(redis, local_id):
-        scheduler = Scheduler(redis, machine="pod")
+        scheduler = Scheduler(RedisStateStore(redis, bucket()), machine="pod")
         user = redis.connection_pool.connection_kwargs["username"]
         started.append((user, local_id, [scheduler.key(suffix) for suffix in SCHEDULER_SUFFIXES]))
+        scheduler.timer(owner="pod", payload="probe", delay=1)
         raise KeyboardInterrupt
 
     monkeypatch.setattr(daemon, "beat", beat)

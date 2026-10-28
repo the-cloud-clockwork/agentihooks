@@ -186,7 +186,7 @@ def test_service_entrypoint_runs_the_configured_redis_scheduler(monkeypatch):
     monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
 
     async def run(scheduler):
-        received.append(scheduler.redis)
+        received.append(scheduler.state.redis)
 
     monkeypatch.setattr(service, "run", run)
     monkeypatch.setattr(service, "supervise", Mock(side_effect=AssertionError("unexpected supervisor")))

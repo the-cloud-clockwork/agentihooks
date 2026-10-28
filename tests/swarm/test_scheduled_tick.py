@@ -5,6 +5,7 @@ import time
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.scheduler.service import machine_lock, runtime_dir
 from scripts.swarm import scheduled_tick
 
@@ -18,7 +19,7 @@ def _scheduler(machine="proof"):
 
     from scripts.scheduler.core import Scheduler
 
-    return Scheduler(fakeredis.FakeRedis(decode_responses=True), machine=machine)
+    return Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine=machine)
 
 
 def test_ensure_registers_one_minute_cron_with_the_tick_slot():
@@ -33,25 +34,25 @@ def test_ensure_registers_one_minute_cron_with_the_tick_slot():
     assert [(slot["signal"], slot["kind"], slot["reference"]) for slot in record["slots"]] == [
         ("timeout", "callable", "scripts.swarm.scheduled_tick:fire")
     ]
-    assert scheduler.redis.get(scheduler.key("swarm-tick")) == entry_id
-    assert scheduler.redis.hlen(scheduler.key("entries")) == 1
+    assert scheduler.read("swarm-tick") == entry_id
+    assert len(scheduler.records()) == 1
 
 
 def test_ensure_reuses_the_live_entry_and_replaces_a_cancelled_or_missing_one():
     scheduler = _scheduler()
     first = scheduled_tick.ensure(scheduler)
     assert scheduled_tick.ensure(scheduler) == first
-    assert scheduler.redis.hlen(scheduler.key("entries")) == 1
+    assert len(scheduler.records()) == 1
 
     scheduler.get(first).cancel()
     second = scheduled_tick.ensure(scheduler)
     assert second != first
     assert scheduler.get(second).state == "active"
 
-    scheduler.redis.hdel(scheduler.key("entries"), second)
+    scheduler.change(lambda document: document["entries"].pop(second))
     third = scheduled_tick.ensure(scheduler)
     assert third not in (first, second)
-    assert scheduler.redis.get(scheduler.key("swarm-tick")) == third
+    assert scheduler.read("swarm-tick") == third
 
 
 def test_a_pending_entry_counts_as_live():
@@ -64,19 +65,23 @@ def test_a_pending_entry_counts_as_live():
 def test_ensure_holds_the_registration_lock_and_scopes_keys_per_machine():
     import fakeredis
 
+    from scripts.scheduler import lease
     from scripts.scheduler.core import Scheduler
 
     redis = fakeredis.FakeRedis(decode_responses=True)
     locks = []
-    real = redis.lock
-    redis.lock = lambda name, **kwargs: locks.append((name, kwargs)) or real(name, **kwargs)
-    here, there = Scheduler(redis, machine="here"), Scheduler(redis, machine="there")
-    assert scheduled_tick.ensure(here) != scheduled_tick.ensure(there)
-    assert locks == [
-        (here.key("swarm-tick-lock"), {"timeout": 30, "blocking_timeout": 30}),
-        (there.key("swarm-tick-lock"), {"timeout": 30, "blocking_timeout": 30}),
-    ]
-    assert not redis.exists(here.key("swarm-tick-lock"))
+    real = lease.held
+    here, there = (
+        Scheduler(RedisStateStore(redis, "scheduler"), machine="here"),
+        Scheduler(RedisStateStore(redis, "scheduler"), machine="there"),
+    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            lease, "held", lambda state, name, wait_s: locks.append((name, wait_s)) or real(state, name, wait_s)
+        )
+        assert scheduled_tick.ensure(here) != scheduled_tick.ensure(there)
+    assert locks == [(here.name("swarm-tick-lock"), 30), (there.name("swarm-tick-lock"), 30)]
+    assert "lease" not in json.loads(here.state.get(here.name("swarm-tick-lock")).value)
 
 
 def test_the_scheduler_fires_the_tick_holder_every_minute(monkeypatch):
@@ -216,9 +221,9 @@ def _holding(monkeypatch):
     from scripts.scheduler.core import Scheduler
     from scripts.swarm import store, timer
 
-    here = Scheduler(_scheduler().redis)
+    here = Scheduler(RedisStateStore(_scheduler().state.redis, "scheduler"))
     monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
-    monkeypatch.setattr(store, "redis_client", lambda: here.redis)
+    monkeypatch.setattr(store, "redis_client", lambda: here.state.redis)
     return here
 
 
@@ -229,7 +234,7 @@ def test_a_clean_tick_records_the_delivering_root_and_its_finish(monkeypatch):
     )
     before = time.time()
     assert scheduled_tick.main(lambda argv, **kwargs: _Tick([0])) == 0
-    at = json.loads(here.redis.get(here.key(scheduled_tick.DELIVERED)))["at"]
+    at = json.loads(here.read(scheduled_tick.DELIVERED))["at"]
     assert before <= at <= time.time()
     assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, at + 690) == ""
     assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, at + 691) == (
@@ -273,7 +278,7 @@ def test_a_minute_skipped_for_a_running_tick_records_no_delivery(monkeypatch):
 def test_a_delivery_record_resolves_both_roots(tmp_path):
     from scripts.scheduler.core import Scheduler
 
-    here = Scheduler(_scheduler().redis)
+    here = Scheduler(RedisStateStore(_scheduler().state.redis, "scheduler"))
     (tmp_path / "real").mkdir()
     (tmp_path / "link").symlink_to(tmp_path / "real")
     scheduled_tick.record(here, tmp_path / "link", MINUTE_START)
@@ -306,8 +311,8 @@ def test_a_clean_tick_whose_delivery_cannot_be_recorded_still_exits_clean(monkey
 def test_an_unreadable_delivery_record_counts_as_undelivered(raw):
     from scripts.scheduler.core import Scheduler
 
-    here = Scheduler(_scheduler().redis)
-    here.redis.set(here.key(scheduled_tick.DELIVERED), raw)
+    here = Scheduler(RedisStateStore(_scheduler().state.redis, "scheduler"))
+    here.put(scheduled_tick.DELIVERED, raw)
     assert scheduled_tick.undelivered(here, "/installed", MINUTE_START) == (
         f"the swarm tick delivery record is unreadable: {raw}"
     )
@@ -316,7 +321,7 @@ def test_an_unreadable_delivery_record_counts_as_undelivered(raw):
 def test_the_delivery_time_reads_the_record_and_zero_without_one():
     from scripts.scheduler.core import Scheduler
 
-    here = Scheduler(_scheduler().redis)
+    here = Scheduler(RedisStateStore(_scheduler().state.redis, "scheduler"))
     assert scheduled_tick.delivered_at(here) == 0.0
     scheduled_tick.record(here, "/installed", MINUTE_START)
     assert scheduled_tick.delivered_at(here) == MINUTE_START
@@ -326,8 +331,8 @@ def test_the_delivery_time_reads_the_record_and_zero_without_one():
 def test_an_unreadable_delivery_record_has_no_delivery_time(raw):
     from scripts.scheduler.core import Scheduler
 
-    here = Scheduler(_scheduler().redis)
-    here.redis.set(here.key(scheduled_tick.DELIVERED), raw)
+    here = Scheduler(RedisStateStore(_scheduler().state.redis, "scheduler"))
+    here.put(scheduled_tick.DELIVERED, raw)
     assert scheduled_tick.delivered_at(here) == 0.0
 
 
