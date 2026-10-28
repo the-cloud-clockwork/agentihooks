@@ -3,7 +3,6 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import fakeredis
 import pytest
 
 from scripts.gates import entry, lift
@@ -19,6 +18,8 @@ URL = "https://github.com/o/r/pull/7"
 
 @pytest.fixture
 def hosts(tmp_path, monkeypatch):
+    import fakeredis
+
     server = fakeredis.FakeServer()
     master = RedisStore(fakeredis.FakeRedis(server=server, decode_responses=True))
     hive = RedisStore(fakeredis.FakeRedis(server=server, decode_responses=True))
