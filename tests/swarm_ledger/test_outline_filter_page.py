@@ -135,7 +135,8 @@ def test_remote_matches_page_until_every_match_is_listed(ledger):
     page.wait_for_function(f"() => ({count})() === 5")
     more = page.locator('#ol-sec-tasks button[data-matches="tasks"]')
     assert more.text_content() == "Show more matches · 6 left"
-    more.dblclick()
+    # Both activations run in one task, before the first page response; dblclick lets it render in between.
+    more.evaluate("button => { button.click(); button.click(); }")
     page.wait_for_function(f"() => ({count})() >= 10")
     assert reads.count({"state": "done", "q": "old task", "offset": "5", "limit": "50"}) == 1
     assert more.text_content() == "Show more matches · 1 left"
