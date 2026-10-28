@@ -516,14 +516,14 @@ def test_full_reads_per_pass_stop_at_the_bound_and_the_rest_wait_for_the_next_pa
     first = read_pass(full_reads=2)
     assert [r["pr"]["number"] for r in first] == [1, 2]
     assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/1", "repos/o/r/pulls/2"]
+    old = first[0]["pr"]["head"]["sha"]
     for number in (1, 2):
         world["heads"][number] = "c" * 40
     second = read_pass(full_reads=1)
+    assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/3"]
+    assert [(r["pr"]["number"], r["pr"]["head"]["sha"]) for r in second] == [(1, old), (2, old), (3, old)]
+    read_pass(full_reads=1)
     assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/1"]
-    assert [(r["pr"]["number"], r["pr"]["head"]["sha"]) for r in second] == [
-        (1, "c" * 40),
-        (2, first[1]["pr"]["head"]["sha"]),
-    ]
 
 
 def test_full_reads_of_one_pass_run_side_by_side(monkeypatch, tmp_path):
@@ -539,3 +539,31 @@ def test_no_open_pull_request_reads_nothing():
         pytest.fail(f"read without an open pull request: {argv}")
 
     assert ci_read.pull_requests([], run=gh, cache=None) == []
+
+
+def test_the_state_read_asks_each_pull_request_head_and_check_states_in_one_query(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    queries = []
+
+    def gh(argv, **kwargs):
+        queries.append(argv[4])
+        data = {"p0": {"pullRequest": None}, "p1": {"pullRequest": None}}
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"data": data}), "")
+
+    states = ci_read._states([("o/r", 4), ("x/y", 7)], gh)
+    assert states == ['{"pullRequest": null}', '{"pullRequest": null}']
+    state = (
+        "{ headRefOid commits(last: 1) { nodes { commit { checkSuites(first: 50) { nodes { databaseId status"
+        " conclusion checkRuns(first: 100) { totalCount nodes { databaseId status conclusion } } } } } } } }"
+    )
+    assert queries == [
+        f'query={{ p0: repository(owner: "o", name: "r") {{ pullRequest(number: 4) {state} }}'
+        f' p1: repository(owner: "x", name: "y") {{ pullRequest(number: 7) {state} }} }}'
+    ]
+
+
+def test_a_full_read_is_kept_for_a_day_and_the_default_bound_is_eight(monkeypatch, tmp_path):
+    numbers = list(range(1, 10))
+    world, read_pass = _pulls_world(monkeypatch, tmp_path, numbers)
+    assert [r["pr"]["number"] for r in read_pass()] == numbers[:8]
+    assert world["cache"].ttl(f"{ci_read.PULL}o/r:1") == 86_400

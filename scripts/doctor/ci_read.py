@@ -5,6 +5,7 @@ import re
 import subprocess
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from scripts.doctor import ci, ci_cache
@@ -22,6 +23,15 @@ RUNS = "repos/{owner}/{repo}/actions"
 DEV_PUSHES = f"{RUNS}/runs?branch=dev&event=push&status=completed&per_page=100"
 RUNS_JQ = ".workflow_runs[] | {id, name, path, conclusion, created_at, html_url} | @json"
 JOBS_JQ = ".jobs[] | {name, conclusion} | @json"
+
+PULL = f"{ROOT}:doctor:ci-pull:"
+PULL_TTL_S = 24 * 3600
+FULL_READS = 8
+STATE = (
+    "pullRequest(number: %d) { headRefOid commits(last: 1) { nodes { commit { checkSuites(first: 50) { nodes {"
+    " databaseId status conclusion checkRuns(first: 100) { totalCount nodes { databaseId status conclusion } } } } } } }"
+    " }"
+)
 
 
 def test_results(log: str, job: str = "") -> list[dict]:
@@ -127,6 +137,33 @@ def pull_request(repo: str, number: int, run: Callable = subprocess.run, cache: 
         "runs": runs,
         "attempts": _attempts(repo, runs, run, cache),
     }
+
+
+def _states(pulls, run):
+    fields = []
+    for i, (repo, number) in enumerate(pulls):
+        owner, name = repo.split("/")
+        fields.append(f"p{i}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{ {STATE % number} }}")
+    data = json.loads(_gh(["api", "graphql", "-f", f"query={{ {' '.join(fields)} }}"], run))["data"]
+    return [json.dumps(data[f"p{i}"], sort_keys=True) for i in range(len(pulls))]
+
+
+def pull_requests(
+    pulls: list[tuple[str, int]], cache: Redis, run: Callable = subprocess.run, full_reads: int = FULL_READS
+) -> list[dict]:
+    if not pulls:
+        return []
+    states = _states(pulls, run)
+    keys = [f"{PULL}{repo}:{number}" for repo, number in pulls]
+    saved = [ci_cache.read(cache, key) for key in keys]
+    stale = [i for i, kept in enumerate(saved) if kept is None or kept["state"] != states[i]]
+    stale = sorted(stale, key=lambda i: saved[i] is not None and saved[i]["at"])[:full_reads]
+    with ThreadPoolExecutor() as pool:
+        fresh = dict(zip(stale, pool.map(lambda i: pull_request(*pulls[i], run=run, cache=cache), stale), strict=True))
+    now = time.time()
+    for i, record in fresh.items():
+        cache.set(keys[i], ci_cache.encode({"state": states[i], "at": now, "record": record}), ex=PULL_TTL_S)
+    return [fresh[i] if i in fresh else saved[i]["record"] for i in range(len(pulls)) if i in fresh or saved[i]]
 
 
 def _repo_rows(repo_dir, endpoint, jq, run):
