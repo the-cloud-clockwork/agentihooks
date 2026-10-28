@@ -145,6 +145,19 @@ def test_exists_is_false_before_creation_and_true_after(tmp_path):
     assert r.exists("ledger") is True
 
 
+def test_a_reader_connects_to_the_store_path_with_the_lock_wait_and_any_thread(tmp_path, monkeypatch):
+    calls, connect = [], sqlite3.connect
+
+    def recording(*args, **kwargs):
+        calls.append((args, kwargs))
+        return connect(*args, **kwargs)
+
+    path = tmp_path / sqlite.DATABASE
+    monkeypatch.setattr(sqlite.sqlite3, "connect", recording)
+    assert not SQLiteLedgerRepository(path).exists("ledger")
+    assert calls == [((path,), {"timeout": 30, "check_same_thread": False})]
+
+
 def test_entry_reads_fresh_when_nothing_is_cached_and_traces_the_select(tmp_path, monkeypatch):
     r = store(tmp_path)
     monkeypatch.setattr(r.domain, "now_ms", lambda: 1000)
