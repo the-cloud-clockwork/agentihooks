@@ -334,10 +334,12 @@ account reservation is full: account=<harness>:<account> sessions=<count> cap=<c
 
 The hive's beat writes the sessions report every 15 seconds with a 45 second expiry. Between beats the headroom
 publisher, every 10 seconds, moves the hive's `heartbeat_at` forward and extends the sessions report's expiry to the
-90 second live window. A sessions report therefore counts for exactly as long as its hive reads live: while the
-beat stalls, for example while it waits inside a launch, the hive keeps its last report and its sessions still
-count against the cap. Once both the beat and the headroom publisher stop, the heartbeat goes stale after ninety
-seconds and the report expires at the same time, so the hive's sessions stop counting and free the slots.
+90 second live window. While the headroom publisher runs, a sessions report therefore counts for as long as its
+hive reads live: while the beat stalls, for example while it waits inside a launch, the hive keeps its last report
+and its sessions still count against the cap. Once both the beat and the headroom publisher stop, the heartbeat
+goes stale ninety seconds after the last write, and the report expires 45 seconds after it when that write was a
+beat or ninety seconds after it when it was a headroom touch, so the hive's sessions stop counting and free the
+slots.
 
 A beat stalled during a launch therefore holds the cap at the last reported count until the next beat refreshes it,
 which can count a session the hive has since lost. Before this, the report expired 45 seconds after the last beat
@@ -403,7 +405,7 @@ the member's own keys.
 | A hive-run dispatcher or lane agent never sees mail sent to its seat while the seat was empty | The item waits in the controller keys until the next tick's exit sweep moves it. | Wait one tick, then run `agentihooks msg inbox` as the occupant on its hive. Mail to a master seat does not move. |
 | A slot stays taken after a member lost an agent | The member still reports the execution. | The row lapses within two ticks once the execution leaves the member's sessions report. |
 | An account runs more live sessions than its cap | A live hive's sessions report is missing: `redis-cli GET <root>:hive:<id>:sessions` returns nothing while `agentihooks hive list` shows the hive live. | Upgrade the hive to a release whose headroom heartbeat extends the report, then restart its hive service; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
-| Launches report `account reservation is full` though the account runs fewer sessions | A hive's beat is stalled and its last sessions report still counts. | The count corrects on the hive's next beat, or ninety seconds after both its beat and its headroom publisher stop. |
+| Launches report `account reservation is full` though the account runs fewer sessions | A hive's beat is stalled and its last sessions report still counts. | The count corrects on the hive's next beat, or within ninety seconds after both its beat and its headroom publisher stop. |
 
 ## Settings
 
