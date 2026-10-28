@@ -5,6 +5,7 @@ Pure functions over a ledger document and its `_meta` events.
 
 import math
 import statistics
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from scripts.swarm_ledger import ports
@@ -122,7 +123,7 @@ def is_stale(shown, computed):
     return abs(shown - computed) > max(STALE_FLOOR_MINUTES, computed / 4)
 
 
-def with_dependencies(counted: set, pending: dict, gated) -> set:
+def with_dependencies(counted: set, pending: dict, gated: Callable[[dict], bool]) -> set:
     counted, needed = set(counted), list(counted)
     while needed:
         for dep in pending[needed.pop()].get("depends_on") or []:
