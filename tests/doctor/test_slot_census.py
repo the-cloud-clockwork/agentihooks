@@ -131,3 +131,37 @@ def test_the_reader_joins_claim_lines_with_current_and_ended_lives_of_every_swar
     spawn_read.slot_claims(store, "sw", "2 hours ago", journal, until="now")
     assert calls[1][calls[1].index("--since") + 1] == "2 hours ago"
     assert calls[1][calls[1].index("--until") + 1] == "now"
+
+
+def test_the_reader_places_ended_lives_on_the_hive_their_execution_ran_on():
+    from dataclasses import asdict, replace
+
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
+    for name in ("ci@remote", "ci@local"):
+        store.put_agent("sw", AgentRecord(name, "ci", "t2", pane_id="w2:pD", started_at=AT - 20))
+    remote = AgentRecord(
+        "ci@remote", "ci", "t2", pane_id="w2:pD", started_at=AT - 20, hive="h6", execution_id="exe-1", state="ended"
+    )
+    store.redis.hset(store.key("sw", "executions-archive"), "exe-1", json.dumps(asdict(remote)))
+    store.redis.hset(
+        store.key("sw", "executions"),
+        "exe-2",
+        json.dumps(asdict(replace(remote, started_at=AT - 90, hive="h7", execution_id="exe-2"))),
+    )
+    for name in ("ci@remote", "ci@local"):
+        store.drop_agent("sw", name, at=AT + 5)
+    message = "sw: local slot claim new for t9 on root counted 0 of 6: "
+
+    def journal(argv, **kwargs):
+        row = {"__REALTIME_TIMESTAMP": str(AT * 1000), "_PID": "97698", "MESSAGE": message}
+        return subprocess.CompletedProcess(argv, 0, json.dumps(row) + "\n", "")
+
+    read = spawn_read.slot_claims(store, "sw", run=journal)
+    ended = {row["name"]: row for row in read["lives"] if row["ended_at"]}
+    assert (ended["ci@remote"]["hive"], ended["ci@remote"]["runtime_backend"]) == ("h6", "local")
+    assert "hive" not in ended["ci@local"]
+    [found] = slot_census.findings(read)
+    assert found.summary.endswith("left 1 live local agents out: ci@local")
