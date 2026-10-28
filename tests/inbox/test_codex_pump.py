@@ -806,6 +806,22 @@ def test_an_unknown_delivery_the_thread_never_shows_is_submitted_again(rig, reco
     assert rig.server.turns[0]["inputs"][-1].endswith("\nmaybe")
 
 
+def test_a_running_pump_resubmits_after_its_own_timeout_without_a_restart(rig, recovery_deadline):
+    rig.server.silent.add("turn/start")
+    item = rig.store.send("alice", ME, "again")
+
+    def sleep(delay):
+        rig.server.silent.clear()
+        rig.clock.now += delay
+
+    rig.pump.timing = replace(rig.pump.timing, sleep=sleep)
+    assert rig.run(3) == codex.STOPPED
+    assert rig.server.methods().count("turn/start") == 2
+    assert rig.store.get(item.id).state == "delivered"
+    assert sorted(d.state for d in deliveries(rig, item.id)) == ["accepted", "rejected"]
+    assert rig.record().state == CONNECTED
+
+
 def test_an_unknown_delivery_the_thread_shows_is_accepted_without_a_second_turn(rig, recovery_deadline):
     rig.server.dropped.add("turn/start")
     item = rig.store.send("alice", ME, "arrived")

@@ -376,7 +376,6 @@ class Pump:
         return thread
 
     def _settle(self, recovered: list[Delivery], thread: dict) -> None:
-        """Accept each unknown delivery the thread carries; reject the rest so the next scan submits them again."""
         shown, owner = json.dumps(thread), self.binding.owner
         for delivery in recovered:
             if delivery.state != UNKNOWN:
