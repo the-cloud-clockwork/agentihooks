@@ -643,9 +643,10 @@ def test_a_search_reads_tool_output_when_the_target_sends_no_tool_response(world
     assert [(row["purpose"], row["pack_bytes"]) for row in metrics.events(grant)] == [("search", 4)]
 
 
-def test_b_search_outside_a_swarm_task_records_nothing(world, monkeypatch):
+@pytest.mark.parametrize("unset", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK"])
+def test_b_search_outside_a_swarm_task_records_nothing(world, monkeypatch, unset):
     metrics, grant, _, _, _, _ = world
-    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK")
+    monkeypatch.delenv(unset)
     consultation.search(
         {"session_id": grant.principal, "tool_name": "mcp__agentibrain__kb_search", "tool_response": "result"}
     )
