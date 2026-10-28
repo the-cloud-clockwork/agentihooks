@@ -123,7 +123,7 @@ def adopt_disk(slug):
     paths = sorted(media.folder(slug).glob("*"))
     if not paths:
         return
-    stored, imaged = artifact_files.ids(slug), set(media.media_files.ages(slug))
+    stored, imaged = artifact_files.ids(slug), media.media_files.ages(slug)
     for path in paths:
         if ID_RE.match(path.name) and path.name not in stored:
             artifact_files.save(slug, path.name, path.read_bytes())
