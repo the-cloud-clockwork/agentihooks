@@ -551,14 +551,14 @@ jobs:
 
       - name: Upload the tests that killed mutants
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
+          after-cancel: true
           name: mutation-killers-${{ matrix.shard }}
           path: .mutation-killers/
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 1
-          overwrite: true
 
       - name: Stage shard replay evidence
         if: always()
@@ -572,13 +572,13 @@ jobs:
 
       - name: Upload shard mutation evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
+          after-cancel: true
           name: mutation-preflight-shard-${{ matrix.shard }}
           path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
           include-hidden-files: true
           retention-days: 7
-          overwrite: true
 
   # Readers take one report and the check named mutation, so every shard ends here.
   mutation:
@@ -599,10 +599,24 @@ jobs:
 
       - name: Download every mutation shard report
         if: needs.plan.outputs.changed != '0'
+        id: download-every-mutation-shard-report
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &download-every-mutation-shard-report
           pattern: mutation-preflight-shard-*
           path: .mutation-shards
+
+      - name: Download every mutation shard report, wait before attempt 2
+        if: steps.download-every-mutation-shard-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download every mutation shard report failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download every mutation shard report, attempt 2
+        if: steps.download-every-mutation-shard-report.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *download-every-mutation-shard-report
 
       - name: Restore the tests that killed this branch's earlier mutants
         if: needs.plan.outputs.changed != '0'
@@ -614,11 +628,25 @@ jobs:
 
       - name: Download the tests that killed mutants
         if: needs.plan.outputs.changed != '0'
+        id: download-the-tests-that-killed-mutants
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &download-the-tests-that-killed-mutants
           pattern: mutation-killers-*
           path: .mutation-stats/killers
           merge-multiple: true
+
+      - name: Download the tests that killed mutants, wait before attempt 2
+        if: steps.download-the-tests-that-killed-mutants.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the tests that killed mutants failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the tests that killed mutants, attempt 2
+        if: steps.download-the-tests-that-killed-mutants.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *download-the-tests-that-killed-mutants
 
       - name: Keep the tests that killed mutants for this branch's next plan
         if: needs.plan.outputs.changed != '0' && hashFiles('.mutation-stats/killers/*') != ''
@@ -639,13 +667,13 @@ jobs:
 
       - name: Upload complete mutation evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
+          after-cancel: true
           name: mutation-preflight-report
           path: .mutation-gate/
           include-hidden-files: true
           retention-days: 7
-          overwrite: true
 
       - name: Fail when a shard did not finish
         if: needs.plan.outputs.changed != '0' && needs.mutation-shard.result != 'success'
