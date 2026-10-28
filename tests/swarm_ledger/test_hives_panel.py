@@ -113,7 +113,7 @@ def test_each_hive_shows_liveness_tags_excluded_prefer_max_agents_and_master_wit
     page = hives_page()
     rows = page.table("swarm-hives")
     heads = [text.lower() for text in page.tab.locator("#hives-table th").all_text_contents()]
-    assert len(heads) == 10 and "slots" not in heads
+    assert heads == ["hive", "state", "ui", "ephemeral", "excluded", "max agents", "agents", "master", "actions"]
     assert [row[0] for row in rows] == ["desk", "pod", "lab"]
     assert [row[1] for row in rows] == ["LIVE", "LIVE", "QUIET"]
     assert [row[7] for row in rows] == ["2/4", "0/2", "0/4"]
@@ -142,12 +142,14 @@ def test_a_failed_read_says_the_hives_could_not_be_read(browser):
         page.context.close()
 
 
-def test_the_quota_count_carries_no_hive_capacity(hives_page):
+def test_the_quota_header_has_only_its_title_and_refresh_control(hives_page):
     page = hives_page()
-    page.tab.locator("#swarm-hives tr#hive-desk").wait_for(timeout=3000)
-    page.tab.wait_for_function("() => document.querySelector('#quota-count').textContent.includes('account')")
-    count = page.text("#quota-count").lower()
-    assert not any(hive in count for hive in ("desk", "pod", "lab", "2/4", "0/2"))
+    header = page.tab.locator("#quota-fold > summary")
+    assert header.inner_text().strip() == "Quota"
+    assert header.locator("h3").all_text_contents() == ["Quota"]
+    assert header.locator("button").count() == 1
+    assert header.locator("#quota-refresh").get_attribute("aria-label") == "Refresh quota"
+    assert header.locator(".sw-count").count() == 0
 
 
 def test_editing_max_agents_writes_it_as_the_operator(hives_page):
