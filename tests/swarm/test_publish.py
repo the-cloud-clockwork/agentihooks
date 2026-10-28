@@ -1600,7 +1600,7 @@ def test_continuation_takes_the_recorded_branch_only_over_an_unpushed_entry(publ
     assert publish.continuation_task(p.repo, task, scoped, "predecessor") == scoped
 
 
-@pytest.mark.parametrize("open_branch,diverged", [("", False), ("another-task", False), ("predecessor", True)])
+@pytest.mark.parametrize("open_branch,diverged", [("", True), ("another-task", False), ("predecessor", True)])
 def test_publish_refuses_unverified_or_diverged_retained_delivery(publication, monkeypatch, open_branch, diverged):
     from scripts.swarm import publish
 
@@ -1626,6 +1626,7 @@ def test_missing_pull_request_never_authorizes_retained_delivery(publication, mo
 
     p = publication
     git(p.root, "push", "origin", "HEAD:predecessor")
+    retained = git(p.root, "rev-parse", "HEAD")
     p.task["branch"] = "predecessor"
 
     def open_head(remote, url):
@@ -1636,10 +1637,30 @@ def test_missing_pull_request_never_authorizes_retained_delivery(publication, mo
     monkeypatch.setattr(publish.publish_queue, "open_head", open_head)
     if command == "prepare":
         result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
-        assert result["branch"] == p.task["branch"] == "engineer-test"
     else:
-        with pytest.raises(publish.SwarmError, match="differs from registered branch predecessor"):
-            publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Do not redirect", ["chosen.txt"])
+        result = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Do not redirect", ["chosen.txt"])
+    assert result["branch"] == p.task["branch"] == "engineer-test"
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == retained
+
+
+@pytest.mark.parametrize("pushed", [True, False])
+def test_hive_successor_publishes_its_own_branch_over_the_predecessor_hive_key(publication, monkeypatch, pushed):
+    from scripts.swarm import publish
+
+    p = publication
+    if pushed:
+        git(p.root, "push", "origin", "HEAD:predecessor")
+    hive_key = f"/hive/predecessor/{p.repo.name}"
+    p.task.update(branch="predecessor", repository_branches={hive_key: "predecessor", "/hive/bundle": "kept"})
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "")
+    monkeypatch.chdir(p.root)
+
+    published = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue as successor", ["chosen.txt"])
+
+    assert published["branch"] == p.task["branch"] == "engineer-test"
+    assert p.task["repository_branches"] == {str(p.repo): "engineer-test", "/hive/bundle": "kept"}
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == published["head"]
+    assert git(p.root, "rev-parse", "--abbrev-ref", "HEAD") == "engineer-test"
 
 
 def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):
