@@ -118,10 +118,27 @@ def settle(tab):
 def slow_background_paint(tab):
     tab.evaluate(
         """() => {
+          window.__paintPending = 0;
+          window.__sectionStates = Object.fromEntries([...document.querySelectorAll(".col > section > details.fold")]
+            .map((box) => [box.id, box.open ? "open" : "closed"]));
+          addEventListener("toggle", (ev) => {
+            if (ev.target.matches(".col > section > details.fold")) window.__sectionStates[ev.target.id] = ev.newState;
+          }, true);
           const post = scheduler.postTask.bind(scheduler);
-          scheduler.postTask = (task, options) =>
-            new Promise((done) => setTimeout(done, 100)).then(() => post(task, options));
+          scheduler.postTask = (task, options) => {
+            window.__paintPending++;
+            return new Promise((done) => setTimeout(done, 100)).then(() => post(task, options))
+              .finally(() => { window.__paintPending--; });
+          };
         }"""
+    )
+
+
+def painted(tab, state):
+    tab.wait_for_function(
+        """([ids, state]) => window.__paintPending === 0
+             && ids.every((id) => window.__sectionStates[id] === state)""",
+        arg=[list(SECTIONS), state],
     )
 
 
@@ -178,14 +195,15 @@ def test_sections_toggle_leaves_comments_and_outline_alone(tab):
     before = tab.evaluate(probe)
     slow_background_paint(tab)
     tab.click("#sections-all")
-    tab.wait_for_timeout(150)
-    tab.click("#sections-all")
-    tab.click("#sections-all")
     tab.wait_for_function(
-        """(keys) => keys.every((k) => [...document.querySelectorAll("details[data-key], #outline details.fold")]
-             .some((d) => (d.dataset.key || d.id) === k))""",
-        arg=list(before),
+        "(ids) => ids.every((id) => window.__sectionStates[id] === 'open') && window.__paintPending > 0",
+        arg=list(SECTIONS),
     )
+    tab.click("#sections-all")
+    painted(tab, "closed")
+    # A closed section drops its rows, so its comment boxes come back only when it opens again.
+    tab.click("#sections-all")
+    painted(tab, "open")
     after = tab.evaluate(probe)
     assert before.items() <= after.items()
     assert all(v is False for k, v in after.items() if k not in before)
