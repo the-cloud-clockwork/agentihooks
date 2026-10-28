@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -9,7 +10,7 @@ from scripts.hive import admission, headroom, orders, placement, placement_waits
 from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import ACK_LATER, Placed
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
@@ -55,7 +56,8 @@ ROOM_DETAILS = {"reason": "", "detail": ""}
 def loaded_hives(store: RedisStore) -> list[dict]:
     """Every registered hive with the worker agents it runs or is launching.
 
-    A hive counts a running agent in its slot's processes even when it lists no execution for it."""
+    A hive counts a running agent in its slot's processes even when it lists no execution for it, and never fewer
+    agents than the live worker records any swarm places on it."""
     agents = [agent for slug in store.slugs() for agent in store.agents(slug)]
     hives, now = registry.hives(store.redis), lease.now_ms(store)
     for hive in hives:
@@ -67,15 +69,13 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         }
         masters = sum(count for key, count in counts.items() if key.startswith("interactive:"))
         pending: dict[str, int] = {}
+        recorded = 0
         for agent in agents:
-            if (
-                agent.hive == hive["id"]
-                and agent.lane != "master"
-                and agent.state in ("launching", "working", "suspect")
-                and agent.execution_id not in seen
-            ):
-                slot = f"{agent.harness}:{agent.account}"
-                pending[slot] = pending.get(slot, 0) + 1
+            if agent.hive == hive["id"] and agent.lane != "master" and agent.state not in ("finished", "ended"):
+                recorded += 1
+                if agent.state in ("launching", "working", "suspect") and agent.execution_id not in seen:
+                    slot = f"{agent.harness}:{agent.account}"
+                    pending[slot] = pending.get(slot, 0) + 1
         unclaimed = {
             slot: max(0, reported.get(slot, 0) - counts.get(f"interactive:{slot}", 0) - len(executions.get(slot, [])))
             for slot in pending
@@ -83,6 +83,7 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
             max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
+        hive["agents"] = max(hive["agents"], recorded)
         from scripts.swarm import local_slots
         from scripts.swarm.commands import hive_id
 
@@ -151,6 +152,12 @@ def _pinned(hives: list[dict], task: dict, role: str) -> tuple[list[dict], place
         return hives, None
     kept = [hive for hive in hives if hive["id"] == hive_id()]
     return kept, None if kept else placement.Wait(placement.NEEDS_WORKSTATION, role)
+
+
+def _by_mode(config: SwarmConfig, hives: list[dict], role: str, now: int) -> list[dict]:
+    if config.placement_mode != ROUND_ROBIN or role in registry.UI_ROLES:
+        return hives
+    return placement.round_robin(hives, config.placement_nodes, config.repo, now)
 
 
 def _matched_origin(hives: list[dict], hive: str, repo: str) -> str | placement.Wait:
@@ -235,6 +242,7 @@ class HiveLaunch:
             for hive in self._pass_hives[1]:
                 if hive["id"] == selected.hive:
                     hive["room"] -= 1
+                    hive[placement.PLACED] = hive.get(placement.PLACED, 0) + 1
         return selected
 
     def _withdraw(self, request: SpawnRequest, selected: Selection, refused: str) -> placement.Wait:
@@ -277,6 +285,7 @@ class HiveLaunch:
         from scripts.swarm import local_slots
         from scripts.swarm.commands import hive_id
 
+        hives = _by_mode(config, hives, role, now)
         if lane != placement.MASTER:
             for index, hive in enumerate(hives):
                 if hive["id"] == hive_id():
@@ -381,6 +390,19 @@ class HiveLaunch:
             refused = refused or self.reserve_room(request, selected)
             if not refused:
                 return selected
+            print(
+                json.dumps(
+                    {
+                        "event": "hive_admission_refused",
+                        "slug": self.slug,
+                        "task": request.task["id"],
+                        "name": request.name,
+                        "hive": selected.hive,
+                        "reason": refused,
+                    }
+                ),
+                file=sys.stderr,
+            )
             waited = self._withdraw(request, selected, refused)
             excluded.add(selected.hive)
             selected = self._select(request.config, request.lane, request.task, excluded)

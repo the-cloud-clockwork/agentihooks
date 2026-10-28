@@ -144,7 +144,7 @@ class FencedRuntime:
 
             selected = self.runtime.hive_launch.select(self.store.config(self.slug), lane, task)
             if not isinstance(selected, Wait):
-                return ""
+                return self._workstation_claim(lane, task, claim)
             if lane == "master":
                 return f"{WORKSTATION.format(lane=lane)}: {selected.reason}"
             return self._overflow(lane, task, selected, claim)
@@ -152,6 +152,11 @@ class FencedRuntime:
         if wanted == WORKSTATION_BACKEND:
             return WORKSTATION.format(lane=lane)
         return DISABLED.format(backend=wanted) if router.enabled_backend(wanted) != wanted else ""
+
+    def _workstation_claim(self, lane: str, task: dict, claim: str) -> str:
+        if self.runtime.router.placed_backend(lane, task) != WORKSTATION_BACKEND:
+            return ""
+        return self._local_refusal(lane, task, claim)
 
     def _local_refusal(self, lane: str, task: dict, name: str) -> str:
         if lane == "master":

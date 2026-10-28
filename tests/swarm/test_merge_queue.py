@@ -722,6 +722,22 @@ def test_queue_reports_rest_transport_failure(error):
     assert str(exc.value) == f"GitHub API: {error}"
 
 
+def test_a_job_log_read_allows_escape_sequences_and_returns_text():
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        log = command[2].endswith("/logs")
+        return subprocess.CompletedProcess(command, 0, "\x1b[31mFAILED\x1b[0m\n" if log else "{}", "")
+
+    assert merge_queue.rest("repos/o/r/actions/jobs/5/logs", run) == "\x1b[31mFAILED\x1b[0m\n"
+    assert merge_queue.rest("repos/o/r/actions/runs/5", run) == {}
+    assert calls == [
+        ["gh", "api", "repos/o/r/actions/jobs/5/logs", "--allow-escape-sequences"],
+        ["gh", "api", "repos/o/r/actions/runs/5"],
+    ]
+
+
 def test_dequeue_removes_the_pull_request_then_reports_its_state():
     run, calls = runner(
         {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},

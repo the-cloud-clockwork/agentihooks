@@ -78,7 +78,6 @@ def test_tick_codex_master_records_staged_home_before_completing_launch(tmp_path
 
 def test_front_door_claude_master_keeps_deferred_login_route_and_staged_binding(tmp_path, monkeypatch):
     from hooks import config as hooks_config
-    from scripts import master_claude_login
     from scripts.profiles import binding
     from scripts.routing import native_login
     from scripts.swarm import launch_check
@@ -114,7 +113,7 @@ def test_front_door_claude_master_keeps_deferred_login_route_and_staged_binding(
     assert (placed.harness, placed.route_kind) == ("claude", "interactive")
     command = seen[0]
     assert "--defer-canary" in command
-    assert command[command.index("--route") + 1] == master_claude_login.ROUTE
+    assert command[command.index("--route") + 1] == "claude-ai"
     record = placed_record(AgentRecord(name, MASTER, MASTER, seat="master@sw"), placed)
     assert record.profile_decision["validation"]["state"] == "pending"
     result = {

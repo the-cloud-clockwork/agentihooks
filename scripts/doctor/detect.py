@@ -18,11 +18,13 @@ from scripts.doctor import (
     features,
     handoffs,
     health,
+    hive_pools,
     inbox,
     master_launches,
     master_prompts,
     read,
     runtime,
+    slot_census,
     spawn_read,
     spawns,
     tick_delivery,
@@ -31,10 +33,11 @@ from scripts.doctor import (
 )
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
-from scripts.swarm import idle, input_wait, status, timing
+from scripts.swarm import commands, idle, input_wait, status, timing
 from scripts.swarm.health import activity
 from scripts.swarm.runtime import SWARM_HOME
 
+HOUR_MS = 3_600_000
 PR_RE = re.compile(r"github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)")
 
 
@@ -136,6 +139,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
     mail = InboxStore(store.redis)
     items = _once(lambda: read.inbox_items(mail, slug))
     tasks = _once(lambda: ledger.tasks(slug))
+    claims = _once(lambda: spawn_read.slot_claims(store, slug))
 
     found = {
         "runtime storage": lambda: runtime.findings(now_ms, env),
@@ -147,8 +151,11 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         "handoff": lambda: handoffs.findings(read.handoffs(store, mail, home, slug, items())),
         "spawn": lambda: spawns.findings(spawn_read.records(store, slug, now_ms)),
         "master launch": lambda: master_launches.findings(spawn_read.master_records(store, slug)),
+        "slot census": lambda: slot_census.findings(claims()),
+        "unclaimed launch": lambda: slot_census.unclaimed(claims(), commands.hive_id(), now_ms - HOUR_MS),
         "startup": lambda: _starts(store, slug, now_ms),
         "headroom": lambda: _headroom(store, now_ms),
+        "hive pool": lambda: hive_pools.read(store, slug, now_ms),
         "context overrun": lambda: _overruns(store, slug),
         "master prompt": lambda: _master_prompts(store, slug, now_ms),
         "ci": lambda: _ci(store, tasks(), now_ms),

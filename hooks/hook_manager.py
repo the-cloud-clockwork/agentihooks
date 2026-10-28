@@ -1163,7 +1163,9 @@ def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None
 def _swarm_outcome(payload: dict) -> None:
     try:
         from hooks.context.swarm_heartbeat import outcome
+        from hooks.observability.consultation import search
 
+        search(payload)
         outcome(payload)
     except Exception as e:
         log("swarm outcome record failed", {"error": str(e)})
@@ -1255,8 +1257,10 @@ def _operator_question(payload: dict) -> str:
     try:
         from hooks.context import master_question, operator_mode
 
-        return master_question.move(payload) or operator_mode.question_block(
-            payload.get("tool_name"), payload.get("session_id")
+        return (
+            master_question.move(payload)
+            or master_question.refusal(payload)
+            or operator_mode.question_block(payload.get("tool_name"), payload.get("session_id"))
         )
     except Exception as e:
         log("operator question check failed", {"error": str(e)})

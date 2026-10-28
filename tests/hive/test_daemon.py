@@ -396,6 +396,25 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     sleep.assert_called_once_with(12, redis=waiter, timeout=12)
 
 
+def test_run_refreshes_the_bundle_on_every_beat_from_the_daemon_start(monkeypatch):
+    _quiet_quota(monkeypatch)
+    monkeypatch.setattr(daemon, "hive_id", lambda: "local")
+    monkeypatch.setattr(daemon, "beat", lambda redis, hive: None)
+    monkeypatch.setattr(daemon.time, "time", lambda: 50)
+    calls = []
+
+    def refresh(last, now, environ):
+        calls.append((last, now, environ))
+        return last + 7
+
+    monkeypatch.setattr(daemon.bundle_refresh, "refresh", refresh)
+    sleep = Mock(side_effect=[None, KeyboardInterrupt])
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(Mock(return_value=(object(), object())))
+    assert calls == [(50, 50, daemon.os.environ), (57, 50, daemon.os.environ)]
+
+
 def _paced(monkeypatch, rounds):
     import threading
 

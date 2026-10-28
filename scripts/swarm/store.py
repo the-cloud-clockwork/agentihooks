@@ -36,6 +36,8 @@ EVENTS_ENGINE = "events"
 MAX_LOAD = 10.0
 CODEX_TRANSPORTS = ("legacy", "app_server")
 LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
+PLACEMENT_MODES = ("anton-first", "round-robin")
+ANTON_FIRST, ROUND_ROBIN = PLACEMENT_MODES
 
 
 class SwarmError(RuntimeError):
@@ -88,10 +90,17 @@ class SwarmConfig:
     window: dict = field(default_factory=dict)
     focus_weight: int = 50
     watchdog_address: str = ""
+    placement_mode: str = ANTON_FIRST
+    placement_nodes: int = 0
+    repo_origin: str = ""
 
     def __post_init__(self) -> None:
         if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
             raise SwarmError("focus weight must be a whole number from 0 to 100")
+        if self.placement_mode not in PLACEMENT_MODES:
+            raise SwarmError(f"placement mode must be one of {', '.join(PLACEMENT_MODES)}")
+        if type(self.placement_nodes) is not int or self.placement_nodes < 0:
+            raise SwarmError("placement-nodes takes a whole number of hives, 0 for no limit")
         if self.engine not in ("legacy", "events"):
             raise SwarmError("engine must be one of legacy, events")
 
@@ -164,6 +173,16 @@ class RedisStore:
 
     def key(self, slug, *parts):
         return ":".join((PREFIX, slug, *parts))
+
+    def put_gate_lift(self, slug: str, scope: str, subject: str, gate: str, record: dict) -> None:
+        self.redis.hset(self.key(slug, "gate-lifts", scope, subject), gate, json.dumps(record))
+
+    def gate_lift(self, slug: str, scope: str, subject: str, gate: str) -> dict:
+        raw = self.redis.hget(self.key(slug, "gate-lifts", scope, subject), gate)
+        return json.loads(raw) if raw else {}
+
+    def drop_task_lifts(self, slug: str, task: str) -> None:
+        self.redis.delete(self.key(slug, "gate-lifts", "tasks", task))
 
     @property
     def operation_journal(self) -> "OperationJournal":
@@ -240,6 +259,9 @@ class RedisStore:
             json.loads(raw.get("window") or "{}"),
             int(raw.get("focus_weight", 50)),
             raw.get("watchdog_address", ""),
+            raw.get("placement_mode") or ANTON_FIRST,
+            int(raw.get("placement_nodes") or 0),
+            raw.get("repo_origin", ""),
         )
 
     def update(self, slug, **changes):
@@ -455,6 +477,7 @@ class RedisStore:
                     executions = [a for a in self.execution_registry.occupants(slug, pipe).values() if a.name == name]
                     if expected is not None and expected.execution_id not in {a.execution_id for a in executions}:
                         return False
+                    lives = self.execution_registry.records(slug) if previous else []
                     pipe.multi()
                     if before is not None:
                         before(pipe)
@@ -463,7 +486,16 @@ class RedisStore:
                         reason = "finished" if row["state"] == "finished" else "retired"
                         if self.handoff(slug, row["task"]):
                             reason = "handed off"
-                        pipe.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
+                        placement = {
+                            field: getattr(agent, field)
+                            for agent in lives
+                            if (agent.name, agent.started_at) == (name, row.get("started_at"))
+                            for field in ("execution_id", "hive", "runtime_backend")
+                        }
+                        pipe.rpush(
+                            self.key(slug, "history"),
+                            json.dumps({**row, **placement, "ended_at": ended, "reason": reason}),
+                        )
                     for agent in executions:
                         if agent.state != "finished":
                             pipe.hset(
@@ -769,3 +801,9 @@ def connect(environ=None):
         return RedisStore(redis_client(environ))
     except redis.RedisError as exc:
         raise Unreachable(f"Redis is unreachable ({exc}); the swarm refuses to run without it") from exc
+
+
+def store_errors() -> tuple[type[BaseException], ...]:
+    import redis
+
+    return (redis.RedisError,)

@@ -899,7 +899,7 @@ def test_chart_proof_input_key_covers_every_file_the_swarm_image_copies():
     for line in (_ROOT / "Dockerfile").read_text().splitlines():
         words = line.split()
         if words[:1] == ["COPY"] and not any(w.startswith("--from") for w in words):
-            sources += words[1:-1]
+            sources += [w for w in words[1:-1] if not w.startswith("--")]
     assert sources
     assert all(any(s.rstrip("/") == p or s.startswith(f"{p}/") for p in listed) for s in sources), sources
     assert {"Dockerfile", ".dockerignore", "deploy/helm/agentihooks-swarm", ".github/workflows/helm-kind.yml"} <= set(

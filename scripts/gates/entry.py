@@ -30,6 +30,7 @@ from scripts.gates.verdicts import Verdicts
 from scripts.gates.watch import WatchBudget
 
 LIFTED = "lifted by the operator: "
+FAILED_OPEN = Decision()
 
 GATES = {
     gate.name: gate
@@ -63,6 +64,13 @@ def main(argv=None, stdin=None, environ=None, home=None):
     return evaluate(gate, call, environ, home)
 
 
+def _brain_metric(gate, call, who, result):
+    if gate.name == "brain":
+        from hooks.observability import consultation
+
+        consultation.gate(call, who, result)
+
+
 def evaluate(gate, call, environ=None, home=None):
     environ = os.environ if environ is None else environ
     if not gate.matches(call):
@@ -70,18 +78,23 @@ def evaluate(gate, call, environ=None, home=None):
     who = Who.from_env(environ)
     mode = modes.mode(gate, environ, modes.swarm_gates(who.swarm, environ))
     if mode == "off":
+        _brain_metric(gate, call, who, "off")
         return 0
     decision = _decide(gate, call, who, home, mode)
     if decision.allowed:
+        _brain_metric(gate, call, who, "fail-open" if decision is FAILED_OPEN else "allow")
         return 0
     if lift.lifted(who.swarm, call.session, gate.name, home) or lift.held(
         who.swarm, who.name, who.task, gate.name, home, command=call.command
     ):
+        _brain_metric(gate, call, who, "lifted")
         _record(who, log.Row.of(gate.name, "observe", who, call.tool, LIFTED + decision.reason), home)
         return 0
     if mode == "observe":
+        _brain_metric(gate, call, who, "observe")
         _record(who, log.Row.of(gate.name, "observe", who, call.tool, decision.reason), home)
         return 0
+    _brain_metric(gate, call, who, "deny")
     _record(who, log.Row.of(gate.name, "deny", who, call.tool, decision.reason), home)
     print(decision.reason, file=sys.stderr)
     return 2
@@ -100,8 +113,9 @@ def _decide(gate, call, who, home, mode="enforce"):
             return gate.decide(call, who, state, mode)
         return gate.decide(call, who, state)
     except Exception as exc:  # a crashed gate lets the call through, counted in the gate log
-        _record(who, log.Row.of(gate.name, "fail-open", who, call.tool, f"{type(exc).__name__}: {exc}"), home)
-        return Decision()
+        detail = "gate evaluation failed" if gate.name == "brain" else f"{type(exc).__name__}: {exc}"
+        _record(who, log.Row.of(gate.name, "fail-open", who, call.tool, detail), home)
+        return FAILED_OPEN
 
 
 def _record(who, row, home):

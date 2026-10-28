@@ -485,6 +485,14 @@ login. Each step that empties the list names its reason, and the launch waits wi
 Among the hives left, placement picks the lowest `prefer` rank for the role, then the most room, then a lasting
 hive over an ephemeral one, then the hive id.
 
+`agentihooks swarm <id> set placement-mode=round-robin placement-nodes=N` switches a swarm's worker launches from
+this default, `anton-first`, to round robin for load runs: placement keeps only the first `N` live hives by id
+that list the swarm's repo, local or cloud (`placement-nodes=0`, the default, keeps every such hive), ignores
+`prefer`, and gives each agent to the kept hive running the fewest agents, counting launches already placed in the
+same tick. When every kept hive is full the launch waits rather than use another hive. The UI roles, `master`, `qa`
+and `frontend`, and tasks pinned to a hive or to the workstation keep `anton-first`. `placement-mode=anton-first`
+switches back on the next tick.
+
 `eng`, `ci`, `plan` and `dispatch` prefer headless hives, and `master`, `qa` and `frontend` prefer UI hives.
 Placement tries the preferred kind first and takes the other kind only when no preferred hive taking the role has
 room or none is live.
@@ -774,8 +782,10 @@ The controller ends the execution, drops the launch order and reports the spawn 
 A payload that passes is written below the hive's own home, in `~/.agentihooks/swarm/<slug>/tasks/<task id>`:
 
 - `steering.md` is replaced with the controller's copy on every launch.
-- `progress.md` and `proof.md` are written only when the hive does not hold them yet. On a relaunch of the same task
-  on the same hive, its own lines stay and the controller's copy is not merged in.
+- `progress.md`, `proof.md` and every file the controller's folder carries besides them are written when the hive
+  does not hold them yet, and replace the hive's file when it does not already contain the text that was sent. A hive
+  file that holds the sent text and more, such as a `progress.md` the agent kept appending to on a relaunch of the same
+  task on the same hive, stays as it is. A hive file that is a symbolic link is never written.
 
 The agent then starts with `hive_opening` exactly as carried. The hive does not rebuild the prompt from the task.
 
@@ -790,6 +800,53 @@ the live one or else the one started last, is a worker on that hive. Masters are
 When the controller publishes swarm status, each task with a work folder takes its lines from the hive that runs,
 or last ran, its latest execution. A task whose latest execution ran on the controller's own machine is read from
 the local folder. These lines are what the ledger page shows in the task's Contract and proof fold.
+
+### Work folder files on any host
+
+On the same heartbeat each hive writes the files of those folders to `<root>:hive:<hive id>:workspaces:files`,
+expiring after a day so a hive that died still hands its last copy over. The table below lists what travels. On each
+status publish the controller writes each task's copy, from the hive running its latest execution, into its own
+folder. A launch carries the controller's folder to the next hive, added files included, and a file the hive already
+holds is replaced unless it already contains what was sent, so a successor on any host reads what its predecessor
+wrote.
+
+What travels from a task folder:
+
+| File | Travels | Limit |
+|---|---|---|
+| `steering.md` | Only from the controller to the hive, at launch | Whole file |
+| `progress.md`, `proof.md` | Both ways | The last 65,536 characters |
+| Any other file directly in the folder, such as `plan.md`, `measure.sh`, `handoff.md` or `mutation-fix.patch` | Both ways | 32 files, taken in name order; a file over 65,536 bytes is skipped and does not count toward the 32 |
+| Subfolders and the files in them, symbolic links, names that do not start with an ASCII letter or digit, such as hidden names starting with `.`, names whose later characters are not Unicode word characters, `.` or `-`, names over 128 characters, files that are not UTF-8 text | Never | Not carried |
+
+The controller mirrors a task only when its latest execution ran on a hive. A task whose latest execution ran on the
+controller's own machine keeps the controller's folder, and a stale hive copy is not written over it. The mirror
+replaces each file the hive sent with the hive's text and leaves every other controller file in place; a file the
+agent deleted on the hive stays on the controller. Steering in a hive copy is never written back.
+
+The sequence for a task reclaimed from one hive onto another:
+
+1. The first agent, on hive `lab-vm`, appends to `progress.md` and writes `measure.sh` in its task folder.
+2. Within fifteen seconds `lab-vm` writes both files to `agentihooks:hive:lab-vm:workspaces:files`.
+3. On its next status publish the controller writes them into `~/.agentihooks/swarm/<slug>/tasks/<task id>` on its
+   own machine, even when `lab-vm` has stopped beating since, as long as its copy is less than a day old.
+4. The successor launches on hive `lab-vm-2`. Its launch payload carries `steering.md`, `progress.md`, `proof.md` and
+   `measure.sh` from the controller's folder, and `lab-vm-2` writes them below its own home before the agent starts.
+
+Read the copy a hive holds for one task, and how long it has left, on the swarm Redis:
+
+```bash
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:hive:lab-vm:workspaces:files \
+  | jq -r '."rig-grade-swarm"."t945" | keys[]'
+# measure.sh
+# progress.md
+# proof.md
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" TTL agentihooks:hive:lab-vm:workspaces:files
+# up to 86400
+```
+
+A task missing from that output has no execution on that hive as its latest one, or its folder holds none of the files
+that travel. Nothing is configured: the 32 file cap, the 65,536 limit and the one day lifetime are fixed in the code.
 
 ### Resume and recovery prompts
 
@@ -809,7 +866,10 @@ newer hive. Deploy the controller first, then the hives.
 | Launches on one hive end with `hive launch failed: prompt` | The controller predates prompt transport and sends no opening and digest. | Upgrade the controller, then the hive. |
 | Launches on one hive end with `hive launch failed: expired` | The hive picked up the launch order more than 300 seconds after the controller sent it. | Check that the hive beats (`agentihooks hive list` shows `live`) and its `agentihooks-hive` service runs. |
 | A remote task's Contract and proof fold is empty | The hive stopped beating for more than 45 seconds, so its synced copy expired, or the agent has not written a line yet. | Check `agentihooks hive list`. The lines come back on the hive's next heartbeat. |
-| A relaunched agent on the same hive does not see proof lines written on another machine | `progress.md` and `proof.md` already on a hive are kept, never merged. | Copy the missing lines into the hive's work folder, or append them from the agent. |
+| A successor on another host does not see a file its predecessor wrote | The file does not travel: it sits in a subfolder, is a symbolic link, has a hidden or unsupported name, is not UTF-8 text, is over 65,536 bytes, or comes after the first 32 files by name. | Move what the successor needs directly into the task folder as a plain text file under the limit. See [Work folder files on any host](#work-folder-files-on-any-host). |
+| A successor on another host does not see a file its predecessor wrote, and the file is one that travels | The predecessor's hive wrote no copy: it ran a version from before pull request [#7834](https://github.com/the-cloud-clockwork/agentihooks/pull/7834), or its copy expired a day after its last beat. Or the controller runs a version from before #7834 and never writes hive copies into its folders. | Read the key with `redis-cli GET <root>:hive:<id>:workspaces:files`. Upgrade the controller and the hives. A copy that expired is gone; recover the file from the predecessor hive's own folder while that host is up. |
+| Lines a relaunched agent wrote on its hive are replaced by the controller's copy | The hive's file did not contain the text the controller sent, so the controller's copy won. This happens when the hive file was edited rather than appended to. | Append to `progress.md` and `proof.md` instead of rewriting them. |
+| A file deleted on the hive is still in the controller's folder | The mirror writes the files a hive sends and removes none. | Delete the file in the controller's folder too, or leave it: the next launch carries it again. |
 
 ## Failover timing
 
@@ -966,7 +1026,25 @@ recorded as started, and the tick reports the action:
 ```
 
 When the record already carries the acknowledged target, the tick leaves it unchanged. An acknowledgement that is
-missing or not `live` refuses the collection as gone.
+not `live` refuses the spawn and leaves the record `finished`. The refusal reason depends on what the receipt holds:
+
+| Receipt | Spawn refused with |
+|---|---|
+| No acknowledgement | `the hive launch order ended before its acknowledgement` |
+| An acknowledgement with status `failed` | `hive launch failed: <cause>`, the hive's own cause from [Refusal causes](#refusal-causes) |
+
+A failed acknowledgement reads the same here as on a launch the tick collects while the execution still runs, so
+the swarm timer journal and the Doctor's failed spawn finding carry the hive's cause. A Codex worker whose profile
+canary timed out on the hive, for example, is written to the journal as:
+
+```text
+<slug>: spawn failed for <task>: hive launch failed: refused: agentihooks init-agent: mounted profile canary did not validate before timeout: the codex agent reported no canary within 90s
+```
+
+Before [pull request #8039](https://github.com/the-cloud-clockwork/agentihooks/pull/8039) a failed acknowledgement
+on a finished execution was reported with the missing acknowledgement reason. The Doctor finding
+`failed-spawn/t-runners-doc-worker001` read "the hive launch order ended before its acknowledgement" while the
+hive's acknowledgement held the canary timeout above.
 
 With the process identity recorded, the retire order the tick sends for that agent reaches the hive with a process
 it can stop or find already gone, and the retire ends.
@@ -990,6 +1068,8 @@ because the count kept growing.
 |---|---|---|
 | A `retire failed` finding shows `refusal: hive <host> refused retire: runtime target names no process` | The agent's execution record: does its runtime target carry `process_namespace`, `pid` and `pid_start`, or only `host_id`? | A record collected by a current controller carries the identity, and its retire ends. A record left with only `host_id` by an older controller keeps failing until the tick drops the agent from the swarm, which clears its retire count and the finding. |
 | The tick printed "finished … before the tick collected its hive acknowledgement" | The execution record's state | Expected for a task that finished within one tick; the record stays `finished` and the launch is counted as started. |
+| A spawn failed with `hive launch failed: <cause>` for an execution already `finished` | The cause, against [Refusal causes](#refusal-causes) | The hive acknowledged the launch as failed. Fix the cause on the hive; for a canary timeout see [Profile launch home](../reference/profile-launch-home.md). |
+| A spawn failed with `the hive launch order ended before its acknowledgement` | `agentihooks hive list` for the order's hive | The order's receipt holds no acknowledgement, so the hive never answered it. Check that the hive beats and its `agentihooks-hive` service runs. |
 
 ## Hive placement for one swarm on a local machine
 

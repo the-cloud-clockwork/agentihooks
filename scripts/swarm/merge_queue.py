@@ -3,6 +3,7 @@ import subprocess
 import time
 from collections.abc import Callable
 
+from scripts import gh_audit
 from scripts.swarm import github_reads, ledger_events, mutation_wait, staged_compatibility
 from scripts.swarm.store import SwarmError
 
@@ -53,9 +54,10 @@ def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
 def rest(path: str, run) -> dict | list | str:
     if mutation_wait.backing_off():
         raise SwarmError(f"GitHub API rate limit backoff holds {path}")
-    command = ["gh", "api", path]
+    command = ["gh", "api", path, "--allow-escape-sequences"] if path.endswith("/logs") else ["gh", "api", path]
     try:
-        done = run(command, capture_output=True, text=True, timeout=20)
+        with gh_audit.uncharged():
+            done = run(command, capture_output=True, text=True, timeout=20)
         github_reads.charge(github_reads.CALLER.get(), path, time.time())
         if done.returncode:
             if mutation_wait.rate_limited(done.stderr):

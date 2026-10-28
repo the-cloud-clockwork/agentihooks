@@ -155,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
     execute = sub.add_parser("exec", help="Refresh GitHub credentials and execute a process")
     execute.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    if args.action == "exec" and args.command[:1] == ["--"]:
+        args.command = args.command[1:]
     try:
         if args.action == "credential":
             return credential(args.operation, sys.stdin, sys.stdout)
@@ -168,7 +170,11 @@ def main(argv: list[str] | None = None) -> int:
             if refusal:
                 print(refusal, file=sys.stderr)
                 return 3
-            os.execvpe(args.command[0], args.command, env)
+            try:
+                os.execvpe(args.command[0], args.command, env)
+            except OSError:
+                print("GitHub credential wrapper could not execute the command", file=sys.stderr)
+                return 127
         return 0
     except (OSError, KeyError, ValueError, GitAuthRefused, jwt.PyJWTError, requests.RequestException):
         print(REFUSED, file=sys.stderr)
