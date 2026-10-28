@@ -466,6 +466,8 @@ class SQLiteLedgerRepository:
     def _reader(self):
         held = getattr(self._readers, "held", None)
         if held is None or held[0] != self.path:
+            if held is not None:
+                self._held[held[1]]()
             held = self._readers.held = self._open(check_same_thread=False)
             self._held[held[1]] = weakref.finalize(threading.current_thread(), release_reader, self._held, held[1])
         held[1].set_trace_callback(self.trace)
