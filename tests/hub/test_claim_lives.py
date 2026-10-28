@@ -152,7 +152,7 @@ def test_a_reopened_admission_spends_no_life_and_a_counted_start_refunds_normall
     assert rig.store.claims(SLUG, "t1") == 1
 
 
-def test_a_new_claim_drops_a_stale_pending_life_so_its_refund_spends_a_counted_life(rig):
+def test_a_legacy_counted_start_drops_a_stale_pending_life_so_its_refund_spends_a_counted_life(rig):
     rig.admitter.admit(SLUG, ask())
     rig.store.release(SLUG, "t1", rig.store.claimant(SLUG, "t1"))
     assert rig.store.claim(SLUG, "t1", "engineer@legacy", 60_000)

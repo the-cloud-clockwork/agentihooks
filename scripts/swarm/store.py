@@ -297,11 +297,7 @@ class RedisStore:
         return self._if_holder(
             self.key(slug, "claim", task),
             None,
-            lambda pipe, key: (
-                pipe.set(key, agent, nx=True, px=lease_ms),
-                pipe.incr(f"{key}:generation"),
-                pipe.hdel(self.key(slug, "pending-lives"), task),
-            ),
+            lambda pipe, key: (pipe.set(key, agent, nx=True, px=lease_ms), pipe.incr(f"{key}:generation")),
             self._claim_guards(slug, task),
         )
 
@@ -530,6 +526,7 @@ class RedisStore:
         return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
 
     def count_claim(self, slug, task):
+        self.redis.hdel(self.key(slug, "pending-lives"), task)
         self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
         return self.redis.hincrby(self.key(slug, "started-lives"), task)
 
