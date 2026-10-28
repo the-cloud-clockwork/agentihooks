@@ -41,7 +41,7 @@ for compliance.
 | A rule must survive context drift | `enforcement_set` with a tool-call cadence; `matcher` (e.g. `bash.kubectl`) limits it to matching tool calls |
 | The rule belongs to one repository | `enforcement_set(local=true)` — global entries reach every repo on the machine |
 | The operator's message asks to set, change or remove a condition | `condition_set` / `condition_clear` (script body; `scope` global, profile or directory). Never on your own initiative — the hook refuses it |
-| A filter on unwanted text | `condition_set` kind filter (`language="filter"`), only when the operator asks |
+| A filter on unwanted text | `condition_set` with `language="filter"`, only when the operator asks |
 | Which conditions run, or why a call was shaped | `condition_list`, `condition_show` |
 | Runtime doctrine is complete or obsolete | `enforcement_clear` by ID or tag |
 | Which layer (bundle, profile, enforcement, condition, broadcast, brain) put a directive into a session | `agentihooks trace [<session_id>]`: time, layer, source, locator (the store or file to clear it in), text, recorded as each hook injected it |

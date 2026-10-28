@@ -21,7 +21,7 @@ fail open behaviour, so when a filter runs is decided by its filename.
 
 ## Worked example: the capacity line
 
-The swarm capacity reason in `scripts/swarm/capacity.py` once gained this tail:
+The swarm capacity reason in `scripts/swarm/capacity.py` carries this tail:
 
 ```python
 reason += f"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats"
@@ -144,7 +144,7 @@ Built-in finders, shipped in the package:
 |---|---|
 | `string_literals` | Python string and f-string literals through `tokenize`; string literals and text nodes in `.js`, `.ts`, `.jsx`, `.tsx`, `.vue`, `.svelte`, `.html` and `.htm`; reason `user-facing literal` |
 | `explanation_tail` | inside a literal, the span from `because`, `since`, `which means`, `so that` or `; ` to the end of the literal; reason `explanation tail` |
-| `judge_cues` | a package `_finders` script used by the judge bias filter |
+| `judge_cues` | a package `_finders` script used by the judge blind filter |
 
 ## Synthetic tools
 
@@ -168,7 +168,7 @@ matcher is a near miss of one of them.
 
 | Action | Effect |
 |---|---|
-| `send-back` | denies the call; the reason lists every confirmed finding as `- "<span>": <reason>` |
+| `send-back` | denies the call; the reason lists each confirmed finding not yet at the [round cap](#round-cap) as `- "<span>": <reason>` |
 | `flag` | allows the call and adds the findings as context, `filter flagged:` |
 | `strip` | removes the confirmed spans through an input rewrite where the harness applies rewrites at `pre`; elsewhere it sends back. Outside `bypassPermissions` the rewrite asks for permission |
 
