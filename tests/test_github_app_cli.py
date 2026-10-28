@@ -263,7 +263,7 @@ def test_exec_missing_command_is_not_reported_as_credentials_failure(monkeypatch
     monkeypatch.setattr(github_app_cli, "token", Mock(return_value="fixture"))
     monkeypatch.setattr(github_app_cli.os, "execvpe", Mock(side_effect=FileNotFoundError("private detail")))
     assert github_app_cli.main(["exec", "missing"]) == 127
-    assert capsys.readouterr().err == "GitHub credential wrapper could not execute the command\\n"
+    assert capsys.readouterr().err == "GitHub credential wrapper could not execute the command\n"
 
 
 READS = [
