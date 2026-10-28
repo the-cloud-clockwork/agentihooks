@@ -127,8 +127,8 @@ def test_a_hive_at_its_cap_launches_nothing_when_its_session_report_misses_recor
     setup.store.create(SwarmConfig("doctor", "agentihooks", 1, 1))
     rows = [
         (setup.config.slug, "eng", "pinned", "working"),
-        (setup.config.slug, "ci", "free", "working"),
-        ("doctor", "eng", "other", "working"),
+        (setup.config.slug, "ci", "free", "starting"),
+        ("doctor", "eng", "other", "retiring"),
         ("doctor", "master", "master", "working"),
         ("doctor", "eng", "gone", "ended"),
     ]

@@ -70,13 +70,9 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         pending: dict[str, int] = {}
         recorded = 0
         for agent in agents:
-            if (
-                agent.hive == hive["id"]
-                and agent.lane != "master"
-                and agent.state in ("launching", "working", "suspect")
-            ):
+            if agent.hive == hive["id"] and agent.lane != "master" and agent.state not in ("finished", "ended"):
                 recorded += 1
-                if agent.execution_id not in seen:
+                if agent.state in ("launching", "working", "suspect") and agent.execution_id not in seen:
                     slot = f"{agent.harness}:{agent.account}"
                     pending[slot] = pending.get(slot, 0) + 1
         unclaimed = {
