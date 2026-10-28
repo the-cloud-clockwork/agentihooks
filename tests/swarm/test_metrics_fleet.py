@@ -338,8 +338,9 @@ def test_checkpoint_contention_is_reported_after_bounded_attempts(monkeypatch):
         raise StateConflict("taken")
 
     monkeypatch.setattr(saved, "create", raced)
-    with pytest.raises(StateConflict, match="metrics checkpoints remained busy"):
+    with pytest.raises(StateConflict) as raised:
         metrics_fleet.record_checkpoint(SimpleNamespace(), SLUG, "first", "eng-1", 100)
+    assert str(raised.value) == "metrics checkpoints remained busy"
     assert len(attempts) == 16
 
 
