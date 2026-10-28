@@ -677,6 +677,10 @@ def test_cached_static_and_class_method_bodies_keep_their_binding_when_mutated(m
         assert ungraded == []
     generated, names = selected_mutants("scripts/sample.py", source, {6, 10})
     assert {name.split("__mutmut_")[0] for name in names} == {"xǁBoxǁdoubled", "xǁBoxǁtripled"}
+    for copy, binding in (("doubled", "@staticmethod"), ("tripled", "@classmethod")):
+        chunks = generated.split(f"def xǁBoxǁ{copy}__mutmut_")
+        assert len(chunks) > 2
+        assert all(chunk.rstrip().endswith(binding) for chunk in chunks[:-1])
 
     def measure():
         namespace = {"__name__": "scripts.sample"}
