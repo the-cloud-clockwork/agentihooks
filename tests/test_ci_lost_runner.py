@@ -347,6 +347,39 @@ def test_a_run_rerun_meanwhile_is_left_alone(monkeypatch, no_sleep):
     assert api.posts() == []
 
 
+PR_RUN = {**RUN, "event": "pull_request", "workflow_id": 5, "head_branch": "feat/x"}
+LATEST = "repos/o/r/actions/workflows/5/runs?event=pull_request&branch=feat%2Fx&per_page=1"
+
+
+def pull_request_watch(monkeypatch, states, newest):
+    pages = {
+        JOBS: lines(*stalled_run()),
+        RUNS: [json.dumps(state) for state in states],
+        RUNNER_LIST: "anton-oss-light-live\n",
+        LATEST: json.dumps({"workflow_runs": [{"id": newest}]}),
+    }
+    api = Api(pages)
+    monkeypatch.setattr(ci_lost_runner, "_api", api)
+    return api, ci_lost_runner.watch("o/r", PR_RUN, WORKFLOW, GRACE)
+
+
+def test_a_pull_request_run_a_newer_push_superseded_is_left_alone(monkeypatch, no_sleep):
+    api, report = pull_request_watch(monkeypatch, [PR_RUN], 9)
+    assert report == {
+        "run": 7,
+        "attempt": 1,
+        "action": "none",
+        "reason": "a newer run of its pull request superseded it",
+    }
+    assert api.posts() == []
+
+
+def test_the_newest_pull_request_run_is_still_recovered(monkeypatch, no_sleep):
+    api, report = pull_request_watch(monkeypatch, [PR_RUN, {**PR_RUN, "status": "completed"}], 7)
+    assert report["action"] == "rerun"
+    assert api.posts() == [post(f"{RUNS}/cancel"), post(f"{RUNS}/rerun-failed-jobs")]
+
+
 def refused_cancel(monkeypatch, after):
     api = Api({JOBS: lines(*stalled_run()), RUNS: [json.dumps(RUN), json.dumps(after)], RUNNER_LIST: ""})
 
