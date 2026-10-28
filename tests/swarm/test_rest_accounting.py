@@ -31,7 +31,9 @@ def test_paginated_responses_charge_each_page(tmp_path, monkeypatch, failed):
     assert github_reads.counts(0, float("inf")) == {"caller": 2}
 
 
-@pytest.mark.parametrize("args", [["api", "graphql", "-f", "query={viewer{login}}"], ["repo", "view", "--json", "name"]])
+@pytest.mark.parametrize(
+    "args", [["api", "graphql", "-f", "query={viewer{login}}"], ["repo", "view", "--json", "name"]]
+)
 def test_non_rest_commands_do_not_charge_core_quota(tmp_path, monkeypatch, args):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     result = subprocess.CompletedProcess([], 0, "{}", "")
