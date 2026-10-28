@@ -424,5 +424,5 @@ def test_ui_roles_prefer_ui_hives_and_never_fall_back_to_a_headless_hive():
         assert choose(role, "claude", "acct", "subscription", REPO, hives, NOW) == Choice("ws")
     beside_a_master_pc = [host("pc", "yes", excluded=["qa", "frontend", "eng", "ci", "plan", "dispatch"]), hives[1]]
     assert choose("qa", "claude", "acct", "subscription", REPO, beside_a_master_pc, NOW) == Wait(
-        "no live UI hive takes qa"
+        "no live swarm-master takes qa"
     )
