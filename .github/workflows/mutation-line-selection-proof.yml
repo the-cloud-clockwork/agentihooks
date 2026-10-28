@@ -39,7 +39,7 @@ jobs:
           enable-cache: false
       - name: Install sample dependencies
         working-directory: sample
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --constraint .github/test-requirements.lock --system --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Use the candidate selector on unchanged sample source and tests
         run: |
           cp -a head/scripts/ci_mutation/. sample/scripts/ci_mutation/
