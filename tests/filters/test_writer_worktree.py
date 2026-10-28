@@ -249,7 +249,7 @@ def test_the_trust_check_refuses_only_an_untrusted_repository_with_project_condi
 
 
 def test_the_trust_check_trusts_the_owner_of_the_operators_bundle(server_elsewhere, stranger, tmp_path, monkeypatch):
-    bundle = tmp_path / "bundle"
+    bundle = tmp_path / "operator-bundle"
     bundle.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=bundle, check=True)
     subprocess.run(["git", "remote", "add", "origin", "git@github.com:stranger/bundle.git"], cwd=bundle, check=True)
