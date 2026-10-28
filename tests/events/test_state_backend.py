@@ -243,3 +243,27 @@ def test_unavailable_names_the_backend_errors():
     assert StateConflict in state.unavailable({state.BACKEND_ENV: "bus"})
     assert RuntimeError in state.unavailable({state.BACKEND_ENV: "bus"})
     assert redis.RedisError not in state.unavailable({state.BACKEND_ENV: "bus"})
+
+
+def test_a_swarm_store_shares_its_own_redis_under_the_redis_backend():
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    opened = state.for_store(store, "work", {})
+    assert isinstance(opened, RedisStateStore)
+    assert opened.redis is store.redis
+
+
+def test_a_swarm_store_opens_the_configured_bus_under_the_bus_backend():
+    import fakeredis
+
+    from scripts.events.memory import MemoryStateStore
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    opened = state.for_store(store, "work", {state.BACKEND_ENV: "bus", "AGENTIHOOKS_BUS": "memory"})
+    assert isinstance(opened, MemoryStateStore)
+    opened.create("key", b"value")
+    assert store.redis.keys("*") == []
