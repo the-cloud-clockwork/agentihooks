@@ -15,7 +15,7 @@ PREFLIGHT = ".github/workflows/mutation-preflight.yml"
 
 
 def run(id, event, branch="feature", path=TEST):
-    return {"id": id, "event": event, "head_branch": branch, "path": path}
+    return {"id": id, "run_attempt": 1, "event": event, "head_branch": branch, "path": path}
 
 
 def job(run_id, name, spent, labels=("anton-oss",)):
@@ -191,7 +191,7 @@ def test_completed_runs_already_cached_are_never_read_again(monkeypatch):
         return [job(int(path.split("/")[-2]), "unit", 60)]
 
     monkeypatch.setattr(ci_minutes, "rows", rows)
-    cache = {"1": {"created_at": "2026-10-24T10:00:00Z", "jobs": [job(1, "cached", 120)]}}
+    cache = {"1:1": {"created_at": "2026-10-24T10:00:00Z", "jobs": [job(1, "cached", 120)]}}
     runs = [listed(1), listed(2), listed(3, status="in_progress")]
     jobs = ci_minutes.read_jobs("o/r", runs, cache)
     assert sorted(read) == [
@@ -199,8 +199,18 @@ def test_completed_runs_already_cached_are_never_read_again(monkeypatch):
         "repos/o/r/actions/runs/3/jobs?filter=all&per_page=100",
     ]
     assert sorted(job["name"] for job in jobs) == ["cached", "unit", "unit"]
-    assert sorted(cache) == ["1", "2"]
-    assert cache["2"] == {"created_at": "2026-10-24T10:00:00Z", "jobs": [job(2, "unit", 60)]}
+    assert sorted(cache) == ["1:1", "2:1"]
+    assert cache["2:1"] == {"created_at": "2026-10-24T10:00:00Z", "jobs": [job(2, "unit", 60)]}
+
+
+def test_a_rerun_attempt_of_a_cached_run_is_read_again(monkeypatch):
+    read = []
+    monkeypatch.setattr(ci_minutes, "rows", lambda path, key: read.append(path) or [job(1, "rerun", 60)])
+    cache = {"1:1": {"created_at": "2026-10-24T10:00:00Z", "jobs": [job(1, "first", 120)]}}
+    jobs = ci_minutes.read_jobs("o/r", [{**listed(1), "run_attempt": 2}], cache)
+    assert read == ["repos/o/r/actions/runs/1/jobs?filter=all&per_page=100"]
+    assert jobs == [job(1, "rerun", 60)]
+    assert sorted(cache) == ["1:1", "1:2"]
 
 
 def test_a_second_pass_over_the_same_completed_window_reads_no_jobs(monkeypatch):
@@ -218,12 +228,12 @@ def test_the_cache_round_trips_and_drops_runs_older_than_the_kept_span(tmp_path)
     since = datetime(2026, 10, 24, tzinfo=UTC)
     kept = since - ci_minutes.KEEP
     cache = {
-        "1": {"created_at": "2026-10-23T23:00:00Z", "jobs": [job(1, "unit", 60)]},
-        "2": {"created_at": kept.strftime(ci_minutes.STAMP), "jobs": []},
-        "3": {"created_at": "2026-10-10T00:00:00Z", "jobs": []},
+        "1:1": {"created_at": "2026-10-23T23:00:00Z", "jobs": [job(1, "unit", 60)]},
+        "2:1": {"created_at": kept.strftime(ci_minutes.STAMP), "jobs": []},
+        "3:1": {"created_at": "2026-10-10T00:00:00Z", "jobs": []},
     }
     ci_minutes.save_cache(path, cache, since)
-    assert ci_minutes.load_cache(path) == {"1": cache["1"], "2": cache["2"]}
+    assert ci_minutes.load_cache(path) == {"1:1": cache["1:1"], "2:1": cache["2:1"]}
     assert ci_minutes.load_cache(tmp_path / "missing.json") == {}
 
 
@@ -246,7 +256,7 @@ def test_remaining_reads_the_core_limit_from_the_free_rate_limit_endpoint(monkey
 
 def test_main_reads_only_uncached_runs_and_keeps_the_cache(monkeypatch, tmp_path):
     cache = tmp_path / "jobs.json"
-    cache.write_text(json.dumps({"1": {"created_at": "2026-10-24T10:00:00Z", "jobs": [job(1, "unit", 60)]}}))
+    cache.write_text(json.dumps({"1:1": {"created_at": "2026-10-24T10:00:00Z", "jobs": [job(1, "unit", 60)]}}))
     monkeypatch.setattr(ci_minutes, "read_runs", lambda repo, since, until: [listed(1), listed(2)])
     monkeypatch.setattr(ci_minutes, "merged_count", lambda repo, since, until: 1)
     budgets = []
@@ -258,7 +268,7 @@ def test_main_reads_only_uncached_runs_and_keeps_the_cache(monkeypatch, tmp_path
     assert ci_minutes.main(argv) == 0
     assert budgets == [1]
     assert json.loads(out.read_text())["anton_minutes"] == 3.0
-    assert sorted(json.loads(cache.read_text())) == ["1", "2"]
+    assert sorted(json.loads(cache.read_text())) == ["1:1", "2:1"]
 
 
 def test_runs_are_read_one_hour_at_a_time_and_kept_once(monkeypatch):
@@ -303,7 +313,7 @@ def test_jobs_are_read_for_every_attempt_of_every_run(monkeypatch):
         return [{"path": path}]
 
     monkeypatch.setattr(ci_minutes, "rows", fake)
-    found = ci_minutes.read_jobs("o/r", [run(5, "push"), run(6, "push")])
+    found = ci_minutes.read_jobs("o/r", [run(5, "push"), run(6, "push")], {})
     assert found == [
         {"path": "repos/o/r/actions/runs/5/jobs?filter=all&per_page=100"},
         {"path": "repos/o/r/actions/runs/6/jobs?filter=all&per_page=100"},
@@ -341,11 +351,14 @@ def fake_rows(path, key):
 
 def test_main_writes_the_measurement_prints_it_and_appends_the_summary(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(ci_minutes, "rows", fake_rows)
+    monkeypatch.setattr(ci_minutes, "within_budget", lambda reads: None)
     summary = tmp_path / "summary.md"
     summary.write_text("before\n")
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     out = tmp_path / "m.json"
+    cache = tmp_path / "jobs.json"
     argv = ["--repo", "o/r", "--until", "2026-10-24T02:00:00Z", "--hours", "2", "--out", str(out)]
+    argv += ["--cache", str(cache)]
     assert ci_minutes.main(argv) == 0
     result = json.loads(out.read_text())
     assert out.read_text() == json.dumps(result, indent=2)
