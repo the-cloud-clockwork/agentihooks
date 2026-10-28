@@ -62,3 +62,28 @@ def test_default_hub_registers_the_started_life_counter():
         assert reactor.singleton
     finally:
         bus.close()
+
+
+def test_a_delayed_start_cannot_spend_a_reset_budget(rig):
+    event = started(rig.admitter.admit(SLUG, ask()))
+    rig.store.reset_claims(SLUG, "t1")
+    claims.Claims(rig.store).handle(event)
+    assert rig.store.claims(SLUG, "t1") == 0
+
+
+def test_a_pending_start_refund_preserves_earlier_lives(rig):
+    for _ in range(2):
+        rig.store.count_claim(SLUG, "t1")
+    admitted = rig.admitter.admit(SLUG, ask())
+    event = started(admitted)
+    assert rig.store.refund_held_claim(SLUG, "t1", admitted["name"], rig.store.claim_generation(SLUG, "t1"))
+    assert rig.store.claims(SLUG, "t1") == 2
+    claims.Claims(rig.store).handle(event)
+    assert rig.store.claims(SLUG, "t1") == 2
+
+
+def test_the_first_pending_start_can_be_refunded(rig):
+    admitted = rig.admitter.admit(SLUG, ask())
+    assert rig.store.refund_held_claim(SLUG, "t1", admitted["name"], rig.store.claim_generation(SLUG, "t1"))
+    claims.Claims(rig.store).handle(started(admitted))
+    assert rig.store.claims(SLUG, "t1") == 0
