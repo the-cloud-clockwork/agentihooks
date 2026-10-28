@@ -290,10 +290,11 @@ def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job):
     install = steps[names.index("Install dependencies")]
     assert names.index("Take the helper scripts from the workflow revision") < names.index("Install dependencies")
     assert take["if"] == install["if"]
+    inputs = ".github/scripts .github/test-requirements.lock" if job == "mutation-plan" else ".github/scripts"
     assert take["run"].splitlines() == [
         'git fetch --no-tags origin "$GITHUB_SHA"',
         'mkdir -p "$RUNNER_TEMP/workflow"',
-        'git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"',
+        f'git archive "$GITHUB_SHA" {inputs} | tar -x -C "$RUNNER_TEMP/workflow"',
     ]
 
 
@@ -317,6 +318,7 @@ def test_a_head_that_predates_the_helper_still_runs_it_from_the_workflow_revisio
     git(repo, "checkout", "-q", "--detach", head)
     (origin / ".github/scripts").mkdir(parents=True)
     shutil.copy(RETRY, origin / ".github/scripts/pypi-retry.sh")
+    shutil.copy(ROOT / ".github/test-requirements.lock", origin / ".github/test-requirements.lock")
     git(origin, "add", ".")
     git(origin, "commit", "-qm", "workflow revision")
     workflow_sha = git(origin, "rev-parse", "HEAD").strip()
