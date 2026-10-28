@@ -126,7 +126,14 @@ def frozen(doc: dict, pending: dict, inputs: dict) -> set:
     graph, fix = hierarchy.project(doc)[0], inputs.get("fix_phase")
     freeze = ports.swarm().freeze
     seen = {**doc, freeze.WATCHED: inputs["watched"]} if inputs.get("watched") else doc
-    held = {tid for tid, t in pending.items() if freeze.held(t, seen, graph, fix)}
+    counted = {tid for tid, t in pending.items() if not freeze.held(t, seen, graph, fix)}
+    needed = list(counted)
+    while needed:
+        for dep in pending[needed.pop()].get("depends_on") or []:
+            if dep in pending and dep not in counted and not freeze.claim_gate(pending[dep], seen, graph, fix):
+                counted.add(dep)
+                needed.append(dep)
+    held = set(pending) - counted
     waiting = {tid: t for tid, t in pending.items() if t.get("state") == "open"}
     for _ in waiting:
         held |= {tid for tid, t in waiting.items() if held & set(t.get("depends_on") or [])}

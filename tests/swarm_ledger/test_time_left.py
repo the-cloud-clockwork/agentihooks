@@ -247,7 +247,8 @@ class TestFrozenSplit:
     def test_a_focus_that_holds_most_tasks_counts_only_its_work_and_names_the_rest(self):
         others = [task(f"o{n}", "open", "S") for n in range(40)]
         d = doc(
-            task("x", "open", "S"),
+            task("v", "done", "S"),
+            task("x", "open", "S", depends_on=["v"]),
             task("y", "open", "M", depends_on=["x"]),
             task("w", "open", "S"),
             task("z", "claimed", "S", depends_on=["w"]),
