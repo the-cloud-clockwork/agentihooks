@@ -100,7 +100,7 @@ def test_an_agent_without_an_account_is_never_on_a_revoked_one(store):
 
 def test_a_master_on_a_revoked_account_is_recycled_in_its_seat(store):
     agent, runtime = master(store)
-    agent = replace(agent, account="gone")
+    agent = replace(agent, account="gone", harness="claude")
     store.put_agent("sw", agent)
     revoke(store, "gone")
     found = _watch_agent("sw", store, SlugLedger([]), runtime, {}, agent, START + 60_000)
