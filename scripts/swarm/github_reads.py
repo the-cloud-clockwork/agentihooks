@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -127,6 +128,11 @@ def charge(caller: str, endpoint: str, now: float) -> None:
             log.write(json.dumps({"at": now, "caller": caller, "source": source(), "endpoint": endpoint}) + "\n")
     except OSError:
         pass
+
+
+def rest(caller: str, args: list[str], run: Callable = subprocess.run, **options) -> subprocess.CompletedProcess:
+    charge(caller, args[1] if args[0] == "api" else args[0], time.time())
+    return run(["gh", *args], **options)
 
 
 def counts(since: float, until: float) -> dict[str, int]:

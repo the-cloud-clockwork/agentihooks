@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from scripts.ci_budget import GATE
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity, dev_red, naming, promotion_owner
+from scripts.swarm import capacity, dev_red, github_reads, naming, promotion_owner
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_alerts, ledger_comments
@@ -88,8 +88,10 @@ def key(slug: str, part: str) -> str:
 
 
 def _read(repo_dir: str, endpoint: str, jq: str, run: Callable) -> list[dict]:
-    output = run(
-        ["gh", "api", endpoint, "--paginate", "--jq", jq],
+    output = github_reads.rest(
+        "swarm.promotion_watch",
+        ["api", endpoint, "--paginate", "--jq", jq],
+        run,
         cwd=repo_dir,
         capture_output=True,
         text=True,
@@ -162,8 +164,10 @@ def failing_tests(repo: str, job: dict, run: Callable) -> set[str]:
         return set()
     if not any(s["name"] == TEST_STEP and s.get("conclusion") in FAILED for s in job.get("steps") or []):
         return set()
-    log = run(
-        ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job['id']}/logs"],
+    log = github_reads.rest(
+        "swarm.promotion_watch",
+        ["api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job['id']}/logs"],
+        run,
         cwd=repo,
         capture_output=True,
         text=True,
