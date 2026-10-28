@@ -257,3 +257,34 @@ def test_an_unreadable_worker_pool_stays_an_unavailable_source(tmp_path, store):
     panels, sources = _recorded(tmp_path, store, lambda: None)
     assert not [row for row in panels if row["panel"] == "capacity"]
     assert {row["source"]: (row["available"], row["readings"]) for row in sources}["pools"] == (0, 0)
+
+
+def test_checkpoint_storage_uses_the_bus_and_expires_inactive_records(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.events import factory, memory
+    from scripts.events.config import BusConfig
+
+    bus = memory.open_bus(BusConfig())
+    monkeypatch.setattr(factory, "open_bus", lambda config: bus)
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "bus")
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
+    clock = [1000.0]
+    monkeypatch.setattr("time.time", lambda: clock[0])
+    active = {"eng-1": SimpleNamespace(execution_id="first", started_at=100)}
+    store = SimpleNamespace(execution_occupants=lambda slug: active)
+    metrics_fleet.record_checkpoint(store, SLUG, "first", "eng-1", 200)
+    metrics_fleet.record_checkpoint(store, SLUG, "first", "eng-1", 300)
+    metrics_fleet.record_checkpoint(store, SLUG, "ended", "eng-9", 150)
+    clock[0] += metrics_fleet.CHECKPOINT_TTL_MS / 1000 - 1
+    assert metrics_fleet._checkpoints(store, SLUG) == [{"execution_id": "first", "seat": "eng-1", "taken_at_ms": 300}]
+    clock[0] += 2
+    assert metrics_fleet._checkpoints(store, SLUG) == [{"execution_id": "first", "seat": "eng-1", "taken_at_ms": 300}]
+    saved = bus.state(metrics_fleet.CHECKPOINTS).get(SLUG)
+    assert set(json.loads(saved.value)) == {"first"}
+    active["eng-2"] = SimpleNamespace(execution_id="missing", started_at=400)
+    assert metrics_fleet._checkpoints(store, SLUG)[1] == {
+        "execution_id": "missing",
+        "seat": "eng-2",
+        "taken_at_ms": 400,
+    }

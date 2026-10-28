@@ -501,3 +501,34 @@ def test_a_metrics_interval_raced_by_another_controller_is_skipped(spool, sent, 
     swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
     assert runs == []
+
+
+@pytest.mark.parametrize("operation", ["get", "create", "update", "reopen"])
+@pytest.mark.parametrize("failure", [RuntimeError, OSError])
+def test_bus_interval_outages_do_not_escape_metrics(spool, sent, monkeypatch, operation, failure):
+    import fakeredis
+
+    from scripts.events import memory, state
+    from scripts.events.config import BusConfig
+
+    saved = memory.open_bus(BusConfig()).state(metrics.BUCKET)
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    monkeypatch.setattr(state, "for_store", lambda *args: saved)
+    if operation == "update":
+        saved.create("sw", b"0")
+    method = "update" if operation == "reopen" else operation
+
+    def unavailable(*args):
+        raise failure("state unavailable")
+
+    monkeypatch.setattr(saved, method, unavailable)
+
+    def collect(*args):
+        if operation == "reopen":
+            raise ValueError("collector failed")
+
+    monkeypatch.setattr(metrics, "_collect", collect)
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    environ = {**ON, "AGENTIHOOKS_STATE_BACKEND": "bus"}
+    assert metrics.record_pass("sw", NOW, 0, environ, swarm) == ["metrics outbox failed: state unavailable"]
