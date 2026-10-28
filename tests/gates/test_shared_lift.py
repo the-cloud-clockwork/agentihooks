@@ -7,6 +7,7 @@ import fakeredis
 import pytest
 
 from scripts.gates import entry, lift
+from scripts.gates.subagents import SubagentBudget
 from scripts.swarm import cli
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
@@ -33,7 +34,7 @@ def hosts(tmp_path, monkeypatch):
 def check(home, agent=AGENT, task=TASK):
     payload = {"tool_name": "Agent", "tool_input": {"subagent_type": "Explore", "description": "read", "prompt": "go"}}
     env = {"AGENTIHOOKS_SWARM": SLUG, "AGENTIHOOKS_AGENT_NAME": agent, "AGENTIHOOKS_SWARM_TASK": task}
-    with patch("sys.stderr", io.StringIO()):
+    with patch("sys.stderr", io.StringIO()), patch.dict(entry.GATES, {"subagents": SubagentBudget(launches=2)}):
         return entry.main(["subagents"], io.StringIO(json.dumps(payload)), env, home)
 
 
