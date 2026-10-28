@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-changelog
-  cancel-in-progress: false
+  group: ${{ format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
+  queue: max
 
 jobs:
   changelog:
@@ -35,36 +35,37 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Read the changelog branch
-        run: |
-          if git ls-remote --exit-code origin refs/heads/changelog >/dev/null; then
-            git show origin/changelog:RELEASES.md > "$RUNNER_TEMP/RELEASES.md"
-          else
-            : > "$RUNNER_TEMP/RELEASES.md"
-          fi
-
       - name: Explain every change of the release in 20 to 100 words
         env:
           CHANGELOG_LITELLM_KEY: ${{ secrets.CHANGELOG_LITELLM_KEY }}
           CHANGELOG_LITELLM_URL: ${{ vars.CHANGELOG_LITELLM_URL }}
           CHANGELOG_MODEL: ${{ vars.CHANGELOG_MODEL }}
-        run: python -m scripts.release_changelog "$TAG" "$RUNNER_TEMP/RELEASES.md" "$RUNNER_TEMP/section.md"
+        run: python -m scripts.release_changelog explain "$TAG" "$RUNNER_TEMP/section.md"
 
-      - name: Commit the changelog to its branch
+      - name: Insert the release into the changelog branch
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if git ls-remote --exit-code origin refs/heads/changelog >/dev/null; then
-            git switch --quiet -C changelog origin/changelog
-          else
-            git switch --quiet --orphan changelog
-          fi
-          cp "$RUNNER_TEMP/RELEASES.md" RELEASES.md
-          git add RELEASES.md
-          if ! git diff --cached --quiet; then
-            git commit --quiet -m "Explain the changes of $TAG"
-            git push origin changelog
-          fi
+          for attempt in 1 2 3 4 5; do
+            parent=()
+            : > "$RUNNER_TEMP/RELEASES.md"
+            if git fetch --quiet origin +refs/heads/changelog:refs/remotes/origin/changelog 2>/dev/null; then
+              parent=(-p origin/changelog)
+              git show origin/changelog:RELEASES.md > "$RUNNER_TEMP/RELEASES.md"
+            fi
+            python -m scripts.release_changelog insert "$RUNNER_TEMP/section.md" "$RUNNER_TEMP/RELEASES.md"
+            blob=$(git hash-object -w "$RUNNER_TEMP/RELEASES.md")
+            tree=$(printf '100644 blob %s\tRELEASES.md\n' "$blob" | git mktree)
+            if [[ ${#parent[@]} -gt 0 && "$tree" == "$(git rev-parse origin/changelog^{tree})" ]]; then
+              exit 0
+            fi
+            commit=$(git commit-tree "$tree" "${parent[@]}" -m "Explain the changes of $TAG")
+            if git push --quiet origin "$commit:refs/heads/changelog"; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          exit 1
 
       - name: Add the explanations to the release notes
         run: |

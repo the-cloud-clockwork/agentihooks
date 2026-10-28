@@ -250,23 +250,25 @@ def test_render_release_without_changes_says_so():
     assert rc.render_release("v1.2.3", "2026-10-28", []) == "## v1.2.3 · 2026-10-28\n\nNo merged changes.\n"
 
 
-def test_prepend_release_starts_a_new_changelog():
-    assert rc.prepend_release("", "## v1 · d\n\nx\n") == f"{rc.TITLE}\n\n{rc.INTRO}\n\n## v1 · d\n\nx\n"
+V1, V2, V10 = "## v1.0.1 · d\n\nx\n", "## v1.0.2 · e\n\ny\n", "## v1.0.10 · f\n\nz\n"
+HEAD = f"{rc.TITLE}\n\n{rc.INTRO}\n\n"
 
 
-def test_prepend_release_puts_the_newest_release_first():
-    older = rc.prepend_release("", "## v1 · d\n\nx\n")
-    assert (
-        rc.prepend_release(older, "## v2 · e\n\ny\n")
-        == f"{rc.TITLE}\n\n{rc.INTRO}\n\n## v2 · e\n\ny\n\n## v1 · d\n\nx\n"
-    )
+def test_insert_release_starts_a_new_changelog():
+    assert rc.insert_release("", V1) == HEAD + V1
 
 
-def test_prepend_release_keeps_every_older_release():
-    two = rc.prepend_release(rc.prepend_release("", "## v1 · d\n\nx\n"), "## v2 · e\n\ny\n")
-    assert rc.prepend_release(two, "## v3 · f\n\nz\n") == (
-        f"{rc.TITLE}\n\n{rc.INTRO}\n\n## v3 · f\n\nz\n\n## v2 · e\n\ny\n\n## v1 · d\n\nx\n"
-    )
+def test_insert_release_orders_releases_newest_version_first_whatever_the_arrival_order():
+    assert rc.insert_release(rc.insert_release(HEAD + V1, V10), V2) == HEAD + V10 + "\n" + V2 + "\n" + V1
+
+
+def test_insert_release_keeps_a_release_already_written():
+    existing = HEAD + V2 + "\n" + V1
+    assert rc.insert_release(existing, "## v1.0.1 · d\n\nchanged\n") == existing
+
+
+def test_version_reads_the_numbers_of_a_stable_tag():
+    assert rc.version("v2.17.438") == (2, 17, 438)
 
 
 def test_gh_graphql_runs_the_query_through_gh(monkeypatch):
@@ -276,17 +278,21 @@ def test_gh_graphql_runs_the_query_through_gh(monkeypatch):
     assert seen == [("gh", "api", "graphql", "-f", "query={ q }")]
 
 
-def test_main_needs_a_tag_changelog_and_section():
+@pytest.mark.parametrize("argv", [[], ["explain", "v1"], ["insert", "section"], ["other", "a", "b"]])
+def test_main_refuses_incomplete_commands(argv):
     with pytest.raises(SystemExit):
-        rc.main(["v1", "out"])
+        rc.main(argv)
 
 
-def test_prepend_release_keeps_a_release_already_written():
-    existing = rc.prepend_release("", "## v1 · d\n\nx\n")
-    assert rc.prepend_release(existing, "## v1 · d\n\nchanged\n") == existing
+def test_main_insert_writes_the_section_into_the_changelog(tmp_path):
+    section, changelog = tmp_path / "section.md", tmp_path / "RELEASES.md"
+    section.write_text(V2)
+    changelog.write_text(HEAD + V1)
+    assert rc.main(["insert", str(section), str(changelog)]) == 0
+    assert changelog.read_text() == HEAD + V2 + "\n" + V1
 
 
-def _main(monkeypatch, tmp_path, tag, pulls):
+def _explain(monkeypatch, tmp_path, tag, pulls):
     asked = []
 
     def opener(request, timeout):
@@ -299,32 +305,27 @@ def _main(monkeypatch, tmp_path, tag, pulls):
     monkeypatch.delenv(rc.URL_VAR, raising=False)
     monkeypatch.setenv(rc.MODEL_VAR, "")
     monkeypatch.setenv("GITHUB_REPOSITORY", "org/repo")
-    section, changelog = tmp_path / "section.md", tmp_path / "RELEASES.md"
-    changelog.write_text("")
-    assert rc.main([tag, str(changelog), str(section)]) == 0
-    return section.read_text(), changelog.read_text(), asked
+    section = tmp_path / "section.md"
+    assert rc.main(["explain", tag, str(section)]) == 0
+    return section.read_text(), asked
 
 
-def test_main_writes_the_section_and_the_changelog_for_a_tag(repo, monkeypatch, tmp_path):
+def test_main_explain_writes_the_section_for_a_tag(repo, monkeypatch, tmp_path):
     _promote(repo, _commit(repo, "Base (#1)"), "v1.0.1")
     graded = _commit(repo, "Add the changelog (#5)", "g")
     monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-10-28T10:00:00Z")
     _promote(repo, graded, "v1.0.2")
-    section, changelog, asked = _main(
-        monkeypatch, tmp_path, "v1.0.2", {"p5": {"author": {"login": "dev"}, "body": "b"}}
-    )
-    expected = (
+    section, asked = _explain(monkeypatch, tmp_path, "v1.0.2", {"p5": {"author": {"login": "dev"}, "body": "b"}})
+    assert section == (
         f"## v1.0.2 · 2026-10-28\n\n### 2026-10-27 · {graded[:12]} · #5 · @dev\n\n"
         f"**Add the changelog**\n\n{_words(22)}\n"
     )
-    assert section == expected
-    assert changelog == f"{rc.TITLE}\n\n{rc.INTRO}\n\n{expected}"
     assert asked == [(rc.DEFAULT_URL + "/v1/chat/completions", "Bearer k2", rc.DEFAULT_MODEL)]
 
 
-def test_main_explains_the_whole_history_for_the_first_release(repo, monkeypatch, tmp_path):
+def test_main_explain_covers_the_whole_history_for_the_first_release(repo, monkeypatch, tmp_path):
     graded = _commit(repo, "Start (#1)")
     _promote(repo, graded, "v1.0.1")
-    section, _, asked = _main(monkeypatch, tmp_path, "v1.0.1", {"p1": {"author": {"login": "a"}, "body": ""}})
+    section, asked = _explain(monkeypatch, tmp_path, "v1.0.1", {"p1": {"author": {"login": "a"}, "body": ""}})
     assert section.startswith(f"## v1.0.1 · 2026-10-27\n\n### 2026-10-27 · {graded[:12]} · #1 · @a\n")
     assert len(asked) == 1

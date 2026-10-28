@@ -76,10 +76,13 @@ def graded_revision(ref: str) -> str:
     return match.group(1)
 
 
+def version(tag: str) -> tuple[int, ...]:
+    return tuple(map(int, STABLE.fullmatch(tag).groups()))
+
+
 def previous_tag(tag: str, tags: list[str]) -> str:
-    versions = sorted((tuple(map(int, m.groups())), t) for t in tags if (m := STABLE.fullmatch(t)))
-    older = [t for version, t in versions if version < tuple(map(int, STABLE.fullmatch(tag).groups()))]
-    return older[-1] if older else ""
+    older = sorted((version(t), t) for t in tags if STABLE.fullmatch(t) and version(t) < version(tag))
+    return older[-1][1] if older else ""
 
 
 def collect_changes(previous: str, current: str) -> list[Change]:
@@ -173,12 +176,12 @@ def render_release(tag: str, date: str, entries: list[tuple[Change, str]]) -> st
     return "\n".join(lines)
 
 
-def prepend_release(existing: str, section: str) -> str:
-    heading = section.partition("\n")[0]
-    if f"\n{heading}\n" in f"\n{existing}":
+def insert_release(existing: str, section: str) -> str:
+    releases = [f"## {part}" for part in existing.split("\n## ")[1:]]
+    if any(release.split()[1] == section.split()[1] for release in releases):
         return existing
-    rest = existing.split("\n## ", 1)
-    return f"{TITLE}\n\n{INTRO}\n\n{section}" + (f"\n## {rest[1]}" if len(rest) == 2 else "")
+    ordered = sorted([*releases, section], key=lambda release: version(release.split()[1]), reverse=True)
+    return f"{TITLE}\n\n{INTRO}\n\n" + "\n".join(ordered)
 
 
 def release_section(tag: str, repository: str, ask, graphql=gh_graphql) -> str:
@@ -193,10 +196,17 @@ def release_section(tag: str, repository: str, ask, graphql=gh_graphql) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("tag")
-    parser.add_argument("changelog", type=Path)
-    parser.add_argument("section", type=Path)
+    commands = parser.add_subparsers(dest="command", required=True)
+    explain = commands.add_parser("explain")
+    explain.add_argument("tag")
+    explain.add_argument("section", type=Path)
+    insert = commands.add_parser("insert")
+    insert.add_argument("section", type=Path)
+    insert.add_argument("changelog", type=Path)
     args = parser.parse_args(argv)
+    if args.command == "insert":
+        args.changelog.write_text(insert_release(args.changelog.read_text(), args.section.read_text()))
+        return 0
     url = os.environ.get(URL_VAR) or DEFAULT_URL
     model = os.environ.get(MODEL_VAR) or DEFAULT_MODEL
     key = os.environ[KEY_VAR]
@@ -207,7 +217,6 @@ def main(argv: list[str] | None = None) -> int:
         gh_graphql,
     )
     args.section.write_text(section)
-    args.changelog.write_text(prepend_release(args.changelog.read_text(), section))
     return 0
 
 
