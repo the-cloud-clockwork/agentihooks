@@ -93,7 +93,9 @@ def main(argv: list[str] | None = None) -> int:
     url = os.environ.get(rc.URL_VAR) or rc.DEFAULT_URL
     model = os.environ.get(rc.MODEL_VAR) or rc.DEFAULT_MODEL
     access = rc.gateway_headers(dict(os.environ))
-    sections = write_sections(releases, lambda c: rc.ask_model(c, url, access, model, urlopen), rc.gh_graphql, repository)
+    sections = write_sections(
+        releases, lambda c: rc.ask_model(c, url, access, model, urlopen), rc.gh_graphql, repository
+    )
     existing = args.changelog.read_text() if args.changelog.exists() else ""
     args.changelog.write_text(merge_changelog(existing, sections))
     changes = [c for _, kept in releases for c in kept]
