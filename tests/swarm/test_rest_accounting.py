@@ -11,7 +11,7 @@ def test_paginated_responses_charge_each_page(tmp_path, monkeypatch, failed):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     endpoint = "repos/example/project/actions/runs/1/jobs"
     headers = "HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n"
-    output = headers + '{"id":1}\n' + headers + '{"id":2}\n'
+    output = headers + '{"id":1}\n\n' + headers + '{"id":2}\n'
     result = subprocess.CompletedProcess([], 0, output, "diagnostic")
     run = Mock(return_value=result)
     if failed:
@@ -41,3 +41,20 @@ def test_non_rest_commands_do_not_charge_core_quota(tmp_path, monkeypatch, args)
     assert github_reads.rest("caller", args, run, capture_output=True, text=True) is result
     run.assert_called_once_with(["gh", *args], capture_output=True, text=True)
     assert github_reads.counts(0, float("inf")) == {}
+
+
+@pytest.mark.parametrize("include", [False, True])
+def test_paginated_timeout_preserves_partial_bytes(tmp_path, monkeypatch, include):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    headers = b"HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n"
+    output = headers + b'{"id":1}\n\n' + headers + b'{"id":2}\n'
+    run = Mock(side_effect=subprocess.TimeoutExpired(["gh"], 10, output=output, stderr=b"timeout"))
+    args = ["api", "repos/example/project/actions/jobs", "--paginate", "--jq", ".jobs[]"]
+    if include:
+        args.append("--include")
+    with pytest.raises(subprocess.TimeoutExpired) as error:
+        github_reads.rest("caller", args, run, capture_output=True, text=True)
+    assert error.value.stdout == (output if include else b'{"id":1}\n{"id":2}\n')
+    assert error.value.stderr == b"timeout"
+    assert github_reads.counts(0, float("inf")) == {"caller": 2}
+    assert run.call_args.args[0].count("--include") == 1

@@ -10,6 +10,7 @@ the previous login's entry.
 import fcntl
 import hashlib
 import json
+import re
 import os
 import subprocess
 import time
@@ -130,9 +131,34 @@ def charge(caller: str, endpoint: str, now: float) -> None:
         pass
 
 
+def _rest_pages(caller: str, endpoint: str, output: str | bytes | None, include: bool) -> str | bytes | None:
+    if output is None:
+        return output
+    pattern = rb"(?:\A|\r?\n)HTTP/[\d.]+ \d{3}[^\r\n]*\r?\n(?:[^\r\n]+:[^\r\n]*\r?\n)+\r?\n"
+    cleaned, pages = re.subn(
+        pattern.decode() if isinstance(output, str) else pattern, "" if isinstance(output, str) else b"", output
+    )
+    for _ in range(max(0, pages - 1)):
+        charge(caller, endpoint, time.time())
+    return output if include else cleaned
+
+
 def rest(caller: str, args: list[str], run: Callable = subprocess.run, **options) -> subprocess.CompletedProcess:
-    charge(caller, args[1] if args[0] == "api" else args[0], time.time())
-    return run(["gh", *args], **options)
+    if args[0] != "api" or args[1] == "graphql":
+        return run(["gh", *args], **options)
+    endpoint = args[1]
+    charge(caller, endpoint, time.time())
+    if "--paginate" not in args:
+        return run(["gh", *args], **options)
+    include = "--include" in args or "-i" in args
+    command = ["gh", *args] if include else ["gh", *args, "--include"]
+    try:
+        result = run(command, **options)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        exc.stdout = _rest_pages(caller, endpoint, exc.stdout, include)
+        raise
+    result.stdout = _rest_pages(caller, endpoint, result.stdout, include)
+    return result
 
 
 def counts(since: float, until: float) -> dict[str, int]:
