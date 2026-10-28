@@ -230,7 +230,7 @@ def seen(page, selectors) -> dict[str, int]:
 
 def mismatched(contract: dict[str, int], shown: dict[str, int]) -> list[str]:
     return [
-        f"{selector} names {matches} elements but the base page shows at most {shown.get(selector, 0)}"
+        f"{selector} names {matches} elements but the most the base page shows at once is {shown.get(selector, 0)}"
         for selector, matches in contract.items()
         if shown.get(selector, 0) != matches
     ]

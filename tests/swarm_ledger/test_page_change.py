@@ -57,13 +57,17 @@ def test_a_named_selector_the_base_page_never_shows_fails_the_contract(browser):
     contract = {**REMOVED, "#never": 1}
     seen, _ = capture(browser, BASE, contract)
     assert seen["#never"] == 0
-    assert page_replay.mismatched(contract, seen) == ["#never names 1 elements but the base page shows at most 0"]
+    assert page_replay.mismatched(contract, seen) == [
+        "#never names 1 elements but the most the base page shows at once is 0"
+    ]
 
 
 def test_a_selector_broader_than_its_named_count_fails_the_contract(browser):
     contract = {"main": 1, "p": 1}
     seen, _ = capture(browser, BASE, contract)
-    assert page_replay.mismatched(contract, seen) == ["p names 1 elements but the base page shows at most 2"]
+    assert page_replay.mismatched(contract, seen) == [
+        "p names 1 elements but the most the base page shows at once is 2"
+    ]
 
 
 def contract(tmp_path, value):
@@ -114,7 +118,7 @@ def test_the_page_grader_hides_named_elements_only_in_the_base_replay_of_a_chang
     page = script.split("\npage() {\n", 1)[1].split("\n}\n", 1)[0]
     assert "contract=scripts/swarm_ledger/expected_page_change.json" in page
     assert '! diff -q "head/$contract" "base/$contract"' in page
-    [base] = [line for line in page.split(" &\n") if line.strip().startswith("replay base-page ")]
+    base = page.split("replay base-page ", 1)[1].split(" &\n", 1)[0]
     assert base.endswith('base-page.json \\\n    "${remove[@]}"')
     others = [
         line for line in page.splitlines() if line.strip().startswith(("replay head-page ", "replay fault-page "))
