@@ -17,7 +17,8 @@ function fixture(options = {}) {
     base: { ref: 'main' }, html_url: 'https://github.com/owner/repo/pull/7' };
   const runUrl = 'https://github.com/owner/repo/actions/runs/42';
   const jobs = [{ id: 71, run_id: 42, name: 'promote / promote', status: 'in_progress',
-    check_run_url: 'https://api.github.com/repos/owner/repo/check-runs/900' }];
+    check_run_url: 'https://api.github.com/repos/owner/repo/check-runs/900' },
+    { id: 72, run_id: 42, name: 'Gate — Required', status: 'completed', conclusion: 'success' }];
   const checks = [
     { id: 901, name: 'Gate — Required', status: 'completed', conclusion: 'success', details_url: `${runUrl}/job/72` },
     { id: 900, name: 'promote / promote', status: 'in_progress', conclusion: null,
@@ -74,11 +75,11 @@ function fixture(options = {}) {
     pages.push(args);
     if (method === github.rest.actions.listJobsForWorkflowRun) return jobs;
     if (method === github.rest.checks.listForRef) return checks;
-    if (method === github.rest.repos.listCommitStatusesForRef) return statuses;
+    if (method === github.rest.repos.listCommitStatusesForRef) return args.ref === 'snapshot' ? [...grades].reverse() : statuses;
     throw new Error('Unexpected paginated endpoint');
   };
   const summary = { addHeading() { return this; }, addTable() { return this; }, async write() {} };
-  const core = { setOutput: (key, value) => { outputs[key] = value; }, summary };
+  const core = { setOutput: (key, value) => { outputs[key] = value; }, summary, info() {} };
   github.graphql = async () => ({ repository: { object: { statusCheckRollup: { contexts: {
     nodes: [], pageInfo: { hasNextPage: false, endCursor: null },
   } } } } });
@@ -99,13 +100,13 @@ test('reports the snapshot grade with the promotion app before merging', async (
 
 test('keeps the snapshot grade pending until the original grade completes', async () => {
   const f = fixture();
-  f.checks[0].status = 'queued';
+  f.jobs[1].status = 'queued';
   const sleep = f.sleep;
   f.sleep = async ms => {
     assert.equal(f.grades.at(-1).state, 'pending');
     assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
     await sleep(ms);
-    if (f.now() >= 15000) f.checks[0].status = 'completed';
+    if (f.now() >= 15000) f.jobs[1].status = 'completed';
   };
   await promote(f);
   assert.equal(f.now(), 15000);
@@ -114,11 +115,20 @@ test('keeps the snapshot grade pending until the original grade completes', asyn
 
 test('never reports a passing snapshot grade for a failed original grade', async () => {
   const f = fixture();
-  f.checks[0].conclusion = 'failure';
+  f.jobs[1].conclusion = 'failure';
   await assert.rejects(promote(f));
   assert.ok(f.grades.length > 0);
   assert.ok(f.grades.every(grade => grade.state !== 'success'));
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+});
+
+test('waits for the reported snapshot grade to appear before merging', async () => {
+  const f = fixture();
+  const paginate = f.github.paginate;
+  f.github.paginate = async (method, args) => args.ref === 'snapshot' && f.now() < 15000 ? [] : paginate(method, args);
+  await promote(f);
+  assert.equal(f.now(), 15000);
+  assert.equal(f.grades.at(-1).state, 'success');
 });
 
 test('waits past four minutes for the snapshot required checks to turn green', async () => {
@@ -463,7 +473,7 @@ test('reads a failing status beyond the first hundred contexts', async () => {
 
 test('finds the exact current job beyond the first hundred jobs', async () => {
   const f = selfWaitFixture();
-  f.jobs.unshift(...Array.from({ length: 110 }, (_, id) => ({ id, run_id: 42, name: `extra-${id}`, status: 'completed' })));
+  f.jobs.unshift(...Array.from({ length: 110 }, (_, id) => ({ id, run_id: 42, name: `extra-${id}`, status: 'completed', conclusion: 'success' })));
   await promote(f);
   assert.equal(f.outputs.main, 'rebased');
 });
