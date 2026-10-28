@@ -111,7 +111,10 @@ def collect_changes(previous: str, current: str) -> list[Change]:
 
 
 def gh_graphql(query: str) -> dict:
-    return json.loads(run("gh", "api", "graphql", "-f", f"query={query}", check=False))["data"]
+    answer = json.loads(run("gh", "api", "graphql", "-f", f"query={query}", check=False))
+    if any(error.get("type") != "NOT_FOUND" for error in answer.get("errors", [])):
+        raise RuntimeError(f"GraphQL errors: {answer['errors']}")
+    return answer["data"]
 
 
 def fetch_pull_requests(changes: list[Change], repository: str, graphql: Callable[[str], dict] = gh_graphql) -> None:

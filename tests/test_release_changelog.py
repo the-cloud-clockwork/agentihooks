@@ -306,6 +306,19 @@ def test_gh_graphql_runs_the_query_through_gh(monkeypatch):
     assert seen == [(("gh", "api", "graphql", "-f", "query={ q }"), False)]
 
 
+def test_gh_graphql_accepts_numbers_github_cannot_resolve(monkeypatch):
+    answer = {"data": {"repository": {"p2": None}}, "errors": [{"type": "NOT_FOUND", "message": "x"}]}
+    monkeypatch.setattr(rc, "run", lambda *command, check: json.dumps(answer))
+    assert rc.gh_graphql("{ q }") == {"repository": {"p2": None}}
+
+
+def test_gh_graphql_refuses_any_other_error(monkeypatch):
+    answer = {"data": None, "errors": [{"type": "NOT_FOUND"}, {"type": "RATE_LIMITED"}]}
+    monkeypatch.setattr(rc, "run", lambda *command, check: json.dumps(answer))
+    with pytest.raises(RuntimeError, match="^GraphQL errors: .*RATE_LIMITED"):
+        rc.gh_graphql("{ q }")
+
+
 def test_run_returns_the_output_of_a_failing_command_when_unchecked(repo):
     assert rc.run("git", "rev-parse", "--verify", "--quiet", "no-such-ref", check=False) == ""
     assert rc.run("git", "rev-parse", "--abbrev-ref", "HEAD", check=False) == "dev\n"

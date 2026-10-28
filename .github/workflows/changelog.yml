@@ -46,27 +46,32 @@ jobs:
       - name: Insert the release into the changelog branch
         run: |
           repo="repos/$GITHUB_REPOSITORY"
-          for attempt in 1 2 3 4 5; do
-            parent=$(gh api "$repo/git/matching-refs/heads/changelog" --jq '.[] | select(.ref == "refs/heads/changelog") | .object.sha')
+          write() {
+            local parent blob tree commit
+            parent=$(gh api "$repo/git/matching-refs/heads/changelog" --jq '.[] | select(.ref == "refs/heads/changelog") | .object.sha') || return 1
             : > "$RUNNER_TEMP/RELEASES.md"
             if [[ -n "$parent" ]]; then
-              gh api -H 'Accept: application/vnd.github.raw' "$repo/contents/RELEASES.md?ref=$parent" > "$RUNNER_TEMP/RELEASES.md"
+              gh api -H 'Accept: application/vnd.github.raw' "$repo/contents/RELEASES.md?ref=$parent" > "$RUNNER_TEMP/RELEASES.md" || return 1
             fi
             cp "$RUNNER_TEMP/RELEASES.md" "$RUNNER_TEMP/RELEASES.before"
-            python -m scripts.release_changelog insert "$RUNNER_TEMP/section.md" "$RUNNER_TEMP/RELEASES.md"
+            python -m scripts.release_changelog insert "$RUNNER_TEMP/section.md" "$RUNNER_TEMP/RELEASES.md" || return 1
             if [[ -n "$parent" ]] && cmp -s "$RUNNER_TEMP/RELEASES.before" "$RUNNER_TEMP/RELEASES.md"; then
-              exit 0
+              return 0
             fi
             blob=$(python -c 'import base64, json, sys; print(json.dumps({"content": base64.b64encode(open(sys.argv[1], "rb").read()).decode(), "encoding": "base64"}))' "$RUNNER_TEMP/RELEASES.md" \
-              | gh api "$repo/git/blobs" --input - --jq .sha)
-            tree=$(gh api "$repo/git/trees" -f 'tree[][path]=RELEASES.md' -f 'tree[][mode]=100644' -f 'tree[][type]=blob' -f "tree[][sha]=$blob" --jq .sha)
+              | gh api "$repo/git/blobs" --input - --jq .sha) || return 1
+            tree=$(python -c 'import json, sys; print(json.dumps({"tree": [{"path": "RELEASES.md", "mode": "100644", "type": "blob", "sha": sys.argv[1]}]}))' "$blob" \
+              | gh api "$repo/git/trees" --input - --jq .sha) || return 1
             commit=$(python -c 'import json, sys; print(json.dumps({"message": sys.argv[1], "tree": sys.argv[2], "parents": sys.argv[3:]}))' "Explain the changes of $TAG" "$tree" ${parent:+"$parent"} \
-              | gh api "$repo/git/commits" --input - --jq .sha)
+              | gh api "$repo/git/commits" --input - --jq .sha) || return 1
             if [[ -n "$parent" ]]; then
-              if gh api -X PATCH "$repo/git/refs/heads/changelog" -f "sha=$commit" -F force=false >/dev/null; then
-                exit 0
-              fi
-            elif gh api "$repo/git/refs" -f ref=refs/heads/changelog -f "sha=$commit" >/dev/null; then
+              gh api -X PATCH "$repo/git/refs/heads/changelog" -f "sha=$commit" -F force=false >/dev/null
+            else
+              gh api "$repo/git/refs" -f ref=refs/heads/changelog -f "sha=$commit" >/dev/null
+            fi
+          }
+          for attempt in 1 2 3 4 5; do
+            if write; then
               exit 0
             fi
             sleep $((attempt * 5))
