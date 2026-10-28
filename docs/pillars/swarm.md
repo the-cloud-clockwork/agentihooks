@@ -3331,8 +3331,24 @@ is a real reading for a task on the watched ledger or for the master:
 agentihooks doctor rig-grade-swarm measure failed-spawn/t-runners-doc-worker001
 ```
 
+Both the detector and the measure read the swarm timer's user journal with `journalctl --user`, bounded at thirty
+seconds. When `journalctl` is not on `PATH`, exits non zero or times out, the read refuses with the error type and
+its message instead of counting nothing, because an unread journal is not a reading of 0. The measure prints the
+refusal and exits 1 with nothing on standard output:
+
+```text
+$ agentihooks doctor rig-grade-swarm measure failed-spawn/t-plan-ref-repoint
+doctor: tick journal unavailable: FileNotFoundError: [Errno 2] No such file or directory: 'journalctl'
+```
+
+A Doctor detection pass reports the same refusal as `the spawn detector failed: SwarmError: tick journal
+unavailable: <error type>: <message>`, and its other detectors still report.
+
 | Symptom | Check | Cause and action |
 |---|---|---|
+| The measure or the detection pass says `tick journal unavailable: FileNotFoundError` | `command -v journalctl` in the shell that runs the Doctor | `journalctl` is not on that `PATH`. Run the Doctor on the workstation whose user journal holds the swarm timer, or add the systemd tools to its `PATH`. |
+| The refusal names `CalledProcessError` or `TimeoutExpired` | `journalctl --user -t agentihooks-swarm --since '1 hour ago' -o cat --no-pager \| tail` | The user journal could not be read, for example with no user session bus, or took over thirty seconds. Fix the journal read, then measure again over the same window. |
+| The measure ends in a Python traceback that names `journalctl` | `git -C <agentihooks checkout> log -1 --oneline --grep '(#8184)'` prints nothing | The Doctor runs code from before [pull request #8184](https://github.com/the-cloud-clockwork/agentihooks/pull/8184). Apply it with `agentihooks doctor <watched slug> intervene pull-dev`. |
 | A finding id ends in `:`, such as `failed-spawn/dt2:`, and its reason is cut short | `git -C <agentihooks checkout> log -1 --oneline --grep '(#8039)'` prints nothing | The Doctor runs code from before [pull request #8039](https://github.com/the-cloud-clockwork/agentihooks/pull/8039), whose task id match kept the colon of a reason that held colons. Apply it with `agentihooks doctor <watched slug> intervene pull-dev`. |
 | The reason reads `the hive launch order ended before its acknowledgement` | The hive acknowledgement, see [A worker that finishes before the tick collects its acknowledgement](hives.md#a-worker-that-finishes-before-the-tick-collects-its-acknowledgement) | Since pull request #8039 this reason means the hive never acknowledged the order. A hive that acknowledged a failure is reported as `hive launch failed: <cause>`. |
 
