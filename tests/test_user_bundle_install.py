@@ -592,7 +592,7 @@ def test_explicit_manifesto_overrides_ignore_the_user_bundle(world, clean_manife
 
     monkeypatch.delenv("CI_MANIFESTO_PATH")
     folder = tmp_path / "chosen"
-    _manifesto(tmp_path, "chosen/one.md", "ONE")
+    _write(folder / "one.md", "ONE")
     monkeypatch.setenv("MANIFESTOS_DIR", str(folder))
     assert [Path(p).name for p in config._resolve_manifesto_paths(world["root"], user_root=world["user"])] == ["one.md"]
 
@@ -666,6 +666,7 @@ def test_manifestos_list_names_the_user_bundle_entries(world, clean_manifesto_en
     _manifesto(world["root"], "core.md", "ROOT CORE")
     _manifesto(world["user"], "mine.md", "USER MINE")
     _link_both(world)
+    capsys.readouterr()
 
     assert manifestos.main(["list"]) == 0
 
