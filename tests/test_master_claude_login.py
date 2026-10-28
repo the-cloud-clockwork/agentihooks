@@ -1457,3 +1457,36 @@ def test_token_home_from_a_plain_shell_builds_from_the_default_claude_home(ah, t
     assert (target / "CLAUDE.md").read_text() == "operator persona"
     assert json.loads((target / "settings.json").read_text()) == {}
     assert json.loads((target / login.CONFIG).read_text()) == {"hasCompletedOnboarding": True}
+
+
+def test_the_master_token_route_takes_a_seat_past_full_lane_agents(ah, rendered, tmp_path, monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer as router
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.chdir(tmp_path)
+    full = {"workeratexample_com": 6}
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: full)
+    env = _environ(rendered)
+    picked = []
+
+    def overflow(environ, **options):
+        picked.append((environ, options))
+        credential = router.Credential("AH_CC_TOKEN_workeratexample_com", "routed")
+        return router.RouteDecision(credential, None, "master overflow", 6, 6)
+
+    monkeypatch.setattr(router, "select_master_credential", overflow)
+    monkeypatch.setattr(account_slots, "execute", lambda harness, account, environ, launch: launch(environ))
+    executed = []
+    monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, environ: executed.append(environ))
+    report = tmp_path / "route"
+    login.launch_token("/opt/claude", ["--model", "opus"], env, str(report))
+    assert picked == [(env, {"claude_bin": "/opt/claude", "sessions": full, "exclude": (router.API_ACCOUNT,)})]
+    assert report.read_text().splitlines() == [
+        "status=routed",
+        "account=workeratexample_com",
+        "placement=fallback",
+        "remote_control=off",
+    ]
+    assert executed[0]["CLAUDE_CODE_OAUTH_TOKEN"] == "routed"
