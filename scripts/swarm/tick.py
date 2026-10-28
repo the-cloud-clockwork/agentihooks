@@ -273,7 +273,7 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
             actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
             if config.state == "running" and config.engine != EVENTS_ENGINE:
-                placement = partial(_room_wait, runtime)
+                placement = partial(preempt.probe, runtime)
                 seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order, placement)
                 actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
                 with _placement_pass(runtime):

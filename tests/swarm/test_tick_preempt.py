@@ -104,7 +104,7 @@ def test_a_full_lane_probes_placement_again_before_asking_for_an_urgent_task_ref
     assert [a.name for a in store.agents("sw") if asks(store, a.name)] == []
 
 
-def test_an_unresolved_profile_reads_as_placeable_when_probing_before_a_preemption_ask(
+def test_an_urgent_task_with_an_unresolved_profile_asks_nobody_once_its_refusal_is_old(
     store,  # noqa: F811
     monkeypatch,
 ):
@@ -123,7 +123,8 @@ def test_an_unresolved_profile_reads_as_placeable_when_probing_before_a_preempti
     placement_waits.observe(store, "sw", "eng", "t4", "no eng hive has room: cpu", 3_000)
     for at in (3_000, 4_000 + placement_waits.WAIT_MS):
         tick("sw", store, ledger, runtime, now_ms=at)
-    assert [a.task for a in store.agents("sw") if asks(store, a.name)] == ["t2"]
+    assert workers(store)
+    assert [a.task for a in store.agents("sw") if asks(store, a.name)] == []
 
 
 def test_spawn_order_shares_one_handoff_batch_across_lanes_and_queue_sort(store, monkeypatch):  # noqa: F811

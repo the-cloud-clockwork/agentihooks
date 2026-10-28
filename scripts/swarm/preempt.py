@@ -43,6 +43,16 @@ def _places(lane: str, task: dict) -> str:
     return ""
 
 
+def probe(runtime, lane: str, task: dict) -> str:
+    from scripts.swarm.profile_choice import ProfileUnresolved
+    from scripts.swarm.seat_spawn import placed_elsewhere
+
+    try:
+        return placed_elsewhere(runtime, lane, task)
+    except ProfileUnresolved as exc:
+        return f"profile unresolved: {exc}"
+
+
 def run(slug: str, config, store, doc: dict, now_ms: int, seats: Seats) -> list[str]:
     from scripts.swarm import capacity
 
