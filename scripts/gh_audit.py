@@ -72,8 +72,7 @@ def audit(event: str, args: tuple) -> None:
     if path:
         from scripts.swarm import github_reads
 
-        caller = github_reads.CALLER.get()
-        charge(process_caller() if caller == github_reads.CALLER.default else caller, path)
+        charge(github_reads.CALLER.get(None) or process_caller(), path)
 
 
 def commands(text: str) -> list[list[str]]:
