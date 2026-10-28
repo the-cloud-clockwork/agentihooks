@@ -1,1 +1,3 @@
+### Fixed
+
 - The ledger server start pass no longer rereads and reencodes artifacts and images the database already holds, so writes stay fast right after a restart on new code.
