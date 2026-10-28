@@ -78,3 +78,18 @@ def test_repository_lock_pins_pytest_plugins_and_mutmut():
         assert matches, f"{tool} is missing from the repository lock"
         assert all(len(requirement.specifier) == 1 for requirement in matches)
         assert all(next(iter(requirement.specifier)).operator == "==" for requirement in matches)
+
+
+@pytest.mark.parametrize(
+    "workflow,job,checkout",
+    [("mutation-line-selection-proof.yml", "compare", "head"), ("ledger-row-memory.yml", "replay", "proof")],
+)
+def test_historical_replays_use_the_current_checkouts_lock(workflow, job, checkout):
+    document = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())
+    steps = document["jobs"][job]["steps"]
+    current = next(step for step in steps if step.get("with", {}).get("path") == checkout)
+    assert "ref" not in current["with"]
+    install = next(step for step in steps if "pip install" in step.get("run", ""))
+    assert install["working-directory"] != checkout
+    tokens = shlex.split(install["run"])
+    assert tokens[tokens.index("--constraint") + 1] == f"../{checkout}/{LOCK}"
