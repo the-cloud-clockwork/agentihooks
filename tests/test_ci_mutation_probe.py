@@ -1,8 +1,9 @@
 import copy
+from importlib import import_module
 
 import pytest
 
-from scripts.ci_mutation.probe import merge_probes, plan_fingerprint, probe_plan, probe_results
+probe = import_module("scripts.ci_mutation.probe")
 
 
 def _plan():
@@ -22,14 +23,14 @@ def _plan():
 def _records(plan):
     return [
         {
-            "plan": plan_fingerprint(plan),
+            "plan": probe.plan_fingerprint(plan),
             "index": 0,
             "total": 2,
             "seconds": 7,
             "results": {"scripts.a.x_f__mutmut_1": "killed"},
         },
         {
-            "plan": plan_fingerprint(plan),
+            "plan": probe.plan_fingerprint(plan),
             "index": 1,
             "total": 2,
             "seconds": 9,
@@ -45,7 +46,7 @@ def test_early_probes_partition_only_split_mutants_once_without_mutating_the_ori
     before = copy.deepcopy(plan)
     owned = []
     for index in range(2):
-        early = probe_plan(plan, (index, 2))
+        early = probe.probe_plan(plan, (index, 2))
         names = [name for name, assignment in early["assignments"].items() if holds(assignment, index)]
         owned.extend(names)
         assert len(names) == 1
@@ -58,14 +59,14 @@ def test_complete_early_results_share_kills_and_remove_early_tests_from_survivor
     from scripts.ci_mutation.mutant_shards import unit_tests
 
     plan = _plan()
-    merged = merge_probes(plan, _records(plan))
-    results, seconds = probe_results(merged)
+    merged = probe.merge_probes(plan, _records(plan))
+    results, seconds = probe.probe_results(merged)
     assert results == {"scripts.a.x_f__mutmut_1": "killed", "scripts.a.x_f__mutmut_2": "survived"}
     assert seconds == 9
     assert unit_tests(merged, "scripts.a.x_f__mutmut_2", 1) == {"left"}
     assert unit_tests(merged, "scripts.a.x_f__mutmut_2", 0) == {"right"}
     assert unit_tests(plan, "scripts.a.x_f__mutmut_2", 0) == {"early", "right"}
-    assert probe_results(plan) == ({}, 0)
+    assert probe.probe_results(plan) == ({}, 0)
 
 
 @pytest.mark.parametrize(
@@ -94,16 +95,16 @@ def test_partial_stale_or_invalid_probe_results_fail_closed(fault):
     else:
         records[0]["total"] = 3
     with pytest.raises(ValueError):
-        merge_probes(plan, records)
+        probe.merge_probes(plan, records)
 
 
 def test_a_shared_probe_cannot_be_reused_after_its_plan_or_result_changes():
     plan = _plan()
-    merged = merge_probes(plan, _records(plan))
+    merged = probe.merge_probes(plan, _records(plan))
     merged["head"] = "new revision"
     with pytest.raises(ValueError):
-        probe_results(merged)
-    merged = merge_probes(plan, _records(plan))
+        probe.probe_results(merged)
+    merged = probe.merge_probes(plan, _records(plan))
     merged["probe"]["results"].pop("scripts.a.x_f__mutmut_1")
     with pytest.raises(ValueError):
-        probe_results(merged)
+        probe.probe_results(merged)
