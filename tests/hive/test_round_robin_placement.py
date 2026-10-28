@@ -63,3 +63,14 @@ def test_round_robin_keeps_a_task_pinned_to_a_hive_outside_the_node_limit(setup)
     config = replace(setup.config, placement_mode="round-robin", placement_nodes=2)
 
     assert setup.launcher.select(config, "eng", {"id": "task", "hive": "remote"}).hive == "remote"
+
+
+def test_round_robin_keeps_a_workstation_task_outside_the_node_limit(setup, monkeypatch):  # noqa: F811
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "z")
+    for name in ("a", "b", "z"):
+        write_hive(setup, id=name)
+    config = replace(setup.config, placement_mode="round-robin", placement_nodes=2)
+
+    assert setup.launcher.select(config, "eng", {"id": "task", "workstation": True}).hive == "z"
