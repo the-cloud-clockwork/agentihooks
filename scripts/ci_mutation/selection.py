@@ -106,13 +106,19 @@ def plain_copies(code: str) -> str:
     import libcst as cst
 
     # mutmut copies a method with its decorators, and the trampoline cannot call a copied property object.
-    class Plain(cst.CSTTransformer):
-        def leave_FunctionDef(self, original_node, updated_node):
-            if "__mutmut_" in updated_node.name.value and is_property(updated_node):
-                return updated_node.with_changes(decorators=[])
-            return updated_node
+    def plain(node):
+        if isinstance(node, cst.FunctionDef) and "__mutmut_" in node.name.value and is_property(node):
+            return node.with_changes(decorators=[])
+        return node
 
-    return cst.parse_module(code).visit(Plain()).code
+    module = cst.parse_module(code)
+    body = [
+        statement.with_changes(body=statement.body.with_changes(body=[plain(node) for node in statement.body.body]))
+        if isinstance(statement, cst.ClassDef)
+        else statement
+        for statement in module.body
+    ]
+    return module.with_changes(body=body).code
 
 
 def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int, list[str]]:

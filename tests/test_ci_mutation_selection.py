@@ -572,7 +572,7 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
     }
     monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
     namespace = {"__name__": "scripts.sample"}
-    exec(compile(generated, "scripts/sample.py", "exec"), namespace)
+    exec(compile(generated, "<sample>", "exec"), namespace)
     shape = namespace["Shape"]
 
     def measure():
