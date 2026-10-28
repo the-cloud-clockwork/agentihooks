@@ -84,8 +84,7 @@ def _process_table_reads(check, process_paths):
     return count
 
 
-def test_no_check_reads_the_process_table_twice_in_one_statement():
-    tests = Path(__file__).resolve().parent
+def _process_table_violations(tests):
     found = []
     for path in sorted(tests.rglob("*.py")):
         for function in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -107,4 +106,28 @@ def test_no_check_reads_the_process_table_twice_in_one_statement():
                     continue
                 if _process_table_reads(check, process_paths) > 1:
                     found.append(f"{path.relative_to(tests)}:{statement.lineno}")
-    assert sorted(set(found)) == []
+    return sorted(set(found))
+
+
+def test_no_check_reads_the_process_table_twice_in_one_statement():
+    assert _process_table_violations(Path(__file__).resolve().parent) == []
+
+
+def test_process_table_scan_skips_irrelevant_files_and_refuses_double_reads(tmp_path, monkeypatch):
+    (tmp_path / "irrelevant.py").write_text("value = 1", encoding="utf-8")
+    sources = {
+        "processes.py": "def check():\n    assert 1 not in processes() or processes()[1].state == 'Z'\n",
+        "process.py": "def check():\n    assert _process(1) == _process(1)\n",
+        "path.py": 'def check(pid):\n    path = Path(f"/proc/{pid}/stat")\n    assert path.exists() and path.read_text()\n',
+        "snapshot.py": "def check():\n    snapshot = processes()\n    assert 1 not in snapshot or snapshot[1].state == 'Z'\n",
+    }
+    for name, source in sources.items():
+        (tmp_path / name).write_text(source, encoding="utf-8")
+    parse = ast.parse
+
+    def parse_relevant(source):
+        assert source != "value = 1", "irrelevant files must not be parsed"
+        return parse(source)
+
+    monkeypatch.setattr(ast, "parse", parse_relevant)
+    assert _process_table_violations(tmp_path) == ["path.py:3", "process.py:2", "processes.py:2"]
