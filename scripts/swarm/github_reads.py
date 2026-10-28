@@ -128,9 +128,9 @@ def _conditional_page(caller: str, endpoint: str, fetch: Callable) -> dict:
         with calling(caller):
             output = fetch(*args)
     except subprocess.CalledProcessError as error:
-        output = error.stdout or ""
-        if not _not_modified(output):
+        if not _not_modified(error.stdout):
             raise
+        output = error.stdout
     header, _, body = output.replace("\r\n", "\n").partition("\n\n")
     lines = header.splitlines()
     status = int(lines[0].split()[1])
@@ -202,8 +202,10 @@ def _rest_pages(
 
 
 def _not_modified(output: str | bytes | None) -> bool:
-    text = output[:64].decode("utf-8", "replace") if isinstance(output, bytes) else output or ""
-    return bool(re.match(r"HTTP/\S+ 304\b", text))
+    if output is None:
+        return False
+    pattern = rb"HTTP/\S+ 304\b" if isinstance(output, bytes) else r"HTTP/\S+ 304\b"
+    return bool(re.match(pattern, output))
 
 
 def rest(caller: str, args: list[str], run: Callable = subprocess.run, **options) -> subprocess.CompletedProcess:

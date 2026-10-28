@@ -365,3 +365,113 @@ def test_conditional_pages_accept_a_304_gh_error_but_propagate_other_errors(monk
     now[0] += 60
     with pytest.raises(subprocess.CalledProcessError):
         github_reads.conditional_pages("jobs", "resource", fetch)
+
+
+def test_conditional_pages_reject_a_non_success_response_with_its_diagnostics(monkeypatch, tmp_path):
+    import subprocess
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    output = response(403, '{"message": "refused"}')
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        github_reads.conditional_pages("jobs", "resource", lambda *args: output)
+    assert error.value.returncode == 1
+    assert error.value.cmd == ["gh", "api", "resource", "--include"]
+    assert error.value.stdout == output
+
+
+def test_conditional_pages_split_headers_from_pretty_json_at_the_first_blank_line(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    body = '{\n\n"jobs": [1]\n}'
+    assert github_reads.conditional_pages("jobs", "resource", lambda *args: response(200, body)) == [{"jobs": [1]}]
+
+
+def test_conditional_pages_without_a_validator_still_share_one_interval(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    calls = []
+
+    def fetch(*args):
+        calls.append(args)
+        return response(200, '{"jobs": []}')
+
+    assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": []}]
+    assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": []}]
+    assert calls == [("resource", "--include")]
+
+
+def test_conditional_pages_use_distinct_cache_entries_for_every_page(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    keys = []
+    outputs = iter(
+        [
+            response(200, '{"jobs": [1]}', Link='<second>; rel="next"'),
+            response(200, '{"jobs": [2]}'),
+        ]
+    )
+
+    def snapshot(key, now, fetch):
+        assert key is not None
+        assert key not in keys
+        keys.append(key)
+        return fetch()
+
+    monkeypatch.setattr(github_reads, "snapshot", snapshot)
+    assert github_reads.conditional_pages("jobs", "first", lambda *args: next(outputs)) == [
+        {"jobs": [1]},
+        {"jobs": [2]},
+    ]
+    assert len(keys) == 2
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        b"HTTP/2.0 304 Not Modified\r\nETag: one\r\n\r\n",
+        "HTTP/2.0 304 Not Modified\nETag: one\n\n",
+    ],
+)
+def test_not_modified_subprocess_errors_preserve_output_and_spend_no_primary_quota(monkeypatch, tmp_path, output):
+    import subprocess
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    failure = subprocess.CalledProcessError(1, ["gh"], output=output)
+
+    def run(*args, **kwargs):
+        raise failure
+
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        github_reads.rest("jobs", ["api", "resource", "--include"], run)
+    assert error.value is failure
+    assert github_reads.counts(0, float("inf")) == {}
+
+
+@pytest.mark.parametrize(
+    "output, expected",
+    [
+        (None, False),
+        ("", False),
+        (b"", False),
+        (b"HTTP/1.1 304 Not Modified\r\n\xff", True),
+        (b"HTTP/2.0 3040 Wrong\r\n\xff", False),
+        ("HTTP/2.0 200 OK\n", False),
+        ("prefix HTTP/2.0 304 Not Modified\n", False),
+    ],
+)
+def test_not_modified_recognizes_only_an_initial_304_status(output, expected):
+    assert github_reads._not_modified(output) is expected
+
+
+def test_rest_accounts_for_leading_slash_endpoints_and_retains_the_query(monkeypatch, tmp_path):
+    import subprocess
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    endpoint = "/repos/o/r/jobs?per_page=100"
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="{}")
+
+    github_reads.rest("jobs", ["api", "-X", "GET", endpoint], run)
+    assert calls == [["gh", "api", "-X", "GET", endpoint]]
+    rows = [json.loads(line) for line in (github_reads.home() / "charged.jsonl").read_text().splitlines()]
+    assert [(row["caller"], row["endpoint"]) for row in rows] == [("jobs", endpoint)]

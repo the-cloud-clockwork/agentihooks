@@ -262,8 +262,10 @@ def test_open_runs_lists_every_page_of_every_unfinished_status(monkeypatch):
 
 
 def test_jobs_of_reads_every_page_of_the_latest_jobs(monkeypatch):
-    monkeypatch.setattr(ci_lost_runner, "_api", Api({JOBS: lines({"name": "lint"}, {"name": "docs"})}))
+    api = Api({JOBS: lines({"name": "lint"}, {"name": "docs"})})
+    monkeypatch.setattr(ci_lost_runner, "_api", api)
     assert ci_lost_runner.jobs_of("o/r", 7) == [{"name": "lint"}, {"name": "docs"}]
+    assert api.calls == [JOBS]
 
 
 def test_first_look_shares_job_pages_but_recovery_confirmation_reads_fresh(monkeypatch, no_sleep):
