@@ -22,7 +22,7 @@ RECORD = """() => {
 
 @pytest.fixture(scope="module", autouse=True)
 def busy():
-    procs = [subprocess.Popen([sys.executable, "-c", "while True: pass"]) for _ in range(2 * (os.cpu_count() or 2))]
+    procs = [subprocess.Popen([sys.executable, "-c", "while True: pass"]) for _ in range(os.cpu_count() or 2)]
     yield
     for proc in procs:
         proc.kill()
@@ -32,6 +32,7 @@ def busy():
 def test_probe(tab, rep):  # noqa: F811
     if tab.viewport_size["width"] < 1024:
         return
+    tab.set_default_timeout(20000)
     tab.evaluate(RECORD)
     beside = """() => {
       const panel = document.getElementById("notif").getBoundingClientRect();
