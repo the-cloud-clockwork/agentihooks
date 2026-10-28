@@ -51,11 +51,14 @@ def mutation_diff(path: str, original: str, mutated: str, start: int) -> str:
 def mutant_identity(original: str, mutated: str) -> str:
     before = original.splitlines()
     after = mutated.splitlines()
-    hunks = [
-        "\n".join([f"-{line}" for line in before[first:last]] + [f"+{line}" for line in after[low:high]])
-        for tag, first, last, low, high in SequenceMatcher(a=before, b=after, autojunk=False).get_opcodes()
-        if tag != "equal"
-    ]
+    hunks = []
+    for tag, first, last, low, high in SequenceMatcher(a=before, b=after, autojunk=False).get_opcodes():
+        if tag != "equal":
+            removed = before[first:last]
+            repeat = sum(before[index : index + len(removed)] == removed for index in range(first))
+            hunks.append(
+                "\n".join([str(repeat)] + [f"-{line}" for line in removed] + [f"+{line}" for line in after[low:high]])
+            )
     return hashlib.sha256("\0".join(hunks).encode()).hexdigest()
 
 

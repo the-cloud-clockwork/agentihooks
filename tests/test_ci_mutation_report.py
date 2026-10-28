@@ -185,7 +185,12 @@ def test_clearance_keeps_its_identity_across_an_unrelated_argument_edit(tmp_path
     rewritten = _argument_rows(tmp_path / "rewritten", monkeypatch, "a", "return a + 1", [("a", "return None")])
     survivor = base["hooks.sample.x_value__mutmut_1"]
     moved = edited["hooks.sample.x_value__mutmut_2"]
-    assert survivor["identity"] == mutant_identity("    return a", "    return None")
+    assert survivor["identity"] == hashlib.sha256(b"0\n-    return a\n+    return None").hexdigest()
+    repeated = "def f(x):\n    if x > 0:\n        return 1\n    if x > 0:\n        return 2"
+    first = mutant_identity(repeated, repeated.replace("x > 0", "x >= 0", 1))
+    second = mutant_identity(repeated, "def f(x):\n    if x > 0:\n        return 1\n    if x >= 0:\n        return 2")
+    assert first == hashlib.sha256(b"0\n-    if x > 0:\n+    if x >= 0:").hexdigest()
+    assert second == hashlib.sha256(b"1\n-    if x > 0:\n+    if x >= 0:").hexdigest()
     assert survivor["fingerprint"] != moved["fingerprint"]
     key = clearance_key("hooks/sample.py", survivor)
     assert key == f"hooks/sample.py:hooks.sample.x_value:{survivor['identity']}"
@@ -196,7 +201,6 @@ def test_clearance_keeps_its_identity_across_an_unrelated_argument_edit(tmp_path
     report = evaluate("hooks/sample.py", list(edited.values()), {1, 3}, cleared)
     assert [row["name"] for row in report["cleared"]] == ["hooks.sample.x_value__mutmut_2"]
     assert [row["name"] for row in report["failures"]] == ["hooks.sample.x_value__mutmut_1"]
-    assert key not in survivor_text(report)
     assert f"hooks/sample.py:hooks.sample.x_value:{edited['hooks.sample.x_value__mutmut_1']['identity']}" in (
         survivor_text(report)
     )
