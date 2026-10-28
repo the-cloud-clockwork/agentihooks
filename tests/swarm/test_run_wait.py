@@ -233,12 +233,24 @@ def test_the_wait_pass_reads_a_remote_ledger_only_with_tick_authority(tick, monk
     tick.store.redis.hset(tick.store.key("sw", "config"), "api_url", "https://hosted.example")
     hold_run(tick)
     before = idle.wait(tick.store.redis, "sw", ME)
-    acquired = []
-    monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: acquired.append(slug))
-    monkeypatch.setattr(cli, "LedgerClient", lambda: pytest.fail("remote ledger was read"))
+    acquired, read = [], []
+    monkeypatch.setattr(
+        lease, "acquire", lambda _store, slug, owner: acquired.append(slug) or lease.Lease(owner, 1, 10**15)
+    )
+
+    def client():
+        read.append(True)
+        raise RuntimeError("remote ledger read")
+
+    monkeypatch.setattr(cli, "LedgerClient", client)
     with authority_context.bound(authority):
-        assert cli.run_waits(tick.store, "sw") == []
+        if authority:
+            with pytest.raises(RuntimeError, match="remote ledger read"):
+                cli.run_waits(tick.store, "sw")
+        else:
+            assert cli.run_waits(tick.store, "sw") == []
     assert acquired == (["sw"] if authority else [])
+    assert read == ([True] if authority else [])
     assert idle.wait(tick.store.redis, "sw", ME) == before
     assert tick.told() == []
 
