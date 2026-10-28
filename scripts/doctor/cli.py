@@ -72,7 +72,7 @@ from scripts.doctor import (
 from scripts.doctor.priming import SUFFIX, TEMPLATE, cancel_master_items, doctor_slug
 from scripts.gates import Who
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import clearance
+from scripts.swarm import clearance, scheduled_tick
 from scripts.swarm import cli as swarm
 from scripts.swarm.health.findings import MINUTE_MS, limits
 from scripts.swarm.health.verdicts import VERDICTS
@@ -208,9 +208,10 @@ def cmd_start(store, args):
     _pair(store, slug, doctor)
     loop.reset(store, doctor)
     if ledger.closed(doctor):
-        swarm.cmd_reopen(store, Namespace(slug=doctor, name=_name()))
+        swarm.cmd_reopen(store, Namespace(slug=doctor, name=_name(), tick=False))
     else:
-        swarm.cmd_start(store, Namespace(slug=doctor))
+        swarm.cmd_start(store, Namespace(slug=doctor, tick=False))
+    scheduled_tick.fire({}, "", store.redis)
     _relay(slug, doctor, relay)
 
 

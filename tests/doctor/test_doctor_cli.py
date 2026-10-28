@@ -76,6 +76,15 @@ def env(monkeypatch, memory_path):
     monkeypatch.setattr(doctor, "linked_bundle", lambda: memory_path / "bundle")
     monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {})
     monkeypatch.setattr(doctor.loop, "speed", lambda *args: [])
+    monkeypatch.setattr(
+        doctor.scheduled_tick,
+        "fire",
+        lambda *args: [
+            list(swarm_cli.run_tick(store, s))
+            for s in store.slugs()
+            if s.endswith(doctor.SUFFIX) and store.config(s).state == "running"
+        ],
+    )
     monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
     assert swarm_cli.main([WATCHED, "create", "--repo", "/repo"]) == 0
     return store, rt, memory_path
