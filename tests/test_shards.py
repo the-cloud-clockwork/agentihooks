@@ -518,7 +518,8 @@ def test_the_controller_warms_its_shards_test_modules_once_per_worker(monkeypatc
     sizes = conftest.source_sizes(_ROOT, files)
     part = conftest.assign_nodes(durations, 4, conftest.grouped_files(_ROOT, files), 4, sizes=sizes)[1]
     known = {node.split("::", 1)[0] for node in durations}
-    shard = sorted({node.split("::", 1)[0] for node in part} | (set(files) - known))
+    unknown = {path for path in set(files) - known if zlib.crc32(path.encode()) % 4 == 1}
+    shard = sorted({node.split("::", 1)[0] for node in part} | unknown)
     assert calls == [([path.removesuffix(".py").replace("/", ".") for path in shard], 4)]
     reaped = []
     monkeypatch.setattr(conftest.os, "waitpid", lambda pid, flags: reaped.append(pid))
