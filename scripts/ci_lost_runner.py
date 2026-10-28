@@ -7,6 +7,7 @@ from collections.abc import Callable, Container
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO
+from urllib.parse import quote
 
 import yaml
 
@@ -139,6 +140,14 @@ def stop(repo: str, run_id: int, recovery: dict) -> dict:
     return run
 
 
+def superseded(repo: str, run: dict) -> bool:
+    if run.get("event") != "pull_request":
+        return False
+    branch = quote(run["head_branch"], safe="")
+    url = f"repos/{repo}/actions/workflows/{run['workflow_id']}/runs?event=pull_request&branch={branch}&per_page=1"
+    return json.loads(_api(url))["workflow_runs"][0]["id"] != run["id"]
+
+
 def jobs_of(repo: str, run_id: int) -> list[dict]:
     url = f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"
     return [json.loads(line) for line in _api("--paginate", url, "--jq", JOBS).splitlines()]
@@ -180,6 +189,8 @@ def watch(repo: str, run: dict, workflow: dict, grace: timedelta, source: Source
     action, why = decide(run, jobs)
     if run_state(repo, run["id"])["run_attempt"] != run["run_attempt"]:
         return report(run, "none", "the run was rerun meanwhile")
+    if superseded(repo, run):
+        return report(run, "none", "a newer run of its pull request superseded it")
     recovery = report(run, action, f"{reason}; {why}") | {
         "detected_at": detected_at,
         "force_cancel_requested_at": None,
