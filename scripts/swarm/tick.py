@@ -681,13 +681,13 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             actions += _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live and agent.lane == MASTER:
             runtime.name_pane(agent)
-            actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
+            actions += _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live:
             _restore_owner(slug, store, ledger, rows, agent)
             if _ended(agent, rows):
                 actions += _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms)
             else:
-                actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
+                actions += _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms)
         elif resume.recovery_pending(store, slug, agent):
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
@@ -721,7 +721,7 @@ def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
     if agent.state == SUSPECT:
         agent = replace(agent, state="working")
         store.put_agent(slug, agent)
-    return _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
+    return _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms)
 
 
 def _strays(slug, config, store, runtime):
@@ -779,9 +779,13 @@ def _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms):
     ]
 
 
-def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
+def _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms):
     if revoked_seats.on_revoked(store, slug, agent):
         return _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms)
+    return _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
+
+
+def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     observed = runtime.observe(agent)
     if _refusal_due(slug, store, rows, agent, observed, now_ms):
         return _free_refused(slug, store, ledger, runtime, rows, agent, now_ms)

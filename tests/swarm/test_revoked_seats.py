@@ -6,7 +6,7 @@ import pytest
 from scripts.handoff import transfers
 from scripts.swarm import revoked_seats
 from scripts.swarm.store import MASTER
-from scripts.swarm.tick import _watch_idle, tick
+from scripts.swarm.tick import _watch_agent, tick
 from tests.swarm.test_master_stall import START, SlugLedger, master
 from tests.swarm.test_outage_resume import three_owners
 from tests.swarm.test_outage_seat_release import executing
@@ -103,7 +103,7 @@ def test_a_master_on_a_revoked_account_is_recycled_in_its_seat(store):
     agent = replace(agent, account="gone")
     store.put_agent("sw", agent)
     revoke(store, "gone")
-    found = _watch_idle("sw", store, SlugLedger([]), runtime, {}, agent, START + 60_000)
+    found = _watch_agent("sw", store, SlugLedger([]), runtime, {}, agent, START + 60_000)
     assert found == [f"recycled master {agent.name} in its seat: claude account gone was revoked"]
     assert [a.state for a in store.agents("sw")] == ["finished"]
     handoff = store.handoff("sw", MASTER)
