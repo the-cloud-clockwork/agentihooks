@@ -57,6 +57,8 @@ def example_problems(chart: str) -> list[str]:
         True,
     ):
         return ["the hive only example must mount the same invite into worker enrollment"]
+    if env["HIVE_NAME"] != "invited":
+        return ["the worker hive must carry its Helm release name as HIVE_NAME"]
     return []
 
 
