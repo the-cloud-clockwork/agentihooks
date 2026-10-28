@@ -494,7 +494,7 @@ def test_an_unchanged_pull_request_costs_one_state_read_on_the_next_pass(monkeyp
     assert world["calls"].count("graphql") == 1
     assert [r["pr"]["number"] for r in first] == [4, 5]
     assert read_pass() == first
-    assert Counter(world["calls"]) == Counter(["graphql"])
+    assert world["calls"] == ["graphql"]
 
 
 def test_a_new_head_reads_the_pull_request_in_full(monkeypatch, tmp_path):
@@ -520,7 +520,8 @@ def test_a_changed_check_state_on_the_same_head_reads_in_full(monkeypatch, tmp_p
     world["checks"][4] = "FAILURE"
     world["fixture"]["checks"][0]["conclusion"] = "failure"
     [record] = read_pass()
-    assert Counter(["graphql", "repos/o/r/pulls/4"]) <= Counter(world["calls"])
+    assert world["calls"].count("graphql") == 1
+    assert world["calls"].count("repos/o/r/pulls/4") == 1
     assert record["checks"][0]["conclusion"] == "failure"
 
 
@@ -535,7 +536,7 @@ def test_full_reads_per_pass_stop_at_the_bound_and_the_rest_wait_for_the_next_pa
     world, read_pass = _pulls_world(monkeypatch, tmp_path, [1, 2, 3])
     first = read_pass(full_reads=2)
     assert [r["pr"]["number"] for r in first] == [1, 2]
-    assert Counter(c for c in world["calls"] if "/pulls/" in c) == Counter(["repos/o/r/pulls/1", "repos/o/r/pulls/2"])
+    assert sorted(c for c in world["calls"] if "/pulls/" in c) == ["repos/o/r/pulls/1", "repos/o/r/pulls/2"]
     old = first[0]["pr"]["head"]["sha"]
     for number in (1, 2):
         world["heads"][number] = "c" * 40
