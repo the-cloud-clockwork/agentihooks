@@ -45,13 +45,11 @@ def project(store: RedisStore, slug: str, now_ms: int) -> dict:
 
 
 class Swarm:
-    """The authoritative store every viewer projects; the tick and the worker are writes to it."""
-
     def __init__(self, data: dict):
         import fakeredis
 
-        self.data, self.slug, self.ran = data, data["swarm"], []
-        self.store = RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
+        self.data, self.slug, self.ran, self.server = data, data["swarm"], [], fakeredis.FakeServer()
+        self.store = self.connect()
         self.store.create(SwarmConfig(self.slug, ".", 3, 0, state="stopped"))
         self.agent, self.heartbeat_ms = None, 0
         self.publish()
@@ -158,14 +156,20 @@ class Swarm:
     def current(self) -> AgentRecord:
         return self.store.execution(self.slug, self.agent.execution_id)
 
+    def connect(self) -> RedisStore:
+        import fakeredis
+
+        return RedisStore(fakeredis.FakeRedis(server=self.server, decode_responses=True))
+
     def snapshot(self) -> dict:
         keys = sorted(key for key in self.store.redis.keys("*") if not key.endswith("lifecycle-conflicts"))
         return {key: self.store.redis.dump(key) for key in keys}
 
+    def conflicts(self) -> dict:
+        return self.store.redis.hgetall(self.store.key(self.slug, "lifecycle-conflicts"))
+
 
 class Viewer:
-    """One browser viewer: a fresh context with no cached storage, whose stream projects the store on each connect."""
-
     def __init__(self, browser, swarm: Swarm, viewport: dict, now_ms: int):
         self.swarm, self.now_ms, self.puts, self.dialogs, self.errors = swarm, now_ms, [], [], []
         self.frozen = self.down = self.accept = False
@@ -349,6 +353,7 @@ def _case_a(browser, data: dict) -> tuple[dict, dict, Counter]:
     second, _ = _workflow(browser, data)
     views, launched = first["reopened"], first["launched"]
     names = (second["launched"]["puts"][1]["agent"], launched["puts"][1]["agent"])
+    only_names = all(names[0] in path for path in differs(first, second))
     second = json.loads(json.dumps(second).replace(*names))
     seen = "seen 0m ago"
     checks = {
@@ -369,7 +374,7 @@ def _case_a(browser, data: dict) -> tuple[dict, dict, Counter]:
         "desktop_and_mobile_agree": views["desktop"]["row"] == views["mobile"]["row"],
         "page_matches_the_store": first["store"] == {"state": "running", "agent": "working", "generation": 1},
         "no_page_errors": not launched["errors"] and not any(v["errors"] for v in views.values()),
-        "second_fixture_matches_the_first": second == first,
+        "second_fixture_matches_the_first": only_names and second == first,
     }
     return checks, {**first, "second_fixture_differs": differs(first, second)}, counts
 
@@ -445,6 +450,7 @@ def _case_b(browser, data: dict) -> tuple[dict, dict, Counter]:
         "non_operator_refused_without_change": unauthorized[0] == 403 and unauthorized_unchanged,
         "new_request_accepted_once": len(phone.puts) == 2 and accepted and len(queued) == 1,
         "same_operation_replay_adds_nothing": replayed == {"code": 200, "unchanged": True, "queued": []},
+        "only_the_stale_refusal_is_counted": swarm.conflicts() == {"stale": "1"},
         "no_page_errors": phone.errors == [],
     }
     observed = {
@@ -492,7 +498,7 @@ def _case_c(browser, data: dict) -> tuple[dict, dict, Counter]:
     viewer.tab.wait_for_timeout(1500)
     restored = {"row": viewer.row(name), "controls": viewer.controls(name)}
     counts["stale_marks_cleared"] += 1
-    reread = project(RedisStore(swarm.store.redis), swarm.slug, reopened)
+    reread = project(swarm.connect(), swarm.slug, reopened)
     checks = {
         "fresh_terminal_shown_live_before_close": "behind heartbeat" not in live and "cached" not in live,
         "every_viewer_was_closed": closed == 0,
@@ -505,7 +511,7 @@ def _case_c(browser, data: dict) -> tuple[dict, dict, Counter]:
         and "behind heartbeat" not in fresh,
         "controls_return_after_a_fresh_read": any(not c["disabled"] for c in restored["controls"]),
         "no_command_replayed": viewer.puts == [] and swarm.run_commands() == [],
-        "outage_wrote_nothing": during == before,
+        "outage_wrote_nothing": during == before and swarm.conflicts() == {},
         "restart_reads_the_same_view": reread["executions"] == swarm.view(reopened)["executions"],
         "no_page_errors": viewer.errors == [] and first.errors == [],
     }
