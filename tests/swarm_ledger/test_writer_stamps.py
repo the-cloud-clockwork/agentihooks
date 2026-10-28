@@ -115,6 +115,8 @@ def test_a_write_holds_an_independent_writer_copy_for_the_next_write(tmp_path):
     entry = cached(repo)
     held = entry.writer
     assert held == entry.state
+    assert list(held) == list(entry.state)
+    assert list(held["_meta"]) == list(entry.state["_meta"])
     stamps = {id(record) for record in entry.state["_meta"]["stamps"].values()}
     assert set(containers(held, {})) & set(containers(entry.state, {})) <= stamps
     before = copy.deepcopy(entry.state)
@@ -156,6 +158,28 @@ def test_a_failed_write_drops_the_held_copy_and_the_next_write_copies_again(tmp_
     _, rejected = repo.apply_ops("ledger", ops=[CHAT])
     assert rejected == []
     assert sqlite.SQLiteLedgerRepository(repo.path).get_document("ledger") == repo.get_document("ledger")
+
+
+def test_a_mutation_that_raises_drops_the_held_copy(tmp_path, monkeypatch):
+    import ledger_priorities
+
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    entry = cached(repo)
+    before = copy.deepcopy(entry.state)
+
+    def broken(doc, ctx):
+        doc["tasks"].clear()
+        raise RuntimeError("derive failed")
+
+    monkeypatch.setattr(ledger_priorities, "derive", broken)
+    with pytest.raises(RuntimeError, match="derive failed"):
+        repo.apply_ops("ledger", ops=[CHAT])
+    monkeypatch.undo()
+    assert entry.writer is None
+    assert entry.state == before
+    repo.apply_ops("ledger", ops=[CHAT])
+    assert repo.get_document("ledger")["tasks"] == before["tasks"]
 
 
 def test_a_write_through_the_held_copy_copies_only_the_leaves_it_changed(tmp_path, monkeypatch):
