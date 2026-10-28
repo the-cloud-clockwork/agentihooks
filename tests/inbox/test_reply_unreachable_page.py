@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.inbox import outbox
 from scripts.inbox.store import InboxStore
 from scripts.swarm import delivery, ledger_client
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused, LedgerUnreachable
@@ -60,7 +61,7 @@ def test_a_reply_to_the_operator_waits_out_a_timing_out_ledger_page_and_lands_on
             id=answer.id, reason="ledger reply-proof: ledger server not answering on http://ledger.test: timed out"
         )
     ]
-    assert alerts[0].fyi
+    assert alerts[0].fyi and alerts[0].id == outbox.stable_id("unshown", answer.id)
 
     assert delivery.relay_to_page(box, SLUG, agents, LedgerClient()) == 1
     assert box.get(answer.id).state == "done"
@@ -130,5 +131,7 @@ def test_a_post_queued_in_the_local_outbox_is_not_yet_shown(monkeypatch, write):
     ledger = SimpleNamespace(Missing=LookupError, call=lambda slug, ops, service=False: {"queued": ops[0]["id"]})
     monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
     args = ("sw", "hello", "sw-master-1", "op-1") if write == "relay" else ("sw", "phases/p1", "hello", "m", "op-1")
-    with pytest.raises(LedgerUnreachable, match="waits in the local outbox"):
+    with pytest.raises(
+        LedgerUnreachable, match="^ledger sw: the server is not answering, the post waits in the local outbox$"
+    ):
         getattr(LedgerClient(), write)(*args)
