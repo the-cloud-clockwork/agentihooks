@@ -150,4 +150,4 @@ def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, check
     )
     assert error == "", (grading / "run.log").read_text()
     assert len(results[SOURCE]) == 1, results
-    assert any(row["status"] == "killed" for row in results[SOURCE]), results
+    assert any(row["status"] == "killed" for row in results[SOURCE]), (results, (grading / "run.log").read_text())

@@ -23,10 +23,13 @@ def prepare(root: Path, baseline: Path) -> None:
     stats = root / ".mutation-stats"
     stats.mkdir(exist_ok=True)
     (stats / "plan.json").write_text(json.dumps(plan))
-    print(f"Original workload: {len(names)} identical mutants across {len(plan['shards'])} shards", flush=True)
+    print(f"Original workload: {len(names)} identical mutants across {plan['shards']} shards", flush=True)
 
 
-def verify(folder: Path, baseline: Path) -> None:
+def verify(folder: Path, baseline: Path, sample: Path) -> None:
+    from scripts.ci_mutation.clearances import load_clearances
+    from scripts.ci_mutation.merge import merge_reports
+
     plan_file = next(baseline.glob("*/shard-plan.json"))
     plan = json.loads(plan_file.read_text())
     reports = {path.parent: json.loads(path.read_text()) for path in folder.glob("*/report.json")}
@@ -58,6 +61,9 @@ def verify(folder: Path, baseline: Path) -> None:
         }
         checked.update(actual)
     assert len(checked) == 72 and checked == set(plan["assignments"]), len(checked)
+    merged = merge_reports(list(reports.values()), load_clearances(sample))
+    (folder / "merged-report.json").write_text(json.dumps(merged))
+    assert not merged["failed"], merged
     print(json.dumps({"mutants": len(checked), "shards": [report["shard"] for report in reports.values()]}), flush=True)
 
 
@@ -65,4 +71,4 @@ if __name__ == "__main__":
     if sys.argv[1] == "prepare":
         prepare(Path.cwd(), Path(sys.argv[2]))
     else:
-        verify(Path(sys.argv[2]), Path(sys.argv[3]))
+        verify(Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4]))

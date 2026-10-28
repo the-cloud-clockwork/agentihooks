@@ -137,6 +137,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: 859b8526d233e56ec95946bd9d17a192e2e4b57e
+          path: sample
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -152,4 +156,10 @@ jobs:
           path: baseline
       - name: Require complete grading within every original budget
         working-directory: .
-        run: python tests/writer_mutation_cost_proof.py verify results baseline
+        run: python -m tests.writer_mutation_cost_proof verify results baseline sample
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: writer-merged-report
+          path: results/merged-report.json
+          if-no-files-found: error

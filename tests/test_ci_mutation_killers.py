@@ -132,7 +132,7 @@ def test_the_selection_runner_orders_by_kills_and_records_them_only_for_mutants(
     runner = SimpleNamespace(
         collect_source_file_mutation_data=None,
         PytestRunner=PytestRunner,
-        mutmut=SimpleNamespace(),
+        mutmut=SimpleNamespace(tests_by_mangled_function_name={}),
         cli=cli,
     )
     monkeypatch.setitem(sys.modules, "mutmut", SimpleNamespace(__main__=runner))
