@@ -467,3 +467,14 @@ def test_a_trace_whose_count_moved_without_a_newer_event_lists_again(cursors):
     backend.total = 2
     registry.read("s", [agent], backend, state, 15, 50)
     assert sum(1 for path, params in backend.calls if params.get("limit") == 100) == 2
+
+
+def test_a_trace_with_a_newer_event_and_the_same_count_lists_again(cursors):
+    _session(cursors, "sid", [], 0, accepted={"a": "rev"})
+    row = {"id": "a", "startTime": "2026-10-07T08:00:00Z"}
+    backend = Langfuse([_trace("tr", "sid")], [row], total=1)
+    agent, state = {**AGENT, "conversation_id": "sid"}, {}
+    registry.read("s", [agent], backend, state, 15, 50)
+    backend.observations = [{**row, "endTime": "2026-10-07T08:00:05Z"}]
+    registry.read("s", [agent], backend, state, 15, 50)
+    assert sum(1 for path, params in backend.calls if params.get("limit") == 100) == 2
