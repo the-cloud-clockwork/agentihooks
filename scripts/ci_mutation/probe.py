@@ -3,6 +3,7 @@ import ast
 import hashlib
 import json
 import math
+import os
 import shutil
 import subprocess
 import time
@@ -166,7 +167,10 @@ def main() -> int:
             f"Shared early mutations: {len(plan['probe']['results'])}; charged seconds: {plan['probe']['seconds']:.3f}"
         )
         return 0
+    os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     root = Path.cwd()
+    if os.environ.get("MUTATION_STATS_CACHE"):
+        os.environ["MUTATION_STATS_ROOT"] = str(root)
     changes = discover_changes(root, args.bases.split(","), "HEAD")
     planned = root / ".mutation-selection.json"
     selection = json.loads(planned.read_text()) if planned.is_file() else None

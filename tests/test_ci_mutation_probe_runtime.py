@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -122,8 +123,15 @@ def test_probe_command_uses_the_declared_scope_budget_and_shard_and_writes_its_r
 
     def run(root, selected, shared, shard, budget):
         seen.append((root, selected, shared, shard, budget))
+        seen.append((os.environ.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD"), os.environ.get("MUTATION_STATS_ROOT")))
         return record
 
+    monkeypatch.delenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", raising=False)
+    monkeypatch.delenv("MUTATION_STATS_ROOT", raising=False)
+    if planned:
+        monkeypatch.setenv("MUTATION_STATS_CACHE", str(tmp_path / "cache"))
+    else:
+        monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
     monkeypatch.setattr(probe, "run_probe", run)
     monkeypatch.setattr(
         sys,
@@ -146,6 +154,7 @@ def test_probe_command_uses_the_declared_scope_budget_and_shard_and_writes_its_r
     assert seen == [
         (tmp_path, ["base-one", "base-two"], "HEAD"),
         (tmp_path, {"scripts/a.py": ({2}, ["tests/a.py"])}, stats, (0, 2), 100),
+        ("1", str(tmp_path) if planned else None),
     ]
     assert json.loads((stats.folder / "probe-0.json").read_text()) == record
 
