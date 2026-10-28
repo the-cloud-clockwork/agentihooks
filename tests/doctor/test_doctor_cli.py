@@ -69,6 +69,7 @@ def env(monkeypatch, memory_path):
     rt = FakeRuntime()
     monkeypatch.setattr(swarm_cli, "connect", lambda: store)
     monkeypatch.setattr(swarm_cli, "LedgerClient", FileLedger)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", FileLedger)
     monkeypatch.setattr(swarm_cli, "HerdrRuntime", lambda: rt)
     monkeypatch.setattr(swarm_cli.timer, "ensure", lambda binary: True)
     monkeypatch.setattr(swarm_cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))

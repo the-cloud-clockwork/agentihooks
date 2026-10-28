@@ -934,7 +934,6 @@ def cmd_master(store, args):
     if store.config(args.slug).state in ("stopped", "stopping"):
         store.update(args.slug, state="paused")
         timer.ensure(timer.entry_point())
-    ledger.join(args.slug, launched.master, "orchestrator")
     print(json.dumps(asdict(launched)))
 
 

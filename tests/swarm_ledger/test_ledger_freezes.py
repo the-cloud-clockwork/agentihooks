@@ -262,8 +262,8 @@ def test_a_missing_freeze_target_names_the_reason():
 
 
 def test_dispatcher_refusal_names_the_required_autonomy(monkeypatch):
-    monkeypatch.setattr(ledger_freezes, "resolve_name", lambda name: "dispatch@f2e3d4-0003")
-    state, rejected = freeze("plans/a", by="dispatch@f2e3d4-0003")
+    monkeypatch.setattr(ledger_freezes, "resolve_name", lambda name: DISPATCHER)
+    state, rejected = freeze("plans/a", by=DISPATCHER)
     assert rejected
     assert any("requires full autonomy" in warning for warning in state["_meta"]["warnings"])
 
