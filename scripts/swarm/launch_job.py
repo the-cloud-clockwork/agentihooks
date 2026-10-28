@@ -153,7 +153,7 @@ def collect(run) -> tuple[list[str], set[str]]:
                 placed = codex.complete(run.config, name, placed, run.runtime.reap_name)
                 launched = codex.admit_legacy(run.store, run.slug, engine.placed_record(agent, placed), run.runtime)
         except Exception as exc:
-            error = exc if isinstance(exc, SpawnError) else SpawnError(str(exc), harness=picked.harness)
+            error = exc if isinstance(exc, SpawnError) else SpawnError(str(exc))
             if not error.harness:
                 error.harness = picked.harness
             if not error.pane_id:

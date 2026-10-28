@@ -24,7 +24,7 @@ def test_runtime_prepares_a_detached_job_for_a_workstation_claim(tmp_path, monke
     placed = runtime._account_launch(
         config,
         "eng",
-        {"id": "t1", "detached_launch": True},
+        {"id": "t1", "detached_launch": True, "controller_epoch": 7},
         "engineer",
         ["agentihooks", "--agent", "claude", "--", "--route", "account"],
     )
@@ -32,6 +32,8 @@ def test_runtime_prepares_a_detached_job_for_a_workstation_claim(tmp_path, monke
     assert placed.launch_job["timeout"] == 300
     request = json.loads(Path(placed.launch_job["request"]).read_text())
     assert request["launch"]["task_id"] == "t1"
+    assert request["launch"]["controller_epoch"] == 7
+    assert request["home"] == str(tmp_path)
     assert request["name"] == "engineer" and request["lane"] == "eng"
     runtime._launch.assert_not_called()
     popen.assert_not_called()
@@ -52,6 +54,7 @@ def test_worker_writes_success_failure_and_late_success_results(tmp_path, monkey
     monkeypatch.setattr(HerdrRuntime, "reap_name", lambda self, name: reaped.append(name))
 
     def launch(self, config, lane, **kwargs):
+        assert self.home == tmp_path
         assert config.slug == "sw" and lane == "eng" and kwargs["name"] == "engineer"
         assert kwargs["task_id"] == "t1"
         if error:
@@ -158,12 +161,41 @@ def test_completed_takes_the_launch_result_and_clears_the_job():
     assert launch_job.completed(picked, replace(placed, account="api")).route_kind == "api"
 
 
+def test_completed_takes_effort_launch_time_and_conversation_from_the_result():
+    picked = Placed("", "claude", effort="low", launched_at=5, conversation_id="old", launch_job={"path": "x"})
+    placed = Placed("w:p1", "claude", effort="high", launched_at=1100, conversation_id="c1")
+    result = launch_job.completed(picked, placed)
+    assert (result.effort, result.launched_at, result.conversation_id) == ("high", 1100, "c1")
+
+
+def test_worker_gives_the_launcher_no_time_once_the_budget_runs_out_mid_launch(tmp_path, monkeypatch):
+    monkeypatch.setattr(launch_job.time, "time", lambda: 1)
+    job = launch_job.start(tmp_path, SwarmConfig("sw", "/repo", 1, 1), "eng", "engineer", {"task_id": "t1", "argv": []})
+    clock = [2]
+    monkeypatch.setattr(launch_job.time, "time", lambda: clock[0])
+    calls = []
+    monkeypatch.setattr(launch_job.subprocess, "run", lambda argv, **kwargs: calls.append(kwargs["timeout"]))
+    monkeypatch.setattr(HerdrRuntime, "reap_name", lambda self, name: None)
+
+    def launch(self, *args, **kwargs):
+        clock[0] = 400
+        self.run(["launcher"], timeout=300)
+        return Placed("w:p1", "claude")
+
+    monkeypatch.setattr(HerdrRuntime, "_launch", launch)
+    launch_job.run(Path(job["request"]))
+    assert calls == [0]
+
+
 class DetachedRuntime(FakeRuntime):
     def __init__(self, home):
         super().__init__()
         self.home = home
         self.jobs = []
         self.collected = []
+
+    def launch_room(self, config):
+        return 2
 
     def collect(self, config, lane, name, task):
         self.collected.append(name)
@@ -426,6 +458,8 @@ def test_job_starts_a_detached_process_and_returns_without_waiting(tmp_path, mon
     assert args[0] == [sys.executable, "-m", "scripts.swarm.launch_job", job["request"]]
     assert kwargs["start_new_session"] is True
     assert kwargs["stdin"] == subprocess.DEVNULL
+    assert kwargs["stdout"] == subprocess.DEVNULL
+    assert kwargs["stderr"].name == str(tmp_path / "sw" / launch_job.KEY / "engineer.request.log")
     assert job["timeout"] == SPAWN_TIMEOUT_S
     assert Path(job["path"]).parent.exists()
     popen.return_value.wait.assert_not_called()
@@ -436,8 +470,9 @@ def test_job_starts_a_detached_process_and_returns_without_waiting(tmp_path, mon
     [
         ("master", {}, []),
         ("eng", {"handoff_envelope": {"reason": "quota"}}, []),
-        ("eng", {}, ["--route", "interactive"]),
-        ("eng", {}, ["--route", "master-login"]),
+        ("eng", {}, ["--route", "interactive", "--model", "opus"]),
+        ("eng", {}, ["--route", "master-login", "--model", "opus"]),
+        ("eng", {"admitted_execution_id": "e1"}, []),
     ],
 )
 def test_ordered_launches_remain_synchronous(tmp_path, monkeypatch, lane, task, route):
