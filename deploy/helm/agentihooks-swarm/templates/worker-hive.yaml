@@ -121,6 +121,8 @@ spec:
               value: {{ join "," ($workers.masterSwarms | default list) | quote }}
             - name: HIVE_MAX_AGENTS
               value: {{ $workers.maxAgents | quote }}
+            - name: HIVE_PREFER
+              value: {{ $workers.prefer | default "" | quote }}
             - name: HIVE_REPOSITORIES
               value: {{ $workers.repositories | toJson | quote }}
             - name: HIVE_CREDENTIAL_FILE

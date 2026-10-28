@@ -216,3 +216,18 @@ def test_a_master_compares_a_full_one_slot_hive_with_a_partly_filled_hive():
 
     records = [hive("a", max_agents=1, agents=1), hive("b", max_agents=4, agents=3)]
     assert placement.choose("master", "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice("b")
+
+
+@pytest.mark.parametrize(("used_percent", "expected"), [(79, "worker-one"), (81, "oracle")])
+def test_the_preferred_hive_takes_agents_until_its_node_memory_crosses_eighty_percent(used_percent, expected):
+    from scripts.hive import admission, placement
+
+    total = 92_000
+    reading = {"cpus": 16, "load5": 1.0, "total_mb": total, "available_mb": total * (100 - used_percent) // 100}
+    records = [
+        hive("oracle", ui="no", max_agents=24),
+        hive("worker-one", ui="no", max_agents=28, agents=20, prefer={"eng": 1, "ci": 1, "plan": 1}),
+    ]
+    records[1]["room"] = admission.capped(admission.room(reading), 20, 28).room
+
+    assert placement.choose("eng", "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice(expected)
