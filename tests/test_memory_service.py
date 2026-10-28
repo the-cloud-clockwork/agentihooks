@@ -140,15 +140,17 @@ def test_an_empty_body_is_refused(served):
 
 
 def test_a_body_over_the_bound_is_refused(served):
-    # The service answers and closes without reading the body, so a client still sending it can hit a broken pipe.
+    # Headers only: the service refuses on Content-Length without reading the body, and urllib would send one.
     connection = http.client.HTTPConnection(served.removeprefix("http://"), timeout=10)
-    connection.putrequest("POST", service.SEARCH_PATH)
-    connection.putheader("Authorization", f"Bearer {TOKEN}")
-    connection.putheader("Content-Length", str(service.MAX_BODY + 1))
-    connection.endheaders()
-    response = connection.getresponse()
-    answer = json.loads(response.read())
-    connection.close()
+    try:
+        connection.putrequest("POST", service.SEARCH_PATH)
+        connection.putheader("Authorization", f"Bearer {TOKEN}")
+        connection.putheader("Content-Length", str(service.MAX_BODY + 1))
+        connection.endheaders()
+        response = connection.getresponse()
+        answer = json.loads(response.read())
+    finally:
+        connection.close()
     assert response.status == 400 and answer == refusal("invalid_request", service.BAD_BODY)
 
 
