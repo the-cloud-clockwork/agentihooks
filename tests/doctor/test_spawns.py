@@ -20,6 +20,16 @@ def test_recorded_spawns_and_planted_failed_spawn():
     assert record["actions"] == []
 
 
+@pytest.mark.parametrize("reopened", ["", ", task dt2 reopened"])
+def test_a_failure_reason_with_colons_keeps_its_subject_and_whole_text(reopened):
+    record = load("spawns")
+    reason = "hive launch failed: refused: agentihooks init-agent: canary timeout"
+    record["actions"] = [f"{record['slug']}: spawn failed for dt2{reopened}: {reason}"]
+    [found] = spawns.failed(record)
+    assert found.id == "failed-spawn/dt2"
+    assert found.evidence == (reason,)
+
+
 def test_reservation_refusals_require_recorded_free_sessions():
     record = load("spawns")
     slug = record["slug"]
@@ -294,3 +304,25 @@ def test_a_local_agent_keeps_the_first_event_rule():
     late = {**agent, "started_at": 1_000_000}
     [found] = spawns.silent_starts([late], {}, 1_000_000 + 2 * spawns.TICK_MS)
     assert found.measure == 2
+
+
+def test_live_worker_hives_without_a_fresh_headroom_reading_are_flagged():
+    from scripts.hive import registry
+
+    now = 1_000_000
+    beat = now - 5_000
+    hives = [
+        {"id": "hh4", "name": "swarm-hive-002", "ui": "no", "heartbeat_at": beat, "version": "v1"},
+        {"id": "hh5", "name": "swarm-hive-003", "ui": "no", "heartbeat_at": beat, "version": "v1"},
+        {"id": "hh6", "name": "swarm-hive-004", "ui": "no", "heartbeat_at": beat},
+        {"id": "ws", "name": "swarm-master", "ui": "yes", "heartbeat_at": beat, "version": "v1"},
+        {"id": "old", "name": "gone", "ui": "no", "heartbeat_at": now - registry.LIVE_MS - 1, "version": "v1"},
+    ]
+    readings = {"hh5": {"measured_at": now}}
+    found, unversioned = spawns.missing_headroom(hives, readings, now)
+    assert found.id == "missing-headroom/hh4"
+    assert found.measure == 1
+    assert found.summary == "live hive has no fresh headroom reading, so the tick refuses its launches"
+    assert found.threshold == "a live worker hive with no fresh headroom reading"
+    assert found.evidence == ("hive swarm-hive-002", f"heartbeat at {beat}", "version v1")
+    assert unversioned.evidence == ("hive swarm-hive-004", f"heartbeat at {beat}", "version ")
