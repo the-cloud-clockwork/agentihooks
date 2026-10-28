@@ -165,11 +165,14 @@ jobs:
           from pathlib import Path
 
           from scripts.ci_mutation.browser import needs_browser
-          from scripts.ci_select import changed_files, is_test
+          from scripts.ci_select import changed_files, is_test, selected_tests
           from scripts.ci_touched_tests import worker_count
 
           root = Path.cwd()
-          tests = [path for path in changed_files(root, "origin/dev", "HEAD") if is_test(path) and (root / path).is_file()]
+          changed = changed_files(root, "origin/dev", "HEAD")
+          tests = [path for path in changed if is_test(path) and (root / path).is_file()]
+          javascript = [path for path in changed if Path(path).suffix == ".js"]
+          tests = sorted(set(tests) | selected_tests(root, javascript, False))
           browser = str(bool(tests) and needs_browser(root, tests)).lower()
           workers = worker_count(tests) if tests else 1
           print("Touched tests:", *tests or ["none"], sep="\n")
