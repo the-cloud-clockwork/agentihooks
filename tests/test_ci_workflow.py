@@ -333,9 +333,9 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     assert install["env"] == {"PYTHON_PATH": "${{ steps.python.outputs.python-path }}"}
     assert install["run"].strip().splitlines() == [
         'uv venv --python "$PYTHON_PATH" "$HOME/venv"',
-        'uv pip install --constraint .github/test-requirements.lock --offline --no-index --find-links /opt/wheelhouse --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
+        'uv pip install --offline --no-index --find-links /opt/wheelhouse --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
         'echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"',
-        'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
+        'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
     ]
 
 
@@ -347,7 +347,6 @@ def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
     assert "${{ runner.os }}" in key
     assert f"${{{{ steps.{python['id']}.outputs.python-version }}}}" in key
     assert "${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}" in key
-    assert "${{ hashFiles('.github/test-requirements.lock') }}" in key
     _, day = _unit_step_index(lambda s: s.get("id") == "day")
     assert day["run"] == 'echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"'
     assert "${{ steps.day.outputs.date }}" in key
@@ -439,11 +438,7 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
 
 def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs():
     workflow = _workflow()
-    assert (_ROOT / ".github/test-constraints.txt").read_text().splitlines() == [
-        "playwright==1.63.0",
-        "pytest<9.2",
-        "--constraint test-requirements.lock",
-    ]
+    assert (_ROOT / ".github/test-constraints.txt").read_text().split() == ["playwright==1.63.0", "pytest<9.2"]
     for job in ("test-count", "split", "unit"):
         assert workflow["jobs"][job]["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
         cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
@@ -2177,7 +2172,7 @@ def test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pin
     specs = [declared[name] for name in sorted(PLANNER_PACKAGES)]
     assert (
         install["run"]
-        == 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --constraint .github/test-requirements.lock --system '
+        == 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system '
         + " ".join(f'"{spec}"' for spec in specs)
     )
     assert _planner_third_party() == set(PLANNER_PACKAGES.values())

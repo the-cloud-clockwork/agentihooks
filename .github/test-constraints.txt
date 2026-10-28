@@ -1,3 +1,2 @@
 playwright==1.63.0
 pytest<9.2
---constraint test-requirements.lock

@@ -43,7 +43,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv pip install --constraint .github/test-requirements.lock --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
 
       - name: Install kind
         run: |
