@@ -1,6 +1,6 @@
 """A master held on a question panel, a permission prompt or an interrupted prompt while operator items wait: the tick
 asks it for a handoff through its inbox, then recycles it in its seat like a stalled master, which also dismisses an
-open question panel. The master-reset enforcement starts log only."""
+open question panel. The reset enforcement starts log only."""
 
 from scripts.gates import modes
 from scripts.gates.base import Who
@@ -9,8 +9,10 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import affinity, master_retire, master_stall
 from scripts.swarm.health.findings import MINUTE_MS
+from scripts.swarm.pane import interrupted_prompt
 from scripts.swarm.store import MASTER
 
+TAIL_LINES = 40
 WAKE_MINUTES = 10
 RESET_MINUTES = 15
 OPERATOR = "operator"
@@ -39,18 +41,29 @@ Answer the open operator items in the master inbox first, then re-read the ledge
 """
 
 
-def held_on(observed) -> str:
+def held_on(observed, tail: str = "", harness: str = "claude") -> str:
     if observed.state == "waiting":
         return f"the prompt {observed.prompt_title or 'waiting on input'}"
-    if observed.state == "idle" and observed.interrupted:
+    if observed.state == "idle" and interrupted_prompt(harness, tail):
         return "an interrupted prompt"
     return ""
 
 
-def _oldest_operator_item(store, slug, master):
+def _prompt(runtime, master):
+    observed = runtime.observe(master)
+    if observed.state != "idle":
+        return held_on(observed)
+    try:
+        tail = runtime.pane_tail(master.pane_id, TAIL_LINES)
+    except Exception:  # an unreadable pane reads as not held, like an unknown pane state
+        tail = ""
+    return held_on(observed, tail, master.harness)
+
+
+def _operator_waiting(store, slug, master):
     inbox = InboxStore(store.redis)
     mail = inbox.open_items(master.name) + inbox.open_items(master.seat or seat_address(slug, MASTER))
-    return min((item.created_at for item in mail if item.sender == OPERATOR), default=None)
+    return any(item.sender == OPERATOR for item in mail)
 
 
 def _clear(store, slug, master, key):
@@ -64,13 +77,12 @@ def run(slug, config, store, ledger, runtime, now_ms):
     if master is None or master.lane != MASTER or config.state in {"stopping", "stopped"}:
         return []
     key = store.key(slug, "master-prompt-stall", master.name)
-    prompt = held_on(runtime.observe(master)) if master.name in runtime.live_names() else ""
-    oldest = _oldest_operator_item(store, slug, master) if prompt else None
-    if oldest is None:
+    prompt = _prompt(runtime, master) if master.name in runtime.live_names() else ""
+    if not prompt or not _operator_waiting(store, slug, master):
         _clear(store, slug, master, key)
         return []
     store.redis.hsetnx(key, "since", now_ms)
-    minutes = (now_ms - max(int(store.redis.hget(key, "since")), oldest)) // MINUTE_MS
+    minutes = (now_ms - int(store.redis.hget(key, "since"))) // MINUTE_MS
     mode = modes.configured(GATE, config.gates)
     if minutes < WAKE_MINUTES or mode == "off":
         return []
@@ -83,9 +95,9 @@ def run(slug, config, store, ledger, runtime, now_ms):
         GATE.allows(store, who, stage, reason, now_ms)
         would = f"recycle {master.name}" if stage == "recycle" else f"ask {master.name} for a handoff"
         return [f"log only: would {would}, {reason}"]
-    asking = not master_retire.reason(store, slug, master.name)
-    if held := master_retire.hold(store, slug, master, reason, True, now_ms):
-        if asking:
+    held_for = master_retire.reason(store, slug, master.name)
+    if held := master_retire.hold(store, slug, master, held_for or reason, True, now_ms):
+        if not held_for:
             GATE.allows(store, who, "wake", reason, now_ms)
         return [held]
     if minutes < RESET_MINUTES:

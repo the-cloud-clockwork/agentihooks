@@ -22,7 +22,7 @@ class Enforcement:
 STALL_WATCH = Enforcement("stall")
 LANE_SPLIT = Enforcement("lane-split")
 NIGHT_WATCH = Enforcement("nightwatch")
-MASTER_RESET = Enforcement("master-reset")
+MASTER_RESET = Enforcement("reset")
 ENFORCEMENTS = {
     STALL_WATCH.name: STALL_WATCH,
     LANE_SPLIT.name: LANE_SPLIT,

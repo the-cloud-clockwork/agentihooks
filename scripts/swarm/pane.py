@@ -12,7 +12,6 @@ class PaneObservation:
     provider_checked: bool = field(default=False, compare=False)
     provider_error_id: str = ""
     content_refusal: bool = False
-    interrupted: bool = False
 
 
 PROVIDER_ERRORS = {

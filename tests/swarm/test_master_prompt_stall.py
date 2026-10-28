@@ -27,14 +27,22 @@ def isolated(tmp_path, monkeypatch):
 class PromptRuntime(FakeRuntime):
     def __init__(self):
         super().__init__()
-        self.panes = {}
+        self.panes, self.tails = {}, {}
 
     def observe(self, agent):
         return self.panes.get(agent.name) or super().observe(agent)
 
+    def pane_tail(self, pane_id, lines):
+        assert lines == master_prompt_stall.TAIL_LINES
+        tail = self.tails.get(pane_id, "")
+        if isinstance(tail, Exception):
+            raise tail
+        return tail
+
 
 QUESTION = PaneObservation("waiting", "Which task first?")
-INTERRUPTED = PaneObservation("idle", interrupted=True)
+INTERRUPTED = PaneObservation("idle")
+INTERRUPT = "● Asking the operator\n  ⎿  Interrupted · What should Claude do instead?\n\n─────\n❯ \n─────\n"
 
 
 def master(store, pane=QUESTION, slug="sw", enforce=True):
@@ -47,6 +55,7 @@ def master(store, pane=QUESTION, slug="sw", enforce=True):
     runtime = PromptRuntime()
     runtime.live.add(name)
     runtime.panes[name] = pane
+    runtime.tails[agent.pane_id] = INTERRUPT
     return agent, runtime
 
 
@@ -72,7 +81,7 @@ def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(st
     operator_says(store, START)
     assert run(store, runtime, START) == []
     assert run(store, runtime, START + 9 * MINUTE) == []
-    held = master_prompt_stall.held_on(pane)
+    held = master_prompt_stall.held_on(pane, INTERRUPT)
     reason = master_prompt_stall.REASON.format(prompt=held, minutes=10)
     assert run(store, runtime, START + 10 * MINUTE) == [
         f"asked {agent.name} for a handoff before retiring it: {reason}"
@@ -92,23 +101,34 @@ def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(st
     [row] = transfers.list_transfers(store, "sw")
     assert (row["reason"], row["predecessor"]) == (master_stall.STALLED, agent.name)
     assert [(r["gate"], r["kind"], r["tool"]) for r in rows()] == [
-        ("master-reset", "deny", "wake"),
-        ("master-reset", "deny", "recycle"),
+        ("reset", "deny", "wake"),
+        ("reset", "deny", "recycle"),
     ]
 
 
 def test_held_on_names_the_prompt():
     assert master_prompt_stall.held_on(QUESTION) == "the prompt Which task first?"
     assert master_prompt_stall.held_on(PaneObservation("waiting")) == "the prompt waiting on input"
-    assert master_prompt_stall.held_on(INTERRUPTED) == "an interrupted prompt"
-    assert master_prompt_stall.held_on(PaneObservation("idle")) == ""
-    assert master_prompt_stall.held_on(PaneObservation("working", interrupted=True)) == ""
+    assert master_prompt_stall.held_on(INTERRUPTED, INTERRUPT) == "an interrupted prompt"
+    assert master_prompt_stall.held_on(INTERRUPTED, INTERRUPT, "codex") == ""
+    assert master_prompt_stall.held_on(INTERRUPTED) == ""
+    assert master_prompt_stall.held_on(PaneObservation("working"), INTERRUPT) == ""
 
 
-def test_the_stall_counts_from_the_oldest_operator_item(store):
+@pytest.mark.parametrize("tail", ["● Back to work\n❯ \n", OSError("pane gone")], ids=["answered", "unreadable"])
+def test_idle_master_off_an_interrupt_stays(store, tail):
+    agent, runtime = master(store, INTERRUPTED)
+    runtime.tails[agent.pane_id] = tail
+    operator_says(store, START)
+    run(store, runtime, START)
+    assert run(store, runtime, START + 60 * MINUTE) == []
+
+
+def test_the_count_starts_when_an_operator_item_arrives(store):
     agent, runtime = master(store)
     assert run(store, runtime, START) == []
     operator_says(store, START + 20 * MINUTE)
+    assert run(store, runtime, START + 20 * MINUTE) == []
     assert run(store, runtime, START + 29 * MINUTE) == []
     assert run(store, runtime, START + 30 * MINUTE)[0].startswith(f"asked {agent.name}")
 
@@ -156,7 +176,7 @@ def test_other_retire_reasons_are_left_alone(store):
 
 def test_log_only_by_default_writes_would_be_rows_once_and_acts_on_nothing(store):
     agent, runtime = master(store, enforce=False)
-    assert catalog.defaults()["master-reset"] == "observe"
+    assert catalog.defaults()["reset"] == "observe"
     operator_says(store, START)
     run(store, runtime, START)
     held = master_prompt_stall.held_on(QUESTION)
@@ -178,7 +198,7 @@ def test_log_only_by_default_writes_would_be_rows_once_and_acts_on_nothing(store
 
 def test_off_mode_skips(store):
     agent, runtime = master(store, enforce=False)
-    store.update("sw", gates={"master-reset": "off"})
+    store.update("sw", gates={"reset": "off"})
     operator_says(store, START)
     run(store, runtime, START)
     assert run(store, runtime, START + 60 * MINUTE) == []
@@ -218,9 +238,6 @@ def test_tick_recycles_a_master_on_a_question_and_a_fresh_master_answers_the_ope
     assert item.id in [i.id for i in inbox.open_items(agent.seat)]
     inbox.reply(item.id, fresh, "here, working your list")
     assert inbox.get(item.id).state not in ("pending", "delivered", "confirmed")
-
-
-INTERRUPT = "● Asking the operator\n  ⎿  Interrupted · What should Claude do instead?\n\n─────\n❯ \n─────\n"
 
 
 @pytest.mark.parametrize(
