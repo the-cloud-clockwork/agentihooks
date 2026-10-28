@@ -155,6 +155,59 @@ def test_clearance_survives_unrelated_line_shift_and_tells_identical_mutants_apa
     assert len(report["failures"]) == 2
 
 
+def _argument_rows(folder, monkeypatch, signature, body, mutants):
+    import json
+
+    from scripts.ci_mutation.report import collect_results
+
+    for name in ("hooks", "scripts", "mutants/hooks"):
+        (folder / name).mkdir(parents=True)
+    (folder / "hooks/sample.py").write_text(f"def value({signature}):\n    first = 1\n    {body}\n")
+    (folder / "setup.cfg").write_text("[mutmut]\nsource_paths=hooks/\n")
+    functions = [("orig", signature, body)] + [(str(n), *mutant) for n, mutant in enumerate(mutants, 1)]
+    (folder / "mutants/hooks/sample.py").write_text(
+        "".join(f"def x_value__mutmut_{n}({args}):\n    first = 1\n    {line}\n\n" for n, args, line in functions)
+    )
+    keys = {f"hooks.sample.x_value__mutmut_{n}": 0 for n in range(1, len(mutants) + 1)}
+    meta = {"exit_code_by_key": keys, "durations_by_key": {}, "estimated_durations_by_key": {}}
+    (folder / "mutants/hooks/sample.py.meta").write_text(json.dumps(meta))
+    monkeypatch.chdir(folder)
+    return {row["name"]: row for row in collect_results(Path("hooks/sample.py"))}
+
+
+def test_clearance_keeps_its_identity_across_an_unrelated_argument_edit(tmp_path, monkeypatch):
+    from scripts.ci_mutation.report import clearance_key, mutant_identity, survivor_text
+
+    base = _argument_rows(tmp_path / "base", monkeypatch, "a", "return a", [("a", "return None")])
+    edited = _argument_rows(
+        tmp_path / "edited", monkeypatch, "a, b=2", "return a", [("a, b=3", "return a"), ("a, b=2", "return None")]
+    )
+    rewritten = _argument_rows(tmp_path / "rewritten", monkeypatch, "a", "return a + 1", [("a", "return None")])
+    survivor = base["hooks.sample.x_value__mutmut_1"]
+    moved = edited["hooks.sample.x_value__mutmut_2"]
+    assert survivor["identity"] == mutant_identity("    return a", "    return None")
+    assert survivor["fingerprint"] != moved["fingerprint"]
+    key = clearance_key("hooks/sample.py", survivor)
+    assert key == f"hooks/sample.py:hooks.sample.x_value:{survivor['identity']}"
+    assert clearance_key("hooks/sample.py", moved) == key
+    assert clearance_key("hooks/sample.py", edited["hooks.sample.x_value__mutmut_1"]) != key
+    assert clearance_key("hooks/sample.py", rewritten["hooks.sample.x_value__mutmut_1"]) != key
+    cleared = {key: {"reader": "Standards", "reason": "Returning None is never observed"}}
+    report = evaluate("hooks/sample.py", list(edited.values()), {1, 3}, cleared)
+    assert [row["name"] for row in report["cleared"]] == ["hooks.sample.x_value__mutmut_2"]
+    assert [row["name"] for row in report["failures"]] == ["hooks.sample.x_value__mutmut_1"]
+    assert key not in survivor_text(report)
+    assert f"hooks/sample.py:hooks.sample.x_value:{edited['hooks.sample.x_value__mutmut_1']['identity']}" in (
+        survivor_text(report)
+    )
+    report = evaluate("hooks/sample.py", list(rewritten.values()), {3}, cleared)
+    assert report["cleared"] == []
+    legacy = f"hooks/sample.py:hooks.sample.x_value__mutmut_1:{survivor['fingerprint']}"
+    legacy_cleared = {legacy: cleared[key]}
+    assert len(evaluate("hooks/sample.py", list(base.values()), {3}, legacy_cleared)["cleared"]) == 1
+    assert evaluate("hooks/sample.py", list(edited.values()), {3}, legacy_cleared)["cleared"] == []
+
+
 def test_survivor_text_prints_each_failure_with_its_diff_and_clearance_file():
     from scripts.ci_mutation.report import survivor_text
 

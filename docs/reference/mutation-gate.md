@@ -1782,11 +1782,11 @@ cat mutation-report/reuse.json
 
 Mutmut 3 mutates functions and methods. Files without mutable functions are reported explicitly with a zero count. A surviving or uncovered mutant fails when its original source lines intersect added or changed hunk lines. Incomplete, timed out and unexpected mutant outcomes fail regardless of their line. Generated trampolines and function relative diffs are mapped back to the original source, including decorators and methods.
 
-A Standards reader clears an exact survivor with one JSON file under `mutation-clearances/`. Each file holds one key combining the source file, mutant name and fingerprint from the report. The filename is the SHA256 of that complete key followed by `.json`, so different rulings can be added by concurrent pull requests without editing a shared object. Every entry requires the reader and its reason. The runner also reads the legacy root `mutation-cleared.txt`; identical duplicates are accepted and conflicting rulings fail. The fingerprint binds the original function and mutant, so a changed function invalidates an old clearance.
+A Standards reader clears an exact survivor with one JSON file under `mutation-clearances/`. Each file holds one key combining the source file, the mutated function name without its mutmut number and the mutant identity from the report. The filename is the SHA256 of that complete key followed by `.json`, so different rulings can be added by concurrent pull requests without editing a shared object. Every entry requires the reader and its reason. The runner also reads the legacy root `mutation-cleared.txt`; identical duplicates are accepted and conflicting rulings fail. The identity hashes only the lines the mutant changes, so a clearance survives unrelated edits elsewhere in its function, such as a new argument that renumbers its mutants, and a change to the mutant's own lines invalidates it. Older clearances keyed by mutant name and whole function fingerprint still match the exact mutant they were written for.
 
 ```json
 {
-  "hooks/example.py:hooks.example.x_example__mutmut_1:FINGERPRINT": {
+  "hooks/example.py:hooks.example.x_example:IDENTITY": {
     "reader": "Standards",
     "reason": "The changed argument does not change the observed output."
   }

@@ -48,6 +48,17 @@ def mutation_diff(path: str, original: str, mutated: str, start: int) -> str:
     return "\n".join(lines)
 
 
+def mutant_identity(original: str, mutated: str) -> str:
+    before = original.splitlines()
+    after = mutated.splitlines()
+    hunks = [
+        "\n".join([f"-{line}" for line in before[first:last]] + [f"+{line}" for line in after[low:high]])
+        for tag, first, last, low, high in SequenceMatcher(a=before, b=after, autojunk=False).get_opcodes()
+        if tag != "equal"
+    ]
+    return hashlib.sha256("\0".join(hunks).encode()).hexdigest()
+
+
 def function_start(source: str, original: str, class_name: str | None) -> int:
     nodes = ast.parse(source).body
     if class_name is not None:
@@ -84,13 +95,21 @@ def collect_results(path: Path, shard: tuple[int, int] = (0, 1)) -> list[dict]:
             start = function_start(source, original, class_name)
             row["lines"] = sorted(mutation_lines(original, mutated, start))
             row["fingerprint"] = hashlib.sha256((original + "\0" + mutated).encode()).hexdigest()
+            row["identity"] = mutant_identity(original, mutated)
             row["diff"] = mutation_diff(path.as_posix(), original, mutated, start)
         rows.append(row)
     return rows
 
 
+def clearance_keys(path: str, row: dict) -> list[str]:
+    exact = f"{path}:{row['name']}:{row['fingerprint']}"
+    if not row.get("identity"):
+        return [exact]
+    return [f"{path}:{row['name'].rpartition('__mutmut_')[0]}:{row['identity']}", exact]
+
+
 def clearance_key(path: str, row: dict) -> str:
-    return f"{path}:{row['name']}:{row['fingerprint']}"
+    return clearance_keys(path, row)[0]
 
 
 def evaluate(path: str, rows: list[dict], changed: set[int], cleared: dict) -> dict:
@@ -111,8 +130,8 @@ def evaluate(path: str, rows: list[dict], changed: set[int], cleared: dict) -> d
         if not changed.intersection(row["lines"]):
             report["untouched_survivors"].append(row)
             continue
-        key = clearance_key(path, row)
-        if key in cleared:
+        key = next((key for key in clearance_keys(path, row) if key in cleared), None)
+        if key is not None:
             entry = cleared[key]
             if not entry.get("reader") or not entry.get("reason"):
                 raise ValueError("Mutation clearance requires reader and reason")
