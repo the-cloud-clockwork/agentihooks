@@ -53,6 +53,11 @@ ATTEMPTS_FILE = "codex-probe-attempts.json"
 READING_MAX_AGE_ENV = "AGENTIHOOKS_CODEX_READING_MAX_AGE_H"
 READING_MAX_AGE_H = 6.0
 HOUR_S = 3600
+TOKEN_MIN_LIFE_ENV = "AGENTIHOOKS_CODEX_TOKEN_MIN_LIFE_H"
+TOKEN_MIN_LIFE_H = 6.0
+EXPIRING = (
+    "{env} expires in under {hours:g} h; the refresh authority renews it, else run agentihooks codex login {name}"
+)
 # A running app-server daemon answers account/read with its own auth, so a token session must not attach to it.
 NO_DAEMON = "--no-daemon"
 ACCOUNT_ID_ENV = envs.CHATGPT_ACCOUNT_ID_ENV
@@ -147,7 +152,22 @@ def refusal(account: CodexAccount, environ: Mapping[str, str]) -> str:
         credential_kind(account, environ)
     except RoutingError as exc:
         return str(exc)
+    if expiring(account, environ, time.time()):
+        return EXPIRING.format(env=account.env_name, hours=_min_life(environ) / HOUR_S, name=account.name)
     return ""
+
+
+def _min_life(environ: Mapping[str, str]) -> float:
+    try:
+        return float(environ.get(TOKEN_MIN_LIFE_ENV) or TOKEN_MIN_LIFE_H) * HOUR_S
+    except ValueError:
+        return TOKEN_MIN_LIFE_H * HOUR_S
+
+
+def expiring(account: CodexAccount, environ: Mapping[str, str], now: float) -> bool:
+    """A routed session holds only the bearer token and cannot refresh it, so it dies at the token's exp."""
+    exp = _claims(environ.get(account.env_name) or "").get("exp") if account.is_token else None
+    return isinstance(exp, int | float) and exp - now < _min_life(environ)
 
 
 def bearer_overrides() -> list[str]:
@@ -334,7 +354,7 @@ def duplicates(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str
             groups.setdefault(found, []).append(account)
     repeated = {}
     for group in groups.values():
-        kept = min(group, key=lambda account: _routed_rank(account, environ))
+        kept = min(group, key=lambda account: (bool(refusal(account, environ)), _routed_rank(account, environ)))
         repeated.update({account.name: kept.name for account in group if account is not kept})
     return repeated
 
