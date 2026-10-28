@@ -212,7 +212,7 @@ def test_swarm_status_prints_the_capacity_decision_and_the_drain_finding(env, ca
     run("sw", "status")
     out = capsys.readouterr().out.splitlines()
     line = "quota account claude alpha  closed  routing 7.5% left, read 1m ago  sessions 1"
-    assert out[out.index(line) - 1] == (
+    assert out[out.index(line) - 2] == (
         "quota capacity eng 2 of 4, ci 1 of 1, plan 0 of 1, changed 12 minutes ago, because accounts are closed; "
         "Claude has 1 free seats and Codex has 0 free seats"
     )

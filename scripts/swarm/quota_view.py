@@ -52,9 +52,10 @@ def scaling_line(decision: dict, counts: dict[str, int], scaling: str) -> str:
     scaled = decision.get("autoscale") if scaling == AUTO_SCALING else None
     ceilings = scaled["ceilings"] if scaled else decision["configured"]
     lanes = ", ".join(f"{lane} {counts[lane]} of {ceilings[lane]}" for lane in capacity.LANES)
-    seats = decision["placeable"]
-    line = f"scaling {scaling}, live of ceiling {lanes}, "
-    line += f"free quota seats claude {seats['claude']} and codex {seats['codex']}"
+    seats = decision.get("placeable")
+    line = f"scaling {scaling}, live of ceiling {lanes}"
+    if seats:
+        line += f", free quota seats claude {seats['claude']} and codex {seats['codex']}"
     return line + (f", because {scaled['reason'].rstrip('.')}" if scaled else "")
 
 

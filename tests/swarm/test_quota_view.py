@@ -69,6 +69,13 @@ def test_the_mode_comes_from_the_config_not_the_stored_decision():
     )
 
 
+def test_a_decision_without_free_seat_counts_names_no_seats():
+    decision = {key: value for key, value in DECISION.items() if key != "placeable"}
+    assert quota_view.scaling_line(decision, LIVE, "manual") == (
+        "scaling manual, live of ceiling eng 2 of 4, ci 1 of 1, plan 0 of 1"
+    )
+
+
 def test_live_counts_every_unfinished_agent_by_lane():
     class Agent:
         def __init__(self, lane, state="working"):
