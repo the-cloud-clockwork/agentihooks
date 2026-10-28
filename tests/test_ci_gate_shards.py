@@ -95,9 +95,10 @@ def test_a_transient_github_failure_is_retried_with_backoff(binary):
     assert [call.args for call in sleep.call_args_list] == [(5,), (10,)]
 
 
-def test_an_unparseable_github_page_is_retried_until_a_valid_page():
+@pytest.mark.parametrize("body", [b'[{"jobs": [}', b"\xff"], ids=["truncated", "not utf-8"])
+def test_an_unparseable_github_page_is_retried_until_a_valid_page(body):
     results = [
-        subprocess.CompletedProcess([], 0, stdout=b'[{"jobs": [}'),
+        subprocess.CompletedProcess([], 0, stdout=body),
         subprocess.CompletedProcess([], 0, stdout=b'[{"jobs": []}]'),
     ]
     with (
