@@ -2,11 +2,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import pytest
-from scripts.events.redis_state import RedisStateStore
 
 from scripts.events import memory, state
 from scripts.events.bus import StateConflict, StateStore
 from scripts.events.config import BusConfig
+from scripts.events.redis_state import RedisStateStore
 
 from . import nats_server
 
