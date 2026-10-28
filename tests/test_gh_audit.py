@@ -115,8 +115,6 @@ def test_process_caller_prefers_the_main_module(monkeypatch):
 
 
 def test_a_real_subprocess_is_charged_by_the_installed_hook(charged, tmp_path, monkeypatch):
-    import sys
-
     fake = tmp_path / "gh"
     fake.write_text("#!/bin/sh\necho '{}'\n")
     fake.chmod(0o755)
