@@ -3260,14 +3260,14 @@ counted. Each claim now journals its names (see [The local agent cap hold](#the-
 Doctor's `slot census` detector checks them on every Doctor pass.
 
 It reads the tick journal's `local slot claim` lines of the last hour whose prefix is the watched swarm, and the
-agents of every swarm on the machine: current agent records and the ended ones in each swarm's history. For each claim
+agents of every swarm in the store: current agent records and the ended ones in each swarm's history. For each claim
 it lists the agents live at the claim's instant that the claim did not name, by bare name or `<slug>/<name>`. An agent
 is live when all of these hold:
 
 | Condition | Field |
 |---|---|
-| Runs on the local backend | `runtime_backend` is `local` |
-| On the claiming machine | `hive` is empty or the claim's machine |
+| Runs on the local backend | `runtime_backend` is `local` or absent |
+| On the claiming machine | `hive` is empty, absent or the claim's machine |
 | A worker | `lane` is not `master` |
 | Not done | `state` is not `finished` or `ended` |
 | Holds a pane | `pane_id` is set |
@@ -3303,7 +3303,8 @@ agentihooks doctor rig-grade-swarm measure local-slot-census
 ```
 
 It prints `local-slot-census count <findings> unknown <failed detectors> max <most agents left out>`, and refuses
-with `no finding of the class local-slot-census has been seen` until the Doctor has seen one.
+with `no finding of the class local-slot-census has been seen` until the Doctor has seen one. With no current finding
+and a failed detector it prints `local-slot-census is unknown because <failures>` instead of a count of 0.
 
 [Pull request 7995](https://github.com/the-cloud-clockwork/agentihooks/pull/7995) delivered the journal line and
 the detector.
