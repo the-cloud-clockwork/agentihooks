@@ -480,8 +480,7 @@ def test_owner_liveness_uses_the_hive_join_heartbeat_window(age):
     from scripts.hive import join_report
 
     swarm = Swarm(RUNNING, live=False)
-    owner = replace(swarm.store.agents(SLUG)[0], hive="w7")
-    swarm.store.put_agent(SLUG, owner)
+    owner = swarm.store.start_execution(SLUG, replace(swarm.store.agents(SLUG)[0], hive="w7"))
     for at in (START, START + 10 * MINUTE):
         join_report.start(swarm.store.redis, SLUG, owner, str(at), {}, {}, at - age)
         swarm.tick(at)
