@@ -1,6 +1,9 @@
 import os
 
-from scripts import gh_audit, gh_config
+from scripts import gh_config
 
 gh_config.pin(os.environ)
-gh_audit.install()
+if os.environ.get("GITHUB_ACTIONS") != "true":
+    from scripts import gh_audit
+
+    gh_audit.install()
