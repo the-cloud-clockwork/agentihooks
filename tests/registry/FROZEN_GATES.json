@@ -10,7 +10,8 @@
     "82e213e63fae4cab1f19d44a3356b0a357148d56"
   ],
   ".github/workflows/gate-protected.yml": [
-    "d794eee5a317a353e437e19ff2c64498a86d6c5f"
+    "d794eee5a317a353e437e19ff2c64498a86d6c5f",
+    "9a199d0372c53fd79da2628d6ef8f21fd61b65fd"
   ],
   ".github/rulesets/dev-history.json": [
     "028765d3118bc97ee1ea82a511cdee04caa074b0"
