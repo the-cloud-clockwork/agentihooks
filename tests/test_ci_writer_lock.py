@@ -72,3 +72,26 @@ def test_writer_lock_install_uses_trusted_version_without_scanning_git():
     assert install.get("env", {}).get("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS") == (
         "0.dev${{ github.run_number }}"
     )
+
+
+def test_writer_lock_version_inference_bypasses_a_stalled_git_status(monkeypatch):
+    import subprocess
+
+    from setuptools_scm import get_version
+    from setuptools_scm.git import GitWorkdir
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/writer-lock.yml").read_text())
+    steps = workflow["jobs"]["scenario"]["steps"]
+    [install] = [step for step in steps if step.get("name") == "Install dependencies"]
+    monkeypatch.delenv("SETUPTOOLS_SCM_PRETEND_VERSION", raising=False)
+    monkeypatch.delenv("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS", raising=False)
+
+    def stalled_status(self):
+        raise subprocess.TimeoutExpired(["git", "status", "--porcelain", "--untracked-files=no"], 40)
+
+    monkeypatch.setattr(GitWorkdir, "is_dirty", stalled_status)
+    with pytest.raises(subprocess.TimeoutExpired, match="40 seconds"):
+        get_version(root=str(ROOT), dist_name="agentihooks")
+    for key, value in install.get("env", {}).items():
+        monkeypatch.setenv(key, value.replace("${{ github.run_number }}", "123"))
+    assert get_version(root=str(ROOT), dist_name="agentihooks") == "0.dev123"
