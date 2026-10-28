@@ -371,6 +371,24 @@ def test_the_mirror_writes_utf8_under_an_ascii_locale(homes):
     assert progress.read_bytes() == "café\n".encode()
 
 
+def test_the_mirror_names_utf8_when_it_writes(homes, monkeypatch):
+    import codecs
+
+    used = []
+    real = Path.write_text
+
+    def spy(self, text, *args, **kwargs):
+        used.append(kwargs.get("encoding"))
+        return real(self, text, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", spy)
+    copies = {"task": {"progress.md": "step —\n"}}
+    with at(homes.controller), patch.object(ledger_workspace, "_synced", return_value=copies):
+        ledger_workspace.mirror(None, "fixture", {})
+    assert len(used) == 1
+    assert used[0] and codecs.lookup(used[0]).name == "utf-8"
+
+
 def test_the_latest_execution_of_a_task_wins(setup):
     from dataclasses import replace
 
