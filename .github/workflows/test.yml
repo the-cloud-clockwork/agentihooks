@@ -24,7 +24,7 @@ on:
         default: origin/dev
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || github.event_name == 'push' && 'promotion-dev' || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}
   queue: ${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -2764,7 +2764,6 @@ jobs:
         if: ${{ !cancelled() && steps.self-plant.outputs.changed == 'true' }}
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
-          PYTHONNOUSERSITE: '1'
         run: |
           grader="$RUNNER_TEMP/grader/tests/mutation_self_plant/plant.py"
           if [[ ! -f "$grader" ]]; then
@@ -3648,7 +3647,6 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       MUTATION_STATS_CACHE: ${{ github.workspace }}/.mutation-stats-cache
-      PYTHONNOUSERSITE: "1"
     steps:
       - uses: actions/checkout@v4
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -3830,7 +3828,6 @@ jobs:
         shard: ${{ fromJSON(needs.mutation-plan.outputs.shards) }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
-      PYTHONNOUSERSITE: "1"
     steps:
       - uses: actions/checkout@v4
         if: needs.mutation-plan.outputs.forwarded != 'true'

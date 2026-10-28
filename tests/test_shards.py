@@ -1,3 +1,4 @@
+import importlib
 import json
 import os
 import re
@@ -498,6 +499,14 @@ def test_workers_and_runs_without_workers_warm_nothing(monkeypatch):
 def test_platforms_without_fork_warm_nothing(monkeypatch):
     monkeypatch.delattr(conftest.os, "fork")
     assert _configured(monkeypatch, 4)[0] == []
+
+
+def test_every_pytest_process_imports_the_redis_clients_once_at_start(monkeypatch):
+    imported = []
+    monkeypatch.setattr(importlib, "import_module", imported.append)
+    _configured(monkeypatch, 4, workerinput={})
+    _configured(monkeypatch, None)
+    assert imported == ["redis.asyncio", "fakeredis"] * 2
 
 
 class _Manager:

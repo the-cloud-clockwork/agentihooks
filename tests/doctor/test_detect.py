@@ -176,6 +176,24 @@ def test_the_startup_reader_judges_hive_agents_from_their_heartbeat_after_the_ac
     assert sorted(f.subject for f in found) == ["sw-eng-2", "sw-eng-4"]
 
 
+def test_the_headroom_reader_reads_each_live_hive_at_the_pass_time():
+    import json
+
+    import fakeredis
+
+    from scripts.hive import headroom, registry
+    from scripts.hive.auth import INDEX
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    now = 1_000_000
+    for hive in ("hh4", "hh5"):
+        redis.sadd(INDEX, hive)
+        redis.hset(registry.key(hive), "heartbeat_at", now - 1_000)
+    redis.set(headroom.key("hh5"), json.dumps({"measured_at": now - 1_000}))
+    found = detect.readers(SimpleNamespace(redis=redis), None, "sw", now, environ={})["headroom"]()
+    assert [f.id for f in found] == ["missing-headroom/hh4"]
+
+
 def test_ci_reads_only_the_pull_requests_of_tasks_waiting_in_review():
     tasks = [
         {"state": "pr", "pr_url": "https://github.com/o/r/pull/9"},
@@ -192,8 +210,8 @@ def test_ci_reports_a_red_head_only_past_the_tick_red_window(monkeypatch):
     record["checks"][0]["conclusion"] = "failure"
     monkeypatch.setattr(
         detect.ci_read,
-        "pull_request",
-        lambda repo, number, cache: {("o/r", 487, store.redis): record}[(repo, number, cache)],
+        "pull_requests",
+        lambda pulls, cache: [record] if pulls == [("o/r", 487)] and cache is store.redis else [],
     )
     ledger = SimpleNamespace(tasks=lambda slug: [{"state": "pr", "pr_url": "https://github.com/o/r/pull/487"}])
     window = ledger_events.RED_QUIET_MS
@@ -207,21 +225,18 @@ def test_ci_reports_a_red_head_only_past_the_tick_red_window(monkeypatch):
     assert [f.id for f in late] == ["red-checks/487"]
 
 
-def test_ci_reads_the_pull_requests_of_one_pass_side_by_side(monkeypatch):
-    import threading
-
+def test_ci_reads_the_open_pull_requests_of_one_pass_together(monkeypatch):
     import fakeredis
 
-    met = threading.Barrier(2, timeout=5)
+    store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
 
-    def pull_request(repo, number, cache):
-        met.wait()
-        return {"number": number}
+    def pull_requests(pulls, cache):
+        assert cache is store.redis
+        return [{"number": number} for _, number in pulls]
 
-    monkeypatch.setattr(detect.ci_read, "pull_request", pull_request)
+    monkeypatch.setattr(detect.ci_read, "pull_requests", pull_requests)
     monkeypatch.setattr(detect.ci, "findings", lambda record, now_ms: [record["number"]])
     tasks = [{"state": "pr", "pr_url": f"https://github.com/o/r/pull/{n}"} for n in (4, 5)]
-    store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
     assert detect.readers(store, SimpleNamespace(tasks=lambda slug: tasks), "s", 1, environ={})["ci"]() == [4, 5]
 
 
