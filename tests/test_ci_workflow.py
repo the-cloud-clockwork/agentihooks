@@ -248,7 +248,7 @@ def test_nats_server_reuses_only_the_exact_runner_version(tmp_path, version):
     (commands / "uname").symlink_to("/usr/bin/uname")
     if version != "missing":
         binary = commands / "nats-server"
-        expected = step["env"]["NATS_SERVER_RELEASE"] if version == "matching" else "v0.0.0"
+        expected = step["env"]["NATS_SERVER_RELEASE"] if version in {"matching", "broken"} else "v0.0.0"
         binary.write_text(f"#!/bin/bash\necho 'nats-server: {expected}'\nexit {1 if version == 'broken' else 0}\n")
         binary.chmod(0o755)
     output = tmp_path / "output"

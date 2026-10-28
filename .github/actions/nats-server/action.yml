@@ -12,7 +12,7 @@ runs:
         NATS_SERVER_SHA256_ARM64: e2fbab4cad7d3c76e3052eb959570393c9d73ba756b70bf8e9eea61e9ae6d49c
       run: |
         set -euo pipefail
-        if [[ "$(nats-server --version 2>/dev/null)" == "nats-server: $NATS_SERVER_RELEASE" ]]; then
+        if version=$(nats-server --version 2>/dev/null) && [[ "$version" == "nats-server: $NATS_SERVER_RELEASE" ]]; then
           echo "installed=true" >> "$GITHUB_OUTPUT"
           echo "NATS_SERVER_REQUIRED=1" >> "$GITHUB_ENV"
           exit 0
