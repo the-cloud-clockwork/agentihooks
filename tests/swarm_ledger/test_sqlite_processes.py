@@ -106,3 +106,14 @@ def test_a_reader_closes_when_its_thread_ends_while_the_store_lives(tmp_path):
         read_on_a_thread(repo)
         assert open_files(path.parent) == []
         assert repo.exists("processes")
+
+
+def test_a_reader_for_a_moved_ledger_folder_closes_the_earlier_one(tmp_path, monkeypatch):
+    repo = SQLiteLedgerRepository()
+    with uncollected():
+        monkeypatch.setattr(repo.domain, "LEDGER_DIR", tmp_path / "first")
+        repo.create("processes", CONTENT)
+        monkeypatch.setattr(repo.domain, "LEDGER_DIR", tmp_path / "second")
+        repo.create("processes", CONTENT)
+        assert open_files(tmp_path / "first") == []
+        assert open_files(tmp_path / "second")
