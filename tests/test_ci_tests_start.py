@@ -164,9 +164,10 @@ def test_default_registration_wait_is_bounded(monkeypatch):
 
 
 @pytest.mark.parametrize("arguments", [[], ["--repository", "owner/repo"], ["--head", "head"]])
-def test_command_requires_repository_and_head(arguments):
+def test_command_requires_repository_and_head(monkeypatch, arguments):
     from scripts import ci_tests_start
 
+    monkeypatch.setattr(ci_tests_start, "verify", lambda *args, **kwargs: pytest.fail("accepted missing arguments"))
     with pytest.raises(SystemExit) as stopped:
         ci_tests_start.main(arguments)
     assert stopped.value.code == 2
@@ -178,6 +179,7 @@ def test_can_verify_the_push_event_used_by_the_ci_plant(monkeypatch, capsys):
     endpoints = []
 
     def api(endpoint):
+        assert endpoint == "repos/owner/repo/actions/workflows/test.yml/runs?head_sha=head&event=push&per_page=1"
         endpoints.append(endpoint)
         return {"workflow_runs": [{"id": 11, "head_sha": "head", "status": "completed", "conclusion": "failure"}]}
 
