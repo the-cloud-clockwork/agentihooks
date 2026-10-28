@@ -176,6 +176,10 @@ def _pair_of(store, slug):
     return slug, doctor
 
 
+def _no_tick(store, slug):
+    return []
+
+
 def cmd_start(store, args):
     bundle = linked_bundle()
     if bundle is None:
@@ -208,10 +212,10 @@ def cmd_start(store, args):
     _pair(store, slug, doctor)
     loop.reset(store, doctor)
     if ledger.closed(doctor):
-        swarm.cmd_reopen(store, Namespace(slug=doctor, name=_name(), tick=False))
+        swarm.cmd_reopen(store, Namespace(slug=doctor, name=_name(), tick=_no_tick))
         print(ledger_link.page_line(doctor))
     else:
-        swarm.cmd_start(store, Namespace(slug=doctor, tick=False))
+        swarm.cmd_start(store, Namespace(slug=doctor, tick=_no_tick))
     scheduled_tick.fire({}, "", store.redis)
     _relay(slug, doctor, relay)
 

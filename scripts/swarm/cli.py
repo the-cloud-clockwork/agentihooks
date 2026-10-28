@@ -766,7 +766,7 @@ def cmd_create(store, args):
     print(ledger_link.page_line(args.slug))
 
 
-def _state(store, args, state, tick=True):
+def _state(store, args, state):
     if state == "running":
         store.redis.delete(store.key(args.slug, "master-retired-tasks"))
     store.update(args.slug, state=state)
@@ -776,7 +776,7 @@ def _state(store, args, state, tick=True):
             "run agentihooks swarm tick yourself",
             file=sys.stderr,
         )
-    for action in run_tick(store, args.slug) if tick else []:
+    for action in getattr(args, "tick", run_tick)(store, args.slug):
         print(action)
     print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state}))
 
@@ -786,7 +786,7 @@ def cmd_start(store, args):
     print(shape["summary"], flush=True)
     if shape["warning"]:
         print(f"warning: {shape['warning']}", file=sys.stderr, flush=True)
-    _state(store, args, "running", getattr(args, "tick", True))
+    _state(store, args, "running")
     print(ledger_link.page_line(args.slug))
 
 
@@ -896,7 +896,7 @@ def cmd_reopen(store, args):
         store.drop_agent(args.slug, agent.name)
     by = _caller(args) or "operator"
     LedgerClient().reopen(args.slug, by)
-    _state(store, args, "running", getattr(args, "tick", True))
+    _state(store, args, "running")
 
 
 def cmd_take_master(store, args):
