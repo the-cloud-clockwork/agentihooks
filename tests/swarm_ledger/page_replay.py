@@ -175,7 +175,7 @@ def settle(page, ms=0):
     raise TimeoutError("the page kept changing on each clock tick")
 
 
-def load_contract(path: Path) -> tuple[str, ...]:
+def load_contract(path: Path) -> dict[str, int]:
     contract = json.loads(path.read_text())
     removed = contract.get("removed") if isinstance(contract, dict) else None
     reviewers = contract.get("reviewed_by") if isinstance(contract, dict) else None
@@ -184,8 +184,10 @@ def load_contract(path: Path) -> tuple[str, ...]:
         and removed
         and all(
             isinstance(entry, dict)
-            and set(entry) == {"selector", "order"}
-            and all(isinstance(entry[key], str) and entry[key].strip() for key in entry)
+            and set(entry) == {"selector", "order", "matches"}
+            and all(isinstance(entry[key], str) and entry[key].strip() for key in ("selector", "order"))
+            and type(entry["matches"]) is int
+            and entry["matches"] > 0
             for entry in removed
         )
     )
@@ -200,10 +202,10 @@ def load_contract(path: Path) -> tuple[str, ...]:
     ):
         raise SystemExit(
             f"{path}: an expected page change contract holds reviewed_by, a list of reviewers, and removed, "
-            "a list of entries with a selector and the operator order that removed it"
+            "a list of entries with a selector, the operator order that removed it and how many elements it matches"
         )
-    selectors = tuple(entry["selector"] for entry in removed)
-    if len(set(selectors)) != len(selectors):
+    selectors = {entry["selector"]: entry["matches"] for entry in removed}
+    if len(selectors) != len(removed):
         raise SystemExit(f"{path}: each removed selector is named once")
     return selectors
 
@@ -220,9 +222,18 @@ def removal(selectors) -> str:
 }})();"""
 
 
-def seen(page, selectors) -> set:
-    counts = page.evaluate("(all) => all.map((s) => document.querySelectorAll(s).length)", list(selectors))
-    return {selector for selector, count in zip(selectors, counts, strict=True) if count}
+def seen(page, selectors) -> dict[str, int]:
+    selectors = list(selectors)
+    counts = page.evaluate("(all) => all.map((s) => document.querySelectorAll(s).length)", selectors)
+    return dict(zip(selectors, counts, strict=True))
+
+
+def mismatched(contract: dict[str, int], shown: dict[str, int]) -> list[str]:
+    return [
+        f"{selector} names {matches} elements but the base page shows at most {shown.get(selector, 0)}"
+        for selector, matches in contract.items()
+        if shown.get(selector, 0) != matches
+    ]
 
 
 def steps():
@@ -338,11 +349,12 @@ def serve(root: Path, folder: Path, stack: ExitStack):
     return f"http://{host}/{SLUG}"
 
 
-def record(root: Path, folder: Path, removed: tuple[str, ...] = ()) -> list:
+def record(root: Path, folder: Path, removed: dict[str, int] | None = None) -> list:
     from playwright.sync_api import sync_playwright
 
+    removed = removed or {}
     results = []
-    shown = set()
+    shown = {}
     with ExitStack() as stack:
         url = serve(root, folder, stack)
         pw = stack.enter_context(sync_playwright())
@@ -368,7 +380,8 @@ def record(root: Path, folder: Path, removed: tuple[str, ...] = ()) -> list:
         for name, act in steps():
             act(page)
             settle(page)
-            shown |= seen(page, removed)
+            for selector, count in seen(page, removed).items():
+                shown[selector] = max(count, shown.get(selector, 0))
             requests, dialogs = api.take()
             results.append(
                 {
@@ -380,9 +393,9 @@ def record(root: Path, folder: Path, removed: tuple[str, ...] = ()) -> list:
                 }
             )
             errors.clear()
-    unseen = [selector for selector in removed if selector not in shown]
-    if unseen:
-        raise SystemExit(f"the expected page change names elements the base page never shows: {', '.join(unseen)}")
+    problems = mismatched(removed, shown)
+    if problems:
+        raise SystemExit("the expected page change does not match the base page: " + "; ".join(problems))
     return results
 
 
@@ -393,7 +406,7 @@ def main() -> None:
     parser.add_argument("output", type=Path)
     parser.add_argument("--remove", type=Path)
     args = parser.parse_args()
-    removed = load_contract(args.remove) if args.remove else ()
+    removed = load_contract(args.remove) if args.remove else {}
     results = record(args.root.resolve(), args.folder, removed)
     args.output.write_text(json.dumps(results, indent=1, ensure_ascii=False) + "\n")
 
