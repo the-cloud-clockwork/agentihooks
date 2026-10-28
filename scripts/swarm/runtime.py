@@ -852,7 +852,11 @@ class HerdrRuntime:
             placed,
             model_source=picked.source,
             model_confidence=picked.confidence,
-            profile_decision={**decision.record(), **placed.profile_decision},
+            profile_decision={
+                **decision.record(),
+                **placed.profile_decision,
+                "automated": {"swarm": config.slug, "seat": task.get("seat", "")},
+            },
             choice=agent_choice.choice_kind(reason),
             overlays=list(decision.overlays),
             route_kind=placed_kind,

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, github_app_cli, master_claude_login, session_bands
-from scripts.hive import quota_refresh, registry
+from scripts.hive import bundle_refresh, quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm.commands import hive_id
@@ -254,7 +254,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     fill_operator_env()
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
-    renewed = time.time()
+    renewed = bundled = time.time()
     failures = 0
     while True:
         stop = threading.Event()
@@ -267,6 +267,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                 _keep_helpers(helpers, (redis, waiter, local_id, stop))
                 worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
                 renewed = github_app_cli.renew(renewed, time.time())
+                bundled = bundle_refresh.refresh(bundled, time.time(), os.environ)
                 beat(redis, local_id)
                 elapsed = time.monotonic() - started
                 delay = max(0, BEAT_SECONDS - max(WAKE_SLACK_S, elapsed))

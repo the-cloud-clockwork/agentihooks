@@ -649,7 +649,8 @@ class SwarmPanel(unittest.TestCase):
             "agents": [{"lane": "eng"}, {"lane": "eng", "state": "finished"}, {"lane": "ci"}, {"lane": "master"}],
         }
         self.assertEqual(
-            self.run_js(["liveAgents", "liveCaps"], f"liveCaps({json.dumps(sw)})"), ["eng 1/3", "ci 1/1", "plan 0/1"]
+            self.run_js(["liveAgents", "laneCeilings", "liveCaps"], f"liveCaps({json.dumps(sw)})"),
+            ["eng 1/3", "ci 1/1", "plan 0/1"],
         )
 
     def test_open_stale_claims_name_their_task_claimant_and_last_nudge(self):
