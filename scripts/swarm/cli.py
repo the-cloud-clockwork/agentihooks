@@ -2444,6 +2444,10 @@ def main(argv):
         from scripts.swarm import swarm_init
 
         return swarm_init.check(argv[2:])
+    if argv[:1] == ["brain-place"]:
+        from scripts.swarm import brain_place
+
+        return brain_place.main(argv[1:])
     return dispatch(argv)
 
 
