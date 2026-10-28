@@ -1,6 +1,7 @@
 """Shared test fixtures for agentihooks."""
 
 import errno
+import importlib
 import json
 import os
 import re
@@ -137,6 +138,9 @@ def _shard_files(config) -> frozenset[str]:
 
 
 def pytest_configure(config):
+    # A cold import that a request thread interrupts drops redis.asyncio but keeps its submodules, breaking fakeredis.
+    importlib.import_module("redis.asyncio")
+    importlib.import_module("fakeredis")
     _reused(config)
     config.args.sort(key=lambda arg: (Path(arg.split("::", 1)[0]).parent.parts, arg))
     workers = getattr(config.option, "numprocesses", None)
