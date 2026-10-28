@@ -73,6 +73,7 @@
   "test.yml/mutation-plan": "light",
   "test.yml/mutation-stats": "batch",
   "test.yml/mutation-stats-seed": "light",
+  "test.yml/promotion-ready": "hosted",
   "test.yml/queue-fail-fast": "light",
   "test.yml/refresh-durations": "standard",
   "test.yml/reuse": "light",
