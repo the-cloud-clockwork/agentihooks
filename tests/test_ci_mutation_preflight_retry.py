@@ -229,3 +229,35 @@ def test_a_partial_shard_report_download_is_cleared_before_attempt_two(tmp_path)
     )
     assert done.returncode == 0, done.stderr
     assert not (tmp_path / ".mutation-shards").exists()
+
+
+@pytest.mark.parametrize(
+    "name, inputs",
+    [
+        ("Download planned mutation test selection", {"name": "mutation-selection"}),
+        (
+            "Download the shared mutation stats",
+            {"pattern": "mutation-stats-*", "path": ".mutation-stats", "merge-multiple": True},
+        ),
+        ("Download the measured mutation plan", {"name": "mutation-plan", "path": ".mutation-stats"}),
+    ],
+)
+@pytest.mark.parametrize(
+    "resets, expected",
+    [(0, (False, 0, 1)), (1, (False, 0, 2)), (2, (True, 0, 2))],
+)
+def test_shard_input_downloads_retry_one_reset_and_fail_persistent_resets(name, inputs, resets, expected):
+    steps = _jobs()["mutation-shard"]["steps"]
+    names = [step.get("name") for step in steps]
+    start = names.index(name)
+    retry_name = f"{name}, attempt 2"
+    end = names.index(retry_name) + 1 if retry_name in names else start + 1
+    group = steps[start:end]
+    assert _run(group, budget=resets) == expected, name
+    assert group[0]["with"] == inputs
+    if len(group) > 1:
+        assert group[-1]["with"] == inputs
+        assert group[-1].get("continue-on-error", False) is False
+        assert group[1]["if"] == group[-1]["if"] == f"steps.{group[0]['id']}.outcome == 'failure'"
+        assert "sleep 30" in group[1]["run"]
+        assert "::warning::" in group[1]["run"]
