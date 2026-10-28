@@ -3,6 +3,7 @@
 GraphQL commands are left out: they draw on a separate limit from the core one the sampler measures.
 """
 
+import importlib
 import os
 import re
 import shlex
@@ -56,10 +57,13 @@ def process_caller() -> str:
     return ".".join(["proc", name.removesuffix(".__main__"), *args])
 
 
-def charge(caller: str, path: str) -> None:
-    from scripts.swarm import github_reads
+def reads():
+    """The charged log module, loaded by name so the scripts package import does not pull in the swarm tree."""
+    return importlib.import_module("scripts.swarm.github_reads")
 
-    github_reads.charge(caller, path, time.time())
+
+def charge(caller: str, path: str) -> None:
+    reads().charge(caller, path, time.time())
 
 
 @contextmanager
@@ -85,9 +89,7 @@ def audit(event: str, args: tuple) -> None:
         return
     paths = endpoints(args[1]) if isinstance(args[1], list | tuple) else []
     if paths:
-        from scripts.swarm import github_reads
-
-        caller = github_reads.CALLER.get(None) or process_caller()
+        caller = reads().CALLER.get(None) or process_caller()
         for path in paths:
             charge(caller, path)
 
@@ -95,7 +97,7 @@ def audit(event: str, args: tuple) -> None:
 def commands(text: str) -> list[list[str]]:
     try:
         lexer = shlex.shlex(text.replace("\n", ";"), posix=True, punctuation_chars=True)
-        lexer.whitespace_split = True
+        setattr(lexer, "whitespace_split", True)
         words = list(lexer)
     except ValueError:
         return []
