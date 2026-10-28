@@ -19,9 +19,9 @@ def _env(root: Path) -> dict:
     return (_load_native_layer(path).get("env") or {}) if path else {}
 
 
-def enabled(bundle: Path | None, dirs: list[tuple[str, Path]]) -> bool:
+def enabled(bundle: Path | None, dirs: list[tuple[str, Path]], user: Path | None = None) -> bool:
     value = "true"
-    for root in ([bundle] if bundle is not None else []) + [path for _, path in dirs]:
+    for root in [r for r in (bundle, user) if r is not None] + [path for _, path in dirs]:
         value = str(_env(root).get(ENABLED, value))
     return value.lower() in ("true", "1", "yes")
 
@@ -41,10 +41,10 @@ def choice(dirs: list[tuple[str, Path]]) -> dict[str, bool]:
     return chosen
 
 
-def paths(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
-    if not enabled(bundle, dirs):
+def paths(bundle: Path | None, dirs: list[tuple[str, Path]], user: Path | None = None) -> list[Path]:
+    if not enabled(bundle, dirs, user):
         return []
-    found = config._resolve_manifesto_paths(bundle, profile_chain.role(dirs), choice(dirs))
+    found = config._resolve_manifesto_paths(bundle, profile_chain.role(dirs), choice(dirs), user)
     return [Path(path) for path in found]
 
 
@@ -69,8 +69,10 @@ def main(argv: list[str] | None = None) -> int:
     listing = commands.add_parser("list", help="Print which package roles receive each bundle manifesto")
     listing.add_argument("--bundle", type=Path, help="Bundle to read (default: the linked bundle)")
     args = parser.parse_args(argv)
-    bundle = args.bundle or profile_chain.bundle_path(profile_chain.read_state())
-    found = [Path(path) for path in config._resolve_manifesto_paths(bundle)]
+    state = profile_chain.read_state()
+    bundle = args.bundle or profile_chain.bundle_path(state)
+    user = None if args.bundle else profile_chain.user_bundle_path(state)
+    found = [Path(path) for path in config._resolve_manifesto_paths(bundle, user_root=user)]
     if not found:
         folder = Path(bundle) / "manifestos" if bundle is not None else "the default manifesto folder"
         print(f"No manifestos in {folder}", file=sys.stderr)

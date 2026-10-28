@@ -1,7 +1,8 @@
 """`agentihooks deps check|ensure` — the bundle's dev-environment dependencies, checked and installed before launch.
 
-The manifest is ``<bundle>/deps.json``. Each entry declares how to check itself and,
-unless its kind is ``system``, how to install itself. System dependencies need the
+The manifest is ``<bundle>/deps.json``, read from the root bundle and then the user bundle; an
+entry of the user bundle replaces the root entry with the same id. Each entry declares how to check
+itself and, unless its kind is ``system``, how to install itself. System dependencies need the
 operator (sudo, a package manager), so they are only reported.
 """
 
@@ -73,11 +74,28 @@ def manifest_path() -> Path | None:
     return path if path and path.is_file() else None
 
 
-def fleet_plugins(bundle: Path | None) -> list[str]:
-    path = bundle / "deps.json" if bundle else None
-    if path is None or not path.is_file():
-        return []
-    return [dep.id for dep in parse(json.loads(path.read_text())) if dep.kind == "claude-plugin" and dep.present]
+def user_manifest_path() -> Path | None:
+    from scripts.install import _get_user_bundle_path
+
+    user = _get_user_bundle_path()
+    path = user / "deps.json" if user else None
+    return path if path and path.is_file() else None
+
+
+def manifest_paths() -> list[Path]:
+    return [path for path in (manifest_path(), user_manifest_path()) if path]
+
+
+def declared(paths: list[Path] | None = None) -> list[Dep]:
+    merged: dict[str, Dep] = {}
+    for path in manifest_paths() if paths is None else paths:
+        merged.update({dep.id: dep for dep in parse(json.loads(path.read_text()))})
+    return list(merged.values())
+
+
+def fleet_plugins(bundle: Path | None, user: Path | None = None) -> list[str]:
+    paths = [root / "deps.json" for root in (bundle, user) if root is not None and (root / "deps.json").is_file()]
+    return [dep.id for dep in declared(paths) if dep.kind == "claude-plugin" and dep.present]
 
 
 def _stamp() -> Path:
@@ -88,16 +106,17 @@ def installs_log() -> Path:
     return mcp_daemon.state_dir() / "deps-installs.jsonl"
 
 
-def _sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _sha(*paths: Path) -> str:
+    digests = [hashlib.sha256(path.read_bytes()).hexdigest() for path in paths]
+    return digests[0] if len(digests) == 1 else hashlib.sha256("".join(digests).encode()).hexdigest()
 
 
-def stamp_fresh(path: Path) -> bool:
+def stamp_fresh(*paths: Path) -> bool:
     try:
         stamp = json.loads(_stamp().read_text())
     except (OSError, ValueError):
         return False
-    return stamp.get("manifest_sha") == _sha(path) and time.time() - stamp.get("ok_at", 0) < STAMP_TTL_SECONDS
+    return stamp.get("manifest_sha") == _sha(*paths) and time.time() - stamp.get("ok_at", 0) < STAMP_TTL_SECONDS
 
 
 def _run(argv: tuple[str, ...], timeout: float) -> bool:
@@ -163,15 +182,15 @@ def ensure(*, quiet: bool = False) -> int:
 
     repair()
     refresh_codex_wrapper("deps")
-    path = manifest_path()
-    if path is None or stamp_fresh(path):
+    paths = manifest_paths()
+    if not paths or stamp_fresh(*paths):
         return 0
     with _lock():
-        if stamp_fresh(path):
+        if stamp_fresh(*paths):
             return 0
         install_declared(quiet=quiet)
         missing_system = []
-        for dep in parse(json.loads(path.read_text())):
+        for dep in declared(paths):
             if satisfied(dep):
                 continue
             if dep.kind == "system":
@@ -187,7 +206,7 @@ def ensure(*, quiet: bool = False) -> int:
             print(f"[agentihooks] deps: {dep.id} is missing and needs the operator: {dep.hint}", file=sys.stderr)
         if missing_system:
             return EXIT_MISSING_SYSTEM
-        _stamp().write_text(json.dumps({"manifest_sha": _sha(path), "ok_at": time.time()}))
+        _stamp().write_text(json.dumps({"manifest_sha": _sha(*paths), "ok_at": time.time()}))
         return 0
 
 
@@ -207,9 +226,7 @@ def unsatisfied() -> list[Dep]:
         )
         for spec in tool_deps.missing_here()
     )
-    path = manifest_path()
-    if path is not None:
-        missing.extend(dep for dep in parse(json.loads(path.read_text())) if not satisfied(dep))
+    missing.extend(dep for dep in declared() if not satisfied(dep))
     return missing
 
 

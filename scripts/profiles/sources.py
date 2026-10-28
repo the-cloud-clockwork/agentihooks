@@ -58,7 +58,7 @@ def doctrine_files(bundle: Path | None, dirs: list[tuple[str, Path]], user: Path
             shared = root / ".claude" / "CLAUDE.md"
             files.append(shared if shared.exists() else root / "CLAUDE.md")
     files += [directory / "CLAUDE.md" for _, directory in dirs]
-    files += manifestos.paths(bundle, dirs)
+    files += manifestos.paths(bundle, dirs, user)
     return [file for file in files if file.is_file() and file.read_text().strip()]
 
 

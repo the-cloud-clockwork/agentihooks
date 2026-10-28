@@ -109,10 +109,10 @@ def settings_document(rendered: dict) -> dict:
     return rendered
 
 
-def enabled_plugins(operator: dict, layered: dict, bundle: Path | None) -> dict:
+def enabled_plugins(operator: dict, layered: dict, bundle: Path | None, user: Path | None = None) -> dict:
     from scripts.deps_preflight import fleet_plugins
 
-    return {**operator, **dict.fromkeys(fleet_plugins(bundle), True), **layered}
+    return {**operator, **dict.fromkeys(fleet_plugins(bundle, user), True), **layered}
 
 
 def _install_rule_files(dst: Path, sources: list[Path], filter_fn) -> None:
@@ -228,7 +228,10 @@ class ClaudeAdapter:
         merged.update(rendered)
         existing = _i.load_json(existing_settings_path) if existing_settings_path.exists() else {}
         merged["enabledPlugins"] = enabled_plugins(
-            existing.get("enabledPlugins") or {}, rendered.get("enabledPlugins") or {}, _i._get_bundle_path()
+            existing.get("enabledPlugins") or {},
+            rendered.get("enabledPlugins") or {},
+            _i._get_bundle_path(),
+            _i._get_user_bundle_path(),
         )
         merged["hooks"] = _keep_foreign_hooks(existing_settings_path, rendered.get("hooks") or {})
         if not merged["hooks"]:

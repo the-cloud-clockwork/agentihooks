@@ -3074,7 +3074,7 @@ def _install_claude_persona(
     _prepend_bundle_claude_md(bundle_dir, user_dir)
 
     # --- 5b. Append CI manifesto to ~/.claude/CLAUDE.md (memory channel) ---
-    _append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs)
+    _append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs, user_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -4101,7 +4101,9 @@ def _symlink_dir_contents(
 
 
 def _append_ci_manifesto_to_claude_md(
-    bundle_dir: Path | None = None, profile_dirs: list[tuple[str, Path]] | None = None
+    bundle_dir: Path | None = None,
+    profile_dirs: list[tuple[str, Path]] | None = None,
+    user_dir: Path | None = None,
 ) -> None:
     """Append every enabled bundle manifesto to ~/.claude/CLAUDE.md as a fenced block.
 
@@ -4123,7 +4125,7 @@ def _append_ci_manifesto_to_claude_md(
         return
     from scripts.profiles import manifestos
 
-    manifesto_paths = manifestos.paths(bundle_dir, profile_dirs or [])
+    manifesto_paths = manifestos.paths(bundle_dir, profile_dirs or [], user_dir)
     if not manifesto_paths:
         _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
         return

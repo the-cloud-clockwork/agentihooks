@@ -133,11 +133,13 @@ Re-running `agentihooks init` replaces the block in place — it never stacks. I
 bundle has no `.claude/CLAUDE.md`, or no profile in the chain has a `CLAUDE.md` to
 prepend onto, the step is a no-op.
 
-Every `*.md` file under the linked bundle's `manifestos/` directory is appended
+Every `*.md` file under the linked bundle's `manifestos/` directory, and under the user bundle's `manifestos/` directory, is appended
 in filename order; `README.md` is excluded. Set
 `AGENTIHOOKS_SKIP_MANIFESTO=uno,dos,tres` to omit named manifestos. Names may
 include or omit `.md`. `CI_MANIFESTO_PATH` remains a single-file compatibility
-override, and `MANIFESTOS_DIR` can replace the bundle directory.
+override, and `MANIFESTOS_DIR` can replace the bundle directory. A user-bundle manifesto replaces a root-bundle manifesto with the same file stem; `MANIFESTOS_DIR` and `CI_MANIFESTO_PATH` bypass the user bundle.
+
+`deps.json` is read from the root bundle and then the user bundle; a user-bundle entry replaces the root entry with the same `id`, and the dependency stamp is invalidated by a change to either file.
 
 A manifesto may open with front matter naming the package roles that receive it:
 
