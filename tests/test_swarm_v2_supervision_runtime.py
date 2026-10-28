@@ -81,6 +81,18 @@ def test_observe_preserves_living_agent(supervisor, monkeypatch):
     assert supervisor.exits == {}
 
 
+def test_observe_keeps_the_exit_code_a_wrapper_writes_just_before_it_exits(supervisor, monkeypatch):
+    monkeypatch.setattr(runtime.trees, "reap", lambda: [])
+    protocol.write(supervisor.root / "agent.json", {**supervisor.scope, "pid": 123, "pid_start": 7})
+
+    def exited(*_):
+        protocol.write(supervisor.root / "agent.exit.json", {**supervisor.scope, "exit_code": 0})
+
+    monkeypatch.setattr(runtime, "_process", exited)
+    supervisor.observe()
+    assert supervisor.exits == {"agent": 0}
+
+
 def test_wait_observes_after_bounded_sleep(supervisor, monkeypatch):
     sleep = Mock()
     observe = Mock()
