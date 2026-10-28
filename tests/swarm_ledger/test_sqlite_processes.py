@@ -81,6 +81,7 @@ def read_on_a_thread(repo):
     thread = threading.Thread(target=repo.exists, args=("processes",))
     thread.start()
     thread.join()
+    return thread
 
 
 @pytest.mark.parametrize("reader", ["same thread", "other thread"])
@@ -89,13 +90,11 @@ def test_a_released_store_leaves_no_connection_for_a_forked_child_to_close(tmp_p
     with uncollected():
         repo = SQLiteLedgerRepository(path)
         repo.create("processes", CONTENT)
-        if reader == "other thread":
-            read_on_a_thread(repo)
-        else:
-            repo.exists("processes")
+        thread = read_on_a_thread(repo) if reader == "other thread" else repo.exists("processes")
         assert open_files(path.parent)
         del repo
         assert open_files(path.parent) == []
+        assert thread
 
 
 def test_a_reader_closes_when_its_thread_ends_while_the_store_lives(tmp_path):
