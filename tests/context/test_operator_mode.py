@@ -604,7 +604,9 @@ def test_master_pane_prompt_allows_long_reply_only_during_quiet_window(monkeypat
     assert operator_mode.reply_refusal(payload, SWARM)
 
 
-@pytest.mark.parametrize("prompt", ['<channel source="inbox">operator on</channel>', delivery.marked("operator on"), WAKE_TEXT])
+@pytest.mark.parametrize(
+    "prompt", ['<channel source="inbox">operator on</channel>', delivery.marked("operator on"), WAKE_TEXT]
+)
 def test_automated_master_prompts_neither_grant_nor_renew_temporary_presence(monkeypatch, capsys, prompt):
     monkeypatch.setenv("AGENTIHOOKS_INBOX_QUIET_S", "10")
     monkeypatch.setattr(operator_mode.time, "time", lambda: 100)
