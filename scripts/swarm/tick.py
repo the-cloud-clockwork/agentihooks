@@ -282,17 +282,12 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += timing.call(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
     timing.call(_conversations, slug, store, runtime)
     timing.call(_session_models, slug, store)
-    timing.call(observe_bindings, store, slug, runtime)
+    timing.call(transfers.observe, store, slug, runtime.live_names())
     return (
         actions
         + skip_refused(_settle, slug, config, store, ledger, rows, doc)
         + timing.call(_close_space, slug, config, store, runtime)
     )
-
-
-def observe_bindings(store, slug, runtime):
-    unlaunched = frozenset(a.name for a in store.agents(slug) if a.state in ("starting", "launching"))
-    transfers.observe(store, slug, runtime.live_names(), unlaunched)
 
 
 def skip_refused(function, *args):

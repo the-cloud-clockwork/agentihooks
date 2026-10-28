@@ -125,7 +125,8 @@ def detach(store, slug: str, agent) -> None:
         _change(store, slug, row["id"], change)
 
 
-def observe(store, slug: str, live: set[str], unlaunched: frozenset[str] = frozenset()) -> None:
+def observe(store, slug: str, live: set[str]) -> None:
+    unlaunched = {agent.name for agent in store.agents(slug) if agent.state in ("starting", "launching")}
     for row in list_transfers(store, slug):
         if not row["successor"] or row["binding"]["state"] == "live" or row["successor"] in unlaunched:
             continue
