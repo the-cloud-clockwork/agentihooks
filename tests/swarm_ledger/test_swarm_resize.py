@@ -398,8 +398,8 @@ def test_home_columns_drag_and_step_and_keep_their_widths(browser, base):
         while not held and time.monotonic() < deadline:
             tab.wait_for_timeout(50)
         held[0].continue_()
-        tab.wait_for_function("() => document.documentElement.dataset.layout === 'ready'", timeout=5000)
         widths = saved_columns("home", settled=lambda found: abs(found[2] - (before[2] - 116)) <= 2)
+        tab.wait_for_function("() => document.documentElement.dataset.layout === 'ready'", timeout=5000)
         assert abs(widths[2] - (before[2] - 116)) <= 2
         assert widths[:2] == [round(w) for w in before[:2]]
         tab.locator(".sort[data-sort=kind]").click()
