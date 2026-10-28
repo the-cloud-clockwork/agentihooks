@@ -3254,6 +3254,62 @@ names the minutes down and the tasks refused a launch meanwhile, its evidence na
 and its number is the minutes down. A ready hive in the pool clears it, and a pool whose hives lost their records is
 forgotten.
 
+### Doctor slot census detector
+
+Six parallel local slot claims once passed a cap of six with nine agents local, and nothing kept what each claim had
+counted. Each claim now journals its names (see [The local agent cap hold](#the-local-agent-cap-hold)), and the
+Doctor's `slot census` detector checks them on every Doctor pass.
+
+It reads the tick journal's `local slot claim` lines of the last hour whose prefix is the watched swarm, and the
+agents of every swarm in the store: current agent records and the ended ones in each swarm's history. For each claim
+it lists the agents live at the claim's instant that the claim did not name, by bare name or `<slug>/<name>`. An agent
+is live when all of these hold:
+
+| Condition | Field |
+|---|---|
+| Runs on the local backend | `runtime_backend` is `local` or absent |
+| On the claiming machine | `hive` is empty, absent or the claim's machine |
+| A worker | `lane` is not `master` |
+| Not done | `state` is not `finished` or `ended` |
+| Holds a pane | `pane_id` is set |
+| Started by then and not ended | `started_at` at or before the claim, `ended_at` unset or after it |
+| Not the claim's own task | another swarm, or another task in the watched swarm |
+
+A claim that left out one or more live agents raises one finding:
+
+| Field | Value |
+|---|---|
+| kind | `local slot census` |
+| id | `local-slot-census/<agent>@<claim time in ms>` |
+| summary | `the local slot claim for <agent> left <n> live local agents out: <names>` |
+| evidence | `journal at <ms> pid <pid>: <journal line>`, then `<name> of <slug> on task <task>` per agent left out |
+| number | the count of agents left out |
+
+The detector compares recorded agents only. The claim also counts named Claude or Codex sessions on the process table,
+so a pane with no agent record never raises a finding. A journal that cannot be read fails the detector with
+`local slot claims unavailable: <error>`, and the other detectors of the pass still report.
+
+Measure a finding before and after a fix:
+
+```bash
+agentihooks doctor rig-grade-swarm measure local-slot-census/engineer@d44a5a-1999@1793000000000
+```
+
+It prints 0 once a finding the Doctor saw is gone, and refuses an id it never saw. The claim time is part of the id, so
+a finding also leaves once its claim is older than the hour the detector reads. To compare a fix, measure the class
+instead of one id, the same way before and after:
+
+```bash
+agentihooks doctor rig-grade-swarm measure local-slot-census
+```
+
+It prints `local-slot-census count <findings> unknown <failed detectors> max <most agents left out>`, and refuses
+with `no finding of the class local-slot-census has been seen` until the Doctor has seen one. With no current finding
+and a failed detector it prints `local-slot-census is unknown because <failures>` instead of a count of 0.
+
+[Pull request 7995](https://github.com/the-cloud-clockwork/agentihooks/pull/7995) delivered the journal line and
+the detector.
+
 ### Doctor handoff detectors
 
 The Doctor's handoff detectors (`scripts.doctor.handoffs`) run with the other detectors on every Doctor detection
@@ -5588,6 +5644,27 @@ With one local slot free the hold does not apply, and the clock keeps running; t
 finding. A refusal from an earlier pass, or one recorded for another machine whose slots have since freed, holds
 nothing. The swarm keeps only its latest local cap refusal, so each new refusal replaces the one before. On a swarm's
 first observation there is no previous pass, and any stored refusal counts.
+
+Every local slot claim, granted or refused, writes one line to the tick journal with the names it counted:
+
+```text
+<slug>: local slot claim <agent> for <task> on <machine> counted <n> of <maximum>: <names>
+```
+
+`<names>` is the sorted, comma separated list behind `<n>`: a running agent by its bare name, a pending claim as
+`<slug>/<agent>`. A claim is refused when `<n>` is at or above `<maximum>`. The claim leaves out agents on its own task
+in its own swarm, so a successor does not count its predecessor. Read the lines of the last hour:
+
+```bash
+journalctl --user _SYSTEMD_USER_UNIT=agentihooks-swarm.service + SYSLOG_IDENTIFIER=agentihooks-swarm \
+  --since "1 hour ago" -g "local slot claim" --no-pager
+```
+
+```text
+rig-grade-swarm: local slot claim new for t9 on workstation counted 3 of 6: ci@cccccc-0001, doctor/pending, engineer@bbbbbb-0001
+```
+
+The [Doctor slot census detector](#doctor-slot-census-detector) compares each line with the recorded agents live at that instant.
 
 The fix shipped in [pull request 6322](https://github.com/the-cloud-clockwork/agentihooks/pull/6322). Before
 it, a full cap shared by two swarms on the operator's machine raised spawn stall on each of them, and masters closed

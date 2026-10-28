@@ -2,6 +2,7 @@ import copy
 import json
 import re
 import subprocess
+from collections import Counter
 
 import pytest
 
@@ -502,12 +503,14 @@ def test_a_new_head_reads_the_pull_request_in_full(monkeypatch, tmp_path):
     fresh = "b" * 40
     world["heads"][5] = fresh
     second = read_pass()
-    assert world["calls"] == [
-        "graphql",
-        "repos/o/r/pulls/5",
-        f"repos/o/r/commits/{fresh}/check-runs?per_page=100",
-        f"repos/o/r/actions/runs?head_sha={fresh}&per_page=100",
-    ]
+    assert Counter(world["calls"]) == Counter(
+        [
+            "graphql",
+            "repos/o/r/pulls/5",
+            f"repos/o/r/commits/{fresh}/check-runs?per_page=100",
+            f"repos/o/r/actions/runs?head_sha={fresh}&per_page=100",
+        ]
+    )
     assert second[1]["pr"]["head"]["sha"] == fresh
 
 
@@ -517,7 +520,8 @@ def test_a_changed_check_state_on_the_same_head_reads_in_full(monkeypatch, tmp_p
     world["checks"][4] = "FAILURE"
     world["fixture"]["checks"][0]["conclusion"] = "failure"
     [record] = read_pass()
-    assert world["calls"][:2] == ["graphql", "repos/o/r/pulls/4"]
+    assert world["calls"].count("graphql") == 1
+    assert world["calls"].count("repos/o/r/pulls/4") == 1
     assert record["checks"][0]["conclusion"] == "failure"
 
 
@@ -525,7 +529,7 @@ def test_a_changed_check_state_on_the_same_head_reads_in_full(monkeypatch, tmp_p
 def test_state_reads_beyond_twenty_pull_requests_split_into_more_queries(monkeypatch, tmp_path, count, queries):
     world, read_pass = _pulls_world(monkeypatch, tmp_path, list(range(1, count + 1)))
     read_pass(full_reads=0)
-    assert world["calls"] == ["graphql"] * queries
+    assert Counter(world["calls"]) == Counter({"graphql": queries})
 
 
 def test_full_reads_per_pass_stop_at_the_bound_and_the_rest_wait_for_the_next_pass(monkeypatch, tmp_path):
@@ -537,10 +541,10 @@ def test_full_reads_per_pass_stop_at_the_bound_and_the_rest_wait_for_the_next_pa
     for number in (1, 2):
         world["heads"][number] = "c" * 40
     second = read_pass(full_reads=1)
-    assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/3"]
+    assert Counter(c for c in world["calls"] if "/pulls/" in c) == Counter(["repos/o/r/pulls/3"])
     assert [(r["pr"]["number"], r["pr"]["head"]["sha"]) for r in second] == [(1, old), (2, old), (3, old)]
     read_pass(full_reads=1)
-    assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/1"]
+    assert Counter(c for c in world["calls"] if "/pulls/" in c) == Counter(["repos/o/r/pulls/1"])
 
 
 def test_full_reads_of_one_pass_run_side_by_side(monkeypatch, tmp_path):
@@ -595,7 +599,7 @@ def test_the_oldest_saved_read_is_refreshed_first(monkeypatch, tmp_path):
     read_pass(full_reads=1)
     world["heads"][1] = world["heads"][2] = "e" * 40
     read_pass(full_reads=1)
-    assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/2"]
+    assert Counter(c for c in world["calls"] if "/pulls/" in c) == Counter(["repos/o/r/pulls/2"])
 
 
 def test_a_failed_read_keeps_the_other_reads_of_its_pass(monkeypatch, tmp_path):
@@ -610,7 +614,7 @@ def test_a_failed_read_keeps_the_other_reads_of_its_pass(monkeypatch, tmp_path):
         read_pass()
     world["on_pull"] = lambda endpoint: None
     read_pass()
-    assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/5"]
+    assert Counter(c for c in world["calls"] if "/pulls/" in c) == Counter(["repos/o/r/pulls/5"])
 
 
 def test_a_full_read_keeps_each_retried_attempt_in_the_cache(monkeypatch, tmp_path):
@@ -618,8 +622,8 @@ def test_a_full_read_keeps_each_retried_attempt_in_the_cache(monkeypatch, tmp_pa
     run = world["fixture"]["runs"][0]
     run["run_attempt"] = 2
     read_pass()
-    attempts = [c for c in world["calls"] if "/attempts/" in c]
-    assert attempts == [f"repos/o/r/actions/runs/{run['id']}/attempts/{n}/jobs?per_page=100" for n in (1, 2)]
+    attempts = Counter(c for c in world["calls"] if "/attempts/" in c)
+    assert attempts == Counter(f"repos/o/r/actions/runs/{run['id']}/attempts/{n}/jobs?per_page=100" for n in (1, 2))
     assert world["cache"].exists(*(f"{ci_read.ROOT}:doctor:ci-attempt:o/r:{run['id']}:{n}" for n in (1, 2))) == 2
 
 
