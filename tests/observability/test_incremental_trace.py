@@ -1318,6 +1318,9 @@ def _staged(tmp_path, records):
     state = agent_trace._progress("session")
     state["session_id"] = "session"
     agent_trace._stage_source(state, str(path))
+    while state.get("deferred_source"):
+        agent_trace._stage_source(state, str(path))
+    assert len(state["records"]) == len(records)
     return state
 
 
@@ -1326,19 +1329,19 @@ def test_prepare_redacts_each_exported_field_once(export, tmp_path, monkeypatch)
 
     from hooks import secrets
 
-    state = _staged(tmp_path, _large_session(turn_count=2, calls=3, result_words=400))
+    records = _large_session(turn_count=2, calls=3, result_words=400)
+    outputs = [r["message"]["content"][0]["content"] for r in records if r["uuid"].startswith("r")]
+    state = _staged(tmp_path, records)
     redact = secrets.redact
     seen = Counter()
 
     def counted(text, *, mode=None):
-        if len(text) > 1_000:
-            seen[text] += 1
+        seen[text] += 1
         return redact(text, mode=mode)
 
     monkeypatch.setattr(secrets, "redact", counted)
     agent_trace._prepare_pending("session", state, agent_trace.Identity("session"))
-    assert len(seen) >= 6
-    assert max(seen.values()) == 1
+    assert [seen[output] for output in outputs] == [1] * 6
 
 
 def test_prepare_of_a_large_session_state_leaves_the_flush_attempt_room(export, tmp_path):
