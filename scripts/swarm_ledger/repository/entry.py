@@ -31,3 +31,7 @@ class Entry:
 
     def mutable(self) -> dict:
         return thawed(self.state)
+
+    def for_write(self) -> dict:
+        meta = {key: value.copy() if key == "stamps" else thawed(value) for key, value in self.state["_meta"].items()}
+        return {key: meta if key == "_meta" else thawed(value) for key, value in self.state.items()}
