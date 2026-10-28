@@ -355,6 +355,32 @@ def test_run_beats_immediately_then_waits_a_beat_less_the_wake_slack(monkeypatch
     ]
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_rollout_readiness_is_published_only_after_a_successful_beat(monkeypatch, tmp_path, fails):
+    marker = tmp_path / "ready"
+    monkeypatch.setenv("HIVE_READY_FILE", str(marker))
+    _quiet_quota(monkeypatch)
+    monkeypatch.setattr(daemon, "fill_operator_env", lambda: None)
+    monkeypatch.setattr(daemon, "_keep_helpers", lambda *args: None)
+    monkeypatch.setattr(daemon, "hive_id", lambda: "fixture")
+    monkeypatch.setattr(daemon.github_app_cli, "renew", lambda renewed, now: renewed)
+
+    def beat(*args):
+        assert not marker.exists()
+        if fails:
+            raise RuntimeError("beat refused")
+
+    def wait(*args, **kwargs):
+        assert marker.is_file()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(daemon, "beat", beat)
+    monkeypatch.setattr(daemon, "scheduled_wait", wait)
+    with pytest.raises(RuntimeError if fails else KeyboardInterrupt):
+        daemon.run(lambda: (object(), object()))
+    assert marker.exists() is not fails
+
+
 def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", lambda redis, hive: None)
