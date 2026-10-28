@@ -4,7 +4,7 @@ import secrets
 import sqlite3
 import threading
 import weakref
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
 
 from scripts.swarm_ledger import request_metrics
@@ -459,14 +459,13 @@ class SQLiteLedgerRepository:
             raise
         return path, connection
 
-    @contextmanager
     def _reader(self):
         held = getattr(self._readers, "held", None)
         if held is None or held[0] != self.path:
             held = self._readers.held = self._open(check_same_thread=False)
             self._held.append(held[1])
         held[1].set_trace_callback(self.trace)
-        yield held[1]
+        return nullcontext(held[1])
 
     def _set_up(self, connection, path: Path) -> None:
         with self._guard:
