@@ -225,8 +225,9 @@ def test_publish_refuses_a_registered_branch_mismatch_before_any_mutation(
     from scripts.swarm.store import SwarmError
 
     root = publication.root
-    git(root, "push", "origin", "HEAD:prerequisite")
     original = git(root, "rev-parse", "HEAD")
+    diverged = git(root, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Prerequisite work")
+    git(root, "push", "origin", f"{diverged}:refs/heads/prerequisite")
     publication.task["branch"] = "prerequisite"
     if repository_branch:
         publication.task["branch"] = "engineer-test"
@@ -242,7 +243,7 @@ def test_publish_refuses_a_registered_branch_mismatch_before_any_mutation(
     assert git(root, "diff", "--cached") == ""
     assert (root / "chosen.txt").read_text() == "after"
     assert publication.updates == []
-    assert git(root, "ls-remote", "origin", "refs/heads/prerequisite").split()[0] == original
+    assert git(root, "ls-remote", "origin", "refs/heads/prerequisite").split()[0] == diverged
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
@@ -1643,13 +1644,11 @@ def test_missing_pull_request_never_authorizes_retained_delivery(publication, mo
     assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == retained
 
 
-@pytest.mark.parametrize("pushed", [True, False])
-def test_hive_successor_publishes_its_own_branch_over_the_predecessor_hive_key(publication, monkeypatch, pushed):
+def test_hive_successor_publishes_its_own_branch_over_the_predecessor_hive_key(publication, monkeypatch):
     from scripts.swarm import publish
 
     p = publication
-    if pushed:
-        git(p.root, "push", "origin", "HEAD:predecessor")
+    git(p.root, "push", "origin", "HEAD:predecessor")
     hive_key = f"/hive/predecessor/{p.repo.name}"
     p.task.update(branch="predecessor", repository_branches={hive_key: "predecessor", "/hive/bundle": "kept"})
     monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "")

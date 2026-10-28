@@ -360,7 +360,7 @@ def delivery_branch(root: Path, task: dict, branch: str) -> str:
 
 def succeeds(root: Path, recorded: str) -> bool:
     if not remote_head(root, recorded):
-        return True
+        return False
     git(root, "fetch", "origin", recorded)
     return descends(root, recorded)
 
