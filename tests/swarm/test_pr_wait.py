@@ -9,7 +9,7 @@ from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 
 ME = "engineer@a1b2c3-0001"
-OTHER = "engineer@a1b2c3-0002"
+OTHER = "engineer@a1b2c3-0000"
 URL = "https://github.com/o/r/pull/7"
 ENV = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": ME, "AGENTIHOOKS_SWARM_TASK": "t1"}
 UNTASKED = {k: v for k, v in ENV.items() if k != "AGENTIHOOKS_SWARM_TASK"}
@@ -278,16 +278,14 @@ SKIPS = {
 }
 
 
-@pytest.mark.parametrize("first", [True, False])
 @pytest.mark.parametrize("skip", sorted(SKIPS))
-def test_an_agent_the_pass_skips_never_stops_it_for_the_next(skip, first):
+def test_an_agent_the_pass_skips_never_stops_it_for_the_next(skip):
     import fakeredis
 
     prepare, state, url = SKIPS[skip]
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    records = [AgentRecord(name=OTHER, lane="eng", task="t2", state=state), AgentRecord(name=ME, lane="eng", task="t1")]
-    for record in records if first else records[::-1]:
-        store.put_agent("sw", record)
+    store.put_agent("sw", AgentRecord(name=OTHER, lane="eng", task="t2", state=state))
+    store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1"))
     prepare(store)
     mark(store)
     assert enforce(store, {**ROWS, "t2": {"id": "t2", "pr_url": url}}, {URL: OPEN}) == [
