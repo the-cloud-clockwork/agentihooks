@@ -21,6 +21,8 @@ NEEDS_WORKSTATION = "the task needs the workstation, so no remote hive takes it"
 NEEDS_CAPABILITY = "the task needs a hive with {needs}, and no hive declares it"
 NEEDS_TOGETHER = "the task needs a hive with {needs}, and no single hive declares all of them"
 UNRANKED = math.inf
+SPREAD = "spread"
+PLACED = "placed"
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,11 @@ def for_swarm(hives: list[dict], slug: str) -> list[dict]:
     ]
 
 
+def round_robin(hives: list[dict], nodes: int, repo: str, now: int) -> list[dict]:
+    chosen = sorted((hive for hive in hives if live(hive, now) and repo in hive["repos"]), key=lambda hive: hive["id"])
+    return [{**hive, SPREAD: hive["agents"] + hive.get(PLACED, 0)} for hive in chosen[: nodes or None]]
+
+
 def _room(hive: dict) -> int:
     return hive["room"]
 
@@ -101,7 +108,7 @@ def _checks(
 
 def _order(role: str) -> Callable[[dict], tuple]:
     return lambda hive: (
-        hive["prefer"].get(role, UNRANKED),
+        hive[SPREAD] if SPREAD in hive else hive["prefer"].get(role, UNRANKED),
         hive["agents"] / max(hive["max_agents"], 1),
         hive["ephemeral"] == YES,
         hive["id"],

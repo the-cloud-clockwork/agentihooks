@@ -29,12 +29,16 @@ def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario():
     assert scenario["needs"] == ["inputs"]
     assert scenario["if"] == "github.event_name == 'workflow_dispatch' || needs.inputs.outputs.hit != 'true'"
     assert scenario["services"]["postgres"]["image"] == "public.ecr.aws/docker/library/postgres:16"
+    assert scenario["services"]["pgvector"]["image"] == "pgvector/pgvector:0.8.0-pg16"
+    assert scenario["services"]["pgvector"]["ports"] == ["5433:5432"]
+    assert scenario["env"]["MEMORY_TEST_POSTGRES_URL"] == "postgresql://postgres@127.0.0.1:5433/memory"
     steps = scenario["steps"]
     assert "tests/swarm_ledger/test_postgres_writer_lock.py" in steps[-2]["run"]
     assert "tests/swarm_ledger/test_postgres_outbox.py" in steps[-2]["run"]
     assert "tests/swarm_ledger/test_postgres_writer_floor.py" in steps[-2]["run"]
     assert "tests/swarm_ledger/test_postgres_repository.py" in steps[-2]["run"]
-    assert "grep -q ' 14 passed'" in steps[-2]["run"]
+    assert "tests/test_memory_postgres_parity.py" in steps[-2]["run"]
+    assert "grep -q ' 16 passed'" in steps[-2]["run"]
     assert steps[-1]["uses"] == "./.github/actions/input-key/save"
     assert steps[-1]["if"] == "github.event_name == 'push' || github.event_name == 'workflow_dispatch'"
     assert steps[-1]["with"] == {"key": "${{ needs.inputs.outputs.key }}"}
@@ -48,8 +52,14 @@ def test_writer_lock_key_covers_the_scenario_repository_and_install_inputs():
         "hooks",
         "tests/conftest.py",
         "tests/swarm_ledger",
+        "tests/test_memory_postgres_parity.py",
+        "tests/sv2_idx02_cases.py",
+        "tests/sv2_idx04_cases.py",
+        "tests/sv2_idx05_cases.py",
+        "tests/fixtures/swarm_v2",
         "pyproject.toml",
         ".github/test-excludes.txt",
         ".github/workflows/writer-lock.yml",
     } <= set(entry["paths"])
     assert "postgres 16" in entry["tools"]
+    assert "pgvector 0.8.0 pg16" in entry["tools"]

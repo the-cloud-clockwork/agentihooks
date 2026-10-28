@@ -94,6 +94,7 @@ See [Cancelled watcher after the gate change](delivery-tiers.md#cancelled-watche
 | [Helm kind registration to readiness](../ci-timing.md#helm-kind-registration-to-readiness) | Preserved recovery checks, parallel work, kind probe settings, CI dispatch and measured intervals |
 | [Codex CLI cache in unit jobs](../ci-timing.md#codex-cli-cache) | Seed the CLI on main, configure its release, diagnose cache misses and verify installation and shard timings |
 | [Worker hive pod image build](../ci-timing.md#worker-hive-pod-image-build) | Reuse of the published worker base, the base inputs and rebuild decisions, build output, measurements and troubleshooting |
+| [Parallel launches in one process](../swarm-v2/execution-identity.md#parallel-launches-in-one-process) | The per swarm lock on execution history writes, the five watched attempts and their errors, writers in another process, reading a failed spawn line and the tests |
 | [Refused worker startup diagnostics](../swarm-v2/startup-diagnostics.md) | Startup log and exit reason kept before a refused worker Pod is removed, the bounded cleanup log retry, `pods/log` permission, reading the records and troubleshooting |
 | [Worker profile proof](worker-profile-proof.md) | Offline Codex SessionStart replay, first registry write timing, surviving hook child failures, the session start dependency check, fixed limits and CI evidence |
 | [Browser cache](browser-cache.md) | Verified Chromium preparation, dev push only saving, restore scope, workflow configuration and cache inspection |

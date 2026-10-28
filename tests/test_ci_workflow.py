@@ -240,6 +240,47 @@ def _nats_server_steps() -> dict[str, dict]:
     return {step["name"]: step for step in action["runs"]["steps"]}
 
 
+@pytest.mark.parametrize("version", ["matching", "different", "broken", "missing"])
+def test_nats_server_reuses_only_the_exact_runner_version(tmp_path, version):
+    step = _nats_server_steps()["Resolve the pinned nats server"]
+    commands = tmp_path / "bin"
+    commands.mkdir()
+    (commands / "uname").symlink_to("/usr/bin/uname")
+    if version != "missing":
+        binary = commands / "nats-server"
+        expected = step["env"]["NATS_SERVER_RELEASE"] if version in {"matching", "broken"} else "v0.0.0"
+        binary.write_text(f"#!/bin/bash\necho 'nats-server: {expected}'\nexit {1 if version == 'broken' else 0}\n")
+        binary.chmod(0o755)
+    output = tmp_path / "output"
+    required = tmp_path / "env"
+    subprocess.run(
+        ["/bin/bash", "-euo", "pipefail", "-c", step["run"]],
+        env={
+            **step["env"],
+            "PATH": str(commands),
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_ENV": str(required),
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert values.get("installed", "false") == ("true" if version == "matching" else "false")
+    assert required.read_text() == "NATS_SERVER_REQUIRED=1\n" if version == "matching" else not required.exists()
+
+
+def test_nats_server_skips_archive_work_when_the_runner_version_matches():
+    steps = _nats_server_steps()
+    for name in (
+        "Restore the pinned nats server archive",
+        "Install the pinned nats server",
+        "Save the pinned nats server archive",
+    ):
+        assert "steps.pin.outputs.installed != 'true'" in steps[name]["if"]
+
+
 def test_nats_server_archive_is_cached_on_its_pinned_release_and_checksum():
     steps = _nats_server_steps()
     names = list(steps)
@@ -255,7 +296,10 @@ def test_nats_server_archive_is_cached_on_its_pinned_release_and_checksum():
     }
     assert install["env"]["CACHE_HIT"] == "${{ steps.cache.outputs.cache-hit }}"
     assert save["uses"] == "actions/cache/save@v4"
-    assert save["if"] == "steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'"
+    assert (
+        save["if"]
+        == "steps.pin.outputs.installed != 'true' && steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'"
+    )
     assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.cache.outputs.cache-primary-key }}"}
 
 
@@ -1963,7 +2007,9 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     setup = [
         step
         for step in setup
-        if not str(step.get("name", "")).startswith((*downloads, "Cap the merged test stats"))
+        if not str(step.get("name", "")).startswith(
+            (*downloads, "Cap the merged test stats", "Check for merged test stats")
+        )
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
     ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
@@ -2105,7 +2151,7 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     }
     merged = mutation[mutation_names.index("Save the merged test stats")]
     assert merged["uses"] == "actions/cache/save@v4"
-    assert merged["if"] == f"{first} && hashFiles('.mutation-stats-cache/**') != ''"
+    assert merged["if"] == f"{first} && steps.merged-stats.outputs.found == 'true'"
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
     capped = mutation[mutation_names.index("Cap the merged test stats")]
     assert capped["if"] == first
@@ -2236,7 +2282,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"strategy.job-total != 1 && {skipped}",
         f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}",
         f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}"
-        " && hashFiles('.mutation-stats-cache/**') != ''",
+        " && steps.merged-stats.outputs.found == 'true'",
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
     )
