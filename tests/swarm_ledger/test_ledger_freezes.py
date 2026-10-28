@@ -229,6 +229,26 @@ def test_an_engineers_freeze_write_is_refused():
 
 
 @pytest.mark.parametrize("verb", ["freeze", "focus"])
+def test_refused_freeze_names_the_missing_orchestrator_role(verb):
+    state, rejected = freeze("plans/a", verb=verb, by=ENGINEER)
+    assert rejected
+    assert any("not an orchestrator" in warning for warning in state["_meta"]["warnings"])
+
+
+def test_a_masters_plain_join_preserves_its_orchestrator_role():
+    before = core.sync(SLUG)[0]["_meta"]["members"][MASTER].copy()
+    state, rejected = write("join", by=MASTER, role="member")
+    assert not rejected
+    member = state["_meta"]["members"][MASTER]
+    assert member["role"] == "orchestrator"
+    assert member["joined_at"] == before["joined_at"]
+    assert member["claims"] == before["claims"]
+    state, rejected = freeze("plans/a", verb="focus", by=MASTER)
+    assert not rejected
+    assert targets(state) == [("focus", "plans/a")]
+
+
+@pytest.mark.parametrize("verb", ["freeze", "focus"])
 def test_the_master_writes_freezes_without_a_quote_and_preserves_verified_words(verb):
     state, rejected = freeze("plans/a", verb=verb, by=MASTER, quote="freeze the swarm v2 plan")
     assert rejected == []
