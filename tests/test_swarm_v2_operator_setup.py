@@ -522,14 +522,14 @@ def test_install_command_names_an_unreachable_scheduler_redis_and_keeps_the_old_
     assert run_main(["install", "--check"], {}, Who(), tmp_path / "home") == (
         1,
         "",
-        "operator terminal install refused: the scheduler Redis is unreachable: ConnectionError\n",
+        "operator terminal install refused: the scheduler store is unreachable: ConnectionError\n",
     )
     for name in LEGACY:
         (units / name).write_text("old\n")
     assert run_main(["install"], {}, Who(), tmp_path / "home") == (
         1,
         "",
-        "operator terminal install refused: the scheduler Redis is unreachable: ConnectionError\n",
+        "operator terminal install refused: the scheduler store is unreachable: ConnectionError\n",
     )
     assert sorted(path.name for path in units.iterdir()) == sorted(LEGACY)
 

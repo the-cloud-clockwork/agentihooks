@@ -14,6 +14,11 @@ PUBLISH_HEADROOM = daemon.publish_headroom
 PUBLISH_HERDR_STATS = daemon.publish_herdr_stats
 
 
+@pytest.fixture(autouse=True)
+def timer_state(monkeypatch):
+    monkeypatch.setattr(daemon, "timer_state", lambda waiter: waiter)
+
+
 @pytest.fixture
 def redis():
     import fakeredis
@@ -332,8 +337,8 @@ def test_run_beats_immediately_then_waits_a_beat_less_the_wake_slack(monkeypatch
 
     waits = []
 
-    def sleep(seconds, redis, timeout):
-        assert redis is connection
+    def sleep(seconds, state, timeout):
+        assert state is connection
         assert timeout == seconds + 1
         events.append(seconds)
         waits.append(seconds)
@@ -380,8 +385,8 @@ def _paced(monkeypatch, rounds):
     stop, waits, beats = threading.Event(), [], []
     monkeypatch.setattr(orders, "alive", lambda client, hive: beats.append((client, hive)))
 
-    def wait(seconds, redis, timeout):
-        waits.append((seconds, redis, timeout))
+    def wait(seconds, state, timeout):
+        waits.append((seconds, state, timeout))
         if len(waits) == rounds:
             stop.set()
 
@@ -466,7 +471,7 @@ def test_headroom_logs_and_ends_when_its_wait_loses_the_connection(monkeypatch, 
 
     from scripts.hive import headroom
 
-    def wait(seconds, redis, timeout):
+    def wait(seconds, state, timeout):
         raise getattr(exceptions, error)("gone")
 
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
@@ -483,7 +488,7 @@ def test_headroom_keeps_publishing_while_a_beat_blocks(monkeypatch):
     _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "publish_headroom", PUBLISH_HEADROOM)
-    monkeypatch.setattr(daemon, "scheduled_wait", lambda seconds, redis, timeout: threading.Event().wait(0.001))
+    monkeypatch.setattr(daemon, "scheduled_wait", lambda seconds, state, timeout: threading.Event().wait(0.001))
     published = threading.Event()
     calls = []
 
@@ -555,8 +560,8 @@ def ticks(monkeypatch, count):
     """A scheduler wait that returns `count` times, then sets the stop event."""
     stop, waits = threading.Event(), []
 
-    def wait(seconds, redis, timeout):
-        waits.append((seconds, redis, timeout))
+    def wait(seconds, state, timeout):
+        waits.append((seconds, state, timeout))
         if len(waits) > count:
             stop.set()
 
@@ -917,8 +922,8 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
         if server.connected:
             queued.append(clients[-1].xadd(stream, {"order": "{}"}))
 
-    def wait(seconds, redis, timeout):
-        assert redis is clients[-1]
+    def wait(seconds, state, timeout):
+        assert state is clients[-1]
         if now[0] == 2000.0:
             raise KeyboardInterrupt
         server.connected = False
@@ -960,8 +965,8 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypat
         if error:
             raise error("lost")
 
-    def wait(seconds, redis, timeout):
-        assert redis is connections[-1]
+    def wait(seconds, state, timeout):
+        assert state is connections[-1]
         waits.append(seconds)
         if len(waits) == 1:
             raise ConnectionError("lost while waiting")

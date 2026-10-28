@@ -207,9 +207,10 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
 def timer_state(waiter: "Redis"):
     from scripts.events import state
     from scripts.events.redis_state import RedisStateStore
+    from scripts.events.scheduler_state import open_scheduler_state
     from scripts.scheduler.core import bucket
 
-    return RedisStateStore(waiter, bucket()) if state.backend() == "redis" else state.open_state(bucket())
+    return RedisStateStore(waiter, bucket()) if state.backend() == "redis" else open_scheduler_state(bucket())
 
 
 def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:

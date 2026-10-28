@@ -15,6 +15,13 @@ POLL_S = 0.2
 DONE = ("fired", "cancelled", "stopped")
 
 
+def wake(event: dict, delivery_id: str, state: "StateStore") -> None:
+    key = json.loads(event["payload"])["key"]
+    from scripts.scheduler.slots import first_delivery
+
+    first_delivery(state, key, delivery_id)
+
+
 def _recheck(deadline: float | None) -> float:
     if deadline is None:
         return RECHECK_S
