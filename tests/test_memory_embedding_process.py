@@ -468,7 +468,8 @@ def test_main_flushes_each_report_as_it_is_printed(prepared, provider, monkeypat
 
     for key, value in environment(prepared, provider).items():
         monkeypatch.setenv(key, value)
-    monkeypatch.setattr(embedding_process, "cycle", lambda worker, settings, after: {"after": ""})
+    pages = iter([{"after": ""}])
+    monkeypatch.setattr(embedding_process, "cycle", lambda worker, settings, after: next(pages))
     stream = Stream()
     monkeypatch.setattr(sys, "stdout", stream)
     assert embedding_process.main([]) == 0
