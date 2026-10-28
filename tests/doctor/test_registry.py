@@ -733,6 +733,11 @@ def test_a_root_missing_one_attribute_is_read_again_until_every_attribute_is_pre
     assert found["traces"][0]["profile"] == "engineer"
 
 
+def test_a_known_root_on_a_trace_row_without_a_session_reads_an_empty_session(cursors):
+    known = {"life": "l", "seat": "s", "task": "t", "harness": "h", "profile": "p"}
+    assert registry._correlated(None, {"id": "tr"}, {"tr": known}) == {"id": "tr", "session_id": "", **known}
+
+
 def test_a_rescan_of_an_unchanged_binding_with_two_traces_costs_three_requests(cursors):
     langfuse = Langfuse([_trace("tr-new", "sid-new"), _trace("tr-old", "sid-old")], [])
     state = {}
