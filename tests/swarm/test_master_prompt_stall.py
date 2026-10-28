@@ -47,7 +47,9 @@ INTERRUPT = "● Asking the operator\n  ⎿  Interrupted · What should Claude d
 
 def master(store, pane=QUESTION, slug="sw", enforce=True):
     name = store.next_name(slug, MASTER)
-    agent = AgentRecord(name, MASTER, MASTER, pane_id="w1:p1", started_at=START, seat=f"master@{slug}")
+    agent = AgentRecord(
+        name, MASTER, MASTER, pane_id="w1:p1", started_at=START, seat=f"master@{slug}", harness="claude"
+    )
     store.put_agent(slug, agent)
     store.seats.occupy(agent.seat, agent.name, START)
     if enforce:
