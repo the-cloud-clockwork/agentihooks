@@ -56,9 +56,12 @@ def test_anton_first_keeps_the_ranked_hive_while_it_has_room(setup):  # noqa: F8
 
 
 def test_anton_first_fills_the_lowest_id_among_equal_hives_in_one_pass(setup):  # noqa: F811
+    from scripts.hive import placement
+
     write_hive(setup, id="a")
 
     assert selected(setup, setup.config, 4) == ["a", "a", "a", "remote"]
+    assert {hive["id"]: hive.get(placement.PLACED) for hive in setup.launcher.hives()} == {"a": 3, "remote": 1}
 
 
 def test_round_robin_leaves_ui_roles_on_their_ranked_hive(setup):  # noqa: F811

@@ -271,9 +271,11 @@ def test_swarm_set_switches_hive_placement(store, capsys, value, stored):
     from scripts.swarm import cli
 
     store.update("sw", state="paused", hive_placement=not stored)
-    cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=[f"hive-placement={value}"]))
+    cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=[f"hive-placement={value}", "placement-nodes=3"]))
     assert store.config("sw").hive_placement is stored
-    assert json.loads(capsys.readouterr().out)["hive_placement"] is stored
+    assert store.config("sw").placement_nodes == 3
+    shown = json.loads(capsys.readouterr().out)
+    assert (shown["hive_placement"], shown["placement_mode"], shown["placement_nodes"]) == (stored, "anton-first", 3)
 
 
 def test_swarm_set_refuses_another_hive_placement_value(store):
