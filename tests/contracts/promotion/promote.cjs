@@ -53,7 +53,7 @@ function fixture(options = {}) {
       },
     },
     repos: {
-      getCommit: async ({ ref }) => ({ data: ref === 'graded' ? commit('graded', 'tree') :
+      getCommit: async ({ ref }) => ({ data: ref === context.sha ? commit(context.sha, 'tree') :
         ref === 'main' && options.mainMoves && ++mainReads > 1 ? commit('moved', 'old', `Promote green dev to main (#8)\n\nGraded dev revision: ${options.mainMoves}\n`) :
         ref === 'main' ? commit('main', options.already ? 'tree' : 'old', options.promoted ? `Promote green dev to main (#6)\n\nGraded dev revision: ${options.promoted}\n` : '') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
       listCommitStatusesForRef: async () => ({ data: statuses.slice(0, 100) }),
@@ -336,10 +336,31 @@ test('closes its snapshot when a newer grade becomes ready before merge', async 
 });
 
 test('one release serves a batch and an older green grade completing afterwards skips', async () => {
-  const latest = fixture();
+  const latest = fixture({ context: { sha: newer, runId: 43 } });
   const older = batchFixture();
+  let main = { sha: 'main', commit: { tree: { sha: 'old' }, message: '' } };
+  for (const f of [latest, older]) {
+    const get = f.github.rest.repos.getCommit;
+    f.github.rest.repos.getCommit = async args => args.ref === 'main' ? { data: main } : get(args);
+    f.github.rest.repos.compareCommits = async ({ base, head }) => {
+      assert.equal(base, older.context.sha);
+      assert.equal(head, latest.context.sha);
+      return { data: { status: 'ahead' } };
+    };
+  }
+  const merge = latest.github.rest.pulls.merge;
+  latest.github.rest.pulls.merge = async args => {
+    const result = await merge(args);
+    main = { sha: result.data.sha, commit: { tree: { sha: 'tree' },
+      message: `Graded dev revision: ${latest.context.sha}` } };
+    return result;
+  };
   await promote(latest);
   await promote(older);
+  assert.notEqual(latest.context.sha, older.context.sha);
+  assert.notEqual(latest.context.runId, older.context.runId);
+  assert.equal(latest.outputs.graded, newer);
+  assert.equal(older.outputs.graded, older.context.sha);
   assert.equal([...latest.writes, ...older.writes].filter(([kind]) => kind === 'merge').length, 1);
   assert.equal(latest.outputs.main, 'rebased');
   assert.equal(older.outputs.main, undefined);
