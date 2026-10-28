@@ -445,12 +445,12 @@ def remove_units(unit_dir: Path, run: Callable = subprocess.run) -> None:
 
 
 def _scheduler() -> Scheduler:
-    from redis.exceptions import RedisError
+    from scripts.events import state
 
     try:
-        return Scheduler(redis_client())
-    except RedisError as error:
-        raise SetupRefused(f"the scheduler Redis is unreachable: {type(error).__name__}") from None
+        return Scheduler()
+    except state.unavailable() as error:
+        raise SetupRefused(f"the scheduler store is unreachable: {type(error).__name__}") from None
 
 
 def _unit_dir() -> Path:

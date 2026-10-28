@@ -31,6 +31,7 @@ WORKER_KEYS = (
     "swarm:*:identity-conflicts",
     "swarm:*:desired-routes",
     "swarm:*:state-since",
+    "swarm:state:scheduler:*",
     "swarm:*:claim:*",
     "swarm:*:ready",
     "swarm:*:restart-causes",

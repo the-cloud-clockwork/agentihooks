@@ -19,9 +19,8 @@ class CommandError(ValueError):
 
 def connect() -> Scheduler:
     from scripts.scheduler.service import ensure_running
-    from scripts.swarm.store import redis_client
 
-    scheduler = Scheduler(redis_client())
+    scheduler = Scheduler()
     ensure_running()
     return scheduler
 
@@ -74,10 +73,11 @@ def describe(record: dict) -> dict:
 def _reachable(scheduler: Scheduler, slot: Slot) -> None:
     if not isinstance(slot, SwarmSlot):
         return
-    from scripts.swarm.store import RedisStore, SwarmError
+    from scripts.scheduler.slots import swarm_store
+    from scripts.swarm.store import SwarmError
 
     try:
-        RedisStore(scheduler.redis).config(slot.slug)
+        swarm_store(scheduler.state).config(slot.slug)
     except SwarmError as exc:
         raise CommandError(str(exc)) from None
 
