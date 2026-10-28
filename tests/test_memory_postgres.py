@@ -133,6 +133,13 @@ def test_statements_without_a_translation_are_refused(statement):
     assert str(raised.value) == postgres.UNSUPPORTED + statement[:80]
 
 
+def test_a_refusal_quotes_the_first_eighty_characters():
+    statement = "SELECT MAX(rowid) FROM session_event WHERE " + "x = 1 AND " * 10
+    with pytest.raises(ValueError) as raised:
+        postgres.translate(statement)
+    assert str(raised.value) == postgres.UNSUPPORTED + statement[:80] and len(statement) > 81
+
+
 def test_execute_runs_the_translated_statement_with_tuple_parameters():
     raw = FakeRaw()
     cursor = postgres.Connection(raw).execute("SELECT a FROM t WHERE b = ?", ["x"])
@@ -242,7 +249,8 @@ def test_an_unreachable_server_is_a_catalog_operational_error(monkeypatch):
     assert str(raised.value) == "connection refused"
 
 
-def test_the_catalog_opens_postgres_for_a_postgres_url(monkeypatch):
+def test_the_catalog_opens_postgres_for_a_postgres_url(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     opened, memory = [], sqlite3.connect(":memory:", isolation_level=None)
 
     def connect(url):

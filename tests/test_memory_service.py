@@ -1,6 +1,7 @@
 """Tests for the hosted session memory service: bearer authentication, routes, configuration and its entrypoint."""
 
 import hashlib
+import io
 import json
 import os
 import socket
@@ -143,6 +144,40 @@ def test_a_body_over_the_bound_is_refused(served):
     assert status == 400 and answer == refusal("invalid_request", service.BAD_BODY)
 
 
+class Unread:
+    def read(self, length):
+        raise AssertionError(f"read {length} bytes of a refused body")
+
+
+class Posted:
+    def __init__(self, length, rfile):
+        self.headers = {} if length is None else {"Content-Length": str(length)}
+        self.rfile = rfile
+
+
+@pytest.mark.parametrize("length", [None, 0, 1, service.MAX_BODY + 1])
+def test_a_body_outside_the_bound_is_refused_without_reading(length):
+    assert service.read_body(Posted(length, Unread())) is None
+
+
+def test_the_smallest_and_the_largest_object_bodies_are_read():
+    assert service.read_body(Posted(2, io.BytesIO(b"{}"))) == {}
+    largest = b'{"q": "' + b"x" * (service.MAX_BODY - 9) + b'"}'
+    assert len(largest) == service.MAX_BODY
+    assert service.read_body(Posted(service.MAX_BODY, io.BytesIO(largest))) == {"q": "x" * (service.MAX_BODY - 9)}
+
+
+def test_an_answer_states_its_length(served):
+    with urllib.request.urlopen(served + service.HEALTH_PATH, timeout=10) as response:
+        raw = response.read()
+    assert response.headers["Content-Length"] == str(len(raw)) and json.loads(raw) == {"state": "ready"}
+
+
+def test_the_handler_is_quiet_and_named_for_sessions():
+    built = service.handler(None, {})
+    assert built.__name__ == "Sessions" and built.log_message is service.quiet
+
+
 @pytest.mark.parametrize(
     "method,path", [("POST", "/v2/sessions/ingest"), ("POST", "/"), ("GET", "/v2/sessions/search")]
 )
@@ -235,6 +270,24 @@ def test_build_defaults_the_listener_address(tmp_path, monkeypatch):
     assert bound == [(service.DEFAULT_HOST, service.DEFAULT_PORT)] == [("0.0.0.0", 8790)]
 
 
+def test_build_binds_the_configured_port_over_tools_with_the_object_store(tmp_path, monkeypatch):
+    bound, built = [], []
+
+    class Recorder:
+        def __init__(self, address, handler):
+            bound.append(address)
+
+    class Tools:
+        def __init__(self, catalog, store):
+            built.append(store)
+
+    monkeypatch.setattr(service, "HTTPServer", Recorder)
+    monkeypatch.setattr(service.records, "SessionTools", Tools)
+    service.build(environment(tmp_path, port="8123"))
+    assert bound == [("127.0.0.1", 8123)]
+    assert [type(store) for store in built] == [service.archive.ObjectStore]
+
+
 def test_main_serves_until_interrupted_and_closes(monkeypatch, capsys):
     events = []
 
@@ -248,8 +301,10 @@ def test_main_serves_until_interrupted_and_closes(monkeypatch, capsys):
         def server_close(self):
             events.append("close")
 
-    monkeypatch.setattr(service, "build", lambda environ: Server())
+    seen = []
+    monkeypatch.setattr(service, "build", lambda environ: seen.append(environ) or Server())
     assert service.main() == 0
+    assert seen == [dict(os.environ)]
     assert events == ["serve", "close"]
     assert capsys.readouterr().err == "session memory service listening on 0.0.0.0:8790\n"
 

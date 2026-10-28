@@ -30,6 +30,9 @@ PORT_ENV = "AGENTIHOOKS_SESSION_PORT"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8790
 MAX_BODY = 1 << 20
+LENGTH_HEADER = "Content-Length"
+AUTH_HEADER = "Authorization"
+PROBE = "SELECT 1"
 SEARCH_PATH = "/v2/sessions/search"
 TOOLS_PREFIX = "/v2/sessions/tools/"
 HEALTH_PATH = "/healthz"
@@ -42,7 +45,7 @@ MISSING_CONFIG = "AGENTIHOOKS_SESSION_CATALOG, AGENTIHOOKS_SESSION_OBJECTS and A
 
 
 def load_grants(path: str | Path) -> dict[str, Grant]:
-    entries = json.loads(Path(path).read_text(encoding="utf-8"))
+    entries = json.loads(Path(path).read_bytes())
     return {
         token_digest: Grant(entry["principal"], entry["corpus"], frozenset(entry["projects"]))
         for token_digest, entry in entries.items()
@@ -71,8 +74,8 @@ def _refusal(error_class: str, detail: str) -> dict:
 
 def read_body(request: BaseHTTPRequestHandler) -> dict | None:
     try:
-        length = int(request.headers.get("Content-Length") or 0)
-        if length not in range(1, MAX_BODY + 1):
+        length = int(request.headers.get(LENGTH_HEADER) or 0)
+        if length not in range(2, MAX_BODY + 1):
             return None
         body = json.loads(request.rfile.read(length))
     except ValueError:
@@ -83,7 +86,7 @@ def read_body(request: BaseHTTPRequestHandler) -> dict | None:
 def post(tools: records.SessionTools, grants: dict[str, Grant], request: BaseHTTPRequestHandler) -> tuple:
     if request.path != SEARCH_PATH and not request.path.startswith(TOOLS_PREFIX):
         return 404, _refusal("not_found", NOT_FOUND)
-    grant = authenticate(grants, request.headers.get("Authorization"))
+    grant = authenticate(grants, request.headers.get(AUTH_HEADER))
     if grant is None:
         return 401, _refusal("unauthenticated", UNAUTHENTICATED), {"WWW-Authenticate": "Bearer"}
     body = read_body(request)
@@ -98,7 +101,7 @@ def answer(request: BaseHTTPRequestHandler, status: int, body: dict, headers: di
     payload = json.dumps(body).encode()
     request.send_response(status)
     request.send_header("Content-Type", "application/json")
-    request.send_header("Content-Length", str(len(payload)))
+    request.send_header(LENGTH_HEADER, str(len(payload)))
     for name, value in (headers or {}).items():
         request.send_header(name, value)
     request.end_headers()
@@ -109,7 +112,7 @@ def get(tools: records.SessionTools, request: BaseHTTPRequestHandler) -> tuple:
     if request.path != HEALTH_PATH:
         return 404, _refusal("not_found", NOT_FOUND)
     try:
-        tools.catalog.db.execute("SELECT 1").fetchone()
+        tools.catalog.db.execute(PROBE).fetchone()
     except sqlite3.OperationalError:
         return 503, _refusal("dependency_unavailable", CATALOG_DOWN)
     return 200, {"state": "ready"}

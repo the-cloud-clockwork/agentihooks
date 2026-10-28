@@ -41,7 +41,7 @@ def translate(statement: str) -> str | None:
     statement = JSON_FIELD.sub(r"(\1::jsonb ->> '\2')", statement)
     statement = statement.replace(JSON_LIST, 'SELECT value COLLATE "C" FROM jsonb_array_elements_text(?::jsonb)')
     if statement.startswith("INSERT OR IGNORE INTO"):
-        statement = statement.replace("INSERT OR IGNORE INTO", "INSERT INTO", 1) + " ON CONFLICT DO NOTHING"
+        statement = "INSERT INTO" + statement.removeprefix("INSERT OR IGNORE INTO") + " ON CONFLICT DO NOTHING"
     target = TARGET.match(statement)
     if target:
         statement = SELF_INCREMENT.sub(rf"SET \1 = {target.group(1)}.\1 + excluded.\1", statement)
