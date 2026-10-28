@@ -485,6 +485,14 @@ login. Each step that empties the list names its reason, and the launch waits wi
 Among the hives left, placement picks the lowest `prefer` rank for the role, then the most room, then a lasting
 hive over an ephemeral one, then the hive id.
 
+`agentihooks swarm <id> set placement-mode=round-robin placement-nodes=N` switches a swarm's worker launches from
+this default, `anton-first`, to round robin for load runs: placement keeps only the first `N` live hives by id
+that list the swarm's repo, local or cloud (`placement-nodes=0`, the default, keeps every such hive), ignores
+`prefer`, and gives each agent to the kept hive running the fewest agents, counting launches already placed in the
+same tick. When every kept hive is full the launch waits rather than use another hive. The UI roles, `master`, `qa`
+and `frontend`, and tasks pinned to a hive or to the workstation keep `anton-first`. `placement-mode=anton-first`
+switches back on the next tick.
+
 `eng`, `ci`, `plan` and `dispatch` prefer headless hives, and `master`, `qa` and `frontend` prefer UI hives.
 Placement tries the preferred kind first and takes the other kind only when no preferred hive taking the role has
 room or none is live.
@@ -790,6 +798,17 @@ the live one or else the one started last, is a worker on that hive. Masters are
 When the controller publishes swarm status, each task with a work folder takes its lines from the hive that runs,
 or last ran, its latest execution. A task whose latest execution ran on the controller's own machine is read from
 the local folder. These lines are what the ledger page shows in the task's Contract and proof fold.
+
+### Work folder files on any host
+
+On the same heartbeat each hive writes the files of those folders to `<root>:hive:<hive id>:workspaces:files`,
+expiring after a day so a hive that died still hands its last copy over. It holds the last 65,536 characters of
+`progress.md` and `proof.md` and up to 32 other plain UTF-8 files directly in the folder of at most 65,536 bytes
+each, by name; steering, subfolders, symbolic links, hidden names and binary files stay behind. On each status publish the
+controller writes each task's copy, from the hive running its latest execution, into its own folder. A launch
+carries the controller's folder to the next hive, added files included, and a file the hive already holds is replaced
+unless it already contains what was sent, so a successor on any host reads what its
+predecessor wrote.
 
 ### Resume and recovery prompts
 
