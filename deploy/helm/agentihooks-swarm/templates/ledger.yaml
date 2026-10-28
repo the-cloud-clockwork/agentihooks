@@ -2,8 +2,32 @@
 {{- $fullname := include "swarm.fullname" . }}
 {{- $host := printf "%s-ledger" $fullname }}
 {{- $port := .Values.ledger.port }}
-{{- if ne (int .Values.ledger.replicas) 1 }}
-{{- fail "ledger.replicas must be 1: the ledger folder has one active writer, and a second replica would be refused at startup" }}
+{{- $replicas := int .Values.ledger.replicas }}
+{{- $secretNames := list }}
+{{- range .Values.ledger.secretEnv }}
+{{- $secretNames = append $secretNames .name }}
+{{- end }}
+{{- $shared := or (not (empty (get (.Values.ledger.env | default dict) "AGENTIHOOKS_SWARM_DATABASE_URL"))) (has "AGENTIHOOKS_SWARM_DATABASE_URL" $secretNames) }}
+{{- if lt $replicas 1 }}
+{{- fail "ledger.replicas must be at least 1" }}
+{{- end }}
+{{- if and (gt $replicas 1) (not $shared) }}
+{{- fail "ledger.replicas above 1 needs the shared database: set AGENTIHOOKS_SWARM_DATABASE_URL in ledger.secretEnv, since a ledger folder has one active writer" }}
+{{- end }}
+{{- if gt $replicas 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $host }}
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ledger
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "ledger") | nindent 6 }}
+---
 {{- end }}
 apiVersion: v1
 kind: Service
@@ -33,7 +57,10 @@ metadata:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: ledger
 spec:
-  replicas: {{ .Values.ledger.replicas }}
+  replicas: {{ $replicas }}
+  {{- if gt $replicas 1 }}
+  minReadySeconds: 5
+  {{- end }}
   serviceName: {{ $host }}
   podManagementPolicy: OrderedReady
   updateStrategy:
@@ -48,7 +75,7 @@ spec:
         app.kubernetes.io/component: ledger
     spec:
       {{- include "swarm.podSecurity" . | nindent 6 }}
-      terminationGracePeriodSeconds: 10
+      terminationGracePeriodSeconds: {{ ternary 20 10 (gt $replicas 1) }}
       {{- with .Values.ledger.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
@@ -90,6 +117,12 @@ spec:
             {{- include "swarm.secretKeyEnv" .Values.ledger.secretEnv | nindent 12 }}
             {{- include "swarm.extraEnv" .Values.ledger.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
+          {{- if gt $replicas 1 }}
+          lifecycle:
+            preStop:
+              exec:
+                command: [python, -c, "import time; time.sleep(8)"]
+          {{- end }}
           readinessProbe:
             {{- include "swarm.healthz" . | nindent 12 }}
             periodSeconds: 5
