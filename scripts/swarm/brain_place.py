@@ -88,7 +88,7 @@ def place(environ: Mapping[str, str], bao: openbao_kv.OpenBao, binding_text: str
         print(f"brain-place: {exc}; nothing was written", file=out)
         return 1
     binding_file, env_file = brain_binding.path(environ), _home(environ) / ENV_FILE
-    _write(binding_file, binding_text)
+    _write(binding_file, json.dumps(doc, indent=2, sort_keys=True) + "\n")
     _write(env_file, "".join(f"{name}={shlex.quote(value)}\n" for name, value in values.items()))
     for written in (binding_file, env_file):
         print(f"{written.name} {written.stat().st_mode & 0o777:04o}", file=out)
@@ -104,7 +104,7 @@ def main(
     out: TextIO | None = None,
     opener: Callable | None = None,
 ) -> int:
-    parser = argparse.ArgumentParser(prog="agentihooks swarm brain-place")
+    parser = argparse.ArgumentParser(prog="agentihooks swarm brain-place", description=__doc__)
     parser.add_argument("--binding", type=Path, help="binding JSON file instead of the swarm-brain-binding ConfigMap")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ
