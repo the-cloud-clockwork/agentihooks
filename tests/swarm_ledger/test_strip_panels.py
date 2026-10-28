@@ -122,9 +122,7 @@ def test_a_window_resize_keeps_the_strip_scroll_and_the_focused_icon(tab):
         return
     tab.set_viewport_size({"width": 1280, "height": 320})
     strip = tab.locator("#icon-strip")
-    tab.wait_for_function(
-        "() => { const el = document.getElementById('icon-strip'); return el.scrollHeight > el.clientHeight; }"
-    )
+    assert strip.evaluate("el => el.scrollHeight > el.clientHeight")
     tab.locator("#bell").click()
     strip.evaluate("el => { el.scrollTop = 40; }")
     tab.evaluate("() => window.dispatchEvent(new Event('resize'))")
