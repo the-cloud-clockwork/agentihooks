@@ -601,8 +601,8 @@ def _paged_out(paged: Mapping, key: str, record: dict) -> bool:
     from hooks.observability.transcript import mask_value
 
     message = _message_id(record)
-    return _paged_digest(key) in paged.get("keys", ()) or (
-        message is not None and _paged_digest(mask_value(message)) in paged.get("messages", ())
+    return _paged_digest(key) in paged["keys"] or (
+        message is not None and _paged_digest(mask_value(message)) in paged["messages"]
     )
 
 
