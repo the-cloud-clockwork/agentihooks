@@ -60,8 +60,16 @@ jobs:
         run: |
           for attempt in 1 2 3 4 5; do
             rm -f RELEASES.md
-            if git fetch origin changelog; then
-              git switch --detach --discard-changes FETCH_HEAD
+            found=0
+            git ls-remote --exit-code --heads origin changelog >/dev/null || found=$?
+            if [[ "$found" == 0 ]]; then
+              if ! git fetch origin changelog || ! git switch --detach --discard-changes FETCH_HEAD; then
+                found=1
+              fi
+            fi
+            if [[ "$found" != 0 && "$found" != 2 ]]; then
+              sleep $((attempt * 5))
+              continue
             fi
             touch RELEASES.md
             for section in "$RUNNER_TEMP"/sections/*.md; do
