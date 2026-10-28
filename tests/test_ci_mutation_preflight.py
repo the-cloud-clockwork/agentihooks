@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from string import Template
 
+import pytest
 import yaml
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -640,9 +641,10 @@ def test_touched_tests_keep_one_xdist_group_on_one_worker(tmp_path):
     assert len(set(workers)) == 1, (workers, output)
 
 
-def test_protected_mutation_planner_installs_with_no_branch_lock(tmp_path):
+@pytest.mark.parametrize("job", ["mutation-plan", "mutation-stats", "mutation"])
+def test_protected_mutation_jobs_install_with_no_branch_lock(tmp_path, job):
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
-    steps, names = _steps(workflow["jobs"]["mutation-plan"])
+    steps, names = _steps(workflow["jobs"][job])
     export = steps[names.index("Take the helper scripts from the workflow revision")]["run"]
     install = steps[names.index("Install dependencies")]["run"]
     trusted = tmp_path / "workflow"

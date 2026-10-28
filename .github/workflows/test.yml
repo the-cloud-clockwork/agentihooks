@@ -3671,7 +3671,7 @@ jobs:
         run: |
           git fetch --no-tags origin "$GITHUB_SHA"
           mkdir -p "$RUNNER_TEMP/workflow"
-          git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"
+          git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
 
       - name: Take the local actions from the workflow revision
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -3681,7 +3681,10 @@ jobs:
 
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: |
+          locked=.
+          [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
+          bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$locked/.github/test-requirements.lock" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
@@ -3902,7 +3905,7 @@ jobs:
         run: |
           git fetch --no-tags origin "$GITHUB_SHA"
           mkdir -p "$RUNNER_TEMP/workflow"
-          git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"
+          git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
 
       - name: Take the local actions from the workflow revision
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -3912,7 +3915,10 @@ jobs:
 
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: |
+          locked=.
+          [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
+          bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$locked/.github/test-requirements.lock" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
