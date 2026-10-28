@@ -58,16 +58,16 @@ def test_resource_refusal_spills_to_the_next_ranked_hive(setup, monkeypatch, in_
     captured = capsys.readouterr()
     assert captured.out == ""
     logged = json.loads(captured.err)
+    reason = logged.pop("reason")
     assert logged == {
         "event": "hive_admission_refused",
         "slug": "fixture",
         "task": "task",
         "name": request.name,
         "hive": "remote",
-        "reason": logged["reason"],
     }
-    assert logged["reason"].startswith("no hive for eng has room: remote ")
-    assert logged["reason"].split(": ", 2)[2]
+    assert reason.startswith("no hive for eng has room: remote ")
+    assert reason.split(": ", 2)[2]
 
 
 def test_spill_does_not_bypass_hive_role_constraints(setup, monkeypatch):  # noqa: F811
