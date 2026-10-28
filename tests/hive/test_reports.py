@@ -1075,6 +1075,8 @@ LAUNCHED = 5_000
         (True, 0, 0, False),
         (True, 0, -1, False),
         (False, -1, 1, True),
+        (None, 0, None, False),
+        (None, 0, 1, True),
     ],
 )
 def test_a_paneless_hive_worker_whose_process_or_pod_is_gone_is_retired_and_its_seat_freed(
@@ -1088,7 +1090,7 @@ def test_a_paneless_hive_worker_whose_process_or_pod_is_gone_is_retired_and_its_
     _publish(remote, state="unknown")
     report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
     report.update(
-        names=[agent.name] if listed else ["someone-else"],
+        names={True: [agent.name], False: ["someone-else"], None: []}[listed],
         pane_ids=[],
         process_namespace="replacement",
         observed_at=LAUNCHED + remote.reports.STARTUP_MS + observed_after,

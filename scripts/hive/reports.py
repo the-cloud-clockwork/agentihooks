@@ -61,7 +61,7 @@ class Reports:
         if report.get("started_at", 0) > launched:
             return True
         names = report.get("names")
-        if isinstance(names, list) and agent.name not in names and observed - launched >= STARTUP_MS:
+        if isinstance(names, list) and names and agent.name not in names and observed - launched >= STARTUP_MS:
             return True
         panes = report.get("pane_ids")
         if not isinstance(panes, list):
