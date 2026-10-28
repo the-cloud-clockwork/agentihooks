@@ -659,6 +659,17 @@ def test_master_temporary_presence_uses_the_session_binding_and_supplied_environ
     assert not operator_mode.present("pane", {**env, **SWARM}, now=101)
 
 
+def test_master_presence_notice_uses_supplied_clock_after_automated_prompt(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 100)
+    operator_mode.observe("pane", "Explain the work", True, now=100)
+    assert operator_mode.present("pane", SWARM, now=279.99)
+    assert (
+        operator_mode.notice({"session_id": "pane", "prompt": delivery.marked("continue")}, False, now=280) == REMINDER
+    )
+
+
 CHANNEL = '<channel source="inbox" item_id="ITEM" sender="SENDER" sent_at_ms="MILLIS">Automated notice</channel>'
 
 
