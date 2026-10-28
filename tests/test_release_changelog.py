@@ -110,6 +110,12 @@ def test_write_entry_fails_after_two_short_answers(capsys):
     assert capsys.readouterr().err == "#7 attempt 1: 5 words, need 20 to 100\n#7 attempt 2: 5 words, need 20 to 100\n"
 
 
+def test_write_entry_raises_the_last_failure():
+    answers = iter([_words(5), "# heading " + _words(25)])
+    with pytest.raises(rc.MarkupError):
+        rc.write_entry(_change(), lambda c: next(answers))
+
+
 def test_previous_tag_orders_by_version_and_ignores_prereleases():
     tags = ["v2.17.9", "v2.17.10", "v2.17.100", "v2.17.11rc1", "latest", "v2.16.200"]
     assert rc.previous_tag("v2.17.100", tags) == "v2.17.10"

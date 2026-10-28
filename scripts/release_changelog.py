@@ -39,7 +39,7 @@ NUMBER = re.compile(r"\(#(\d+)\)$")
 STABLE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
 FIELD = "\x1f"
 LOG_FORMAT = "--format=%H%x1f%cs%x1f%an%x1f%s"
-MARKUP = re.compile(r"^#|<(?=/?[A-Za-z!])|\]\(|```")
+MARKUP = re.compile(r"(?:^#)|<(?=/?[A-Za-z!])|\]\(|```")
 CONTENT_TYPE = "Content-Type"
 AUTHORIZATION = "Authorization"
 JSON = "application/json"
