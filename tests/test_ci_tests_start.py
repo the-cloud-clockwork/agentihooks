@@ -43,7 +43,14 @@ def _verify(monkeypatch, runs, jobs):
 )
 def test_rejects_tests_without_startup_evidence(monkeypatch, runs, jobs, message):
     result, _ = _verify(monkeypatch, runs, jobs)
-    assert message in result
+    assert (
+        result
+        == {
+            "missing": "Tests run is missing for this head.",
+            "failure": "Tests run 11 ended with failure.",
+            "no jobs": "Tests run 11 has no jobs.",
+        }[message]
+    )
 
 
 @pytest.mark.parametrize("status,conclusion", [("in_progress", None), ("completed", "success")])
@@ -137,3 +144,29 @@ def test_api_uses_checked_bounded_json_request(monkeypatch):
     assert calls == [
         ((["gh", "api", "endpoint"],), {"check": True, "capture_output": True, "text": True, "timeout": 30})
     ]
+
+
+def test_default_registration_wait_is_bounded(monkeypatch):
+    from scripts import ci_tests_start
+
+    calls = []
+    sleeps = []
+
+    def api(*args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args[0], 0, '{"workflow_runs": []}', "")
+
+    monkeypatch.setattr(ci_tests_start.subprocess, "run", api)
+    monkeypatch.setattr(ci_tests_start.time, "sleep", sleeps.append)
+    assert ci_tests_start.verify("owner/repo", "head") == "Tests run is missing for this head."
+    assert len(calls) == 12
+    assert sleeps == [5] * 11
+
+
+@pytest.mark.parametrize("arguments", [[], ["--repository", "owner/repo"], ["--head", "head"]])
+def test_command_requires_repository_and_head(arguments):
+    from scripts import ci_tests_start
+
+    with pytest.raises(SystemExit) as stopped:
+        ci_tests_start.main(arguments)
+    assert stopped.value.code == 2
