@@ -81,7 +81,7 @@ def test_files_only_executed_by_changed_tests_do_not_break_the_carried_coverage_
 
         assert reused_coverage.keep(source, out, {"tests/test_a.py::kept"}, {}) == 1
         merged = Coverage(data_file=str(tmp_path / f"merged-{arcs}.coverage"), config_file=False)
-        merged.combine(data_paths=[str(out.parent)], keep=True)
+        merged.combine(data_paths=[str(out)], keep=True)
         merged.xml_report(outfile=str(tmp_path / f"coverage-{arcs}.xml"))
         assert merged.get_data().measured_files() == {kept}
         assert merged.get_data().measured_contexts() == {"tests/test_a.py::kept|run"}
