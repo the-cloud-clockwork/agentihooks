@@ -25,7 +25,7 @@ def isolated(tmp_path, monkeypatch):
 
 @pytest.fixture
 def ah(tmp_path, monkeypatch):
-    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", tmp_path / "ah")
     return tmp_path / "ah"
 
 

@@ -347,7 +347,7 @@ def test_worker_smoke_runs_independent_proofs_in_parallel_and_compares_every_inv
     run = next(step for step in image["steps"] if "smoke.sh" in step.get("run", ""))
     assert run["env"]["WORKER_PROOF"] == "${{ matrix.proof }}"
     assert run["run"].endswith(' "$WORKER_PROOF"')
-    upload = next(step for step in image["steps"] if step.get("uses", "").startswith("actions/upload-artifact@"))
+    upload = next(step for step in image["steps"] if step.get("uses") == "./.github/actions/retry-upload")
     assert upload["with"]["name"] == "swarm-worker-image-${{ matrix.proof }}"
     compare = workflow["jobs"]["worker-image-compare"]
     assert compare["needs"] == ["worker-image"]

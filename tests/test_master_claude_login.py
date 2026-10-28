@@ -25,7 +25,7 @@ def no_managed_settings(tmp_path, monkeypatch):
 
 @pytest.fixture
 def ah(tmp_path, monkeypatch):
-    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", tmp_path / "ah")
     return tmp_path / "ah"
 
 
@@ -848,7 +848,7 @@ def test_slot_zero_falls_back_to_slot_one(ah, monkeypatch):
 
 def test_use_creates_a_nested_missing_home(tmp_path, monkeypatch):
     nested = tmp_path / "a" / "b" / "ah"
-    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(nested))
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", nested)
     monkeypatch.delenv(login.SLOT_ENV, raising=False)
     login.use(2)
     assert (nested / login.SLOT_FILE).read_text() == "2\n"

@@ -1463,6 +1463,26 @@ def test_a_resumed_or_served_session_is_named_without_typing(transport, resume, 
     assert init_agent._served(SimpleNamespace(codex_transport=transport, resume=resume)) is served
 
 
+@pytest.mark.parametrize(
+    ("agent", "transport", "push"),
+    [("codex", init_agent.APP_SERVER, "1"), ("codex", "", None), ("claude", init_agent.APP_SERVER, None)],
+)
+def test_only_a_codex_app_server_launch_renders_its_profile_home_with_push(monkeypatch, agent, transport, push):
+    from types import SimpleNamespace
+
+    from scripts import select_profile
+
+    seen = {}
+    monkeypatch.setattr(select_profile, "prepare", lambda *a: seen.update(a[5]) or ({}, a[4]))
+    args = SimpleNamespace(
+        handoff="", resume="", profile="engineer", overlay=[], bundle_revision="r1", codex_transport=transport
+    )
+    environ = {select_profile.RECORDED_HOME: "/old"}
+    init_agent._prepare_profile(args, agent, [], environ)
+    assert seen.get(select_profile.PUSH) == push
+    assert select_profile.PUSH not in environ
+
+
 @pytest.mark.parametrize(("held", "argv"), [("1", "<a b>\n"), ("", "<a b><Start the task.>\n")])
 def test_the_codex_launcher_line_runs_its_command_without_the_prompt_only_when_held(tmp_path, held, argv):
     spec = init_agent.AgentSpec(agent="codex")
