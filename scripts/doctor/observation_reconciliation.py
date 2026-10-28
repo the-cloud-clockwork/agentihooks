@@ -49,8 +49,11 @@ def _remote_pass(get, trace_id, cancelled):
         previous_count = len(ids)
         ids.update(row["id"] for row in body["data"])
         total = body["meta"]["totalItems"]
-        if len(ids) != previous_count + len(body["data"]) or (len(body["data"]) < PAGE and page * PAGE < total):
+        if len(ids) != previous_count + len(body["data"]):
             return None
+        if len(body["data"]) < PAGE and page * PAGE < total:
+            following = get("observations", {"traceId": trace_id, "limit": PAGE, "page": page + 1})["data"]
+            return None if following else ids
         if len(body["data"]) < PAGE or page * PAGE >= total:
             return ids
     raise ValueError("observation identity page budget exhausted")
