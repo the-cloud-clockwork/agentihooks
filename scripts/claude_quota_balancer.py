@@ -36,6 +36,9 @@ CACHE_TTL_SECONDS = 60
 OPEN = "OPEN"
 NOT_APPLICABLE = "n/a"
 MASTERS_ONLY = "MASTERS"
+REVOKED = "revoked"
+REVOKED_ERROR = "the provider revoked or rejects this token"
+AUTH_REJECTED = frozenset({401})
 
 
 @dataclass(frozen=True)
@@ -440,6 +443,8 @@ def probe_credential(
         return _error_result(credential.account, f"probe timed out after {timeout:g}s")
 
     elapsed_ms = round((time.monotonic() - started) * 1000)
+    if auth_rejected(completed.stdout):
+        return revoked_result(credential.account, elapsed_ms)
     if completed.returncode != 0:
         return _error_result(credential.account, f"claude exited {completed.returncode}", elapsed_ms)
     result = parse_probe(credential.account, completed.stdout, elapsed_ms, include_fable)
@@ -666,6 +671,30 @@ def _error_result(account: str, error: str, latency_ms: int | None = None) -> Pr
     )
 
 
+def revoked_result(account: str, latency_ms: int | None) -> ProbeResult:
+    return ProbeResult(
+        account=account,
+        provider_status=REVOKED,
+        state="REVOKED",
+        margin=0.0,
+        five_hour=QuotaWindow(),
+        seven_day=QuotaWindow(),
+        latency_ms=latency_ms,
+        error=REVOKED_ERROR,
+    )
+
+
+def auth_rejected(output: str) -> bool:
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict) and event.get("api_error_status") in AUTH_REJECTED:
+            return True
+    return False
+
+
 def _metric(value: float | None) -> float:
     return -1.0 if value is None else value
 
@@ -674,7 +703,7 @@ def account_cap(
     result: ProbeResult, now: float | None = None, include_fable: bool = False, ceiling: int | None = None
 ) -> int | None:
     """Live sessions the account may hold under the session bands; None without a full reading."""
-    if result.provider_status == "rejected":
+    if result.provider_status in ("rejected", REVOKED):
         return 0
     timestamp = time.time() if now is None else now
     weeks = [result.seven_day, *([result.fable] if include_fable else [])]
