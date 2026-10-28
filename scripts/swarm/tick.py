@@ -291,8 +291,8 @@ def tick(slug, store, ledger, runtime, now_ms):
 
 
 def observe_bindings(store, slug, runtime):
-    unlaunched = {a.name for a in store.agents(slug) if a.state in ("starting", "launching")}
-    transfers.observe(store, slug, runtime.live_names() - unlaunched)
+    unlaunched = frozenset(a.name for a in store.agents(slug) if a.state in ("starting", "launching"))
+    transfers.observe(store, slug, runtime.live_names(), unlaunched)
 
 
 def skip_refused(function, *args):
