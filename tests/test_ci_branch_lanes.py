@@ -240,7 +240,7 @@ def test_unchanged_ancestor_jobs_stay_trusted_without_admitting_new_jobs(tmp_pat
         proof={"runs-on": "x", "concurrency": LANED},
     )
     if added:
-        branch["jobs"]["escape"] = {"runs-on": "x"}
+        branch["jobs"]["z_escape"] = {"runs-on": "x"}
     workflow = repo / lanes.WORKFLOWS / "replay.yml"
     workflow.write_text(yaml.safe_dump(branch))
     lanes.git("add", ".")
@@ -259,14 +259,14 @@ def test_unchanged_ancestor_jobs_stay_trusted_without_admitting_new_jobs(tmp_pat
         lanes.git("fetch", "--quiet", "--depth", "1", "origin", head)
         repo = clone
     expected = (
-        {f"{lanes.WORKFLOWS}/replay.yml": ["job escape has no shared hosted lane concurrency group"]} if added else {}
+        {f"{lanes.WORKFLOWS}/replay.yml": ["job z_escape has no shared hosted lane concurrency group"]} if added else {}
     )
     assert lanes.refused(head, repo) == expected
 
 
 @pytest.mark.parametrize("fault", ["none", "steps", "events", "name", "concurrency", "copy"])
 def test_ancestor_trust_requires_the_same_job_and_execution_context(fault):
-    ancestor = _workflow(promote={"runs-on": "x", "steps": [{"run": "echo inherited"}]})
+    ancestor = _workflow({"group": "trusted"}, promote={"runs-on": "x", "steps": [{"run": "echo inherited"}]})
     workflow = yaml.safe_load(yaml.safe_dump(ancestor))
     current = _workflow(promote={"runs-on": "x", "concurrency": LANED})
     current["on"]["push"] = None
@@ -286,6 +286,38 @@ def test_ancestor_trust_requires_the_same_job_and_execution_context(fault):
         else [f"job {'copy' if fault == 'copy' else 'promote'} has no shared hosted lane concurrency group"]
     )
     assert lanes.grade(yaml.safe_dump(workflow), yaml.safe_dump(current), yaml.safe_dump(ancestor)) == expected
+
+
+@pytest.mark.parametrize("shallow", [False, True])
+def test_trusted_ancestor_uses_the_requested_checkout_outside_the_current_directory(tmp_path, monkeypatch, shallow):
+    _, repo, head = _repo(tmp_path, {})
+    lanes.git("-C", str(repo), "branch", "-m", "dev")
+    if shallow:
+        clone = tmp_path / "clone"
+        subprocess.run(["git", "clone", "--quiet", "--depth", "1", repo.as_uri(), str(clone)], check=True)
+        repo = clone
+    monkeypatch.chdir(tmp_path)
+    assert lanes.trusted_ancestor(head, repo) == head
+
+
+def test_shallow_ancestor_fetch_preserves_the_requested_refs_and_excludes_tags(tmp_path, monkeypatch):
+    (tmp_path / ".git").mkdir()
+    commands = []
+
+    def git(*args):
+        commands.append(args)
+        if "rev-parse" in args:
+            return "true\n"
+        if "merge-base" in args:
+            return "ancestor\n"
+        return ""
+
+    monkeypatch.setattr(lanes, "git", git)
+    assert lanes.trusted_ancestor("branch-head", tmp_path) == "ancestor"
+    fetch = next(command for command in commands if "fetch" in command)
+    assert fetch[:2] == ("-C", str(tmp_path))
+    assert "--no-tags" in fetch
+    assert fetch[-3:] == ("origin", "dev", "branch-head")
 
 
 @pytest.mark.parametrize("called_block, unsafe", [(CALLED, True), (LANED, False)])
