@@ -294,3 +294,25 @@ def test_a_local_agent_keeps_the_first_event_rule():
     late = {**agent, "started_at": 1_000_000}
     [found] = spawns.silent_starts([late], {}, 1_000_000 + 2 * spawns.TICK_MS)
     assert found.measure == 2
+
+
+def test_live_worker_hives_without_a_fresh_headroom_reading_are_flagged():
+    from scripts.hive import registry
+
+    now = 1_000_000
+    beat = now - 5_000
+    hives = [
+        {"id": "hh4", "name": "swarm-hive-002", "ui": "no", "heartbeat_at": beat, "version": "v1"},
+        {"id": "hh5", "name": "swarm-hive-003", "ui": "no", "heartbeat_at": beat, "version": "v1"},
+        {"id": "hh6", "name": "swarm-hive-004", "ui": "no", "heartbeat_at": beat},
+        {"id": "ws", "name": "swarm-master", "ui": "yes", "heartbeat_at": beat, "version": "v1"},
+        {"id": "old", "name": "gone", "ui": "no", "heartbeat_at": now - registry.LIVE_MS - 1, "version": "v1"},
+    ]
+    readings = {"hh5": {"measured_at": now}}
+    found, unversioned = spawns.missing_headroom(hives, readings, now)
+    assert found.id == "missing-headroom/hh4"
+    assert found.measure == 1
+    assert found.summary == "live hive has no fresh headroom reading, so the tick refuses its launches"
+    assert found.threshold == "a live worker hive with no fresh headroom reading"
+    assert found.evidence == ("hive swarm-hive-002", f"heartbeat at {beat}", "version v1")
+    assert unversioned.evidence == ("hive swarm-hive-004", f"heartbeat at {beat}", "version ")
