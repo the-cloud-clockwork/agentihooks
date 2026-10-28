@@ -59,6 +59,8 @@ def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path,
     leftover = threading.Thread(target=metrics.measured(in_flight), args=(leaked,))
     leftover.start()
     started.wait(10)
+    record, own = metrics.record, threading.get_ident()
+    monkeypatch.setattr(metrics, "record", lambda *row: record(*row) if threading.get_ident() == own else None)
     clock = Clock()
     monkeypatch.setattr(metrics, "time", clock)
     repo = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3", domain=server.core)
