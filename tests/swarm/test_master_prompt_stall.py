@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -83,7 +84,7 @@ def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(st
     operator_says(store, START)
     assert run(store, runtime, START) == []
     assert run(store, runtime, START + 9 * MINUTE) == []
-    held = master_prompt_stall.held_on(pane, INTERRUPT, "claude")
+    held = master_prompt_stall.held_on(pane) or master_prompt_stall.INTERRUPTED
     reason = master_prompt_stall.REASON.format(prompt=held, minutes=10)
     assert run(store, runtime, START + 10 * MINUTE) == [
         f"asked {agent.name} for a handoff before retiring it: {reason}"
@@ -122,12 +123,25 @@ def test_recycle_comes_at_fifteen_minutes_whatever_the_handoff_wait(store, monke
 
 
 def test_held_on_names_the_prompt():
-    assert master_prompt_stall.held_on(QUESTION, None, "claude") == "the prompt Which task first?"
-    assert master_prompt_stall.held_on(PaneObservation("waiting"), None, "codex") == "the prompt waiting on input"
-    assert master_prompt_stall.held_on(INTERRUPTED, INTERRUPT, "claude") == "an interrupted prompt"
-    assert master_prompt_stall.held_on(INTERRUPTED, INTERRUPT, "codex") == ""
-    assert master_prompt_stall.held_on(INTERRUPTED, "", "claude") == ""
-    assert master_prompt_stall.held_on(PaneObservation("working"), INTERRUPT, "claude") == ""
+    assert master_prompt_stall.held_on(QUESTION) == "the prompt Which task first?"
+    assert master_prompt_stall.held_on(PaneObservation("waiting")) == "the prompt waiting on input"
+    assert master_prompt_stall.held_on(INTERRUPTED) == ""
+    assert master_prompt_stall.INTERRUPTED == "an interrupted prompt"
+
+
+def test_an_interrupt_on_a_codex_pane_is_not_held(store):
+    agent, runtime = master(store, INTERRUPTED)
+    store.put_agent("sw", replace(agent, harness="codex"))
+    operator_says(store, START)
+    run(store, runtime, START)
+    assert run(store, runtime, START + 60 * MINUTE) == []
+
+
+def test_a_working_pane_with_an_interrupt_in_its_tail_is_not_held(store):
+    agent, runtime = master(store, PaneObservation("working"))
+    operator_says(store, START)
+    run(store, runtime, START)
+    assert run(store, runtime, START + 60 * MINUTE) == []
 
 
 @pytest.mark.parametrize("tail", ["● Back to work\n❯ \n", OSError("pane gone")], ids=["answered", "unreadable"])
@@ -207,7 +221,7 @@ def test_log_only_by_default_writes_would_be_rows_once_and_acts_on_nothing(store
     assert catalog.defaults()["reset"] == "observe"
     operator_says(store, START)
     run(store, runtime, START)
-    held = master_prompt_stall.held_on(QUESTION, None, "claude")
+    held = master_prompt_stall.held_on(QUESTION)
     assert run(store, runtime, START + 10 * MINUTE) == [
         f"log only: would ask {agent.name} for a handoff, held on {held} with operator items waiting for 10 minutes"
     ]

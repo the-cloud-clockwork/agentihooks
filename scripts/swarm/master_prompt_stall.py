@@ -18,6 +18,7 @@ WAKE_MINUTES = 10
 RESET_MINUTES = 15
 OPERATOR = "operator"
 HELD = "held on "
+INTERRUPTED = "an interrupted prompt"
 REASON = HELD + "{prompt} with operator items waiting for {minutes} minutes"
 RESUMED = "the master left the prompt"
 RECYCLED = "the swarm recycled the master after fifteen minutes on the prompt"
@@ -43,23 +44,21 @@ Answer the open operator items in the master inbox first, then re-read the ledge
 """
 
 
-def held_on(observed, tail: str | None, harness: str) -> str:
+def held_on(observed) -> str:
     if observed.state == "waiting":
         return f"the prompt {observed.prompt_title or 'waiting on input'}"
-    if observed.state == "idle" and interrupted_prompt(harness, tail):
-        return "an interrupted prompt"
     return ""
 
 
 def _prompt(runtime, master):
     observed = runtime.observe(master)
     if observed.state != "idle":
-        return held_on(observed, None, master.harness)
+        return held_on(observed)
     try:
         tail = runtime.pane_tail(master.pane_id, TAIL_LINES)
     except Exception:
         return ""
-    return held_on(observed, tail, master.harness)
+    return INTERRUPTED if interrupted_prompt(master.harness, tail) else ""
 
 
 def _operator_waiting(store, slug, master):
