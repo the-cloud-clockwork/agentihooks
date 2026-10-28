@@ -553,6 +553,20 @@ def test_an_added_seat_that_took_a_new_phase_takes_only_what_its_share_still_lac
     assert owners == {"p1": LEAD, "p2": LEAD, "p3": SECOND, "p4": third}
 
 
+def test_an_added_seat_takes_no_phase_a_retirement_handed_to_the_front_door():
+    third = f"master-3@{SLUG}"
+    previous = {"p1": LEAD, "p2": LEAD, "p3": LEAD, "p4": SECOND}
+    owners = masters.assign(PHASES, [LEAD, SECOND, third], previous, [LEAD, SECOND], {"p3"})
+    assert owners == {"p1": LEAD, "p2": third, "p3": LEAD, "p4": SECOND}
+
+
+def test_an_added_seat_takes_from_a_less_busy_seat_when_the_busiest_holds_only_handed_phases():
+    third = f"master-3@{SLUG}"
+    previous = {"p1": LEAD, "p2": LEAD, "p3": LEAD, "p4": SECOND}
+    owners = masters.assign(PHASES, [LEAD, SECOND, third], previous, [LEAD, SECOND], {"p1", "p2", "p3"})
+    assert owners == {"p1": LEAD, "p2": LEAD, "p3": LEAD, "p4": third}
+
+
 def test_a_master_seat_owns_a_hive_while_operator_writes_on_it_reach_the_front_door(swarm):
     store, inbox = swarm
     seated(store, FIRST, OTHER)

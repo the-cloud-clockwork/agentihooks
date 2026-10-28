@@ -571,3 +571,45 @@ def test_a_message_check_reads_the_ledger_of_the_swarm_it_names(monkeypatch):
     monkeypatch.setattr(ledger_client, "LedgerClient", Client)
 
     assert master_fence._ledger_state(SLUG) == {"slug": SLUG}
+
+
+def test_a_refilled_seat_leaves_the_front_door_the_claimants_its_retirement_handed_over(world):
+    table = masters.MasterSeats(world.redis)
+    assert table.owners(SLUG, world.doc())["p2"] == SECOND
+    world.down(SECOND_NAME)
+    table.retire(SLUG, SECOND, 1)
+    assert table.owners(SLUG, world.doc()) == {"p1": LEAD, "p2": LEAD}
+
+    table.keep_retired(SLUG, 2, 2)
+    world.seat(world.store.names.next(SLUG, "master"), SECOND)
+
+    assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD, SECOND]
+    assert table.owners(SLUG, world.doc()) == {"p1": LEAD, "p2": LEAD}
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+    assert world.refusals() == 0
+
+
+def test_a_retirement_tells_the_front_door_each_phase_it_takes(world):
+    table = masters.MasterSeats(world.redis)
+    table.owners(SLUG, world.doc())
+    world.down(SECOND_NAME)
+
+    table.retire(SLUG, SECOND, 1)
+
+    texts = [item.text for item in inbox(world).inbox(LEAD)]
+    assert texts == [f"Master phase owners of swarm {SLUG} changed: p2 moved from {SECOND} to {LEAD}."]
+    assert inbox(world).inbox(SECOND) == []
+
+
+def test_a_rebalance_tells_both_masters_each_phase_that_changes_owner(world):
+    table = masters.MasterSeats(world.redis)
+    world.redis.hset(
+        table.key(SLUG), mapping={"owners": json.dumps({"p1": LEAD, "p2": LEAD}), "seats": json.dumps([LEAD])}
+    )
+
+    assert table.owners(SLUG, world.doc()) == {"p1": LEAD, "p2": SECOND}
+    table.owners(SLUG, world.doc())
+
+    text = f"Master phase owners of swarm {SLUG} changed: p2 moved from {LEAD} to {SECOND}."
+    assert [item.text for item in inbox(world).inbox(LEAD)] == [text]
+    assert [item.text for item in inbox(world).inbox(SECOND)] == [text]
