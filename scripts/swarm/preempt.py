@@ -33,9 +33,14 @@ class Seats:
     ended: Callable
     owner: Callable
     ready: Callable
+    placement: Callable
 
     def holds(self, agent) -> bool:
         return not self.ended(agent, self.rows) and self.owner(agent, self.rows.get(agent.task, {}))
+
+
+def _places(lane: str, task: dict) -> str:
+    return ""
 
 
 def run(slug: str, config, store, doc: dict, now_ms: int, seats: Seats) -> list[str]:
@@ -47,7 +52,7 @@ def run(slug: str, config, store, doc: dict, now_ms: int, seats: Seats) -> list[
         holders = [a for a in agents if a.lane == lane and seats.holds(a)]
         if cap and len(holders) >= cap:
             full[lane] = (seats.ready(slug, store, seats.rows, doc, lane, dispatched), holders)
-    return step(slug, store, seats.rows, doc, full, now_ms)
+    return step(slug, store, seats.rows, doc, full, now_ms, seats.placement)
 
 
 def yielding(store, slug: str, doc: dict, dispatched):
@@ -73,8 +78,9 @@ def preferred(task: dict, doc: dict, graph: dict) -> bool:
     return any(r["verb"] == "focus" and freeze.covers(r["target"], task, chain) for r in doc.get("freezes") or [])
 
 
-def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> list[str]:
-    """full maps each lane whose every seat is busy to its claimable tasks in claim order and its live holders."""
+def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int, probe: Callable = _places) -> list[str]:
+    """full maps each lane whose every seat is busy to its claimable tasks in claim order and its live holders;
+    probe(lane, task) returns why placement refuses the task now, empty when it would place."""
     from scripts.hive import placement_waits
 
     graph, redis = hierarchy.project(doc)[0], store.redis
@@ -88,7 +94,7 @@ def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> li
             waiting.add(task["id"])
             if task["id"] not in seen or _pending(asked, task["id"], now_ms):
                 continue
-            if _refused(refused.get(task["id"]), lane, now_ms):
+            if _refused(refused.get(task["id"]), lane, now_ms) or probe(lane, task):
                 continue
             victim = _victim([a for a in holders if a.name not in asked], rows, doc, graph)
             if victim is not None:
