@@ -438,10 +438,14 @@ class SQLiteLedgerRepository:
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(path, timeout=30)
-        connection.execute("PRAGMA foreign_keys=ON")
-        if path not in self._ready:
-            self._set_up(connection, path)
-        connection.execute("PRAGMA synchronous=FULL")
+        try:
+            connection.execute("PRAGMA foreign_keys=ON")
+            if path not in self._ready:
+                self._set_up(connection, path)
+            connection.execute("PRAGMA synchronous=FULL")
+        except BaseException:
+            connection.close()
+            raise
         return path, connection
 
     def _reader(self):

@@ -487,3 +487,29 @@ def test_one_thread_reads_existence_credential_and_task_rows_through_one_connect
     readers = [ident for ident in opened if ident != threading.get_ident()]
     assert generations[0] < generations[1] == generations[2]
     assert reads == 1 and len(readers) == 1
+
+
+@pytest.mark.parametrize("read", ["connect", "reader"])
+def test_a_store_setup_failure_closes_the_connection_it_opened(tmp_path, monkeypatch, read):
+    closed = []
+
+    class Closing(sqlite3.Connection):
+        def close(self):
+            closed.append(self)
+            super().close()
+
+    connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", lambda *args, **kwargs: connect(*args, factory=Closing, **kwargs))
+    repo = store(tmp_path)
+
+    def refuse(connection, path):
+        raise sqlite3.OperationalError("disk full")
+
+    monkeypatch.setattr(repo, "_set_up", refuse)
+    with pytest.raises(sqlite3.OperationalError, match="disk full"):
+        if read == "connect":
+            with repo.connect():
+                pass
+        else:
+            repo.exists("ledger")
+    assert len(closed) == 1
