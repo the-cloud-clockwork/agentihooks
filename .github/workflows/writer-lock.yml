@@ -46,8 +46,20 @@ jobs:
           --health-cmd pg_isready
           --health-interval 2s
           --health-retries 30
+      pgvector:
+        image: pgvector/pgvector:0.8.0-pg16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: memory
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-retries 30
     env:
       LEDGER_TEST_POSTGRES_URL: postgresql://postgres@127.0.0.1:5432/ledger
+      MEMORY_TEST_POSTGRES_URL: postgresql://postgres@127.0.0.1:5433/memory
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,8 +81,8 @@ jobs:
       - name: Run the idle writer lock holder scenario
         shell: bash
         run: |
-          python -m pytest tests/swarm_ledger/test_postgres_writer_lock.py tests/swarm_ledger/test_postgres_outbox.py tests/swarm_ledger/test_postgres_writer_floor.py tests/swarm_ledger/test_postgres_repository.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/writer-lock.log"
-          grep -q ' 14 passed' "$RUNNER_TEMP/writer-lock.log" || { echo '::error::The writer lock, outbox, writer floor and repository scenarios did not run.'; exit 1; }
+          python -m pytest tests/swarm_ledger/test_postgres_writer_lock.py tests/swarm_ledger/test_postgres_outbox.py tests/swarm_ledger/test_postgres_writer_floor.py tests/swarm_ledger/test_postgres_repository.py tests/test_memory_postgres_parity.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/writer-lock.log"
+          grep -q ' 16 passed' "$RUNNER_TEMP/writer-lock.log" || { echo '::error::The writer lock, outbox, writer floor, repository and session memory parity scenarios did not run.'; exit 1; }
 
       - name: Save the passed input key
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'

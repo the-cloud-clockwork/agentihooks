@@ -504,21 +504,20 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
     assert all(name.startswith("xǁLauncherǁlaunch__mutmut_") for name in names)
     assert "self.count - 1" in generated
     compile(generated, "scripts/sample.py", "exec")
-    assert mutation_counts("scripts/sample.py", source, {9}) == (2, 2)
-    assert mutation_counts("scripts/sample.py", source, {6}) == (0, 0)
-    assert mutation_counts("scripts/sample.py", source, {6, 9}) == (2, 2)
+    assert mutation_counts("scripts/sample.py", source, {9}) == (2, [])
+    assert mutation_counts("scripts/sample.py", source, {6}) == (0, [])
+    assert mutation_counts("scripts/sample.py", source, {6, 9}) == (2, [])
     assert selected_mutants("scripts/sample.py", source, {13, 18})[1] == []
-    assert mutation_counts("scripts/sample.py", source, {13}) == (0, 2)
-    found, in_body = mutation_counts("scripts/sample.py", source, {18})
-    assert found == 0
-    assert in_body > 0
-    assert mutation_counts("scripts/sample.py", source, {4, 11}) == (0, 0)
+    assert mutation_counts("scripts/sample.py", source, {13}) == (0, ["cached"])
+    assert mutation_counts("scripts/sample.py", source, {18}) == (0, ["__lt__"])
+    assert mutation_counts("scripts/sample.py", source, {9, 13, 18}) == (2, ["cached", "__lt__"])
+    assert mutation_counts("scripts/sample.py", source, {4, 11}) == (0, [])
     monkeypatch.setattr(
         Config,
         "get",
         lambda: SimpleNamespace(do_not_mutate_patterns=[r"count \+ 1"], source_paths=[], max_stack_depth=-1),
     )
-    assert mutation_counts("scripts/sample.py", source, {9, 13}) == (0, 2)
+    assert mutation_counts("scripts/sample.py", source, {9, 13}) == (0, ["cached"])
 
 
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
