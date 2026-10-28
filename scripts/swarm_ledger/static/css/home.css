@@ -30,6 +30,8 @@ li.row:hover,li.row:focus-within{background:var(--hover)}
 .head{min-height:0;padding-top:14px;padding-bottom:8px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
 .title{overflow:hidden;text-overflow:ellipsis;color:var(--link);font-size:14px;font-weight:700;text-decoration:none}
 .title:hover{text-decoration:underline;text-underline-offset:3px}
+.title>a{display:block;overflow:hidden;text-overflow:ellipsis;color:inherit;text-decoration:inherit}
+.title>a:focus-visible{outline:1px solid var(--ring);outline-offset:-1px}
 .title:focus-visible{outline:2px solid var(--ring);outline-offset:3px;border-radius:2px}
 .kind{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-2);}
 .ov{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
@@ -56,6 +58,9 @@ li.row:hover,li.row:focus-within{background:var(--hover)}
 .act.del:hover,.act.del:focus-visible{color:var(--destructive)}
 .act.reopen,.act.restore{color:var(--link)}
 .empty{padding:28px 12px;color:var(--muted)}
+.empty a{color:var(--link)}
+#notice:not(:empty){display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px;color:var(--text-2)}
+.head>[role=columnheader]:last-child{font-size:0}
 .fab{position:fixed;left:16px;bottom:16px;z-index:10;width:44px;height:44px;border:0;border-radius:12px;display:grid;place-content:center;color:var(--signal);background:transparent;transition:background .15s,filter .15s}
 .fab svg{width:20px;height:20px}
 .fab:hover,.fab:focus-visible{background:var(--hover);outline:none}
@@ -98,3 +103,4 @@ li.row:hover,li.row:focus-within{background:var(--hover)}
 .fm[data-silent=yes] dd{color:var(--warn)}
 .home-grid{display:grid;grid-template-columns:224px minmax(0,1fr);gap:16px;align-items:start}
 @media (max-width:1100px){.home-grid{grid-template-columns:minmax(0,1fr)}.monitor dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));column-gap:24px}.fm.sub,.fm.sub.end{padding:7px 0;border-bottom:1px solid var(--rule)}.fm.sub dt{padding-left:0}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}}

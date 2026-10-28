@@ -37,7 +37,7 @@ def test_collection_failures_offer_retry_without_raw_errors(context, failure):
     expect(page.locator("body")).not_to_contain_text("private server traceback")
     page.unroute(route, handler)
     page.get_by_role("button", name="Retry", exact=True).click()
-    expect(page.locator("li.row")).to_have_count(6)
+    expect(page.locator("li.row")).to_have_count(7)
 
 
 @pytest.mark.parametrize("failure", ["network", "server"])
