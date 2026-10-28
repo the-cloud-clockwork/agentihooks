@@ -15,15 +15,14 @@ LITERAL = re.compile(r"'(?:''|[^'])*'")
 NAME = re.compile(r"[A-Za-z_][\w-]*(?:\.[\w-]+)*")
 FIXED_NAMES = frozenset(
     {
-        "contains",
-        "fromJSON",
-        "github.actor",
         "github.event.pull_request.head.repo.full_name",
         "github.event_name",
         "github.ref",
         "github.repository",
-        "github.triggering_actor",
     }
+)
+ACTOR_TEST = re.compile(
+    r"contains\(fromJSON\(\),\s*github\.(?:triggering_)?actor\)|github\.(?:triggering_)?actor\s*[!=]="
 )
 LANE = (
     "format('hosted-lane-{0}', "
@@ -213,7 +212,7 @@ def runner_labels(runner: object) -> list[str]:
     found = []
     for item in runner if isinstance(runner, list) else []:
         text = str(item)
-        bare = LITERAL.sub("", text)
+        bare = ACTOR_TEST.sub("", LITERAL.sub("", text))
         fixed = "[" not in bare and set(NAME.findall(bare)) <= FIXED_NAMES
         selected = SELECTED.findall(text) if "${{" in text and fixed else []
         found += selected or [text]

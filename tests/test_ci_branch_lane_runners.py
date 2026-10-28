@@ -41,6 +41,11 @@ ROUTED = "${{ contains(fromJSON('[\"nestorcolt\"]'), github.actor) && '%s' || 'u
         ("${{ inputs.label || 'ubuntu-latest' }}", "${{ inputs.label || 'ubuntu-latest' }}"),
         ("${{ github.ref_name || 'anton-oss' }}", "${{ github.ref_name || 'anton-oss' }}"),
         ("${{ secrets.R || 'anton-oss' }}", "${{ secrets.R || 'anton-oss' }}"),
+        ("${{ github.actor || 'anton-oss' }}", "${{ github.actor || 'anton-oss' }}"),
+        (
+            "${{ github.event_name == 'push' && 'anton-oss' || github.triggering_actor }}",
+            "${{ github.event_name == 'push' && 'anton-oss' || github.triggering_actor }}",
+        ),
         ("${{ matrix['runner'] || 'anton-oss' }}", "${{ matrix['runner'] || 'anton-oss' }}"),
     ],
 )
