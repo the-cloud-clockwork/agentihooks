@@ -14,7 +14,9 @@ def _register(path) -> None:
 
 def _tick_spawn(world, profile: str = "engineer"):  # noqa: F811
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
-    request = SpawnRequest(config, "eng", "e1", {"id": "task", "seat": FIRST, "profile": profile})
+    request = SpawnRequest(
+        config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": FIRST, "profile": profile}
+    )
     world.launcher.router = RuntimeRouter([world.runtime], placement=Placement(BACKEND))
     return world.launcher.from_tick(request, replace(world.terms, bundled=True), pod_target)
 
