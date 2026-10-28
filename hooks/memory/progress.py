@@ -23,6 +23,18 @@ COMPLETE = """SELECT DISTINCT g.built_through FROM search_chunk c
             AND v.content_hash = json_extract(missing.record, '$.content_hash')))"""
 
 
+def _prefix(catalog: Catalog, scope: Scope, current: int) -> int:
+    rows = catalog.db.execute(
+        f"SELECT previous_through, through, archived FROM memory_progress_batch WHERE {KEY} AND through > ? ORDER BY through",
+        (*scope.key(), current),
+    )
+    for previous, end, acknowledged in rows:
+        if not acknowledged or previous != current:
+            break
+        current = end
+    return current
+
+
 class Recorder:
     def __init__(
         self, catalog: Catalog, grant: Grant, scope: Scope, project: str, clock: Callable[[], float] = time.time
@@ -58,9 +70,10 @@ class Recorder:
                 self.meter._advance(self.scope, "indexed_chunk", 0, 0.0)
                 self.meter._advance(self.scope, "brain_consumed", 0, 0.0)
             current = self.meter._points(self.scope)["archive"][-1][0]
+            through = _prefix(self.meter.catalog, self.scope, max(current, through))
             if through > current:
                 self.meter._advance(self.scope, "archive", through, now)
-            return max(current, through)
+            return through
 
     def buffered(self, entry: Entry) -> None:
         self.meter._authorize(self.grant, self.scope)
@@ -92,15 +105,7 @@ class Recorder:
                 f"UPDATE memory_progress_batch SET archived = 1 WHERE {KEY} AND identity = ?", key
             )
             current = self.meter._points(self.scope)["archive"][-1][0]
-            through = current
-            rows = self.meter.catalog.db.execute(
-                f"SELECT previous_through, through, archived FROM memory_progress_batch WHERE {KEY} AND through > ? ORDER BY through",
-                (*self.scope.key(), current),
-            )
-            for previous, end, acknowledged in rows:
-                if not acknowledged or previous != through:
-                    break
-                through = end
+            through = _prefix(self.meter.catalog, self.scope, current)
             if through > current:
                 self.meter._advance(self.scope, "archive", through, self.clock())
 

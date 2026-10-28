@@ -429,7 +429,8 @@ def test_inactive_replacement_cannot_clear_active_index_lag(tmp_path):
     index.session.catalog.close()
 
 
-def test_existing_archive_reconciles_before_new_spool_batches_and_survives_restart(tmp_path):
+@pytest.mark.parametrize("when", ["before", "after"])
+def test_existing_archive_reconciles_before_new_spool_batches_and_survives_restart(tmp_path, when):
     from tests.sv2_idx02_cases import grant, records
     from tests.sv2_idx03_cases import Index
     from tests.sv2_obs02_cases import FIXTURE
@@ -444,17 +445,21 @@ def test_existing_archive_reconciles_before_new_spool_batches_and_survives_resta
         index.session.catalog, caller, scope, inputs["grant"]["projects"][0], clock=lambda: clock[0]
     )
     baseline = index.session.sequence
-    assert recorder.reconcile(index.session.store) == baseline
-    initial = recorder.meter.status(caller, scope, 100.0)
-    assert initial["stages"]["archive"]["through"] == baseline
-    assert initial["stages"]["indexed_chunk"]["through"] == 0
-    assert initial["stages"]["brain_consumed"]["through"] == 0
+    if when == "before":
+        assert recorder.reconcile(index.session.store) == baseline
+        initial = recorder.meter.status(caller, scope, 100.0)
+        assert initial["stages"]["archive"]["through"] == baseline
+        assert initial["stages"]["indexed_chunk"]["through"] == 0
+        assert initial["stages"]["brain_consumed"]["through"] == 0
     queue = spool.Spool(
         spool.SpoolConfig(tmp_path / "spool", 1000000, 800000), clock=lambda: clock[0], progress=recorder
     )
     clock[0] = 110.0
     queue.append("new-tail", records(inputs["turns"][1:3]))
     queue.flush(lambda entry: index.session.append([entry.records]))
+    if when == "after":
+        assert recorder.meter.status(caller, scope, 150.0)["stages"]["archive"]["through"] == 0
+        assert recorder.reconcile(index.session.store) == index.session.sequence
     assert recorder.meter.status(caller, scope, 150.0)["archive_lag_seconds"] == 0.0
     snapshot = recorder.meter.snapshot()
     assert recorder.reconcile(index.session.store) == index.session.sequence
