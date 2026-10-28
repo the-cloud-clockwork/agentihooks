@@ -619,8 +619,8 @@ def test_a_full_read_keeps_each_retried_attempt_in_the_cache(monkeypatch, tmp_pa
     run["run_attempt"] = 2
     read_pass()
     attempts = [c for c in world["calls"] if "/attempts/" in c]
-    assert attempts == [f"repos/o/r/actions/runs/{run['id']}/attempts/1/jobs?per_page=100"]
-    assert world["cache"].exists(f"{ci_read.ROOT}:doctor:ci-attempt:o/r:{run['id']}:1")
+    assert attempts == [f"repos/o/r/actions/runs/{run['id']}/attempts/{n}/jobs?per_page=100" for n in (1, 2)]
+    assert world["cache"].exists(*(f"{ci_read.ROOT}:doctor:ci-attempt:o/r:{run['id']}:{n}" for n in (1, 2))) == 2
 
 
 def test_attempt_jobs_read_without_a_cache_are_never_shared(monkeypatch, tmp_path):
