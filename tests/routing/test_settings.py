@@ -202,6 +202,14 @@ def test_a_claim_sees_a_legacy_holder(fake, home):
     assert store.state.get(settings.ENTRY) is None
 
 
+def test_the_legacy_seed_reads_the_whole_history_list(fake, home):
+    from scripts.events.redis_state import RedisStateStore
+
+    rows = [{"key": "codex-api-weight", "value": value, "actor": "operator", "at": float(value)} for value in (1, 2, 3)]
+    fake.rpush(f"{keyspace.ROOT}:routing:settings:history", *[json.dumps(row) for row in rows])
+    assert settings.open_store(RedisStateStore(fake, settings.BUCKET), home).history() == rows
+
+
 def test_a_state_store_without_legacy_rows_reads_empty(state, home):
     assert settings.StateSettings(state)._load() == ({"settings": {}, "history": []}, None)
 

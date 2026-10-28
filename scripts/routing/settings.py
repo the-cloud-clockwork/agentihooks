@@ -119,7 +119,7 @@ class StateSettings(SettingsStore):
         return json.loads(entry.value), entry.revision
 
     def _commit(self, change: Callable[[dict], object]) -> object:
-        for attempt in range(1, WRITE_TRIES + 1):
+        for left in range(WRITE_TRIES, 0, -1):
             data, revision = self._load()
             held = change(data)
             if held is not None:
@@ -132,7 +132,7 @@ class StateSettings(SettingsStore):
                     self.state.update(ENTRY, raw, revision)
                 return None
             except StateConflict:
-                if attempt == WRITE_TRIES:
+                if left == 1:
                     raise
 
     def _write(self, key: str, value: object, entry: dict) -> None:
