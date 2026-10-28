@@ -287,8 +287,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += timing.call(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
     timing.call(_conversations, slug, store, runtime)
     timing.call(_session_models, slug, store)
-    starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}
-    timing.call(transfers.observe, store, slug, runtime.live_names() - starting)
+    timing.call(transfers.observe, store, slug, runtime.live_names())
     return (
         actions
         + skip_refused(_settle, slug, config, store, ledger, rows, doc)
