@@ -69,6 +69,39 @@ def test_a_failed_launch_stamps_its_absent_binding_when_it_fails(setup, monkeypa
     assert retry["at"] == 101
 
 
+@pytest.mark.parametrize("state", ["starting", "launching"])
+@pytest.mark.parametrize("lane", ["eng", "ci", "master"])
+def test_a_successor_whose_launch_is_unrecorded_keeps_a_pending_binding(setup, state, lane):
+    from scripts.swarm.tick import observe_bindings
+
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2", lane=lane, state=state)
+    store.put_agent("sw", new)
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    runtime = FakeRuntime()
+    observe_bindings(store, "sw", runtime)
+    assert transfers.get(store, "sw", transfer["id"])["binding"] == {"state": "pending"}
+    store.put_agent("sw", replace(new, state="working", launched_at=40))
+    runtime.live.add(new.name)
+    observe_bindings(store, "sw", runtime)
+    assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "live"
+
+
+def test_a_launched_successor_missing_from_the_live_names_is_absent(setup):
+    from scripts.swarm.tick import observe_bindings
+
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2", state="working", launched_at=40)
+    store.put_agent("sw", new)
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    observe_bindings(store, "sw", FakeRuntime())
+    assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "absent"
+
+
 def test_detach_frees_only_the_waiting_spawns_unbound_transfers(setup):
     store, old = setup
     other = transfers.record(store, "sw", old, "recycle", DOC, 10)
