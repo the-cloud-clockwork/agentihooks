@@ -55,6 +55,8 @@ def test_function_offsets_cover_decorated_methods_and_async_functions():
     source = "\nclass Example:\n    @decorator\n    def f(self):\n        return 1\n\nasync def run():\n    return 2\n"
     assert function_start(source, "@decorator\ndef f(self):\n    return 1", "Example") == 3
     assert function_start(source, "async def run():\n    return 2", None) == 7
+    source = "class Example:\n    x = 1\n\n    @property\n    def f(self):\n        return 1\n"
+    assert function_start(source, "def f(self):\n    return 1", "Example") == 4
 
 
 def test_report_reads_real_mutmut_metadata_and_maps_original_lines(tmp_path, monkeypatch):
