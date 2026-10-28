@@ -40,7 +40,7 @@ async function snapshotChecksComplete(github, api, snapshot, number) {
     const contexts = result.repository.object.statusCheckRollup?.contexts;
     for (const check of contexts?.nodes || []) {
       if (!check.isRequired) continue;
-      const pending = check.context ? check.state === 'PENDING' : check.status !== 'COMPLETED';
+      const pending = check.context ? ['EXPECTED', 'PENDING'].includes(check.state) : check.status !== 'COMPLETED';
       const passed = check.context ? check.state === 'SUCCESS' : ['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(check.conclusion);
       if (!pending && !passed) throw new Error(`Required snapshot check failed: ${check.context || check.name}`);
       if (pending) complete = false;

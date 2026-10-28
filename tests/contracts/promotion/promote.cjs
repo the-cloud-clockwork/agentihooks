@@ -122,7 +122,8 @@ test('stops pending snapshot checks at the thirty minute deadline', async () => 
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
 });
 
-test('waits for every required snapshot context even when mergeability reads clean', async () => {
+for (const state of ['EXPECTED', 'PENDING']) {
+test(`waits for every required snapshot context even when mergeability reads clean: ${state}`, async () => {
   const f = fixture();
   const queries = [];
   f.github.graphql = async (query, variables) => {
@@ -130,7 +131,7 @@ test('waits for every required snapshot context even when mergeability reads cle
     assert.match(query, /isRequired\(pullRequestNumber: \$number\)/);
     return { repository: { object: { statusCheckRollup: { contexts: {
       nodes: variables.cursor ? [
-        { context: 'required status', isRequired: true, state: f.now() < 330000 ? 'PENDING' : 'SUCCESS' },
+        { context: 'required status', isRequired: true, state: f.now() < 330000 ? state : 'SUCCESS' },
         { name: 'optional check', isRequired: false, status: 'COMPLETED', conclusion: 'FAILURE' },
       ] : [{ name: 'required check', isRequired: true, status: 'COMPLETED', conclusion: 'SUCCESS' }],
       pageInfo: { hasNextPage: !variables.cursor, endCursor: variables.cursor ? null : 'next-page' },
@@ -142,6 +143,7 @@ test('waits for every required snapshot context even when mergeability reads cle
   assert.deepEqual(queries[0], { owner: 'owner', repo: 'repo', snapshot: 'snapshot', number: 7, cursor: null });
   assert.equal(queries[1].cursor, 'next-page');
 });
+}
 
 test('reads a required failure on a later page even while another check is pending', async () => {
   const f = fixture({ pending: true });
