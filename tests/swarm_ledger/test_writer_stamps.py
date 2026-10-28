@@ -289,7 +289,7 @@ def test_an_entry_refreshed_without_a_held_copy_copies_on_write(tmp_path):
     assert [message["text"] for message in reader.get_document("ledger")["chat"]][-2:] == ["hello", "again"]
 
 
-@pytest.mark.parametrize("held, built", [({"held": 1}, {"built": 1}), (None, {"built": 1}), ({"held": 1}, None)])
+@pytest.mark.parametrize("held, built", [({"_meta": {}}, True), (None, True), ({"_meta": {}}, None)])
 def test_refreshed_rebuilds_the_held_copy_by_the_same_paths_and_releases_it(monkeypatch, held, built):
     calls = []
 
@@ -309,20 +309,18 @@ def test_refreshed_rebuilds_the_held_copy_by_the_same_paths_and_releases_it(monk
         assert len(calls) == 1
     else:
         assert state == {"state": 1, "paths": {"p"}}
-        assert writer == {"held": 1, "paths": {"p"}}
-        assert calls[1] == ("db", "ledger", {"held": 1}, {"p"})
+        assert writer == {"_meta": {}, "paths": {"p"}}
+        assert calls[1] == ("db", "ledger", {"_meta": {}}, {"p"})
 
 
-def test_evented_gives_the_writer_its_own_copy_of_the_stored_events():
-    events = [{"rev": 1}]
-    writer = {"_meta": {"rev": 1}}
-    assert writer_copy.evented(writer, {"_meta": {"events": events}}) is writer
-    assert writer["_meta"]["events"] == events
-    assert writer["_meta"]["events"] is not events
-    assert writer["_meta"]["events"][0] is not events[0]
-    plain = {"_meta": {"rev": 1}}
-    assert writer_copy.evented(plain, {"_meta": {"rev": 1}}) == {"_meta": {"rev": 1}}
-    assert writer_copy.evented(None, {"_meta": {"events": events}}) is None
+def test_refreshed_reads_the_stored_events_into_the_rebuilt_copy_only_when_it_keeps_events(monkeypatch):
+    monkeypatch.setattr(writer_copy.refresh, "refreshed", lambda connection, slug, value, paths: copy.deepcopy(value))
+    monkeypatch.setattr(writer_copy, "read_events", lambda connection, slug: [{"rev": 2, "from": (connection, slug)}])
+    held = {"_meta": {"events": [{"rev": 1}]}}
+    _, writer = writer_copy.refreshed("db", "ledger", Entry(1, None, {"_meta": {}}, writer=held), {"p"})
+    assert writer == {"_meta": {"events": [{"rev": 2, "from": ("db", "ledger")}]}}
+    _, plain = writer_copy.refreshed("db", "ledger", Entry(1, None, {"_meta": {}}, writer={"_meta": {"rev": 1}}), {"p"})
+    assert plain == {"_meta": {"rev": 1}}
 
 
 def two_states():

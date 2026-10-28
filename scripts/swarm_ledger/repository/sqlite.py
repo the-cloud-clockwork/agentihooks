@@ -486,20 +486,22 @@ class SQLiteLedgerRepository:
             cached = self._cache.get(self._key(slug))
             if cached is not None and cached.generation >= row[0]:
                 return cached
-            state, writer = (None, None) if cached is None else self._refreshed(connection, slug, cached, row[0])
+            state, writer = self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
                 state = load(connection, slug)
             if "events" in state["_meta"]:
                 state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
             fragments = document(state, None if whole else cached.fragments)
-            entry = Entry(row[0], None, fragments.value, fragments, writer_copy.evented(writer, state))
+            entry = Entry(row[0], None, fragments.value, fragments, writer)
             self._remember(slug, entry)
         if whole:
             heap.release()
         return entry
 
-    def _refreshed(self, connection, slug: str, cached: Entry, generation: int) -> tuple[dict | None, dict | None]:
+    def _refreshed(self, connection, slug: str, cached: Entry | None, generation: int) -> tuple:
+        if cached is None:
+            return None, None
         paths = refresh.changed_paths(connection, slug, cached.generation, generation, CHANGES_KEPT)
         return (None, None) if paths is None else writer_copy.refreshed(connection, slug, cached, paths)
 

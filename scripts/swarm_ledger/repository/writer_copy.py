@@ -1,5 +1,6 @@
 from . import refresh
 from .entry import thawed
+from .events import read_events
 from .fragments import Fragment, document
 
 
@@ -17,13 +18,10 @@ def refreshed(connection, slug: str, cached, paths: set) -> tuple[dict | None, d
     writer, cached.writer = cached.writer, None
     if state is None or writer is None:
         return state, None
-    return state, refresh.refreshed(connection, slug, writer, paths)
-
-
-def evented(writer: dict | None, state: dict) -> dict | None:
-    if writer is not None and "events" in state["_meta"]:
-        writer["_meta"]["events"] = thawed(state["_meta"]["events"])
-    return writer
+    writer = refresh.refreshed(connection, slug, writer, paths)
+    if writer is not None and "events" in writer["_meta"]:
+        writer["_meta"]["events"] = read_events(connection, slug)
+    return state, writer
 
 
 def detached(fragment: Fragment, previous: Fragment | None, value: object) -> tuple[Fragment, object]:
