@@ -96,19 +96,23 @@ spec:
         - name: worker-hive
           image: {{ include "swarm.image" (dict "Values" (dict "image" $workers.image)) }}
           imagePullPolicy: {{ $workers.image.pullPolicy }}
+          {{- if $root.Values.workers.rollout.enabled }}
           readinessProbe:
             exec:
               command: ["python3", "-m", "scripts.hive.rollout", "ready"]
             periodSeconds: 5
             timeoutSeconds: 5
+          {{- end }}
           lifecycle:
             preStop:
               exec:
                 command: ["sh", "-c", {{ printf "agentihooks hive drain --wait %d >>/proc/1/fd/1 2>&1" (int $workers.drainSeconds) | quote }}]
           {{- include "swarm.containerSecurity" $root | nindent 10 }}
           env:
+            {{- if $root.Values.workers.rollout.enabled }}
             - name: HIVE_READY_FILE
               value: /tmp/hive-ready
+            {{- end }}
             {{- if $github.secretName }}
             - name: HIVE_GITHUB_AUTH_MODE
               value: {{ $github.mode | quote }}

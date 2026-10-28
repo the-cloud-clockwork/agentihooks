@@ -271,7 +271,7 @@ workers:
   # A stopping hive takes no new agents and waits this long for its agents to finish before it exits.
   drainSeconds: 300
   rollout:
-    enabled: true
+    enabled: false
     namespace: default
     leaseName: agentihooks-hive-rollout
   excluded: [master]

@@ -17,6 +17,8 @@ def render(*settings):
         "--set",
         "hiveOnly=true",
         "--set",
+        "workers.rollout.enabled=true",
+        "--set",
         "workers.replicas=1",
         "--set",
         "workers.credentialSecret.name=member",
@@ -71,6 +73,16 @@ def test_hives_in_one_release_have_distinct_sync_waves():
     assert set(command[command.index("--deployment") + 1].split(",")) == {item["metadata"]["name"] for item in workers}
 
 
+def test_disabled_rollouts_do_not_require_a_new_worker_image():
+    objects = render("workers.rollout.enabled=false")
+    assert not [item for item in objects if item["kind"] == "Job"]
+    worker = next(item for item in objects if item["kind"] == "Deployment")
+    container = worker["spec"]["template"]["spec"]["containers"][0]
+    assert "readinessProbe" not in container
+    assert not any(item["name"] == "HIVE_READY_FILE" for item in container["env"])
+    assert yaml.safe_load((CHART / "values.yaml").read_text())["workers"]["rollout"]["enabled"] is False
+
+
 def test_a_drain_that_consumes_the_rollout_budget_is_refused():
     try:
         render("workers.drainSeconds=600")
@@ -84,4 +96,5 @@ if __name__ == "__main__":
     test_every_roll_acquires_before_sync_and_releases_after_serving()
     test_hives_in_one_release_have_distinct_sync_waves()
     test_a_drain_that_consumes_the_rollout_budget_is_refused()
+    test_disabled_rollouts_do_not_require_a_new_worker_image()
     print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")
