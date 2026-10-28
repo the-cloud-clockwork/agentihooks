@@ -126,10 +126,10 @@ def test_policy_reads_the_state_store_the_routing_client_opens(monkeypatch, tmp_
     settings.open_store(routing, {}).set("codex-api-max-sessions", 0, "operator", NOW)
     seen = []
     monkeypatch.setattr(state, "open_state", lambda bucket, environ: seen.append((bucket, environ)) or routing)
-    env = {"AGENTIHOOKS_HOME": str(tmp_path)}
+    env = {"AGENTIHOOKS_HOME": str(tmp_path / "ah")}
     assert place.policy("codex", env) == place.ApiPolicy(0, 0)
     assert seen == [("routing", env)]
-    assert list(tmp_path.iterdir()) == []
+    assert not (tmp_path / "ah").exists()
 
 
 def test_the_routing_client_is_the_redis_state_store_by_default(monkeypatch):
