@@ -30,14 +30,44 @@ DECISION = {
 }
 
 
+LIVE = {"eng": 2, "ci": 1, "plan": 0}
+
+
 def test_status_lines_name_each_lane_cap_the_reason_the_change_age_and_every_account():
-    assert quota_view.lines(DECISION, 1_000_000 + 5 * MINUTE) == [
+    assert quota_view.lines(DECISION, 1_000_000 + 5 * MINUTE, LIVE) == [
         "quota capacity eng 2 of 4, ci 1 of 1, plan 0 of 1, changed 5 minutes ago, because accounts are closed; "
         "Claude has 1 free seats and Codex has 0 free seats",
+        "scaling manual, live of ceiling eng 2 of 4, ci 1 of 1, plan 0 of 1, free quota seats claude 1 and codex 0",
         "quota account claude alpha  closed  routing 7.5% left  sessions 2",
         "quota account claude beta  open  routing 60% left  sessions 1",
         "quota account codex main  unknown  routing unknown  sessions 0",
     ]
+
+
+AUTOSCALE = {
+    "ceilings": {"eng": 6, "ci": 2, "plan": 1},
+    "pending_raise": {"target": None, "ticks": 0},
+    "reason": "Quota seats 4 (claude 3, codex 1); host room 5; ceiling 9 of 9.",
+    "host": {"room": 5, "reason": "fits 5"},
+}
+
+
+def test_an_auto_swarm_reads_its_ceilings_and_the_autoscale_reason():
+    decision = {**DECISION, "accounts": [], "placeable": {"claude": 3, "codex": 1}, "autoscale": AUTOSCALE}
+    assert quota_view.scaling_line(decision, LIVE) == (
+        "scaling auto, live of ceiling eng 2 of 6, ci 1 of 2, plan 0 of 1, free quota seats claude 3 and codex 1, "
+        "because Quota seats 4 (claude 3, codex 1); host room 5; ceiling 9 of 9"
+    )
+    assert quota_view.lines(decision, 1_000_000, LIVE)[1] == quota_view.scaling_line(decision, LIVE)
+
+
+def test_live_counts_every_unfinished_agent_by_lane():
+    class Agent:
+        def __init__(self, lane, state="working"):
+            self.lane, self.state = lane, state
+
+    agents = [Agent("eng"), Agent("eng"), Agent("eng", "finished"), Agent("ci"), Agent("master")]
+    assert quota_view.live(agents) == {"eng": 2, "ci": 1, "plan": 0}
 
 
 def test_codex_routing_left_is_its_week_left():
@@ -45,28 +75,31 @@ def test_codex_routing_left_is_its_week_left():
     assert quota_view.routing_left(codex) == 35.0
     assert quota_view.routing_left({**codex, "five_left": 20.0}) == 35.0
     assert quota_view.routing_left(row("alpha", five=None)) is None
-    assert quota_view.lines({**DECISION, "accounts": [codex]}, 1_000_000)[1] == (
+    assert quota_view.lines({**DECISION, "accounts": [codex]}, 1_000_000, LIVE)[2] == (
         "quota account codex personal  reduce  routing 35% left  sessions 3"
     )
     assert quota_view.page({**DECISION, "accounts": [codex]})["accounts"][0]["routing"] == 35.0
 
 
 def test_a_change_under_a_minute_old_reads_just_now_and_one_minute_is_singular():
-    assert quota_view.lines({**DECISION, "accounts": []}, 1_000_000 + 59_999)[0].split(", ")[3] == "changed just now"
     assert (
-        quota_view.lines({**DECISION, "accounts": []}, 1_000_000 + MINUTE)[0].split(", ")[3] == "changed 1 minute ago"
+        quota_view.lines({**DECISION, "accounts": []}, 1_000_000 + 59_999, LIVE)[0].split(", ")[3] == "changed just now"
+    )
+    assert (
+        quota_view.lines({**DECISION, "accounts": []}, 1_000_000 + MINUTE, LIVE)[0].split(", ")[3]
+        == "changed 1 minute ago"
     )
 
 
 def test_no_decision_says_capacity_was_not_observed():
-    assert quota_view.lines({}, 0) == ["quota capacity has not been observed"]
+    assert quota_view.lines({}, 0, LIVE) == ["quota capacity has not been observed"]
 
 
 def test_the_host_room_follows_the_quota_head_line():
     host = {"room": 3, "reason": "2100 MB available memory fits 3 at 700 MB each", "limit": "memory"}
-    lines = quota_view.lines({**DECISION, "accounts": [], "host": host}, 1_000_000)
-    assert lines[1:] == ["host room 3: 2100 MB available memory fits 3 at 700 MB each"]
-    assert len(quota_view.lines({**DECISION, "accounts": []}, 1_000_000)) == 1
+    lines = quota_view.lines({**DECISION, "accounts": [], "host": host}, 1_000_000, LIVE)
+    assert lines[2:] == ["host room 3: 2100 MB available memory fits 3 at 700 MB each"]
+    assert len(quota_view.lines({**DECISION, "accounts": []}, 1_000_000, LIVE)) == 2
 
 
 def test_an_unknown_host_room_reads_unknown():
@@ -109,7 +142,7 @@ API_DECISION = {
 
 
 def test_each_api_line_shows_its_harness_share_against_its_weight():
-    assert quota_view.lines(API_DECISION, 1_000_000)[3:] == [
+    assert quota_view.lines(API_DECISION, 1_000_000, LIVE)[4:] == [
         "quota account claude api  open  api share 25% of 4 sessions against weight 25%  sessions 1",
         "quota account codex api  closed  api share 0% of 0 sessions against no weight  sessions 0",
     ]
@@ -130,7 +163,7 @@ def test_codex_status_and_page_report_week_remaining(five):
     account = row("a", five=five, week=73.0, harness="codex")
     decision = {**DECISION, "accounts": [account]}
     assert quota_view.routing_left(account) == 73.0
-    assert quota_view.lines(decision, decision["at"])[-1] == (
+    assert quota_view.lines(decision, decision["at"], LIVE)[-1] == (
         "quota account codex a  open  routing 73% left  sessions 0"
     )
     assert quota_view.page(decision)["accounts"][0]["routing"] == 73.0
@@ -144,7 +177,7 @@ def test_each_read_account_line_names_its_reading_age_and_an_unread_one_names_no
     read = {**row("alpha", sessions=2), "observed_at": 1_000.0}
     reserved = {**row("beta", week=30.0), "observed_at": 400.0, "reserved": "held"}
     decision = {**DECISION, "accounts": [read, reserved, row("gamma")]}
-    assert quota_view.lines(decision, 1_000_000 + 2 * MINUTE)[1:] == [
+    assert quota_view.lines(decision, 1_000_000 + 2 * MINUTE, LIVE)[2:] == [
         "quota account claude alpha  open  routing 60% left, read 2m ago  sessions 2",
         "quota account claude beta  open  routing 30% left, held, read 12m ago  sessions 0",
         "quota account claude gamma  open  routing 60% left  sessions 0",
