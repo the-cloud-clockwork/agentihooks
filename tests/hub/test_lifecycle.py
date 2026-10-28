@@ -135,6 +135,40 @@ def test_redelivery_does_not_repeat_task_or_slot_effects(rig):
     assert len(rig.ledger.writes) == len(rig.returned) == 1
 
 
+@pytest.mark.parametrize(
+    "dep_state, reason, victim, lives",
+    [
+        ("claimed", None, False, 1),
+        ("done", None, False, 2),
+        (None, "quota", False, 1),
+        (None, "operator", True, 1),
+        (None, "operator", False, 2),
+        (None, "recycle", True, 2),
+    ],
+)
+def test_exit_refunds_a_started_life_for_a_park_a_quota_handoff_or_an_operator_preemption(
+    rig, dep_state, reason, victim, lives
+):
+    from scripts.swarm import preempt
+
+    rows = {"task": rig.row, "dep": {"id": "dep", "state": dep_state}}
+    rig.ledger.task = lambda slug, task_id: dict(rows[task_id])
+    if dep_state:
+        rig.row["parked_on"] = ["dep"]
+    if reason:
+        rig.store.put_handoff("rig", "task", "handoff", envelope={"reason": reason})
+    if victim:
+        rig.store.redis.hset(rig.store.key("rig", preempt.VICTIMS), "engineer", "1")
+    for _ in range(2):
+        rig.store.count_claim("rig", "task")
+
+    rig.react.handle(rig.event)
+    rig.react.handle(replace(rig.event, id="redelivery"))
+
+    assert rig.store.claims("rig", "task") == lives
+    assert rig.store.redis.hget(rig.store.key("rig", preempt.VICTIMS), "engineer") is None
+
+
 def test_failed_slot_return_retries_without_prematurely_reopening_the_task(rig):
     def unavailable(*_):
         raise OSError("slot store unavailable")
