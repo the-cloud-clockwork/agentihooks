@@ -81,6 +81,7 @@ python - "$MIGRATION_DIR/source.json" <<'PY'
 import json
 import sys
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 from scripts.events.config import BusConfig
@@ -88,7 +89,10 @@ from scripts.events.factory import open_bus
 from scripts.inbox.migration import digest, read_records
 
 source = json.loads(Path(sys.argv[1]).read_text())
-bus = open_bus(BusConfig.from_environ())
+config = BusConfig.from_environ()
+if config.backend != "nats" or not config.url or config.scoped:
+    raise SystemExit("verification requires the authorized unscoped NATS migration connection")
+bus = open_bus(replace(config, provision=False))
 try:
     destination = read_records(source, bus)
 finally:
