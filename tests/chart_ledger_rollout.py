@@ -65,16 +65,19 @@ def surge_problems(chart: str, label: str, *extra: str) -> list[str]:
 def allowed_hosts(chart: str, *extra: str) -> list[str]:
     result = render(chart, *extra)
     if result.returncode:
-        return []
+        raise ValueError(result.stderr.strip())
     container = ledger_docs(result.stdout)["StatefulSet"]["spec"]["template"]["spec"]["containers"][0]
     return next(e["value"] for e in container["env"] if e["name"] == "SWARM_ALLOWED_HOSTS").split(",")
 
 
 def host_problems(chart: str) -> list[str]:
-    hosts = allowed_hosts(chart, "--set", f"ledger.allowedHosts={{{EXTRA_HOST}}}")
+    try:
+        hosts, default = allowed_hosts(chart, "--set", f"ledger.allowedHosts={{{EXTRA_HOST}}}"), allowed_hosts(chart)
+    except ValueError as exc:
+        return [f"the ledger allowed hosts fail to render: {exc}"]
     if EXTRA_HOST not in hosts or f"{LEDGER}:8765" not in hosts:
         return [f"ledger.allowedHosts does not add {EXTRA_HOST} beside the service names: {hosts}"]
-    if "" in allowed_hosts(chart):
+    if "" in default:
         return ["a chart without ledger.allowedHosts renders an empty allowed host"]
     return []
 
