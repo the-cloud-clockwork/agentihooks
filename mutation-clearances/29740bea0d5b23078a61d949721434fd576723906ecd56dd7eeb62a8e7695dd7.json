@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lost_runner.py:scripts.ci_lost_runner.x_superseded__mutmut_15:f3053c9a19fbbf61e1eacb4cc88acaf35c4046faf638b019c8e9ca0c48654720": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: X is an ASCII letter, already in the always safe set of urllib.parse.quote regardless of the safe argument, so safe empty and safe XXXX produce identical output for every branch name; no test can observe a difference."
+  }
+}

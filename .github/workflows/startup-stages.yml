@@ -68,7 +68,8 @@ jobs:
         run: |
           printf '%s\n' 'kind: Cluster' 'apiVersion: kind.x-k8s.io/v1alpha4' 'nodes:' \
             '  - role: control-plane' '  - role: worker' '  - role: worker' > "$RUNNER_TEMP/kind.yaml"
-          kind create cluster --name startup --image "$KIND_NODE_IMAGE" --config "$RUNNER_TEMP/kind.yaml" --wait 120s
+          node_image="$(bash deploy/helm/agentihooks-swarm/ci/pull-kind-node.sh)"
+          kind create cluster --name startup --image "$node_image" --config "$RUNNER_TEMP/kind.yaml" --wait 120s
           docker network connect kind kind-registry
           for node in $(kind get nodes --name startup); do
             docker exec "$node" mkdir -p /etc/containerd/certs.d/kind-registry:5000
