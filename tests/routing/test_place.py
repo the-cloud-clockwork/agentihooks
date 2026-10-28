@@ -101,6 +101,28 @@ def test_api_side_applies_the_harness_policy_to_every_api_slot(monkeypatch):
     assert seen == [("codex", {"K": "v"})]
 
 
+def test_closure_names_an_api_side_closed_by_settings(monkeypatch):
+    seen = []
+
+    def invalid(harness, environ):
+        seen.append((harness, environ))
+        raise place.SettingsError("routing setting codex-api-weight is invalid")
+
+    monkeypatch.setattr(place, "policy", invalid)
+    found = [Slot("codex", "api", 0, 0, kind=API, provider="openai-key")]
+    assert place.closure(_Source(found), "codex", {"K": "v"}, NOW) == [
+        "api side closed: routing setting codex-api-weight is invalid"
+    ]
+    assert seen == [("codex", {"K": "v"})]
+
+
+def test_closure_is_empty_without_an_api_slot_or_with_readable_settings(monkeypatch):
+    monkeypatch.setattr(place, "policy", lambda harness, environ: pytest.fail("policy read without an api slot"))
+    assert place.closure(_Source([]), "claude", {}, NOW) == []
+    monkeypatch.setattr(place, "policy", lambda harness, environ: place.ApiPolicy(10, 2))
+    assert place.closure(_Source([_api()]), "claude", {}, NOW) == []
+
+
 def test_policy_defaults_to_weight_zero_and_an_unbounded_cap(monkeypatch, tmp_path):
     monkeypatch.setattr(place, "_client", lambda environ: None)
     assert place.policy("claude", {"AGENTIHOOKS_HOME": str(tmp_path)}) == place.ApiPolicy(0, API_UNBOUNDED)

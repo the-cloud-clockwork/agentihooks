@@ -549,7 +549,8 @@ def select(
     if seat is None:
         refused = [text for account in token_accounts(environ or {}) if (text := refusal(account, environ or {}))]
         no_seat = "no signed in Codex account has a fresh reading and a free session under its quota band"
-        raise RoutingError("; ".join([no_seat, *refused]))
+        closed = place.closure(codex_api.CodexApiSource(sessions), "codex", environ or {}, now)
+        raise RoutingError("; ".join([no_seat, *refused, *closed]))
     if seat.kind == API:
         return api_account(environ or {}), "open", seat
     return by_name[seat.account], "open", seat
