@@ -195,7 +195,7 @@ def test_an_agent_that_never_runs_swarm_wait_is_woken_on_merge(store):
     assert waits.end_pass(store, "sw", rows, inbox, queued.get, 5_000, queued.get) == [
         f"set the wait of {ME} on merge of {URL} from its push"
     ]
-    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "merge", "target": URL}
+    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "merge", "target": URL, "queued": True}
     pulls = {URL: MERGED}
     assert waits.end_pass(store, "sw", rows, inbox, pulls.get, 6_000, pulls.get) == [
         f"ended the wait of {ME}: pull request {URL}, now merged"
