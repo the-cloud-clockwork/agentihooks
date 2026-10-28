@@ -74,7 +74,9 @@ def test_api_failure_cannot_pass(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "problem,code,output", [("", 0, "Tests startup verified for this head.\n"), ("missing", 1, "::error::missing\n")]
+    "problem,code,output",
+    [("", 0, "Tests startup verified for this head.\n"), ("missing", 1, "::error::missing\n")],
+    ids=["started", "missing"],
 )
 def test_command_reports_startup_result(monkeypatch, capsys, problem, code, output):
     from scripts import ci_tests_start
