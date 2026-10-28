@@ -102,8 +102,8 @@ function openFindings(sw) {
 }
 
 export function laneCeilings(sw) {
-  const scaled = sw.config.scaling === "auto" && ((sw.quota_capacity || {}).autoscale || {}).ceilings;
-  return Object.fromEntries(LIVE_LANES.map(([lane, key]) => [key, (scaled && scaled[lane]) ?? sw.config[key] ?? 0]));
+  const scaled = (sw.config.scaling === "auto" && ((sw.quota_capacity || {}).autoscale || {}).ceilings) || {};
+  return Object.fromEntries(LIVE_LANES.map(([lane, key]) => [key, scaled[lane] ?? sw.config[key] ?? 0]));
 }
 
 function liveCaps(sw) {

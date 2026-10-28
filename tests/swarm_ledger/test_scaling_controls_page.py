@@ -1,3 +1,4 @@
+import pytest
 from playwright.sync_api import expect
 
 from tests.swarm_ledger import test_swarm_layout as layout
@@ -32,6 +33,19 @@ def test_auto_scaling_shows_the_ceilings_read_only_with_no_steppers(open_page):
         for step in ("down", "up"):
             expect(page.tab.locator(f'[data-swarm="{lane}_{step}"]')).to_be_hidden()
     expect(page.tab.locator("#cap-masters")).to_be_editable()
+
+
+def caps_line(page):
+    return [
+        text.split("/")[1]
+        for text in page.tab.eval_on_selector_all("#alert-live span", "ss => ss.map(s => s.textContent)")
+    ]
+
+
+@pytest.mark.parametrize("scaling,expected", [("auto", ["6", "2", "1"]), ("manual", ["3", "1", "1"])])
+def test_the_live_line_counts_against_the_ceiling_in_auto_and_the_cap_in_manual(open_page, scaling, expected):
+    page = scaling_page(open_page, scaling, {"eng": 6, "ci": 2, "plan": 1})
+    assert caps_line(page) == expected
 
 
 def test_auto_without_a_decision_reads_the_configured_caps(open_page):
