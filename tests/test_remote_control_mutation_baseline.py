@@ -113,9 +113,20 @@ def timed(monkeypatch):
         with log.open("w") as out:
             for line in process.stdout:
                 out.write(line)
-                TIMELINE.append(f"{time.monotonic() - start:7.1f} {line.rstrip()[:160]}")
+                if not any("\u2800" <= char <= "\u28ff" for char in line):
+                    TIMELINE.append(f"{time.monotonic() - start:7.1f} {line.rstrip()[:160]}")
         return process.wait()
 
+    for name in ("fixture_files", "prepare_git_inputs"):
+        original = getattr(runner, name)
+
+        def step(*args, original=original, name=name):
+            began = time.monotonic()
+            value = original(*args)
+            TIMELINE.append(f"{time.monotonic() - start:7.1f} {name} took {time.monotonic() - began:.1f}")
+            return value
+
+        monkeypatch.setattr(runner, name, step)
     monkeypatch.setattr(runner, "prepare_workspace", timed_prepare)
     monkeypatch.setattr(runner, "run_process", timed_run)
 
@@ -161,7 +172,7 @@ def test_remote_control_statistics_baseline_collects_without_grading(baseline):
     _, _, work, results, error = baseline
     assert error == "", (work / "run.log").read_text()
     assert results == {SOURCE: []}
-    pytest.fail("PROFILE\n" + "\n".join(TIMELINE[-400:]))
+    pytest.fail("PROFILE\n" + "\n".join(TIMELINE[:300]))
 
 
 def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, checkout_scratch, monkeypatch):
@@ -178,4 +189,4 @@ def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, check
     assert error == "", (grading / "run.log").read_text()
     assert len(results[SOURCE]) == 1, results
     assert any(row["status"] == "killed" for row in results[SOURCE]), results
-    pytest.fail("PROFILE\n" + "\n".join(TIMELINE[-400:]))
+    pytest.fail("PROFILE\n" + "\n".join(TIMELINE[:300]))
