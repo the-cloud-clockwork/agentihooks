@@ -846,7 +846,7 @@ The early verifier also waits for the other required queue jobs, including `shar
 
 ## Lost fail fast watcher
 
-The workflow key remains `queue-fail-fast`, but its merge group Actions name is now `Gate — Required`. It starts after queue planning and holds a light runner while `Verify every queue gate while the units finish` runs `python3 -m scripts.ci_gate_queue`. The verifier waits only for the required queue jobs and the planned unit shards, so a red check outside them never holds a green group. It checks the queue ref and this attempt's job inventory every five seconds, with a twenty minute verification deadline. It checks the ref again before accepting a complete inventory.
+The workflow key remains `queue-fail-fast`, but its merge group Actions name is now `Gate — Required`. It starts after queue planning and holds a light runner while `Verify every queue gate while the units finish` runs `python3 -m scripts.ci_gate_queue`. The verifier waits only for the required queue jobs and the planned unit shards, so a red check outside them never holds a green group. It checks the queue ref and this attempt's job inventory every five seconds, with a forty minute verification deadline. It checks the ref again before accepting a complete inventory.
 
 This job now owns the required status. A lost or cancelled early gate cannot authorize a merge even if every unit passed. The later `Queue gate summary` still permits a failed or cancelled watcher with an empty `failed` output when its graded dependencies passed; that summary does not replace a successful `Gate — Required` check.
 
@@ -860,7 +860,7 @@ A successful verification returns without a success message and skips `Cancel a 
 | `Unexpected queue result: <job>` | A completed job has the wrong conclusion. Check the named job, including classification and recovery jobs |
 | `Unplanned original shard`, `Unplanned recovery shard` or `Duplicate queue job` | The observed inventory disagrees with the queue plan. Inspect the plan and all job names |
 | `::error::queue group is no longer current` | The queue ref no longer matches the run's commit. This verifier rejects the stale group; it does not write the old queue rebuild record |
-| `Queue verification timed out before every expected job completed` | The twenty minute verification deadline expired. Find the missing or unfinished jobs |
+| `Queue verification timed out before every expected job completed` | The forty minute verification deadline expired. Find the missing or unfinished jobs |
 
 The old `Watch for the first failed graded job` step, fifteen second poll, ten read fallback and `<job> failed, so Gate Required cannot pass; cancelling this queue run.` line describe the replaced watcher. They are not the current early gate's output.
 

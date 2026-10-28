@@ -62,7 +62,7 @@ def test_required_queue_checks_still_hold_with_unrelated_red_work(name, state):
     assert ci_gate_queue.verify(jobs, [2, 7]) is False
 
 
-def test_unrelated_red_work_cannot_allow_a_stale_queue_head(monkeypatch):
+def test_the_queue_ref_check_still_rejects_a_stale_head_beside_unrelated_red_work(monkeypatch):
     jobs = complete()
     next(job for job in jobs if job["name"] == "sonar")["conclusion"] = "failure"
     monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint, size: jobs)
