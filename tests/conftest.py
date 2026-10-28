@@ -23,7 +23,11 @@ for _redis_name in list(os.environ):
 from tests import installer_isolation, ledger_guard, mutation_trace, redis_key_guard, swarm_v2_isolation
 from tests.shards import (
     FIRST_SHARD_FILES,
+    OWNER_COPIES,
+    SECONDS_PER_SOURCE_BYTE,
+    WORKER_FILES,
     assign_nodes,
+    assign_owners,
     discover_test_files,
     grouped_files,
     setup_nodes_in_parallel,
@@ -77,6 +81,10 @@ def _reused(config) -> tuple[frozenset[str], frozenset[str]]:
 @pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node):
     node.workerinput["ci_reused"] = node.config.stash[REUSED_SOURCE]
+    # A replacement worker gets a new id and no share, so it collects the whole shard and can run any test.
+    owned = node.config.stash.get(WORKER_FILES, {}).get(node.gateway.id)
+    if owned is not None:
+        node.workerinput["owned_files"] = owned
 
 
 def pytest_collection_modifyitems(config, items):
@@ -152,6 +160,20 @@ def pytest_configure(config):
     NodeManager.setup_nodes = setup_nodes_in_parallel
     modules = [path.removesuffix(".py").replace("/", ".") for path in sorted(_shard_files(config))]
     config.stash[WARM_PIDS] = warm_imports(modules, workers)
+    config.stash[WORKER_FILES] = _worker_files(config, workers)
+
+
+def _worker_files(config, workers: int) -> dict[str, list[str]]:
+    index = int(config.getoption("shard").split("/")[0]) - 1
+    files = sorted(_shard_files(config))
+    durations = json.loads((config.rootpath / ".test_durations").read_text())
+    seconds = {path: size * SECONDS_PER_SOURCE_BYTE for path, size in source_sizes(config.rootpath, files).items()}
+    for node, shard in config.stash[NODE_SHARDS].items():
+        path = node.split("::", 1)[0]
+        if shard == index and path in seconds:
+            seconds[path] += durations.get(node, 0.0)
+    owned = assign_owners(seconds, set(grouped_files(config.rootpath, files)), workers, OWNER_COPIES)
+    return {f"gw{worker}": sorted(paths) for worker, paths in enumerate(owned)}
 
 
 # Importing Playwright here would put it in every test's import closure, so the browser check would turn on greenlet
@@ -179,7 +201,11 @@ def pytest_ignore_collect(collection_path, config):
     spec = config.getoption("shard")
     if not spec or collection_path.suffix != ".py" or not collection_path.name.startswith("test_"):
         return None
-    if collection_path.relative_to(config.rootpath).as_posix() not in _shard_files(config):
+    path = collection_path.relative_to(config.rootpath).as_posix()
+    if path not in _shard_files(config):
+        return True
+    owned = getattr(config, "workerinput", {}).get("owned_files")
+    if owned is not None and path not in owned:
         return True
     return None
 

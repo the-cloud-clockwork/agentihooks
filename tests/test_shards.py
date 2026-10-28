@@ -605,3 +605,53 @@ def test_a_shard_holding_a_serial_group_stays_heavy_for_later_parallel_tests():
     parts = assign_nodes(durations, 2, {"tests/test_a.py": "a"}, 4)
 
     assert parts == [["tests/test_a.py::test_a"], ["tests/test_b.py::test_b", "tests/test_c.py::test_c"]]
+
+
+def test_every_file_of_a_shard_is_owned_by_two_workers_and_grouped_files_share_them():
+    from tests.shards import assign_owners
+
+    seconds = {f"tests/test_{n}.py": float(n + 1) for n in range(10)}
+    grouped = {"tests/test_2.py", "tests/test_7.py"}
+    owned = assign_owners(seconds, grouped, 4, 2)
+    assert len(owned) == 4
+    assert all(sum(path in paths for paths in owned) == 2 for path in seconds)
+    assert [("tests/test_2.py" in paths) for paths in owned] == [("tests/test_7.py" in paths) for paths in owned]
+    loads = [sum(seconds[path] for path in paths) / 2 for paths in owned]
+    assert max(loads) - min(loads) <= max(seconds.values())
+    assert assign_owners(seconds, set(), 1, 2) == [set(seconds)]
+
+
+def test_the_controller_hands_each_worker_its_share_of_the_shard_files(monkeypatch):
+    _, config = _configured(monkeypatch, 4)
+    shares = config.stash[conftest.WORKER_FILES]
+    files = conftest._shard_files(config)
+    assert sorted(shares) == ["gw0", "gw1", "gw2", "gw3"]
+    assert all(sum(path in share for share in shares.values()) == 2 for path in files)
+    assert set().union(*shares.values()) == files
+    node = SimpleNamespace(config=config, gateway=SimpleNamespace(id="gw1"), workerinput={})
+    conftest.pytest_configure_node(node)
+    assert node.workerinput["owned_files"] == shares["gw1"]
+    replacement = SimpleNamespace(config=config, gateway=SimpleNamespace(id="gw4"), workerinput={})
+    conftest.pytest_configure_node(replacement)
+    assert "owned_files" not in replacement.workerinput
+
+
+def test_a_worker_collects_only_the_shard_files_it_owns(tmp_path):
+    (tmp_path / "tests").mkdir()
+    for name in "ab":
+        (tmp_path / f"tests/test_{name}.py").write_text("pass\n")
+    durations = {"tests/test_a.py::t": 1.0, "tests/test_b.py::t": 1.0}
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+
+    def ignored(workerinput):
+        config = SimpleNamespace(
+            getoption=lambda name: "1/1",
+            stash=pytest.Stash(),
+            rootpath=tmp_path,
+            option=SimpleNamespace(numprocesses=None),
+            workerinput=workerinput,
+        )
+        return [conftest.pytest_ignore_collect(tmp_path / f"tests/test_{name}.py", config) for name in "ab"]
+
+    assert ignored({"owned_files": ["tests/test_b.py"]}) == [True, None]
+    assert ignored({}) == [None, None]

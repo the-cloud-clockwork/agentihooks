@@ -15,13 +15,45 @@ import pytest
 from xdist.dsession import get_default_max_worker_restart
 from xdist.scheduler import LoadGroupScheduling, LoadScopeScheduling
 
+from tests.shards import WORKER_FILES, slowest_first
+
 
 class RefillingLoadGroupScheduling(LoadGroupScheduling):
     # A worker runs a test only once it holds the next one or is shut down, and a replacement
     # worker after a crash gets a single work unit, so keep every worker at two queued tests.
     # Workers read pytest-rerunfailures' crash count from a controller thread, so a crashed test
     # stays held until FlakeLedger.pytest_handlecrashitem runs after that count is recorded.
+    # A sharded run's workers collect only their owned files, so a worker gets only units it collected.
     holding = False
+
+    def _owned(self):
+        return bool(getattr(self.config, "stash", {}).get(WORKER_FILES, None))
+
+    def _collected(self, node):
+        cache = self.__dict__.setdefault("_collected_sets", {})
+        if node not in cache:
+            cache[node] = frozenset(self.registered_collections[node])
+        return cache[node]
+
+    def add_node_collection(self, node, collection):
+        if not self._owned():
+            return super().add_node_collection(node, collection)
+        self.registered_collections[node] = list(collection)
+
+    def schedule(self):
+        if self.collection is not None or not self._owned():
+            return super().schedule()
+        durations = json.loads((self.config.rootpath / ".test_durations").read_text())
+        union = dict.fromkeys(nodeid for collection in self.registered_collections.values() for nodeid in collection)
+        self.collection = slowest_first(list(union), durations, 0.1)
+        units = {}
+        for nodeid in self.collection:
+            units.setdefault(self._split_scope(nodeid), {})[nodeid] = False
+        order = sorted(units, key=lambda scope: -len(units[scope])) if self.config.option.loadscopereorder else units
+        self.workqueue.update((scope, units[scope]) for scope in order)
+        self.config.pluginmanager.getplugin("dsession")._session.testscollected = len(self.collection)
+        for node in self.nodes:
+            self._reschedule(node)
 
     def remove_node(self, node):
         self.holding = True
@@ -33,6 +65,15 @@ class RefillingLoadGroupScheduling(LoadGroupScheduling):
     def release(self):
         for node in self.nodes:
             self._reschedule(node)
+
+    def _assign_work_unit(self, node):
+        collected = self._collected(node)
+        scope = next((scope for scope, unit in self.workqueue.items() if collected.issuperset(unit)), None)
+        if scope is None:
+            node.shutdown()
+            return
+        self.workqueue.move_to_end(scope, last=False)
+        super()._assign_work_unit(node)
 
     def _reschedule(self, node):
         # A replacement worker still collecting gets its work from schedule() once it has collected.
