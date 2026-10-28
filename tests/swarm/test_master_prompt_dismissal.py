@@ -151,4 +151,6 @@ def test_an_opened_question_is_recorded_for_the_tick(master, store, tmp_path):
 
     typed_at(1_000.0)
     assert master_question.move(ask(FOCUS), Ledger(), now=1_000.0 + 1, store=store) == ""
-    assert master_questions.held(store, "sw", NAME) == [f"{FOCUS['question']} Options: Proof and cleanup; Hive placement."]
+    assert master_questions.held(store, "sw", NAME) == [
+        f"{FOCUS['question']} Options: Proof and cleanup; Hive placement."
+    ]
