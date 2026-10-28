@@ -37,9 +37,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     problem = verify(args.repository, args.head)
     if problem:
-        print(f"::error::{problem}", flush=True)
+        print(f"::error::{problem}")
         return 1
-    print("Tests startup verified for this head.", flush=True)
+    print("Tests startup verified for this head.")
     return 0
 
 
