@@ -72,6 +72,13 @@ def test_thirty_minute_probe_records_real_inbox_answer_once(world):
     assert sweep(world, START + LIMIT)
     item = question(world)
     assert "nothing to do" in item.text
+    assert item.ref == "automated-activity"
+    assert item.task == agent.task
+    runtime.nudge.assert_called_once_with(
+        agent,
+        f"Read activity question {item.id} with agentihooks msg read, then answer it with "
+        "agentihooks msg reply. Reply exactly nothing to do only when you have no work.",
+    )
     assert sweep(world, START + LIMIT + 1) == []
     reply = answer(world, "nothing to do")
     assert sweep(world, START + LIMIT + 2) == [f"recorded activity answer from {agent.name}"]
@@ -80,6 +87,8 @@ def test_thirty_minute_probe_records_real_inbox_answer_once(world):
 
     state = automated_gc.state(store, SLUG, agent)
     assert state["idle_answers"] == 1
+    assert state["request"] == ""
+    assert inbox.get(reply.id).reason == "activity answer recorded"
     assert state["answers"] == [{"id": reply.id, "text": "nothing to do", "at": START + LIMIT + 2}]
     runtime.retire.assert_not_called()
 
@@ -323,7 +332,8 @@ def test_collection_continues_to_later_agents(world, monkeypatch, first_state):
 
 
 @pytest.mark.parametrize("swarm_state", ["stopped", "paused"])
-def test_tick_collects_with_the_current_ledger_rows(world, monkeypatch, swarm_state):
+@pytest.mark.parametrize("idle_answers", [0, 3])
+def test_tick_collects_with_the_current_ledger_rows(world, monkeypatch, swarm_state, idle_answers):
     from scripts.swarm import automated_gc, tick
 
     store, _, agent, runtime, ledger = world
@@ -341,11 +351,133 @@ def test_tick_collects_with_the_current_ledger_rows(world, monkeypatch, swarm_st
     collected = Mock()
     monkeypatch.setattr(tick, "_collected", collected)
     record = automated_gc.state(store, SLUG, agent)
-    record["idle_answers"] = 3
+    record["idle_answers"] = idle_answers
     automated_gc._save(store, SLUG, agent, record)
-    assert tick.tick(SLUG, store, ledger, runtime, START + LIMIT) == [
-        f"collected automated agent {agent.name} after three idle answers"
-    ]
-    runtime.retire.assert_called_once_with(agent)
+    actions = tick.tick(SLUG, store, ledger, runtime, START + LIMIT)
     ledger.state.assert_called_once_with(SLUG)
-    collected.assert_called_once_with(SLUG, store, ledger, rows, agent)
+    if idle_answers == 3:
+        assert actions == [f"collected automated agent {agent.name} after three idle answers"]
+        runtime.retire.assert_called_once_with(agent)
+        collected.assert_called_once_with(SLUG, store, ledger, rows, agent)
+    else:
+        assert actions == [f"asked automated agent {agent.name} what it is doing"]
+        runtime.retire.assert_not_called()
+        collected.assert_not_called()
+
+
+def test_activity_state_is_persisted_in_its_swarm_namespace(world):
+    import json
+
+    from scripts.swarm import automated_gc
+
+    store, _, agent, runtime, _ = world
+    expected = {"idle_answers": 0, "answers": [], "request": "", "last_probe": 0}
+    assert automated_gc.state(store, SLUG, agent) == expected
+    runtime.nudge.return_value = "not delivered"
+    sweep(world, START + LIMIT)
+    record = json.loads(store.redis.get(store.key(SLUG, "automated-gc", f"{NAME}:{START}")))
+    assert record["delivered"] is False
+    assert record["request"] == question(world).id
+    assert record["last_probe"] == START + LIMIT
+
+
+def test_activity_history_retains_only_the_last_three_answers(world):
+    from scripts.swarm import automated_gc
+
+    store, _, agent, _, _ = world
+    replies = []
+    for attempt in range(1, 5):
+        at = START + attempt * LIMIT
+        sweep(world, at)
+        reply = answer(world, f"working on item {attempt}")
+        sweep(world, at + 1)
+        replies.append({"id": reply.id, "text": reply.text, "at": at + 1})
+    assert automated_gc.state(store, SLUG, agent)["answers"] == replies[-3:]
+
+
+@pytest.mark.parametrize("wrong", ["reference", "sender"])
+def test_unrelated_activity_answers_are_not_recorded(world, wrong):
+    from scripts.swarm import automated_gc
+
+    _, _, agent, _, _ = world
+    record = {"request": "question", "answers": [], "idle_answers": 0}
+    inbox = Mock()
+    inbox.get.side_effect = [
+        SimpleNamespace(id="question", reason=automated_gc.REPLY_PREFIX + "answer"),
+        SimpleNamespace(ref="other" if wrong == "reference" else "question", sender="stranger"),
+    ]
+    inbox.acts_for.return_value = wrong != "sender"
+    assert not automated_gc._answer(inbox, agent, record, START)
+    assert record == {"request": "question", "answers": [], "idle_answers": 0}
+    inbox.close.assert_not_called()
+
+
+@pytest.mark.parametrize("hold", ["heartbeat", "wait", "outage"])
+def test_activity_holds_prevent_collection(world, monkeypatch, hold):
+    from scripts.swarm import automated_gc
+
+    store, _, agent, runtime, _ = world
+    at = START + LIMIT
+    held = Mock(return_value=hold == "outage")
+    monkeypatch.setattr(automated_gc.outage, "held", held)
+    monkeypatch.setattr(
+        automated_gc.idle, "heartbeat", lambda *_: {"state": "working", "at": at} if hold == "heartbeat" else None
+    )
+    monkeypatch.setattr(automated_gc.idle, "wait", lambda *_: {"until": at + 10} if hold == "wait" else None)
+    assert not automated_gc._ready(store, SLUG, runtime, agent, at)
+    held.assert_called_once_with(store, SLUG, agent.name)
+    if hold == "outage":
+        runtime.observe.assert_not_called()
+    else:
+        runtime.observe.assert_called_once_with(agent)
+
+
+@pytest.mark.parametrize("source", ["heartbeat", "prompt"])
+def test_recent_idle_activity_postpones_the_next_question(world, monkeypatch, source):
+    from scripts.swarm import idle
+
+    store, inbox, agent, runtime, _ = world
+    at = START + LIMIT
+    if source == "heartbeat":
+        idle.beat(store.redis, SLUG, agent.name, "idle", at)
+    else:
+        monkeypatch.setattr(idle, "last_prompt", lambda *_: at)
+    assert sweep(world, at + 1) == []
+    assert inbox.inbox(agent.name) == []
+    runtime.retire.assert_not_called()
+
+
+@pytest.mark.parametrize("push,owner", [(True, False), (False, True)])
+def test_activity_question_uses_the_existing_inbox_transport(world, monkeypatch, push, owner):
+    from scripts.inbox.dispatch import Dispatcher
+    from scripts.swarm import automated_gc, capabilities
+
+    store, inbox, agent, runtime, _ = world
+    monkeypatch.setattr(capabilities, "of_agent", lambda _: SimpleNamespace(push_inbox=push))
+    monkeypatch.setattr(Dispatcher, "owner", lambda self, name: owner)
+    sweep(world, START + LIMIT)
+    assert len(inbox.inbox(agent.name)) == 1
+    assert automated_gc.state(store, SLUG, agent)["delivered"] is True
+    assert sweep(world, START + LIMIT + 1) == []
+    runtime.nudge.assert_not_called()
+
+
+def test_collected_worker_forwards_its_ledger_to_claim_cleanup(world, monkeypatch):
+    from scripts.swarm import tick
+
+    store, _, agent, _, ledger = world
+    worker = replace(agent, lane="eng", task="work")
+    rows = {"work": {"id": "work"}}
+    drop = Mock(return_value="task reopened")
+    monkeypatch.setattr(tick, "_drop", drop)
+    assert tick._collected(SLUG, store, ledger, rows, worker) == "task reopened"
+    drop.assert_called_once_with(SLUG, store, ledger, rows, worker)
+
+
+def test_legacy_agent_without_a_start_timestamp_is_probed_at_thirty_minutes(world):
+    store, inbox, agent, runtime, _ = world
+    store.put_agent(SLUG, replace(agent, started_at=0))
+    assert sweep(world, LIMIT - 1) == []
+    assert sweep(world, LIMIT) == [f"asked automated agent {agent.name} what it is doing"]
+    assert len(inbox.inbox(agent.name)) == 1
+    runtime.retire.assert_not_called()
