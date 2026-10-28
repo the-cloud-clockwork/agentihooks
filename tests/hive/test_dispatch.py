@@ -1,9 +1,7 @@
-import json
 import subprocess
 import threading
 from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pytest
 
