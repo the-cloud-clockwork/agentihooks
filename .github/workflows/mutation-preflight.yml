@@ -612,6 +612,7 @@ jobs:
         run: |
           echo "::warning::Download every mutation shard report failed, as an artifact service outage does; retrying it once in 30 seconds."
           sleep 30
+          rm -rf .mutation-shards
 
       - name: Download every mutation shard report, attempt 2
         if: steps.download-every-mutation-shard-report.outcome == 'failure'

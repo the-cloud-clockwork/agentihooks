@@ -162,7 +162,7 @@ def test_the_retried_uploads_keep_their_names_paths_and_retention(job, name, giv
 
 def test_the_aggregator_outlasts_a_report_upload_that_uses_every_attempt():
     action = yaml.safe_load((_ROOT / ".github/actions/retry-upload/action.yml").read_text())
-    worst = 3 * int(action["inputs"]["attempt-seconds"]["default"]) + 10 + 20
+    worst = 3 * (int(action["inputs"]["attempt-seconds"]["default"]) + 10) + 10 + 20
     assert _jobs()["mutation"]["timeout-minutes"] * 60 > worst + 2 * 30
 
 
@@ -198,6 +198,7 @@ def test_the_aggregator_downloads_wait_and_name_the_outage_before_attempt_two(na
     (binary / "sleep").chmod(0o755)
     done = subprocess.run(
         [wait["shell"], "-e", "-c", wait["run"]],
+        cwd=tmp_path,
         env=dict(os.environ, PATH=f"{binary}:{os.environ['PATH']}", SLEPT=str(tmp_path / "slept")),
         capture_output=True,
         text=True,
@@ -206,3 +207,25 @@ def test_the_aggregator_downloads_wait_and_name_the_outage_before_attempt_two(na
     assert done.returncode == 0, done.stderr
     assert done.stdout.startswith(f"::warning::{name} failed, as an artifact service outage does;")
     assert (tmp_path / "slept").read_text() == "30\n"
+
+
+def test_a_partial_shard_report_download_is_cleared_before_attempt_two(tmp_path):
+    steps = _jobs()["mutation"]["steps"]
+    wait = next(s for s in steps if s.get("name") == "Download every mutation shard report, wait before attempt 2")
+    partial = tmp_path / ".mutation-shards/mutation-preflight-shard-0/report.json"
+    partial.parent.mkdir(parents=True)
+    partial.write_text("{")
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "sleep").write_text("#!/usr/bin/env bash\n")
+    (binary / "sleep").chmod(0o755)
+    done = subprocess.run(
+        [wait["shell"], "-e", "-c", wait["run"]],
+        cwd=tmp_path,
+        env=dict(os.environ, PATH=f"{binary}:{os.environ['PATH']}"),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert done.returncode == 0, done.stderr
+    assert not (tmp_path / ".mutation-shards").exists()
