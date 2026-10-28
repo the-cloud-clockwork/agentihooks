@@ -66,7 +66,7 @@ def record(table, rows, now_ms, environ=os.environ, extra=None):
             timing.call(box.flush, now_ms)
         finally:
             box.close()
-    except (sqlite3.Error, OSError, ValueError) as exc:
+    except (sqlite3.Error, OSError, ValueError, *state.unavailable(environ)) as exc:
         return [f"metrics outbox failed: {exc}"]
     return []
 

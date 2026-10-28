@@ -179,7 +179,12 @@ def _recorded(tmp_path, store, pools=None):
         box.close()
 
 
-def test_the_newest_checkpoint_of_each_active_execution_reaches_the_sink(tmp_path, store):
+def test_the_newest_checkpoint_of_each_active_execution_reaches_the_sink(tmp_path, store, monkeypatch):
+    from scripts.events import state
+
+    clock = [NOW / 1000]
+    monkeypatch.setattr(metrics_fleet.time, "time", lambda: clock[0])
+    saved = state.for_store(store, metrics_fleet.CHECKPOINTS)
     seeded(store)
     executions = sorted(store.execution_occupants(SLUG).values(), key=lambda agent: agent.task)
     first, second = (agent.execution_id for agent in executions)
@@ -187,12 +192,13 @@ def test_the_newest_checkpoint_of_each_active_execution_reaches_the_sink(tmp_pat
     metrics_fleet.record_checkpoint(store, SLUG, first, f"eng-1@{SLUG}", NOW - 2_000_000)
     metrics_fleet.record_checkpoint(store, SLUG, second, f"eng-2@{SLUG}", NOW - 1_800_000)
     metrics_fleet.record_checkpoint(store, SLUG, "ended", "eng-9@scratch", NOW - 9_000_000)
-    assert 604_000_000 < store.redis.pttl(store.key(SLUG, "fleet-checkpoint", first)) <= 604_800_000
-    store.redis.pexpire(store.key(SLUG, "fleet-checkpoint", first), 1_000)
-    store.redis.pexpire(store.key(SLUG, "fleet-checkpoint", "ended"), 1_000)
+    before = json.loads(saved.get(SLUG).value)
+    assert before[first]["expires_at_ms"] == NOW + metrics_fleet.CHECKPOINT_TTL_MS
+    clock[0] += 1
     found = metrics_fleet.sample(store, SLUG, NOW, NOW)
-    assert 604_000_000 < store.redis.pttl(store.key(SLUG, "fleet-checkpoint", first)) <= 604_800_000
-    assert store.redis.pttl(store.key(SLUG, "fleet-checkpoint", "ended")) <= 1_000
+    after = json.loads(saved.get(SLUG).value)
+    assert after[first]["expires_at_ms"] == NOW + 1000 + metrics_fleet.CHECKPOINT_TTL_MS
+    assert after["ended"]["expires_at_ms"] == before["ended"]["expires_at_ms"]
     assert found["checkpoints"] == [
         {"execution_id": first, "seat": f"eng-1@{SLUG}", "taken_at_ms": NOW - 2_000_000},
         {"execution_id": second, "seat": f"eng-2@{SLUG}", "taken_at_ms": NOW - 1_800_000},
@@ -288,3 +294,69 @@ def test_checkpoint_storage_uses_the_bus_and_expires_inactive_records(monkeypatc
         "seat": "eng-2",
         "taken_at_ms": 400,
     }
+
+
+def test_checkpoint_compare_and_swap_retries_without_losing_another_writer(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.events import memory, state
+    from scripts.events.config import BusConfig
+
+    saved = memory.open_bus(BusConfig()).state(metrics_fleet.CHECKPOINTS)
+    monkeypatch.setattr(state, "for_store", lambda *args: saved)
+    metrics_fleet.record_checkpoint(SimpleNamespace(), SLUG, "first", "eng-1", 100)
+    update = saved.update
+    attempts = []
+
+    def raced(key, value, revision):
+        attempts.append(revision)
+        if len(attempts) == 1:
+            concurrent = json.loads(saved.get(key).value)
+            concurrent["other"] = {"checkpoint": {"execution_id": "other"}, "expires_at_ms": 10**18}
+            update(key, json.dumps(concurrent).encode(), revision)
+        return update(key, value, revision)
+
+    monkeypatch.setattr(saved, "update", raced)
+    metrics_fleet.record_checkpoint(SimpleNamespace(), SLUG, "second", "eng-2", 200)
+    assert len(attempts) == 2
+    assert set(json.loads(saved.get(SLUG).value)) == {"first", "other", "second"}
+
+
+def test_checkpoint_contention_is_reported_after_bounded_attempts(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.events import memory, state
+    from scripts.events.bus import StateConflict
+    from scripts.events.config import BusConfig
+
+    saved = memory.open_bus(BusConfig()).state(metrics_fleet.CHECKPOINTS)
+    monkeypatch.setattr(state, "for_store", lambda *args: saved)
+    attempts = []
+
+    def raced(*args):
+        attempts.append(args)
+        raise StateConflict("taken")
+
+    monkeypatch.setattr(saved, "create", raced)
+    with pytest.raises(StateConflict, match="metrics checkpoints remained busy"):
+        metrics_fleet.record_checkpoint(SimpleNamespace(), SLUG, "first", "eng-1", 100)
+    assert len(attempts) == 16
+
+
+def test_an_expired_checkpoint_falls_back_to_the_execution_start(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.events import memory, state
+    from scripts.events.config import BusConfig
+
+    saved = memory.open_bus(BusConfig()).state(metrics_fleet.CHECKPOINTS)
+    monkeypatch.setattr(state, "for_store", lambda *args: saved)
+    clock = [1000.0]
+    monkeypatch.setattr(metrics_fleet.time, "time", lambda: clock[0])
+    store = SimpleNamespace(
+        execution_occupants=lambda slug: {"eng-1": SimpleNamespace(execution_id="first", started_at=100)}
+    )
+    metrics_fleet.record_checkpoint(store, SLUG, "first", "eng-1", 200)
+    clock[0] += metrics_fleet.CHECKPOINT_TTL_MS / 1000
+    assert metrics_fleet._checkpoints(store, SLUG) == [{"execution_id": "first", "seat": "eng-1", "taken_at_ms": 100}]
+    assert json.loads(saved.get(SLUG).value) == {}
