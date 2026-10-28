@@ -273,6 +273,7 @@ WRITES = [
     ["api", "-XPOST", "repos/o/r/actions/jobs/1/rerun"],
     ["api", "-fbody=done", "repos/o/r/issues/8/comments"],
     ["api", "graphql", "-F", "query=@enqueue.graphql"],
+    ["api", "graphql", "--input", "enqueue.json"],
     ["workflow", "run", "publish-pypi.yml"],
 ]
 UNCHECKED = [*WRITES, ["api", "rate_limit"], ["auth", "status"], ["config", "list"]]
