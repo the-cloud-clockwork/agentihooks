@@ -220,7 +220,8 @@ def test_an_edited_workflow_cannot_add_an_uncapped_job(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("added", [False, True])
-def test_unchanged_ancestor_jobs_stay_trusted_without_admitting_new_jobs(tmp_path, monkeypatch, added):
+@pytest.mark.parametrize("shallow", [False, True])
+def test_unchanged_ancestor_jobs_stay_trusted_without_admitting_new_jobs(tmp_path, monkeypatch, added, shallow):
     inherited = _workflow(promote={"runs-on": "x", "steps": [{"run": "echo inherited"}]})
     _, repo, ancestor = _repo(tmp_path, {"replay.yml": inherited})
     monkeypatch.chdir(repo)
@@ -242,10 +243,40 @@ def test_unchanged_ancestor_jobs_stay_trusted_without_admitting_new_jobs(tmp_pat
     workflow.write_text(yaml.safe_dump(current))
     lanes.git("add", ".")
     lanes.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "dev")
+    if shallow:
+        clone = tmp_path / "shallow"
+        subprocess.run(["git", "clone", "--quiet", "--depth", "1", repo.as_uri(), str(clone)], check=True)
+        monkeypatch.chdir(clone)
+        lanes.git("fetch", "--quiet", "--depth", "1", "origin", head)
+        repo = clone
     expected = (
         {f"{lanes.WORKFLOWS}/replay.yml": ["job escape has no shared hosted lane concurrency group"]} if added else {}
     )
     assert lanes.refused(head, repo) == expected
+
+
+@pytest.mark.parametrize("fault", ["none", "steps", "events", "name", "concurrency", "copy"])
+def test_ancestor_trust_requires_the_same_job_and_execution_context(fault):
+    ancestor = _workflow(promote={"runs-on": "x", "steps": [{"run": "echo inherited"}]})
+    workflow = yaml.safe_load(yaml.safe_dump(ancestor))
+    current = _workflow(promote={"runs-on": "x", "concurrency": LANED})
+    current["on"]["push"] = None
+    if fault == "steps":
+        workflow["jobs"]["promote"]["steps"][0]["run"] = "echo changed"
+    elif fault == "events":
+        workflow["on"]["push"] = None
+    elif fault == "name":
+        workflow["name"] = "Copy"
+    elif fault == "concurrency":
+        workflow["concurrency"] = {"group": "branch-only"}
+    elif fault == "copy":
+        workflow["jobs"]["copy"] = workflow["jobs"].pop("promote")
+    expected = (
+        []
+        if fault == "none"
+        else [f"job {'copy' if fault == 'copy' else 'promote'} has no shared hosted lane concurrency group"]
+    )
+    assert lanes.grade(yaml.safe_dump(workflow), yaml.safe_dump(current), yaml.safe_dump(ancestor)) == expected
 
 
 @pytest.mark.parametrize("called_block, unsafe", [(CALLED, True), (LANED, False)])
