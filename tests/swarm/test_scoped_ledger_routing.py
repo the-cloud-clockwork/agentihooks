@@ -167,9 +167,25 @@ def test_timer_prechecks_and_waits_resolve_the_selected_route(store, monkeypatch
     assert seen == [("selected", "https://hosted.example"), ("other", ledger.BASE or ledger_link.base())]
     seen.clear()
     monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: seen.append((slug, ledger.base())))
-    assert cli.run_waits(store, "selected") == []
-    assert cli.run_waits(store, "other") == []
+    with authority_context.bound("trusted-tick-fixture"):
+        assert cli.run_waits(store, "selected") == []
+        assert cli.run_waits(store, "other") == []
     assert seen == [("selected", "https://hosted.example"), ("other", ledger.BASE or ledger_link.base())]
+
+
+def test_the_wait_command_skips_a_remote_swarm_and_finishes_the_local_one(store, monkeypatch, capsys):
+    from argparse import Namespace
+
+    monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli.timer, "guard", lambda binary: True)
+    acquired = []
+    monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: acquired.append(slug))
+    with authority_context.bound(None):
+        cli.cmd_waits(store, Namespace())
+    assert acquired == ["other"]
+    assert capsys.readouterr() == ("", "")
 
 
 @pytest.mark.parametrize("active", [False, True])
