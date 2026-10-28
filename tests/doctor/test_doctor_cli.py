@@ -128,6 +128,19 @@ def test_a_proof_doctor_on_a_scratch_folder_needs_its_own_redis(env, monkeypatch
     assert not (tmp / f"{DOCTOR}.json").exists()
 
 
+def test_start_returns_before_any_tick_step_and_leaves_the_first_tick_to_a_detached_child(env, monkeypatch, capsys):
+    store, _, _ = env
+    ticks, detached = [], []
+    monkeypatch.setattr(swarm_cli, "run_tick", lambda *args, **kwargs: ticks.append(args) or [])
+    monkeypatch.setattr("scripts.swarm.scheduled_tick.fire", lambda *args: detached.append(args))
+    assert doctor.main([WATCHED, "start"]) == 0
+    assert ticks == [] and len(detached) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert ledger_link.page_line(DOCTOR) in out
+    assert json.dumps({"swarm": DOCTOR, "state": "running"}) in out
+    assert store.config(DOCTOR).state == "running" and store.agents(DOCTOR) == []
+
+
 def test_start_links_both_ledgers_starts_the_doctor_and_registers_peer_masters(env):
     store, rt, tmp = env
     assert doctor.main([WATCHED, "start"]) == 0
