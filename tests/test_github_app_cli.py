@@ -1,4 +1,5 @@
 import io
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -263,6 +264,8 @@ READS = [
     ["pr", "view", "8"],
     ["pr", "checks", "8"],
     ["search", "prs", "flaky"],
+    ["api", "-XGET", "repos/o/r/actions/artifacts/1/zip"],
+    ["api", "repos/o/r/pulls", "-X"],
 ]
 WRITES = [
     ["pr", "merge", "8", "--squash"],
@@ -277,8 +280,20 @@ WRITES = [
     ["api", "graphql", "-F", "query=@enqueue.graphql"],
     ["api", "graphql", "--input", "enqueue.json"],
     ["workflow", "run", "publish-pypi.yml"],
+    ["api", "repos/o/r/actions/jobs/1/rerun", "-X", "POST"],
+    ["api", "--method=POST", "repos/o/r/actions/jobs/1/rerun"],
+    ["api", "graphql", "-f", "query= mutation { enqueuePullRequest(input: {}) { clientMutationId } }"],
+    ["api", "graphql", "-f", 'query=mutation { addComment(input: {body: "a=b=c"}) { clientMutationId } }'],
 ]
-UNCHECKED = [*WRITES, ["api", "rate_limit"], ["auth", "status"], ["config", "list"]]
+UNCHECKED = [
+    *WRITES,
+    ["api", "rate_limit"],
+    ["api", "/rate_limit"],
+    ["auth", "status"],
+    ["config", "list"],
+    ["pr"],
+    [],
+]
 
 
 @pytest.mark.parametrize("arguments", READS)
@@ -324,6 +339,17 @@ def test_the_reserve_is_set_by_environment(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_GITHUB_READ_RESERVE", "50")
     assert gh_exec(monkeypatch, 50, ["run", "list"])[0] == 0
     assert gh_exec(monkeypatch, 49, ["run", "list"])[0] == 3
+
+
+def test_the_reset_time_is_named_in_utc_whatever_the_local_zone(monkeypatch, capsys):
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    try:
+        gh_exec(monkeypatch, 0, ["run", "list"])
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+    assert capsys.readouterr().err.endswith("reset at 2026-10-28T04:00:00Z\n")
 
 
 @pytest.mark.parametrize("failure", ["error", "headers"])
