@@ -582,6 +582,21 @@ def test_a_typed_turn_while_away_never_lifts_the_limit(monkeypatch):
     assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "word " * 21}, SWARM) != ""
 
 
+@pytest.mark.parametrize("prompt", ["Explain the current work", "What is waiting?"])
+def test_master_pane_prompt_allows_long_reply_only_during_quiet_window(monkeypatch, capsys, prompt):
+    monkeypatch.setenv("AGENTIHOOKS_INBOX_QUIET_S", "180")
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 100)
+    out = run_prompt(monkeypatch, capsys, "master-pane", prompt)
+    assert REMINDER not in out
+    payload = {"session_id": "master-pane", "last_assistant_message": "word " * 21}
+    assert operator_mode.present("master-pane", SWARM, now=279)
+    assert not operator_mode.present("other-pane", SWARM, now=101)
+    assert operator_mode.reply_refusal(payload, SWARM) == ""
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 280)
+    assert not operator_mode.present("master-pane", SWARM, now=280)
+    assert operator_mode.reply_refusal(payload, SWARM)
+
+
 CHANNEL = '<channel source="inbox" item_id="ITEM" sender="SENDER" sent_at_ms="MILLIS">Automated notice</channel>'
 
 
