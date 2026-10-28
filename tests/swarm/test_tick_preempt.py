@@ -84,6 +84,49 @@ def test_the_preempted_life_is_refunded_and_a_refused_urgent_task_asks_nobody(st
     assert [asks(store, a.name) for a in workers(store)] == [[], []]
 
 
+def test_a_full_lane_probes_placement_again_before_asking_for_an_urgent_task_refused_long_ago(
+    store,  # noqa: F811
+    monkeypatch,
+):
+    from scripts.hive import placement_waits
+
+    refused = "no eng hive has room: cpu"
+    ledger, runtime = busy_with_normal_work(store)
+    ledger.rows["t3"]["rank"] = "high"
+    monkeypatch.setattr(
+        runtime, "placement_refusal", lambda lane, task: refused if task.get("id") == "t4" else "", raising=False
+    )
+    ledger.rows["t4"] = {"id": "t4", "lane": "eng", "state": "open", "claimed_by": "", "rank": "urgent"}
+    placement_waits.observe(store, "sw", "eng", "t4", refused, 3_000)
+    for at in (3_000, 4_000 + placement_waits.WAIT_MS, 5_000 + placement_waits.WAIT_MS + preempt.ANSWER_MS):
+        tick("sw", store, ledger, runtime, now_ms=at)
+    assert workers(store)
+    assert [a.name for a in store.agents("sw") if asks(store, a.name)] == []
+
+
+def test_an_urgent_task_with_an_unresolved_profile_asks_nobody_once_its_refusal_is_old(
+    store,  # noqa: F811
+    monkeypatch,
+):
+    from scripts.hive import placement_waits
+    from scripts.swarm.profile_choice import ProfileUnresolved
+
+    def refusal(lane, task):
+        if task.get("id") == "t4":
+            raise ProfileUnresolved("t4 profile is unresolved")
+        return ""
+
+    ledger, runtime = busy_with_normal_work(store)
+    ledger.rows["t3"]["rank"] = "high"
+    monkeypatch.setattr(runtime, "placement_refusal", refusal, raising=False)
+    ledger.rows["t4"] = {"id": "t4", "lane": "eng", "state": "open", "claimed_by": "", "rank": "urgent"}
+    placement_waits.observe(store, "sw", "eng", "t4", "no eng hive has room: cpu", 3_000)
+    for at in (3_000, 4_000 + placement_waits.WAIT_MS):
+        tick("sw", store, ledger, runtime, now_ms=at)
+    assert workers(store)
+    assert [a.task for a in store.agents("sw") if asks(store, a.name)] == []
+
+
 def test_spawn_order_shares_one_handoff_batch_across_lanes_and_queue_sort(store, monkeypatch):  # noqa: F811
     from importlib import import_module
     from unittest.mock import Mock, call
