@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from hooks.memory import archive
+from hooks.memory.api import ingest as ingest_api
 from hooks.memory.api import records
 from hooks.memory.api import search as search_api
 from hooks.memory.api.ingest import SCHEMA_VERSION, Grant
@@ -30,9 +31,13 @@ PORT_ENV = "AGENTIHOOKS_SESSION_PORT"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8790
 MAX_BODY = 1 << 20
+DRAIN_LIMIT = 4 * MAX_BODY
+DRAIN_CHUNK = 1 << 16
+READ_TIMEOUT = 10.0
 LENGTH_HEADER = "Content-Length"
 AUTH_HEADER = "Authorization"
 PROBE = "SELECT 1"
+INGEST_PATH = "/v2/sessions/ingest"
 SEARCH_PATH = "/v2/sessions/search"
 TOOLS_PREFIX = "/v2/sessions/tools/"
 HEALTH_PATH = "/healthz"
@@ -72,10 +77,30 @@ def _refusal(error_class: str, detail: str) -> dict:
     }
 
 
+class UnreadBody(Exception):
+    pass
+
+
+def drain(request: BaseHTTPRequestHandler, length: int) -> None:
+    if length > DRAIN_LIMIT:
+        raise UnreadBody
+    deadline = time.monotonic() + READ_TIMEOUT
+    while length > 0:
+        if time.monotonic() > deadline:
+            raise UnreadBody
+        chunk = request.rfile.read1(min(length, DRAIN_CHUNK))
+        if not chunk:
+            return
+        length -= len(chunk)
+
+
 def read_body(request: BaseHTTPRequestHandler) -> dict | None:
     try:
         length = int(request.headers.get(LENGTH_HEADER) or 0)
-        if length not in range(2, MAX_BODY + 1):
+        if length > MAX_BODY:
+            drain(request, length)
+            return None
+        if length < 2:
             return None
         body = json.loads(request.rfile.read(length))
     except ValueError:
@@ -84,14 +109,19 @@ def read_body(request: BaseHTTPRequestHandler) -> dict | None:
 
 
 def post(tools: records.SessionTools, grants: dict[str, Grant], request: BaseHTTPRequestHandler) -> tuple:
-    if request.path != SEARCH_PATH and not request.path.startswith(TOOLS_PREFIX):
+    if request.path not in (SEARCH_PATH, INGEST_PATH) and not request.path.startswith(TOOLS_PREFIX):
         return 404, _refusal("not_found", NOT_FOUND)
     grant = authenticate(grants, request.headers.get(AUTH_HEADER))
     if grant is None:
         return 401, _refusal("unauthenticated", UNAUTHENTICATED), {"WWW-Authenticate": "Bearer"}
-    body = read_body(request)
+    try:
+        body = read_body(request)
+    except (UnreadBody, TimeoutError):
+        return 400, _refusal("invalid_request", BAD_BODY), {"Connection": "close"}
     if body is None:
         return 400, _refusal("invalid_request", BAD_BODY)
+    if request.path == INGEST_PATH:
+        return 200, ingest_api.ingest(tools.catalog, grant, body)
     if request.path == SEARCH_PATH:
         return 200, search_api.search(tools.searcher, grant, body)
     return 200, records.call(tools, request.path.removeprefix(TOOLS_PREFIX), grant, body, time.time())
@@ -127,6 +157,7 @@ def handler(tools: records.SessionTools, grants: dict[str, Grant]) -> type[BaseH
         "do_GET": lambda request: answer(request, *get(tools, request)),
         "do_POST": lambda request: answer(request, *post(tools, grants, request)),
         "log_message": quiet,
+        "timeout": READ_TIMEOUT,
     }
     return type("Sessions", (BaseHTTPRequestHandler,), routes)
 

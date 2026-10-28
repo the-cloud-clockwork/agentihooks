@@ -46,6 +46,7 @@ WORKER_KEYS = (
     "swarm:*:dev-red",
     "swarm:*:prerequisite-waits",
     "swarm:*:stage-covers",
+    "swarm:*:gate-lifts:tasks:*",
     "seat:*:recaps",
     "seat:*:learned",
     "seat-of:*:exit",

@@ -652,3 +652,110 @@ def test_unreadable_exporter_progress_is_a_failure_line_not_a_crash(cursors, rea
     )
     assert failure.startswith(f"{reason} at {registry.__file__}:")
     assert failure.rpartition(":")[2].isdigit()
+
+
+def _read_order(monkeypatch, agents, state):
+    monkeypatch.setattr(registry, "READERS", 1)
+    langfuse = Langfuse([_trace("tr", "sid")], [])
+    found, failures = registry.read("s", agents, langfuse, state, 15, 50)
+    assert failures == []
+    return [params["tags"][1] for path, params in langfuse.calls if path == "traces"], found
+
+
+def test_bindings_are_read_largest_trace_first_and_reported_in_their_own_order(cursors, monkeypatch):
+    small, large = AGENT, {**AGENT, "name": "engineer@1-0002"}
+    state = {"sizes": {"engineer@1-0001": 31, "engineer@1-0002": 700}}
+    order, found = _read_order(monkeypatch, [small, large], state)
+    assert order == ["agent:engineer@1-0002", "agent:engineer@1-0001"]
+    assert [b["agent"] for b in found] == ["engineer@1-0001", "engineer@1-0002"]
+    assert state["sizes"] == {"engineer@1-0001": 40, "engineer@1-0002": 40}
+
+
+def test_a_master_with_no_known_size_is_read_first_and_other_unknown_bindings_last(cursors, monkeypatch):
+    known, master, unknown = AGENT, {**AGENT, "name": "master@1-0001"}, {**AGENT, "name": "engineer@1-0003"}
+    order, _ = _read_order(monkeypatch, [known, unknown, master], {"sizes": {"engineer@1-0001": 300, "gone": 9}})
+    assert order == ["agent:master@1-0001", "agent:engineer@1-0001", "agent:engineer@1-0003"]
+
+
+def test_an_unknown_binding_starts_after_a_binding_known_to_hold_one_observation(cursors, monkeypatch):
+    unknown, one = AGENT, {**AGENT, "name": "engineer@1-0002"}
+    order, _ = _read_order(monkeypatch, [unknown, one], {"sizes": {"engineer@1-0002": 1}})
+    assert order == ["agent:engineer@1-0002", "agent:engineer@1-0001"]
+
+
+def test_an_unread_binding_keeps_its_last_known_size(cursors, read_clock):
+    state = {"sizes": {"engineer@1-0001": 700, "gone": 9}}
+    registry.read("s", [AGENT], Langfuse([], []), state, 0, 50)
+    assert state["sizes"] == {"engineer@1-0001": 700}
+
+
+def _root_reads(langfuse):
+    return [params["traceId"] for path, params in langfuse.calls if params.get("type") == "AGENT"]
+
+
+def test_a_later_scan_reads_no_root_of_a_known_trace_and_reads_the_root_of_a_new_one(cursors):
+    langfuse = Langfuse([_trace("tr-new", "sid-new"), _trace("tr-old", "sid-old")], [])
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert _root_reads(langfuse) == ["tr-new", "tr-old"]
+    langfuse.calls.clear()
+    langfuse.traces = [_trace("tr-next", "sid-next", life="engineer@1-0001#2"), *langfuse.traces]
+    [found], failures = registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert failures == [] and _root_reads(langfuse) == ["tr-next"]
+    assert [(t["id"], t["session_id"], t["life"], t["profile"]) for t in found["traces"]] == [
+        ("tr-next", "sid-next", "engineer@1-0001#2", "engineer"),
+        ("tr-new", "sid-new", f"engineer@1-0001#{T0}", "engineer"),
+        ("tr-old", "sid-old", f"engineer@1-0001#{T0}", "engineer"),
+    ]
+    assert sorted(state["roots"]) == ["tr-new", "tr-next", "tr-old"]
+
+
+def test_a_trace_without_a_root_observation_is_read_again_at_the_next_scan(cursors):
+    langfuse = Langfuse([{"id": "tr-orphan", "sessionId": "sid"}], [])
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert _root_reads(langfuse) == ["tr-orphan", "tr-orphan"]
+    assert state["roots"] == {}
+
+
+def test_a_root_missing_one_attribute_is_read_again_until_every_attribute_is_present(cursors):
+    partial = _trace("tr", "sid")
+    partial["metadata"]["attributes"]["agentihooks.correlation.profile.resolved"] = ""
+    langfuse = Langfuse([partial], [])
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert state["roots"] == {}
+    langfuse.traces = [_trace("tr", "sid")]
+    [found], _ = registry.read("s", [AGENT], langfuse, state, 15, 50)
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert _root_reads(langfuse) == ["tr", "tr"]
+    assert found["traces"][0]["profile"] == "engineer"
+
+
+def test_a_known_root_on_a_trace_row_without_a_session_reads_an_empty_session(cursors):
+    known = {"life": "l", "seat": "s", "task": "t", "harness": "h", "profile": "p"}
+    assert registry._correlated(None, {"id": "tr"}, {"tr": known}) == {"id": "tr", "session_id": "", **known}
+
+
+def test_a_rescan_of_an_unchanged_binding_with_two_traces_costs_three_requests(cursors):
+    langfuse = Langfuse([_trace("tr-new", "sid-new"), _trace("tr-old", "sid-old")], [])
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert len(langfuse.calls) == 5
+    langfuse.calls.clear()
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert [path for path, _ in langfuse.calls] == ["traces", "observations", "observations"]
+
+
+def test_a_full_read_drops_roots_of_traces_no_longer_listed_and_a_failed_read_keeps_them(cursors, read_clock):
+    known = {"life": "x", "seat": "", "task": "", "harness": "", "profile": ""}
+    state = {"roots": {"gone": known}}
+    registry.read("s", [AGENT], Langfuse([_trace("tr-1", "sid")], []), state, 15, 50)
+    assert list(state["roots"]) == ["tr-1"]
+
+    def down(path, params):
+        raise ConnectionError("refused")
+
+    registry.read("s", [AGENT], down, state, 15, 50)
+    assert list(state["roots"]) == ["tr-1"]

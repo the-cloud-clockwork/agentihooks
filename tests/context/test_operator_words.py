@@ -344,6 +344,15 @@ def test_question_answers_are_removed_with_their_swarm():
     assert operator_words.matching("master@a1-1", "Swarm answer", within=None) == ""
 
 
+def test_an_unavailable_shared_store_mirrors_nothing(monkeypatch):
+    class Down:
+        def get(self, key):
+            raise OSError("store down")
+
+    monkeypatch.setattr(operator_words, "_shared", lambda: Down())
+    assert operator_words._mirror("demo", "master@a1-1", 100, "ship it") is False
+
+
 def test_upgrade_continues_past_empty_and_unresolved_files(tmp_path, monkeypatch):
     import json
 
@@ -785,6 +794,22 @@ def test_an_unreachable_or_failing_shared_redis_keeps_the_local_words(tmp_path, 
     operator_words.forget("demo")
     _hosted(tmp_path, monkeypatch)
     assert operator_words.matching("master@a1-1", "keep the local words", within=None) == ""
+
+
+def test_legacy_redis_errors_preserve_state_words_and_allow_forget(shared, tmp_path, monkeypatch):
+    from redis.exceptions import ResponseError
+
+    operator_words.record("master@a1-1", "Keep the state words", now=100, swarm="demo")
+    _hosted(tmp_path, monkeypatch)
+
+    def denied(*args):
+        raise ResponseError("NOPERM")
+
+    monkeypatch.setattr(shared, "smembers", denied)
+    assert operator_words.recorded("master@*") == ["master@a1-1"]
+    assert operator_words.matching("master@a1-1", "state words", within=None) == "Keep the state words"
+    operator_words.forget("demo")
+    assert operator_words.matching("master@a1-1", "state words", within=None) == ""
 
 
 def test_the_shared_client_connects_once_per_process_and_retries_after_a_refusal(monkeypatch):

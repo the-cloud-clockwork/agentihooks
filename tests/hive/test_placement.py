@@ -153,7 +153,7 @@ def test_the_order(hives, expected):
 def test_the_master_never_lands_on_a_hive_that_excludes_it():
     hives = [eng("a", agents=4), eng("b", agents=5), hive("vm", heartbeat_at=0)]
     assert place("master", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live hive takes master")
-    assert place("qa", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live UI hive takes qa")
+    assert place("qa", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live swarm-master takes qa")
 
 
 def test_a_full_fleet_names_every_hive_refusal_in_order():
@@ -171,9 +171,13 @@ def test_a_full_master_ui_hive_keeps_the_master_without_counting_against_it():
 @pytest.mark.parametrize("role", ["frontend", "qa"])
 def test_a_ui_profile_task_waits_for_a_ui_host_instead_of_a_headless_hive(role):
     headless = [eng("anton-test"), eng("anton-stable")]
-    assert place(role, "claude", "acct", "subscription", REPO, headless, NOW) == Wait(f"no live UI hive takes {role}")
+    assert place(role, "claude", "acct", "subscription", REPO, headless, NOW) == Wait(
+        f"no live swarm-master takes {role}"
+    )
     full = [hive("workstation", agents=2), *headless]
-    assert place(role, "claude", "acct", "subscription", REPO, full, NOW) == Wait(f"no UI hive for {role} has room")
+    assert place(role, "claude", "acct", "subscription", REPO, full, NOW) == Wait(
+        f"no swarm-master for {role} has room"
+    )
 
 
 def test_the_codex_harness_matches_its_own_slot_and_login():

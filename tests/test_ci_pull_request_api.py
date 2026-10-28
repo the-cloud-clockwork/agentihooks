@@ -18,7 +18,7 @@ BESIDE = re.compile(r"\$\(dirname \"\$0\"\)|\$\{?GITHUB_ACTION_PATH\}?")
 WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
-    ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "_run", "budget"},
+    ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "budget"},
     ROOT / "scripts/ci_mutation/reuse.py": {"api"},
     ROOT / "scripts/ci_stats_seed.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
@@ -213,6 +213,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/chart_hive_join.py",
         "tests/chart_hive_only.py",
         "tests/chart_hub.py",
+        "tests/chart_ledger_rollout.py",
         "tests/chart_nats.py",
         "tests/chart_network.py",
         "tests/chart_redis.py",

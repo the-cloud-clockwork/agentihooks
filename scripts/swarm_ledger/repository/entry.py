@@ -19,11 +19,12 @@ def thawed(value: object) -> object:
 
 
 class Entry:
-    """One ledger as last stored: its generation, canonical text, a parsed copy callers only read and views of it."""
+    """One ledger as last stored: its generation, canonical text, a parsed copy callers only read, views of it and
+    the private copy the write that stored it left for the next write."""
 
-    def __init__(self, generation, text, state, fragments=None):
+    def __init__(self, generation, text, state, fragments=None, writer=None):
         self.generation, self._text, self.state, self.views = generation, text, state, {}
-        self.fragments = fragments
+        self.fragments, self.writer = fragments, writer
 
     @property
     def text(self) -> str:
@@ -33,5 +34,9 @@ class Entry:
         return thawed(self.state)
 
     def for_write(self) -> dict:
+        """The writer copy the write that stored this entry left, once; otherwise a fresh copy sharing stamp records."""
+        writer, self.writer = self.writer, None
+        if writer is not None:
+            return writer
         meta = {key: value.copy() if key == "stamps" else thawed(value) for key, value in self.state["_meta"].items()}
         return {key: meta if key == "_meta" else thawed(value) for key, value in self.state.items()}

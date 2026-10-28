@@ -231,6 +231,7 @@ def _no_git(argv, **kw):
 def env(monkeypatch, store):
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}])
     ledger.say = lambda slug, text, by=None: None
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda _, *args: ledger.join(*args))
     rt = FakeRuntime()
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)

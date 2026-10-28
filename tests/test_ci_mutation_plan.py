@@ -728,18 +728,15 @@ def test_estimate_names_the_file_whose_pragma_is_broken(tmp_path, monkeypatch):
         plan.estimate(tmp_path, {"scripts/broken.py": {3}})
 
 
-@pytest.mark.parametrize(
-    "decorator, refused", [("@functools.cache\n", True), ("@dataclasses.dataclass\nclass Box:\n", False)]
-)
+@pytest.mark.parametrize("decorator, refused", [("@opaque\n", True), ("@dataclasses.dataclass\n", False)])
 def test_estimate_refuses_changed_function_lines_that_produce_no_mutant(tmp_path, monkeypatch, decorator, refused):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("mutmut.configuration._config", None)
     _project(tmp_path, {})
-    indent = "    " * decorator.endswith(":\n")
-    body = f"{indent}def doubled(value):\n{indent}    return value * 2\n"
-    (tmp_path / "scripts/cached.py").write_text(f"import dataclasses\nimport functools\n\n{decorator}{body}")
-    (tmp_path / "tests/test_cached.py").write_text("from scripts.cached import doubled\n")
-    line = 6 + (not refused)
+    source = f"import dataclasses\n\n{decorator}class Box:\n    def doubled(self, value):\n        return value * 2\n"
+    (tmp_path / "scripts/cached.py").write_text(source)
+    (tmp_path / "tests/test_cached.py").write_text("from scripts.cached import Box\n")
+    line = source.splitlines().index("        return value * 2") + 1
     if refused:
         with pytest.raises(SystemExit) as refusal:
             plan.estimate(tmp_path, {"scripts/cached.py": {line}})
@@ -749,15 +746,15 @@ def test_estimate_refuses_changed_function_lines_that_produce_no_mutant(tmp_path
     assert plan.estimate(tmp_path, {"scripts/cached.py": {1}})[1] == 0
 
 
-@pytest.mark.parametrize("decorator, refused", [("@functools.cache\n", True), ("", False)])
+@pytest.mark.parametrize("decorator, refused", [("@opaque\nclass Box:\n    ", True), ("", False)])
 def test_estimate_refuses_an_ungraded_changed_function_beside_a_graded_one(tmp_path, monkeypatch, decorator, refused):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("mutmut.configuration._config", None)
     _project(tmp_path, {})
-    source = f"import functools\n\n\ndef tripled(value):\n    return value * 3\n\n\n{decorator}def doubled(value):\n    return value * 2\n"
+    source = f"import functools\n\n\ndef tripled(value):\n    return value * 3\n\n\n{decorator}def doubled(value):\n{'    ' if refused else ''}    return value * 2\n"
     (tmp_path / "scripts/mixed.py").write_text(source)
     (tmp_path / "tests/test_mixed.py").write_text("from scripts.mixed import doubled, tripled\n")
-    lines = {5, source.splitlines().index("    return value * 2") + 1}
+    lines = {5, next(index for index, line in enumerate(source.splitlines(), 1) if line.strip() == "return value * 2")}
     if refused:
         with pytest.raises(SystemExit) as refusal:
             plan.estimate(tmp_path, {"scripts/mixed.py": lines})
@@ -770,11 +767,11 @@ def test_estimate_names_each_ungraded_function_in_source_order(tmp_path, monkeyp
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("mutmut.configuration._config", None)
     _project(tmp_path, {})
-    source = "import functools\n\n\n@functools.cache\ndef tripled(value):\n    return value * 3\n\n\n@functools.cache\ndef doubled(value):\n    return value * 2\n"
+    source = "\n\n@opaque\nclass Box:\n    def tripled(value):\n        return value * 3\n\n\n    def doubled(value):\n        return value * 2\n"
     (tmp_path / "scripts/mixed.py").write_text(source)
     (tmp_path / "tests/test_mixed.py").write_text("from scripts.mixed import doubled, tripled\n")
     with pytest.raises(SystemExit) as refusal:
-        plan.estimate(tmp_path, {"scripts/mixed.py": {6, 11}})
+        plan.estimate(tmp_path, {"scripts/mixed.py": {6, 10}})
     assert str(refusal.value) == "scripts/mixed.py: not mutated, changed functions produce no mutants: tripled, doubled"
 
 
