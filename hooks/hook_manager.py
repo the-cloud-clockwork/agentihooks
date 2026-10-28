@@ -1255,8 +1255,10 @@ def _operator_question(payload: dict) -> str:
     try:
         from hooks.context import master_question, operator_mode
 
-        return master_question.move(payload) or operator_mode.question_block(
-            payload.get("tool_name"), payload.get("session_id")
+        return (
+            master_question.move(payload)
+            or master_question.refusal(payload)
+            or operator_mode.question_block(payload.get("tool_name"), payload.get("session_id"))
         )
     except Exception as e:
         log("operator question check failed", {"error": str(e)})

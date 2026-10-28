@@ -1480,3 +1480,16 @@ class HerdrRuntime:
             self.herdr(["agent", "prompt", pane_target(agent), marked(text)])
         except Exception as exc:
             return str(exc) or type(exc).__name__
+
+    def dismiss(self, agent):
+        """Press escape on the local pane's open prompt; False for a pane this runtime cannot reach or own."""
+        if self.remote(agent) or agent.runtime_backend != "local":
+            return False
+        found = self._get(pane_target(agent))
+        if found is None or not _owns(found, agent):
+            return False
+        try:
+            self.herdr(["pane", "send-keys", found["pane_id"], "esc"])
+        except Exception:
+            return False
+        return True

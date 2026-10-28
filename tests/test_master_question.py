@@ -185,8 +185,13 @@ def test_explicit_priority_commands_pass_the_question_hook_without_automatic_que
 
 
 def test_a_master_whose_operator_typed_in_the_last_ten_minutes_may_ask(master):
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
     typed_at(NOW - master_question.WINDOW_SEC + 1)
-    assert master_question.move(ask(FOCUS), master, now=NOW) == ""
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    assert master_question.move(ask(FOCUS), master, now=NOW, store=store) == ""
     assert master.questions == []
 
 

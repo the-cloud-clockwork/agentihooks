@@ -154,3 +154,47 @@ def test_an_opened_question_is_recorded_for_the_tick(master, store, tmp_path):
     assert master_questions.held(store, "sw", NAME) == [
         f"{FOCUS['question']} Options: Proof and cleanup; Hive placement."
     ]
+
+
+class Herdr:
+    def __init__(self, found=None, fail=False):
+        self.found, self.fail, self.calls = found, fail, []
+
+    def __call__(self, args):
+        self.calls.append(args)
+        if args[:2] == ["agent", "get"]:
+            if self.found is None:
+                raise RuntimeError("no such agent")
+            return {"agent": self.found}
+        if self.fail:
+            raise RuntimeError("herdr down")
+        return {}
+
+
+def dismissing(tmp_path, herdr, **fields):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    agent = AgentRecord(NAME, "master", "", seat="master@sw", pane_id="w1:m1", **fields)
+    return HerdrRuntime(home=tmp_path, herdr=herdr).dismiss(agent)
+
+
+def test_the_runtime_presses_escape_on_the_owned_master_pane(tmp_path):
+    herdr = Herdr({"pane_id": "w1:m1", "name": NAME})
+    assert dismissing(tmp_path, herdr) is True
+    assert herdr.calls == [["agent", "get", "w1:m1"], ["pane", "send-keys", "w1:m1", "esc"]]
+
+
+@pytest.mark.parametrize(
+    "herdr,fields,sent",
+    [
+        (Herdr(None), {}, False),
+        (Herdr({"pane_id": "w1:m1", "name": "someone-else"}), {}, False),
+        (Herdr({"pane_id": "w1:m1", "name": NAME}, fail=True), {}, True),
+        (Herdr({"pane_id": "w1:m1", "name": NAME}), {"runtime_backend": "kubernetes"}, False),
+        (Herdr({"pane_id": "w1:m1", "name": NAME}), {"runtime_target": {"host_id": "hive-elsewhere"}}, False),
+    ],
+    ids=["gone", "not owned", "herdr fails", "not local", "on a hive"],
+)
+def test_the_runtime_reports_a_pane_it_cannot_dismiss(tmp_path, herdr, fields, sent):
+    assert dismissing(tmp_path, herdr, **fields) is False
+    assert (["pane", "send-keys", "w1:m1", "esc"] in herdr.calls) is sent
