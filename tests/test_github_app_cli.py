@@ -232,3 +232,102 @@ def test_a_failed_renewal_keeps_the_old_file_and_retries(monkeypatch, tmp_path):
     mint.side_effect = github_app_cli.GitAuthRefused(github_app_cli.REFUSED)
     assert github_app_cli.renew(0.0, 99999.0) == 0.0
     assert path.read_text() == "old\n"
+
+
+def gh_exec(monkeypatch, remaining, arguments, command="/usr/bin/gh"):
+    monkeypatch.setattr(github_app_cli, "token", Mock(return_value="fixture"))
+    reply = Mock(
+        headers={
+            "X-RateLimit-Remaining": str(remaining),
+            "X-RateLimit-Limit": "5000",
+            "X-RateLimit-Reset": "1793160000",
+        }
+    )
+    read = Mock(return_value=reply)
+    monkeypatch.setattr(github_app_cli.requests, "get", read)
+    execute = Mock()
+    monkeypatch.setattr(github_app_cli.os, "execvpe", execute)
+    return github_app_cli.main(["exec", command, *arguments]), read, execute
+
+
+READS = [
+    ["api", "repos/{owner}/{repo}/actions/artifacts?name=flake-budget&per_page=100"],
+    ["api", "--paginate", "repos/o/r/actions/runs"],
+    ["api", "-X", "GET", "search/issues", "-f", "q=repo:o/r"],
+    ["api", "--method=get", "repos/o/r/pulls"],
+    ["api", "graphql", "-f", "query=query { viewer { login } }"],
+    ["run", "list"],
+    ["run", "download", "123"],
+    ["pr", "view", "8"],
+    ["pr", "checks", "8"],
+    ["search", "prs", "flaky"],
+]
+WRITES = [
+    ["pr", "merge", "8", "--squash"],
+    ["pr", "create", "--base", "dev"],
+    ["api", "-X", "POST", "repos/o/r/actions/jobs/1/rerun"],
+    ["api", "--method", "PUT", "repos/o/r/pulls/8/merge"],
+    ["api", "repos/o/r/issues/8/comments", "-f", "body=done"],
+    ["api", "repos/o/r/dispatches", "--input", "body.json"],
+    ["api", "graphql", "-f", "query=mutation { enqueuePullRequest(input: {}) { clientMutationId } }"],
+    ["workflow", "run", "publish-pypi.yml"],
+    ["api", "rate_limit"],
+    ["auth", "status"],
+]
+
+
+@pytest.mark.parametrize("arguments", READS)
+def test_a_read_below_the_reserve_is_refused_naming_the_reset(monkeypatch, capsys, arguments):
+    status, read, execute = gh_exec(monkeypatch, 999, arguments)
+    assert status == 3
+    execute.assert_not_called()
+    read.assert_called_once_with(
+        "https://api.github.com/rate_limit",
+        headers={"Authorization": "Bearer fixture", "Accept": "application/vnd.github+json"},
+        timeout=10,
+    )
+    assert capsys.readouterr().err == (
+        "GitHub read refused: the shared App limit has 999 of 5000 calls left, below the reserve of 1000 kept for "
+        "launches, queueing and merges; reads resume after the reset at 2026-10-28T04:00:00Z\n"
+    )
+
+
+@pytest.mark.parametrize("arguments", READS)
+def test_a_read_at_the_reserve_runs(monkeypatch, arguments):
+    status, _, execute = gh_exec(monkeypatch, 1000, arguments)
+    assert status == 0
+    execute.assert_called_once()
+    assert execute.call_args.args[1] == ["/usr/bin/gh", *arguments]
+
+
+@pytest.mark.parametrize("arguments", WRITES)
+def test_writes_and_local_commands_run_below_the_reserve_without_a_budget_read(monkeypatch, arguments):
+    status, read, execute = gh_exec(monkeypatch, 0, arguments)
+    assert status == 0
+    read.assert_not_called()
+    execute.assert_called_once()
+
+
+def test_other_commands_never_read_the_budget(monkeypatch):
+    status, read, execute = gh_exec(monkeypatch, 0, ["run", "list"], command="bash")
+    assert status == 0
+    read.assert_not_called()
+    execute.assert_called_once()
+
+
+def test_the_reserve_is_set_by_environment(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_GITHUB_READ_RESERVE", "50")
+    assert gh_exec(monkeypatch, 50, ["run", "list"])[0] == 0
+    assert gh_exec(monkeypatch, 49, ["run", "list"])[0] == 3
+
+
+@pytest.mark.parametrize("failure", ["error", "headers"])
+def test_an_unreadable_budget_lets_the_read_run(monkeypatch, failure):
+    status, read, execute = gh_exec(monkeypatch, 0, ["run", "list"])
+    if failure == "error":
+        read.side_effect = github_app_cli.requests.ConnectionError("down")
+    else:
+        read.return_value = Mock(headers={})
+    execute.reset_mock()
+    assert github_app_cli.main(["exec", "/usr/bin/gh", "run", "list"]) == 0
+    execute.assert_called_once()
