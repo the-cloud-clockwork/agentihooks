@@ -131,3 +131,11 @@ def test_each_claim_journals_the_agent_names_it_counted(setup, monkeypatch, caps
         f"{slug}: local slot claim late for other on workstation counted 4 of 3: "
         f"ci@cccccc-0001, doctor/pending, engineer@bbbbbb-0001, {slug}/new",
     ]
+
+
+def test_the_claim_line_is_flushed_so_the_journal_keeps_it_at_the_claim(setup, monkeypatch):
+    printed = []
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    monkeypatch.setattr(local_slots, "print", lambda *args, **kwargs: printed.append(kwargs), raising=False)
+    local_slots.claim(setup.store, "workstation", setup.config.slug, "task", "new", 6)
+    assert printed == [{"flush": True}]

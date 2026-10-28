@@ -104,6 +104,19 @@ def test_the_master_launch_reader_reads_the_watched_swarm(monkeypatch):
     assert seen == [(store, "sw")]
 
 
+def test_the_slot_census_reader_reads_the_watched_swarm(monkeypatch):
+    from scripts.doctor import slot_census, spawn_read
+
+    seen = []
+    monkeypatch.setattr(spawn_read, "slot_claims", lambda store, slug: seen.append((store, slug)) or "rec")
+    monkeypatch.setattr(slot_census, "findings", lambda record: [STALE] if record == "rec" else [])
+    import fakeredis
+
+    store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
+    assert detect.readers(store, None, "sw", 42, environ={})["slot census"]() == [STALE]
+    assert seen == [(store, "sw")]
+
+
 @pytest.mark.parametrize(("configured", "limit"), [(0, 600), (700, 700)])
 def test_the_context_overrun_reader_reads_the_swarm_agents_at_its_compact_limit(monkeypatch, configured, limit):
     import fakeredis
