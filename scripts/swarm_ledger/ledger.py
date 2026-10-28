@@ -207,7 +207,7 @@ def launch_token(slug, name):
         )
     client = ResourceClient(base(slug), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
     try:
-        return client.request(slug, "agent-token", {})["data"]["token"]
+        return retried(lambda: client.request(slug, "agent-token", {}), REMOTE_READ_ATTEMPTS)["data"]["token"]
     except urllib.error.HTTPError as exc:
         if exc.code not in (401, 403):
             raise
