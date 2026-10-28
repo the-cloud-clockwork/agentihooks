@@ -804,13 +804,11 @@ the local folder. These lines are what the ledger page shows in the task's Contr
 ### Work folder files on any host
 
 On the same heartbeat each hive writes the files of those folders to `<root>:hive:<hive id>:workspaces:files`,
-expiring after a day so a hive that died still hands its last copy over. It holds the last 65,536 characters of
-`progress.md` and `proof.md` and up to 32 other plain UTF-8 files directly in the folder of at most 65,536 bytes
-each, by name; steering, subfolders, symbolic links, hidden names and binary files stay behind. On each status publish the
-controller writes each task's copy, from the hive running its latest execution, into its own folder. A launch
-carries the controller's folder to the next hive, added files included, and a file the hive already holds is replaced
-unless it already contains what was sent, so a successor on any host reads what its
-predecessor wrote.
+expiring after a day so a hive that died still hands its last copy over. The table below lists what travels. On each
+status publish the controller writes each task's copy, from the hive running its latest execution, into its own
+folder. A launch carries the controller's folder to the next hive, added files included, and a file the hive already
+holds is replaced unless it already contains what was sent, so a successor on any host reads what its predecessor
+wrote.
 
 What travels from a task folder:
 
@@ -819,7 +817,7 @@ What travels from a task folder:
 | `steering.md` | Only from the controller to the hive, at launch | Whole file |
 | `progress.md`, `proof.md` | Both ways | The last 65,536 characters |
 | Any other file directly in the folder, such as `plan.md`, `measure.sh`, `handoff.md` or `mutation-fix.patch` | Both ways | 32 files, taken in name order; a file over 65,536 bytes is skipped and does not count toward the 32 |
-| Subfolders and the files in them, symbolic links, names that do not start with a letter or digit, such as hidden names starting with `.`, names holding characters other than letters, digits, `_`, `.` and `-`, names over 128 characters, files that are not UTF-8 text | Never | |
+| Subfolders and the files in them, symbolic links, names that do not start with an ASCII letter or digit, such as hidden names starting with `.`, names whose later characters are not letters, digits, `_`, `.` or `-` (Unicode letters and digits count), names over 128 characters, files that are not UTF-8 text | Never | Not carried |
 
 The controller mirrors a task only when its latest execution ran on a hive. A task whose latest execution ran on the
 controller's own machine keeps the controller's folder, and a stale hive copy is not written over it. The mirror
@@ -830,7 +828,7 @@ The sequence for a task reclaimed from one hive onto another:
 
 1. The first agent, on hive `lab-vm`, appends to `progress.md` and writes `measure.sh` in its task folder.
 2. Within fifteen seconds `lab-vm` writes both files to `agentihooks:hive:lab-vm:workspaces:files`.
-3. On the next tick the controller writes them into `~/.agentihooks/swarm/<slug>/tasks/<task id>` on its own machine,
+3. On its next status publish the controller writes them into `~/.agentihooks/swarm/<slug>/tasks/<task id>` on its own machine,
    even when `lab-vm` has stopped beating since, as long as its copy is less than a day old.
 4. The successor launches on hive `lab-vm-2`. Its launch payload carries `steering.md`, `progress.md`, `proof.md` and
    `measure.sh` from the controller's folder, and `lab-vm-2` writes them below its own home before the agent starts.
@@ -869,7 +867,7 @@ newer hive. Deploy the controller first, then the hives.
 | Launches on one hive end with `hive launch failed: expired` | The hive picked up the launch order more than 300 seconds after the controller sent it. | Check that the hive beats (`agentihooks hive list` shows `live`) and its `agentihooks-hive` service runs. |
 | A remote task's Contract and proof fold is empty | The hive stopped beating for more than 45 seconds, so its synced copy expired, or the agent has not written a line yet. | Check `agentihooks hive list`. The lines come back on the hive's next heartbeat. |
 | A successor on another host does not see a file its predecessor wrote | The file does not travel: it sits in a subfolder, is a symbolic link, has a hidden or unsupported name, is not UTF-8 text, is over 65,536 bytes, or comes after the first 32 files by name. | Move what the successor needs directly into the task folder as a plain text file under the limit. See [Work folder files on any host](#work-folder-files-on-any-host). |
-| A successor on another host does not see a file its predecessor wrote, and the file is one that travels | The predecessor's hive wrote no copy: it ran a release before pull request [#7834](https://github.com/the-cloud-clockwork/agentihooks/pull/7834), or its copy expired a day after its last beat. When no hive copy ever reaches the controller's folders, the controller runs a release before #7834. | Read the key with `redis-cli GET <root>:hive:<id>:workspaces:files`. Upgrade the controller and the hives. A copy that expired is gone; recover the file from the predecessor hive's own folder while that host is up. |
+| A successor on another host does not see a file its predecessor wrote, and the file is one that travels | The predecessor's hive wrote no copy: it ran a version from before pull request [#7834](https://github.com/the-cloud-clockwork/agentihooks/pull/7834), or its copy expired a day after its last beat. Or the controller runs a version from before #7834 and never writes hive copies into its folders. | Read the key with `redis-cli GET <root>:hive:<id>:workspaces:files`. Upgrade the controller and the hives. A copy that expired is gone; recover the file from the predecessor hive's own folder while that host is up. |
 | Lines a relaunched agent wrote on its hive are replaced by the controller's copy | The hive's file did not contain the text the controller sent, so the controller's copy won. This happens when the hive file was edited rather than appended to. | Append to `progress.md` and `proof.md` instead of rewriting them. |
 | A file deleted on the hive is still in the controller's folder | The mirror writes the files a hive sends and removes none. | Delete the file in the controller's folder too, or leave it: the next launch carries it again. |
 
