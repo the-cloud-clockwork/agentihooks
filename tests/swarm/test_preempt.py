@@ -92,6 +92,29 @@ def test_an_ask_is_forgotten_once_its_holder_left(store):
     assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {"e1": '["t3", 2]'}
 
 
+def refuse(store, task, seen_at, lane="eng"):
+    from scripts.hive import placement_waits
+
+    placement_waits.observe(store, SLUG, lane, task, "no eng hive has room: cpu", seen_at)
+
+
+def test_an_urgent_task_that_placement_refuses_asks_nobody_to_hand_off(store):
+    refuse(store, "t3", 1)
+    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
+    assert preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2) == []
+    assert asks(store, "e1") == asks(store, "e2") == []
+
+
+def test_a_stale_or_other_lane_placement_refusal_still_asks(store):
+    from scripts.hive import placement_waits
+
+    refuse(store, "t3", 0)
+    refuse(store, "t4", placement_waits.FRESH_MS, lane="ci")
+    now = placement_waits.FRESH_MS
+    preempt.step(SLUG, store, ROWS, doc(), full("t3", "t4"), now)
+    assert len(preempt.step(SLUG, store, ROWS, doc(), full("t3", "t4"), now)) == 2
+
+
 def test_an_ask_is_recorded_before_its_message_so_a_failed_tick_never_resends_it(store, monkeypatch):
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
 
