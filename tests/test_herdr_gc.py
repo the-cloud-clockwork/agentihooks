@@ -625,6 +625,7 @@ def test_a_dropped_agent_prompt_protects_its_pane_under_either_name(env, owner, 
     }
     store.redis = SimpleNamespace(
         get=prompts.get,
+        hget=lambda key, field: None,
         scan_iter=lambda match: (key for key in prompts if fnmatchcase(key, match)),
         smembers=lambda key: set(),
     )
