@@ -75,6 +75,15 @@ def test_a_first_manifest_on_the_bundle_reruns_ensure(tmp_path, ensures):
     assert ensures == [ENSURE]
 
 
+def test_an_empty_first_manifest_reads_like_a_missing_one(tmp_path, ensures):
+    remote, bundle, environ = _hive(tmp_path, tmp_path / "root", first="README.md")
+    _commit(remote, "deps.json", "")
+
+    assert bundle_refresh.refresh(0.0, 900.0, environ) == 900.0
+    assert (bundle / "deps.json").read_text() == ""
+    assert ensures == []
+
+
 def test_a_bundle_change_outside_the_manifest_moves_the_checkout_without_ensure(tmp_path, ensures):
     remote, bundle, environ = _hive(tmp_path, tmp_path / "root")
     merged = _commit(remote, "rules.md", "rule")
