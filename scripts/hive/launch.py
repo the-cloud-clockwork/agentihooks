@@ -55,7 +55,8 @@ ROOM_DETAILS = {"reason": "", "detail": ""}
 def loaded_hives(store: RedisStore) -> list[dict]:
     """Every registered hive with the worker agents it runs or is launching.
 
-    A hive counts a running agent in its slot's processes even when it lists no execution for it."""
+    A hive counts a running agent in its slot's processes even when it lists no execution for it, and never fewer
+    agents than the live worker records any swarm places on it."""
     agents = [agent for slug in store.slugs() for agent in store.agents(slug)]
     hives, now = registry.hives(store.redis), lease.now_ms(store)
     for hive in hives:
@@ -67,15 +68,13 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         }
         masters = sum(count for key, count in counts.items() if key.startswith("interactive:"))
         pending: dict[str, int] = {}
+        recorded = 0
         for agent in agents:
-            if (
-                agent.hive == hive["id"]
-                and agent.lane != "master"
-                and agent.state in ("launching", "working", "suspect")
-                and agent.execution_id not in seen
-            ):
-                slot = f"{agent.harness}:{agent.account}"
-                pending[slot] = pending.get(slot, 0) + 1
+            if agent.hive == hive["id"] and agent.lane != "master" and agent.state not in ("finished", "ended"):
+                recorded += 1
+                if agent.state in ("launching", "working", "suspect") and agent.execution_id not in seen:
+                    slot = f"{agent.harness}:{agent.account}"
+                    pending[slot] = pending.get(slot, 0) + 1
         unclaimed = {
             slot: max(0, reported.get(slot, 0) - counts.get(f"interactive:{slot}", 0) - len(executions.get(slot, [])))
             for slot in pending
@@ -83,6 +82,7 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
             max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
+        hive["agents"] = max(hive["agents"], recorded)
         from scripts.swarm import local_slots
         from scripts.swarm.commands import hive_id
 
