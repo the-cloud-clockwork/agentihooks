@@ -8,6 +8,7 @@ import time
 import traceback
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
@@ -27,6 +28,12 @@ REMOTE_FIELDS = {
     "harness": "harness",
     "profile": "profile.resolved",
 }
+
+
+@dataclass(frozen=True)
+class Known:
+    marks: dict
+    roots: dict
 
 
 def failure(exc: BaseException) -> str:
@@ -171,6 +178,17 @@ def _remote_trace(row: dict, root: dict) -> dict:
     }
 
 
+def _correlated(get, row: dict, roots: dict) -> dict:
+    if row["id"] in roots:
+        return {"id": row["id"], "session_id": row.get("sessionId") or "", **roots[row["id"]]}
+    return _remote_trace(row, _root(get, row["id"]))
+
+
+def _known_roots(found: list[dict]) -> dict:
+    fields = {t["id"]: {name: t[name] for name in REMOTE_FIELDS} for b in found for t in b["traces"]}
+    return {trace: kept for trace, kept in fields.items() if any(kept.values())}
+
+
 def _freshness(get, trace_id: str, mark: dict, page: int) -> dict:
     params = {"traceId": trace_id, "limit": page, "page": 1}
     if mark.get("start_ms"):
@@ -192,7 +210,7 @@ def _cached_listing(prior: dict, mark: dict, total: int, listing: Callable[[], s
     return ids
 
 
-def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: int, ended: Event) -> dict:
+def _read_binding(get, slug: str, binding: dict, known: Known, kept: dict, page: int, ended: Event) -> dict:
     params = {
         "tags": [f"swarm:{slug}", f"agent:{binding['agent']}"],
         "fields": "core",
@@ -200,12 +218,12 @@ def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: 
         "limit": TRACES_LIMIT,
         "page": 1,
     }
-    found = [_remote_trace(row, _root(get, row["id"])) for row in get("traces", params)["data"]]
+    found = [_correlated(get, row, known.roots) for row in get("traces", params)["data"]]
     own = binding["session_id"]
     current = next((t for t in found if t["session_id"] == own), None) if own else (found or [None])[0]
     if current is None:
         return {"read": True, "traces": found, "remote": None}
-    prior = marks.get(current["id"], {})
+    prior = known.marks.get(current["id"], {})
     mark = _freshness(get, current["id"], prior, page)
     kept[current["id"]] = mark
     total = get("observations", {"traceId": current["id"], "limit": 1, "page": 1})["meta"].get("totalItems") or 0
@@ -228,13 +246,13 @@ def _unread() -> dict:
     return {"read": False, "traces": [], "remote": None}
 
 
-def _attempts(get, slug: str, binding: dict, marks: dict, page: int, ended: Event, slot: dict) -> tuple[dict, dict]:
+def _attempts(get, slug: str, binding: dict, known: Known, page: int, ended: Event, slot: dict) -> tuple[dict, dict]:
     tries = 0
     while tries < ATTEMPTS and not ended.is_set():
         tries += 1
         kept: dict = {}
         try:
-            remote = _read_binding(get, slug, binding, marks, kept, page, ended)
+            remote = _read_binding(get, slug, binding, known, kept, page, ended)
             slot.clear()
             return remote, kept
         except Exception as exc:  # noqa: BLE001
@@ -242,12 +260,12 @@ def _attempts(get, slug: str, binding: dict, marks: dict, page: int, ended: Even
     return _unread(), {}
 
 
-def _read_all(get, slug: str, active: list[dict], marks: dict, page: int, remaining: float) -> list[tuple]:
+def _read_all(get, slug: str, active: list[dict], known: Known, page: int, remaining: float) -> list[tuple]:
     if remaining <= 0:
         return [(_unread(), {}, None) for _ in active]
     slots: list[dict] = [{} for _ in active]
     ended, pool = Event(), ThreadPoolExecutor(max_workers=READERS)
-    futures = [pool.submit(_attempts, get, slug, b, marks, page, ended, slot) for b, slot in zip(active, slots)]
+    futures = [pool.submit(_attempts, get, slug, b, known, page, ended, slot) for b, slot in zip(active, slots)]
     wait(futures, timeout=remaining)
     ended.set()
     pool.shutdown(wait=False)
@@ -261,9 +279,9 @@ def _size(binding: dict, sizes: dict) -> float:
     return math.inf if binding["agent"].startswith("master@") else 0
 
 
-def _largest_first(get, slug: str, active: list[dict], marks: dict, page: int, remaining: float, sizes: dict) -> list:
+def _largest_first(get, slug: str, active: list[dict], known: Known, page: int, remaining: float, sizes: dict) -> list:
     order = sorted(range(len(active)), key=lambda i: -_size(active[i], sizes))
-    ranked = dict(zip(order, _read_all(get, slug, [active[i] for i in order], marks, page, remaining)))
+    ranked = dict(zip(order, _read_all(get, slug, [active[i] for i in order], known, page, remaining)))
     return [ranked[i] for i in range(len(active))]
 
 
@@ -280,7 +298,8 @@ def read(
     deadline = clock() + seconds
     marks, kept, failures, found = state.get("marks", {}), {}, [], []
     active, sizes = bindings(agents), state.get("sizes", {})
-    results = _largest_first(get, slug, active, marks, page, deadline - clock(), sizes)
+    known = Known(marks, state.get("roots", {}))
+    results = _largest_first(get, slug, active, known, page, deadline - clock(), sizes)
     for binding, (remote, marked, error) in zip(active, results):
         kept.update(marked)
         if not remote["read"]:
@@ -293,6 +312,7 @@ def read(
         failures += [error] if error else []
         found.append(merged)
     state["marks"] = {**marks, **kept} if failures else kept
+    state["roots"] = {**known.roots, **_known_roots(found)} if failures else _known_roots(found)
     state["sizes"] = {
         **{b["agent"]: sizes[b["agent"]] for b in active if b["agent"] in sizes},
         **{b["agent"]: b["remote"]["observations"] for b in found if b["remote"]},
