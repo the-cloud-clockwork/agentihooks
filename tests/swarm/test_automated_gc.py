@@ -74,8 +74,8 @@ def test_thirty_minute_probe_records_real_inbox_answer_once(world):
     assert "nothing to do" in item.text
     assert sweep(world, START + LIMIT + 1) == []
     reply = answer(world, "nothing to do")
-    sweep(world, START + LIMIT + 2)
-    sweep(world, START + LIMIT + 3)
+    assert sweep(world, START + LIMIT + 2) == [f"recorded activity answer from {agent.name}"]
+    assert sweep(world, START + LIMIT + 3) == []
     from scripts.swarm import automated_gc
 
     state = automated_gc.state(store, SLUG, agent)
@@ -86,16 +86,22 @@ def test_thirty_minute_probe_records_real_inbox_answer_once(world):
 
 def test_third_distinct_idle_answer_retires_owned_pane_and_records_exit(world):
     store, _, agent, runtime, ledger = world
+    release = Mock(wraps=store.release)
+    store.release = release
     for attempt in range(1, 4):
         at = START + attempt * LIMIT
         sweep(world, at)
         answer(world, "nothing to do")
-        sweep(world, at + 1)
+        actions = sweep(world, at + 1)
+        assert actions[0] == f"recorded activity answer from {agent.name}"
+        if attempt == 3:
+            assert actions[1] == f"collected automated agent {agent.name} after three idle answers"
         if attempt < 3:
             runtime.retire.assert_not_called()
     runtime.retire.assert_called_once_with(agent)
     assert store.agents(SLUG) == []
     ledger.notify.assert_called_once_with(SLUG, "An automated agent ended after three nothing to do answers.")
+    release.assert_called_once_with(SLUG, agent.task, agent.name)
 
 
 @pytest.mark.parametrize("text", ["working: reviewing a pull request", "I have work", "NOTHING TO DO later"])
@@ -287,3 +293,59 @@ def test_collected_master_sleeps_until_new_task_or_operator_inbox(world):
     store.redis.set(store.key(SLUG, "master-retired-tasks"), "[]")
     inbox.send("operator", agent.seat, "New work")
     assert not lifetime.sleeping(SLUG, store, {})
+
+
+@pytest.mark.parametrize("first_state", ["untagged", "busy", "collected", "ready"])
+def test_collection_continues_to_later_agents(world, monkeypatch, first_state):
+    from scripts.swarm import automated_gc
+
+    store, inbox, agent, runtime, ledger = world
+    later = replace(agent, name="master@323133-9999")
+    first = replace(agent, profile_decision={}) if first_state == "untagged" else agent
+    monkeypatch.setattr(store, "agents", lambda slug: [first, later] if slug == SLUG else [])
+    if first_state == "busy":
+        runtime.observe.side_effect = lambda actual: SimpleNamespace(
+            state="working" if actual == first else "idle", typed=False, prompt_title="", provider_error=""
+        )
+    if first_state == "collected":
+        record = automated_gc.state(store, SLUG, first)
+        record["idle_answers"] = 3
+        automated_gc._save(store, SLUG, first, record)
+    actions = sweep(world, START + LIMIT)
+    assert len(inbox.inbox(later.name)) == 1
+    if first_state in {"collected", "ready"}:
+        assert len(actions) == 2
+    if first_state == "collected":
+        runtime.retire.assert_called_once_with(first)
+        assert actions[0] == f"collected automated agent {first.name} after three idle answers"
+    else:
+        runtime.retire.assert_not_called()
+
+
+@pytest.mark.parametrize("swarm_state", ["stopped", "paused"])
+def test_tick_collects_with_the_current_ledger_rows(world, monkeypatch, swarm_state):
+    from scripts.swarm import automated_gc, tick
+
+    store, _, agent, runtime, ledger = world
+    config = SimpleNamespace(state=swarm_state, engine=tick.EVENTS_ENGINE)
+    rows = {"work": {"id": "work", "state": "done"}}
+    ledger.state.return_value = {"tasks": list(rows.values())}
+    monkeypatch.setattr(store, "ensure_code", lambda slug: config if slug == SLUG else None)
+    monkeypatch.setattr(tick, "_woken", lambda *_: False)
+    monkeypatch.setattr(tick, "_bin_closed", lambda *_: [])
+    monkeypatch.setattr(tick, "skip_refused", lambda *_: [])
+    monkeypatch.setattr(tick, "skip_dropped", lambda *_: [])
+    monkeypatch.setattr(tick.freeze, "watched", lambda slug, actual_store, actual_ledger, doc: doc)
+    monkeypatch.setattr(tick.lifetime, "sleeping", lambda *_: True)
+    monkeypatch.setattr(tick.timing, "call", lambda fn, *args: fn(*args) if fn == ledger.state else [])
+    collected = Mock()
+    monkeypatch.setattr(tick, "_collected", collected)
+    record = automated_gc.state(store, SLUG, agent)
+    record["idle_answers"] = 3
+    automated_gc._save(store, SLUG, agent, record)
+    assert tick.tick(SLUG, store, ledger, runtime, START + LIMIT) == [
+        f"collected automated agent {agent.name} after three idle answers"
+    ]
+    runtime.retire.assert_called_once_with(agent)
+    ledger.state.assert_called_once_with(SLUG)
+    collected.assert_called_once_with(SLUG, store, ledger, rows, agent)

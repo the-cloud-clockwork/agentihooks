@@ -206,9 +206,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     if config.state == "stopped":
         doc = timing.call(ledger.state, slug)
         rows = {t["id"]: t for t in doc["tasks"]}
-        actions += automated_gc.run(
-            slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows)
-        )
+        actions = automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
         if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
             return (
@@ -225,10 +223,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
-    if config.state != "stopped":
-        actions += automated_gc.run(
-            slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows)
-        )
+    actions += automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
     actions += skip_dropped(
         exits.sweep,
         InboxStore(store.redis),
