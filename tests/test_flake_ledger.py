@@ -12,8 +12,7 @@ import xdist.newhooks
 import yaml
 from xdist.scheduler import LoadScopeScheduling
 
-from tests.flake_ledger import FlakeLedger, RefillingLoadGroupScheduling
-from tests.shards import WORKER_FILES
+from tests.flake_ledger import WORKER_FILES, FlakeLedger, RefillingLoadGroupScheduling
 
 pytestmark = pytest.mark.unit
 

@@ -15,7 +15,9 @@ import pytest
 from xdist.dsession import get_default_max_worker_restart
 from xdist.scheduler import LoadGroupScheduling, LoadScopeScheduling
 
-from tests.shards import WORKER_FILES, slowest_first
+from tests.shards import slowest_first
+
+WORKER_FILES = pytest.StashKey[dict[str, list[str]]]()
 
 
 class RefillingLoadGroupScheduling(LoadGroupScheduling):

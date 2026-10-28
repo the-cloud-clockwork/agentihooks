@@ -6,13 +6,10 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import pytest
-
 # Every xdist worker of a shard rewrites each file it collects, while stored durations split between workers; measured.
 SECONDS_PER_SOURCE_BYTE = 3e-6
 FIRST_SHARD_FILES = frozenset({"tests/routing/test_codex_api.py"})
 OWNER_COPIES = 2
-WORKER_FILES = pytest.StashKey[dict[str, list[str]]]()
 
 
 def discover_test_files(root: Path) -> list[str]:

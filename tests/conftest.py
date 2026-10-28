@@ -21,11 +21,11 @@ for _redis_name in list(os.environ):
         os.environ.pop(_redis_name)
 
 from tests import installer_isolation, ledger_guard, mutation_trace, redis_key_guard, swarm_v2_isolation
+from tests.flake_ledger import WORKER_FILES
 from tests.shards import (
     FIRST_SHARD_FILES,
     OWNER_COPIES,
     SECONDS_PER_SOURCE_BYTE,
-    WORKER_FILES,
     assign_nodes,
     assign_owners,
     discover_test_files,
