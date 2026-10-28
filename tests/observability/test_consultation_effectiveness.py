@@ -580,3 +580,82 @@ def test_a_runtime_namespace_uses_verified_project_and_selected_brain(monkeypatc
     actual = consultation.runtime_namespace()
     assert calls == [consultation.os.getcwd()]
     assert actual == replace(namespace, project="verified-project" if resolved else "unknown")
+
+
+@pytest.mark.parametrize(
+    "tool,response,retrieval",
+    [
+        ("mcp__agentibrain__kb_search", {"results": ["private lesson body"]}, "delivered"),
+        ("mcp__brain__brain_search_arcs", "private arc body", "delivered"),
+        ("mcp__agentibrain__kb_brief", "", "empty"),
+    ],
+)
+def test_a_brain_search_through_the_hook_records_one_search_observation(world, tool, response, retrieval):
+    from hooks import hook_manager
+
+    metrics, grant, _, _, _, _ = world
+    hook_manager._brain_search(
+        {
+            "session_id": grant.principal,
+            "tool_name": tool,
+            "tool_input": {"query": "private prompt words"},
+            "tool_response": response,
+        }
+    )
+    rows = metrics.events(grant)
+    assert len(rows) == 1
+    row = rows[0]
+    text = response if isinstance(response, str) else json.dumps(response)
+    assert {name: row[name] for name in ("kind", "purpose", "target", "delivery", "retrieval", "pack_bytes")} == {
+        "kind": "delivery",
+        "purpose": "search",
+        "target": "claude",
+        "delivery": "delivered",
+        "retrieval": retrieval,
+        "pack_bytes": len(text.encode()),
+    }
+    stored = json.dumps(rows)
+    assert "private" not in stored
+    assert "fixture-task" not in stored
+
+
+@pytest.mark.parametrize(
+    "tool", ["Bash", "mcp__agentihooks__recall_search", "kb_search", "mcp__agentibrain__kb_search_extra"]
+)
+def test_b_other_tools_record_no_search_observation(world, tool):
+    from hooks import hook_manager
+
+    metrics, grant, _, _, _, _ = world
+    hook_manager._brain_search({"session_id": grant.principal, "tool_name": tool, "tool_response": "result"})
+    assert metrics.events(grant) == []
+
+
+def test_b_search_outside_a_swarm_task_records_nothing(world, monkeypatch):
+    metrics, grant, _, _, _, _ = world
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK")
+    consultation.search(grant.principal, "mcp__agentibrain__kb_search", "result")
+    assert metrics.events(grant) == []
+
+
+def test_a_brain_feed_refresh_records_one_refresh_observation(world, monkeypatch):
+    from hooks.context import brain_adapter
+
+    metrics, grant, _, _, _, _ = world
+    pack = "private refresh pack"
+    monkeypatch.setattr("hooks.config.BRAIN_ENABLED", True)
+    monkeypatch.setattr("hooks.config.BRAIN_REFRESH_TOOL_CALLS", 20)
+    monkeypatch.setattr(brain_adapter, "_refresh", lambda: None)
+    monkeypatch.setattr(project_cache, "project_context", lambda session, cwd="": pack)
+    assert brain_adapter.maybe_refresh_on_tool_call(grant.principal, 20) == pack
+    rows = metrics.events(grant)
+    assert len(rows) == 1
+    assert rows[0]["purpose"] == "refresh"
+    assert rows[0]["delivery"] == "delivered"
+    assert rows[0]["pack_bytes"] == len(pack.encode())
+    assert pack not in json.dumps(rows)
+
+
+def test_a_session_start_delivery_keeps_task_transition_purpose(world):
+    metrics, grant, _, _, _, _ = world
+    assert task_context.offer(grant.principal, "SessionStart", "context", injectable=True) == "context"
+    assert [row["purpose"] for row in metrics.events(grant)] == ["task_transition"]
