@@ -77,10 +77,16 @@ def checkout_fields(root: Path) -> dict:
 
 
 def branch_record(fields: dict, repository: Path, task: dict) -> dict:
+    name = repository_name(str(repository))
+    branches = {
+        key: value
+        for key, value in task.get("repository_branches", {}).items()
+        if repository_name(key) != name or value != task.get("branch")
+    }
     return {
         "branch": fields["branch"],
         "branch_repo": fields["branch_repo"],
-        "repository_branches": {**task.get("repository_branches", {}), str(repository): fields["branch"]},
+        "repository_branches": {**branches, str(repository): fields["branch"]},
     }
 
 
@@ -343,10 +349,20 @@ def delivery_branch(root: Path, task: dict, branch: str) -> str:
     recorded = task.get("branch")
     if recorded and branch != recorded:
         remote = git(root, "remote", "get-url", "origin")
-        if publish_queue.open_head(remote, task.get("pr_url", "")) == recorded and descends(root, recorded):
+        delivered = publish_queue.open_head(remote, task.get("pr_url", ""))
+        if delivered == recorded and descends(root, recorded):
             return recorded
+        if not delivered and succeeds(root, recorded):
+            return branch
         raise SwarmError(f"current worktree {root} branch {branch} differs from registered branch {recorded}")
     return branch
+
+
+def succeeds(root: Path, recorded: str) -> bool:
+    if not remote_head(root, recorded):
+        return True
+    git(root, "fetch", "origin", recorded)
+    return descends(root, recorded)
 
 
 def gate_python(repo: Path) -> str:
