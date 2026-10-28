@@ -2,6 +2,7 @@ import copy
 
 import pytest
 
+from scripts.swarm_ledger.repository import entry as entry_module
 from scripts.swarm_ledger.repository import fragments, sqlite, writer_copy
 from scripts.swarm_ledger.repository.entry import Entry
 from scripts.swarm_ledger.repository.fragments import document, encoded
@@ -246,6 +247,46 @@ def test_a_reloaded_entry_holds_no_writer_copy_and_copies_on_write(tmp_path):
     assert writing == reloaded.state
     assert writing is not reloaded.state
     assert writing["tasks"] is not reloaded.state["tasks"]
+
+
+def test_an_entry_refreshed_after_another_writer_keeps_an_independent_writer_copy(tmp_path, monkeypatch):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    held = cached(repo)
+    assert held.writer is not None
+    other = sqlite.SQLiteLedgerRepository(repo.path)
+    other.apply_ops("ledger", ops=[CHAT])
+    entry = cached(repo)
+    assert entry is not held
+    assert held.writer is None
+    writer = entry.writer
+    assert writer == entry.state == other.get_document("ledger")
+    assert writer["_meta"]["events"]
+    stamps = {id(record) for record in entry.state["_meta"]["stamps"].values()}
+    assert set(containers(writer, {})) & set(containers(entry.state, {})) <= stamps
+    before = copy.deepcopy(entry.state)
+    for task in writer["tasks"]:
+        task["title"] = "changed by the writer"
+    writer["chat"].append({"id": "m9", "text": "writer only"})
+    writer["_meta"]["events"][0]["rev"] = -1
+    assert entry.state == before
+    copied = []
+    monkeypatch.setattr(entry_module, "thawed", lambda value: copied.append(value) or value)
+    assert entry.for_write() is writer
+    assert copied == []
+
+
+def test_an_entry_refreshed_without_a_held_copy_copies_on_write(tmp_path):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    reader = sqlite.SQLiteLedgerRepository(repo.path)
+    assert cached(reader).writer is None
+    repo.apply_ops("ledger", ops=[CHAT])
+    entry = cached(reader)
+    assert entry.writer is None
+    reader.apply_ops("ledger", ops=[{**CHAT, "id": "m2", "text": "again"}])
+    assert repo.get_document("ledger") == reader.get_document("ledger")
+    assert [message["text"] for message in reader.get_document("ledger")["chat"]][-2:] == ["hello", "again"]
 
 
 def two_states():
