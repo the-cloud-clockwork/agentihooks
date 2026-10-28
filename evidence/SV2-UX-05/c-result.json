@@ -30,6 +30,26 @@
       "cancel",
       "force stop"
     ],
+    "durability": {
+      "kept_by_the_page": "the last observed swarm view, marked not current",
+      "lost_in_the_outage": [],
+      "survived_the_outage": [
+        "agentihooks-test-ef396413824a:names:code-of",
+        "agentihooks-test-ef396413824a:names:codes",
+        "agentihooks-test-ef396413824a:names:name:engineer@a1b2c3-0001",
+        "agentihooks-test-ef396413824a:names:names:a1b2c3",
+        "agentihooks-test-ef396413824a:names:seq:a1b2c3",
+        "agentihooks-test-ef396413824a:swarm:index",
+        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:agents",
+        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:config",
+        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:context-evidence",
+        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:executions",
+        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:published",
+        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:state-since",
+        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:task-context-packs",
+        "agentihooks-test-ef396413824a:swarm:sv2-ux-05:terminals"
+      ]
+    },
     "lost": {
       "controls": [
         {

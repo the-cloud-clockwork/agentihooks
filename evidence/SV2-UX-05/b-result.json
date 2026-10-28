@@ -7,9 +7,13 @@
     "dismissed_tap_sent_nothing": true,
     "every_control_names_its_agent_and_scope": true,
     "every_control_visible_without_hover": true,
+    "new_request_accepted_once": true,
     "no_page_errors": true,
+    "non_operator_refused_without_change": true,
+    "only_the_stale_refusal_is_counted": true,
     "protected_state_unchanged": true,
     "refusal_discloses_no_identity": true,
+    "same_operation_replay_adds_nothing": true,
     "successor_kept_working": true,
     "swarm_wide_control_names_its_scope": true,
     "touch_layout_without_hover": true
@@ -64,14 +68,28 @@
     ],
     "dialogs": [
       "cancel engineer@a1b2c3-0001? This agent checkpoints and stops; its task stays claimed for a new attempt.",
+      "cancel engineer@a1b2c3-0001? This agent checkpoints and stops; its task stays claimed for a new attempt.",
       "cancel engineer@a1b2c3-0001? This agent checkpoints and stops; its task stays claimed for a new attempt."
     ],
     "pause_title": "one swarm: Pauses the whole swarm: no new agent starts, running agents keep working.",
     "puts": [
+      "cancel",
       "cancel"
     ],
+    "queued": [
+      "control lifecycle acknowledged"
+    ],
     "refused_note": "Could not cancel: the page is stale: this agent was replaced, finished or moved task; wait for the next swarm view. Try again or ask the master.",
-    "touch": true
+    "replayed": {
+      "code": 200,
+      "queued": [],
+      "unchanged": true
+    },
+    "touch": true,
+    "unauthorized": [
+      403,
+      "cancel needs the operator"
+    ]
   },
   "operator_workflow_acceptance": {
     "controls_checked": 4,

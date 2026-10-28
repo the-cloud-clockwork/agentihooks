@@ -6,7 +6,7 @@
     "b": "evidence/SV2-UX-05/b-result.json",
     "c": "evidence/SV2-UX-05/c-result.json"
   },
-  "compatibility": "Test and documentation only: no page, ledger server or swarm code changed; the cases exercise the lifecycle controls of SV2-UX-03, the execution and terminal columns and the Brain context panel of SV2-UX-04 as already merged",
+  "compatibility": "Test and documentation only: no page, ledger server or swarm code changed. Compared with SV2-UX-03 and SV2-UX-04 as merged: the lifecycle controls keep their labels, scopes, consequences, stale refusal text and operator gate, and the execution, terminal and Brain context columns keep their text; the cases read them unchanged",
   "dependencies": {
     "SV2-UX-04": "merged into dev (#7701)"
   },
@@ -20,7 +20,9 @@
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/8230",
   "limitations": [
     "No live ledger HTTP server, worker Pod, herdr server or Anton cluster runs in the cases; the page reads the swarm view through a harness route and its writes enter the ledger server lifecycle control in process",
-    "The terminal attach is consumed by the hive command runner with its terminal commands stubbed, so no terminal screen is shown"
+    "The terminal attach is consumed by the hive command runner with its terminal commands stubbed, so no terminal screen is shown",
+    "The agent is launched by a fixture write to the store, not by the swarm tick",
+    "The rollback was not rehearsed: this package changes no page build, so its own rollback is a revert of tests and docs"
   ],
   "measurements": {
     "operator_workflow_acceptance": {
@@ -47,14 +49,15 @@
   },
   "package": "SV2-UX-05",
   "package_complete": false,
-  "pull_request": "",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/8254",
+  "redaction": "The fixture is synthetic: its transcript lines, session, Pod and machine names are invented for this package and hold no operator or customer content; the refusal text is checked to name no execution, Pod or identity",
   "rollback": "Restore the previous ledger page build by reverting its pull request on dev and letting promotion republish the ledger server image; worker Pods are not restarted and the swarm store is not touched. AGENTIHOOKS_LIFECYCLE_DESTRUCTIVE=off on the ledger server withdraws only the destructive controls. This package changes no page build, so its own rollback is a revert of tests and docs.",
   "states": {
-    "accepted": "Pending: Standards and Spec reviews on the pull request",
+    "accepted": "Standards and Spec reviews on pull request 8254; round one findings fixed in ea13868a4",
     "committed": "Case records, manifest and result committed on the task branch; the change reaches dev only when its pull request merges",
     "externally_verified": "Not on Anton: no ledger page was driven against a live swarm on Anton compute; the evidence is mocked and labelled so",
-    "observed": "Cases B and C passed in focused Proofs run 40660518512 on feff11d67; case A's checks passed there except the repeat comparison, which differed only in the swarm code of the second fixture and is normalised in 97d5f5fd3; the cases failed before in Proofs run 40659191699 on f0184ec97"
+    "observed": "Cases A, B and C passed in focused Proofs run 40664080238 on ea13868a4 (evidence/SV2-UX-05/a-result.json, b-result.json, c-result.json); the cases failed before in Proofs run 40659191699 on f0184ec97"
   },
   "status": "fixture-qualified: after every viewer closed, desktop and phone views read the same running remote agent, its task and its evidence from the store; every phone control is visible with its agent and scope, a destructive tap asks first and a stale tab is refused without changing state; a reconnecting terminal shows cached and stale until a fresh check, and a lost read disables every control; no Anton rollout has been observed",
-  "tested_commit": "97d5f5fd3"
+  "tested_commit": "ea13868a4"
 }
