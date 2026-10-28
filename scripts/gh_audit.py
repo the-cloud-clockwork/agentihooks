@@ -29,7 +29,7 @@ VALUED = frozenset(
 
 def endpoint(argv) -> str | None:
     words = [str(word) for word in argv]
-    while words and Path(words[0]).name != "gh" and (words[0] in WRAPPERS or PREFIX.match(words[0])):
+    while words and (words[0] in WRAPPERS or PREFIX.match(words[0])):
         words = words[1:]
     if not words or Path(words[0]).name != "gh":
         return None
@@ -42,7 +42,7 @@ def endpoint(argv) -> str | None:
         return None
     group, verb = rest[0], rest[1]
     if group == "api":
-        path = verb.split("?")[0].lstrip("/")
+        path = verb.split("?")[0].removeprefix("/")
         return None if path in FREE else path
     if group in REST_GROUPS or (group == "pr" and verb in REST_PULL):
         return f"gh {group} {verb}"
@@ -50,9 +50,8 @@ def endpoint(argv) -> str | None:
 
 
 def process_caller() -> str:
-    main = sys.modules.get("__main__")
-    spec = getattr(main, "__spec__", None)
-    name = spec.name if spec else Path(sys.argv[0] if sys.argv else "python").name
+    spec = sys.modules["__main__"].__spec__
+    name = spec.name if spec else Path(next(iter(sys.argv), "")).name
     args = [arg for arg in sys.argv[1:2] if not arg.startswith("-")]
     return ".".join(["proc", name.removesuffix(".__main__"), *args])
 
@@ -84,7 +83,7 @@ def endpoints(argv) -> list[str]:
 def audit(event: str, args: tuple) -> None:
     if event not in SPAWNS or UNCHARGED.get():
         return
-    paths = endpoints(args[1] if isinstance(args[1], list | tuple) else [args[0] or ""])
+    paths = endpoints(args[1]) if isinstance(args[1], list | tuple) else []
     if paths:
         from scripts.swarm import github_reads
 
@@ -102,7 +101,7 @@ def commands(text: str) -> list[list[str]]:
         return []
     found, current = [], []
     for word in words:
-        if set(word) <= SEPARATORS:
+        if word and word[0] in SEPARATORS:
             found.append(current)
             current = []
         else:
@@ -114,12 +113,10 @@ def charge_command(tool_name: str, tool_input) -> None:
     if tool_name != "Bash" or not isinstance(tool_input, dict):
         return
     caller = f"agent.{os.environ.get('AGENTIHOOKS_AGENT_NAME') or 'bash'}"
-    for command in commands(str(tool_input.get("command") or "")):
+    for command in commands(str(tool_input.get("command"))):
         for path in endpoints(command):
             charge(caller, path)
 
 
 def install() -> None:
-    if not getattr(sys, "_agentihooks_gh_audit", False):
-        sys._agentihooks_gh_audit = True
-        sys.addaudithook(audit)
+    sys.addaudithook(audit)

@@ -70,7 +70,7 @@ def test_agent_shell_charges_each_rest_command_in_a_pipeline(charged):
 
 def test_agent_shell_charges_loops_and_nested_shells_to_the_named_agent(charged, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "ci@1-2")
-    command = "for n in 1 2; do gh api repos/a/b/runs/$n; done; bash -c 'gh label list'; echo x | xargs gh run view"
+    command = "for n in 1 2; do gh api repos/a/b/runs/$n; done; bash -c 'gh label list'; echo '' | xargs gh run view"
     gh_audit.charge_command("Bash", {"command": command})
     assert charged() == [
         ("agent.ci@1-2", "repos/a/b/runs/$n"),
@@ -109,17 +109,36 @@ def test_process_caller_prefers_the_main_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "__main__", main)
     monkeypatch.setattr(sys, "argv", ["loop", "--once"])
     assert gh_audit.process_caller() == "proc.scripts.doctor.loop"
+    monkeypatch.setitem(sys.modules, "__main__", type(sys)("__main__"))
+    monkeypatch.setattr(sys, "argv", [])
+    assert gh_audit.process_caller() == "proc."
 
 
 def test_a_real_subprocess_is_charged_once_by_the_installed_hook(charged, tmp_path):
-    gh_audit.install()
-    gh_audit.install()
     fake = tmp_path / "gh"
     fake.write_text("#!/bin/sh\necho '{}'\n")
     fake.chmod(0o755)
     with github_reads.calling("swarm.probe"):
         subprocess.run([str(fake), "api", "repos/a/b/pulls/3"], capture_output=True, check=True)
     assert charged() == [("swarm.probe", "repos/a/b/pulls/3")]
+
+
+def test_install_registers_the_audit_hook(monkeypatch):
+    hooks = []
+    monkeypatch.setattr(sys, "addaudithook", hooks.append)
+    gh_audit.install()
+    assert hooks == [gh_audit.audit]
+
+
+def test_a_charge_records_when_it_was_spent(charged, monkeypatch):
+    monkeypatch.setattr(gh_audit.time, "time", lambda: 5.0)
+    gh_audit.charge("swarm.probe", "repos/a/b")
+    assert json.loads((github_reads.home() / "charged.jsonl").read_text())["at"] == 5.0
+
+
+def test_a_bare_shell_flag_names_no_request():
+    assert gh_audit.endpoints(["sh", "-c"]) == []
+    assert gh_audit.endpoints(["sh", "-c", "gh api repos/a/b"]) == ["repos/a/b"]
 
 
 def test_pre_tool_activity_charges_agent_shell_requests_outside_a_swarm(charged, tmp_path):
