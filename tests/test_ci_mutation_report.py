@@ -226,11 +226,10 @@ def test_mutant_identity_separates_hunks_and_matches_repeated_lines_in_long_func
 
     two = mutant_identity("def f(x):\n    a = 1\n    b = 2\n    c = 3", "def f(x):\n    a = 9\n    b = 2\n    c = 9")
     assert two == hashlib.sha256(b"0\n-    a = 1\n+    a = 9\x000\n-    c = 3\n+    c = 9").hexdigest()
-    long = "def f(x):\n" + "    x += 1\n" * 250 + "    return x"
-    assert (
-        mutant_identity(long, long.replace("return x", "return None"))
-        == hashlib.sha256(b"0\n-    return x\n+    return None").hexdigest()
-    )
+    body = "    x += 1\n" * 250
+    long = mutant_identity("def f(x):\n" + body + "    return x", "def g(x):\n" + body + "    return None")
+    expected = b"0\n-def f(x):\n+def g(x):\x000\n-    return x\n+    return None"
+    assert long == hashlib.sha256(expected).hexdigest()
     row = {"name": "m.x_f__mutmut_old__mutmut_3", "identity": "i", "fingerprint": "f"}
     assert clearance_keys("p", row) == ["p:m.x_f__mutmut_old:i", "p:m.x_f__mutmut_old__mutmut_3:f"]
 
