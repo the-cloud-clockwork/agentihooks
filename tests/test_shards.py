@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import threading
+import zlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -157,6 +158,39 @@ def test_a_grouped_file_longer_than_an_even_shard_share_still_splits():
     durations = {f"tests/test_g.py::test_{n}": 30.0 for n in range(4)}
     parts = assign_nodes(durations, 2, {"tests/test_g.py": "g"}, 4)
     assert [len(part) for part in parts] == [2, 2]
+
+
+def test_a_file_shorter_than_an_even_shard_share_stays_on_one_shard():
+    from tests.shards import assign_nodes
+
+    durations = {f"tests/test_{name}.py::test_{case}": 1.0 for name in "abcd" for case in range(4)}
+    parts = assign_nodes(durations, 2, {}, 4)
+    assert all(len({node.split("::")[0] for node in part}) == 2 for part in parts)
+    assert [len(part) for part in parts] == [8, 8]
+    assert sorted(node for part in parts for node in part) == sorted(durations)
+
+
+def test_an_unmeasured_file_is_collected_by_one_shard_that_runs_all_its_cases(tmp_path):
+    (tmp_path / "tests").mkdir()
+    for name in ("test_known.py", "test_new.py"):
+        (tmp_path / "tests" / name).write_text("pass\n")
+    (tmp_path / ".test_durations").write_text(json.dumps({"tests/test_known.py::test_x": 1.0}))
+    nodes = [f"tests/test_new.py::test_{n}" for n in range(8)]
+    collecting = []
+    for shard in range(1, 5):
+        config = SimpleNamespace(
+            getoption=lambda name, shard=shard: f"{shard}/4",
+            stash=pytest.Stash(),
+            rootpath=tmp_path,
+            option=SimpleNamespace(numprocesses=None),
+            workerinput={"workercount": 4},
+        )
+        if conftest.pytest_ignore_collect(tmp_path / "tests/test_new.py", config):
+            continue
+        items = [SimpleNamespace(nodeid=node) for node in nodes]
+        conftest.pytest_collection_modifyitems(config, items)
+        collecting.append({item.nodeid for item in items})
+    assert collecting == [set(nodes)]
 
 
 def test_worker_shards_charge_collection_once_per_file():
@@ -374,7 +408,8 @@ def test_shard_option_collects_only_that_shards_files(pytestconfig):
         shard - 1
     ]
     known = {node.split("::", 1)[0] for node in durations}
-    expected = {node.split("::", 1)[0] for node in part} | (set(files) - known)
+    unknown = {path for path in set(files) - known if zlib.crc32(path.encode()) % 4 == shard - 1}
+    expected = {node.split("::", 1)[0] for node in part} | unknown
     assert "shard" in vars(pytestconfig.option)
     config = SimpleNamespace(getoption=lambda name: f"{shard}/4", stash=pytest.Stash(), rootpath=_ROOT)
     kept = {path for path in files if not conftest.pytest_ignore_collect(_ROOT / path, config)}
