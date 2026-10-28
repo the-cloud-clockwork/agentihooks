@@ -452,7 +452,8 @@ A refusal that keeps repeating with no `ended orphan execution` line has one of 
 above still holds (an agent record with that name, a pane or hook report under it, or a remote hive report that
 still lists it or no report at all), or the launch is refused for another reason its error names:
 `master launch refused: unfinished lead`, `current execution publication is in flight`,
-`the controller lease is stale`, `execution history kept changing` or
+`the controller lease is stale`, `execution history kept changing` (see
+[Parallel launches in one process](../swarm-v2/execution-identity.md#parallel-launches-in-one-process)) or
 `canonical agent already belongs to another execution seat`. Read the seat history before acting; never end an
 execution by writing to Redis by hand.
 
