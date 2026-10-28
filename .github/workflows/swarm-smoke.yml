@@ -23,10 +23,21 @@ jobs:
           ref: ${{ github.sha }}
       - name: Pull the Python base with bounded retries
         run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
+      - name: Restore the swarm smoke layers
+        id: layers
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/swarm-smoke-layers
+          key: swarm-smoke-layers-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: swarm-smoke-layers-${{ runner.os }}-${{ runner.arch }}-
       - name: Build the swarm image
         id: build
+        env:
+          LAYERS_FROM: ${{ steps.layers.outputs.cache-matched-key && format('type=local,src={0}/swarm-smoke-layers', runner.temp) || '' }}
+          LAYERS_TO: ${{ steps.layers.outputs.cache-hit != 'true' && format('type=local,dest={0}/swarm-smoke-layers-next,mode=max,compression=uncompressed', runner.temp) || '' }}
         run: |
-          docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &
+          docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed \
+            ${LAYERS_FROM:+--cache-from "$LAYERS_FROM"} ${LAYERS_TO:+--cache-to "$LAYERS_TO"} . &
           build=$!
           status=0
           bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7 &&
@@ -64,3 +75,14 @@ jobs:
       - name: Run the pinned herdr and ssh clients inside the swarm image
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check
+      - name: Keep the swarm smoke layers
+        if: steps.layers.outputs.cache-hit != 'true'
+        run: |
+          rm -rf "$RUNNER_TEMP/swarm-smoke-layers"
+          mv "$RUNNER_TEMP/swarm-smoke-layers-next" "$RUNNER_TEMP/swarm-smoke-layers"
+      - name: Save the swarm smoke layers
+        if: steps.layers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/swarm-smoke-layers
+          key: ${{ steps.layers.outputs.cache-primary-key }}

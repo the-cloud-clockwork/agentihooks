@@ -749,6 +749,53 @@ def test_a_trusted_mutation_leg_may_move_to_a_group_of_its_own_run(job, stage, i
     assert bool(found) == (change is not None)
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        None,
+        "group",
+        "queue",
+        "cancel",
+        "name",
+        "events",
+        "job",
+        "untrusted",
+        "trusted-name",
+        "trusted-events",
+        "extra-job",
+    ],
+)
+def test_only_the_trusted_chart_release_may_leave_the_shared_proof_lane(change):
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "chart-release.yml").read_text())
+    baseline["concurrency"] = {"group": lanes.GROUP, "queue": "max", "cancel-in-progress": False}
+    updated = copy.deepcopy(baseline)
+    updated["concurrency"] = {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
+    if change == "group":
+        updated["concurrency"]["group"] = "chart-release-other"
+    elif change == "queue":
+        updated["concurrency"]["queue"] = "single"
+    elif change == "cancel":
+        updated["concurrency"]["cancel-in-progress"] = True
+    elif change == "name":
+        updated["name"] = "Other release"
+    elif change == "events":
+        updated[True]["workflow_dispatch"] = None
+    elif change == "job":
+        updated["jobs"]["publish"]["runs-on"] = "ubuntu-latest"
+    elif change == "untrusted":
+        baseline = None
+    elif change == "trusted-name":
+        baseline["name"] = updated["name"] = "Other release"
+    elif change == "trusted-events":
+        baseline[True] = updated[True] = {"workflow_dispatch": None}
+    elif change == "extra-job":
+        baseline["jobs"]["other"] = updated["jobs"]["other"] = {"runs-on": "ubuntu-latest"}
+    found = lanes.problems(updated, baseline)
+    assert bool(found) == (change is not None)
+
+
 SUPERSEDED_LANE = (
     "format('mutation-lane-{0}', "
     "((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || "

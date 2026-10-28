@@ -130,6 +130,21 @@ def test_items_for_the_operator_from_swarm_agents_are_shown_on_the_page_and_clos
     assert delivery.relay_to_page(box, "sw", agents, ledger) == 0
 
 
+def test_a_reply_from_an_agent_that_already_left_the_swarm_is_still_shown(store):
+    box = InboxStore(store.redis)
+    gone = store.names.next("sw", "eng")
+    reply = box.send(gone, "operator", "handed off before any branch existed")
+    live = AgentRecord(store.names.next("sw", "eng"), "eng", "t")
+    other = box.send(live.name, "operator", "from a live agent")
+    store.create(SwarmConfig("elsewhere", "/repo", 1, 1))
+    foreign = box.send(store.names.next("elsewhere", "eng"), "operator", "from another swarm")
+    ledger = PageLedger()
+    assert delivery.relay_to_page(box, "sw", [live], ledger) == 2
+    assert ledger.said == [("handed off before any branch existed", gone), ("from a live agent", other.sender)]
+    assert box.get(reply.id).state == "done"
+    assert box.get(foreign.id).state == "pending"
+
+
 def test_a_refused_page_post_closes_that_item_alone_and_tells_its_sender(store):
     from scripts.swarm.store import SwarmError
 
