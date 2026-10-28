@@ -93,7 +93,7 @@ def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], repo
         front = front_door_route.check(environ.get("AGENTIHOOKS_PROFILE", ""), title, [])
         child, found, number = (_front if front else prepare)(environ, Path.cwd())
     except login.LoginRefused as exc:
-        if front:
+        if front and str(exc) == native_login.EXPIRED:
             print(f"[agenti] claude ai login refused: {exc}", file=sys.stderr, flush=True)
             return login.launch_token(binary, args, environ, report)
         raise RoutingError(str(exc)) from exc
