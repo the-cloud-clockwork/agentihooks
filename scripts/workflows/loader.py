@@ -31,7 +31,7 @@ def layer_dirs(state: dict, cwd: str | Path | None) -> list[tuple[str, Path]]:
     if user is not None:
         layers.append(("user-bundle", user / WORKFLOWS))
     chain = profile_chain.profile_dirs(
-        bundle, profile_chain.active_profile(state), profile_chain.linked_profiles(state), user
+        bundle, profile_chain.active_profile(state), profile_chain.linked_profiles(state), *([user] if user else [])
     )
     layers.extend((f"profile:{name}", directory / WORKFLOWS) for name, directory in chain)
     root = repo_root(cwd)
