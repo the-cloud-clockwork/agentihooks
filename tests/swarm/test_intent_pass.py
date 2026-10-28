@@ -1,3 +1,5 @@
+import threading
+
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import cli
@@ -16,8 +18,14 @@ def test_ready_intent_is_delivered_before_a_slow_runtime_launch(env, monkeypatch
     )
     ledger.pulls[url] = PullRequest("OPEN", None, None, False, head="h1")
     clock, delivered, at_launch = [1_000_000], [], []
+    launching = threading.Event()
     monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
-    monkeypatch.setattr(intent, "pr_view", lambda url: {"title": "Ready", "body": "", "files": [], "head": "h1"})
+
+    def view(url):
+        launching.wait(10)
+        return {"title": "Ready", "body": "", "files": [], "head": "h1"}
+
+    monkeypatch.setattr(intent, "pr_view", view)
 
     def judge(state):
         delivered.append(clock[0])
@@ -26,6 +34,7 @@ def test_ready_intent_is_delivered_before_a_slow_runtime_launch(env, monkeypatch
     launch = runtime.spawn
 
     def slow_launch(*args, **kwargs):
+        launching.set()
         at_launch.append(Verdicts("sw", "intent").read("t1"))
         clock[0] += 780_000
         return launch(*args, **kwargs)
