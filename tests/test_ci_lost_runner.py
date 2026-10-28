@@ -260,6 +260,26 @@ def test_jobs_of_reads_every_page_of_the_latest_jobs(monkeypatch):
     assert ci_lost_runner.jobs_of("o/r", 7) == [{"name": "lint"}, {"name": "docs"}]
 
 
+def test_first_look_shares_job_pages_but_recovery_confirmation_reads_fresh(monkeypatch, no_sleep):
+    from scripts.swarm import github_reads
+
+    reads = []
+    pages = [{"jobs": [job("lint")]}]
+
+    def conditional(caller, endpoint, fetch):
+        reads.append((caller, endpoint, fetch))
+        return pages
+
+    monkeypatch.setattr(github_reads, "conditional_pages", conditional, raising=False)
+    api = Api({JOBS: lines(job("lint")), RUNNER_LIST: ""})
+    monkeypatch.setattr(ci_lost_runner, "_api", api)
+    assert ci_lost_runner.first_look("o/r", RUN, WORKFLOW, GRACE)["action"] == "none"
+    assert reads == [("lost_runner.jobs", "repos/o/r/actions/runs/7/jobs?filter=latest&per_page=100", api)]
+    assert JOBS not in api.calls
+    assert ci_lost_runner.watch("o/r", RUN, WORKFLOW, GRACE)["action"] == "none"
+    assert JOBS in api.calls
+
+
 def watched(monkeypatch, run, jobs, states):
     api = Api(
         {JOBS: lines(*jobs), RUNS: [json.dumps(state) for state in states], RUNNER_LIST: "anton-oss-light-live\n"}

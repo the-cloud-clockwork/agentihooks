@@ -247,3 +247,115 @@ def test_retained_readers_share_the_lock_with_an_existing_process(kind, monkeypa
         assert future.result(timeout=5) == payload
     assert contended == [True]
     assert fetches == []
+
+
+def response(status, body="", **headers):
+    fields = "\r\n".join(f"{key}: {value}" for key, value in headers.items())
+    return f"HTTP/2.0 {status}\r\n{fields}\r\n\r\n{body}"
+
+
+def test_conditional_pages_share_reads_then_revalidate_without_charging_unchanged_data(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("GH_TOKEN", "conditional-test-token")
+    now = [1_000.0]
+    monkeypatch.setattr(github_reads.time, "time", lambda: now[0])
+    calls = []
+    outputs = iter(
+        [
+            response(200, '{"jobs": [{"id": 1}]}', ETag='"one"'),
+            response(304),
+            response(200, '{"jobs": [{"id": 2}]}', ETag='"two"'),
+        ]
+    )
+
+    def fetch(*args):
+        calls.append(args)
+        return next(outputs)
+
+    endpoint = "repos/o/r/actions/runs/7/jobs?per_page=100"
+    assert github_reads.conditional_pages("lost_runner.jobs", endpoint, fetch) == [{"jobs": [{"id": 1}]}]
+    now[0] += 59
+    assert github_reads.conditional_pages("another", endpoint, fetch) == [{"jobs": [{"id": 1}]}]
+    assert len(calls) == 1
+    now[0] += 1
+    assert github_reads.conditional_pages("lost_runner.jobs", endpoint, fetch) == [{"jobs": [{"id": 1}]}]
+    assert calls[-1] == (endpoint, "--include", "-H", 'If-None-Match: "one"')
+    assert github_reads.counts(1_000, 1_061) == {"lost_runner.jobs": 1}
+    now[0] += 60
+    assert github_reads.conditional_pages("lost_runner.jobs", endpoint, fetch) == [{"jobs": [{"id": 2}]}]
+    assert github_reads.counts(1_000, 1_121) == {"lost_runner.jobs": 2}
+
+
+def test_conditional_pages_keep_cached_links_on_304_and_drop_removed_pages(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    now = [1_000.0]
+    monkeypatch.setattr(github_reads.time, "time", lambda: now[0])
+    first = "repos/o/r/jobs?per_page=1"
+    second = "https://api.github.com/repos/o/r/jobs?per_page=1&page=2"
+    outputs = iter(
+        [
+            response(200, '{"jobs": [1]}', ETag='"one"', Link=f'<{second}>; rel="next"'),
+            response(200, '{"jobs": [2]}', ETag='"two"'),
+            response(304),
+            response(304),
+            response(200, '{"jobs": [3]}', ETag='"three"'),
+        ]
+    )
+    calls = []
+
+    def fetch(*args):
+        calls.append(args)
+        return next(outputs)
+
+    assert github_reads.conditional_pages("jobs", first, fetch) == [{"jobs": [1]}, {"jobs": [2]}]
+    now[0] += 60
+    assert github_reads.conditional_pages("jobs", first, fetch) == [{"jobs": [1]}, {"jobs": [2]}]
+    assert calls[3] == (second, "--include", "-H", 'If-None-Match: "two"')
+    now[0] += 60
+    assert github_reads.conditional_pages("jobs", first, fetch) == [{"jobs": [3]}]
+    assert len(calls) == 5
+
+
+def test_conditional_pages_without_etags_or_with_a_new_credential_read_fresh(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    now = [1_000.0]
+    monkeypatch.setattr(github_reads.time, "time", lambda: now[0])
+    calls = []
+
+    def fetch(*args):
+        calls.append(args)
+        return response(200, '{"jobs": []}')
+
+    for token in ("first-test-token", "second-test-token", "first-test-token"):
+        monkeypatch.setenv("GH_TOKEN", token)
+        assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": []}]
+        now[0] += 60
+    assert calls == [("resource", "--include")] * 3
+
+
+def test_conditional_pages_accept_a_304_gh_error_but_propagate_other_errors(monkeypatch, tmp_path):
+    import subprocess
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    now = [1_000.0]
+    monkeypatch.setattr(github_reads.time, "time", lambda: now[0])
+    outputs = iter(
+        [
+            response(200, '{"jobs": []}', ETag='"one"'),
+            subprocess.CalledProcessError(1, ["gh"], output=response(304)),
+            subprocess.CalledProcessError(1, ["gh"], output=response(403, '{"message": "refused"}')),
+        ]
+    )
+
+    def fetch(*args):
+        found = next(outputs)
+        if isinstance(found, Exception):
+            raise found
+        return found
+
+    assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": []}]
+    now[0] += 60
+    assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": []}]
+    now[0] += 60
+    with pytest.raises(subprocess.CalledProcessError):
+        github_reads.conditional_pages("jobs", "resource", fetch)
