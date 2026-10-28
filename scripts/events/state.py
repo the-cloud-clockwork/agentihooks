@@ -30,6 +30,15 @@ def open_state(bucket: str, environ: Mapping[str, str] | None = None) -> StateSt
     return RedisStateStore(redis_client() if environ is None else redis_client(environ), bucket)
 
 
+def for_store(store, bucket: str, environ: Mapping[str, str] | None = None) -> StateStore:
+    env = os.environ if environ is None else environ
+    if backend(env) == "redis":
+        from .redis_state import RedisStateStore
+
+        return RedisStateStore(store.redis, bucket)
+    return open_state(bucket, env)
+
+
 def unavailable(environ: Mapping[str, str] = os.environ) -> tuple[type[BaseException], ...]:
     if backend(environ) == "bus":
         from nats.errors import Error
