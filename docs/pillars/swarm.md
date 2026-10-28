@@ -143,8 +143,9 @@ follow up, question, blocked task and done task, each phase it ticks or reopens,
 
 The master recycles like any agent: at `AGENTIHOOKS_COMPACT_LIMIT` it writes a handoff document and runs
 `agentihooks swarm <id> handoff <doc>`. The next tick retires it and spawns the next master with the document,
-so one master is always online. `issue`, `pr`, `done` and `block` refuse the master. The swarm panel on the
-ledger page shows the master as the first card.
+so one master is always online. A master busy with no tool call past the stall threshold is recycled the same
+way without its own document: see [Stalled master recycle](#stalled-master-recycle). `issue`, `pr`, `done` and
+`block` refuse the master. The swarm panel on the ledger page shows the master as the first card.
 
 Before the tick retires a live master that reported its hook, for any reason (a live binding mismatch, a failed
 launch check, the idle limit or a stopping swarm), it sends that master an inbox item asking for a Handoff v2 and
@@ -1175,6 +1176,9 @@ agentihooks ledger \
   "Remove the size allowance while fixing the size gate." \
   --quote "Remove the size allowance too."
 ```
+
+The ledger checks the quote against the operator's recorded words; a hosted ledger reads them from the shared swarm
+Redis. See [Relayed operator words](../reference/hosted-ledger-auth.md#relayed-operator-words).
 
 ### Retrace and inspect the result
 
@@ -5318,6 +5322,102 @@ not update the activity clock. See the `verdict` command above for recurrence
 behavior and [Outage holds and recovery](#outage-holds-and-recovery) for provider
 or Redis outages, which have their own hold and resume behavior.
 
+### Stalled master recycle
+
+A master that shows busy with no tool call past the stall threshold is recycled by its swarm's tick through a
+recovery handoff in the same seat, so a stalled master never waits on the operator to stop it. A proof swarm's
+controls accept only the operator and its own master, so no other agent can stop a stalled proof master.
+
+Every tick of a swarm that is not stopping or stopped checks the swarm's live master. Its stall clock runs only
+when all of these hold:
+
+| Clock runs only when | Reason |
+|---|---|
+| The master's pane reports `working` | An idle or waiting pane is not stalled. |
+| The master has no declared wait (`swarm <id> wait`) | A declared wait is work in progress. |
+| The master has recorded at least one tool call and its end | A master whose first call is still running is inside a tool call. |
+| No tool call it began is still open | A long Bash, Monitor or Agent call, including an Agent call whose subagent runs its own tools, is never interrupted. |
+| Its session started more than six minutes ago | The startup grace covers launch. |
+
+The quiet time counts from the later of the last tool call's end and the session start. Once it reaches
+`AGENTIHOOKS_HEALTH_STALLED_MINUTES` (default 10, the same threshold as the [stalled finding](#stalled-activity-findings)),
+the tick acts in this order:
+
+1. **Proof swarm with a blocked parent task.** When the swarm is a proof swarm (`proof-<code>-<task>-<n>`) whose
+   creating task in its parent swarm is blocked, the tick sets the swarm to `stopping` instead of recycling the master.
+   The task id is compared without case or punctuation, so `t1199` and `T-1199` match. The tick journal line is
+   `stopped proof swarm <id>: its parent task is blocked and its master <name> stalled`.
+2. **Ask for a handoff.** A live master gets the same inbox item every master retire sends, asking it to write a
+   Handoff v2 and submit it with `agentihooks swarm <id> handoff <doc>`, and the tick waits up to
+   `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5). The journal lines are `asked <name> for a handoff before
+   retiring it: busy with no tool call for <n> minutes`, then `waiting on <name>'s handoff ...` on each later tick.
+   A master that hands off is replaced from its own document, as in [The master](#the-master).
+3. **Recycle.** At the deadline, or at once when the wait is 0 or the master is not live, the tick stores a recovery
+   handoff for the master seat, records a transfer with reason `stalled`, and marks the master `finished`. It never
+   kills the process here. The next master starts in the same seat from that handoff. The journal line is
+   `recycled master <name> in its seat after <n> minutes busy with no tool call`.
+
+While the ask is pending, the tick withdraws it as soon as the clock stops or falls back under the threshold: the
+master starts or finishes a tool call, declares a wait, or its pane leaves `working`. It closes the ask item as done
+with `the master resumed work` in every one of these cases, including a pane that went idle. Retire requests raised
+for other reasons are left alone.
+
+The recovery handoff is runtime written. Its envelope carries reason `recycle`, the master's name and seat and the
+ledger; its body marks Done, Stopped at and Decisions and promises as `unknown`, because the stalled master reported
+nothing, and its Next tells the successor to re-read the ledger and the master inbox. The successor reads the master
+inbox first.
+
+#### How the hooks feed the stall clock
+
+The clock reads the per agent activity records under `~/.agentihooks/swarm-activity/<id>/`, written by the swarm
+session's hooks:
+
+| Hook | Record |
+|---|---|
+| `PreToolUse` | The call's time (`<name>.last`) and an open marker named by its `tool_use_id` (`<name>.open/<id>`). |
+| `PostToolUse` and `PostToolUseFailure` | The call's end time (`<name>.done`), and removes its open marker. Claude reports failed calls only through `PostToolUseFailure`, which the base settings wire to the same hook. |
+| A `PreToolUse` the hook denies | Ends the call the same way, since a denied call gets neither post hook. |
+| `Stop` (heartbeat turns idle) | Drops every open marker left over at turn end. |
+
+A call id that is not 1 to 128 letters, digits, `_` or `-` records no open marker. An installation that predates the
+`PostToolUseFailure` entry needs `agentihooks init` again to install it; without it a failed call's marker stays until
+turn end.
+
+#### Configure
+
+The threshold and handoff wait are read by the process that runs the tick. For normal operation set them in the
+swarm timer's or controller's managed environment, as in [Configure the threshold](#configure-the-threshold), since
+the timer starts each tick as its own child process. A prefix on a manual tick affects only that invocation:
+
+```bash
+# Manual tick: recycle after 20 quiet minutes and give the master 3 minutes to hand off
+AGENTIHOOKS_HEALTH_STALLED_MINUTES=20 AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES=3 agentihooks swarm tick
+```
+
+`AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES=0` recycles without asking. There is no separate switch: raising the
+threshold delays the recycle.
+
+#### Check a recycle
+
+```bash
+# Ask, wait, recycle and proof swarm stop lines from the tick journal
+journalctl --user -t agentihooks-swarm --since "-1 day" --no-pager \
+  | grep -E "busy with no tool call|stopped proof swarm"
+
+# Recorded transfers; a stalled master recycle has reason "stalled"
+agentihooks swarm <id> status --json | jq '.transfers[] | select(.reason == "stalled")'
+
+# Tool calls the master still has open; an entry here holds the clock
+ls ~/.agentihooks/swarm-activity/<id>/<master name>.open/
+```
+
+| Symptom | Cause and check |
+|---|---|
+| A master busy for longer than the threshold is not recycled | A tool call is still open, it declared a wait, its pane does not read `working`, or the swarm is stopping. List its open markers; a leftover one from a failed call means the `PostToolUseFailure` hook is not installed. |
+| The ask arrives but the master keeps working | Expected: its next tool call withdraws the ask as resumed. |
+| A proof swarm stopped instead of recycling its master | Its parent task is blocked. Nothing restarts the proof swarm when the parent task is unblocked; run `agentihooks swarm <id> start` to continue the proof. |
+| The successor starts with unknown Done and Stopped at | Expected for a recovery handoff; it rebuilds its state from the ledger and the master inbox. |
+
 ### Spawn stall findings
 
 A `spawn stall` health finding means the swarm could have launched an agent for ten minutes and launched none. The
@@ -6477,6 +6577,129 @@ To list the agents without push inbox, which rely on a typed wake:
 agentihooks swarm <id> status --json \
   | jq -r '.agents[] | select(.capabilities.push_inbox | not) | .name'
 ```
+
+### Inbox wakes for Codex agents on another hive
+
+A legacy Codex worker that runs on another hive gets the same typed wake as one
+on the tick's own machine. The tick cannot type into a remote pane, so it orders
+the agent's hive to type the wake text there. Before
+[pull request 7802](https://github.com/the-cloud-clockwork/agentihooks/pull/7802)
+the wake step skipped every agent on another hive: a wait outcome, a nudge or a
+master message to an idle hive Codex agent stayed unread until escalation, while
+Claude agents on the same hives took theirs through the inbox channel.
+
+An agent gets a typed wake when all of these hold, wherever it runs:
+
+- it has a pane and is not a master;
+- its transport has no push inbox: Codex `legacy`, never `app_server`;
+- no Codex push pump owns its inbox.
+
+The wake reaches the pane by one of two routes:
+
+| Where the agent runs | How the tick reads idle | How the wake reaches the pane |
+|---|---|---|
+| The tick's own machine | herdr pane status, plus the quiet window and typed input checks | herdr types the wake text into the pane |
+| Another hive | The agent's hook heartbeat in Redis, plus the quiet window | A `nudge` command order on that hive's command stream; the hive types the wake text into the pane |
+
+For a remote agent the heartbeat decides:
+
+| Heartbeat | Wake |
+|---|---|
+| `idle`, from the agent's Stop hook | Sent |
+| `working`, written less than 20 minutes ago | None; the item escalates after the retry window as for any busy pane |
+| `working`, 20 minutes old or more | Sent: a stale working beat counts as idle |
+| None recorded | None: a missing heartbeat counts as working |
+
+The tick sends the order only while the hive's report exists. A hive
+that stopped reporting gets no order, the item records no `woken` event and the
+next pass tries again. The hive applies the order only to the execution and
+generation it names, so a replaced agent's pane is never typed into. Each order
+id starts with `wake:<execution id>:<generation>:`. The tick records the `woken`
+event when it queues the order and does not wait for the hive's answer, so a
+refused order still uses one of the item's three wakes.
+
+Both wake paths use this route. The tick's wake pass covers every pending work
+item. The immediate wake when mail lands for a Codex agent (`wake_now`) also
+reads the mail a hive's member world holds for the agent, so mail sent through
+that hive wakes the pane as well. Information only items get no wake on either
+path, and the limit of three wakes per item, one per retry window, is
+unchanged.
+
+#### Usage
+
+Nothing turns this on. Pull request 7802 changed only the sending side, so the
+checkout the tick runs from needs it. Three processes take part:
+
+| Process | Role |
+|---|---|
+| The swarm tick | Sends wake orders on its minute pass |
+| `agentihooks-inbox-waker` user service (`agentihooks swarm waker`) | Sends the immediate wake when mail lands; without it, wakes wait for the next tick |
+| `agentihooks-hive` user service (`agentihooks hive run`) on the agent's hive | Applies the `nudge` order and types the wake text |
+
+The settings under
+[Inbox escalation sender exclusion](#inbox-escalation-sender-exclusion) apply on
+the tick's and the waker's processes:
+
+| Setting | Default | Effect on a hive wake |
+|---|---|---|
+| `AGENTIHOOKS_INBOX_RETRY_WINDOW_S` | `300` seconds | Time between wakes and before escalation |
+| `AGENTIHOOKS_INBOX_QUIET_S` | `180` seconds | No wake while the operator prompted the agent inside this window |
+
+To check one agent, read an item sent to it and look for the tick's wake in its
+history:
+
+```bash
+agentihooks swarm <slug> status --json \
+  | jq '.agents[] | select(.harness == "codex") | {name, transport, capabilities}'
+agentihooks msg inbox --of <seat>@<slug>
+agentihooks msg read <message-id>
+```
+
+A queued wake shows a `woken` event by `swarm` with the reason
+`prompted <agent> to read its inbox`. Once the hive applies the order, its pane
+shows the line that begins
+`[swarm delivery] You have unread inbox messages: run agentihooks msg inbox`.
+
+To confirm the hive is reporting, so orders can be sent:
+
+```bash
+agentihooks hive list
+```
+
+#### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| An idle Codex agent on a hive has unread work and no `woken` event | Its heartbeat says `working` and is less than 20 minutes old, or no heartbeat exists | Expected: the item escalates to the master after the retry window. Check the agent's hooks are installed on the hive if it never writes a heartbeat |
+| No `woken` event and the agent's heartbeat is idle | The hive stopped reporting, so no order was sent | Check `agentihooks hive list`; on the hive, `systemctl --user restart agentihooks-hive`. The tick retries on every pass |
+| A `woken` event exists but the pane shows no wake text | The hive refused the order: the agent was replaced and the order named the old generation, or its runtime could not type into the pane. The wake still counts toward the item's three | Check `agentihooks-hive` is running on the hive; a replaced agent's successor gets its own wake, and the item escalates after its wakes run out |
+| Wakes arrive only on the minute, never when mail lands | `agentihooks-inbox-waker` is not running on the tick's machine | `systemctl --user status agentihooks-inbox-waker`, then start it |
+| An `app_server` Codex agent on a hive gets no wake | Expected: its push pump delivers the item | See [Codex inbox transport](../reference/codex-inbox-transport.md) |
+
+The tick does not escalate an item while it keeps choosing a wake for it: if a
+hive stops reporting and the agent's last heartbeat still reads idle, the item
+waits for the hive to come back or for the agent to read its inbox.
+
+#### Delivery evidence
+
+[Pull request 7802](https://github.com/the-cloud-clockwork/agentihooks/pull/7802)
+merged into `dev` on 27 October 2026 at 18:33 UTC for issue 7794. Its
+final head passed the
+[Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40549044022)
+and the
+[Mutation preflight run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40549036252).
+The cases in `tests/inbox/test_member_mail.py` assert that an idle legacy Codex
+pane on a hive gets one `nudge` order carrying the swarm, agent, execution,
+generation and wake text, from both the tick pass and `wake_now`; that a
+working pane gets no order and escalates to the master; that a missing heartbeat
+gets no order; that a stale working beat gets one; that a hive with no report
+gets no order and no `woken` event; and that an `app_server` agent gets no
+order.
+
+The source finding is Doctor ledger task t931 on the `rig-grade-swarm-doctor`
+ledger, 27 October 2026: two Codex agents on one hive left a wait outcome, stale
+nudges and a master message unread for over fifteen minutes, at least four
+items past one wake window that day.
 
 ### Agents panel cells that overflow
 

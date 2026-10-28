@@ -438,7 +438,7 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
 
 def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs():
     workflow = _workflow()
-    assert (_ROOT / ".github/test-constraints.txt").read_text().strip() == "playwright==1.63.0"
+    assert (_ROOT / ".github/test-constraints.txt").read_text().split() == ["playwright==1.63.0", "pytest<9.2"]
     for job in ("test-count", "split", "unit"):
         assert workflow["jobs"][job]["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
         cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
@@ -1484,6 +1484,10 @@ def test_unit_shards_upload_elapsed_time_after_failed_pytest():
 def test_selected_legs_record_elapsed_time_and_their_job_and_preserve_pytest_status(tmp_path, status):
     steps = _workflow()["jobs"]["unit-selected"]["steps"]
     step = next(item for item in steps if item.get("name") == "Run the selected tests")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "__init__.py").touch()
+    (scripts / "ci_cpu_quota.py").write_text("print(1)\n")
     (tmp_path / "pytest.py").write_text(
         f"def main(args):\n    open('durations.json', 'w').write('{{}}')\n    return {status}\n"
     )
@@ -1508,6 +1512,13 @@ def test_selected_legs_upload_elapsed_time_beside_their_durations():
 
 def _selected_step(name: str) -> dict:
     return next(step for step in _workflow()["jobs"]["unit-selected"]["steps"] if step.get("name") == name)
+
+
+def test_selected_legs_size_workers_by_the_container_cpu_quota():
+    run = _selected_step("Run the selected tests")["run"]
+    assert "workers=$(python -m scripts.ci_cpu_quota)" in run
+    assert '-n "$workers"' in run
+    assert "-n auto" not in run
 
 
 def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_only_for_the_grader():
@@ -1877,6 +1888,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         "BASE": "${{ inputs.base || 'origin/dev' }}",
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
         "MUTATION_SHARD_CPU_QUOTA": "3",
+        "PYTHONUNBUFFERED": "1",
     }
     names = [item.get("id") for item in plan["steps"]]
     mint = plan["steps"][names.index("app-token")]
@@ -1946,7 +1958,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     setup = [
         step
         for step in setup
-        if not str(step.get("name", "")).startswith(downloads)
+        if not str(step.get("name", "")).startswith((*downloads, "Cap the merged test stats"))
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
     ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
@@ -2090,8 +2102,21 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     assert merged["uses"] == "actions/cache/save@v4"
     assert merged["if"] == f"{first} && hashFiles('.mutation-stats-cache/**') != ''"
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
+    capped = mutation[mutation_names.index("Cap the merged test stats")]
+    assert capped["if"] == first
+    assert capped["run"] == (
+        "python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap;"
+        ' print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")\' .mutation-stats-cache'
+    )
     assert mutation_names.index(base["name"]) == 1
-    order = [base["name"], download["name"], merged["name"], "Install dependencies", "Mutate changed Python files"]
+    order = [
+        base["name"],
+        download["name"],
+        capped["name"],
+        merged["name"],
+        "Install dependencies",
+        "Mutate changed Python files",
+    ]
     assert [mutation_names.index(name) for name in order] == sorted(mutation_names.index(name) for name in order)
 
 
