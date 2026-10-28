@@ -31,6 +31,7 @@ from scripts.claude_config import claude_json as claude_json_path
 from scripts.cli_delegates import delegated_cli
 from scripts.cli_help import USAGE as _USAGE_TEXT
 from scripts.cli_parser import ArgumentParser
+from scripts.profiles import bundles
 from scripts.targets import DEFAULT_TARGET, SUPPORTED_TARGETS, get_adapter, resolve_target
 from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
 
@@ -101,6 +102,7 @@ STATE_JSON = AGENTIHOOKS_STATE_DIR / "state.json"
 
 # Repeated path fragment constants (avoids S1192 duplicate-literal warnings)
 _CLAUDE_SUBDIR = ".claude"
+_USER_BUNDLE_ENV = "AGENTIHOOKS_USER_BUNDLE_PATH"
 _CLAUDE_MD_NAME = "CLAUDE.md"
 _MCP_JSON_NAME = ".mcp.json"
 
@@ -549,6 +551,12 @@ def _managed_roots() -> list[Path]:
     env_bundle = os.environ.get("AGENTIHOOKS_BUNDLE_PATH", "")
     if env_bundle:
         roots.append(Path(env_bundle).expanduser())
+    user_bundle = state.get("user_bundle")
+    if isinstance(user_bundle, dict) and user_bundle.get("path"):
+        roots.append(Path(user_bundle["path"]))
+    env_user_bundle = os.environ.get(_USER_BUNDLE_ENV, "")
+    if env_user_bundle:
+        roots.append(Path(env_user_bundle).expanduser())
     for entry in _get_linked_profiles():
         p = entry.get("path")
         if p:
@@ -794,6 +802,35 @@ def _get_bundle_path() -> Path | None:
     return None
 
 
+def _get_user_bundle_path() -> Path | None:
+    """Return the linked user bundle path from state.json, or AGENTIHOOKS_USER_BUNDLE_PATH."""
+    from hooks.context.profile_chain import user_bundle_path
+
+    linked = user_bundle_path(_load_state())
+    if linked:
+        return linked
+    env_path = os.environ.get(_USER_BUNDLE_ENV, "")
+    if env_path:
+        p = Path(env_path).expanduser().resolve()
+        if p.is_dir():
+            return p
+    return None
+
+
+def _bundle_roots() -> list[tuple[str, Path]]:
+    from hooks.context.profile_chain import bundle_roots
+
+    found = (("bundle", _get_bundle_path()), ("user_bundle", _get_user_bundle_path()))
+    return bundle_roots({key: {"path": str(path)} for key, path in found if path})
+
+
+def _bundle_profile_dir(profile_name: str) -> Path | None:
+    for _kind, root in _bundle_roots():
+        if (root / "profiles" / profile_name).is_dir():
+            return root / "profiles" / profile_name
+    return None
+
+
 def _get_linked_profiles() -> list[dict]:
     """Return the list of externally linked profiles from state.json."""
     state = _load_state()
@@ -831,12 +868,9 @@ def _resolve_profile_dir(profile_name: str) -> Path | None:
     local = PROFILES_DIR / profile_name
     if local.is_dir():
         return local
-    # Bundle profiles
-    bundle = _get_bundle_path()
-    if bundle:
-        bp = bundle / "profiles" / profile_name
-        if bp.is_dir():
-            return bp
+    bundle_profile = _bundle_profile_dir(profile_name)
+    if bundle_profile:
+        return bundle_profile
     # Linked external profiles
     linked = _resolve_linked_profile_dir(profile_name)
     if linked is not None:
@@ -845,12 +879,12 @@ def _resolve_profile_dir(profile_name: str) -> Path | None:
 
 
 def _profile_source_label(profile_name: str) -> str:
-    """Return 'built-in', 'bundle', 'linked' or 'package' for a profile name."""
+    """Return 'built-in', 'bundle', 'user bundle', 'linked' or 'package' for a profile name."""
     if (PROFILES_DIR / profile_name).is_dir():
         return "built-in"
-    bundle = _get_bundle_path()
-    if bundle and (bundle / "profiles" / profile_name).is_dir():
-        return "bundle"
+    for kind, root in _bundle_roots():
+        if (root / "profiles" / profile_name).is_dir():
+            return "bundle" if kind == "root" else "user bundle"
     if _resolve_linked_profile_dir(profile_name) is not None:
         return "linked"
     if _package_role_dir(profile_name) is not None:
@@ -884,152 +918,6 @@ def _resolve_profile_chain(profile_input: str) -> list[tuple[str, Path]]:
 
     resolved = {name: path for name, path in dirs}
     return [(name, _resolve_profile_dir(name)) for name in expand_profiles(list(resolved), _resolve_profile_dir)]
-
-
-def cmd_bundle(action: str, path: str | None = None, rebase: bool = False) -> None:
-    """Handle 'agentihooks bundle' subcommands."""
-    if action == "link":
-        _bundle_link(Path(path).expanduser().resolve() if path else None)
-    elif action == "unlink":
-        _bundle_unlink()
-    elif action == "list":
-        _bundle_list()
-    elif action == "pull":
-        _bundle_pull(rebase=rebase)
-    else:
-        print(f"Unknown bundle action: {action}", file=sys.stderr)
-        sys.exit(1)
-
-
-def _bundle_pull(rebase: bool = False) -> None:
-    """Git pull the linked bundle directory."""
-    import subprocess as _sp
-
-    bundle_dir = _get_bundle_path()
-    if not bundle_dir:
-        print("No bundle linked.", file=sys.stderr)
-        sys.exit(1)
-
-    if not (bundle_dir / ".git").exists():
-        print(f"ERROR: {bundle_dir} is not a git repository.", file=sys.stderr)
-        sys.exit(1)
-
-    cmd = ["git", "-C", str(bundle_dir), "pull"]
-    if rebase:
-        cmd.append("--rebase")
-
-    print(f"Pulling bundle: {bundle_dir}")
-    print(f"  $ {' '.join(cmd)}")
-    result = _sp.run(cmd, capture_output=True, text=True)
-
-    if result.stdout.strip():
-        print(result.stdout.strip())
-    if result.stderr.strip():
-        print(result.stderr.strip())
-
-    if result.returncode != 0:
-        print("ERROR: git pull failed.", file=sys.stderr)
-        sys.exit(1)
-
-    _cprint("[OK] Bundle updated.")
-
-
-def _bundle_link(bundle_dir: Path | None) -> None:
-    """Link a bundle directory."""
-    if bundle_dir is None:
-        print("ERROR: Provide the path to a bundle directory.", file=sys.stderr)
-        sys.exit(1)
-
-    if not bundle_dir.is_dir():
-        print(f"ERROR: {bundle_dir} is not a directory.", file=sys.stderr)
-        sys.exit(1)
-
-    state = _load_state()
-    old_bundle = state.get("bundle")
-    if old_bundle:
-        print(f"Replacing existing bundle: {old_bundle['path']}")
-
-    state["bundle"] = {
-        "path": str(bundle_dir),
-        "linked_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    _save_state(state)
-
-    # Summary
-    profiles_dir = bundle_dir / "profiles"
-    profile_names = sorted(p.name for p in profiles_dir.iterdir() if p.is_dir()) if profiles_dir.is_dir() else []
-    has_claude = (bundle_dir / ".claude").is_dir()
-
-    _cprint(f"[OK] Linked bundle: {bundle_dir}")
-    if profile_names:
-        print(f"     Profiles: {', '.join(profile_names)}")
-    if has_claude:
-        print("     Global .claude/: skills, commands, agents")
-    print()
-    print("Run 'agentihooks init' to apply.")
-
-
-def _bundle_unlink() -> None:
-    """Unlink the current bundle."""
-    state = _load_state()
-    bundle = state.get("bundle")
-    if not bundle:
-        print("No bundle linked.")
-        return
-
-    bundle_path = bundle["path"]
-
-    # Remove bundle-sourced connectors
-    connectors = state.get("connectors", {})
-    to_remove = [name for name, info in connectors.items() if info.get("source") == "bundle"]
-    for name in to_remove:
-        del connectors[name]
-        _cprint(f"  [OK] Removed bundle connector: {name}")
-
-    del state["bundle"]
-    _save_state(state)
-    _cprint(f"[OK] Unlinked bundle: {bundle_path}")
-    print()
-    print("Run 'agentihooks init' to remove bundle settings.")
-
-
-def _bundle_list() -> None:
-    """Show the linked bundle and its contents."""
-    bundle = _get_bundle_path()
-    if not bundle:
-        print("No bundle linked.")
-        print()
-        print("Link one with:")
-        print("  agentihooks bundle link /path/to/.agentihooks")
-        return
-
-    state = _load_state()
-    linked_at = state.get("bundle", {}).get("linked_at", "?")
-
-    print(f"Bundle: {bundle}")
-    print(f"Linked: {linked_at}")
-    print()
-
-    # Profiles
-    profiles_dir = bundle / "profiles"
-    if profiles_dir.is_dir():
-        profile_names = sorted(p.name for p in profiles_dir.iterdir() if p.is_dir())
-        if profile_names:
-            print(f"Profiles ({len(profile_names)}):")
-            for name in profile_names:
-                print(f"  {name}")
-            print()
-
-    # Connectors
-    conn_dir = bundle / "connectors"
-    if conn_dir.is_dir():
-        conn_names = sorted(d.name for d in conn_dir.iterdir() if d.is_dir() and (d / "connector.yml").exists())
-        if conn_names:
-            print(f"Connectors ({len(conn_names)}):")
-            for name in conn_names:
-                print(f"  {name}")
-            print()
 
 
 # ---------------------------------------------------------------------------
@@ -1163,8 +1051,7 @@ def _link_profile_link(
             file=sys.stderr,
         )
         sys.exit(1)
-    bundle = _get_bundle_path()
-    if bundle and (bundle / "profiles" / derived_name).is_dir():
+    if _bundle_profile_dir(derived_name):
         print(
             f"ERROR: Name '{derived_name}' collides with a bundle profile. Pass --name <alias> to disambiguate.",
             file=sys.stderr,
@@ -2045,7 +1932,9 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     if getattr(args, "force", False):
         _kept_state = _load_state()
         _clean_state_dir()
-        _identity = {k: _kept_state[k] for k in ("bundle", "linked_profiles", "herdr") if _kept_state.get(k)}
+        _identity = {
+            k: _kept_state[k] for k in ("bundle", "user_bundle", "linked_profiles", "herdr") if _kept_state.get(k)
+        }
         if _identity:
             _save_state(_identity)
     bundle_path = getattr(args, "bundle", None)
@@ -2064,8 +1953,9 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
                 print("HINT: Point --bundle at the repo root, not .agentihooks/")
             print(f"ERROR: No profiles/ directory found in {bundle_dir}", file=sys.stderr)
             sys.exit(1)
-        _bundle_link(bundle_dir)
+        bundles.link(bundle_dir)
         print()
+    bundles.link_user_arg(getattr(args, "user_bundle", None))
 
     # B1: process --link-profile NAME=PATH (repeatable) BEFORE profile resolution
     # so the new profile names are visible to the chain validation downstream.
@@ -2092,6 +1982,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
 
     # Check bundle (optional — works without one using built-in profiles only)
     bundle = _get_bundle_path()
+    bundles.warn_unavailable()
     if not bundle:
         print(f"{_DIM}[--] No bundle linked — using built-in profiles only.{_RESET}")
         # B2: auto-discover hint — don't auto-link, just suggest the command.
@@ -2683,9 +2574,8 @@ def _available_profiles() -> list[str]:
     names = {d.name for d in PROFILES_DIR.iterdir() if d.is_dir() and not d.name.startswith("_")}
     if PACKAGE_ROLES.is_dir():
         names.update(d.name for d in PACKAGE_ROLES.iterdir() if d.is_dir() and not d.name.startswith("_"))
-    bundle = _get_bundle_path()
-    if bundle:
-        bp = bundle / "profiles"
+    for _kind, root in _bundle_roots():
+        bp = root / "profiles"
         if bp.is_dir():
             names.update(d.name for d in bp.iterdir() if d.is_dir() and not d.name.startswith("_"))
     for entry in _get_linked_profiles():
@@ -6236,7 +6126,7 @@ def _crew_doctor(argv: list[str]) -> bool:
 
 
 def main() -> None:
-    _argv = sys.argv[1:]
+    _argv = bundles.user_last(sys.argv[1:])
     if _argv[:1] == ["enforcement"] and "--local" in _argv[2:]:
         _argv.remove("--local")
         _argv.insert(1, "--local")
@@ -6358,6 +6248,9 @@ def main() -> None:
     init_p.add_argument(
         "--bundle", default=None, help="Path to bundle directory (first-time setup: link bundle + global install)"
     )
+    init_p.add_argument(
+        "--user-bundle", default=None, help="Path to the personal user bundle applied beside the root bundle"
+    )
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
     init_p.add_argument(
         "--target",
@@ -6406,14 +6299,7 @@ def main() -> None:
         help="Skip bundle auto-discovery hint when state has no bundle linked.",
     )
 
-    bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (new, link, unlink, list, pull)")
-    bundle_p.add_argument(
-        "action",
-        choices=["new", "link", "unlink", "list", "pull"],
-        help="new <path> | link <path> | unlink | list | pull",
-    )
-    bundle_p.add_argument("bundle_path", nargs="?", default=None, help="Bundle directory path (for link)")
-    bundle_p.add_argument("--rebase", action="store_true", help="Use --rebase when pulling")
+    bundles.add_parser(sub)
 
     lp_p = sub.add_parser(
         "link-profile",
@@ -6746,7 +6632,7 @@ notes:
     elif args.command == "uninstall":
         uninstall_global(args)
     elif args.command == "bundle":
-        cmd_bundle(args.action, path=args.bundle_path, rebase=args.rebase)
+        bundles.cmd_bundle(args.action, path=args.bundle_path, rebase=args.rebase, user=args.user)
     elif args.command == "link-profile":
         if args.action == "link":
             cmd_link_profile(

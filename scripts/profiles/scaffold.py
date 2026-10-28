@@ -8,6 +8,7 @@ import yaml
 
 from hooks.context import profile_chain
 from scripts import install
+from scripts.profiles import bundles
 from scripts.profiles.render import KEY_SEPARATOR
 
 BUNDLE_FOLDERS = ("skills", "agents", "commands", "rules", "conditions")
@@ -55,7 +56,7 @@ def bundle_new(target: Path) -> int:
         _keep(target / ".claude" / folder)
     _keep(target / "profiles")
     (target / "README.md").write_text(BUNDLE_README)
-    install._bundle_link(target)
+    bundles.link(target)
     return 0
 
 

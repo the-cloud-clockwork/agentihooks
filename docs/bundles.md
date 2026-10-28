@@ -79,7 +79,15 @@ my-tools/                                   <- the bundle directory
 3. Profiles inside `profiles/` are **auto-discovered** by `--list-profiles`
 4. `agentihooks init --profile <name>` checks built-in profiles first, then bundle
 
-Only **one bundle** can be linked at a time.
+Only **one root bundle** can be linked at a time. A second, personal **user bundle** is linked beside it:
+
+```bash
+agentihooks bundle link --user ~/dev/my-user-bundle      # or: agentihooks init --user-bundle <path>
+agentihooks bundle list --user
+agentihooks bundle unlink --user                         # the root link and every bundle file stay
+```
+
+The root bundle holds shared configuration; the user bundle holds personal configuration. Sources apply in the order package, root bundle, user bundle, profile chain, so a user-bundle file wins over a root-bundle file of the same name. A configured user bundle whose directory is missing is reported on `init` and not applied. `AGENTIHOOKS_USER_BUNDLE_PATH` names a user bundle when none is linked.
 
 ## 3-Layer Merge
 
@@ -164,9 +172,11 @@ When you run `agentihooks init --profile X`:
 
 1. Check `profiles/X` in the agentihooks repo (built-in)
 2. Check `profiles/X` in the linked bundle
-3. Error if not found
+3. Check `profiles/X` in the linked user bundle
+4. Check profiles registered with `link-profile`, then the packaged base roles
+5. Error if not found
 
-Built-in profiles always take precedence. Name your bundle profiles to avoid conflicts.
+Built-in profiles always take precedence. Name your bundle profiles to avoid conflicts; a name defined in both the root and the user bundle resolves to the root's and `init` warns.
 
 ## Permission Tiers
 

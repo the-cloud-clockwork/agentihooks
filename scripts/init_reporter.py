@@ -95,6 +95,8 @@ def report_target(
         overlays = installed.get("settings_profile") or "none"
         print("AgentiHooks installed")
         print(f"Bundle {installed.get('bundle') or 'none'}")
+        if installed.get("user_bundle"):
+            print(f"User bundle {installed['user_bundle']}")
         print(f"Profile {profile} | Chain {chain} | Overlays {overlays}")
     print(
         f"{adapter.name.capitalize()} {adapter.home()} | "
@@ -136,6 +138,7 @@ def run_init(args: Namespace, installer: ModuleType) -> None:
         if index:
             target_args.force = False
             target_args.bundle = None
+            target_args.user_bundle = None
             target_args.link_profile = []
 
         def record() -> dict:
@@ -145,6 +148,7 @@ def run_init(args: Namespace, installer: ModuleType) -> None:
                     name for name, _ in installer._resolve_profile_chain(installed["profile"])
                 ]
             installed["bundle"] = installer._get_bundle_path()
+            installed["user_bundle"] = installer._get_user_bundle_path()
             return installed
 
         report_target(

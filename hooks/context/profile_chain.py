@@ -44,6 +44,36 @@ def bundle_path(state: dict) -> Path | None:
     return None
 
 
+def user_bundle_path(state: dict) -> Path | None:
+    bp = (state.get("user_bundle") or {}).get("path")
+    if bp:
+        path = Path(bp).expanduser()
+        if path.is_dir():
+            return path
+    return None
+
+
+def bundle_roots(state: dict) -> list[tuple[str, Path]]:
+    found = [("root", bundle_path(state)), ("user", user_bundle_path(state))]
+    return [(kind, path) for kind, path in found if path is not None]
+
+
+def missing_bundle_roots(state: dict) -> list[tuple[str, Path]]:
+    found = []
+    for kind, key in (("root", "bundle"), ("user", "user_bundle")):
+        raw = (state.get(key) or {}).get("path")
+        if raw and not Path(raw).expanduser().is_dir():
+            found.append((kind, Path(raw).expanduser()))
+    return found
+
+
+def profile_collisions(bundle: Path | None, user: Path | None) -> list[str]:
+    if bundle is None or user is None:
+        return []
+    names = (path.name for path in (user / BUNDLE_PROFILES).glob("*") if path.is_dir())
+    return sorted(name for name in names if (bundle / BUNDLE_PROFILES / name).is_dir())
+
+
 def active_profile(state: dict) -> str | None:
     from hooks.targets import global_record
 
@@ -185,7 +215,7 @@ def expand_profiles(names: list[str], resolve: Callable[[str], Path | None]) -> 
 
 
 def profile_candidates(
-    bundle: Path | None, profile_csv: str | None, linked: dict[str, Path]
+    bundle: Path | None, profile_csv: str | None, linked: dict[str, Path], user: Path | None = None
 ) -> list[tuple[str, list[Path]]]:
     """Each chained profile name with its candidate dirs, highest priority first."""
 
@@ -195,6 +225,8 @@ def profile_candidates(
         paths = [BUILT_IN_PROFILES / name]
         if bundle is not None:
             paths.append(bundle / BUNDLE_PROFILES / name)
+        if user is not None:
+            paths.append(user / BUNDLE_PROFILES / name)
         if name in linked:
             paths.append(linked[name])
         paths.append(PACKAGE_ROLES / name)
@@ -209,18 +241,22 @@ def profile_candidates(
     return [(name, candidates(name)) for name in expanded + [name for name in names if name not in found]]
 
 
-def profile_dirs(bundle: Path | None, profile_csv: str | None, linked: dict[str, Path]) -> list[tuple[str, Path]]:
+def profile_dirs(
+    bundle: Path | None, profile_csv: str | None, linked: dict[str, Path], user: Path | None = None
+) -> list[tuple[str, Path]]:
     """The chain's resolved profile dirs: the first existing candidate per name."""
     out = []
-    for name, candidates in profile_candidates(bundle, profile_csv, linked):
+    for name, candidates in profile_candidates(bundle, profile_csv, linked, user):
         found = next((path for path in candidates if path.is_dir()), None)
         if found is not None:
             out.append((name, found))
     return out
 
 
-def rendered_dirs(bundle: Path | None, profile_csv: str, linked: dict[str, Path]) -> list[tuple[str, Path]]:
+def rendered_dirs(
+    bundle: Path | None, profile_csv: str, linked: dict[str, Path], user: Path | None = None
+) -> list[tuple[str, Path]]:
     """The chain a profile home renders: the profile's dirs plus every overlay the chain declares."""
-    dirs = profile_dirs(bundle, profile_csv, linked)
+    dirs = profile_dirs(bundle, profile_csv, linked, user)
     declared = [overlay for _, path in dirs for overlay in overlays(path)]
-    return profile_dirs(bundle, ",".join([profile_csv, *declared]), linked) if declared else dirs
+    return profile_dirs(bundle, ",".join([profile_csv, *declared]), linked, user) if declared else dirs

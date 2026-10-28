@@ -101,6 +101,7 @@ def check_profile() -> dict[str, Any]:
 
     bundle = state.get("bundle", {}).get("path", "")
     bundle_ok = bool(bundle and Path(bundle).expanduser().exists())
+    user_bundle = state.get("user_bundle", {}).get("path", "")
     raw_links = state.get("linked_profiles", []) or []
     # A linked profile counts as in-chain if ANY target carries it; naming the
     # targets is what makes a claude/codex chain divergence visible here.
@@ -127,6 +128,8 @@ def check_profile() -> dict[str, Any]:
         "targets": targets,
         "bundle": bundle or "(none)",
         "bundle_ok": bundle_ok,
+        "user_bundle": user_bundle or "(none)",
+        "user_bundle_ok": bool(user_bundle and Path(user_bundle).expanduser().exists()),
         "linked_profiles": linked,
         "ok": bool(name),
     }
@@ -611,6 +614,13 @@ def _fmt_bytes(n: int) -> str:
     return str(n)
 
 
+def _user_bundle_lines(profile: dict[str, Any]) -> list[str]:
+    if profile.get("user_bundle", "(none)") == "(none)":
+        return []
+    tag = "[OK]" if profile["user_bundle_ok"] else "[!!]"
+    return [_cprint(f"     {tag} user bundle: {profile['user_bundle']}")]
+
+
 def format_cli(results: dict[str, Any]) -> str:
     lines = []
 
@@ -620,6 +630,7 @@ def format_cli(results: dict[str, Any]) -> str:
     bundle_str = f" (bundle: {p['bundle']})" if p["bundle"] != "(none)" else ""
     sp_str = f" | settings: {p['settings_profile']}" if p.get("settings_profile") else ""
     lines.append(_cprint(f"{tag} Profile: {p['name']}{sp_str}{bundle_str}"))
+    lines.extend(_user_bundle_lines(p))
     # One line per install target, so a claude/codex chain divergence is
     # visible instead of hidden behind the headline record.
     for t in p.get("targets", []) or []:
