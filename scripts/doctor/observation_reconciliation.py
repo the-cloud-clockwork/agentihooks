@@ -41,30 +41,34 @@ def _accepted(session_id, harness, cancelled):
 
 
 def _remote_pass(get, trace_id, cancelled):
-    ids = set()
+    ids, rows, total = set(), 0, 0
     for page in range(1, MAX_PAGES + 1):
         if cancelled():
             raise TimeoutError("observation identity read cancelled")
         body = get("observations", {"traceId": trace_id, "limit": PAGE, "page": page})
         previous_count = len(ids)
         ids.update(row["id"] for row in body["data"])
+        rows += len(body["data"])
         total = body["meta"]["totalItems"]
         if len(ids) != previous_count + len(body["data"]):
-            return None
+            return None, rows, len(ids), total
         if len(body["data"]) < PAGE and page * PAGE < total:
             following = get("observations", {"traceId": trace_id, "limit": PAGE, "page": page + 1})["data"]
-            return None if following else ids
+            return (None if following else ids), rows, len(ids), total
         if len(body["data"]) < PAGE or page * PAGE >= total:
-            return ids
+            return ids, rows, len(ids), total
     raise ValueError("observation identity page budget exhausted")
 
 
 def _remote_ids(get, trace_id, cancelled):
     for _ in range(ATTEMPTS):
-        ids = _remote_pass(get, trace_id, cancelled)
+        ids, rows, distinct, total = _remote_pass(get, trace_id, cancelled)
         if ids is not None:
             return ids
-    raise ValueError("observation identity listing is incomplete")
+    raise ValueError(
+        f"observation identity listing of trace {trace_id} is incomplete: "
+        f"{rows} rows with {distinct} distinct ids against {total} reported"
+    )
 
 
 def reconcile(
