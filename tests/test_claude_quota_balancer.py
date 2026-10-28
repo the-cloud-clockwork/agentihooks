@@ -237,6 +237,68 @@ def test_cache_refreshes_after_quota_reset(monkeypatch, tmp_path):
     assert calls == [["ALPHA"], ["ALPHA"]]
 
 
+def test_a_revoked_account_is_cached_and_shown_as_revoked(monkeypatch, tmp_path):
+    calls = []
+
+    def probe(credentials, *args, **kwargs):
+        calls.append([credential.account for credential in credentials])
+        return [balancer.revoked_result(credential.account, 100) for credential in credentials]
+
+    monkeypatch.setattr(balancer, "probe_credentials", probe)
+    cache = tmp_path / "cache.json"
+    credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")
+
+    first, _ = balancer.collect_results([credential], cache_file=cache, environ={}, now=1000)
+    second, source = balancer.collect_results([credential], cache_file=cache, environ={}, now=1030)
+
+    assert (source, calls) == ("cached", [["ALPHA"]])
+    assert [(r.provider_status, r.state, r.margin) for r in second] == [("revoked", "REVOKED", 0.0)]
+    assert balancer.account_cap(second[0], 1030) == 0
+    assert balancer._state("revoked", balancer.QuotaWindow(), balancer.QuotaWindow()) == ("REVOKED", 0.0)
+    assert [result.state for result in balancer.rank_results([*first, *second])] == ["REVOKED", "REVOKED"]
+
+
+def _revoked_stream(status: int) -> str:
+    events = [
+        {"type": "system", "subtype": "api_retry", "error": "authentication_failed", "error_status": status},
+        {"type": "result", "is_error": True, "api_error_status": status, "result": "Failed to authenticate"},
+    ]
+    return "\n".join(json.dumps(event) for event in events)
+
+
+@pytest.mark.parametrize("status", [401, 403])
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_the_cli_probe_reads_a_revoked_token_as_revoked(monkeypatch, status, returncode):
+    monkeypatch.setattr(
+        balancer.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, returncode, _revoked_stream(status), ""),
+    )
+    credential = balancer.Credential("AH_CC_TOKEN_A", "tok-a")
+    found = balancer.probe_credential(credential, "fable", 60, {}, include_fable=True)
+    assert (found.account, found.provider_status, found.state, found.error) == (
+        "A",
+        "revoked",
+        "REVOKED",
+        balancer.REVOKED_ERROR,
+    )
+    assert found.latency_ms is not None
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "",
+        "not json\n[1, 2]",
+        json.dumps({"type": "result", "api_error_status": 500}),
+        json.dumps({"type": "system", "error_status": 401}),
+    ],
+)
+def test_only_a_401_or_403_api_error_reads_as_rejected(output):
+    assert not balancer.auth_rejected(output)
+    assert balancer.auth_rejected(output + "\n" + json.dumps({"api_error_status": 403}))
+
+
 def test_corrupt_cache_is_replaced(monkeypatch, tmp_path):
     cache = tmp_path / "cache.json"
     cache.write_text("{broken")

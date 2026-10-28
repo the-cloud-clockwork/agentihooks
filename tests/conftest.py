@@ -526,6 +526,14 @@ def _swarm_tick_reaps_no_real_process(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _native_login_probe_runs_no_model(monkeypatch):
+    """The provider probe of a native login starts a real model turn; tests read it as accepted."""
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(native_login, "rejected", lambda environ, account, run=None: False, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _workstation_headroom_is_roomy(monkeypatch):
     """Workstation admission reads a roomy fixed machine instead of the test runner's own load."""
     from scripts.hive import headroom

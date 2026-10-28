@@ -200,10 +200,25 @@ def test_a_429_with_rate_limit_headers_reads_like_a_200():
     assert (found.state, found.five_hour.used, found.error) == ("BLOCKED", 100.0, "")
 
 
-@pytest.mark.parametrize("status, headers", [(401, Message()), (403, Message()), (429, Message()), (500, _headers())])
+@pytest.mark.parametrize("status, headers", [(429, Message()), (500, _headers()), (402, Message())])
 def test_any_other_answer_is_an_error_naming_the_status(status, headers, clock):
     found = claude_usage.probe("a", "tok", "haiku", _opener(status, headers))
     assert (found.account, found.state, found.error, found.latency_ms) == ("a", "ERROR", f"HTTP {status}", 2500)
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_revoked_or_rejected_token_closes_the_account(status, clock):
+    found = claude_usage.probe("a", "tok", "haiku", _opener(status, Message()))
+    assert (found.account, found.provider_status, found.state, found.margin, found.latency_ms) == (
+        "a",
+        "revoked",
+        "REVOKED",
+        0.0,
+        2500,
+    )
+    assert found.error == balancer.REVOKED_ERROR
+    assert balancer.account_cap(found, 0) == 0
+    assert not balancer.is_routable(found, 0)
 
 
 @pytest.mark.parametrize("error", [TimeoutError("slow"), urllib.error.URLError(TimeoutError("slow"))])
