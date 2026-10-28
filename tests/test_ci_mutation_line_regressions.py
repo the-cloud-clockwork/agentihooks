@@ -38,7 +38,10 @@ def test_teardown_and_later_safe_mutants_keep_their_own_covering_tests(tmp_path)
     first, second = "tests/a.py::first", "tests/a.py::second"
     coverage, root = _measured(tmp_path, source, {first + "|unexpected": [2], second + "|teardown": [3]})
     tests = {"scripts.writer.x_write": [first, second]}
-    assert covered_mutant_tests(coverage, root, tests) == {"scripts.writer.x_write__mutmut_2": [second]}
+    assert covered_mutant_tests(coverage, root, tests) == {
+        "scripts.writer.x_write__mutmut_2": [second],
+        "scripts.writer.x_other__mutmut_1": [],
+    }
 
 
 def test_nonstatement_changed_lines_without_context_keep_the_function_fallback(tmp_path):
