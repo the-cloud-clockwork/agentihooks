@@ -260,3 +260,36 @@ def test_the_tick_holds_a_task_red_only_from_a_shared_check_and_releases_it_once
     passed = [[run("Tests", "SUCCESS", at)]] * 3
     monkeypatch.setattr(fleet_red, "read", lambda repo: fleet([run("Tests", "FAILURE", at)], *passed))
     assert sorted(t["id"] for t in _claimable("sw", store, rows, doc, "eng")) == ["plain", "red"]
+
+
+def test_an_unlisted_pull_request_owns_no_failing_checks():
+    assert fleet_red.own(fleet([run("Tests", "FAILURE")]), "https://github.com/o/r/pull/99") == set()
+
+
+def test_the_notice_pass_declares_a_hold_listed_after_a_task_that_is_not_held(store):
+    both = [run("Tests", "FAILURE")]
+    red = fleet(both, *[both] * 3)
+    rows = {t["id"]: t for t in [task("green", pr_url="https://github.com/o/r/pull/99"), task("red", pr_url=MINE)]}
+    actions = fleet_red.notice_pass("sw", store.config("sw"), store, Ledger(), rows, NOW_MS, lambda repo: red)
+    assert actions == [f"task red held unclaimed, {MINE} is red only from Tests"]
+
+
+def test_the_claim_view_lists_open_pull_requests_in_the_swarm_repo(store, monkeypatch):
+    reads = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or [])
+    rows = {"red": task("red", pr_url=MINE, awaiting="fix")}
+    _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng")
+    assert reads == [store.config("sw").repo]
+
+
+def test_the_tick_hands_the_notice_pass_its_store_ledger_rows_and_clock(store, monkeypatch):
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    seen = []
+    monkeypatch.setattr(fleet_red, "notice_pass", lambda *args: seen.append(args) or ["noticed"])
+    ledger = FakeLedger([{"id": "a"}])
+    actions = tick.tick("sw", store, ledger, FakeRuntime(), now_ms=4_321)
+    [(slug, config, got_store, got_ledger, rows, now_ms)] = seen
+    assert (slug, config.slug, got_store, got_ledger, list(rows), now_ms) == ("sw", "sw", store, ledger, ["a"], 4_321)
+    assert "noticed" in actions
