@@ -44,17 +44,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Mint the Actions read token
+      # The swarm App's hourly limit belongs to hives, launch checks and merge queueing.
+      - name: Mint the TCC Main CI Actions read token
         id: app-token
         uses: actions/create-github-app-token@v3.2.0
         with:
-          app-id: ${{ secrets.AGENTICORE_APP_ID }}
-          private-key: ${{ secrets.AGENTICORE_APP_PRIVATE_KEY }}
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
           permission-metadata: read
           permission-pull-requests: read
+      - name: Restore the jobs of completed runs read before
+        uses: actions/cache/restore@v4
+        with:
+          path: ci-minutes-jobs.json
+          key: ci-minutes-jobs-${{ github.run_id }}
+          restore-keys: ci-minutes-jobs-
       - name: Count the merge path and head push causes
         if: inputs.merge_path == 'true'
         env:
@@ -68,7 +75,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           UNTIL: ${{ inputs.until }}
           HOURS: ${{ inputs.hours || '24' }}
-        run: python -m scripts.ci_minutes --repo "$GITHUB_REPOSITORY" --hours "$HOURS" ${UNTIL:+--until "$UNTIL"}
+        run: python -m scripts.ci_minutes --repo "$GITHUB_REPOSITORY" --hours "$HOURS" ${UNTIL:+--until "$UNTIL"} --cache ci-minutes-jobs.json
       - name: Measure mutation stats per merged pull request
         if: inputs.stats_prs != '0' && inputs.stats_prs != ''
         env:
@@ -77,6 +84,12 @@ jobs:
           SINCE: ${{ inputs.since }}
           COUNT: ${{ inputs.stats_prs }}
         run: python -m scripts.ci_stats_minutes --repo "$GITHUB_REPOSITORY" --count "$COUNT" --until "$UNTIL" --since "$SINCE" --out ci-minutes.json
+      - name: Keep the jobs of completed runs for the next dispatch
+        if: ${{ always() }}
+        uses: actions/cache/save@v4
+        with:
+          path: ci-minutes-jobs.json
+          key: ci-minutes-jobs-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Keep the measurement
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
