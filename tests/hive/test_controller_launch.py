@@ -1577,7 +1577,7 @@ def test_non_claude_and_full_accounts_cannot_place_a_worker(setup, row, seats):
     [
         ("yes", False, "remote"),
         ("yes", True, "no live hive takes frontend"),
-        ("no", False, "no live UI hive takes frontend"),
+        ("no", False, "no live swarm-master takes frontend"),
     ],
 )
 def test_ui_profiles_take_only_a_live_ui_hive_that_does_not_exclude_them(setup, ui, stale, expected):
