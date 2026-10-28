@@ -287,3 +287,30 @@ def test_a_swarm_pass_ships_admission_and_headroom_rows(store, quiet_pass):
     assert inserted["swarm.admission_samples"]["outcome"] == "admitted"
     assert inserted["swarm.hive_headroom"]["hive"] == "h1"
     assert inserted["swarm.hive_headroom"]["measured_at_ms"] == NOW
+
+
+def test_unavailable_readings_do_not_skip_later_hives_or_resources(store):
+    from scripts.hive import headroom
+
+    registry.update(store.redis, "h0", ["name=absent"])
+    registry.update(store.redis, "h1", ["name=measured"])
+    store.redis.set(
+        headroom.key("h1"),
+        json.dumps(
+            {
+                "cpus": 4,
+                "load5": 1,
+                "available_mb": 4,
+                "total_mb": 8,
+                "pod_total_mb": 2,
+                "pod_available_mb": 1,
+                "measured_at": NOW,
+            }
+        ),
+    )
+    rows = metrics_service.headroom_rows(store, "sw", NOW)
+    assert [(r["hive"], r["scope"], r["resource"], r["available"], r["total"]) for r in rows] == [
+        ("h1", "host", "cpu", 3.0, 4.0),
+        ("h1", "host", "memory", 4.0, 8.0),
+        ("h1", "pod", "memory", 1.0, 2.0),
+    ]
