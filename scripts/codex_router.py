@@ -159,7 +159,7 @@ def refusal(account: CodexAccount, environ: Mapping[str, str]) -> str:
 
 def _min_life(environ: Mapping[str, str]) -> float:
     try:
-        return float(environ.get(TOKEN_MIN_LIFE_ENV) or TOKEN_MIN_LIFE_H) * HOUR_S
+        return max(0.0, float(environ.get(TOKEN_MIN_LIFE_ENV) or TOKEN_MIN_LIFE_H)) * HOUR_S
     except ValueError:
         return TOKEN_MIN_LIFE_H * HOUR_S
 

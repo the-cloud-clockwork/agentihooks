@@ -1021,6 +1021,7 @@ EXPIRING_MESSAGE = (
         (NOW + 3600 - 1, "1", "1"),
         (NOW + 1800 - 1, "0.5", "0.5"),
         (float(NOW + 60), "", "6"),
+        (NOW - 1, "-1", "0"),
     ],
 )
 def test_a_token_that_expires_inside_the_minimum_life_is_refused_by_name(monkeypatch, exp, life, hours):
@@ -1032,7 +1033,7 @@ def test_a_token_that_expires_inside_the_minimum_life_is_refused_by_name(monkeyp
 
 @pytest.mark.parametrize(
     ("exp", "life"),
-    [(NOW + 6 * 3600, ""), (NOW + 6 * 3600, "bad"), (NOW + 3600, "1"), (NOW + 1800, "0.5")],
+    [(NOW + 6 * 3600, ""), (NOW + 6 * 3600, "bad"), (NOW + 3600, "1"), (NOW + 1800, "0.5"), (NOW, "-1")],
 )
 def test_a_token_with_the_minimum_life_left_is_placed(monkeypatch, exp, life):
     monkeypatch.setattr(router.time, "time", lambda: NOW)
