@@ -808,6 +808,14 @@ def test_the_shared_client_connects_once_per_process_and_retries_after_a_refusal
     assert len(calls) == 2
 
 
+def test_an_unknown_state_backend_is_refused_rather_than_kept_local(monkeypatch):
+    monkeypatch.setattr(operator_words, "_SHARED", [])
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "disk")
+    with pytest.raises(ValueError, match="unknown state backend 'disk'; known: bus, redis"):
+        operator_words._shared()
+    assert operator_words._SHARED == []
+
+
 @pytest.mark.parametrize("copies", [1, 2])
 def test_legacy_sorted_rows_merge_with_state_rows_and_forget_drops_both(shared, tmp_path, monkeypatch, copies):
     from scripts.swarm.store import PREFIX
@@ -821,7 +829,7 @@ def test_legacy_sorted_rows_merge_with_state_rows_and_forget_drops_both(shared, 
     _hosted(tmp_path, monkeypatch)
     assert operator_words.recorded("master@*") == ["master@a1-1", "master@c3-1"]
     assert [row["words"] for row in operator_words._shared_rows("master@a1-1")] == [
-        *["New state words"] * copies,
+        "New state words",
         "Other sorted words",
         "Old sorted words",
     ]

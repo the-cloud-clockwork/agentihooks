@@ -86,10 +86,7 @@ def _shared():
     from scripts.events import state
 
     if not _SHARED:
-        try:
-            errors = state.unavailable()
-        except ValueError:
-            return None
+        errors = state.unavailable()
         try:
             _SHARED.append(state.open_state(BUCKET))
         except errors:
