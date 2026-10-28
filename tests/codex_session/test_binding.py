@@ -122,6 +122,31 @@ def test_a_change_on_one_attempt_is_retried_and_reserves(bindings, monkeypatch):
     assert bindings.redis.hget(bindings.store.key(SLUG, ENDPOINTS), reserved.endpoint_ref) == "exe-one"
 
 
+@pytest.mark.parametrize(
+    ("concurrent", "refusal"),
+    [
+        (record(endpoint="unix:///run/cx/two/s"), "duplicate launch"),
+        (record(execution="exe-two"), "endpoint already belongs to another execution"),
+    ],
+)
+def test_a_rerun_refuses_what_the_concurrent_launch_reserved(bindings, monkeypatch, concurrent, refusal):
+    pipeline = type(bindings.redis.pipeline())
+    checked = pipeline.hexists
+    launched = []
+
+    def raced(self, name, key):
+        if not launched:
+            launched.append(None)
+            launched[0] = bindings.reserve(SLUG, concurrent)
+        return checked(self, name, key)
+
+    monkeypatch.setattr(pipeline, "hexists", raced)
+    with pytest.raises(BindingError, match=EXACT[refusal]):
+        bindings.reserve(SLUG, record())
+    assert bindings.get(SLUG, concurrent.execution_id) == launched[0]
+    assert bindings.redis.hget(bindings.store.key(SLUG, ENDPOINTS), concurrent.endpoint_ref) == concurrent.execution_id
+
+
 def test_updates_keep_the_record_identity(bindings):
     bindings.reserve(SLUG, record())
     bindings.put(SLUG, record(state=CONNECTED, thread_id="thread-1"))
