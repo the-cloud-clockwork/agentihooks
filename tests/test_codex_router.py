@@ -1013,24 +1013,32 @@ EXPIRING_MESSAGE = (
 
 
 @pytest.mark.parametrize(
-    ("exp", "life", "refused"),
+    ("exp", "life", "hours"),
     [
         (NOW - 1, "", "6"),
         (NOW + 6 * 3600 - 1, "", "6"),
-        (NOW + 6 * 3600, "", ""),
         (NOW + 6 * 3600 - 1, "bad", "6"),
         (NOW + 3600 - 1, "1", "1"),
-        (NOW + 3600, "1", ""),
         (NOW + 1800 - 1, "0.5", "0.5"),
         (float(NOW + 60), "", "6"),
     ],
 )
-def test_a_token_that_expires_inside_the_minimum_life_is_refused_by_name(monkeypatch, exp, life, refused):
+def test_a_token_that_expires_inside_the_minimum_life_is_refused_by_name(monkeypatch, exp, life, hours):
     monkeypatch.setattr(router.time, "time", lambda: NOW)
     environ = {"AH_CX_TOKEN_alpha": _expiring_jwt(exp), "AGENTIHOOKS_CODEX_TOKEN_MIN_LIFE_H": life}
-    expected = EXPIRING_MESSAGE.format(name="alpha", hours=refused) if refused else ""
-    assert router.refusal(_token("alpha"), environ) == expected
-    assert router.expiring(_token("alpha"), environ, NOW) is bool(refused)
+    assert router.refusal(_token("alpha"), environ) == EXPIRING_MESSAGE.format(name="alpha", hours=hours)
+    assert router.expiring(_token("alpha"), environ, NOW) is True
+
+
+@pytest.mark.parametrize(
+    ("exp", "life"),
+    [(NOW + 6 * 3600, ""), (NOW + 6 * 3600, "bad"), (NOW + 3600, "1"), (NOW + 1800, "0.5")],
+)
+def test_a_token_with_the_minimum_life_left_is_placed(monkeypatch, exp, life):
+    monkeypatch.setattr(router.time, "time", lambda: NOW)
+    environ = {"AH_CX_TOKEN_alpha": _expiring_jwt(exp), "AGENTIHOOKS_CODEX_TOKEN_MIN_LIFE_H": life}
+    assert router.refusal(_token("alpha"), environ) == ""
+    assert router.expiring(_token("alpha"), environ, NOW) is False
 
 
 def test_a_token_without_an_expiry_claim_and_the_default_login_never_expire(monkeypatch):
