@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
+from scripts.doctor.slot_census import CLAIM
 from scripts.handoff import transfers
 from scripts.swarm.store import MASTER, SwarmError
 
@@ -24,23 +25,26 @@ def records(
     *,
     until: str | None = None,
 ) -> dict:
-    journal = run(
-        [
-            "journalctl",
-            "--user",
-            *TICK_JOURNAL,
-            "--since",
-            since,
-            *(["--until", until] if until is not None else []),
-            "-o",
-            "cat",
-            "--no-pager",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
-    )
+    try:
+        journal = run(
+            [
+                "journalctl",
+                "--user",
+                *TICK_JOURNAL,
+                "--since",
+                since,
+                *(["--until", until] if until is not None else []),
+                "-o",
+                "cat",
+                "--no-pager",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SwarmError(f"tick journal unavailable: {type(exc).__name__}: {exc}") from exc
     return {
         "slug": slug,
         "now": now_ms,
@@ -89,6 +93,26 @@ def doctor_passes(doctor: str, since: str, until: str, run: Callable = subproces
     if entries is None:
         raise SwarmError(f"Doctor passes unavailable: {error}")
     return tuple(e["at"] for e in entries)
+
+
+def slot_claims(
+    store: RedisStore,
+    slug: str,
+    since: str = "1 hour ago",
+    run: Callable = subprocess.run,
+    *,
+    until: str | None = None,
+) -> dict:
+    entries, error = _grep(CLAIM, since, until, run)
+    lives = [
+        {**row, "slug": swarm}
+        for swarm in store.slugs()
+        for row in (
+            *({**asdict(a), "ended_at": 0} for a in store.agents(swarm)),
+            *(json.loads(row) for row in store.redis.lrange(store.key(swarm, "history"), 0, -1)),
+        )
+    ]
+    return {"slug": slug, "claims": entries, "journal_error": error, "lives": lives}
 
 
 def _grep(pattern, since, until, run):

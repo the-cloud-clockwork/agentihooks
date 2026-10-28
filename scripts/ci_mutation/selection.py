@@ -90,24 +90,26 @@ def is_dataclass(decorator) -> bool:
     return isinstance(name, cst.Name) and name.value == "dataclass"
 
 
-def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int, int]:
+def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int, list[str]]:
     from libcst import FunctionDef
     from libcst.metadata import MetadataWrapper, PositionProvider
 
     module, graded, possible = created_mutations(filename, source)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(PositionProvider)
-    found = sum(
-        1
+    found = [
+        mutation.contained_by_top_level_function
         for mutation in on_changed_lines(module, graded, changed)
         if isinstance(mutation.contained_by_top_level_function, FunctionDef)
-    )
-    body = sum(
-        positions[mutation.original_node].start.line
-        >= positions[mutation.contained_by_top_level_function.body.body[0]].start.line
+    ]
+    in_body = {
+        mutation.contained_by_top_level_function
         for mutation in on_changed_lines(module, possible, changed)
         if isinstance(mutation.contained_by_top_level_function, FunctionDef)
-    )
-    return found, body
+        and positions[mutation.original_node].start.line
+        >= positions[mutation.contained_by_top_level_function.body.body[0]].start.line
+    }
+    ungraded = sorted(in_body.difference(found), key=lambda function: positions[function].start.line)
+    return len(found), [function.name.value for function in ungraded]
 
 
 def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:

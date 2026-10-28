@@ -452,7 +452,8 @@ A refusal that keeps repeating with no `ended orphan execution` line has one of 
 above still holds (an agent record with that name, a pane or hook report under it, or a remote hive report that
 still lists it or no report at all), or the launch is refused for another reason its error names:
 `master launch refused: unfinished lead`, `current execution publication is in flight`,
-`the controller lease is stale`, `execution history kept changing` or
+`the controller lease is stale`, `execution history kept changing` (see
+[Parallel launches in one process](../swarm-v2/execution-identity.md#parallel-launches-in-one-process)) or
 `canonical agent already belongs to another execution seat`. Read the seat history before acting; never end an
 execution by writing to Redis by hand.
 
@@ -3238,6 +3239,20 @@ as a failed spawn. The `headroom` detector reads every registered hive at the pa
 expiry. Its evidence names the hive, its last heartbeat and its version; its number is 1. The workstation measures its
 own room at each launch, so the interface hive is left out.
 
+### Doctor hive pool detector
+
+A release roll under the Recreate strategy drains every pod of a hive deployment at once, so launches meant for that
+kind of hive spill onto whatever hive is left, which then refuses them for room. The `hive pool` detector groups the
+worker hives into pools by their measured shape, CPUs and memory limit, as `<cpus>cpu-<mb>mb`, and remembers each
+hive's pool by its id so a hive that stops publishing headroom stays in it. A hive is ready when it is live, not
+draining and has a fresh headroom reading. Each Doctor pass keeps, in the watched swarm's `doctor-hive-pools` key,
+the first pass that found each pool with no ready hive and every task whose launch the tick refused for room in any
+swarm since then (a placement wait whose reason says `has room`), counted once per task however many ticks refuse it
+again. A pool down for ten minutes raises `hive-pool-down/<pool>`; its summary
+names the minutes down and the tasks refused a launch meanwhile, its evidence names the pool, the down start and its hives,
+and its number is the minutes down. A ready hive in the pool clears it, and a pool whose hives lost their records is
+forgotten.
+
 ### Doctor handoff detectors
 
 The Doctor's handoff detectors (`scripts.doctor.handoffs`) run with the other detectors on every Doctor detection
@@ -3294,6 +3309,66 @@ The red [Tests run 39373109267](https://github.com/the-cloud-clockwork/agentihoo
 test only head failed on the empty subject; the green
 [Tests run 39373777928](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373777928) passed with
 the fix.
+
+### Doctor failed spawn detector
+
+The Doctor's `failed spawn` detector (`scripts.doctor.spawns.failed`) reads the watched swarm's tick actions, the
+lines the swarm timer journal prints with the swarm's slug in front. It counts these three shapes:
+
+```text
+<slug>: spawn failed for <task>: <reason>
+<slug>: spawn failed for <task>, task <task> reopened: <reason>
+<slug>: master spawn failed: <reason>
+```
+
+Each failed task raises `failed-spawn/<task>`, and a failed master `failed-spawn/master`. The evidence lists every
+reason in journal order, the number is the count of failures, and the threshold is at least one failed spawn.
+
+The task id stops at the first space, comma or colon. An optional `, task <task> reopened` clause may follow it, and
+everything after the next `: ` is the reason, colons included. A reason from a hive or from `init-agent` usually
+holds several colons:
+
+```text
+<slug>: spawn failed for dt2: hive launch failed: refused: agentihooks init-agent: canary timeout
+  id        failed-spawn/dt2
+  evidence  hive launch failed: refused: agentihooks init-agent: canary timeout
+```
+
+A failure whose reason says `account reservation is full` counts only when the account had room at the refusal.
+When the reason carries `sessions=<n> cap=<m>`, as the hive's refusal does, it counts when `n` is below `m`.
+Otherwise it counts when the last `spawn capacity for <task>` line the tick printed for that task shows an open
+account of the same harness with fewer sessions than its cap.
+
+Measure one finding the same way before and after a fix. The reading counts the spawn journal over the window, so 0
+is a real reading for a task on the watched ledger or for the master:
+
+```bash
+agentihooks doctor rig-grade-swarm measure failed-spawn/t-runners-doc-worker001
+```
+
+Both the detector and the measure read the swarm timer's user journal with `journalctl --user`, bounded at thirty
+seconds. When `journalctl` is not on `PATH`, exits non zero or times out, the read refuses with the error type and
+its message instead of counting nothing, because an unread journal is not a reading of 0. The measure prints the
+refusal and exits 1 with nothing on standard output:
+
+```bash
+agentihooks doctor rig-grade-swarm measure failed-spawn/t-plan-ref-repoint
+```
+
+```text
+doctor: tick journal unavailable: FileNotFoundError: [Errno 2] No such file or directory: 'journalctl'
+```
+
+A Doctor detection pass reports the same refusal as `the spawn detector failed: SwarmError: tick journal
+unavailable: <error type>: <message>`, and its other detectors still report.
+
+| Symptom | Check | Cause and action |
+|---|---|---|
+| The measure or the detection pass says `tick journal unavailable: FileNotFoundError` | `command -v journalctl` in the shell that runs the Doctor | `journalctl` is not on that `PATH`. Run the Doctor on the workstation whose user journal holds the swarm timer, or add the systemd tools to its `PATH`. |
+| The refusal names `CalledProcessError` or `TimeoutExpired` | `journalctl --user _SYSTEMD_USER_UNIT=agentihooks-swarm.service + SYSLOG_IDENTIFIER=agentihooks-swarm --since '1 hour ago' -o cat --no-pager \| tail` | The user journal could not be read, for example with no user session bus, or took over thirty seconds. Fix the journal read, then measure again over the same window. |
+| The measure ends in a Python traceback that names `journalctl` | `git -C <agentihooks checkout> log -1 --oneline --grep '(#8184)'` prints nothing | The Doctor runs code from before [pull request #8184](https://github.com/the-cloud-clockwork/agentihooks/pull/8184). Apply it with `agentihooks doctor <watched slug> intervene pull-dev`. |
+| A finding id ends in `:`, such as `failed-spawn/dt2:`, and its reason is cut short | `git -C <agentihooks checkout> log -1 --oneline --grep '(#8039)'` prints nothing | The Doctor runs code from before [pull request #8039](https://github.com/the-cloud-clockwork/agentihooks/pull/8039), whose task id match kept the colon of a reason that held colons. Apply it with `agentihooks doctor <watched slug> intervene pull-dev`. |
+| The reason reads `the hive launch order ended before its acknowledgement` | The hive acknowledgement, see [A worker that finishes before the tick collects its acknowledgement](hives.md#a-worker-that-finishes-before-the-tick-collects-its-acknowledgement) | Since pull request #8039 this reason means the hive never acknowledged the order. A hive that acknowledged a failure is reported as `hive launch failed: <cause>`. |
 
 ## One task per agent life
 
@@ -4829,7 +4904,7 @@ A detection pass reads:
 - **The watched tasks, once.** The CI detector and the trace detector share one read of the watched ledger's tasks.
 - **Every detector side by side.** Each detector runs in its own thread and is still timed as its own
   `doctor.<name>` step: `runtime storage`, `scheduled tick`, `health`, `inbox`, `handoff`, `spawn`,
-  `master launch`, `startup`, `headroom`, `context overrun`, `master prompt`, `ci`, `dev workflow`,
+  `master launch`, `startup`, `headroom`, `hive pool`, `context overrun`, `master prompt`, `ci`, `dev workflow`,
   [`feature`](../reference/feature-live-checks.md) and, with telemetry on, `trace`. A detector that raises is reported as `the <name> detector failed: <error type>: <message>` while the
   others still report.
 - **Pull requests side by side.** The CI detector reads each open pull request of the watched tasks in a thread pool.
