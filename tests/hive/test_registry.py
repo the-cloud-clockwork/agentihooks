@@ -147,6 +147,16 @@ def test_a_restarted_registration_with_nothing_new_writes_nothing(redis):
     assert redis.hgetall(registry.key("box")) == stored
 
 
+def test_a_declared_name_lands_on_a_new_record_and_survives_reregistration(redis):
+    first = registry.update(redis, "box", ["name=swarm-hive-002", "max-agents=9"], keep=True)
+    assert first["name"] == "swarm-hive-002"
+    restarted = registry.update(redis, "box", ["name=swarm-hive-002", "max-agents=9"], keep=True)
+    assert restarted["name"] == "swarm-hive-002"
+    registry.update(redis, "box", ["name=CustomDesk"])
+    kept = registry.update(redis, "box", ["name=swarm-hive-002", "max-agents=9"], keep=True)
+    assert kept["name"] == "CustomDesk"
+
+
 def test_empty_excluded_and_prefer_clear_them(redis):
     registry.update(redis, "box", ["excluded=eng,ci,", "prefer=plan:1,,dispatch:2"])
     assert registry.show(redis, "box")["prefer"] == {"plan": 1, "dispatch": 2}

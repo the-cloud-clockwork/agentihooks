@@ -35,7 +35,7 @@ INT_FIELDS = ("max_agents", "heartbeat_at")
 LEGACY = "roles"
 LEGACY_FIELDS = (LEGACY, "max_agents")
 UNSET = ("max_agents", "excluded")
-KEPT = (*UNSET, "ui", "ephemeral")
+KEPT = (*UNSET, "ui", "ephemeral", "name")
 MASTER_NAME = "swarm-master"
 
 
