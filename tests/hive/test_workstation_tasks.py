@@ -1,6 +1,9 @@
+import pytest
+
 from scripts.hive import launch, placement, placement_waits
 from scripts.hive.placement import Wait
 from scripts.swarm import commands, local_slots
+from scripts.swarm.tick import SpawnError
 from scripts.swarm_v2.runtime.base import LOCAL, Placement
 from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 from tests.hive.test_controller_launch import setup as setup
@@ -55,6 +58,17 @@ def test_a_hybrid_controller_claims_a_local_slot_for_a_workstation_task_on_the_w
     assert setup.store.redis.hkeys(local_slots.key("workstation")) == ["fixture/eng name"]
     assert "fixture: local slot claim eng name for landing on workstation counted 0 of 4" in capsys.readouterr().out
     fenced.runtime.hive_launch.spawn.assert_not_called()
+
+
+def test_a_workstation_task_whose_claim_finds_the_workstation_full_waits_in_its_lane(setup, monkeypatch):
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    fenced = hybrid(setup, monkeypatch)
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=4)
+    monkeypatch.setattr(local_slots, "claim", lambda *_: 4)
+    with pytest.raises(SpawnError, match=placement.LOCAL_FULL):
+        fenced.spawn(setup.config, "eng", "eng name", TASK)
+    assert placement_waits.read(setup.store, setup.config.slug)["landing"]["lane"] == "eng"
+    setup.herdr.spawn.assert_not_called()
 
 
 def test_a_hybrid_controller_leaves_the_claim_of_a_plain_task_to_the_hive_launch(setup, monkeypatch):
