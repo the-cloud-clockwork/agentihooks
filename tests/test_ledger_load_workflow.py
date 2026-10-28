@@ -42,6 +42,7 @@ def test_every_ledger_load_job_starts_redis_from_a_retried_pull():
     assert all("services" not in job for job in jobs.values())
     image = "public.ecr.aws/docker/library/redis:7-alpine"
     for name in ("load", "compare"):
+        assert "'anton-oss'" in jobs[name]["runs-on"]
         steps = jobs[name]["steps"]
         start = next(i for i, step in enumerate(steps) if step.get("name") == "Start Redis from a retried pull")
         assert "if" not in steps[start]
