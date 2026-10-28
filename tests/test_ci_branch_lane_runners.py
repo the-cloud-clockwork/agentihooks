@@ -47,6 +47,10 @@ ROUTED = "${{ contains(fromJSON('[\"nestorcolt\"]'), github.actor) && '%s' || 'u
             "${{ github.event_name == 'push' && 'anton-oss' || github.triggering_actor }}",
         ),
         ("${{ matrix['runner'] || 'anton-oss' }}", "${{ matrix['runner'] || 'anton-oss' }}"),
+        (
+            "${{ github.event_name[0] == 'p' && 'anton-oss' || 'ubuntu-latest' }}",
+            "${{ github.event_name[0] == 'p' && 'anton-oss' || 'ubuntu-latest' }}",
+        ),
     ],
 )
 def test_a_private_runner_label_is_refused(runner, label):
