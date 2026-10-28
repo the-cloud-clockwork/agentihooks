@@ -310,6 +310,8 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
         finally:
             connection.close()
 
+    _reader = connect
+
     def _set_up(self, connection, address) -> None:
         with self._guard:
             if address in self._ready:
