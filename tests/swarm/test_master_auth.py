@@ -34,7 +34,7 @@ def test_only_the_master_can_use_reserved_room(tmp_path, lane, five_left, week_l
         lanes={lane: {"agent": "claude"}},
         autonomy="delegate",
     )
-    task = {"id": lane, "title": "proof", "route_kind": "subscription"}
+    task = {"id": lane, "title": "proof", "seat": "master-2@proof", "route_kind": "subscription"}
     if quota_handoff:
         task["handoff"] = "Continue the task after quota handoff."
         task["handoff_envelope"] = {
@@ -88,7 +88,7 @@ def test_master_prefers_a_valid_login_even_after_a_token_handoff(tmp_path, login
         lanes={"master": {"agent": "claude"}},
         autonomy="delegate",
     )
-    task = {"id": "master", "title": "proof"}
+    task = {"id": "master", "title": "proof", "seat": "master-2@proof"}
     if handoff:
         task["handoff"] = "Continue the master task."
         task["handoff_envelope"] = {
@@ -201,6 +201,8 @@ def _master_spawn(tmp_path, login, task):
 
 
 def test_fallback_launch_raises_the_finding_and_a_valid_login_at_handoff_clears_it(tmp_path):
+    from dataclasses import replace
+
     import fakeredis
 
     from scripts.swarm.health.findings import Limits, findings
@@ -213,7 +215,7 @@ def test_fallback_launch_raises_the_finding_and_a_valid_login_at_handoff_clears_
         store.put_agent("proof", placed_record(AgentRecord("agent", "master", "master", seat="master@proof"), placed))
         return [f.id for f in findings({}, [store.agents("proof")[0].__dict__], {}, Limits())]
 
-    fallback = _master_spawn(tmp_path, False, {"id": "master", "title": "proof"})
+    fallback = replace(_master_spawn(tmp_path, False, {"id": "master", "title": "proof"}), route_kind="subscription")
     assert (fallback.route_kind, fallback.desired_route_kind) == ("subscription", "interactive")
     assert "master-fallback-auth/master@proof" in stored(fallback)
     handoff = {
@@ -376,7 +378,12 @@ def test_the_login_probe_runs_as_the_native_interactive_account(tmp_path):
         lanes={"master": {"agent": "claude"}},
         autonomy="delegate",
     )
-    assert runtime.spawn(config, "master", "agent", {"id": "master", "title": "proof"}).route_kind == "interactive"
+    assert (
+        runtime.spawn(
+            config, "master", "agent", {"id": "master", "title": "proof", "seat": "master-2@proof"}
+        ).route_kind
+        == "interactive"
+    )
     assert probes and probes[0].get(f"{envs.INTERACTIVE_PREFIX}native") == "1"
 
 
@@ -396,7 +403,7 @@ def test_a_valid_login_skips_the_quota_transfer_of_a_master_handoff(tmp_path):
     }
     placed = runtime.spawn(config, "master", "agent", task)
     assert placed.route_kind == "interactive"
-    assert seen[0][seen[0].index("--") + 1 :][:2] == ["--route", "interactive"]
+    assert seen[0][seen[0].index("--") + 1 :][:2] == ["--route", "claude-ai"]
 
 
 def test_a_resumed_master_keeps_its_desired_route(tmp_path):

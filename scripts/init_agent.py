@@ -478,6 +478,9 @@ def _agent_command(
         *_model_args("claude", agent_args, environ),
         *agent_args,
     ]
+    from scripts import front_door_route
+
+    command = [*command[:2], *front_door_route.check(spec.profile, spec.title or name, command[2:])]
     # A server on MCP revision 2026-07-28 never registers as a channel.
     before = "export MCP_PROTOCOL_NEGOTIATION=legacy\n" if spec.channel else ""
     return _profile_command(command, spec), before

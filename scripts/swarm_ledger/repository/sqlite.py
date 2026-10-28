@@ -399,6 +399,7 @@ class SQLiteLedgerRepository:
         self._cache = {}
         self._loads = {}
         self._guard = threading.Lock()
+        self._readers = threading.local()
 
     @property
     def domain(self):
@@ -426,6 +427,14 @@ class SQLiteLedgerRepository:
 
     @contextmanager
     def connect(self):
+        _, connection = self._open()
+        try:
+            connection.set_trace_callback(self.trace)
+            yield connection
+        finally:
+            connection.close()
+
+    def _open(self) -> tuple:
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(path, timeout=30)
@@ -434,10 +443,18 @@ class SQLiteLedgerRepository:
             if path not in self._ready:
                 self._set_up(connection, path)
             connection.execute("PRAGMA synchronous=FULL")
-            connection.set_trace_callback(self.trace)
-            yield connection
-        finally:
+        except BaseException:
             connection.close()
+            raise
+        return path, connection
+
+    @contextmanager
+    def _reader(self):
+        held = getattr(self._readers, "held", None)
+        if held is None or held[0] != self.path:
+            held = self._readers.held = self._open()
+        held[1].set_trace_callback(self.trace)
+        yield held[1]
 
     def _set_up(self, connection, path: Path) -> None:
         with self._guard:
@@ -522,7 +539,7 @@ class SQLiteLedgerRepository:
 
     def exists(self, slug: str) -> bool:
         self._adopt(slug)
-        with self.connect() as connection:
+        with self._reader() as connection:
             return connection.execute(STORED, (slug,)).fetchone() is not None
 
     def get_document(self, slug: str) -> dict:
@@ -584,7 +601,7 @@ class SQLiteLedgerRepository:
 
     def token(self, slug: str) -> str | None:
         self._adopt(slug)
-        with self.connect() as connection:
+        with self._reader() as connection:
             row = connection.execute(TOKEN, (slug,)).fetchone()
         return None if row is None else row[0]
 
@@ -592,7 +609,7 @@ class SQLiteLedgerRepository:
         """(generation, `_meta` task revision fields, task rows) as stored now, reusing each row of since that no
         write reached; since is a tuple this returned earlier."""
         self._adopt(slug)
-        with self.connect() as connection, connection:
+        with self._reader() as connection, connection:
             connection.execute(BEGIN)
             row = connection.execute(GENERATION, (slug,)).fetchone()
             if row is None:
