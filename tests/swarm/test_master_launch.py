@@ -949,7 +949,7 @@ def test_a_new_master_reads_quota_before_it_is_placed(up, monkeypatch):
     assert order == [("spent", 1), ("quota", "sw", AT / 1000), "spawn"]
 
 
-def quota_master(monkeypatch, tmp_path, observed):
+def quota_master(monkeypatch, tmp_path, observed, store):
     monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: observed)
     rt = runtime.HerdrRuntime(
         home=tmp_path / "home", choose=lambda requested, environ: (requested or "claude", "priority")
@@ -961,7 +961,10 @@ def quota_master(monkeypatch, tmp_path, observed):
             "master", "task", "explicit"
         ),
     )
-    monkeypatch.setattr(rt, "live_names", set)
+    live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
+    store.put_agent("sw", live)
+    counted(store, 2)
+    monkeypatch.setattr(rt, "live_names", lambda: {live.name})
     monkeypatch.setattr(rt, "reported", lambda agent: True)
     routes = []
 
@@ -976,10 +979,10 @@ def quota_master(monkeypatch, tmp_path, observed):
 
 def test_a_new_master_leaves_a_warned_account_or_refuses_naming_it(up, monkeypatch, tmp_path):
     store, _, _ = up
-    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("ok")])
+    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("ok")], store)
     direct(store, rt, master_launch.NEW)
     assert routes == ["ok"]
-    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5)])
+    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5)], store)
     refusal = "no claude or codex account has placeable quota seats: claude w is at its week quota warning"
     with pytest.raises(SwarmError, match=f"^the new master could not start: {refusal}$"):
         direct(store, rt, master_launch.NEW)
@@ -988,7 +991,9 @@ def test_a_new_master_leaves_a_warned_account_or_refuses_naming_it(up, monkeypat
 
 def test_a_new_master_free_to_pick_its_harness_refuses_naming_every_warned_account(up, monkeypatch, tmp_path):
     store, _, _ = up
-    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("cw", harness="codex", left=5)])
+    rt, routes = quota_master(
+        monkeypatch, tmp_path, [account("w", left=5), account("cw", harness="codex", left=5)], store
+    )
     warned = "claude w is at its week quota warning; codex cw is at its week quota warning"
     with pytest.raises(
         SwarmError,
