@@ -74,6 +74,14 @@ def test_the_gate_refuses_a_switched_on_master_whose_operator_has_been_quiet_pas
     assert hook_manager._operator_question(unattributed()) == operator_mode.MASTER_ASK_REFUSAL
 
 
+def test_the_gate_asks_whether_the_calling_session_is_the_master(master, monkeypatch):
+    operator_mode._save(SID, {"on": True, "turn_at": 1_000.0})
+    monkeypatch.setattr(master_question.master_coding, "is_master", lambda session: session == SID)
+    assert master_question.refusal(unattributed(), now=1_000.0 + master_question.WINDOW_SEC) == (
+        operator_mode.MASTER_ASK_REFUSAL
+    )
+
+
 def test_the_gate_opens_for_a_master_whose_operator_typed_inside_the_window(master):
     operator_mode._save(SID, {"on": True, "turn_at": 1_000.0})
     assert master_question.refusal(unattributed(), now=1_000.0 + master_question.WINDOW_SEC - 1) == ""
@@ -154,6 +162,27 @@ def test_an_opened_question_is_recorded_for_the_tick(master, store):
     assert master_questions.held(store, "sw", NAME) == [
         f"{FOCUS['question']} Options: Proof and cleanup; Hive placement."
     ]
+
+
+def test_held_questions_live_a_day_under_the_master_questions_key(store):
+    import json
+
+    master_questions.hold(store, "sw", NAME, QUESTIONS)
+    key = store.key("sw", "master-questions", NAME)
+    assert json.loads(store.redis.get(key)) == QUESTIONS
+    assert 0 < store.redis.ttl(key) <= master_questions.DAY_S
+
+
+def test_each_moved_question_carries_a_thirty_two_character_ledger_id(store):
+    runtime, ledger = Runtime(), Ledger()
+    master_questions.hold(store, "sw", NAME, QUESTIONS)
+    waited(store, runtime, ledger, 10)
+    assert [len(op) for *_, op in ledger.questions] == [32, 32]
+
+
+def test_an_unbound_master_holds_no_questions(store):
+    master_question._hold("<slug>", NAME, [{"question": PROMPT}], store)
+    assert master_questions.held(store, "<slug>", NAME) == []
 
 
 class Herdr:
