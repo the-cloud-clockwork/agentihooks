@@ -83,3 +83,32 @@ def test_another_swarm_writes_while_an_admission_is_in_flight(store, monkeypatch
     first.join(5)
     assert finished
     assert [agent.seat for agent in admitted] == ["eng-1@other"]
+
+
+@pytest.mark.parametrize("operation", ["put", "start", "update", "set_pane"])
+@pytest.mark.parametrize(("slug", "blocked"), [("fixture", True), ("other", False)])
+def test_each_registry_write_holds_the_lock_of_its_own_swarm(store, monkeypatch, operation, slug, blocked):
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def held(self, *arguments):
+        calls.append(arguments)
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(5)
+
+    monkeypatch.setattr(execution.ExecutionRegistry, f"_{operation}", held)
+    write = getattr(store.execution_registry, operation)
+    extra = ("record", "previous") if operation in ("start", "set_pane") else ("record",)
+    first = threading.Thread(target=write, args=("fixture", *extra))
+    second = threading.Thread(target=write, args=(slug, *extra))
+    first.start()
+    assert entered.wait(5)
+    second.start()
+    second.join(0.5)
+    waited = second.is_alive()
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert waited is blocked
+    assert calls == [("fixture", *extra), (slug, *extra)]
