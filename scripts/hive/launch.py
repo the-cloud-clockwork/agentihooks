@@ -514,8 +514,10 @@ class HiveLaunch:
         _match("seat", agent.seat, request.task["seat"])
         _match("generation", order.generation, agent.generation)
         ack = self.orders.ack(order)
-        if not ack or ack.status != "live":
+        if not ack:
             return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
+        if ack.status != "live":
+            return Outcome("spawn", Status.REFUSED, HIVE, detail=f"hive launch failed: {ack.failure}")
         _match("ack host", order.hive, ack.target.get("host_id"))
         admission.joined(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
         if agent.runtime_target != ack.target:

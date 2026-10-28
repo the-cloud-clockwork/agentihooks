@@ -1,6 +1,7 @@
 import json
 import re
 
+from scripts.hive import registry
 from scripts.swarm.health.findings import Finding
 
 TICK_MS = 60_000
@@ -130,6 +131,21 @@ def _silent_hive(agent: dict, beats: dict, now_ms: int) -> list[Finding]:
             "no heartbeat one tick after the hive acknowledgement",
             (now_ms - acked) // TICK_MS,
         )
+    ]
+
+
+def missing_headroom(hives: list[dict], readings: dict, now_ms: int) -> list[Finding]:
+    return [
+        Finding(
+            "missing headroom",
+            hive["id"],
+            "live hive has no fresh headroom reading, so the tick refuses its launches",
+            (f"hive {hive['name']}", f"heartbeat at {hive['heartbeat_at']}", f"version {hive.get('version', '')}"),
+            "a live worker hive with no fresh headroom reading",
+            1,
+        )
+        for hive in hives
+        if hive.get("ui") != "yes" and registry.live(hive, now_ms) and readings.get(hive["id"]) is None
     ]
 
 
