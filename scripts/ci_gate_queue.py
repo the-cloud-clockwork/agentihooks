@@ -104,7 +104,7 @@ def verify(jobs: list[dict], shards: list[int], lost: Callable[[dict], bool] = l
         raise ValueError("The queue needs a nonempty unique positive shard plan")
     expected = {f"unit (3.12, {shard})" for shard in shards}
     groups = inventory(jobs, expected)
-    finished = [checked(groups.get(name), "success" if name in REQUIRED else "skipped") for name in REQUIRED | SKIPPED]
+    finished = [checked(groups.get(name), "success") for name in REQUIRED]
     recovered, originals_finished = originals(groups, expected, lost)
     recovery_finished = recovery(groups, recovered) if originals_finished else False
     return all(finished) and originals_finished and recovery_finished

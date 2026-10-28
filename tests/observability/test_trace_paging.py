@@ -342,6 +342,12 @@ def test_message_split_across_the_paging_cut_stays_open_for_a_late_record():
     assert paged["messages"] == [agent_trace._paged_digest("m3")]
     assert paged["keys"] == sorted(agent_trace._paged_digest(key) for key in ("a1", "a3"))
     assert not agent_trace._paged_out(paged, "a4", _call("a4", "m1", {"type": "text", "text": "late"}, 4))
+    later = agent_trace._paged_ids(paged, ["a2", "a5"], [values[1], _call("a5", "m5", {}, 5)], [0, 1], [])
+    assert later["messages"] == sorted(agent_trace._paged_digest(message) for message in ("m1", "m3", "m5"))
+
+
+def test_paged_digest_stays_readable_from_state_written_by_earlier_releases():
+    assert agent_trace._paged_digest("m3") == "32c2aea8c2e77450"
 
 
 def _bytes_read_per_pass(monkeypatch, path) -> list[int]:
