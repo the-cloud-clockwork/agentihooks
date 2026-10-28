@@ -1270,3 +1270,120 @@ def test_existing_marker_in_sensitive_value_cannot_hide_literal_suffix():
     assert contains_generic_secret('ordinary="' + value + '"') is False
     assert source.mask_value({"ordinary": value}) == {"ordinary": value}
     assert contains_generic_secret("password=$ENV_REFERENCE") is False
+
+
+class _Killed(BaseException):
+    pass
+
+
+def _large_session(turn_count=15, calls=10, result_words=3_400):
+    records = []
+    second = 0
+
+    def stamp():
+        nonlocal second
+        second += 1
+        return f"2026-10-28T07:{second // 60:02d}:{second % 60:02d}Z"
+
+    def words(seed, count):
+        return " ".join(f"w{(seed * 7919 + index * 104729) % 99991:x}" for index in range(count))
+
+    for turn in range(turn_count):
+        records.append(
+            {"type": "user", "uuid": f"p{turn}", "timestamp": stamp(), "message": {"content": words(turn, 200)}}
+        )
+        for call in range(calls):
+            seed = turn * calls + call
+            tool = {"type": "tool_use", "id": f"t{seed}", "name": "Bash", "input": {"command": words(seed, 30)}}
+            records.append(
+                {
+                    "type": "assistant",
+                    "uuid": f"a{seed}",
+                    "timestamp": stamp(),
+                    "message": {
+                        "id": f"m{seed}",
+                        "model": "model",
+                        "content": [{"type": "text", "text": words(seed, 80)}, tool],
+                    },
+                }
+            )
+            result = {"type": "tool_result", "tool_use_id": f"t{seed}", "content": words(seed + 1, result_words)}
+            records.append({"type": "user", "uuid": f"r{seed}", "timestamp": stamp(), "message": {"content": [result]}})
+    return records
+
+
+def _staged(tmp_path, records):
+    path = tmp_path / "large.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in records))
+    state = agent_trace._progress("session")
+    state["session_id"] = "session"
+    agent_trace._stage_source(state, str(path))
+    return state
+
+
+def test_prepare_redacts_each_exported_field_once(export, tmp_path, monkeypatch):
+    from collections import Counter
+
+    from hooks import secrets
+
+    state = _staged(tmp_path, _large_session(turn_count=2, calls=3, result_words=400))
+    redact = secrets.redact
+    seen = Counter()
+
+    def counted(text, *, mode=None):
+        if len(text) > 1_000:
+            seen[text] += 1
+        return redact(text, mode=mode)
+
+    monkeypatch.setattr(secrets, "redact", counted)
+    agent_trace._prepare_pending("session", state, agent_trace.Identity("session"))
+    assert len(seen) >= 6
+    assert max(seen.values()) == 1
+
+
+def test_prepare_of_a_large_session_state_leaves_the_flush_attempt_room(export, tmp_path):
+    import time
+
+    records = _large_session()
+    assert len(json.dumps(records)) > 3_000_000
+    state = _staged(tmp_path, records)
+    started = time.perf_counter()
+    agent_trace._prepare_pending("session", state, agent_trace.Identity("session"))
+    elapsed = time.perf_counter() - started
+    assert len(state["pending"]) > 300
+    assert elapsed < 2.5, f"prepare took {elapsed:.2f} s of the 5 s flush attempt"
+
+
+def test_a_pass_killed_after_its_last_batch_still_advances_the_accepted_point(export, transcript, monkeypatch):
+    path, _ = transcript
+
+    def killed(*args):
+        raise _Killed
+
+    monkeypatch.setattr(agent_trace, "_collector_outcomes", killed)
+    with pytest.raises(_Killed):
+        flush(path)
+    cursor = agent_trace._cursor("session")
+    assert cursor["pending"] == []
+    assert cursor["source"]["accepted_bytes"] == path.stat().st_size
+    assert cursor["turns"] == cursor["buffered_turns"] >= 1
+
+
+def test_a_pass_with_nothing_to_send_saves_the_accepted_point_before_paging(export, transcript, monkeypatch):
+    path, _ = transcript
+    flush(path)
+    frozen = agent_trace._cursor("session")
+    frozen["source"]["accepted_bytes"], frozen["turns"] = 0, 0
+    agent_trace._save_progress("session", frozen)
+
+    def killed(*args):
+        raise _Killed
+
+    monkeypatch.setattr(agent_trace, "_page_accepted", killed)
+    calls = len(export.calls)
+    with pytest.raises(_Killed):
+        flush(path)
+    cursor = agent_trace._cursor("session")
+    assert len(export.calls) == calls
+    assert cursor["source"]["accepted_bytes"] == path.stat().st_size
+    assert cursor["turns"] == cursor["buffered_turns"] >= 1
