@@ -129,6 +129,8 @@ Because profile content is written *after* the shared block, a profile can still
 override shared guidance by restating it. Keep profile `CLAUDE.md` files to what
 is genuinely profile-specific.
 
+A worker pod carries only the root bundle, so a swarm tick refuses a remote launch while a user bundle is registered on the launching host (`bundle unlink --user` clears it); nothing is seeded without its user source.
+
 A pinned render (`--bundle-revision`, used by swarm overlay launches) rebuilds from the recorded root and user commits, copies both into the profile home and records both in its render stamp. It never reads the live user bundle, and refuses a revision that names no user commit while a user bundle is linked.
 
 Re-running `agentihooks init` replaces the block in place — it never stacks. If the

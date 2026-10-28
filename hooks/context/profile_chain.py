@@ -16,6 +16,7 @@ BUNDLE_PROFILES = "profiles"
 RENDER_STAMP = ".agentihooks-render.json"
 OVERLAY_CAP = 3
 HIVE_CAPABILITIES = "AGENTIHOOKS_HIVE_CAPABILITIES"
+USER_BUNDLE_ENV = "AGENTIHOOKS_USER_BUNDLE_PATH"
 
 
 def state_path() -> Path:
@@ -51,6 +52,11 @@ def user_bundle_path(state: dict) -> Path | None:
         if path.is_dir():
             return path
     return None
+
+
+def registered_user_bundle(state: dict, environ: Mapping[str, str]) -> Path | None:
+    raw = (state.get("user_bundle") or {}).get("path") or environ.get(USER_BUNDLE_ENV, "")
+    return Path(raw).expanduser() if raw else None
 
 
 def bundle_roots(state: dict) -> list[tuple[str, Path]]:
