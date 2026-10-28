@@ -91,17 +91,21 @@ def is_dataclass(decorator) -> bool:
 
 
 def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int, int]:
+    from libcst import FunctionDef
     from libcst.metadata import MetadataWrapper, PositionProvider
 
     module, graded, possible = created_mutations(filename, source)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(PositionProvider)
-    # mutmut emits only mutants inside a function or method.
-    found = sum(1 for mutation in on_changed_lines(module, graded, changed) if mutation.contained_by_top_level_function)
+    found = sum(
+        1
+        for mutation in on_changed_lines(module, graded, changed)
+        if isinstance(mutation.contained_by_top_level_function, FunctionDef)
+    )
     body = sum(
         positions[mutation.original_node].start.line
         >= positions[mutation.contained_by_top_level_function.body.body[0]].start.line
         for mutation in on_changed_lines(module, possible, changed)
-        if mutation.contained_by_top_level_function
+        if isinstance(mutation.contained_by_top_level_function, FunctionDef)
     )
     return found, body
 
