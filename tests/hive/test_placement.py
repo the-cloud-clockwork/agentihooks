@@ -171,9 +171,13 @@ def test_a_full_master_ui_hive_keeps_the_master_without_counting_against_it():
 @pytest.mark.parametrize("role", ["frontend", "qa"])
 def test_a_ui_profile_task_waits_for_a_ui_host_instead_of_a_headless_hive(role):
     headless = [eng("anton-test"), eng("anton-stable")]
-    assert place(role, "claude", "acct", "subscription", REPO, headless, NOW) == Wait(f"no live swarm-master takes {role}")
+    assert place(role, "claude", "acct", "subscription", REPO, headless, NOW) == Wait(
+        f"no live swarm-master takes {role}"
+    )
     full = [hive("workstation", agents=2), *headless]
-    assert place(role, "claude", "acct", "subscription", REPO, full, NOW) == Wait(f"no swarm-master for {role} has room")
+    assert place(role, "claude", "acct", "subscription", REPO, full, NOW) == Wait(
+        f"no swarm-master for {role} has room"
+    )
 
 
 def test_the_codex_harness_matches_its_own_slot_and_login():
