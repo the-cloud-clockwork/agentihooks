@@ -575,9 +575,10 @@ def test_workspace_discovers_inputs_read_by_an_imported_test_helper(tmp_path):
     (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
     (root / "tests/nested/helper.py").write_text(
         'from pathlib import Path\nSTART = Path(__file__).resolve().parents[2] / "deploy/worker/start.sh"\n'
+        "def startup():\n    return START.read_text()\n"
     )
     (root / "tests/nested/test_selected.py").write_text(
-        "from tests.nested.helper import START\n\ndef test_selected():\n    START.read_text()\n"
+        "from tests.nested.helper import startup\n\ndef test_selected():\n    startup()\n"
     )
     work = tmp_path / "work"
     work.mkdir()
