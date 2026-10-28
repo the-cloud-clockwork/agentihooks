@@ -213,6 +213,20 @@ def test_a_published_machine_without_a_harness_counts_it_as_zero():
     assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 2}]
 
 
+def test_a_reading_where_no_machine_answers_falls_back_to_hive_counts():
+    published = {"machines": {}, "silent": ["master"], "measured_at": NOW}
+    readings = {"root": {**HOST, "agents": {"claude": 3, "codex": 1}}}
+    data = viewed(Store({}), *ports_for([ROOT], readings, published=published))
+    assert data["agents"] == {"total": 4, "source": "hives", "reporting": 1, "of": 1, "claude": 3, "codex": 1}
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 4}]
+
+
+def test_a_silent_master_entry_keeps_the_swarm_master_name():
+    published = {"machines": {"hive-1": {"claude": 1}}, "silent": ["master"], "measured_at": NOW}
+    data = viewed(Store({}), *ports_for([ROOT], {}, published=published))
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": None}, {"name": "hive-1", "agents": 1}]
+
+
 def test_the_bridge_is_read_from_each_live_interface_hive_in_the_store_redis_at_the_request_time():
     store, reads = Store({}), []
     second = {**ROOT, "id": "desk", "name": "desk"}
@@ -240,3 +254,41 @@ def test_a_swarm_store_error_answers_503_storage_error():
     with pytest.raises(APIError) as caught:
         monitor.route(services)
     assert (caught.value.status, caught.value.code, str(caught.value)) == (503, "storage_error", "no store")
+
+
+def test_two_live_interface_hives_merge_into_one_swarm_master_row():
+    stale = {"id": "old-id", "name": "swarm-master", "ui": "yes", "live": True}
+    readings = {
+        "root": {**HOST, "agents": {"claude": 6, "codex": 0}},
+        "old-id": {**HOST, "agents": {"claude": 0, "codex": 0}},
+    }
+    data = viewed(Store({}), *ports_for([ROOT, stale], readings))
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}]
+    assert data["hives"]["live"] == 1
+    assert data["agents"] == {"total": 6, "source": "hives", "reporting": 1, "of": 1, "claude": 6, "codex": 0}
+
+
+def test_a_herdr_label_matching_a_live_hive_shows_its_current_name_not_its_raw_id():
+    worker = {"id": "06db8fa06259f56a", "name": "worker-one", "ui": "no", "live": True}
+    published = {
+        "machines": {"master": {"claude": 6}, "06db8fa06259f56a": {"claude": 7}},
+        "silent": [],
+        "measured_at": NOW,
+    }
+    data = viewed(Store({}), *ports_for([ROOT, worker], {}, published=published))
+    assert data["hives"]["rows"] == [
+        {"name": "swarm-master", "agents": 6},
+        {"name": "worker-one", "agents": 7},
+    ]
+
+
+def test_a_herdr_label_matching_a_hive_no_longer_live_is_not_listed():
+    dead = {"id": "dead-id", "name": "dead-hive", "ui": "no", "live": False}
+    published = {
+        "machines": {"master": {"claude": 6}, "dead-id": {"claude": 9}},
+        "silent": [],
+        "measured_at": NOW,
+    }
+    data = viewed(Store({}), *ports_for([ROOT, dead], {}, published=published))
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}]
+    assert data["agents"] == {"total": 6, "source": "herdr", "reporting": 1, "of": 1, "claude": 6, "codex": 0}

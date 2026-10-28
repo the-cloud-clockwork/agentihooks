@@ -153,7 +153,7 @@ def test_the_order(hives, expected):
 def test_the_master_never_lands_on_a_hive_that_excludes_it():
     hives = [eng("a", agents=4), eng("b", agents=5), hive("vm", heartbeat_at=0)]
     assert place("master", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live hive takes master")
-    assert place("qa", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live UI hive takes qa")
+    assert place("qa", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live swarm-master takes qa")
 
 
 def test_a_full_fleet_names_every_hive_refusal_in_order():
@@ -171,9 +171,13 @@ def test_a_full_master_ui_hive_keeps_the_master_without_counting_against_it():
 @pytest.mark.parametrize("role", ["frontend", "qa"])
 def test_a_ui_profile_task_waits_for_a_ui_host_instead_of_a_headless_hive(role):
     headless = [eng("anton-test"), eng("anton-stable")]
-    assert place(role, "claude", "acct", "subscription", REPO, headless, NOW) == Wait(f"no live UI hive takes {role}")
+    assert place(role, "claude", "acct", "subscription", REPO, headless, NOW) == Wait(
+        f"no live swarm-master takes {role}"
+    )
     full = [hive("workstation", agents=2), *headless]
-    assert place(role, "claude", "acct", "subscription", REPO, full, NOW) == Wait(f"no UI hive for {role} has room")
+    assert place(role, "claude", "acct", "subscription", REPO, full, NOW) == Wait(
+        f"no swarm-master for {role} has room"
+    )
 
 
 def test_the_codex_harness_matches_its_own_slot_and_login():
@@ -231,3 +235,41 @@ def test_the_preferred_hive_takes_agents_until_its_node_memory_crosses_eighty_pe
     records[1]["room"] = admission.capped(admission.room(reading), 20, 28).room
 
     assert placement.choose("eng", "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice(expected)
+
+
+def test_round_robin_keeps_at_most_the_node_limit_of_live_hives_listing_the_repo_by_id():
+    from scripts.hive import placement
+
+    records = [
+        hive("c"),
+        hive("a"),
+        hive("d", heartbeat_at=NOW - registry.LIVE_MS - 1),
+        hive("aa", repos=["other"]),
+        hive("b"),
+    ]
+
+    assert [record["id"] for record in placement.round_robin(records, 2, REPO, NOW)] == ["a", "b"]
+    assert [record["id"] for record in placement.round_robin(records, 0, REPO, NOW)] == ["a", "b", "c"]
+    assert [record["id"] for record in placement.round_robin(records, 5, REPO, NOW)] == ["a", "b", "c"]
+
+
+def test_round_robin_gives_the_agent_to_the_chosen_hive_running_the_fewest_agents():
+    from scripts.hive import placement
+
+    records = [
+        hive("worker-one", ui="no", max_agents=28, agents=3, prefer={"eng": 1}),
+        hive("oracle", ui="no", max_agents=4, agents=2),
+        hive("zeta", ui="no", max_agents=4, agents=0),
+    ]
+
+    spread = placement.round_robin(records, 2, REPO, NOW)
+    assert [record[placement.SPREAD] for record in spread] == [2, 3]
+    assert placement.choose("eng", "claude", "acct", "subscription", REPO, spread, NOW) == placement.Choice("oracle")
+    assert placement.choose("eng", "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice(
+        "worker-one"
+    )
+    records[1][placement.PLACED] = 2
+    spread = placement.round_robin(records, 2, REPO, NOW)
+    assert placement.choose("eng", "claude", "acct", "subscription", REPO, spread, NOW) == placement.Choice(
+        "worker-one"
+    )

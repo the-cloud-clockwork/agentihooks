@@ -10,6 +10,7 @@ LIMIT_MS = 10 * 60_000
 FRESH_MS = 2 * 60_000
 SENDER = "swarm"
 REF = "stale-nudge"
+LAST = "stale-nudged"
 IDLE_REASON = "no activity from you for over ten minutes"
 ERROR_REASON = "your pane shows a provider error"
 TEXT = (
@@ -66,4 +67,10 @@ def nudge(inbox: InboxStore, slug: str, agent: AgentRecord, provider_error: str,
         item = inbox.send(SENDER, agent.name, text, ref=f"{REF}:{nudge_id}", task=agent.task, item_id=nudge_id)
     except DuplicateItem:
         return []
+    redis.set(idle.key(slug, LAST, agent.name), now_ms, ex=idle.BEAT_TTL_S)
     return [f"nudged stale {agent.name} through its inbox as message {item.id}"]
+
+
+def last(redis, slug: str, name: str) -> int | None:
+    raw = redis.get(idle.key(slug, LAST, name))
+    return int(raw) if raw else None

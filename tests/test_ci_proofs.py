@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -65,11 +66,115 @@ def test_a_focused_proof_is_red_unless_every_test_path_is_on_one_line_under_test
 
 def test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota():
     step = next(s for s in _workflow()["jobs"]["tests"]["steps"] if s.get("name") == "Run selected tests")
-    lines = [line.strip() for line in step["run"].splitlines() if "pytest" in line]
+    lines = [line.strip() for line in step["run"].splitlines() if "workers" in line]
     assert lines == [
-        'workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" '
-        "--dist loadgroup -p tests.flake_ledger --tb=short"
+        "workers=$(python -m scripts.ci_cpu_quota)",
+        'python -m pytest "${paths[@]}" -v -n "$workers" '
+        '--dist loadgroup -p tests.flake_ledger --tb=short 2>&1 | tee "$log" || status=$?',
     ]
+
+
+@pytest.mark.parametrize(
+    ("log", "exit_code", "code"),
+    [
+        ("INTERNALERROR> Traceback (most recent call last):\n=== no tests ran in 0.50s ===\n", 0, 1),
+        ("[gw0] PASSED tests/test_a.py::test_a\nINTERNALERROR> KeyError\n=== 1 passed in 0.50s ===\n", 0, 1),
+        ("=== no tests ran in 0.50s ===\n", 0, 1),
+        ("=== 3 skipped in 0.10s ===\n", 0, 1),
+        ("collecting ...\n", 0, 1),
+        ("=== 2 passed in 1.20s ===\n", 0, 0),
+        ("[gw0] [ 50%] PASSED tests/test_a.py::test_a[INTERNALERROR> KeyError]\n=== 1 passed in 0.20s ===\n", 0, 0),
+        ("=== 2 passed, 1 skipped, 3 warnings in 75.32s (0:01:15) ===\n", 0, 0),
+        ("\x1b[32m=== \x1b[32m\x1b[1m2 passed\x1b[0m\x1b[32m in 1.20s\x1b[0m\x1b[32m ===\x1b[0m\n", 0, 0),
+        ("=== 1 failed, 2 passed in 1.20s ===\n", 1, 1),
+        ("=== 2 passed in 1.20s ===\n", 3, 3),
+    ],
+)
+def test_a_focused_proof_is_red_unless_a_test_completed_without_an_internal_error(log, exit_code, code, tmp_path):
+    step = next(s for s in _workflow()["jobs"]["tests"]["steps"] if s.get("name") == "Run selected tests")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (tmp_path / "pytest.log").write_text(log)
+    stub = bin_dir / "python"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f'[[ "$1 $2" != "-m pytest" ]] || {{ cat "{tmp_path / "pytest.log"}"; exit {exit_code}; }}\n'
+        '[[ "$1 $2" != "-m scripts.ci_cpu_quota" ]] || { echo 2; exit 0; }\n'
+        f'exec "{sys.executable}" "$@"\n'
+    )
+    stub.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "TEST_PATHS": "tests/test_a.py",
+            "RUNNER_TEMP": str(tmp_path),
+        },
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == code, result.stdout + result.stderr
+    assert (tmp_path / "focused-proof.log").read_text() == log
+    assert ("::error title=Focused proof::" in result.stdout) == (code == 1 and exit_code == 0)
+
+
+def test_the_proof_outcome_names_why_a_run_proved_nothing(tmp_path, capsys):
+    from scripts import ci_proof_outcome
+
+    green = tmp_path / "green.log"
+    green.write_text("=== 1 xfailed, 1 xpassed in 0.20s ===\n")
+    crashed = tmp_path / "crashed.log"
+    crashed.write_text("INTERNALERROR> worker gw0 crashed\n=== 1 passed in 0.20s ===\n")
+    assert ci_proof_outcome.main([str(green)]) == 0
+    assert capsys.readouterr().out == ""
+    assert ci_proof_outcome.main([str(crashed)]) == 1
+    assert capsys.readouterr().out == "::error title=Focused proof::pytest raised an internal error.\n"
+    assert ci_proof_outcome.verdict("=== 4 deselected in 0.10s ===") == "No selected test completed."
+
+
+@pytest.mark.parametrize(
+    ("line", "head"),
+    [
+        ("=== 2 passed in 1.20s ===", "2 passed"),
+        ("  == 3 passed, 1 failed in 75.32s (0:01:15) ==  ", "3 passed, 1 failed"),
+        ("=== 2 passed in a in 1.00s ===", "2 passed in a"),
+        ("=== XX in 1.00s ===", "XX"),
+        ("=== 1 passed in tests/x ===", None),
+        ("2 passed in 1.20s ===", None),
+        ("=== 2 passed in 1.20s", None),
+        ("=== FAILURES ===", None),
+    ],
+)
+def test_the_proof_outcome_reads_only_pytest_summary_lines(line, head):
+    from scripts import ci_proof_outcome
+
+    assert ci_proof_outcome.summary(line) == head
+
+
+@pytest.mark.parametrize(
+    ("log", "reason"),
+    [
+        ("\x1b[32m=== \x1b[1m2 passed\x1b[0m\x1b[32m in 1.20s ===\x1b[0m\n", None),
+        ("\x1b[31mINTERNALERROR> boom\x1b[0m\n=== 2 passed in 1.20s ===\n", "pytest raised an internal error."),
+        ("[gw3] INTERNALERROR> boom\n=== 2 passed in 1.20s ===\n", "pytest raised an internal error."),
+        ("=== 1 passed in 1.00s ===\n=== no tests ran in 1.00s ===\n", "No selected test completed."),
+        ("=== 2 skipped, 1 passed in 1.00s ===\n", None),
+    ],
+)
+def test_the_proof_outcome_reads_colored_and_worker_output(log, reason):
+    from scripts import ci_proof_outcome
+
+    assert ci_proof_outcome.verdict(log) == reason
+
+
+def test_the_proof_outcome_reads_a_log_with_undecodable_bytes(tmp_path):
+    from scripts import ci_proof_outcome
+
+    log = tmp_path / "proof.log"
+    log.write_bytes(b"\xff\xfe output\n=== 1 passed in 0.10s ===\n")
+    assert ci_proof_outcome.main([str(log)]) == 0
 
 
 @pytest.mark.parametrize(

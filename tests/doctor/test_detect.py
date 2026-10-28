@@ -89,6 +89,12 @@ def test_the_spawn_reader_reads_the_watched_swarm_at_the_pass_time(monkeypatch):
     store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
     assert detect.readers(store, None, "sw", 42, environ={})["spawn"]() == [STALE]
     assert seen == [(store, "sw", 42)]
+    from scripts.doctor import slot_census
+
+    monkeypatch.setattr(spawn_read, "slot_claims", lambda store, slug: seen.append((store, slug)) or "claims")
+    monkeypatch.setattr(slot_census, "findings", lambda record: [STALE] if record == "claims" else [])
+    assert detect.readers(store, None, "sw", 42, environ={})["slot census"]() == [STALE]
+    assert seen[1:] == [(store, "sw")]
 
 
 def test_the_master_launch_reader_reads_the_watched_swarm(monkeypatch):
@@ -174,6 +180,24 @@ def test_the_startup_reader_judges_hive_agents_from_their_heartbeat_after_the_ac
     idle.beat(store.redis, "sw", local.name, idle.WORKING, 2_000)
     found = detect.readers(store, None, "sw", acked + 2 * spawns.TICK_MS, environ={})["startup"]()
     assert sorted(f.subject for f in found) == ["sw-eng-2", "sw-eng-4"]
+
+
+def test_the_headroom_reader_reads_each_live_hive_at_the_pass_time():
+    import json
+
+    import fakeredis
+
+    from scripts.hive import headroom, registry
+    from scripts.hive.auth import INDEX
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    now = 1_000_000
+    for hive in ("hh4", "hh5"):
+        redis.sadd(INDEX, hive)
+        redis.hset(registry.key(hive), "heartbeat_at", now - 1_000)
+    redis.set(headroom.key("hh5"), json.dumps({"measured_at": now - 1_000}))
+    found = detect.readers(SimpleNamespace(redis=redis), None, "sw", now, environ={})["headroom"]()
+    assert [f.id for f in found] == ["missing-headroom/hh4"]
 
 
 def test_ci_reads_only_the_pull_requests_of_tasks_waiting_in_review():

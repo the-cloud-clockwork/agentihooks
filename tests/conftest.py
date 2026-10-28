@@ -1,6 +1,7 @@
 """Shared test fixtures for agentihooks."""
 
 import errno
+import importlib
 import json
 import os
 import re
@@ -129,14 +130,18 @@ def _shard_files(config) -> frozenset[str]:
         for node, shard in config.stash[NODE_SHARDS].items():
             owners.setdefault(node.split("::", 1)[0], set()).add(shard)
         config.stash[FILE_SHARDS] = {path: sorted(shards) for path, shards in owners.items()}
-        config.stash[FILE_SHARDS].update({path: [0] for path in pinned})
         known = {node.split("::", 1)[0] for node in measured}
-        files = {node.split("::", 1)[0] for node in parts[index - 1]} | (set(files) - known)
+        config.stash[FILE_SHARDS].update({path: [zlib.crc32(path.encode()) % shards] for path in set(files) - known})
+        config.stash[FILE_SHARDS].update({path: [0] for path in pinned})
+        files = {path for path in files if index - 1 in config.stash[FILE_SHARDS].get(path, ())}
         config.stash[SHARD_FILES] = frozenset(files) | (pinned if index == 1 else frozenset())
     return config.stash[SHARD_FILES]
 
 
 def pytest_configure(config):
+    # A cold import that a request thread interrupts drops redis.asyncio but keeps its submodules, breaking fakeredis.
+    importlib.import_module("redis.asyncio")
+    importlib.import_module("fakeredis")
     _reused(config)
     config.args.sort(key=lambda arg: (Path(arg.split("::", 1)[0]).parent.parts, arg))
     workers = getattr(config.option, "numprocesses", None)
@@ -518,6 +523,15 @@ def _swarm_tick_reaps_no_real_process(tmp_path, monkeypatch):
     from scripts.swarm import tick_reaper
 
     monkeypatch.setattr(tick_reaper, "PROC", tmp_path / "no-proc")
+
+
+@pytest.fixture(autouse=True)
+def _native_login_probe_runs_no_model(monkeypatch):
+    """The provider probe of a native login starts a real model turn; tests read it as accepted. Its own tests import
+    the real function at collection, before this stub applies."""
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(native_login, "rejected", lambda environ, account, run=None: False)
 
 
 @pytest.fixture(autouse=True)

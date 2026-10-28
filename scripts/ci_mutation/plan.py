@@ -92,9 +92,9 @@ def estimate(
                 raise SystemExit(f"{path}: not mutated, no matching or importing test modules")
             continue
         tests.update(chosen)
-        found, in_body = mutation_counts(path, (root / path).read_text(), lines)
-        if in_body and not found:
-            raise SystemExit(f"{path}: not mutated, changed function lines produce no mutants")
+        found, ungraded = mutation_counts(path, (root / path).read_text(), lines)
+        if ungraded:
+            raise SystemExit(f"{path}: not mutated, changed functions produce no mutants: {', '.join(ungraded)}")
         mutants += found
     return mutants * MUTANT_SECONDS, mutants, sorted(tests)
 

@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO
 
@@ -11,6 +12,10 @@ from scripts.github_app import REFUSED, GitAuthRefused, GitHubAppAuth
 
 _AUTH: GitHubAppAuth | None = None
 RENEW_SECONDS = 1800
+READ_RESERVE = 1000
+READ_VERBS = frozenset({"list", "view", "download", "checks", "diff", "status", "watch"})
+WRITE_FIELDS = ("-f", "-F", "--field", "--raw-field", "--input")
+LOCAL_GROUPS = frozenset({"alias", "auth", "completion", "config", "extension"})
 
 
 def token_file() -> Path:
@@ -74,6 +79,73 @@ def renew(last: float, now: float) -> float:
     return now
 
 
+def _method(arguments: list[str]) -> str | None:
+    for index, value in enumerate(arguments):
+        if value in ("-X", "--method"):
+            return arguments[index + 1] if index + 1 < len(arguments) else None
+        if value.startswith("--method="):
+            return value.removeprefix("--method=")
+        if value.startswith("-X"):
+            return value.removeprefix("-X")
+    return None
+
+
+def _api_read(arguments: list[str]) -> bool:
+    if "rate_limit" in arguments or "/rate_limit" in arguments:
+        return False
+    method = _method(arguments)
+    if method is not None:
+        return method.upper() == "GET"
+    if "graphql" in arguments:
+        return not any(
+            value.split("=", 1)[-1].lstrip().startswith(("mutation", "@")) or value.startswith("--input")
+            for value in arguments
+        )
+    return not any(value.startswith(WRITE_FIELDS) for value in arguments)
+
+
+def is_read(arguments: list[str]) -> bool:
+    if not arguments:
+        return False
+    if arguments[0] == "api":
+        return _api_read(arguments[1:])
+    if arguments[0] in LOCAL_GROUPS:
+        return False
+    return arguments[0] == "search" or (len(arguments) > 1 and arguments[1] in READ_VERBS)
+
+
+def budget(value: str) -> tuple[int, int, int] | None:
+    try:
+        reply = requests.get(
+            "https://api.github.com/rate_limit",
+            headers={"Authorization": f"Bearer {value}", "Accept": "application/vnd.github+json"},
+            timeout=10,
+        )
+        headers = reply.headers
+        return (
+            int(headers["X-RateLimit-Remaining"]),
+            int(headers["X-RateLimit-Limit"]),
+            int(headers["X-RateLimit-Reset"]),
+        )
+    except (requests.RequestException, KeyError, ValueError):
+        return None
+
+
+def reserve_refusal(command: list[str], value: str) -> str | None:
+    if Path(command[0]).name != "gh" or not is_read(command[1:]):
+        return None
+    found = budget(value)
+    reserve = int(os.environ.get("AGENTIHOOKS_GITHUB_READ_RESERVE") or READ_RESERVE)
+    if found is None or found[0] >= reserve:
+        return None
+    remaining, limit, reset = found
+    at = datetime.fromtimestamp(reset, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (
+        f"GitHub read refused: the shared App limit has {remaining} of {limit} calls left, below the reserve of "
+        f"{reserve} kept for launches, queueing and merges; reads resume after the reset at {at}"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Use GitHub App installation credentials without saving tokens")
     sub = parser.add_subparsers(dest="action", required=True)
@@ -83,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
     execute = sub.add_parser("exec", help="Refresh GitHub credentials and execute a process")
     execute.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    if args.action == "exec" and args.command[:1] == ["--"]:
+        args.command = args.command[1:]
     try:
         if args.action == "credential":
             return credential(args.operation, sys.stdin, sys.stdout)
@@ -91,7 +165,16 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if not args.command:
                 parser.error("exec requires a command")
-            os.execvpe(args.command[0], args.command, environment())
+            env = environment()
+            refusal = reserve_refusal(args.command, env["GH_TOKEN"])
+            if refusal:
+                print(refusal, file=sys.stderr)
+                return 3
+            try:
+                os.execvpe(args.command[0], args.command, env)
+            except OSError:
+                print("GitHub credential wrapper could not execute the command", file=sys.stderr)
+                return 127
         return 0
     except (OSError, KeyError, ValueError, GitAuthRefused, jwt.PyJWTError, requests.RequestException):
         print(REFUSED, file=sys.stderr)

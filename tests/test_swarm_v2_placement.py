@@ -212,7 +212,8 @@ class Launcher:
         return Outcome("spawn", self.status, BACKEND, placed, self.detail)
 
 
-def test_the_tick_runtime_sends_placed_spawns_through_the_distributed_launch():
+def test_the_tick_runtime_sends_placed_spawns_through_the_distributed_launch(monkeypatch):
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda *args: None)
     herdr, remote, launcher = Herdr(), Remote(), Launcher()
     runtime = routed({}, herdr, kubernetes=remote, launch=launcher)
     for lane, name, task in (
