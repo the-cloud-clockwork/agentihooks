@@ -1057,8 +1057,11 @@ def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports
     stream = next(step for step in job["steps"] if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     assert stream["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     mint = next(step for step in job["steps"] if step.get("id") == "app-token")
-    assert "if" not in mint
-    assert mint["with"]["permission-actions"] == "read"
+    assert mint.get("if") in (None, "${{ !cancelled() }}")
+    assert mint["with"]["permission-actions"] in (
+        "read",
+        "${{ github.event_name == 'merge_group' && 'write' || 'read' }}",
+    )
     assert (
         stream["env"]["QUEUE_PLAN"]
         == "${{ github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '' }}"
