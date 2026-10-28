@@ -41,7 +41,7 @@ OUTAGE_SIGNS = (
     "Failed to download archive",
     "lost communication with the server",
     "The operation was canceled",
-    *(f"The requested URL returned error: {code}" for code in (408, 500, 502, 503, 504)),
+    *(f"The requested URL returned error: {code}" for code in (408, 502, 503, 504)),
     "this is not a code verdict",
 )
 SETUP_STEP = "Set up job"
@@ -264,8 +264,11 @@ def _held_causes(redis, slug: str, doc: dict) -> set[str]:
 def _red(slug, store, ledger, doc, last, causes, repo):
     redis, run_id, sha, url = store.redis, last["id"], last["head_sha"], last["html_url"]
     held, present = _held_causes(redis, slug, doc), {t["id"] for t in doc.get("tasks", [])}
+    alerted = bool(_live_alerts(doc))
     for previous in promotion_owner.history(repo, redis) - {slug}:
-        held.update(_held_causes(redis, previous, ledger.state(previous)))
+        state = ledger.state(previous)
+        held.update(_held_causes(redis, previous, state))
+        alerted = alerted or bool(_live_alerts(state))
     lane, actions, new = "", [], []
     outage = [(OUTAGE, why) for job, why in causes if job == OUTAGE]
     for n, (job, why) in enumerate(causes):
@@ -284,7 +287,7 @@ def _red(slug, store, ledger, doc, last, causes, repo):
         ledger.add_task(slug, {**fields, "description": description, "not_duplicate": NOT_DUPLICATE}, SENDER)
         actions.append(f"filed {task_id} for the failed dev job {job}")
         new.append((task_id, why))
-    if new or not _live_alerts(doc):
+    if new or not alerted:
         named = [why.removesuffix(": ").removesuffix(".") for _, why in outage + new] or [job for job, _ in causes]
         actions += _alert(slug, ledger, doc, last, named)
     if new:

@@ -869,6 +869,15 @@ def test_a_live_outage_alert_stays_quiet_through_a_later_outage_and_a_green_run_
     assert ledger.alerts[0]["state"] == "done"
 
 
+def test_an_outage_stays_quiet_while_a_former_owner_holds_a_live_promotion_alert(store, monkeypatch):
+    former = Ledger(alerts=[{"id": "al-0", "source": "promotion", "text": "red", "state": "open"}])
+    ledger = Ledger()
+    ledger.state = lambda slug: former.doc()
+    monkeypatch.setattr(promotion_watch.promotion_owner, "history", lambda repo, redis: {SLUG, "former"})
+    refresh(store, ledger, outage_run([("unit (3.11, 1)", RAN, DOWNLOAD)]))
+    assert (ledger.added, ledger.raised) == ([], [])
+
+
 UPLOADED = [*RAN, {"name": "Upload durations", "conclusion": "failure"}]
 LOST_SHARDS = [
     "unit (3.11, 1)",

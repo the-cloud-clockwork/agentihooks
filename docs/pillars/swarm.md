@@ -2315,7 +2315,7 @@ exit code 1.` and empty messages. The job failed on infrastructure when any of t
 | The cause contains `Failed to download action` or `Failed to download archive` | `Failed to download archive after 3 attempts.` |
 | The cause contains `lost communication with the server` | `The self-hosted runner: anton-x lost communication with the server.` |
 | The cause contains `The operation was canceled` | A spot drain or node loss stopped the job |
-| The cause contains `The requested URL returned error: ` with 408, 500, 502, 503 or 504 | `RPC failed; HTTP 408 curl 22 The requested URL returned error: 408` on checkout |
+| The cause contains `The requested URL returned error: ` with 408, 502, 503 or 504 | `RPC failed; HTTP 408 curl 22 The requested URL returned error: 408` on checkout |
 | The cause contains `this is not a code verdict` | The Sonar or PyPI retry script gave up on a server that did not answer |
 | The `Set up job` step failed or timed out | The runner died before any workflow step ran |
 | The job has a `Run tests` step that neither passed nor failed, and no step of the job failed | `Run tests` ends `skipped`, `cancelled` or with no conclusion |
