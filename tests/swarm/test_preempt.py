@@ -99,12 +99,15 @@ def refuse(store, task, seen_at, lane="eng"):
 
 
 def test_an_urgent_task_that_placement_refuses_asks_nobody_to_hand_off(store):
+    from scripts.hive import placement_waits
+
     refuse(store, "t3", 1)
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
     assert preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2) == []
-    assert preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2 + 3 * preempt.ANSWER_MS) == []
+    assert preempt.step(SLUG, store, ROWS, doc(), full("t3"), placement_waits.WAIT_MS) == []
     assert asks(store, "e1") == asks(store, "e2") == []
     assert store.redis.smembers(store.key(SLUG, preempt.WAITING)) == {"t3"}
+    assert len(preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1 + placement_waits.WAIT_MS)) == 1
 
 
 def test_a_placement_refusal_in_another_lane_still_asks_and_names_the_victim(store):

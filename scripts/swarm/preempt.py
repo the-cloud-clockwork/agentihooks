@@ -88,7 +88,7 @@ def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> li
             waiting.add(task["id"])
             if task["id"] not in seen or _pending(asked, task["id"], now_ms):
                 continue
-            if refused.get(task["id"], {}).get("lane") == lane:
+            if _refused(refused.get(task["id"]), lane, now_ms):
                 continue
             victim = _victim([a for a in holders if a.name not in asked], rows, doc, graph)
             if victim is not None:
@@ -105,6 +105,12 @@ def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> li
 
 def _pending(asked: dict, task_id: str, now_ms: int) -> bool:
     return any(target == task_id and now_ms - at < ANSWER_MS for target, at in map(json.loads, asked.values()))
+
+
+def _refused(wait, lane, now_ms):
+    from scripts.hive import placement_waits
+
+    return wait is not None and wait["lane"] == lane and now_ms - wait["seen_at"] < placement_waits.WAIT_MS
 
 
 def preempted(store, slug: str, name: str) -> bool:
