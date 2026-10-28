@@ -55,9 +55,14 @@ def mutant_identity(original: str, mutated: str) -> str:
     for tag, first, last, low, high in SequenceMatcher(a=before, b=after, autojunk=False).get_opcodes():
         if tag != "equal":
             removed = before[first:last]
-            repeat = sum(before[index : index + len(removed)] == removed for index in range(first))
+            anchor = removed or before[first - 1 : first]
+            start = first - len(anchor) + len(removed)
+            repeat = sum(before[index : index + len(anchor)] == anchor for index in range(start))
+            mark = "-" if removed else " "
             hunks.append(
-                "\n".join([str(repeat)] + [f"-{line}" for line in removed] + [f"+{line}" for line in after[low:high]])
+                "\n".join(
+                    [str(repeat), *(f"{mark}{line}" for line in anchor), *(f"+{line}" for line in after[low:high])]
+                )
             )
     return hashlib.sha256("\0".join(hunks).encode()).hexdigest()
 

@@ -191,6 +191,13 @@ def test_clearance_keeps_its_identity_across_an_unrelated_argument_edit(tmp_path
     second = mutant_identity(repeated, "def f(x):\n    if x > 0:\n        return 1\n    if x >= 0:\n        return 2")
     assert first == hashlib.sha256(b"0\n-    if x > 0:\n+    if x >= 0:").hexdigest()
     assert second == hashlib.sha256(b"1\n-    if x > 0:\n+    if x >= 0:").hexdigest()
+    inserted = mutant_identity("def f(x):\n    a = 1\n    return x", "def f(x):\n    a = 1\n    pass\n    return x")
+    assert inserted == hashlib.sha256(b"0\n     a = 1\n+    pass").hexdigest()
+    shifted = "def f(x):\n    b = 2\n    a = 1\n    return x"
+    assert mutant_identity(shifted, "def f(x):\n    b = 2\n    a = 1\n    pass\n    return x") == inserted
+    doubled = "def f(x):\n    a = 1\n    a = 1\n    return x"
+    later = mutant_identity(doubled, "def f(x):\n    a = 1\n    a = 1\n    pass\n    return x")
+    assert later == hashlib.sha256(b"1\n     a = 1\n+    pass").hexdigest()
     assert survivor["fingerprint"] != moved["fingerprint"]
     key = clearance_key("hooks/sample.py", survivor)
     assert key == f"hooks/sample.py:hooks.sample.x_value:{survivor['identity']}"
