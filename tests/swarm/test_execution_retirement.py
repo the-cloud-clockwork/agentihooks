@@ -73,7 +73,14 @@ def test_drop_preserves_history_and_clears_all_agent_indexes(store, state, hando
         store.drop_agent("fixture", agent.name)
     assert store.execution("fixture", agent.execution_id).state == terminal
     assert [json.loads(raw) for raw in store.redis.lrange(store.key("fixture", "history"), 0, -1)] == [
-        {**previous, "ended_at": 1234, "reason": reason}
+        {
+            **previous,
+            "execution_id": agent.execution_id,
+            "hive": agent.hive,
+            "runtime_backend": agent.runtime_backend,
+            "ended_at": 1234,
+            "reason": reason,
+        }
     ]
     for part in ("agents", "desired-routes", "state-since", "retire-failures"):
         assert not store.redis.hexists(store.key("fixture", part), agent.name)
