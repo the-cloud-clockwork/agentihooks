@@ -18,7 +18,7 @@ def api(endpoint: str, *, binary: bool = False) -> list | bytes:
         try:
             result = gh_api(command, timeout=60)
             return result.stdout if binary else json.loads(result.stdout)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, UnicodeDecodeError):
             if delay is None:
                 raise
             time.sleep(delay)
