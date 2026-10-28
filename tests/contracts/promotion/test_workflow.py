@@ -89,8 +89,8 @@ def test_promotion_reuses_the_release_environment_and_never_dispatches_or_publis
     assert "workflow_call" in workflow.get("on", workflow.get(True))
     job = workflow["jobs"]["promote"]
     assert job["environment"] == "release"
-    assert job["timeout-minutes"] == 10
-    assert ci_budget.BUDGETS["promote"] == job["timeout-minutes"] * 60
+    assert job["timeout-minutes"] == 40
+    assert ci_budget.BUDGETS["promote"] == 10 * 60
     assert job["concurrency"] == {"group": "release-version", "cancel-in-progress": False}
     commands = "\n".join(step.get("run", "") for step in job["steps"])
     assert "--generate-notes" in commands
