@@ -266,8 +266,8 @@ def _delivered_event(
 
 
 @_best_effort
-def search(session: str, tool_name: str, response) -> None:
-    server, _, name = tool_name.rpartition("__")
+def search(payload: dict) -> None:
+    server, _, name = str(payload.get("tool_name")).rpartition("__")
     if not server.startswith("mcp__") or name not in SEARCH_TOOLS:
         return
     from hooks.context import task_context
@@ -275,6 +275,8 @@ def search(session: str, tool_name: str, response) -> None:
     task = os.environ.get("AGENTIHOOKS_SWARM_TASK")
     if not (os.environ.get("AGENTIHOOKS_SWARM") and task):
         return
+    session = payload["session_id"]
+    response = payload.get("tool_response", payload.get("tool_output"))
     text = response if isinstance(response, str) else json.dumps(response)
     _delivered_event(
         session,

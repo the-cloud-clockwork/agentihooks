@@ -582,6 +582,14 @@ def test_a_runtime_namespace_uses_verified_project_and_selected_brain(monkeypatc
     assert actual == replace(namespace, project="verified-project" if resolved else "unknown")
 
 
+def post_tool_use(monkeypatch, payload):
+    from hooks import hook_manager
+    from hooks.context import swarm_heartbeat
+
+    monkeypatch.setattr(swarm_heartbeat, "outcome", lambda payload: None)
+    hook_manager._swarm_outcome(payload)
+
+
 @pytest.mark.parametrize(
     "tool,response,retrieval",
     [
@@ -590,17 +598,16 @@ def test_a_runtime_namespace_uses_verified_project_and_selected_brain(monkeypatc
         ("mcp__agentibrain__kb_brief", "", "empty"),
     ],
 )
-def test_a_brain_search_through_the_hook_records_one_search_observation(world, tool, response, retrieval):
-    from hooks import hook_manager
-
+def test_a_brain_search_through_the_hook_records_one_search_observation(world, monkeypatch, tool, response, retrieval):
     metrics, grant, _, _, _, _ = world
-    hook_manager._brain_search(
+    post_tool_use(
+        monkeypatch,
         {
             "session_id": grant.principal,
             "tool_name": tool,
             "tool_input": {"query": "private prompt words"},
             "tool_response": response,
-        }
+        },
     )
     rows = metrics.events(grant)
     assert len(rows) == 1
@@ -622,20 +629,16 @@ def test_a_brain_search_through_the_hook_records_one_search_observation(world, t
 @pytest.mark.parametrize(
     "tool", ["Bash", "mcp__agentihooks__recall_search", "kb_search", "mcp__agentibrain__kb_search_extra"]
 )
-def test_b_other_tools_record_no_search_observation(world, tool):
-    from hooks import hook_manager
-
+def test_b_other_tools_record_no_search_observation(world, monkeypatch, tool):
     metrics, grant, _, _, _, _ = world
-    hook_manager._brain_search({"session_id": grant.principal, "tool_name": tool, "tool_response": "result"})
+    post_tool_use(monkeypatch, {"session_id": grant.principal, "tool_name": tool, "tool_response": "result"})
     assert metrics.events(grant) == []
 
 
-def test_a_search_reads_tool_output_when_the_target_sends_no_tool_response(world):
-    from hooks import hook_manager
-
+def test_a_search_reads_tool_output_when_the_target_sends_no_tool_response(world, monkeypatch):
     metrics, grant, _, _, _, _ = world
-    hook_manager._brain_search(
-        {"session_id": grant.principal, "tool_name": "mcp__agentibrain__kb_search", "tool_output": "four"}
+    post_tool_use(
+        monkeypatch, {"session_id": grant.principal, "tool_name": "mcp__agentibrain__kb_search", "tool_output": "four"}
     )
     assert [(row["purpose"], row["pack_bytes"]) for row in metrics.events(grant)] == [("search", 4)]
 
@@ -643,7 +646,9 @@ def test_a_search_reads_tool_output_when_the_target_sends_no_tool_response(world
 def test_b_search_outside_a_swarm_task_records_nothing(world, monkeypatch):
     metrics, grant, _, _, _, _ = world
     monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK")
-    consultation.search(grant.principal, "mcp__agentibrain__kb_search", "result")
+    consultation.search(
+        {"session_id": grant.principal, "tool_name": "mcp__agentibrain__kb_search", "tool_response": "result"}
+    )
     assert metrics.events(grant) == []
 
 

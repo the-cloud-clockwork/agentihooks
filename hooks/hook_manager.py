@@ -1163,7 +1163,9 @@ def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None
 def _swarm_outcome(payload: dict) -> None:
     try:
         from hooks.context.swarm_heartbeat import outcome
+        from hooks.observability.consultation import search
 
+        search(payload)
         outcome(payload)
     except Exception as e:
         log("swarm outcome record failed", {"error": str(e)})
@@ -1208,7 +1210,6 @@ def _swarm_after_tool(payload: dict) -> None:
     _swarm_tool_end(payload)
     _hive_join(payload, "tool")
     _swarm_ledger(payload)
-    _brain_search(payload)
 
 
 def _swarm_tool_end(payload: dict) -> None:
@@ -1216,16 +1217,6 @@ def _swarm_tool_end(payload: dict) -> None:
     from scripts.swarm.health.activity import finish
 
     finish(call_id=payload.get("tool_use_id") or "")
-
-
-def _brain_search(payload: dict) -> None:
-    from hooks.observability import consultation
-
-    consultation.search(
-        payload.get("session_id", ""),
-        payload.get("tool_name", ""),
-        payload.get("tool_response", payload.get("tool_output")),
-    )
 
 
 def _operator_words(payload: dict) -> bool:
