@@ -372,13 +372,18 @@ def test_a_working_heartbeat_keeps_a_failed_launch(store, monkeypatch, scratch, 
     report = launch_check.report(store, "sw", "t1")
     assert report["state"] == "failed"
     assert report["held"] is True
-    assert report["misses"]["profile"] == {"expected": "engineer", "actual": "anton"}
+    expected = (
+        {"hive_join": {"expected": "session join report", "actual": "missing"}}
+        if hive
+        else {"profile": {"expected": "engineer", "actual": "anton"}}
+    )
+    assert report["misses"] == expected
     assert report["at"] == now
 
 
-@pytest.mark.parametrize("hive", ["", "remote"])
+@pytest.mark.parametrize("hive,relaunch", [("", True), ("remote", True), ("remote", False)])
 @pytest.mark.parametrize("state,age", [(None, 0), ("idle", 0), ("working", 20 * 60_000)])
-def test_an_idle_or_stale_heartbeat_does_not_keep_a_failed_launch(store, monkeypatch, scratch, hive, state, age):
+def test_an_idle_or_stale_heartbeat_does_not_keep_a_failed_launch(store, monkeypatch, scratch, hive, relaunch, state, age):
     from scripts.swarm import idle
 
     scratch("t1")
@@ -388,6 +393,7 @@ def test_an_idle_or_stale_heartbeat_does_not_keep_a_failed_launch(store, monkeyp
     agent = store.agents("sw")[0]
     monkeypatch.setattr("scripts.swarm.tick.reports.host", lambda observed: hive if observed.name == agent.name else "")
     joined(ledger, runtime, LAUNCH + 1)
+    launch_check.begin(store, "sw", agent, LAUNCH, relaunch=relaunch)
     runtime.statuses[agent.name] = "idle"
     now = LAUNCH + idle.STALE_MS + launch_check.DEADLINE_MS
     if state is not None:
@@ -396,7 +402,8 @@ def test_an_idle_or_stale_heartbeat_does_not_keep_a_failed_launch(store, monkeyp
     actions = tick("sw", store, ledger, runtime, now)
 
     assert agent.name in runtime.killed
-    reason = "hive join failed" if hive else "launch check failed on profile"
+    field = "hive_join" if hive else "profile"
+    reason = "hive join failed" if hive and not relaunch else f"launch check failed on {field}"
     assert any(action.startswith(f"retired {agent.name} after its {reason}") for action in actions)
 
 
