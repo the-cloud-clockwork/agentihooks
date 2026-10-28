@@ -62,6 +62,33 @@ def test_reusing_every_test_with_no_change_keeps_the_dev_arcs_exactly(tmp_path):
     assert _arcs(out) == _arcs(source)
 
 
+def test_files_only_executed_by_changed_tests_do_not_break_the_carried_coverage_merge(tmp_path):
+    from coverage import Coverage
+
+    kept = str(tmp_path / "kept.py")
+    missing = str(tmp_path / "sample.py")
+    Path(kept).write_text("value = 1\n")
+    for arcs in (True, False):
+        source = tmp_path / f"source-{arcs}.coverage"
+        data = CoverageData(basename=str(source))
+        record = data.add_arcs if arcs else data.add_lines
+        data.set_context("tests/test_a.py::kept|run")
+        record({kept: [(-1, 1), (1, -1)] if arcs else [1]})
+        data.set_context("tests/test_a.py::changed|run")
+        record({missing: [(-1, 1), (1, -1)] if arcs else [1]})
+        data.write()
+        out = tmp_path / f"carry-{arcs}" / ".coverage"
+
+        assert reused_coverage.keep(source, out, {"tests/test_a.py::kept"}, {}) == 1
+        merged = Coverage(data_file=str(tmp_path / f"merged-{arcs}.coverage"))
+        merged.combine(data_paths=[str(out.parent)], keep=True)
+        merged.xml_report(outfile=str(tmp_path / f"coverage-{arcs}.xml"))
+        assert merged.get_data().measured_files() == {kept}
+        assert merged.get_data().measured_contexts() == {"tests/test_a.py::kept|run"}
+        data.read()
+        assert data.measured_files() == {kept, missing}
+
+
 def test_the_command_remaps_files_changed_since_the_dev_commit(tmp_path):
     repo = tmp_path / "repo"
     (repo / "hooks").mkdir(parents=True)
