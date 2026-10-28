@@ -98,6 +98,7 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:dev-red",
                     f"~{ROOT}:swarm:*:prerequisite-waits",
                     f"~{ROOT}:swarm:*:stage-covers",
+                    f"~{ROOT}:swarm:*:gate-lifts:tasks:*",
                     f"~{ROOT}:seat:*:recaps",
                     f"~{ROOT}:seat:*:learned",
                     f"~{ROOT}:seat-of:*:exit",
@@ -158,6 +159,8 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("swarm:proof:dev-red", True),
         ("swarm:proof:prerequisite-waits", True),
         ("swarm:proof:stage-covers", True),
+        ("swarm:proof:gate-lifts:tasks:t1", True),
+        ("swarm:proof:gate-lifts:agents:engineer@0001-0001", False),
         ("swarm:proof:execution-publishing", True),
         ("swarm:proof:codex-transport", True),
         ("swarm:proof:codex-endpoints", True),
@@ -589,3 +592,30 @@ def test_a_member_credential_runs_a_checked_wait_and_a_cover_and_no_other_writes
     for forbidden in (f"{ROOT}:hive:m2:swarm:proof:wait:{agent.name}", swarm.key("proof", "config")):
         with pytest.raises(NoPermissionError):
             member.set(forbidden, "write")
+
+
+def test_a_member_credential_drops_its_task_gate_lifts_on_swarm_pr_and_writes_no_agent_lift():
+    import fakeredis
+    from redis.exceptions import NoPermissionError
+
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    admin.acl_setuser(
+        "hive-m1",
+        enabled=True,
+        nopass=True,
+        categories=auth.ACL_CATEGORIES,
+        keys=auth._acl_keys("m1"),
+        channels=auth.ACL_PATTERNS,
+    )
+    member = fakeredis.FakeRedis(server=server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    swarm = store.RedisStore(member)
+    tasks = swarm.key("proof", "gate-lifts", "tasks", "t1")
+    admin.hset(tasks, "intent", "{}")
+
+    swarm.drop_task_lifts("proof", "t1")
+
+    assert not admin.exists(tasks)
+    with pytest.raises(NoPermissionError):
+        swarm.put_gate_lift("proof", "agents", "engineer@0001-0001", "intent", {})

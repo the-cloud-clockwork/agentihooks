@@ -430,6 +430,10 @@ def _raising(error):
         (_raising(http_error(codex_refresh.TOKEN_URL, 401, b'{"error": "invalid_grant"}')), "HTTP 401 invalid_grant"),
         (_raising(http_error(codex_refresh.TOKEN_URL, 400, b"")), "HTTP 400 with no OAuth error"),
         (_raising(http_error(codex_refresh.TOKEN_URL, 400, b'{"error": {"code": 1}}')), "HTTP 400 with no OAuth error"),
+        (
+            _raising(http_error(codex_refresh.TOKEN_URL, 401, b'{"error": {"code": "refresh_token_reused"}}')),
+            "HTTP 401 refresh_token_reused",
+        ),
         (_raising(urllib.error.URLError("timed out")), "unreachable: timed out"),
         (_raising(OSError("network down")), "unreachable: network down"),
         (lambda request, timeout=None: io.BytesIO(b"<html>"), "unreachable: Expecting value: line 1 column 1 (char 0)"),
