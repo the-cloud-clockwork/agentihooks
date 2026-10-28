@@ -89,9 +89,10 @@ def _interval_ms(environ):
 
 
 def _claim_interval(slug, store, now_ms, environ):
+    every_ms = _interval_ms(environ)
     claims = state.for_store(store, BUCKET, environ)
     entry = claims.get(slug)
-    if entry is not None and int(entry.value or 0) + _interval_ms(environ) > now_ms:
+    if entry is not None and int(entry.value or 0) + every_ms > now_ms:
         return False
     try:
         if entry is None:
