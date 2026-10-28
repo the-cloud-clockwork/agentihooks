@@ -130,7 +130,7 @@ async function reopenLedger(b) {
 
 function notice(text, actions = []) {
   const box = document.getElementById("notice");
-  box.replaceChildren(h("span", { text }));
+  box.replaceChildren(...(text ? [h("span", { text })] : []));
   for (const [label, run] of actions) {
     const button = h("button", { type: "button", class: "act", text: label });
     button.addEventListener("click", async () => {
