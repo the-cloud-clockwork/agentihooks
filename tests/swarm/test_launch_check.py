@@ -364,7 +364,8 @@ def test_a_working_heartbeat_keeps_a_failed_launch(store, monkeypatch, scratch, 
 
     assert agent.name not in runtime.killed
     assert len(runtime.spawned) == 1
-    assert any("reported only" in action and agent.name in action for action in actions)
+    field = "hive_join" if hive else "profile"
+    assert f"{agent.name} failed its launch check on {field}; reported only while working" in actions
     assert store.agents("sw")[0].name == agent.name
     assert ledger.rows["t1"]["claimed_by"] == agent.name
     assert launch_check.pending(store, "sw") == {}
@@ -383,7 +384,9 @@ def test_a_working_heartbeat_keeps_a_failed_launch(store, monkeypatch, scratch, 
 
 @pytest.mark.parametrize("hive,relaunch", [("", True), ("remote", True), ("remote", False)])
 @pytest.mark.parametrize("state,age", [(None, 0), ("idle", 0), ("working", 20 * 60_000)])
-def test_an_idle_or_stale_heartbeat_does_not_keep_a_failed_launch(store, monkeypatch, scratch, hive, relaunch, state, age):
+def test_an_idle_or_stale_heartbeat_does_not_keep_a_failed_launch(
+    store, monkeypatch, scratch, hive, relaunch, state, age
+):
     from scripts.swarm import idle
 
     scratch("t1")
