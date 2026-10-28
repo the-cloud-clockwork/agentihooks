@@ -92,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("changelog", type=Path)
     parser.add_argument("--days", type=int, default=DAYS)
     parser.add_argument("--dev", default="origin/dev")
+    parser.add_argument("--sections", type=Path)
     args = parser.parse_args(argv)
     repository = os.environ["GITHUB_REPOSITORY"]
     since = (date.today() - timedelta(days=args.days)).isoformat()
@@ -113,6 +114,10 @@ def main(argv: list[str] | None = None) -> int:
         repository,
     )
     args.changelog.write_text(merge_changelog(existing, sections))
+    if args.sections:
+        args.sections.mkdir(parents=True, exist_ok=True)
+        for section in sections:
+            (args.sections / f"{section.split()[1]}.md").write_text(section)
     changes = [c for _, kept in releases for c in kept]
     pulls = sum(c.number is not None for c in changes)
     until = commit_field(release_revision(releases[0][0], trees), "%cI")

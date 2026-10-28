@@ -186,8 +186,11 @@ def test_main_seeds_the_window_and_reports_matching_counts(repo, monkeypatch, tm
     windows = []
     monkeypatch.setattr(seed, "merged_count", lambda *a: windows.append(a) or 1)
     changelog = tmp_path / "RELEASES.md"
-    assert seed.main([str(changelog), "--dev", "dev"]) == 0
+    sections = tmp_path / "sections"
+    assert seed.main([str(changelog), "--dev", "dev", "--sections", str(sections)]) == 0
     text = changelog.read_text()
+    assert [path.name for path in sections.iterdir()] == ["v1.0.2.md"]
+    assert rc.insert_release("", (sections / "v1.0.2.md").read_text()) == text
     assert text.startswith(f"{rc.TITLE}\n\n{rc.INTRO}\n\n## v1.0.2 · 2026-10-20\n\n")
     assert f"· {graded[:12]} · #5 · @dev\n\n**Add the seed**\n\n{_words(30)}\n" in text
     assert "· direct commit · @a\n\n**Direct fix**" in text

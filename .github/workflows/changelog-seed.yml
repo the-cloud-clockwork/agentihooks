@@ -50,24 +50,32 @@ jobs:
           DAYS: ${{ inputs.days }}
         shell: bash
         run: |
-          python -m scripts.release_changelog_seed "$RUNNER_TEMP/changelog/RELEASES.md" --days "$DAYS" | tee -a "$GITHUB_STEP_SUMMARY"
+          python -m scripts.release_changelog_seed "$RUNNER_TEMP/changelog/RELEASES.md" --days "$DAYS" --sections "$RUNNER_TEMP/sections" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Publish the seeded changelog
         working-directory: ${{ runner.temp }}/changelog
         env:
           DAYS: ${{ inputs.days }}
+          PYTHONPATH: ${{ github.workspace }}
         run: |
-          git add RELEASES.md
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -m "Seed the release changelog with the last $DAYS days of merges into dev"
           for attempt in 1 2 3 4 5; do
+            rm -f RELEASES.md
+            if git fetch origin changelog; then
+              git switch --detach --discard-changes FETCH_HEAD
+            fi
+            touch RELEASES.md
+            for section in "$RUNNER_TEMP"/sections/*.md; do
+              [[ -e "$section" ]] || exit 0
+              python -m scripts.release_changelog insert "$section" RELEASES.md
+            done
+            git add RELEASES.md
+            if git diff --cached --quiet; then
+              exit 0
+            fi
+            git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -m "Seed the release changelog with the last $DAYS days of merges into dev"
             if git push origin HEAD:refs/heads/changelog; then
               exit 0
             fi
             sleep $((attempt * 5))
-            git fetch origin changelog
-            git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com rebase origin/changelog
           done
           exit 1
