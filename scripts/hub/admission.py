@@ -2,7 +2,7 @@
 or occupy a seat, and a remote hive makes no service ledger reads."""
 
 import json
-import logging
+import sys
 from types import SimpleNamespace
 
 from scripts.hub import lease
@@ -48,7 +48,7 @@ class Admission:
         from scripts.swarm import tick
 
         if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
-            logging.getLogger(__name__).warning("events claim cap swarm=%s task=%s: %s", slug, task_id, reason)
+            print(f"hub: events claim cap swarm={slug} task={task_id}: {reason}", file=sys.stderr)
             return None
         return self._claim(slug, request, view.rows[task_id])
 
