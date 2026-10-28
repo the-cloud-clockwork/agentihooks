@@ -44,14 +44,14 @@ def resolve(profile):
     return Resolved(profile, role, KINDS[role])
 
 
-def up(store, slug, runtime, profile, at):
+def up(store, slug, runtime, profile, at, agent=""):
     found = resolve(profile)
     config = store.ensure_code(slug)
     name = store.next_name(slug, found.lane, at)
     store.names.note(name, operator=found.profile)
     text = prompt.build_operator(slug, config.repo, name, found.role, found.profile)
     try:
-        placed = runtime.operator(config, name, found.profile, text)
+        placed = runtime.operator(config, name, found.profile, text, agent)
     except Exception as exc:
         store.names.retire(name, at)
         raise SwarmError(f"{name} could not start: {exc}") from exc

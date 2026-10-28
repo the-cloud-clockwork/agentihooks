@@ -16,7 +16,7 @@ agentihooks swarm <id> master move --to HIVE                      order the live
 agentihooks swarm <id> set master-move-grace=SECONDS              how long a quiet master hive may stay quiet before the master moves (default 300)
 agentihooks swarm <id> set hive-placement=on|off                  place this swarm's work on hives while a local machine stays local
 agentihooks swarm <id> set local-max-agents=N                     with hive placement on, workers no hive takes run locally below N (default 8)
-agentihooks swarm <id> <profile> up                               from a terminal: any role or overlay profile (planner, engineer, cicd, qa, frontend) in a pane for you, no task
+agentihooks swarm <id> <profile> up [--agent claude|codex]        from a terminal: any role or overlay profile (planner, engineer, cicd, qa, frontend) in a pane for you, no task; default the harness of the next open seat
 agentihooks swarm <id> agent-up <profile>                         the same launch in its parser form
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
@@ -67,6 +67,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from hooks.context import injection_trace, quarantine
+from scripts import agent_choice
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, lift, modes, progress, quiet
 from scripts.gates import log as gate_log
@@ -946,7 +947,7 @@ def cmd_master(store, args):
 
 
 def cmd_agent_up(store, args):
-    launched = agent_up.up(store, args.slug, HerdrRuntime(), args.profile, now_ms())
+    launched = agent_up.up(store, args.slug, HerdrRuntime(), args.profile, now_ms(), args.agent)
     print(json.dumps(asdict(launched)))
 
 
@@ -2322,7 +2323,9 @@ def build_parser():
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
     pick.add_argument("--replace", dest="choice", action="store_const", const=master_launch.REPLACE)
-    sub.add_parser("agent-up").add_argument("profile")
+    agent_up_parser = sub.add_parser("agent-up")
+    agent_up_parser.add_argument("profile")
+    agent_up_parser.add_argument("--agent", choices=agent_choice.AGENTS, default="")
     sub.add_parser("exit")
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
@@ -2490,8 +2493,8 @@ def dispatch(argv):
             "autonomy",
         ):
             argv = [argv[0], "set", *argv[1:]]
-        elif len(argv) == 3 and argv[2] == "up" and argv[1] != "master":
-            argv = [argv[0], "agent-up", argv[1]]
+        elif len(argv) >= 3 and argv[2] == "up" and argv[1] != "master":
+            argv = [argv[0], "agent-up", argv[1], *argv[3:]]
         args = build_parser().parse_args(argv)
         handler = vars(args).get("handler") or globals()[f"cmd_{args.command.replace('-', '_')}"]
     who = Who.from_env()
