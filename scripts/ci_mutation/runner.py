@@ -144,8 +144,21 @@ def fixture_candidates(root: Path, work: Path, literal: str) -> list[Path]:
     return list(root.glob(literal))
 
 
+def imported_test_modules(root: Path, source: Path) -> set[Path]:
+    if not source.is_file():
+        return set()
+    modules = {
+        node.module
+        for node in ast.walk(ast.parse(source.read_text()))
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] == "tests"
+    }
+    return {root / Path(*module.split(".")).with_suffix(".py") for module in modules}
+
+
 def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
     sources = {root / test.split("::")[0] for test in tests}
+    for source in tuple(sources):
+        sources.update(imported_test_modules(root, source))
     for source in tuple(sources):
         sources.update(parent / "conftest.py" for parent in source.parents if parent.is_relative_to(root))
     tracked = (

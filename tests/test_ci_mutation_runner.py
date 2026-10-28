@@ -565,6 +565,26 @@ def test_workspace_discovers_inputs_read_by_a_parent_conftest(tmp_path):
     assert (work / "records/input.json").read_text() == "fixture"
 
 
+def test_workspace_discovers_inputs_read_by_an_imported_test_helper(tmp_path):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests/nested").mkdir(parents=True)
+    (root / "deploy/worker").mkdir(parents=True)
+    (root / "deploy/worker/start.sh").write_text("fixture")
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "tests/nested/helper.py").write_text(
+        'from pathlib import Path\nSTART = Path(__file__).resolve().parents[2] / "deploy/worker/start.sh"\n'
+    )
+    (root / "tests/nested/test_selected.py").write_text(
+        "from tests.nested.helper import START\n\ndef test_selected():\n    START.read_text()\n"
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/nested/test_selected.py::test_selected"])
+    assert (work / "deploy/worker/start.sh").read_text() == "fixture"
+
+
 def test_workspace_does_not_copy_inputs_referenced_through_repository_parent_traversal(tmp_path):
     from scripts.ci_mutation.runner import prepare_workspace
 
