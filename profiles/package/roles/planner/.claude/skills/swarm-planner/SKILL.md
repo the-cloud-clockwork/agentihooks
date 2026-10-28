@@ -84,7 +84,8 @@ never in harness project memory.
 5. Work outside the phase is a follow up:
    `agentihooks ledger --slug <slug> --as <name> followup add "<text>"`.
 6. A task or follow up add may be refused as a duplicate. The refusal names the
-   item it repeats with its state, rank and phase; that item will be built, so
+   item it repeats with its state, rank and phase, or only its title when that
+   item landed while the check ran. It will be built or is already built, so
    drop the add. Only when the new item is a different change, repeat the add
    with `--not-duplicate "<why it differs>"`. Done when every add landed or was
    dropped as a repeat.

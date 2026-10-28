@@ -155,8 +155,9 @@ contract either. The ledger refuses `done` on a
 task beyond code until its agent posts the proof its kind needs.
 
 A task, follow up or phase add that repeats an item already on the ledger is
-refused. The refusal names that item with its state, rank and phase, and says
-it will be built or is already built: drop the add. Only when the new item is a
+refused. The refusal names that item with its state, rank and phase, or only
+its title when that item landed while the check ran. That item will be built
+or is already built: drop the add. Only when the new item is a
 different change, repeat it with `--not-duplicate "<why it differs>"`, or give
 the phase a `not_duplicate` reason in `plan phases`.
 
