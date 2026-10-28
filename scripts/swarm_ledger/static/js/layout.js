@@ -285,7 +285,11 @@ export function startLayout() {
 export function wireRail() {
   const rail = $("icon-strip");
   const railButtons = ["home", "art-fab", "bell", "alert-fab", "to-top", "sync"].map($);
-  for (const btn of railButtons) rail.append(btn);
+  const placeRail = () => {
+    for (const btn of railButtons) rail.append(btn);
+  };
+  placeRail();
+  window.addEventListener("resize", placeRail);
   const stripPanels = [[$("notif"), $("bell"), showNotifications], [$("alert-panel"), $("alert-fab"), showAlerts], [$("art-panel"), $("art-fab"), showArtifacts]];
   const anchorOpen = () => { for (const [panel, icon] of stripPanels) if (!panel.hidden) anchorPanel(panel, icon); };
   new ResizeObserver(anchorOpen).observe(rail);

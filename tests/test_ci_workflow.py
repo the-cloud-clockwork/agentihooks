@@ -817,7 +817,7 @@ def test_equivalence_plants_each_fault_in_a_file_that_exists():
 def test_equivalence_grades_with_the_base_copy():
     steps = _equivalence_steps()
     [base] = [step for step in steps if step.get("with", {}).get("path") == "base"]
-    assert base["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    assert base["with"]["ref"] == "${{ steps.comparison-base.outputs.sha }}"
     [pick] = [step for step in steps if step.get("name") == "Pick the protected grader"]
     assert pick["run"].startswith("if [[ -f base/tests/swarm_ledger/equivalence.sh ]]; then\n")
     assert pick["run"].index('"GRADER=$PWD/base"') < pick["run"].index("else") < pick["run"].index('"GRADER=$PWD/head"')
@@ -834,6 +834,42 @@ def test_equivalence_grades_with_the_base_copy():
         assert step is pick or "GITHUB_ENV" not in run
     script = _EQUIVALENCE.read_text()
     assert 'replays=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)' in script and "head/tests" not in script
+
+
+def test_equivalence_compares_against_the_dev_parent_of_the_tested_merge(tmp_path):
+    steps = _equivalence_steps()
+    assert steps[0]["with"]["fetch-depth"] == 2
+    [selector] = [step for step in steps if step.get("id") == "comparison-base"]
+    head = tmp_path / "head"
+    head.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-c", "user.name=CI", "-c", "user.email=ci@example.invalid", "-c", "commit.gpgsign=false", *args],
+            cwd=head,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    git("init", "-q", "-b", "dev")
+    git("commit", "-q", "--allow-empty", "-m", "event base")
+    event_base = git("rev-parse", "HEAD")
+    git("switch", "-q", "-c", "pr")
+    git("commit", "-q", "--allow-empty", "-m", "pull request")
+    git("switch", "-q", "dev")
+    git("commit", "-q", "--allow-empty", "-m", "page change merged to dev later")
+    dev = git("rev-parse", "HEAD")
+    git("merge", "-q", "--no-ff", "pr", "-m", "tested merge")
+    output = tmp_path / "output"
+    subprocess.run(
+        ["bash", "-e", "-c", selector["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "GITHUB_OUTPUT": str(output)},
+        check=True,
+    )
+    assert output.read_text() == f"sha={dev}\n"
+    assert dev != event_base
 
 
 def _equivalence_steps() -> list[dict]:
