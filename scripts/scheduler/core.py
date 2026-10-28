@@ -60,13 +60,12 @@ class Entry:
     scheduler: "Scheduler"
     id: str
 
+    @property
     def record(self) -> dict:
         entry = self.scheduler.document()["entries"].get(self.id)
         if entry is None:
             raise KeyError(self.id)
         return entry
-
-    record = property(record)
 
     @property
     def state(self) -> str:
@@ -126,14 +125,13 @@ class Scheduler:
         self._state = state
         self.machine = machine or socket.gethostname()
 
+    @property
     def state(self) -> "StateStore":
         if self._state is None:
             from scripts.events.scheduler_state import open_scheduler_state
 
             self._state = open_scheduler_state(bucket())
         return self._state
-
-    state = property(state)
 
     def key(self, suffix: str) -> str:
         from scripts.swarm_ledger import ledger_link
