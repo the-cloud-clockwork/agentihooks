@@ -234,7 +234,7 @@ def test_a_failed_renewal_keeps_the_old_file_and_retries(monkeypatch, tmp_path):
     assert path.read_text() == "old\n"
 
 
-def gh_exec(monkeypatch, remaining, arguments, command="/usr/bin/gh"):
+def gh_exec(monkeypatch, remaining, arguments, command="/usr/bin/gh", get=None):
     monkeypatch.setattr(github_app_cli, "token", Mock(return_value="fixture"))
     reply = Mock(
         headers={
@@ -243,7 +243,7 @@ def gh_exec(monkeypatch, remaining, arguments, command="/usr/bin/gh"):
             "X-RateLimit-Reset": "1793160000",
         }
     )
-    read = Mock(return_value=reply)
+    read = get or Mock(return_value=reply)
     monkeypatch.setattr(github_app_cli.requests, "get", read)
     execute = Mock()
     monkeypatch.setattr(github_app_cli.os, "execvpe", execute)
@@ -270,10 +270,12 @@ WRITES = [
     ["api", "repos/o/r/issues/8/comments", "-f", "body=done"],
     ["api", "repos/o/r/dispatches", "--input", "body.json"],
     ["api", "graphql", "-f", "query=mutation { enqueuePullRequest(input: {}) { clientMutationId } }"],
+    ["api", "-XPOST", "repos/o/r/actions/jobs/1/rerun"],
+    ["api", "-fbody=done", "repos/o/r/issues/8/comments"],
+    ["api", "graphql", "-F", "query=@enqueue.graphql"],
     ["workflow", "run", "publish-pypi.yml"],
-    ["api", "rate_limit"],
-    ["auth", "status"],
 ]
+UNCHECKED = [*WRITES, ["api", "rate_limit"], ["auth", "status"], ["config", "list"]]
 
 
 @pytest.mark.parametrize("arguments", READS)
@@ -300,7 +302,7 @@ def test_a_read_at_the_reserve_runs(monkeypatch, arguments):
     assert execute.call_args.args[1] == ["/usr/bin/gh", *arguments]
 
 
-@pytest.mark.parametrize("arguments", WRITES)
+@pytest.mark.parametrize("arguments", UNCHECKED)
 def test_writes_and_local_commands_run_below_the_reserve_without_a_budget_read(monkeypatch, arguments):
     status, read, execute = gh_exec(monkeypatch, 0, arguments)
     assert status == 0
@@ -323,11 +325,12 @@ def test_the_reserve_is_set_by_environment(monkeypatch):
 
 @pytest.mark.parametrize("failure", ["error", "headers"])
 def test_an_unreadable_budget_lets_the_read_run(monkeypatch, failure):
-    status, read, execute = gh_exec(monkeypatch, 0, ["run", "list"])
-    if failure == "error":
-        read.side_effect = github_app_cli.requests.ConnectionError("down")
-    else:
-        read.return_value = Mock(headers={})
-    execute.reset_mock()
-    assert github_app_cli.main(["exec", "/usr/bin/gh", "run", "list"]) == 0
+    unreadable = (
+        Mock(side_effect=github_app_cli.requests.ConnectionError("down"))
+        if failure == "error"
+        else Mock(return_value=Mock(headers={}))
+    )
+    status, read, execute = gh_exec(monkeypatch, 0, ["run", "list"], get=unreadable)
+    assert status == 0
+    read.assert_called_once()
     execute.assert_called_once()

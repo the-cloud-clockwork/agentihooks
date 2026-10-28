@@ -14,7 +14,8 @@ _AUTH: GitHubAppAuth | None = None
 RENEW_SECONDS = 1800
 READ_RESERVE = 1000
 READ_VERBS = frozenset({"list", "view", "download", "checks", "diff", "status", "watch"})
-WRITE_FIELDS = frozenset({"-f", "-F", "--field", "--raw-field", "--input"})
+WRITE_FIELDS = ("-f", "-F", "--field", "--raw-field", "--input")
+LOCAL_GROUPS = frozenset({"alias", "auth", "completion", "config", "extension"})
 
 
 def token_file() -> Path:
@@ -78,17 +79,26 @@ def renew(last: float, now: float) -> float:
     return now
 
 
+def _method(arguments: list[str]) -> str | None:
+    for index, value in enumerate(arguments):
+        if value in ("-X", "--method"):
+            return arguments[index + 1] if index + 1 < len(arguments) else None
+        if value.startswith("--method="):
+            return value.removeprefix("--method=")
+        if value.startswith("-X"):
+            return value.removeprefix("-X")
+    return None
+
+
 def _api_read(arguments: list[str]) -> bool:
     if any(value.lstrip("/") == "rate_limit" for value in arguments):
         return False
-    for index, value in enumerate(arguments):
-        method = arguments[index + 1] if value in ("-X", "--method") and index + 1 < len(arguments) else None
-        method = value.removeprefix("--method=") if value.startswith("--method=") else method
-        if method is not None:
-            return method.upper() == "GET"
+    method = _method(arguments)
+    if method is not None:
+        return method.upper() == "GET"
     if "graphql" in arguments:
-        return not any("mutation" in value for value in arguments)
-    return not any(value.split("=", 1)[0] in WRITE_FIELDS for value in arguments)
+        return not any("mutation" in value or "query=@" in value for value in arguments)
+    return not any(value.startswith(WRITE_FIELDS) for value in arguments)
 
 
 def is_read(arguments: list[str]) -> bool:
@@ -96,6 +106,8 @@ def is_read(arguments: list[str]) -> bool:
         return False
     if arguments[0] == "api":
         return _api_read(arguments[1:])
+    if arguments[0] in LOCAL_GROUPS:
+        return False
     return arguments[0] == "search" or (len(arguments) > 1 and arguments[1] in READ_VERBS)
 
 
