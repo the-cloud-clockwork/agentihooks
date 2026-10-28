@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from scripts.swarm import cli, ledger_events, merge_queue, queue_exit, waits
+from scripts.swarm import cli, ledger_events, merge_queue, queue_exit, queue_priority, waits
 from scripts.swarm.store import SwarmError
 
 URL = "https://github.com/o/r/pull/7"
@@ -783,8 +783,11 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
         return {"queued": True}
 
     monkeypatch.setattr(merge_queue, "operate", operate)
+    prioritized = []
+    monkeypatch.setattr(queue_priority, "auto", lambda store, slug, url: prioritized.append((slug, url)))
     assert cli.main(["sw", "merge", action, URL]) == 0
     assert seen == [(action, URL, URL, 40 if action == "queue" else None)]
+    assert prioritized == ([("sw", URL)] if action == "queue" else [])
     assert capsys.readouterr().out == '{"queued": true}\n'
 
 

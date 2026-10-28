@@ -962,3 +962,38 @@ def test_blocker_reports_the_first_reason_an_entry_stays_out(raw, reason):
 
 def test_the_state_query_reads_mergeable():
     assert "isDraft mergeable" in merge_queue.FIELDS
+
+
+@pytest.mark.parametrize(
+    "task_extra, freezes",
+    [
+        ({}, [{"verb": "focus", "target": "tasks/t1"}]),
+        ({"rank": "urgent"}, []),
+    ],
+)
+def test_auto_prioritizes_a_focused_or_urgent_task_without_lifting(monkeypatch, task_extra, freezes):
+    store = swarm_of("master")
+    tasks = [{"id": "t1", "pr_url": URL, "claimed_by": "eng@a", "state": "pr", **task_extra}]
+    doc = {"tasks": tasks, "freezes": freezes}
+    monkeypatch.setattr(queue_priority, "LedgerClient", lambda: SimpleNamespace(state=lambda slug: doc))
+    calls = []
+    monkeypatch.setattr(queue_priority, "request", lambda *a, **k: calls.append((a, k)) or {"url": URL})
+    assert queue_priority.auto(store, "sw", URL) == {"url": URL}
+    assert calls == [((store, "sw", URL, "swarm", tasks), {"lift": False})]
+
+
+def test_auto_leaves_a_normal_task_to_queue_as_usual(monkeypatch):
+    store = swarm_of("master")
+    tasks = [{"id": "t1", "pr_url": URL, "claimed_by": "eng@a", "state": "pr"}]
+    doc = {"tasks": tasks, "freezes": []}
+    monkeypatch.setattr(queue_priority, "LedgerClient", lambda: SimpleNamespace(state=lambda slug: doc))
+    monkeypatch.setattr(queue_priority, "request", lambda *a, **k: pytest.fail("priority applied for a normal task"))
+    assert queue_priority.auto(store, "sw", URL) is None
+
+
+def test_auto_does_nothing_when_the_url_owns_no_task(monkeypatch):
+    store = swarm_of("master")
+    doc = {"tasks": [], "freezes": [{"verb": "focus", "target": "tasks/t1"}]}
+    monkeypatch.setattr(queue_priority, "LedgerClient", lambda: SimpleNamespace(state=lambda slug: doc))
+    monkeypatch.setattr(queue_priority, "request", lambda *a, **k: pytest.fail("priority applied with no owning task"))
+    assert queue_priority.auto(store, "sw", URL) is None
