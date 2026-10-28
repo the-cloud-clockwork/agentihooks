@@ -249,3 +249,105 @@ def test_reconciliation_stops_at_a_real_archive_sequence_hole(tmp_path):
         assert status["stages"][stage]["through"] == 0
         assert status["stages"][stage]["updated_at"] == 0.0
     index.session.catalog.close()
+
+
+def test_pending_source_binding_cannot_borrow_another_source_project(captured):
+    from hooks.memory.api.ingest import Grant
+    from hooks.memory.archive import EvidenceRefused
+
+    catalog, meter, scope = captured
+    broad = Grant(GRANT.principal, GRANT.corpus, GRANT.projects | {"other-project"})
+    foreign = metrics.Scope(scope.access_domain, scope.session_uid, "foreign-pending")
+    meter.bind(broad, scope, "agentihooks")
+    meter.bind(broad, foreign, "other-project")
+    meter.advance(broad, foreign, "local_spool", 5, 100.0)
+    before = meter.snapshot()
+    assert foreign.source_generation not in {
+        row["source_generation"] for row in meter.coverage(GRANT, [], 200.0)["sources"]
+    }
+    with pytest.raises(EvidenceRefused):
+        meter.status(GRANT, foreign, 200.0)
+    with pytest.raises(EvidenceRefused):
+        meter.advance(GRANT, foreign, "archive", 5, 200.0)
+    assert meter.snapshot() == before
+    assert meter.status(broad, foreign, 200.0)["stages"]["local_spool"]["through"] == 5
+
+
+def test_inactive_chunker_and_chunker_rollback_preserve_partial_coverage(tmp_path):
+    from hooks.memory.index_worker import Target
+    from tests.sv2_idx02_cases import grant, policy
+    from tests.sv2_idx03_cases import FixtureEmbedder, Index, model
+    from tests.sv2_obs02_cases import FIXTURE
+
+    inputs = json.loads(FIXTURE.read_text())
+    inputs["policies"]["next"] = {**inputs["policies"]["current"], "version": "next-chunker"}
+    index = Index(inputs, tmp_path)
+    session, caller = index.session, grant(inputs)
+    scope = metrics.Scope(index.domain, inputs["session_uid"], session.generation)
+    recorder = progress.Recorder(session.catalog, caller, scope, inputs["grant"]["projects"][0], clock=lambda: 100.0)
+    session.append(inputs["turns"][:1])
+    recorder.reconcile(session.store)
+    session.build()
+    session.validate()
+    session.activate("current", 0)
+    index.worker.register(index.domain, index.generation, model(inputs))
+    index.enqueue(100.0)
+    index.drain(FixtureEmbedder(model(inputs)), 100.0)
+    index.worker.activate(index.domain, index.generation, 0, now=100.0)
+    first = session.sequence
+    session.append(inputs["turns"][1:3])
+    total = session.sequence
+    recorder.meter.advance(caller, scope, "local_spool", total, 110.0)
+    recorder.reconcile(session.store)
+    session.build("next")
+    session.validate("next")
+    replacement = Target(index.domain, inputs["session_uid"], policy(inputs, "next").version, index.generation)
+    index.worker.enqueue(caller, replacement, 110.0)
+    index.drain(FixtureEmbedder(model(inputs)), 120.0)
+    recorder.consume(total, lambda source, through: {"state": "committed", "through": through})
+    delayed = recorder.meter.status(caller, scope, 150.0)
+    assert delayed["stages"]["indexed_chunk"]["through"] == first
+    assert delayed["embedding_lag_seconds"] == 50.0
+    assert delayed["coverage"] == "partial"
+    session.activate("next", 1)
+    progress.indexed(session.catalog, index.domain, index.generation, 160.0)
+    assert recorder.meter.status(caller, scope, 170.0)["coverage"] == "complete"
+    persisted = recorder.meter.snapshot()
+    session.activate("current", 2)
+    rolled_back = recorder.meter.status(caller, scope, 180.0)
+    assert rolled_back["stages"]["indexed_chunk"]["through"] == first
+    assert rolled_back["embedding_lag_seconds"] == 80.0
+    assert rolled_back["coverage"] == "partial"
+    assert recorder.meter.snapshot() == persisted
+    session.activate("next", 3)
+    assert recorder.meter.status(caller, scope, 190.0)["coverage"] == "complete"
+    session.catalog.close()
+
+
+def test_metadata_only_archive_clears_indexing_lag(tmp_path):
+    from tests.sv2_idx02_cases import grant
+    from tests.sv2_idx03_cases import FixtureEmbedder, Index, model
+    from tests.sv2_obs02_cases import FIXTURE
+
+    inputs = json.loads(FIXTURE.read_text())
+    index = Index(inputs, tmp_path)
+    session, caller = index.session, grant(inputs)
+    session.append([[{"kind": "meta", "text": "fixture metadata"}]])
+    scope = metrics.Scope(index.domain, inputs["session_uid"], session.generation)
+    recorder = progress.Recorder(session.catalog, caller, scope, inputs["grant"]["projects"][0], clock=lambda: 100.0)
+    recorder.reconcile(session.store)
+    session.build()
+    session.validate()
+    session.activate("current", 0)
+    assert session.chunks("current") == []
+    index.worker.register(index.domain, index.generation, model(inputs))
+    index.enqueue(100.0)
+    index.drain(FixtureEmbedder(model(inputs)), 110.0)
+    index.worker.activate(index.domain, index.generation, 0, now=120.0)
+    recorder.consume(session.sequence, lambda source, through: {"state": "committed", "through": through})
+    status = recorder.meter.status(caller, scope, 130.0)
+    assert status["stages"]["indexed_chunk"]["through"] == session.sequence
+    assert status["embedding_lag_seconds"] == 0.0
+    assert status["coverage"] == "complete"
+    assert status["alerts"] == []
+    session.catalog.close()
