@@ -223,6 +223,33 @@ def test_the_wait_pass_leaves_a_foreign_controllers_wait_untouched(tick, monkeyp
     assert tick.told() == []
 
 
+@pytest.mark.parametrize("authority", [None, "trusted-tick-fixture"])
+def test_the_wait_pass_reads_a_remote_ledger_only_with_tick_authority(tick, monkeypatch, authority):  # noqa: F811
+    from scripts.swarm_ledger import authority_context
+
+    monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    tick.store.redis.hset(tick.store.key("sw", "config"), "api_url", "https://hosted.example")
+    hold_run(tick)
+    before = idle.wait(tick.store.redis, "sw", ME)
+    read = []
+
+    def client():
+        read.append(True)
+        raise RuntimeError("remote ledger read")
+
+    monkeypatch.setattr(cli, "LedgerClient", client)
+    with authority_context.bound(authority):
+        if authority:
+            with pytest.raises(RuntimeError, match="remote ledger read"):
+                cli.run_waits(tick.store, "sw")
+        else:
+            assert cli.run_waits(tick.store, "sw") == []
+    assert read == ([True] if authority else [])
+    assert idle.wait(tick.store.redis, "sw", ME) == before
+    assert tick.told() == []
+
+
 @pytest.mark.parametrize("held", ["none", "bare", "finished"])
 def test_the_wait_pass_skips_ledger_reads_without_active_checked_waits(tick, monkeypatch, held):  # noqa: F811
     if held != "none":
