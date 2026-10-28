@@ -1066,7 +1066,8 @@ class Herdr:
         return Placed(f"pane-{name}", "claude")
 
 
-def test_the_tick_runtime_launches_placed_spawns_with_the_swarm_api_address(world):
+def test_the_tick_runtime_launches_placed_spawns_with_the_swarm_api_address(world, monkeypatch):
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda *args: None)
     herdr, name = Herdr(), world.store.next_name(SLUG, "eng")
     runtime = routed(
         {},
