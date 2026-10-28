@@ -799,7 +799,22 @@ def test_an_unreadable_routing_setting_closes_only_the_api_side(monkeypatch, tmp
     assert capsys.readouterr().err == "[claude] api side closed: routing settings are unreadable: KeyError\n"
     with pytest.raises(balancer.RoutingError) as raised:
         _pick(env, tmp_path, {"BEST": 9, "MID": 9, "LOW": 9})
-    assert str(raised.value) == "no Claude account has a free session under its quota band"
+    assert str(raised.value) == (
+        "no Claude account has a free session under its quota band; "
+        "api side closed: routing settings are unreadable: KeyError"
+    )
+
+
+def test_no_tokens_and_an_api_closed_by_settings_name_both_sides(monkeypatch, tmp_path):
+    def invalid(harness, environ):
+        raise place.SettingsError("routing setting claude-api-weight is invalid")
+
+    monkeypatch.setattr(place, "policy", invalid)
+    with pytest.raises(balancer.RoutingError) as raised:
+        _pick({"ANTHROPIC_API_KEY": "key"}, tmp_path)
+    assert str(raised.value) == (
+        "no non-empty AH_CC_TOKEN_* variables found; api side closed: routing setting claude-api-weight is invalid"
+    )
 
 
 def test_a_token_named_api_is_reserved_for_the_api_route():
