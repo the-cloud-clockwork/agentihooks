@@ -46,7 +46,7 @@ def test_codex_install_skips_agents_with_its_message(tmp_path, monkeypatch, caps
     home = run_install(tmp_path, monkeypatch, "codex")
     out = capsys.readouterr().out
     assert (
-        "  [--] Codex has no custom-subagent registry — agents skipped (docs/reference/CODEX-COMPAT.md §3 row 16).\n"
+        "  [--] Codex has no custom-subagent registry — agents skipped (docs/reference/CODEX-COMPAT.md §3 row 16)."
         in out
     )
     assert sorted(p.name for p in home.rglob("scouter.md")) == []
