@@ -88,7 +88,10 @@ def _process_table_violations(tests):
     found = []
     for path in sorted(tests.rglob("*.py")):
         source = path.read_text(encoding="utf-8")
-        if not any(marker in source for marker in ("_process", "processes", "/proc/")):
+        if source.isascii() and not any(
+            marker in source
+            for marker in ("_process", "processes", "exists", "is_file", "read_text", "read_bytes", "open")
+        ):
             continue
         for function in ast.walk(ast.parse(source)):
             if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -122,6 +125,9 @@ def test_process_table_scan_skips_irrelevant_files_and_refuses_double_reads(tmp_
         "processes.py": "def check():\n    assert 1 not in processes() or processes()[1].state == 'Z'\n",
         "process.py": "def check():\n    assert _process(1) == _process(1)\n",
         "path.py": 'def check(pid):\n    path = Path(f"/proc/{pid}/stat")\n    assert path.exists() and path.read_text()\n',
+        "escaped.py": 'def check(pid):\n    path = Path(f"/pr\\x6fc/{pid}/stat")\n    assert path.exists() and path.read_text()\n',
+        "adjacent.py": 'def check(pid):\n    path = Path(f"/pr" f"oc/{pid}/stat")\n    assert path.exists() and path.read_text()\n',
+        "unicode.py": 'def check(pid):\n    assert ｏｐｅｎ(f"/pr\\x6fc/{pid}/stat") and ｏｐｅｎ(f"/pr\\x6fc/{pid}/stat")\n',
         "snapshot.py": "def check():\n    snapshot = processes()\n    assert 1 not in snapshot or snapshot[1].state == 'Z'\n",
     }
     for name, source in sources.items():
@@ -133,4 +139,11 @@ def test_process_table_scan_skips_irrelevant_files_and_refuses_double_reads(tmp_
         return parse(source, *args, **kwargs)
 
     monkeypatch.setattr(ast, "parse", parse_relevant)
-    assert _process_table_violations(tmp_path) == ["path.py:3", "process.py:2", "processes.py:2"]
+    assert _process_table_violations(tmp_path) == [
+        "adjacent.py:3",
+        "escaped.py:3",
+        "path.py:3",
+        "process.py:2",
+        "processes.py:2",
+        "unicode.py:2",
+    ]
