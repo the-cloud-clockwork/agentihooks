@@ -115,6 +115,16 @@ def settle(tab):
     tab.wait_for_timeout(50)
 
 
+def slow_background_paint(tab):
+    tab.evaluate(
+        """() => {
+          const post = scheduler.postTask.bind(scheduler);
+          scheduler.postTask = (task, options) =>
+            new Promise((done) => setTimeout(done, 100)).then(() => post(task, options));
+        }"""
+    )
+
+
 @pytest.mark.parametrize("tab", [0, 250], indirect=True)
 def test_every_header_shows_its_counts_folded_and_open(tab):
     tab.wait_for_function(
@@ -166,21 +176,19 @@ def test_sections_toggle_leaves_comments_and_outline_alone(tab):
     probe = """() => Object.fromEntries([...document.querySelectorAll("details[data-key], #outline details.fold")]
              .map((d) => [d.dataset.key || d.id, d.open]))"""
     before = tab.evaluate(probe)
-    tab.evaluate(
-        """() => {
-          const post = scheduler.postTask.bind(scheduler);
-          scheduler.postTask = (task, options) =>
-            new Promise((done) => setTimeout(done, 100)).then(() => post(task, options));
-        }"""
-    )
+    slow_background_paint(tab)
     tab.click("#sections-all")
     tab.wait_for_timeout(150)
     tab.click("#sections-all")
-    settle(tab)
+    tab.click("#sections-all")
+    tab.wait_for_function(
+        """(keys) => keys.every((k) => [...document.querySelectorAll("details[data-key], #outline details.fold")]
+             .some((d) => (d.dataset.key || d.id) === k))""",
+        arg=list(before),
+    )
     after = tab.evaluate(probe)
-    changed = {k: (v, after.get(k, "missing")) for k, v in before.items() if after.get(k, "missing") != v}
-    added = {k: v for k, v in after.items() if k not in before and v is not False}
-    assert not changed and not added, f"changed {changed} added {added}"
+    assert before.items() <= after.items()
+    assert all(v is False for k, v in after.items() if k not in before)
 
 
 def test_sections_state_survives_a_reload(tab):
