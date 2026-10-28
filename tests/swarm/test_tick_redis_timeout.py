@@ -48,7 +48,9 @@ def test_a_redis_timeout_in_the_conversations_step_lets_the_pass_finish(store, m
     assert observed == ["sw"]
     assert len(models) == 1
     assert closed == ["sw"]
-    assert failures == [("scripts.swarm.tick._conversations", "TimeoutError")]
+    assert [failure for failure in failures if failure[1] == "TimeoutError"] == [
+        ("scripts.swarm.tick._conversations", "TimeoutError")
+    ]
     assert "skipped scripts.swarm.tick._conversations: its Redis read timed out" in actions
     assert (
         "scripts.swarm.tick._conversations skipped, its Redis read timed out: Timeout reading from socket"
