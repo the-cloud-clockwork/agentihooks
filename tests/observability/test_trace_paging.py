@@ -260,6 +260,96 @@ def test_paged_point_without_every_position_keeps_the_earlier_point():
     assert agent_trace._paged_point(state, ["a", "b"], [0, 1], None) == ("b", None)
 
 
+def _call(uuid: str, message: str, block: dict, second: int) -> dict:
+    content = {"id": message, "model": "model-0", "content": [block]}
+    return {"type": "assistant", "uuid": uuid, "timestamp": _stamp(second), "message": content}
+
+
+def _paged_session(tmp_path, monkeypatch):
+    metadata = [{"type": "custom-title", "customTitle": "rig"}, {"type": "agent-name", "agentName": "master"}]
+
+    def tool(name: str) -> dict:
+        return {"type": "tool_use", "id": name, "name": "shell", "input": {"cmd": name}}
+
+    def user(uuid: str, content, second: int) -> dict:
+        return {"type": "user", "uuid": uuid, "timestamp": _stamp(second), "message": {"content": content}}
+
+    result = [{"type": "tool_result", "tool_use_id": "t2", "content": "two"}]
+    first = [
+        *metadata,
+        user("p0", "ask 0", 1),
+        _call("a1", "m1", tool("t1"), 2),
+        *metadata,
+        _call("a2", "m2", tool("t2"), 3),
+        user("r2", result, 4),
+    ]
+    records = [*first, *metadata, user("p1", "ask 1", 5)]
+    receiver, _, path = _run(tmp_path, monkeypatch, "paged", CAP, first, len(first))
+    with path.open("a") as handle:
+        handle.write("".join(_line(record) for record in records[len(first) :]))
+    for _ in range(3):
+        agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+    assert set(agent_trace._cursor("session")["records"]) == {"p1"}
+    return receiver, path, records
+
+
+def _assert_no_recount(receiver: Receiver, path, dropped: str) -> None:
+    for _ in range(3):
+        agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+    state = agent_trace._cursor("session")
+    assert len(state["accepted"]) + state["paged"]["spans"] == len(receiver.observations)
+    assert set(state["records"]) == {"p1"}
+    exported = json.dumps([dict(span.attributes or {}) for span in receiver.observations.values()], default=str)
+    assert dropped not in exported
+
+
+@pytest.mark.parametrize("rewrite", ["without-boundary", "truncated", "revised"])
+def test_transcript_rewritten_in_place_never_recounts_paged_spans(tmp_path, monkeypatch, quiet, rewrite):
+    receiver, path, records = _paged_session(tmp_path, monkeypatch)
+    boundary = agent_trace._cursor("session")["paged"]["boundary"]
+    revised = _call("a1", "m1", {"type": "text", "text": "revised text"}, 2)
+    if rewrite == "truncated":
+        kept = records[:4]
+    elif rewrite == "revised":
+        kept = [revised if transcript.record_id(record) == "a1" else record for record in records]
+    else:
+        kept = [record for record in records if transcript.record_id(record) != boundary]
+    inode = path.stat().st_ino
+    path.write_text("".join(_line(record) for record in kept))
+    assert path.stat().st_ino == inode
+    _assert_no_recount(receiver, path, "revised text")
+
+
+@pytest.mark.parametrize("masked", [False, True])
+def test_late_record_for_a_paged_message_never_recounts_its_span(tmp_path, monkeypatch, quiet, masked):
+    if masked:
+        original = transcript.mask_value
+        monkeypatch.setattr(transcript, "mask_value", lambda value: "M1" if value == "m1" else original(value))
+    receiver, path, _ = _paged_session(tmp_path, monkeypatch)
+    late = _call("a1-late", "m1", {"type": "text", "text": "late text"}, 6)
+    with path.open("a") as handle:
+        handle.write(_line(late))
+    _assert_no_recount(receiver, path, "late text")
+
+
+def test_message_split_across_the_paging_cut_stays_open_for_a_late_record():
+    values = [
+        _call("a1", "m1", {"type": "text", "text": "one"}, 1),
+        _call("a2", "m1", {"type": "text", "text": "two"}, 2),
+    ]
+    values.append(_call("a3", "m3", {"type": "text", "text": "three"}, 3))
+    paged = agent_trace._paged_ids({}, ["a1", "a2", "a3"], values, [0, 2], [1])
+    assert paged["messages"] == [agent_trace._paged_digest("m3")]
+    assert paged["keys"] == sorted(agent_trace._paged_digest(key) for key in ("a1", "a3"))
+    assert not agent_trace._paged_out(paged, "a4", _call("a4", "m1", {"type": "text", "text": "late"}, 4))
+    later = agent_trace._paged_ids(paged, ["a2", "a5"], [values[1], _call("a5", "m5", {}, 5)], [0, 1], [])
+    assert later["messages"] == sorted(agent_trace._paged_digest(message) for message in ("m1", "m3", "m5"))
+
+
+def test_paged_digest_stays_readable_from_state_written_by_earlier_releases():
+    assert agent_trace._paged_digest("m3") == "32c2aea8c2e77450"
+
+
 @pytest.mark.parametrize("chunk", [1, 3])
 def test_streamed_generation_keeps_its_accepted_identity_after_tool_results(tmp_path, monkeypatch, quiet, chunk):
     records = _claude(1, 2)
