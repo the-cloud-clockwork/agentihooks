@@ -226,7 +226,9 @@ class LaunchSlots:
         from scripts.hive import registry
         from scripts.swarm.keyspace import ROOT
 
-        heartbeats = {hive["id"]: hive["heartbeat_at"] for hive in registry.hives(self.redis)}
+        heartbeats = (
+            {hive["id"]: hive["heartbeat_at"] for hive in registry.hives(self.redis)} if mode == "reserve" else {}
+        )
         return self.redis.eval(
             _LAUNCH,
             3,

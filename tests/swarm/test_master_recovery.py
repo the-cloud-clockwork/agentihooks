@@ -198,10 +198,7 @@ def _hive(store, hive, beat):  # noqa: F811
 
     registry.update(store.redis, hive, ["ui=yes"])
     slots = [{"harness": "claude", "account": "one", "kind": "subscription"}]
-    store.redis.hset(
-        registry.key(hive),
-        mapping={"heartbeat_at": beat, "slots": json.dumps(slots), "repos": json.dumps(["/repo"])},
-    )
+    registry.beat(store.redis, hive, {"heartbeat_at": beat, "slots": slots, "repos": ["/repo"]})
 
 
 def _hive_master(store, hive="lost"):  # noqa: F811
@@ -434,7 +431,7 @@ def test_master_move_refuses_a_hive_that_cannot_take_the_master(store, to, reaso
     _hive(store, "home", NOW)
     _hive(store, "dead", NOW - 100_000)
     registry.update(store.redis, "bare", ["ui=yes"])
-    store.redis.hset(registry.key("bare"), "heartbeat_at", NOW)
+    registry.beat(store.redis, "bare", {"heartbeat_at": NOW})
     _hive_master(store, "home")
 
     with pytest.raises(SwarmError) as refused:
@@ -463,7 +460,7 @@ def test_master_move_matches_a_local_checkout_by_the_origin_the_hive_lists(store
     store.redis.hset(store.key("sw", "config"), "repo", str(checkout))
     _hive(store, "home", NOW)
     _hive(store, "spare", NOW)
-    store.redis.hset(registry.key("spare"), "repos", json.dumps([listed]))
+    registry.beat(store.redis, "spare", {"repos": [listed]})
     _hive_master(store, "home")
 
     if refusal is None:
@@ -498,7 +495,7 @@ def test_the_lost_hive_move_places_the_master_on_the_hive_with_room(store):  # n
     _hive(store, "lost", NOW - GRACE_MS - 1)
     for hive, room, workers in (("big", 0, 8), ("small", 2, 6)):
         _hive(store, hive, NOW)
-        store.redis.hset(registry.key(hive), "max_agents", 8)
+        registry.beat(store.redis, hive, {"max_agents": 8})
         store.redis.set(f"{registry.key(hive)}:sessions", json.dumps({"claude:one": workers}))
         publish_room(store, hive, room)
     _hive_master(store)
@@ -552,7 +549,7 @@ def test_master_move_keeps_an_interactive_master_on_a_hive_holding_its_login(sto
 
     _hive(store, "spare", NOW)
     _hive(store, "login", NOW)
-    store.redis.hset(registry.key("login"), "interactive", json.dumps({"claude": "one", "codex": ""}))
+    registry.beat(store.redis, "login", {"interactive": {"claude": "one", "codex": ""}})
     name = store.next_name("sw", MASTER)
     store.put_agent(
         "sw",

@@ -1183,7 +1183,7 @@ def test_hive_live_counts_refuse_a_launch_before_the_runtime(world):
 
     redis = world.store.redis
     registry.update(redis, "hive", ["max-agents=4"])
-    redis.hset(registry.key("hive"), "heartbeat_at", world.clock[0])
+    registry.beat(redis, "hive", {"heartbeat_at": world.clock[0]})
     redis.set(f"{registry.key('hive')}:sessions", json.dumps({f"claude:{ACCOUNT}": 1}), ex=45)
     launch = world.launch(FIRST)
     assert launch.outcome.status is Status.UNAVAILABLE
@@ -1197,7 +1197,7 @@ def test_hive_launch_registration_and_exit_keep_one_global_slot(world):
 
     redis = world.store.redis
     registry.update(redis, "hive", ["max-agents=4"])
-    redis.hset(registry.key("hive"), "heartbeat_at", world.clock[0])
+    registry.beat(redis, "hive", {"heartbeat_at": world.clock[0]})
     redis.set(f"{registry.key('hive')}:sessions", "{}", ex=45)
     launch = world.launch(FIRST)
     slots = reservation.LaunchSlots(redis)
@@ -1215,7 +1215,7 @@ def test_tick_launch_reserves_the_selected_harness(world, harness, live):
 
     redis = world.store.redis
     registry.update(redis, "hive", ["max-agents=4"])
-    redis.hset(registry.key("hive"), "heartbeat_at", world.clock[0])
+    registry.beat(redis, "hive", {"heartbeat_at": world.clock[0]})
     redis.set(f"{registry.key('hive')}:sessions", json.dumps({f"{harness}:{ACCOUNT}": live}), ex=45)
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(

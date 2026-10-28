@@ -225,6 +225,13 @@ def test_bus_registry_index_keeps_reports_visible(client, bus):
     client.set(key("worker"), json.dumps(monkey_report))
     assert reports.live() == {"worker": monkey_report}
     client.delete(key("worker"))
-    agent = SimpleNamespace(state="finished", hive="worker", execution_id="execution", generation=1, runtime_target={})
+    agent = SimpleNamespace(
+        state="finished",
+        hive="worker",
+        execution_id="execution",
+        generation=1,
+        runtime_backend="local",
+        runtime_target={"host_id": "worker"},
+    )
     assert not reports.removed(agent, 1000)
     assert not reports.removed(agent, 1000 + registry.LIVE_MS)

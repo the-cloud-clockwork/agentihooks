@@ -105,7 +105,7 @@ def test_like_copies_the_addresses_and_ca_of_another_hive_and_mints_a_new_member
     assert env["AGENTIHOOKS_HIVE_URL"] == URL
     assert _redis(admin, env) == ("rediss", f"hive-{member}", "hive.example", 6380, "/2")
     assert auth.ledger_member(admin, env["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"]) == member
-    assert admin.hget(f"{auth.PREFIX}:member:{member}", "name") == "lab"
+    assert auth.member(admin, member)["name"] == "lab"
     assert fake.records[LIKE] == _sample()
     assert message == (
         f"invited hive member {member} as lab; OpenBao secret/{RECORD}: wrote ca_pem, credential, swarm_url "
