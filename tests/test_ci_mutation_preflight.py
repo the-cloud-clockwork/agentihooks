@@ -668,3 +668,26 @@ export -f uv
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Trusted dependency lock resolved without a branch lock" in result.stdout
+
+
+@pytest.mark.parametrize("job", ["mutation-stats", "mutation"])
+def test_mutation_jobs_keep_the_head_lock_when_the_head_has_one(tmp_path, job):
+    steps, names = _steps(yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"][job])
+    install = steps[names.index("Install dependencies")]["run"]
+    helper = tmp_path / "workflow/.github/scripts/pypi-retry.sh"
+    helper.parent.mkdir(parents=True)
+    helper.write_text('shift 2\n"$@"\n')
+    branch = tmp_path / "branch"
+    (branch / ".github").mkdir(parents=True)
+    (branch / ".github/test-requirements.lock").write_text("pytest==8.0\n")
+    probe = 'uv() { echo "constraint=$5"; }\nexport -f uv\n'
+    result = subprocess.run(
+        ["bash", "-euc", probe + install],
+        cwd=branch,
+        env=dict(os.environ, RUNNER_TEMP=str(tmp_path)),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "constraint=./.github/test-requirements.lock"
