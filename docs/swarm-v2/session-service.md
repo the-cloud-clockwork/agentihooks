@@ -77,7 +77,8 @@ The producer must register retained sessions, preserve their archive evidence, b
 and activate their chunk generations through the existing catalog and chunk APIs. Ingestion alone does
 not perform those operations. This process discovers retained sessions with active chunk generations,
 enqueues changed chunks under its grant and drains the configured generation. Sessions outside its
-project grant are skipped; existing pending work outside the grant fails closed before provider access.
+project grant are skipped; each selected provider batch is checked against the grant and retained
+session state before provider access.
 Give a generation one owner and a stable grant; changing the model or dimension requires a new generation.
 
 Continuous mode advances its session cursor and wraps at the end so later sessions are visited.

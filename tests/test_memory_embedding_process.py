@@ -435,3 +435,74 @@ def test_main_waits_between_passes_and_restores_signal_handlers(prepared, provid
     assert waits == [5.0]
     assert json.loads(capsys.readouterr().out)["embedded"]
     assert {sig: signal.getsignal(sig) for sig in previous} == previous
+
+
+def test_scope_checks_touch_only_the_selected_bounded_batch(prepared, provider, monkeypatch):
+    from dataclasses import replace
+
+    from hooks.memory import archive
+    from hooks.memory.embedding_process import ScopedProvider, configure
+    from hooks.memory.index_worker import IndexWorker, Limits
+
+    settings = configure(environment(prepared, provider))
+    settings = replace(settings, limits=Limits(1, 64000, 1))
+    prepared.worker.register(prepared.domain, prepared.generation, settings.provider.model)
+    prepared.enqueue(1.0)
+    before = len(prepared.work())
+    assert before > 1
+    worker = IndexWorker(prepared.session.catalog, settings.limits)
+    reads = []
+    original = worker.catalog.session
+
+    def counted(domain, uid):
+        reads.append((domain, uid))
+        return original(domain, uid)
+
+    def no_history(*_):
+        raise AssertionError("drain loaded session history")
+
+    monkeypatch.setattr(worker.catalog, "session", counted)
+    monkeypatch.setattr(archive, "_readable", no_history)
+    report = worker.drain(ScopedProvider(worker, settings), prepared.domain, prepared.generation, 2.0)
+    assert len(report["embedded"]) == 1
+    assert report["pending"] == before - 1
+    assert reads == [(prepared.domain, prepared.inputs["session_uid"])]
+    assert len(provider[1]) == 1
+    assert len(provider[1][0][2]["input"]) == 1
+
+
+def test_scoped_provider_refuses_a_changed_batch(prepared, provider, monkeypatch):
+    from hooks.memory.archive import EvidenceRefused
+    from hooks.memory.embedding_process import ScopedProvider, configure
+
+    settings = configure(environment(prepared, provider))
+    monkeypatch.setattr(prepared.worker, "_batch", lambda *_: [])
+    with pytest.raises(EvidenceRefused, match="changed"):
+        ScopedProvider(prepared.worker, settings).embed(["not selected"])
+    assert not provider[1]
+
+
+@pytest.mark.parametrize("change", ["missing", "restricted", "project", "corpus"])
+def test_scoped_provider_refuses_unavailable_or_unauthorized_chunks(prepared, provider, monkeypatch, change):
+    from hooks.memory.archive import EvidenceRefused
+    from hooks.memory.embedding_process import ScopedProvider, configure
+
+    settings = configure(environment(prepared, provider))
+    chunk = {
+        "preview": "private",
+        "session_uid": prepared.inputs["session_uid"],
+        "access_domain": prepared.domain,
+        "project_ids": list(settings.grant.projects),
+    }
+    if change == "missing":
+        chunk["session_uid"] = "missing"
+    elif change == "restricted":
+        prepared.session.catalog.set_state(prepared.domain, chunk["session_uid"], "restricted", 0)
+    elif change == "project":
+        chunk["project_ids"] = ["outside"]
+    else:
+        chunk["access_domain"] = "outside"
+    monkeypatch.setattr(prepared.worker, "_batch", lambda *_: [chunk])
+    with pytest.raises(EvidenceRefused, match="outside"):
+        ScopedProvider(prepared.worker, settings).embed(["private"])
+    assert not provider[1]

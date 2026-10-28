@@ -32,7 +32,6 @@ ACTIVE_SESSIONS = (
     "ON r.access_domain = c.access_domain AND r.session_uid = c.session_uid "
     "WHERE c.access_domain = ? AND r.state = 'retained' AND c.session_uid > ? ORDER BY c.session_uid LIMIT ?"
 )
-QUEUED_SESSIONS = "SELECT DISTINCT session_uid FROM embedding_work WHERE access_domain = ? AND index_generation = ?"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -133,6 +132,32 @@ def configure(environ: dict) -> Settings:
     )
 
 
+@dataclass
+class ScopedProvider:
+    worker: IndexWorker
+    settings: Settings
+
+    @property
+    def model(self) -> EmbeddingModel:
+        return self.settings.provider.model
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        grant = self.settings.grant
+        batch = self.worker._batch(grant.corpus, self.settings.generation)
+        if [chunk["preview"] for chunk in batch] != texts:
+            raise archive.EvidenceRefused("embedding batch changed before authorization")
+        for chunk in batch:
+            session = self.worker.catalog.session(grant.corpus, chunk["session_uid"])
+            if (
+                chunk["access_domain"] != grant.corpus
+                or not set(chunk["project_ids"]).issubset(grant.projects)
+                or session is None
+                or session["state"] != "retained"
+            ):
+                raise archive.EvidenceRefused("embedding batch is outside the grant or no longer retained")
+        return self.settings.provider.embed(texts)
+
+
 def cycle(worker: IndexWorker, settings: Settings, after: str) -> dict:
     grant, generation = settings.grant, settings.generation
     rows = worker.catalog.db.execute(ACTIVE_SESSIONS, (grant.corpus, after, settings.session_limit)).fetchall()
@@ -142,10 +167,7 @@ def cycle(worker: IndexWorker, settings: Settings, after: str) -> dict:
             worker.enqueue(grant, Target(grant.corpus, uid, version, generation), time.time())
         except archive.EvidenceRefused:
             skipped += 1
-    pending = worker.catalog.db.execute(QUEUED_SESSIONS, (grant.corpus, generation)).fetchall()
-    for (uid,) in pending:
-        archive._readable(worker.catalog, grant, grant.corpus, uid)
-    report = worker.drain(settings.provider, grant.corpus, generation, time.time())
+    report = worker.drain(ScopedProvider(worker, settings), grant.corpus, generation, time.time())
     return {**report, "skipped": skipped, "after": rows[-1][0] if len(rows) == settings.session_limit else ""}
 
 
