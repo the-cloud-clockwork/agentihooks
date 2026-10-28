@@ -87,3 +87,17 @@ def test_the_first_pending_start_can_be_refunded(rig):
     assert rig.store.refund_held_claim(SLUG, "t1", admitted["name"], rig.store.claim_generation(SLUG, "t1"))
     claims.Claims(rig.store).handle(started(admitted))
     assert rig.store.claims(SLUG, "t1") == 0
+
+
+def test_a_reopened_admission_spends_no_life_and_a_counted_start_refunds_normally(rig):
+    rig.store.count_claim(SLUG, "t1")
+    reopened = rig.admitter.admit(SLUG, ask())
+    assert rig.admitter.reopen(SLUG, ask())
+    claims.Claims(rig.store).handle(started(reopened))
+    assert rig.store.claims(SLUG, "t1") == 1
+
+    admitted = rig.admitter.admit(SLUG, ask(generation=2))
+    claims.Claims(rig.store).handle(started(admitted))
+    assert rig.store.claims(SLUG, "t1") == 2
+    assert rig.store.refund_held_claim(SLUG, "t1", admitted["name"], rig.store.claim_generation(SLUG, "t1"))
+    assert rig.store.claims(SLUG, "t1") == 1

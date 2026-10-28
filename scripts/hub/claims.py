@@ -9,6 +9,9 @@ _COUNT = """
 if redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2]) == 0 then
     return 0
 end
+if redis.call('HGET', KEYS[3], ARGV[2]) == ARGV[1] then
+    redis.call('HDEL', KEYS[3], ARGV[2])
+end
 redis.call('HSETNX', KEYS[2], ARGV[2], ARGV[3])
 return redis.call('HINCRBY', KEYS[2], ARGV[2], 1)
 """
@@ -31,9 +34,10 @@ class Claims:
             return
         lives = self.store.redis.eval(
             _COUNT,
-            2,
+            3,
             self.store.key(event.swarm, "counted-executions"),
             self.store.key(event.swarm, "started-lives"),
+            self.store.key(event.swarm, "pending-lives"),
             json.dumps([event.key, event.version]),
             task,
             self.store.claims(event.swarm, task),

@@ -71,6 +71,7 @@ class Admission:
         live = self._mark(slug, request, row, name)
         if live is None:
             return None
+        self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))
         self.store.seats.occupy(seat, name, now)
         task = tick.primed(self.store, slug, seat, {**row, **live})
         identity = {"execution_id": agent.execution_id, "execution_generation": agent.generation}
@@ -107,6 +108,7 @@ class Admission:
         if not held or json.loads(held)["hive"] != request["hive"]:
             return False
         name = json.loads(held)["name"]
+        self.store.cancel_pending_life(slug, request["task"])
         self._unclaim(slug, request["task"], name)
         self.ledger.update_task(
             slug,
