@@ -437,6 +437,19 @@ def test_a_failed_worker_records_the_error_as_the_retry_reason(world, monkeypatc
     assert (row["status"], row["attempts"], row["reason"]) == ("pending", 1, "RuntimeError")
 
 
+def test_a_session_end_on_a_remote_ledger_defers_the_request_with_its_reason(world, monkeypatch):
+    class Unauthenticated(SystemExit):
+        pass
+
+    def remote(slug, task_id):
+        raise Unauthenticated("unauthenticated: remote ledger")
+
+    monkeypatch.setattr(world[2], "task", remote)
+    path, _, _ = failed_request(world, monkeypatch, answer())
+    row = json.loads(path.read_text())
+    assert (row["status"], row["attempts"], row["reason"]) == ("pending", 1, "Unauthenticated")
+
+
 def test_a_session_end_leaves_its_own_worker_the_first_attempt(world, monkeypatch):
     _, payload, ledger, jobs = world
     clock = Clock()
