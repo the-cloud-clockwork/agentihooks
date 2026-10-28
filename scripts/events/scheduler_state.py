@@ -60,3 +60,18 @@ def read(state: StateStore, key: str, legacy_key: str) -> StateEntry | None:
             continue
         return state.get(key)
     raise StateConflict(f"scheduler migration {key!r} kept changing")
+
+
+def wake(state: StateStore, key: str, delivery_id: str) -> None:
+    from .redis_state import RedisStateStore
+
+    if isinstance(state, RedisStateStore):
+        with state.redis.pipeline() as pipe:
+            pipe.rpush(key, delivery_id)
+            pipe.ltrim(key, -1, -1)
+            pipe.execute()
+        return
+    try:
+        state.create(key.replace(":", "."), delivery_id.encode())
+    except StateConflict:
+        pass
