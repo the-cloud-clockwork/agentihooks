@@ -54,12 +54,16 @@ def source_calls():
             tree = ast.parse(path.read_text(encoding="utf-8"))
             aliases = source_aliases(tree, ".".join(path.parent.relative_to(root).parts))
             functions = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+            owners = {}
+            for index, item in sorted(
+                enumerate(functions), key=lambda pair: (pair[1].lineno - pair[1].end_lineno, -pair[0])
+            ):
+                owners.update(dict.fromkeys(range(item.lineno, item.end_lineno + 1), item.name))
             for node in (item for item in ast.walk(tree) if isinstance(item, ast.Call)):
                 name = ast.unparse(node.func)
                 first, dot, rest = name.partition(".")
                 name = aliases.get(first, first) + (dot + rest if dot else "")
-                owners = [item for item in functions if item.lineno <= node.lineno <= item.end_lineno]
-                owner = min(owners, key=lambda item: item.end_lineno - item.lineno).name if owners else "<module>"
+                owner = owners.get(node.lineno, "<module>")
                 if "__mutmut_" in owner:
                     owner = owner.split("__mutmut_", 1)[0].removeprefix("x_")
                 result.append((str(path.relative_to(root)), node.lineno, name, owner))
