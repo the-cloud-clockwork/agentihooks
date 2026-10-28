@@ -45,33 +45,28 @@ jobs:
 
       - name: Insert the release into the changelog branch
         run: |
-          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
-          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          export GIT_CONFIG_VALUE_0
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          repo="repos/$GITHUB_REPOSITORY"
           for attempt in 1 2 3 4 5; do
-            parent=()
+            parent=$(gh api "$repo/git/matching-refs/heads/changelog" --jq '.[] | select(.ref == "refs/heads/changelog") | .object.sha')
             : > "$RUNNER_TEMP/RELEASES.md"
-            status=0
-            git ls-remote --exit-code origin refs/heads/changelog >/dev/null || status=$?
-            if [[ $status -eq 0 ]]; then
-              git fetch --quiet origin +refs/heads/changelog:refs/remotes/origin/changelog
-              parent=(-p origin/changelog)
-              if git cat-file -e origin/changelog:RELEASES.md 2>/dev/null; then
-                git show origin/changelog:RELEASES.md > "$RUNNER_TEMP/RELEASES.md"
-              fi
-            elif [[ $status -ne 2 ]]; then
-              exit "$status"
+            if [[ -n "$parent" ]]; then
+              gh api -H 'Accept: application/vnd.github.raw' "$repo/contents/RELEASES.md?ref=$parent" > "$RUNNER_TEMP/RELEASES.md"
             fi
+            cp "$RUNNER_TEMP/RELEASES.md" "$RUNNER_TEMP/RELEASES.before"
             python -m scripts.release_changelog insert "$RUNNER_TEMP/section.md" "$RUNNER_TEMP/RELEASES.md"
-            blob=$(git hash-object -w "$RUNNER_TEMP/RELEASES.md")
-            tree=$(printf '100644 blob %s\tRELEASES.md\n' "$blob" | git mktree)
-            if [[ ${#parent[@]} -gt 0 && "$tree" == "$(git rev-parse origin/changelog^{tree})" ]]; then
+            if [[ -n "$parent" ]] && cmp -s "$RUNNER_TEMP/RELEASES.before" "$RUNNER_TEMP/RELEASES.md"; then
               exit 0
             fi
-            commit=$(git commit-tree "$tree" "${parent[@]}" -m "Explain the changes of $TAG")
-            if git push --quiet origin "$commit:refs/heads/changelog"; then
+            blob=$(python -c 'import base64, json, sys; print(json.dumps({"content": base64.b64encode(open(sys.argv[1], "rb").read()).decode(), "encoding": "base64"}))' "$RUNNER_TEMP/RELEASES.md" \
+              | gh api "$repo/git/blobs" --input - --jq .sha)
+            tree=$(gh api "$repo/git/trees" -f 'tree[][path]=RELEASES.md' -f 'tree[][mode]=100644' -f 'tree[][type]=blob' -f "tree[][sha]=$blob" --jq .sha)
+            commit=$(python -c 'import json, sys; print(json.dumps({"message": sys.argv[1], "tree": sys.argv[2], "parents": sys.argv[3:]}))' "Explain the changes of $TAG" "$tree" ${parent:+"$parent"} \
+              | gh api "$repo/git/commits" --input - --jq .sha)
+            if [[ -n "$parent" ]]; then
+              if gh api -X PATCH "$repo/git/refs/heads/changelog" -f "sha=$commit" -F force=false >/dev/null; then
+                exit 0
+              fi
+            elif gh api "$repo/git/refs" -f ref=refs/heads/changelog -f "sha=$commit" >/dev/null; then
               exit 0
             fi
             sleep $((attempt * 5))
