@@ -25,6 +25,7 @@ sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
 python3 tests/chart_examples.py "$chart"
 python3 tests/chart_github_auth.py "$chart"
 python3 tests/chart_hive_home.py "$chart"
+python3 tests/chart_hive_rollout.py
 python3 tests/chart_hive_only.py "$chart"
 python3 tests/chart_hub.py "$chart"
 python3 tests/chart_nats.py "$chart"

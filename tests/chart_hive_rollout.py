@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-CHART = Path(__file__).resolve().parents[2] / "deploy/helm/agentihooks-swarm"
+CHART = Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm"
 
 
 def render(*settings):
@@ -78,3 +78,10 @@ def test_a_drain_that_consumes_the_rollout_budget_is_refused():
         assert "workers.drainSeconds must be between 0 and 300" in error.stderr
     else:
         raise AssertionError("an hour long drain must not render")
+
+
+if __name__ == "__main__":
+    test_every_roll_acquires_before_sync_and_releases_after_serving()
+    test_hives_in_one_release_have_distinct_sync_waves()
+    test_a_drain_that_consumes_the_rollout_budget_is_refused()
+    print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")
