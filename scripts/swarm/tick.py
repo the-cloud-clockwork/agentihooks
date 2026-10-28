@@ -973,8 +973,8 @@ def _stacked_dep(dep, row, repo):
 
 
 def _refund_parked(slug, store, rows, agent):
-    quota = (store.handoff_envelope(slug, agent.task) or {}).get("reason") == "quota"
-    if _parked(rows.get(agent.task, {}), rows) or quota:
+    requested = (store.handoff_envelope(slug, agent.task) or {}).get("reason") in ("quota", "operator")
+    if _parked(rows.get(agent.task, {}), rows) or requested:
         store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
 
 

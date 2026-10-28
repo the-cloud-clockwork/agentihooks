@@ -74,8 +74,11 @@ def preferred(task: dict, doc: dict, graph: dict) -> bool:
 
 def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> list[str]:
     """full maps each lane whose every seat is busy to its claimable tasks in claim order and its live holders."""
+    from scripts.hive import placement_waits
+
     graph, redis = hierarchy.project(doc)[0], store.redis
     seen, asked = redis.smembers(store.key(slug, WAITING)), redis.hgetall(store.key(slug, ASKED))
+    refused = placement_waits.read(store, slug)
     holding = {a.name for _, holders in full.values() for a in holders}
     asked = {name: entry for name, entry in asked.items() if name in holding}
     waiting, actions = set(), []
@@ -83,6 +86,8 @@ def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> li
         for task in (t for t in ready if preferred(t, doc, graph)):
             waiting.add(task["id"])
             if task["id"] not in seen or _pending(asked, task["id"], now_ms):
+                continue
+            if _refused(refused.get(task["id"]), lane, now_ms):
                 continue
             victim = _victim([a for a in holders if a.name not in asked], rows, doc, graph)
             if victim is not None:
@@ -98,6 +103,12 @@ def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> li
 
 def _pending(asked: dict, task_id: str, now_ms: int) -> bool:
     return any(target == task_id and now_ms - at < ANSWER_MS for target, at in map(json.loads, asked.values()))
+
+
+def _refused(wait, lane, now_ms):
+    from scripts.hive import placement_waits
+
+    return wait is not None and wait["lane"] == lane and now_ms - wait["seen_at"] < placement_waits.FRESH_MS
 
 
 def _victim(holders, rows, doc, graph):
