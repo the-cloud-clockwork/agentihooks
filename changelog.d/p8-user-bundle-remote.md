@@ -1,1 +1,1 @@
-A swarm tick refuses a remote worker-pod launch while a user bundle is registered on the launching host, naming the bundle, because the pod carries only the root bundle; the launch is no longer admitted with the user source silently dropped.
+A seat that would run on another hive or in a worker pod is refused, naming the bundle, while a user bundle is registered on the launching host, because a remote machine carries only the root bundle; the seat is no longer placed with the user source silently dropped. A seat on the launching hive is unchanged.

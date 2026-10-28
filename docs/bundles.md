@@ -129,7 +129,7 @@ Because profile content is written *after* the shared block, a profile can still
 override shared guidance by restating it. Keep profile `CLAUDE.md` files to what
 is genuinely profile-specific.
 
-A worker pod carries only the root bundle, so a swarm tick refuses a remote launch while a user bundle is registered on the launching host (`bundle unlink --user` clears it); nothing is seeded without its user source.
+A worker pod and a remote hive carry only the root bundle, so a seat is refused, before any order or pod is created, when a user bundle is registered on the host that launches it and the seat would run on another machine (`bundle unlink --user` clears it). A seat on the launching hive keeps its user bundle. Nothing is placed remotely without its user source.
 
 A pinned render (`--bundle-revision`, used by swarm overlay launches) rebuilds from the recorded root and user commits, copies both into the profile home and records both in its render stamp. It never reads the live user bundle, and refuses a revision that names no user commit while a user bundle is linked.
 
