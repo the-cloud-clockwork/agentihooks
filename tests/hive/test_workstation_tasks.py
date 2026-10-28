@@ -1,7 +1,8 @@
 from scripts.hive import launch, placement, placement_waits
 from scripts.hive.placement import Wait
-from scripts.swarm import commands
+from scripts.swarm import commands, local_slots
 from scripts.swarm_v2.runtime.base import LOCAL, Placement
+from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
 from tests.hive.test_local_overflow import hybrid
@@ -46,12 +47,20 @@ def test_runtime_placement_keeps_a_workstation_task_local():
 def test_a_hybrid_controller_claims_a_local_slot_for_a_workstation_task_on_the_workstation_hive(
     setup, monkeypatch, capsys
 ):
-    from scripts.swarm import local_slots
-
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
     fenced = hybrid(setup, monkeypatch)
+    fenced.runtime.router.runtimes[LOCAL] = LocalHerdrRuntime(setup.herdr)
     write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=4)
     assert fenced.spawn(setup.config, "eng", "eng name", TASK) == "placed on the workstation"
     assert setup.store.redis.hkeys(local_slots.key("workstation")) == ["fixture/eng name"]
     assert "fixture: local slot claim eng name for landing on workstation counted 0 of 4" in capsys.readouterr().out
     fenced.runtime.hive_launch.spawn.assert_not_called()
+
+
+def test_a_hybrid_controller_leaves_the_claim_of_a_plain_task_to_the_hive_launch(setup, monkeypatch):
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    fenced = hybrid(setup, monkeypatch)
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=4)
+    assert fenced.spawn(setup.config, "eng", "eng name", {"id": "other"}) == "placed on the hive"
+    assert setup.store.redis.hkeys(local_slots.key("workstation")) == []
+    setup.herdr.spawn.assert_not_called()
