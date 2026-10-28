@@ -135,9 +135,10 @@ def take(store, slug, name, runtime, now_ms, replace_live=False, admit=lambda na
     if running and not replace_live:
         raise SwarmError(f"{running[0]} is the live master of {slug}; run take-master --replace to retire it first")
     pid = agent_pid()
+    record = master_record(slug, name, pid, now_ms)
     if not seated:
         name = store.next_name(slug, MASTER, now_ms)
-    record = master_record(slug, name, pid, now_ms)
+        record = replace(record, name=name)
     if not name_session(pid, name):
         raise SwarmError("this session is not registered with agentihooks, so the tick could not see it as master")
     before, after = (others, []) if hive else ([], others)

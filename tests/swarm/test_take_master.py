@@ -89,6 +89,7 @@ def test_take_master_refuses_when_neither_process_nor_binding_names_a_harness(ta
         "neither its process nor its profile binding names claude or codex"
     )
     assert [a for a in store.agents("sw") if a.lane == "master"] == []
+    assert store.next_name("sw", "master", 1) == "master@a1b2c3-0001"
 
 
 def test_take_master_records_the_mounted_profile(taker, monkeypatch):

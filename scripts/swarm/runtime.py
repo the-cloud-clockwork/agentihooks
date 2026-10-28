@@ -679,7 +679,7 @@ class HerdrRuntime:
     def _fallback_choice(self, saved, profile, quota_transfer, environ, requested, avoid):
         if saved:
             return self._saved_choice(saved, profile, quota_transfer, environ)
-        if requested and not hasattr(self, "_quota_accounts") and plugins.claude_only(profile):
+        if not hasattr(self, "_quota_accounts") and plugins.claude_only(profile):
             self._claude_held(profile, environ)
         return self._rotation(requested, environ, _prefer(profile, avoid))
 
