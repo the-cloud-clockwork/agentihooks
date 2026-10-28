@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from hooks.memory import catalog
+
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -311,20 +313,20 @@ def test_provider_posts_the_model_and_preserves_input_order(prepared, provider):
 
 
 @pytest.mark.parametrize(
-    "body",
+    "body,error",
     [
-        b'{"model":"other","data":[]}',
-        b'{"model":"fixture-hash-embedder-4","data":[{"index":2,"embedding":[1,0,0,0]}]}',
-        b'{"model":"fixture-hash-embedder-4","data":[{"index":0,"embedding":[1]}]}',
-        b"broken json",
-        b"x" * ((2 << 20) + 1),
+        (b'{"model":"other","data":[]}', ValueError),
+        (b'{"model":"fixture-hash-embedder-4","data":[{"index":2,"embedding":[1,0,0,0]}]}', ValueError),
+        (b'{"model":"fixture-hash-embedder-4","data":[{"index":0,"embedding":[1]}]}', catalog.Conflict),
+        (b"broken json", ValueError),
+        (b"x" * ((2 << 20) + 1), ValueError),
     ],
 )
-def test_provider_rejects_invalid_or_oversized_responses(prepared, provider, body):
+def test_provider_rejects_invalid_or_oversized_responses(prepared, provider, body, error):
     from hooks.memory.embedding_process import configure
 
     provider[2]["body"] = body
-    with pytest.raises(ValueError):
+    with pytest.raises(error):
         configure(environment(prepared, provider)).provider.embed(["text"])
 
 

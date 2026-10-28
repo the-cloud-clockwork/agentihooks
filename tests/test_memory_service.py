@@ -249,7 +249,7 @@ def test_the_handler_is_quiet_and_named_for_sessions():
 
 
 @pytest.mark.parametrize(
-    "method,path", [("POST", "/v2/sessions/ingest"), ("POST", "/"), ("GET", "/v2/sessions/search")]
+    "method,path", [("POST", "/v2/sessions/unknown"), ("POST", "/"), ("GET", "/v2/sessions/search")]
 )
 def test_unknown_routes_are_not_found(served, method, path):
     status, _, answer = call(served, path, {} if method == "POST" else None, TOKEN, method=method)
