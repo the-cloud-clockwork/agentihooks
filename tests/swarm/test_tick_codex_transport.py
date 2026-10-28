@@ -29,6 +29,7 @@ def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transpo
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     monkeypatch.setattr(codex, "connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda *args: None)
     config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, codex_inbox_transport=transport)
     store.create(config)
     ledger = FakeLedger([{"id": "t1", "title": "Transport", "lane": "eng"}])
@@ -110,6 +111,7 @@ def test_failed_transport_admission_retires_the_launched_pane(tmp_path, monkeypa
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, codex_inbox_transport=transport))
     monkeypatch.setattr(codex, "connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda *args: None)
     fake = FakeRuntime()
     ended = []
 
