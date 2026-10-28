@@ -68,6 +68,31 @@ def _refusal(error_class: str, detail: str) -> dict:
     }
 
 
+def read_body(request: BaseHTTPRequestHandler) -> dict | None:
+    try:
+        length = int(request.headers.get("Content-Length") or 0)
+        if length not in range(1, MAX_BODY + 1):
+            return None
+        body = json.loads(request.rfile.read(length))
+    except ValueError:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def post(tools: records.SessionTools, grants: dict[str, Grant], request: BaseHTTPRequestHandler) -> tuple:
+    if request.path != SEARCH_PATH and not request.path.startswith(TOOLS_PREFIX):
+        return 404, _refusal("not_found", NOT_FOUND)
+    grant = authenticate(grants, request.headers.get("Authorization"))
+    if grant is None:
+        return 401, _refusal("unauthenticated", UNAUTHENTICATED), {"WWW-Authenticate": "Bearer"}
+    body = read_body(request)
+    if body is None:
+        return 400, _refusal("invalid_request", BAD_BODY)
+    if request.path == SEARCH_PATH:
+        return 200, search_api.search(tools.searcher, grant, body)
+    return 200, records.call(tools, request.path.removeprefix(TOOLS_PREFIX), grant, body, time.time())
+
+
 def handler(tools: records.SessionTools, grants: dict[str, Grant]) -> type[BaseHTTPRequestHandler]:
     class Sessions(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -80,28 +105,7 @@ def handler(tools: records.SessionTools, grants: dict[str, Grant]) -> type[BaseH
             return self._answer(200, {"state": "ready"})
 
         def do_POST(self):
-            if self.path != SEARCH_PATH and not self.path.startswith(TOOLS_PREFIX):
-                return self._answer(404, _refusal("not_found", NOT_FOUND))
-            grant = authenticate(grants, self.headers.get("Authorization"))
-            if grant is None:
-                return self._answer(401, _refusal("unauthenticated", UNAUTHENTICATED), {"WWW-Authenticate": "Bearer"})
-            body = self._body()
-            if body is None:
-                return self._answer(400, _refusal("invalid_request", BAD_BODY))
-            if self.path == SEARCH_PATH:
-                return self._answer(200, search_api.search(tools.searcher, grant, body))
-            name = self.path.removeprefix(TOOLS_PREFIX)
-            return self._answer(200, records.call(tools, name, grant, body, time.time()))
-
-        def _body(self) -> dict | None:
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-                if length not in range(1, MAX_BODY + 1):
-                    return None
-                body = json.loads(self.rfile.read(length))
-            except ValueError:
-                return None
-            return body if isinstance(body, dict) else None
+            self._answer(*post(tools, grants, self))
 
         def _answer(self, status: int, body: dict, headers: dict | None = None):
             payload = json.dumps(body).encode()
