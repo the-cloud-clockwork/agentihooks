@@ -388,7 +388,7 @@ class Snapshot:
         return None if row is None else row[0]
 
 
-def release(held: dict, connection) -> None:
+def release_reader(held: dict, connection) -> None:
     held.pop(connection, None)
     connection.close()
 
@@ -467,7 +467,7 @@ class SQLiteLedgerRepository:
         held = getattr(self._readers, "held", None)
         if held is None or held[0] != self.path:
             held = self._readers.held = self._open(check_same_thread=False)
-            self._held[held[1]] = weakref.finalize(threading.current_thread(), release, self._held, held[1])
+            self._held[held[1]] = weakref.finalize(threading.current_thread(), release_reader, self._held, held[1])
         held[1].set_trace_callback(self.trace)
         return nullcontext(held[1])
 
