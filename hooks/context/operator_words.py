@@ -208,10 +208,10 @@ def _shared_forget(swarm):
 
     def drop_legacy(redis):
         for name in redis.smembers(_shared_key()):
-            for raw in [
+            for raw in {
                 *redis.zrange(_shared_key(name, "entries"), 0, -1),
                 *redis.lrange(_shared_key(name), 0, -1),
-            ]:
+            }:
                 if json.loads(raw)["swarm"] == swarm:
                     redis.zrem(_shared_key(name, "entries"), raw)
                     redis.lrem(_shared_key(name), 0, raw)
