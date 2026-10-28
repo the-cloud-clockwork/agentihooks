@@ -84,7 +84,13 @@ def test_main_keeps_its_existing_branch_match_and_rules():
 
     assert ruleset["conditions"] == {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}
     rules = {rule["type"]: rule for rule in ruleset["rules"]}
-    assert set(rules) == {"deletion", "non_fast_forward", "required_linear_history", "pull_request", "required_status_checks"}
+    assert set(rules) == {
+        "deletion",
+        "non_fast_forward",
+        "required_linear_history",
+        "pull_request",
+        "required_status_checks",
+    }
     assert rules["required_status_checks"]["parameters"] == {
         "strict_required_status_checks_policy": False,
         "do_not_enforce_on_create": False,
