@@ -30,6 +30,8 @@ PORT_ENV = "AGENTIHOOKS_SESSION_PORT"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8790
 MAX_BODY = 1 << 20
+DRAIN_LIMIT = 4 * MAX_BODY
+DRAIN_CHUNK = 1 << 16
 LENGTH_HEADER = "Content-Length"
 AUTH_HEADER = "Authorization"
 PROBE = "SELECT 1"
@@ -72,10 +74,24 @@ def _refusal(error_class: str, detail: str) -> dict:
     }
 
 
+def drain(request: BaseHTTPRequestHandler, length: int) -> None:
+    if length > DRAIN_LIMIT:
+        request.close_connection = True
+        return
+    while length > 0:
+        chunk = request.rfile.read(min(length, DRAIN_CHUNK))
+        if not chunk:
+            return
+        length -= len(chunk)
+
+
 def read_body(request: BaseHTTPRequestHandler) -> dict | None:
     try:
         length = int(request.headers.get(LENGTH_HEADER) or 0)
-        if length not in range(2, MAX_BODY + 1):
+        if length > MAX_BODY:
+            drain(request, length)
+            return None
+        if length < 2:
             return None
         body = json.loads(request.rfile.read(length))
     except ValueError:
