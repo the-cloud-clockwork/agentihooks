@@ -88,7 +88,10 @@ def test_no_check_reads_the_process_table_twice_in_one_statement():
     tests = Path(__file__).resolve().parent
     found = []
     for path in sorted(tests.rglob("*.py")):
-        for function in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        source = path.read_text(encoding="utf-8")
+        if not any(name in source for name in ("_process", "processes", "/proc/")):
+            continue
+        for function in ast.walk(ast.parse(source)):
             if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             process_paths = {
