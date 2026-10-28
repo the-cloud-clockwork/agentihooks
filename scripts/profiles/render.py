@@ -737,8 +737,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "measure":
         return measure.main(args)
-    if (args.bundle is not None or args.user_bundle is not None) and args.out is None:
-        render_cmd.error("--bundle and --user-bundle need --out")
+    if args.out is None:
+        for flag, value in (("--bundle", args.bundle), ("--user-bundle", args.user_bundle)):
+            if value is not None:
+                render_cmd.error(f"{flag} needs --out")
     try:
         if args.out is not None:
             return _render_scratch(args)
