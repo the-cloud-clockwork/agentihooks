@@ -75,3 +75,33 @@ def test_writer_lock_key_covers_the_scenario_repository_and_install_inputs():
     } <= set(entry["paths"])
     assert "postgres 16" in entry["tools"]
     assert "pgvector 0.8.0 pg16" in entry["tools"]
+
+
+def test_writer_lock_install_uses_trusted_version_without_scanning_git():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/writer-lock.yml").read_text())
+    steps = workflow["jobs"]["scenario"]["steps"]
+    [install] = [step for step in steps if step.get("name") == "Install dependencies"]
+    assert install.get("env", {}).get("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS") == (
+        "0.dev${{ github.run_number }}"
+    )
+
+
+def test_writer_lock_version_inference_bypasses_a_stalled_git_status(monkeypatch):
+    import subprocess
+
+    from setuptools_scm import get_version
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/writer-lock.yml").read_text())
+    steps = workflow["jobs"]["scenario"]["steps"]
+    [install] = [step for step in steps if step.get("name") == "Install dependencies"]
+    monkeypatch.delenv("SETUPTOOLS_SCM_PRETEND_VERSION", raising=False)
+    monkeypatch.delenv("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS", raising=False)
+
+    def stalled_status(root, config):
+        raise subprocess.TimeoutExpired(["git", "status", "--porcelain", "--untracked-files=no"], 40)
+
+    with pytest.raises(subprocess.TimeoutExpired, match="40 seconds"):
+        get_version(root=str(ROOT), dist_name="agentihooks", parse=stalled_status)
+    for key, value in install.get("env", {}).items():
+        monkeypatch.setenv(key, value.replace("${{ github.run_number }}", "123"))
+    assert get_version(root=str(ROOT), dist_name="agentihooks", parse=stalled_status) == "0.dev123"
