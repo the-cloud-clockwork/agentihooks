@@ -349,17 +349,17 @@ def delivery_branch(root: Path, task: dict, branch: str) -> str:
         delivered = publish_queue.open_head(remote, task.get("pr_url", ""))
         if delivered == recorded and descends(root, recorded):
             return recorded
-        if not delivered and cut_from(root, recorded) and settled(root, task.get("pr_url", "")):
+        if not delivered and cut_from(root, recorded) and settled(root, task):
             return branch
         raise SwarmError(f"current worktree {root} branch {branch} differs from registered branch {recorded}")
     return branch
 
 
 def cut_from(root: Path, recorded: str) -> bool:
-    if not remote_head(root, recorded):
+    head = remote_head(root, recorded)
+    if not head:
         return False
-    git(root, "fetch", "origin", recorded)
-    return descends(root, recorded)
+    return git(root, "merge-base", head, "HEAD") == head
 
 
 def drop_repository(task: dict, repository: Path) -> dict:
@@ -371,7 +371,8 @@ def drop_repository(task: dict, repository: Path) -> dict:
     }
 
 
-def settled(root: Path, url: str) -> bool:
+def settled(root: Path, task: dict) -> bool:
+    url = task.get("pr_url")
     if not url:
         return True
     return json.loads(execute(["gh", "pr", "view", url, "--json", "state"], root))["state"] != "OPEN"
