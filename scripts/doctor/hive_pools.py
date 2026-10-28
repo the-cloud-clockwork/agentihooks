@@ -5,6 +5,7 @@ import json
 
 from scripts.hive import placement, placement_waits, registry
 from scripts.swarm.health.findings import Finding
+from scripts.swarm.store import RedisStore
 
 MINUTE_MS = 60_000
 DOWN_MS = 10 * MINUTE_MS
@@ -65,7 +66,7 @@ def findings(state: dict, now_ms: int) -> list[Finding]:
     return found
 
 
-def refusals(store) -> list[dict]:
+def refusals(store: RedisStore) -> list[dict]:
     return [
         {"id": f"{slug}/{task}", "seen_at": row["seen_at"]}
         for slug in store.slugs()
@@ -74,7 +75,7 @@ def refusals(store) -> list[dict]:
     ]
 
 
-def read(store, slug: str, now_ms: int) -> list[Finding]:
+def read(store: RedisStore, slug: str, now_ms: int) -> list[Finding]:
     from scripts.hive import headroom
 
     key = store.key(slug, STATE)

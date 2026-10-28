@@ -34,7 +34,6 @@ def _refusals(at, start, count):
 
 
 def _roll(stays_ready):
-    """Doctor passes ten minutes apart around the release roll: both Oracle hives drain, stop beating, then return."""
     passes = []
     for minute, oracle, refused in (
         (-10, "ready", 0),
