@@ -5,7 +5,7 @@ on:
     branches: [dev]
 
 concurrency:
-  group: promotion-dev
+  group: promotion-dev-${{ github.run_id }}
   cancel-in-progress: false
 
 permissions:
@@ -40,6 +40,9 @@ jobs:
   promote:
     needs: checks
     environment: promotion
+    concurrency:
+      group: release-version
+      cancel-in-progress: false
     runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4

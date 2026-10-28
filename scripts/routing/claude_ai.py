@@ -5,7 +5,7 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from scripts import aicode_tokens, master_logins, openbao_kv, quota_state
+from scripts import aicode_tokens, front_door_route, master_logins, openbao_kv, quota_state
 from scripts import master_claude_login as login
 from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import binding
@@ -70,13 +70,27 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[dict[str, str], str,
     raise login.LoginRefused(NONE.format(reasons="; ".join(reasons)))
 
 
+def _front(environ: Mapping[str, str], cwd: Path) -> tuple[dict[str, str], str, int]:
+    target, found = login.prepare(environ, cwd)
+    child = login.child(environ, target, found)
+    try:
+        native_login.check(child, found)
+    except native_login.LoginError as exc:
+        login.release(target, environ)
+        raise login.LoginRefused(str(exc)) from exc
+    number = next(number for number in login.numbers() if login.home(number) == target)
+    return child, found, number
+
+
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from scripts.claude_quota_balancer import RoutingError
     from scripts.hive.account_slots import execute
     from scripts.install import _claude_command, _write_route_report
 
     try:
-        child, found, number = prepare(environ, Path.cwd())
+        title = next((args[index + 1] for index, flag in enumerate(args[:-1]) if flag == "--name"), "")
+        front = front_door_route.check(environ.get("AGENTIHOOKS_PROFILE", ""), title, [])
+        child, found, number = (_front if front else prepare)(environ, Path.cwd())
     except login.LoginRefused as exc:
         raise RoutingError(str(exc)) from exc
     _write_route_report(report, status="routed", account=found, placement="forced")

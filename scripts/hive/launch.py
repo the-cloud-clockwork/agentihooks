@@ -246,11 +246,14 @@ class HiveLaunch:
                     hive["room"] = 0
         return waited
 
-    def _select(self, config: SwarmConfig, lane: str, task: dict) -> Selection | placement.Wait:
+    def _select(
+        self, config: SwarmConfig, lane: str, task: dict, excluded: set[str] | None = None
+    ) -> Selection | placement.Wait:
         chosen = config.lanes.get(lane, {})
         saved = task.get("launch_assignment") or profile_choice.transfer(task)
         decision = self.herdr._profile_decision(config, lane, chosen, task, saved, saved, dict(os.environ))
         hives, now = self.hives(), lease.now_ms(self.store)
+        hives = [hive for hive in hives if hive["id"] not in (excluded or ())]
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
         hives, refused = _pinned(_by_origin(hives, config.repo), task, role)
         if refused:
@@ -370,6 +373,24 @@ class HiveLaunch:
             ),
         )
 
+    def _admitted_selection(self, request: SpawnRequest) -> Selection | placement.Wait:
+        selected = self.select(request.config, request.lane, request.task)
+        excluded = set()
+        while isinstance(selected, Selection):
+            refused = self.queue_refusal(request, selected, self.store.redis.xlen(self.orders.stream(selected.hive)))
+            refused = refused or self.reserve_room(request, selected)
+            if not refused:
+                return selected
+            waited = self._withdraw(request, selected, refused)
+            excluded.add(selected.hive)
+            selected = self._select(request.config, request.lane, request.task, excluded)
+            if isinstance(selected, placement.Wait):
+                return self._record_wait(request.lane, request.task, waited)
+            if self.placement_cache is not None:
+                selected = self._spend(selected)
+                self.placement_cache[(request.lane, request.task["id"])] = selected
+        return selected
+
     def spawn(self, request: SpawnRequest) -> Outcome:
         lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
         if order := self.orders_for(request.task["id"]):
@@ -385,30 +406,24 @@ class HiveLaunch:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail="another claimant owns the hive launch order")
             else:
                 return self.answer(request, order)
-        selected = self.select(request.config, request.lane, request.task)
+        selected = self._admitted_selection(request)
         if isinstance(selected, placement.Wait):
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
-        if refused := self.queue_refusal(request, selected, self.store.redis.xlen(self.orders.stream(selected.hive))):
-            self._record_wait(request.lane, request.task, placement.Wait(refused))
-            return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
-        named = replace(
-            request,
-            config=replace(request.config, repo=selected.origin) if selected.origin else request.config,
-            task={**request.task, "harness": selected.account.harness},
-        )
-        task = orders.carried(
-            self.slug,
-            {
-                **request.task,
-                "profile_decision": selected.profile.record(),
-                **({orders.ORIGIN: selected.origin} if selected.origin else {}),
-            },
-            self.opening(named),
-        )
-        if refused := self.reserve_room(request, selected):
-            self._record_wait(request.lane, request.task, self._withdraw(request, selected, refused))
-            return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
         try:
+            named = replace(
+                request,
+                config=replace(request.config, repo=selected.origin) if selected.origin else request.config,
+                task={**request.task, "harness": selected.account.harness},
+            )
+            task = orders.carried(
+                self.slug,
+                {
+                    **request.task,
+                    "profile_decision": selected.profile.record(),
+                    **({orders.ORIGIN: selected.origin} if selected.origin else {}),
+                },
+                self.opening(named),
+            )
             return self.send_order(request, selected, task)
         except BaseException:
             from scripts.swarm import local_slots
@@ -506,8 +521,10 @@ class HiveLaunch:
         _match("seat", agent.seat, request.task["seat"])
         _match("generation", order.generation, agent.generation)
         ack = self.orders.ack(order)
-        if not ack or ack.status != "live":
+        if not ack:
             return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
+        if ack.status != "live":
+            return Outcome("spawn", Status.REFUSED, HIVE, detail=f"hive launch failed: {ack.failure}")
         _match("ack host", order.hive, ack.target.get("host_id"))
         admission.joined(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
         if agent.runtime_target != ack.target:
