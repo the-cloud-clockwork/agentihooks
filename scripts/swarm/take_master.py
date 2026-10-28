@@ -107,7 +107,7 @@ def master_record(slug, name, pid, now_ms):
             "take-master could not name this session's harness: "
             "neither its process nor its profile binding names claude or codex"
         )
-    model, effort = launch_model.read(harness, argv_of(pid)) if harness else ("", "")
+    model, effort = launch_model.read(harness, argv_of(pid))
     return AgentRecord(
         name,
         MASTER,

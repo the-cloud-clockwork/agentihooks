@@ -68,13 +68,13 @@ def test_the_role_of_an_installed_profile_comes_from_its_chain(monkeypatch):
 
 class OperatorRuntime:
     def __init__(self, fail=""):
-        self.launched, self.reaped, self.fail = [], [], fail
+        self.launched, self.reaped, self.agents, self.fail = [], [], [], fail
 
     def operator(self, config, name, profile, text, agent=""):
         if self.fail:
             raise RuntimeError(self.fail)
         self.launched.append((config.slug, name, profile, text))
-        self.agents = [*getattr(self, "agents", []), agent]
+        self.agents.append(agent)
         return Placed(pane_id="w1:p7", harness="claude")
 
     def reap_name(self, name):
