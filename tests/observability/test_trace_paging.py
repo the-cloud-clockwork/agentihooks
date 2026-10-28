@@ -315,7 +315,11 @@ def test_transcript_rewritten_in_place_never_recounts_paged_spans(tmp_path, monk
     _assert_no_recount(receiver, path)
 
 
-def test_late_record_for_a_paged_message_never_recounts_its_span(tmp_path, monkeypatch, quiet):
+@pytest.mark.parametrize("masked", [False, True])
+def test_late_record_for_a_paged_message_never_recounts_its_span(tmp_path, monkeypatch, quiet, masked):
+    if masked:
+        original = transcript.mask_value
+        monkeypatch.setattr(transcript, "mask_value", lambda value: "M1" if value == "m1" else original(value))
     receiver, path, _ = _paged_session(tmp_path, monkeypatch)
     late = _call("a1-late", "m1", {"type": "text", "text": "late"}, 6)
     with path.open("a") as handle:
