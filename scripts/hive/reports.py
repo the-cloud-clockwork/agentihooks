@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from scripts.swarm.store import AgentRecord
 
 LOST_MS = 10 * 60_000
+STARTUP_MS = 6 * 60_000
 
 
 def key(hive: str) -> str:
@@ -53,14 +54,21 @@ class Reports:
         report = self.read(host(agent))
         if report is None:
             return False
-        if report.get("observed_at", 0) < (agent.launched_at or agent.started_at):
+        launched = agent.launched_at or agent.started_at
+        observed = report.get("observed_at", 0)
+        if observed < launched:
             return False
+        if report.get("started_at", 0) > launched:
+            return True
+        names = report.get("names")
+        if isinstance(names, list) and agent.name not in names and observed - launched >= STARTUP_MS:
+            return True
         panes = report.get("pane_ids")
         if not isinstance(panes, list):
             return False
         namespace = report.get("process_namespace")
-        launched = agent.runtime_target.get("process_namespace")
-        if namespace and launched and namespace != launched:
+        recorded = agent.runtime_target.get("process_namespace")
+        if namespace and recorded and namespace != recorded:
             return True
         return bool(agent.pane_id) and agent.pane_id not in panes
 

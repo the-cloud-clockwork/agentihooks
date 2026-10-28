@@ -1715,6 +1715,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
     herdr.conversations.return_value = {"w1:p1": "conversation"}
     herdr.herdr.return_value = {"panes": [{"pane_id": "w1:p1"}]}
     monkeypatch.setattr(process, "local_namespace", lambda: "hive-namespace")
+    monkeypatch.setattr(process, "started_ms", lambda: 100000)
     monkeypatch.setattr(daemon.time, "time", lambda: 123)
     herdr.observe.return_value = PaneObservation("idle", typed="half")
     herdr.reported.return_value = True
@@ -1733,6 +1734,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
         "panes": {"w1:p1": "conversation"},
         "pane_ids": ["w1:p1"],
         "process_namespace": "hive-namespace",
+        "started_at": 100000,
         "observed_at": 123000,
         "executions": {
             here.execution_id: {
