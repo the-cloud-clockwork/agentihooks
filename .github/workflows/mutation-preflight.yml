@@ -494,9 +494,23 @@ jobs:
         run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
+        id: download-planned-mutation-test-selection
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &download-planned-mutation-test-selection
           name: mutation-selection
+
+      - name: Download planned mutation test selection, wait before attempt 2
+        if: steps.download-planned-mutation-test-selection.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download planned mutation test selection failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download planned mutation test selection, attempt 2
+        if: steps.download-planned-mutation-test-selection.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *download-planned-mutation-test-selection
 
       - name: Install the pinned nats server for the bus backend tests
         timeout-minutes: 3
@@ -515,11 +529,25 @@ jobs:
           exit 1
 
       - name: Download the shared mutation stats
+        id: download-the-shared-mutation-stats
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
           merge-multiple: true
+
+      - name: Download the shared mutation stats, wait before attempt 2
+        if: steps.download-the-shared-mutation-stats.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the shared mutation stats failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the shared mutation stats, attempt 2
+        if: steps.download-the-shared-mutation-stats.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
         uses: actions/cache/restore@v4
@@ -529,10 +557,24 @@ jobs:
           restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
 
       - name: Download the measured mutation plan
+        id: download-the-measured-mutation-plan
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &download-the-measured-mutation-plan
           name: mutation-plan
           path: .mutation-stats
+
+      - name: Download the measured mutation plan, wait before attempt 2
+        if: steps.download-the-measured-mutation-plan.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the measured mutation plan failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the measured mutation plan, attempt 2
+        if: steps.download-the-measured-mutation-plan.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *download-the-measured-mutation-plan
 
       - name: Mutate changed Python files
         env:
