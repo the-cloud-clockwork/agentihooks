@@ -88,7 +88,7 @@ def _attempts(repo, runs, run, cache=None):
 def _job_tests(repo, job, run):
     endpoint = f"repos/{repo}/actions/jobs/{job['id']}/logs"
     try:
-        log = github_reads.job_log(endpoint, lambda: _gh(["api", endpoint], run))
+        log = github_reads.job_log(endpoint, lambda: _gh(["api", endpoint, "--allow-escape-sequences"], run))
     except subprocess.CalledProcessError as exc:
         if "HTTP 404" not in exc.stderr:
             raise

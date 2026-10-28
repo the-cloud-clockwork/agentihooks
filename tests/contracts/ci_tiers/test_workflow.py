@@ -33,6 +33,7 @@ PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lin
     "coverage-ratchet",
     "coverage-baseline",
     "promote",
+    "promotion-ready",
     "refresh-durations",
     "mutation-stats-seed",
     "count-record",

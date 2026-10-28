@@ -3310,6 +3310,20 @@ and a failed detector it prints `local-slot-census is unknown because <failures>
 [Pull request 7995](https://github.com/the-cloud-clockwork/agentihooks/pull/7995) delivered the journal line and
 the detector.
 
+### Doctor unclaimed launch detector
+
+A launch path that skips the local slot claim writes no journal line, so the slot census cannot see it. The
+`unclaimed launch` detector reads the same claim lines and agents as the slot census and counts the watched swarm's
+agents started in the last hour that hold a pane on the local backend, on this machine's hive or none, outside the
+`master` lane, whose name no `local slot claim` line of the watched swarm carries. Ended agents in the swarm's history
+count too.
+
+When one or more such launches exist it raises one finding, kind `unclaimed local launch`, id
+`unclaimed-local-launch/<slug>`, summary `<n> local launches of <slug> in the last hour held a pane with no local slot
+claim: <names>`, evidence `<name> on task <task> started at <ms> on <hive>` per launch, with `the workstation` for
+an empty hive, and the launch count as its number. An unreadable journal fails it with `local slot claims unavailable:
+<error>`. Measure it with `agentihooks doctor rig-grade-swarm measure unclaimed-local-launch`.
+
 ### Doctor handoff detectors
 
 The Doctor's handoff detectors (`scripts.doctor.handoffs`) run with the other detectors on every Doctor detection

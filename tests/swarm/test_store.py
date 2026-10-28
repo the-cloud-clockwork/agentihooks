@@ -470,6 +470,29 @@ def test_agent_registry_and_sequence(store):
     assert store.agents("smoke") == []
 
 
+def test_history_rows_carry_the_execution_placement_of_the_ended_life(store):
+    from dataclasses import asdict, replace
+
+    store.create(config())
+    remote = AgentRecord("ci@remote", "ci", "t1", pane_id="w2:pD", seat="ci-1@smoke", started_at=5)
+    local = AgentRecord("ci@local", "ci", "t2", pane_id="w2:pE", started_at=6)
+    for agent in (remote, local):
+        store.put_agent("smoke", agent)
+    run = replace(remote, execution_id="exe-1", generation=1, hive="h6", runtime_backend="kubernetes")
+    earlier = replace(run, execution_id="exe-0", started_at=2, hive="h8")
+    successor = replace(run, name="ci@next", execution_id="exe-2", generation=2, started_at=8, hive="h9")
+    for key, life in (("executions", run), ("executions-archive", earlier), ("executions", successor)):
+        store.redis.hset(store.key("smoke", key), life.execution_id, json.dumps(asdict(life)))
+    store.drop_agent("smoke", remote.name, at=9)
+    store.drop_agent("smoke", local.name, at=10)
+    rows = {row["name"]: row for row in map(json.loads, store.redis.lrange(store.key("smoke", "history"), 0, -1))}
+    placed = rows["ci@remote"]
+    assert (placed["execution_id"], placed["hive"], placed["runtime_backend"]) == ("exe-1", "h6", "kubernetes")
+    assert (placed["ended_at"], placed["pane_id"]) == (9, "w2:pD")
+    assert {"execution_id", "hive"}.isdisjoint(rows["ci@local"])
+    assert rows["ci@local"]["ended_at"] == 10
+
+
 def test_no_redis_refuses():
     with pytest.raises(SwarmError):
         RedisStore(None)

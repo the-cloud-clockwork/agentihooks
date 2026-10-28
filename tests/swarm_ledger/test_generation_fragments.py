@@ -37,7 +37,8 @@ def test_a_generation_joins_its_text_when_read_and_keeps_no_copy(tmp_path, monke
     new, _ = stored.apply_ops(SLUG, ops=[message("chat")], copy_state=False)
     entry = stored.current(SLUG)
     assert [item for item in held(entry.fragments) if isinstance(item.signature, str)] == []
-    assert Fragment.__slots__ == ("value", "parts", "signature")
+    assert Fragment.__slots__ == ("value", "parts", "signature", "data")
+    assert [item for item in held(entry.fragments) if item.data is not None] == []
     assert entry.text == encode(new)
     assert Entry(1, "stored text", {}).text == "stored text"
 

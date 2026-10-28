@@ -1108,7 +1108,12 @@ def recorded_test_failure(
     def run(argv, **kwargs):
         if argv[2].endswith("/logs"):
             job_id = argv[2].split("/jobs/")[1].split("/")[0]
-            assert argv == ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs"]
+            assert argv == [
+                "gh",
+                "api",
+                f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs",
+                "--allow-escape-sequences",
+            ]
             assert kwargs == {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
             output = "\n".join(f"2026-10-20T12:47:13Z FAILED {test} - AssertionError: failure" for test in tests)
             return subprocess.CompletedProcess(argv, 0, output, "")

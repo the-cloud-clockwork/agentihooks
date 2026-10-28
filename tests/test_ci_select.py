@@ -260,6 +260,12 @@ def test_a_changed_file_outside_python_selects_the_tests_that_name_it(repo):
     assert decide(repo, ["scripts/static/ledger.js"]) == ("selected", [["tests/test_page.py"]])
 
 
+@pytest.mark.parametrize("source", ["scripts/static/page.css", "outside/page.py"])
+def test_other_sources_do_not_select_python_tests_by_stem(repo, source):
+    write(repo, {source: "x\n"})
+    assert ci_select.selected_tests(repo, [source], False) == set()
+
+
 def test_a_changed_file_is_also_selected_by_its_full_path(repo):
     write(repo, {"tests/test_docs.py": "DOC = 'docs/guide/index.md'\n"})
     assert decide(repo, ["docs/guide/index.md"]) == ("selected", [["tests/test_docs.py"]])

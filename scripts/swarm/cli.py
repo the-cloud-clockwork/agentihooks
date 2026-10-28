@@ -532,8 +532,16 @@ def _reconcile_services():
         print(f"warning: the swarm user services could not be installed or enabled{why}", file=sys.stderr)
 
 
-@ledger_route.tick
 def run_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
+    from scripts.swarm_ledger import authority_context
+
+    with ledger_route.scoped(slug, ledger_route.configured(store, slug)):
+        if ledger_link.remote(slug=slug) and not authority_context.tick_headers(slug):
+            return []
+        return _end_waits(store, slug, ledger)
+
+
+def _end_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
     from scripts.swarm import commands, lease
 
     held = lease.acquire(store, slug, commands.hive_id())
@@ -934,7 +942,6 @@ def cmd_master(store, args):
     if store.config(args.slug).state in ("stopped", "stopping"):
         store.update(args.slug, state="paused")
         timer.ensure(timer.entry_point())
-    ledger.join(args.slug, launched.master, "orchestrator")
     print(json.dumps(asdict(launched)))
 
 
@@ -1295,7 +1302,7 @@ def cmd_status(store, args):
     from scripts.swarm import capacity, incidents, quota_view
     from scripts.swarm_ledger import ledger_freezes
 
-    quota = quota_view.lines(capacity.read(store, args.slug), now_ms())
+    quota = quota_view.lines(capacity.read(store, args.slug), now_ms(), quota_view.live(agents), config.scaling)
     held = spawn_holds(store, args.slug) + failed_panes.status_lines(store, args.slug)
     held += incidents.status_lines(store, args.slug)
     from scripts.hive import admission, placement_waits
@@ -1702,7 +1709,7 @@ def cmd_pr(store, args):
     fields.update(scoped)
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
     if not keeps_main and row.get("pr_url") != args.url:
-        lift.drop_task(args.slug, agent.task)
+        lift.drop_task(args.slug, agent.task, store=store)
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
 

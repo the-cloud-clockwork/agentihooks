@@ -198,6 +198,7 @@ def test_completed_attempts_are_reused_while_new_attempts_are_read():
         else:
             number = int(endpoint.split("/jobs/")[1].split("/")[0])
             assert endpoint == f"repos/o/r/actions/jobs/{number}/logs"
+            assert argv[3:] == ["--allow-escape-sequences"]
             outcome = "FAILED" if number == 1 else "PASSED"
             output = f"2026-10-05T00:00:00Z {outcome} tests/test_x.py::test_x\n"
         return subprocess.CompletedProcess(argv, 0, output, "")
