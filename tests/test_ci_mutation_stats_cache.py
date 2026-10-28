@@ -1492,16 +1492,18 @@ def test_prune_caps_the_cache_before_reading_its_records(tmp_path, monkeypatch):
 
     from scripts.ci_mutation import stats_dependencies
 
+    folder = tmp_path / "cache"
+    folder.mkdir()
     monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", 10)
     for age, name in enumerate(["new", "old"]):
-        path = tmp_path / f"{name}.json"
+        path = folder / f"{name}.json"
         path.write_text('{"a": 1}')
         os.utime(path, (1000 - age, 1000 - age))
     read = []
     monkeypatch.setattr(stats_dependencies.StoredStats, "read", staticmethod(read.append))
-    stats_dependencies.StoredStats(tmp_path, tmp_path, {}, {}).prune()
-    assert read == [tmp_path / "new.json"]
-    assert [path.name for path in tmp_path.iterdir()] == ["new.json"]
+    stats_dependencies.StoredStats(tmp_path, folder, {}, {}).prune()
+    assert read == [folder / "new.json"]
+    assert [path.name for path in folder.iterdir()] == ["new.json"]
 
 
 def test_collected_stats_are_capped_before_the_cache_is_saved(tmp_path, monkeypatch):
