@@ -101,9 +101,14 @@ function openFindings(sw) {
   return (sw.findings || []).filter((f) => !f.verdict);
 }
 
+export function laneCeilings(sw) {
+  const scaled = sw.config.scaling === "auto" && ((sw.quota_capacity || {}).autoscale || {}).ceilings;
+  return Object.fromEntries(LIVE_LANES.map(([lane, key]) => [key, (scaled && scaled[lane]) ?? sw.config[key] ?? 0]));
+}
+
 function liveCaps(sw) {
-  const live = (lane) => liveAgents(sw).filter((a) => a.lane === lane).length;
-  return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${sw.config[key] ?? 0}`);
+  const live = (lane) => liveAgents(sw).filter((a) => a.lane === lane).length, caps = laneCeilings(sw);
+  return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${caps[key]}`);
 }
 
 function modelText(a) {

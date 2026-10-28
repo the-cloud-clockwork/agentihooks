@@ -43,7 +43,21 @@ def _account_line(row: dict, accounts: list[dict], now_ms: int) -> str:
     return f"quota account {row['harness']} {row['name']}  {state_text(row)}  {detail}  sessions {row['sessions']}"
 
 
-def lines(decision: dict, now_ms: int) -> list[str]:
+def live(agents: list) -> dict[str, int]:
+    return {lane: sum(a.lane == lane and a.state != "finished" for a in agents) for lane in capacity.LANES}
+
+
+def scaling_line(decision: dict, live: dict[str, int]) -> str:
+    scaled = decision.get("autoscale")
+    ceilings = scaled["ceilings"] if scaled else decision["configured"]
+    lanes = ", ".join(f"{lane} {live[lane]} of {ceilings[lane]}" for lane in capacity.LANES)
+    seats = decision["placeable"]
+    line = f"scaling {'auto' if scaled else 'manual'}, live of ceiling {lanes}, "
+    line += f"free quota seats claude {seats['claude']} and codex {seats['codex']}"
+    return line + (f", because {scaled['reason'].rstrip('.')}" if scaled else "")
+
+
+def lines(decision: dict, now_ms: int, live: dict[str, int]) -> list[str]:
     if not decision:
         return [capacity.status_line(decision)]
     caps = ", ".join(
@@ -51,7 +65,8 @@ def lines(decision: dict, now_ms: int) -> list[str]:
     )
     head = f"quota capacity {caps}, {_changed(decision['at'], now_ms)}, because {decision['reason']}"
     host = [host_line(decision["host"])] if "host" in decision else []
-    return [head] + host + [_account_line(row, decision["accounts"], now_ms) for row in decision["accounts"]]
+    accounts = [_account_line(row, decision["accounts"], now_ms) for row in decision["accounts"]]
+    return [head, scaling_line(decision, live)] + host + accounts
 
 
 def host_line(host: dict) -> str:

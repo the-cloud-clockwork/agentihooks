@@ -525,6 +525,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-num { field-sizing: content; min-width: 2ch; padding: 2px 4px; border: 0; border-radius: 4px; background: var(--surface-2); text-align: right; font: inherit; font-size: var(--fs-item); font-weight: 700; color: var(--text); }
 @supports not (field-sizing: content) { .sw-num { width: 4ch; } }
 .sw-num:hover { background: var(--hover); }
+.sw-num[readonly] { background: transparent; cursor: default; }
 .sw-num:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .sw-num[aria-invalid="true"] { color: var(--destructive); }
 .sw-unit { font-size: var(--fs-meta); color: var(--muted); }
