@@ -82,7 +82,7 @@ def outcome(payload, environ=None, redis=None, now_ms=None):
 
     command = (payload.get("tool_input") or {}).get("command") if payload.get("tool_name") == "Bash" else None
     kind = outcome_of(command)
-    if not (kind or pr_wait.triggered(command)):
+    if not (kind or (env.get("AGENTIHOOKS_SWARM_TASK") and pr_wait.triggered(command))):
         return False
     if redis is None:
         from scripts.swarm.store import redis_client
@@ -95,7 +95,6 @@ def outcome(payload, environ=None, redis=None, now_ms=None):
 
 
 def push_mark(payload, environ=None, redis=None, now_ms=None):
-    """Mark a pinned worker's push of its task branch or queue of its pull request, for the tick's checked wait."""
     env = os.environ if environ is None else environ
     slug, name = env.get("AGENTIHOOKS_SWARM"), env.get("AGENTIHOOKS_AGENT_NAME")
     command = (payload.get("tool_input") or {}).get("command") if payload.get("tool_name") == "Bash" else None

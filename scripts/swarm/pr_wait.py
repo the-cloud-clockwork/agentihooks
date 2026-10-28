@@ -24,29 +24,29 @@ QUERY = """query($owner: String!, $name: String!, $branch: String!) {
 }"""
 
 
-def triggered(command):
+def triggered(command: str | None) -> bool:
     return bool(command and TRIGGERS.search(command))
 
 
-def key(redis, slug, agent):
+def key(redis, slug: str, agent: str) -> str:
     from scripts.hive import scope
 
     return f"{scope.readings(redis, slug, agent)}:{slug}:pushed:{agent}"
 
 
-def mark(redis, slug, agent, at, repo="", branch=""):
+def mark(redis, slug: str, agent: str, at: int, repo: str = "", branch: str = "") -> None:
     name = key(redis, slug, agent)
     redis.delete(name)
     redis.hset(name, mapping={"at": at, "repo": repo, "branch": branch})
     redis.expire(name, TTL_S)
 
 
-def read(redis, slug, agent):
+def read(redis, slug: str, agent: str) -> dict | None:
     raw = redis.hgetall(key(redis, slug, agent))
     return raw if raw.get("at") else None
 
 
-def pushed_where(command, cwd):
+def pushed_where(command: str, cwd: str) -> tuple[str, str]:
     """The repository and branch a git push in the command writes, empty where it names none on GitHub."""
     from scripts.gates.one_push import actions, destinations, repo_of
 
@@ -57,7 +57,7 @@ def pushed_where(command, cwd):
     return "", ""
 
 
-def forge_pull(repo, branch):
+def forge_pull(repo: str, branch: str) -> str:
     """The open pull request whose head is the branch, '' when there is none or the forge cannot say."""
     if "://" in repo or "@" in repo:
         try:
@@ -86,8 +86,7 @@ def pull_of(redis, slug, agent, pushed, task, now_ms, forge):
     return forge(repo, task.get("branch") or pushed.get("branch", ""))
 
 
-def enforce_pass(store, slug, rows, github, now_ms, forge=forge_pull):
-    """Declare a checked wait for each live agent whose push left its task's open pull request unwatched."""
+def enforce_pass(store, slug: str, rows: dict, github, now_ms: int, forge=forge_pull) -> list[str]:
     actions = []
     for agent in store.agents(slug):
         pushed = read(store.redis, slug, agent.name)
