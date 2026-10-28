@@ -1360,7 +1360,8 @@ def test_a_clean_home_install_schedules_both_jobs_and_the_setup_job_places_the_f
     monkeypatch.delenv("AGENTIHOOKS_HIVE_REDIS_ADDRESS", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_ANTONCORE_DIR", raising=False)
     key = Ed25519PrivateKey.generate()
-    bao = Bao({"user_ca": ssh_private(key)})
+    secret = ssh_private(key)
+    bao = Bao({"user_ca": secret})
     monkeypatch.setattr(openbao_kv.urllib.request, "urlopen", bao)
     synced = []
     monkeypatch.setattr(operator_setup, "sync_once", lambda environ, root: synced.append(root) or 0)
@@ -1373,7 +1374,7 @@ def test_a_clean_home_install_schedules_both_jobs_and_the_setup_job_places_the_f
         assert machine.run_due(now=time.time() + operator_setup.REFRESH_SECONDS + 1) == 2
 
     placement = operator_setup.Placement(state / operator_setup.FOLDER)
-    assert placement.ca_key.read_text() == ssh_private(key)
+    assert placement.ca_key.read_text() == secret
     assert operator_setup.settings(state) == {
         operator_setup.CA_KEY_ENV: str(placement.ca_key),
         operator_setup.POLICY_ENV: str(placement.policy),
