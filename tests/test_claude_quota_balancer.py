@@ -254,7 +254,7 @@ def test_a_revoked_account_is_cached_and_shown_as_revoked(monkeypatch, tmp_path)
     assert (source, calls) == ("cached", [["ALPHA"]])
     assert [(r.provider_status, r.state, r.margin) for r in second] == [("revoked", "REVOKED", 0.0)]
     assert balancer.account_cap(second[0], 1030) == 0
-    assert balancer._state("revoked", balancer.QuotaWindow(), balancer.QuotaWindow()) == ("REVOKED", 0.0)
+    assert second[0].five_hour == second[0].seven_day == balancer.QuotaWindow()
     assert [result.state for result in balancer.rank_results([*first, *second])] == ["REVOKED", "REVOKED"]
 
 

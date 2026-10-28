@@ -6,7 +6,7 @@ from scripts import claude_quota_balancer as balancer
 from scripts.handoff import transfers
 from scripts.swarm import revoked_seats
 from scripts.swarm.store import MASTER
-from scripts.swarm.tick import _watch_agent, tick
+from scripts.swarm.tick import _reap, _watch_agent, tick
 from tests.swarm.test_master_stall import START, SlugLedger, master
 from tests.swarm.test_outage_resume import three_owners
 from tests.swarm.test_outage_seat_release import executing
@@ -29,9 +29,10 @@ def test_the_revoked_accounts_are_read_from_the_probe_cache(monkeypatch):
     assert revoked_seats.accounts() == {("claude", "gone"), ("claude", "lost")}
 
 
-def test_every_worker_on_a_revoked_account_is_retired_and_its_task_reopened(store, monkeypatch):
+def test_every_worker_on_a_revoked_account_is_retired_and_its_task_reopened(store, monkeypatch, scratch):
     ledger, runtime, agents = three_owners(store)
     gone = [executing(store, replace(agent, account="gone")) for agent in agents[:2]]
+    homes = {agent.name: scratch(agent.task) for agent in gone}
     kept = executing(store, replace(agents[2], account="gone", harness="codex"))
     runtime.statuses[kept.name] = "working"
     claims = {agent.task: store.claims("sw", agent.task) for agent in gone}
@@ -49,7 +50,13 @@ def test_every_worker_on_a_revoked_account_is_retired_and_its_task_reopened(stor
         assert "avoid_harness" not in row
         assert "the provider revoked the token of claude account gone" in row["handoff"]
         assert f"workspace:{agent.task}/progress" in row["handoff"]
+        assert (
+            f"Observed: the quota probe of account gone was refused by the provider, so the tick retired {agent.name}."
+            in row["handoff"]
+        )
+        assert f"unknown: {agent.name} could not run a turn" in row["handoff"]
         assert row["handoff"].endswith("<!-- handoff complete -->\n")
+        assert runtime.homes[agent.name] == homes[agent.name]
     assert kept.name not in runtime.killed
     assert store.claimant("sw", kept.task) == kept.name
     assert set(rows) == {agent.name for agent in gone}
@@ -100,6 +107,11 @@ def test_a_master_on_a_revoked_account_is_recycled_in_its_seat(store, monkeypatc
     handoff = store.handoff("sw", MASTER)
     assert "Continue as the master of sw; the provider revoked the token of claude account gone" in handoff
     assert "inbox:master" in handoff and handoff.endswith("<!-- handoff complete -->\n")
+    assert (
+        f"Observed: the quota probe of account gone was refused by the provider, so the swarm recycled {agent.name}."
+        in handoff
+    )
+    assert f"unknown: {agent.name} could not run a turn" in handoff
     assert store.handoff_seat("sw", MASTER) == agent.seat
     assert store.handoff_envelope("sw", MASTER)["reason"] == "recycle"
     [row] = transfers.list_transfers(store, "sw")
@@ -110,3 +122,14 @@ def test_a_master_on_a_revoked_account_is_recycled_in_its_seat(store, monkeypatc
         START + 60_000,
     )
     assert runtime.killed == []
+
+
+def test_the_reap_pass_recycles_a_live_master_on_a_revoked_account(store, monkeypatch):
+    agent, runtime = master(store)
+    agent = replace(agent, account="gone", harness="claude")
+    store.put_agent("sw", agent)
+    revoke(monkeypatch, "gone")
+    found = _reap("sw", store, SlugLedger([]), runtime, {}, START + 60_000)
+    assert found == [f"recycled master {agent.name} in its seat: claude account gone was revoked"]
+    assert runtime.named == [agent.name]
+    assert [a.state for a in store.agents("sw")] == ["finished"]

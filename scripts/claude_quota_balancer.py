@@ -334,8 +334,6 @@ def _state(
 ) -> tuple[str, float | None]:
     if provider_status == "rejected":
         return "BLOCKED", 0.0
-    if provider_status == REVOKED:
-        return "REVOKED", 0.0
     windows = [five_hour, seven_day, *([fable] if fable is not None else [])]
     usages = [window.used for window in windows if window.used is not None]
     if len(usages) != len(windows):
@@ -674,12 +672,11 @@ def _error_result(account: str, error: str, latency_ms: int | None = None) -> Pr
 
 
 def revoked_result(account: str, latency_ms: int | None) -> ProbeResult:
-    state, margin = _state(REVOKED, QuotaWindow(), QuotaWindow())
     return ProbeResult(
         account=account,
         provider_status=REVOKED,
-        state=state,
-        margin=margin,
+        state="REVOKED",
+        margin=0.0,
         five_hour=QuotaWindow(),
         seven_day=QuotaWindow(),
         latency_ms=latency_ms,
