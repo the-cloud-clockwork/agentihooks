@@ -6,6 +6,7 @@ on its merge while it sits in the merge queue, on its checks otherwise, so no ag
 """
 
 import re
+from collections.abc import Callable
 
 from scripts.swarm import idle, merge_queue, publish_queue, waits
 from scripts.swarm.store import SwarmError
@@ -90,7 +91,9 @@ def pull_of(redis, slug, agent, pushed, task, now_ms, forge):
     return forge(repo, task.get("branch") or pushed.get("branch", ""))
 
 
-def enforce_pass(store, slug: str, rows: dict, github, now_ms: int, forge=forge_pull) -> list[str]:
+def enforce_pass(
+    store, slug: str, rows: dict, github: Callable, now_ms: int, forge: Callable[[str, str], str] = forge_pull
+) -> list[str]:
     actions = []
     for agent in store.agents(slug):
         pushed = read(store.redis, slug, agent.name)
