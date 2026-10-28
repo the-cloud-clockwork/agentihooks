@@ -523,6 +523,10 @@ def _failed_hive_launch(slug, store, ledger, runtime, rows, miss, now_ms):
 def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
     agent, found = miss.agent, miss.found
     fields, elapsed = ", ".join(found), now_ms - launch_check.session_started_at(agent)
+    if idle.verdict(idle.IDLE, idle.heartbeat(store.redis, slug, agent.name), None, now_ms) == idle.WORKING:
+        launch_check.record(store, slug, agent, found, now_ms, elapsed, held=True)
+        launch_check.forget(store, slug, agent.name)
+        return f"{agent.name} failed its launch check on {fields}; reported only while working"
     hive = bool(agent.hive or reports.host(agent))
     if (
         hive

@@ -377,7 +377,7 @@ def test_a_working_heartbeat_keeps_a_failed_launch(store, monkeypatch, scratch, 
 
 
 @pytest.mark.parametrize("hive", ["", "remote"])
-@pytest.mark.parametrize("state,age", [("idle", 0), ("working", 20 * 60_000)])
+@pytest.mark.parametrize("state,age", [(None, 0), ("idle", 0), ("working", 20 * 60_000)])
 def test_an_idle_or_stale_heartbeat_does_not_keep_a_failed_launch(store, monkeypatch, scratch, hive, state, age):
     from scripts.swarm import idle
 
@@ -390,14 +390,14 @@ def test_an_idle_or_stale_heartbeat_does_not_keep_a_failed_launch(store, monkeyp
     joined(ledger, runtime, LAUNCH + 1)
     runtime.statuses[agent.name] = "idle"
     now = LAUNCH + idle.STALE_MS + launch_check.DEADLINE_MS
-    idle.beat(store.redis, "sw", agent.name, state, now - age)
+    if state is not None:
+        idle.beat(store.redis, "sw", agent.name, state, now - age)
 
     actions = tick("sw", store, ledger, runtime, now)
 
     assert agent.name in runtime.killed
-    assert any(
-        action.startswith(f"retired {agent.name} after its launch check failed on profile") for action in actions
-    )
+    reason = "hive join failed" if hive else "launch check failed on profile"
+    assert any(action.startswith(f"retired {agent.name} after its {reason}") for action in actions)
 
 
 def test_an_agent_that_never_joins_is_still_retired_and_relaunched(store, monkeypatch, scratch):
