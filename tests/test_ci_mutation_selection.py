@@ -688,10 +688,7 @@ def test_cached_static_and_class_method_bodies_keep_their_binding_when_mutated(m
     assert measure() == (6, 6, 9, 9)
     for name in names:
         monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
-        try:
-            assert measure() != (6, 6, 9, 9)
-        except TypeError:
-            pass
+        assert measure() != (6, 6, 9, 9)
 
 
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
