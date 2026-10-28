@@ -110,6 +110,103 @@ def test_search_answers_as_the_search_call(inputs, bank, served):
     assert answer["state"] == "answered" and answer["results"]
 
 
+def ingest_body(inputs):
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "batch_id": "http-ingest",
+        "access_domain": inputs["grant"]["corpus"],
+        "session_uid": "http-session",
+        "source_generation": "http-source",
+        "events": [
+            {
+                "sequence": 1,
+                "byte_start": 0,
+                "byte_end": 10,
+                "project_id": inputs["grant"]["projects"][0],
+                "record": {"kind": "user_text", "text": "persisted over HTTP"},
+            }
+        ],
+    }
+
+
+def test_http_ingest_persists_and_replays_without_claiming_indexing(served, bank, inputs):
+    payload = ingest_body(inputs)
+    status, _, result = call(served, "/v2/sessions/ingest", payload, TOKEN)
+    assert status == 200
+    assert result["state"] == "committed"
+    assert result["durable_through"] == 1
+    assert result["indexed"] is False
+    events = bank.tools.catalog.events(payload["access_domain"], payload["session_uid"], payload["source_generation"])
+    assert len(events) == 1
+    assert events[0]["record"]["text"] == "persisted over HTTP"
+    status, _, replay = call(served, "/v2/sessions/ingest", payload, TOKEN)
+    assert status == 200
+    assert replay["state"] == "replayed"
+    assert replay["accepted"] == result["accepted"]
+    assert replay["indexed"] is False
+
+
+def test_http_ingest_refuses_a_changed_batch_under_a_reused_identity(served, bank, inputs):
+    payload = ingest_body(inputs)
+    assert call(served, "/v2/sessions/ingest", payload, TOKEN)[2]["state"] == "committed"
+    payload["events"][0]["record"]["text"] = "changed under the same batch"
+    before = bank.tools.catalog.snapshot()
+    status, _, result = call(served, "/v2/sessions/ingest", payload, TOKEN)
+    assert status == 200
+    assert result["state"] == "rejected"
+    assert result["error"]["class"] == "revision_conflict"
+    assert bank.tools.catalog.snapshot() == before
+
+
+def test_http_ingest_reports_a_catalog_outage_as_a_safe_retry(served, bank, inputs, monkeypatch):
+    def unavailable(_):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(bank.tools.catalog, "commit", unavailable)
+    status, _, result = call(served, "/v2/sessions/ingest", ingest_body(inputs), TOKEN)
+    assert status == 200
+    assert result["state"] == "rejected"
+    assert result["error"] == {
+        "class": "dependency_unavailable",
+        "retry": "same_batch",
+        "detail": "the catalog failed before acknowledging; retrying the same batch is safe",
+    }
+
+
+@pytest.mark.parametrize("token", [None, "unknown"])
+def test_http_ingest_authenticates_before_reading_the_body(served, bank, token, monkeypatch):
+    def unread(_):
+        raise AssertionError("unauthenticated request reached body parsing")
+
+    monkeypatch.setattr(service, "read_body", unread)
+    before = bank.tools.catalog.snapshot()
+    status, headers, result = call(served, "/v2/sessions/ingest", {}, token)
+    assert status == 401
+    assert headers["WWW-Authenticate"] == "Bearer"
+    assert result["error"]["class"] == "unauthenticated"
+    assert bank.tools.catalog.snapshot() == before
+
+
+@pytest.mark.parametrize("outside", ["corpus", "project"])
+def test_http_ingest_refuses_scope_widening(served, bank, inputs, outside):
+    payload = ingest_body(inputs)
+    if outside == "corpus":
+        payload["access_domain"] = "other-corpus"
+    else:
+        payload["events"][0]["project_id"] = "other-project"
+    before = bank.tools.catalog.snapshot()
+    status, _, result = call(served, "/v2/sessions/ingest", payload, TOKEN)
+    assert status == 200
+    assert result["error"]["class"] == "forbidden_scope"
+    assert bank.tools.catalog.snapshot() == before
+
+
+def test_http_ingest_reuses_bounded_json_validation(served):
+    status, _, result = call(served, "/v2/sessions/ingest", raw=b"[]", token=TOKEN)
+    assert status == 400
+    assert result["error"]["class"] == "invalid_request"
+
+
 def test_the_narrow_token_sees_only_its_projects(inputs, served):
     _, _, wide = call(served, service.TOOLS_PREFIX + "session_list", body(inputs), TOKEN)
     _, _, narrow = call(served, service.TOOLS_PREFIX + "session_list", body(inputs), NARROW_TOKEN)
@@ -264,7 +361,7 @@ def test_the_handler_is_quiet_and_named_for_sessions():
 
 
 @pytest.mark.parametrize(
-    "method,path", [("POST", "/v2/sessions/ingest"), ("POST", "/"), ("GET", "/v2/sessions/search")]
+    "method,path", [("POST", "/v2/sessions/unknown"), ("POST", "/"), ("GET", "/v2/sessions/search")]
 )
 def test_unknown_routes_are_not_found(served, method, path):
     status, _, answer = call(served, path, {} if method == "POST" else None, TOKEN, method=method)
