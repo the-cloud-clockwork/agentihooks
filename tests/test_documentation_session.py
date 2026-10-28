@@ -8,6 +8,7 @@ from hooks.classifier import settings as classifier_settings
 from hooks.classifier.errors import ClassifierUnavailable
 from hooks.classifier.result import Answer, DecisionResult
 from hooks.context import documentation, documentation_session
+from scripts.swarm_ledger import ledger
 from tests.test_documentation_evidence import git, pull, repository, unrelated
 
 
@@ -437,17 +438,15 @@ def test_a_failed_worker_records_the_error_as_the_retry_reason(world, monkeypatc
     assert (row["status"], row["attempts"], row["reason"]) == ("pending", 1, "RuntimeError")
 
 
-def test_a_session_end_on_a_remote_ledger_defers_the_request_with_its_reason(world, monkeypatch):
-    class Unauthenticated(SystemExit):
-        pass
-
+@pytest.mark.parametrize("exit_type", [ledger.Unauthenticated, ledger.Missing])
+def test_a_session_end_on_a_remote_ledger_defers_the_request_with_its_reason(world, monkeypatch, exit_type):
     def remote(slug, task_id):
-        raise Unauthenticated("unauthenticated: remote ledger")
+        raise exit_type("remote ledger")
 
     monkeypatch.setattr(world[2], "task", remote)
     path, _, _ = failed_request(world, monkeypatch, answer())
     row = json.loads(path.read_text())
-    assert (row["status"], row["attempts"], row["reason"]) == ("pending", 1, "Unauthenticated")
+    assert (row["status"], row["attempts"], row["reason"]) == ("pending", 1, exit_type.__name__)
 
 
 def test_a_session_end_leaves_its_own_worker_the_first_attempt(world, monkeypatch):
