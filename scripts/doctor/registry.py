@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 import traceback
 from collections.abc import Callable
@@ -257,7 +258,7 @@ def _read_all(get, slug: str, active: list[dict], marks: dict, page: int, remain
 def _size(binding: dict, sizes: dict) -> float:
     if binding["agent"] in sizes:
         return sizes[binding["agent"]]
-    return float("inf") if binding["agent"].startswith("master@") else 0
+    return math.inf if binding["agent"].startswith("master@") else 0
 
 
 def _largest_first(get, slug: str, active: list[dict], marks: dict, page: int, remaining: float, sizes: dict) -> list:

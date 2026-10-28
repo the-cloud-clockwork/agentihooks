@@ -677,6 +677,12 @@ def test_a_master_with_no_known_size_is_read_first_and_other_unknown_bindings_la
     assert order == ["agent:master@1-0001", "agent:engineer@1-0001", "agent:engineer@1-0003"]
 
 
+def test_an_unknown_binding_starts_after_a_binding_known_to_hold_one_observation(cursors, monkeypatch):
+    unknown, one = AGENT, {**AGENT, "name": "engineer@1-0002"}
+    order, _ = _read_order(monkeypatch, [unknown, one], {"sizes": {"engineer@1-0002": 1}})
+    assert order == ["agent:engineer@1-0002", "agent:engineer@1-0001"]
+
+
 def test_an_unread_binding_keeps_its_last_known_size(cursors, read_clock):
     state = {"sizes": {"engineer@1-0001": 700, "gone": 9}}
     registry.read("s", [AGENT], Langfuse([], []), state, 0, 50)
