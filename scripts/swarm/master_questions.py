@@ -29,8 +29,10 @@ def drop(store, slug: str, name: str) -> None:
 
 
 def _asked(question: str, title: str) -> bool:
-    """The pane titles a question prompt by the last wrapped line of the question, ending on its question mark."""
-    return title.endswith("?") and question.split(" Options: ")[0].endswith(title)
+    """The pane titles a question prompt by the last wrapped line of the question, ending on its question mark, or by
+    the first line of a question without one."""
+    head = question.split(" Options: ")[0]
+    return head.endswith(title) if title.endswith("?") else head.startswith(title)
 
 
 def dismiss(slug, store, ledger, runtime, agent, now_ms: int) -> list[str]:

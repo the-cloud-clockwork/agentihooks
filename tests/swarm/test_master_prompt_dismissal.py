@@ -147,7 +147,7 @@ def test_a_master_prompt_the_gate_did_not_record_is_left_alone(store, held):
     assert store.agents("sw")[0].input_prompt == PROMPT
 
 
-@pytest.mark.parametrize("title", ["Bash", "Which phase", "Waiting on input"])
+@pytest.mark.parametrize("title", ["Bash", "focus on next", "Waiting on input", "swarm focus?"])
 def test_a_prompt_titled_by_part_of_a_held_question_is_left_alone(store, title):
     runtime, ledger = Runtime(), Ledger()
     master_questions.hold(store, "sw", NAME, QUESTIONS)
@@ -161,6 +161,14 @@ def test_a_prompt_titled_by_the_wrapped_tail_of_a_held_question_is_dismissed(sto
     master_questions.hold(store, "sw", NAME, QUESTIONS)
     for minute in range(11):
         watch(store, runtime, ledger, PaneObservation("waiting", "focus on next?"), ENTERED + minute * MINUTE)
+    assert runtime.dismissed == [NAME]
+
+
+def test_a_prompt_titled_by_the_first_line_of_a_held_question_without_a_question_mark_is_dismissed(store):
+    runtime, ledger = Runtime(), Ledger()
+    master_questions.hold(store, "sw", NAME, ["Pick the phase the swarm works next. Options: Proof; Hives."])
+    for minute in range(11):
+        watch(store, runtime, ledger, PaneObservation("waiting", "Pick the phase"), ENTERED + minute * MINUTE)
     assert runtime.dismissed == [NAME]
 
 
