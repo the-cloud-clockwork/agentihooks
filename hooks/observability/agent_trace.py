@@ -677,7 +677,7 @@ def _resume_point(state: dict, transcript_path: str) -> dict:
         point = {"device": stat.st_dev, "inode": stat.st_ino, **start}
         state["source_points"] = {}
     if point.get("boundary") != paged["boundary"]:
-        point = _scan_to(transcript_path, point, paged["boundary"])
+        point = _scan_to(transcript_path, point, paged, state["records"])
     paged["source"] = point
     return point
 
@@ -691,21 +691,26 @@ def _still_at(transcript_path: str, point: dict) -> bool:
         handle.seek(point["line"])
         line = handle.read(point["offset"] - point["line"])
     try:
-        return line.endswith(b"\n") and record_id(json.loads(line)) == point["boundary"]
+        return line.endswith(b"\n") and record_id(json.loads(line)) == point.get("record", point["boundary"])
     except (ValueError, UnicodeDecodeError, AttributeError):
         return False
 
 
-def _scan_to(transcript_path: str, point: dict, boundary: str) -> dict:
+def _scan_to(transcript_path: str, point: dict, paged: dict, merged: dict) -> dict:
+    """Past the boundary, or when it is gone, past the last paged record before any unpaged record."""
     from hooks.observability.transcript import iter_complete_records, record_id
 
+    boundary = paged["boundary"]
     line, records, unsupported = point["offset"], point["records"], point["unsupported"]
+    known = {name: set(paged.get(name, ())) for name in ("keys", "messages")}
+    past, history = {}, True
     for record, end in iter_complete_records(transcript_path, point["offset"]):
         if record is None:
             unsupported += 1
         else:
             records += 1
-            if record_id(record) == boundary:
+            key = record_id(record)
+            if key == boundary:
                 return {
                     **point,
                     "line": line,
@@ -713,9 +718,13 @@ def _scan_to(transcript_path: str, point: dict, boundary: str) -> dict:
                     "records": records,
                     "unsupported": unsupported,
                     "boundary": boundary,
+                    "record": boundary,
                 }
+            history = history and key not in merged
+            if history and _paged_out(known, key, record):
+                past = {"line": line, "offset": end, "records": records, "unsupported": unsupported, "record": key}
         line = end
-    return {**point, "boundary": boundary}
+    return {**point, **past, "boundary": boundary}
 
 
 def _revision(spec: SpanSpec) -> str:
