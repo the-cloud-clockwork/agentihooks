@@ -3,11 +3,18 @@
 import json
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 
-from scripts.swarm.ledger_events import RED
+from scripts.swarm.ledger_events import RED, iso_ms
 
 MIN_OTHERS = 3
+WINDOW_MS = 6 * 3_600_000
+ERRORS = (OSError, ValueError, subprocess.SubprocessError)
+NOTICE = (
+    "The swarm holds this task unclaimed: its pull request {url} is red only from {checks}, which also fail on "
+    "most other open pull requests. It is claimed again once those checks stop failing elsewhere."
+)
 
 
 class ReadError(Exception):
@@ -26,6 +33,11 @@ def own(pulls: list[dict], url: str) -> set[str]:
     return next((failing(p) for p in pulls if p.get("url") == url), set())
 
 
+def recent(pull: dict, now_ms: int) -> bool:
+    marks = [c.get("completedAt") or c.get("startedAt") for c in pull.get("statusCheckRollup") or []]
+    return any(iso_ms(mark) >= now_ms - WINDOW_MS for mark in marks if mark)
+
+
 def read(repo: str, run: Callable = subprocess.run) -> list[dict]:
     found = run(
         ["gh", "pr", "list", "--state", "open", "--limit", "200", "--json", "url,statusCheckRollup"],
@@ -39,19 +51,19 @@ def read(repo: str, run: Callable = subprocess.run) -> list[dict]:
     return json.loads(found.stdout)
 
 
-def shared(pulls: list[dict], url: str) -> set[str]:
-    others = [failing(p) for p in pulls if p.get("url") != url and p.get("statusCheckRollup")]
+def shared(pulls: list[dict], url: str, now_ms: int) -> set[str]:
+    others = [failing(p) for p in pulls if p.get("url") != url and recent(p, now_ms)]
     if len(others) < MIN_OTHERS:
         return set()
     return {name for name in own(pulls, url) if sum(name in other for other in others) * 2 > len(others)}
 
 
-def held(pulls: list[dict], url: str) -> bool:
+def held(pulls: list[dict], url: str, now_ms: int) -> bool:
     mine = own(pulls, url)
-    return bool(mine) and mine <= shared(pulls, url)
+    return bool(mine) and mine <= shared(pulls, url, now_ms)
 
 
-def checker(repo: str, reader: Callable | None = None) -> Callable[[dict], bool]:
+def checker(repo: str, reader: Callable | None = None, clock: Callable = time.time) -> Callable[[dict], bool]:
     known: list[dict] | None = None
 
     def admits(task: dict) -> bool:
@@ -62,9 +74,31 @@ def checker(repo: str, reader: Callable | None = None) -> Callable[[dict], bool]
         if known is None:
             try:
                 known = (reader or read)(repo)
-            except (ReadError, OSError, ValueError, subprocess.SubprocessError) as exc:
+            except (ReadError, *ERRORS) as exc:
                 print(f"fleet red hold skipped, listing open pull requests failed: {exc}", file=sys.stderr)
                 known = []
-        return not held(known, url)
+        return not held(known, url, int(clock() * 1000))
 
     return admits
+
+
+def notice_pass(slug, config, store, ledger, rows, now_ms, reader: Callable | None = None) -> list[str]:
+    waiting = [task for task in rows.values() if task.get("state") == "open" and task.get("pr_url")]
+    if not waiting:
+        return []
+    try:
+        pulls = (reader or read)(config.repo)
+    except (ReadError, *ERRORS):
+        return []
+    actions = []
+    for task in waiting:
+        task_id, url = task["id"], task["pr_url"]
+        key = store.key(slug, f"fleet-red:{task_id}")
+        if not held(pulls, url, now_ms):
+            store.redis.delete(key)
+            continue
+        if store.redis.set(key, url, nx=True):
+            checks = ", ".join(sorted(own(pulls, url)))
+            ledger.notice(slug, task_id, NOTICE.format(url=url, checks=checks))
+            actions.append(f"task {task_id} held unclaimed, {url} is red only from {checks}")
+    return actions
