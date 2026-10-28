@@ -28,7 +28,7 @@ jobs:
           checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
           enable-cache: false
       - name: Install dependencies
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --constraint .github/test-requirements.lock --system --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Preserve retained scope and refine its mutation plan
         id: plan
         env:
@@ -67,7 +67,7 @@ jobs:
           checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
           enable-cache: false
       - name: Install dependencies
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --constraint .github/test-requirements.lock --system --excludes .github/test-excludes.txt -e '.[dev,all]'
       - uses: actions/download-artifact@v4
         with:
           name: mutation-replay-input
@@ -104,7 +104,7 @@ jobs:
           checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
           enable-cache: false
       - name: Install dependencies
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --constraint .github/test-requirements.lock --system --excludes .github/test-excludes.txt -e '.[dev,all]'
       - uses: actions/download-artifact@v4
         with:
           name: mutation-replay-input

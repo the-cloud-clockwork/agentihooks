@@ -36,7 +36,7 @@ jobs:
           enable-cache: false
       - name: Install the revision under measurement
         working-directory: replay
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --constraint ../proof/.github/test-requirements.lock --system --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Replay the same requests for twenty minutes
         working-directory: replay
         env:

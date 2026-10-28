@@ -73,7 +73,7 @@ jobs:
           exit 1
       - name: Install dependencies shared by both revisions
         working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --constraint .github/test-requirements.lock --system --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Prepare identical hierarchy probes for base and head
         run: |
           mkdir hierarchy-evidence
@@ -154,7 +154,7 @@ jobs:
           exit 1
       - name: Install dependencies shared by both revisions
         working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --constraint .github/test-requirements.lock --system --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Prepare the same load harness for base and head
         run: |
           mkdir load-evidence
