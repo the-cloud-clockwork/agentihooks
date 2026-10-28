@@ -211,6 +211,7 @@ NO_API_ADDRESS = "api-url takes an http or https address with a host and no cred
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
 HIVE_PLACEMENT = "hive-placement"
 ON_OFF = {"on": True, "off": False}
+PLACEMENT_NODES = "placement-nodes"
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
@@ -219,6 +220,8 @@ CONFIG_KEYS = {
     HIVE_PLACEMENT: "hive_placement",
     "engine": "engine",
     "watchdog-address": "watchdog_address",
+    "placement-mode": "placement_mode",
+    PLACEMENT_NODES: "placement_nodes",
 }
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
@@ -1032,10 +1035,14 @@ def api_address(value):
 
 
 def config_value(key, value):
-    if key in default_models.KEYS or key in TRANSPORT_KEYS or key in ("engine", "watchdog-address"):
+    if key in default_models.KEYS or key in TRANSPORT_KEYS or key in ("engine", "watchdog-address", "placement-mode"):
         return value
     if key == HIVE_PLACEMENT:
         return on_off(value)
+    if key == PLACEMENT_NODES:
+        if not value.isdigit():
+            raise SwarmError("placement-nodes takes a whole number of hives, 0 for no limit")
+        return int(value)
     return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
 
 
@@ -1164,6 +1171,8 @@ def cmd_set(store, args):
                 "swap_full_share": config.swap_full_share,
                 "swap_floor_mb": config.swap_floor_mb,
                 "hive_placement": config.hive_placement,
+                "placement_mode": config.placement_mode,
+                "placement_nodes": config.placement_nodes,
                 "local_max_agents": config.local_max_agents,
                 "api_url": config.api_url,
                 "codex_inbox_transport": config.codex_inbox_transport,

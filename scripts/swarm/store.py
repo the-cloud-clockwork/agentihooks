@@ -36,6 +36,8 @@ EVENTS_ENGINE = "events"
 MAX_LOAD = 10.0
 CODEX_TRANSPORTS = ("legacy", "app_server")
 LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
+PLACEMENT_MODES = ("anton-first", "round-robin")
+ANTON_FIRST, ROUND_ROBIN = PLACEMENT_MODES
 
 
 class SwarmError(RuntimeError):
@@ -88,11 +90,17 @@ class SwarmConfig:
     window: dict = field(default_factory=dict)
     focus_weight: int = 50
     watchdog_address: str = ""
+    placement_mode: str = ANTON_FIRST
+    placement_nodes: int = 0
     repo_origin: str = ""
 
     def __post_init__(self) -> None:
         if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
             raise SwarmError("focus weight must be a whole number from 0 to 100")
+        if self.placement_mode not in PLACEMENT_MODES:
+            raise SwarmError(f"placement mode must be one of {', '.join(PLACEMENT_MODES)}")
+        if type(self.placement_nodes) is not int or self.placement_nodes < 0:
+            raise SwarmError("placement-nodes takes a whole number of hives, 0 for no limit")
         if self.engine not in ("legacy", "events"):
             raise SwarmError("engine must be one of legacy, events")
 
@@ -241,6 +249,8 @@ class RedisStore:
             json.loads(raw.get("window") or "{}"),
             int(raw.get("focus_weight", 50)),
             raw.get("watchdog_address", ""),
+            raw.get("placement_mode") or ANTON_FIRST,
+            int(raw.get("placement_nodes") or 0),
             raw.get("repo_origin", ""),
         )
 
