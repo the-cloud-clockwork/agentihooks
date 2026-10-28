@@ -120,3 +120,51 @@ def test_cli_reuses_an_announcement_and_lands_from_committed_bytes(tmp_path, mon
     assert (root / WORKFLOW).read_bytes() == CONTENT
     landing = commit(root)
     assert gate_protected._frozen_problems(root, f"{announcement}^", f"{announcement}^", landing)
+
+
+def test_yaml_candidate_lands_with_default_integration_base_from_nested_directory(tmp_path, monkeypatch):
+    from scripts import ci_frozen
+
+    root = frozen_repo(tmp_path)
+    workflow = ".github/workflows/alternate.yaml"
+    (root / WORKFLOW).rename(root / workflow)
+    registry = root / gate_protected.FROZEN
+    accepted = json.loads(registry.read_bytes())
+    registry.write_text(json.dumps({workflow: accepted[WORKFLOW]}))
+    candidate = tmp_path / "reviewed.yaml"
+    candidate.write_bytes(CONTENT)
+    blob = ci_frozen.announce(root, workflow, candidate)
+    commit(root)
+    git(root, "update-ref", "refs/remotes/origin/dev", "HEAD")
+
+    ci_frozen.land(root, workflow, blob)
+    assert (root / workflow).read_bytes() == CONTENT
+    git(root, "checkout", "--", workflow)
+    monkeypatch.chdir(root / ".github" / "workflows")
+    assert ci_frozen.main(["land", workflow, blob]) == 0
+    assert (root / workflow).read_bytes() == CONTENT
+
+
+def test_cli_requires_an_action(capsys):
+    from scripts import ci_frozen
+
+    with pytest.raises(SystemExit) as exc:
+        ci_frozen.main([])
+    assert exc.value.code == 2
+    assert "required" in capsys.readouterr().err
+
+
+def test_missing_committed_candidate_reports_git_failure(tmp_path):
+    from scripts import ci_frozen
+
+    root = frozen_repo(tmp_path)
+    candidate = tmp_path / "reviewed.yml"
+    candidate.write_bytes(CONTENT)
+    blob = ci_frozen.announce(root, WORKFLOW, candidate)
+    (root / ci_frozen.CANDIDATES / blob).unlink()
+    commit(root)
+    with pytest.raises(subprocess.CalledProcessError) as exc:
+        ci_frozen.land(root, WORKFLOW, blob, "dev")
+    assert exc.value.returncode == 128
+    assert b"does not exist" in exc.value.stderr
+    assert (root / WORKFLOW).read_bytes() == b"name: Old\n"

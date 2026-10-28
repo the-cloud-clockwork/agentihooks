@@ -25,7 +25,7 @@ def announce(root: Path, workflow: str, candidate: Path) -> str:
     content = candidate.read_bytes()
     blob = _git(root, "hash-object", "--stdin", data=content).decode().strip()
     stored = root / CANDIDATES / blob
-    stored.parent.mkdir(parents=True, exist_ok=True)
+    stored.parent.mkdir(exist_ok=True)
     stored.write_bytes(content)
     if blob not in registry[workflow]:
         registry[workflow].append(blob)
