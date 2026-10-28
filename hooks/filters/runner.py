@@ -7,7 +7,8 @@ from dataclasses import dataclass, replace
 from pathlib import PurePath
 
 from hooks import classifier
-from hooks.classifier import definitions, runner
+from hooks.classifier import answer_cache, definitions, runner
+from hooks.classifier import settings as classifier_settings
 from hooks.filters import extract, rounds, schema
 from hooks.filters.finders import scripts
 
@@ -92,14 +93,27 @@ def confirm(entry: dict, spec: schema.FilterSpec, payload: dict, findings: list[
         return findings
     tool_input = payload.get("tool_input") or {}
     intent = _intent(spec, tool_input)
-    state = {
-        "filter": entry["file"],
-        "tool": payload.get("tool_name"),
-        "path": extract.target_path(tool_input),
-        "intent": intent,
-    }
+    models = classifier_settings.load().models
+    keys = [answer_cache.key(intent, spec.question, f.text, models) for f in findings]
+    answers = answer_cache.lookup(keys)
+    asked = [(f, k) for f, k in zip(findings, keys) if k not in answers]
+    if asked:
+        state = {
+            "filter": entry["file"],
+            "tool": payload.get("tool_name"),
+            "path": extract.target_path(tool_input),
+            "intent": intent,
+        }
+        fresh = _ask(entry, spec, state, asked)
+        answer_cache.store(fresh)
+        answers.update(fresh)
+    return [f for f, k in zip(findings, keys) if answers.get(k)]
+
+
+def _ask(entry: dict, spec: schema.FilterSpec, state: dict, asked: list[tuple[Finding, str]]) -> dict[str, bool]:
+    findings = [f for f, _ in asked]
     try:
-        output = runner.run(PURPOSE, state, _params(spec, intent, findings), decider=classifier.decide)
+        output = runner.run(PURPOSE, state, _params(spec, state["intent"], findings), decider=classifier.decide)
     except classifier.ClassifierInputError:
         raise
     except classifier.ClassifierError as error:
@@ -109,8 +123,8 @@ def confirm(entry: dict, spec: schema.FilterSpec, payload: dict, findings: list[
             "filter passed: classifier unavailable",
             {"filter": entry["path"], "findings": len(findings), "error": str(error)},
         )
-        return []
-    return [f for i, f in enumerate(findings) if output.verdicts[f"finding_{i}"]]
+        return {}
+    return {k: bool(output.verdicts[f"finding_{i}"]) for i, (_, k) in enumerate(asked)}
 
 
 def _listing(findings: list[Finding]) -> str:
