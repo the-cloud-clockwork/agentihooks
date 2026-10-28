@@ -197,6 +197,7 @@ def test_owner_retry_and_waiting_retry_preserve_the_same_lease(monkeypatch):
     slept = []
 
     def recovered(seconds):
+        assert not slept, "release did not free the lease for the waiting owner"
         slept.append(seconds)
         module.release(cluster, "default", "shared", "first", "hive", "own")
 
