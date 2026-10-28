@@ -119,7 +119,7 @@ def test_each_hive_shows_only_the_requested_columns(hives_page):
     assert all(len(row) == 9 for row in rows)
     assert [row[6] for row in rows] == ["2/4", "0/2", "0/4"]
     assert [row[7] for row in rows] == ["master@rig-1", "—", "—"]
-    assert [row[8] for row in rows] == ["MOVE MASTER"] * 3
+    assert [row[8] for row in rows] == ["move master"] * 3
     assert "luna" not in page.text("#swarm-hives")
     assert fields(page, "pod") == [
         ["ui", "no"],
