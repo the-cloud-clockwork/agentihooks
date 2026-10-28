@@ -1765,6 +1765,123 @@ def test_the_required_grader_passes_equivalence_edits_outside_the_grading(repo, 
     assert "ledger equivalence" not in capsys.readouterr().out
 
 
+def _event_base(workflow):
+    steps = _equivalence_steps(workflow)
+    steps[:] = [step for step in steps if step.get("id") != "comparison-base"]
+    steps[0]["with"].pop("fetch-depth", None)
+    steps[1]["with"]["ref"] = "${{ github.event.pull_request.base.sha }}"
+    return workflow
+
+
+def _dev_parent(workflow):
+    steps = _equivalence_steps(_event_base(workflow))
+    steps[0]["with"]["fetch-depth"] = 2
+    steps.insert(
+        1,
+        {
+            "name": "Select the dev parent of the tested merge",
+            "id": "comparison-base",
+            "run": 'echo "sha=$(git -C head rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"',
+        },
+    )
+    steps[2]["with"]["ref"] = "${{ steps.comparison-base.outputs.sha }}"
+    return workflow
+
+
+def _grade_equivalence(repo, base, head):
+    _commit_equivalence(repo, base, "base grader")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    changed = _commit_equivalence(repo, head, "select the dev parent")
+    _git(repo, "checkout", "-q", "dev")
+    return gate_protected.main(["--root", str(repo), "--head", changed])
+
+
+def test_the_required_grader_accepts_the_dev_parent_base_selection(repo, capsys):
+    assert _grade_equivalence(repo, _event_base(_equivalence()), _dev_parent(_equivalence())) == 0
+    assert "0 protected gate problems" in capsys.readouterr().out
+
+
+def test_the_required_grader_keeps_accepting_the_dev_parent_form_once_dev_carries_it(repo):
+    head = _dev_parent(_equivalence())
+    head["jobs"]["ledger-equivalence"]["timeout-minutes"] = 20
+    assert _grade_equivalence(repo, _dev_parent(_equivalence()), head) == 0
+
+
+def _duplicate_selector(workflow):
+    steps = _equivalence_steps(_dev_parent(workflow))
+    steps.insert(1, copy.deepcopy(steps[1]))
+    return workflow
+
+
+@pytest.mark.parametrize("head", [_duplicate_selector, _event_base])
+def test_a_dev_carrying_the_dev_parent_form_refuses_any_other_selection(repo, capsys, head):
+    assert _grade_equivalence(repo, _dev_parent(_equivalence()), head(_equivalence())) == 1
+    assert (
+        "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+def _full_history(steps):
+    steps[0]["with"]["fetch-depth"] = 0
+
+
+def _second_parent(steps):
+    steps[1]["run"] = steps[1]["run"].replace("HEAD^1", "HEAD^2")
+
+
+def _selector_writes_env(steps):
+    steps[1]["run"] = 'echo "GRADER=$PWD/head" >> "$GITHUB_ENV"'
+
+
+def _head_ref(steps):
+    steps[2]["with"]["ref"] = "${{ github.event.pull_request.head.sha }}"
+
+
+def _event_ref(steps):
+    steps[2]["with"]["ref"] = "${{ github.event.pull_request.base.sha }}"
+
+
+def _selector_after_base(steps):
+    steps[1], steps[2] = steps[2], steps[1]
+
+
+def _selector_without_id(steps):
+    del steps[1]["id"]
+
+
+def _fetch_before_base(steps):
+    steps.insert(2, {"run": "git -C head fetch origin dev"})
+
+
+def _grader_word_after_page(steps):
+    steps.append({"run": "echo GRADER"})
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        _full_history,
+        _second_parent,
+        _selector_writes_env,
+        _head_ref,
+        _event_ref,
+        _selector_after_base,
+        _selector_without_id,
+        _fetch_before_base,
+        _grader_word_after_page,
+    ],
+)
+def test_the_required_grader_refuses_any_other_dev_parent_selection(repo, capsys, fault):
+    head = _dev_parent(_equivalence())
+    fault(_equivalence_steps(head))
+    assert _grade_equivalence(repo, _event_base(_equivalence()), head) == 1
+    assert (
+        "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
+        in capsys.readouterr().out.splitlines()
+    )
+
+
 def test_the_required_grader_leaves_equivalence_alone_before_its_base_grades(repo, capsys):
     base = _equivalence()
     steps = _equivalence_steps(base)
