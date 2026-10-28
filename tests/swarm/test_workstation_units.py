@@ -3,6 +3,7 @@ from argparse import Namespace
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.swarm import cli, timer
 from scripts.swarm.store import SwarmError
 
@@ -27,7 +28,7 @@ def scheduler(monkeypatch):
 
     redis = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(store, "redis_client", lambda: redis)
-    return Scheduler(redis)
+    return Scheduler(RedisStateStore(redis, "scheduler"))
 
 
 @pytest.fixture
@@ -77,14 +78,14 @@ def test_a_distributed_install_cancels_a_minute_tick_registered_before_and_a_sec
 
     owned = scheduler.owned(scheduled_tick.OWNER)
     assert owned and [entry.state for entry in owned] == ["cancelled"] * len(owned)
-    assert scheduler.redis.get(scheduler.key("swarm-tick")) is None
-    assert scheduler.redis.zcard(scheduler.key("due")) == 0
+    assert scheduler.read("swarm-tick") == ""
+    assert [entry for entry in scheduler.records() if entry["state"] == "active"] == []
     records = scheduler.records()
 
     assert timer.ensure(BINARY, tmp_path, run=systemctl([]))
 
     assert scheduler.records() == records
-    assert scheduler.redis.get(scheduler.key("swarm-tick")) is None
+    assert scheduler.read("swarm-tick") == ""
 
 
 def test_a_distributed_install_without_redis_still_enables_the_spoke(tmp_path, distributed, monkeypatch, capsys):

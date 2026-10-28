@@ -4,6 +4,7 @@ from argparse import Namespace
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.swarm import cli, timer
 from scripts.swarm.store import SwarmError
 
@@ -603,7 +604,7 @@ def test_schedule_registers_the_tick_and_starts_the_scheduler_runner(monkeypatch
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
     monkeypatch.setenv("SCHEDULE_MARKER", "kept")
     monkeypatch.setattr(store, "redis_client", lambda: "redis")
-    monkeypatch.setattr(scheduled_tick, "ensure", lambda scheduler: seen.append(("tick", scheduler.redis)))
+    monkeypatch.setattr(scheduled_tick, "ensure", lambda scheduler: seen.append(("tick", scheduler.state.redis)))
     monkeypatch.setattr(
         service,
         "ensure_running",
@@ -739,9 +740,9 @@ def test_undelivered_reads_this_machine_against_the_installed_root(monkeypatch):
     monkeypatch.setattr(store, "redis_client", lambda: redis)
     monkeypatch.setattr(time, "time", lambda: 1_000.0)
     assert real_undelivered() == NONE_YET
-    scheduled_tick.record(Scheduler(redis), "/installed", 900.0)
+    scheduled_tick.record(Scheduler(RedisStateStore(redis, "scheduler")), "/installed", 900.0)
     assert real_undelivered() == ""
-    scheduled_tick.record(Scheduler(redis), "/main", 900.0)
+    scheduled_tick.record(Scheduler(RedisStateStore(redis, "scheduler")), "/main", 900.0)
     assert real_undelivered() == (
         "the last swarm tick was delivered by a scheduler running /main, not the installed /installed"
     )
@@ -872,7 +873,7 @@ def _delivering(monkeypatch):
 
     redis = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(store, "redis_client", lambda: redis)
-    return Scheduler(redis)
+    return Scheduler(RedisStateStore(redis, "scheduler"))
 
 
 def _kept_units(unit_dir):

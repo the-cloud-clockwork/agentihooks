@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from scripts import gc_cli
+from scripts.events.redis_state import RedisStateStore
 from scripts.host_guard import sync
 
 pytestmark = pytest.mark.unit
@@ -21,7 +22,7 @@ def scheduler(monkeypatch):
 
     from scripts.scheduler.core import Scheduler
 
-    live = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    live = Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof")
     monkeypatch.setattr(sync, "_scheduler", lambda: live)
     monkeypatch.setattr(sync, "_stranded_scheduler", lambda: None)
     monkeypatch.setattr("scripts.scheduler.service.ensure_running", Mock(return_value=True))
@@ -34,7 +35,7 @@ def stranded(monkeypatch, scheduler):
 
     from scripts.scheduler.core import Scheduler
 
-    old = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    old = Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof")
     monkeypatch.setattr(sync, "_stranded_scheduler", lambda: old)
     return old
 
@@ -292,7 +293,7 @@ def test_the_scheduler_uses_the_swarm_redis(monkeypatch):
 
     client = Mock()
     monkeypatch.setattr(store, "redis_client", lambda: client)
-    assert sync._scheduler().redis is client
+    assert sync._scheduler().state.redis is client
 
 
 def test_install_removes_a_lone_systemd_timer(tmp_path, scheduler, calls):
@@ -436,7 +437,7 @@ def test_the_stranded_scheduler_is_the_local_redis_only_when_the_swarm_moved(mon
     monkeypatch.setattr(store, "redis_url", lambda environ: environ is os.environ and current[0])
     assert sync._stranded_scheduler() is None
     current[0] = "redis://remote:6379/0"
-    options = sync._stranded_scheduler().redis.connection_pool.connection_kwargs
+    options = sync._stranded_scheduler().state.redis.connection_pool.connection_kwargs
     assert (options["host"], options["port"], options["db"]) == ("127.0.0.1", 6379, 0)
     assert options["decode_responses"] is True
     assert (options["socket_connect_timeout"], options["socket_timeout"]) == (3, 10)
@@ -464,8 +465,9 @@ def test_tick_runs_the_home_script_once_per_delivery(monkeypatch):
     monkeypatch.setattr(sync.subprocess, "Popen", lambda command, **options: started.append((command, options)))
     redis = fakeredis.FakeRedis(decode_responses=True)
     event = {"payload": json.dumps({"script": "/home/me/guard-daemon.sh"})}
-    sync.tick(event, "delivery", redis)
-    sync.tick(event, "delivery", redis)
+    state = RedisStateStore(redis, "scheduler")
+    sync.tick(event, "delivery", state)
+    sync.tick(event, "delivery", state)
     devnull = sync.subprocess.DEVNULL
     assert started == [
         (
@@ -473,12 +475,9 @@ def test_tick_runs_the_home_script_once_per_delivery(monkeypatch):
             {"stdin": devnull, "stdout": devnull, "stderr": devnull, "start_new_session": True},
         )
     ]
-    from hooks._redis import redis_key
-
-    key = redis_key("scheduler", "agentihooks-host-guard:delivery")
-    assert redis.keys() == [key]
-    assert redis.get(key) == "1"
-    assert 0 < redis.ttl(key) <= 3600
+    assert len(redis.hkeys(state._current)) == 1
+    sync.tick(event, "next", state)
+    assert len(started) == 2
 
 
 def test_tick_runs_without_timeout_and_logs_a_failed_start(monkeypatch):
@@ -495,7 +494,11 @@ def test_tick_runs_without_timeout_and_logs_a_failed_start(monkeypatch):
 
     monkeypatch.setattr(sync.subprocess, "Popen", refuse)
     monkeypatch.setattr(common, "log", lambda message, data: logged.append((message, data)))
-    sync.tick({"payload": json.dumps({"script": "/g.sh"})}, "one", fakeredis.FakeRedis(decode_responses=True))
+    sync.tick(
+        {"payload": json.dumps({"script": "/g.sh"})},
+        "one",
+        RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"),
+    )
     assert started == [["/g.sh"]]
     assert logged == [("host guard failed to start", {"error": "denied"})]
 

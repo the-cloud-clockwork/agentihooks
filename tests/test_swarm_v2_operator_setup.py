@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.rsa import generate_private_key
 
 from scripts import cli_delegates, openbao_kv
+from scripts.events.redis_state import RedisStateStore
 from scripts.gates.base import Who
 from scripts.swarm.store import SwarmError
 from scripts.swarm_v2.deployed import pod_policy
@@ -303,7 +304,7 @@ def scheduler():
 
     from scripts.scheduler import Scheduler
 
-    return Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    return Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof")
 
 
 LEGACY = (
@@ -388,6 +389,7 @@ def test_install_defaults_to_the_user_units_the_machine_scheduler_and_its_superv
     redis, started = fakeredis.FakeRedis(decode_responses=True), []
     monkeypatch.setattr(operator_setup.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(operator_setup, "redis_client", lambda: redis)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", operator_setup.redis_client)
     monkeypatch.setattr(operator_setup, "ensure_running", lambda: started.append(True))
     units = tmp_path / ".config" / "systemd" / "user"
     units.mkdir(parents=True)
@@ -399,9 +401,9 @@ def test_install_defaults_to_the_user_units_the_machine_scheduler_and_its_superv
     assert list(units.iterdir()) == []
     assert systemctl.calls == [(["systemctl", "--user", "daemon-reload"], {**QUIET, "check": True})]
     assert started == [True]
-    machine = operator_setup.Scheduler(redis)
+    machine = operator_setup.Scheduler(RedisStateStore(redis, "scheduler"))
     record = recorded(tmp_path / "home")
-    assert sorted(machine.redis.hgetall(machine.key("entries"))) == sorted([record["refresh"], record["sync"]])
+    assert sorted(machine.document()["entries"]) == sorted([record["refresh"], record["sync"]])
     assert operator_setup.installed(tmp_path / "home")
     (units / "agentihooks-swarm-terminal.timer").write_text("old\n")
     assert not operator_setup.installed(tmp_path / "home")
@@ -512,6 +514,7 @@ def test_install_command_names_an_unreachable_scheduler_redis_and_keeps_the_old_
 
     monkeypatch.setattr(operator_setup.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(operator_setup, "redis_client", refuse)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", operator_setup.redis_client)
     monkeypatch.setattr(operator_setup, "ensure_running", lambda: pytest.fail("started without a scheduler"))
     units = tmp_path / ".config" / "systemd" / "user"
     units.mkdir(parents=True)
@@ -1180,7 +1183,7 @@ def test_install_schedules_both_jobs_once_and_records_them(tmp_path):
     operator_setup.install(root, address, tmp_path, Systemctl(), machine, lambda: started.append(True))
 
     assert recorded(root) == record
-    assert len(machine.redis.hgetall(machine.key("entries"))) == 2
+    assert len(machine.document()["entries"]) == 2
     assert started == [True, True]
 
 
@@ -1264,7 +1267,7 @@ def test_a_job_mid_delivery_still_counts_as_scheduled(tmp_path):
 def test_jobs_the_scheduler_no_longer_holds_are_scheduled_again(tmp_path):
     machine, root = scheduler(), tmp_path / "home"
     operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
-    machine.redis.delete(machine.key("entries"))
+    machine.change(lambda document: document["entries"].clear())
 
     assert not operator_setup.installed(root, "", tmp_path, machine)
     operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
@@ -1319,7 +1322,8 @@ def test_the_scheduled_setup_never_takes_openbao_settings_from_the_runner_shell(
 def test_a_refused_setup_before_the_hive_transport_alerts_the_swarms_of_the_machine_redis(tmp_path, monkeypatch):
     ledger, made = Ledger(), alarm_store(["hive-a", "hive-b"])
     monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
-    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.redis)
+    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.state.redis)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", operator_setup.redis_client)
     message = f"operator terminal setup refused: {MISSING_BAO}"
 
     assert run_main(["setup"], {}, Who(), tmp_path / "home") == (1, "", message + "\n")
@@ -1342,6 +1346,7 @@ def test_an_unreachable_machine_redis_leaves_a_refusal_in_the_journal_only(tmp_p
         raise AssertionError("no ledger without a swarm to alert")
 
     monkeypatch.setattr(operator_setup, "redis_client", unreachable)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", operator_setup.redis_client)
     monkeypatch.setattr(operator_setup, "LedgerClient", refuse)
 
     assert run_main(["setup"], {}, Who(), tmp_path / "home")[0] == 1
@@ -1366,7 +1371,8 @@ def test_a_hive_transport_failing_at_the_socket_falls_back_to_the_machine_redis(
     ledger, made = Ledger(), alarm_store(["hive-a"])
     monkeypatch.setattr(publications, "connect", broken)
     monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
-    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.redis)
+    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.state.redis)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", operator_setup.redis_client)
 
     assert run_main(["setup"], {}, Who(), tmp_path / "home")[0] == 1
     assert [slug for slug, _, _ in ledger.alerts] == ["hive-a"]

@@ -341,6 +341,7 @@ def test_run_beats_immediately_then_waits_a_beat_less_the_wake_slack(monkeypatch
             raise KeyboardInterrupt
 
     monkeypatch.setattr(daemon, "scheduled_wait", sleep)
+    monkeypatch.setattr(daemon, "timer_state", lambda waiter: waiter)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(_once(connection))
     environ = daemon.os.environ
@@ -364,10 +365,11 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
     monkeypatch.setattr(daemon, "scheduled_wait", sleep)
+    monkeypatch.setattr(daemon, "timer_state", lambda waiter: waiter)
     waiter = object()
     with pytest.raises(KeyboardInterrupt):
         daemon.run(Mock(return_value=(object(), waiter)))
-    sleep.assert_called_once_with(12, redis=waiter, timeout=12)
+    sleep.assert_called_once_with(12, state=waiter, timeout=12)
 
 
 def _paced(monkeypatch, rounds):
@@ -890,10 +892,11 @@ def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
     monkeypatch.setattr(daemon, "scheduled_wait", sleep)
+    monkeypatch.setattr(daemon, "timer_state", lambda waiter: waiter)
     connection = object()
     with pytest.raises(KeyboardInterrupt):
         daemon.run(_once(connection))
-    sleep.assert_called_once_with(0, redis=connection, timeout=0)
+    sleep.assert_called_once_with(0, state=connection, timeout=0)
 
 
 def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch):

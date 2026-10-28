@@ -13,7 +13,7 @@ def start_scheduler(environ):
     log = directory / "fixture.log"
     root = Path(__file__).resolve().parents[2]
     entries = subprocess.run(
-        [sys.executable, "-c", "from scripts.scheduler.core import Scheduler; print(Scheduler(None).key('entries'))"],
+        [sys.executable, "-c", "from scripts.scheduler.core import Scheduler; print(Scheduler(None).name('entries'))"],
         cwd=root,
         env=environ,
         capture_output=True,
@@ -43,10 +43,21 @@ def start_scheduler(environ):
 
 
 def stop_scheduler(scheduler, redis):
+    from scripts.events.bus import StateConflict
+    from scripts.events.redis_state import RedisStateStore
+    from scripts.scheduler.core import BUCKET
+
     process, entries = scheduler
     process.terminate()
     process.wait(timeout=10)
-    for raw in redis.hvals(entries):
-        record = json.loads(raw)
-        if record["owner"] == "process":
-            redis.lpush(json.loads(record["payload"])["key"], "cancelled")
+    state = RedisStateStore(redis, BUCKET)
+    while (stored := state.get(entries)) is not None:
+        document = json.loads(stored.value)
+        for record in document.get("entries", {}).values():
+            if record["owner"] == "process" and record["state"] in ("ready", "active", "pending"):
+                record["state"] = "cancelled"
+        try:
+            state.update(entries, json.dumps(document).encode(), stored.revision)
+            return
+        except StateConflict:
+            continue

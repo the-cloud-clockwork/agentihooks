@@ -9,11 +9,13 @@ from typing import TYPE_CHECKING, Callable, TypeVar
 
 from hooks._redis import redis_key
 from scripts.events.bus import StateConflict
-from scripts.scheduler.lease import Lease, dispatch_lock, verify_lease
+from scripts.scheduler.lease import Lease, check, dispatch_lock, verify_lease
 from scripts.scheduler.model import Schedule, next_due
 from scripts.scheduler.slots import CallableSlot, Slot, restore
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from scripts.events.bus import StateStore
 
 _log = logging.getLogger(__name__)
@@ -43,6 +45,14 @@ class Signal:
             entry["slots"] = [slot for slot in entry["slots"] if slot["id"] != connection_id]
 
         self.scheduler.update(self.entry_id, change)
+
+
+def bucket(environ: "Mapping[str, str] | None" = None) -> str:
+    from scripts.swarm_ledger import ledger_link
+
+    env = os.environ if environ is None else environ
+    member = "" if ledger_link.local_mode(env) else env.get("AGENTIHOOKS_HIVE_ID")
+    return f"{BUCKET}-{member}" if member else BUCKET
 
 
 @dataclass(frozen=True)
@@ -120,7 +130,7 @@ class Scheduler:
         if self._state is None:
             from scripts.events.state import open_state
 
-            self._state = open_state(BUCKET)
+            self._state = open_state(bucket())
         return self._state
 
     def key(self, suffix: str) -> str:
@@ -142,16 +152,17 @@ class Scheduler:
 
     def _read(self) -> tuple[dict, int | None]:
         stored = self.state.get(self.name("entries"))
-        if stored is None:
-            return {"entries": {}, "retired": {}}, None
-        return json.loads(stored.value), stored.revision
+        document = json.loads(stored.value) if stored is not None and stored.value else {}
+        document.setdefault("entries", {})
+        document.setdefault("retired", {})
+        return document, None if stored is None else stored.revision
 
     def change(self, change: Callable[[dict], T], *, lease: Lease | None = None) -> T:
         key = self.name("entries")
         for _ in range(WRITE_TRIES):
-            if lease is not None:
-                verify_lease(self.state, lease)
             document, revision = self._read()
+            if lease is not None:
+                check(document, lease)
             before = json.dumps(document, sort_keys=True)
             result = change(document)
             after = json.dumps(document, sort_keys=True)
@@ -273,7 +284,7 @@ class Scheduler:
         pending = entry.get("pending")
         if pending is None:
             _log.warning("scheduler skipped stale pending entry %s: no pending details", entry_id)
-            self.update(entry_id, lambda current: current.__setitem__("state", "fired"), lease=lease)
+            self.update(entry_id, lambda current: current.__setitem__("state", "stale"), lease=lease)
             return
         event = {
             **entry,
@@ -332,7 +343,7 @@ class Scheduler:
 
     def run_due(self, *, now: float | None = None) -> int:
         now = time.time() if now is None else now
-        with dispatch_lock(self.state, self.name("dispatch-lock")) as lease:
+        with dispatch_lock(self.state, self.name("entries")) as lease:
             fired = self.change(lambda document: self._claim(document, now), lease=lease)
             for entry_id, entry in self.document()["entries"].items():
                 if entry["state"] == "pending":

@@ -5,6 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
+
 pytestmark = pytest.mark.unit
 
 SCHEDULED = "[OK] Lifecycle sweep scheduled hourly on the agentihooks scheduler (0 * * * *)"
@@ -18,7 +20,7 @@ def scheduler(monkeypatch):
     from hooks.lifecycle import maintenance, timer
     from scripts.scheduler.core import Scheduler
 
-    live = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    live = Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof")
     monkeypatch.setattr(timer, "_scheduler", lambda: live)
     monkeypatch.setattr(maintenance, "load_roots", lambda: [])
     monkeypatch.setattr("scripts.scheduler.service.ensure_running", Mock(return_value=True))
@@ -134,7 +136,7 @@ def test_the_scheduler_uses_the_swarm_redis_client(monkeypatch):
 
     client = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: client)
-    assert timer._scheduler().redis is client
+    assert timer._scheduler().state.redis is client
 
 
 def test_gc_cli_parses_the_schedule_flags(monkeypatch, capsys):
@@ -191,7 +193,6 @@ def test_unreachable_redis_reports_and_starts_no_runner(monkeypatch, systemctl):
 def test_the_gc_slot_starts_one_detached_sweep_per_delivery(monkeypatch):
     import fakeredis
 
-    from hooks._redis import redis_key
     from hooks.lifecycle import timer
 
     redis = fakeredis.FakeRedis(decode_responses=True)
@@ -201,8 +202,9 @@ def test_the_gc_slot_starts_one_detached_sweep_per_delivery(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_PROOF", "kept")
     payload = {"python": "/venv/bin/python", "root": "/opt/agentihooks", "home": "/srv/ah"}
     event = {"payload": json.dumps(payload)}
-    timer.sweep(event, "delivery-1", redis)
-    timer.sweep(event, "delivery-1", redis)
+    state = RedisStateStore(redis, "scheduler")
+    timer.sweep(event, "delivery-1", state)
+    timer.sweep(event, "delivery-1", state)
     started.assert_called_once()
     assert started.call_args.args == (
         ["nice", "-n", "10", "/venv/bin/python", "-m", "scripts.gc_cli", "gc", "--enforce"],
@@ -217,10 +219,10 @@ def test_the_gc_slot_starts_one_detached_sweep_per_delivery(monkeypatch):
         "stderr": subprocess.DEVNULL,
         "start_new_session": True,
     }
-    marker = redis_key("scheduler", "agentihooks-gc:delivery-1")
-    assert redis.get(marker) == "1" and redis.ttl(marker) == 86400
-    timer.sweep(event, "delivery-2", redis)
+    timer.sweep(event, "delivery-2", state)
     assert started.call_count == 2
+    timer.sweep(event, "delivery-1", state)
+    assert started.call_count == 3
 
 
 def test_the_sweep_is_time_limited_and_idle_where_the_tools_exist(monkeypatch):
@@ -232,7 +234,7 @@ def test_the_sweep_is_time_limited_and_idle_where_the_tools_exist(monkeypatch):
     monkeypatch.setattr(timer.subprocess, "Popen", started)
     monkeypatch.setattr(timer.shutil, "which", {"timeout": "/usr/bin/timeout", "ionice": "/usr/bin/ionice"}.get)
     payload = {"python": "/venv/bin/python", "root": "/opt/agentihooks", "home": "/srv/ah"}
-    timer.sweep({"payload": json.dumps(payload)}, "delivery-1", fakeredis.FakeRedis())
+    timer.sweep({"payload": json.dumps(payload)}, "delivery-1", RedisStateStore(fakeredis.FakeRedis(), "scheduler"))
     assert started.call_args.args[0] == [
         "timeout",
         "3600",
@@ -259,7 +261,10 @@ def test_a_sweep_that_cannot_start_never_crashes_the_runner(monkeypatch):
     monkeypatch.setattr("hooks.common.log", logged)
     monkeypatch.setattr(timer.subprocess, "Popen", Mock(side_effect=FileNotFoundError("nice")))
     payload = {"python": "/gone/python", "root": "/opt/agentihooks", "home": "/srv/ah"}
-    assert timer.sweep({"payload": json.dumps(payload)}, "delivery-1", fakeredis.FakeRedis()) is None
+    assert (
+        timer.sweep({"payload": json.dumps(payload)}, "delivery-1", RedisStateStore(fakeredis.FakeRedis(), "scheduler"))
+        is None
+    )
     logged.assert_called_once_with("lifecycle sweep failed to start", {"error": "nice"})
 
 

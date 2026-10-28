@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
+
 pytestmark = pytest.mark.unit
 
 
@@ -21,7 +23,9 @@ def test_start_uses_the_activation_clock_and_preserves_absolute_deadlines(monkey
 
     clock = [100]
     monkeypatch.setattr(core, "time", SimpleNamespace(time=lambda: clock[0]))
-    scheduler = core.Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    scheduler = core.Scheduler(
+        RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof"
+    )
     entry = getattr(scheduler, kind)(owner="operator", payload="notice", **options)
     clock[0] = 120
     if kind == "stopwatch":

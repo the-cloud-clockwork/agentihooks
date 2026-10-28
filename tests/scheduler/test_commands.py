@@ -1,5 +1,6 @@
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.scheduler import commands
 from scripts.scheduler.slots import BroadcastSlot, InboxSlot, SwarmSlot, restore
 
@@ -14,14 +15,14 @@ def scheduler():
 
     from scripts.scheduler.core import Scheduler
 
-    return Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    return Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof")
 
 
 @pytest.fixture
 def swarm(scheduler):
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-    store = RedisStore(scheduler.redis)
+    store = RedisStore(scheduler.state.redis)
     store.create(SwarmConfig("sw", "/repo", 2, 1))
     for name, lane in (("sw-eng-1", "eng"), ("sw-eng-2", "eng"), ("sw-ci-1", "ci")):
         store.put_agent("sw", AgentRecord(name, lane, "t"))
@@ -177,7 +178,7 @@ def test_a_cron_reads_its_expression_in_its_time_zone(scheduler):
 def test_a_cron_the_scheduler_refuses_is_a_command_refusal(scheduler, expression, timezone, message):
     with refused(message):
         commands.add_cron(scheduler, OWNER, BroadcastSlot(), "x", expression=expression, timezone=timezone, now=0)
-    assert scheduler.redis.hlen(scheduler.key("entries")) == 0
+    assert scheduler.document()["entries"] == {}
 
 
 def test_listing_shows_open_entries_of_one_kind_soonest_first(scheduler):
@@ -281,9 +282,9 @@ def test_a_swarm_target_reaches_each_live_agent_once_but_not_the_owner(scheduler
     from scripts.inbox.store import InboxStore
 
     event = {"owner": "sw-eng-1", "payload": "stand up"}
-    SwarmSlot("sw").deliver(event, "delivery-1", scheduler.redis)
-    SwarmSlot("sw").deliver(event, "delivery-1", scheduler.redis)
-    inbox = InboxStore(scheduler.redis)
+    SwarmSlot("sw").deliver(event, "delivery-1", scheduler.state)
+    SwarmSlot("sw").deliver(event, "delivery-1", scheduler.state)
+    inbox = InboxStore(scheduler.state.redis)
     assert inbox.inbox("sw-eng-1") == []
     for name in ("sw-eng-2", "sw-ci-1"):
         items = inbox.inbox(name)
@@ -302,8 +303,8 @@ def test_connect_starts_the_runner_on_the_shared_redis(monkeypatch, scheduler):
     from scripts.swarm import store
 
     started = []
-    monkeypatch.setattr(store, "redis_client", lambda: scheduler.redis)
+    monkeypatch.setattr(store, "redis_client", lambda: scheduler.state.redis)
     monkeypatch.setattr(service, "ensure_running", lambda: started.append(True))
     connected = commands.connect()
-    assert connected.redis is scheduler.redis
+    assert connected.redis is scheduler.state.redis
     assert started == [True]

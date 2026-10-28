@@ -1,5 +1,7 @@
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
+
 pytestmark = pytest.mark.unit
 
 
@@ -11,12 +13,12 @@ def test_timer_signal_survives_restart_and_delivers_once():
     from scripts.scheduler.slots import InboxSlot
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    scheduler = Scheduler(redis, machine="proof")
+    scheduler = Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
     timer = scheduler.timer(owner="operator", delay=5, payload="time expired", now=100)
     timer.timeout.connect(InboxSlot("session-proof"))
     timer.start(now=100)
     assert scheduler.run_due(now=104) == 0
-    restarted = Scheduler(redis, machine="proof")
+    restarted = Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
     assert restarted.run_due(now=110) == 1
     assert restarted.run_due(now=111) == 0
     inbox = InboxStore(redis)

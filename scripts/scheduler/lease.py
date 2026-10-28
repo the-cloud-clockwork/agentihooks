@@ -11,63 +11,88 @@ from scripts.events.bus import StateConflict, StateStore
 LEASE_SECONDS = 30
 RENEW_SECONDS = 10
 WAIT_POLL_S = 0.1
+WRITE_TRIES = 64
 
 
 @dataclass
 class Lease:
     name: str
     token: str
-    revision: int
 
 
-def _held(state: StateStore, name: str) -> tuple[dict | None, int | None]:
+def _document(state: StateStore, name: str) -> tuple[dict, int | None]:
     entry = state.get(name)
     if entry is None:
-        return None, None
-    return (json.loads(entry.value) if entry.value else None), entry.revision
+        return {}, None
+    return (json.loads(entry.value) if entry.value else {}), entry.revision
 
 
-def _value(token: str, now: float) -> bytes:
-    return json.dumps({"token": token, "expires": now + LEASE_SECONDS}).encode()
+def _write(state: StateStore, name: str, document: dict, revision: int | None) -> None:
+    value = json.dumps(document, sort_keys=True).encode()
+    if revision is None:
+        state.create(name, value)
+    else:
+        state.update(name, value, revision)
+
+
+def holds(document: dict, lease: Lease, now: float) -> bool:
+    held = document.get("lease")
+    return held is not None and held["token"] == lease.token and held["expires"] > now
+
+
+def check(document: dict, lease: Lease, now: float | None = None) -> None:
+    if not holds(document, lease, time.time() if now is None else now):
+        raise RuntimeError("scheduler lost its dispatch lock")
+
+
+def _change(state: StateStore, name: str, change) -> None:
+    for _ in range(WRITE_TRIES):
+        document, revision = _document(state, name)
+        if change(document) is False:
+            return
+        try:
+            _write(state, name, document, revision)
+            return
+        except StateConflict:
+            continue
+    raise StateConflict(f"scheduler lease {name!r} kept changing")
 
 
 def acquire(state: StateStore, name: str, *, now: float | None = None) -> Lease:
     now = time.time() if now is None else now
-    holder, revision = _held(state, name)
-    if holder is not None and holder["expires"] > now:
-        raise RuntimeError("another scheduler is dispatching on this machine")
-    token = uuid.uuid4().hex
-    try:
-        if revision is None:
-            written = state.create(name, _value(token, now))
-        else:
-            written = state.update(name, _value(token, now), revision)
-    except StateConflict as exc:
-        raise RuntimeError("another scheduler is dispatching on this machine") from exc
-    return Lease(name, token, written)
+    lease = Lease(name, uuid.uuid4().hex)
+
+    def take(document):
+        held = document.get("lease")
+        if held is not None and held["expires"] > now:
+            raise RuntimeError("another scheduler is dispatching on this machine")
+        document["lease"] = {"token": lease.token, "expires": now + LEASE_SECONDS}
+
+    _change(state, name, take)
+    return lease
 
 
 def verify_lease(state: StateStore, lease: Lease, *, now: float | None = None) -> None:
-    now = time.time() if now is None else now
-    holder, _ = _held(state, lease.name)
-    if holder is None or holder["token"] != lease.token or holder["expires"] <= now:
-        raise RuntimeError("scheduler lost its dispatch lock")
+    check(_document(state, lease.name)[0], lease, now)
 
 
 def renew(state: StateStore, lease: Lease, *, now: float | None = None) -> None:
     now = time.time() if now is None else now
-    verify_lease(state, lease, now=now)
-    lease.revision = state.update(lease.name, _value(lease.token, now), lease.revision)
+
+    def extend(document):
+        check(document, lease, now)
+        document["lease"] = {"token": lease.token, "expires": now + LEASE_SECONDS}
+
+    _change(state, lease.name, extend)
 
 
 def release(state: StateStore, lease: Lease) -> None:
-    holder, revision = _held(state, lease.name)
-    if holder is None or holder["token"] != lease.token:
-        return
-    try:
-        state.update(lease.name, b"", revision)
-    except StateConflict:
-        pass
+    def drop(document):
+        if not holds(document, lease, float("-inf")):
+            return False
+        document.pop("lease")
+
+    _change(state, lease.name, drop)
 
 
 def _renew(state: StateStore, lease: Lease, stopped: Event) -> None:

@@ -1,5 +1,7 @@
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
+
 pytestmark = pytest.mark.unit
 
 
@@ -11,7 +13,7 @@ def test_an_interval_emits_one_interval_after_each_dispatch_and_coalesces_downti
     from scripts.scheduler.slots import InboxSlot
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    scheduler = Scheduler(redis, machine="proof")
+    scheduler = Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
     interval = scheduler.interval(owner="operator", payload="tick", every=15, now=0)
     interval.timeout.connect(InboxSlot("session-proof"))
     assert (interval.record["kind"], interval.record["delay"], interval.record["due"]) == ("interval", 15, 15)
@@ -24,7 +26,7 @@ def test_an_interval_emits_one_interval_after_each_dispatch_and_coalesces_downti
     assert scheduler.run_due(now=115) == 1
     assert (interval.state, interval.record["due"]) == ("active", 130)
     assert scheduler.run_due(now=129) == 0
-    restarted = Scheduler(redis, machine="proof")
+    restarted = Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
     assert restarted.run_due(now=500) == 1
     assert restarted.run_due(now=500) == 0
     assert (restarted.get(interval.id).state, restarted.get(interval.id).record["due"]) == ("active", 515)
@@ -38,7 +40,7 @@ def test_a_cancelled_interval_emits_no_more():
 
     from scripts.scheduler.core import Scheduler
 
-    scheduler = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    scheduler = Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof")
     interval = scheduler.interval(owner="operator", payload="tick", every=15, now=0)
     interval.start(now=0)
     assert scheduler.run_due(now=15) == 1
@@ -54,7 +56,9 @@ def test_an_interval_defaults_to_the_wall_clock(monkeypatch):
     from scripts.scheduler import core
 
     monkeypatch.setattr(core.time, "time", lambda: 1000.0)
-    scheduler = core.Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    scheduler = core.Scheduler(
+        RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof"
+    )
 
     assert scheduler.interval(owner="operator", payload="tick", every=15).record["due"] == 1015.0
 
@@ -65,12 +69,12 @@ def test_an_interval_must_be_positive(every):
 
     from scripts.scheduler.core import Scheduler
 
-    scheduler = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    scheduler = Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof")
     with pytest.raises(ValueError) as refused:
         scheduler.interval(owner="operator", payload="tick", every=every, now=0)
 
     assert str(refused.value) == "an interval must be positive"
-    assert scheduler.redis.hgetall(scheduler.key("entries")) == {}
+    assert scheduler.document()["entries"] == {}
 
 
 def test_an_interval_of_one_second_is_accepted():
@@ -78,6 +82,6 @@ def test_an_interval_of_one_second_is_accepted():
 
     from scripts.scheduler.core import Scheduler
 
-    scheduler = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    scheduler = Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof")
 
     assert scheduler.interval(owner="operator", payload="tick", every=1, now=0).record["due"] == 1
