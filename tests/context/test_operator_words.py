@@ -796,6 +796,22 @@ def test_an_unreachable_or_failing_shared_redis_keeps_the_local_words(tmp_path, 
     assert operator_words.matching("master@a1-1", "keep the local words", within=None) == ""
 
 
+def test_legacy_redis_errors_preserve_state_words_and_allow_forget(shared, tmp_path, monkeypatch):
+    from redis.exceptions import ResponseError
+
+    operator_words.record("master@a1-1", "Keep the state words", now=100, swarm="demo")
+    _hosted(tmp_path, monkeypatch)
+
+    def denied(*args):
+        raise ResponseError("NOPERM")
+
+    monkeypatch.setattr(shared, "smembers", denied)
+    assert operator_words.recorded("master@*") == ["master@a1-1"]
+    assert operator_words.matching("master@a1-1", "state words", within=None) == "Keep the state words"
+    operator_words.forget("demo")
+    assert operator_words.matching("master@a1-1", "state words", within=None) == ""
+
+
 def test_the_shared_client_connects_once_per_process_and_retries_after_a_refusal(monkeypatch):
     import redis
 
