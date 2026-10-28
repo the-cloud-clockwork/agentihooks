@@ -336,6 +336,10 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
             coverage_file, Path.cwd() / "mutants", root, list(runner.mutmut.duration_by_test), tracked
         )
     tests_by_function = {name: sorted(names) for name, names in runner.mutmut.tests_by_mangled_function_name.items()}
+    if measured:
+        from scripts.ci_mutation.line_tests import covered_mutant_tests
+
+        tests_by_function.update(covered_mutant_tests(coverage_file, work / "mutants", tests_by_function))
     output.write_text(
         json.dumps(
             {
@@ -620,7 +624,8 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
             except runner.BadTestExecutionCommandsException:
                 # The stats shards proved these node ids collect, so a usage error here is the forced failure at import.
                 return 1
-        tests = list(tests)
+        selected = runner.mutmut.tests_by_mangled_function_name.get(mutant_name, tests)
+        tests = [test for test in tests if test in selected]
         return run_unit(run_tests, self, mutant_name, tests, shard_tests(tests, mutant_name, shard[0]), memory)
 
     memory = KillMemory(Path.cwd() / "killers")
