@@ -8,9 +8,9 @@ from pathlib import Path
 import yaml
 
 WORKFLOWS = ".github/workflows"
-PUBLIC_RUNNER = re.compile(r"anton-oss(-[\w.-]+)?")
-PRIVATE_RUNNER = re.compile(r"anton-[\w.-]+|self-hosted")
-LITERAL = re.compile(r"'((?:''|[^'])*)'")
+PUBLIC_RUNNER = re.compile(r"anton-oss(-[\w.-]+)?|(ubuntu|windows|macos)-[\w.-]+", re.IGNORECASE)
+PUBLIC_GROUPS = ("anton-oss",)
+SELECTED = re.compile(r"(?:&&|\|\|)\s*'((?:''|[^'])*)'")
 LANE = (
     "format('hosted-lane-{0}', "
     "((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || "
@@ -188,21 +188,22 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
 
 def runner_labels(runner: object) -> list[str]:
     if isinstance(runner, dict):
-        runner = runner.get("labels") or []
+        group = runner.get("group")
+        labels = runner.get("labels") or []
+        runner = [
+            *([] if group is None or group in PUBLIC_GROUPS else [f"group {group}"]),
+            *([labels] if isinstance(labels, str) else labels),
+        ]
     if isinstance(runner, str):
         runner = [runner]
     found = []
     for item in runner if isinstance(runner, list) else []:
-        found += LITERAL.findall(str(item)) if "${{" in str(item) else [str(item)]
+        found += (SELECTED.findall(str(item)) or [str(item)]) if "${{" in str(item) else [str(item)]
     return found
 
 
 def private_runners(runner: object) -> list[str]:
-    return [
-        label
-        for label in runner_labels(runner)
-        if PRIVATE_RUNNER.fullmatch(label) and not PUBLIC_RUNNER.fullmatch(label)
-    ]
+    return [label for label in runner_labels(runner) if not PUBLIC_RUNNER.fullmatch(label)]
 
 
 def runner_problems(workflow: object) -> list[str]:

@@ -19,6 +19,12 @@ ROUTED = "${{ contains(fromJSON('[\"nestorcolt\"]'), github.actor) && '%s' || 'u
         (ROUTED % "anton-light", "anton-light"),
         ({"group": "Default", "labels": ["anton-light"]}, "anton-light"),
         ("anton-heavy", "anton-heavy"),
+        ("Anton-Light", "Anton-Light"),
+        ("gpu-light", "gpu-light"),
+        ({"group": "Default"}, "group Default"),
+        ({"group": "anton-oss", "labels": "anton-light"}, "anton-light"),
+        ("${{ matrix.runner }}", "${{ matrix.runner }}"),
+        ("${{ format('anton-{0}', 'light') }}", "${{ format('anton-{0}', 'light') }}"),
     ],
 )
 def test_a_private_runner_label_is_refused(runner, label):
@@ -38,7 +44,10 @@ def test_a_private_runner_label_is_refused(runner, label):
         ROUTED % "anton-oss-light",
         "${{ github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss' }}",
         {"labels": ["anton-oss-batch"]},
-        "x",
+        {"group": "anton-oss", "labels": "anton-oss"},
+        "Ubuntu-Latest",
+        "windows-latest",
+        "macos-14",
         None,
     ],
 )
