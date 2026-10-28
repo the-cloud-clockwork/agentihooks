@@ -68,6 +68,8 @@ def ledger(browser):
         if parts.path.startswith("/api/v1/ledgers/") and parts.path.endswith("/tasks"):
             query = {key: values[0] for key, values in parse_qs(parts.query).items()}
             reads.append(query)
+            if query.get("offset") == "10":
+                __import__("time").sleep(0.5)
             rows = done_rows(query)
             offset = int(query["offset"]) - (0 if "q" in query else 10)
             size = min(int(query["limit"]), 5) if "q" in query else int(query["limit"])
