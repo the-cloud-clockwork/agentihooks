@@ -1,0 +1,6 @@
+{
+  "scripts/hive/rollout.py:scripts.hive.rollout.x_serving__mutmut_37:ea869c674a6993123f387f23fb0895b02cb2d794c845f6b7c323be57f0cf6153": {
+    "reader": "Independent Standards",
+    "reason": "Equivalent boolean result: the preceding replicas > 0 check excludes zero; a missing replica counter therefore fails equality with both default 0 and default None. Present counters are unchanged."
+  }
+}

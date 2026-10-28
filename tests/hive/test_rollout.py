@@ -11,9 +11,14 @@ class Cluster:
         self.healthy = True
 
     def request(self, method, path, body=None):
-        self.calls.append((method, path, body))
+        import re
+
+        assert method in ("GET", "POST", "PUT")
+        self.calls.append((method, path, copy.deepcopy(body)))
         if "deployments" in path:
-            deployment = {
+            assert method == "GET"
+            assert re.fullmatch(r"/apis/apps/v1/namespaces/[^/]+/deployments/[^/]+", path)
+            return {
                 "metadata": {"name": "hive-worker-hive", "namespace": "hive", "generation": 2},
                 "spec": {"replicas": 1},
                 "status": {
@@ -23,11 +28,22 @@ class Cluster:
                     "availableReplicas": int(self.healthy),
                 },
             }
-            return {"items": [deployment]} if "?" in path else deployment
+        route = re.fullmatch(r"/apis/coordination.k8s.io/v1/namespaces/([^/]+)/leases(?:/([^/]+))?", path)
+        assert route is not None
         if method == "GET":
+            assert route[2]
             return copy.deepcopy(self.lease)
-        if method == "POST" and self.lease is not None:
-            raise importlib.import_module("scripts.hive.rollout").Conflict()
+        assert body["apiVersion"] == "coordination.k8s.io/v1"
+        assert body["kind"] == "Lease"
+        assert body["metadata"]["namespace"] == route[1]
+        if method == "POST":
+            assert route[2] is None
+            assert body["metadata"]["name"]
+            if self.lease is not None:
+                raise importlib.import_module("scripts.hive.rollout").Conflict()
+        else:
+            assert body["metadata"]["name"] == route[2]
+            assert body["metadata"]["resourceVersion"] == self.lease["metadata"]["resourceVersion"]
         self.lease = copy.deepcopy(body)
         self.lease["metadata"]["resourceVersion"] = str(len(self.calls))
         return copy.deepcopy(self.lease)
@@ -54,7 +70,7 @@ def test_a_failed_replacement_holds_the_lock_without_expiry():
     cluster = Cluster()
     module.acquire(cluster, "default", "shared", "first", timeout=0)
     cluster.healthy = False
-    with pytest.raises(RuntimeError, match="serving"):
+    with pytest.raises(RuntimeError, match="^replacement hive is not serving; rollout ownership retained$"):
         module.release(cluster, "default", "shared", "first", "hive", "hive-worker-hive")
     assert cluster.lease["spec"]["holderIdentity"] == "first"
     assert "leaseDurationSeconds" not in cluster.lease["spec"]
@@ -64,7 +80,7 @@ def test_only_the_owner_can_release_after_the_current_generation_serves():
     module = rollout()
     cluster = Cluster()
     module.acquire(cluster, "default", "shared", "first", timeout=0)
-    with pytest.raises(RuntimeError, match="owner"):
+    with pytest.raises(RuntimeError, match="^only the rollout owner can release the lease$"):
         module.release(cluster, "default", "shared", "second", "hive", "hive-worker-hive")
     module.release(cluster, "default", "shared", "first", "hive", "hive-worker-hive")
     module.acquire(cluster, "default", "shared", "second", timeout=0)
@@ -73,7 +89,7 @@ def test_only_the_owner_can_release_after_the_current_generation_serves():
 
 def test_serving_rejects_old_generations_and_old_replicas():
     module = rollout()
-    deployment = Cluster().request("GET", "/deployments/own")
+    deployment = Cluster().request("GET", "/apis/apps/v1/namespaces/hive/deployments/own")
     assert module.serving(deployment)
     for key, value in [
         ("observedGeneration", 1),
@@ -113,6 +129,7 @@ def test_readiness_needs_a_recent_successful_heartbeat(tmp_path):
     import os
 
     os.utime(marker, (100, 100))
+    assert module.ready(marker, now=100)
     assert module.ready(marker, now=110)
     assert not module.ready(marker, now=160)
     assert not module.ready(marker, now=99)
@@ -131,7 +148,7 @@ def test_a_release_checks_every_worker_before_releasing_ownership():
         return result
 
     cluster.request = unhealthy_second
-    with pytest.raises(RuntimeError, match="serving"):
+    with pytest.raises(RuntimeError, match="^replacement hive is not serving; rollout ownership retained$"):
         module.release(cluster, "default", "shared", "first", "hive", "first,second")
     assert cluster.lease["spec"]["holderIdentity"] == "first"
 
@@ -146,7 +163,14 @@ def test_kubernetes_transport_preserves_api_failures(monkeypatch, status):
     calls = []
     body = {"spec": {"holderIdentity": "owner"}}
     transport = SimpleNamespace(send=lambda *args: calls.append(args) or (status, body))
-    monkeypatch.setattr(KubeHttp, "in_cluster", lambda environ: transport)
+
+    def connect(environ):
+        import os
+
+        assert environ is os.environ
+        return transport
+
+    monkeypatch.setattr(KubeHttp, "in_cluster", connect)
     client = module.Kubernetes()
     if status in (200, 201):
         assert client.request("PUT", "/lease", body) == body
@@ -160,7 +184,7 @@ def test_kubernetes_transport_preserves_api_failures(monkeypatch, status):
     else:
         with pytest.raises(RuntimeError, match="500"):
             client.request("GET", "/lease")
-    assert calls[0][1] == "/lease"
+    assert calls[0] == (("PUT", "/lease", body) if status in (200, 201, 409) else ("GET", "/lease", None))
 
 
 def test_owner_retry_and_waiting_retry_preserve_the_same_lease(monkeypatch):
@@ -186,12 +210,12 @@ def test_owner_retry_and_waiting_retry_preserve_the_same_lease(monkeypatch):
 def test_missing_lease_and_missing_replacement_never_release_ownership():
     module = rollout()
     cluster = Cluster()
-    with pytest.raises(RuntimeError, match="owner"):
+    with pytest.raises(RuntimeError, match="^only the rollout owner can release the lease$"):
         module.release(cluster, "default", "shared", "first", "hive", "own")
     module.acquire(cluster, "default", "shared", "first", timeout=0)
     original = cluster.request
     cluster.request = lambda method, path, body=None: None if "deployments" in path else original(method, path, body)
-    with pytest.raises(RuntimeError, match="serving"):
+    with pytest.raises(RuntimeError, match="^replacement hive is not serving; rollout ownership retained$"):
         module.release(cluster, "default", "shared", "first", "hive", "own")
     assert cluster.lease["spec"]["holderIdentity"] == "first"
 
@@ -222,3 +246,123 @@ def test_hook_entrypoint_routes_to_the_exclusive_protocol(monkeypatch, tmp_path,
     else:
         module.main()
         assert cluster.lease["spec"]["holderIdentity"] == ("first" if action == "acquire" else "")
+
+
+def test_kubernetes_creation_uses_the_exact_lease_envelope_and_collection():
+    module = rollout()
+    cluster = Cluster()
+    module.acquire(cluster, "rolls", "capacity", "hive/app", timeout=0)
+    assert cluster.calls == [
+        ("GET", "/apis/coordination.k8s.io/v1/namespaces/rolls/leases/capacity", None),
+        (
+            "POST",
+            "/apis/coordination.k8s.io/v1/namespaces/rolls/leases",
+            {
+                "apiVersion": "coordination.k8s.io/v1",
+                "kind": "Lease",
+                "metadata": {"name": "capacity", "namespace": "rolls"},
+                "spec": {"holderIdentity": "hive/app"},
+            },
+        ),
+    ]
+
+
+def test_unobserved_and_zero_capacity_deployments_never_count_as_serving():
+    module = rollout()
+    template = Cluster().request("GET", "/apis/apps/v1/namespaces/hive/deployments/own")
+    defaulted = copy.deepcopy(template)
+    del defaulted["spec"]["replicas"]
+    assert module.serving(defaulted)
+    two = copy.deepcopy(template)
+    two["spec"]["replicas"] = 2
+    two["status"].update(updatedReplicas=2, readyReplicas=2, availableReplicas=2)
+    assert module.serving(two)
+    zero = copy.deepcopy(template)
+    zero["spec"]["replicas"] = 0
+    zero["status"].update(updatedReplicas=0, readyReplicas=0, availableReplicas=0)
+    assert not module.serving(zero)
+    absent = copy.deepcopy(template)
+    del absent["status"]
+    assert not module.serving(absent)
+    unobserved = copy.deepcopy(template)
+    unobserved["metadata"]["generation"] = 1
+    del unobserved["status"]["observedGeneration"]
+    assert not module.serving(unobserved)
+    for field in ("readyReplicas", "availableReplicas", "updatedReplicas"):
+        partial = copy.deepcopy(template)
+        del partial["status"][field]
+        assert not module.serving(partial)
+
+
+@pytest.mark.parametrize("timeout", [None, 0])
+def test_ownership_wait_ends_at_the_exact_deadline(monkeypatch, timeout):
+    module = rollout()
+    cluster = Cluster()
+    module.acquire(cluster, "default", "shared", "first", timeout=0)
+    ticks = iter([0, 1800 if timeout is None else 0])
+    monkeypatch.setattr(module.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: pytest.fail("slept beyond the acquisition deadline"))
+    kwargs = {} if timeout is None else {"timeout": timeout}
+    with pytest.raises(TimeoutError) as failed:
+        module.acquire(cluster, "default", "shared", "second", **kwargs)
+    assert str(failed.value) == "another hive rollout owns the lease; no workload was changed"
+    assert cluster.lease["spec"]["holderIdentity"] == "first"
+
+
+def test_resource_names_are_quoted_as_single_url_segments():
+    module = rollout()
+    assert (
+        module.lease_path("team/one", "roll/two")
+        == "/apis/coordination.k8s.io/v1/namespaces/team%2Fone/leases/roll%2Ftwo"
+    )
+    cluster = Cluster()
+    module.acquire(cluster, "default", "shared", "first", timeout=0)
+    module.release(cluster, "default", "shared", "first", "team/one", "hive/two")
+    assert cluster.calls[-2][:2] == ("GET", "/apis/apps/v1/namespaces/team%2Fone/deployments/hive%2Ftwo")
+
+
+@pytest.mark.parametrize("action", ["acquire", "release"])
+def test_hook_cli_defaults_and_overrides_reach_the_protocol(monkeypatch, action):
+    import sys
+
+    module = rollout()
+    api, calls = object(), []
+    monkeypatch.setattr(module, "Kubernetes", lambda: api)
+    monkeypatch.setattr(module, action, lambda *args: calls.append(args))
+    monkeypatch.setattr(sys, "argv", ["rollout", action])
+    module.main()
+    defaults = (api, "default", "agentihooks-hive-rollout", "")
+    assert calls == [defaults if action == "acquire" else (*defaults, "", "")]
+    calls.clear()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "rollout",
+            action,
+            "--namespace",
+            "rolls",
+            "--name",
+            "shared",
+            "--owner",
+            "hive/app",
+            "--hive-namespace",
+            "workers",
+            "--deployment",
+            "one,two",
+        ],
+    )
+    module.main()
+    override = (api, "rolls", "shared", "hive/app")
+    assert calls == [override if action == "acquire" else (*override, "workers", "one,two")]
+
+
+def test_unknown_hook_actions_never_contact_kubernetes(monkeypatch):
+    import sys
+
+    module = rollout()
+    monkeypatch.setattr(module, "Kubernetes", lambda: pytest.fail("invalid action contacted Kubernetes"))
+    monkeypatch.setattr(sys, "argv", ["rollout", "unknown"])
+    with pytest.raises(SystemExit) as failed:
+        module.main()
+    assert failed.value.code == 2
