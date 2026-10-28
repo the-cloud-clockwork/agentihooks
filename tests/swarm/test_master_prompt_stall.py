@@ -83,7 +83,7 @@ def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(st
     operator_says(store, START)
     assert run(store, runtime, START) == []
     assert run(store, runtime, START + 9 * MINUTE) == []
-    held = master_prompt_stall.held_on(pane, INTERRUPT)
+    held = master_prompt_stall.held_on(pane, INTERRUPT, "claude")
     reason = master_prompt_stall.REASON.format(prompt=held, minutes=10)
     assert run(store, runtime, START + 10 * MINUTE) == [
         f"asked {agent.name} for a handoff before retiring it: {reason}"
@@ -97,14 +97,15 @@ def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(st
     ]
     assert [a.state for a in store.agents("sw")] == ["finished"]
     handoff = store.handoff("sw", MASTER)
-    assert f"{agent.name} sat 15 minutes on {held} while operator items waited" in handoff
+    assert f"master of sw; {agent.name} sat 15 minutes on {held} while operator items waited" in handoff
     assert handoff.endswith("<!-- handoff complete -->\n")
     assert store.handoff_envelope("sw", MASTER)["reason"] == "recycle"
     [row] = transfers.list_transfers(store, "sw")
     assert (row["reason"], row["predecessor"]) == (master_stall.STALLED, agent.name)
-    assert [(r["gate"], r["kind"], r["tool"]) for r in rows()] == [
-        ("reset", "deny", "wake"),
-        ("reset", "deny", "recycle"),
+    recycled = master_prompt_stall.REASON.format(prompt=held, minutes=15)
+    assert [(r["gate"], r["kind"], r["tool"], r["reason"], r["at"], r["agent"]) for r in rows()] == [
+        ("reset", "deny", "wake", reason, START + 10 * MINUTE, agent.name),
+        ("reset", "deny", "recycle", recycled, START + 15 * MINUTE, agent.name),
     ]
 
 
@@ -121,12 +122,12 @@ def test_recycle_comes_at_fifteen_minutes_whatever_the_handoff_wait(store, monke
 
 
 def test_held_on_names_the_prompt():
-    assert master_prompt_stall.held_on(QUESTION) == "the prompt Which task first?"
-    assert master_prompt_stall.held_on(PaneObservation("waiting")) == "the prompt waiting on input"
-    assert master_prompt_stall.held_on(INTERRUPTED, INTERRUPT) == "an interrupted prompt"
+    assert master_prompt_stall.held_on(QUESTION, None, "claude") == "the prompt Which task first?"
+    assert master_prompt_stall.held_on(PaneObservation("waiting"), None, "codex") == "the prompt waiting on input"
+    assert master_prompt_stall.held_on(INTERRUPTED, INTERRUPT, "claude") == "an interrupted prompt"
     assert master_prompt_stall.held_on(INTERRUPTED, INTERRUPT, "codex") == ""
-    assert master_prompt_stall.held_on(INTERRUPTED) == ""
-    assert master_prompt_stall.held_on(PaneObservation("working"), INTERRUPT) == ""
+    assert master_prompt_stall.held_on(INTERRUPTED, "", "claude") == ""
+    assert master_prompt_stall.held_on(PaneObservation("working"), INTERRUPT, "claude") == ""
 
 
 @pytest.mark.parametrize("tail", ["● Back to work\n❯ \n", OSError("pane gone")], ids=["answered", "unreadable"])
@@ -206,7 +207,7 @@ def test_log_only_by_default_writes_would_be_rows_once_and_acts_on_nothing(store
     assert catalog.defaults()["reset"] == "observe"
     operator_says(store, START)
     run(store, runtime, START)
-    held = master_prompt_stall.held_on(QUESTION)
+    held = master_prompt_stall.held_on(QUESTION, None, "claude")
     assert run(store, runtime, START + 10 * MINUTE) == [
         f"log only: would ask {agent.name} for a handoff, held on {held} with operator items waiting for 10 minutes"
     ]
@@ -217,9 +218,10 @@ def test_log_only_by_default_writes_would_be_rows_once_and_acts_on_nothing(store
     assert run(store, runtime, START + 60 * MINUTE) == []
     assert InboxStore(store.redis).pending_items(agent.name) == []
     assert store.agents("sw")[0].state != "finished"
-    assert [(r["kind"], r["tool"], r["agent"]) for r in rows()] == [
-        ("observe", "wake", agent.name),
-        ("observe", "recycle", agent.name),
+    reasons = [master_prompt_stall.REASON.format(prompt=held, minutes=m) for m in (10, 15)]
+    assert [(r["kind"], r["tool"], r["agent"], r["reason"], r["at"]) for r in rows()] == [
+        ("observe", "wake", agent.name, reasons[0], START + 10 * MINUTE),
+        ("observe", "recycle", agent.name, reasons[1], START + 15 * MINUTE),
     ]
 
 
@@ -234,10 +236,12 @@ def test_off_mode_skips(store):
 
 @pytest.mark.parametrize("state", ["stopping", "stopped"])
 def test_stopping_swarm_is_left_to_its_stop(store, state):
-    _, runtime = master(store)
+    agent, runtime = master(store)
     operator_says(store, START)
+    run(store, runtime, START)
     store.update("sw", state=state)
     assert run(store, runtime, START + 60 * MINUTE) == []
+    assert InboxStore(store.redis).pending_items(agent.name) == []
 
 
 def test_master_not_live_stays(store):

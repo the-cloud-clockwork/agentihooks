@@ -43,7 +43,7 @@ Answer the open operator items in the master inbox first, then re-read the ledge
 """
 
 
-def held_on(observed, tail: str = "", harness: str = "claude") -> str:
+def held_on(observed, tail: str | None, harness: str) -> str:
     if observed.state == "waiting":
         return f"the prompt {observed.prompt_title or 'waiting on input'}"
     if observed.state == "idle" and interrupted_prompt(harness, tail):
@@ -54,17 +54,17 @@ def held_on(observed, tail: str = "", harness: str = "claude") -> str:
 def _prompt(runtime, master):
     observed = runtime.observe(master)
     if observed.state != "idle":
-        return held_on(observed)
+        return held_on(observed, None, master.harness)
     try:
         tail = runtime.pane_tail(master.pane_id, TAIL_LINES)
     except Exception:
-        tail = ""
+        return ""
     return held_on(observed, tail, master.harness)
 
 
 def _operator_waiting(store, slug, master):
     inbox = InboxStore(store.redis)
-    mail = inbox.open_items(master.name) + inbox.open_items(master.seat or seat_address(slug, MASTER))
+    mail = inbox.open_items(master.name) + inbox.open_items(seat_address(slug, MASTER))
     return any(item.sender == OPERATOR for item in mail)
 
 
@@ -76,7 +76,7 @@ def _clear(store, slug, master, key):
 
 def run(slug, config, store, ledger, runtime, now_ms):
     master = affinity.live_master(store, slug)
-    if master is None or master.lane != MASTER or config.state in {"stopping", "stopped"}:
+    if master is None or config.state in {"stopping", "stopped"}:
         return []
     key = store.key(slug, "master-prompt-stall", master.name)
     live = master.name in runtime.live_names()
@@ -91,7 +91,7 @@ def run(slug, config, store, ledger, runtime, now_ms):
     if minutes < WAKE_MINUTES or mode == "off":
         return []
     reason = REASON.format(prompt=prompt, minutes=minutes)
-    who = Who(name=master.name, swarm=slug, lane=MASTER)
+    who = Who(name=master.name, swarm=slug)
     if mode == "observe":
         stage = "recycle" if minutes >= RESET_MINUTES else "wake"
         if not store.redis.hsetnx(key, stage, now_ms):
