@@ -25,7 +25,7 @@ def outcomes() -> dict:
     return project_cache._read(_outcomes_path())
 
 
-def _record(target: str, outcome: str) -> None:
+def _record(target: str, outcome: str, session: str = "", pack: str | None = None) -> None:
     from hooks.context.broadcast import _file_lock
 
     path = _outcomes_path()
@@ -34,6 +34,10 @@ def _record(target: str, outcome: str) -> None:
         row = counts.setdefault(target, {})
         row[outcome] = row.get(outcome, 0) + 1
         project_cache._write(path, counts)
+    if session:
+        from hooks.observability import consultation
+
+        consultation.delivery(session, pack, outcome)
 
 
 def _receipt_path(session_id: str) -> Path:
@@ -100,19 +104,24 @@ def _consult(session_id: str, bound: dict, pack: str, now: float) -> None:
 
 def offer(session_id: str, event: str, pack: str | None, injectable: bool | None = None) -> str | None:
     if not pack:
+        from hooks.observability import consultation as metrics
+
+        bound = binding(os.environ.get("AGENTIHOOKS_SWARM"), os.environ.get("AGENTIHOOKS_SWARM_TASK"))
+        if not consultation(session_id) or not _consulted(session_id, bound):
+            metrics.delivery(session_id, pack, "missing")
         return None
     target = current_target()
     project_cache.take_project_context(session_id)
     if _disabled(target):
-        _record(target, "disabled")
+        _record(target, "disabled", session_id, pack)
         return None
     bound = binding(os.environ.get("AGENTIHOOKS_SWARM"), os.environ.get("AGENTIHOOKS_SWARM_TASK"))
     if receipt(session_id).get("digest") == digest(pack) and _consulted(session_id, bound):
-        _record(target, "deduplicated")
+        _record(target, "deduplicated", session_id, pack)
         return None
     if not (can_inject_context(event) if injectable is None else injectable):
         hold(session_id, pack)
-        _record(target, "unsupported_event")
+        _record(target, "unsupported_event", session_id, pack)
         return None
     now = time.time()
     project_cache._write(
@@ -125,7 +134,7 @@ def offer(session_id: str, event: str, pack: str | None, injectable: bool | None
     )
     if bound:
         _consult(session_id, bound, pack, now)
-    _record(target, "delivered")
+    _record(target, "delivered", session_id, pack)
     return pack
 
 
