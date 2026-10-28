@@ -100,7 +100,30 @@ def test_a_full_lane_probes_placement_again_before_asking_for_an_urgent_task_ref
     placement_waits.observe(store, "sw", "eng", "t4", refused, 3_000)
     for at in (3_000, 4_000 + placement_waits.WAIT_MS, 5_000 + placement_waits.WAIT_MS + preempt.ANSWER_MS):
         tick("sw", store, ledger, runtime, now_ms=at)
-    assert workers(store) and [a.name for a in store.agents("sw") if asks(store, a.name)] == []
+    assert workers(store)
+    assert [a.name for a in store.agents("sw") if asks(store, a.name)] == []
+
+
+def test_an_unresolved_profile_reads_as_placeable_when_probing_before_a_preemption_ask(
+    store,  # noqa: F811
+    monkeypatch,
+):
+    from scripts.hive import placement_waits
+    from scripts.swarm.profile_choice import ProfileUnresolved
+
+    def refusal(lane, task):
+        if task.get("id") == "t4":
+            raise ProfileUnresolved("t4 profile is unresolved")
+        return ""
+
+    ledger, runtime = busy_with_normal_work(store)
+    ledger.rows["t3"]["rank"] = "high"
+    monkeypatch.setattr(runtime, "placement_refusal", refusal, raising=False)
+    ledger.rows["t4"] = {"id": "t4", "lane": "eng", "state": "open", "claimed_by": "", "rank": "urgent"}
+    placement_waits.observe(store, "sw", "eng", "t4", "no eng hive has room: cpu", 3_000)
+    for at in (3_000, 4_000 + placement_waits.WAIT_MS):
+        tick("sw", store, ledger, runtime, now_ms=at)
+    assert [a.task for a in store.agents("sw") if asks(store, a.name)] == ["t2"]
 
 
 def test_spawn_order_shares_one_handoff_batch_across_lanes_and_queue_sort(store, monkeypatch):  # noqa: F811
