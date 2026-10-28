@@ -93,7 +93,9 @@ def test_a_full_lane_probes_placement_again_before_asking_for_an_urgent_task_ref
     refused = "no eng hive has room: cpu"
     ledger, runtime = busy_with_normal_work(store)
     ledger.rows["t3"]["rank"] = "high"
-    monkeypatch.setattr(runtime, "placement_refusal", lambda lane, task: refused if task.get("id") == "t4" else "")
+    monkeypatch.setattr(
+        runtime, "placement_refusal", lambda lane, task: refused if task.get("id") == "t4" else "", raising=False
+    )
     ledger.rows["t4"] = {"id": "t4", "lane": "eng", "state": "open", "claimed_by": "", "rank": "urgent"}
     placement_waits.observe(store, "sw", "eng", "t4", refused, 3_000)
     for at in (3_000, 4_000 + placement_waits.WAIT_MS, 5_000 + placement_waits.WAIT_MS + preempt.ANSWER_MS):
