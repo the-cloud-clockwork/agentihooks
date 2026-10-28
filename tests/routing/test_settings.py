@@ -22,9 +22,19 @@ def home(tmp_path):
     return {"AGENTIHOOKS_HOME": str(tmp_path / "ah")}
 
 
-@pytest.fixture(params=["redis", "file"])
-def store(request, fake, home):
-    return settings.open_store(fake if request.param == "redis" else None, home)
+@pytest.fixture
+def state():
+    from scripts.events import memory
+    from scripts.events.config import BusConfig
+
+    bus = memory.open_bus(BusConfig())
+    yield bus.state(settings.BUCKET)
+    bus.close()
+
+
+@pytest.fixture(params=["state", "file"])
+def store(request, state, home):
+    return settings.open_store(state if request.param == "state" else None, home)
 
 
 def test_defaults_are_zero_weights_and_unset_everything_else(store):
@@ -155,11 +165,110 @@ def test_an_unknown_key_is_refused_on_read_and_write(store):
     assert store.history() == []
 
 
-def test_the_redis_store_keeps_the_hash_under_the_swarm_root(fake, home, tmp_path):
-    settings.open_store(fake, home).set("claude-api-weight", 40, "operator", NOW)
-    assert fake.hgetall(f"{keyspace.ROOT}:routing:settings") == {"claude-api-weight": "40"}
-    assert fake.llen(f"{keyspace.ROOT}:routing:settings:history") == 1
+def test_the_state_store_keeps_settings_and_history_in_one_routing_entry(state, home, tmp_path):
+    settings.open_store(state, home).set("claude-api-weight", 40, "operator", NOW)
+    assert json.loads(state.get(settings.ENTRY).value) == {
+        "settings": {"claude-api-weight": 40},
+        "history": [{"key": "claude-api-weight", "value": 40, "actor": "operator", "at": NOW}],
+    }
+    assert settings.ENTRY == "settings"
+    assert settings.BUCKET == "routing"
     assert list((tmp_path / "ah").iterdir()) == []
+
+
+def _legacy(fake):
+    from scripts.events.redis_state import RedisStateStore
+
+    root = f"{keyspace.ROOT}:routing:settings"
+    fake.hset(root, "codex-api-weight", "30")
+    fake.rpush(f"{root}:history", json.dumps({"key": "codex-api-weight", "value": 30, "actor": "operator", "at": 1.0}))
+    return RedisStateStore(fake, settings.BUCKET)
+
+
+def test_the_redis_state_store_seeds_from_the_legacy_hash_until_its_first_write(fake, home):
+    store = settings.open_store(_legacy(fake), home)
+    assert store.all() == {"claude-api-weight": 0, "codex-api-weight": 30}
+    assert store.history() == [{"key": "codex-api-weight", "value": 30, "actor": "operator", "at": 1.0}]
+    store.set("claude-api-weight", 5, "operator", NOW)
+    fake.hset(f"{keyspace.ROOT}:routing:settings", "codex-api-weight", "99")
+    assert store.all() == {"claude-api-weight": 5, "codex-api-weight": 30}
+    assert [entry["key"] for entry in store.history()] == ["codex-api-weight", "claude-api-weight"]
+
+
+def test_a_claim_sees_a_legacy_holder(fake, home):
+    fake.hset(f"{keyspace.ROOT}:routing:settings", "master-account-claude", json.dumps("old"))
+    store = settings.open_store(_legacy(fake), home)
+    assert store.claim("master-account-claude", "new", "master@x", NOW) == "old"
+    assert store.state.get(settings.ENTRY) is None
+
+
+def test_a_state_store_without_legacy_rows_reads_empty(state, home):
+    assert settings.StateSettings(state)._load() == ({"settings": {}, "history": []}, None)
+
+
+class _Racing:
+    def __init__(self, state, races):
+        self.state, self.races, self.writes = state, races, 0
+
+    def get(self, key):
+        return self.state.get(key)
+
+    def _race(self):
+        self.writes += 1
+        if self.races:
+            self.races -= 1
+            settings.StateSettings(self.state).set("codex-api-weight", self.writes, "rival", NOW)
+
+    def create(self, key, value):
+        self._race()
+        return self.state.create(key, value)
+
+    def update(self, key, value, revision):
+        self._race()
+        return self.state.update(key, value, revision)
+
+
+def test_a_write_that_lost_a_race_is_retried_on_the_fresh_entry(state, home):
+    racing = _Racing(state, 2)
+    settings.open_store(racing, home).set("claude-api-weight", 7, "operator", NOW)
+    assert settings.StateSettings(state).all() == {"claude-api-weight": 7, "codex-api-weight": 2}
+    assert [entry["actor"] for entry in settings.StateSettings(state).history()] == ["rival", "rival", "operator"]
+    assert racing.writes == 3
+
+
+def test_a_claim_that_lost_a_race_returns_the_rival_holder(state, home):
+    class Rival(_Racing):
+        def _race(self):
+            if self.races:
+                self.races -= 1
+                settings.StateSettings(self.state).claim("master-account-claude", "rival", "m", NOW)
+
+    assert settings.open_store(Rival(state, 1), home).claim("master-account-claude", "me", "m", NOW) == "rival"
+    assert len(settings.StateSettings(state).history()) == 1
+
+
+def test_a_write_that_keeps_losing_raises_the_last_conflict(state, home):
+    from scripts.events.bus import StateConflict
+
+    racing = _Racing(state, settings.WRITE_TRIES)
+    with pytest.raises(StateConflict) as raised:
+        settings.open_store(racing, home).set("claude-api-weight", 7, "operator", NOW)
+    assert (
+        str(raised.value)
+        == f"state key 'settings' is at revision {settings.WRITE_TRIES}, not {settings.WRITE_TRIES - 1}"
+    )
+    assert racing.writes == settings.WRITE_TRIES
+    assert settings.WRITE_TRIES == 8
+
+
+@pytest.mark.parametrize("module", ["scripts/routing/settings.py", "scripts/routing/place.py"])
+def test_no_routing_placement_module_imports_the_redis_client(module):
+    import ast
+
+    tree = ast.parse((Path(__file__).parents[2] / module).read_text())
+    imported = [alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names]
+    imported += [node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module]
+    assert [name for name in imported if name.split(".")[0] == "redis"] == []
 
 
 def test_the_file_store_lives_in_the_agentihooks_home(home, tmp_path):

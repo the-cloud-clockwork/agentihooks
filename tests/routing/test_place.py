@@ -118,18 +118,31 @@ def test_policy_reads_each_harness_weight_and_cap_from_the_store(monkeypatch, tm
     assert place.policy("codex", env) == place.ApiPolicy(80, API_UNBOUNDED)
 
 
-def test_policy_reads_the_swarm_redis_when_it_answers(monkeypatch, tmp_path):
+def test_policy_reads_the_state_store_the_routing_client_opens(monkeypatch, tmp_path):
+    from scripts.events import memory, state
+    from scripts.events.config import BusConfig
+
+    routing = memory.open_bus(BusConfig()).state(settings.BUCKET)
+    settings.open_store(routing, {}).set("codex-api-max-sessions", 0, "operator", NOW)
+    seen = []
+    monkeypatch.setattr(state, "open_state", lambda bucket, environ: seen.append((bucket, environ)) or routing)
+    env = {"AGENTIHOOKS_HOME": str(tmp_path)}
+    assert place.policy("codex", env) == place.ApiPolicy(0, 0)
+    assert seen == [("routing", env)]
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_the_routing_client_is_the_redis_state_store_by_default(monkeypatch):
     import fakeredis
 
+    from scripts.events.redis_state import RedisStateStore
     from scripts.swarm import store
 
     fake = fakeredis.FakeStrictRedis(decode_responses=True)
-    settings.open_store(fake, {}).set("codex-api-max-sessions", 0, "operator", NOW)
-    seen = []
-    monkeypatch.setattr(store, "redis_client", lambda environ: seen.append(environ) or fake)
-    env = {"AGENTIHOOKS_HOME": str(tmp_path)}
-    assert place.policy("codex", env) == place.ApiPolicy(0, 0)
-    assert seen == [env]
+    monkeypatch.setattr(store, "redis_client", lambda environ: fake)
+    opened = place._client({})
+    assert isinstance(opened, RedisStateStore)
+    assert opened.redis is fake
 
 
 @pytest.mark.parametrize("error", ["OSError", "ConnectionError"])
@@ -228,7 +241,7 @@ def test_a_redis_read_failure_is_a_settings_error(monkeypatch, tmp_path):
     import redis
 
     class Failing:
-        def hgetall(self, key):
+        def get(self, key):
             raise redis.TimeoutError("slow")
 
     monkeypatch.setattr(place, "_client", lambda environ: Failing())
