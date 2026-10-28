@@ -430,6 +430,15 @@ def _no_runner_git_config(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _restore_item_node_id():
+    # The mutation worker's pytest 9.2 node id alias is process wide; a test that runs it in process takes it back.
+    added = "_nodeid" not in vars(pytest.Item)
+    yield
+    if added and "_nodeid" in vars(pytest.Item):
+        del pytest.Item._nodeid
+
+
+@pytest.fixture(autouse=True)
 def _production_redis_key_guard(monkeypatch):
     # The isolation fixture above drops every AGENTIHOOKS_ variable; subprocesses need the prefix back.
     monkeypatch.setenv(redis_key_guard.keyspace.ENV, redis_key_guard.keyspace.ROOT)
