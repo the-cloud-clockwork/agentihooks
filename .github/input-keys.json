@@ -1,7 +1,7 @@
 {
   "writer-lock": {
-    "paths": ["hooks", "scripts", "profiles", "tests/__init__.py", "tests/conftest.py", "tests/swarm_ledger", "pyproject.toml", ".github/test-excludes.txt", ".github/workflows/writer-lock.yml"],
-    "tools": ["python 3.12", "uv 0.12.23", "postgres 16"]
+    "paths": ["hooks", "scripts", "profiles", "tests/__init__.py", "tests/conftest.py", "tests/swarm_ledger", "tests/test_memory_postgres_parity.py", "tests/sv2_idx02_cases.py", "tests/sv2_idx04_cases.py", "tests/sv2_idx05_cases.py", "tests/fixtures/swarm_v2", "pyproject.toml", ".github/test-excludes.txt", ".github/workflows/writer-lock.yml"],
+    "tools": ["python 3.12", "uv 0.12.23", "postgres 16", "pgvector 0.8.0 pg16"]
   },
   "brain-smoke": {
     "paths": ["hooks", "scripts", "profiles", "pyproject.toml", ".github/workflows/brain-smoke.yml"],
