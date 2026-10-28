@@ -88,7 +88,7 @@ def test_thirty_minute_probe_records_real_inbox_answer_once(world):
     state = automated_gc.state(store, SLUG, agent)
     assert state["idle_answers"] == 1
     assert state["request"] == ""
-    assert inbox.get(reply.id).reason == "activity answer recorded"
+    assert inbox.get(reply.id).reason == "done: activity answer recorded"
     assert state["answers"] == [{"id": reply.id, "text": "nothing to do", "at": START + LIMIT + 2}]
     runtime.retire.assert_not_called()
 
