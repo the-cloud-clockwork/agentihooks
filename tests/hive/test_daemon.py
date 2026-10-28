@@ -569,12 +569,12 @@ def test_herdr_stats_publish_on_the_scheduler_cadence_from_the_interface_hive_on
 
     redis.hset(registry.key("machine"), mapping={"name": "machine", "ui": ui, "heartbeat_at": "1"})
     calls = []
-    monkeypatch.setattr(herdr_stats, "publish", lambda redis, now_ms: calls.append((redis, now_ms)))
+    monkeypatch.setattr(herdr_stats, "publish", lambda redis, hive, now_ms: calls.append((redis, hive, now_ms)))
     monkeypatch.setattr(daemon.time, "time", lambda: 12.3456)
     stop, waits = ticks(monkeypatch, 2)
     PUBLISH_HERDR_STATS(redis, "waiter", "machine", stop)
     assert waits == [(herdr_stats.EVERY_S, "waiter", herdr_stats.EVERY_S + daemon.WAKE_SLACK_S)] * 3
-    assert calls == [(redis, 12_345)] * published
+    assert calls == [(redis, "machine", 12_345)] * published
 
 
 def test_herdr_stats_keep_their_cadence_through_a_failed_publish(redis, monkeypatch, capsys):

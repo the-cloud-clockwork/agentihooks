@@ -371,6 +371,7 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     assert merged["if"] in {
         "success() && hashFiles('.mutation-stats-cache/**') != ''",
         "success() && steps.merged-stats.outputs.found == 'true'",
+        "success() && steps.merged-stats.outputs.found == 'true' && steps.cache-budget.outputs.available == 'true'",
     }
     if "hashFiles" not in merged["if"]:
         check = refine_steps[refine_names.index("Check for merged test stats")]

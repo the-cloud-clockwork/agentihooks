@@ -350,7 +350,10 @@ def test_the_test_planner_installs_its_pinned_pyyaml_with_uv_through_the_retry()
         'bash .github/scripts/pypi-retry.sh "Install the test planner dependencies" -- '
         '"$HOME/venv/bin/uv" pip install --python "$PYTHON_PATH" --quiet PyYAML==6.0.3'
     ]
-    assert 'cat "$RUNNER_TEMP/plan.log"' in next(s for s in steps if s.get("name") == "Wait for the test plan")["run"]
+    assert (
+        'tail -n +1 -f --pid="$!" "$RUNNER_TEMP/plan.log"'
+        in next(s for s in steps if s.get("name") == "Wait for the test plan")["run"]
+    )
 
 
 class _FlakyIndex(BaseHTTPRequestHandler):
