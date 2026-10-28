@@ -16,15 +16,19 @@ def _unlocked_installs(root):
     for path in sorted((root / ".github").rglob("*")):
         if path.suffix in {".yml", ".yaml"}:
             document = yaml.safe_load(path.read_text()) or {}
-            jobs = document.get("jobs", {})
-            steps = [step for job in jobs.values() for step in job.get("steps", [])]
-            steps += document.get("runs", {}).get("steps", [])
-            scripts = [step.get("run", "") for step in steps]
+            scripts = [
+                (step.get("run", ""), document.get("env", {}) | job.get("env", {}) | step.get("env", {}))
+                for job in document.get("jobs", {}).values()
+                for step in job.get("steps", [])
+            ]
+            scripts += [
+                (step.get("run", ""), step.get("env", {})) for step in document.get("runs", {}).get("steps", [])
+            ]
         elif path.suffix == ".sh":
-            scripts = [path.read_text()]
+            scripts = [(path.read_text(), {})]
         else:
             continue
-        for script in scripts:
+        for script, environment in scripts:
             script = script.replace("\\\n", " ")
             for line in script.splitlines():
                 if not re.search(r"\bpip\s+install\b", line):
@@ -40,6 +44,12 @@ def _unlocked_installs(root):
                     and token.endswith(LOCK)
                     for index, token in enumerate(tokens)
                 )
+                constraint = environment.get("UV_CONSTRAINT", "")
+                if constraint.endswith(".github/test-constraints.txt"):
+                    constrained |= (
+                        "--constraint test-requirements.lock"
+                        in (root / ".github/test-constraints.txt").read_text().splitlines()
+                    )
                 if not constrained:
                     failures.append(f"{path.relative_to(root)}: unlocked test tool install: {line.strip()}")
     return failures
@@ -93,3 +103,21 @@ def test_historical_replays_use_the_current_checkouts_lock(workflow, job, checko
     assert install["working-directory"] != checkout
     tokens = shlex.split(install["run"])
     assert tokens[tokens.index("--constraint") + 1] == f"../{checkout}/{LOCK}"
+
+
+@pytest.mark.parametrize("scope", ["workflow", "job", "step"])
+def test_inherited_constraints_must_include_the_generated_lock(tmp_path, scope):
+    workflows = tmp_path / ".github/workflows"
+    workflows.mkdir(parents=True)
+    constraints = workflows.parent / "test-constraints.txt"
+    constraints.write_text("pytest<9.2\n")
+    step = {"run": "uv pip install pytest mutmut"}
+    job = {"steps": [step]}
+    workflow = {"jobs": {"plant": job}}
+    {"workflow": workflow, "job": job, "step": step}[scope]["env"] = {
+        "UV_CONSTRAINT": "head/.github/test-constraints.txt"
+    }
+    (workflows / "plant.yml").write_text(yaml.safe_dump(workflow))
+    assert len(_unlocked_installs(tmp_path)) == 1
+    constraints.write_text("pytest<9.2\n--constraint test-requirements.lock\n")
+    assert _unlocked_installs(tmp_path) == []
