@@ -6,7 +6,7 @@ from dotenv import dotenv_values
 from scripts.hive import auth, registry, server
 from scripts.swarm_ledger import ledger_ca
 
-SETTINGS = ("AGENTIHOOKS_BUS", "AGENTIHOOKS_BUS_URL", "AGENTIHOOKS_SWARM_URL")
+SETTINGS = ("AGENTIHOOKS_BUS", "AGENTIHOOKS_BUS_URL", "AGENTIHOOKS_SWARM_URL", "AGENTIHOOKS_DEPLOYMENT")
 REQUIRED = ("AGENTIHOOKS_HIVE_ID", "AGENTIHOOKS_HIVE_URL", "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
 SCOPED = "AGENTIHOOKS_BUS_SCOPED"
 
@@ -31,6 +31,7 @@ def enroll(path: Path, environ: Mapping[str, str]) -> str:
     if any(not values.get(name) for name in REQUIRED):
         raise auth.HiveError("the invite needs a hive id, endpoint and ledger credential")
     selected = {name: values[name] for name in (*REQUIRED, *SETTINGS) if values.get(name)}
+    selected.setdefault("AGENTIHOOKS_DEPLOYMENT", "distributed")
     if any("\n" in value or "\r" in value for value in selected.values()):
         raise auth.HiveError("invite settings must each fit on one line")
     url = selected["AGENTIHOOKS_HIVE_URL"]
