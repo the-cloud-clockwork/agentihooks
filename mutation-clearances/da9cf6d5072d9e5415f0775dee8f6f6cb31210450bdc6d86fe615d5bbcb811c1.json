@@ -1,0 +1,6 @@
+{
+  "scripts/events/redis_state.py:scripts.events.redis_state.xǁRedisStateStoreǁwatch__mutmut_1:613f6f502a2ae851f0505def5a640a692134f6a362f18224a0c08a2dcd70afe0": {
+    "reader": "master@323133-0406",
+    "reason": "Equivalent: Redis state revisions come only from INCR on a fresh counter and start at one, and watch keeps entries at or above the start, so a default start of zero or one selects the same entries for every reachable history."
+  }
+}
