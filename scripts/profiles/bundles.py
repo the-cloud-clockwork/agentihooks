@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -121,13 +122,18 @@ def link(bundle_dir: Path | None, user: bool = False) -> None:
     print("Run 'agentihooks init' to apply.")
 
 
+def _generated(path: Path, entry: dict) -> bool:
+    if path.is_symlink():
+        return os.readlink(path).rstrip("/") == str(entry.get("target", "")).rstrip("/")
+    return entry.get("kind") == "rules" and path.is_file()
+
+
 def _sweep_generated(root: Path) -> None:
     _i = _install_module()
     swept = []
     for link, entry in _i._state_links().items():
         path = Path(link)
-        generated = path.is_symlink() or (entry.get("kind") == "rules" and path.is_file())
-        if generated and Path(entry.get("target", "")).is_relative_to(root):
+        if _generated(path, entry) and Path(entry.get("target", "")).is_relative_to(root):
             path.unlink()
             swept.append(path)
             _i._cprint(f"  [RM] Removed user bundle link: {path}")

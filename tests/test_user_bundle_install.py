@@ -254,6 +254,30 @@ def test_unlinking_the_user_bundle_removes_its_generated_links_and_leaves_every_
     assert json.loads(install.STATE_JSON.read_text())["bundle"]["path"] == str(world["root"])
 
 
+def test_unlinking_the_user_bundle_keeps_a_ledgered_link_that_now_points_elsewhere(world, tmp_path):
+    _skill(world["root"], "shared-skill", "root")
+    _skill(world["user"], "personal-skill", "user")
+    _skill(world["user"], "repointed-to-root", "user")
+    _skill(world["user"], "repointed-to-foreign", "user")
+    _link_both(world)
+    _install()
+    skills = world["home"] / ".claude" / "skills"
+    foreign = tmp_path / "foreign-skill"
+    foreign.mkdir()
+    root_skill = world["root"] / ".claude" / "skills" / "shared-skill"
+    for name, target in (("repointed-to-root", root_skill), ("repointed-to-foreign", foreign)):
+        (skills / name).unlink()
+        (skills / name).symlink_to(target)
+
+    bundles.unlink(user=True)
+
+    assert not (skills / "personal-skill").is_symlink()
+    assert (skills / "repointed-to-root").resolve() == root_skill
+    assert (skills / "repointed-to-foreign").resolve() == foreign
+    assert (world["root"] / ".claude" / "skills" / "shared-skill" / "SKILL.md").is_file()
+    assert foreign.is_dir()
+
+
 def test_unlinking_the_user_bundle_drops_its_directive_block_on_the_next_install(world):
     _write(world["root"] / ".claude" / "CLAUDE.md", "ROOT DIRECTIVE\n")
     _write(world["user"] / ".claude" / "CLAUDE.md", "USER DIRECTIVE\n")
