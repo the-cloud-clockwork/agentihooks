@@ -32,6 +32,7 @@ DEFAULT_PORT = 8790
 MAX_BODY = 1 << 20
 DRAIN_LIMIT = 4 * MAX_BODY
 DRAIN_CHUNK = 1 << 16
+READ_TIMEOUT = 10.0
 LENGTH_HEADER = "Content-Length"
 AUTH_HEADER = "Authorization"
 PROBE = "SELECT 1"
@@ -76,7 +77,6 @@ def _refusal(error_class: str, detail: str) -> dict:
 
 def drain(request: BaseHTTPRequestHandler, length: int) -> None:
     if length > DRAIN_LIMIT:
-        request.close_connection = True
         return
     while length > 0:
         chunk = request.rfile.read(min(length, DRAIN_CHUNK))
@@ -94,7 +94,7 @@ def read_body(request: BaseHTTPRequestHandler) -> dict | None:
         if length < 2:
             return None
         body = json.loads(request.rfile.read(length))
-    except ValueError:
+    except (ValueError, TimeoutError):
         return None
     return body if isinstance(body, dict) else None
 
@@ -107,7 +107,7 @@ def post(tools: records.SessionTools, grants: dict[str, Grant], request: BaseHTT
         return 401, _refusal("unauthenticated", UNAUTHENTICATED), {"WWW-Authenticate": "Bearer"}
     body = read_body(request)
     if body is None:
-        return 400, _refusal("invalid_request", BAD_BODY)
+        return 400, _refusal("invalid_request", BAD_BODY), {"Connection": "close"}
     if request.path == SEARCH_PATH:
         return 200, search_api.search(tools.searcher, grant, body)
     return 200, records.call(tools, request.path.removeprefix(TOOLS_PREFIX), grant, body, time.time())
@@ -143,6 +143,7 @@ def handler(tools: records.SessionTools, grants: dict[str, Grant]) -> type[BaseH
         "do_GET": lambda request: answer(request, *get(tools, request)),
         "do_POST": lambda request: answer(request, *post(tools, grants, request)),
         "log_message": quiet,
+        "timeout": READ_TIMEOUT,
     }
     return type("Sessions", (BaseHTTPRequestHandler,), routes)
 
