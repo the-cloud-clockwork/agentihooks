@@ -19,6 +19,7 @@ jobs:
     environment: release
     concurrency:
       group: release-version
+      queue: max
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4

@@ -64,11 +64,31 @@ async function supersededBy(github, api, graded, main) {
   return promoted;
 }
 
-async function endSuperseded(core, graded, main, promoted) {
+async function newerGreenGrade(github, context, api) {
+  const current = (await github.rest.actions.getWorkflowRun({ ...api, run_id: context.runId })).data;
+  const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+    ...api, workflow_id: current.workflow_id, branch: 'dev', event: 'push',
+    created: `>=${current.created_at}`, per_page: 100,
+  });
+  for (const run of runs.filter(run => run.run_number > current.run_number &&
+      run.event === 'push' && run.head_branch === 'dev').sort((a, b) => b.run_number - a.run_number)) {
+    const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+      ...api, run_id: run.id, filter: 'latest', per_page: 100,
+    });
+    if (!jobs.some(job => job.run_id === run.id && job.name === 'Promotion ready' &&
+        job.status === 'completed' && job.conclusion === 'success')) continue;
+    if ((await github.rest.repos.compareCommits({ ...api, base: context.sha, head: run.head_sha })).data.status === 'ahead') {
+      return run.head_sha;
+    }
+  }
+  return null;
+}
+
+async function endSuperseded(core, graded, main, promoted, reason = 'Main already promoted dev') {
   core.setOutput('graded', graded);
   core.setOutput('superseded', promoted);
   await core.summary.addHeading('Promotion superseded').addTable([
-    ['Graded dev', graded], ['Main', main.sha], ['Main already promoted dev', promoted],
+    ['Graded dev', graded], ['Main', main.sha], [reason, promoted],
   ]).write();
 }
 
@@ -80,6 +100,8 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
   const api = { owner, repo };
   const graded = (await github.rest.repos.getCommit({ ...api, ref: context.sha })).data;
   let main = (await github.rest.repos.getCommit({ ...api, ref: 'main' })).data;
+  const newer = await newerGreenGrade(github, context, api);
+  if (newer) return endSuperseded(core, context.sha, main, newer, 'Newer green dev awaiting promotion');
   if (main.commit.tree.sha !== graded.commit.tree.sha) {
     const head = `promotion/${context.sha}`;
     const ref = `heads/${head}`;
@@ -131,6 +153,12 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
         return endSuperseded(core, context.sha, current, promoted);
       }
       throw new Error('Promotion snapshot is stale, main moved during the wait');
+    }
+    const latestGreen = await newerGreenGrade(github, context, api);
+    if (latestGreen) {
+      await github.rest.pulls.update({ ...api, pull_number: pull.number, state: 'closed' });
+      await deleteSnapshot(github, api, ref);
+      return endSuperseded(core, context.sha, main, latestGreen, 'Newer green dev awaiting promotion');
     }
     const merged = (await github.rest.pulls.merge({ ...api, pull_number: pull.number, sha: snapshot, merge_method: 'squash', commit_message: body })).data;
     if (!merged.merged) throw new Error('GitHub refused the promotion merge');

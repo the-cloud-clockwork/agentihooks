@@ -294,7 +294,7 @@ const last = 'a'.repeat(40);
 
 const newer = 'b'.repeat(40);
 
-function batchFixture({ ready = true, order = 'ahead', late = false } = {}) {
+function batchFixture({ ready = true, order = 'ahead', late = false, marker = {}, candidate = {} } = {}) {
   const f = fixture();
   const paginate = f.github.paginate;
   let selections = 0;
@@ -305,11 +305,11 @@ function batchFixture({ ready = true, order = 'ahead', late = false } = {}) {
       assert.equal(args.branch, 'dev');
       assert.equal(args.event, 'push');
       assert.equal(args.created, '>=2026-10-28T01:00:00Z');
-      return [{ id: 43, run_number: 43, head_sha: newer, event: 'push', head_branch: 'dev' }];
+      return [{ id: 43, run_number: 43, head_sha: newer, event: 'push', head_branch: 'dev', ...candidate }];
     }
     if (method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43) {
       return [{ name: 'Promotion ready', run_id: 43, status: 'completed',
-        conclusion: ready && (!late || selections > 1) ? 'success' : 'failure' }];
+        conclusion: ready && (!late || selections > 1) ? 'success' : 'failure', ...marker }];
     }
     return paginate(method, args);
   };
@@ -335,7 +335,25 @@ test('closes its snapshot when a newer grade becomes ready before merge', async 
   assert.equal(f.outputs.main, undefined);
 });
 
-for (const options of [{ ready: false }, { order: 'behind' }, { order: 'diverged' }]) {
+test('one release serves a batch and an older green grade completing afterwards skips', async () => {
+  const latest = fixture();
+  const older = batchFixture();
+  await promote(latest);
+  await promote(older);
+  assert.equal([...latest.writes, ...older.writes].filter(([kind]) => kind === 'merge').length, 1);
+  assert.equal(latest.outputs.main, 'rebased');
+  assert.equal(older.outputs.main, undefined);
+  assert.equal(older.outputs.superseded, newer);
+});
+
+for (const options of [
+  { ready: false }, { order: 'behind' }, { order: 'diverged' },
+  { marker: { status: 'in_progress', conclusion: null } },
+  { marker: { conclusion: 'cancelled' } }, { marker: { conclusion: 'skipped' } },
+  { marker: { run_id: 44 } }, { marker: { name: 'Gate — Required' } },
+  { candidate: { run_number: 41 } }, { candidate: { event: 'workflow_dispatch' } },
+  { candidate: { head_branch: 'main' } },
+]) {
   test(`keeps the current green grade eligible ${JSON.stringify(options)}`, async () => {
     const f = batchFixture(options);
     await promote(f);
