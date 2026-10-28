@@ -15,6 +15,7 @@ SHARED = [
 SHARED_ENV = ["--set", "ledger.env.AGENTIHOOKS_SWARM_DATABASE_URL=postgresql://ledger@db/ledger"]
 EMPTY_ENV = ["--set", "ledger.env.AGENTIHOOKS_SWARM_DATABASE_URL="]
 REFUSAL = "ledger.replicas above 1 needs the shared database"
+EXTRA_HOST = "ledger-internal.example:8765"
 
 
 def render(chart: str, *extra: str) -> subprocess.CompletedProcess:
@@ -61,6 +62,23 @@ def surge_problems(chart: str, label: str, *extra: str) -> list[str]:
     return found
 
 
+def allowed_hosts(chart: str, *extra: str) -> list[str]:
+    result = render(chart, *extra)
+    if result.returncode:
+        return []
+    container = ledger_docs(result.stdout)["StatefulSet"]["spec"]["template"]["spec"]["containers"][0]
+    return next(e["value"] for e in container["env"] if e["name"] == "SWARM_ALLOWED_HOSTS").split(",")
+
+
+def host_problems(chart: str) -> list[str]:
+    hosts = allowed_hosts(chart, "--set", f"ledger.allowedHosts={{{EXTRA_HOST}}}")
+    if EXTRA_HOST not in hosts or f"{LEDGER}:8765" not in hosts:
+        return [f"ledger.allowedHosts does not add {EXTRA_HOST} beside the service names: {hosts}"]
+    if "" in allowed_hosts(chart):
+        return ["a chart without ledger.allowedHosts renders an empty allowed host"]
+    return []
+
+
 def problems(chart: str) -> list[str]:
     found = [
         *refused(chart, "two folder ledgers", REFUSAL, "--set", "ledger.replicas=2"),
@@ -68,6 +86,7 @@ def problems(chart: str) -> list[str]:
         *surge_problems(chart, "a ledger on the shared database secret", *SHARED),
         *surge_problems(chart, "a ledger on the shared database env", *SHARED_ENV),
         *refused(chart, "an empty shared database env", REFUSAL, "--set", "ledger.replicas=2", *EMPTY_ENV),
+        *host_problems(chart),
     ]
     single = render(chart, *SHARED)
     if single.returncode:
