@@ -58,9 +58,8 @@ def _commit(repo, subject, name="f"):
 
 def _promote(repo, graded, tag):
     tree = _git(repo, "rev-parse", f"{graded}^{{tree}}")
-    sha = _git(
-        repo, "commit-tree", tree, "-m", f"Promote green dev to main\n\nGraded dev revision: {graded}\n\nTests: x"
-    )
+    message = f"Promote green dev to main\n\nGraded dev revision: {graded}\n\nTests: x"
+    sha = _git(repo, "commit-tree", tree, "-p", graded, "-m", message)
     _git(repo, "tag", tag, sha)
     return sha
 
@@ -122,10 +121,16 @@ def test_graded_revision_reads_the_promotion_commit(repo):
     assert rc.graded_revision("v1.0.1") == graded
 
 
-def test_graded_revision_refuses_a_commit_without_one(repo):
-    _commit(repo, "One (#1)")
-    with pytest.raises(ValueError, match="^HEAD records no graded dev revision$"):
-        rc.graded_revision("HEAD")
+def test_graded_revision_refuses_a_commit_without_one_even_above_a_promotion(repo):
+    promoted = _promote(repo, _commit(repo, "One (#1)"), "v1.0.1")
+    plain = _git(repo, "commit-tree", f"{promoted}^{{tree}}", "-p", promoted, "-m", "Plain")
+    with pytest.raises(ValueError, match=f"^{plain} records no graded dev revision$"):
+        rc.graded_revision(plain)
+
+
+def test_run_fails_on_a_failing_command(repo):
+    with pytest.raises(subprocess.CalledProcessError):
+        rc.run("git", "rev-parse", "no-such-ref")
 
 
 def test_collect_changes_lists_first_parent_changes_newest_first(repo):
@@ -136,12 +141,14 @@ def test_collect_changes_lists_first_parent_changes_newest_first(repo):
     _git(repo, "merge", "-q", "--no-ff", "-m", "Add a thing (#12)", "side")
     first = _git(repo, "rev-parse", "HEAD")
     second = _commit(repo, "Direct fix", "h")
+    _commit(repo, "Later\n\nTwo lines (#99)", "i")
     changes = rc.collect_changes(base, second)
     assert [(c.sha, c.number, c.title, c.date) for c in changes] == [
         (second, None, "Direct fix", "2026-10-27"),
         (first, 12, "Add a thing", "2026-10-27"),
     ]
     assert changes[0].stat == "1 file changed, 1 insertion(+)"
+    assert rc.collect_changes(second, "HEAD")[0].title == "Later"
 
 
 def test_collect_changes_without_previous_reads_the_whole_history(repo):
@@ -279,10 +286,7 @@ def test_prepend_release_keeps_a_release_already_written():
     assert rc.prepend_release(existing, "## v1 · d\n\nchanged\n") == existing
 
 
-def test_main_writes_the_section_and_the_changelog_for_a_tag(repo, monkeypatch, tmp_path):
-    _promote(repo, _commit(repo, "Base (#1)"), "v1.0.1")
-    graded = _commit(repo, "Add the changelog (#5)", "g")
-    _promote(repo, graded, "v1.0.2")
+def _main(monkeypatch, tmp_path, tag, pulls):
     asked = []
 
     def opener(request, timeout):
@@ -290,17 +294,37 @@ def test_main_writes_the_section_and_the_changelog_for_a_tag(repo, monkeypatch, 
         return _Response(json.dumps({"choices": [{"message": {"content": _words(22)}}]}).encode())
 
     monkeypatch.setattr(rc, "urlopen", opener)
-    monkeypatch.setattr(
-        rc, "gh_graphql", lambda query: {"repository": {"p5": {"author": {"login": "dev"}, "body": "b"}}}
-    )
+    monkeypatch.setattr(rc, "gh_graphql", lambda query: {"repository": pulls})
     monkeypatch.setenv(rc.KEY_VAR, "k2")
     monkeypatch.delenv(rc.URL_VAR, raising=False)
     monkeypatch.setenv(rc.MODEL_VAR, "")
-    section, changelog = tmp_path / "section.md", tmp_path / "out" / "RELEASES.md"
-    changelog.parent.mkdir()
     monkeypatch.setenv("GITHUB_REPOSITORY", "org/repo")
-    assert rc.main(["v1.0.2", str(changelog), str(section)]) == 0
-    expected = f"## v1.0.2 · 2026-10-27\n\n### 2026-10-27 · {graded[:12]} · #5 · @dev\n\n**Add the changelog**\n\n{_words(22)}\n"
-    assert section.read_text() == expected
-    assert changelog.read_text() == f"{rc.TITLE}\n\n{rc.INTRO}\n\n{expected}"
+    section, changelog = tmp_path / "section.md", tmp_path / "RELEASES.md"
+    changelog.write_text("")
+    assert rc.main([tag, str(changelog), str(section)]) == 0
+    return section.read_text(), changelog.read_text(), asked
+
+
+def test_main_writes_the_section_and_the_changelog_for_a_tag(repo, monkeypatch, tmp_path):
+    _promote(repo, _commit(repo, "Base (#1)"), "v1.0.1")
+    graded = _commit(repo, "Add the changelog (#5)", "g")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-10-28T10:00:00Z")
+    _promote(repo, graded, "v1.0.2")
+    section, changelog, asked = _main(
+        monkeypatch, tmp_path, "v1.0.2", {"p5": {"author": {"login": "dev"}, "body": "b"}}
+    )
+    expected = (
+        f"## v1.0.2 · 2026-10-28\n\n### 2026-10-27 · {graded[:12]} · #5 · @dev\n\n"
+        f"**Add the changelog**\n\n{_words(22)}\n"
+    )
+    assert section == expected
+    assert changelog == f"{rc.TITLE}\n\n{rc.INTRO}\n\n{expected}"
     assert asked == [(rc.DEFAULT_URL + "/v1/chat/completions", "Bearer k2", rc.DEFAULT_MODEL)]
+
+
+def test_main_explains_the_whole_history_for_the_first_release(repo, monkeypatch, tmp_path):
+    graded = _commit(repo, "Start (#1)")
+    _promote(repo, graded, "v1.0.1")
+    section, _, asked = _main(monkeypatch, tmp_path, "v1.0.1", {"p1": {"author": {"login": "a"}, "body": ""}})
+    assert section.startswith(f"## v1.0.1 · 2026-10-27\n\n### 2026-10-27 · {graded[:12]} · #1 · @a\n")
+    assert len(asked) == 1

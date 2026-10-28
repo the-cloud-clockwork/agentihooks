@@ -6,7 +6,6 @@ import os
 import re
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -16,7 +15,6 @@ WORDS_MIN = 20
 WORDS_MAX = 100
 ATTEMPTS = 2
 BATCH = 50
-WORKERS = 8
 BODY_CHARS = 4000
 TIMEOUT_S = 120
 DEFAULT_URL = "http://litellm.anton-prod.svc.cluster.local:4000"
@@ -37,6 +35,11 @@ SYSTEM = (
 GRADED = re.compile(r"^Graded dev revision: ([0-9a-f]{40})$", re.MULTILINE)
 NUMBER = re.compile(r"\(#(\d+)\)$")
 STABLE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
+FIELD = "\x1f"
+LOG_FORMAT = "--format=%H%x1f%cs%x1f%s"
+CONTENT_TYPE = "Content-Type"
+AUTHORIZATION = "Authorization"
+JSON = "application/json"
 
 
 class WordCountError(ValueError):
@@ -67,7 +70,7 @@ def git(*args: str) -> str:
 
 
 def graded_revision(ref: str) -> str:
-    match = GRADED.search(git("log", "-1", "--format=%B", ref))
+    match = GRADED.search(git("cat-file", "commit", ref))
     if not match:
         raise ValueError(f"{ref} records no graded dev revision")
     return match.group(1)
@@ -82,8 +85,8 @@ def previous_tag(tag: str, tags: list[str]) -> str:
 def collect_changes(previous: str, current: str) -> list[Change]:
     span = f"{previous}..{current}" if previous else current
     changes = []
-    for record in git("log", "--first-parent", "--format=%H%x1f%cs%x1f%s", span).splitlines():
-        sha, date, subject = record.split("\x1f")
+    for record in git("log", "--first-parent", LOG_FORMAT, span).splitlines():
+        sha, date, subject = record.split(FIELD)
         match = NUMBER.search(subject)
         title = subject[: match.start()].rstrip() if match else subject
         stat = git("show", "--shortstat", "--format=", sha).strip()
@@ -129,10 +132,10 @@ def prompt(change: Change) -> list[dict]:
 
 def ask_model(change: Change, url: str, key: str, model: str, opener=urlopen) -> str:
     body = json.dumps({"model": model, "messages": prompt(change), "max_tokens": 400}).encode()
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
+    headers = {CONTENT_TYPE: JSON, AUTHORIZATION: f"Bearer {key}"}
     try:
         with opener(
-            Request(url.rstrip("/") + "/v1/chat/completions", data=body, headers=headers), timeout=TIMEOUT_S
+            Request(url.removesuffix("/") + "/v1/chat/completions", data=body, headers=headers), timeout=TIMEOUT_S
         ) as response:
             return json.loads(response.read())["choices"][0]["message"]["content"]
     except HTTPError as error:
@@ -171,34 +174,32 @@ def render_release(tag: str, date: str, entries: list[tuple[Change, str]]) -> st
 
 
 def prepend_release(existing: str, section: str) -> str:
-    heading = section.split("\n", 1)[0]
+    heading = section.partition("\n")[0]
     if f"\n{heading}\n" in f"\n{existing}":
         return existing
     rest = existing.split("\n## ", 1)
-    older = f"## {rest[1]}" if len(rest) == 2 else ""
-    return "\n".join([TITLE, "", INTRO, "", section.rstrip("\n"), "", older]).rstrip("\n") + "\n"
+    return f"{TITLE}\n\n{INTRO}\n\n{section}" + (f"\n## {rest[1]}" if len(rest) == 2 else "")
 
 
 def release_section(tag: str, repository: str, ask, graphql=gh_graphql) -> str:
-    tags = git("tag", "--list", "v*").split()
+    tags = git("tag").split()
     previous = previous_tag(tag, tags)
     current = graded_revision(tag)
     changes = collect_changes(graded_revision(previous) if previous else "", current)
     fetch_pull_requests(changes, repository, graphql)
-    with ThreadPoolExecutor(WORKERS) as pool:
-        texts = list(pool.map(lambda change: write_entry(change, ask), changes))
+    texts = [write_entry(change, ask) for change in changes]
     return render_release(tag, git("log", "-1", "--format=%cs", tag).strip(), list(zip(changes, texts)))
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="release_changelog")
+    parser = argparse.ArgumentParser()
     parser.add_argument("tag")
     parser.add_argument("changelog", type=Path)
     parser.add_argument("section", type=Path)
     args = parser.parse_args(argv)
     url = os.environ.get(URL_VAR) or DEFAULT_URL
     model = os.environ.get(MODEL_VAR) or DEFAULT_MODEL
-    key = os.environ.get(KEY_VAR, "")
+    key = os.environ[KEY_VAR]
     section = release_section(
         args.tag,
         os.environ["GITHUB_REPOSITORY"],
@@ -206,8 +207,7 @@ def main(argv: list[str] | None = None) -> int:
         gh_graphql,
     )
     args.section.write_text(section)
-    existing = args.changelog.read_text() if args.changelog.exists() else ""
-    args.changelog.write_text(prepend_release(existing, section))
+    args.changelog.write_text(prepend_release(args.changelog.read_text(), section))
     return 0
 
 

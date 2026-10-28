@@ -39,6 +39,8 @@ jobs:
         run: |
           if git ls-remote --exit-code origin refs/heads/changelog >/dev/null; then
             git show origin/changelog:RELEASES.md > "$RUNNER_TEMP/RELEASES.md"
+          else
+            : > "$RUNNER_TEMP/RELEASES.md"
           fi
 
       - name: Explain every change of the release in 20 to 100 words
