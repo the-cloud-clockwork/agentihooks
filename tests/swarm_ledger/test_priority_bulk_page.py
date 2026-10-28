@@ -27,7 +27,9 @@ def priorities(browser):
             if op.get("target") in conflicts:
                 request.fulfill(status=409, json={"error": "revision conflict"})
             else:
-                request.fulfill(json={"rejected": [op["id"]] if op.get("target") in rejected else [], "_meta": {"rev": 2}})
+                request.fulfill(
+                    json={"rejected": [op["id"]] if op.get("target") in rejected else [], "_meta": {"rev": 2}}
+                )
         elif "/swarm/" in request.request.url:
             request.fulfill(json=SWARM)
         elif request.request.url.startswith(URL):
