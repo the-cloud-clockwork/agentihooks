@@ -54,6 +54,7 @@ class AppServer:
         self.sent = []
         self.turns = []
         self.silent = set()
+        self.dropped = set()
         self.broken = None
         self.early = []
 
@@ -67,6 +68,8 @@ class AppServer:
         if "id" not in message or message["method"] in self.silent:
             return
         result = getattr(self, message["method"].replace("/", "_"))(message["params"])
+        if message["method"] in self.dropped:
+            return
         if isinstance(result, str):
             reply = {"id": message["id"], "error": {"code": -32600, "message": result}}
         else:
@@ -106,7 +109,14 @@ class AppServer:
         return {}
 
     def thread_read(self, params):
-        turns = [{"id": turn["id"], "status": turn["status"]} for turn in self.turns]
+        turns = [
+            {
+                "id": turn["id"],
+                "status": turn["status"],
+                "items": [{"type": "userMessage", "content": [{"type": "text", "text": t}]} for t in turn["inputs"]],
+            }
+            for turn in self.turns
+        ]
         return {"thread": {"id": params["threadId"], "turns": turns}}
 
     def thread_resume(self, params):
@@ -778,7 +788,7 @@ def test_items_go_one_at_a_time_in_inbox_order(rig, recovery_deadline):
     assert [rig.store.get(i.id).state for i in (first, second)] == ["delivered", "delivered"]
 
 
-def test_a_lost_acknowledgement_stays_unknown_and_is_never_replayed(rig, recovery_deadline):
+def test_an_unknown_delivery_the_thread_never_shows_is_submitted_again(rig, recovery_deadline):
     rig.server.silent.add("turn/start")
     item = rig.store.send("alice", ME, "maybe")
     assert rig.run(1) == codex.STOPPED
@@ -788,9 +798,27 @@ def test_a_lost_acknowledgement_stays_unknown_and_is_never_replayed(rig, recover
     rig.server.silent.clear()
     rig.pump = rig.new_pump()
     assert rig.run(2) == codex.STOPPED
+    assert rig.server.methods().count("turn/start") == 2
+    assert rig.store.get(item.id).state == "delivered"
+    assert Receipts(rig.store).get(delivery.id).state == "rejected"
+    assert Receipts(rig.store).get(delivery.id).reason == codex.UNSENT
+    assert sorted(d.state for d in deliveries(rig, item.id)) == ["accepted", "rejected"]
+    assert rig.server.turns[0]["inputs"][-1].endswith("\nmaybe")
+
+
+def test_an_unknown_delivery_the_thread_shows_is_accepted_without_a_second_turn(rig, recovery_deadline):
+    rig.server.dropped.add("turn/start")
+    item = rig.store.send("alice", ME, "arrived")
+    assert rig.run(1) == codex.STOPPED
+    [delivery] = deliveries(rig, item.id)
+    assert delivery.state == "unknown"
+    rig.server.dropped.clear()
+    rig.pump = rig.new_pump()
+    assert rig.run(2) == codex.STOPPED
     assert rig.server.methods().count("turn/start") == 1
-    assert rig.store.get(item.id).state == "pending"
-    assert [d.state for d in deliveries(rig, item.id)] == ["unknown"]
+    assert rig.store.get(item.id).state == "delivered"
+    assert [d.state for d in deliveries(rig, item.id)] == ["accepted"]
+    assert rig.store.redis.get(rig.store.key("reservation", item.id)) is None
 
 
 def test_a_disconnect_marks_the_delivery_unknown_and_degrades(rig):
