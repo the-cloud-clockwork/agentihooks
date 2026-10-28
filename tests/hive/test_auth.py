@@ -656,6 +656,9 @@ def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts
         assert host.gate_lift("proof", "tasks", "t1", "subagents") == {}
     host.put_gate_lift("proof", "tasks", "t1", "subagents", {"at": 100.00001})
     assert host.gate_lift("proof", "tasks", "t1", "subagents") == {"at": 100.00001}
+    admin.hset(host.key("proof", "gate-lift-drops"), "t2", "0.5")
+    host.put_gate_lift("proof", "tasks", "t2", "subagents", {"url": url})
+    assert host.gate_lift("proof", "tasks", "t2", "subagents") == {}
     host.put_gate_lift("proof", "agents", "t1", "subagents", {"at": 1.0})
     assert host.gate_lift("proof", "agents", "t1", "subagents") == {"at": 1.0}
     with pytest.raises(NoPermissionError):
