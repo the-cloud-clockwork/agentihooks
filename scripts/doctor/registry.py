@@ -183,7 +183,7 @@ def _freshness(get, trace_id: str, mark: dict, page: int) -> dict:
     }
 
 
-def _listed(prior: dict, mark: dict, total: int, listing: Callable[[], set]) -> set:
+def _cached_listing(prior: dict, mark: dict, total: int, listing: Callable[[], set]) -> set:
     known = prior.get("listed")
     unchanged = known and known["total"] == total and prior["fresh_ms"] == mark["fresh_ms"]
     ids = set(known["ids"]) if unchanged else listing()
@@ -210,7 +210,7 @@ def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: 
     total = get("observations", {"traceId": current["id"], "limit": 1, "page": 1})["meta"].get("totalItems") or 0
     from scripts.doctor.observation_reconciliation import reconcile
 
-    listed = partial(_listed, prior, mark, int(total))
+    listed = partial(_cached_listing, prior, mark, int(total))
     reconciled = reconcile(get, own or current["session_id"], binding["harness"], current["id"], ended.is_set, listed)
     remote = {"trace": current["id"], "fresh_ms": mark["fresh_ms"], "observations": int(total)}
     if reconciled is not None:
