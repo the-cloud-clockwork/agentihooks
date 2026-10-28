@@ -604,11 +604,3 @@ def test_a_failed_read_keeps_the_other_reads_of_its_pass(monkeypatch, tmp_path):
     world["on_pull"] = lambda endpoint: None
     read_pass()
     assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/5"]
-
-
-def test_a_read_over_the_entry_cap_is_read_again_next_pass(monkeypatch, tmp_path):
-    world, read_pass = _pulls_world(monkeypatch, tmp_path, [4])
-    monkeypatch.setattr(ci_read.ci_cache, "ENTRY_BYTES", 10)
-    read_pass()
-    read_pass()
-    assert [c for c in world["calls"] if "/pulls/" in c] == ["repos/o/r/pulls/4"]

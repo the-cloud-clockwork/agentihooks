@@ -169,9 +169,7 @@ def pull_requests(
 
     def read(i):
         record = pull_request(*pulls[i], run=run, cache=cache, shared=False)
-        encoded = ci_cache.encode({"state": states[i], "at": time.time(), "record": record})
-        if len(encoded) <= ci_cache.ENTRY_BYTES:
-            cache.set(keys[i], encoded, ex=PULL_TTL_S)
+        cache.set(keys[i], ci_cache.encode({"state": states[i], "at": time.time(), "record": record}), ex=PULL_TTL_S)
         return record
 
     with ThreadPoolExecutor() as pool:
