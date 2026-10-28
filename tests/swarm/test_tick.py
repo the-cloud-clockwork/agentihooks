@@ -106,6 +106,9 @@ class FakeLedger:
     def comment(self, slug, task_id, text, by):
         self.comments.append((task_id, text, by))
 
+    def join(self, slug, name, role):
+        return None
+
     def notice(self, slug, task_id, text):
         self.comments.append((task_id, text, "swarm"))
 
