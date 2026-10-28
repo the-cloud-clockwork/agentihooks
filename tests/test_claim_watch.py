@@ -138,15 +138,17 @@ def test_the_ci_lane_is_checked(hive):
     assert stop is not None
 
 
-def test_the_ledger_is_read_at_most_once_per_interval(hive):
+def test_a_reopened_task_stops_on_the_call_after_a_successful_check(hive):
     row = {"id": "t1", "state": "claimed", "claimed_by": NAME}
     ledger, spawn = Ledger(row), Spawn()
 
-    claim_watch.check(ENV, ledger, 1000.0, spawn)
-    claim_watch.check(ENV, ledger, 1000.0 + claim_watch.EVERY_S - 1, spawn)
-    assert ledger.reads == [("sw", "t1")]
-    claim_watch.check(ENV, ledger, 1000.0 + claim_watch.EVERY_S, spawn)
+    assert claim_watch.check(ENV, ledger, 1000.0, spawn) is None
+    row.update(state="open", claimed_by="")
+    assert claim_watch.check(ENV, ledger, 1001.0, spawn) == claim_watch.STOP.format(
+        task="t1", slug="sw", owner="nobody"
+    )
     assert ledger.reads == [("sw", "t1"), ("sw", "t1")]
+    assert len(spawn.calls) == 1
 
 
 def test_the_pre_tool_hook_denies_the_next_call_of_a_reopened_claimant(hive, monkeypatch):
@@ -167,6 +169,25 @@ def test_the_pre_tool_hook_denies_the_next_call_of_a_reopened_claimant(hive, mon
     assert [argv for argv, _ in spawn.calls] == [["agentihooks", "swarm", "sw", "--as", NAME, "exit"]]
 
 
+@pytest.mark.parametrize("session", [{}, {"session_id": "s1"}])
+def test_the_pre_tool_hook_passes_the_session_to_swarm_gates(hive, monkeypatch, session):
+    from hooks import hook_manager
+    from hooks.context import swarm_gates
+
+    calls = []
+
+    def pretool(tool_name, tool_input, session_id):
+        calls.append((tool_name, tool_input, session_id))
+        return "stop"
+
+    monkeypatch.setattr(swarm_gates, "pretool", pretool)
+    with pytest.raises(hook_manager.BlockAction, match="^stop$"):
+        hook_manager.on_pre_tool_use(
+            {**session, "tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/"}
+        )
+    assert calls == [("Bash", {"command": "git status"}, session.get("session_id", ""))]
+
+
 def test_the_swarm_gates_run_in_order_and_the_first_block_wins(monkeypatch):
     from hooks.context import context_recycle, swarm_gates
 
@@ -174,7 +195,7 @@ def test_the_swarm_gates_run_in_order_and_the_first_block_wins(monkeypatch):
 
     def recycle(tool_name, tool_input, session_id):
         calls.append(("recycle", tool_name, tool_input, session_id))
-        return None
+        return "handoff"
 
     def claim():
         calls.append(("claim",))
@@ -184,12 +205,12 @@ def test_the_swarm_gates_run_in_order_and_the_first_block_wins(monkeypatch):
     monkeypatch.setattr(claim_watch, "check", claim)
 
     assert swarm_gates.pretool("Bash", {"command": "ls"}, "s1") == "stop"
-    assert calls == [("recycle", "Bash", {"command": "ls"}, "s1"), ("claim",)]
+    assert calls == [("claim",)]
 
-    monkeypatch.setattr(context_recycle, "gate", lambda *args: "handoff")
+    monkeypatch.setattr(claim_watch, "check", lambda: None)
     calls.clear()
     assert swarm_gates.pretool("Bash", {}, "s1") == "handoff"
-    assert calls == []
+    assert calls == [("recycle", "Bash", {}, "s1")]
 
 
 def test_a_failing_swarm_gate_is_logged_and_the_next_one_still_runs(monkeypatch):
@@ -207,8 +228,8 @@ def test_a_failing_swarm_gate_is_logged_and_the_next_one_still_runs(monkeypatch)
     assert swarm_gates.pretool("Bash", {}, "s1") is None
     assert logged == [("context recycle gate failed", {"error": "no transcript"})]
 
-    monkeypatch.setattr(context_recycle, "gate", lambda *args: "")
+    monkeypatch.setattr(context_recycle, "gate", lambda *args: "handoff")
     monkeypatch.setattr(claim_watch, "check", broken)
     logged.clear()
-    assert swarm_gates.pretool("Bash", {}, "s1") is None
+    assert swarm_gates.pretool("Bash", {}, "s1") == "handoff"
     assert logged == [("claim watch failed", {"error": "no transcript"})]
