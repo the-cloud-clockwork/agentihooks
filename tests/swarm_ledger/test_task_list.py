@@ -140,3 +140,48 @@ def test_a_task_list_read_after_tasks_are_added_removed_or_moved_matches_the_sto
         == [row["id"] for row in stored]
         == [row["id"] for row in changed]
     )
+
+
+@pytest.mark.wall_clock
+def test_a_hundred_concurrent_task_list_walks_return_the_stored_pages_within_budget(tmp_path):
+    import threading
+    import warnings
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger.api import routes
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    path = tmp_path / "ledger.sqlite3"
+    SQLiteLedgerRepository(path).import_document(
+        "walks", {"title": "Walks", **ledger(2, *(f"T{n}" for n in range(200)))}
+    )
+    repository = SQLiteLedgerRepository(path)
+    host = SimpleNamespace(repository=repository)
+
+    def request(cursor, pages):
+        assert repository.exists("walks") and repository.token("walks") is not None
+        pages.append(
+            routes.ledger_read(host, "walks", "tasks", {"limit": 20, **({"cursor": cursor} if cursor else {})})
+        )
+
+    def walk(pages):
+        cursor = None
+        while cursor is not None or not pages:
+            served = threading.Thread(target=request, args=(cursor, pages))
+            served.start()
+            served.join()
+            cursor = pages[-1]["next_cursor"]
+
+    expected = []
+    walk(expected)
+    walks = [[] for _ in range(100)]
+    walkers = [threading.Thread(target=walk, args=(pages,)) for pages in walks]
+    started = time.monotonic()
+    for walker in walkers:
+        walker.start()
+    for walker in walkers:
+        walker.join()
+    elapsed = time.monotonic() - started
+    warnings.warn(f"a hundred concurrent task list walks took {elapsed:.2f} s", stacklevel=1)
+    assert len(expected) == 10 and all(pages == expected for pages in walks)
+    assert elapsed < 3.5, f"a hundred concurrent task list walks took {elapsed:.2f} s"
