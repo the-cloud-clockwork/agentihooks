@@ -11,7 +11,7 @@ from scripts.feature_checks import front_door_login as check
 
 @pytest.fixture(autouse=True)
 def ah(tmp_path, monkeypatch):
-    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", tmp_path / "ah")
     monkeypatch.delenv(login.SLOT_ENV, raising=False)
     monkeypatch.delenv(login.ORDER_ENV, raising=False)
     monkeypatch.setattr(
