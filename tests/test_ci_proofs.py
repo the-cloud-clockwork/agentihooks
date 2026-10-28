@@ -135,6 +135,47 @@ def test_the_proof_outcome_names_why_a_run_proved_nothing(tmp_path, capsys):
 
 
 @pytest.mark.parametrize(
+    ("line", "head"),
+    [
+        ("=== 2 passed in 1.20s ===", "2 passed"),
+        ("  == 3 passed, 1 failed in 75.32s (0:01:15) ==  ", "3 passed, 1 failed"),
+        ("=== 2 passed in a in 1.00s ===", "2 passed in a"),
+        ("=== 1 passed in tests/x ===", None),
+        ("2 passed in 1.20s ===", None),
+        ("=== 2 passed in 1.20s", None),
+        ("=== FAILURES ===", None),
+    ],
+)
+def test_the_proof_outcome_reads_only_pytest_summary_lines(line, head):
+    from scripts import ci_proof_outcome
+
+    assert ci_proof_outcome.summary(line) == head
+
+
+@pytest.mark.parametrize(
+    ("log", "reason"),
+    [
+        ("\x1b[32m=== \x1b[1m2 passed\x1b[0m\x1b[32m in 1.20s ===\x1b[0m\n", None),
+        ("\x1b[31mINTERNALERROR> boom\x1b[0m\n=== 2 passed in 1.20s ===\n", "pytest raised an internal error."),
+        ("[gw3] INTERNALERROR> boom\n=== 2 passed in 1.20s ===\n", "pytest raised an internal error."),
+        ("=== 1 passed in 1.00s ===\n=== no tests ran in 1.00s ===\n", "No selected test completed."),
+    ],
+)
+def test_the_proof_outcome_reads_colored_and_worker_output(log, reason):
+    from scripts import ci_proof_outcome
+
+    assert ci_proof_outcome.verdict(log) == reason
+
+
+def test_the_proof_outcome_reads_a_log_with_undecodable_bytes(tmp_path):
+    from scripts import ci_proof_outcome
+
+    log = tmp_path / "proof.log"
+    log.write_bytes(b"\xff\xfe output\n=== 1 passed in 0.10s ===\n")
+    assert ci_proof_outcome.main([str(log)]) == 0
+
+
+@pytest.mark.parametrize(
     "paths", ["tests/missing.py", "tests/missing.py::test_case", "tests/existing.py tests/missing.py"]
 )
 def test_a_focused_proof_refuses_missing_paths_before_setup(paths, tmp_path):
