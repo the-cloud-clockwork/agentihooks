@@ -232,6 +232,9 @@ def trusted_ancestor(head: str, root: Path) -> str | None:
 
 
 def refused(head: str, root: Path) -> dict[str, list[str]]:
+    paths = branch_only(head, root, include_edits=True)
+    if not paths:
+        return {}
     ancestor = trusted_ancestor(head, root)
     inherited = set(git("ls-tree", "-r", "--name-only", ancestor, "--", WORKFLOWS).splitlines()) if ancestor else set()
     graded = {
@@ -240,7 +243,7 @@ def refused(head: str, root: Path) -> dict[str, list[str]]:
             (root / path).read_text() if (root / path).exists() else None,
             git("show", f"{ancestor}:{path}") if path in inherited else None,
         )
-        for path in branch_only(head, root, include_edits=True)
+        for path in paths
     }
     for path, found in graded.items():
         if "does not parse as YAML" not in found:

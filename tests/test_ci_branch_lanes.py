@@ -192,6 +192,15 @@ def test_unchanged_workflows_are_not_selected_as_edits(tmp_path, monkeypatch):
     assert lanes.branch_only(sha, base, include_edits=True) == []
 
 
+def test_unchanged_workflows_do_not_fetch_ancestry(tmp_path, monkeypatch):
+    _, repo, head = _repo(tmp_path, {})
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(
+        lanes, "trusted_ancestor", lambda *_: pytest.fail("unchanged workflows must not fetch ancestry")
+    )
+    assert lanes.refused(head, repo) == {}
+
+
 @pytest.mark.parametrize("change", ["override", "rename"])
 def test_an_edit_cannot_escape_trusted_concurrency(tmp_path, monkeypatch, change):
     trusted = {"group": "${{ github.workflow == 'Replay' && 'hosted-lane-a' || github.run_id }}"}
