@@ -243,6 +243,21 @@ def test_the_wait_pass_reads_a_remote_ledger_only_with_tick_authority(tick, monk
     assert tick.told() == []
 
 
+def test_another_sessions_hosted_swarm_leaves_this_wait_pass_local(tick, monkeypatch):  # noqa: F811
+    from scripts.swarm import lease
+    from scripts.swarm_ledger import authority_context
+
+    monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    monkeypatch.setenv("SWARM_URL", "https://hosted.example")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "other")
+    acquired = []
+    monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: acquired.append(slug))
+    with authority_context.bound(None):
+        assert cli.run_waits(tick.store, "sw") == []
+    assert acquired == ["sw"]
+
+
 @pytest.mark.parametrize("held", ["none", "bare", "finished"])
 def test_the_wait_pass_skips_ledger_reads_without_active_checked_waits(tick, monkeypatch, held):  # noqa: F811
     if held != "none":
