@@ -58,7 +58,7 @@ def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path,
     leaked.path = "/api/v1/ledgers/earlier/events"
     leftover = threading.Thread(target=metrics.measured(in_flight), args=(leaked,))
     leftover.start()
-    started.wait(10)
+    assert started.wait(10)
     record, own = metrics.record, threading.get_ident()
     monkeypatch.setattr(metrics, "record", lambda *row: record(*row) if threading.get_ident() == own else None)
     clock = Clock()
@@ -84,9 +84,11 @@ def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path,
     handler = server.Handler.__new__(server.Handler)
     handler.path = "/api/v1/ledgers/timing/operations?private=hidden"
     handler.command = "POST"
-    handler.do_POST()
-    release.set()
-    leftover.join(10)
+    try:
+        handler.do_POST()
+    finally:
+        release.set()
+        leftover.join(10)
     monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{ledger_port}"})
     with ThreadingHTTPServer(("127.0.0.1", ledger_port), server.Handler) as http:
         thread = threading.Thread(target=http.serve_forever)
