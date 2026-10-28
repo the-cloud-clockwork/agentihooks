@@ -1079,20 +1079,21 @@ LAUNCHED = 5_000
         (None, 0, 1, True),
     ],
 )
+@pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED}], indirect=True)
 def test_a_paneless_hive_worker_whose_process_or_pod_is_gone_is_retired_and_its_seat_freed(
     remote, listed, observed_after, pod_started_after, retired
 ):
     from scripts.inbox.store import InboxStore
     from scripts.swarm import tick
 
-    agent = replace(remote.agent, pane_id="", launched_at=LAUNCHED, runtime_target={"host_id": HIVE})
+    agent = replace(remote.agent, pane_id="")
     remote.store.put_agent("fixture", agent)
     _publish(remote, state="unknown")
     report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
     report.update(
         names={True: [agent.name], False: ["someone-else"], None: []}[listed],
         pane_ids=[],
-        process_namespace="replacement",
+        process_namespace="theirs",
         observed_at=LAUNCHED + remote.reports.STARTUP_MS + observed_after,
     )
     if pod_started_after is not None:
