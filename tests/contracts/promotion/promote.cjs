@@ -15,10 +15,10 @@ function fixture(options = {}) {
   const commit = (sha, tree, message = '') => ({ sha, commit: { tree: { sha: tree }, message } });
   const pull = { number: 7, head: { sha: options.pullHead || 'snapshot', repo: { full_name: 'owner/repo' } },
     base: { ref: 'main' }, html_url: 'https://github.com/owner/repo/pull/7' };
-  const runUrl = 'https://github.com/owner/repo/actions/runs/42';
-  const jobs = [{ id: 71, run_id: 42, name: 'promote / promote', status: 'in_progress',
+  const runUrl = `https://github.com/owner/repo/actions/runs/${context.runId}`;
+  const jobs = [{ id: 71, run_id: context.runId, name: 'promote / promote', status: 'in_progress',
     check_run_url: 'https://api.github.com/repos/owner/repo/check-runs/900' },
-    { id: 72, run_id: 42, name: 'Gate — Required', status: 'completed', conclusion: 'success' }];
+    { id: 72, run_id: context.runId, name: 'Gate — Required', status: 'completed', conclusion: 'success' }];
   const checks = [
     { id: 901, name: 'Gate — Required', status: 'completed', conclusion: 'success', details_url: `${runUrl}/job/72` },
     { id: 900, name: 'promote / promote', status: 'in_progress', conclusion: null,
@@ -32,7 +32,11 @@ function fixture(options = {}) {
   let readiness = 0;
   let mainReads = 0;
   const github = { rest: {
-    actions: { listJobsForWorkflowRun: async () => ({ data: { jobs: jobs.slice(0, 100) } }) },
+    actions: {
+      getWorkflowRun: async () => ({ data: { workflow_id: 10, run_number: context.runId, created_at: '2026-10-28T01:00:00Z' } }),
+      listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
+      listJobsForWorkflowRun: async () => ({ data: { jobs: jobs.slice(0, 100) } }),
+    },
     checks: { listForRef: async () => ({ data: { check_runs: checks.slice(0, 100) } }) },
     git: {
       getRef: async ({ ref }) => {
@@ -52,7 +56,7 @@ function fixture(options = {}) {
     },
     repos: {
       createCommitStatus: async args => { grades.push(args); },
-      getCommit: async ({ ref }) => ({ data: ref === 'graded' ? commit('graded', 'tree') :
+      getCommit: async ({ ref }) => ({ data: ref === context.sha ? commit(context.sha, 'tree') :
         ref === 'main' && options.mainMoves && ++mainReads > 1 ? commit('moved', 'old', `Promote green dev to main (#8)\n\nGraded dev revision: ${options.mainMoves}\n`) :
         ref === 'main' ? commit('main', options.already ? 'tree' : 'old', options.promoted ? `Promote green dev to main (#6)\n\nGraded dev revision: ${options.promoted}\n` : '') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
       listCommitStatusesForRef: async () => ({ data: statuses.slice(0, 100) }),
@@ -73,6 +77,7 @@ function fixture(options = {}) {
   } };
   github.paginate = async (method, args) => {
     pages.push(args);
+    if (method === github.rest.actions.listWorkflowRuns) return [];
     if (method === github.rest.actions.listJobsForWorkflowRun) return jobs;
     if (method === github.rest.checks.listForRef) return checks;
     if (method === github.rest.repos.listCommitStatusesForRef) return args.ref === 'snapshot' ? [...grades].reverse() : statuses;
@@ -335,6 +340,136 @@ test('an open pull request without its snapshot branch cannot merge', async () =
 const last = 'a'.repeat(40);
 
 const newer = 'b'.repeat(40);
+
+function batchFixture({ ready = true, order = 'ahead', late = false, marker = {}, candidate = {}, unstable = false } = {}) {
+  const f = fixture({ mergeState: unstable ? 'unstable' : undefined });
+  const getCommit = f.github.rest.repos.getCommit;
+  f.github.rest.repos.getCommit = async args => args.ref === newer ?
+    { data: { sha: newer, commit: { tree: { sha: 'tree' }, message: '' } } } : getCommit(args);
+  const paginate = f.github.paginate;
+  let selections = 0;
+  f.github.paginate = async (method, args) => {
+    if (method === f.github.rest.actions.listWorkflowRuns) {
+      selections++;
+      assert.equal(args.workflow_id, 10);
+      assert.equal(args.branch, 'dev');
+      assert.equal(args.event, 'push');
+      assert.equal(args.created, '>=2026-10-28T01:00:00Z');
+      return [{ id: 43, run_number: 43, head_sha: newer, event: 'push', head_branch: 'dev', ...candidate }];
+    }
+    if (method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43) {
+      return [{ name: 'Promotion ready', run_id: 43, status: 'completed',
+        conclusion: ready && (!late || selections > 1) ? 'success' : 'failure', ...marker },
+        { name: 'Gate — Required', run_id: 43, status: 'completed', conclusion: 'success' },
+        { name: 'promote / promote', run_id: 43, status: 'completed', conclusion: 'cancelled' }];
+    }
+    return paginate(method, args);
+  };
+  f.github.rest.repos.compareCommits = async () => ({ data: { status: order } });
+  return f;
+}
+
+test('skips the older grade and releases the newest verified green head', async () => {
+  const f = batchFixture();
+  await promote(f);
+  assert.deepEqual(f.writes.map(([kind]) => kind), ['create', 'merge']);
+  assert.equal(f.writes[0][1].head, `promotion/${newer}`);
+  assert.match(f.writes[0][1].body, /actions\/runs\/43/);
+  assert.equal(f.outputs.graded, newer);
+  assert.equal(f.outputs.superseded, newer);
+  assert.equal(f.outputs.main, 'rebased');
+});
+
+test('a late older green run replacing the newest pending run releases only the newest grade', async () => {
+  const f = batchFixture();
+  await promote(f);
+  assert.equal(f.writes.filter(([kind]) => kind === 'merge').length, 1);
+  assert.equal(f.writes[0][1].head, `promotion/${newer}`);
+  assert.match(f.writes[0][1].body, new RegExp(`Graded dev revision: ${newer}`));
+  assert.equal(f.outputs.graded, newer);
+  assert.equal(f.outputs.superseded, newer);
+  assert.equal(f.outputs.main, 'rebased');
+});
+
+test('verifies the running job separately from its selected newer grade during self wait', async () => {
+  const f = batchFixture({ unstable: true });
+  await promote(f);
+  assert.equal(f.outputs.main, 'rebased');
+  assert.equal(f.outputs.graded, newer);
+});
+
+test('never releases a selected grade whose readiness is revoked before merge', async () => {
+  const f = batchFixture();
+  const paginate = f.github.paginate;
+  let reads = 0;
+  f.github.paginate = async (method, args) => {
+    const result = await paginate(method, args);
+    if (method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43 && ++reads > 1) {
+      return result.map(job => ({ ...job, conclusion: 'failure' }));
+    }
+    return result;
+  };
+  await assert.rejects(promote(f), /no longer ready/);
+  assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+  assert.equal(f.outputs.main, undefined);
+});
+
+test('closes its snapshot when a newer grade becomes ready before merge', async () => {
+  const f = batchFixture({ late: true });
+  await promote(f);
+  assert.deepEqual(f.writes.map(([kind]) => kind), ['create', 'update']);
+  assert.equal(f.writes[1][1].state, 'closed');
+  assert.equal(f.refs.at(-1)[0], 'delete');
+  assert.equal(f.outputs.superseded, newer);
+  assert.equal(f.outputs.main, undefined);
+});
+
+test('one release serves a batch and an older green grade completing afterwards skips', async () => {
+  const latest = fixture({ context: { sha: newer, runId: 43 } });
+  const older = batchFixture();
+  let main = { sha: 'main', commit: { tree: { sha: 'old' }, message: '' } };
+  for (const f of [latest, older]) {
+    const get = f.github.rest.repos.getCommit;
+    f.github.rest.repos.getCommit = async args => args.ref === 'main' ? { data: main } : get(args);
+    f.github.rest.repos.compareCommits = async ({ base, head }) => {
+      assert.equal(base, older.context.sha);
+      assert.equal(head, latest.context.sha);
+      return { data: { status: 'ahead' } };
+    };
+  }
+  const merge = latest.github.rest.pulls.merge;
+  latest.github.rest.pulls.merge = async args => {
+    const result = await merge(args);
+    main = { sha: result.data.sha, commit: { tree: { sha: 'tree' },
+      message: `Graded dev revision: ${latest.context.sha}` } };
+    return result;
+  };
+  await promote(latest);
+  await promote(older);
+  assert.notEqual(latest.context.sha, older.context.sha);
+  assert.notEqual(latest.context.runId, older.context.runId);
+  assert.equal(latest.outputs.graded, newer);
+  assert.equal(older.outputs.graded, older.context.sha);
+  assert.equal([...latest.writes, ...older.writes].filter(([kind]) => kind === 'merge').length, 1);
+  assert.equal(latest.outputs.main, 'rebased');
+  assert.equal(older.outputs.main, undefined);
+  assert.equal(older.outputs.superseded, newer);
+});
+
+for (const options of [
+  { ready: false }, { order: 'behind' }, { order: 'diverged' },
+  { marker: { status: 'in_progress', conclusion: null } },
+  { marker: { conclusion: 'cancelled' } }, { marker: { conclusion: 'skipped' } },
+  { marker: { run_id: 44 } }, { marker: { name: 'Gate — Required' } },
+  { candidate: { run_number: 41 } }, { candidate: { event: 'workflow_dispatch' } },
+  { candidate: { head_branch: 'main' } },
+]) {
+  test(`keeps the current green grade eligible ${JSON.stringify(options)}`, async () => {
+    const f = batchFixture(options);
+    await promote(f);
+    assert.equal(f.outputs.main, 'rebased');
+  });
+}
 
 test('promotes a revision that descends from the last promotion', async () => {
   const f = fixture({ promoted: last, order: 'ahead' });

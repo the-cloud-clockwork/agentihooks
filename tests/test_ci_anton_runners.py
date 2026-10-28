@@ -130,6 +130,7 @@ CLASSED = {
     ("ci-templates.yml", "actionlint"),
     ("pages.yml", "build"),
     ("promote.yml", "promote"),
+    ("test.yml", "promotion-ready"),
     ("publish-pypi.yml", "verify"),
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),
