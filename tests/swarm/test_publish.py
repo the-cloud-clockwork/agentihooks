@@ -1638,6 +1638,7 @@ def test_missing_pull_request_publishes_the_successor_branch_and_keeps_the_retai
         return ""
 
     monkeypatch.setattr(publish.publish_queue, "open_head", open_head)
+    monkeypatch.chdir(p.repo)
     if command == "prepare":
         result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
     else:
@@ -1659,7 +1660,7 @@ def test_hive_successor_publishes_its_own_branch_over_the_predecessor_hive_key(p
         repository_branches={hive_key: "predecessor", older: "older-task", "/hive/bundle": "kept"},
     )
     monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "")
-    monkeypatch.chdir(p.root)
+    monkeypatch.chdir(p.repo)
 
     if command == "prepare":
         result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)

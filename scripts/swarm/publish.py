@@ -375,7 +375,7 @@ def settled(root: Path, task: dict) -> bool:
     url = task.get("pr_url")
     if not url:
         return True
-    return json.loads(execute(["gh", "pr", "view", url, "--json", "state"], root))["state"] != "OPEN"
+    return json.loads(execute(["gh", "pr", "view", url, "--json", "state"], root))["state"] in ("CLOSED", "MERGED")
 
 
 def gate_python(repo: Path) -> str:
