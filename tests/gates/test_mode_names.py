@@ -53,6 +53,6 @@ def test_status_uses_new_names_in_modes_and_decisions(env, monkeypatch, capsys, 
             "gate modes  identity=deny  watch=log only  subagents=deny  reruns=deny  intent=log only  "
             "build=log only  claim-stop=deny  push-stop=deny  quiet=deny  one-push=deny  brain=log only  claims=deny  "
             "trace-plan=log only  "
-            "window=log only  stall=log only  lane-split=log only  nightwatch=log only  talk=log only"
+            "window=log only  stall=log only  lane-split=log only  nightwatch=log only  reset=log only  talk=log only"
         )
         assert lines[-1] == "gate  log only  watch  agent  work  budget spent"

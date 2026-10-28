@@ -56,6 +56,7 @@ from scripts.swarm import (
     lost_runner,
     master_alarm,
     master_move,
+    master_prompt_stall,
     master_questions,
     master_retire,
     master_stall,
@@ -234,6 +235,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
     actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(master_stall.run, slug, config, store, ledger, runtime, now_ms)
+    actions += skip_refused(master_prompt_stall.run, slug, config, store, ledger, runtime, now_ms)
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
