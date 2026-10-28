@@ -65,16 +65,19 @@ class Supervisor:
                 if child.pid == pid:
                     child.returncode = code
                     self.exits.setdefault(role, code)
-        agent = read(self.root / "agent.json")
-        gone = False
-        if matches(agent, self.scope) and type(agent.get("pid")) is int:
-            found = _process(agent["pid"], Path("/proc"))
-            gone = found is None or found.start_time != agent.get("pid_start") or found.state == "Z"
+        gone = self.agent_gone()
         value = read(self.root / "agent.exit.json")
         if matches(value, self.scope) and type(value.get("exit_code")) is int:
             self.exits.setdefault("agent", value["exit_code"])
         if gone:
             self.exits.setdefault("agent", "unknown")
+
+    def agent_gone(self) -> bool:
+        agent = read(self.root / "agent.json")
+        if not matches(agent, self.scope) or type(agent.get("pid")) is not int:
+            return False
+        found = _process(agent["pid"], Path("/proc"))
+        return found is None or found.start_time != agent.get("pid_start") or found.state == "Z"
 
     def spawn(self, role: str, command: tuple[str, ...]) -> None:
         self.children[role] = subprocess.Popen(
