@@ -588,7 +588,7 @@ def test_main_reports_a_refused_call_and_keeps_watching(monkeypatch, capsys, no_
     api = Api({RUNS: json.dumps(RUN), "repos/o/r/actions/runs/8": json.dumps(done)})
 
     def refusing(*args):
-        if args == JOBS:
+        if args == JOBS or args == (JOBS[1], "--include"):
             raise subprocess.CalledProcessError(1, ["gh", "api", "jobs"])
         return api(*args)
 

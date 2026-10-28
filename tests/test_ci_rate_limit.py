@@ -358,3 +358,42 @@ def test_the_test_planner_reports_its_calls(monkeypatch, capsys, tmp_path):
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     ci_test_plan.main(["--repository", "o/r", "--head", "h", "--out", str(tmp_path / "plan.json"), "--before", "t"])
     assert capsys.readouterr().err == "The test planner made 6 GitHub API calls\n"
+
+
+@pytest.mark.parametrize("status, expected", [(200, 2), (304, 1)])
+def test_each_conditional_retry_attempt_is_attributed_without_charging_304(
+    monkeypatch, tmp_path, clock, status, expected
+):
+    from scripts.swarm import github_reads
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("GH_TOKEN", "conditional-retry-test-token")
+    commands = []
+    outputs = iter(["secondary rate limit", f"HTTP/2.0 {status}\r\nETag: test\r\n\r\n{{}}"])
+    monkeypatch.setattr(rate_limit.subprocess, "run", _gh(outputs, commands))
+    with github_reads.calling("lost_runner.jobs"):
+        rate_limit.gh_api(["repos/o/r/jobs", "--include", "-H", "If-None-Match: test"], timeout=60, text=True)
+    assert clock == [60]
+    assert len(commands) == 2
+    assert github_reads.counts(1_000, 1_001) == {"lost_runner.jobs": expected}
+
+
+def test_paginated_retry_helper_counts_every_page_without_audit_duplicates(monkeypatch, tmp_path, clock):
+    from scripts import gh_audit
+    from scripts.swarm import github_reads
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    commands = []
+    raw = 'HTTP/2.0 200\r\nX-Page: 1\r\n\r\n{"jobs": [1]}\nHTTP/2.0 200\r\nX-Page: 2\r\n\r\n{"jobs": [2]}'
+
+    def run(command, **kwargs):
+        commands.append(command)
+        gh_audit.audit("subprocess.Popen", (command[0], command, None, None))
+        return subprocess.CompletedProcess(command, 0, stdout=raw)
+
+    monkeypatch.setattr(rate_limit.subprocess, "run", run)
+    with github_reads.calling("lost_runner.jobs"):
+        result = rate_limit.gh_api(["--paginate", "repos/o/r/jobs"], timeout=60, text=True)
+    assert commands == [["gh", "api", "--paginate", "repos/o/r/jobs", "--include"]]
+    assert result.stdout == '{"jobs": [1]}\n{"jobs": [2]}'
+    assert github_reads.counts(1_000, 1_001) == {"lost_runner.jobs": 2}
