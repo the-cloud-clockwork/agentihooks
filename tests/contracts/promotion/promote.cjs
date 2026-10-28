@@ -325,6 +325,17 @@ test('skips an older green grade when a newer green head is waiting to release',
   assert.equal(f.outputs.main, undefined);
 });
 
+test('a late older green run replacing the newest pending run releases only the newest grade', async () => {
+  const f = batchFixture();
+  await promote(f);
+  assert.equal(f.writes.filter(([kind]) => kind === 'merge').length, 1);
+  assert.equal(f.writes[0][1].head, `promotion/${newer}`);
+  assert.match(f.writes[0][1].body, new RegExp(`Graded dev revision: ${newer}`));
+  assert.equal(f.outputs.graded, newer);
+  assert.equal(f.outputs.superseded, newer);
+  assert.equal(f.outputs.main, 'rebased');
+});
+
 test('closes its snapshot when a newer grade becomes ready before merge', async () => {
   const f = batchFixture({ late: true });
   await promote(f);
