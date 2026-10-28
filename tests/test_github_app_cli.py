@@ -251,6 +251,21 @@ def gh_exec(monkeypatch, remaining, arguments, command="/usr/bin/gh", get=None):
     return github_app_cli.main(["exec", command, *arguments]), read, execute
 
 
+def test_exec_accepts_the_command_delimiter(monkeypatch):
+    monkeypatch.setattr(github_app_cli, "token", Mock(return_value="fixture"))
+    execute = Mock()
+    monkeypatch.setattr(github_app_cli.os, "execvpe", execute)
+    assert github_app_cli.main(["exec", "--", "/bin/true"]) == 0
+    assert execute.call_args.args[:2] == ("/bin/true", ["/bin/true"])
+
+
+def test_exec_missing_command_is_not_reported_as_credentials_failure(monkeypatch, capsys):
+    monkeypatch.setattr(github_app_cli, "token", Mock(return_value="fixture"))
+    monkeypatch.setattr(github_app_cli.os, "execvpe", Mock(side_effect=FileNotFoundError("private detail")))
+    assert github_app_cli.main(["exec", "missing"]) == 127
+    assert capsys.readouterr().err == "GitHub credential wrapper could not execute the command\n"
+
+
 READS = [
     ["api", "repos/{owner}/{repo}/actions/artifacts?name=flake-budget&per_page=100"],
     ["api", "--paginate", "repos/o/r/actions/runs"],

@@ -301,6 +301,8 @@ def talk(ops):
 
 
 def queue(slug, ops, service):
+    if outbox.holds(ops[0]["id"]):
+        return {"queued": ops[0]["id"]}
     who = Who.from_env()
     try:
         outbox.append(outbox.ledger_record(slug, ops, who.name if who.pinned else "", service))

@@ -129,7 +129,7 @@ def dedicated_chart_group(name: str, block: object, job: dict, trusted: dict) ->
     )
 
 
-def problems(workflow: object, baseline: object = None) -> list[str]:
+def problems(workflow: object, baseline: object = None, ancestor: object = None) -> list[str]:
     if not isinstance(workflow, dict):
         return ["is not a workflow mapping"]
     jobs = workflow.get("jobs") or {}
@@ -142,9 +142,19 @@ def problems(workflow: object, baseline: object = None) -> list[str]:
         and same_events(baseline, workflow)
         else {}
     )
+    inherited = (
+        ancestor
+        if isinstance(ancestor, dict)
+        and ancestor.get("name") == workflow.get("name")
+        and same_events(ancestor, workflow)
+        and ancestor.get("concurrency") == workflow.get("concurrency")
+        else {}
+    )
     found = []
     for name, job in jobs.items():
         job = job if isinstance(job, dict) else {}
+        if name in (inherited.get("jobs") or {}) and job == inherited["jobs"][name]:
+            continue
         block = job.get("concurrency", workflow.get("concurrency"))
         base_job = (trusted.get("jobs") or {}).get(name, {})
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
@@ -173,9 +183,13 @@ def problems(workflow: object, baseline: object = None) -> list[str]:
     return found
 
 
-def grade(text: str, baseline: str | None = None) -> list[str]:
+def grade(text: str, baseline: str | None = None, ancestor: str | None = None) -> list[str]:
     try:
-        return problems(yaml.safe_load(text), yaml.safe_load(baseline) if baseline is not None else None)
+        return problems(
+            yaml.safe_load(text),
+            yaml.safe_load(baseline) if baseline is not None else None,
+            yaml.safe_load(ancestor) if ancestor is not None else None,
+        )
     except yaml.YAMLError:
         return ["does not parse as YAML"]
 
@@ -208,10 +222,28 @@ def reusable_problems(head: str, root: Path, workflow: object, seen: tuple[str, 
     return found
 
 
+def trusted_ancestor(head: str, root: Path) -> str | None:
+    if not (root / ".git").exists():
+        return None
+    prefix = ("-C", str(root))
+    if git(*prefix, "rev-parse", "--is-shallow-repository").strip() == "true":
+        git(*prefix, "fetch", "--no-tags", "--unshallow", "origin", "dev", head)
+    return git(*prefix, "merge-base", "HEAD", head).strip()
+
+
 def refused(head: str, root: Path) -> dict[str, list[str]]:
+    paths = branch_only(head, root, include_edits=True)
+    if not paths:
+        return {}
+    ancestor = trusted_ancestor(head, root)
+    inherited = set(git("ls-tree", "-r", "--name-only", ancestor, "--", WORKFLOWS).splitlines()) if ancestor else set()
     graded = {
-        path: grade(git("show", f"{head}:{path}"), (root / path).read_text() if (root / path).exists() else None)
-        for path in branch_only(head, root, include_edits=True)
+        path: grade(
+            git("show", f"{head}:{path}"),
+            (root / path).read_text() if (root / path).exists() else None,
+            git("show", f"{ancestor}:{path}") if path in inherited else None,
+        )
+        for path in paths
     }
     for path, found in graded.items():
         if "does not parse as YAML" not in found:
