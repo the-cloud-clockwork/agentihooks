@@ -71,8 +71,14 @@ class Api:
         self.calls.append(args)
         if args[0] == "-X":
             return ""
-        value = self.pages[args if args[0] == "--paginate" else args[0]]
-        return value.pop(0) if isinstance(value, list) else value
+        included = "--include" in args
+        key = ("--paginate", args[0], "--jq", ".jobs[]") if included else args if args[0] == "--paginate" else args[0]
+        value = self.pages[key]
+        value = value.pop(0) if isinstance(value, list) else value
+        if included:
+            jobs = [json.loads(line) for line in value.splitlines()]
+            return "HTTP/2.0 200\nContent-Type: application/json\n\n" + json.dumps({"jobs": jobs})
+        return value
 
     def posts(self):
         return [call[1:] for call in self.calls if call[0] == "-X"]

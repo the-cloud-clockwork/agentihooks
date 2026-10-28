@@ -115,6 +115,53 @@ def snapshot(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
         return found
 
 
+def _conditional_page(caller: str, endpoint: str, fetch: Callable) -> dict:
+    from scripts.gh_audit import uncharged
+
+    entry = home() / f"{_key(f'etag {endpoint}')}.json"
+    try:
+        cached = json.loads(entry.read_text())
+    except (OSError, ValueError):
+        cached = {}
+    args = [endpoint, "--include"]
+    if cached.get("etag"):
+        args += ["-H", f"If-None-Match: {cached['etag']}"]
+    try:
+        with uncharged():
+            output = fetch(*args)
+    except subprocess.CalledProcessError as error:
+        output = error.stdout or ""
+        if not re.match(r"HTTP/\S+ 304\b", output):
+            charge(caller, endpoint, time.time())
+            raise
+    except subprocess.SubprocessError:
+        charge(caller, endpoint, time.time())
+        raise
+    header, _, body = output.replace("\r\n", "\n").partition("\n\n")
+    lines = header.splitlines()
+    status = int(lines[0].split()[1])
+    if status == 304:
+        return cached
+    charge(caller, endpoint, time.time())
+    if status != 200:
+        raise subprocess.CalledProcessError(1, ["gh", "api", *args], output=output)
+    headers = {key.lower(): value.strip() for key, _, value in (line.partition(":") for line in lines[1:])}
+    links = re.findall(r'<([^>]+)>;\s*rel="next"', headers.get("link", ""))
+    found = {"body": json.loads(body), "etag": headers.get("etag", ""), "next": links[0] if links else ""}
+    _write(entry, found)
+    return found
+
+
+def conditional_pages(caller: str, endpoint: str, fetch: Callable) -> list[dict]:
+    pages = []
+    while endpoint:
+        current = endpoint
+        page = snapshot(f"conditional {current}", time.time(), lambda: _conditional_page(caller, current, fetch))
+        pages.append(page["body"])
+        endpoint = page["next"]
+    return pages
+
+
 def _write(path, body):
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

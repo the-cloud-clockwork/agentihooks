@@ -148,8 +148,12 @@ def superseded(repo: str, run: dict) -> bool:
     return json.loads(_api(url))["workflow_runs"][0]["id"] != run["id"]
 
 
-def jobs_of(repo: str, run_id: int) -> list[dict]:
+def jobs_of(repo: str, run_id: int, cached: bool = False) -> list[dict]:
     url = f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"
+    if cached:
+        from scripts.swarm.github_reads import conditional_pages
+
+        return [job for page in conditional_pages("lost_runner.jobs", url, _api) for job in page["jobs"]]
     return [json.loads(line) for line in _api("--paginate", url, "--jq", JOBS).splitlines()]
 
 
@@ -162,9 +166,9 @@ def open_runs(repo: str, workflow: str) -> list[dict]:
 
 
 def assess(
-    repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners
+    repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners, cached: bool = False
 ) -> tuple[bool, str, list[dict]]:
-    jobs = jobs_of(repo, run["id"])
+    jobs = jobs_of(repo, run["id"], cached)
     lost = lost_jobs(jobs, source(repo.split("/")[0]), datetime.now(UTC), grace)
     stuck, reason = stalled(jobs, lost, workflow)
     return stuck, reason, jobs
@@ -177,7 +181,7 @@ def report(run: dict, action: str, reason: str) -> dict:
 def first_look(repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners) -> dict | None:
     if run["status"] == "completed":
         return report(run, "none", f"run completed with conclusion {run['conclusion']}")
-    stuck, reason, _ = assess(repo, run, workflow, grace, source)
+    stuck, reason, _ = assess(repo, run, workflow, grace, source, cached=True)
     return None if stuck else report(run, "none", reason)
 
 
