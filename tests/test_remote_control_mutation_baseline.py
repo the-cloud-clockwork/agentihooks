@@ -1,8 +1,10 @@
 import faulthandler
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager, suppress
 from pathlib import Path
@@ -83,7 +85,9 @@ def timed(monkeypatch):
 
     def timed_prepare(*args):
         prepare(*args)
-        TIMELINE.append(f"{time.monotonic() - start:7.1f} prepare_workspace done")
+        TIMELINE.append(
+            f"{time.monotonic() - start:7.1f} prepare_workspace done, same device {os.stat(ROOT).st_dev == os.stat(args[1]).st_dev}"
+        )
 
     def timed_run(command, cwd, timeout, log):
         TIMELINE.append(f"{time.monotonic() - start:7.1f} start {command[2:4]}")
@@ -116,8 +120,17 @@ def baseline_cache():
     return []
 
 
+@pytest.fixture(scope="module")
+def checkout_scratch():
+    # Hard links copy the checkout into a workspace in seconds; across devices, as to the runner's temp folder, every
+    # file is copied and the copy alone overran the suite timeout.
+    folder = Path(tempfile.mkdtemp(prefix="remote-control-mutation-", dir=ROOT.parent))
+    yield folder
+    shutil.rmtree(folder, ignore_errors=True)
+
+
 @pytest.fixture
-def baseline(baseline_cache, tmp_path_factory, monkeypatch):
+def baseline(baseline_cache, checkout_scratch, monkeypatch):
     # A cached pass that recorded an error is rebuilt, so a rerun or the next test retries a load-bound overrun.
     if not baseline_cache or baseline_cache[0][4]:
         baseline_cache.clear()
@@ -127,7 +140,7 @@ def baseline(baseline_cache, tmp_path_factory, monkeypatch):
             if "order = store.redis.lrange" in text
         )
         selected = {SOURCE: ({line}, ["tests/swarm_ledger/test_remote_control_process.py"])}
-        folder = tmp_path_factory.mktemp("remote-control")
+        folder = Path(tempfile.mkdtemp(prefix="baseline-", dir=checkout_scratch))
         stats = SharedStats(folder / "stats", "remote-control", (0, 1))
         stats.folder.mkdir()
         work = folder / "baseline"
@@ -146,11 +159,11 @@ def test_remote_control_statistics_baseline_collects_without_grading(baseline):
     pytest.fail("PROFILE\n" + "\n".join(TIMELINE[:300]))
 
 
-def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, tmp_path, monkeypatch):
+def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, checkout_scratch, monkeypatch):
     selected, stats, work, _, error = baseline
     assert error == "", (work / "run.log").read_text()
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
-    grading = tmp_path / "grading"
+    grading = Path(tempfile.mkdtemp(prefix="grading-", dir=checkout_scratch)) / "grading"
     grading.mkdir()
     mutants = selected_mutant_names(SOURCE, (ROOT / SOURCE).read_text(), selected[SOURCE][0])
     timed(monkeypatch)
