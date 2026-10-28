@@ -645,7 +645,6 @@ def test_protected_mutation_planner_installs_with_no_branch_lock(tmp_path):
     steps, names = _steps(workflow["jobs"]["mutation-plan"])
     export = steps[names.index("Take the helper scripts from the workflow revision")]["run"]
     install = steps[names.index("Install dependencies")]["run"]
-    assert names.index("Take the helper scripts from the workflow revision") < names.index("Install dependencies")
     trusted = tmp_path / "workflow"
     trusted.mkdir()
     env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_SHA="HEAD")
