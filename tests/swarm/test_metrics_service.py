@@ -258,3 +258,32 @@ def test_missing_stale_and_unmeasured_pod_headroom_stays_absent(store):
         ("host", "cpu", 1.0, 2.0),
         ("host", "memory", 4.0, 8.0),
     ]
+
+
+def test_a_swarm_pass_ships_admission_and_headroom_rows(store, quiet_pass):
+    from scripts.hive import headroom
+
+    metrics, sent = quiet_pass
+    registry.update(store.redis, "h1", ["name=anton-1"])
+    store.redis.hset(store.key("sw", "pending-admission-total"), mapping={"admitted": "2"})
+    store.redis.set(
+        headroom.key("h1"),
+        json.dumps(
+            {
+                "cpus": 4,
+                "load5": 1,
+                "available_mb": 4,
+                "total_mb": 8,
+                "measured_at": NOW,
+            }
+        ),
+    )
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
+    inserted = {
+        query.split()[2]: json.loads(data.splitlines()[0]) for query, data in sent if query.startswith("INSERT")
+    }
+    assert inserted["swarm.admission_samples"]["total"] == 2
+    assert inserted["swarm.admission_samples"]["outcome"] == "admitted"
+    assert inserted["swarm.hive_headroom"]["hive"] == "h1"
+    assert inserted["swarm.hive_headroom"]["measured_at_ms"] == NOW
