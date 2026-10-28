@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -381,6 +382,19 @@ class HiveLaunch:
             refused = refused or self.reserve_room(request, selected)
             if not refused:
                 return selected
+            print(
+                json.dumps(
+                    {
+                        "event": "hive_admission_refused",
+                        "slug": self.slug,
+                        "task": request.task["id"],
+                        "name": request.name,
+                        "hive": selected.hive,
+                        "reason": refused,
+                    }
+                ),
+                file=sys.stderr,
+            )
             waited = self._withdraw(request, selected, refused)
             excluded.add(selected.hive)
             selected = self._select(request.config, request.lane, request.task, excluded)
