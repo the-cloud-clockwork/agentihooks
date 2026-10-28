@@ -17,19 +17,20 @@ MOVED = (
 )
 
 
-def move(payload: dict, ledger=None, environ=None, now: float | None = None) -> str:
+def move(payload: dict, ledger=None, environ=None, now: float | None = None, store=None) -> str:
     """The denial naming the moved questions, or empty when the question tool may open; each decision is a gate log
-    row naming the operator's last typed turn it read."""
+    row naming the operator's last typed turn it read, and an opened prompt's questions are held for the tick."""
     session = payload.get("session_id")
     if payload.get("tool_name") != operator_mode.QUESTION_TOOL or not master_coding.is_master(session):
         return ""
     now = time.time() if now is None else now
     slug, name = operator_mode._binding(os.environ if environ is None else environ, session)
     typed = operator_mode._load(session).get("turn_at")
-    if typed is not None and now - typed < WINDOW_SEC:
-        _record(slug, name, "count", f"opened: the operator typed {_ago(typed, now)}", now)
-        return ""
     questions = [q for q in (payload.get("tool_input") or {}).get("questions") or [] if q.get("question")]
+    if _recent(typed, now):
+        _record(slug, name, "count", f"opened: the operator typed {_ago(typed, now)}", now)
+        _hold(slug, name, questions, store)
+        return ""
     if not questions or not _deliberate(payload):
         _record(slug, name, "count", f"left to the operator presence check: typed {_ago(typed, now)}", now)
         return ""
@@ -42,6 +43,34 @@ def move(payload: dict, ledger=None, environ=None, now: float | None = None) -> 
         ledger.question(slug, text, name, hashlib.sha256(f"{session}:{typed}:{text}".encode()).hexdigest()[:32])
     _record(slug, name, "deny", f"moved {len(questions)} questions: the operator typed {_ago(typed, now)}", now)
     return MOVED.format(asked=" ".join(q["question"] for q in questions))
+
+
+def refusal(payload: dict, now: float | None = None) -> str:
+    """The refusal of a master's question tool when the operator has not typed in the pane inside the window, on the
+    paths move leaves to the presence check."""
+    session = payload.get("session_id")
+    if payload.get("tool_name") != operator_mode.QUESTION_TOOL or not master_coding.is_master(session):
+        return ""
+    now = time.time() if now is None else now
+    return "" if _recent(operator_mode._load(session).get("turn_at"), now) else operator_mode.MASTER_ASK_REFUSAL
+
+
+def _recent(typed: float | None, now: float) -> bool:
+    return typed is not None and now - typed < WINDOW_SEC
+
+
+def _hold(slug: str, name: str, questions: list[dict], store) -> None:
+    import redis
+
+    from scripts.swarm import master_questions
+    from scripts.swarm.store import Unreachable, connect
+
+    if slug == "<slug>" or not questions:
+        return
+    try:
+        master_questions.hold(store or connect(), slug, name, [_text(q) for q in questions])
+    except (Unreachable, redis.RedisError):
+        _record(slug, name, "count", "opened but not held for the tick: the swarm store was unreachable", time.time())
 
 
 def _ago(typed: float | None, now: float) -> str:
