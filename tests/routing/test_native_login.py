@@ -81,7 +81,7 @@ def test_a_login_whose_oauth_session_cannot_be_refreshed_reads_as_rejected():
             },
         )
     )
-    run = Mock(return_value=SimpleNamespace(returncode=1, stdout=stream))
+    run = Mock(return_value=SimpleNamespace(returncode=1, stdout="Login expired\n" + stream))
     assert REJECTED({}, "master", run) is True
 
 

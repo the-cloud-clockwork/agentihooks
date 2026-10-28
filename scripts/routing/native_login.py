@@ -14,6 +14,7 @@ PROOF = {"command": "claude auth status --text", "status": STATUS}
 EXPIRED = "native Claude login is expired or missing; renew the native Claude login"
 UNAVAILABLE = "native Claude login could not be checked"
 PROBE_TIMEOUT_S = 60
+AUTHENTICATION_FAILED = "authentication_failed"
 PROOF_NAME = "interactive-claude-status.json"
 
 
@@ -50,7 +51,18 @@ def rejected(environ: Mapping[str, str], account: str, run: Callable = subproces
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return auth_rejected(probe.stdout)
+    return auth_rejected(probe.stdout) or _authentication_failed(probe.stdout)
+
+
+def _authentication_failed(output: str) -> bool:
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict) and event.get("error") == AUTHENTICATION_FAILED:
+            return True
+    return False
 
 
 def record(home: Path, slug: str, proof: dict) -> None:
