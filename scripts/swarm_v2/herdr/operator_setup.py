@@ -252,7 +252,7 @@ def _swarms(environ: Mapping[str, str], placed: Mapping[str, str]) -> list[str]:
 
     try:
         return publications.connect(transport(environ, placed)).slugs()
-    except (OSError, SwarmError):
+    except (OSError, RedisError, SwarmError):
         pass
     try:
         return RedisStore(redis_client()).slugs()

@@ -1348,11 +1348,20 @@ def test_an_unreachable_machine_redis_leaves_a_refusal_in_the_journal_only(tmp_p
     assert not (tmp_path / "home" / "swarm-terminal" / "alarm").exists()
 
 
-def test_a_hive_transport_failing_at_the_socket_falls_back_to_the_machine_redis(tmp_path, monkeypatch):
+@pytest.mark.parametrize("kind", ["socket", "redis"])
+def test_a_hive_transport_failing_at_the_socket_falls_back_to_the_machine_redis(tmp_path, monkeypatch, kind):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
     from scripts.swarm_v2.herdr import publications
 
+    class Dropped:
+        def slugs(self):
+            raise RedisConnectionError("dropped")
+
     def broken(environ):
-        raise OSError("socket closed")
+        if kind == "socket":
+            raise OSError("socket closed")
+        return Dropped()
 
     ledger, made = Ledger(), alarm_store(["hive-a"])
     monkeypatch.setattr(publications, "connect", broken)
