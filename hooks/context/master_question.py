@@ -70,7 +70,7 @@ def _hold(slug: str, name: str, questions: list[dict], store) -> None:
     try:
         master_questions.hold(store or connect(), slug, name, [_text(q) for q in questions])
     except (Unreachable, redis.RedisError):
-        return
+        _record(slug, name, "count", "opened but not held for the tick: the swarm store was unreachable", time.time())
 
 
 def _ago(typed: float | None, now: float) -> str:

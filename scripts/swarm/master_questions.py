@@ -28,6 +28,11 @@ def drop(store, slug: str, name: str) -> None:
     store.redis.delete(_key(store, slug, name))
 
 
+def _asked(question: str, title: str) -> bool:
+    """The pane titles a question prompt by the last wrapped line of the question, ending on its question mark."""
+    return title.endswith("?") and question.split(" Options: ")[0].endswith(title)
+
+
 def dismiss(slug, store, ledger, runtime, agent, now_ms: int) -> list[str]:
     """Dismiss a master prompt the gate recorded once it has been open past the window, writing its questions to the
     ledger first so a failed dismissal retries under the same ledger ids."""
@@ -35,7 +40,7 @@ def dismiss(slug, store, ledger, runtime, agent, now_ms: int) -> list[str]:
     if since is None or now_ms - since < WINDOW_SEC * 1000:
         return []
     questions = held(store, slug, agent.name)
-    if not any(agent.input_prompt in question for question in questions):
+    if not any(_asked(question, agent.input_prompt) for question in questions):
         return []
     for question in questions:
         op_id = hashlib.sha256(f"{agent.name}:{since}:{question}".encode()).hexdigest()[:32]

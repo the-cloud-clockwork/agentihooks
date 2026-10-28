@@ -1,3 +1,4 @@
+import json
 from dataclasses import asdict
 
 import pytest
@@ -146,6 +147,37 @@ def test_a_master_prompt_the_gate_did_not_record_is_left_alone(store, held):
     assert store.agents("sw")[0].input_prompt == PROMPT
 
 
+@pytest.mark.parametrize("title", ["Bash", "Which phase", "Waiting on input"])
+def test_a_prompt_titled_by_part_of_a_held_question_is_left_alone(store, title):
+    runtime, ledger = Runtime(), Ledger()
+    master_questions.hold(store, "sw", NAME, QUESTIONS)
+    for minute in range(21):
+        watch(store, runtime, ledger, PaneObservation("waiting", title), ENTERED + minute * MINUTE)
+    assert runtime.dismissed == [] and ledger.questions == []
+
+
+def test_a_prompt_titled_by_the_wrapped_tail_of_a_held_question_is_dismissed(store):
+    runtime, ledger = Runtime(), Ledger()
+    master_questions.hold(store, "sw", NAME, QUESTIONS)
+    for minute in range(11):
+        watch(store, runtime, ledger, PaneObservation("waiting", "focus on next?"), ENTERED + minute * MINUTE)
+    assert runtime.dismissed == [NAME]
+
+
+def test_a_question_left_unheld_by_an_unreachable_store_is_logged(master, monkeypatch):
+    from scripts.gates import log
+    from scripts.swarm.store import Unreachable
+
+    def unreachable(*args):
+        raise Unreachable("down")
+
+    rows = []
+    monkeypatch.setattr(log, "append", lambda slug, row: rows.append((slug, row.reason)))
+    monkeypatch.setattr(master_questions, "hold", unreachable)
+    master_question._hold("sw", NAME, [{"question": PROMPT}], object())
+    assert rows == [("sw", "opened but not held for the tick: the swarm store was unreachable")]
+
+
 def test_a_prompt_that_ends_drops_its_recorded_questions(store):
     runtime, ledger = Runtime(), Ledger()
     master_questions.hold(store, "sw", NAME, QUESTIONS)
@@ -165,8 +197,6 @@ def test_an_opened_question_is_recorded_for_the_tick(master, store):
 
 
 def test_held_questions_live_a_day_under_the_master_questions_key(store):
-    import json
-
     master_questions.hold(store, "sw", NAME, QUESTIONS)
     key = store.key("sw", "master-questions", NAME)
     assert json.loads(store.redis.get(key)) == QUESTIONS
