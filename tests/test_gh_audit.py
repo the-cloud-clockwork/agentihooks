@@ -114,12 +114,20 @@ def test_process_caller_prefers_the_main_module(monkeypatch):
     assert gh_audit.process_caller() == "proc."
 
 
-def test_a_real_subprocess_is_charged_by_the_installed_hook(charged, tmp_path):
+def test_a_real_subprocess_is_charged_by_the_installed_hook(charged, tmp_path, monkeypatch):
+    import sys
+
     fake = tmp_path / "gh"
     fake.write_text("#!/bin/sh\necho '{}'\n")
     fake.chmod(0o755)
-    with github_reads.calling("swarm.probe"):
-        subprocess.run([str(fake), "api", "repos/a/b/pulls/3"], capture_output=True, check=True)
+    monkeypatch.setenv("GITHUB_ACTIONS", "false")
+    code = (
+        "import subprocess, sys\n"
+        "from scripts.swarm import github_reads\n"
+        "with github_reads.calling('swarm.probe'):\n"
+        "    subprocess.run([sys.argv[1], 'api', 'repos/a/b/pulls/3'], capture_output=True, check=True)\n"
+    )
+    subprocess.run([sys.executable, "-c", code, str(fake)], capture_output=True, check=True)
     assert set(charged()) == {("swarm.probe", "repos/a/b/pulls/3")}
 
 
