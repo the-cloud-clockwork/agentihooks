@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.events.bus import StateConflict
+from scripts.events.redis_state import RedisStateStore
 from scripts.swarm import keyspace
 
 if TYPE_CHECKING:
@@ -114,7 +115,7 @@ class StateSettings(SettingsStore):
     def _load(self) -> tuple[dict, int | None]:
         entry = self.state.get(ENTRY)
         if entry is None:
-            return _legacy(getattr(self.state, "redis", None)), None
+            return _legacy(self.state.redis if isinstance(self.state, RedisStateStore) else None), None
         return json.loads(entry.value), entry.revision
 
     def _commit(self, change: Callable[[dict], object]) -> object:
