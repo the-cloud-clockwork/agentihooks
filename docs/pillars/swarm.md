@@ -3320,7 +3320,7 @@ count too.
 
 When one or more such launches exist it raises one finding, kind `unclaimed local launch`, id
 `unclaimed-local-launch/<slug>`, summary `<n> local launches of <slug> in the last hour held a pane with no local slot
-claim: <names>`, evidence `<name> on task <task> started at <ms> on <hive>` per launch, and the launch count as its
+claim: <names>`, evidence `<name> on task <task> started at <ms> on <hive>` per launch, with `the workstation` for an empty hive, and the launch count as its
 number. An unreadable journal fails it with `local slot claims unavailable: <error>`. Measure it with
 `agentihooks doctor rig-grade-swarm measure unclaimed-local-launch`.
 
