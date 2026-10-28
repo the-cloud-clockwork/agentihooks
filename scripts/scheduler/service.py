@@ -64,17 +64,16 @@ def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iter
 
 
 async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
-    from redis.exceptions import ConnectionError as RedisConnectionError
-    from redis.exceptions import TimeoutError as RedisTimeoutError
+    from scripts.events import state
 
-    transient = (RedisConnectionError, RedisTimeoutError)
+    transient = state.unavailable()
     stopped = stop if stop is not None else _on_signals()
     with machine_lock("runner"):
         while not stopped.is_set():
             try:
                 await asyncio.to_thread(scheduler.run_due)
             except transient:
-                print("scheduler pass skipped: Redis did not answer", file=sys.stderr)
+                print("scheduler pass skipped: the state store did not answer", file=sys.stderr)
             try:
                 await asyncio.wait_for(stopped.wait(), timeout=1)
             except TimeoutError:
@@ -218,9 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.mode == "run":
-            from scripts.swarm.store import redis_client
-
-            asyncio.run(run(Scheduler(redis_client())))
+            asyncio.run(run(Scheduler()))
         else:
             _supervised()
     except AlreadyRunning as exc:

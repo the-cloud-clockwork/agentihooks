@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from redis import Redis
+    from scripts.events.bus import StateStore
 
 UNIT = "agentihooks-gc"
 CRON = "0 * * * *"
@@ -31,14 +31,12 @@ def _systemctl(*args: str) -> bool:
 
 def _scheduler():
     from scripts.scheduler import Scheduler
-    from scripts.swarm.store import redis_client
 
-    return Scheduler(redis_client())
+    return Scheduler()
 
 
 def scheduled(scheduler) -> list[str]:
-    entries = (json.loads(raw) for raw in scheduler.redis.hvals(scheduler.key("entries")))
-    return [entry["id"] for entry in entries if entry["owner"] == UNIT and entry["state"] in LIVE]
+    return [entry["id"] for entry in scheduler.records() if entry["owner"] == UNIT and entry["state"] in LIVE]
 
 
 def install_timer(python: str, root: str) -> str:
@@ -48,9 +46,8 @@ def install_timer(python: str, root: str) -> str:
 
 
 def _schedule(python: str, root: str) -> str:
-    from redis.exceptions import RedisError
-
     from hooks.config import AGENTIHOOKS_HOME
+    from scripts.events import state
     from scripts.scheduler.service import ensure_running
     from scripts.swarm.store import redis_url
 
@@ -62,7 +59,7 @@ def _schedule(python: str, root: str) -> str:
         cron = scheduler.cron(owner=UNIT, payload=payload, expression=CRON)
         cron.timeout.connect(sweep)
         cron.start()
-    except RedisError:
+    except state.unavailable():
         return "[--] Redis unreachable: lifecycle sweep not scheduled, sessions trigger the sweep instead"
     ensure_running({**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)})
     return f"[OK] Lifecycle sweep scheduled hourly on the agentihooks scheduler ({CRON})"
@@ -82,7 +79,7 @@ def _remove_units() -> list[str]:
 
 
 def remove_timer() -> str:
-    from redis.exceptions import RedisError
+    from scripts.events import state
 
     messages = _remove_units()
     try:
@@ -90,7 +87,7 @@ def remove_timer() -> str:
         entries = scheduled(scheduler)
         for entry_id in entries:
             scheduler.get(entry_id).cancel()
-    except RedisError:
+    except state.unavailable():
         return "\n  ".join([*messages, "[--] Redis unreachable: lifecycle sweep schedule not checked"])
     if entries:
         messages.append("[OK] Lifecycle sweep removed from the agentihooks scheduler")
@@ -104,10 +101,10 @@ def reconcile_units(python: str, root: str, enabled: bool) -> str:
     return f"{schedule}\n  {reconcile(Path.home())}"
 
 
-def sweep(event: dict, delivery_id: str, redis: "Redis") -> None:
-    from hooks._redis import redis_key
+def sweep(event: dict, delivery_id: str, state: "StateStore") -> None:
+    from scripts.scheduler.slots import first_delivery
 
-    if not redis.set(redis_key("scheduler", f"{UNIT}:{delivery_id}"), "1", nx=True, ex=86400):
+    if not first_delivery(state, UNIT, delivery_id):
         return
     target = json.loads(event["payload"])
     limit = ["timeout", "3600"] if shutil.which("timeout") else []
