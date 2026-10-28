@@ -95,6 +95,33 @@ def test_a_transient_github_failure_is_retried_with_backoff(binary):
     assert [call.args for call in sleep.call_args_list] == [(5,), (10,)]
 
 
+def test_an_unparseable_github_page_is_retried_until_a_valid_page():
+    results = [
+        subprocess.CompletedProcess([], 0, stdout=b'[{"jobs": [}'),
+        subprocess.CompletedProcess([], 0, stdout=b'[{"jobs": []}]'),
+    ]
+    with (
+        patch.object(ci_gate_shards.subprocess, "run", side_effect=results) as run,
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
+    ):
+        value = ci_gate_shards.api("repos/org/repo/actions/runs/123/jobs?per_page=100")
+    assert value == [{"jobs": []}]
+    assert run.call_count == 2
+    assert [call.args for call in sleep.call_args_list] == [(5,)]
+
+
+def test_an_unparseable_github_page_on_every_attempt_still_raises():
+    page = subprocess.CompletedProcess([], 0, stdout=b"<html>")
+    with (
+        patch.object(ci_gate_shards.subprocess, "run", return_value=page) as run,
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
+        pytest.raises(ValueError),
+    ):
+        ci_gate_shards.api("repos/org/repo/actions/runs/123/jobs?per_page=100")
+    assert run.call_count == 4
+    assert [call.args for call in sleep.call_args_list] == [(5,), (10,), (20,)]
+
+
 def test_wait_times_out_red_when_a_planned_shard_never_finishes(tmp_path):
     with (
         patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1200]),
