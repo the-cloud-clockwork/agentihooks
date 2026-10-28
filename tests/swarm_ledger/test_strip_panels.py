@@ -117,7 +117,7 @@ def test_an_open_panel_follows_its_icon_when_the_page_resizes_or_the_strip_scrol
     assert bell.bounding_box()["y"] == pytest.approx(moved - 40, abs=0.5)
 
 
-def test_a_window_resize_keeps_the_strip_scroll(tab):
+def test_a_window_resize_keeps_the_strip_scroll_and_the_focused_icon(tab):
     if tab.viewport_size["width"] < 1024:
         return
     tab.set_viewport_size({"width": 1280, "height": 320})
@@ -125,8 +125,10 @@ def test_a_window_resize_keeps_the_strip_scroll(tab):
     tab.wait_for_function(
         "() => { const el = document.getElementById('icon-strip'); return el.scrollHeight > el.clientHeight; }"
     )
+    tab.locator("#bell").click()
     strip.evaluate("el => { el.scrollTop = 40; }")
     tab.evaluate("() => window.dispatchEvent(new Event('resize'))")
+    assert tab.evaluate("document.activeElement.id") == "bell"
     assert strip.evaluate("el => el.scrollTop") == 40
 
 
