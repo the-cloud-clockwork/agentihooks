@@ -63,3 +63,12 @@ def test_writer_lock_key_covers_the_scenario_repository_and_install_inputs():
     } <= set(entry["paths"])
     assert "postgres 16" in entry["tools"]
     assert "pgvector 0.8.0 pg16" in entry["tools"]
+
+
+def test_writer_lock_install_uses_trusted_version_without_scanning_git():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/writer-lock.yml").read_text())
+    steps = workflow["jobs"]["scenario"]["steps"]
+    [install] = [step for step in steps if step.get("name") == "Install dependencies"]
+    assert install.get("env", {}).get("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS") == (
+        "0.dev${{ github.run_number }}"
+    )
