@@ -214,7 +214,10 @@ def is_clearance(area: str) -> bool:
 
 def _changelog_fragment(area: str) -> bool:
     path = PurePosixPath(area)
-    return len(path.parts) == 2 and path.parts[0] == "changelog.d" and path.suffix == ".md" and path.name != "README.md"
+    folder = path.parts[:1] == ("changelog.d",)
+    return folder and (
+        len(path.parts) == 1 or (len(path.parts) == 2 and path.suffix == ".md" and path.name != "README.md")
+    )
 
 
 def _source_areas(areas: tuple) -> list[str]:
