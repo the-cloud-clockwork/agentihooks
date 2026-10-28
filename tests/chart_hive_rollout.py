@@ -79,15 +79,17 @@ def test_disabled_rollouts_do_not_require_a_new_worker_image():
     worker = next(item for item in objects if item["kind"] == "Deployment")
     container = worker["spec"]["template"]["spec"]["containers"][0]
     assert "readinessProbe" not in container
+    assert worker["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 3630
+    assert "--wait 3600" in container["lifecycle"]["preStop"]["exec"]["command"][-1]
     assert not any(item["name"] == "HIVE_READY_FILE" for item in container["env"])
     assert yaml.safe_load((CHART / "values.yaml").read_text())["workers"]["rollout"]["enabled"] is False
 
 
 def test_a_drain_that_consumes_the_rollout_budget_is_refused():
     try:
-        render("workers.drainSeconds=600")
+        render("workers.rollout.drainSeconds=600")
     except subprocess.CalledProcessError as error:
-        assert "workers.drainSeconds must be between 0 and 300" in error.stderr
+        assert "workers.rollout.drainSeconds must be between 0 and 300" in error.stderr
     else:
         raise AssertionError("an hour long drain must not render")
 

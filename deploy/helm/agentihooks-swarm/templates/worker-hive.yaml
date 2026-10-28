@@ -1,8 +1,12 @@
 {{- define "swarm.workerHive" }}
 {{- $root := .root }}
 {{- $workers := .workers }}
-{{- if or (lt (int $workers.drainSeconds) 0) (gt (int $workers.drainSeconds) 300) }}
-{{- fail "workers.drainSeconds must be between 0 and 300" }}
+{{- $drain := int $workers.drainSeconds }}
+{{- if $root.Values.workers.rollout.enabled }}
+{{- $drain = int $root.Values.workers.rollout.drainSeconds }}
+{{- if or (lt $drain 0) (gt $drain 300) }}
+{{- fail "workers.rollout.drainSeconds must be between 0 and 300" }}
+{{- end }}
 {{- end }}
 {{- range $swarm := ($workers.masterSwarms | default list) }}
 {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*$" (toString $swarm)) }}
@@ -91,7 +95,7 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      terminationGracePeriodSeconds: {{ add $workers.drainSeconds 30 }}
+      terminationGracePeriodSeconds: {{ add $drain 30 }}
       containers:
         - name: worker-hive
           image: {{ include "swarm.image" (dict "Values" (dict "image" $workers.image)) }}
@@ -106,7 +110,7 @@ spec:
           lifecycle:
             preStop:
               exec:
-                command: ["sh", "-c", {{ printf "agentihooks hive drain --wait %d >>/proc/1/fd/1 2>&1" (int $workers.drainSeconds) | quote }}]
+                command: ["sh", "-c", {{ printf "agentihooks hive drain --wait %d >>/proc/1/fd/1 2>&1" $drain | quote }}]
           {{- include "swarm.containerSecurity" $root | nindent 10 }}
           env:
             {{- if $root.Values.workers.rollout.enabled }}
