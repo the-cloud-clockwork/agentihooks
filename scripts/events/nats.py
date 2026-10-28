@@ -526,6 +526,7 @@ class NatsBus:
             await msg.respond(answer)
 
         self._loop.run(self._nc.subscribe(subject, queue=queue, cb=respond))
+        self._loop.run(self._nc.flush())
 
     def request(self, subject: str, data: bytes, timeout_ms: int) -> bytes:
         nats_payload.validate(self._nc, subject, data)
