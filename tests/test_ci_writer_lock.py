@@ -89,6 +89,7 @@ def test_writer_lock_version_inference_bypasses_a_stalled_git_status(monkeypatch
     def stalled_status(self):
         raise subprocess.TimeoutExpired(["git", "status", "--porcelain", "--untracked-files=no"], 40)
 
+    monkeypatch.setattr("setuptools_scm.git.version_from_describe", lambda *args: None)
     monkeypatch.setattr(GitWorkdir, "is_dirty", stalled_status)
     with pytest.raises(subprocess.TimeoutExpired, match="40 seconds"):
         get_version(root=str(ROOT), dist_name="agentihooks")
