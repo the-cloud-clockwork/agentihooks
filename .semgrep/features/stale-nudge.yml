@@ -26,5 +26,5 @@ rules:
                     return stale_nudge.nudge(...)
     paths:
       include:
-        - scripts/swarm/tick.py
+        - /scripts/swarm/tick.py
         - '*.test.py'
