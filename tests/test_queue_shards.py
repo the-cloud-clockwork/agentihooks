@@ -65,6 +65,7 @@ def test_the_planned_slowest_queue_shard_matches_the_recorded_real_slowest_shard
     ratios = sorted(planned / real for real in _RECORDED_SLOWEST_SHARDS)
 
     assert 0.95 <= ratios[len(ratios) // 2] <= 1.05
+    # Runner speed varies between runs; percentiles drop the one 371s outlier, and planning slow is the safe side.
     assert 0.85 <= ratios[len(ratios) // 10] and ratios[len(ratios) * 9 // 10] <= 1.2
 
 

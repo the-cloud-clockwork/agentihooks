@@ -84,8 +84,7 @@ def _seconds(part: list[str], durations: dict[str, float], grouped: dict[str, st
     for node in part:
         if group := grouped.get(node.split("::", 1)[0]):
             serial[group] = serial.get(group, 0.0) + durations[node]
-    # Merge group shards measured the slowdown on the shared four worker share; a serial group or a single test ran
-    # faster than its stored time, so it keeps that time.
+    # Only the four worker share slows down; measured serial groups ran under their stored time.
     return max(
         SLOWDOWN * sum(durations[node] for node in part) / WORKERS,
         max((durations[node] for node in part), default=0.0),
