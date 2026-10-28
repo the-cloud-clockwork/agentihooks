@@ -132,7 +132,7 @@ class StoredStats:
         ):
             self.misses["identity"] += 1
             return None
-        if not inputs.keys() <= set(self.context["inventory"]) or scope != self.scope(inputs):
+        if not inputs.keys() <= set(self.context["inventory"]) or self.scope(inputs) not in ({}, scope):
             self.misses["scope"] += 1
             return None
         changed = [
