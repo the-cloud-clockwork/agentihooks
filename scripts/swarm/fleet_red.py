@@ -83,7 +83,13 @@ def checker(repo: str, reader: Callable | None = None, clock: Callable = time.ti
 
 
 def notice_pass(slug, config, store, ledger, rows, now_ms, reader: Callable | None = None) -> list[str]:
-    waiting = [task for task in rows.values() if task.get("state") == "open" and task.get("pr_url")]
+    waiting = []
+    for task in rows.values():
+        key = store.key(slug, f"fleet-red:{task['id']}")
+        if task.get("state") != "open" or task.get("claimed_by") or store.claimant(slug, task["id"]):
+            store.redis.delete(key)
+        elif task.get("pr_url"):
+            waiting.append((task, key))
     if not waiting:
         return []
     try:
@@ -91,9 +97,8 @@ def notice_pass(slug, config, store, ledger, rows, now_ms, reader: Callable | No
     except (ReadError, *ERRORS):
         return []
     actions = []
-    for task in waiting:
+    for task, key in waiting:
         task_id, url = task["id"], task["pr_url"]
-        key = store.key(slug, f"fleet-red:{task_id}")
         if not held(pulls, url, now_ms):
             store.redis.delete(key)
             continue

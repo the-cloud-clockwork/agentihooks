@@ -207,6 +207,28 @@ def test_the_notice_pass_declares_each_hold_once_and_again_after_it_lifts(store)
     assert len(ledger.notices) == 2
 
 
+def test_the_notice_pass_skips_claimed_tasks_and_forgets_a_hold_once_its_task_leaves_open(store):
+    both = [run("Tests", "FAILURE")]
+    red = fleet(both, *[both] * 3)
+    ledger, config = Ledger(), store.config("sw")
+    rows = {"red": task("red", pr_url=MINE)}
+    assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, lambda repo: red)
+    key = store.key("sw", "fleet-red:red")
+    for moved in ({"state": "pr"}, {"claimed_by": "engineer@a"}):
+        store.redis.set(key, MINE)
+        rows = {"red": task("red", pr_url=MINE, **moved)}
+        assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, lambda repo: red) == []
+        assert store.redis.get(key) is None
+    store.redis.set(key, MINE)
+    store.redis.set(store.key("sw", "claim", "red"), "engineer@b")
+    rows = {"red": task("red", pr_url=MINE)}
+    assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, lambda repo: red) == []
+    assert store.redis.get(key) is None
+    store.redis.delete(store.key("sw", "claim", "red"))
+    assert fleet_red.notice_pass("sw", config, store, ledger, rows, NOW_MS, lambda repo: red)
+    assert len(ledger.notices) == 2
+
+
 def test_the_notice_pass_reads_nothing_without_an_open_task_with_a_pull_request(store):
     def reader(repo):
         raise AssertionError("read")
