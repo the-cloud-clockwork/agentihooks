@@ -532,8 +532,16 @@ def _reconcile_services():
         print(f"warning: the swarm user services could not be installed or enabled{why}", file=sys.stderr)
 
 
-@ledger_route.tick
 def run_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
+    from scripts.swarm_ledger import authority_context
+
+    with ledger_route.scoped(slug, ledger_route.configured(store, slug)):
+        if ledger_link.remote(slug=slug) and not authority_context.tick_headers(slug):
+            return []
+        return _end_waits(store, slug, ledger)
+
+
+def _end_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
     from scripts.swarm import commands, lease
 
     held = lease.acquire(store, slug, commands.hive_id())
