@@ -240,11 +240,15 @@ def test_run_looks_only_at_lanes_whose_every_seat_is_held(store, monkeypatch):
         calls.append((slug, received is store, rows is ROWS, received_doc["tasks"], lane, dispatched({"id": "t1"})))
         return [ROWS["t3"]]
 
-    seats = preempt.Seats(ROWS, lambda agent, rows: agent.name == "x", lambda agent, row: True, ready)
+    probed = []
+    seats = preempt.Seats(
+        ROWS, lambda agent, rows: agent.name == "x", lambda agent, row: True, ready, lambda *a: probed.append(a)
+    )
     config = store.config(SLUG)
     preempt.run(SLUG, config, store, doc(), 1, seats)
     actions = preempt.run(SLUG, config, store, doc(), 2, seats)
     assert calls == [(SLUG, True, True, doc()["tasks"], "eng", (2, "t1"))] * 2
+    assert probed == [("eng", ROWS["t3"])]
     assert len(actions) == 1 and len(asks(store, "e2")) == 1
     store.update(SLUG, max_eng=0)
     assert preempt.run(SLUG, store.config(SLUG), store, doc(), 3, seats) == []
@@ -257,7 +261,7 @@ def test_a_seat_is_held_by_a_live_agent_that_still_owns_its_task():
     def ended(agent, received):
         return received is rows and agent.name == "x"
 
-    seats = preempt.Seats(rows, ended, lambda agent, row: row.get("claimed_by", agent.name) == agent.name, None)
+    seats = preempt.Seats(rows, ended, lambda agent, row: row.get("claimed_by", agent.name) == agent.name, None, None)
     agents = [holder("e1", "t1"), holder("x", "t1"), holder("e2", "t2"), holder("e3", "gone")]
     assert [seats.holds(a) for a in agents] == [True, False, False, True]
 
