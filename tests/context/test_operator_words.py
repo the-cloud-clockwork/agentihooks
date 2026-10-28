@@ -344,6 +344,15 @@ def test_question_answers_are_removed_with_their_swarm():
     assert operator_words.matching("master@a1-1", "Swarm answer", within=None) == ""
 
 
+def test_an_unavailable_shared_store_mirrors_nothing(monkeypatch):
+    class Down:
+        def get(self, key):
+            raise OSError("store down")
+
+    monkeypatch.setattr(operator_words, "_shared", lambda: Down())
+    assert operator_words._mirror("demo", "master@a1-1", 100, "ship it") is False
+
+
 def test_upgrade_continues_past_empty_and_unresolved_files(tmp_path, monkeypatch):
     import json
 
