@@ -36,6 +36,7 @@ def live(monkeypatch):
     yield httpd.server_address[1], legacy_page.stored_token(html_path)
     httpd.shutdown()
     httpd.server_close()
+    assert server.HUB.watched() == []
 
 
 def connect(port, token, cursor=None, timeout=5):
