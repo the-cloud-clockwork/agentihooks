@@ -78,7 +78,7 @@ async function newerGreenGrade(github, context, api) {
     if (!jobs.some(job => job.run_id === run.id && job.name === 'Promotion ready' &&
         job.status === 'completed' && job.conclusion === 'success')) continue;
     if ((await github.rest.repos.compareCommits({ ...api, base: context.sha, head: run.head_sha })).data.status === 'ahead') {
-      return run.head_sha;
+      return run;
     }
   }
   return null;
@@ -98,10 +98,20 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
   if (context.eventName !== 'push' || context.ref !== 'refs/heads/dev' ||
       context.payload.repository.full_name !== repository) return;
   const api = { owner, repo };
+  const triggering = context;
+  const newer = await newerGreenGrade(github, triggering, api);
+  if (newer) {
+    core.setOutput('superseded', newer.head_sha);
+    await core.summary.addHeading('Older graded head skipped').addTable([
+      ['Triggering dev', triggering.sha], ['Newest green dev', newer.head_sha],
+    ]).write();
+    context = { ...context, sha: newer.head_sha, runId: newer.id };
+  }
   const graded = (await github.rest.repos.getCommit({ ...api, ref: context.sha })).data;
   let main = (await github.rest.repos.getCommit({ ...api, ref: 'main' })).data;
-  const newer = await newerGreenGrade(github, context, api);
-  if (newer) return endSuperseded(core, context.sha, main, newer, 'Newer green dev awaiting promotion');
+  if (newer && main.commit.tree.sha === graded.commit.tree.sha) {
+    return endSuperseded(core, triggering.sha, main, newer.head_sha, 'Newer green dev already promoted');
+  }
   if (main.commit.tree.sha !== graded.commit.tree.sha) {
     const head = `promotion/${context.sha}`;
     const ref = `heads/${head}`;
@@ -137,7 +147,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       if (latest.mergeable === false) throw new Error('Promotion pull request has merge conflicts');
       const complete = await snapshotChecksComplete(github, api, snapshot, pull.number);
       if (complete && latest.mergeable === true && (latest.mergeable_state === 'clean' ||
-          latest.mergeable_state === 'unstable' && await gradeIsComplete(github, context, api))) {
+          latest.mergeable_state === 'unstable' && await gradeIsComplete(github, triggering, api))) {
         ready = true;
         break;
       }
@@ -154,11 +164,12 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       }
       throw new Error('Promotion snapshot is stale, main moved during the wait');
     }
-    const latestGreen = await newerGreenGrade(github, context, api);
-    if (latestGreen) {
+    const latestGreen = await newerGreenGrade(github, triggering, api);
+    if (newer && !latestGreen) throw new Error('Selected promotion grade is no longer ready');
+    if (latestGreen && latestGreen.head_sha !== context.sha) {
       await github.rest.pulls.update({ ...api, pull_number: pull.number, state: 'closed' });
       await deleteSnapshot(github, api, ref);
-      return endSuperseded(core, context.sha, main, latestGreen, 'Newer green dev awaiting promotion');
+      return endSuperseded(core, context.sha, main, latestGreen.head_sha, 'Newer green dev awaiting promotion');
     }
     const merged = (await github.rest.pulls.merge({ ...api, pull_number: pull.number, sha: snapshot, merge_method: 'squash', commit_message: body })).data;
     if (!merged.merged) throw new Error('GitHub refused the promotion merge');

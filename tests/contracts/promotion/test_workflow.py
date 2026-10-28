@@ -91,7 +91,7 @@ def test_promotion_reuses_the_release_environment_and_never_dispatches_or_publis
     assert job["environment"] == "release"
     assert job["timeout-minutes"] == 40
     assert ci_budget.BUDGETS["promote"] == 10 * 60
-    assert job["concurrency"] == {"group": "release-version", "queue": "max", "cancel-in-progress": False}
+    assert job["concurrency"] == {"group": "release-version", "cancel-in-progress": False}
     commands = "\n".join(step.get("run", "") for step in job["steps"])
     assert "--generate-notes" in commands
     assert commands.index("ci_release.sh notes") < commands.index('--notes-file "$RUNNER_TEMP/notes.md"')

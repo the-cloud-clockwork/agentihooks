@@ -294,8 +294,11 @@ const last = 'a'.repeat(40);
 
 const newer = 'b'.repeat(40);
 
-function batchFixture({ ready = true, order = 'ahead', late = false, marker = {}, candidate = {} } = {}) {
-  const f = fixture();
+function batchFixture({ ready = true, order = 'ahead', late = false, marker = {}, candidate = {}, unstable = false } = {}) {
+  const f = fixture({ mergeState: unstable ? 'unstable' : undefined });
+  const getCommit = f.github.rest.repos.getCommit;
+  f.github.rest.repos.getCommit = async args => args.ref === newer ?
+    { data: { sha: newer, commit: { tree: { sha: 'tree' }, message: '' } } } : getCommit(args);
   const paginate = f.github.paginate;
   let selections = 0;
   f.github.paginate = async (method, args) => {
@@ -317,12 +320,15 @@ function batchFixture({ ready = true, order = 'ahead', late = false, marker = {}
   return f;
 }
 
-test('skips an older green grade when a newer green head is waiting to release', async () => {
+test('skips the older grade and releases the newest verified green head', async () => {
   const f = batchFixture();
   await promote(f);
-  assert.deepEqual(f.writes, []);
+  assert.deepEqual(f.writes.map(([kind]) => kind), ['create', 'merge']);
+  assert.equal(f.writes[0][1].head, `promotion/${newer}`);
+  assert.match(f.writes[0][1].body, /actions\/runs\/43/);
+  assert.equal(f.outputs.graded, newer);
   assert.equal(f.outputs.superseded, newer);
-  assert.equal(f.outputs.main, undefined);
+  assert.equal(f.outputs.main, 'rebased');
 });
 
 test('a late older green run replacing the newest pending run releases only the newest grade', async () => {
@@ -334,6 +340,29 @@ test('a late older green run replacing the newest pending run releases only the 
   assert.equal(f.outputs.graded, newer);
   assert.equal(f.outputs.superseded, newer);
   assert.equal(f.outputs.main, 'rebased');
+});
+
+test('verifies the running job separately from its selected newer grade during self wait', async () => {
+  const f = batchFixture({ unstable: true });
+  await promote(f);
+  assert.equal(f.outputs.main, 'rebased');
+  assert.equal(f.outputs.graded, newer);
+});
+
+test('never releases a selected grade whose readiness is revoked before merge', async () => {
+  const f = batchFixture();
+  const paginate = f.github.paginate;
+  let reads = 0;
+  f.github.paginate = async (method, args) => {
+    const result = await paginate(method, args);
+    if (method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43 && ++reads > 1) {
+      return result.map(job => ({ ...job, conclusion: 'failure' }));
+    }
+    return result;
+  };
+  await assert.rejects(promote(f), /no longer ready/);
+  assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+  assert.equal(f.outputs.main, undefined);
 });
 
 test('closes its snapshot when a newer grade becomes ready before merge', async () => {
