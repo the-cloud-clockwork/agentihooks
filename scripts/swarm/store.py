@@ -184,7 +184,8 @@ class RedisStore:
         return {} if dropped and record.get("at", 0) <= float(dropped) else record
 
     def drop_task_lifts(self, slug: str, task: str) -> None:
-        self.redis.hset(self.key(slug, "gate-lift-drops"), task, repr(time.time()))
+        seconds, micros = self.redis.time()
+        self.redis.hset(self.key(slug, "gate-lift-drops"), task, f"{seconds}.{micros:06d}")
 
     @property
     def operation_journal(self) -> "OperationJournal":

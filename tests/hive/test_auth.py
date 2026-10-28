@@ -595,7 +595,7 @@ def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts
     import fakeredis
     from redis.exceptions import NoPermissionError
 
-    from scripts.swarm import cli
+    from scripts.swarm import cli as swarm_cli
 
     server = fakeredis.FakeServer()
     admin = fakeredis.FakeRedis(server=server, decode_responses=True)
@@ -635,17 +635,23 @@ def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts
     swarm = store.RedisStore(member)
     # The agent listing reads through a read only Lua pipeline that fakeredis checks without the %R~ grant.
     swarm.agents = host.agents
-    monkeypatch.setattr(cli, "connect", lambda: swarm)
-    monkeypatch.setattr(cli, "LedgerClient", Ledger)
-    monkeypatch.setattr(cli, "pull_branch", lambda pull: ("", ""))
+    member.time = lambda: (100, 5)
+    monkeypatch.setattr(swarm_cli, "connect", lambda: swarm)
+    monkeypatch.setattr(swarm_cli, "LedgerClient", Ledger)
+    monkeypatch.setattr(swarm_cli, "pull_branch", lambda pull: ("", ""))
     monkeypatch.setattr("scripts.gates.intent.stamp_body", lambda *args, **kwargs: False)
 
-    assert cli.main(["proof", "--as", "engineer@0001-0001", "pr", url]) == 0
+    assert swarm_cli.main(["proof", "--as", "engineer@0001-0001", "pr", url]) == 0
 
     assert updates == [("t1", {"state": "pr", "awaiting": "", "pr_url": url}, "engineer@0001-0001")]
     assert host.gate_lift("proof", "tasks", "t1", "subagents") == {}
-    later = float(admin.hget(host.key("proof", "gate-lift-drops"), "t1")) + 1
-    host.put_gate_lift("proof", "tasks", "t1", "subagents", {"at": later})
-    assert host.gate_lift("proof", "tasks", "t1", "subagents") == {"at": later}
+    assert admin.hget(host.key("proof", "gate-lift-drops"), "t1") == "100.000005"
+    for record in ({"at": 100.000005}, {"url": url}):
+        host.put_gate_lift("proof", "tasks", "t1", "subagents", record)
+        assert host.gate_lift("proof", "tasks", "t1", "subagents") == {}
+    host.put_gate_lift("proof", "tasks", "t1", "subagents", {"at": 100.00001})
+    assert host.gate_lift("proof", "tasks", "t1", "subagents") == {"at": 100.00001}
+    host.put_gate_lift("proof", "agents", "t1", "subagents", {"at": 1.0})
+    assert host.gate_lift("proof", "agents", "t1", "subagents") == {"at": 1.0}
     with pytest.raises(NoPermissionError):
         member.hset(host.key("proof", "gate-lifts", "tasks", "t1"), "subagents", "{}")
