@@ -817,7 +817,7 @@ What travels from a task folder:
 | `steering.md` | Only from the controller to the hive, at launch | Whole file |
 | `progress.md`, `proof.md` | Both ways | The last 65,536 characters |
 | Any other file directly in the folder, such as `plan.md`, `measure.sh`, `handoff.md` or `mutation-fix.patch` | Both ways | 32 files, taken in name order; a file over 65,536 bytes is skipped and does not count toward the 32 |
-| Subfolders and the files in them, symbolic links, names that do not start with an ASCII letter or digit, such as hidden names starting with `.`, names whose later characters are not letters, digits, `_`, `.` or `-` (Unicode letters and digits count), names over 128 characters, files that are not UTF-8 text | Never | Not carried |
+| Subfolders and the files in them, symbolic links, names that do not start with an ASCII letter or digit, such as hidden names starting with `.`, names whose later characters are not Unicode word characters, `.` or `-`, names over 128 characters, files that are not UTF-8 text | Never | Not carried |
 
 The controller mirrors a task only when its latest execution ran on a hive. A task whose latest execution ran on the
 controller's own machine keeps the controller's folder, and a stale hive copy is not written over it. The mirror
@@ -828,8 +828,8 @@ The sequence for a task reclaimed from one hive onto another:
 
 1. The first agent, on hive `lab-vm`, appends to `progress.md` and writes `measure.sh` in its task folder.
 2. Within fifteen seconds `lab-vm` writes both files to `agentihooks:hive:lab-vm:workspaces:files`.
-3. On its next status publish the controller writes them into `~/.agentihooks/swarm/<slug>/tasks/<task id>` on its own machine,
-   even when `lab-vm` has stopped beating since, as long as its copy is less than a day old.
+3. On its next status publish the controller writes them into `~/.agentihooks/swarm/<slug>/tasks/<task id>` on its
+   own machine, even when `lab-vm` has stopped beating since, as long as its copy is less than a day old.
 4. The successor launches on hive `lab-vm-2`. Its launch payload carries `steering.md`, `progress.md`, `proof.md` and
    `measure.sh` from the controller's folder, and `lab-vm-2` writes them below its own home before the agent starts.
 
