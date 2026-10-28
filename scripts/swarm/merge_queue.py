@@ -54,7 +54,7 @@ def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
 def rest(path: str, run) -> dict | list | str:
     if mutation_wait.backing_off():
         raise SwarmError(f"GitHub API rate limit backoff holds {path}")
-    command = ["gh", "api", path]
+    command = ["gh", "api", path, "--allow-escape-sequences"] if path.endswith("/logs") else ["gh", "api", path]
     try:
         with gh_audit.uncharged():
             done = run(command, capture_output=True, text=True, timeout=20)

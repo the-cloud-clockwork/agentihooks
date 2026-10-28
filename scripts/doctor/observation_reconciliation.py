@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from functools import partial
 
 PAGE = 100
 MAX_PAGES = 100
@@ -77,9 +78,11 @@ def reconcile(
     harness: str,
     trace_id: str,
     cancelled: Callable[[], bool] = bool,
+    listed: Callable[[Callable[[], set]], set] | None = None,
 ) -> dict | None:
     accepted, aggregate = _accepted(session_id, harness, cancelled)
     if not aggregate:
         return None
-    remote = _remote_ids(get, trace_id, cancelled)
+    listing = partial(_remote_ids, get, trace_id, cancelled)
+    remote = listed(listing) if listed else listing()
     return {"accepted": len(accepted), "missing": sorted(accepted - remote), "drift": aggregate - len(accepted)}

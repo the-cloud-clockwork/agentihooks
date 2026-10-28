@@ -50,21 +50,18 @@ this repository's dev and reads both back on every
 antoncore dev push or dispatch, so a change here goes live on the next
 antoncore dev push or a dispatch of that workflow. The reconcile requires the
 required check to name its source, `integration_id` 15368 for GitHub Actions.
-The operator applies the
-other payloads. Agents cannot mutate remote rulesets. From a checkout
-containing the reviewed payloads:
-
-```bash
-gh api \
-  --method PUT \
-  repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 \
-  --input .github/rulesets/main-prod-lockdown.json
-```
+The same workflow applies `main-prod-lockdown.json` and reads back the
+effective main rules. Main requires `Gate — Required` from the `tcc-main-ci`
+App, `integration_id` 5243008, which the promotion workflow reports on the
+snapshot commit it opens as the promotion pull request head, so promotion
+cannot merge with the grade missing, pending or red.
+Agents cannot mutate remote rulesets.
 
 Verify the effective rules and bypass lists:
 
 ```bash
 gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/dev
+gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/main
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/16090886 --jq .bypass_actors
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/25468405 --jq .bypass_actors
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 --jq .bypass_actors
