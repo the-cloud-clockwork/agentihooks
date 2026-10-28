@@ -35,15 +35,6 @@ jobs:
     if: ${{ !inputs.compare }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 15
-    services:
-      redis:
-        image: public.ecr.aws/docker/library/redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 2s
-          --health-retries 15
     env:
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: maintenance.auto
@@ -60,12 +51,16 @@ jobs:
           BASE: ${{ inputs.base }}
         run: git fetch --no-tags --depth=1 origin "${BASE#origin/}"
 
+      - name: Start Redis from a retried pull
+        run: |
+          bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine
+          docker run --pull never --rm -d --name ledger-load-redis -p 6379:6379 public.ecr.aws/docker/library/redis:7-alpine
+          timeout 30 bash -c 'until docker exec ledger-load-redis redis-cli ping; do sleep 1; done'
+
       - name: Read the Redis service image
         id: redis
         if: ${{ !inputs.streams && !inputs.compare }}
-        env:
-          SERVICE: ${{ job.services.redis.id }}
-        run: echo "image=$(docker inspect --format '{{.Image}}' "$SERVICE")" >> "$GITHUB_OUTPUT"
+        run: echo "image=$(docker inspect --format '{{.Image}}' ledger-load-redis)" >> "$GITHUB_OUTPUT"
 
       - name: Key the declared inputs
         id: key
@@ -137,15 +132,6 @@ jobs:
       fail-fast: false
       matrix:
         pair: [1, 2, 3, 4, 5]
-    services:
-      redis:
-        image: public.ecr.aws/docker/library/redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 2s
-          --health-retries 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -155,6 +141,12 @@ jobs:
         env:
           BASE: ${{ inputs.base }}
         run: git fetch --no-tags --depth=1 origin "${BASE#origin/}"
+
+      - name: Start Redis from a retried pull
+        run: |
+          bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine
+          docker run --pull never --rm -d --name ledger-load-redis -p 6379:6379 public.ecr.aws/docker/library/redis:7-alpine
+          timeout 30 bash -c 'until docker exec ledger-load-redis redis-cli ping; do sleep 1; done'
 
       - name: Set up Python
         id: python
