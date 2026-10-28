@@ -248,9 +248,10 @@ def test_paged_point_resumes_past_the_dropped_record_read_last():
     assert agent_trace._paged_point(state, ["a", "b"], [0, 1], earlier) == ("a", point)
 
 
-def test_paged_point_never_moves_behind_the_earlier_paged_point():
+@pytest.mark.parametrize("offset", [20, 40])
+def test_paged_point_never_moves_behind_the_earlier_paged_point(offset):
     state = {"source": {"device": 1, "inode": 2}, "source_points": {"a": [0, 10, 1, 0], "b": [10, 20, 2, 0]}}
-    earlier = {"device": 1, "inode": 2, "line": 30, "offset": 40, "records": 4, "unsupported": 0, "boundary": "d"}
+    earlier = {"device": 1, "inode": 2, "line": 0, "offset": offset, "records": 4, "unsupported": 0, "boundary": "d"}
     assert agent_trace._paged_point(state, ["a", "b", "c"], [0, 1], earlier) == ("d", earlier)
 
 
