@@ -114,4 +114,23 @@ def test_readiness_needs_a_recent_successful_heartbeat(tmp_path):
 
     os.utime(marker, (100, 100))
     assert module.ready(marker, now=110)
-    assert not module.ready(marker, now=200)
+    assert not module.ready(marker, now=160)
+    assert not module.ready(marker, now=99)
+
+
+def test_a_release_checks_every_worker_before_releasing_ownership():
+    module = rollout()
+    cluster = Cluster()
+    module.acquire(cluster, "default", "shared", "first", timeout=0)
+    original = cluster.request
+
+    def unhealthy_second(method, path, body=None):
+        result = original(method, path, body)
+        if path.endswith("/second"):
+            result["status"]["readyReplicas"] = 0
+        return result
+
+    cluster.request = unhealthy_second
+    with pytest.raises(RuntimeError, match="serving"):
+        module.release(cluster, "default", "shared", "first", "hive", "first,second")
+    assert cluster.lease["spec"]["holderIdentity"] == "first"

@@ -70,11 +70,12 @@ def release(api: Kubernetes, namespace: str, name: str, owner: str, hive_namespa
     lease = api.request("GET", path)
     if lease is None or lease["spec"].get("holderIdentity") != owner:
         raise RuntimeError("only the rollout owner can release the lease")
-    workload = api.request(
-        "GET", f"/apis/apps/v1/namespaces/{quote(hive_namespace, safe='')}/deployments/{quote(deployment, safe='')}"
-    )
-    if workload is None or not serving(workload):
-        raise RuntimeError("replacement hive is not serving; rollout ownership retained")
+    for worker in deployment.split(","):
+        workload = api.request(
+            "GET", f"/apis/apps/v1/namespaces/{quote(hive_namespace, safe='')}/deployments/{quote(worker, safe='')}"
+        )
+        if workload is None or not serving(workload):
+            raise RuntimeError("replacement hive is not serving; rollout ownership retained")
     lease["spec"]["holderIdentity"] = ""
     api.request("PUT", path, lease)
 

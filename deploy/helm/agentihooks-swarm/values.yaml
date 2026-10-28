@@ -269,7 +269,11 @@ workers:
   replicas: 0
   maxAgents: 20
   # A stopping hive takes no new agents and waits this long for its agents to finish before it exits.
-  drainSeconds: 3600
+  drainSeconds: 300
+  rollout:
+    enabled: true
+    namespace: default
+    leaseName: agentihooks-hive-rollout
   excluded: [master]
   # Swarms whose masters this hive takes although it excludes master; every other swarm still sees masters excluded.
   masterSwarms: []
