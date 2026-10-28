@@ -50,6 +50,7 @@
   "runner-trust.yml/actors": "hosted",
   "semgrep.yml/charts": "light",
   "semgrep.yml/feature-tests": "light",
+  "semgrep.yml/scan": "light",
   "startup-stages.yml/measure": "standard",
   "swarm-image.yml/publish": "standard",
   "swarm-node-base.yml/copy": "standard",
