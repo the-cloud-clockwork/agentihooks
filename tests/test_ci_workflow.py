@@ -438,7 +438,7 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
 
 def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs():
     workflow = _workflow()
-    assert (_ROOT / ".github/test-constraints.txt").read_text().strip() == "playwright==1.63.0"
+    assert (_ROOT / ".github/test-constraints.txt").read_text().split() == ["playwright==1.63.0", "pytest<9.2"]
     for job in ("test-count", "split", "unit"):
         assert workflow["jobs"][job]["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
         cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
