@@ -58,7 +58,7 @@ def test_metadata_is_decoded_and_paginated_when_binary_is_omitted():
     result = subprocess.CompletedProcess([], 0, stdout=b'[{"artifacts": []}]')
     with patch.object(ci_gate_shards.subprocess, "run", return_value=result) as run:
         assert ci_gate_shards.api("repos/org/repo/actions") == [{"artifacts": []}]
-    assert run.call_args.args[0] == ["gh", "api", "repos/org/repo/actions", "--paginate", "--slurp"]
+    assert run.call_args.args[0] == ["gh", "api", "repos/org/repo/actions", "--paginate", "--slurp", "--include"]
 
 
 @pytest.mark.parametrize(
