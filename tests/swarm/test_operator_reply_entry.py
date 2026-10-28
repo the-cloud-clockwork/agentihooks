@@ -67,12 +67,25 @@ def answer(swarm, monkeypatch, event, agent, words):
     return item, shown(swarm)
 
 
-def test_a_reply_to_an_operator_task_comment_lands_as_a_comment_on_that_task(swarm, monkeypatch):
+def test_a_claimant_reply_to_an_operator_task_comment_goes_to_the_front_door(swarm, monkeypatch):
     event = operator_write(5, "comment added", "tasks/t1", "is the fix merged")
     item, ledger = answer(swarm, monkeypatch, event, ENG, ["merged", "and", "deployed"])
-    assert ledger.commented == [(SLUG, "tasks/t1", "merged and deployed", ENG.name)]
-    assert ledger.said == []
+    assert ledger.commented == [] and ledger.said == []
     _, inbox = swarm
+    held = {mail.id: mail for mail in inbox.open_mail(BOSS.seat)}
+    assert held[item.id].sender == "operator" and inbox.pending_items("operator") == []
+    assert [(m.sender, m.text) for m in held.values() if m.ref == item.id] == [(ENG.name, "merged and deployed")]
+
+
+def test_a_front_door_reply_to_an_operator_task_comment_lands_as_a_comment_on_that_task(swarm, monkeypatch):
+    event = operator_write(5, "comment added", "tasks/t1", "is the fix merged")
+    item = relayed(swarm, event)
+    _, inbox = swarm
+    inbox.redirect(item.id, "swarm", BOSS.seat, "handed to the front door")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", BOSS.name)
+    assert cli.main(["reply", item.id, "merged", "and", "deployed"]) == 0
+    ledger = shown(swarm)
+    assert ledger.commented == [(SLUG, "tasks/t1", "merged and deployed", BOSS.name)]
     assert inbox.get(item.id).state == "done" and inbox.pending_items("operator") == []
     assert ledger.ids == [inbox.get(item.id).reason.rpartition(" ")[2]]
 

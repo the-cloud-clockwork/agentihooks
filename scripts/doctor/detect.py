@@ -118,8 +118,7 @@ def _once(load):
 
 def _ci(store, tasks, now_ms):
     pulls = open_pulls(tasks)
-    with ThreadPoolExecutor() as pool:
-        records = list(pool.map(lambda pull: ci_read.pull_request(*pull, cache=store.redis), pulls))
+    records = ci_read.pull_requests(pulls, cache=store.redis)
     return [f for record in records for f in ci.findings(record, now_ms)]
 
 

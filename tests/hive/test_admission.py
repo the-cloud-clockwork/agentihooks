@@ -72,6 +72,18 @@ def test_a_machine_without_cpu_or_load_refuses_on_missing_telemetry(measured):
     assert admission.refusal(found) == "missing telemetry: no fresh headroom reading"
 
 
+def test_a_hive_below_its_worktree_floor_refuses_on_disk():
+    found = admission.room(reading(disk_free_gb=9, disk_floor_gb=50), 0, 0, 6)
+    assert found == admission.Room(0, admission.DISK, "9 GB free on the agent home, below the 50 GB worktree floor")
+    assert admission.refusal(found) == "disk: 9 GB free on the agent home, below the 50 GB worktree floor"
+    assert admission.category(f"no hive for eng has room: anton {admission.refusal(found)}") == admission.DISK
+
+
+def test_a_hive_at_its_worktree_floor_or_without_a_disk_reading_keeps_its_room():
+    assert admission.room(reading(disk_free_gb=50, disk_floor_gb=50)) == admission.room(reading())
+    assert admission.room(reading(disk_free_gb=9)).room == admission.room(reading(disk_floor_gb=50)).room == 25
+
+
 def test_a_reading_from_a_hive_not_yet_republishing_total_mb_is_read_on_cpu_alone():
     found = admission.room({"cpus": 4, "load5": 0.0, "available_mb": 1000})
     assert (found.room, found.reason) == (6, admission.CPU)
@@ -236,7 +248,16 @@ def test_status_counts_refusals_by_reason_in_a_fixed_order():
     }
     assert admission.status_lines(waits) == ["admission refusals  cpu 2  ram 1  quota 1"]
     assert admission.status_lines({}) == []
-    assert admission.REASONS == ("cpu", "ram", "quota", "placement", "node cap", "max agents", "missing telemetry")
+    assert admission.REASONS == (
+        "cpu",
+        "ram",
+        "disk",
+        "quota",
+        "placement",
+        "node cap",
+        "max agents",
+        "missing telemetry",
+    )
 
 
 def test_status_report_carries_refusal_counts_for_the_ledger_page(env):
@@ -396,3 +417,69 @@ def test_the_max_agents_cap_binds_only_when_tighter_than_the_headroom():
 def test_a_max_agents_refusal_falls_in_its_own_reason():
     assert admission.category("no hive for eng has room: remote max agents: 3 of 3 agents") == admission.MAX_AGENTS
     assert admission.MAX_AGENTS in admission.REASONS
+
+
+def launched_ago(redis, machine, member, ago_ms):
+    seconds, micros = redis.time()
+    now = int(seconds) * 1000 + int(micros) // 1000
+    redis.zadd(admission.key(machine), {member: now - ago_ms + admission.PENDING_MS})
+    return now
+
+
+def test_a_joined_agent_older_than_one_load_window_no_longer_uses_room_while_an_unjoined_launch_does(redis):
+    measured = reading(cpus=8, load5=3.65)
+    launched_ago(redis, "hive-two", "s/joined", admission.LOAD_WINDOW_MS + 1000)
+    launched_ago(redis, "hive-two", "s/unjoined", admission.LOAD_WINDOW_MS + 1000)
+    assert admission.room(measured, pending=admission.pending(redis, "hive-two")).room == 3
+    admission.joined(redis, "hive-two", "s/joined")
+    assert admission.pending(redis, "hive-two") == 1
+    assert admission.room(measured, pending=admission.pending(redis, "hive-two")) == admission.Room(
+        4,
+        admission.CPU,
+        "five minute load 3.65 on 8 CPUs, 0.5 CPU per agent with 1 pending launches, "
+        "fits 4 more under the 80 percent line",
+    )
+    assert admission.HOST_PERCENT == 80
+
+
+def test_a_joined_agent_still_uses_room_until_one_load_window_after_its_launch(redis):
+    now = launched_ago(redis, "anton", "s/one", 60_000)
+    admission.joined(redis, "anton", "s/one")
+    assert admission.pending(redis, "anton") == 1
+    assert redis.zscore(admission.key("anton"), "s/one") is None
+    expiry = redis.zscore(admission.key("anton"), "s/one" + admission.JOINED) - now
+    assert expiry == admission.LOAD_WINDOW_MS - 60_000
+
+
+def test_joining_twice_keeps_the_first_join_window(redis):
+    now = launched_ago(redis, "anton", "s/one", 60_000)
+    admission.joined(redis, "anton", "s/one")
+    admission.joined(redis, "anton", "s/one")
+    assert redis.zrange(admission.key("anton"), 0, -1, withscores=True) == [
+        ("s/one" + admission.JOINED, now + admission.LOAD_WINDOW_MS - 60_000)
+    ]
+
+
+def test_joining_a_launch_without_a_reservation_adds_none(redis):
+    admission.joined(redis, "anton", "s/none")
+    assert redis.exists(admission.key("anton")) == 0
+
+
+def test_a_release_frees_a_joined_reservation(redis):
+    admission.reserve(redis, "anton", "s/one", 2)
+    admission.reserve(redis, "anton", "s/two", 2)
+    admission.joined(redis, "anton", "s/one")
+    admission.release(redis, "anton", "s/one")
+    assert redis.zrange(admission.key("anton"), 0, -1) == ["s/two"]
+
+
+def test_a_new_launch_of_a_joined_name_replaces_its_joined_reservation(redis):
+    launched_ago(redis, "anton", "s/one", 60_000)
+    admission.joined(redis, "anton", "s/one")
+    assert admission.reserve(redis, "anton", "s/one", 1) == (True, 0)
+    assert redis.zrange(admission.key("anton"), 0, -1) == ["s/one"]
+    assert admission.pending(redis, "anton") == 1
+
+
+def test_the_load_window_is_five_minutes():
+    assert (admission.LOAD_WINDOW_MS, admission.JOINED) == (300_000, "#joined")

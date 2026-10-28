@@ -23,7 +23,7 @@ venv="$HOME/dev/tcc-ecosystem/.venv"
 git config --global user.name >/dev/null || git config --global user.name "agentihooks hive"
 git config --global user.email >/dev/null || git config --global user.email agentihooks-hive@users.noreply.github.com
 git config --global credential.https://github.com.helper \
-  "!$(command -v python3) -m scripts.github_app_cli credential"
+  "!$(command -v python3) -P -m scripts.github_app_cli credential"
 if [[ "${HIVE_GITHUB_AUTH_MODE:-}" == app ]]; then
   token_file="$AGENTIHOOKS_HOME/github-token"
   python3 -m scripts.github_app_cli token > "$token_file.next"
@@ -172,5 +172,6 @@ agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
 agentihooks hive set --keep "$member" ui=no ephemeral=yes draining=no \
-  "excluded=${HIVE_EXCLUDED-master}" "master-swarms=${HIVE_MASTER_SWARMS-}" "max-agents=${HIVE_MAX_AGENTS:-20}"
+  "excluded=${HIVE_EXCLUDED-master}" "master-swarms=${HIVE_MASTER_SWARMS-}" "max-agents=${HIVE_MAX_AGENTS:-20}" \
+  "prefer=${HIVE_PREFER-}"
 exec agentihooks hive run

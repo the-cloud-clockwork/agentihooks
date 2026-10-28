@@ -122,16 +122,30 @@ def refusal_branch(repo: Path, task: dict) -> str:
     return task.get("branch", "") if branch is None else branch
 
 
+def recorded_branch(repo: Path, task: dict) -> str:
+    remote = task.get("branch_repo")
+    if remote and stack.repo_key(remote) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
+        return ""
+    if not remote and len(task.get("repositories", [])) > 1:
+        return ""
+    return task.get("branch") or ""
+
+
 def repository_task(repo: Path, task: dict) -> dict:
     branch = mapped_branch(repo, task)
     if branch is None:
-        branch = task.get("branch", "")
-        remote = task.get("branch_repo")
-        if remote and stack.repo_key(remote) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
-            branch = ""
-        elif not remote and len(task.get("repositories", [])) > 1:
-            branch = ""
+        branch = recorded_branch(repo, task)
     return {**task, "branch": require_branch(branch) if branch else ""}
+
+
+def continuation_task(repo: Path, task: dict, scoped: dict, branch: str) -> dict:
+    mapped, recorded = scoped["branch"], recorded_branch(repo, task)
+    if branch == mapped or recorded in ("", mapped):
+        return scoped
+    heads = {name for name in (mapped, recorded) if git(repo, "ls-remote", "origin", f"refs/heads/{name}")}
+    if mapped in heads or recorded not in heads:
+        return scoped
+    return {**scoped, "branch": recorded}
 
 
 def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | None, Path, dict]:
@@ -153,6 +167,7 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
         if root is None:
             return existing(primary, scoped, agent), primary, scoped
         branch = require_branch(git(root, "branch", "--show-current"))
+        scoped = continuation_task(primary, task, scoped, branch)
         own = re.fullmatch(rf"{re.escape(naming.plain(agent.name))}(?:-\d+)?", branch)
         if not (own or branch == scoped.get("branch")):
             raise SwarmError(f"current worktree {root} does not belong to this task")
@@ -186,6 +201,19 @@ def merged_record(repo: Path, task: dict) -> bool:
     return pull["state"] == "MERGED" and pull["headRefName"] == task["branch"]
 
 
+def open_pull_head(root: Path, task: dict, branch: str, remote: str) -> str:
+    url = task.get("pr_url", "")
+    head = publish_queue.open_head(remote, url)
+    if head and head != branch:
+        git(root, "fetch", "origin", head)
+        if not descends(root, head):
+            raise SwarmError(
+                f"open pull request {url} delivers branch {head}, but worktree {root} on branch {branch} "
+                f"does not descend from it; continue from origin/{head} or close that pull request"
+            )
+    return head
+
+
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
     fields, cleared = [], {}
@@ -214,11 +242,11 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
                 output = execute(command, repository)
                 root = Path(output.splitlines()[-1])
             checkout = checkout_fields(root)
-            delivery = target_branch(root, scoped, checkout["branch"], scoped if retired else task)
+            head = open_pull_head(root, scoped, checkout["branch"], checkout["branch_repo"])
+            delivery = head or target_branch(root, scoped, checkout["branch"], scoped if retired else task)
             if delivery != checkout["branch"]:
                 git(root, "branch", f"--set-upstream-to=origin/{delivery}")
-                if publish_queue.open_head(checkout["branch_repo"], scoped.get("pr_url", "")) == delivery:
-                    checkout["branch"] = delivery
+            checkout["branch"] = head or checkout["branch"]
             fields.append({**checkout, "repository": str(repository)})
         except SwarmError as exc:
             raise PublicationRefusal(repository, refusal_branch(repository, scoped), str(exc)) from exc

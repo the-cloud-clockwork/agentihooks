@@ -35,7 +35,7 @@ def test_publisher_uploads_the_passed_dev_baseline_for_queue_runs():
     job = _jobs()["coverage-baseline"]
     save = _step(job["steps"], "Save the passed dev coverage baseline")
     upload = _step(job["steps"], "Publish the passed dev coverage baseline")
-    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["uses"] == "./.github/actions/retry-upload"
     assert upload["with"]["name"] == "coverage-baseline"
     assert upload["with"]["path"] == save["with"]["path"] == "~/coverage-baseline"
     assert upload["with"]["if-no-files-found"] == "error"
@@ -268,6 +268,7 @@ def test_dispatch_runs_restore_durations_and_the_base_baseline_on_the_app_token(
         "Find the dev push run of the dispatched base",
         "Download the dev durations",
         "Download the dispatched base's coverage baseline",
+        "Check out the upload action for artifact republishing",
         "Republish the dev durations",
         "Republish the dispatched base's coverage baseline",
         "Mark the dev artifacts restored",

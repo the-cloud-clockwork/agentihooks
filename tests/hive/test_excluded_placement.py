@@ -106,7 +106,7 @@ def test_hive_list_shows_max_agents_and_excluded(redis, monkeypatch, capsys):
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
         "anton\tstale\tui=no\tmax-agents=20\texcluded=master\theadroom=missing\n"
-        "root\tstale\tui=yes\tmax-agents=10\texcluded=none\theadroom=missing\n"
+        "root\tname=swarm-master\tstale\tui=yes\tmax-agents=10\texcluded=none\theadroom=missing\n"
     )
 
 
@@ -118,7 +118,7 @@ def test_hive_list_shows_a_readable_name_beside_its_id(redis, monkeypatch, capsy
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
         "ff0f11b025271d0c\tname=anton-2\tstale\tui=no\tmax-agents=20\texcluded=master\theadroom=missing\n"
-        "root\tstale\tui=yes\tmax-agents=10\texcluded=none\theadroom=missing\n"
+        "root\tname=swarm-master\tstale\tui=yes\tmax-agents=10\texcluded=none\theadroom=missing\n"
     )
 
 

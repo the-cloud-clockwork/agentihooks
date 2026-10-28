@@ -107,8 +107,9 @@ jobs:
         run: redis-cli -p 6379 shutdown nosave || true
       - name: Preserve the pair's hierarchy profiles and exact response bodies
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./head/.github/actions/retry-upload
         with:
+          after-cancel: true
           name: hierarchy-pair-${{ matrix.pair }}
           path: hierarchy-evidence/*.json
           if-no-files-found: error
@@ -193,8 +194,9 @@ jobs:
         run: redis-cli -p 6379 shutdown nosave || true
       - name: Preserve the pair's load measurements and server logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./head/.github/actions/retry-upload
         with:
+          after-cancel: true
           name: load-pair-${{ matrix.pair }}
           path: |
             load-evidence/*.log

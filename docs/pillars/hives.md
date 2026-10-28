@@ -273,6 +273,32 @@ agentihooks msg reply <id> "thanks, take the next task"
 # The reply is written into the member's inbox keys, where the engineer reads it
 ```
 
+### Seat mail follows its occupant
+
+A send to a seat writes into the inbox of the agent occupying it at send time. A send to an empty seat, such as
+`dispatcher@<slug>` between two dispatchers, lands in the controller keys. When the next occupant starts on a
+member, its mail would sit in keys it never reads.
+
+Every swarm tick's exit sweep moves that mail. For each live agent that is the current occupant of a lane seat
+(`eng-N@<slug>`, `ci-N@<slug>`, `plan-N@<slug>`) or the dispatcher seat (`dispatcher@<slug>`), the sweep moves every
+open item addressed to the seat from any other reachable inbox into the inbox that holds the agent: the member keys
+of the hive it runs on, or the controller keys when it runs on the swarm host. A moved item:
+
+- keeps its id, sender, text, history and ledger entry;
+- turns pending at the same seat address, so the occupant's next inbox read delivers it;
+- gains a history entry by `swarm` with the reason `moved to hive <id>, where <agent> runs <seat>`, or
+  `moved to the controller, where <agent> runs <seat>`.
+
+Master seats never move: their mail stays with the master pool of its inbox. An inbox whose Redis times out or
+drops is skipped for that pass, and the sweep moves its mail on a later tick.
+
+To see a moved item, run on the hive where the occupant runs, as that occupant:
+
+```bash
+agentihooks msg inbox            # the item shows pending, with its original id
+agentihooks msg read <id>        # its history ends with the move and its reason
+```
+
 ### Launch slot rows
 
 Launch slot rows count how many executions hold each account slot. Only the controller writes them; a member never
@@ -314,9 +340,10 @@ the member's own keys.
 
 ### Limitations
 
-- The controller's wake and escalation pass, exit sweep, swarm status, handoff mailbox and swarm removal read only
-  the controller inbox. Mail held for an agent a member runs gets no wake, escalation or exit settlement, and the
-  controller's seen marks for such agents stay in the controller keys.
+- The controller's wake and escalation pass, exit sweep, swarm status, handoff mailbox and swarm removal read every
+  joined member's inbox as well as the controller's. Mail sent to a seat while it was empty still waits in the
+  controller keys until the next tick's [seat mail move](#seat-mail-follows-its-occupant), and master seat mail
+  never moves.
 - A member-hosted agent cannot yet complete a life: its agent record writes, such as order consumer binding, take
   master, done, handoff and seat exits, sit outside its keys and are refused.
 - A member's master pool, filled while every live master sat on that member, drains only on the next send there.
@@ -331,6 +358,7 @@ the member's own keys.
 | A member item closes as `refused: the hive member that sent it does not run its sender` | The sender named on the item is not an agent placed on that member. | Send from the agent's own session on the member; the sender is the session, never an argument. |
 | A member process fails a write with `NOPERM` | The process writes outside its hive key, such as an agent record or a launch slot row. | Expected for agent record writes, see Limitations; anything else is a bug to file with the key named. |
 | The controller shows a member agent idle though it works | The agent's execution record names a hive with no member record, so the controller reads its readings from the controller keys. | Check `agentihooks hive show <id>` lists the hive and that it was added with `hive add`. |
+| A hive-run dispatcher or lane agent never sees mail sent to its seat while the seat was empty | The item waits in the controller keys until the next tick's exit sweep moves it. | Wait one tick, then run `agentihooks msg inbox` as the occupant on its hive. Mail to a master seat does not move. |
 | A slot stays taken after a member lost an agent | The member still reports the execution. | The row lapses within two ticks once the execution leaves the member's sessions report. |
 
 ## Settings
@@ -340,7 +368,7 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 
 | Setting | Values | Default | Meaning |
 |---|---|---|---|
-| `name` | text | the hive id | Display name. |
+| `name` | text | the hive id | Display name. A hive with `ui=yes`, where the masters run, is always named `swarm-master`. |
 | `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. |
 | `ephemeral` | `yes`, `no` | `no` | The machine can disappear, such as a pod. Placement prefers lasting hives on a tie. |
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
@@ -867,6 +895,48 @@ failed with "hive launch failed: `<cause>`".
 | `ambiguous` | The agent may have started but its process could not be identified, or the order was taken 300 seconds ago with no result. |
 | `<status>: <detail>` | The local runtime refused the spawn, such as `refused: <why>` or `unavailable: <why>`, with the runtime's own reason. |
 
+### A worker that finishes before the tick collects its acknowledgement
+
+Until the tick collects a hive launch's `live` acknowledgement, the execution record names only the hive in its
+runtime target (`host_id`). The process identity a retire needs (`process_namespace`, `pid`, `pid_start`), the
+pane, the launch time and the launch timings arrive with the acknowledgement.
+
+A short task can finish between the hive's acknowledgement and the next tick. The tick then collects the
+acknowledgement of an execution already marked `finished`. It checks that the controller epoch, claimant, seat,
+generation and acknowledging hive match the order, and copies the acknowledged runtime target, pane, launch time
+and timings into the execution record. The record stays `finished`, the agent is not revived, the launch is
+recorded as started, and the tick reports the action:
+
+```text
+<agent> finished <task> before the tick collected its hive acknowledgement
+```
+
+When the record already carries the acknowledged target, the tick leaves it unchanged. An acknowledgement that is
+missing or not `live` refuses the collection as gone.
+
+With the process identity recorded, the retire order the tick sends for that agent reaches the hive with a process
+it can stop or find already gone, and the retire ends.
+
+Before this, the record kept only `host_id`. Every tick sent a retire order that the hive refused because it could
+not identify a process, the per agent retire count grew each tick, and from the third failing tick
+`agentihooks swarm <id> status` listed a `retire failed` finding with this evidence:
+
+```text
+<agent> is still running after <n> retire attempts
+process 0
+refusal: hive <host> refused retire: runtime target names no process
+```
+
+On the Doctor swarm the finding for one ci agent reached 25 failing ticks and came back after a resolved verdict
+because the count kept growing.
+
+### Troubleshooting
+
+| Symptom | Check | Fix |
+|---|---|---|
+| A `retire failed` finding shows `refusal: hive <host> refused retire: runtime target names no process` | The agent's execution record: does its runtime target carry `process_namespace`, `pid` and `pid_start`, or only `host_id`? | A record collected by a current controller carries the identity, and its retire ends. A record left with only `host_id` by an older controller keeps failing until the tick drops the agent from the swarm, which clears its retire count and the finding. |
+| The tick printed "finished … before the tick collected its hive acknowledgement" | The execution record's state | Expected for a task that finished within one tick; the record stays `finished` and the launch is counted as started. |
+
 ## Hive placement for one swarm on a local machine
 
 A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks swarm <id> set hive-placement=on`
@@ -894,7 +964,9 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
 5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
-   max-agents=<workers.maxAgents>`, by default `excluded=master master-swarms= max-agents=20`.
+   max-agents=<workers.maxAgents> prefer=<workers.prefer>`, by default `excluded=master master-swarms= max-agents=20
+   prefer=`. `workers.prefer` takes `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to
+   the lowest ranked hive while admission leaves it room.
 6. Runs `agentihooks hive run`.
 
 When the pod stops, for an image update, a rollout or a node drain, its preStop runs `agentihooks hive drain --wait

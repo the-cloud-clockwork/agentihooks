@@ -495,6 +495,32 @@ Tier names in targets are `pull_request` and `merge_group`; output names them
 `pull request` and `queue`. Grouped runner targets sort and deduplicate labels
 and require an exact label set, not a match on one label within a larger set.
 
+Notices sent before pull request 5715 named grouped findings with the window
+start in milliseconds ahead of the scope. Measure accepts those ids as written
+and reads the same label set or tier as the stable id, over the same default
+or `--since`/`--until` window; the window start in the id selects nothing:
+
+```bash
+agentihooks doctor rig-grade-swarm measure \
+  'ci-runner-wait/1792617600000-["anton-oss"]'
+agentihooks doctor rig-grade-swarm measure \
+  ci-tier-wall-time/1792617600000-merge_group
+```
+
+Both print the same class line as the stable ids
+`ci-runner-wait/["anton-oss"]` and `ci-tier-wall-time/merge_group`, which
+begin `ci-runner-wait anton-oss, window ...` and
+`ci-tier-wall-time queue, window ...`. The parser tries the target forms in this
+order:
+
+| Target subject | Read as | Example |
+|---|---|---|
+| Empty | Every scope of the class | `ci-runner-wait` |
+| Tier name, wall time class only | That tier | `ci-tier-wall-time/pull_request` |
+| JSON list of label names, runner and queue age classes only | That exact label set; `[]` is `unassigned` | `ci-queue-age-unconfirmed/[]` |
+| Digits, a dash, then one of the two forms above | The same tier or label set; the leading number is ignored | `ci-tier-wall-time/1792617600000-merge_group` |
+| `<run>-<attempt>`, optionally `-<label set>` | That run attempt's own value, then its class summary | `ci-tier-wall-time/39356970006-1` |
+
 #### Window and summary rules
 
 The default summary covers the hour ending when the command starts. Set both
@@ -566,6 +592,8 @@ changing either requires a reviewed code change.
 | `has no job on runner labels` or `match no job in the window` | The requested set has no matching measurable jobs for the run, or no matching jobs in the window. Use the reported known label sets and check the bounds. |
 | Window read error or incomplete snapshot | The command refuses the class result. A run value may already have printed; it does not establish a complete class read. |
 | `0 of 0 runs over ...` | No measurable samples for the selected tier or label set, or no scopes for a bare class. A label set can have jobs but no confirmed waits for `ci-runner-wait`, or no unconfirmed jobs for `ci-queue-age-unconfirmed`. Median and worst are omitted. This is no exposure, not evidence of improvement. |
+| `<finding> names no run attempt, runner label set or tier: ...` | The subject matches none of the target forms, and the command exits 1 before reading CI. A tier under a runner class (`ci-runner-wait/pull_request`), a label set under the wall time class, an event other than the two tiers (`ci-tier-wall-time/1792617600000-push`) and unbalanced JSON are refused this way. Copy the id from the notice. |
+| `<finding> names no run attempt, runner label set or tier: runner labels [1, "a"] are not a list of names` | The JSON list holds something other than label strings. Quote the label set exactly as the notice prints it. |
 
 [Pull request 5076](https://github.com/the-cloud-clockwork/agentihooks/pull/5076)
 delivered this measurement path. Its source proof reported 818 of 818 recorded
@@ -857,6 +885,72 @@ decides whether it is sent again. A corrected read removes a superseded run
 from its group, and the group is retracted once no run is left; see
 [Retractions, configuration and troubleshooting](#retractions-configuration-and-troubleshooting).
 
+#### One id across windows and verdicts
+
+The timer keeps one group per id in the `groups` field of the Doctor's
+`ci-speed` Redis record, together with the window it was last filled in, and
+drops groups more than one window old. When a crossing arrives in a later
+window, the group under that id is replaced: its members from the earlier
+window are dropped and the new window's runs start it again. Only groups filled
+in the current window are raised. The id itself does
+not change, so a verdict a master gives in one window still names the finding
+the next window raises.
+
+A verdict of any value (`false-positive`, `early-real`, `established`,
+`insufficient-evidence` or `resolved`) covers every finding of the same class
+and label set or tier. The comparison drops a leading window start, so a
+verdict recorded on an id such as `ci-runner-wait/1792617600000-["anton-oss"]`,
+sent before pull request 5715, still covers `ci-runner-wait/["anton-oss"]`. It
+does not cover another tier or another label set: a verdict on
+`ci-tier-wall-time/merge_group` leaves `ci-tier-wall-time/pull_request`
+unjudged, and a verdict on `["a"]` leaves `["a", "b"]` unjudged.
+
+Within the verdict cooldown, a covered finding is dropped from the pass's
+recorded findings and keyed notices while its worst settled measure stays at or
+under the judged worst plus the growth margin. The judged worst is the largest
+measure among the verdicts of any value on the same scope given no earlier than
+24 hours before this verdict (`JUDGED_SPAN_MS` in the CI speed detector), later
+verdicts and old window ids included. Members count as settled or open:
+
+| Member | State | Counts toward the settled worst |
+|---|---|---|
+| `ci runner wait` crossing | Settled: the job started, so its wait no longer changes | Yes |
+| `ci tier wall time` crossing of a completed run | Settled | Yes |
+| `ci tier wall time` crossing of a run that is not completed and has no completed `Gate — Required` job | Open | No |
+| `ci queue age unconfirmed` crossing | Open: its age grows with every pass until a job starts | No |
+
+The tier wall time detector raises only completed runs, so its members are
+settled in practice; the open rule covers a group kept from code that raised
+running tiers. A group holding only open members has a settled worst of zero.
+A queue age finding a master has judged therefore stays silent while only
+its clock grows. When the queued job starts, the run joins a
+`ci-runner-wait` group, a different class that the queue age verdict does not
+cover.
+
+Notices follow two paths:
+
+| Class | What is sent to each master |
+|---|---|
+| `ci-runner-wait`, `ci-tier-wall-time` | Once per run: each pass sends the groups raised this pass, naming only the runs not sent to that master before. A run whose crossing joins a judged group is still sent, alone in its notice. A run already sent is never sent again, however its measure grows. |
+| `ci-queue-age-unconfirmed` and the other Doctor CI speed findings | Once per notice key. Without a verdict on the exact id the key is the id; with one it is the id and the verdict's time, so a new verdict opens a new key. A verdict on an older window id still covers the stable id, but never keys its notice, because the key reads the verdict on the exact id. |
+
+A corrected read that removes every run from a group, followed by a new
+crossing that refills the group in the same pass, leaves the finding standing:
+the timer retracts only ids missing from the current window's groups.
+
+To see the groups the timer holds and their windows, read the record, a JSON
+string under `<prefix>:swarm:<doctor>:ci-speed`, where the prefix is
+`AGENTIHOOKS_SWARM_KEY_PREFIX` or `agentihooks`. The command needs `jq`; the
+Redis URL defaults to the one the swarm store uses when
+`AGENTIHOOKS_SWARM_REDIS_URL` is unset:
+
+```bash
+doctor=rig-grade-swarm-doctor
+redis-cli -u "${AGENTIHOOKS_SWARM_REDIS_URL:-redis://127.0.0.1:6379/0}" --raw \
+  GET "${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}:swarm:$doctor:ci-speed" \
+  | jq '.groups | to_entries[] | {id: .key, window: .value.window, runs: [.value.members[].run]}'
+```
+
 #### Configuration
 
 The hold and the grouping are automatic. No flag or environment variable turns
@@ -891,7 +985,9 @@ journalctl --user -t agentihooks-swarm --since '-6 hours' --no-pager -o cat \
 | A slow CI hour raised findings although GitHub had an incident | The incident names neither an `Actions` component nor Actions in its title, or the status page could not be read. Both hold nothing by design. |
 | A finding carries the incident evidence line | Some of its runs had jobs created inside the incident window. Compare those runs with the rest before acting. |
 | Ten slow runs raised one finding | Expected: one finding per class and label set or tier per pass. Read the run ids in the first evidence line. |
-| A second notice for the same group | A verdict was given and a later run passed the judged worst by more than the growth margin, or the verdict cooldown ended. |
+| A second notice for the same group | For runner wait and tier wall time, a run not sent before joined the group; the notice names only that run. For queue age, a new verdict or the cooldown ending opened a new notice key. |
+| A verdict was given on an id with a window start and the stable id still arrives | Check that the stable id names the same class and the same exact label set or tier; a verdict on one tier or label set never covers another. Then compare its settled worst with the judged worst plus the growth margin. |
+| `measure` refuses an id copied from an old notice | Copy the whole id, quotes included, and compare it with the target forms in [Measure a CI run and its class over a window](#measure-a-ci-run-and-its-class-over-a-window). |
 
 #### Delivery evidence
 
@@ -918,6 +1014,34 @@ Later pull requests changed the grouping:
 window out of the finding id, so a group keeps its id from one window to the
 next, and [5707](https://github.com/the-cloud-clockwork/agentihooks/pull/5707)
 sent the hold notice as an FYI notice.
+
+Pull request 5715 merged on 22 October 2026 for [issue
+5710](https://github.com/the-cloud-clockwork/agentihooks/issues/5710). Before
+it, each ten minute window minted a new runner wait or tier wall time id, so a
+verdict never held into the next window and the watched master received the
+same evidence two or three times in thirty minutes. The [red Proofs run
+39715758369](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39715758369)
+ran the new id tests on a test only branch without the fix and failed 11 tests
+and 4 collections; the [green Proofs run
+39717401266](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39717401266)
+ran them on the pull request's branch and passed. The tests assert that two
+windows with the same tier and label set yield one id, and run detector emitted
+ids, stable and window prefixed, through the measure entry point.
+
+The source task's recorded proof counted distinct runner wait and tier wall
+time ids in Doctor timer notices to the masters over equal six hour windows.
+The after window ran from 06:39:52 to 12:39:52 UTC on 22 October, starting with
+the first tick after the watched master applied the change at 06:39:51 UTC:
+
+| Window | Notice items | Distinct ids | Ids per hour |
+|---|---|---|---|
+| Six hours before the task started | 280 | 101 | 16.83 |
+| Six hours after the change was applied | 76 | 5 | 0.83 |
+
+The five ids after the change were one per runner label set or tier:
+`anton-oss`, `anton-oss-batch`, `anton-oss-queue`, `merge_group` and
+`pull_request`. Repeats of judged findings whose only growth was a running
+clock still occurred in that window; this change did not remove them.
 
 ### Inspect and diagnose a read
 
@@ -1830,8 +1954,8 @@ Grouping per branch stays at the workflow level. A branch push run joins `mutati
 | Job | Runner label | Concurrency group |
 |---|---|---|
 | Whole run, branch push | per job, below | `mutation-preflight-refs/heads/<branch>`, newer push cancels the older run |
-| `plan`, `refine`, `mutation` | `anton-oss-light` | the run's group only |
-| `touched-tests` | `anton-oss` | the run's group only |
+| `refine`, `mutation` | `anton-oss-light` | the run's group only |
+| `plan`, `touched-tests` | `anton-oss` | the run's group only |
 | `stats` | `anton-oss-batch` | `mutation-preflight-job-<run id>-stats-<part>` |
 | `mutation-shard` | `anton-oss-batch` | `mutation-preflight-job-<run id>-shard-<shard>` |
 
@@ -2193,6 +2317,80 @@ A shard listed with `success` stalled once and recovered; one listed with `failu
 | Both checkouts failed, shard-check reports missing tests | the stall or a GitHub outage persisted past the retry | read both step logs; rerun the failed jobs once GitHub serves fetches again |
 | A checkout step runs for minutes with no abort | the low speed settings were removed from that step | restore the `env` block; `tests/test_ci_workflow.py` fails without it |
 | A checkout fails within seconds on both attempts | the error is not a stall: a bad ref, permissions or a missing commit | read the first error in the step log; a retry does not fix it |
+
+## Protected provenance checkout
+
+On `pull_request` and `merge_group` events the first step of the Tests workflow's `select` job checks out the protected base commit into `provenance-grader`, so the grader that judges the pull request comes from the protected branch, never from the head under test. The step keeps full provenance history and never stores the token in the checkout:
+
+```yaml
+- uses: actions/checkout@v4
+  if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
+  with:
+    ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+    path: provenance-grader
+    fetch-depth: 0
+    persist-credentials: false
+  env:
+    GIT_HTTP_LOW_SPEED_LIMIT: "1000"
+    GIT_HTTP_LOW_SPEED_TIME: "60"
+```
+
+The `env` block is the same low speed bound the [unit checkout](#unit-checkout) uses: Git aborts any HTTP transfer that stays below 1000 bytes per second for 60 seconds. `actions/checkout` already retries a failed `git fetch` up to three attempts, waiting 10 to 20 seconds between them, so a stalled fetch now fails in about a minute and the next attempt starts on the same runner. No second checkout step is needed here, because this checkout has no blob filter: every object arrives in the retried `git fetch`, and nothing is fetched later by the unretried `git checkout`.
+
+`select` has a five minute job timeout. Before the change a stalled fetch had no bound below that timeout.
+
+In the census over 453 pull request runs from 15:10 UTC on 23 October to 15:10 UTC on 24 October 2026 (issue #6757), the protected checkout took a median of 10 seconds and a 90th percentile of 15 seconds over 431 measured runs. One run, Tests run 40100096746 on an `anton-oss-light` runner, sat 290 seconds in fetch with almost no bytes transferred until the job was cancelled. A peer job on the same node fetched normally, and repository size, fetch depth and node network were ruled out; the cause of the stall itself is not known.
+
+With the bound, one stalled attempt costs about 60 seconds plus the retry wait. Three stalled attempts take about three and a half minutes and fail the step inside the job timeout, so a persistent stall shows as a failed checkout with `Operation too slow` in its log rather than a cancelled job.
+
+### What guards it
+
+| Guard | Fails when |
+|---|---|
+| `tests/test_ci_provenance_checkout.py` (unit) | the first `select` step is not `actions/checkout@v4`, its `env` is not exactly the two values above, its `with` block or `if` changes, or it gains `continue-on-error` |
+| The protected gate's durations provenance check (`scripts.gate_protected`) | the head's `select` steps do not start with the protected provenance prefix; it admits that prefix, or its variant that publishes through the `retry-upload` action, with or without exactly this `env` block; any other `env` value is refused. The check applies only while the head's `reuse` job keeps its pull request and merge group exclusion |
+| `tests/ci_provenance_checkout_probe.py` (`wall_clock`) | a real run of the installed `actions/checkout` v4 against a local HTTP remote misses its budget; it needs an Actions runner and runs only through the Proofs workflow |
+
+Both values are pinned as literals in the unit test and the gate, so a change to either value changes the workflow, the unit test and the gate together. The probe reads them from the workflow.
+
+### Proof
+
+The probe serves a bare repository over local HTTP and runs the cached `actions/checkout` v4 with the `with` and `env` blocks read from the workflow. The `normal` case serves every request; the `stalled-once` case holds the first ref advertisement silent.
+
+| Run | Result |
+|---|---|
+| Proofs 40106870333, before the bound | `normal` passed; `stalled-once` exceeded the probe's 100 second limit |
+| Proofs 40170949592, with the bound, running the unit test and the probe | 3 passed in 76.47 seconds: the normal fetch under 10 seconds, the stalled transfer aborted about 60 seconds in with `Operation too slow`, the retry finished under 95 seconds, the protected commit checked out with full history and no stored credential |
+| Tests 40170910619 and protected grading 40170909045 on the pull request head | passed |
+
+The run results are those recorded in the body of pull request #6769.
+
+Pull request #6769 merged into `dev` at 07:16 UTC on 25 October 2026. Its target is zero selection runs whose protected checkout exceeds four minutes over the 24 hours after the merge, against one in the census day before. That after count is not yet recorded on the source task.
+
+Repeat the probe with a focused Proofs dispatch:
+
+```bash
+gh workflow run proofs.yml --ref dev -f proof=tests \
+  -f tests='tests/test_ci_provenance_checkout.py tests/ci_provenance_checkout_probe.py'
+```
+
+### Checking a run
+
+Step 2 of `select` is the protected checkout (step 1 is `Set up job`). Print its time and result for a run:
+
+```bash
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs?per_page=100" \
+  --jq '.jobs[] | select(.name == "select") | .steps[] | select(.number == 2) | {name, conclusion, started_at, completed_at}'
+```
+
+A healthy step is named `Run actions/checkout@v4` and completes in about 10 to 15 seconds. A recovered stall shows `RPC failed; curl 28 Operation too slow. Less than 1000 bytes/sec transferred the last 60 seconds` in the step log, then `Waiting <n> seconds before trying again`, and the step still succeeds.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| The step took about 80 to 100 seconds and succeeded | one stalled fetch, recovered by the retry | none; selection and its tests stand |
+| The step failed after about three and a half minutes with `Operation too slow` on every attempt | the stall or a GitHub outage persisted through all three attempts | rerun the failed jobs once GitHub serves fetches again |
+| The step runs until the `select` job is cancelled at five minutes | the `env` block was removed or changed | restore it; `tests/test_ci_provenance_checkout.py` fails without it |
+| The step fails within seconds | the error is not a stall: a missing base commit, permissions or a bad ref | read the first error in the step log; a retry does not fix it |
 
 ## Worker hive pod image build
 

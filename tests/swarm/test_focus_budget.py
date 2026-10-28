@@ -124,8 +124,69 @@ def test_unresolved_profiles_do_not_count_as_running_normal_work():
     assert selected == [{**plain, profile_first.UNRESOLVED: "unknown"}]
 
 
+def test_unresolved_profile_placement_stops_at_the_remaining_lane_room():
+    from scripts.swarm import focus_budget, profile_first
+
+    running = [work("running", state="claimed")]
+    waiting = [work(f"waiting{i}") for i in range(3)]
+
+    def locate(tasks, room):
+        return [{**task, profile_first.UNRESOLVED: "unknown"} for task in tasks[:room]], []
+
+    selected, notes = focus_budget.place(document(running + waiting), waiting, "eng", 3, 50, running, locate)
+    assert selected == [{**task, profile_first.UNRESOLVED: "unknown"} for task in waiting[:2]]
+    assert notes == []
+
+
 def test_unfocused_tasks_keep_their_existing_rank_order():
     from scripts.swarm import focus_budget
 
     plain = [work("urgent", rank="urgent"), work("normal")]
     assert focus_budget.select(document(plain), plain, "eng", 10, 50) == plain
+
+
+def test_a_document_without_freezes_ranks_every_task_unfocused():
+    from scripts.swarm import focus_budget
+
+    plain = [work("a"), work("b")]
+    found = {"tasks": plain, "phases": [], "plans": []}
+    assert focus_budget.ranks(found) == {"a": 0, "b": 0}
+    assert focus_budget.select(found, plain, "eng", 10, 50) == plain
+
+
+def test_a_focus_on_a_plan_reaches_tasks_through_their_phase():
+    from scripts.swarm import focus_budget
+
+    inside, outside = {**work("inside"), "phase": "p1"}, work("outside")
+    found = {
+        "tasks": [outside, inside],
+        "phases": [{"id": "p1", "plan": "plans/pl"}],
+        "plans": [{"id": "pl"}],
+        "freezes": [{"verb": "focus", "target": "plans/pl"}],
+    }
+    assert focus_budget.ranks(found) == {"outside": 1, "inside": 0}
+
+
+def test_focused_pull_requests_hold_focus_slots_when_running_is_read_from_the_document():
+    from scripts.swarm import focus_budget
+
+    held = [work(f"pr{i}", hot=True, state="pr") for i in range(5)]
+    hot, plain = work("hot", hot=True), [work(f"plain{i}") for i in range(5)]
+    assert focus_budget.select(document([*held, hot, *plain]), [*plain, hot], "eng", 10, 50) == plain
+
+
+def test_a_running_task_missing_from_the_document_counts_as_unfocused():
+    from scripts.swarm import focus_budget
+
+    hot, plain, ghost = work("hot", hot=True), work("plain"), work("ghost", state="claimed")
+    assert focus_budget.select(document([hot, plain]), [plain, hot], "eng", 10, 50, running=[ghost]) == [hot, plain]
+
+
+@pytest.mark.parametrize(
+    "capacity,weight,busy,focused,normal,slots",
+    [(10, 50, 2, 1, 0, 0), (10, 50, 4, 4, 10, 1), (10, 90, 8, 0, 10, 2)],
+)
+def test_allowance_is_bound_by_the_share_the_cap_and_the_free_room(capacity, weight, busy, focused, normal, slots):
+    from scripts.swarm import focus_budget
+
+    assert focus_budget.allowance(capacity, weight, busy, focused, normal) == slots

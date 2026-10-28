@@ -36,6 +36,7 @@ LEGACY = "roles"
 LEGACY_FIELDS = (LEGACY, "max_agents")
 UNSET = ("max_agents", "excluded")
 KEPT = (*UNSET, "ui", "ephemeral")
+MASTER_NAME = "swarm-master"
 
 
 def key(hive_id: str) -> str:
@@ -168,7 +169,9 @@ def _stored(redis: "Redis", hive_id: str) -> dict | None:
 
 
 def _settle(hive_id: str, record: dict) -> dict:
-    return {**_default(hive_id, record.get("ui", "no")), **record}
+    """The hive hosting the operator's interface runs the masters and is always named MASTER_NAME."""
+    settled = {**_default(hive_id, record.get("ui", "no")), **record}
+    return {**settled, "name": MASTER_NAME} if settled["ui"] == "yes" else settled
 
 
 def show(redis: "Redis", hive_id: str) -> dict | None:
@@ -244,6 +247,7 @@ def touch(redis: "Redis", hive_id: str, now_ms: int) -> None:
         if pipe.hexists(hash_key, "heartbeat_at"):
             pipe.multi()
             pipe.hset(hash_key, "heartbeat_at", now_ms)
+            pipe.pexpire(f"{hash_key}:sessions", LIVE_MS)
 
     redis.transaction(refresh, hash_key)
 

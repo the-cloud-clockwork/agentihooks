@@ -1,5 +1,6 @@
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -727,6 +728,27 @@ def test_estimate_names_the_file_whose_pragma_is_broken(tmp_path, monkeypatch):
         plan.estimate(tmp_path, {"scripts/broken.py": {3}})
 
 
+@pytest.mark.parametrize(
+    "decorator, refused", [("@functools.cache\n", True), ("@dataclasses.dataclass\nclass Box:\n", False)]
+)
+def test_estimate_refuses_changed_function_lines_that_produce_no_mutant(tmp_path, monkeypatch, decorator, refused):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    indent = "    " * decorator.endswith(":\n")
+    body = f"{indent}def doubled(value):\n{indent}    return value * 2\n"
+    (tmp_path / "scripts/cached.py").write_text(f"import dataclasses\nimport functools\n\n{decorator}{body}")
+    (tmp_path / "tests/test_cached.py").write_text("from scripts.cached import doubled\n")
+    line = 6 + (not refused)
+    if refused:
+        with pytest.raises(SystemExit) as refusal:
+            plan.estimate(tmp_path, {"scripts/cached.py": {line}})
+        assert str(refusal.value) == "scripts/cached.py: not mutated, changed function lines produce no mutants"
+    else:
+        assert plan.estimate(tmp_path, {"scripts/cached.py": {line}})[1] == 2
+    assert plan.estimate(tmp_path, {"scripts/cached.py": {1}})[1] == 0
+
+
 def _budget_project(tmp_path, monkeypatch, seconds, timed):
     _project(tmp_path, {})
     tests = _timed_tests(tmp_path, timed)
@@ -785,18 +807,48 @@ def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, m
         calls.append(("discover", root, bases, head))
         return changed
 
+    started = threading.Event()
+
     def record(repository):
-        calls.append(("record", repository))
+        started.set()
         return None, ""
 
+    def bases(*args):
+        # The record read is already running while the bases are worked out.
+        assert not changed or started.wait(10)
+        return ["base"]
+
     monkeypatch.setattr(plan, "read_record", record)
-    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "touches_code", lambda *args: calls.append(("touches", *args)) or bool(changed))
+    monkeypatch.setattr(plan, "own_bases", bases)
     monkeypatch.setattr(plan, "discover_changes", discover)
     assert plan.main() == 0
-    assert calls == [("discover", tmp_path, ["base"], "HEAD"), *[("record", "owner/repo")] * bool(changed)]
+    assert calls == [("touches", tmp_path, "base", "HEAD"), ("discover", tmp_path, ["base"], "HEAD")]
+    assert started.is_set() is bool(changed)
     assert f"changed={len(changed)}\n" in (tmp_path / "github-output").read_text()
     if not changed:
         assert "No change remains to mutate, so the recorded dev coverage is not read.\n" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "changed, touched",
+    [
+        ("scripts/sample.py", True),
+        ("hooks/sample.py", True),
+        ("scripts/caf\u00e9.py", True),
+        ("scripts/notes.txt", False),
+        ("tests/test_x.py", False),
+    ],
+)
+def test_touches_code_names_only_hooks_or_scripts_python_changes(tmp_path, changed, touched):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "base")
+    _git(tmp_path, "branch", "base")
+    (tmp_path / changed).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / changed).write_text("VALUE = 1\n")
+    _git(tmp_path, "add", changed)
+    _git(tmp_path, "commit", "-qm", "change")
+    assert plan.touches_code(tmp_path, "base", "HEAD") is touched
 
 
 @pytest.mark.parametrize("source, matched", [("sample", False), ("sample", True), ("plain", False)])
@@ -856,6 +908,46 @@ def test_planning_checks_selected_test_collection_and_worker_contracts(
     else:
         assert plan.main() == 0
         assert "stats_parts=" in output.read_text()
+
+
+def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_path, monkeypatch):
+    from tests import test_collection_imports as contracts
+
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/lazy.py").write_text("def load():\n    import mcp\n")
+    group = 'pytestmark = pytest.mark.xdist_group("mcp-sdk")\n'
+    (tmp_path / "tests/test_a.py").write_text("from scripts.lazy import load\n" + group)
+    (tmp_path / "tests/test_b.py").write_text("from scripts.lazy import load\n")
+    plan.validate_tests(tmp_path, ["tests/test_a.py::test_one"])
+    with pytest.raises(SystemExit, match="tests/test_b.py: loads the MCP SDK without the mcp-sdk worker group"):
+        plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
+
+
+def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(tmp_path, monkeypatch):
+    from tests import test_collection_imports as contracts
+
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/leaf.py").write_text("")
+    (tmp_path / "scripts/clean.py").write_text("def run():\n    import scripts.leaf\n")
+    (tmp_path / "tests/test_a.py").write_text("from scripts.clean import run\n")
+    (tmp_path / "tests/test_b.py").write_text("from scripts.clean import run\n")
+    walks = []
+    loads_heavy = contracts.loads_heavy
+
+    def counted(name, seen):
+        if name not in seen:
+            walks.append(name)
+        return loads_heavy(name, seen)
+
+    monkeypatch.setattr(contracts, "loads_heavy", counted)
+    plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
+    assert walks.count("scripts.leaf") == 1
 
 
 def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):

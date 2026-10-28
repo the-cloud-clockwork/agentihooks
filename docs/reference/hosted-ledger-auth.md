@@ -217,6 +217,106 @@ agentihooks ledger --slug my-ledger --as engineer@abc123-0001 alert list
 | `unauthenticated: the ledger server refused the hive credential: <status>` | The hive credential from `agentihooks hive add` is wrong or no longer known to the ledger | Run `agentihooks hive add` again from the UI hive, or set `AGENTIHOOKS_LEDGER_AGENT_TOKEN` |
 | A spawned agent has no `SWARM_SECRET` | Intended: the tick and the launcher remove it | Nothing to fix; the agent uses its own `AGENTIHOOKS_LEDGER_AGENT_TOKEN` |
 
+## Relayed operator words
+
+A master posts a decision the operator gave it in its own pane with `agentihooks ledger relay`. The ledger stores
+it as the operator's entry only when the quote is the operator's own words, recorded by the hooks. A hosted ledger
+server holds no record of what the operator typed on the workstation, so it reads those words from the shared swarm
+Redis, where the workstation hooks mirror them.
+
+### What is recorded
+
+- Every prompt the operator types in a named session (`UserPromptSubmit`) and every `AskUserQuestion` answer,
+  with its notes, is appended to the operator words store, `~/.agentihooks/operator_words/words.sqlite3`. Prompts
+  the swarm puts into a pane (inbox wakes, idle nudges, marked deliveries, task notifications, channel items) are
+  never recorded, and neither is the launch or handoff prompt of an agent the tick started.
+- An entry recorded for a swarm is also mirrored into the swarm Redis. Each speaker's name joins the set
+  `agentihooks:swarm:operator-words`, and the entry lands in the sorted set
+  `agentihooks:swarm:operator-words:<name>:entries`, scored by its time, as `{"swarm", "at", "words"}`.
+- An entry the mirror could not write, because Redis was unreachable or refused the write, stays marked unpublished
+  and is written the next time the store is opened, oldest first. Entries recorded before the mirror existed are
+  published the same way.
+- Words recorded with no swarm stay on the workstation only.
+- When the bin removes a ledger for good, that swarm's words are removed from the local store and from Redis.
+
+### What the server checks
+
+The server lands a relay only when every check passes. A failed check refuses the relay and names it:
+
+| Check | Refusal |
+|---|---|
+| The item exists | `relay on <item> refused: the entry does not exist` |
+| The relaying agent is an orchestrator of the ledger, its master | `relay on <item> refused: <name> is not an orchestrator of this ledger` |
+| The quote has at least three words, and those words, in order and ignoring case and spacing, sit inside one recorded entry | `relay on <item> refused: the server could not verify at least three quoted operator words in its recorded prompts or answers` |
+
+The quote is searched in the entries of the relaying agent's own names and of every master and planner of its swarm
+that has recorded words. A Doctor master also searches the masters of the swarm it watches. Engineer and CI sessions
+never count, and neither do words from another swarm's sessions. A relay matches words of any age.
+
+The server reads its own store first, then the mirrored entries in Redis, newest first. A quote the hooks never
+recorded is refused on both. The stored entry carries `by: operator`, `relayed_by` (the master),
+`relayed_from: master pane` and `quote`, the matched span as the operator wrote it. A question takes the relay as an
+answer; any other item takes it as a comment.
+
+The `agentihooks ledger relay` command runs the same check on the master's machine before it sends, and stops with
+`relay refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded`
+when it fails there.
+
+### Relay configuration
+
+The workstation hooks and the hosted server must resolve the same Redis. Both use the swarm Redis client:
+
+| Variable | Used when | Meaning |
+|---|---|---|
+| `AGENTIHOOKS_HIVE_REDIS_URL` | The process is not in local mode (`AGENTIHOOKS_DEPLOYMENT` is set to a mode other than `local`, or it is unset and `LEDGER_URL` is set) | The Redis the hosted swarm shares |
+| `AGENTIHOOKS_SWARM_REDIS_URL` | Otherwise | The swarm Redis; default `redis://127.0.0.1:6379/0` |
+| `AGENTIHOOKS_SWARM_KEY_PREFIX` | Always | Root of every swarm key; default `agentihooks` |
+
+The Redis URL carries the credential that authenticates the read and the write. Keep it in `~/.agentihooks/.env` or
+the server's secret, never in code or a committed file.
+
+### Relay usage
+
+Relay a decision the operator typed in the master pane, quoting at least three of his words:
+
+```bash
+agentihooks ledger \
+  --slug example-swarm \
+  --as master@a1b2c3-0001 \
+  relay tasks/t747 \
+  "Scale the stable hive to eight agents." \
+  --quote "scale the stable hive"
+```
+
+A landed relay prints `{"relayed": true, "item": "tasks/t747"}`. Queued for replay while the server is unreachable,
+it prints `"relayed": false` with `"queued": true`.
+
+Check that a master's words reached the shared Redis without printing them:
+
+```bash
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" SISMEMBER agentihooks:swarm:operator-words master@a1b2c3-0001
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" ZCARD agentihooks:swarm:operator-words:master@a1b2c3-0001:entries
+```
+
+Use `AGENTIHOOKS_HIVE_REDIS_URL` instead when the workstation is not in local mode.
+
+### Relay limitations
+
+- The hosted server sees only words the workstation mirrored. While the workstation cannot reach Redis, its new
+  words stay local, and relays of them are refused on the hosted ledger until a later store open publishes them.
+- A master's relay check uses the master's own store and Redis, so it can pass on the workstation and still be
+  refused by a server that reads a different Redis.
+- Words recorded before a session was bound to a swarm carry no swarm and are never mirrored.
+
+### Relay troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `relay refused: the quote is not in an operator prompt or answer …` from the command | The quote is under three words, the operator never typed it in a master or planner pane of this swarm, or it spans two separate prompts | Quote at least three consecutive words from one prompt or answer the operator gave in that pane |
+| The command passes, then the server refuses with `could not verify at least three quoted operator words` | The workstation and the server resolve different Redis URLs, the mirror has not published the words yet, or the key prefix differs | Compare the Redis URL and `AGENTIHOOKS_SWARM_KEY_PREFIX` on both sides; run the `SISMEMBER` and `ZCARD` checks above against the server's Redis |
+| `is not an orchestrator of this ledger` | The relaying session joined the ledger as a member, or is not the master | Relay from the master session, which joins as orchestrator |
+| `SISMEMBER` returns `0` for a master with recorded words | The words carry no swarm, or Redis refused the write | Check `AGENTIHOOKS_SWARM` in that session and the Redis user's write permission on `agentihooks:swarm:operator-words*` |
+
 ## Evidence
 
 - `tests/swarm_ledger/test_swarm_url_client.py` covers the client: `SWARM_URL` makes the client remote and sets its base address, a remote client without an address names `SWARM_URL`, the access headers need both parts and ride every API request, ledger transport request, upload, proof ledger call, proof control call and health probe, a pinned agent derives its token from the server secret, and `SWARM_URL` never starts a local server. `tests/swarm/test_runtime.py` checks that a spawned agent gets its own token and never the server secret; `tests/swarm/test_ledger_watchdog.py` that the watchdog leaves a remote ledger alone.
@@ -226,3 +326,4 @@ agentihooks ledger --slug my-ledger --as engineer@abc123-0001 alert list
   - the page server takes an operator write behind Access;
   - both refuse the page credential.
 - `tests/swarm_ledger/test_authority_context.py` covers the tick credential: it accepts a current `X-Ledger-Tick` and refuses one for another ledger, an expired one, one past the 900 second window, a tampered or malformed one, and any tick credential when the server has no `SWARM_SECRET`.
+- `tests/context/test_operator_words.py` covers the mirror: swarm words reach a server without the local store while words with no swarm stay local, the newest shared words win, removing a swarm drops only its shared words, an unreachable or failing Redis keeps the local words, and the shared client connects once per process and retries after a refusal. `tests/swarm_ledger/test_ledger_relay.py` runs a hosted ledger that lands a relay of words recorded on the workstation and refuses an unrecorded quote and an engineer's words.

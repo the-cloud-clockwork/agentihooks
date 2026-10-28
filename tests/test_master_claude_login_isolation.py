@@ -12,7 +12,7 @@ ROLES = ("master", "engineer", "cicd", "planner")
 
 @pytest.fixture
 def roles(world, monkeypatch, tmp_path):
-    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", tmp_path / "ah")
     for name in ROLES:
         _write(world["bundle"] / "profiles" / name / "profile.yml", f"name: {name}\n")
     _write(world["home"] / ".claude" / ".credentials.json", "operator login")

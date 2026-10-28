@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from tests.swarm.test_cli import env as env
@@ -44,11 +46,13 @@ def test_a_claimable_task_has_no_hold():
     assert hold(doc([task("a")]), "a") == ""
 
 
-def test_focus_weight_defaults_to_fifty_and_is_settable(env):
+def test_focus_weight_defaults_to_fifty_and_set_reports_the_new_value(env, capsys):
     store, _, _ = env
     run(SLUG, "create", "--repo", "/repo")
     assert store.config(SLUG).focus_weight == 50
+    capsys.readouterr()
     assert run(SLUG, "set", "focus-weight=30") == 0
+    assert json.loads(capsys.readouterr().out)["focus_weight"] == 30
     assert store.config(SLUG).focus_weight == 30
     assert run(SLUG, "set", "focus-weight=x") == 1
     assert run(SLUG, "set", "focus-weight=101") == 1
