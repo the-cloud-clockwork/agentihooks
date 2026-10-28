@@ -548,6 +548,8 @@ class InboxStore:
             moved = replace(item, state="pending", updated_at=now_ms(), reason=reason)
             pipe.multi()
             pipe.delete(key, history, self.key("entry", item_id))
+            pipe.srem(self.key("wake-outbox"), item_id)
+            pipe.sadd(target.key("wake-outbox"), item_id)
             pipe.zrem(self.key("address", item.address), item_id)
             pipe.zrem(self.key("open", item.address), item_id)
             pipe.decr(self.key("open-size", item.address))

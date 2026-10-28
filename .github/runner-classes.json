@@ -29,7 +29,7 @@
   "mutation-line-selection-proof.yml/compare": "batch",
   "mutation-preflight.yml/mutation": "light",
   "mutation-preflight.yml/mutation-shard": "batch",
-  "mutation-preflight.yml/plan": "light",
+  "mutation-preflight.yml/plan": "standard",
   "mutation-preflight.yml/refine": "light",
   "mutation-preflight.yml/stats": "batch",
   "mutation-preflight.yml/touched-tests": "standard",

@@ -3,6 +3,9 @@ from pathlib import Path
 
 from hooks.proc import Process, _process, _target, processes
 
+READERS = {"processes", "_process"}
+PROC_ROOT = "/proc/"
+
 
 def fake_proc(root: Path, pid: int, *, comm="claude", argv=("claude",), ppid=1, start=4242, state="S") -> None:
     entry = root / str(pid)
@@ -60,7 +63,7 @@ def _names_a_process(node):
         isinstance(part, ast.JoinedStr)
         and len(part.values) > 1
         and isinstance(part.values[0], ast.Constant)
-        and part.values[0].value == "/proc/"
+        and part.values[0].value == PROC_ROOT
         and isinstance(part.values[1], ast.FormattedValue)
         for part in ast.walk(node)
     )
@@ -73,10 +76,8 @@ def _process_table_reads(check, process_paths):
             continue
         func = call.func
         if isinstance(func, ast.Name):
-            count += func.id in {"processes", "_process"} or (
-                func.id == "open" and bool(call.args) and _names_a_process(call.args[0])
-            )
-        elif isinstance(func, ast.Attribute) and func.attr in {"processes", "_process"}:
+            count += func.id in READERS or (func.id == "open" and bool(call.args) and _names_a_process(call.args[0]))
+        elif isinstance(func, ast.Attribute) and func.attr in READERS:
             count += 1
         elif isinstance(func, ast.Attribute) and func.attr in {"exists", "is_file", "read_text", "read_bytes", "open"}:
             receiver = func.value
@@ -84,11 +85,16 @@ def _process_table_reads(check, process_paths):
     return count
 
 
-def test_no_check_reads_the_process_table_twice_in_one_statement():
-    tests = Path(__file__).resolve().parent
+def _process_table_violations(tests):
     found = []
     for path in sorted(tests.rglob("*.py")):
-        for function in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        source = path.read_text(encoding="utf-8")
+        if source.isascii() and not any(
+            marker in source
+            for marker in ("_process", "processes", "exists", "is_file", "read_text", "read_bytes", "open")
+        ):
+            continue
+        for function in ast.walk(ast.parse(source)):
             if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             process_paths = {
@@ -107,4 +113,38 @@ def test_no_check_reads_the_process_table_twice_in_one_statement():
                     continue
                 if _process_table_reads(check, process_paths) > 1:
                     found.append(f"{path.relative_to(tests)}:{statement.lineno}")
-    assert sorted(set(found)) == []
+    return sorted(set(found))
+
+
+def test_no_check_reads_the_process_table_twice_in_one_statement():
+    assert _process_table_violations(Path(__file__).resolve().parent) == []
+
+
+def test_process_table_scan_skips_irrelevant_files_and_refuses_double_reads(tmp_path, monkeypatch):
+    (tmp_path / "irrelevant.py").write_text("value = 1", encoding="utf-8")
+    sources = {
+        "processes.py": "def check():\n    assert 1 not in processes() or processes()[1].state == 'Z'\n",
+        "process.py": "def check():\n    assert _process(1) == _process(1)\n",
+        "path.py": 'def check(pid):\n    path = Path(f"/proc/{pid}/stat")\n    assert path.exists() and path.read_text()\n',
+        "escaped.py": 'def check(pid):\n    path = Path(f"/pr\\x6fc/{pid}/stat")\n    assert path.exists() and path.read_text()\n',
+        "adjacent.py": 'def check(pid):\n    path = Path(f"/pr" f"oc/{pid}/stat")\n    assert path.exists() and path.read_text()\n',
+        "unicode.py": 'def check(pid):\n    assert ｏｐｅｎ(f"/pr\\x6fc/{pid}/stat") and ｏｐｅｎ(f"/pr\\x6fc/{pid}/stat")\n',
+        "snapshot.py": "def check():\n    snapshot = processes()\n    assert 1 not in snapshot or snapshot[1].state == 'Z'\n",
+    }
+    for name, source in sources.items():
+        (tmp_path / name).write_text(source, encoding="utf-8")
+    parse = ast.parse
+
+    def parse_relevant(source, *args, **kwargs):
+        assert source != "value = 1", "irrelevant files must not be parsed"
+        return parse(source, *args, **kwargs)
+
+    monkeypatch.setattr(ast, "parse", parse_relevant)
+    assert _process_table_violations(tmp_path) == [
+        "adjacent.py:3",
+        "escaped.py:3",
+        "path.py:3",
+        "process.py:2",
+        "processes.py:2",
+        "unicode.py:2",
+    ]

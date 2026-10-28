@@ -190,6 +190,43 @@ def test_a_dropped_swarm_notice_closes_the_item_and_tells_its_sender(store):
     assert notice.text == delivery.REFUSED.format(id=item.id, reason="the swarm notice was dropped")
 
 
+def test_a_refused_item_from_a_retired_sender_whose_seat_moved_on_closes_without_a_notice(store):
+    old = store.names.next("sw", "master")
+    store.seats.occupy("master@sw", old, 1)
+    store.names.retire(old, 2)
+    new = store.names.next("sw", "master")
+    store.seats.occupy("master@sw", new, 3)
+    box = InboxStore(store.redis)
+    item = box.send(old, "operator", "the phase is done")
+    assert delivery.post(box, item, lambda: False) is False
+    closed = box.get(item.id)
+    assert (closed.state, closed.reason) == (
+        "cancelled",
+        "cancelled: refused by the ledger page: the swarm notice was dropped",
+    )
+    assert box.pending_items(old) == [] and box.pending_mail(new) == []
+
+
+def test_a_refused_item_from_a_retired_sender_still_holding_its_seat_tells_it(store):
+    gone = store.names.next("sw", "eng")
+    store.seats.occupy("eng-1@sw", gone, 1)
+    store.names.retire(gone, 2)
+    box = InboxStore(store.redis)
+    item = box.send(gone, "operator", "the docs are merged")
+    assert delivery.post(box, item, lambda: False) is False
+    [notice] = box.pending_items(gone)
+    assert notice.text == delivery.REFUSED.format(id=item.id, reason="the swarm notice was dropped")
+
+
+def test_a_refused_item_from_a_retired_sender_never_seated_closes_without_a_notice(store):
+    gone = store.names.next("sw", "eng")
+    store.names.retire(gone, 2)
+    box = InboxStore(store.redis)
+    item = box.send(gone, "operator", "the docs are merged")
+    assert delivery.post(box, item, lambda: False) is False
+    assert box.get(item.id).state == "cancelled" and box.pending_items(gone) == []
+
+
 def test_a_shown_item_stays_open_for_its_caller(store):
     box = InboxStore(store.redis)
     item = box.send("sw-eng-1", "operator", "the docs are merged")
