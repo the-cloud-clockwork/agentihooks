@@ -9,7 +9,7 @@ from pathlib import Path
 from scripts.swarm_ledger import request_metrics
 
 from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
-from .entry import Entry
+from .entry import Entry, detached
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
 from .rows import TABLES, assemble, diff, encode, flatten, load, read_rows, write_rows
@@ -661,7 +661,7 @@ class SQLiteLedgerRepository:
             if state.get("tasks", []) != entry.state.get("tasks", [])
             else previous.get("task_revision", previous["rev"])
         )
-        fragments = document(state, entry.fragments)
+        fragments, writer = detached(document(state, entry.fragments), entry.fragments, state)
         state = fragments.value
         before, after = diff(*(without_events(value) for value in (entry.state, state)))
         paths = write_rows(connection, slug, before, after)
@@ -677,7 +677,7 @@ class SQLiteLedgerRepository:
             UPDATE,
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),
         )
-        return Entry(generation, None, state, fragments)
+        return Entry(generation, None, state, fragments, writer)
 
     def _insert(self, connection, slug: str, state: dict, token: str, seeds: dict | None = None) -> None:
         previous = connection.execute(GENERATION, (slug,)).fetchone()
