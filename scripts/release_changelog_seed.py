@@ -19,12 +19,11 @@ def stable_tags(tags: list[str]) -> list[str]:
     return sorted((t for t in tags if rc.STABLE.fullmatch(t)), key=rc.version)
 
 
-def dev_trees(ref: str) -> dict[str, str]:
+def dev_trees() -> dict[str, str]:
     trees = {}
-    for line in rc.run("git", "log", "--first-parent", "--format=%T %H", ref).split("\n"):
-        if line.strip():
-            tree, sha = line.split()
-            trees.setdefault(tree, sha)
+    for line in rc.git("log", "--first-parent", "--format=%T %H").splitlines():
+        tree, sha = line.split()
+        trees.setdefault(tree, sha)
     return trees
 
 
@@ -88,24 +87,22 @@ def merged_count(repository: str, since: str, until: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m scripts.release_changelog_seed")
+    parser = argparse.ArgumentParser()
     parser.add_argument("changelog", type=Path)
+    parser.add_argument("sections", type=Path)
     parser.add_argument("--days", type=int, default=DAYS)
-    parser.add_argument("--dev", default="origin/dev")
-    parser.add_argument("--sections", type=Path)
     args = parser.parse_args(argv)
     repository = os.environ["GITHUB_REPOSITORY"]
     since = (date.today() - timedelta(days=args.days)).isoformat()
-    tags = rc.run("git", "tag", "--list", "v*").split()
-    trees = dev_trees(args.dev)
-    releases = window_releases(tags, trees, since)
+    trees = dev_trees()
+    releases = window_releases(rc.git("tag").split(), trees, since)
     if not releases:
         print(f"no release since {since}", file=sys.stderr)
         return 1
     url = os.environ.get(rc.URL_VAR) or rc.DEFAULT_URL
     model = os.environ.get(rc.MODEL_VAR) or rc.DEFAULT_MODEL
     access = rc.gateway_headers(dict(os.environ))
-    existing = args.changelog.read_text() if args.changelog.exists() else ""
+    existing = args.changelog.read_text()
     written = written_tags(existing)
     sections = write_sections(
         [release for release in releases if release[0] not in written],
@@ -114,10 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         repository,
     )
     args.changelog.write_text(merge_changelog(existing, sections))
-    if args.sections:
-        args.sections.mkdir(parents=True, exist_ok=True)
-        for section in sections:
-            (args.sections / f"{section.split()[1]}.md").write_text(section)
+    for section in sections:
+        (args.sections / f"{section.split()[1]}.md").write_text(section)
     changes = [c for _, kept in releases for c in kept]
     pulls = sum(c.number is not None for c in changes)
     until = commit_field(release_revision(releases[0][0], trees), "%cI")

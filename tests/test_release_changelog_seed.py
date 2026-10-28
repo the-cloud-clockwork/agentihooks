@@ -73,7 +73,26 @@ def test_release_revision_without_a_graded_line_matches_the_dev_tree(repo):
     first = _commit(repo, "One (#1)")
     _commit(repo, "Two (#2)", "g")
     _promote(repo, first, "v1.0.1", graded_line=False)
-    assert seed.release_revision("v1.0.1", seed.dev_trees("dev")) == first
+    assert seed.release_revision("v1.0.1", seed.dev_trees()) == first
+
+
+def test_dev_trees_follow_only_the_first_parent_line(repo):
+    first = _commit(repo, "One (#1)")
+    _git(repo, "switch", "-q", "-c", "side")
+    _commit(repo, "Side one", "s")
+    _commit(repo, "Side two", "t")
+    _git(repo, "switch", "-q", "dev")
+    _git(repo, "merge", "-q", "--no-ff", "-m", "Merge side", "side")
+    merge = _git(repo, "rev-parse", "HEAD")
+    assert seed.dev_trees() == {
+        _git(repo, "rev-parse", f"{merge}^{{tree}}"): merge,
+        _git(repo, "rev-parse", f"{first}^{{tree}}"): first,
+    }
+
+
+def test_written_tags_reads_every_release_heading():
+    text = f"{rc.TITLE}\n\n{rc.INTRO}\n\n## v1.0.2 · d\n\n### x · y\n\n## v1.0.1 · c\n"
+    assert seed.written_tags(text) == {"v1.0.2", "v1.0.1"}
 
 
 def test_release_revision_refuses_a_tag_matching_no_dev_tree(repo):
@@ -101,7 +120,15 @@ def test_window_releases_groups_by_first_release_and_drops_older_changes(repo, m
     ]
 
 
-def test_write_sections_renders_each_release_with_one_entry_per_change(repo):
+def test_write_sections_renders_each_release_with_one_entry_per_change(repo, monkeypatch):
+    pools = []
+
+    class Pool(seed.ThreadPoolExecutor):
+        def __init__(self, workers):
+            pools.append(workers)
+            super().__init__(workers)
+
+    monkeypatch.setattr(seed, "ThreadPoolExecutor", Pool)
     graded = _commit(repo, "Add it (#7)")
     _promote(repo, graded, "v1.0.1")
     releases = seed.window_releases(["v1.0.1"], {}, "2026-09-01")
@@ -114,6 +141,7 @@ def test_write_sections_renders_each_release_with_one_entry_per_change(repo):
         workers=2,
     )
     assert asked == [7]
+    assert pools == [2]
     assert sections == [
         f"## v1.0.1 · 2026-09-01\n\n### 2026-09-01 · {graded[:12]} · #7 · @ann\n\n**Add it**\n\n{_words(21)}\n"
     ]
@@ -160,49 +188,96 @@ class _Today(seed.date):
         return cls(2026, 10, 28)
 
 
-def _seed_repo(repo, monkeypatch):
-    _promote(repo, _commit(repo, "Old (#1)"), "v1.0.1")
+def _seed_repo(repo, monkeypatch, models):
+    _promote(repo, _commit(repo, "Old (#1)"), "v1.0.1", graded_line=False)
     _day(monkeypatch, "2026-10-20")
     _commit(repo, "Direct fix", "h")
+    _commit(repo, "Add the base (#4)", "i")
     graded = _commit(repo, "Add the seed (#5)", "g")
-    _promote(repo, graded, "v1.0.2")
+    _promote(repo, graded, "v1.0.2", graded_line=False)
     monkeypatch.setattr(seed, "date", _Today)
+
+    def answer(request, timeout):
+        models.append(json.loads(request.data)["model"])
+        return _Response(json.dumps({"choices": [{"message": {"content": _words(30)}}]}).encode())
+
+    monkeypatch.setattr(seed, "urlopen", answer)
     monkeypatch.setattr(
-        seed,
-        "urlopen",
-        lambda request, timeout: _Response(json.dumps({"choices": [{"message": {"content": _words(30)}}]}).encode()),
-    )
-    monkeypatch.setattr(
-        rc, "gh_graphql", lambda query: {"repository": {"p5": {"author": {"login": "dev"}, "body": ""}}}
+        rc,
+        "gh_graphql",
+        lambda query: {
+            "repository": {
+                "p4": {"author": {"login": "ann"}, "body": ""},
+                "p5": {"author": {"login": "dev"}, "body": ""},
+            }
+        },
     )
     for var in (rc.KEY_VAR, *rc.ACCESS_VARS):
         monkeypatch.setenv(var, "k")
+    monkeypatch.delenv(rc.MODEL_VAR, raising=False)
     monkeypatch.setenv("GITHUB_REPOSITORY", "org/repo")
     return graded
 
 
-def test_main_seeds_the_window_and_reports_matching_counts(repo, monkeypatch, tmp_path, capsys):
-    graded = _seed_repo(repo, monkeypatch)
-    windows = []
-    monkeypatch.setattr(seed, "merged_count", lambda *a: windows.append(a) or 1)
+def _paths(tmp_path):
     changelog = tmp_path / "RELEASES.md"
+    changelog.write_text("")
     sections = tmp_path / "sections"
-    assert seed.main([str(changelog), "--dev", "dev", "--sections", str(sections)]) == 0
+    sections.mkdir()
+    return changelog, sections
+
+
+def test_main_seeds_the_window_and_reports_matching_counts(repo, monkeypatch, tmp_path, capsys):
+    models = []
+    graded = _seed_repo(repo, monkeypatch, models)
+    windows = []
+    monkeypatch.setattr(seed, "merged_count", lambda *a: windows.append(a) or 2)
+    changelog, sections = _paths(tmp_path)
+    assert seed.main([str(changelog), str(sections), "--days", "30"]) == 0
     text = changelog.read_text()
+    assert models == [rc.DEFAULT_MODEL] * 3
     assert [path.name for path in sections.iterdir()] == ["v1.0.2.md"]
     assert rc.insert_release("", (sections / "v1.0.2.md").read_text()) == text
     assert text.startswith(f"{rc.TITLE}\n\n{rc.INTRO}\n\n## v1.0.2 · 2026-10-20\n\n")
     assert f"· {graded[:12]} · #5 · @dev\n\n**Add the seed**\n\n{_words(30)}\n" in text
     assert "· direct commit · @a\n\n**Direct fix**" in text
     assert "Old" not in text
-    assert windows == [("org/repo", "2026-09-28", _git(repo, "log", "-1", "--format=%cI", graded))]
-    out = capsys.readouterr().out
-    assert "entries: 2 (pull requests 1, direct commits 1)\n" in out
-    assert "merged pull requests into dev in window: 1\n" in out
+    until = _git(repo, "log", "-1", "--format=%cI", graded)
+    assert windows == [("org/repo", "2026-09-28", until)]
+    assert capsys.readouterr().out == (
+        f"window: 2026-09-28 to {until}, releases v1.0.2 to v1.0.2\n"
+        "entries: 3 (pull requests 2, direct commits 1)\n"
+        "merged pull requests into dev in window: 2\n"
+    )
+
+
+def test_main_uses_the_configured_model_and_skips_written_releases(repo, monkeypatch, tmp_path):
+    models = []
+    _seed_repo(repo, monkeypatch, models)
+    monkeypatch.setenv(rc.MODEL_VAR, "haiku")
+    monkeypatch.setattr(seed, "merged_count", lambda *a: 2)
+    changelog, sections = _paths(tmp_path)
+    assert seed.main([str(changelog), str(sections)]) == 0
+    assert models == ["haiku"] * 3
+    written = changelog.read_text()
+    second = tmp_path / "second"
+    second.mkdir()
+    assert seed.main([str(changelog), str(second)]) == 0
+    assert models == ["haiku"] * 3
+    assert changelog.read_text() == written
+    assert list(second.iterdir()) == []
 
 
 def test_main_fails_when_the_counts_differ(repo, monkeypatch, tmp_path, capsys):
-    _seed_repo(repo, monkeypatch)
-    monkeypatch.setattr(seed, "merged_count", lambda *a: 2)
-    assert seed.main([str(tmp_path / "RELEASES.md"), "--dev", "dev"]) == 1
-    assert "merged pull requests into dev in window: 2\n" in capsys.readouterr().out
+    _seed_repo(repo, monkeypatch, [])
+    monkeypatch.setattr(seed, "merged_count", lambda *a: 3)
+    assert seed.main([*map(str, _paths(tmp_path))]) == 1
+    assert "merged pull requests into dev in window: 3\n" in capsys.readouterr().out
+
+
+def test_main_fails_without_a_release_in_the_window(repo, monkeypatch, tmp_path, capsys):
+    _promote(repo, _commit(repo, "Old (#1)"), "v1.0.1")
+    monkeypatch.setattr(seed, "date", _Today)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "org/repo")
+    assert seed.main([*map(str, _paths(tmp_path))]) == 1
+    assert capsys.readouterr().err == "no release since 2026-09-28\n"

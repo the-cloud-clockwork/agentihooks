@@ -50,7 +50,9 @@ jobs:
           DAYS: ${{ inputs.days }}
         shell: bash
         run: |
-          python -m scripts.release_changelog_seed "$RUNNER_TEMP/changelog/RELEASES.md" --days "$DAYS" --sections "$RUNNER_TEMP/sections" | tee -a "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$RUNNER_TEMP/sections"
+          touch "$RUNNER_TEMP/changelog/RELEASES.md"
+          python -m scripts.release_changelog_seed "$RUNNER_TEMP/changelog/RELEASES.md" "$RUNNER_TEMP/sections" --days "$DAYS" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Publish the seeded changelog
         working-directory: ${{ runner.temp }}/changelog
