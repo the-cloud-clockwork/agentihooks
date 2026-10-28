@@ -438,12 +438,19 @@ def stale_claims(agents, tasks, limits):
                 "stale claim",
                 a["task"],
                 f"no progress for {_plural(quiet, 'minute')}",
-                (f"task {_title(tasks, a['task'])}", f"claimed by {a['name']}"),
+                (f"task {_title(tasks, a['task'])}", f"claimed by {a['name']}", _last_nudge(a)),
                 f"{_plural(limits.stale_minutes, 'minute')} without progress",
                 quiet,
             )
         )
     return found
+
+
+def _last_nudge(agent):
+    minutes = agent.get("last_nudge_minutes")
+    if minutes is None:
+        return "no stale nudge sent"
+    return f"last stale nudge {_plural(minutes, 'minute')} ago"
 
 
 def watch_limits(by, limits):

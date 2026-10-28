@@ -64,8 +64,8 @@ def assign_nodes(
     workers: int,
     sizes: dict[str, int] | None = None,
 ) -> list[list[str]]:
-    # A named group's tests in one file reuse what its first test built, which another shard would build again; a
-    # group longer than an even shard share still splits, since one shard cannot hold it.
+    # Every shard that holds one of a file's tests collects all of them, and a named group's tests reuse what its first
+    # test built, so a file stays on one shard; a file longer than an even shard share still splits.
     share = sum(durations.values()) / shards
     file_seconds: dict[str, float] = {}
     for node, duration in durations.items():
@@ -74,7 +74,7 @@ def assign_nodes(
     units: dict[str, list[str]] = {}
     for node in durations:
         path = node.split("::", 1)[0]
-        together = isinstance(grouped, dict) and path in grouped and file_seconds[path] <= share
+        together = file_seconds[path] <= share
         units.setdefault(path if together else node, []).append(node)
     seconds = {unit: sum(durations[node] for node in nodes) for unit, nodes in units.items()}
     files = {unit: unit.split("::", 1)[0] for unit in units}

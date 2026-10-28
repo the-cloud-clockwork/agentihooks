@@ -101,9 +101,18 @@ function openFindings(sw) {
   return (sw.findings || []).filter((f) => !f.verdict);
 }
 
+export function laneCeilings(sw) {
+  const scaled = (sw.config.scaling === "auto" && ((sw.quota_capacity || {}).autoscale || {}).ceilings) || {};
+  return Object.fromEntries(LIVE_LANES.map(([lane, key]) => [key, scaled[lane] ?? sw.config[key] ?? 0]));
+}
+
+function staleClaims(sw) {
+  return openFindings(sw).filter((f) => f.kind === "stale claim").map((f) => [f.subject, ...f.evidence.slice(1)].join(" · "));
+}
+
 function liveCaps(sw) {
-  const live = (lane) => liveAgents(sw).filter((a) => a.lane === lane).length;
-  return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${sw.config[key] ?? 0}`);
+  const live = (lane) => liveAgents(sw).filter((a) => a.lane === lane).length, caps = laneCeilings(sw);
+  return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${caps[key]}`);
 }
 
 function modelText(a) {
@@ -328,6 +337,7 @@ export function renderSwarm(sw) {
   $("swarm-alert").hidden = !open.length;
   $("alert-count").textContent = `${open.length} ${open.length === 1 ? "finding" : "findings"} open`;
   $("alert-kinds").textContent = [...new Set(open.map((f) => f.kind))].join(" · ");
+  $("alert-stale").replaceChildren(...staleClaims(sw).map((text) => h("span", { text })));
   $("alert-live").replaceChildren(...liveCaps(sw).map((text) => h("span", { text })));
   renderAgents(sw, now);
   renderOverlays(sw);
