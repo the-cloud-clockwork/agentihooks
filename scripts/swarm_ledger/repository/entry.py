@@ -19,7 +19,8 @@ def thawed(value: object) -> object:
 
 
 class Entry:
-    """One ledger as last stored: its generation, canonical text, a parsed copy callers only read and views of it."""
+    """One ledger as last stored: its generation, canonical text, a parsed copy callers only read, views of it and
+    the private copy the write that stored it left for the next write."""
 
     def __init__(self, generation, text, state, fragments=None, writer=None):
         self.generation, self._text, self.state, self.views = generation, text, state, {}

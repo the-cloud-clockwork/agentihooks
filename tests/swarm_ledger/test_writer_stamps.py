@@ -2,6 +2,7 @@ import copy
 
 import pytest
 
+from scripts.swarm_ledger.repository import entry as entry_module
 from scripts.swarm_ledger.repository import sqlite
 from scripts.swarm_ledger.repository.entry import Entry
 from tests.swarm_ledger.test_repository_outbox import CHAT, CLAIM, store
@@ -155,3 +156,35 @@ def test_a_failed_write_drops_the_held_copy_and_the_next_write_copies_again(tmp_
     _, rejected = repo.apply_ops("ledger", ops=[CHAT])
     assert rejected == []
     assert sqlite.SQLiteLedgerRepository(repo.path).get_document("ledger") == repo.get_document("ledger")
+
+
+def test_a_write_through_the_held_copy_copies_only_the_leaves_it_changed(tmp_path, monkeypatch):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    tasks = [copy.deepcopy(task) for task in cached(repo).state["tasks"]]
+    assert tasks
+    copied = []
+    real = entry_module.thawed
+
+    def counting(value):
+        copied.append(value)
+        return real(value)
+
+    monkeypatch.setattr(entry_module, "thawed", counting)
+    published, _ = repo.apply_ops("ledger", ops=[CHAT], copy_state=False)
+    assert published["tasks"] == tasks
+    assert not [value for value in copied if isinstance(value, dict) and value in tasks]
+    assert [value for value in copied if isinstance(value, dict) and value.get("text") == "hello"]
+    published["chat"].clear()
+    assert cached(repo).writer["chat"]
+
+
+def test_a_reloaded_entry_holds_no_writer_copy_and_copies_on_write(tmp_path):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    reloaded = cached(sqlite.SQLiteLedgerRepository(repo.path))
+    assert reloaded.writer is None
+    writing = reloaded.for_write()
+    assert writing == reloaded.state
+    assert writing is not reloaded.state
+    assert writing["tasks"] is not reloaded.state["tasks"]
