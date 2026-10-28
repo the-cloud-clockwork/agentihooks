@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts import ci_branch_lanes, ci_public_runners
+from scripts import ci_branch_lanes
 
 pytestmark = pytest.mark.unit
 
@@ -22,7 +22,7 @@ ROUTED = "${{ contains(fromJSON('[\"nestorcolt\"]'), github.actor) && '%s' || 'u
     ],
 )
 def test_a_private_runner_label_is_refused(runner, label):
-    assert ", ".join(ci_public_runners.refused(runner)) == label
+    assert ", ".join(ci_branch_lanes.private_runners(runner)) == label
 
 
 @pytest.mark.parametrize(
@@ -38,11 +38,12 @@ def test_a_private_runner_label_is_refused(runner, label):
         ROUTED % "anton-oss-light",
         "${{ github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss' }}",
         {"labels": ["anton-oss-batch"]},
+        "x",
         None,
     ],
 )
 def test_public_runner_labels_pass(runner):
-    assert ci_public_runners.refused(runner) == []
+    assert ci_branch_lanes.private_runners(runner) == []
 
 
 def test_problems_name_each_job_with_a_private_label():
@@ -53,9 +54,11 @@ def test_problems_name_each_job_with_a_private_label():
             "call": {"uses": "./.github/workflows/b.yml"},
         }
     }
-    assert ci_public_runners.problems(workflow) == ["job bad asks for private runner label anton-light, anton-heavy"]
-    assert ci_public_runners.problems(None) == []
-    assert ci_public_runners.problems({"jobs": "x"}) == []
+    assert ci_branch_lanes.runner_problems(workflow) == [
+        "job bad asks for private runner label anton-light, anton-heavy"
+    ]
+    assert ci_branch_lanes.runner_problems(None) == []
+    assert ci_branch_lanes.runner_problems({"jobs": "x"}) == []
 
 
 def test_the_branch_lanes_grader_refuses_a_planted_private_label():
@@ -69,4 +72,4 @@ def test_the_branch_lanes_grader_refuses_a_planted_private_label():
 def test_the_repository_workflows_ask_only_for_public_runners():
     folder = ROOT / ".github/workflows"
     for path in sorted([*folder.glob("*.yml"), *folder.glob("*.yaml")]):
-        assert ci_public_runners.problems(yaml.safe_load(path.read_text())) == [], path.name
+        assert ci_branch_lanes.runner_problems(yaml.safe_load(path.read_text())) == [], path.name
