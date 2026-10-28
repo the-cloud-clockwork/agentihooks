@@ -121,7 +121,8 @@ def test_no_check_reads_the_process_table_twice_in_one_statement():
 
 
 def test_process_table_scan_skips_irrelevant_files_and_refuses_double_reads(tmp_path, monkeypatch):
-    (tmp_path / "irrelevant.py").write_text("value = 1", encoding="utf-8")
+    irrelevant = "def check(path):\n    assert path.exists() and open(path).read() and path.is_file()\n"
+    (tmp_path / "irrelevant.py").write_text(irrelevant, encoding="utf-8")
     sources = {
         "processes.py": "def check():\n    assert 1 not in processes() or processes()[1].state == 'Z'\n",
         "process.py": "def check():\n    assert _process(1) == _process(1)\n",
@@ -136,7 +137,7 @@ def test_process_table_scan_skips_irrelevant_files_and_refuses_double_reads(tmp_
     parse = ast.parse
 
     def parse_relevant(source, *args, **kwargs):
-        assert source != "value = 1", "irrelevant files must not be parsed"
+        assert source != irrelevant, "irrelevant files must not be parsed"
         return parse(source, *args, **kwargs)
 
     monkeypatch.setattr(ast, "parse", parse_relevant)
