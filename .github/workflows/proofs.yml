@@ -68,7 +68,7 @@ jobs:
           enable-cache: false
       - name: Install shared dependencies
         working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Observe base receipt request times
         working-directory: base
         run: |
@@ -111,7 +111,7 @@ jobs:
           enable-cache: false
       - name: Install dependencies shared by both revisions
         working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Replay base on the shared runner
         working-directory: base
         env:
@@ -302,7 +302,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
 
       - name: Install the pinned nats server for the bus backend tests
         timeout-minutes: 3

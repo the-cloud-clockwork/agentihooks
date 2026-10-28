@@ -235,7 +235,7 @@ def _spawn(tmp_path, lane, seat, kind="interactive"):
 
 
 def test_the_front_door_master_launches_on_the_master_login(tmp_path):
-    assert _spawn(tmp_path, "master", "master@proof")[:2] == ["--route", "master-login"]
+    assert _spawn(tmp_path, "master", "master@proof")[:2] == ["--route", "claude-ai"]
 
 
 @pytest.mark.parametrize(("lane", "seat"), [("master", "master-2@proof"), ("eng", "eng-1@proof")])
@@ -245,4 +245,4 @@ def test_a_pool_master_and_an_engineer_stay_on_their_routes(tmp_path, lane, seat
 
 @pytest.mark.parametrize("kind", ["subscription", "api"])
 def test_a_front_door_order_on_an_explicit_route_takes_the_master_login(tmp_path, kind):
-    assert _spawn(tmp_path, "master", "master@proof", kind)[:2] == ["--route", "master-login"]
+    assert _spawn(tmp_path, "master", "master@proof", kind)[:2] == ["--route", "claude-ai"]

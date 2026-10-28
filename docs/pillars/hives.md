@@ -966,7 +966,25 @@ recorded as started, and the tick reports the action:
 ```
 
 When the record already carries the acknowledged target, the tick leaves it unchanged. An acknowledgement that is
-missing or not `live` refuses the collection as gone.
+not `live` refuses the spawn and leaves the record `finished`. The refusal reason depends on what the receipt holds:
+
+| Receipt | Spawn refused with |
+|---|---|
+| No acknowledgement | `the hive launch order ended before its acknowledgement` |
+| An acknowledgement with status `failed` | `hive launch failed: <cause>`, the hive's own cause from [Refusal causes](#refusal-causes) |
+
+A failed acknowledgement reads the same here as on a launch the tick collects while the execution still runs, so
+the swarm timer journal and the Doctor's failed spawn finding carry the hive's cause. A Codex worker whose profile
+canary timed out on the hive, for example, is written to the journal as:
+
+```text
+<slug>: spawn failed for <task>: hive launch failed: refused: agentihooks init-agent: mounted profile canary did not validate before timeout: the codex agent reported no canary within 90s
+```
+
+Before [pull request #8039](https://github.com/the-cloud-clockwork/agentihooks/pull/8039) a failed acknowledgement
+on a finished execution was reported with the missing acknowledgement reason. The Doctor finding
+`failed-spawn/t-runners-doc-worker001` read "the hive launch order ended before its acknowledgement" while the
+hive's acknowledgement held the canary timeout above.
 
 With the process identity recorded, the retire order the tick sends for that agent reaches the hive with a process
 it can stop or find already gone, and the retire ends.
@@ -990,6 +1008,8 @@ because the count kept growing.
 |---|---|---|
 | A `retire failed` finding shows `refusal: hive <host> refused retire: runtime target names no process` | The agent's execution record: does its runtime target carry `process_namespace`, `pid` and `pid_start`, or only `host_id`? | A record collected by a current controller carries the identity, and its retire ends. A record left with only `host_id` by an older controller keeps failing until the tick drops the agent from the swarm, which clears its retire count and the finding. |
 | The tick printed "finished … before the tick collected its hive acknowledgement" | The execution record's state | Expected for a task that finished within one tick; the record stays `finished` and the launch is counted as started. |
+| A spawn failed with `hive launch failed: <cause>` for an execution already `finished` | The cause, against [Refusal causes](#refusal-causes) | The hive acknowledged the launch as failed. Fix the cause on the hive; for a canary timeout see [Profile launch home](../reference/profile-launch-home.md). |
+| A spawn failed with `the hive launch order ended before its acknowledgement` | `agentihooks hive list` for the order's hive | The order's receipt holds no acknowledgement, so the hive never answered it. Check that the hive beats and its `agentihooks-hive` service runs. |
 
 ## Hive placement for one swarm on a local machine
 
@@ -1117,6 +1137,17 @@ Recreate so two hives never share it. `workers.worktreeMinFreeGb` (default 50), 
 and `workers.worktreeStaleDays` (default 7) reach agents as `WT_MIN_FREE_GB`, `WT_MAX_PER_REPO` and `WT_STALE_DAYS`
 through the release's worktrees ConfigMap: `wt.sh new` evicts the oldest safe worktrees to keep that floor and cap, and
 `agentihooks gc` removes worktrees untouched that many days.
+
+`hiveStorage` keeps hive host folders in one per node setting. `hiveStorage.nodes.<node>` names `homes`, an optional
+`tmp` and an optional `mount` (`path`, `fsType` and `marker`, a path that exists only on the data disk);
+`hiveStorage.default` serves nodes without an entry. A hive that sets `workers.node` is pinned to that node, mounts
+`<homes>/<folder>` as `/home/worker` and `<tmp>/<folder>` as `/tmp` (an emptyDir without `tmp`), where the folder is the
+release name, or `<release>_<name>` for a `workers.hives` entry, which inherits `workers.node`; it replaces `homeVolume`
+and rolls out by Recreate. A pre-install and pre-upgrade Job makes both folders for uid 10001 first, and refuses unless
+`mount.path` is an `fsType` filesystem holding `mount.marker`, so an unmounted data disk never gets hive folders on the
+system drive. `hiveStorage.homeFolders.hives` lists hives whose `homeVolume` is set by hand under `default.homes`; one
+DaemonSet makes their folders on every node `homeFolders.nodeSelector` selects, except the nodes `hiveStorage.nodes`
+lists.
 
 A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
 CI work as Pods while its master, planners and dispatcher stay on the workstation; see
