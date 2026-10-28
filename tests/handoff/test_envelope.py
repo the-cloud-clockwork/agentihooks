@@ -369,7 +369,7 @@ def _git(*args, cwd=None):
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def test_a_hive_handoff_envelope_carries_the_task_branch_and_its_remote_head(tmp_path, monkeypatch):
+def _hive(tmp_path, monkeypatch):
     import fakeredis
 
     for key, value in {"NAME": "hive", "EMAIL": "hive@example.com"}.items():
@@ -384,12 +384,36 @@ def test_a_hive_handoff_envelope_carries_the_task_branch_and_its_remote_head(tmp
     _git("worktree", "add", "-b", "engineer-a1b2c3-0000", str(worktree), cwd=checkout)
     _git("commit", "--allow-empty", "-m", "task work", cwd=worktree)
     _git("push", "-u", "origin", "engineer-a1b2c3-0000", cwd=worktree)
-    head = _git("rev-parse", "HEAD", cwd=worktree)
     monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "dev"))
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", str(tmp_path / "workstation" / "agentihooks"), 1, 1))
-    rows = [{"id": "t1", "phase": "p7", "branch": "engineer-a1b2c3-0000"}]
-    envelope = build(store, "sw", _agent(), "operator", rows, 0)
+    return store, worktree, _git("rev-parse", "HEAD", cwd=worktree)
+
+
+def _list_times_out(cmd, **kwargs):
+    if cmd[3:5] == ["worktree", "list"]:
+        raise subprocess.TimeoutExpired(cmd, 30)
+    return subprocess.run(cmd, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "row, run",
+    [
+        ({"branch": "engineer-a1b2c3-0000"}, subprocess.run),
+        (
+            {
+                "branch": "engineer-a1b2c3-0009",
+                "repository_branches": {"https://github.com/o/agentihooks": "engineer-a1b2c3-0000"},
+            },
+            subprocess.run,
+        ),
+        ({"branch": "engineer-a1b2c3-0000"}, _list_times_out),
+    ],
+    ids=["recorded branch", "repository branch", "worktree list times out"],
+)
+def test_a_hive_handoff_envelope_carries_the_task_branch_and_its_remote_head(tmp_path, monkeypatch, row, run):
+    store, worktree, head = _hive(tmp_path, monkeypatch)
+    envelope = build(store, "sw", _agent(), "operator", [{"id": "t1", "phase": "p7", **row}], 0, run=run)
     assert {key: envelope[key] for key in ("worktree", "branch", "remote_branch", "remote_head", "continue_from")} == {
         "worktree": str(worktree),
         "branch": "engineer-a1b2c3-0000",
@@ -397,3 +421,9 @@ def test_a_hive_handoff_envelope_carries_the_task_branch_and_its_remote_head(tmp
         "remote_head": head,
         "continue_from": "origin/engineer-a1b2c3-0000",
     }
+
+
+def test_a_hive_handoff_envelope_without_a_task_worktree_names_it_unknown(tmp_path, monkeypatch):
+    store, _, _ = _hive(tmp_path, monkeypatch)
+    envelope = build(store, "sw", _agent(), "operator", [{"id": "t1", "branch": "engineer-a1b2c3-0007"}], 0)
+    assert (envelope["worktree"], envelope["branch"]) == ("unknown", "unknown")

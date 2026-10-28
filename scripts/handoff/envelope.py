@@ -70,11 +70,14 @@ def _worktree(store, slug, agent, row, run):
     repo = store.config(slug).repo
     if agent.lane == MASTER:
         return repo
+    return _listed_worktree(repo, agent, run) or _task_worktree(repo, row or {}, agent)
+
+
+def _listed_worktree(repo, agent, run):
     try:
-        found = snapshot.worktrees(repo, [agent.name], run).get(agent.name, "")
+        return snapshot.worktrees(repo, [agent.name], run)[agent.name]
     except FAILED:
-        found = ""
-    return found or _task_worktree(repo, row or {}, agent)
+        return ""
 
 
 def _task_worktree(repo, row, agent):
