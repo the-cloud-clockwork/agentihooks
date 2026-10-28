@@ -248,10 +248,14 @@ def test_the_trust_check_refuses_only_an_untrusted_repository_with_project_condi
     assert filter_check.trusted_folder(str(tmp_path / "server")) == str(tmp_path / "server")
 
 
-def test_the_trust_check_trusts_the_owner_of_the_operators_bundle(server_elsewhere, stranger, tmp_path):
+def test_the_trust_check_trusts_the_owner_of_the_operators_bundle(server_elsewhere, stranger, tmp_path, monkeypatch):
     bundle = tmp_path / "bundle"
+    bundle.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=bundle, check=True)
     subprocess.run(["git", "remote", "add", "origin", "git@github.com:stranger/bundle.git"], cwd=bundle, check=True)
+    with pytest.raises(ValueError):
+        filter_check.trusted_folder(stranger)
+    monkeypatch.setattr("hooks.context.profile_chain.read_state", lambda: {"bundle": {"path": str(bundle)}})
     assert filter_check.trusted_folder(stranger) == stranger
 
 
