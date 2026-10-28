@@ -333,6 +333,7 @@ def test_provider_posts_the_model_and_preserves_input_order(prepared, provider):
         (b"broken json", ValueError),
         (b"x" * ((2 << 20) + 1), ValueError),
     ],
+    ids=["other-model", "invalid-index", "wrong-dimension", "broken-json", "oversized"],
 )
 def test_provider_rejects_invalid_or_oversized_responses(prepared, provider, body, error):
     from hooks.memory.embedding_process import configure
@@ -572,6 +573,7 @@ def test_configure_accepts_secure_or_loopback_provider_urls(prepared, provider, 
         ),
         (b"x" * ((2 << 20) + 1), "embedding response exceeds 2 MiB"),
     ],
+    ids=["other-model", "invalid-index", "oversized"],
 )
 def test_provider_response_refusals_are_explicit(prepared, provider, body, message):
     from hooks.memory.embedding_process import configure
