@@ -28,11 +28,22 @@ def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario():
     scenario = jobs["scenario"]
     assert scenario["needs"] == ["inputs"]
     assert scenario["if"] == "github.event_name == 'workflow_dispatch' || needs.inputs.outputs.hit != 'true'"
-    assert scenario["services"]["postgres"]["image"] == "public.ecr.aws/docker/library/postgres:16"
+    assert "postgres" not in scenario["services"]
+    image = "public.ecr.aws/docker/library/postgres:16"
+    steps = scenario["steps"]
+    start = next(i for i, step in enumerate(steps) if step.get("name") == "Start Postgres from a retried pull")
+    assert "if" not in steps[start]
+    assert any(step.get("uses", "").startswith("actions/checkout@") for step in steps[:start])
+    run = steps[start]["run"]
+    pull = run.index(f"bash scripts/packaging/pull-runtime-image.sh {image}\n")
+    assert pull < run.index(
+        "docker run --pull never --rm -d --name writer-lock-postgres -p 5432:5432"
+        f" -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=ledger {image}\n"
+    )
+    assert "until docker exec writer-lock-postgres pg_isready" in run
     assert scenario["services"]["pgvector"]["image"] == "pgvector/pgvector:0.8.0-pg16"
     assert scenario["services"]["pgvector"]["ports"] == ["5433:5432"]
     assert scenario["env"]["MEMORY_TEST_POSTGRES_URL"] == "postgresql://postgres@127.0.0.1:5433/memory"
-    steps = scenario["steps"]
     assert "tests/swarm_ledger/test_postgres_writer_lock.py" in steps[-2]["run"]
     assert "tests/swarm_ledger/test_postgres_outbox.py" in steps[-2]["run"]
     assert "tests/swarm_ledger/test_postgres_writer_floor.py" in steps[-2]["run"]
