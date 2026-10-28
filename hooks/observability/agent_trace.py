@@ -885,10 +885,9 @@ def _send_pending(session_id: str, state: dict, exporter) -> None:
 def _accept_source(state: dict) -> None:
     if state["pending"] or not state["accepted"]:
         return
-    state.setdefault("accepted_records", {}).update(state.get("pending_records", {}))
-    accepted_source = state.get("pending_source", {})
-    state["source"]["accepted_bytes"] = accepted_source.get("buffered_bytes", 0)
-    state["turns"] = state.get("buffered_turns", 0)
+    state.setdefault("accepted_records", {}).update(state["pending_records"])
+    state["source"]["accepted_bytes"] = state["pending_source"]["buffered_bytes"]
+    state["turns"] = state["buffered_turns"]
 
 
 def _message_id(entry: dict) -> object:
