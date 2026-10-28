@@ -258,6 +258,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/swarm_ledger/test_postgres_repository.py",
         "tests/test_memory_postgres_parity.py",
         "tests/test_suite_speed.py",
+        "tests/test_swarm_chart_additional_hosts.py",
         "scripts/ci_reuse.py",
         "scripts/ci_runner_classes.py",
     ]
