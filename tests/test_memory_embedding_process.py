@@ -314,7 +314,7 @@ def test_provider_posts_the_model_and_preserves_input_order(prepared, provider):
     assert adapter.embed(["one", "two"]) == [[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]
     assert provider[1] == [
         (
-            provider[0].removeprefix(provider[0].rsplit("/", 1)[0]),
+            "/embeddings",
             "Bearer fixture-provider-token",
             {
                 "model": "fixture-hash-embedder-4",

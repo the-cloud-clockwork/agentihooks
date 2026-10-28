@@ -176,9 +176,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
     settings = configure(dict(os.environ))
+    catalog = Catalog(settings.catalog)
     stopped = threading.Event()
     previous = {sig: signal.signal(sig, lambda *_: stopped.set()) for sig in (signal.SIGTERM, signal.SIGINT)}
-    catalog = Catalog(settings.catalog)
     try:
         worker = IndexWorker(catalog, settings.limits)
         worker.register(settings.grant.corpus, settings.generation, settings.provider.model)
