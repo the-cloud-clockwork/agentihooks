@@ -18,6 +18,9 @@ permissions:
   pull-requests: read
   actions: read
 
+env:
+  PYTHONNOUSERSITE: "1"
+
 jobs:
   plan:
     if: ${{ github.event_name != 'push' || !github.event.deleted }}
