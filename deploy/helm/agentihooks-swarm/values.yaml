@@ -53,6 +53,7 @@ ledger:
   tolerations: []
   port: 8765
   publicUrl: ""
+  allowedHosts: []
   # Secret with tls.crt, tls.key and ca.crt; clients refuse to send ledger credentials over plain http off loopback.
   # The certificate must name <fullname>-ledger, the service and ingress backend name, as a SAN.
   tls:
