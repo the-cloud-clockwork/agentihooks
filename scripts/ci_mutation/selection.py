@@ -21,6 +21,7 @@ from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
 from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.scope import selects, test_file
 from scripts.ci_mutation.stats import write_part
+from scripts.ci_mutation.stats_dependencies import records_within
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 # This group only loads fakeredis once per xdist worker; it guards no shared resource.
@@ -28,10 +29,13 @@ IMPORT_GROUPS = {"fakeredis"}
 
 
 def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[object, list]:
-    from libcst.metadata import MetadataWrapper, WhitespaceInclusivePositionProvider
-    from mutmut.mutation.file_mutation import create_mutations
+    module, mutations, _ = created_mutations(filename, source)
+    return module, on_changed_lines(module, mutations, changed)
 
-    module, mutations, _, _ = create_mutations(filename, source)
+
+def on_changed_lines(module, mutations: list, changed: set[int]) -> list:
+    from libcst.metadata import MetadataWrapper, WhitespaceInclusivePositionProvider
+
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(WhitespaceInclusivePositionProvider)
     selected = []
     for mutation in mutations:
@@ -45,7 +49,61 @@ def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[ob
         )
         if changed.intersection(lines):
             selected.append(mutation)
-    return module, selected
+    return selected
+
+
+def created_mutations(filename: str, source: str) -> tuple[object, list, list]:
+    import libcst as cst
+    from libcst.metadata import MetadataWrapper
+    from mutmut.mutation.file_mutation import NEVER_MUTATE_FUNCTION_NAMES, MutationVisitor
+    from mutmut.mutation.mutators import mutation_operators
+    from mutmut.mutation.pragma_handling import get_ignored_lines
+
+    class Visitor(MutationVisitor):
+        def __init__(self, ignored, allowed) -> None:
+            super().__init__(mutation_operators, ignored)
+            self.allowed = allowed
+
+        # mutmut 3.6.0 skips every decorated class, yet a dataclass keeps its methods, so their trampolines work.
+        def _skip_node_and_children(self, node: cst.CSTNode) -> bool:
+            skipped = super()._skip_node_and_children(node)
+            if not skipped or not isinstance(node, cst.FunctionDef | cst.ClassDef) or not node.decorators:
+                return skipped
+            if not self.allowed(node):
+                return True
+            return isinstance(node, cst.FunctionDef) and node.name.value in NEVER_MUTATE_FUNCTION_NAMES
+
+    wrapper = MetadataWrapper(cst.parse_module(source))
+    ignored = get_ignored_lines(filename, source, wrapper)
+    graded = Visitor(ignored, lambda node: isinstance(node, cst.ClassDef) and all(map(is_dataclass, node.decorators)))
+    possible = Visitor(ignored, lambda node: True)
+    module = wrapper.visit(graded)
+    wrapper.visit(possible)
+    return module, graded.mutations, possible.mutations
+
+
+def is_dataclass(decorator) -> bool:
+    import libcst as cst
+
+    target = decorator.decorator.func if isinstance(decorator.decorator, cst.Call) else decorator.decorator
+    name = target.attr if isinstance(target, cst.Attribute) else target
+    return isinstance(name, cst.Name) and name.value == "dataclass"
+
+
+def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int, int]:
+    from libcst.metadata import MetadataWrapper, PositionProvider
+
+    module, graded, possible = created_mutations(filename, source)
+    positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(PositionProvider)
+    # mutmut emits only mutants inside a function or method.
+    found = sum(1 for mutation in on_changed_lines(module, graded, changed) if mutation.contained_by_top_level_function)
+    body = sum(
+        positions[mutation.original_node].start.line
+        >= positions[mutation.contained_by_top_level_function.body.body[0]].start.line
+        for mutation in on_changed_lines(module, possible, changed)
+        if mutation.contained_by_top_level_function
+    )
+    return found, body
 
 
 def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:
@@ -95,7 +153,7 @@ def unit_records(root: Path) -> list[dict[str, float]]:
 
 def traced_records(root: Path) -> list[dict[str, float]]:
     folder = Path(os.environ.get("MUTATION_STATS_CACHE", root / ".mutation-stats-cache"))
-    records = [json.loads(path.read_text()) for path in folder.glob("*.json")]
+    records = (json.loads(path.read_text()) for path in records_within(folder)[0])
     return [record["durations"] for record in records if record["status"] == 0]
 
 
@@ -455,9 +513,44 @@ def run_unit(
     return run_tests(runner, mutant_name=mutant_name, tests=memory.prepare(mutant_name, chosen))
 
 
+def forked_children():
+    # Defined inside a function: a mutated copy trampolines top level methods,
+    # and mutmut reads os.environ in its forced fail.
+    class ForkedChildren(ModuleType):
+        # mutmut reaps with os.wait() and raises KeyError on a child a test left behind in its own process.
+        def __init__(self):
+            super().__init__(os.__name__)
+            self.pids = set()
+
+        def __getattr__(self, name):
+            return getattr(os, name)
+
+        def fork(self):
+            pid = os.fork()
+            if pid:
+                self.pids.add(pid)
+            return pid
+
+        def wait(self):
+            while True:
+                pid, status = os.wait()
+                if pid in self.pids:
+                    self.pids.discard(pid)
+                    return pid, status
+
+    return ForkedChildren()
+
+
+def keep_node_ids() -> None:
+    # mutmut's stats plugin reads Item._nodeid, which pytest 9.2 removed in favour of nodeid.
+    if pytest.version_tuple >= (9, 2, 0) and not hasattr(pytest.Item, "_nodeid"):
+        pytest.Item._nodeid = property(lambda item: item.nodeid)
+
+
 def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
     from mutmut import __main__ as runner
 
+    keep_node_ids()
     if not os.environ.get("CI"):
         print("Local mutation worker cap: 2 (mutation and stats)")
     changes = json.loads(selection.read_text())
@@ -535,6 +628,7 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     runner.PytestRunner.execute_pytest = memory.wrap(runner.PytestRunner.execute_pytest)
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
     runner.write_all_mutants_to_file = write_selected
+    runner.os = forked_children()
     for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
         sys.modules.pop(name)
     runner.cli(["run", "--max-children", str(worker_count(os.cpu_count()))])

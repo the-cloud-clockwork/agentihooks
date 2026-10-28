@@ -153,6 +153,7 @@ INTERPRETERS = {"python", "python2", "python3", "node", "ruby", "perl", "php", "
 GREP_FAMILY = {"grep", "egrep", "fgrep", "rg", "ack"}
 PAGERS = {"cat", "head", "tail", "less", "more", "bat", "tac", "nl"}
 WRAPPERS = {"docker", "podman", "nerdctl", "kubectl", "ssh"}
+GH_TOKEN_SUBCOMMANDS = {"status", "token"}
 GIT_READ_SUBCOMMANDS = {"diff", "show", "grep", "log", "blame", "cat-file", "difftool"}
 PATTERN_FLAGS = {"-e", "--regexp"}
 FIND_NAME_FLAGS = {
@@ -538,6 +539,32 @@ def renderer_verdict(command):
     return None
 
 
+def prints_gh_token(toks):
+    wrapped = verb_of(toks) in WRAPPERS
+    for i, tok in enumerate(toks):
+        nested = " " in tok and (wrapped or toks[i - 1 : i] == ["-c"])
+        if nested and prints_gh_token(tokens_of(tok)):
+            return True
+        if tok.split("/")[-1] == "gh":
+            rest = toks[i + 1 :]
+            args = [t for t in rest if not t.startswith("-")]
+            leading = 2 if rest and rest[0].startswith("-") else 1
+            if any(a == "auth" and b in GH_TOKEN_SUBCOMMANDS for a, b in zip(args[:leading], args[1:])):
+                return True
+    return False
+
+
+def gh_token_verdict(command):
+    inner = [next(g for g in m.groups() if g is not None) for m in SUBSTITUTION.finditer(command)]
+    if any(prints_gh_token(tokens_of(text)) for text in split_stages(command) + inner):
+        return (
+            block("printing the GitHub token (gh auth status or gh auth token)", KIND_ENVIRONMENT)
+            + '\nTo test whether the token is set:  test -n "${GH_TOKEN:-}" && echo set || echo unset'
+            + "\nTo test whether it works:  gh api rate_limit --jq .rate.remaining"
+        )
+    return None
+
+
 # --- operand-aware reader detection ------------------------------------------
 
 
@@ -859,7 +886,7 @@ def decide_bash(tool_input, ctx=None):
         seg = parts[i]
         if not seg.strip():
             continue
-        for check in (env_dump_verdict, echo_secret_verdict, renderer_verdict):
+        for check in (env_dump_verdict, echo_secret_verdict, renderer_verdict, gh_token_verdict):
             reason = check(seg)
             if reason:
                 return Verdict(block=reason)

@@ -163,9 +163,9 @@ NOT_SWARM = "credential reference must be a SWARM_BRAIN_ variable"
         (_origin_doc(CLUSTER_API), (), f"endpoint {CLUSTER_API} {UNAUTHORIZED}"),
         (_origin_doc("ftp://brain.example.test"), (), f"endpoint ftp://brain.example.test {UNAUTHORIZED}"),
         (
-            _origin_doc("https://someone@brain.example.test"),
+            _origin_doc("https://someone:fxpw@brain.example.test"),
             (),
-            f"endpoint https://someone@brain.example.test {NOT_PLAIN}",
+            f"endpoint https://brain.example.test {NOT_PLAIN}",
         ),
         (_origin_doc(API + "?audience=x"), (), f"endpoint {API} {NOT_PLAIN}"),
         (_origin_doc(API + "#x"), (), f"endpoint {API} {NOT_PLAIN}"),

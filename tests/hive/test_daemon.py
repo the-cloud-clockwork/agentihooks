@@ -459,9 +459,7 @@ def test_headroom_keeps_its_cadence_through_a_failed_publish(monkeypatch, capsys
 
 
 @pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError"])
-def test_headroom_ends_when_its_wait_loses_the_connection(monkeypatch, error):
-    import threading
-
+def test_headroom_logs_and_ends_when_its_wait_loses_the_connection(monkeypatch, capsys, error):
     from redis import exceptions
 
     from scripts.hive import headroom
@@ -472,6 +470,7 @@ def test_headroom_ends_when_its_wait_loses_the_connection(monkeypatch, error):
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
     monkeypatch.setattr(headroom, "publish", Mock(side_effect=AssertionError("published")))
     PUBLISH_HEADROOM(object(), object(), "local", threading.Event())
+    assert capsys.readouterr().err == f"hive headroom wait failed ({error}: gone)\n"
 
 
 def test_headroom_keeps_publishing_while_a_beat_blocks(monkeypatch):
@@ -569,12 +568,12 @@ def test_herdr_stats_publish_on_the_scheduler_cadence_from_the_interface_hive_on
 
     redis.hset(registry.key("machine"), mapping={"name": "machine", "ui": ui, "heartbeat_at": "1"})
     calls = []
-    monkeypatch.setattr(herdr_stats, "publish", lambda redis, now_ms: calls.append((redis, now_ms)))
+    monkeypatch.setattr(herdr_stats, "publish", lambda redis, hive, now_ms: calls.append((redis, hive, now_ms)))
     monkeypatch.setattr(daemon.time, "time", lambda: 12.3456)
     stop, waits = ticks(monkeypatch, 2)
     PUBLISH_HERDR_STATS(redis, "waiter", "machine", stop)
     assert waits == [(herdr_stats.EVERY_S, "waiter", herdr_stats.EVERY_S + daemon.WAKE_SLACK_S)] * 3
-    assert calls == [(redis, 12_345)] * published
+    assert calls == [(redis, "machine", 12_345)] * published
 
 
 def test_herdr_stats_keep_their_cadence_through_a_failed_publish(redis, monkeypatch, capsys):
@@ -590,15 +589,43 @@ def test_herdr_stats_keep_their_cadence_through_a_failed_publish(redis, monkeypa
     assert capsys.readouterr().err.count("hive herdr stats publish failed (RedisError: down)") == 2
 
 
-def test_herdr_stats_end_when_their_wait_loses_the_connection(monkeypatch):
-    from redis.exceptions import ConnectionError
+@pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError"])
+def test_herdr_stats_log_and_end_when_their_wait_loses_the_connection(monkeypatch, capsys, error):
+    from redis import exceptions
 
     from scripts.hive import herdr_stats
 
-    monkeypatch.setattr(daemon, "scheduled_wait", Mock(side_effect=ConnectionError("lost")))
+    monkeypatch.setattr(daemon, "scheduled_wait", Mock(side_effect=getattr(exceptions, error)("lost")))
     monkeypatch.setattr(herdr_stats, "publish", Mock())
     PUBLISH_HERDR_STATS(object(), "waiter", "machine", threading.Event())
     herdr_stats.publish.assert_not_called()
+    assert capsys.readouterr().err == f"hive herdr stats wait failed ({error}: lost)\n"
+
+
+def test_each_beat_restarts_only_the_helper_threads_that_ended(monkeypatch):
+    started = []
+
+    class Thread:
+        def __init__(self, target, args, daemon):
+            self.target, self.args, self.daemon, self.alive = target, args, daemon, True
+
+        def start(self):
+            started.append((self.target, self.args, self.daemon))
+
+        def is_alive(self):
+            return self.alive
+
+    monkeypatch.setattr(daemon.threading, "Thread", Thread)
+    helpers, args = {}, ("redis", "waiter", "local", "stop")
+    daemon._keep_helpers(helpers, args)
+    daemon._keep_helpers(helpers, args)
+    assert started == [(daemon.publish_headroom, args, True), (daemon.publish_herdr_stats, args, True)]
+    helpers[daemon.publish_headroom].alive = False
+    daemon._keep_helpers(helpers, args)
+    assert started[2:] == [(daemon.publish_headroom, args, True)]
+    helpers[daemon.publish_herdr_stats].alive = False
+    daemon._keep_helpers(helpers, args)
+    assert started[3:] == [(daemon.publish_herdr_stats, args, True)]
 
 
 def test_install_writes_the_service_and_enables_it(tmp_path):

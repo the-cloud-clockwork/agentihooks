@@ -170,6 +170,47 @@ def test_tests_workflow_cache_restores_bound_download_timeout():
         assert step.get("env", {}).get("SEGMENT_DOWNLOAD_TIMEOUT_MINS") == "1", step.get("name", step["with"]["path"])
 
 
+def test_every_delivery_upload_uses_the_bounded_retry_action():
+    action = yaml.safe_load((_ROOT / ".github/actions/retry-upload/action.yml").read_text())
+    default = int(action["inputs"]["attempt-seconds"]["default"])
+    assert 0 < default <= 120
+    pending = []
+    for path in (_ROOT / ".github/workflows").glob("*.y*ml"):
+        workflow = yaml.safe_load(path.read_text())
+        triggers = workflow.get("on", workflow.get(True, {}))
+        push = triggers.get("push") or {}
+        dev_push = (
+            "push" in triggers
+            and any(Path("dev").match(pattern) for pattern in push.get("branches", ["dev"]))
+            and not any(Path("dev").match(pattern) for pattern in push.get("branches-ignore", []))
+        )
+        if any(event in triggers for event in ("pull_request", "pull_request_target", "merge_group")) or dev_push:
+            pending.append(path)
+    seen = set()
+    plain = []
+    uploads = []
+    while pending:
+        path = pending.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        workflow = yaml.safe_load(path.read_text())
+        for name, job in workflow["jobs"].items():
+            uses = job.get("uses", "")
+            if uses.startswith("./.github/workflows/"):
+                pending.append(_ROOT / uses)
+            for step in job.get("steps", []):
+                uses = step.get("uses", "")
+                if uses.lower().startswith("actions/upload-artifact@"):
+                    plain.append((path.name, name, step.get("name")))
+                if uses.endswith("/.github/actions/retry-upload"):
+                    uploads.append(step)
+    assert not plain, plain
+    assert uploads
+    for step in uploads:
+        assert 0 < int(step.get("with", {}).get("attempt-seconds", default)) <= 120
+
+
 def test_nats_server_download_retries_fit_inside_every_step_timeout():
     action = yaml.safe_load((_ROOT / ".github/actions/nats-server/action.yml").read_text())
     lines = [line for step in action["runs"]["steps"] for line in step.get("run", "").splitlines()]
@@ -397,7 +438,7 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
 
 def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs():
     workflow = _workflow()
-    assert (_ROOT / ".github/test-constraints.txt").read_text().strip() == "playwright==1.63.0"
+    assert (_ROOT / ".github/test-constraints.txt").read_text().split() == ["playwright==1.63.0", "pytest<9.2"]
     for job in ("test-count", "split", "unit"):
         assert workflow["jobs"][job]["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
         cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
@@ -1443,6 +1484,10 @@ def test_unit_shards_upload_elapsed_time_after_failed_pytest():
 def test_selected_legs_record_elapsed_time_and_their_job_and_preserve_pytest_status(tmp_path, status):
     steps = _workflow()["jobs"]["unit-selected"]["steps"]
     step = next(item for item in steps if item.get("name") == "Run the selected tests")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "__init__.py").touch()
+    (scripts / "ci_cpu_quota.py").write_text("print(1)\n")
     (tmp_path / "pytest.py").write_text(
         f"def main(args):\n    open('durations.json', 'w').write('{{}}')\n    return {status}\n"
     )
@@ -1467,6 +1512,13 @@ def test_selected_legs_upload_elapsed_time_beside_their_durations():
 
 def _selected_step(name: str) -> dict:
     return next(step for step in _workflow()["jobs"]["unit-selected"]["steps"] if step.get("name") == name)
+
+
+def test_selected_legs_size_workers_by_the_container_cpu_quota():
+    run = _selected_step("Run the selected tests")["run"]
+    assert "workers=$(python -m scripts.ci_cpu_quota)" in run
+    assert '-n "$workers"' in run
+    assert "-n auto" not in run
 
 
 def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_only_for_the_grader():
@@ -1803,7 +1855,7 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
         == 'python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
         + " --stats .mutation-stats"
     )
-    artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact"))
+    artifact = next(step for step in steps if step.get("name") == "Upload complete mutation evidence")
     assert artifact["if"] == "always() && needs.mutation-plan.outputs.forwarded != 'true'"
     assert artifact["with"]["include-hidden-files"] is True
     assert artifact["with"]["name"] == "mutation-report-${{ matrix.shard }}"
@@ -1836,6 +1888,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         "BASE": "${{ inputs.base || 'origin/dev' }}",
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
         "MUTATION_SHARD_CPU_QUOTA": "3",
+        "PYTHONUNBUFFERED": "1",
     }
     names = [item.get("id") for item in plan["steps"]]
     mint = plan["steps"][names.index("app-token")]
@@ -1905,7 +1958,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     setup = [
         step
         for step in setup
-        if not str(step.get("name", "")).startswith(downloads)
+        if not str(step.get("name", "")).startswith((*downloads, "Cap the merged test stats"))
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
     ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
@@ -1937,7 +1990,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     evidence = stats_steps[len(setup) + 2]
     assert evidence["if"] == "failure()"
     assert evidence["with"]["name"] == "mutation-evidence-stats-${{ matrix.part }}"
-    assert evidence["with"]["overwrite"] is True
+    assert evidence["uses"] == "./.workflow-revision/.github/actions/retry-upload"
     names = [step.get("name") for step in mutation["steps"]]
     download = mutation["steps"][names.index("Download the shared mutation stats")]
     assert names.index("Download the shared mutation stats") < names.index("Mutate changed Python files")
@@ -2049,8 +2102,21 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     assert merged["uses"] == "actions/cache/save@v4"
     assert merged["if"] == f"{first} && hashFiles('.mutation-stats-cache/**') != ''"
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
+    capped = mutation[mutation_names.index("Cap the merged test stats")]
+    assert capped["if"] == first
+    assert capped["run"] == (
+        "python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap;"
+        ' print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")\' .mutation-stats-cache'
+    )
     assert mutation_names.index(base["name"]) == 1
-    order = [base["name"], download["name"], merged["name"], "Install dependencies", "Mutate changed Python files"]
+    order = [
+        base["name"],
+        download["name"],
+        capped["name"],
+        merged["name"],
+        "Install dependencies",
+        "Mutate changed Python files",
+    ]
     assert [mutation_names.index(name) for name in order] == sorted(mutation_names.index(name) for name in order)
 
 
@@ -2193,8 +2259,16 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         for name, job in jobs.items()
         if name.startswith("mutation") and any(s.get("with", {}).get("ref") == head for s in job.get("steps", []))
     }
-    assert {"mutation-stats", "mutation"} <= set(local)
-    assert all(not steps for name, steps in local.items() if name not in {"mutation-stats", "mutation"})
+    assert {"mutation-plan", "mutation-stats", "mutation"} == set(local)
+    plan = jobs["mutation-plan"]["steps"]
+    take = next(step for step in plan if step.get("name") == "Take the upload action from the workflow revision")
+    assert take["run"].splitlines() == [
+        'git fetch --no-tags origin "$GITHUB_SHA"',
+        "mkdir -p .workflow-revision",
+        'git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision',
+    ]
+    assert {step["uses"] for step in local["mutation-plan"]} == {"./.workflow-revision/.github/actions/retry-upload"}
+    assert all(plan.index(take) < plan.index(step) for step in local["mutation-plan"])
     for name in ("mutation-stats", "mutation"):
         steps = jobs[name]["steps"]
         names = [step.get("name") for step in steps]
@@ -2208,7 +2282,8 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         assert {step["uses"] for step in local[name]} == {
             "./.workflow-revision/.github/actions/nats-server",
             "./.workflow-revision/.github/actions/browser-cache",
-        } | ({"./.workflow-revision/.github/actions/retry-upload"} if name == "mutation-stats" else set())
+            "./.workflow-revision/.github/actions/retry-upload",
+        }
         assert all(steps.index(take) < steps.index(step) for step in local[name])
         assert all("hashFiles" not in step.get("if", "") for step in local[name])
 

@@ -119,6 +119,16 @@ def per_run_mutation_group(name: str, block: object, job: dict, trusted: dict) -
     return block in ({"group": group}, superseded)
 
 
+def dedicated_chart_group(name: str, block: object, job: dict, trusted: dict) -> bool:
+    return (
+        trusted.get("name") == "Helm chart release"
+        and events(trusted) == [{"release": {"types": ["published"]}}]
+        and name in {"publish", "kind"}
+        and job == (trusted.get("jobs") or {}).get(name)
+        and block == {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
+    )
+
+
 def problems(workflow: object, baseline: object = None) -> list[str]:
     if not isinstance(workflow, dict):
         return ["is not a workflow mapping"]
@@ -138,7 +148,22 @@ def problems(workflow: object, baseline: object = None) -> list[str]:
         block = job.get("concurrency", workflow.get("concurrency"))
         base_job = (trusted.get("jobs") or {}).get(name, {})
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
+        if dedicated_chart_group(name, block, job, trusted):
+            continue
         if per_run_mutation_group(name, block, job, trusted):
+            continue
+        if (
+            trusted.get("name") == "Tests"
+            and name in (trusted.get("jobs") or {})
+            and block
+            == {
+                "group": "${{ github.event_name == 'workflow_dispatch' && "
+                + LANE
+                + " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}",
+                "queue": "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}",
+                "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+            }
+        ):
             continue
         if trusted and (name in (trusted.get("jobs") or {}) or base_block is not None) and block == base_block:
             continue

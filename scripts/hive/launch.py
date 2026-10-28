@@ -237,6 +237,15 @@ class HiveLaunch:
                     hive["room"] -= 1
         return selected
 
+    def _withdraw(self, request: SpawnRequest, selected: Selection, refused: str) -> placement.Wait:
+        waited = placement.Wait(refused, ROLE_PROFILES.get(selected.profile.profile, selected.profile.profile))
+        if self.placement_cache is not None:
+            self.placement_cache[(request.lane, request.task["id"])] = waited
+            for hive in self.hives():
+                if hive["id"] == selected.hive and placement.LOCAL_FULL not in refused:
+                    hive["room"] = 0
+        return waited
+
     def _select(self, config: SwarmConfig, lane: str, task: dict) -> Selection | placement.Wait:
         chosen = config.lanes.get(lane, {})
         saved = task.get("launch_assignment") or profile_choice.transfer(task)
@@ -397,7 +406,7 @@ class HiveLaunch:
             self.opening(named),
         )
         if refused := self.reserve_room(request, selected):
-            self._record_wait(request.lane, request.task, placement.Wait(refused))
+            self._record_wait(request.lane, request.task, self._withdraw(request, selected, refused))
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
         try:
             return self.send_order(request, selected, task)
@@ -497,8 +506,10 @@ class HiveLaunch:
         _match("seat", agent.seat, request.task["seat"])
         _match("generation", order.generation, agent.generation)
         ack = self.orders.ack(order)
-        if not ack or ack.status != "live":
+        if not ack:
             return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
+        if ack.status != "live":
+            return Outcome("spawn", Status.REFUSED, HIVE, detail=f"hive launch failed: {ack.failure}")
         _match("ack host", order.hive, ack.target.get("host_id"))
         admission.joined(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
         if agent.runtime_target != ack.target:

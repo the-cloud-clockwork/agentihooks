@@ -24,7 +24,7 @@ on:
         default: origin/dev
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || github.event_name == 'push' && 'promotion-dev' || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}
   queue: ${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -524,27 +524,34 @@ jobs:
         uses: actions/download-artifact@v4
         with: *select-download-the-dispatched-bases-coverage-baseline
 
+      - name: Check out the upload action for artifact republishing
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .upload-action
+          sparse-checkout: .github/actions/retry-upload
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Republish the dev durations
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: ./.upload-action/.github/actions/retry-upload
         with:
           name: dev-durations
           path: ~/dev-durations/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
-      # No checkout precedes this on workflow_dispatch, so the local retry-upload action cannot load here.
       - name: Republish the dispatched base's coverage baseline
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: ./.upload-action/.github/actions/retry-upload
         with:
           name: queue-coverage-baseline
           path: ~/coverage-baseline/
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       - name: Mark the dev artifacts restored
         id: republished
@@ -642,7 +649,7 @@ jobs:
       # Job outputs are protected, so each leg reads its files from this artifact.
       - name: Upload the selected legs
         if: steps.select.outputs.scope == 'selected'
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: selection
           path: ${{ runner.temp }}/selection/selection.txt
@@ -786,6 +793,7 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           ENVIRONMENT: ${{ steps.venv.outputs.cache-primary-key }}
+          PYTHONUNBUFFERED: "1"
         run: |
           git worktree add --detach "$RUNNER_TEMP/planner" "$GRADER"
           export GITHUB_OUTPUT="$RUNNER_TEMP/plan-outputs.txt"
@@ -853,8 +861,8 @@ jobs:
         run: |
           while [[ ! -f "$RUNNER_TEMP/plan.status" ]] && kill -0 "$(cat "$RUNNER_TEMP/plan.pid")" 2>/dev/null; do
             sleep 1
-          done
-          cat "$RUNNER_TEMP/plan.log"
+          done &
+          tail -n +1 -f --pid="$!" "$RUNNER_TEMP/plan.log"
           if [[ ! -f "$RUNNER_TEMP/plan.status" ]]; then
             echo "::error::The test planner exited without reporting a status."
             exit 1
@@ -864,23 +872,21 @@ jobs:
 
       - name: Upload the test plan
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: reused-tests-${{ matrix.python-version }}
           path: reused-tests.json
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       - name: Upload the pull request runs' test plan
         if: github.event_name == 'pull_request' && steps.plan.outputs.branch != '' && steps.plan.outputs.branch != '0'
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: reused-branch-${{ matrix.python-version }}
           path: ${{ runner.temp }}/reused-branch.json
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       # The grader's manifest code picks what is skipped; the head supplies only the plan and its collection.
       - name: Deselect the reused tests
@@ -896,16 +902,15 @@ jobs:
 
       - name: Upload the deselected tests
         if: *deselect
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: reused-${{ matrix.python-version }}
           path: ${{ runner.temp }}/reused.json
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       - name: Upload the early collection
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: early-collected-${{ matrix.python-version }}
           path: |
@@ -914,7 +919,6 @@ jobs:
             ${{ runner.temp }}/plan-outputs.txt
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       # The next group's base is this head, and its dev record lands only after that group has started.
       - name: Record the head count for the next queue group
@@ -929,13 +933,12 @@ jobs:
 
       - name: Upload the head count for the next queue group
         if: github.event_name == 'merge_group'
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: count-record-${{ matrix.python-version }}
           path: ${{ runner.temp }}/count-record/record.json
           if-no-files-found: ignore
           retention-days: 7
-          overwrite: true
 
       - name: Save exact count collections
         if: steps.counts.outputs.cache-hit != 'true'
@@ -1172,13 +1175,12 @@ jobs:
           retention-days: 7
 
       - name: Upload collected tests
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: collected-${{ matrix.python-version }}
           path: collected.json
           if-no-files-found: error
           retention-days: 14
-          overwrite: true
 
   unit:
     name: unit (${{ matrix.python-version }}, ${{ matrix.shard }})
@@ -1810,7 +1812,8 @@ jobs:
           read -ra files <<< "$FILES"
           start=$SECONDS
           status=0
-          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" --cov-context=test -p tests.dep_inputs -p tests.pass_record -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short --timeout=60 --timeout-method=thread -o faulthandler_timeout=45 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?
+          workers=$(python -m scripts.ci_cpu_quota)
+          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" --cov-context=test -p tests.dep_inputs -p tests.pass_record -v -n "$workers" --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short --timeout=60 --timeout-method=thread -o faulthandler_timeout=45 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?
           echo "{\"seconds\":$((SECONDS - start)),\"job\":\"$GITHUB_JOB\"}" > elapsed.json
           exit "$status"
 
@@ -1844,24 +1847,22 @@ jobs:
 
       - name: Upload selected test durations
         if: ${{ !cancelled() && hashFiles('durations.json') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: durations-${{ matrix.python-version }}-${{ matrix.leg }}
           path: |
             durations.json
             elapsed.json
           retention-days: 14
-          overwrite: true
 
       - name: Upload selected test flakes
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: flakes-${{ matrix.python-version }}-${{ matrix.leg }}
           path: flakes.jsonl
           if-no-files-found: error
           retention-days: 14
-          overwrite: true
 
       - name: Check every selected test ran once or was reused
         if: steps.reuse.outputs.graded == 'true'
@@ -2310,23 +2311,21 @@ jobs:
 
       - name: Upload the test dependency manifest
         if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: dep-manifest
           path: ${{ runner.temp }}/dep-manifest/manifest.json
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       - name: Upload the packed test dependency manifest
         if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: dep-manifest-packed
           path: ${{ runner.temp }}/dep-manifest/packed.json
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       - name: Upload coverage and analysis evidence
         if: always()
@@ -2465,7 +2464,7 @@ jobs:
 
       - name: Retain the rendered documentation
         if: ${{ !cancelled() && steps.docs.outputs.build == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: documentation-site
           path: _site/
@@ -3356,13 +3355,12 @@ jobs:
         run: python -m tests.flake_budget --history ~/flake-history/history.jsonl --reports ~/flake-reports --out flake-budget.json | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Publish the flake budget
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: flake-budget
           path: flake-budget.json
           if-no-files-found: error
           retention-days: 14
-          overwrite: true
 
       - name: Save the flake history
         uses: actions/cache/save@v4
@@ -3497,6 +3495,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
+      - name: Take the upload action from the workflow revision
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          mkdir -p .workflow-revision
+          git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -3548,7 +3552,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.reuse.outputs.reused != 'true'
-        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0,<9.2" "pyyaml>=6.0" "tomlkit>=0.12"
 
       - name: Restore latest dev durations
         if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
@@ -3587,6 +3591,7 @@ jobs:
           BASE: ${{ inputs.base || 'origin/dev' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           MUTATION_SHARD_CPU_QUOTA: "3"
+          PYTHONUNBUFFERED: "1"
         run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
 
       # The workflow comes from the merge ref, so a head whose planner predates the selection writes none.
@@ -3605,7 +3610,7 @@ jobs:
 
       - name: Upload planned mutation test selection
         if: steps.reuse.outputs.reused != 'true' && steps.contract.outputs.selection == 'true'
-        uses: actions/upload-artifact@v4
+        uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-selection
           path: .mutation-selection.json
@@ -3621,8 +3626,9 @@ jobs:
 
       - name: Forward the reused or empty mutation report
         if: always() && (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0')
-        uses: actions/upload-artifact@v4
+        uses: ./.workflow-revision/.github/actions/retry-upload
         with:
+          after-cancel: true
           name: mutation-report-0
           path: .mutation-gate/
           include-hidden-files: true
@@ -3770,13 +3776,12 @@ jobs:
 
       - name: Upload stats evidence
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-evidence-stats-${{ matrix.part }}
           path: .mutation-gate/
           include-hidden-files: true
           retention-days: 7
-          overwrite: true
 
       - name: Keep only the test stats this part wrote
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -3804,8 +3809,9 @@ jobs:
 
       - name: Upload complete inline mutation evidence
         if: always() && steps.mutate.outcome != 'skipped'
-        uses: actions/upload-artifact@v4
+        uses: ./.workflow-revision/.github/actions/retry-upload
         with:
+          after-cancel: true
           name: mutation-report-0
           path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
           include-hidden-files: true
@@ -3861,17 +3867,21 @@ jobs:
         uses: actions/download-artifact@v4
         with: *mutation-download-every-parts-test-stats-cache
 
+      - uses: actions/setup-python@v5
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Cap the merged test stats
+        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
+        run: python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap; print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")' .mutation-stats-cache
+
       - name: Save the merged test stats
         if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.mutation-stats-cache/**') != ''
         uses: actions/cache/save@v4
         with:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - uses: actions/setup-python@v5
-        if: needs.mutation-plan.outputs.forwarded != 'true'
-        with:
-          python-version: "3.12"
 
       - uses: astral-sh/setup-uv@v10.2.0
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -3994,8 +4004,9 @@ jobs:
 
       - name: Upload complete mutation evidence
         if: always() && needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/upload-artifact@v4
+        uses: ./.workflow-revision/.github/actions/retry-upload
         with:
+          after-cancel: true
           name: mutation-report-${{ matrix.shard }}
           path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
           include-hidden-files: true
