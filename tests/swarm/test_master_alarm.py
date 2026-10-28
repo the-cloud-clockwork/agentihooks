@@ -132,9 +132,7 @@ def test_the_alarm_state_is_saved_before_any_item(store, monkeypatch):  # noqa: 
 
     monkeypatch.setattr(InboxStore, "send", send)
     master_alarm.run("sw", store, runtime, "")
-    assert seen == [
-        {"error": BROKEN, "at": 1, "failures": 1, "first_at": 1, "doctor": DOCTOR, "told": [ENGINEER]}
-    ] * 2
+    assert seen == [{"error": BROKEN, "at": 1, "failures": 1, "first_at": 1, "doctor": DOCTOR, "told": [ENGINEER]}] * 2
 
 
 def test_nothing_is_sent_without_a_recorded_failure(store):  # noqa: F811
