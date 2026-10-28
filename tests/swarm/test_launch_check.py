@@ -343,6 +343,61 @@ def test_a_late_join_that_holds_its_seat_is_reported_and_kept(store, monkeypatch
     assert name not in launch_check.pending(store, "sw")
 
 
+@pytest.mark.parametrize("hive,relaunch", [("", True), ("remote", True), ("remote", False)])
+@pytest.mark.parametrize("age", [0, 20 * 60_000 - 1])
+def test_a_working_heartbeat_keeps_a_failed_launch(store, monkeypatch, scratch, hive, relaunch, age):
+    from scripts.swarm import idle
+
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    runtime.profile = "anton"
+    tick("sw", store, ledger, runtime, LAUNCH)
+    agent = replace(store.agents("sw")[0], hive=hive)
+    store.put_agent("sw", agent)
+    launch_check.begin(store, "sw", agent, LAUNCH, relaunch=relaunch)
+    runtime.statuses[agent.name] = "idle"
+    now = LAUNCH + idle.STALE_MS + launch_check.DEADLINE_MS
+    idle.beat(store.redis, "sw", agent.name, idle.WORKING, now - age)
+
+    actions = tick("sw", store, ledger, runtime, now)
+
+    assert agent.name not in runtime.killed
+    assert len(runtime.spawned) == 1
+    assert any("reported only" in action and agent.name in action for action in actions)
+    assert store.agents("sw")[0].name == agent.name
+    assert ledger.rows["t1"]["claimed_by"] == agent.name
+    assert launch_check.pending(store, "sw") == {}
+    assert not launch_check.relaunched(store, "sw", "t1")
+    report = launch_check.report(store, "sw", "t1")
+    assert report["state"] == "failed"
+    assert report["held"] is True
+    assert report["misses"]["profile"] == {"expected": "engineer", "actual": "anton"}
+    assert report["at"] == now
+
+
+@pytest.mark.parametrize("hive", ["", "remote"])
+@pytest.mark.parametrize("state,age", [("idle", 0), ("working", 20 * 60_000)])
+def test_an_idle_or_stale_heartbeat_does_not_keep_a_failed_launch(store, monkeypatch, scratch, hive, state, age):
+    from scripts.swarm import idle
+
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    runtime.profile = "anton"
+    tick("sw", store, ledger, runtime, LAUNCH)
+    agent = replace(store.agents("sw")[0], hive=hive)
+    store.put_agent("sw", agent)
+    runtime.statuses[agent.name] = "idle"
+    now = LAUNCH + idle.STALE_MS + launch_check.DEADLINE_MS
+    idle.beat(store.redis, "sw", agent.name, state, now - age)
+
+    actions = tick("sw", store, ledger, runtime, now)
+
+    assert agent.name in runtime.killed
+    assert any(
+        action.startswith(f"retired {agent.name} after its launch check failed on profile") for action in actions
+    )
+
+
 def test_an_agent_that_never_joins_is_still_retired_and_relaunched(store, monkeypatch, scratch):
     scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
