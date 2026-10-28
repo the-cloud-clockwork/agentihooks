@@ -200,7 +200,10 @@ def main(argv: list[str] | None = None) -> int:
     model = os.environ.get(MODEL_VAR) or DEFAULT_MODEL
     key = os.environ.get(KEY_VAR, "")
     section = release_section(
-        args.tag, os.environ["GITHUB_REPOSITORY"], lambda change: ask_model(change, url, key, model)
+        args.tag,
+        os.environ["GITHUB_REPOSITORY"],
+        lambda change: ask_model(change, url, key, model, urlopen),
+        gh_graphql,
     )
     args.section.write_text(section)
     existing = args.changelog.read_text() if args.changelog.exists() else ""
