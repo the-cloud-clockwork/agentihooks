@@ -247,7 +247,7 @@ def test_a_read_that_would_leave_less_than_the_reserve_is_refused(monkeypatch):
 def test_remaining_reads_the_core_limit_from_the_free_rate_limit_endpoint(monkeypatch):
     def fake(args, **kwargs):
         assert args == ["gh", "api", "rate_limit"]
-        assert kwargs["check"] is True
+        assert kwargs == {"capture_output": True, "check": True, "timeout": 30, "text": True}
         return subprocess.CompletedProcess(args, 0, json.dumps({"resources": {"core": {"remaining": 4321}}}), "")
 
     monkeypatch.setattr(ci_minutes.subprocess, "run", fake)

@@ -132,16 +132,15 @@ def read_runs(repo: str, since: datetime, until: datetime) -> list[dict]:
 
 def read_jobs(repo: str, runs: list[dict], cache: dict) -> list[dict]:
     def read(run):
-        return rows(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100", "jobs")
+        return attempt(run), rows(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100", "jobs")
 
-    keys = [attempt(run) for run in runs]
-    unread = [run for run, key in zip(runs, keys, strict=True) if key not in cache]
+    unread = [run for run in runs if attempt(run) not in cache]
     with ThreadPoolExecutor() as pool:
-        fresh = {attempt(run): jobs for run, jobs in zip(unread, pool.map(read, unread), strict=True)}
+        fresh = dict(pool.map(read, unread))
     for run in unread:
         if run.get("status") == "completed":
             cache[attempt(run)] = {"created_at": run["created_at"], "jobs": fresh[attempt(run)]}
-    return [job for key in keys for job in (fresh[key] if key in fresh else cache[key]["jobs"])]
+    return [job for key in map(attempt, runs) for job in (fresh[key] if key in fresh else cache[key]["jobs"])]
 
 
 def attempt(run: dict) -> str:
