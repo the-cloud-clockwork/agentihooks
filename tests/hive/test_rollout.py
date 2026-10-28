@@ -103,3 +103,15 @@ def test_acquisition_conflict_reads_the_winner_instead_of_overwriting_it():
     with pytest.raises(TimeoutError):
         module.acquire(cluster, "default", "shared", "loser", timeout=0)
     assert cluster.lease["spec"]["holderIdentity"] == "winner"
+
+
+def test_readiness_needs_a_recent_successful_heartbeat(tmp_path):
+    module = rollout()
+    marker = tmp_path / "ready"
+    assert not module.ready(marker, now=100)
+    marker.touch()
+    import os
+
+    os.utime(marker, (100, 100))
+    assert module.ready(marker, now=110)
+    assert not module.ready(marker, now=200)
