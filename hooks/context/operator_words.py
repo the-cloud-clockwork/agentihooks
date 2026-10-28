@@ -163,7 +163,8 @@ def _amend(shared, key, change):
 def _mirror(swarm, name, at, words):
     def push(shared):
         _amend(shared, NAMES_KEY, lambda names: names if name in names else [*names, name])
-        return _amend(shared, _rows_key(name), lambda rows: [*rows, {"swarm": swarm, "at": at, "words": words}])
+        row = {"swarm": swarm, "at": at, "words": words}
+        return _amend(shared, _rows_key(name), lambda rows: rows if row in rows else [*rows, row])
 
     return _shared_call(push, False)
 

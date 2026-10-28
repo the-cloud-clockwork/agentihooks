@@ -803,8 +803,8 @@ def test_the_shared_client_connects_once_per_process_and_retries_after_a_refusal
     monkeypatch.setattr(operator_words, "_SHARED", [])
     monkeypatch.setattr(store, "redis_client", connect)
     assert operator_words._shared() is None
-    assert operator_words._shared() == "client"
-    assert operator_words._shared() == "client"
+    assert operator_words._shared().redis == "client"
+    assert operator_words._shared() is operator_words._shared()
     assert len(calls) == 2
 
 

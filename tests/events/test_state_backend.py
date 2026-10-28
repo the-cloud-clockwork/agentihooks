@@ -133,7 +133,8 @@ def test_redis_state_retries_a_write_raced_on_another_key(monkeypatch):
 
     def racing(name, amount=1):
         if not raced:
-            raced.append(other.create("other", b"raced"))
+            raced.append(None)
+            raced[0] = other.create("other", b"raced")
         return incr(name, amount)
 
     monkeypatch.setattr(client, "incr", racing)
