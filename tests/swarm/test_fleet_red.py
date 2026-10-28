@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 
 from scripts.swarm import fleet_red
@@ -93,11 +95,27 @@ def test_the_checker_reads_open_pull_requests_once_and_only_for_an_open_task_wit
     assert reads == ["/repo"]
 
 
-def test_a_failed_read_admits_every_task():
-    def broken(repo):
-        raise fleet_red.ReadError("gh pr list exited 1")
+@pytest.mark.parametrize(
+    "error",
+    [
+        fleet_red.ReadError("no auth"),
+        OSError("no auth"),
+        ValueError("no auth"),
+        subprocess.TimeoutExpired("no auth", 60),
+    ],
+)
+def test_a_failed_read_admits_every_task_and_says_why(error, capsys):
+    reads = []
 
-    assert fleet_red.checker("/repo", broken)(task("red", pr_url=MINE))
+    def broken(repo):
+        reads.append(repo)
+        raise error
+
+    admits = fleet_red.checker("/repo", broken)
+    assert admits(task("red", pr_url=MINE))
+    assert admits(task("again", pr_url=MINE))
+    assert reads == ["/repo"]
+    assert capsys.readouterr().err == f"fleet red hold skipped, listing open pull requests failed: {error}\n"
 
 
 def test_read_lists_open_pull_requests_with_their_check_rollup():
@@ -110,14 +128,16 @@ def test_read_lists_open_pull_requests_with_their_check_rollup():
     assert found == [{"url": "u", "statusCheckRollup": []}]
     ((args, kwargs),) = calls
     assert args == (["gh", "pr", "list", "--state", "open", "--limit", "200", "--json", "url,statusCheckRollup"],)
-    assert kwargs["cwd"] == "/repo" and kwargs["timeout"] == 60
+    assert kwargs == {"cwd": "/repo", "capture_output": True, "text": True, "timeout": 60}
 
 
-def test_read_raises_a_read_error_on_a_failed_listing():
+@pytest.mark.parametrize(("stderr", "why"), [(" no auth\n", "^no auth$"), ("", "^gh pr list exited 4$")])
+def test_read_raises_a_read_error_on_a_failed_listing(stderr, why):
     class Failed:
-        returncode, stdout, stderr = 1, "", "no auth"
+        returncode, stdout = 4, ""
 
-    with pytest.raises(fleet_red.ReadError, match="no auth"):
+    Failed.stderr = stderr
+    with pytest.raises(fleet_red.ReadError, match=why):
         fleet_red.read("/repo", lambda *args, **kwargs: Failed())
 
 
