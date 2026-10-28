@@ -87,7 +87,7 @@ def _process_table_reads(check, process_paths):
 
 
 def _code_reads_the_process_table(code):
-    if READERS.intersection(code.co_names, code.co_varnames, code.co_cellvars, code.co_freevars):
+    if READERS & {*code.co_names, *code.co_varnames, *code.co_cellvars, *code.co_freevars}:
         return True
     return any(
         const == PROC_ROOT or (isinstance(const, types.CodeType) and _code_reads_the_process_table(const))
@@ -99,7 +99,7 @@ def _process_table_violations(tests):
     found = []
     for path in sorted(tests.rglob("*.py")):
         source = path.read_text(encoding="utf-8")
-        if not _code_reads_the_process_table(compile(source, str(path), "exec", dont_inherit=True)):
+        if not _code_reads_the_process_table(compile(source, str(path), "exec", dont_inherit=True, optimize=0)):
             continue
         for function in ast.walk(ast.parse(source)):
             if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
