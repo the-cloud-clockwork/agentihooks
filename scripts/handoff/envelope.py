@@ -9,10 +9,10 @@ from collections.abc import Collection, Mapping
 from datetime import datetime, timezone
 
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import effort_range, snapshot
+from scripts.swarm import effort_range, publish, snapshot
 from scripts.swarm.ledger_events import RED
 from scripts.swarm.naming import plain
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, SwarmError
 
 REASONS = ("recycle", "quota", "succession", "takeover", "reopen", "restore", "inbox", "exit", "operator")
 UNKNOWN, NONE = "unknown", "none"
@@ -36,7 +36,7 @@ def build(store, slug, agent, reason, rows, at, run=subprocess.run):
     if reason not in REASONS:
         raise ValueError(f"handoff reason {reason!r} is not one of {', '.join(REASONS)}")
     row = next((r for r in rows or [] if r.get("id") == agent.task), None)
-    worktree = _worktree(store, slug, agent, run)
+    worktree = _worktree(store, slug, agent, row, run)
     branch = _branch(worktree, run) if worktree else UNKNOWN
     return {
         "seat": agent.seat or UNKNOWN,
@@ -66,13 +66,22 @@ def _launch(store, slug, agent):
     return launch
 
 
-def _worktree(store, slug, agent, run):
+def _worktree(store, slug, agent, row, run):
     repo = store.config(slug).repo
     if agent.lane == MASTER:
         return repo
     try:
-        return snapshot.worktrees(repo, [agent.name], run).get(agent.name, "")
+        found = snapshot.worktrees(repo, [agent.name], run).get(agent.name, "")
     except FAILED:
+        found = ""
+    return found or _task_worktree(repo, row or {}, agent)
+
+
+def _task_worktree(repo, row, agent):
+    try:
+        local = publish.local_repository(repo, repo)
+        return str(publish.existing(local, publish.repository_task(local, row), agent) or "")
+    except (*FAILED, SwarmError):
         return ""
 
 
