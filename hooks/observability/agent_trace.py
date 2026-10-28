@@ -381,7 +381,9 @@ def session_spans(
     for number, turn in enumerate(all_turns[first_turn:], start=offset + first_turn + 1):
         carry = paged.get("open") if number == offset + 1 else None
         spans.extend(_turn_spans(session_id, number, turn, root_id, results, carry))
-    shared = {"langfuse.session.id": session_id, "langfuse.user.id": identity.user_id()}
+    from hooks.observability.transcript import mask_value
+
+    shared = mask_value({"langfuse.session.id": session_id, "langfuse.user.id": identity.user_id()})
     for span in spans:
         span.attributes.update({key: value for key, value in shared.items() if value})
     return spans
