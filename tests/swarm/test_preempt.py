@@ -126,6 +126,21 @@ def test_a_placement_refusal_in_another_lane_still_asks_and_names_the_victim(sto
     assert not preempt.take_victim(store, SLUG, "e2")
 
 
+def test_an_urgent_task_whose_placement_stays_refused_asks_nobody_over_an_hour(store):
+    probed = []
+
+    def probe(lane, task):
+        probed.append((lane, task["id"]))
+        return "no eng hive has room: cpu"
+
+    refuse(store, "t3", 1)
+    for at in range(1, 60 * 60_000 + 2, 60_000):
+        assert preempt.step(SLUG, store, ROWS, doc(), full("t3"), at, probe) == []
+    assert asks(store, "e1") == asks(store, "e2") == []
+    assert set(probed) == {("eng", "t3")}
+    assert len(preempt.step(SLUG, store, ROWS, doc(), full("t3"), 61 * 60_000, lambda lane, task: "")) == 1
+
+
 def test_an_ask_is_recorded_before_its_message_so_a_failed_tick_never_resends_it(store, monkeypatch):
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
 
