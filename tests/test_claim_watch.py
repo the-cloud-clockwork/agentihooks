@@ -165,3 +165,50 @@ def test_the_pre_tool_hook_denies_the_next_call_of_a_reopened_claimant(hive, mon
         )
     assert ledger.reads == [("sw", "t1")]
     assert [argv for argv, _ in spawn.calls] == [["agentihooks", "swarm", "sw", "--as", NAME, "exit"]]
+
+
+def test_the_swarm_gates_run_in_order_and_the_first_block_wins(monkeypatch):
+    from hooks.context import context_recycle, swarm_gates
+
+    calls = []
+
+    def recycle(tool_name, tool_input, session_id):
+        calls.append(("recycle", tool_name, tool_input, session_id))
+        return None
+
+    def claim():
+        calls.append(("claim",))
+        return "stop"
+
+    monkeypatch.setattr(context_recycle, "gate", recycle)
+    monkeypatch.setattr(claim_watch, "check", claim)
+
+    assert swarm_gates.pretool("Bash", {"command": "ls"}, "s1") == "stop"
+    assert calls == [("recycle", "Bash", {"command": "ls"}, "s1"), ("claim",)]
+
+    monkeypatch.setattr(context_recycle, "gate", lambda *args: "handoff")
+    calls.clear()
+    assert swarm_gates.pretool("Bash", {}, "s1") == "handoff"
+    assert calls == []
+
+
+def test_a_failing_swarm_gate_is_logged_and_the_next_one_still_runs(monkeypatch):
+    from hooks.context import context_recycle, swarm_gates
+
+    logged = []
+
+    def broken(*args):
+        raise RuntimeError("no transcript")
+
+    monkeypatch.setattr(context_recycle, "gate", broken)
+    monkeypatch.setattr(claim_watch, "check", lambda: None)
+    monkeypatch.setattr(swarm_gates, "log", lambda message, payload: logged.append((message, payload)))
+
+    assert swarm_gates.pretool("Bash", {}, "s1") is None
+    assert logged == [("context recycle gate failed", {"error": "no transcript"})]
+
+    monkeypatch.setattr(context_recycle, "gate", lambda *args: "")
+    monkeypatch.setattr(claim_watch, "check", broken)
+    logged.clear()
+    assert swarm_gates.pretool("Bash", {}, "s1") is None
+    assert logged == [("claim watch failed", {"error": "no transcript"})]

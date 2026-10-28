@@ -1467,25 +1467,11 @@ def on_pre_tool_use(payload: dict) -> None:
         log("swarm activity record failed", {"error": str(e)})
     _swarm_heartbeat("working", payload=payload)
 
-    _recycle_block = None
-    try:
-        from hooks.context.context_recycle import gate as _recycle_gate
+    from hooks.context.swarm_gates import pretool as _swarm_gates
 
-        _recycle_block = _recycle_gate(tool_name, tool_input, payload.get("session_id", ""))
-    except Exception as e:
-        log("context recycle gate failed", {"error": str(e)})
-    if _recycle_block:
-        raise BlockAction(_recycle_block)
-
-    _claim_block = None
-    try:
-        from hooks.context.claim_watch import check as _claim_check
-
-        _claim_block = _claim_check()
-    except Exception as e:
-        log("claim watch failed", {"error": str(e)})
-    if _claim_block:
-        raise BlockAction(_claim_block)
+    _swarm_block = _swarm_gates(tool_name, tool_input, payload.get("session_id", ""))
+    if _swarm_block:
+        raise BlockAction(_swarm_block)
 
     from hooks.lifecycle.guard import pretool as _lifecycle_pretool
 
