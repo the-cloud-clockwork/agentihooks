@@ -75,7 +75,10 @@ def created_mutations(filename: str, source: str) -> tuple[object, list, list]:
 
     wrapper = MetadataWrapper(cst.parse_module(source))
     ignored = get_ignored_lines(filename, source, wrapper)
-    graded = Visitor(ignored, lambda node: isinstance(node, cst.ClassDef) and all(map(is_dataclass, node.decorators)))
+    graded = Visitor(
+        ignored,
+        lambda node: all(map(is_dataclass, node.decorators)) if isinstance(node, cst.ClassDef) else is_property(node),
+    )
     possible = Visitor(ignored, lambda node: True)
     module = wrapper.visit(graded)
     wrapper.visit(possible)
@@ -83,11 +86,32 @@ def created_mutations(filename: str, source: str) -> tuple[object, list, list]:
 
 
 def is_dataclass(decorator) -> bool:
+    return decorator_name(decorator) == "dataclass"
+
+
+def decorator_name(decorator) -> str | None:
     import libcst as cst
 
     target = decorator.decorator.func if isinstance(decorator.decorator, cst.Call) else decorator.decorator
     name = target.attr if isinstance(target, cst.Attribute) else target
-    return isinstance(name, cst.Name) and name.value == "dataclass"
+    return name.value if isinstance(name, cst.Name) else None
+
+
+def is_property(node) -> bool:
+    return len(node.decorators) == 1 and decorator_name(node.decorators[0]) in {"property", "cached_property"}
+
+
+def plain_copies(code: str) -> str:
+    import libcst as cst
+
+    # mutmut copies a method with its decorators, and the trampoline cannot call a copied property object.
+    class Plain(cst.CSTTransformer):
+        def leave_FunctionDef(self, original_node, updated_node):
+            if "__mutmut_" in updated_node.name.value and is_property(updated_node):
+                return updated_node.with_changes(decorators=[])
+            return updated_node
+
+    return cst.parse_module(code).visit(Plain()).code
 
 
 def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int, list[str]]:
@@ -117,6 +141,11 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
 
     module, selected = changed_mutations(filename, source, changed)
     code, names = combine_mutations_to_source(module, selected)
+    if any(
+        mutation.contained_by_top_level_function and is_property(mutation.contained_by_top_level_function)
+        for mutation in selected
+    ):
+        code = plain_copies(code)
     return code, list(names)
 
 
