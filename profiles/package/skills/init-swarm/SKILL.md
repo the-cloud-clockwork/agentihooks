@@ -154,6 +154,12 @@ A code task takes no `--kind` and no contract. A `ci` lane task may take
 contract either. The ledger refuses `done` on a
 task beyond code until its agent posts the proof its kind needs.
 
+A task, follow up or phase add that repeats an item already on the ledger is
+refused. The refusal names that item with its state, rank and phase, and says
+it will be built or is already built: drop the add. Only when the new item is a
+different change, repeat it with `--not-duplicate "<why it differs>"`, or give
+the phase a `not_duplicate` reason in `plan phases`.
+
 The tick claims a task once every task in `--depends-on` is done, or is claimed
 or in review with a recorded branch. That stacked claim starts its worktree from
 the dependency's branch, builds what it can, pushes and parks with `swarm park`;
