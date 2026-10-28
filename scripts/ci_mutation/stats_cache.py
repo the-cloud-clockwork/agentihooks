@@ -266,7 +266,7 @@ def per_test_stats(
             {
                 test
                 for result in fresh
-                for test in result["tests"].get(function, result["tests"].get(function.partition("__mutmut_")[0], []))
+                for test in result["tests"].get(function, result["tests"].get(function.rpartition("__mutmut_")[0], []))
                 if test in durations
             }
         )
@@ -312,7 +312,7 @@ def result_by_path(result: dict, paths: list[str], owners: dict[str, list[str]])
                 parts[path][name][test] = value
     for function, tests in result["tests"].items():
         if "__mutmut_" in function:
-            for test in result["tests"].get(function.partition("__mutmut_")[0], ()):
+            for test in result["tests"].get(function.rpartition("__mutmut_")[0], ()):
                 for path in owners.get(test, ()):
                     parts[path]["tests"].setdefault(function, [])
         for test in tests:

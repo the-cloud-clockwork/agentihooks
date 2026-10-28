@@ -70,7 +70,7 @@ def merged_test_selections(results: list[dict]) -> dict[str, set[str]]:
         name: {
             test
             for result in results
-            for test in result["tests"].get(name, result["tests"].get(name.partition("__mutmut_")[0], ()))
+            for test in result["tests"].get(name, result["tests"].get(name.rpartition("__mutmut_")[0], ()))
         }
         for name in names
     }
