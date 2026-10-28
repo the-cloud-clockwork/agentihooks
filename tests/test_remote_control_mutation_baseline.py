@@ -84,7 +84,28 @@ def timed(monkeypatch):
     prepare = runner.prepare_workspace
 
     def timed_prepare(*args):
+        probe = Path(tempfile.mkdtemp(dir=args[1].parent))
+        began = time.monotonic()
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("COV_CORE", "COVERAGE"))}
+        code = (
+            "import sys; from pathlib import Path; from scripts.ci_mutation.runner import prepare_workspace; "
+            "prepare_workspace(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3:4], sys.argv[4:])"
+        )
+        (probe / "w").mkdir()
+        subprocess.run(
+            [sys.executable, "-c", code, str(args[0]), str(probe / "w"), args[2][0], *args[3]],
+            cwd=ROOT,
+            env=env,
+            check=False,
+        )
+        TIMELINE.append(
+            f"{time.monotonic() - start:7.1f} untraced subprocess prepare took {time.monotonic() - began:.1f}"
+        )
+        began = time.monotonic()
         prepare(*args)
+        TIMELINE.append(
+            f"{time.monotonic() - start:7.1f} traced prepare took {time.monotonic() - began:.1f} tracer {sys.gettrace()!r:.60} monitoring {getattr(sys, 'monitoring', None) and sys.monitoring.get_tool(1)}"
+        )
         TIMELINE.append(
             f"{time.monotonic() - start:7.1f} prepare_workspace done, same device {os.stat(ROOT).st_dev == os.stat(args[1]).st_dev}"
         )
