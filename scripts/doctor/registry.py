@@ -186,7 +186,7 @@ def _correlated(get, row: dict, roots: dict) -> dict:
 
 def _known_roots(found: list[dict]) -> dict:
     fields = {t["id"]: {name: t[name] for name in REMOTE_FIELDS} for b in found for t in b["traces"]}
-    return {trace: kept for trace, kept in fields.items() if any(kept.values())}
+    return {trace: kept for trace, kept in fields.items() if all(kept.values())}
 
 
 def _freshness(get, trace_id: str, mark: dict, page: int) -> dict:

@@ -719,6 +719,30 @@ def test_a_trace_without_a_root_observation_is_read_again_at_the_next_scan(curso
     assert state["roots"] == {}
 
 
+def test_a_root_missing_one_attribute_is_read_again_until_every_attribute_is_present(cursors):
+    partial = _trace("tr", "sid")
+    partial["metadata"]["attributes"]["agentihooks.correlation.profile.resolved"] = ""
+    langfuse = Langfuse([partial], [])
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert state["roots"] == {}
+    langfuse.traces = [_trace("tr", "sid")]
+    [found], _ = registry.read("s", [AGENT], langfuse, state, 15, 50)
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert _root_reads(langfuse) == ["tr", "tr"]
+    assert found["traces"][0]["profile"] == "engineer"
+
+
+def test_a_rescan_of_an_unchanged_binding_with_two_traces_costs_three_requests(cursors):
+    langfuse = Langfuse([_trace("tr-new", "sid-new"), _trace("tr-old", "sid-old")], [])
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert len(langfuse.calls) == 5
+    langfuse.calls.clear()
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert [path for path, _ in langfuse.calls] == ["traces", "observations", "observations"]
+
+
 def test_a_full_read_drops_roots_of_traces_no_longer_listed_and_a_failed_read_keeps_them(cursors, read_clock):
     known = {"life": "x", "seat": "", "task": "", "harness": "", "profile": ""}
     state = {"roots": {"gone": known}}

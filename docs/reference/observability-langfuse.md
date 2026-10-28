@@ -567,8 +567,8 @@ observation identities are listed page by page for the
 `telemetry count drift` check. A later scan reuses that listing while the trace
 reports the same observation count and the same newest event, and lists again
 once either changes. The correlation attributes of each listed trace's root
-observation are read once and kept in reader state, so a later scan reads the
-root only of a trace it has not seen with attributes before.
+observation are kept in reader state once a read returns every one of them, so
+a later scan reads the root only of a trace it has not yet seen complete.
 
 | Limit | Value | Applies to |
 |---|---|---|
