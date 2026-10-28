@@ -271,6 +271,20 @@ def test_main_reads_only_uncached_runs_and_keeps_the_cache(monkeypatch, tmp_path
     assert sorted(json.loads(cache.read_text())) == ["1:1", "2:1"]
 
 
+def test_main_budgets_a_rerun_attempt_of_a_cached_run_as_one_read(monkeypatch, tmp_path):
+    cache = tmp_path / "jobs.json"
+    cache.write_text(json.dumps({"1:1": {"created_at": "2026-10-24T10:00:00Z", "jobs": [job(1, "unit", 60)]}}))
+    monkeypatch.setattr(ci_minutes, "read_runs", lambda repo, since, until: [{**listed(1), "run_attempt": 2}])
+    monkeypatch.setattr(ci_minutes, "merged_count", lambda repo, since, until: 1)
+    budgets = []
+    monkeypatch.setattr(ci_minutes, "within_budget", budgets.append)
+    monkeypatch.setattr(ci_minutes, "rows", lambda path, key: [job(1, "rerun", 60)])
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    argv = ["--repo", "o/r", "--until", "2026-10-24T12:00:00Z", "--out", str(tmp_path / "out.json")]
+    assert ci_minutes.main([*argv, "--cache", str(cache)]) == 0
+    assert budgets == [1]
+
+
 def test_runs_are_read_one_hour_at_a_time_and_kept_once(monkeypatch):
     calls = []
 
