@@ -16,7 +16,9 @@ REST_GROUPS = frozenset({"cache", "label", "release", "ruleset", "run", "secret"
 REST_PULL = frozenset({"diff"})
 UNCHARGED = ContextVar("gh_uncharged", default=False)
 SEPARATORS = frozenset("|&;()")
-WRAPPERS = frozenset({"command", "do", "else", "env", "exec", "nice", "sudo", "then", "time", "timeout", "xargs"})
+WRAPPERS = frozenset(
+    {"command", "do", "else", "env", "exec", "nice", "sudo", "then", "time", "timeout", "until", "while", "xargs"}
+)
 SHELLS = frozenset({"bash", "sh", "zsh"})
 SPAWNS = frozenset({"os.exec", "os.posix_spawn", "subprocess.Popen"})
 PREFIX = re.compile(r"^(?:[A-Za-z_]\w*=.*|-.*|\d+[smhd]?)$")
