@@ -92,6 +92,7 @@ class SwarmConfig:
     watchdog_address: str = ""
     placement_mode: str = ANTON_FIRST
     placement_nodes: int = 0
+    repo_origin: str = ""
 
     def __post_init__(self) -> None:
         if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
@@ -250,6 +251,7 @@ class RedisStore:
             raw.get("watchdog_address", ""),
             raw.get("placement_mode") or ANTON_FIRST,
             int(raw.get("placement_nodes") or 0),
+            raw.get("repo_origin", ""),
         )
 
     def update(self, slug, **changes):

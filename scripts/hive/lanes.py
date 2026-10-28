@@ -42,7 +42,10 @@ class LaneTasks:
         admitted = self._ask("admit", event)
         if admitted is None:
             return None
-        return SpawnRequest(self.configs(event.swarm), event.data["lane"], admitted["name"], admitted["task"])
+        config = self.configs(event.swarm)
+        if config.repo_origin:
+            config = replace(config, repo=config.repo_origin)
+        return SpawnRequest(config, event.data["lane"], admitted["name"], admitted["task"])
 
     def reopen(self, event: Envelope) -> None:
         self._ask("reopen", event)
