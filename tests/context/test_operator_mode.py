@@ -619,9 +619,9 @@ def test_automated_master_prompts_neither_grant_nor_renew_temporary_presence(mon
     assert operator_mode._load("pane")["pane_at"] == 100
     monkeypatch.setattr(operator_mode.time, "time", lambda: 109)
     run_prompt(monkeypatch, capsys, "pane", prompt)
-    assert operator_mode.present("pane", SWARM, now=109)
+    assert operator_mode.present("pane", now=109)
     assert operator_mode._load("pane")["pane_at"] == 100
-    assert not operator_mode.present("pane", SWARM, now=110)
+    assert not operator_mode.present("pane", now=110)
 
 
 @pytest.mark.parametrize("source", ["startup", "resume", "compact"])
