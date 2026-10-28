@@ -96,7 +96,6 @@ def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int,
 
     module, graded, possible = created_mutations(filename, source)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(PositionProvider)
-    # mutmut emits only mutants inside a function or method.
     found = [
         mutation.contained_by_top_level_function
         for mutation in on_changed_lines(module, graded, changed)
