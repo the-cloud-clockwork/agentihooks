@@ -30,7 +30,6 @@ def env(monkeypatch, tmp_path):
     import fakeredis
 
     from scripts.swarm.health import merge_stall
-
     monkeypatch.setattr(
         merge_stall,
         "observe",
