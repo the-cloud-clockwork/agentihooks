@@ -8,15 +8,12 @@ pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_push_concurrency_is_one_promotion_group_and_other_runs_keep_their_own():
+def test_push_and_other_non_dispatch_runs_each_keep_their_own_group():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     suffix = " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
     group = workflow["concurrency"]["group"]
     assert group.endswith(suffix)
-    prefix = group.removesuffix(suffix)
-    assert "github.event_name == 'push'" not in prefix or prefix.endswith(
-        "|| github.event_name == 'push' && 'promotion-dev'"
-    )
+    assert "github.event_name == 'push'" not in group.removesuffix(suffix)
 
 
 def test_only_pull_request_updates_cancel_running_checks():
