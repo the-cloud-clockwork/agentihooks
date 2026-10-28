@@ -200,14 +200,21 @@ class Runtime(Protocol):
 
 
 def tick(slug, store, ledger, runtime, now_ms):
+    from scripts.swarm import automated_gc
+
     config = store.ensure_code(slug)
     actions = []
     if config.state == "stopped":
         doc = timing.call(ledger.state, slug)
         rows = {t["id"]: t for t in doc["tasks"]}
+        actions = automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
         if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
-            return skip_refused(_close_space, slug, config, store, runtime) + _bin_closed(slug, store, ledger, doc)
+            return (
+                actions
+                + skip_refused(_close_space, slug, config, store, runtime)
+                + _bin_closed(slug, store, ledger, doc)
+            )
         config = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
     store.redis.delete(store.key(slug, SPAWN_HOLD))
@@ -217,6 +224,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
+    actions += automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
     actions += skip_dropped(
         exits.sweep,
         InboxStore(store.redis),
@@ -380,6 +388,12 @@ def _master_down(slug, config, store, ledger, runtime, now_ms):
         return []
     ledger.notify(slug, MASTER_DOWN)
     return [f"master down, told the operator about {len(told)} waiting lines"]
+
+
+def _collected(slug, store, ledger, rows, agent):
+    if agent.lane == MASTER:
+        store.redis.set(store.key(slug, "master-retired-tasks"), json.dumps(list(rows)))
+    return _drop(slug, store, ledger, rows, agent)
 
 
 def _drop(slug, store, ledger, rows, agent, refund=False):
@@ -786,6 +800,8 @@ def _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms):
 
 
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
+    from scripts.swarm import automated_gc
+
     observed = runtime.observe(agent)
     if _refusal_due(slug, store, rows, agent, observed, now_ms):
         return _free_refused(slug, store, ledger, runtime, rows, agent, now_ms)
@@ -825,7 +841,11 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if state in {idle_state.WAITING, idle_state.WORKING}:
         store.put_agent(slug, replace(agent, idle_ticks=0))
         return nudged
-    if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
+    if (
+        _operator_at_pane(slug, store, agent, observed, now_ms)
+        or ledger_probe.holding(store, slug)
+        or automated_gc.owned(slug, agent)
+    ):
         store.put_agent(slug, agent)
         return nudged
     idle = replace(agent, idle_ticks=agent.idle_ticks + 1)

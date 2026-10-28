@@ -668,12 +668,14 @@ def _token_lock(environ: Mapping[str, str]):
 def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from hooks.context.account_sessions import sessions_by_account
     from scripts import master_login_chain as chain
-    from scripts.claude_quota_balancer import API_ACCOUNT, launch_environment, select_credential
+    from scripts.claude_quota_balancer import API_ACCOUNT, launch_environment, select_master_credential
     from scripts.hive.account_slots import execute
     from scripts.install import _claude_command, _write_route_report
 
     with _token_lock(environ):
-        decision = select_credential(environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,))
+        decision = select_master_credential(
+            environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,)
+        )
         target = token_home(environ)
         child_env = {**launch_environment(decision, environ), **dict.fromkeys(SELECTORS, str(target))}
         chain.notification(target, "token", "routed")
