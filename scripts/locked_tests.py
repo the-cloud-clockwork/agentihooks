@@ -13,6 +13,7 @@ LOCKED = tuple(
         ("tests", "context", "test_prod_lockdown.py"),
         ("tests", "test_kubectl_mutation_guard.py"),
         ("tests", "test_credential_guard.py"),
+        ("tests", "swarm", "test_stability_snapshot.py"),
     )
 )
 MANIFEST = Path("tests/LOCKED_MANIFEST.json")
