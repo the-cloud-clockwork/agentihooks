@@ -974,7 +974,7 @@ def _stacked_dep(dep, row, repo):
 
 def _refund_parked(slug, store, rows, agent):
     reason = (store.handoff_envelope(slug, agent.task) or {}).get("reason")
-    preempted = preempt.preempted(store, slug, agent.name)
+    preempted = preempt.take_victim(store, slug, agent.name)
     if _parked(rows.get(agent.task, {}), rows) or reason == "quota" or (reason == "operator" and preempted):
         store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
 

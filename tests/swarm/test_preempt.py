@@ -115,7 +115,8 @@ def test_a_placement_refusal_in_another_lane_still_asks_and_names_the_victim(sto
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
     assert len(preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2)) == 1
     assert store.redis.hgetall(store.key(SLUG, preempt.VICTIMS)) == {"e2": "t3"}
-    assert preempt.preempted(store, SLUG, "e2") and not preempt.preempted(store, SLUG, "e2")
+    assert preempt.take_victim(store, SLUG, "e2")
+    assert not preempt.take_victim(store, SLUG, "e2")
 
 
 def test_an_ask_is_recorded_before_its_message_so_a_failed_tick_never_resends_it(store, monkeypatch):

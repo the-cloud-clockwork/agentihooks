@@ -113,7 +113,7 @@ def _refused(wait, lane, now_ms):
     return wait is not None and wait["lane"] == lane and now_ms - wait["seen_at"] < placement_waits.WAIT_MS
 
 
-def preempted(store, slug: str, name: str) -> bool:
+def take_victim(store, slug: str, name: str) -> bool:
     return bool(store.redis.hdel(store.key(slug, VICTIMS), name))
 
 
