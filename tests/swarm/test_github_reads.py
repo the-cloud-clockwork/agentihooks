@@ -422,6 +422,23 @@ def test_conditional_pages_use_distinct_cache_entries_for_every_page(monkeypatch
     assert len(keys) == 2
 
 
+def test_conditional_pages_revalidate_an_etag_that_contains_a_colon(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    now = [1_000.0]
+    monkeypatch.setattr(github_reads.time, "time", lambda: now[0])
+    calls = []
+    outputs = iter([response(200, '{"jobs": [1]}', ETag='"v:1"'), response(304)])
+
+    def fetch(*args):
+        calls.append(args)
+        return next(outputs)
+
+    assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": [1]}]
+    now[0] += github_reads.RUN_TTL_S
+    assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": [1]}]
+    assert calls[1] == ("resource", "--include", "-H", 'If-None-Match: "v:1"')
+
+
 def test_conditional_pages_stop_at_a_next_link_already_read(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     outputs = iter(
