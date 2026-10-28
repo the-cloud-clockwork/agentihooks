@@ -83,9 +83,12 @@ def run(slug, config, store, ledger, runtime, now_ms):
     live = master.name in runtime.live_names()
     if held := master_retire.hold(store, slug, master, held_for or REASON.format(minutes=minutes), live, now_ms):
         return [held]
-    text = RECOVERY.format(slug=slug, name=master.name, minutes=minutes)
+    recycle(slug, store, ledger, master, RECOVERY.format(slug=slug, name=master.name, minutes=minutes), now_ms)
+    return [f"recycled master {master.name} in its seat after {minutes} minutes busy with no tool call"]
+
+
+def recycle(slug, store, ledger, master, text, now_ms):
     found = envelope.build(store, slug, master, "recycle", ledger.state(slug)["tasks"], now_ms)
     store.put_handoff(slug, MASTER, text, seat=master.seat, envelope=found)
     transfers.record(store, slug, master, STALLED, text, now_ms)
     store.put_agent(slug, replace(master, state="finished"))
-    return [f"recycled master {master.name} in its seat after {minutes} minutes busy with no tool call"]

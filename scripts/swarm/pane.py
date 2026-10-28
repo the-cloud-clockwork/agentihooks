@@ -12,6 +12,7 @@ class PaneObservation:
     provider_checked: bool = field(default=False, compare=False)
     provider_error_id: str = ""
     content_refusal: bool = False
+    interrupted: bool = False
 
 
 PROVIDER_ERRORS = {
@@ -60,6 +61,18 @@ def provider_error(harness: str, text: str) -> str:
 def provider_error_id(harness: str, text: str) -> str:
     lines = [line.strip() for line in ESCAPE.sub("", text).splitlines() if provider_error(harness, line)]
     return hashlib.sha256("\n".join(lines).encode()).hexdigest() if lines else ""
+
+
+INTERRUPTS = re.compile(r"^\s*⎿\s+(?:Interrupted\b|User declined to answer|User rejected)", re.M)
+
+
+def interrupted_prompt(harness: str, text: str) -> bool:
+    """A Claude turn that ended on an interrupt or a rejected tool, with no assistant output after it."""
+    if harness != "claude":
+        return False
+    plain = ESCAPE.sub("", text)
+    marks = list(INTERRUPTS.finditer(plain))
+    return bool(marks) and not re.search(r"(?m)^\s*●", plain[marks[-1].end() :])
 
 
 def selection_prompt(text: str) -> str:

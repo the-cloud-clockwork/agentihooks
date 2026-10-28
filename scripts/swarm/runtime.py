@@ -41,6 +41,7 @@ from scripts.swarm import (
 from scripts.swarm.pane import (
     PaneObservation,
     content_refusal,
+    interrupted_prompt,
     provider_error,
     provider_error_id,
     refusal_input,
@@ -1428,7 +1429,12 @@ class HerdrRuntime:
                 "waiting", title, provider_error=error, provider_checked=True, provider_error_id=error_id
             )
         return PaneObservation(
-            state, typed=typed_input(text), provider_error=error, provider_checked=True, provider_error_id=error_id
+            state,
+            typed=typed_input(text),
+            provider_error=error,
+            provider_checked=True,
+            provider_error_id=error_id,
+            interrupted=interrupted_prompt(agent.harness, text),
         )
 
     def _get(self, target):
