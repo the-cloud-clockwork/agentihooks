@@ -137,13 +137,20 @@ def test_a_proof_doctor_on_a_scratch_folder_needs_its_own_redis(env, monkeypatch
     assert not (tmp / f"{DOCTOR}.json").exists()
 
 
-def test_start_returns_before_any_tick_step_and_leaves_the_first_tick_to_a_detached_child(env, monkeypatch, capsys):
+@pytest.mark.parametrize("closed", [False, True], ids=["new", "reopened"])
+def test_start_returns_before_any_tick_step_and_leaves_the_first_tick_to_a_detached_child(
+    env, monkeypatch, capsys, closed
+):
     store, _, _ = env
+    if closed:
+        assert doctor.main([WATCHED, "start"]) == 0
+        assert doctor.main([WATCHED, "stop"]) == 0
+        capsys.readouterr()
     ticks, detached = [], []
     monkeypatch.setattr(swarm_cli, "run_tick", lambda *args, **kwargs: ticks.append(args) or [])
     monkeypatch.setattr("scripts.swarm.scheduled_tick.fire", lambda *args: detached.append(args))
     assert doctor.main([WATCHED, "start"]) == 0
-    assert ticks == [] and len(detached) == 1
+    assert ticks == [] and detached == [({}, "", store.redis)]
     out = capsys.readouterr().out.splitlines()
     assert ledger_link.page_line(DOCTOR) in out
     assert json.dumps({"swarm": DOCTOR, "state": "running"}) in out

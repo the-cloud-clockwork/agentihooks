@@ -78,7 +78,7 @@ from scripts.swarm.health.findings import MINUTE_MS, limits
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.ledger_client import LEDGER_DIR
 from scripts.swarm.store import SwarmError
-from scripts.swarm_ledger import ledger_creator, ledger_relay
+from scripts.swarm_ledger import ledger_creator, ledger_link, ledger_relay
 
 BY = "doctor"
 ROOT = Path(__file__).resolve().parents[2]
@@ -209,6 +209,7 @@ def cmd_start(store, args):
     loop.reset(store, doctor)
     if ledger.closed(doctor):
         swarm.cmd_reopen(store, Namespace(slug=doctor, name=_name(), tick=False))
+        print(ledger_link.page_line(doctor))
     else:
         swarm.cmd_start(store, Namespace(slug=doctor, tick=False))
     scheduled_tick.fire({}, "", store.redis)
