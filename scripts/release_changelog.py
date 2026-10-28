@@ -38,7 +38,7 @@ NUMBER = re.compile(r"\(#(\d+)\)$")
 STABLE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
 FIELD = "\x1f"
 LOG_FORMAT = "--format=%H%x1f%cs%x1f%an%x1f%s"
-MARKUP = re.compile(r"^#|<|\]\(|`")
+MARKUP = re.compile(r"^#|<(?=/?[A-Za-z!])|\]\(|```")
 CONTENT_TYPE = "Content-Type"
 AUTHORIZATION = "Authorization"
 JSON = "application/json"
@@ -71,8 +71,8 @@ class Change:
     body: str = ""
 
 
-def run(*command: str) -> str:
-    return subprocess.run(command, check=True, capture_output=True, text=True).stdout
+def run(*command: str, check: bool = True) -> str:
+    return subprocess.run(command, check=check, capture_output=True, text=True).stdout
 
 
 def git(*args: str) -> str:
@@ -111,7 +111,7 @@ def collect_changes(previous: str, current: str) -> list[Change]:
 
 
 def gh_graphql(query: str) -> dict:
-    return json.loads(run("gh", "api", "graphql", "-f", f"query={query}"))["data"]
+    return json.loads(run("gh", "api", "graphql", "-f", f"query={query}", check=False))["data"]
 
 
 def fetch_pull_requests(changes: list[Change], repository: str, graphql: Callable[[str], dict] = gh_graphql) -> None:

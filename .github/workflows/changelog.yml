@@ -45,16 +45,24 @@ jobs:
 
       - name: Insert the release into the changelog branch
         run: |
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          export GIT_CONFIG_VALUE_0
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           for attempt in 1 2 3 4 5; do
             parent=()
             : > "$RUNNER_TEMP/RELEASES.md"
-            if git fetch --quiet origin +refs/heads/changelog:refs/remotes/origin/changelog 2>/dev/null; then
+            status=0
+            git ls-remote --exit-code origin refs/heads/changelog >/dev/null || status=$?
+            if [[ $status -eq 0 ]]; then
+              git fetch --quiet origin +refs/heads/changelog:refs/remotes/origin/changelog
               parent=(-p origin/changelog)
               if git cat-file -e origin/changelog:RELEASES.md 2>/dev/null; then
                 git show origin/changelog:RELEASES.md > "$RUNNER_TEMP/RELEASES.md"
               fi
+            elif [[ $status -ne 2 ]]; then
+              exit "$status"
             fi
             python -m scripts.release_changelog insert "$RUNNER_TEMP/section.md" "$RUNNER_TEMP/RELEASES.md"
             blob=$(git hash-object -w "$RUNNER_TEMP/RELEASES.md")
@@ -63,7 +71,7 @@ jobs:
               exit 0
             fi
             commit=$(git commit-tree "$tree" "${parent[@]}" -m "Explain the changes of $TAG")
-            if git push --quiet "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$commit:refs/heads/changelog"; then
+            if git push --quiet origin "$commit:refs/heads/changelog"; then
               exit 0
             fi
             sleep $((attempt * 5))

@@ -123,14 +123,15 @@ def test_graded_revision_reads_the_promotion_commit(repo):
     assert rc.graded_revision("v1.0.2") == graded
 
 
-@pytest.mark.parametrize("text", ["# Heading", "a <b> tag", "a [link](x)", "a `code` span"])
+@pytest.mark.parametrize("text", ["# Heading", "a <b> tag", "a </b> tag", "a <!-- c -->", "a [link](x)", "a ```fence"])
 def test_check_words_refuses_markup(text):
     with pytest.raises(rc.MarkupError, match="^markup in the explanation$"):
         rc.check_words(f"{text} {_words(25)}")
 
 
-def test_check_words_accepts_a_pull_request_mention_inside_the_text():
-    assert rc.check_words(f"Fixes #8338 {_words(25)}") == f"Fixes #8338 {_words(25)}"
+@pytest.mark.parametrize("text", ["Fixes #8338", "keeps 2 < 3 retries", "renames `run_tick`"])
+def test_check_words_accepts_plain_text_that_only_resembles_markup(text):
+    assert rc.check_words(f"{text} {_words(25)}") == f"{text} {_words(25)}"
 
 
 @pytest.mark.parametrize("tag", ["latest", "v1.0", "v1.0.1rc1"])
@@ -298,9 +299,16 @@ def test_version_reads_the_numbers_of_a_stable_tag():
 
 def test_gh_graphql_runs_the_query_through_gh(monkeypatch):
     seen = []
-    monkeypatch.setattr(rc, "run", lambda *command: seen.append(command) or '{"data": {"repository": {}}}')
+    monkeypatch.setattr(
+        rc, "run", lambda *command, check: seen.append((command, check)) or '{"data": {"repository": {}}}'
+    )
     assert rc.gh_graphql("{ q }") == {"repository": {}}
-    assert seen == [("gh", "api", "graphql", "-f", "query={ q }")]
+    assert seen == [(("gh", "api", "graphql", "-f", "query={ q }"), False)]
+
+
+def test_run_returns_the_output_of_a_failing_command_when_unchecked(repo):
+    assert rc.run("git", "rev-parse", "--verify", "--quiet", "no-such-ref", check=False) == ""
+    assert rc.run("git", "rev-parse", "--abbrev-ref", "HEAD", check=False) == "dev\n"
 
 
 @pytest.mark.parametrize("argv", [[], ["explain", "v1"], ["insert", "section"], ["other", "a", "b"]])
