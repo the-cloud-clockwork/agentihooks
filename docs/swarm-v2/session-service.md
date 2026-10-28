@@ -42,16 +42,15 @@ retryable dependency refusal. Successful persistence reports `indexed: false`: i
 
 ## Embedding process
 
-Run `python -m hooks.memory.embedding_process` as a separate supervised process in the same image.
-Run `python -m hooks.memory.embedding_process --once` for one bounded pass; it exits zero on a
-completed pass, including a deferred provider outage. Each pass prints one JSON report with the
-worker state, embedded and failed chunk identities, pending count, backlog age, skipped sessions and scan cursor.
+Run `python -m hooks.memory.embedding_process` from the same image on a schedule, such as a
+Kubernetes CronJob with `concurrencyPolicy: Forbid`; the schedule is the polling interval. Each run makes one
+bounded pass over every active session, one page of `AGENTIHOOKS_SESSION_EMBED_SESSION_LIMIT` sessions at a
+time, and exits zero when the pass completes, including a deferred provider outage. It prints one JSON report
+per page with the worker state, embedded and failed chunk identities, pending count, backlog age, skipped
+sessions and scan cursor.
 Configuration errors, model conflicts, invalid provider responses and queue entries outside its grant exit
-nonzero. These faults persist across restarts, so a supervisor restarts with growing backoff and alerts
-instead of retrying at once. Reports and errors omit the provider credential.
-SIGTERM and SIGINT stop the process after the current pass. A pass drains at most
-`AGENTIHOOKS_SESSION_EMBED_MAX_BATCHES` provider requests of up to thirty seconds each, four minutes at the
-defaults, so give the process a termination grace period longer than that.
+nonzero. These faults persist across runs, so alert on a failed run instead of retrying it at once.
+Reports and errors omit the provider credential.
 
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
@@ -63,7 +62,6 @@ defaults, so give the process a termination grace period longer than that.
 | `AGENTIHOOKS_SESSION_EMBED_DIMENSION` | yes | | Positive vector dimension |
 | `AGENTIHOOKS_SESSION_EMBED_URL` | yes | | Full provider endpoint; HTTPS, or HTTP on loopback for development |
 | `AGENTIHOOKS_SESSION_EMBED_TOKEN` | yes | | Provider bearer credential injected through the environment |
-| `AGENTIHOOKS_SESSION_EMBED_INTERVAL` | no | `5` | Positive finite seconds between passes |
 | `AGENTIHOOKS_SESSION_EMBED_SESSION_LIMIT` | no | `100` | Active sessions scanned per pass |
 | `AGENTIHOOKS_SESSION_EMBED_BATCH_SIZE` | no | `32` | Maximum chunks per provider request |
 | `AGENTIHOOKS_SESSION_EMBED_BATCH_CHARS` | no | `64000` | Worker batch character budget |
@@ -85,8 +83,6 @@ project grant are skipped; each selected provider batch is checked against the g
 session state before provider access.
 Give a generation one owner and a stable grant; changing the model or dimension requires a new generation.
 
-Continuous mode advances its session cursor and wraps at the end so later sessions are visited.
-A one shot invocation visits only the first bounded page; use continuous mode for larger corpora.
 Index generation activation remains an explicit `IndexWorker.activate` operation after complete coverage;
-the process never switches retrieval to an incomplete generation. SIGTERM and SIGINT request shutdown
-between passes, interrupt the idle interval and close the catalog after any current bounded pass finishes.
+the process never switches retrieval to an incomplete generation. SIGTERM stops a run at once: work it did
+not acknowledge stays queued and the next run resumes it without duplicate vectors.

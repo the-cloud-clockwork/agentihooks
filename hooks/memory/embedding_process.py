@@ -1,10 +1,7 @@
 import argparse
 import http.client
 import json
-import math
 import os
-import signal
-import threading
 import time
 import urllib.error
 import urllib.parse
@@ -39,9 +36,16 @@ def refuse_constant(_: str) -> float:
     raise ValueError("embedding provider returned a non finite value")
 
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *_):
-        return None
+def no_redirect_opener() -> urllib.request.OpenerDirector:
+    opener = urllib.request.OpenerDirector()
+    for handler in (
+        urllib.request.HTTPHandler(),
+        urllib.request.HTTPSHandler(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        urllib.request.HTTPErrorProcessor(),
+    ):
+        opener.add_handler(handler)
+    return opener
 
 
 @dataclass(frozen=True)
@@ -59,7 +63,7 @@ class Provider:
             method="POST",
         )
         try:
-            with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
+            with no_redirect_opener().open(request, timeout=30) as response:
                 data = response.read((2 << 20) + 1)
         except urllib.error.HTTPError as error:
             if error.code != 429 and error.code < 500:
@@ -85,7 +89,6 @@ class Settings:
     generation: str
     provider: Provider
     limits: Limits
-    interval: float
     session_limit: int
 
 
@@ -117,14 +120,9 @@ def configure(environ: dict) -> Settings:
             for key, default in (("EMBED_BATCH_SIZE", "32"), ("EMBED_BATCH_CHARS", "64000"), ("EMBED_MAX_BATCHES", "8"))
         )
     )
-    interval = float(environ.get(PREFIX + "EMBED_INTERVAL", "5"))
     session_limit = int(environ.get(PREFIX + "EMBED_SESSION_LIMIT", "100"))
-    if (
-        min(limits.batch_size, limits.batch_chars, limits.max_batches, session_limit) < 1
-        or not math.isfinite(interval)
-        or interval <= 0
-    ):
-        raise ValueError("embedding bounds and interval must be positive and finite")
+    if min(limits.batch_size, limits.batch_chars, limits.max_batches, session_limit) < 1:
+        raise ValueError("embedding bounds must be positive")
     grant = Grant("session-embedding-process", environ[PREFIX + "EMBED_CORPUS"], frozenset(projects))
     return Settings(
         environ[PREFIX + "CATALOG"],
@@ -132,7 +130,6 @@ def configure(environ: dict) -> Settings:
         environ[PREFIX + "EMBED_GENERATION"],
         Provider(model, url, environ[PREFIX + "EMBED_TOKEN"]),
         limits,
-        interval,
         session_limit,
     )
 
@@ -177,28 +174,21 @@ def cycle(worker: IndexWorker, settings: Settings, after: str) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--once", action="store_true")
-    args = parser.parse_args(argv)
+    argparse.ArgumentParser(description="Run one bounded session embedding pass.").parse_args(argv)
     settings = configure(dict(os.environ))
     catalog = Catalog(settings.catalog)
-    stopped = threading.Event()
-    previous = {sig: signal.signal(sig, lambda *_: stopped.set()) for sig in (signal.SIGTERM, signal.SIGINT)}
     try:
         worker = IndexWorker(catalog, settings.limits)
         worker.register(settings.grant.corpus, settings.generation, settings.provider.model)
         after = ""
-        while not stopped.is_set():
+        while True:
             report = cycle(worker, settings, after)
             print(json.dumps(report), flush=True)
             after = report["after"]
-            if args.once:
+            if not after:
                 break
-            stopped.wait(settings.interval)
     finally:
         catalog.close()
-        for sig, prior in previous.items():
-            signal.signal(sig, prior)
     return 0
 
 

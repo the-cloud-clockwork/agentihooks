@@ -75,7 +75,7 @@ def environment(index, provider):
 
 def run(env):
     return subprocess.run(
-        [sys.executable, "-m", "hooks.memory.embedding_process", "--once"],
+        [sys.executable, "-m", "hooks.memory.embedding_process"],
         cwd=ROOT,
         env=env,
         capture_output=True,
@@ -160,7 +160,7 @@ def test_main_runs_in_process_and_closes_its_catalog(prepared, provider, monkeyp
 
     for key, value in environment(prepared, provider).items():
         monkeypatch.setenv(key, value)
-    assert embedding_process.main(["--once"]) == 0
+    assert embedding_process.main([]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["state"] == "drained"
     assert report["pending"] == 0
@@ -236,9 +236,6 @@ def test_configure_refuses_unsafe_provider_urls(prepared, provider, url, message
         ("EMBED_BATCH_CHARS", "-1"),
         ("EMBED_MAX_BATCHES", "0"),
         ("EMBED_SESSION_LIMIT", "0"),
-        ("EMBED_INTERVAL", "0"),
-        ("EMBED_INTERVAL", "nan"),
-        ("EMBED_INTERVAL", "inf"),
     ],
 )
 def test_configure_refuses_invalid_bounds(prepared, provider, setting, value):
@@ -248,7 +245,7 @@ def test_configure_refuses_invalid_bounds(prepared, provider, setting, value):
     env[f"AGENTIHOOKS_SESSION_{setting}"] = value
     with pytest.raises(ValueError) as error:
         configure(env)
-    assert str(error.value) == "embedding bounds and interval must be positive and finite"
+    assert str(error.value) == "embedding bounds must be positive"
 
 
 def test_configure_preserves_all_runtime_settings(prepared, provider):
@@ -267,7 +264,6 @@ def test_configure_preserves_all_runtime_settings(prepared, provider):
     assert settings.provider.token == "fixture-provider-token"
     assert "fixture-provider-token" not in repr(settings)
     assert (settings.limits.batch_size, settings.limits.batch_chars, settings.limits.max_batches) == (32, 64000, 8)
-    assert settings.interval == 5
     assert settings.session_limit == 100
     changed = configure(
         {
@@ -276,12 +272,10 @@ def test_configure_preserves_all_runtime_settings(prepared, provider):
             "AGENTIHOOKS_SESSION_EMBED_BATCH_CHARS": "2000",
             "AGENTIHOOKS_SESSION_EMBED_MAX_BATCHES": "2",
             "AGENTIHOOKS_SESSION_EMBED_SESSION_LIMIT": "3",
-            "AGENTIHOOKS_SESSION_EMBED_INTERVAL": "0.1",
         }
     )
     assert (changed.limits.batch_size, changed.limits.batch_chars, changed.limits.max_batches) == (1, 2000, 2)
     assert changed.session_limit == 3
-    assert changed.interval == 0.1
 
 
 @pytest.mark.parametrize("status", [429, 500, 503])
@@ -428,56 +422,25 @@ def test_cycle_defers_a_provider_outage_without_losing_work(prepared, provider):
     assert resumed["pending"] == 0
 
 
-@pytest.mark.parametrize("shutdown", ["SIGTERM", "SIGINT"])
-def test_main_waits_between_passes_and_restores_signal_handlers(prepared, provider, monkeypatch, capsys, shutdown):
-    import signal
-    from types import SimpleNamespace
-
+def test_main_pages_through_every_session_then_exits(prepared, provider, monkeypatch, capsys):
     from hooks.memory import embedding_process
 
     for key, value in environment(prepared, provider).items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("AGENTIHOOKS_SESSION_EMBED_BATCH_SIZE", "1")
-    stopped = threading.Event()
-    original = {sig: object() for sig in (signal.SIGTERM, signal.SIGINT)}
-    handlers = dict(original)
-    waits, cursors, limits, output = [], [], [], []
-
-    def install(sig, handler):
-        previous = handlers[sig]
-        handlers[sig] = handler
-        return previous
-
-    def wait(timeout):
-        waits.append(timeout)
-        assert len(waits) <= 2
-        if len(waits) == 2:
-            handlers[getattr(signal, shutdown)](getattr(signal, shutdown), None)
-            assert stopped.is_set()
+    cursors, limits = [], []
+    pages = iter([{"after": "cursor", "pending": 1}, {"after": "", "pending": 0}])
 
     def cycle(worker, settings, after):
         cursors.append(after)
         limits.append(worker.limits.batch_size)
-        return {"after": "cursor", "pending": 0}
+        return next(pages)
 
-    def emit(text, **kwargs):
-        output.append((json.loads(text), kwargs))
-
-    stopped.wait = wait
-    monkeypatch.setattr(embedding_process, "threading", SimpleNamespace(Event=lambda: stopped))
-    monkeypatch.setattr(
-        embedding_process,
-        "signal",
-        SimpleNamespace(SIGTERM=signal.SIGTERM, SIGINT=signal.SIGINT, signal=install),
-    )
     monkeypatch.setattr(embedding_process, "cycle", cycle)
-    monkeypatch.setattr("builtins.print", emit)
     assert embedding_process.main([]) == 0
-    assert waits == [5.0, 5.0]
     assert cursors == ["", "cursor"]
     assert limits == [1, 1]
-    assert output == [({"after": "cursor", "pending": 0}, {"flush": True})] * 2
-    assert handlers == original
+    assert capsys.readouterr().out == '{"after": "cursor", "pending": 1}\n{"after": "", "pending": 0}\n'
 
 
 def test_scope_checks_touch_only_the_selected_bounded_batch(prepared, provider, monkeypatch):
@@ -607,11 +570,7 @@ def test_provider_bounds_its_response_read_and_network_timeout(monkeypatch):
         requests.append((request.get_method(), request.get_header("Content-type"), timeout))
         return Response(body + b" " * ((2 << 20) - len(body)))
 
-    monkeypatch.setattr(
-        embedding_process.urllib.request,
-        "build_opener",
-        lambda *_: SimpleNamespace(open=open_request),
-    )
+    monkeypatch.setattr(embedding_process, "no_redirect_opener", lambda: SimpleNamespace(open=open_request))
     adapter = embedding_process.Provider(
         EmbeddingModel("fixture-hash-embedder-4", 4), "https://provider.example", "fixture"
     )
@@ -637,11 +596,7 @@ def test_provider_connection_failures_defer_without_details(monkeypatch, failure
             "incomplete": IncompleteRead(b"private detail"),
         }[failure]
 
-    monkeypatch.setattr(
-        embedding_process.urllib.request,
-        "build_opener",
-        lambda *_: SimpleNamespace(open=open_request),
-    )
+    monkeypatch.setattr(embedding_process, "no_redirect_opener", lambda: SimpleNamespace(open=open_request))
     adapter = embedding_process.Provider(
         EmbeddingModel("fixture-hash-embedder-4", 4), "https://provider.example", "fixture"
     )
