@@ -1,4 +1,5 @@
 import argparse
+import ast
 import hashlib
 import json
 import math
@@ -73,6 +74,12 @@ def reuse_kills(run_tests: Callable[..., int], early: dict[str, str]) -> Callabl
     return run_cached
 
 
+def worker_failure(work: Path, reason: str) -> RuntimeError:
+    log = work / "run.log"
+    detail = log.read_text()[-12000:] if log.is_file() else ""
+    return RuntimeError(f"early mutation failed: {reason}\n{detail}")
+
+
 def merge_probes(plan: dict, records: list[dict]) -> dict:
     total = plan["shards"]
     if len(records) != total or {record["index"] for record in records} != set(range(total)):
@@ -131,7 +138,7 @@ def run_probe(root: Path, selected: dict, stats: SharedStats, shard: tuple[int, 
                 root, work, {path: selected[path] for path in group}, started + budget, shard, shared.group(index)
             )
             if reason:
-                raise RuntimeError(f"early mutation failed: {reason}")
+                raise worker_failure(work, reason)
             rows.update({row["name"]: row["status"] for values in results.values() for row in values})
     seconds = time.monotonic() - started
     if set(rows) != owned or set(rows.values()) - {"killed", "survived"} or seconds > budget:
@@ -167,6 +174,10 @@ def main() -> int:
         path: (lines, tests)
         for path, lines in changes.items()
         if (tests := selection[path] if selection is not None else select_tests(root, Path(path)))
+        if any(
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            for node in ast.walk(ast.parse((root / path).read_text()))
+        )
     }
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     record = run_probe(root, selected, SharedStats(args.stats, head), (args.shard, args.shards), args.budget)

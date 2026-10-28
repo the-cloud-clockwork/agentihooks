@@ -94,16 +94,28 @@ def test_probe_command_uses_the_declared_scope_budget_and_shard_and_writes_its_r
     plan = _plan()
     stats = _shared(tmp_path, plan)
     monkeypatch.chdir(tmp_path)
+    source = tmp_path / "scripts/a.py"
+    source.parent.mkdir()
+    source.write_text("def f():\n    return 1\n")
+    (tmp_path / "scripts/constant.py").write_text("VALUE = 1\n")
     if planned:
         (tmp_path / ".mutation-selection.json").write_text(
-            json.dumps({"scripts/a.py": ["tests/a.py"], "scripts/b.py": []})
+            json.dumps(
+                {"scripts/a.py": ["tests/a.py"], "scripts/b.py": [], "scripts/constant.py": ["tests/constants.py"]}
+            )
         )
     seen = []
     monkeypatch.setattr(
-        scope, "discover_changes", lambda *args: seen.append(args) or {"scripts/a.py": {2}, "scripts/b.py": {3}}
+        scope,
+        "discover_changes",
+        lambda *args: seen.append(args) or {"scripts/a.py": {2}, "scripts/b.py": {3}, "scripts/constant.py": {1}},
     )
     monkeypatch.setattr(
-        scope, "select_tests", lambda root, path: ["tests/a.py"] if path.as_posix() == "scripts/a.py" else []
+        scope,
+        "select_tests",
+        lambda root, path: {"scripts/a.py": ["tests/a.py"], "scripts/constant.py": ["tests/constants.py"]}.get(
+            path.as_posix(), []
+        ),
     )
     monkeypatch.setattr(probe.subprocess, "check_output", lambda *args, **kwargs: "revision\n")
     record = _records(plan)[0]
