@@ -1217,6 +1217,16 @@ def _swarm_tool_end(payload: dict) -> None:
     finish(call_id=payload.get("tool_use_id") or "")
 
 
+def _brain_search(payload: dict) -> None:
+    from hooks.observability import consultation
+
+    consultation.search(
+        payload.get("session_id", ""),
+        payload.get("tool_name", ""),
+        payload.get("tool_response", payload.get("tool_output")),
+    )
+
+
 def _operator_words(payload: dict) -> bool:
     try:
         from hooks.context.operator_words import typed
@@ -1989,6 +1999,7 @@ def on_post_tool_use(payload: dict) -> None:
     _trace_session_id = payload.get("session_id", "")
     _operator_words(payload)
     _swarm_after_tool(payload)
+    _brain_search(payload)
     _conditions = None
     try:
         from hooks.context.conditions import post_effect

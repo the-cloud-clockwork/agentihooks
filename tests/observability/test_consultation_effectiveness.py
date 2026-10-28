@@ -630,6 +630,16 @@ def test_b_other_tools_record_no_search_observation(world, tool):
     assert metrics.events(grant) == []
 
 
+def test_a_search_reads_tool_output_when_the_target_sends_no_tool_response(world):
+    from hooks import hook_manager
+
+    metrics, grant, _, _, _, _ = world
+    hook_manager._brain_search(
+        {"session_id": grant.principal, "tool_name": "mcp__agentibrain__kb_search", "tool_output": "four"}
+    )
+    assert [(row["purpose"], row["pack_bytes"]) for row in metrics.events(grant)] == [("search", 4)]
+
+
 def test_b_search_outside_a_swarm_task_records_nothing(world, monkeypatch):
     metrics, grant, _, _, _, _ = world
     monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK")

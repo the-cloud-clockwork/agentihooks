@@ -26,6 +26,7 @@
     "Metrics.events and Metrics.report authorize brain and project before reading the persistent store. Session, task, context, incident, lesson and operation identifiers are pseudonymous within the installation, brain and project namespace.",
     "Metrics.review accepts only a principal in trusted adapter operator configuration with a matching scope grant. A request cannot set its own operator role. Reviews are immutable and do not infer usefulness from deliveries, references, tool counts or overrides.",
     "task_context.offer records supported delivery, deduplication, missing context, disabled delivery and unsupported events without storing pack text. A rendered service failure remains a retrieval failure even when its diagnostic notice is delivered.",
+    "Runtime delivery observations carry their purpose: session start and pending deliveries record task_transition, the brain feed refresh at the tool call cadence records refresh, and the PostToolUse hook records search for an MCP kb_search, kb_brief or brain_search_arcs call with its response size and an empty or delivered retrieval outcome. Neither path stores the pack, the search response or the prompt.",
     "The gate dispatcher records effective allow, deny, observe, off, lifted and fail-open outcomes for the brain gate. Receipt age is an observed metadata value; no metric claims comprehension."
   ],
   "supported_versions": {
@@ -71,7 +72,6 @@
     "The preceding local consultation receipt is not a cryptographic boundary against a process that controls its own hook state. Metrics preserve that compatibility contract.",
     "Runtime observations derive their grant from the existing project resolver and selected brain in the same process; preauthenticated grants from adapters apply to Metrics.record callers outside the hook path.",
     "Runtime delivery and gate observations use a fresh operation identity per hook event, so the replay guard deduplicates only callers that supply a stable identity.",
-    "Runtime observations record the task transition purpose only; search and refresh purposes are accepted by the schema but not yet emitted.",
     "Runtime grant scope comes from the project resolver rather than a fixture grant or operator role; that path awaits a ruling on the ledger."
   ]
 }
