@@ -21,6 +21,7 @@ from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
 from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.scope import selects, test_file
 from scripts.ci_mutation.stats import write_part
+from scripts.ci_mutation.stats_dependencies import records_within
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 # This group only loads fakeredis once per xdist worker; it guards no shared resource.
@@ -90,17 +91,21 @@ def is_dataclass(decorator) -> bool:
 
 
 def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int, int]:
+    from libcst import FunctionDef
     from libcst.metadata import MetadataWrapper, PositionProvider
 
     module, graded, possible = created_mutations(filename, source)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(PositionProvider)
-    # mutmut emits only mutants inside a function or method.
-    found = sum(1 for mutation in on_changed_lines(module, graded, changed) if mutation.contained_by_top_level_function)
+    found = sum(
+        1
+        for mutation in on_changed_lines(module, graded, changed)
+        if isinstance(mutation.contained_by_top_level_function, FunctionDef)
+    )
     body = sum(
         positions[mutation.original_node].start.line
         >= positions[mutation.contained_by_top_level_function.body.body[0]].start.line
         for mutation in on_changed_lines(module, possible, changed)
-        if mutation.contained_by_top_level_function
+        if isinstance(mutation.contained_by_top_level_function, FunctionDef)
     )
     return found, body
 
@@ -152,7 +157,7 @@ def unit_records(root: Path) -> list[dict[str, float]]:
 
 def traced_records(root: Path) -> list[dict[str, float]]:
     folder = Path(os.environ.get("MUTATION_STATS_CACHE", root / ".mutation-stats-cache"))
-    records = [json.loads(path.read_text()) for path in folder.glob("*.json")]
+    records = (json.loads(path.read_text()) for path in records_within(folder)[0])
     return [record["durations"] for record in records if record["status"] == 0]
 
 
@@ -540,9 +545,16 @@ def forked_children():
     return ForkedChildren()
 
 
+def keep_node_ids() -> None:
+    # mutmut's stats plugin reads Item._nodeid, which pytest 9.2 removed in favour of nodeid.
+    if pytest.version_tuple >= (9, 2, 0) and not hasattr(pytest.Item, "_nodeid"):
+        pytest.Item._nodeid = property(lambda item: item.nodeid)
+
+
 def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
     from mutmut import __main__ as runner
 
+    keep_node_ids()
     if not os.environ.get("CI"):
         print("Local mutation worker cap: 2 (mutation and stats)")
     changes = json.loads(selection.read_text())

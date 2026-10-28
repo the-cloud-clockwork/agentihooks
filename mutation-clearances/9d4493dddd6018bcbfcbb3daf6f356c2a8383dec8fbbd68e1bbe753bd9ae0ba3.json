@@ -1,0 +1,6 @@
+{
+  "scripts/routing/claude_ai.py:scripts.routing.claude_ai.x_launch_claude__mutmut_25:0dd90921648f2de9ab2ca4c83f768cee5628c393e975685c7bdadccc2bdae68c": {
+    "reader": "standards-reader",
+    "reason": "Omitting dict.get default makes an absent profile None instead of empty string. Both differ from master and select the same standalone prepare path before title matching. Present profiles are unchanged. Independently ruled from complete CI report 40631995725 on e92ec9d83."
+  }
+}

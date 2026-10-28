@@ -1,0 +1,89 @@
+rules:
+  - id: feature-front-door-route-check
+    languages: [python]
+    severity: ERROR
+    message: Ordered 2026-10-27, front door launch commands must pass through front_door_route.check before profile wrapping.
+    patterns:
+      - pattern: |
+          def _agent_command(...):
+            ...
+            return _profile_command(command, spec), before
+      - pattern-not: |
+          def _agent_command(...):
+            ...
+            command = [*command[:2], *front_door_route.check(spec.profile, spec.title or name, command[2:])]
+            ...
+            return _profile_command(command, spec), before
+  - id: feature-front-door-no-token
+    languages: [python]
+    severity: ERROR
+    message: Ordered 2026-10-27, front door launch and Claude AI routing must never set or pass token credentials or launch_token.
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              def _agent_command(...):
+                ...
+          - pattern-inside: |
+              def launch_claude(...):
+                ...
+          - pattern-inside: |
+              def check(...):
+                ...
+          - pattern-inside: |
+              def _front(...):
+                ...
+          - pattern-inside: |
+              def spawn(...):
+                ...
+          - pattern-inside: |
+              def resume(...):
+                ...
+      - pattern-either:
+          - pattern: launch_token(...)
+          - pattern: $MODULE.launch_token(...)
+          - patterns:
+              - pattern: $TOKEN
+              - metavariable-regex:
+                  metavariable: $TOKEN
+                  regex: ^["'](?:AH_CC_TOKEN.*|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)["']$
+    paths:
+      include:
+        - scripts/init_agent.py
+        - scripts/swarm/runtime.py
+        - scripts/front_door_route.py
+        - scripts/routing/claude_ai.py
+        - '*.test.py'
+  - id: feature-front-door-runtime-check
+    languages: [python]
+    severity: ERROR
+    message: Ordered 2026-10-27, master spawn and resume must apply the deterministic front door route before account selection.
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  def spawn(...):
+                    ...
+              - pattern-not: |
+                  def spawn(...):
+                    ...
+                    forced = front_door_route.check(...)
+                    ...
+                    route_kind = self._route_kind(..., forced)
+                    ...
+                    route = forced or ...
+                    ...
+          - patterns:
+              - pattern: |
+                  def resume(...):
+                    ...
+              - pattern-not: |
+                  def resume(...):
+                    ...
+                    forced = front_door_route.check(...)
+                    ...
+                    route = forced or ...
+                    ...
+    paths:
+      include:
+        - scripts/swarm/runtime.py
+        - '*.test.py'

@@ -18,9 +18,6 @@ permissions:
   pull-requests: read
   actions: read
 
-env:
-  PYTHONNOUSERSITE: "1"
-
 jobs:
   plan:
     if: ${{ github.event_name != 'push' || !github.event.deleted }}
@@ -89,7 +86,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Restore measured statistics timings
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
@@ -157,7 +154,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.open.outputs.open == 'false'
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Select the tests the branch touches
         if: steps.open.outputs.open == 'false'
@@ -238,7 +235,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         uses: actions/download-artifact@v4
@@ -371,7 +368,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Restore the tests that killed this branch's earlier mutants
         uses: actions/cache/restore@v4
@@ -400,6 +397,9 @@ jobs:
           pattern: mutation-test-stats-cache-*
           path: .mutation-stats-cache
           merge-multiple: true
+
+      - name: Cap the merged test stats
+        run: python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap; print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")' .mutation-stats-cache
 
       - name: Download planned mutation test selection
         uses: actions/download-artifact@v4
@@ -491,7 +491,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         uses: actions/download-artifact@v4
@@ -559,6 +559,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
           overwrite: true
+
+      - name: Stage shard replay evidence
+        if: always()
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
+        run: |
+          mkdir -p .mutation-gate
+          mv .mutation-gate .mutation-workspaces
+          python -m scripts.ci_mutation.evidence stage --output .mutation-workspaces --bundle .mutation-gate --shard "$SHARD" --shards "$SHARDS"
 
       - name: Upload shard mutation evidence
         if: always()
