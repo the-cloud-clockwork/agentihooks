@@ -616,6 +616,7 @@ def _stage_source(state: dict, transcript_path: str) -> None:
     revisions = state.setdefault("source_revisions", {})
     points = state.setdefault("source_points", {})
     paged = {name: set((state.get("paged") or {}).get(name, ())) for name in ("keys", "messages")}
+    prefix = bool(paged["keys"] or paged["messages"])
     staged_bytes = 0
     state.pop("deferred_source", None)
     size = _pending_bytes(state, merged, state["pending"])
@@ -628,11 +629,15 @@ def _stage_source(state: dict, transcript_path: str) -> None:
             continue
         key = record_id(record)
         revision = _record_revisions({key: record})[key]
-        if key in merged and revisions.get(key) == revision:
-            points[key] = [position, end, count + 1, unsupported]
+        if key not in merged and _paged_out(paged, key, record):
+            if prefix:
+                past = {"line": position, "offset": end, "records": count + 1, "unsupported": unsupported}
+                state["paged"]["source"] = {**point, **past, "record": key}
             position, count = end, count + 1
             continue
-        if key not in merged and _paged_out(paged, key, record):
+        prefix = False
+        if key in merged and revisions.get(key) == revision:
+            points[key] = [position, end, count + 1, unsupported]
             position, count = end, count + 1
             continue
         if staged_bytes >= 256 * 1024:
@@ -691,7 +696,7 @@ def _still_at(transcript_path: str, point: dict) -> bool:
         handle.seek(point["line"])
         line = handle.read(point["offset"] - point["line"])
     try:
-        return line.endswith(b"\n") and record_id(json.loads(line)) == point["boundary"]
+        return line.endswith(b"\n") and record_id(json.loads(line)) == point.get("record", point["boundary"])
     except (ValueError, UnicodeDecodeError, AttributeError):
         return False
 
@@ -713,6 +718,7 @@ def _scan_to(transcript_path: str, point: dict, boundary: str) -> dict:
                     "records": records,
                     "unsupported": unsupported,
                     "boundary": boundary,
+                    "record": boundary,
                 }
         line = end
     return {**point, "boundary": boundary}
