@@ -170,3 +170,69 @@ def test_the_reader_places_ended_lives_on_the_hive_their_execution_ran_on():
     assert "hive" not in ended["ci@local"]
     [found] = slot_census.findings(read)
     assert found.summary.endswith("left 1 live local agents out: ci@local")
+
+
+SINCE = AT - 3_600_000
+
+
+def test_every_local_launch_with_a_claim_line_raises_no_unclaimed_finding():
+    claims = [
+        line("sw: local slot claim engineer@a-1 for t1 on root counted 0 of 6: "),
+        line("other: local slot claim ci@b-1 for t2 on root counted 1 of 6: engineer@a-1"),
+    ]
+    lives = [life("engineer@a-1", hive="root"), life("ci@b-1", slug="other")]
+    assert slot_census.unclaimed(record(claims, lives), "root", SINCE) == []
+
+
+def test_local_launches_with_a_pane_and_no_claim_line_are_counted_for_the_watched_swarm():
+    claims = [
+        line("sw: local slot claim engineer@a-1 for t1 on root counted 0 of 6: "),
+        line("other: local slot claim ci@a-2 for t9 on root counted 0 of 6: "),
+    ]
+    lives = [
+        life("engineer@a-1", hive="root"),
+        life("ci@a-2", task="t2079"),
+        life("engineer@a-3", task="hh4-vm", hive="root", state="ended", ended=AT),
+        life("unclaimed elsewhere", slug="other"),
+        life("master@a-4", lane="master"),
+        life("remote", hive="anton"),
+        life("k8s", runtime_backend="kubernetes"),
+        life("paneless", pane_id=""),
+        life("older", started=SINCE - 1),
+    ]
+    assert slot_census.unclaimed(record(claims, lives), "root", SINCE) == [
+        Finding(
+            slot_census.UNCLAIMED,
+            "sw",
+            "2 local launches of sw in the last hour held a pane with no local slot claim: ci@a-2, engineer@a-3",
+            (
+                f"ci@a-2 on task t2079 started at {AT - 60_000} on the workstation",
+                f"engineer@a-3 on task hh4-vm started at {AT - 60_000} on root",
+            ),
+            "a local launch with a pane and no local slot claim journal line",
+            2,
+        )
+    ]
+
+
+def test_an_unreadable_journal_fails_the_unclaimed_launch_detector():
+    with pytest.raises(SwarmError, match="journalctl exit 1"):
+        slot_census.unclaimed(
+            {"slug": "sw", "claims": None, "journal_error": "journalctl exit 1: no", "lives": [life("a")]}, "root", 0
+        )
+
+
+def test_the_doctor_runs_the_unclaimed_launch_detector_over_the_slot_claim_read(monkeypatch):
+    from scripts.doctor import detect
+
+    read = record([], [life("engineer@a-1", started=AT)])
+    reads = []
+    monkeypatch.setattr(spawn_read, "slot_claims", lambda store, slug: reads.append(slug) or read)
+    monkeypatch.setattr(detect.commands, "hive_id", lambda: "root")
+    from unittest.mock import MagicMock
+
+    found = detect.readers(MagicMock(), None, "sw", AT, environ={}, telemetry=False)
+    [unclaimed] = found["unclaimed launch"]()
+    assert (unclaimed.kind, unclaimed.value) == (slot_census.UNCLAIMED, 1)
+    assert found["slot census"]() == []
+    assert reads == ["sw"]
