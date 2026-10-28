@@ -53,6 +53,8 @@ def test_concurrent_agent_processes_each_land_every_write(tmp_path):
         for worker in workers:
             if worker.pid is not None:
                 worker.kill()
+                worker.join()
+    assert SQLiteLedgerRepository(tmp_path / "other" / sqlite.DATABASE).get_document("other")["chat"]
     assert [worker.exitcode for worker in workers] == [0] * 4
     state = SQLiteLedgerRepository(path).get_document("processes")
     assert {f"eng{index}" for index in range(4)} <= set(state["_meta"]["members"])
