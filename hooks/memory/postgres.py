@@ -6,10 +6,10 @@ use the C collation so ordering matches SQLite byte order; chunk vectors are sto
 
 import re
 import sqlite3
+from collections.abc import Sequence
 
 SCHEMES = ("postgresql://", "postgres://")
 WRITER_LOCK = 0x5E55105
-VECTOR_EXTENSION = "CREATE EXTENSION IF NOT EXISTS vector"
 VECTOR_INSTALLED = "SELECT 1 FROM pg_extension WHERE extname = 'vector'"
 NO_VECTOR = "the session catalog database has no pgvector extension; install vector before opening it"
 UNSUPPORTED = "this statement has no Postgres translation: "
@@ -58,7 +58,7 @@ class Connection:
 
         return self.raw.get_transaction_status() != extensions.TRANSACTION_STATUS_IDLE
 
-    def execute(self, statement: str, parameters: tuple = ()):
+    def execute(self, statement: str, parameters: Sequence = ()):
         import psycopg2
 
         translated = translate(statement)
@@ -89,10 +89,11 @@ def connect(url: str) -> Connection:
     raw.autocommit = True
     connection = Connection(raw)
     try:
-        connection.execute(VECTOR_EXTENSION)
-    except (psycopg2.Error, sqlite3.OperationalError):
-        pass
-    if connection.execute(VECTOR_INSTALLED).fetchone() is None:
+        installed = connection.execute(VECTOR_INSTALLED).fetchone()
+    except sqlite3.OperationalError:
+        raw.close()
+        raise
+    if installed is None:
         raw.close()
         raise sqlite3.OperationalError(NO_VECTOR)
     return connection

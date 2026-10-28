@@ -209,20 +209,8 @@ def test_connect_autocommits_and_verifies_pgvector(monkeypatch):
     opened = patched_connect(monkeypatch, raw)
     connection = postgres.connect("postgresql://u@h/db")
     assert opened == ["postgresql://u@h/db"] and connection.raw is raw and raw.autocommit is True
-    assert raw.calls == [(postgres.VECTOR_EXTENSION, ()), (postgres.VECTOR_INSTALLED, ())]
+    assert raw.calls == [(postgres.VECTOR_INSTALLED, ())]
     assert not raw.closed
-
-
-def test_connect_accepts_an_installed_extension_it_may_not_create(monkeypatch):
-    raw = FakeRaw(failures={postgres.VECTOR_EXTENSION: psycopg2.ProgrammingError("permission denied")})
-    patched_connect(monkeypatch, raw)
-    assert postgres.connect("postgresql://u@h/db").raw is raw
-
-
-def test_connect_accepts_an_extension_create_that_lost_the_server(monkeypatch):
-    raw = FakeRaw(failures={postgres.VECTOR_EXTENSION: psycopg2.OperationalError("could not open control file")})
-    patched_connect(monkeypatch, raw)
-    assert postgres.connect("postgresql://u@h/db").raw is raw
 
 
 def test_connect_refuses_a_database_without_pgvector(monkeypatch):
@@ -231,6 +219,14 @@ def test_connect_refuses_a_database_without_pgvector(monkeypatch):
     with pytest.raises(sqlite3.OperationalError) as raised:
         postgres.connect("postgresql://u@h/db")
     assert str(raised.value) == postgres.NO_VECTOR and raw.closed
+
+
+def test_connect_closes_the_connection_when_the_extension_check_fails(monkeypatch):
+    raw = FakeRaw(failures={postgres.VECTOR_INSTALLED: psycopg2.OperationalError("server closed the connection")})
+    patched_connect(monkeypatch, raw)
+    with pytest.raises(sqlite3.OperationalError) as raised:
+        postgres.connect("postgresql://u@h/db")
+    assert str(raised.value) == "server closed the connection" and raw.closed
 
 
 def test_an_unreachable_server_is_a_catalog_operational_error(monkeypatch):
