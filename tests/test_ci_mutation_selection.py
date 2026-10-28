@@ -589,6 +589,63 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
     assert (9, 12, 6, 2, 6) not in outcomes
 
 
+@pytest.mark.parametrize(
+    "decorator, expected",
+    [
+        ("@functools.lru_cache(maxsize=2)", 6),
+        ("@cache", 6),
+        ("@wrapped", 16),
+        ("@wrapped\n@functools.lru_cache(maxsize=None)", 16),
+    ],
+)
+@pytest.mark.parametrize("method", [False, True])
+def test_wrapped_function_bodies_are_planned_and_their_mutants_run(monkeypatch, decorator, expected, method):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutant_names, selected_mutants
+
+    monkeypatch.setattr(
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1, use_setproctitle=False),
+    )
+    prefix = (
+        "import functools\n"
+        "from functools import cache\n"
+        "decorations = []\n"
+        "def wrapped(function):\n"
+        "    decorations.append(function.__name__)\n"
+        "    def call(*args, **kwargs):\n"
+        "        return function(*args, **kwargs) + 10\n"
+        "    return call\n"
+    )
+    indent = "    " if method else ""
+    signature = "self, value" if method else "value"
+    source = prefix + ("class Box:\n" if method else "")
+    source += "\n".join(f"{indent}{line}" for line in decorator.splitlines()) + "\n"
+    source += f"{indent}def doubled({signature}):\n{indent}    return value * 2\n"
+    line = len(source.splitlines())
+    found, ungraded = mutation_counts("scripts/sample.py", source, {line})
+    assert found == 2
+    assert ungraded == []
+    generated, names = selected_mutants("scripts/sample.py", source, {line})
+    assert len(names) == found
+    assert selected_mutant_names("scripts/sample.py", source, {line}) == names
+
+    def measure():
+        namespace = {"__name__": "scripts.sample"}
+        exec(compile(generated, "<sample>", "exec"), namespace)
+        assert namespace["decorations"] == (["doubled"] if "@wrapped" in decorator else [])
+        function = namespace["Box"]().doubled if method else namespace["doubled"]
+        return function(3)
+
+    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    assert measure() == expected
+    for name in names:
+        monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
+        assert measure() != expected
+
+
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
 def test_shards_split_every_mutant_name_exactly_once_and_evenly(total):
     from scripts.ci_mutation.mutant_shards import shard_names
