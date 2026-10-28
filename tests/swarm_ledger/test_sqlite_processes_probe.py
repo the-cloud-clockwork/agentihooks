@@ -27,14 +27,17 @@ def join(path, index, log):
         os._exit(1)
 
 
-@pytest.mark.parametrize("case", range(8))
-def test_probe(tmp_path, case):
+@pytest.mark.parametrize("method", ["fork", "spawn"])
+@pytest.mark.parametrize("case", range(3))
+def test_probe(tmp_path, case, method):
     failures = []
-    for attempt in range(60):
+    for attempt in range(40):
         base = tmp_path / str(attempt)
         path = base / "ledgers" / sqlite.DATABASE
-        SQLiteLedgerRepository(path).create("processes", CONTENT)
-        context = multiprocessing.get_context("fork")
+        creator = SQLiteLedgerRepository(path)
+        creator.create("processes", CONTENT)
+        assert creator.exists("processes")
+        context = multiprocessing.get_context(method)
         logs = [base / f"child{index}.log" for index in range(4)]
         workers = [context.Process(target=join, args=(path, index, logs[index])) for index in range(4)]
         for worker in workers:
@@ -56,7 +59,8 @@ def test_probe(tmp_path, case):
                     "logs": [log.read_text() if log.exists() else None for log in logs],
                 }
             )
-    print(f"PROBE case={case} failures={len(failures)}")
+    print(f"PROBE method={method} case={case} failures={len(failures)}")
+    del creator
     for failure in failures:
         print("PROBE", json.dumps(failure))
     assert not failures
