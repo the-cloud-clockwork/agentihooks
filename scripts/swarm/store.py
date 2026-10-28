@@ -98,6 +98,8 @@ class SwarmConfig:
             raise SwarmError("focus weight must be a whole number from 0 to 100")
         if self.placement_mode not in PLACEMENT_MODES:
             raise SwarmError(f"placement mode must be one of {', '.join(PLACEMENT_MODES)}")
+        if type(self.placement_nodes) is not int or self.placement_nodes < 0:
+            raise SwarmError("placement-nodes takes a whole number of hives, 0 for no limit")
         if self.engine not in ("legacy", "events"):
             raise SwarmError("engine must be one of legacy, events")
 

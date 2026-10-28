@@ -296,6 +296,14 @@ def test_placement_mode_is_anton_first_with_no_node_limit_by_default(store):
     assert (config.placement_mode, config.placement_nodes) == ("round-robin", 3)
 
 
+@pytest.mark.parametrize("nodes", [-1, "2", 1.5])
+def test_swarm_config_refuses_a_node_limit_that_is_not_a_whole_number(nodes):
+    from scripts.swarm.store import SwarmConfig, SwarmError
+
+    with pytest.raises(SwarmError, match="^placement-nodes takes a whole number of hives, 0 for no limit$"):
+        SwarmConfig("sw", "agentihooks", 1, 1, placement_nodes=nodes)
+
+
 def test_swarm_set_selects_round_robin_placement_and_its_node_limit(store, capsys):
     import argparse
     import json
