@@ -827,6 +827,7 @@ def test_recorded_latencies_of_a_missed_pass_fit_the_budget_when_unchanged_trace
     langfuse = Timed(changed={b["name"] for b in fleet[:8]})
     state = {}
     registry.read("s", fleet, langfuse, state, 15, 50)
-    langfuse.scan, langfuse.seconds = 1, 0.1
-    found, failures = registry.read("s", fleet, langfuse, state, 15 * 0.1 / 1.4, 50)
+    recorded_request_seconds, budget_seconds, scale = 1.4, 15, 0.07
+    langfuse.scan, langfuse.seconds = 1, recorded_request_seconds * scale
+    found, failures = registry.read("s", fleet, langfuse, state, budget_seconds * scale, 50)
     assert failures == [] and all(b["read"] for b in found)
