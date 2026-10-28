@@ -76,6 +76,8 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
 
       - name: Run the idle writer lock holder scenario
