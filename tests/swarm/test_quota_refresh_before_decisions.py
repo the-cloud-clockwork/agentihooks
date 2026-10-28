@@ -18,13 +18,16 @@ def _decisions(row: capacity.Account) -> tuple:
         stored["observed_at"],
         drain_watch.draining(stored, Limits(), NOW),
         quota_handoff.trigger(row, quota_handoff.Thresholds()),
-        quota_view.lines({**_decision(), "accounts": [stored]}, int(NOW * 1000))[1].split("  ")[2],
+        quota_view.lines({**_decision(), "accounts": [stored]}, int(NOW * 1000), _decision()["configured"], "manual")[
+            -1
+        ].split("  ")[2],
     )
 
 
 def _decision() -> dict:
     lanes = {"eng": 0, "ci": 0, "plan": 0}
-    return {"configured": lanes, "effective": lanes, "reason": "test", "at": int(NOW * 1000)}
+    placeable = {"claude": 0, "codex": 0}
+    return {"configured": lanes, "effective": lanes, "placeable": placeable, "reason": "test", "at": int(NOW * 1000)}
 
 
 def test_a_stale_claude_reading_is_read_live_before_the_cap_and_drain_decisions(monkeypatch, tmp_path):

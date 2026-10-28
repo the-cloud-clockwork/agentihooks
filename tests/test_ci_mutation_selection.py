@@ -490,10 +490,10 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
         "    def launch(self):\n"
         "        return self.count + 1\n"
         "\n"
-        "@functools.lru_cache(maxsize=2)\n"
-        "def cached(value):\n"
-        "    return value - 1\n"
-        "\n"
+        "@opaque\n"
+        "class Cached:\n"
+        "    def cached(value):\n"
+        "        return value - 1\n"
         "@functools.total_ordering\n"
         "class Ordered:\n"
         "    def __lt__(self, other):\n"
@@ -507,17 +507,17 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
     assert mutation_counts("scripts/sample.py", source, {9}) == (2, [])
     assert mutation_counts("scripts/sample.py", source, {6}) == (0, [])
     assert mutation_counts("scripts/sample.py", source, {6, 9}) == (2, [])
-    assert selected_mutants("scripts/sample.py", source, {13, 18})[1] == []
-    assert mutation_counts("scripts/sample.py", source, {13}) == (0, ["cached"])
+    assert selected_mutants("scripts/sample.py", source, {14, 18})[1] == []
+    assert mutation_counts("scripts/sample.py", source, {14}) == (0, ["cached"])
     assert mutation_counts("scripts/sample.py", source, {18}) == (0, ["__lt__"])
-    assert mutation_counts("scripts/sample.py", source, {9, 13, 18}) == (2, ["cached", "__lt__"])
+    assert mutation_counts("scripts/sample.py", source, {9, 14, 18}) == (2, ["cached", "__lt__"])
     assert mutation_counts("scripts/sample.py", source, {4, 11}) == (0, [])
     monkeypatch.setattr(
         Config,
         "get",
         lambda: SimpleNamespace(do_not_mutate_patterns=[r"count \+ 1"], source_paths=[], max_stack_depth=-1),
     )
-    assert mutation_counts("scripts/sample.py", source, {9, 13}) == (0, ["cached"])
+    assert mutation_counts("scripts/sample.py", source, {9, 14}) == (0, ["cached"])
 
 
 def test_property_cached_property_static_and_class_method_bodies_are_graded_and_their_mutants_run(monkeypatch):
