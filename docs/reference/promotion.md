@@ -23,7 +23,7 @@ The `promote` job in `.github/workflows/test.yml` is the last job of a `dev` pus
 
 Pull request and merge queue runs never promote. A dispatched Tests run never promotes.
 
-Every `dev` push run shares the concurrency group `promotion-dev` with `cancel-in-progress` off and a single pending slot. A running run always finishes and, when green, promotes the revision it graded even after `dev` has moved on. A newer push only replaces the run still waiting in the pending slot, so a burst of merges grades the running head and the newest head, not every head in between. Runs in the group never overlap, so promotions land in push order.
+Every `dev` push run has its own concurrency group, `tests-push-<run id>`, with `cancel-in-progress` off, so no push waits behind an older run and a red run never holds a newer green head. A green run promotes the revision it graded even after `dev` has moved on. The promotion job's `release-version` group serializes the writes, and a graded revision that is not ahead of the last promoted one is refused, so an older run never overwrites a newer `main`.
 
 ## What a promotion does
 
