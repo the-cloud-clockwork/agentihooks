@@ -284,6 +284,25 @@ def test_alert_line_shows_only_while_a_finding_is_open_with_the_live_caps(open_p
     assert page.text("#alert-live").split() == ["eng", "1/3", "ci", "0/1", "plan", "0/1"]
 
 
+def test_alert_line_names_each_open_stale_claim_with_its_claimant_and_last_nudge(open_page):
+    stale = {
+        "id": "stale-claim/pb10",
+        "kind": "stale claim",
+        "subject": "pb10",
+        "summary": "no progress for 44 minutes",
+        "evidence": ["task Build", "claimed by eng-58", "last stale nudge 3 minutes ago"],
+        "threshold": "30 minutes without progress",
+        "seen_at": NOW_MS - 240_000,
+        "verdict": None,
+    }
+    page = open_page(status(findings=[stale]), width=1920)
+    page.tab.set_viewport_size({"width": 1920, "height": 1080})
+    assert page.tab.locator("#alert-stale span").all_inner_texts() == [
+        "pb10 · claimed by eng-58 · last stale nudge 3 minutes ago"
+    ]
+    assert page.text("#alert-kinds") == "stale claim"
+
+
 def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
     page = open_page()
     fields = {lane: page.tab.locator(f"#cap-{lane}") for lane in ("eng", "ci", "plan", "compact")}

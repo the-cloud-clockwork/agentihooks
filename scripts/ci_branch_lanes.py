@@ -8,6 +8,22 @@ from pathlib import Path
 import yaml
 
 WORKFLOWS = ".github/workflows"
+PUBLIC_RUNNER = re.compile(r"anton-oss(-[\w.-]+)?|(ubuntu|windows|macos)-[\w.-]+", re.IGNORECASE)
+PUBLIC_GROUPS = ("anton-oss",)
+SELECTED = re.compile(r"(?:&&|\|\||\$\{\{)\s*'((?:''|[^'])*)'")
+LITERAL = re.compile(r"'(?:''|[^'])*'")
+NAME = re.compile(r"[A-Za-z_][\w-]*(?:\.[\w-]+)*")
+FIXED_NAMES = frozenset(
+    {
+        "github.event.pull_request.head.repo.full_name",
+        "github.event_name",
+        "github.ref",
+        "github.repository",
+    }
+)
+ACTOR_TEST = re.compile(
+    r"contains\(fromJSON\(\),\s*github\.(?:triggering_)?actor\)|github\.(?:triggering_)?actor\s*[!=]="
+)
 LANE = (
     "format('hosted-lane-{0}', "
     "((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || "
@@ -183,13 +199,47 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
     return found
 
 
+def runner_labels(runner: object) -> list[str]:
+    if isinstance(runner, dict):
+        group = runner.get("group")
+        labels = runner.get("labels") or []
+        runner = [
+            *([] if group is None or group in PUBLIC_GROUPS else [f"group {group}"]),
+            *([labels] if isinstance(labels, str) else labels),
+        ]
+    if isinstance(runner, str):
+        runner = [runner]
+    found = []
+    for item in runner if isinstance(runner, list) else []:
+        text = str(item)
+        bare = ACTOR_TEST.sub("", LITERAL.sub("", text))
+        fixed = "[" not in bare and set(NAME.findall(bare)) <= FIXED_NAMES
+        selected = SELECTED.findall(text) if "${{" in text and fixed else []
+        found += selected or [text]
+    return found
+
+
+def private_runners(runner: object) -> list[str]:
+    return [label for label in runner_labels(runner) if not PUBLIC_RUNNER.fullmatch(label)]
+
+
+def runner_problems(workflow: object) -> list[str]:
+    jobs = workflow.get("jobs") if isinstance(workflow, dict) else None
+    return [
+        f"job {name} asks for private runner label {', '.join(found)}"
+        for name, job in (jobs.items() if isinstance(jobs, dict) else [])
+        if isinstance(job, dict) and (found := private_runners(job.get("runs-on")))
+    ]
+
+
 def grade(text: str, baseline: str | None = None, ancestor: str | None = None) -> list[str]:
     try:
+        workflow = yaml.safe_load(text)
         return problems(
-            yaml.safe_load(text),
+            workflow,
             yaml.safe_load(baseline) if baseline is not None else None,
             yaml.safe_load(ancestor) if ancestor is not None else None,
-        )
+        ) + runner_problems(workflow)
     except yaml.YAMLError:
         return ["does not parse as YAML"]
 

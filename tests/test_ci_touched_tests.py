@@ -51,6 +51,59 @@ def test_touched_test_workers_follow_the_collected_selection(tmp_path, monkeypat
         assert f"{selected} passed" in output
 
 
+@pytest.mark.parametrize("name", ["snapshot.js", "new_contract.js"])
+def test_preflight_selects_every_python_wrapper_of_a_changed_javascript_file(tmp_path, monkeypatch, name):
+    from pathlib import Path
+
+    import yaml
+
+    from scripts import ci_select, ci_touched_tests
+    from scripts.ci_mutation import browser
+
+    root = Path(__file__).resolve().parents[1]
+    workflow = yaml.safe_load((root / ".github/workflows/mutation-preflight.yml").read_text())
+    command = next(
+        step["run"]
+        for step in workflow["jobs"]["touched-tests"]["steps"]
+        if step.get("name") == "Select the tests the branch touches"
+    )
+    source = f"scripts/static/{name}"
+    files = {
+        source: "export const value = 2;\n",
+        "tests/test_direct.py": f"PAGE = '{source}'\n",
+        "tests/nested/test_basename.py": f"PAGE = '{name}'\n",
+        "tests/js_loader.py": f"PAGE = '{name}'\n",
+        "tests/second_loader.py": "from tests import js_loader\n",
+        "tests/test_indirect.py": "from tests import second_loader\n",
+        "tests/test_changed.py": "def test_changed(): pass\n",
+        "tests/test_unrelated.py": "def test_other(): pass\n",
+    }
+    for path, text in files.items():
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ci_select, "changed_files", lambda *_: [source, "tests/test_changed.py"])
+    collected = []
+    monkeypatch.setattr(ci_touched_tests, "worker_count", lambda tests: collected.extend(tests) or 4)
+    monkeypatch.setattr(browser, "needs_browser", lambda root, tests: True)
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    code = command.split("python - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    exec(compile(code, "<preflight selection>", "exec"), {})
+    expected = {
+        "tests/test_direct.py",
+        "tests/nested/test_basename.py",
+        "tests/test_indirect.py",
+        "tests/test_changed.py",
+    }
+    assert set(collected) == expected
+    results = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert set(results["files"].split()) == expected
+    assert results["browser"] == "true"
+    assert results["workers"] == "4"
+
+
 @pytest.mark.wall_clock
 @pytest.mark.parametrize("job", ["unit", "unit-selected"])
 def test_a_hung_worker_fails_before_the_step_timeout(tmp_path, monkeypatch, job):

@@ -158,6 +158,22 @@ def test_unknown_start_and_tool_times_are_not_reported_as_a_stall(monkeypatch, t
     assert rows[0]["tool_quiet_minutes"] is None
 
 
+def test_health_rows_carry_the_minutes_since_the_last_stale_nudge(monkeypatch, tmp_path):
+    import fakeredis
+
+    from scripts.swarm import idle, stale_nudge
+    from scripts.swarm.health import activity
+    from scripts.swarm.status import _health_rows
+    from scripts.swarm.store import AgentRecord
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    worker = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
+    assert _health_rows(store, "sw", [worker], {}, 1_000_000)[0]["last_nudge_minutes"] is None
+    store.redis.set(idle.key("sw", stale_nudge.LAST, worker.name), 1_000_000 - 3 * 60_000 - 1)
+    assert _health_rows(store, "sw", [worker], {}, 1_000_000)[0]["last_nudge_minutes"] == 3
+
+
 def test_missing_tool_clock_remains_unmeasured_despite_old_launch_or_heartbeat(monkeypatch, tmp_path):
     import fakeredis
 

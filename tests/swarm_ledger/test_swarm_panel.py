@@ -653,6 +653,25 @@ class SwarmPanel(unittest.TestCase):
             ["eng 1/3", "ci 1/1", "plan 0/1"],
         )
 
+    def test_open_stale_claims_name_their_task_claimant_and_last_nudge(self):
+        stale = {
+            "kind": "stale claim",
+            "subject": "t1",
+            "evidence": ["task One", "claimed by eng", "no stale nudge sent"],
+        }
+        sw = {
+            "findings": [
+                stale,
+                {**stale, "subject": "t2", "evidence": ["task Two", "claimed by ci", "last stale nudge 3 minutes ago"]},
+                {**stale, "subject": "t3", "verdict": "false-positive"},
+                {"kind": "idle with claim", "subject": "eng", "evidence": ["task One"]},
+            ]
+        }
+        self.assertEqual(
+            self.run_js(["openFindings", "staleClaims"], f"staleClaims({json.dumps(sw)})"),
+            ["t1 · claimed by eng · no stale nudge sent", "t2 · claimed by ci · last stale nudge 3 minutes ago"],
+        )
+
     def test_seat_names_read_as_lane_and_number_and_the_master_seat_stays_whole(self):
         out = self.run_js(["seatText"], '["master@rig", "eng-2@rig", "ci-1@rig"].map(seatText)')
         self.assertEqual(out, ["master@rig", "eng 2", "ci 1"])
