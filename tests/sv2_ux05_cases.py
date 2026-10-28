@@ -220,13 +220,14 @@ class Viewer:
         self.tab.wait_for_function(script, arg=arg, timeout=15000)
 
     def row(self, name: str) -> str:
-        return self.tab.locator(f'[id="agent-{name}"]').inner_text()
+        return self.tab.locator(f'[id="agent-{name}"]').inner_text().lower()
 
     def wait_row(self, name: str, present: str = "", absent: str = "") -> str:
         self.wait(
             """([id, present, absent]) => {
               const row = document.getElementById(id);
-              return !!row && row.innerText.includes(present) && (!absent || !row.innerText.includes(absent));
+              const text = row && row.innerText.toLowerCase();
+              return !!row && text.includes(present) && (!absent || !text.includes(absent));
             }""",
             [f"agent-{name}", present, absent],
         )
