@@ -1,0 +1,6 @@
+{
+  "scripts/ci_frozen.py:scripts.ci_frozen.x_announce__mutmut_34:72a13cb6e9f514c7b4802ccc311907dcdc4038ba7793520f2c3a64feb2689019": {
+    "reader": "standards-reader",
+    "reason": "Only JSON whitespace changes. The registry still parses to the identical workflow to accepted blob mapping; candidate bytes, blob identities and separate announcement acceptance remain identical. Registry indentation is not a protocol requirement."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_frozen.py:scripts.ci_frozen.x_main__mutmut_5:492e12f562e755a68f8076a59ef62b69a19f60e05d99ecbd2205c66879fff6f9": {
+    "reader": "standards-reader",
+    "reason": "Only argparse description or subcommand help presentation changes; command names, required arguments, defaults, dispatch, accepted candidates and written bytes remain identical. Help wording is not the frozen announcement persistence contract."
+  }
+}
