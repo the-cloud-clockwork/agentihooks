@@ -337,7 +337,8 @@ jobs:
           read -r -a paths <<< "$TEST_PATHS"
           log="$RUNNER_TEMP/focused-proof.log"
           status=0
-          workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup -p tests.flake_ledger --tb=short 2>&1 | tee "$log" || status=$?
+          workers=$(python -m scripts.ci_cpu_quota)
+          python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup -p tests.flake_ledger --tb=short 2>&1 | tee "$log" || status=$?
           python -m scripts.ci_proof_outcome "$log" || status=1
           exit "$status"
 

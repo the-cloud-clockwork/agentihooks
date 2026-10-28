@@ -66,10 +66,11 @@ def test_a_focused_proof_is_red_unless_every_test_path_is_on_one_line_under_test
 
 def test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota():
     step = next(s for s in _workflow()["jobs"]["tests"]["steps"] if s.get("name") == "Run selected tests")
-    lines = [line.strip() for line in step["run"].splitlines() if "pytest" in line]
+    lines = [line.strip() for line in step["run"].splitlines() if "workers" in line]
     assert lines == [
-        'workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" '
-        '--dist loadgroup -p tests.flake_ledger --tb=short 2>&1 | tee "$log" || status=$?'
+        "workers=$(python -m scripts.ci_cpu_quota)",
+        'python -m pytest "${paths[@]}" -v -n "$workers" '
+        '--dist loadgroup -p tests.flake_ledger --tb=short 2>&1 | tee "$log" || status=$?',
     ]
 
 
@@ -82,6 +83,7 @@ def test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota():
         ("=== 3 skipped in 0.10s ===\n", 0, 1),
         ("collecting ...\n", 0, 1),
         ("=== 2 passed in 1.20s ===\n", 0, 0),
+        ("[gw0] [ 50%] PASSED tests/test_a.py::test_a[INTERNALERROR> KeyError]\n=== 1 passed in 0.20s ===\n", 0, 0),
         ("=== 2 passed, 1 skipped, 3 warnings in 75.32s (0:01:15) ===\n", 0, 0),
         ("\x1b[32m=== \x1b[32m\x1b[1m2 passed\x1b[0m\x1b[32m in 1.20s\x1b[0m\x1b[32m ===\x1b[0m\n", 0, 0),
         ("=== 1 failed, 2 passed in 1.20s ===\n", 1, 1),

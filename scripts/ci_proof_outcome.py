@@ -6,11 +6,12 @@ COMPLETED = ("passed", "failed", "xfailed", "xpassed")
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 SUMMARY = re.compile(r"^=+ (.+) in [\d.]+s(?: \([^)]*\))? =+$")
 COUNT = re.compile(r"(\d+) (\w+)")
+INTERNAL = re.compile(r"^(?:\[gw\d+\] )?INTERNALERROR>", re.M)
 
 
 def verdict(log: str) -> str | None:
     log = ANSI.sub("", log)
-    if "INTERNALERROR" in log:
+    if INTERNAL.search(log):
         return "pytest raised an internal error."
     summaries = [m.group(1) for line in log.splitlines() if (m := SUMMARY.match(line.strip()))]
     counts = {name: int(n) for n, name in COUNT.findall(summaries[-1])} if summaries else {}
