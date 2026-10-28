@@ -2007,7 +2007,9 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     setup = [
         step
         for step in setup
-        if not str(step.get("name", "")).startswith((*downloads, "Cap the merged test stats"))
+        if not str(step.get("name", "")).startswith(
+            (*downloads, "Cap the merged test stats", "Check for merged test stats")
+        )
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
     ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
@@ -2149,7 +2151,7 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     }
     merged = mutation[mutation_names.index("Save the merged test stats")]
     assert merged["uses"] == "actions/cache/save@v4"
-    assert merged["if"] == f"{first} && hashFiles('.mutation-stats-cache/**') != ''"
+    assert merged["if"] == f"{first} && steps.merged-stats.outputs.found == 'true'"
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
     capped = mutation[mutation_names.index("Cap the merged test stats")]
     assert capped["if"] == first
@@ -2280,7 +2282,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"strategy.job-total != 1 && {skipped}",
         f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}",
         f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}"
-        " && hashFiles('.mutation-stats-cache/**') != ''",
+        " && steps.merged-stats.outputs.found == 'true'",
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
     )
