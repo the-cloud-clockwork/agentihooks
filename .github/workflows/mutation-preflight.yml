@@ -560,6 +560,16 @@ jobs:
           retention-days: 1
           overwrite: true
 
+      - name: Stage shard replay evidence
+        if: always()
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
+        run: |
+          mkdir -p .mutation-gate
+          mv .mutation-gate .mutation-workspaces
+          python -m scripts.ci_mutation.evidence stage --output .mutation-workspaces --bundle .mutation-gate --shard "$SHARD" --shards "$SHARDS"
+
       - name: Upload shard mutation evidence
         if: always()
         uses: actions/upload-artifact@v4
