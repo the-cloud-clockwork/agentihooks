@@ -218,6 +218,15 @@ def test_a_refused_item_from_a_retired_sender_still_holding_its_seat_tells_it(st
     assert notice.text == delivery.REFUSED.format(id=item.id, reason="the swarm notice was dropped")
 
 
+def test_a_refused_item_from_a_retired_sender_never_seated_closes_without_a_notice(store):
+    gone = store.names.next("sw", "eng")
+    store.names.retire(gone, 2)
+    box = InboxStore(store.redis)
+    item = box.send(gone, "operator", "the docs are merged")
+    assert delivery.post(box, item, lambda: False) is False
+    assert box.get(item.id).state == "cancelled" and box.pending_items(gone) == []
+
+
 def test_a_shown_item_stays_open_for_its_caller(store):
     box = InboxStore(store.redis)
     item = box.send("sw-eng-1", "operator", "the docs are merged")

@@ -173,9 +173,9 @@ def post(inbox, item, write):
 
 
 def moved_on(inbox, sender):
-    """A retired sender that no longer holds a seat: its notice would land with whoever took the seat after it."""
+    """A retired sender holding no seat: a notice to it lands with whoever took its seat, or with nobody."""
     entry = inbox.names.entry(sender)
-    return bool(entry and entry["retired_at"]) and not inbox.seats.seat_of(sender)
+    return bool(entry.get("retired_at")) and not inbox.seats.seat_of(sender)
 
 
 def may_cancel(inbox, item, refused):
