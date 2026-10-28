@@ -130,7 +130,7 @@ def test_serving_the_shell_never_writes_the_record_files(base):
 def test_home_shell_lists_no_ledger_rows(base):
     _, _, body = get(base + "/")
     assert SLUG not in body
-    assert '<ul id="rows"></ul>' in body
+    assert '<ul id="rows" role="rowgroup"></ul>' in body
     assert "watermark" not in body and "data-sort" not in body
     script = (core.HOME.parent / "static" / "home" / "home.js").read_text(encoding="utf-8")
     assert '"Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at"' in script

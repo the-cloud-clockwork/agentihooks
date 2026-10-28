@@ -107,17 +107,22 @@ def test_home_spans_the_full_window_width():
 
 def test_each_row_carries_title_kind_counts_swarm_state_and_last_activity(browser, updated_at):
     found = row(home(browser, now=updated_at + 5 * MINUTE), SLUG)
-    assert '<a class="title" href="/rows-2026-01-03" data-tip="Rows plan">Rows plan</a>' in found
-    assert '<span class="kind">swarm</span>' in found
-    assert '<span class="num open"><b>2</b> open</span><span class="num done"><b>1</b> done</span>' in found
-    assert '<span class="state s-running">running</span>' in found
-    assert re.search(r'<time class="when" datetime="[^"]+" data-tip="[^"]+">5m ago</time>', found)
+    assert (
+        '<span class="title" role="cell"><a href="/rows-2026-01-03" data-tip="Rows plan">Rows plan</a></span>' in found
+    )
+    assert '<span class="kind" role="cell">swarm</span>' in found
+    assert (
+        '<span class="num open" role="cell"><b>2</b> open</span><span class="num done" role="cell"><b>1</b> done</span>'
+        in found
+    )
+    assert '<span class="state s-running" role="cell">running</span>' in found
+    assert re.search(r'<time class="when" datetime="[^"]+" data-tip="[^"]+" role="cell">5m ago</time>', found)
     assert re.search(
-        r'</a><span class="kind">swarm</span><span class="ov" data-tip="A long overview[^"]*">A long overview[^<]*</span>'
-        r'<span class="num open">',
+        r'</a></span><span class="kind" role="cell">swarm</span><span class="ov" data-tip="A long overview[^"]*" role="cell">A long overview[^<]*</span>'
+        r'<span class="num open" role="cell">',
         found,
     )
-    assert '<span class="acts"><button class="act del" type="button" data-act="delete"' in found
+    assert '<span class="acts" role="cell"><button class="act del" type="button" data-act="delete"' in found
     assert 'data-slug="rows-2026-01-03" aria-label="Move Rows plan to the bin">' in found
     assert 'data-act="reopen"' not in found
 
@@ -137,15 +142,15 @@ def test_a_ledger_without_tasks_counts_its_phases():
 def test_a_ledger_without_a_swarm_says_so_in_its_row(browser, updated_at):
     make("no-swarm")
     found = row(home(browser), "no-swarm")
-    assert '<span class="state s-none">no swarm</span>' in found
+    assert '<span class="state s-none" role="cell">no swarm</span>' in found
 
 
 def test_a_closed_ledger_shows_closed_and_a_reopen_button(browser, updated_at):
     make("closed-row")
     storage.apply_ops("closed-row", ops=[{"op": "close", "id": "c1", "by": "swarm"}])
     found = row(home(browser), "closed-row")
-    assert '<span class="state s-closed">closed</span>' in found
-    assert '<span class="acts"><button class="act reopen"' in found
+    assert '<span class="state s-closed" role="cell">closed</span>' in found
+    assert '<span class="acts" role="cell"><button class="act reopen"' in found
     assert '>Reopen</button><button class="act del"' in found
 
 
@@ -175,19 +180,19 @@ def test_the_header_brands_home_without_a_ledger_count_and_names_each_column(bro
     assert 'class="total"' not in page
     assert 'id="fold-all"' not in page
     head = re.search(
-        r'<div class="row head">(.*?)</div>', re.sub(r'<span class="col-grip"[^>]*></span>', "", page)
+        r'<div class="row head" role="row">(.*?)</div>',
+        re.sub(r'<span class="col-grip"[^>]*></span>', "", page),
     ).group(1)
-    arrow = '<i aria-hidden="true">▼</i></button>'
-    still = '<i aria-hidden="true">↕</i></button>'
-    assert head == (
-        f'<span>Ledger</span><button class="sort" type="button" data-sort="kind">Kind{still}'
-        f'<span>Overview</span><button class="sort r" type="button" data-sort="open">Open{still}'
-        f'<button class="sort r" type="button" data-sort="done">Done{still}'
-        f'<button class="sort" type="button" data-sort="swarm">Swarm{still}'
-        f'<button class="sort r" type="button" data-sort="at" data-dir="desc">Activity{arrow}<span></span>'
-    )
+    cells = re.findall(r'<span role="columnheader"[^>]*>(.*?)</span>', head)
+    labels = [re.sub(r"<[^>]+>|[↕▲▼]", "", cell) for cell in cells]
+    assert labels == ["Ledger", "Kind", "Overview", "Open", "Done", "Swarm", "Activity", "Actions"]
+    assert re.findall(r'data-sort="(\w+)"', head) == ["kind", "open", "done", "swarm", "at"]
+    assert head.count('aria-sort="none"') == 4
+    assert 'aria-sort="descending"' in head
+    assert '<i aria-hidden="true">▼</i></button>' in head
+    assert head.count('<i aria-hidden="true">↕</i></button>') == 4
     assert '<main class="home">' in page
-    assert '</li><li class="row" data-slug=' in page
+    assert '</li><li class="row" role="row" data-slug=' in page
 
 
 def test_the_bin_lists_days_left_and_a_restore_button(browser, updated_at):
@@ -197,7 +202,7 @@ def test_the_bin_lists_days_left_and_a_restore_button(browser, updated_at):
         page = home(browser, "bin")
     found = row(page, SLUG)
     date = server.time.strftime("%Y-%m-%d", server.time.localtime(updated_at / 1000))
-    assert f'<span class="deleted">{date}</span><span class="left">1 day left</span>' in found
+    assert f'<span class="deleted" role="cell">{date}</span><span class="left" role="cell">1 day left</span>' in found
     assert f'<button class="act restore" type="button" data-act="restore" data-slug="{SLUG}"' in found
     assert "Restore</button>" in found
     assert (
@@ -206,17 +211,20 @@ def test_the_bin_lists_days_left_and_a_restore_button(browser, updated_at):
     )
     assert 'class="watermark"' not in page
     head = re.sub(r'<span class="col-grip"[^>]*></span>', "", page)
-    assert '<span class="r">Deleted</span><span class="r">Left</span><span></span></div>' in head
+    assert (
+        '<span role="columnheader" class="r">Deleted</span><span role="columnheader" class="r">Left</span><span role="columnheader" class="r">Actions</span></div>'
+        in head
+    )
     assert 'id="home-fab" href="/"' in page
     with patch.object(
         server, "bin_summaries", return_value=[{**summary(SLUG), "deleted_at": updated_at, "days_left": 30}]
     ):
-        assert '<span class="left">30 days left</span>' in row(home(browser, "bin"), SLUG)
+        assert '<span class="left" role="cell">30 days left</span>' in row(home(browser, "bin"), SLUG)
 
 
 def test_the_bin_entry_carries_the_bin_count_and_an_empty_bin_says_so(browser, updated_at):
     assert '<span class="count">' not in home(browser)
-    assert '<li class="empty">The bin is empty.</li>' in home(browser, "bin")
+    assert '<li class="empty" role="row"><span role="cell" aria-colspan="6">The bin is empty.' in home(browser, "bin")
     ledger_bin.delete(SLUG)
     assert '<span class="count">1</span></a>' in home(browser)
 
@@ -232,13 +240,13 @@ def test_last_activity_reads_in_the_largest_whole_unit(browser, minutes, text):
 
 def test_activity_in_the_future_reads_just_now_and_unknown_when_missing(browser):
     assert ">just now</time>" in one_row(browser, 0, updated_at=5 * MINUTE)
-    assert '<span class="when">unknown</span>' in one_row(browser, 0, updated_at=None)
+    assert '<span class="when" role="cell">unknown</span>' in one_row(browser, 0, updated_at=None)
     stamp = re.search(r'<time class="when"[^>]*>[^<]*</time>', one_row(browser, 3 * MINUTE, updated_at=MINUTE)).group(0)
     assert stamp.startswith('<time class="when" datetime="1970-01-01T00:01:00Z" data-tip="1970-01-01 ')
-    assert stamp.endswith('">2m ago</time>')
+    assert stamp.endswith('" role="cell">2m ago</time>')
     at = 1_791_290_000_000
     local = server.time.strftime("%Y-%m-%d %H:%M", server.time.localtime(at / 1000))
-    assert f'data-tip="{local}">just now</time>' in one_row(browser, at, updated_at=at)
+    assert f'data-tip="{local}" role="cell">just now</time>' in one_row(browser, at, updated_at=at)
 
 
 def test_the_swarm_state_comes_from_the_swarm_config():
@@ -267,7 +275,7 @@ def test_the_swarm_state_comes_from_the_swarm_config():
 def test_home_cells_escape_an_unknown_state(browser):
     with patch.object(server, "swarm_state", return_value="<b>"):
         page = one_row(browser, 0, updated_at=None)
-    assert re.search(r'<span class="state s-(&lt;|<)b(&gt;|>)">&lt;b&gt;</span>', page)
+    assert re.search(r'<span class="state s-(&lt;|<)b(&gt;|>)" role="cell">&lt;b&gt;</span>', page)
 
 
 class Swarms:

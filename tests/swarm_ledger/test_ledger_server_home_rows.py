@@ -78,7 +78,7 @@ def home_html(browser):
 
 
 def row_attrs(page):
-    return {m.group(1): m.group(0) for m in re.finditer(r'<li class="row" data-slug="(\w)"[^>]*>', page)}
+    return {m.group(1): m.group(0) for m in re.finditer(r'<li class="row"[^>]* data-slug="(\w)"[^>]*>', page)}
 
 
 def test_home_rows_carry_the_values_their_columns_sort_by(home_html):
@@ -118,13 +118,13 @@ def test_a_ledger_without_activity_sorts_as_oldest(browser):
 def test_a_row_title_is_escaped(browser):
     with listed(rows=[{**summaries()[1], "title": "Beta <plan><img src=x>"}]):
         page = rendered_home(server, browser, "home", NOW)
-    assert "<img" not in page.split('<ul id="rows">', 1)[1]
+    assert "<img" not in page.split('<ul id="rows" role="rowgroup">', 1)[1]
     assert 'data-tip="Beta &lt;plan&gt;&lt;img src=x&gt;"' in page
 
 
 def test_bin_has_no_fold_or_sort_controls(home_html):
     page = home_html("bin")
-    assert '<li class="row"><a class="title" href="/a"' in page
+    assert '<li class="row" role="row"><span class="title" role="cell"><a href="/a"' in page
     assert "data-sort=" not in page
     assert 'class="fold"' not in page
     assert 'id="fold-all"' not in page
@@ -243,6 +243,7 @@ class El {
   constructor(tag) { this.tag = tag; this.attrs = {}; this.kids = []; this.textContent = ""; this.content = {}; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   append(...kids) { this.kids.push(...kids); }
+  get children() { return this.kids.filter((kid) => kid instanceof El); }
 }
 const document = { createElement: (tag) => new El(tag), querySelector: () => ({ className: "home" }), getElementById: () => new El("ul"), addEventListener: () => {} };
 const fetch = () => new Promise(() => {});
@@ -255,7 +256,7 @@ const writeLayout = fetch, writeLedgerSwarm = fetch;
 def node_home_rows(rows):
     lines = HOME_JS.read_text(encoding="utf-8").removesuffix("start();\n").splitlines()
     source = "\n".join(line for line in lines if not line.startswith("import "))
-    shown = "rows.map((s) => homeRow(s, NOW)).map((r) => ({ attrs: r.attrs, tip: r.kids[0].attrs['data-tip'], title: r.kids[0].textContent }))"
+    shown = "rows.map((s) => homeRow(s, NOW)).map((r) => ({ attrs: r.attrs, tip: r.kids[0].kids[0].attrs['data-tip'], title: r.kids[0].kids[0].textContent }))"
     script = f"{NODE_DOM}{source}\nconst NOW = {NOW}; const rows = {json.dumps(rows)};\nconsole.log(JSON.stringify({shown}));"
     return json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True).stdout)
 
