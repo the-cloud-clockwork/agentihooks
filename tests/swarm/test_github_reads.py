@@ -506,3 +506,16 @@ def test_rest_accounts_for_leading_slash_endpoints_and_retains_the_query(monkeyp
     assert calls == [["gh", "api", "-X", "GET", endpoint]]
     rows = [json.loads(line) for line in (github_reads.home() / "charged.jsonl").read_text().splitlines()]
     assert [(row["caller"], row["endpoint"]) for row in rows] == [("jobs", endpoint)]
+
+
+def test_rest_strips_slurped_page_headers_into_one_json_array(monkeypatch, tmp_path):
+    import subprocess
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    out = '[HTTP/2.0 200 OK\nEtag: "a"\r\n\r\n{"jobs": [1]}\n,HTTP/2.0 200 OK\nEtag: "b"\r\n\r\n{"jobs": [2]}]'
+
+    def run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, stdout=out)
+
+    result = github_reads.rest("jobs", ["api", "repos/o/r/actions/runs/1/jobs", "--paginate", "--slurp"], run)
+    assert json.loads(result.stdout) == [{"jobs": [1]}, {"jobs": [2]}]
