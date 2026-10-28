@@ -34,6 +34,8 @@ def shell(command, cwd="/"):
     [
         "git push -u origin HEAD",
         "cd /w && git -C /w push",
+        "git -c http.postBuffer=1048576 push",
+        "git --no-pager push origin HEAD",
         "gh pr create --base dev --fill",
         "gh pr ready 7",
         "agentihooks swarm sw publish --message m -- a.py",
@@ -45,7 +47,8 @@ def test_a_push_or_queue_command_triggers_the_wait(command):
 
 
 @pytest.mark.parametrize(
-    "command", ["", "git status", "echo git push", "agentihooks swarm sw merge state x", "gh pr view 7"]
+    "command",
+    ["", "git status", "echo git push", "git push --dry-run", "agentihooks swarm sw merge state x", "gh pr view 7"],
 )
 def test_other_commands_do_not_trigger(command):
     assert not pr_wait.triggered(command)
@@ -81,8 +84,8 @@ def test_a_normalized_codex_push_marks_through_the_post_tool_hook(monkeypatch, s
         monkeypatch.setenv(name, value)
     monkeypatch.setattr("scripts.swarm.store.redis_client", lambda env=None: store.redis)
     raw = {"hook_event_name": "PostToolUse", "session_id": "s1", "tool_response": "ok"}
-    hook_manager._swarm_outcome(normalize_payload({**raw, **shell("agentihooks swarm sw publish -- a.py")}))
-    assert pr_wait.read(store.redis, "sw", ME)["branch"] == ""
+    hook_manager._swarm_outcome(normalize_payload({**raw, **shell("cd /w\ngit push -u origin HEAD")}))
+    assert pr_wait.read(store.redis, "sw", ME)["at"]
 
 
 def test_a_push_records_both_the_progress_outcome_and_the_mark(store):
@@ -142,6 +145,20 @@ def test_a_live_checked_wait_covers_the_push(store):
     assert pr_wait.read(store.redis, "sw", ME) is None
 
 
+@pytest.mark.parametrize(
+    "on",
+    [
+        {"kind": "reply", "target": "abc"},
+        {"kind": "checks", "target": "https://github.com/o/r/pull/8", "head": "x"},
+    ],
+)
+def test_a_wait_on_anything_but_this_pull_request_gives_way(store, on):
+    idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on=on)
+    pr_wait.mark(store.redis, "sw", ME, 100)
+    assert enforce(store, {"t1": {"id": "t1", "pr_url": URL}}, {URL: OPEN})
+    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "first"}
+
+
 def test_a_bare_wait_gives_way_to_the_checked_wait(store):
     idle.declare_wait(store.redis, "sw", ME, 10_000_000, "reading", 1)
     pr_wait.mark(store.redis, "sw", ME, 100)
@@ -173,7 +190,7 @@ def test_a_finished_agent_or_unknown_task_gets_no_wait(store, state, rows):
 def test_an_agent_that_never_runs_swarm_wait_is_woken_on_merge(store):
     inbox = InboxStore(store.redis)
     rows = {"t1": {"id": "t1", "pr_url": URL}}
-    pr_wait.mark(store.redis, "sw", ME, 100)
+    assert swarm_heartbeat.outcome(shell("git push -u origin HEAD"), ENV, store.redis, 100) is True
     enforce(store, rows, {URL: QUEUED})
     assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "merge", "target": URL}
     pulls = {URL: MERGED}

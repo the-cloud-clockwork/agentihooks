@@ -11,9 +11,9 @@ from scripts.swarm import idle, merge_queue, publish_queue, waits
 from scripts.swarm.store import SwarmError
 
 TRIGGERS = re.compile(
-    r"(?:^|[;&|(\n]\s*)(?:git(?:\s+-C\s+\S+)?\s+push\b|gh\s+pr\s+(?:create|ready)\b"
-    r"|agentihooks\s+swarm\s+\S+\s+(?:publish|merge\s+queue)\b)"
+    r"(?:^|[;&|(\n]\s*)(?:gh\s+pr\s+(?:create|ready)\b|agentihooks\s+swarm\s+\S+\s+(?:publish|merge\s+queue)\b)"
 )
+COVERS = ("checks", "merge")
 TTL_S = 24 * 60 * 60
 LOOKUP_MS = 5 * 60_000
 REASON = "set by the swarm from the push of the task branch"
@@ -25,7 +25,11 @@ QUERY = """query($owner: String!, $name: String!, $branch: String!) {
 
 
 def triggered(command: str | None) -> bool:
-    return bool(command and TRIGGERS.search(command))
+    from scripts.gates.one_push import actions
+
+    if not command:
+        return False
+    return bool(TRIGGERS.search(command)) or any(kind == "push" for kind, _, _ in actions(command, "."))
 
 
 def key(redis, slug: str, agent: str) -> str:
@@ -92,16 +96,14 @@ def enforce_pass(store, slug: str, rows: dict, github, now_ms: int, forge=forge_
         pushed = read(store.redis, slug, agent.name)
         if agent.state == "finished" or not pushed or agent.task not in rows:
             continue
-        held = idle.wait(store.redis, slug, agent.name)
-        if held and held.get("on") and held["until"] > now_ms:
-            store.redis.delete(key(store.redis, slug, agent.name))
-            continue
         url = pull_of(store.redis, slug, agent.name, pushed, rows[agent.task], now_ms, forge)
         pull = github(url) if url and waits.PULL_URL.fullmatch(url) else None
         if pull is None:
             continue
         store.redis.delete(key(store.redis, slug, agent.name))
-        if pull.state != "OPEN":
+        held = idle.wait(store.redis, slug, agent.name) or {}
+        on = held.get("on") or {}
+        if pull.state != "OPEN" or (on.get("kind") in COVERS and on.get("target") == url and held["until"] > now_ms):
             continue
         on = waits.on("merge" if pull.queued else "checks", url)
         if on["kind"] == "checks":
