@@ -68,7 +68,8 @@ On the shared database each server skips the folder lease and follows the genera
 write, so several replicas serve one ledger. With more than one, the chart adds a PodDisruptionBudget
 allowing one replica down, `minReadySeconds: 5` so a rollout moves on only after the new replica has
 served, an eight second preStop pause so the Service drops a stopping replica before its server
-ends, and a twenty second grace period that leaves the server its drain after the pause. A rollout then replaces one replica at a time while the other answers. `ci/kind-smoke.sh` runs
+ends, and a twenty second grace period that leaves the server its drain after the pause. A rollout
+then replaces one replica at a time while the other answers. `ci/kind-smoke.sh` runs
 `tests/chart_ledger_rollout.py`, which checks both refusals and the rendered rollout.
 
 ## Snapshots and backups
