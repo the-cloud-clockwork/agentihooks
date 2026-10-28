@@ -225,23 +225,25 @@ def gap_agents(record: dict, limits: Limits) -> list[str]:
 
 
 def wait_coverage(record: dict, limits: Limits) -> list[Finding]:
-    unread = record.get("waits_unread")
-    if not unread:
+    unread = record.get("waits_unread", [])
+    working = _live(record)
+    live = [name for name in unread if name in working]
+    if not live:
         return []
     return [
         Finding(
             "wait history partial",
             record["slug"],
-            f"wait history of {plural(len(unread), 'agent')} with turn gaps over {limits.turn_gap_minutes} minutes "
+            f"wait history of {plural(len(live), 'live agent')} with turn gaps over {limits.turn_gap_minutes} minutes "
             "not read in budget",
             (
-                "unread: " + ", ".join(unread[:5]),
-                f"live agents unread: {len(_live(record) & set(unread))}",
+                "unread: " + ", ".join(live[:5]),
+                f"retired agents unread: {len(unread) - len(live)}",
                 "turn gap findings skip agents whose wait history was not read",
                 "each Doctor scan reads the wait history again within its budget",
             ),
-            "every agent with a turn gap over the limit has its wait history read",
-            len(unread),
+            "every live agent with a turn gap over the limit has its wait history read",
+            len(live),
         )
     ]
 
