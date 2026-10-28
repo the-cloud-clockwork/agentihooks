@@ -233,6 +233,6 @@ def test_the_doctor_runs_the_unclaimed_launch_detector_over_the_slot_claim_read(
 
     found = detect.readers(MagicMock(), None, "sw", AT, environ={}, telemetry=False)
     [unclaimed] = found["unclaimed launch"]()
-    assert (unclaimed.kind, unclaimed.value) == (slot_census.UNCLAIMED, 1)
+    assert (unclaimed.kind, unclaimed.measure) == (slot_census.UNCLAIMED, 1)
     assert found["slot census"]() == []
     assert reads == ["sw"]
