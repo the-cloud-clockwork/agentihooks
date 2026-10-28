@@ -82,9 +82,9 @@ def _reused(config) -> tuple[frozenset[str], frozenset[str]]:
 def pytest_configure_node(node):
     node.workerinput["ci_reused"] = node.config.stash[REUSED_SOURCE]
     # A replacement worker gets a new id and no share, so it collects the whole shard and can run any test.
-    owned = node.config.stash.get(WORKER_FILES, {}).get(node.gateway.id)
-    if owned is not None:
-        node.workerinput["owned_files"] = owned
+    shares = node.config.stash.get(WORKER_FILES, None)
+    if shares and node.gateway.id in shares:
+        node.workerinput["owned_files"] = shares[node.gateway.id]
 
 
 def pytest_collection_modifyitems(config, items):
