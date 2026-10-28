@@ -562,3 +562,5 @@ def test_bus_interval_outages_do_not_escape_metrics(spool, sent, monkeypatch, op
     swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
     environ = {**ON, "AGENTIHOOKS_STATE_BACKEND": "bus"}
     assert metrics.record_pass("sw", NOW, 0, environ, swarm) == ["metrics outbox failed: state unavailable"]
+    if operation == "reopen":
+        assert saved.get("sw").value == str(NOW).encode()

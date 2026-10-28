@@ -2,6 +2,7 @@
 
 import os
 from collections.abc import Mapping
+from typing import Any
 
 from .bus import StateConflict, StateStore
 
@@ -30,7 +31,7 @@ def open_state(bucket: str, environ: Mapping[str, str] | None = None) -> StateSt
     return RedisStateStore(redis_client() if environ is None else redis_client(environ), bucket)
 
 
-def for_store(store, bucket: str, environ: Mapping[str, str] | None = None) -> StateStore:
+def for_store(store: Any, bucket: str, environ: Mapping[str, str] | None = None) -> StateStore:
     env = os.environ if environ is None else environ
     if backend(env) == "redis":
         from .redis_state import RedisStateStore

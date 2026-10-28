@@ -42,7 +42,7 @@ def _collect(slug, now_ms, swarm, box, errors, environ):
     stage_detector.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []), environ, ready=ready)
     from scripts.swarm_v2 import deployed
 
-    outage = store_errors()
+    outage = (*store_errors(), *state.unavailable(environ))
     try:
         metrics_fleet.record(box, swarm.store, slug, now_ms, pools=deployed.worker_pools(environ, slug))
     except (OSError, SwarmError, ValueError, KeyError, *outage) as exc:
