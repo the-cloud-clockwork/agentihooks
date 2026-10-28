@@ -93,12 +93,14 @@ def test_mutation_children_exit_when_the_watchdog_interrupts(monkeypatch):
 
 
 TIMELINE = []
+T0 = time.monotonic()
 
 
 def timed(monkeypatch):
     import scripts.ci_mutation.runner as runner
 
     start = time.monotonic()
+    TIMELINE.append(f"timed begins at module +{start - T0:.1f}")
     prepare = runner.prepare_workspace
 
     def timed_prepare(*args):
@@ -115,7 +117,9 @@ def timed(monkeypatch):
                 out.write(line)
                 if not any("\u2800" <= char <= "\u28ff" for char in line):
                     TIMELINE.append(f"{time.monotonic() - start:7.1f} {line.rstrip()[:160]}")
-        return process.wait()
+        status = process.wait()
+        TIMELINE.append(f"{time.monotonic() - start:7.1f} exit {status}")
+        return status
 
     for name in ("fixture_files", "prepare_git_inputs"):
         original = getattr(runner, name)
@@ -172,6 +176,7 @@ def test_remote_control_statistics_baseline_collects_without_grading(baseline):
     _, _, work, results, error = baseline
     assert error == "", (work / "run.log").read_text()
     assert results == {SOURCE: []}
+    TIMELINE.append(f"test body ends at module +{time.monotonic() - T0:.1f}")
     pytest.fail("PROFILE\n" + "\n".join(TIMELINE[:300]))
 
 
@@ -189,4 +194,5 @@ def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, check
     assert error == "", (grading / "run.log").read_text()
     assert len(results[SOURCE]) == 1, results
     assert any(row["status"] == "killed" for row in results[SOURCE]), results
+    TIMELINE.append(f"test body ends at module +{time.monotonic() - T0:.1f}")
     pytest.fail("PROFILE\n" + "\n".join(TIMELINE[:300]))
