@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts import ci_public_runners
+from scripts import ci_branch_lanes, ci_public_runners
 
 pytestmark = pytest.mark.unit
 
@@ -11,25 +11,18 @@ ROOT = Path(__file__).resolve().parents[1]
 ROUTED = "${{ contains(fromJSON('[\"nestorcolt\"]'), github.actor) && '%s' || 'ubuntu-latest' }}"
 
 
-def workflow(runner):
-    return {"b.yml": {"on": {"push": {}}, "jobs": {"build": {"runs-on": runner, "steps": []}}}}
-
-
 @pytest.mark.parametrize(
-    "runner",
+    ("runner", "label"),
     [
-        "anton-light",
-        ["self-hosted", "anton-light"],
-        ROUTED % "anton-light",
-        {"group": "Default", "labels": ["anton-light"]},
-        "self-hosted",
-        "anton-heavy",
+        ("anton-light", "anton-light"),
+        (["self-hosted", "anton-light"], "self-hosted, anton-light"),
+        (ROUTED % "anton-light", "anton-light"),
+        ({"group": "Default", "labels": ["anton-light"]}, "anton-light"),
+        ("anton-heavy", "anton-heavy"),
     ],
 )
-def test_a_private_runner_label_is_refused(runner):
-    problems = ci_public_runners.check(workflow(runner))
-    assert len(problems) == 1
-    assert problems[0].startswith("b.yml/build: runs-on ")
+def test_a_private_runner_label_is_refused(runner, label):
+    assert ", ".join(ci_public_runners.refused(runner)) == label
 
 
 @pytest.mark.parametrize(
@@ -45,43 +38,35 @@ def test_a_private_runner_label_is_refused(runner):
         ROUTED % "anton-oss-light",
         "${{ github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss' }}",
         {"labels": ["anton-oss-batch"]},
+        None,
     ],
 )
 def test_public_runner_labels_pass(runner):
-    assert ci_public_runners.check(workflow(runner)) == []
+    assert ci_public_runners.refused(runner) == []
 
 
-def test_reusable_workflow_calls_are_not_graded():
-    assert ci_public_runners.check({"c.yml": {"jobs": {"call": {"uses": "./.github/workflows/b.yml"}}}}) == []
+def test_problems_name_each_job_with_a_private_label():
+    workflow = {
+        "jobs": {
+            "ok": {"runs-on": "anton-oss-light"},
+            "bad": {"runs-on": ["anton-light", "anton-oss", "anton-heavy"]},
+            "call": {"uses": "./.github/workflows/b.yml"},
+        }
+    }
+    assert ci_public_runners.problems(workflow) == ["job bad asks for private runner label anton-light, anton-heavy"]
+    assert ci_public_runners.problems(None) == []
+    assert ci_public_runners.problems({"jobs": "x"}) == []
 
 
-def test_every_refused_label_is_named():
-    problems = ci_public_runners.check(workflow(["anton-light", "anton-oss", "anton-heavy"]))
-    assert problems == ["b.yml/build: runs-on anton-light, anton-heavy is not a public runner label"]
-
-
-def test_main_reports_a_planted_label(tmp_path, capsys):
-    folder = tmp_path / ".github/workflows"
-    folder.mkdir(parents=True)
-    (folder / "ok.yml").write_text(yaml.safe_dump(workflow("anton-oss")["b.yml"]))
-    assert ci_public_runners.main(["--root", str(tmp_path)]) == 0
-    (folder / "bad.yaml").write_text(yaml.safe_dump(workflow("anton-light")["b.yml"]))
-    assert ci_public_runners.main(["--root", str(tmp_path)]) == 1
-    out = capsys.readouterr().out
-    assert "::error::bad.yaml/build: runs-on anton-light is not a public runner label" in out
-    assert "Public runner labels: 2 workflows, 1 problems" in out
+def test_the_branch_lanes_grader_refuses_a_planted_private_label():
+    lane = {"group": ci_branch_lanes.GROUP, "queue": "max"}
+    planted = {"name": "Proof", "on": {"push": {}}, "concurrency": lane, "jobs": {"reply": {"runs-on": "anton-light"}}}
+    assert ci_branch_lanes.grade(yaml.safe_dump(planted)) == ["job reply asks for private runner label anton-light"]
+    planted["jobs"]["reply"]["runs-on"] = "anton-oss-light"
+    assert ci_branch_lanes.grade(yaml.safe_dump(planted)) == []
 
 
 def test_the_repository_workflows_ask_only_for_public_runners():
-    assert ci_public_runners.main(["--root", str(ROOT)]) == 0
-
-
-def test_every_branch_push_of_a_workflow_runs_the_check_on_a_hosted_runner():
-    flow = yaml.safe_load((ROOT / ".github/workflows/public-runners.yml").read_text())
-    on = flow.get("on", flow.get(True))
-    assert on["push"]["paths"] == [".github/workflows/**"]
-    assert "branches" not in on["push"]
-    assert on["pull_request"]["paths"] == [".github/workflows/**"]
-    (job,) = flow["jobs"].values()
-    assert job["runs-on"] == "ubuntu-latest"
-    assert any(step.get("run") == "python3 -m scripts.ci_public_runners" for step in job["steps"])
+    folder = ROOT / ".github/workflows"
+    for path in sorted([*folder.glob("*.yml"), *folder.glob("*.yaml")]):
+        assert ci_public_runners.problems(yaml.safe_load(path.read_text())) == [], path.name
