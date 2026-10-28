@@ -801,7 +801,7 @@ def select_master_credential(environ: Mapping[str, str], **options: Any) -> Rout
         timestamp = time.time() if options.get("now") is None else options["now"]
         excluded = set(options.get("exclude", ()))
         reserve = {slug.strip() for slug in environ.get("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",")}
-        fable = options.get("include_fable", False)
+        fable = options.get("include_fable")
         open_results = [
             result for result in exc.results if result.account not in excluded and is_routable(result, timestamp, fable)
         ]
