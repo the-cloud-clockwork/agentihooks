@@ -34,9 +34,7 @@ def error(store, slug, since) -> str:
 
 
 def failed(store, slug, text, at) -> None:
-    state = read(store, slug)
-    failures, first = state.get("failures", 0) + 1, state.get("first_at", at)
-    _save(store, slug, {**state, "error": text, "at": at, "failures": failures, "first_at": first})
+    _save(store, slug, {**read(store, slug), "error": text, "at": at})
 
 
 def clear(store, slug) -> list[str]:

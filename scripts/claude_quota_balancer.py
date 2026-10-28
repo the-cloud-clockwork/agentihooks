@@ -800,14 +800,17 @@ def select_master_credential(environ: Mapping[str, str], **options: Any) -> Rout
     except RoutingError as exc:
         timestamp = time.time() if options.get("now") is None else options["now"]
         excluded = set(options.get("exclude", ()))
+        reserve = {slug.strip() for slug in environ.get("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",")}
         fable = options.get("include_fable", False)
         open_results = [
             result for result in exc.results if result.account not in excluded and is_routable(result, timestamp, fable)
         ]
         if not open_results:
             raise
-        best = rank_results(open_results, fable)[0]
-        return RouteDecision(credential_for_slug(discover_credentials(environ), best.account), best, "master overflow")
+        best = rank_results([result for result in open_results if result.account not in reserve] or open_results, fable)
+        return RouteDecision(
+            credential_for_slug(discover_credentials(environ), best[0].account), best[0], "master overflow"
+        )
 
 
 def _api_side(

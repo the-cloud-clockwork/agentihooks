@@ -79,10 +79,12 @@ def test_launcher_keeps_a_failed_route_report_for_the_waiting_launch(tmp_path, m
         "XDG_RUNTIME_DIR": str(tmp_path),
         "SHELL": str(shell),
     }
-    launcher, _ = init_agent._write_launcher(tmp_path, "route-test", "", [], environ)
+    launcher, prompt = init_agent._write_launcher(tmp_path, "route-test", "opening prompt", [], environ)
     route = init_agent._route_report(launcher)
+    assert prompt.read_text() == "opening prompt"
     subprocess.run(["bash", str(launcher)], env=environ, capture_output=True, text=True, timeout=30)
     assert not launcher.exists()
+    assert not prompt.exists()
     assert init_agent._take_route_report(route)[0] == {
         "status": "failed",
         "error": "native Claude login is expired",

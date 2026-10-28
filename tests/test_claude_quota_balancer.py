@@ -966,3 +966,38 @@ def test_the_master_overflow_still_fails_when_every_account_is_closed(monkeypatc
             {"AH_CC_TOKEN_A": "a", "AH_CC_TOKEN_B": "b"}, cache_file=tmp_path / "c.json", sessions={}, now=1000
         )
     assert str(raised.value) == "no Claude account has a free session under its quota band"
+
+
+def test_the_master_overflow_keeps_off_a_reserved_account_while_another_is_open(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "AGENTIHOOKS_RESERVE_ACCOUNTS": "LOW, BEST"}
+    full = {"BEST": 6, "MID": 6, "LOW": 4}
+    decision = balancer.select_master_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000)
+    assert (decision.account, decision.source) == ("MID", "master overflow")
+    reserved = {**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST,MID,LOW"}
+    decision = balancer.select_master_credential(reserved, cache_file=tmp_path / "c.json", sessions=full, now=1000)
+    assert (decision.account, decision.source) == ("BEST", "master overflow")
+
+
+def test_the_master_overflow_reads_the_clock_when_no_time_is_given(monkeypatch, tmp_path):
+    env = _three(monkeypatch)
+    monkeypatch.setattr(balancer.time, "time", lambda: 1000)
+    full = {"BEST": 6, "MID": 6, "LOW": 4}
+    decision = balancer.select_master_credential(env, cache_file=tmp_path / "c.json", sessions=full)
+    assert (decision.account, decision.source) == ("BEST", "master overflow")
+
+
+def test_the_master_overflow_honours_the_fable_week_when_asked(monkeypatch, tmp_path):
+    spent = balancer.parse_probe("SPENT", _stream(0.10, 0.20, 0.99), 100)
+    open_ = balancer.parse_probe("OPEN", _stream(0.30, 0.40, 0.10), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([spent, open_], "cached"))
+    env = {"AH_CC_TOKEN_SPENT": "s", "AH_CC_TOKEN_OPEN": "o"}
+    decision = balancer.select_master_credential(
+        env, cache_file=tmp_path / "c.json", sessions={"SPENT": 6, "OPEN": 6}, include_fable=True, now=1000
+    )
+    assert (decision.account, decision.source) == ("OPEN", "master overflow")
+    assert (
+        balancer.select_master_credential(
+            env, cache_file=tmp_path / "c.json", sessions={"SPENT": 6, "OPEN": 6}, now=1000
+        ).account
+        == "SPENT"
+    )
