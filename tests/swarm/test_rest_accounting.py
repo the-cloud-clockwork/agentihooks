@@ -58,3 +58,18 @@ def test_paginated_timeout_preserves_partial_bytes(tmp_path, monkeypatch, includ
     assert error.value.stderr == b"timeout"
     assert github_reads.counts(0, float("inf")) == {"caller": 2}
     assert run.call_args.args[0].count("--include") == 1
+
+
+@pytest.mark.parametrize("body", [b'{"id":1}\n', b""])
+@pytest.mark.parametrize("include", [False, True])
+def test_timeout_before_next_page_headers_charges_attempt(tmp_path, monkeypatch, body, include):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    output = b"HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n" + body + b"\n"
+    run = Mock(side_effect=subprocess.TimeoutExpired(["gh"], 10, output=output))
+    args = ["api", "repos/example/project/actions/jobs", "--paginate", "--jq", ".jobs[]"]
+    if include:
+        args.append("-i")
+    with pytest.raises(subprocess.TimeoutExpired) as error:
+        github_reads.rest("caller", args, run, capture_output=True, text=True)
+    assert error.value.stdout == (output if include else body)
+    assert github_reads.counts(0, float("inf")) == {"caller": 2}
