@@ -52,9 +52,18 @@ def function_start(source: str, original: str, class_name: str | None) -> int:
     nodes = ast.parse(source).body
     if class_name is not None:
         nodes = next(node.body for node in nodes if isinstance(node, ast.ClassDef) and node.name == class_name)
-    expected = ast.dump(ast.parse(original).body[0])
-    function = next(node for node in nodes if ast.dump(node) == expected)
+    expected = undecorated(ast.parse(original).body[0])
+    function = next(
+        node
+        for node in nodes
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and undecorated(node) == expected
+    )
     return min([function.lineno] + [node.lineno for node in function.decorator_list])
+
+
+def undecorated(node: ast.stmt) -> str:
+    # The selection strips property decorators from the original copy it writes into the mutants module.
+    return ast.dump(type(node)(**{**vars(node), "decorator_list": []}))
 
 
 def collect_results(path: Path, shard: tuple[int, int] = (0, 1)) -> list[dict]:

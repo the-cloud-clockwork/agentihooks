@@ -94,13 +94,12 @@ def is_dataclass(decorator) -> bool:
 
 
 def is_property(node) -> bool:
-    import libcst as cst
+    import libcst.matchers as m
 
-    return len(node.decorators) == 1 and cst.Module([]).code_for_node(node.decorators[0].decorator) in {
-        "property",
-        "cached_property",
-        "functools.cached_property",
-    }
+    return len(node.decorators) == 1 and m.matches(
+        node.decorators[0].decorator,
+        m.Name("property") | m.Name("cached_property") | m.Attribute(m.Name("functools"), m.Name("cached_property")),
+    )
 
 
 def plain_copies(code: str) -> str:
