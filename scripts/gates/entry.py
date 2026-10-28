@@ -63,6 +63,9 @@ def main(argv=None, stdin=None, environ=None, home=None):
     return evaluate(gate, call, environ, home)
 
 
+FAILED_OPEN = Decision()
+
+
 def _brain_metric(gate, call, who, result):
     if gate.name == "brain":
         from hooks.observability import consultation
@@ -81,7 +84,7 @@ def evaluate(gate, call, environ=None, home=None):
         return 0
     decision = _decide(gate, call, who, home, mode)
     if decision.allowed:
-        _brain_metric(gate, call, who, "fail-open" if decision.reason == "gate evaluation failed" else "allow")
+        _brain_metric(gate, call, who, "fail-open" if decision is FAILED_OPEN else "allow")
         return 0
     if lift.lifted(who.swarm, call.session, gate.name, home) or lift.held(
         who.swarm, who.name, who.task, gate.name, home, command=call.command
@@ -114,7 +117,7 @@ def _decide(gate, call, who, home, mode="enforce"):
     except Exception as exc:  # a crashed gate lets the call through, counted in the gate log
         detail = "gate evaluation failed" if gate.name == "brain" else f"{type(exc).__name__}: {exc}"
         _record(who, log.Row.of(gate.name, "fail-open", who, call.tool, detail), home)
-        return Decision(reason="gate evaluation failed") if gate.name == "brain" else Decision()
+        return FAILED_OPEN
 
 
 def _record(who, row, home):
