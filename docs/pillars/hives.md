@@ -496,8 +496,9 @@ beat loop's own Redis connection to drop. Each check starts at most one thread p
 cannot make the daemon spin. A reconnect starts both helpers fresh on the new connection. The herdr stats thread logs
 a lost wait the same way, as `hive herdr stats wait failed (<error>: <detail>)`.
 
-Between a helper ending and the next beat, only the beat path publishes. A beat that holds a long launch therefore
-still lapses the reading once, until that beat ends and the next one restarts the thread.
+Between a helper ending and the next beat, only the beat path publishes. A beat that holds a launch longer than 30
+seconds, the reading's expiry, therefore still lapses the reading once, until that beat ends and the next one
+restarts the thread.
 
 `hive list` appends the reading to each hive's line, its fields separated by tabs (shown aligned here):
 
@@ -519,7 +520,7 @@ or roll its pod, to pick up the publisher.
 |---|---|---|
 | `hive list` shows `headroom=missing` on a `live` hive | `journalctl --user -u agentihooks-hive`, or the pod log, for `hive headroom publish failed` | Fix the error it names; a Redis error clears when the connection returns. |
 | A launch waits with `missing telemetry` while another launch runs on that hive | The hive's agentihooks version | Upgrade and restart the hive service so the 10 second publisher runs. |
-| `headroom=missing` comes and goes on a `live` hive, with readings only as often as its beats | The log for `hive headroom wait failed`, and the hive's agentihooks version: code from before the helper restart loses its headroom thread for good on the first failed wait | Upgrade and restart the hive service, or roll its pod. |
+| `headroom=missing` comes and goes on a `live` hive, with readings only as often as its beats | The log for `hive headroom wait failed`, and the hive's agentihooks version: code from before the helper restart loses its headroom thread on the first failed wait until the beat loop reconnects | Upgrade and restart the hive service, or roll its pod. |
 | Room reads 0 with a fresh reading | The refusal detail: `cpu`, `ram` or `max agents` | The named limit is spent; wait for agents to finish or raise `max-agents` when the host has room. |
 
 ### Account caps on every hive
