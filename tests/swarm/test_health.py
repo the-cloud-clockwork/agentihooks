@@ -396,12 +396,21 @@ def test_a_quiet_claim_names_the_task_its_holder_and_the_quiet_time():
             "kind": "stale claim",
             "subject": "t1",
             "summary": "no progress for 44 minutes",
-            "evidence": ["task Fold the chat panel", f"claimed by {WORKER}"],
+            "evidence": ["task Fold the chat panel", f"claimed by {WORKER}", "no stale nudge sent"],
             "threshold": "30 minutes without progress",
         }
     ]
     [found] = health.findings(ledger, [{**agent(), "quiet_minutes": 30}], {}, LIMITS)
     assert (found.id, found.measure) == ("stale-claim/t1", 30)
+
+
+@pytest.mark.parametrize(
+    ("minutes", "line"), [(0, "last stale nudge 0 minutes ago"), (1, "last stale nudge 1 minute ago")]
+)
+def test_a_quiet_claim_names_when_its_holder_was_last_nudged(minutes, line):
+    ledger = {"tasks": [task("t1", state="claimed", pr_url="", title="Fold the chat panel")], "_meta": {"events": []}}
+    [found] = run(ledger, [{**agent(), "quiet_minutes": 44, "last_nudge_minutes": minutes}])
+    assert found["evidence"][-1] == line
 
 
 def test_a_claim_quiet_under_the_limit_or_unmeasured_is_not_stale():

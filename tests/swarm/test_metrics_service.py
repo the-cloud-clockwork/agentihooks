@@ -166,3 +166,151 @@ def test_a_refused_hive_index_is_reported(store, quiet_pass, monkeypatch):
     swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
 
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["service metrics failed: no smembers"]
+
+
+def test_admission_totals_are_sampled_per_outcome_and_tick(store):
+    store.redis.hset(store.key("sw", "pending-admission-total"), mapping={"admitted": "5", "deferred": "2"})
+    rows = metrics_service.admission_rows(store, "sw", NOW)
+    assert rows == [
+        {
+            "event_id": f"admission:sw:{NOW}:admitted",
+            "ledger": "sw",
+            "ts_ms": NOW,
+            **metrics_service.PATH,
+            "outcome": "admitted",
+            "total": 5,
+        },
+        {
+            "event_id": f"admission:sw:{NOW}:deferred",
+            "ledger": "sw",
+            "ts_ms": NOW,
+            **metrics_service.PATH,
+            "outcome": "deferred",
+            "total": 2,
+        },
+    ]
+    for row in rows:
+        metrics_service.ADMISSION.check(row)
+    assert metrics_service.admission_rows(store, "empty", NOW) == []
+    assert metrics_service.admission_rows(store, "sw", NOW) == rows
+
+
+def test_headroom_exports_host_and_pod_readings_without_clamping(store):
+    from scripts.hive import headroom
+
+    registry.update(store.redis, "h1", ["name=anton-1"])
+    reading = {
+        "cpus": 8,
+        "load5": 10,
+        "available_mb": 4096,
+        "total_mb": 16384,
+        "pod_cpus": 4,
+        "pod_load": 1.5,
+        "pod_available_mb": 1024,
+        "pod_total_mb": 2048,
+        "measured_at": NOW - 1000,
+    }
+    store.redis.set(headroom.key("h1"), json.dumps(reading))
+    rows = metrics_service.headroom_rows(store, "sw", NOW)
+    assert [(r["scope"], r["resource"], r["available"], r["total"]) for r in rows] == [
+        ("host", "cpu", -2.0, 8.0),
+        ("host", "memory", 4096.0, 16384.0),
+        ("pod", "cpu", 2.5, 4.0),
+        ("pod", "memory", 1024.0, 2048.0),
+    ]
+    for row in rows:
+        assert row == {
+            "event_id": f"headroom:sw:h1:{NOW}:{row['scope']}:{row['resource']}",
+            "ledger": "sw",
+            "ts_ms": NOW,
+            **metrics_service.PATH,
+            "hive": "h1",
+            "name": "anton-1",
+            "scope": row["scope"],
+            "resource": row["resource"],
+            "available": row["available"],
+            "total": row["total"],
+            "measured_at_ms": NOW - 1000,
+        }
+        metrics_service.HEADROOM.check(row)
+
+
+def test_missing_stale_and_unmeasured_pod_headroom_stays_absent(store):
+    from scripts.hive import headroom
+
+    registry.update(store.redis, "h1", ["name=anton-1"])
+    assert metrics_service.headroom_rows(store, "sw", NOW) == []
+    reading = {
+        "cpus": 2,
+        "load5": 1,
+        "available_mb": 4,
+        "total_mb": 8,
+        "pod_cpus": 1,
+        "pod_total_mb": 2,
+        "measured_at": NOW - headroom.STALE_MS - 1,
+    }
+    store.redis.set(headroom.key("h1"), json.dumps(reading))
+    assert metrics_service.headroom_rows(store, "sw", NOW) == []
+    reading["measured_at"] = NOW - headroom.STALE_MS
+    store.redis.set(headroom.key("h1"), json.dumps(reading))
+    rows = metrics_service.headroom_rows(store, "sw", NOW)
+    assert [(r["scope"], r["resource"], r["available"], r["total"]) for r in rows] == [
+        ("host", "cpu", 1.0, 2.0),
+        ("host", "memory", 4.0, 8.0),
+    ]
+
+
+def test_a_swarm_pass_ships_admission_and_headroom_rows(store, quiet_pass):
+    from scripts.hive import headroom
+
+    metrics, sent = quiet_pass
+    registry.update(store.redis, "h1", ["name=anton-1"])
+    store.redis.hset(store.key("sw", "pending-admission-total"), mapping={"admitted": "2"})
+    store.redis.set(
+        headroom.key("h1"),
+        json.dumps(
+            {
+                "cpus": 4,
+                "load5": 1,
+                "available_mb": 4,
+                "total_mb": 8,
+                "measured_at": NOW,
+            }
+        ),
+    )
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
+    inserted = {
+        query.split()[2]: json.loads(data.splitlines()[0]) for query, data in sent if query.startswith("INSERT")
+    }
+    assert inserted["swarm.admission_samples"]["total"] == 2
+    assert inserted["swarm.admission_samples"]["outcome"] == "admitted"
+    assert inserted["swarm.hive_headroom"]["hive"] == "h1"
+    assert inserted["swarm.hive_headroom"]["measured_at_ms"] == NOW
+
+
+def test_unavailable_readings_do_not_skip_later_hives_or_resources(store):
+    from scripts.hive import headroom
+
+    registry.update(store.redis, "h0", ["name=absent"])
+    registry.update(store.redis, "h1", ["name=measured"])
+    store.redis.set(
+        headroom.key("h1"),
+        json.dumps(
+            {
+                "cpus": 4,
+                "load5": 1,
+                "available_mb": 4,
+                "total_mb": 8,
+                "pod_total_mb": 2,
+                "pod_available_mb": 1,
+                "measured_at": NOW,
+            }
+        ),
+    )
+    rows = metrics_service.headroom_rows(store, "sw", NOW)
+    assert [(r["hive"], r["scope"], r["resource"], r["available"], r["total"]) for r in rows] == [
+        ("h1", "host", "cpu", 3.0, 4.0),
+        ("h1", "host", "memory", 4.0, 8.0),
+        ("h1", "pod", "memory", 1.0, 2.0),
+    ]

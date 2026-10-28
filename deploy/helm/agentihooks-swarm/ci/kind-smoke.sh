@@ -27,6 +27,7 @@ python3 tests/chart_github_auth.py "$chart"
 python3 tests/chart_hive_home.py "$chart"
 python3 tests/chart_hive_only.py "$chart"
 python3 tests/chart_hub.py "$chart"
+python3 tests/chart_ledger_rollout.py "$chart"
 python3 tests/chart_nats.py "$chart"
 python3 tests/chart_scratch_swarms.py "$chart"
 
@@ -190,11 +191,6 @@ for tag in "$digest" "@$digest" "$(printf 'b%.0s' $(seq 40))"; do
     exit 1
   fi
 done
-refusal="$(helm template "$release" "$chart" --set ledger.replicas=2 2>&1 >/dev/null || true)"
-if [[ $refusal != *"ledger.replicas must be 1"* ]]; then
-  printf 'the chart did not refuse two ledger writers: %s\n' "$refusal" >&2
-  exit 1
-fi
 refusal="$(helm template "$release" "$chart" --set controller.api.enabled=true 2>&1 >/dev/null || true)"
 if [[ $refusal != *"controller.api.swarm must name the swarm"* ]]; then
   printf 'the chart did not refuse a control API without a swarm: %s\n' "$refusal" >&2

@@ -159,8 +159,8 @@ def test_default_registration_wait_is_bounded(monkeypatch):
     monkeypatch.setattr(ci_tests_start.subprocess, "run", api)
     monkeypatch.setattr(ci_tests_start.time, "sleep", sleeps.append)
     assert ci_tests_start.verify("owner/repo", "head") == "Tests run is missing for this head."
-    assert len(calls) == 12
-    assert sleeps == [5] * 11
+    assert len(calls) == 36
+    assert sleeps == [5] * 35
 
 
 @pytest.mark.parametrize("arguments", [[], ["--repository", "owner/repo"], ["--head", "head"]])

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import asdict
 from typing import TYPE_CHECKING
@@ -109,10 +110,19 @@ def slot_claims(
         for swarm in store.slugs()
         for row in (
             *({**asdict(a), "ended_at": 0} for a in store.agents(swarm)),
-            *(json.loads(row) for row in store.redis.lrange(store.key(swarm, "history"), 0, -1)),
+            *_placed(store, swarm),
         )
     ]
-    return {"slug": slug, "claims": entries, "journal_error": error, "lives": lives}
+    return {"slug": slug, "claims": entries, "journal_error": error, "lives": lives, "now": int(time.time() * 1000)}
+
+
+def _placed(store: RedisStore, swarm: str) -> list[dict]:
+    placements = {
+        (a.name, a.started_at): {"hive": a.hive, "runtime_backend": a.runtime_backend}
+        for a in store.execution_registry.records(swarm)
+    }
+    rows = (json.loads(row) for row in store.redis.lrange(store.key(swarm, "history"), 0, -1))
+    return [{**row, **placements.get((row["name"], row.get("started_at")), {})} for row in rows]
 
 
 def _grep(pattern, since, until, run):

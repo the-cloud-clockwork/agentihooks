@@ -130,9 +130,10 @@ def _shard_files(config) -> frozenset[str]:
         for node, shard in config.stash[NODE_SHARDS].items():
             owners.setdefault(node.split("::", 1)[0], set()).add(shard)
         config.stash[FILE_SHARDS] = {path: sorted(shards) for path, shards in owners.items()}
-        config.stash[FILE_SHARDS].update({path: [0] for path in pinned})
         known = {node.split("::", 1)[0] for node in measured}
-        files = {node.split("::", 1)[0] for node in parts[index - 1]} | (set(files) - known)
+        config.stash[FILE_SHARDS].update({path: [zlib.crc32(path.encode()) % shards] for path in set(files) - known})
+        config.stash[FILE_SHARDS].update({path: [0] for path in pinned})
+        files = {path for path in files if index - 1 in config.stash[FILE_SHARDS].get(path, ())}
         config.stash[SHARD_FILES] = frozenset(files) | (pinned if index == 1 else frozenset())
     return config.stash[SHARD_FILES]
 

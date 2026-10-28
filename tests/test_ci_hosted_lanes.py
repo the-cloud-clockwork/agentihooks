@@ -42,6 +42,8 @@ LANE_USERS = {
     "hive-worker.yml",
     "lost-runner.yml",
     "chart-release.yml",
+    "changelog.yml",
+    "changelog-seed.yml",
     *DIRECT,
 }
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}

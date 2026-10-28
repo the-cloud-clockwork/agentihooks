@@ -110,6 +110,103 @@ def test_search_answers_as_the_search_call(inputs, bank, served):
     assert answer["state"] == "answered" and answer["results"]
 
 
+def ingest_body(inputs):
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "batch_id": "http-ingest",
+        "access_domain": inputs["grant"]["corpus"],
+        "session_uid": "http-session",
+        "source_generation": "http-source",
+        "events": [
+            {
+                "sequence": 1,
+                "byte_start": 0,
+                "byte_end": 10,
+                "project_id": inputs["grant"]["projects"][0],
+                "record": {"kind": "user_text", "text": "persisted over HTTP"},
+            }
+        ],
+    }
+
+
+def test_http_ingest_persists_and_replays_without_claiming_indexing(served, bank, inputs):
+    payload = ingest_body(inputs)
+    status, _, result = call(served, "/v2/sessions/ingest", payload, TOKEN)
+    assert status == 200
+    assert result["state"] == "committed"
+    assert result["durable_through"] == 1
+    assert result["indexed"] is False
+    events = bank.tools.catalog.events(payload["access_domain"], payload["session_uid"], payload["source_generation"])
+    assert len(events) == 1
+    assert events[0]["record"]["text"] == "persisted over HTTP"
+    status, _, replay = call(served, "/v2/sessions/ingest", payload, TOKEN)
+    assert status == 200
+    assert replay["state"] == "replayed"
+    assert replay["accepted"] == result["accepted"]
+    assert replay["indexed"] is False
+
+
+def test_http_ingest_refuses_a_changed_batch_under_a_reused_identity(served, bank, inputs):
+    payload = ingest_body(inputs)
+    assert call(served, "/v2/sessions/ingest", payload, TOKEN)[2]["state"] == "committed"
+    payload["events"][0]["record"]["text"] = "changed under the same batch"
+    before = bank.tools.catalog.snapshot()
+    status, _, result = call(served, "/v2/sessions/ingest", payload, TOKEN)
+    assert status == 200
+    assert result["state"] == "rejected"
+    assert result["error"]["class"] == "revision_conflict"
+    assert bank.tools.catalog.snapshot() == before
+
+
+def test_http_ingest_reports_a_catalog_outage_as_a_safe_retry(served, bank, inputs, monkeypatch):
+    def unavailable(_):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(bank.tools.catalog, "commit", unavailable)
+    status, _, result = call(served, "/v2/sessions/ingest", ingest_body(inputs), TOKEN)
+    assert status == 200
+    assert result["state"] == "rejected"
+    assert result["error"] == {
+        "class": "dependency_unavailable",
+        "retry": "same_batch",
+        "detail": "the catalog failed before acknowledging; retrying the same batch is safe",
+    }
+
+
+@pytest.mark.parametrize("token", [None, "unknown"])
+def test_http_ingest_authenticates_before_reading_the_body(served, bank, token, monkeypatch):
+    def unread(_):
+        raise AssertionError("unauthenticated request reached body parsing")
+
+    monkeypatch.setattr(service, "read_body", unread)
+    before = bank.tools.catalog.snapshot()
+    status, headers, result = call(served, "/v2/sessions/ingest", {}, token)
+    assert status == 401
+    assert headers["WWW-Authenticate"] == "Bearer"
+    assert result["error"]["class"] == "unauthenticated"
+    assert bank.tools.catalog.snapshot() == before
+
+
+@pytest.mark.parametrize("outside", ["corpus", "project"])
+def test_http_ingest_refuses_scope_widening(served, bank, inputs, outside):
+    payload = ingest_body(inputs)
+    if outside == "corpus":
+        payload["access_domain"] = "other-corpus"
+    else:
+        payload["events"][0]["project_id"] = "other-project"
+    before = bank.tools.catalog.snapshot()
+    status, _, result = call(served, "/v2/sessions/ingest", payload, TOKEN)
+    assert status == 200
+    assert result["error"]["class"] == "forbidden_scope"
+    assert bank.tools.catalog.snapshot() == before
+
+
+def test_http_ingest_reuses_bounded_json_validation(served):
+    status, _, result = call(served, "/v2/sessions/ingest", raw=b"[]", token=TOKEN)
+    assert status == 400
+    assert result["error"]["class"] == "invalid_request"
+
+
 def test_the_narrow_token_sees_only_its_projects(inputs, served):
     _, _, wide = call(served, service.TOOLS_PREFIX + "session_list", body(inputs), TOKEN)
     _, _, narrow = call(served, service.TOOLS_PREFIX + "session_list", body(inputs), NARROW_TOKEN)
@@ -138,15 +235,11 @@ def test_an_empty_body_is_refused(served):
     assert status == 400 and answer == refusal("invalid_request", service.BAD_BODY)
 
 
-def test_a_body_over_the_bound_is_refused(served):
-    raw = json.dumps({"query": "x" * service.MAX_BODY}).encode()
-    status, _, answer = call(served, service.SEARCH_PATH, token=TOKEN, raw=raw)
-    assert status == 400 and answer == refusal("invalid_request", service.BAD_BODY)
-
-
 class Unread:
     def read(self, length):
         raise AssertionError(f"read {length} bytes of a refused body")
+
+    read1 = read
 
 
 class Posted:
@@ -155,9 +248,98 @@ class Posted:
         self.rfile = rfile
 
 
-@pytest.mark.parametrize("length", [None, 0, 1, service.MAX_BODY + 1])
-def test_a_body_outside_the_bound_is_refused_without_reading(length):
+class Chunks(io.BytesIO):
+    def __init__(self, raw):
+        super().__init__(raw)
+        self.sizes = []
+
+    def read1(self, size=-1):
+        self.sizes.append(size)
+        return super().read1(size)
+
+
+@pytest.mark.parametrize("length", [None, 0, 1])
+def test_a_body_under_the_bound_is_refused_without_reading(length):
     assert service.read_body(Posted(length, Unread())) is None
+
+
+@pytest.mark.parametrize("length", [service.MAX_BODY + 1, service.DRAIN_LIMIT])
+def test_a_body_over_the_bound_is_drained_in_chunks_before_the_refusal(length):
+    request = Posted(length, Chunks(b"x" * length))
+    assert service.read_body(request) is None
+    assert request.rfile.tell() == length
+    assert max(request.rfile.sizes) == service.DRAIN_CHUNK and min(request.rfile.sizes) > 0
+    assert sum(request.rfile.sizes) == length
+
+
+def test_a_drain_stops_at_the_end_of_a_short_body():
+    request = Posted(service.MAX_BODY + 1, Chunks(b"x" * 10))
+    assert service.read_body(request) is None
+    assert request.rfile.sizes == [service.DRAIN_CHUNK, service.DRAIN_CHUNK]
+
+
+def test_a_body_past_the_drain_limit_is_left_unread():
+    with pytest.raises(service.UnreadBody):
+        service.read_body(Posted(service.DRAIN_LIMIT + 1, Unread()))
+
+
+def test_a_trickling_drain_stops_at_its_deadline_between_reads(monkeypatch):
+    ticks = iter([0.0, 0.0, service.READ_TIMEOUT + 1])
+    monkeypatch.setattr(service.time, "monotonic", lambda: next(ticks))
+    request = Posted(service.MAX_BODY + 1, Chunks(b"x" * (service.MAX_BODY + 1)))
+    with pytest.raises(service.UnreadBody):
+        service.read_body(request)
+    assert request.rfile.sizes == [service.DRAIN_CHUNK]
+
+
+def test_a_drain_reaching_its_deadline_exactly_still_reads(monkeypatch):
+    ticks = iter([0.0, service.READ_TIMEOUT, service.READ_TIMEOUT])
+    monkeypatch.setattr(service.time, "monotonic", lambda: next(ticks))
+    request = Posted(service.MAX_BODY + 1, Chunks(b"x" * 10))
+    assert service.read_body(request) is None
+    assert request.rfile.sizes == [service.DRAIN_CHUNK, service.DRAIN_CHUNK]
+
+
+def raw_post(base, length, body, timeout=10):
+    host, port = base.removeprefix("http://").split(":")
+    head = f"POST {service.SEARCH_PATH} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {TOKEN}\r\n"
+    head += f"Content-Length: {length}\r\n\r\n"
+    with socket.create_connection((host, int(port)), timeout=timeout) as client:
+        client.sendall(head.encode() + body)
+        reply = client.makefile("rb").read()
+    head, _, payload = reply.partition(b"\r\n\r\n")
+    status_line, _, headers = head.partition(b"\r\n")
+    return int(status_line.split()[1]), headers.decode(), json.loads(payload)
+
+
+def test_a_client_writing_a_body_one_byte_over_the_bound_reads_the_refusal(served):
+    length = service.MAX_BODY + 1
+    status, headers, answer = raw_post(served, length, b"x" * length)
+    assert status == 400 and "connection: close" not in headers.lower()
+    assert answer == refusal("invalid_request", service.BAD_BODY)
+
+
+def test_a_refusal_past_the_drain_limit_closes_the_connection(served):
+    status, headers, answer = raw_post(served, service.DRAIN_LIMIT + 1, b"")
+    assert status == 400 and "Connection: close" in headers
+    assert answer == refusal("invalid_request", service.BAD_BODY)
+
+
+def test_a_stalled_client_is_refused_after_the_read_timeout_and_the_service_moves_on(bank, grants, monkeypatch):
+    monkeypatch.setattr(service, "READ_TIMEOUT", 0.5)
+    server = HTTPServer(("127.0.0.1", 0), service.handler(bank.tools, grants))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        status, headers, answer = raw_post(base, 100, b"{", timeout=5)
+        assert status == 400 and "Connection: close" in headers
+        assert answer == refusal("invalid_request", service.BAD_BODY)
+        assert call(base, service.HEALTH_PATH, method="GET")[0] == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_the_smallest_and_the_largest_object_bodies_are_read():
@@ -179,7 +361,7 @@ def test_the_handler_is_quiet_and_named_for_sessions():
 
 
 @pytest.mark.parametrize(
-    "method,path", [("POST", "/v2/sessions/ingest"), ("POST", "/"), ("GET", "/v2/sessions/search")]
+    "method,path", [("POST", "/v2/sessions/unknown"), ("POST", "/"), ("GET", "/v2/sessions/search")]
 )
 def test_unknown_routes_are_not_found(served, method, path):
     status, _, answer = call(served, path, {} if method == "POST" else None, TOKEN, method=method)

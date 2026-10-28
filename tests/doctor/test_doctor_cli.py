@@ -69,6 +69,7 @@ def env(monkeypatch, memory_path):
     rt = FakeRuntime()
     monkeypatch.setattr(swarm_cli, "connect", lambda: store)
     monkeypatch.setattr(swarm_cli, "LedgerClient", FileLedger)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", FileLedger)
     monkeypatch.setattr(swarm_cli, "HerdrRuntime", lambda: rt)
     monkeypatch.setattr(swarm_cli.timer, "ensure", lambda binary: True)
     monkeypatch.setattr(swarm_cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
@@ -754,6 +755,7 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "spawn",
         "master launch",
         "slot census",
+        "unclaimed launch",
         "startup",
         "headroom",
         "hive pool",
