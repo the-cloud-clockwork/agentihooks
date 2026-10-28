@@ -91,13 +91,14 @@ def test_package_bootstrap_keeps_workflow_checkouts_independent_of_local_auditin
         "import subprocess, sys\n"
         "hooks = []\n"
         "sys.addaudithook = hooks.append\n"
+        f"sys.path.insert(0, {str(checkout)!r})\n"
         "import scripts\n"
+        f"assert scripts.__file__ == {str(package / '__init__.py')!r}\n"
         f"assert len(hooks) == {int(actions != 'true')}\n"
         f"assert ('scripts.gh_audit' in sys.modules) is {actions != 'true'}\n"
-        "subprocess.run(['gh', 'run', 'cancel', '1'], check=True)\n"
     )
-    if actions != "true":
-        code = code.replace("subprocess.run(['gh', 'run', 'cancel', '1'], check=True)\n", "")
+    if actions == "true":
+        code += "subprocess.run(['gh', 'run', 'cancel', '1'], check=True)\n"
     result = subprocess.run([sys.executable, "-c", code], cwd=checkout, env=environ, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
