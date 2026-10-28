@@ -146,6 +146,7 @@ def test_world_move_transfers_the_wake_to_its_destination(rig, monkeypatch, sour
     monkeypatch.setattr(scope, "member", lambda: True)
     source = InboxStore(rig.inbox.redis, world=source_world)
     target = InboxStore(rig.inbox.redis, world=target_world)
+    monkeypatch.setattr(type(source.names), "slug_of", lambda self, name: "sw")
     item = source.send("sender", "worker", "moved request")
     monkeypatch.setattr(scope, "member", lambda: False)
     monkeypatch.setattr(scope, "members", lambda redis: ["hive"])
