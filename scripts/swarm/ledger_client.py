@@ -21,6 +21,18 @@ class LedgerRefused(SwarmError):
     pass
 
 
+class LedgerUnreachable(SwarmError):
+    """The ledger server timed out, failed or was down: the write may land on a retry."""
+
+
+UNREACHABLE = ("ledger server not answering", "server refused: 5")
+
+
+def _accepted(slug, state):
+    if "queued" in state:
+        raise LedgerUnreachable(f"ledger {slug}: the server is not answering, the post waits in the local outbox")
+
+
 def _ledger():
     if str(LEDGER_DIR) not in sys.path:
         sys.path.insert(0, str(LEDGER_DIR))
@@ -46,7 +58,9 @@ class LedgerClient:
             raise LedgerGone(str(exc)) from exc
         except SystemExit as exc:
             refused = str(exc).startswith("server refused: 4")
-            raise (LedgerRefused if refused else SwarmError)(f"ledger {slug}: {exc}") from exc
+            unreachable = str(exc).startswith(UNREACHABLE)
+            error = LedgerRefused if refused else LedgerUnreachable if unreachable else SwarmError
+            raise error(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):
             detail = "; ".join(state.get("_meta", {}).get("warnings", [])) or str(state["rejected"])
             raise LedgerRefused(f"ledger {slug} refused: {detail}")
@@ -164,11 +178,11 @@ class LedgerClient:
             op["id"] = op_id
         if reply_to:
             op["reply_to"] = reply_to
-        LedgerClient(service=True)._call(slug, [op])
+        _accepted(slug, LedgerClient(service=True)._call(slug, [op]))
 
     def relay_comment(self, slug, entry, text, by, op_id):
         op = {**_op("add", by, thread=f"{entry}/comments", text=text, to="operator"), "id": op_id}
-        LedgerClient(service=True)._call(slug, [op])
+        _accepted(slug, LedgerClient(service=True)._call(slug, [op]))
 
     def notify(self, slug, text):
         from scripts.gates import Who

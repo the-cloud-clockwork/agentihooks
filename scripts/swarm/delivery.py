@@ -10,6 +10,7 @@ import json
 
 from scripts.inbox import links, outbox
 from scripts.inbox.store import Contended, DuplicateItem, InboxError, InboxStore, Item
+from scripts.swarm.ledger_client import LedgerUnreachable
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import master_fence
 
@@ -21,6 +22,10 @@ MARK = "[swarm delivery]"
 REFUSED = (
     "The ledger page refused to show your message {id} to the operator: {reason}. "
     "Rewrite it in plain words and send it again."
+)
+UNSHOWN = (
+    "Your message {id} to the operator has not reached the ledger page: {reason}. "
+    "It stays queued and the swarm posts it again on every tick until the page accepts it."
 )
 
 
@@ -124,13 +129,15 @@ def relay_to_page(inbox, slug, agents, ledger):
         sender = inbox.names.resolve(item.sender)
         if item.state != "pending" or (sender not in names and inbox.names.slug_of(sender) != slug):
             continue
-        if not post(
-            inbox,
-            item,
-            functools.partial(
-                show, ledger, slug, item, sender, inbox.entry_of(item.id), operator_line(inbox, slug, item)
-            ),
-        ):
+        write = functools.partial(
+            show, ledger, slug, item, sender, inbox.entry_of(item.id), operator_line(inbox, slug, item)
+        )
+        try:
+            posted = post(inbox, item, write)
+        except LedgerUnreachable as exc:
+            unshown(inbox, item, exc)
+            break
+        if not posted:
             continue
         inbox.close(item.id, OPERATOR, "done", "shown on the ledger page")
         shown += 1
@@ -160,6 +167,8 @@ def post(inbox, item, write):
     """Run the ledger write that shows an inbox item; a refusal closes only that item and tells its sender why."""
     try:
         refused = "the swarm notice was dropped" if write() is False else ""
+    except LedgerUnreachable:
+        raise
     except SwarmError as exc:
         refused = exc
     if refused:
@@ -170,6 +179,19 @@ def post(inbox, item, write):
             inbox.send(BY, item.sender, REFUSED.format(id=item.id, reason=refused))
         return False
     return True
+
+
+def unshown(inbox, item, reason):
+    """The page did not answer: the item stays pending for the next pass and its sender's master hears it once."""
+    door, _ = inbox.front_door_of(item.sender)
+    with contextlib.suppress(DuplicateItem):
+        inbox.send(
+            BY,
+            door or item.sender,
+            UNSHOWN.format(id=item.id, reason=reason),
+            fyi=True,
+            item_id=outbox.stable_id("unshown", item.id),
+        )
 
 
 def may_cancel(inbox, item, refused):
