@@ -152,7 +152,7 @@ def test_exit_refunds_a_started_life_for_a_park_a_quota_handoff_or_an_operator_p
     from scripts.swarm import preempt
 
     rows = {"task": rig.row, "dep": {"id": "dep", "state": dep_state}}
-    rig.ledger.task = lambda slug, task_id: dict(rows[task_id])
+    rig.ledger.task = lambda slug, task_id: dict(rows[task_id]) if slug == "rig" else None
     if dep_state:
         rig.row["parked_on"] = ["dep"]
     if reason:

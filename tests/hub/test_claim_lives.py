@@ -65,6 +65,24 @@ def test_reset_clears_the_pending_life(rig):
     assert rig.store.redis.hget(rig.store.key(SLUG, "pending-lives"), "t1") is None
 
 
+def test_a_refund_racing_a_new_pending_start_cancels_that_start(rig, monkeypatch):
+    for _ in range(2):
+        rig.store.count_claim(SLUG, "t1")
+    assert rig.store.claim(SLUG, "t1", "engineer@race", 60_000)
+    real, pending = rig.store._started_lives, rig.store.key(SLUG, "pending-lives")
+
+    def racing(slug, task):
+        monkeypatch.setattr(rig.store, "_started_lives", real)
+        rig.store.redis.hset(pending, task, '["execution", 1]')
+        return real(slug, task)
+
+    monkeypatch.setattr(rig.store, "_started_lives", racing)
+
+    assert rig.store.refund_held_claim(SLUG, "t1", "engineer@race", rig.store.claim_generation(SLUG, "t1"))
+    assert rig.store.claims(SLUG, "t1") == 2
+    assert rig.store.redis.hget(pending, "t1") is None
+
+
 def test_distinct_execution_generations_spend_distinct_lives(rig):
     event = started(rig.admitter.admit(SLUG, ask()))
     counter = claims.Claims(rig.store)
