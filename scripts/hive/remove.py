@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.hive import auth, create, create_github, hive_state, machine, nats_grant, registry
+from scripts.hive import auth, create, create_github, machine, nats_grant, registry
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -63,7 +63,7 @@ class Host:
 
 
 def resolve(redis: "Redis", given: str) -> tuple[str, str]:
-    if name := (auth.member(redis, given) or {}).get("name"):
+    if name := redis.hget(member_key(given), "name"):
         return _sole(redis, given, name), name
     if member := machine.named_member(redis, given):
         return _sole(redis, member, given), given
@@ -73,13 +73,18 @@ def resolve(redis: "Redis", given: str) -> tuple[str, str]:
 
 
 def _sole(redis: "Redis", hive: str, name: str) -> str:
-    for other, found in auth.members(redis).items():
-        if other != hive and found["name"] == name:
+    for key in redis.scan_iter(match=member_key("*")):
+        other = key.removeprefix(member_key(""))
+        if other != hive and redis.hget(key, "name") == name:
             raise auth.HiveError(
                 f"hive {hive} is named {name}, a name hive {other} also holds, so its herdr machine "
                 "could be the other hive's; pass --label"
             )
     return hive
+
+
+def member_key(hive: str) -> str:
+    return f"{auth.PREFIX}:member:{hive}"
 
 
 def hosted(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
@@ -139,7 +144,7 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
 
 
 def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None, dry_run: bool = False) -> list[str]:
-    if auth.member(redis, hive) is None:
+    if not redis.exists(member_key(hive)):
         return [f"{hive} holds no member credential"]
     if dry_run:
         bus = [f"would revoke the NATS credential of {hive}"] if signer is not None else []
@@ -154,8 +159,7 @@ def unregister(redis: "Redis", plan: Plan, home: Path) -> list[str]:
     state = home / create.STATE_FILE
     created = _created(state) == plan.label
     if plan.dry_run:
-        held = redis.exists(*_keys(redis, plan.hive)) + _recorded(redis, plan.hive)
-        lines = [f"would delete {held} registry records of {plan.hive}"]
+        lines = [f"would delete {redis.exists(*_keys(redis, plan.hive))} registry records of {plan.hive}"]
     else:
         lines = forget(redis, plan.hive)
         if nodes:
@@ -180,10 +184,6 @@ def _keys(redis: "Redis", hive: str) -> list[str]:
     return [registry.key(hive), *redis.scan_iter(match=f"{registry.key(hive)}:*")]
 
 
-def _recorded(redis: "Redis", hive: str) -> bool:
-    return hive_state.read(hive_state.records(redis, hive), hive) is not None
-
-
 def forget(redis: "Redis", hive: str) -> list[str]:
     keys = _keys(redis, hive)
     prefix = f"{registry.key(hive)}:swarm:"
@@ -196,11 +196,8 @@ def forget(redis: "Redis", hive: str) -> list[str]:
         for target, history in histories.items():
             pipe.hset(target, mapping=history)
         pipe.delete(*keys)
-        deleted = pipe.execute()[-1]
-    if _recorded(redis, hive):
-        registry.forget(redis, hive)
-        deleted += 1
-    hive_state.indexed(redis, hive, False)
+        pipe.srem(registry.INDEX, hive)
+        deleted, _ = pipe.execute()[-2:]
     return [f"deleted {deleted} registry records of {hive}"]
 
 

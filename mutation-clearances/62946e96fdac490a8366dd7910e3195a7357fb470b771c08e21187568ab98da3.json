@@ -1,6 +1,0 @@
-{
-  "scripts/hive/auth.py:scripts.hive.auth.x__expected__mutmut_47:87018c8ad1c3ec6322b1743967732da15bfa6758b7ad45152d97beba01c2d9e7": {
-    "reader": "standards_reader",
-    "reason": "Python float parses INF case insensitively to the same positive infinity, so the expiry default is unchanged."
-  }
-}

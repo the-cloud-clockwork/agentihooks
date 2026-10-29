@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.hive import auth, cli, hive_state
+from scripts.hive import auth, cli
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger
@@ -42,7 +42,7 @@ def controller_env(hive):
 
 def test_an_issued_controller_credential_is_stored_only_as_its_digest_and_checks(hive):
     credential = auth.issue_controller(hive)
-    assert all(credential.encode() not in entry.value for entry in auth._store(hive).watch("controller"))
+    assert credential not in {hive.get(key) for key in hive.keys()}
     assert auth.controller(hive, credential)
     assert not auth.controller(hive, "wrong")
     assert not auth.controller(hive, "")
@@ -130,28 +130,18 @@ def test_a_service_credential_checks_while_its_key_lives_and_retires_no_other_cr
     first = auth.issue_service(hive, "hub-a")
     second = auth.issue_service(hive, "hub-b")
     assert first.startswith("hub-a.") and second.startswith("hub-b.")
-    assert all(
-        credential.encode() not in entry.value
-        for key in ("controller", auth._service_key("hub-a"), auth._service_key("hub-b"))
-        for entry in auth._store(hive).watch(key)
-        for credential in (controller, first, second)
-    )
+    assert {first, second}.isdisjoint(hive.get(key) for key in hive.keys())
     assert all(auth.controller(hive, credential) for credential in (controller, first, second))
-    assert (
-        0
-        < hive_state.read(auth._store(hive), auth._service_key("hub-a"))["expires"] - auth.time.time()
-        <= auth.SERVICE_TTL_S
-    )
+    assert 0 < hive.ttl(f"{auth.PREFIX}:controller:hub-a") <= auth.SERVICE_TTL_S
 
 
-def test_an_expired_service_credential_is_refused_until_it_is_kept(hive, monkeypatch):
+def test_an_expired_service_credential_is_refused_until_it_is_kept(hive):
     credential = auth.issue_service(hive, "hub-a")
-    later = auth.time.time() + auth.SERVICE_TTL_S + 1
-    monkeypatch.setattr(auth.time, "time", lambda: later)
+    hive.delete(f"{auth.PREFIX}:controller:hub-a")
     assert not auth.controller(hive, credential)
     auth.keep_service(hive, credential)
     assert auth.controller(hive, credential)
-    assert 0 < hive_state.read(auth._store(hive), auth._service_key("hub-a"))["expires"] - later <= auth.SERVICE_TTL_S
+    assert 0 < hive.ttl(f"{auth.PREFIX}:controller:hub-a") <= auth.SERVICE_TTL_S
 
 
 def test_a_service_credential_checks_only_against_its_own_holder(hive):
@@ -165,10 +155,10 @@ def test_a_service_credential_checks_only_against_its_own_holder(hive):
 
 def test_a_dotted_holder_keeps_its_whole_name_in_the_key(hive):
     credential = auth.issue_service(hive, "hub.pod-a")
-    hive_state.amend(auth._store(hive), auth._service_key("hub.pod-a"), lambda _: None)
+    hive.delete(f"{auth.PREFIX}:controller:hub.pod-a")
     assert not auth.controller(hive, credential)
     auth.keep_service(hive, credential)
-    assert hive_state.read(auth._store(hive), auth._service_key("hub")) is None
+    assert hive.get(f"{auth.PREFIX}:controller:hub") is None
     assert auth.controller(hive, credential)
 
 
@@ -187,11 +177,10 @@ def test_reissuing_a_service_credential_retires_only_that_holders_old_one(hive):
     assert auth.controller(hive, new) and auth.controller(hive, other)
 
 
-def test_the_server_accepts_a_live_hub_service_credential_and_refuses_an_expired_one(live, hive, monkeypatch):
+def test_the_server_accepts_a_live_hub_service_credential_and_refuses_an_expired_one(live, hive):
     credential = auth.issue_service(hive, "hub-a")
     status, _, _ = send(live, "GET", f"/api/v1/ledgers/{SLUG}/tasks", **{"X-Controller-Credential": credential})
     assert status == 200
-    later = auth.time.time() + auth.SERVICE_TTL_S + 1
-    monkeypatch.setattr(auth.time, "time", lambda: later)
+    hive.delete(f"{auth.PREFIX}:controller:hub-a")
     status, data, _ = send(live, "GET", f"/api/v1/ledgers/{SLUG}/tasks", **{"X-Controller-Credential": credential})
     assert (status, json.loads(data)["error"]["code"]) == (403, "forbidden")

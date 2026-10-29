@@ -35,7 +35,7 @@ class Runner:
 
 
 def _members(admin):
-    return [f"{auth.PREFIX}:member:{member}" for member in sorted(auth.members(admin))]
+    return admin.keys(f"{auth.PREFIX}:member:*")
 
 
 def _add(admin, run):

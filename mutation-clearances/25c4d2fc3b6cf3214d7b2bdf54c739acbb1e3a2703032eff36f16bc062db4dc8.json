@@ -1,6 +1,0 @@
-{
-  "scripts/hive/registry.py:scripts.hive.registry.x_update:5cbd92d8c9f3f6b49e7fabe70253004b6191cb41127bf18d5120815029daabb7": {
-    "reader": "standards_reader",
-    "reason": "The check reads only prefer and excluded, which come from the merged record and the ui flag, never from the hive id, and its settled result is discarded, so no input changes whether it raises or what is stored."
-  }
-}

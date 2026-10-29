@@ -34,7 +34,7 @@ class Run:
 
 
 def _members(redis):
-    return [f"{auth.PREFIX}:member:{member}" for member in sorted(auth.members(redis))]
+    return sorted(redis.keys(f"{auth.PREFIX}:member:*"))
 
 
 def _add(redis, run, target=CLOUD, label="swarm-hive-001"):

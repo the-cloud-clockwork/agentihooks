@@ -1,6 +1,0 @@
-{
-  "scripts/hive/registry.py:scripts.hive.registry.x_update__mutmut_5:2be9594d16d157db4545f40d564913a154842d640c5b8c70daf3b7d37c4b572f": {
-    "reader": "standards_reader",
-    "reason": "_check reads only prefer and excluded, which come from the record or from _default, whose values depend on ui and never on the hive id."
-  }
-}

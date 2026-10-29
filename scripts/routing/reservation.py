@@ -151,8 +151,9 @@ local held = raw and cjson.decode(raw) or nil
 local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 local seen, used, previous = {}, 0, nil
-for hive, heartbeat in pairs(cjson.decode(ARGV[8])) do
+for _, hive in ipairs(redis.call('SMEMBERS', KEYS[3])) do
     local key = ARGV[6] .. ':hive:' .. hive
+    local heartbeat = tonumber(redis.call('HGET', key, 'heartbeat_at') or '0')
     local sessions = redis.call('GET', key .. ':sessions')
     if heartbeat > 0 and millis - heartbeat <= 90000 and sessions then
         local report = cjson.decode(sessions)
@@ -221,14 +222,9 @@ class LaunchSlots:
     redis: object
 
     def _call(self, mode: str, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> object:
-        import json
-
         from scripts.hive import registry
         from scripts.swarm.keyspace import ROOT
 
-        heartbeats = (
-            {hive["id"]: hive["heartbeat_at"] for hive in registry.hives(self.redis)} if mode == "reserve" else {}
-        )
         return self.redis.eval(
             _LAUNCH,
             3,
@@ -242,7 +238,6 @@ class LaunchSlots:
             ttl_ms,
             ROOT,
             previous,
-            json.dumps(heartbeats),
         )
 
     def reserve(self, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> bool:

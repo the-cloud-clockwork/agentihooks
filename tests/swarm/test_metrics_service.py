@@ -57,8 +57,8 @@ def test_no_probe_pass_yet_gives_no_row(store):
 def test_each_hive_becomes_a_row_with_its_live_flag_and_heartbeat_age(store):
     registry.update(store.redis, "h1", ["name=anton-1"])
     registry.update(store.redis, "h2", ["name=anton-2"])
-    registry.beat(store.redis, "h1", {"heartbeat_at": NOW - 30_000})
-    registry.beat(store.redis, "h2", {"heartbeat_at": NOW - registry.LIVE_MS - 1})
+    store.redis.hset(registry.key("h1"), "heartbeat_at", json.dumps(NOW - 30_000))
+    store.redis.hset(registry.key("h2"), "heartbeat_at", json.dumps(NOW - registry.LIVE_MS - 1))
 
     rows = metrics_service.hive_rows(store, "sw", NOW)
 
@@ -80,7 +80,7 @@ def test_a_hive_that_never_beat_reads_age_minus_one(store):
 
 def test_a_hive_that_beat_at_the_first_millisecond_reads_its_real_age(store):
     registry.update(store.redis, "h1", ["name=anton-1"])
-    registry.beat(store.redis, "h1", {"heartbeat_at": 1})
+    store.redis.hset(registry.key("h1"), "heartbeat_at", json.dumps(1))
 
     (row,) = metrics_service.hive_rows(store, "sw", NOW)
 
@@ -89,7 +89,7 @@ def test_a_hive_that_beat_at_the_first_millisecond_reads_its_real_age(store):
 
 def test_a_heartbeat_after_the_sample_time_reads_age_zero(store):
     registry.update(store.redis, "h1", ["name=anton-1"])
-    registry.beat(store.redis, "h1", {"heartbeat_at": NOW + 20_000})
+    store.redis.hset(registry.key("h1"), "heartbeat_at", json.dumps(NOW + 20_000))
 
     (row,) = metrics_service.hive_rows(store, "sw", NOW)
 

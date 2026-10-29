@@ -43,7 +43,7 @@ def findings(store: "RedisStore", slug: str) -> list[Finding]:
 
     waiting = rows(store, slug)
     hosts = {agent.name: host for agent in store.agents(slug) if (host := reports.host(agent))}
-    indexed = registry.hive_state.index(store.redis)
+    indexed = store.redis.smembers(registry.INDEX)
     absent = sum(row["agent"] in hosts and hosts[row["agent"]] not in indexed for row in waiting)
     return [
         Finding(

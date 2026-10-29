@@ -41,7 +41,7 @@ class Reports:
         return json.loads(raw) if raw else None
 
     def live(self) -> dict[str, dict]:
-        return {hive: report for hive in registry.hive_state.index(self.redis) if (report := self.read(hive))}
+        return {hive: report for hive in sorted(self.redis.smembers(registry.INDEX)) if (report := self.read(hive))}
 
     def execution(self, agent: "AgentRecord") -> dict | None:
         report = self.read(host(agent))
@@ -93,7 +93,7 @@ class Reports:
             self.redis.delete(since_key)
             return False
         if (
-            hive in registry.hive_state.index(self.redis)
+            self.redis.sismember(registry.INDEX, hive)
             or self.read(hive) is not None
             or (record is not None and registry.live(record, now_ms))
         ):

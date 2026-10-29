@@ -210,9 +210,7 @@ def test_create_brings_a_named_hive_from_nothing_to_an_engineer_in_herdr(world):
     assert state["finished"] is True and state["pr"] == PR and state["ssh_port"] == 2225
     assert state["added"] == member
     assert world.run.named("ssh") == []
-    assert [f"{auth.PREFIX}:member:{member}" for member in sorted(auth.members(world.tools.redis))] == [
-        f"{auth.PREFIX}:member:{member}"
-    ]
+    assert world.tools.redis.keys(f"{auth.PREFIX}:member:*") == [f"{auth.PREFIX}:member:{member}"]
     titles = [line.split(": ")[1] for line in world.lines]
     assert titles == [title for title, _ in create.STEPS]
     assert world.lines[-1] == f"hive create {NAME}: engineer: engineer@{member} in demo works on the hive"
@@ -285,7 +283,7 @@ def test_a_finished_create_names_the_next_hive_on_the_next_run(world):
     later = world.run.calls[calls:]
     assert not [argv for argv in later if argv[:3] in (["gh", "pr", "create"], ["herdr", "machine", "add"])]
     assert _state(world)["name"] == NAME and _state(world)["finished"] is True
-    assert len([f"{auth.PREFIX}:member:{member}" for member in sorted(auth.members(world.tools.redis))]) == 1
+    assert len(world.tools.redis.keys(f"{auth.PREFIX}:member:*")) == 1
 
 
 def test_a_second_create_that_stops_early_is_saved_unfinished_under_the_next_name(world):
@@ -305,7 +303,7 @@ def test_a_create_without_its_saved_state_names_a_new_hive_beside_the_one_it_fin
     assert create.create(world.tools, create.Options(dry_run=True)) == (
         "dry run of hive create swarm-hive-002: nothing written"
     )
-    assert len([f"{auth.PREFIX}:member:{member}" for member in sorted(auth.members(world.tools.redis))]) == 1
+    assert len(world.tools.redis.keys(f"{auth.PREFIX}:member:*")) == 1
 
 
 def test_a_create_on_another_node_names_the_next_hive(world):

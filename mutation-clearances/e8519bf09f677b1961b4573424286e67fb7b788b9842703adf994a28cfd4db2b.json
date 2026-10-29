@@ -1,6 +1,0 @@
-{
-  "scripts/hive/registry.py:scripts.hive.registry.x_update:7a0a2c73bba9ee485ab72d56ab1e507df2bb3c123d69c41c19200e35bbbb86d9": {
-    "reader": "standards_reader",
-    "reason": "The amended record always carries the seeded id and name for the real hive id, so the hive id passed to settle only seeds defaults that the record overrides and nothing observable changes."
-  }
-}

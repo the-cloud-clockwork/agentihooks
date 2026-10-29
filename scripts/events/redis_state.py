@@ -22,9 +22,9 @@ def _entry(key: str, raw: str | None) -> StateEntry | None:
 
 
 class RedisStateStore:
-    def __init__(self, redis, bucket: str, prefix: str | None = None):
+    def __init__(self, redis, bucket: str):
         self.redis = redis
-        base = f"{prefix or _prefix()}:state:{bucket}"
+        base = f"{_prefix()}:state:{bucket}"
         self._current = f"{base}:current"
         self._revision = f"{base}:revision"
         self._history = f"{base}:history:"

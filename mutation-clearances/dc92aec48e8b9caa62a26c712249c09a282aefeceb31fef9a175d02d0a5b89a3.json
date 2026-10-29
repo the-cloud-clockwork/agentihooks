@@ -1,6 +1,0 @@
-{
-  "scripts/hive/registry.py:scripts.hive.registry.x_forget__mutmut_10:462613093a2bf8824716df54ceab89bebbb6af997e74ae03db1227d298a305ba": {
-    "reader": "standards_reader",
-    "reason": "The present flag of hive_state.indexed is read only for truthiness, so None behaves exactly like False; no record, index or Redis set differs."
-  }
-}
