@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__publish_pending__mutmut_12:ba35e50286bbb1906ea63faa8e951ffc764bd49ee8da24333578b8784b00354f": {
+    "reader": "standards_reader",
+    "reason": "Cleared, equivalent. The unquoted table name STORED resolves to the existing stored table, so the write is identical."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__publish_pending__mutmut_4:f4b7a211ceae5b58d37b86c71f98bfd9765e3305b629ef32cd77b8e7f7f280dd": {
+    "reader": "standards_reader",
+    "reason": "Cleared, equivalent. SQLite keywords and unquoted identifiers are case-insensitive, so the lowercased statement resolves to the same columns, table and ORDER BY, and returns the same rows."
+  }
+}
