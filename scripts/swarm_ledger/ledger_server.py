@@ -892,6 +892,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def parse_request(self) -> bool:
         parsed = super().parse_request()
+        request_metrics.arrived()
         if parsed:
             self.rfile = request_body.Body(self.rfile, request_body.length(self.headers))
         return parsed
@@ -921,7 +922,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/") and self.headers.get("Origin") == FILE_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", FILE_ORIGIN)
         self.end_headers()
-        self.wfile.write(data)
+        with request_metrics.client():
+            self.wfile.write(data)
 
     def send_header(self, keyword, value):
         super().send_header(keyword, value)
@@ -1499,7 +1501,7 @@ def warm_streams(environ=os.environ) -> list[str]:
 def follow_shared(interval=FOLLOW_S):
     """Publish each watched ledger's newer stored generation, whichever host wrote it to the shared database."""
     while True:
-        for slug in HUB.watched():
+        for slug in () if core.LOCK.locked() else HUB.watched():
             try:
                 repository.current(slug)
             except Exception as exc:  # one unreadable ledger must not stop the others following

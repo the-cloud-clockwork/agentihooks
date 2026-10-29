@@ -142,13 +142,38 @@ def _remote_owner(repo: Path) -> str | None:
             text=True,
             timeout=3,
         )
+        if out.returncode not in (0, 1):
+            return None
+        url = out.stdout.strip()
+    except FileNotFoundError:
+        url = _config_origin(repo)
     except (OSError, subprocess.TimeoutExpired):
         return None
-    url = out.stdout.strip()
+    if url is None:
+        return None
     if not url:
         return ""
     match = re.search(r"[:/]([^/:]+)/[^/]+?/?$", url)
     return match.group(1).lower() if match else None
+
+
+def _config_origin(repo: Path) -> str | None:
+    """Origin url read from the repo's own git config, for hosts that have no git binary."""
+    marker = repo / ".git"
+    try:
+        gitdir = marker if marker.is_dir() else repo / marker.read_text().removeprefix("gitdir:").strip()
+        if (gitdir / "commondir").is_file():
+            gitdir = gitdir / (gitdir / "commondir").read_text().strip()
+        lines = (gitdir / "config").read_text().splitlines()
+    except (OSError, ValueError):
+        return None
+    section = url = ""
+    for line in map(str.strip, lines):
+        if line.startswith("["):
+            section = line
+        elif section == '[remote "origin"]' and line.partition("=")[0].strip() == "url":
+            url = line.partition("=")[2].strip()
+    return url
 
 
 def directory_trust(repo: Path, state: dict) -> tuple[bool, str]:
@@ -161,8 +186,10 @@ def directory_trust(repo: Path, state: dict) -> tuple[bool, str]:
     bundle = profile_chain.bundle_path(state)
     if bundle is not None:
         bundle_owner = _remote_owner(bundle)
-        if bundle_owner:
-            owners.add(bundle_owner)
+    else:
+        bundle_owner = (state.get("bundle") or {}).get("owner")
+    if bundle_owner:
+        owners.add(bundle_owner.lower())
     owner = _remote_owner(repo)
     if owner == "":
         return True, ""

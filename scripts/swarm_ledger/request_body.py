@@ -1,6 +1,8 @@
 import socket
 import time
 
+from scripts.swarm_ledger import request_metrics
+
 CHUNK = 1 << 16
 
 
@@ -10,9 +12,11 @@ class Body:
 
     def read(self, size: int | None = -1) -> bytes:
         if self.left is None:
-            return self.raw.read(size)
+            with request_metrics.client():
+                return self.raw.read(size)
         size = self.left if size is None or size < 0 else min(size, self.left)
-        data = self.raw.read(size) if size else b""
+        with request_metrics.client():
+            data = self.raw.read(size) if size else b""
         self.left -= len(data)
         return data
 

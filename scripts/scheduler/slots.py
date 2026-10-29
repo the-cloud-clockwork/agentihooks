@@ -1,3 +1,5 @@
+import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from importlib import import_module
@@ -5,13 +7,14 @@ from types import FunctionType
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from redis import Redis
+    from scripts.events.bus import StateStore
+    from scripts.swarm.store import RedisStore
 
 
 class Slot(Protocol):
     def record(self) -> dict: ...
 
-    def deliver(self, event: dict, delivery_id: str, redis: "Redis") -> None:
+    def deliver(self, event: dict, delivery_id: str, state: "StateStore") -> None:
         """Commit effects idempotently under delivery_id; retries reuse that identity."""
         ...
 
@@ -33,9 +36,29 @@ class CallableSlot:
     def record(self) -> dict:
         return {"kind": "callable", **asdict(self)}
 
-    def deliver(self, event: dict, delivery_id: str, redis: "Redis") -> None:
+    def deliver(self, event: dict, delivery_id: str, state: "StateStore") -> None:
         module, name = self.reference.split(":")
-        getattr(import_module(module), name)(event, delivery_id, redis)
+        getattr(import_module(module), name)(event, delivery_id, state)
+
+
+def _legacy(state: "StateStore"):
+    from scripts.events.redis_state import RedisStateStore
+
+    return state.redis if isinstance(state, RedisStateStore) else None
+
+
+def _inbox(state: "StateStore"):
+    from scripts.inbox import store
+
+    redis = _legacy(state)
+    return store.connect() if redis is None else store.InboxStore(redis)
+
+
+def swarm_store(state: "StateStore") -> "RedisStore":
+    from scripts.swarm import store
+
+    redis = _legacy(state)
+    return store.connect() if redis is None else store.RedisStore(redis)
 
 
 @dataclass(frozen=True)
@@ -45,11 +68,11 @@ class InboxSlot:
     def record(self) -> dict:
         return {"kind": "inbox", **asdict(self)}
 
-    def deliver(self, event: dict, delivery_id: str, redis: "Redis") -> None:
-        from scripts.inbox.store import DuplicateItem, InboxStore
+    def deliver(self, event: dict, delivery_id: str, state: "StateStore") -> None:
+        from scripts.inbox.store import DuplicateItem
 
         try:
-            InboxStore(redis).send(event["owner"], self.address, event["payload"], item_id=delivery_id)
+            _inbox(state).send(event["owner"], self.address, event["payload"], item_id=delivery_id)
         except DuplicateItem:
             pass
 
@@ -61,7 +84,7 @@ class BroadcastSlot:
     def record(self) -> dict:
         return {"kind": "broadcast", **asdict(self)}
 
-    def deliver(self, event: dict, delivery_id: str, redis: "Redis") -> None:
+    def deliver(self, event: dict, delivery_id: str, state: "StateStore") -> None:
         from hooks.context.broadcast import create_broadcast
 
         create_broadcast(event["payload"], source=event["owner"], channel=self.channel, delivery_id=delivery_id)
@@ -74,14 +97,13 @@ class SwarmSlot:
     def record(self) -> dict:
         return {"kind": "swarm", **asdict(self)}
 
-    def deliver(self, event: dict, delivery_id: str, redis: "Redis") -> None:
+    def deliver(self, event: dict, delivery_id: str, state: "StateStore") -> None:
         from scripts.inbox.outbox import stable_id
-        from scripts.inbox.store import DuplicateItem, InboxStore
+        from scripts.inbox.store import DuplicateItem
         from scripts.swarm.delivery import recipients
-        from scripts.swarm.store import RedisStore
 
-        inbox = InboxStore(redis)
-        for agent in recipients(RedisStore(redis), self.slug, "all", event["owner"]):
+        inbox = _inbox(state)
+        for agent in recipients(swarm_store(state), self.slug, "all", event["owner"]):
             try:
                 inbox.send(
                     event["owner"],
@@ -101,3 +123,17 @@ def restore(record: dict) -> Slot:
     fields = dict(record)
     kind = fields.pop("kind")
     return KINDS[kind](**fields)
+
+
+def first_delivery(state: "StateStore", owner: str, delivery_id: str) -> bool:
+    from scripts.events.bus import StateConflict
+
+    key = "delivered." + hashlib.sha256(json.dumps([owner, delivery_id]).encode()).hexdigest()
+    try:
+        state.create(key, delivery_id.encode())
+    except StateConflict:
+        entry = state.get(key)
+        if entry is not None and entry.value == delivery_id.encode():
+            return False
+        raise
+    return True

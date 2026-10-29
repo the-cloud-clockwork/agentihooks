@@ -54,7 +54,7 @@ def _answer(inbox, agent, record, now_ms):
     record["answers"] = record["answers"][-3:]
     record["idle_answers"] = record["idle_answers"] + 1 if answer.text == IDLE_ANSWER else 0
     record["request"] = ""
-    world.close(answer.id, "swarm", "done", "activity answer recorded")
+    world.settle(answer.id, "swarm", "done", "activity answer recorded")
     return True
 
 

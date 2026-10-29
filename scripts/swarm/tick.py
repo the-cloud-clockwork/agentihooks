@@ -79,6 +79,7 @@ from scripts.swarm import (
     session_model,
     stack,
     stale_nudge,
+    successor_retry,
     tick_master,
     time_left,
     timing,
@@ -1023,14 +1024,14 @@ def _parked(task, rows):
     return any(rows.get(dep, {}).get("state") != "done" for dep in task.get("parked_on") or [])
 
 
-def _stack_base(task, rows, repo):
+def _stack_base(task, rows, repo, origin=None):
     deps = [dep for dep in task.get("depends_on") or [] if rows[dep].get("state") != "done"]
-    return [_stacked_dep(dep, rows[dep], repo) for dep in deps]
+    return [_stacked_dep(dep, rows[dep], repo, origin or stack.origin_key) for dep in deps]
 
 
-def _stacked_dep(dep, row, repo):
+def _stacked_dep(dep, row, repo, origin):
     base = {"task": dep, "branch": row["branch"]}
-    elsewhere = row.get("branch_repo") and stack.repo_key(row["branch_repo"]) != stack.origin_key(repo)
+    elsewhere = row.get("branch_repo") and stack.repo_key(row["branch_repo"]) != origin(repo)
     return {**base, "repo": row["branch_repo"]} if elsewhere else base
 
 
@@ -1357,7 +1358,9 @@ def _launch_all(run, clock, batch):
         outcomes = list(pool.map(lambda context, launch: context.run(_launch, run, launch), contexts, batch))
     clock.charge(at, [error for _, error in outcomes if isinstance(error, Exception)], len(batch))
     actions = []
-    for launch, (placed, launched) in zip(batch, outcomes):
+    for launch, outcome in zip(batch, outcomes):
+        launch, (placed, launched), retried = _retry_successor(run, launch, outcome)
+        actions += retried
         if placed and placed.launch_job:
             launched = launch_job.dispatch(run, launch, placed)
             if isinstance(launched, str):
@@ -1372,6 +1375,15 @@ def _launch_all(run, clock, batch):
             started = Started(launch.record, launch.task, placed, launched)
             actions += timing.timed(_started, run.slug, run.config, run.store, run.ledger, run.doc, started, run.now_ms)
     return actions
+
+
+def _retry_successor(run, launch, outcome):
+    harness = successor_retry.due(launch.task, launch.primed, outcome[1])
+    if not harness:
+        return launch, outcome, []
+    said = successor_retry.note(run.slug, run.store, run.runtime, launch.record, outcome[1], run.now_ms)
+    launch = replace(launch, primed=successor_retry.steered(launch.primed, harness))
+    return launch, _launch(run, launch), [said]
 
 
 def _reported(slug, store, runtime, peers=()):

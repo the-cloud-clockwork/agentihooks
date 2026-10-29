@@ -419,6 +419,9 @@ def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_relea
     publish = steps["Publish the release version and move the release tag when it is the newest"]
     assert publish["env"]["LATEST"] == "${{ needs.image.outputs.latest }}"
     assert 'if [[ "$LATEST" == true ]]; then' in publish["run"]
+    assert publish["run"].index('docker push "$IMAGE:release"') < publish["run"].index(
+        'docker push "$IMAGE:${RELEASE#v}"'
+    )
 
 
 def test_the_proven_image_skips_the_artifact_round_trip():

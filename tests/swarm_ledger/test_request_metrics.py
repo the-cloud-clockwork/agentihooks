@@ -156,6 +156,8 @@ def test_bounded_snapshot_names_capacity_and_restart_gaps(monkeypatch):
     monkeypatch.setattr(metrics, "time", clock)
     monkeypatch.setattr(metrics, "STARTED_AT", clock.time() - 86400.0, raising=False)
     monkeypatch.setattr(metrics, "EVICTED_THROUGH", float("-inf"), raising=False)
+    monkeypatch.setattr(metrics, "HELD_SINCE", None)
+    monkeypatch.setattr(metrics, "LOST", [])
     for wall in range(1, 21):
         clock.wall += 1.0
         metrics.record("POST", "/api/v1/ledgers/:slug/operations", float(wall), 0.25, 1.0)
@@ -245,3 +247,37 @@ def test_failed_write_keeps_its_file_lock_wait(tmp_path, monkeypatch):
     assert result["writes"]["cpu_seconds"] == 1.5
     assert result["writes"]["lock_wait_seconds"] == 2.0
     assert result["writes"]["other_wall_seconds"] == 4.5
+
+
+def test_a_write_waiting_on_another_load_of_its_ledger_counts_that_wait(tmp_path, monkeypatch):
+    from scripts.swarm_ledger.repository import sqlite
+
+    metrics = importlib.import_module("scripts.swarm_ledger.request_metrics")
+    monkeypatch.setattr(metrics, "SAMPLES", deque(maxlen=metrics.MAX_SAMPLES))
+    repo = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3", domain=server.core)
+    repo.import_document(
+        "timing",
+        server.core.normalize(
+            {
+                **new_ledger.build_doc({"title": "Timing"}),
+                "_meta": {"rev": 1, "stamps": {}, "events": [], "members": {}},
+            }
+        ),
+    )
+    reader = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3", domain=server.core)
+    clock = Clock()
+    monkeypatch.setattr(metrics, "time", clock)
+    monkeypatch.setattr(sqlite.threading, "Lock", lambda: DelayedLock(clock))
+
+    def write(handler, module):
+        reader.current("timing")
+        clock.wall += 1.0
+
+    monkeypatch.setattr(api, "handle", write)
+    handler = server.Handler.__new__(server.Handler)
+    handler.path, handler.command = "/api/v1/ledgers/timing/operations", "POST"
+    handler.do_POST()
+    result = metrics.report(1.0)
+    assert result["writes"]["count"] == 1
+    assert result["writes"]["lock_wait_seconds"] == 2.0
+    assert result["writes"]["other_wall_seconds"] == 1.0

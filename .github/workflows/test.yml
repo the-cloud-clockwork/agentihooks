@@ -24,7 +24,7 @@ on:
         default: origin/dev
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || github.event_name == 'push' && format('promotion-dev-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}
   queue: ${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -1116,10 +1116,13 @@ jobs:
 
       - name: Download the queued run's dev durations
         if: needs.select.outputs.source == '' && needs.select.outputs.queued == 'true'
+        continue-on-error: true
         uses: ./.github/actions/retry-download
         with:
           name: dev-durations
           path: ~/dev-durations
+          verify: >-
+            python3 -c 'import json, sys; from pathlib import Path; [json.loads(Path(path).read_text()) for path in sys.argv[1:]]' ~/dev-durations/.test_durations*
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
@@ -1336,6 +1339,8 @@ jobs:
         uses: ./.github/actions/retry-download
         with:
           name: split-${{ matrix.python-version }}
+          verify: >-
+            [[ "$(sha256sum .test_durations | cut -d ' ' -f 1)" == "$(< durations.sha256)" ]]
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
@@ -2693,6 +2698,16 @@ jobs:
           fi
           python -m scripts.locked_tests --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
+      # dev's copy holds the pin list, so a pull request cannot unpin the threshold it loosens.
+      # Only the pull request that introduces the check meets a grader without it; its own copy grades.
+      - name: Pin thresholds, floors and allowlists against the base
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/threshold_pins.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.threshold_pins --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
       - name: Fail on known vulnerabilities new against the base
         if: ${{ !cancelled() }}
@@ -3551,6 +3566,7 @@ jobs:
       reused: ${{ steps.reuse.outputs.reused || 'false' }}
       forwarded: ${{ (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0') && 'true' || 'false' }}
       selection: ${{ steps.contract.outputs.selection || 'false' }}
+      durations: ${{ steps.durations.outputs.cache-matched-key }}
     env:
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: maintenance.auto
@@ -3621,6 +3637,7 @@ jobs:
         run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest>=8.0,<9.2" "pyyaml>=6.0" "tomlkit>=0.12"
 
       - name: Restore latest dev durations
+        id: durations
         if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
         uses: actions/cache/restore@v4
         env:
@@ -3790,14 +3807,14 @@ jobs:
           exit 1
 
       - name: Restore latest dev durations
-        if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'
+        if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.durations != ''
         uses: actions/cache/restore@v4
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/dev-durations
-          key: durations-merged-${{ github.event.pull_request.base.sha }}
-          restore-keys: durations-merged-
+          key: ${{ needs.mutation-plan.outputs.durations }}
+          fail-on-cache-miss: true
 
       - name: Adopt latest dev durations
         if: needs.mutation-plan.outputs.forwarded != 'true'

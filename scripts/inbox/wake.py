@@ -159,10 +159,10 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
             if doc is None:
                 doc = ledger.state(slug)
             if _decided(item.ref, doc):
-                inbox.close(item.id, BY, "done", "decided on the ledger")
+                inbox.settle(item.id, BY, "done", "decided on the ledger")
                 continue
         if item.ref and receiver and (receiver, item.ref) in reads.seen:
-            inbox.close(item.id, receiver, "done", SEEN_ON_LEDGER)
+            inbox.settle(item.id, receiver, "done", SEEN_ON_LEDGER)
             continue
         agent = panes.get(receiver)
         if agent and agent.name not in statuses:

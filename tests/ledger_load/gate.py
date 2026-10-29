@@ -237,7 +237,13 @@ def free_port() -> int:
 
 
 def start_server(folder: Path, port: int, log: TextIO) -> subprocess.Popen:
-    env = {**os.environ, "LEDGER_DIR": str(folder), "LEDGER_PORT": str(port), "SWARM_RELOAD": "0"}
+    env = {
+        **os.environ,
+        "LEDGER_DIR": str(folder),
+        "LEDGER_PORT": str(port),
+        "SWARM_RELOAD": "0",
+        "CONDITIONS_TRUSTED_OWNERS": "The-Cloud-Clockwork",
+    }
     server = subprocess.Popen(
         [sys.executable, ledger_server.__file__, "--serve"],
         env=env,
