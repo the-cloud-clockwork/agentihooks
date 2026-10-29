@@ -140,6 +140,17 @@ def test_swarm_slug_keeps_the_ref_when_the_store_fails(client, on_redis, monkeyp
     ]
 
 
+def test_swarm_slug_keeps_the_ref_when_the_bus_store_fails(bus, monkeypatch, caplog):
+    names = naming.NameRegistry(None)
+
+    def down(*_):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(names.names_state.shared, "get", down)
+    assert names.swarm_slug("swarm@abcdef") == "swarm@abcdef"
+    assert [r.getMessage() for r in caplog.records] == ["swarm alias lookup failed for swarm@abcdef: down"]
+
+
 def test_a_registry_opens_the_names_state_store_only_at_its_first_read(bus, monkeypatch):
     opened = []
     monkeypatch.setattr(name_state.state, "open_state", lambda bucket: opened.append(bucket) or bus.state(bucket))
