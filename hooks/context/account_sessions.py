@@ -281,7 +281,7 @@ def _held(raw: str) -> tuple[str, str] | None:
 def _unavailable() -> tuple[type[BaseException], ...]:
     from scripts.events import state
 
-    # The families still read Redis whatever the configured backend, until their own slices move them.
+    # Store families may read Redis whatever the configured backend.
     return (*state.unavailable({}), *state.unavailable())
 
 
