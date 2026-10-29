@@ -205,9 +205,10 @@ def test_restore_writes_each_row_over_what_the_store_holds(bus):
 
 
 def test_a_restored_removal_hides_the_legacy_value(client, on_redis):
+    client.set("old:alias", "old")
     names = NameState(client)
     names.restore({state_key("alias", "x"): None})
-    assert names.get("alias", "x", lambda _: "old") is None
+    assert names.get("alias", "x", lambda redis: redis.get("old:alias")) is None
 
 
 def test_redis_state_reads_many_keys_in_one_round_trip(client, monkeypatch):
@@ -223,4 +224,4 @@ def test_redis_state_reads_many_keys_in_one_round_trip(client, monkeypatch):
     assert store.get_many(["a", "b"]) == expected
     assert reads == ["hmget"]
     assert store.watch_key == store._current
-    assert client.hget(store.watch_key, "a") is not None
+    assert hmget(store.watch_key, ["a"]) != [None]
