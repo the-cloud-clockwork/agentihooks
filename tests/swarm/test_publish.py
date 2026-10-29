@@ -47,6 +47,14 @@ def test_out_of_order_push_names_the_committed_head_gate(repository):
     assert f"Next: cd {repository} && python -m scripts.ci_prepush" in str(blocked.value)
 
 
+def _no_collection(slug):
+    pytest.fail("publication read the whole tasks collection")
+
+
+def _by_id(task, slug="swarm"):
+    return lambda asked, task_id: task if (asked, task_id) == (slug, task["id"]) else None
+
+
 @pytest.fixture
 def publication(repository, tmp_path, monkeypatch):
     worktree = tmp_path / "worktrees" / "repo" / "engineer-test"
@@ -58,7 +66,7 @@ def publication(repository, tmp_path, monkeypatch):
         updates.append((slug, task_id, fields, by))
         task.update(fields)
 
-    ledger = SimpleNamespace(tasks=lambda slug: {"swarm": [task]}[slug], update_task=update)
+    ledger = SimpleNamespace(task=_by_id(task), tasks=_no_collection, update_task=update)
     agent = AgentRecord("engineer@test", "ci", "t1")
     gate = worktree / "scripts" / "ci_prepush" / "__main__.py"
     gate.write_text(
@@ -413,7 +421,7 @@ def test_prepare_creates_the_task_worktree_once_through_the_worktree_command(rep
     monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed"}
     ledger = SimpleNamespace(
-        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+        task=_by_id(task), tasks=_no_collection, update_task=lambda slug, task_id, fields, by: task.update(fields)
     )
     agent = AgentRecord("engineer@test", "ci", "t1")
     first = publish.prepare("swarm", agent, str(repository), ledger)
@@ -439,7 +447,7 @@ def test_prepare_stacks_on_the_recorded_branch_and_publish_pushes_its_current_br
     monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed", "branch": "predecessor"}
     ledger = SimpleNamespace(
-        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+        task=_by_id(task), tasks=_no_collection, update_task=lambda slug, task_id, fields, by: task.update(fields)
     )
     agent = AgentRecord("engineer@test", "ci", "t1")
     result = publish.prepare("swarm", agent, str(repository), ledger)
@@ -542,7 +550,7 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
         ledger_tasks.check({"op": "task_update", "item": f"tasks/{task_id}", "fields": fields, "by": by})
         task.update(fields)
 
-    ledger = SimpleNamespace(tasks=lambda slug: [task], update_task=update_task)
+    ledger = SimpleNamespace(task=_by_id(task, slug="swarm"), tasks=_no_collection, update_task=update_task)
     agent = AgentRecord("engineer@test", "ci", "t1")
 
     result = publish.prepare("swarm", agent, str(repository), ledger)
@@ -637,7 +645,7 @@ def test_prepare_tracks_the_recorded_delivery_branch_from_an_existing_worktree(r
     git(repository, "worktree", "add", "-b", "engineer-test", str(worktree))
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed", "branch": "predecessor"}
     ledger = SimpleNamespace(
-        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+        task=_by_id(task), tasks=_no_collection, update_task=lambda slug, task_id, fields, by: task.update(fields)
     )
 
     result = publish.prepare("swarm", AgentRecord("engineer@test", "ci", "t1"), str(repository), ledger)
@@ -654,7 +662,7 @@ def test_prepare_reuses_the_recorded_worktree_without_pushing(repository, tmp_pa
     git(repository, "worktree", "add", "-b", "engineer-test", str(worktree))
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed", "branch": "engineer-test"}
     ledger = SimpleNamespace(
-        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+        task=_by_id(task), tasks=_no_collection, update_task=lambda slug, task_id, fields, by: task.update(fields)
     )
     agent = AgentRecord("engineer@test", "ci", "t1")
     first = publish.prepare("swarm", agent, str(repository), ledger)
@@ -669,7 +677,7 @@ def test_publication_without_a_prepared_worktree_names_the_prepare_command(repos
 
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed"}
     ledger = SimpleNamespace(
-        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+        task=_by_id(task), tasks=_no_collection, update_task=lambda slug, task_id, fields, by: task.update(fields)
     )
     agent = AgentRecord("engineer@test", "ci", "t1")
     with pytest.raises(SwarmError, match="Next: agentihooks swarm swarm prepare"):
@@ -705,11 +713,31 @@ def test_a_missing_claim_has_a_named_refusal(publication):
     from scripts.swarm import publish
     from scripts.swarm.store import SwarmError
 
-    publication.ledger.tasks = lambda slug: []
+    publication.ledger.task = lambda slug, task_id: None
     with pytest.raises(SwarmError, match="^publication requires this agent's claimed task$"):
         publish.publish(
             "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
         )
+
+
+@pytest.mark.parametrize("command", ["prepare", "publish"])
+def test_publication_reads_its_own_task_by_id_and_never_the_tasks_collection(publication, monkeypatch, command):
+    from scripts.swarm import cli
+
+    reads, by_id = [], publication.ledger.task
+
+    def task(slug, task_id):
+        reads.append((slug, task_id))
+        return by_id(slug, task_id)
+
+    publication.ledger.task = task
+    monkeypatch.setattr(cli, "_worker", lambda store, args: publication.agent)
+    monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(publication.repo))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: publication.ledger)
+    monkeypatch.chdir(publication.repo)
+    args = SimpleNamespace(slug="swarm", command=command, message="Change chosen", files=["chosen.txt"])
+    getattr(cli, f"cmd_{command}")(None, args)
+    assert reads and set(reads) == {("swarm", "t1")}
 
 
 def test_a_successor_uses_the_recorded_worktree_among_other_checkouts(publication, tmp_path):
@@ -1246,7 +1274,7 @@ def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(
     if recording == "unrecorded":
         p.task.pop("branch")
     if recording == "missing":
-        monkeypatch.setattr(p.ledger, "tasks", lambda slug: [])
+        monkeypatch.setattr(p.ledger, "task", lambda slug, task_id: None)
     reason = (
         "publication requires this agent's claimed task" if recording == "missing" else "recorded branch is missing"
     )
@@ -1261,7 +1289,7 @@ def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(
         raise publish.SwarmError("recorded branch is missing")
 
     if recording == "lookup-refused":
-        monkeypatch.setattr(p.ledger, "tasks", refuse)
+        monkeypatch.setattr(p.ledger, "task", refuse)
     elif recording != "missing":
         monkeypatch.setattr(publish, command, refuse)
     args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
