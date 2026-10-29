@@ -348,17 +348,19 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
 def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, monkeypatch, mode):
     from collections import defaultdict
 
-    from scripts.ci_mutation.selection import run_selected
+    from scripts.ci_mutation.selection import run_selected, split_files
+    from scripts.ci_mutation.stats import split_key
 
     monkeypatch.setenv("CI", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("os.sched_getaffinity", lambda pid: {0, 1})
     selection = tmp_path / "lines.json"
     selection.write_text(json.dumps({"scripts/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]}}))
+    files = ["tests/test_c.py", "tests/test_a.py", "tests/test_b.py"]
     data = SimpleNamespace(exit_code_by_key={} if mode == "empty" else {"m": None}, load=lambda: None)
     config = SimpleNamespace(
         source_paths=[Path("scripts/")],
-        pytest_add_cli_args_test_selection=["tests/test_c.py", "tests/test_a.py", "tests/test_b.py"],
+        pytest_add_cli_args_test_selection=list(files),
     )
     engine = SimpleNamespace(tests_by_mangled_function_name=defaultdict(set), duration_by_test={}, stats_time=None)
     result = {
@@ -422,6 +424,7 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
             "part": 1,
             "parts": 3,
             "results": [] if mode == "empty" else [result],
+            "split": "" if mode == "empty" else split_key(split_files(tmp_path, files, 3)),
         }
         assert saved == []
         raise SystemExit(7)
