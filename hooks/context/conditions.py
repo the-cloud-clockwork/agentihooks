@@ -162,9 +162,9 @@ def directory_trust(repo: Path, state: dict) -> tuple[bool, str]:
     if bundle is not None:
         bundle_owner = _remote_owner(bundle)
     else:
-        bundle_owner = ((state.get("bundle") or {}).get("owner") or "").lower()
+        bundle_owner = (state.get("bundle") or {}).get("owner")
     if bundle_owner:
-        owners.add(bundle_owner)
+        owners.add(bundle_owner.lower())
     owner = _remote_owner(repo)
     if owner == "":
         return True, ""
