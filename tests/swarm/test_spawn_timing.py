@@ -119,3 +119,26 @@ def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
     assert sorted(named) == sorted(per_agent)
     assert [sorted(row) for row in inside if row["step"] in pass_wide] == [sorted(reap)] * 2
     assert "agent" not in reap
+
+
+def test_a_reap_pass_goes_on_to_the_next_agent_after_a_skipped_one(store, capsys, monkeypatch):
+    from dataclasses import replace
+
+    from scripts.hub import reconciler
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    live = store.agents("sw")
+    skipped = replace(live[0], name="engineer@a1b2c3-0009", state="awaiting-decision")
+    rows = {t["id"]: t for t in ledger.rows.values()}
+
+    def watched(agents):
+        monkeypatch.setattr(reconciler, "legacy_agents", lambda *_: agents)
+        capsys.readouterr()
+        with timing.tick("sw"):
+            tick_module._reap("sw", store, ledger, runtime, rows, 2_000)
+        return [row.get("agent") for row in finished(capsys) if row["step"] == timing.named(tick_module._watch_agent)]
+
+    alone = watched(live)
+    assert alone != []
+    assert watched([skipped, *live]) == alone
