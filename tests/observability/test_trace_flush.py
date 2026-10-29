@@ -1155,6 +1155,62 @@ def test_scheduler_wait_returns_within_its_bound_when_the_timer_never_rings(monk
     assert waited == [trace_flush.POLL_LIMIT_SEC] == [5.0]
 
 
+@pytest.mark.parametrize("phase", ["construct", "wait", "retire"])
+def test_scheduler_deadline_covers_the_complete_timer_lifecycle(monkeypatch, phase):
+    import signal
+    from unittest.mock import MagicMock, Mock
+
+    from scripts.scheduler import process_timer
+
+    real_sleep, finished = time.sleep, []
+    previous = signal.getsignal(signal.SIGALRM)
+    context = MagicMock()
+
+    def stall(at):
+        if phase == at:
+            real_sleep(0.1)
+            finished.append(at)
+
+    def construct(*args, **kwargs):
+        stall("construct")
+        return context
+
+    context.__enter__.return_value.wait.side_effect = lambda timeout=None: stall("wait")
+    context.__exit__.side_effect = lambda *args: stall("retire")
+    monkeypatch.setattr(process_timer, "Timer", construct)
+    monkeypatch.setattr(trace_flush, "POLL_LIMIT_SEC", 0.01)
+    sleep = Mock()
+    monkeypatch.setattr(trace_flush.time, "sleep", sleep)
+    trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    assert finished == []
+    sleep.assert_called_once_with(trace_flush.POLL_SEC)
+    assert signal.getsignal(signal.SIGALRM) is previous
+
+
+def test_scheduler_failure_names_the_exporting_session(monkeypatch, capsys):
+    from unittest.mock import Mock
+
+    from scripts.events.bus import StateConflict
+
+    monkeypatch.setattr(trace_flush, "timer_wait", Mock(side_effect=StateConflict("changed")))
+    monkeypatch.setattr(trace_flush.time, "sleep", Mock())
+    trace_flush.scheduled_wait(trace_flush.POLL_SEC, session_id="export-session")
+    assert capsys.readouterr().err == "trace_flush export-session: scheduler fallback: StateConflict: changed\n"
+
+
+def test_terminal_exporter_failure_names_the_session(monkeypatch, capsys):
+    from unittest.mock import Mock
+
+    from scripts.events.bus import StateConflict
+
+    monkeypatch.setattr(trace_flush.signal, "alarm", Mock())
+    monkeypatch.setattr(trace_flush.os, "nice", Mock())
+    monkeypatch.setattr(trace_flush, "supervise", Mock(side_effect=StateConflict("changed")))
+    with pytest.raises(StateConflict, match="changed"):
+        trace_flush.run("export-session")
+    assert capsys.readouterr().err == "trace_flush export-session: FAILED: StateConflict: changed\n"
+
+
 IDENTITY = {
     "AGENTIHOOKS_SWARM": "watched",
     "AGENTIHOOKS_AGENT_NAME": "engineer@owner",
