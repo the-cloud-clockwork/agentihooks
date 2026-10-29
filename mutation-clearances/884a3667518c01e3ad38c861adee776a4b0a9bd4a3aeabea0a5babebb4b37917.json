@@ -1,5 +1,5 @@
 {
-  "hooks/context/operator_words.py:hooks.context.operator_words.x__publish_pending__mutmut_11:03630a746fb4e960ea60b9d3e514f08a4fccab55c8b8160165d81b85c048b0d6": {
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__publish_pending:03630a746fb4e960ea60b9d3e514f08a4fccab55c8b8160165d81b85c048b0d6": {
     "reader": "standards_reader",
     "reason": "Cleared, equivalent. \"insert or ignore into stored values (?)\" binds the same parameters into the same table with the same conflict handling."
   }

@@ -1,5 +1,5 @@
 {
-  "hooks/context/operator_words.py:hooks.context.operator_words.x__publish_pending__mutmut_5:2a564eab356b240cb6b2d7b1eb900ec02f5529a300dd86754e46343f0b428719": {
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__publish_pending:2a564eab356b240cb6b2d7b1eb900ec02f5529a300dd86754e46343f0b428719": {
     "reader": "standards_reader",
     "reason": "Cleared, equivalent. The uppercased \"AND ID NOT IN (SELECT ENTRY FROM STORED) ORDER BY AT, ID\" is the same statement under SQLite's case-insensitive identifier and keyword matching, and the '' literal is unchanged."
   }
