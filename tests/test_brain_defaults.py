@@ -230,6 +230,7 @@ def test_status_ignores_coordination_messages_on_the_brain_channel(brain_env, mo
         "hooks.context.broadcast._load_broadcasts",
         lambda cleanup=False: [
             {"channel": f"brain@{adapter.brain_id()}", "source": "brain-adapter"},
+            {"channel": f"brain@{adapter.brain_id()}", "source": "brain-adapter"},
             {"channel": f"brain@{adapter.brain_id()}", "source": "mcp-channel"},
             {"channel": "brain@url-other", "source": "brain-adapter"},
         ],
@@ -237,7 +238,8 @@ def test_status_ignores_coordination_messages_on_the_brain_channel(brain_env, mo
 
     status = adapter.get_status()
 
-    assert status["active_broadcasts"] == 1
+    assert status["active_broadcasts"] == 2
+    assert status["channel"] == f"brain@{adapter.brain_id()}"
     assert not any("feed has" in warning for warning in status["warnings"])
 
 

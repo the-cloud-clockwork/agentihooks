@@ -113,23 +113,19 @@ def _destination() -> dict | None:
 
     binding = brain_binding.current(os.environ)
     if binding is not None:
-        api = binding.get("api", "") if binding.get("status") == brain_binding.BOUND else ""
+        api = binding.get("api") if binding.get("status") == brain_binding.BOUND else ""
         try:
             brain = brain_identity(url=api)
         except ValueError:
             brain = "invalid"
-        return {"brain": brain, "audience": "swarm", "reference": binding.get("api_env", "")}
+        return {"brain": brain, "audience": "swarm", "reference": binding.get("api_env") or ""}
     if not brain_http_enabled():
         return None
     try:
-        route = brain_routes.resolve(os.environ)
+        route = brain_routes.resolve(os.environ) or {}
     except brain_routes.Refused:
-        route = None
-    return {
-        "brain": brain_id(),
-        "audience": "personal",
-        "reference": route["token_env"] if route else "BRAIN_HTTP_TOKEN",
-    }
+        route = {}
+    return {"brain": brain_id(), "audience": "personal", "reference": route.get("token_env", "BRAIN_HTTP_TOKEN")}
 
 
 def _scoped_outbox(outbox: Path, destination: dict | None) -> Path:

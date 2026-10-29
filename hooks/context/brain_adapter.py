@@ -454,10 +454,8 @@ def _publish_entries(entries: list[BrainEntry]) -> dict:
 
 def _compute_hash(entries: list[BrainEntry]) -> str:
     """Compute a hash of entries to detect changes."""
-    try:
-        from hooks.config import BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES
-    except ImportError:
-        BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES = 10, 1536
+    from hooks.config import BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES
+
     raw = json.dumps(
         {
             "channel": feed_channel(),

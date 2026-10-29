@@ -283,11 +283,12 @@ def test_a_personal_marker_records_its_route_credential_reference(brains, monkey
 
 def test_a_refused_binding_never_lands_markers_on_the_personal_path(brains, monkeypatch):
     client(monkeypatch, SWARM)
-    refused = {"status": brain_binding.REFUSED, "reason": "no binding", "api_env": "SWARM_BRAIN_API_TOKEN"}
+    refused = {"status": brain_binding.REFUSED, "reason": "no binding", "api": SWARM}
     monkeypatch.setenv(brain_binding.VARIABLE, json.dumps(refused))
     writer._write_to_outbox([MARKER], "swarm-session", str(brains.outbox))
-    [folder] = [f.parent.name for f in brains.outbox.rglob("*.json")]
-    assert folder == "swarm-none"
+    [written] = list(brains.outbox.rglob("*.json"))
+    assert written.parent.name == "swarm-none"
+    assert json.loads(written.read_text())["destination"] == {"brain": "none", "audience": "swarm", "reference": ""}
 
     monkeypatch.setattr(brain_http, "brain_http_enabled", lambda: True)
     client(monkeypatch, PERSONAL)
@@ -314,3 +315,78 @@ def test_a_swarm_drain_holds_while_the_ambient_brain_differs_from_the_binding(br
     monkeypatch.setattr("hooks.config.BRAIN_URL", SWARM)
     assert writer._drain_outbox(str(brains.outbox)) == 1
     assert [content for content, _ in brains.received[SWARM]] == [LESSON]
+
+
+def test_a_bound_marker_records_the_binding_brain_and_reference(brains, monkeypatch):
+    from scripts.swarm_v2.keyspace import brain_identity
+
+    client(monkeypatch, SWARM, swarm=True)
+    writer._write_to_outbox([MARKER], "swarm-session", str(brains.outbox))
+    [written] = [json.loads(f.read_text()) for f in brains.outbox.rglob("*.json")]
+    assert written["destination"] == {
+        "brain": brain_identity(url=SWARM),
+        "audience": "swarm",
+        "reference": "SWARM_BRAIN_API_TOKEN",
+    }
+
+
+@pytest.mark.parametrize("resolved", ["legacy", "refused"])
+def test_a_personal_marker_without_a_route_records_the_session_credential(brains, monkeypatch, resolved):
+    from hooks.context import brain_routes
+
+    def resolve(environ):
+        if resolved == "refused":
+            raise brain_routes.Refused("no default brain route")
+        return None
+
+    monkeypatch.setattr(brain_routes, "resolve", resolve)
+    monkeypatch.setattr(brain_http, "brain_http_enabled", lambda: True)
+    client(monkeypatch, PERSONAL)
+    writer._write_to_outbox([MARKER], "personal-session", str(brains.outbox))
+    [written] = [json.loads(f.read_text()) for f in brains.outbox.rglob("*.json")]
+    assert written["destination"] == {
+        "brain": brain_adapter.brain_id(),
+        "audience": "personal",
+        "reference": "BRAIN_HTTP_TOKEN",
+    }
+
+
+def test_a_foreign_marker_sorted_first_never_stops_the_drain(brains, monkeypatch):
+    from hooks.context import brain_routes
+
+    route = {"route": "work", "api": PERSONAL, "token_env": "OLD_BRAIN_TOKEN"}
+    monkeypatch.setattr(brain_routes, "resolve", lambda environ: route)
+    monkeypatch.setattr(brain_http, "brain_http_enabled", lambda: True)
+    client(monkeypatch, PERSONAL)
+    writer._write_to_outbox([{**MARKER, "content": "old reference"}], "personal-session", str(brains.outbox))
+    [old] = list(brains.outbox.rglob("*.json"))
+    old.rename(old.with_name("00000000T000000-lesson-aaaaaaaa.json"))
+    route["token_env"] = "NEW_BRAIN_TOKEN"
+    writer._write_to_outbox([MARKER], "personal-session", str(brains.outbox))
+
+    assert writer._drain_outbox(str(brains.outbox)) == 1
+    assert [content for content, _ in brains.received[PERSONAL]] == [LESSON]
+
+
+def test_the_publish_hash_survives_a_missing_state_folder(brains, monkeypatch, tmp_path):
+    monkeypatch.setattr(brain_adapter, "_HASH_CACHE_FILE", tmp_path / "state" / "brain" / "brain_feed_hash")
+    client(monkeypatch, SWARM, swarm=True)
+    brain_adapter._save_persisted_hash("swarm-hash")
+    assert brain_adapter._load_persisted_hash() == "swarm-hash"
+
+
+def test_the_publish_span_names_the_scoped_feed_channel(brains, monkeypatch):
+    import contextlib
+
+    seen = []
+
+    @contextlib.contextmanager
+    def span_ctx(name, attrs):
+        seen.append((name, attrs.get("channel")))
+        yield type("Span", (), {"set_attrs": lambda self, attrs: None})()
+
+    monkeypatch.setattr("hooks.telemetry.span_ctx", span_ctx)
+    two_feeds(brains)
+    publish(brains, monkeypatch, SWARM, swarm=True)
+    assert [entry for entry in seen if entry[0] == "brain.inject"] == [("brain.inject", brain_adapter.feed_channel())]
+    assert brain_adapter.feed_channel() == f"brain@{brain_adapter.brain_id()}"
