@@ -21,7 +21,9 @@ def started(env):
 def test_handoff_reads_its_own_task_by_id_and_never_the_tasks_collection(started, tmp_path, capsys, monkeypatch):
     reads, by_id = [], started.task
     monkeypatch.setattr(started, "task", lambda slug, task_id: reads.append((slug, task_id)) or by_id(slug, task_id))
+    monkeypatch.setattr(started, "item", lambda slug, path: started.task(slug, path.removeprefix("tasks/")))
     monkeypatch.setattr(started, "tasks", lambda slug: pytest.fail("handoff read the whole tasks collection"))
+    monkeypatch.setattr(started, "state", lambda slug: pytest.fail("handoff read the whole ledger state"))
     capsys.readouterr()
     assert cli.main(["sw", "--as", "engineer@a1b2c3-0001", "handoff", str(_handoff_doc(tmp_path))]) == 0
     assert ("sw", "t1") in reads and {slug for slug, _ in reads} == {"sw"}
