@@ -153,16 +153,16 @@ def test_revoke_conflicting_with_token_recording_cannot_recreate_membership(hive
     from scripts.events.redis_state import RedisStateStore
 
     store, grant = hive
-    update = RedisStateStore.update
+    create = RedisStateStore.create
     revoked = []
 
-    def concurrent_record(self, key, value, revision):
-        if key == f"member.{grant['id']}" and not revoked:
+    def concurrent_record(self, key, value):
+        if key.startswith(f"agent.{grant['id']}.") and not revoked:
             revoked.append(True)
             auth.revoke(store.redis, grant["id"])
-        return update(self, key, value, revision)
+        return create(self, key, value)
 
-    with patch.object(RedisStateStore, "update", concurrent_record):
+    with patch.object(RedisStateStore, "create", concurrent_record):
         with pytest.raises(auth.HiveError, match="Hive membership was revoked"):
             auth.issue_agent(store.redis, grant["id"], SLUG, WORKER)
     assert revoked == [True]
