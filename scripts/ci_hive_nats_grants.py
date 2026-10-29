@@ -19,6 +19,7 @@ def _render(call: str) -> str:
 
 RENDER_MEMBER = _render(f"nats_grant.member_claims({MEMBER_KEY!r})")
 RENDER_CONTROLLER = _render("nats_grant.controller_claims()")
+RENDER_LEDGER = _render("nats_grant.ledger_claims()")
 # The shared swarm-hive password user cannot carry a per member reply prefix, so its _INBOX.> stands for this one.
 MEMBER_INBOX = f"_INBOX.{MEMBER_KEY}.>"
 SHARED_INBOX = "_INBOX.>"
@@ -27,6 +28,7 @@ SERVICE_USERS = "k8s/values-overlays/agentihooks-swarm-nats/users.yaml"
 ACCOUNT = "SWARM"
 HIVE_USER = "swarm-hive"
 CONTROLLER_USER = "swarm-controller"
+LEDGER_USER = "swarm-ledger"
 EVERYTHING = frozenset({">"})
 
 
@@ -64,6 +66,10 @@ def member_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
 
 def controller_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
     return _rendered(agentihooks, RENDER_CONTROLLER, "controller_claims")
+
+
+def ledger_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
+    return _rendered(agentihooks, RENDER_LEDGER, "ledger_claims")
 
 
 def user_grants(antoncore: Path, name: str) -> dict[str, dict[str, frozenset[str]]] | None:
@@ -104,7 +110,7 @@ def differences(ours: dict, theirs: dict, credential: str, user: str) -> list[st
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Fail when hive or controller NATS grants differ from antoncore users."
+        description="Fail when hive, controller or ledger NATS grants differ from antoncore users."
     )
     parser.add_argument("--agentihooks", required=True)
     parser.add_argument("--antoncore", type=Path, required=True)
@@ -113,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         checks = (
             ("hive member", "member", HIVE_USER, member_grants(args.agentihooks)),
             ("controller", "controller", CONTROLLER_USER, controller_grants(args.agentihooks)),
+            ("ledger", "ledger", LEDGER_USER, ledger_grants(args.agentihooks)),
         )
         compared = [(*check, user_grants(args.antoncore, check[2])) for check in checks]
     except (
