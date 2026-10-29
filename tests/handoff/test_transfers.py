@@ -111,6 +111,19 @@ def test_a_hive_successor_is_live_from_seat_occupancy_without_a_workstation_sess
     assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "live"
 
 
+def test_a_finished_hive_successor_is_not_treated_as_live_by_seat_occupancy_alone(setup):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    name = store.next_name("sw", "eng")
+    new = store.start_execution(
+        "sw", AgentRecord(name, "eng", "t1", seat=old.seat, hive="hive-1", state="finished", launched_at=40), ""
+    )
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    transfers.observe(store, "sw", set())
+    assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "absent"
+
+
 def test_a_live_binding_is_kept_when_the_successor_later_leaves_the_live_names(setup):
     store, old = setup
     transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
