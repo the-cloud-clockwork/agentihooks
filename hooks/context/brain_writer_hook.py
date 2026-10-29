@@ -106,17 +106,26 @@ def _parse_transcript_for_markers(transcript_path: str, max_markers: int) -> lis
 
 def _destination() -> dict | None:
     from hooks._brain_http import brain_http_enabled
+    from hooks.context import brain_routes
     from hooks.context.brain_adapter import brain_id
     from scripts.swarm import brain_binding
+    from scripts.swarm_v2.keyspace import brain_identity
 
     binding = brain_binding.current(os.environ)
-    if binding is None:
-        return (
-            {"brain": brain_id(), "audience": "personal", "reference": "BRAIN_HTTP_TOKEN"}
-            if brain_http_enabled()
-            else None
-        )
-    return {"brain": brain_id(), "audience": "swarm", "reference": binding.get("api_env", "")}
+    if binding is not None:
+        api = binding.get("api", "") if binding.get("status") == brain_binding.BOUND else ""
+        return {"brain": brain_identity(url=api), "audience": "swarm", "reference": binding.get("api_env", "")}
+    if not brain_http_enabled():
+        return None
+    try:
+        route = brain_routes.resolve(os.environ)
+    except brain_routes.Refused:
+        route = None
+    return {
+        "brain": brain_id(),
+        "audience": "personal",
+        "reference": route["token_env"] if route else "BRAIN_HTTP_TOKEN",
+    }
 
 
 def _scoped_outbox(outbox: Path, destination: dict | None) -> Path:

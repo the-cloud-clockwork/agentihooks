@@ -255,3 +255,41 @@ def test_a_changed_client_reference_never_replays_the_old_reference_markers(brai
     client(monkeypatch, SWARM, swarm=True, reference="SWARM_BRAIN_API_TOKEN_NEXT")
     assert writer._drain_outbox(str(brains.outbox)) == 0
     assert brains.received[SWARM] == []
+
+
+def test_a_personal_marker_records_its_route_credential_reference(brains, monkeypatch):
+    from hooks.context import brain_routes
+
+    route = {"route": "work", "api": PERSONAL, "token_env": "WORK_BRAIN_TOKEN"}
+    monkeypatch.setattr(brain_routes, "resolve", lambda environ: route)
+    monkeypatch.setattr(brain_http, "brain_http_enabled", lambda: True)
+    client(monkeypatch, PERSONAL)
+    brains.down.add(PERSONAL)
+    writer._write_to_outbox([MARKER], "personal-session", str(brains.outbox))
+    [written] = [json.loads(f.read_text()) for f in brains.outbox.rglob("*.json")]
+    assert written["destination"] == {
+        "brain": brain_adapter.brain_id(),
+        "audience": "personal",
+        "reference": "WORK_BRAIN_TOKEN",
+    }
+    brains.down.clear()
+
+    route["token_env"] = "WORK_BRAIN_TOKEN_NEXT"
+    assert writer._drain_outbox(str(brains.outbox)) == 0
+    route["token_env"] = "WORK_BRAIN_TOKEN"
+    assert writer._drain_outbox(str(brains.outbox)) == 1
+    assert brains.received[PERSONAL] == [(LESSON, written["idempotency_key"])]
+
+
+def test_a_refused_binding_never_lands_markers_on_the_personal_path(brains, monkeypatch):
+    client(monkeypatch, SWARM)
+    refused = {"status": brain_binding.REFUSED, "reason": "no binding", "api_env": "SWARM_BRAIN_API_TOKEN"}
+    monkeypatch.setenv(brain_binding.VARIABLE, json.dumps(refused))
+    writer._write_to_outbox([MARKER], "swarm-session", str(brains.outbox))
+    [folder] = [f.parent.name for f in brains.outbox.rglob("*.json")]
+    assert folder == "swarm-none"
+
+    monkeypatch.setattr(brain_http, "brain_http_enabled", lambda: True)
+    client(monkeypatch, PERSONAL)
+    assert writer._drain_outbox(str(brains.outbox)) == 0
+    assert brains.received[PERSONAL] == []

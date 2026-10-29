@@ -22,7 +22,7 @@ MARKER = {"type": "lesson", "content": "test lesson", "attrs": {"scope": "x"}}
 
 
 def _queued(root, pattern):
-    return [f for f in root.rglob(pattern) if "_home" not in f.relative_to(root).parts]
+    return [f for f in root.rglob(pattern) if f != root / "_home" / ".agentihooks" / "installation.json"]
 
 
 @pytest.fixture
