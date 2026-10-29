@@ -573,6 +573,7 @@ def preflight_client(sent: list, refusal=None) -> type:
     return Api
 
 
+@pytest.mark.wall_clock
 def test_a_refused_write_preflight_fails_the_gate_before_the_timed_window(monkeypatch):
     body = b'{"error": {"code": "invalid_operation", "message": "the thread is not on this ledger"}}'
     sent = []
