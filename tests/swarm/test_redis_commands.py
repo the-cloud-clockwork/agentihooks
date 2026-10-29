@@ -702,6 +702,17 @@ def test_the_hive_stores_are_opened_where_auth_and_the_registry_open_them():
     assert (registry.opener, registry.skipped) == ("scripts.hive.hive_state:records", ())
 
 
+def test_store_keys_open_each_store_as_redis_backed():
+    from types import SimpleNamespace
+
+    from scripts.hive import hive_state
+
+    store = redis_commands.Store(
+        "x", lambda: SimpleNamespace(_current=hive_state.on_redis(), _revision="r", _history="h:")
+    )
+    assert redis_commands.store_keys(store)[0] is True
+
+
 STATE_FILES = {
     "scripts/events/__init__.py": "",
     "scripts/events/bus.py": "class StateStore:\n    def get(self, key): ...\n\n    def watch(self, key): ...\n",
