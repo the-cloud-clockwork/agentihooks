@@ -106,11 +106,15 @@ def _document(state, key="entries"):
 
 
 def test_the_redis_backend_opens_the_named_bucket(monkeypatch):
-    opened = Mock()
+    from scripts.events import redis_state
+    from scripts.swarm import store
+
+    client, opened = Mock(), Mock()
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
-    monkeypatch.setattr(scheduler_state.state, "open_state", opened)
+    monkeypatch.setattr(store, "redis_client", lambda: client)
+    monkeypatch.setattr(redis_state, "RedisStateStore", opened)
     assert scheduler_state.open_scheduler_state("scheduler-member") is opened.return_value
-    opened.assert_called_once_with("scheduler-member")
+    opened.assert_called_once_with(client, "scheduler-member")
 
 
 def test_a_bus_store_is_read_without_a_legacy_lookup():
