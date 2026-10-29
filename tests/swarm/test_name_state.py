@@ -72,6 +72,17 @@ def test_row_makes_the_whole_number_fields_integers():
     assert name_state.row({}) is None
 
 
+def test_read_many_reads_every_key_at_once_where_the_store_can():
+    class Many:
+        def get(self, key):
+            raise AssertionError("one read per key")
+
+        def get_many(self, keys):
+            return [StateEntry(key, b"1", 1) for key in keys]
+
+    assert name_state.read_many(Many(), ["a", "b"]) == [StateEntry("a", b"1", 1), StateEntry("b", b"1", 1)]
+
+
 def test_read_many_falls_back_to_one_read_per_key():
     class Single:
         def get(self, key):
@@ -87,8 +98,11 @@ def test_on_redis_the_store_is_the_names_hash_of_the_same_client(client, on_redi
     assert RedisStateStore(client, "names").get("k").value == b"1"
 
 
-def test_on_the_bus_the_names_bucket_opens_once(bus):
+def test_on_the_bus_the_names_bucket_opens_once(bus, monkeypatch):
+    opened = []
+    monkeypatch.setattr(name_state.state, "open_state", lambda bucket: opened.append(bucket) or bus.state(bucket))
     first = name_state.shared_store(None)
+    assert opened == ["names"]
     assert name_state.shared_store(None) is first
     assert name_state._OPENED == {"names": first}
 
@@ -154,6 +168,7 @@ def test_many_reads_ask_legacy_once_for_the_parts_the_store_lacks(client, on_red
     asked = []
 
     def legacy(redis, missing):
+        assert redis is client
         asked.append(missing)
         return [f"old-{part}" for part in missing]
 
@@ -189,10 +204,23 @@ def test_restore_writes_each_row_over_what_the_store_holds(bus):
     assert names.get("seq", "c", _never) == {"engineer": 2}
 
 
-def test_redis_state_reads_many_keys_in_one_round_trip(client):
+def test_a_restored_removal_hides_the_legacy_value(client, on_redis):
+    names = NameState(client)
+    names.restore({state_key("alias", "x"): None})
+    assert names.get("alias", "x", lambda _: "old") is None
+
+
+def test_redis_state_reads_many_keys_in_one_round_trip(client, monkeypatch):
     store = RedisStateStore(client, "names")
     store.create("a", b"1")
+    expected = [store.get("a"), None]
+    reads = []
+    hmget = client.hmget
+    monkeypatch.setattr(client, "hget", lambda *a: reads.append("hget"))
+    monkeypatch.setattr(client, "hmget", lambda *a: reads.append("hmget") or hmget(*a))
     assert store.get_many([]) == []
-    assert store.get_many(["a", "b"]) == [store.get("a"), None]
+    assert reads == []
+    assert store.get_many(["a", "b"]) == expected
+    assert reads == ["hmget"]
     assert store.watch_key == store._current
     assert client.hget(store.watch_key, "a") is not None

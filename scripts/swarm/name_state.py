@@ -109,4 +109,4 @@ class NameState:
 
     def restore(self, rows: dict[str, Any]) -> None:
         for key, found in rows.items():
-            self.write(key, lambda _, found=found: found, lambda _: None)
+            self.write(key, lambda _, found=found: found, lambda _: MISSING)
