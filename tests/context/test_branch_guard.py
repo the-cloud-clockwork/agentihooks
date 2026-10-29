@@ -80,6 +80,7 @@ class TestBranchGuard:
 
     def test_checkout_dev(self):
         self._assert_allowed("git checkout dev")
+        assert "dev"
 
     def test_checkout_feature_blocked_without_signal(self):
         self._assert_blocked("git checkout -b feature/new-thing")
