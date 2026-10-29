@@ -449,13 +449,14 @@ class NameRegistry:
                 raise NamingError(f"alias {old} already belongs to {held}")
             return KEEP if held == new else new
 
-        self._amend("alias", old, point, self._legacy_alias(old))
+        point(self._get("alias", old, self._legacy_alias(old)))
         self._amend(
             "aliases-of",
             new,
             lambda held: KEEP if old in (held or []) else sorted({*(held or []), old}),
             self._legacy_aliases_of(new),
         )
+        self._amend("alias", old, point, self._legacy_alias(old))
 
     def aliases(self, name, reader=None):
         name = self.resolve(name, reader)
