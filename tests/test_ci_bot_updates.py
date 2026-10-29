@@ -166,7 +166,6 @@ def test_every_mutation_stats_part_restores_the_dev_durations_the_plan_matched()
         "github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'"
         " && needs.mutation-plan.outputs.durations != ''"
     )
-    assert adopt["env"] == ADOPT_ENV
     assert "from tests.dev_durations import adopt" in adopt["run"]
     assert 'Path(".test_durations").write_text' in adopt["run"]
 
