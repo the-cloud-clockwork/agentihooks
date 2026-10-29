@@ -704,6 +704,10 @@ def test_a_script_that_launches_gh_and_names_a_runner_in_data_passes(tmp_path, m
         "os.system('$(which pytest) -q')",
         "os.system('uv run --extra dev pytest')",
         "os.system('pytest tests/context')",
+        "os.system('pytest 2>&1')",
+        "os.system('pytest > out.log')",
+        "os.system('pytest>out.log')",
+        "os.system('pytest .')",
     ],
 )
 def test_a_gh_reader_that_also_launches_a_runner_is_blocked(launch, tmp_path, monkeypatch):
