@@ -132,11 +132,13 @@ def test_done_closes_the_task_and_marks_the_agent_finished(env, monkeypatch):
 
 
 def test_done_refuses_distributed_task_before_proof_or_ledger_mutations(env, monkeypatch):
+    from scripts.swarm import fencing
+
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
-    store.redis.set(store.key("sw", "task-authority", "t1"), "{}")
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({"t1": {}}))
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("provider read"))
     assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 1
     assert ledger.rows["t1"]["state"] == "claimed"
