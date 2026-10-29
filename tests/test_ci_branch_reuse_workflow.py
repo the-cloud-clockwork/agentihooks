@@ -547,6 +547,8 @@ def test_sonar_carries_the_branch_coverage_only_on_same_repo_pull_requests(value
 def test_a_selected_leg_uploads_its_coverage_once(values, database, uploaded):
     upload = _step("unit-selected", "Upload coverage")
     assert _step("unit-selected", "Upload this leg's branch coverage")["id"] == "upload-branch-coverage"
+    assert _step("unit-selected", "Stamp coverage with its attempt")["if"] == upload["if"]
+    assert "coverage-attempt" in upload["with"]["path"]
     condition = upload["if"].replace("hashFiles('.coverage')", repr(database))
     assert _evaluate(condition, {"matrix.python-version": "3.12", **values}) is uploaded
 
@@ -570,14 +572,23 @@ def test_sonar_takes_each_selected_legs_newest_branch_coverage_as_its_shard(tmp_
     assert download["with"]["pattern"] == "branch-coverage-3.12-*"
     assert names.index("Download shard coverage") < names.index(take["name"]) < names.index("Merge shard coverage")
     temp = tmp_path / "temp"
-    for name, text in (("1-1", "old"), ("1-2", "new"), ("12-1", "twelve"), ("3-2", "branch"), ("5-1", "stale")):
+    branches = (
+        ("1-1", "old"),
+        ("1-2", "new"),
+        ("12-1", "twelve"),
+        ("3-2", "branch"),
+        ("5-1", "stale"),
+        ("7-1", "older"),
+    )
+    for name, text in branches:
         (temp / "branch-shards" / f"branch-coverage-3.12-{name}").mkdir(parents=True)
         (temp / "branch-shards" / f"branch-coverage-3.12-{name}" / ".coverage").write_text(text)
     (temp / "branch-shards/branch-coverage-3.12-5-2").mkdir(parents=True)
     (temp / "branch-shards/branch-coverage-3.12-5-2/elapsed.json").write_text("{}")
-    for leg, text in (("3", "attempt one"), ("5", "uploaded")):
+    for leg, text, attempt in (("3", "attempt one", "1"), ("5", "uploaded", "1"), ("7", "fresh", "2")):
         (tmp_path / f".coverage-shards/coverage-3.12-{leg}").mkdir(parents=True)
         (tmp_path / f".coverage-shards/coverage-3.12-{leg}/.coverage").write_text(text)
+        (tmp_path / f".coverage-shards/coverage-3.12-{leg}/coverage-attempt").write_text(f"{attempt}\n")
     result = subprocess.run(
         ["bash", "-c", take["run"]],
         cwd=tmp_path,
@@ -591,6 +602,7 @@ def test_sonar_takes_each_selected_legs_newest_branch_coverage_as_its_shard(tmp_
         "coverage-3.12-12": "twelve",
         "coverage-3.12-3": "branch",
         "coverage-3.12-5": "uploaded",
+        "coverage-3.12-7": "fresh",
     }
 
 

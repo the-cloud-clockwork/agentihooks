@@ -1898,13 +1898,18 @@ jobs:
           jq -r 'select(.crashes) | "::warning title=Worker crash::\(.test) crashed its worker \(.crashes) time(s) in run \(.run)"' flakes.jsonl
 
       # Sonar takes a leg's branch coverage in its place, so a same-repo leg uploads its database once.
+      - name: Stamp coverage with its attempt
+        if: &upload-selected-coverage matrix.python-version == '3.12' && (steps.upload-branch-coverage.outcome != 'success' || hashFiles('.coverage') == '')
+        run: echo "$GITHUB_RUN_ATTEMPT" > coverage-attempt
+
       - name: Upload coverage
-        if: matrix.python-version == '3.12' && (steps.upload-branch-coverage.outcome != 'success' || hashFiles('.coverage') == '')
+        if: *upload-selected-coverage
         uses: ./.github/actions/retry-upload
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.leg }}
           path: |
             .coverage
+            coverage-attempt
             js-coverage/
           include-hidden-files: true
           if-no-files-found: error
@@ -2193,7 +2198,7 @@ jobs:
         uses: actions/download-artifact@v4
         with: *sonar-download-selected-branch-coverage
 
-      # A leg's newest attempt with a database supersedes the shard an older attempt uploaded.
+      # A leg's newest branch database supersedes a shard an older attempt uploaded.
       - name: Take each selected leg's branch coverage as its shard coverage
         if: *selected-branch-coverage
         shell: bash
@@ -2208,6 +2213,8 @@ jobs:
             [[ -z "${seen[$leg]:-}" ]] || continue
             seen[$leg]=1
             [[ -f "$name/.coverage" ]] || continue
+            uploaded=$(cat "$shards/coverage-3.12-$leg/coverage-attempt" 2>/dev/null || echo 0)
+            (( ${rest##*-} > uploaded )) || continue
             rm -rf "$shards/coverage-3.12-$leg"
             mv "$name" "$shards/coverage-3.12-$leg"
           done < <(find . -mindepth 1 -maxdepth 1 -type d -name 'branch-coverage-3.12-*' -printf '%f\n' | sort -t- -k5,5nr)
