@@ -86,7 +86,7 @@ def test_hive_credential_work_that_cannot_start_in_time_is_refused_busy(monkeypa
     assert ran == []
     assert refused[0].status == 503
     assert refused[0].envelope() == {
-        "error": {"code": "busy", "message": "The ledger is busy with other hive credential requests; retry shortly"}
+        "error": {"code": "busy", "message": "The ledger is busy with other hive credential requests"}
     }
 
 

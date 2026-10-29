@@ -210,6 +210,4 @@ def test_a_token_request_while_every_hive_permit_is_held_answers_busy(live, hive
     with every_permit_held():
         status, reply = mint(live, grant, WORKER)
     assert status == 503
-    assert reply == {
-        "error": {"code": "busy", "message": "The ledger is busy with other hive credential requests; retry shortly"}
-    }
+    assert reply == {"error": {"code": "busy", "message": "The ledger is busy with other hive credential requests"}}
