@@ -177,13 +177,14 @@ def test_an_update_that_keeps_the_status_keeps_its_state_since(store):
     from dataclasses import replace
 
     store.create(config())
-    store.put_agent("smoke", AgentRecord("owner", "eng", "t1", started_at=1_000))
-    [current] = store.agents("smoke")
-    store.redis.hset(store.key("smoke", "state-since"), "owner", 1)
+    current = store.start_execution(
+        "smoke", AgentRecord(store.next_name("smoke", "eng"), "eng", "t1", seat="eng-1@smoke", started_at=1_000)
+    )
+    store.redis.hset(store.key("smoke", "state-since"), current.name, 1)
 
     store.execution_registry.update("smoke", replace(current, model="opus"))
 
-    assert store.redis.hget(store.key("smoke", "state-since"), "owner") == "1"
+    assert store.redis.hget(store.key("smoke", "state-since"), current.name) == "1"
 
 
 def race_at_multi(store, monkeypatch, change):

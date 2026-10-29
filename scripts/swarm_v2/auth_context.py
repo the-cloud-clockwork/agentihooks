@@ -288,7 +288,7 @@ class LaunchAuthority:
 
         claims = self._verify(slug, token)
         doc = fencing.read(self.store, slug)
-        registration = _registered(doc, claims["execution_id"])
+        registration = self.registration(slug, claims["execution_id"])
         if registration is None or registration.grant_id != claims["grant_id"]:
             self.refuse(slug, "unauthenticated", "launch grant is not registered")
         if doc["grants"][registration.grant_id]["state"] == "revoked":
