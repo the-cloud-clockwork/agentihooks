@@ -125,3 +125,21 @@ def test_a_forgiven_failed_pool_keeps_its_preparation_time_on_the_budget(store, 
     assert runtime.tried == ["t1", "t2"]
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
     assert ledger.rows["t3"]["state"] == "open"
+
+
+def test_time_before_the_first_launch_never_holds_back_a_filling_pool(store, monkeypatch):
+    from scripts.swarm import tick as tick_module
+
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), PooledLaunches()
+    clock = _slow_launches(monkeypatch, runtime, 0)
+    stop = tick_module._spawn_stop
+
+    def slow_stop(*args):
+        clock[0] += 30.0
+        return stop(*args)
+
+    monkeypatch.setattr(tick_module, "_spawn_stop", slow_stop)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert sorted(task for _, _, task in runtime.spawned) == ["t1", "t2", "t3"]
+    assert not any("launch budget" in action for action in actions)

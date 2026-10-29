@@ -1161,7 +1161,8 @@ class _LaunchClock:
         self.preparations, self.preparing = 0, 0.0
 
     def spent(self, task, batch):
-        spent, charged = time.monotonic() - self.begun - self.free, self.tried - self.forgiven
+        charged = self.tried - self.forgiven
+        spent = time.monotonic() - self.begun - self.free if charged else self.preparing
         launches = spent / charged if charged and not batch else 0.0
         preparing = self.preparing / self.preparations if self.preparations else 0.0
         if self.preparations and spent + max(launches, preparing) >= SPAWN_BUDGET_S:
