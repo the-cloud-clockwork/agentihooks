@@ -72,7 +72,6 @@ def test_the_live_home_schedules_maintenance_and_reports_a_failed_start(repo, mo
         return subprocess.CompletedProcess(args, 1 if failed else 0, "", "no scheduler" if failed else "")
 
     monkeypatch.setattr(maintenance, "_live_home", lambda: True)
-    monkeypatch.setattr(maintenance.shutil, "which", lambda name: f"/usr/bin/{name}" if name == "crontab" else None)
     monkeypatch.setattr(maintenance, "git", fake)
     report = maintenance.maintain([repo.primary], act=True)
     assert ("maintenance", "start") in calls and ("maintenance", "register") not in calls
@@ -80,42 +79,28 @@ def test_the_live_home_schedules_maintenance_and_reports_a_failed_start(repo, mo
     assert report[0]["loose"] is None and report[0]["packs"] is None
 
 
-def test_a_live_home_without_systemd_or_crontab_skips_maintenance_without_calling_git(repo, monkeypatch):
-    calls = []
-
+def test_a_live_home_whose_git_finds_no_scheduler_reports_maintenance_skipped(repo, monkeypatch):
     def fake(path, *args, timeout=120):
-        calls.append(args)
+        if args[0] == "maintenance":
+            message = "fatal: neither systemd timers nor crontab are available"
+            return subprocess.CompletedProcess(args, 128, "", message)
         return subprocess.CompletedProcess(args, 0, "count: 4\npacks: 2", "")
 
     monkeypatch.setattr(maintenance, "_live_home", lambda: True)
-    monkeypatch.setattr(maintenance.shutil, "which", lambda name: None)
     monkeypatch.setattr(maintenance, "git", fake)
     report = maintenance.maintain([repo.primary], act=True)
-    assert [call for call in calls if call[0] == "maintenance"] == []
     assert report == [
         {"path": str(repo.primary), "registered": False, "outcome": maintenance.NO_SCHEDULER, "loose": 4, "packs": 2}
     ]
 
 
-def test_a_live_home_with_only_systemctl_still_starts_maintenance(repo, monkeypatch):
-    calls = []
-
-    def fake(path, *args, timeout=120):
-        calls.append(args)
-        return subprocess.CompletedProcess(args, 0, "count: 0\npacks: 0", "")
-
-    monkeypatch.setattr(maintenance, "_live_home", lambda: True)
-    monkeypatch.setattr(maintenance.shutil, "which", lambda name: "/usr/bin/systemctl" if name == "systemctl" else None)
-    monkeypatch.setattr(maintenance, "git", fake)
-    assert maintenance.register(repo.primary) == "registered"
-    assert calls == [("maintenance", "start")]
-
-
-def test_a_registration_off_the_live_home_ignores_the_missing_scheduler(repo, monkeypatch):
+def test_a_registration_off_the_live_home_with_the_scheduler_error_still_fails(repo, monkeypatch):
+    message = "fatal: neither systemd timers nor crontab are available"
     monkeypatch.setattr(maintenance, "_live_home", lambda: False)
-    monkeypatch.setattr(maintenance.shutil, "which", lambda name: None)
-    assert maintenance.register(repo.primary) == "registered"
-    assert str(repo.primary.resolve()) in _registered()
+    monkeypatch.setattr(
+        maintenance, "git", lambda path, *args, timeout=120: subprocess.CompletedProcess(args, 128, "", message)
+    )
+    assert maintenance.register(repo.primary) == f"failed: {message}"
 
 
 def test_a_git_error_is_reported_without_aborting_the_sweep(repo, monkeypatch):
@@ -190,7 +175,7 @@ def test_setup_marks_a_host_without_a_scheduler_as_skipped_not_failed(monkeypatc
     monkeypatch.setattr(maintenance, "discover", lambda roots: [])
     skipped = [{"path": "/r/a", "registered": False, "outcome": maintenance.NO_SCHEDULER, "loose": 1, "packs": 0}]
     monkeypatch.setattr(maintenance, "maintain", lambda paths, act: skipped)
-    assert maintenance.setup() == ["[--] git maintenance skipped: no systemd timers or crontab on this host for /r/a"]
+    assert maintenance.setup() == ["[--] git maintenance skipped: no scheduler on this host for /r/a"]
 
 
 def test_gc_prints_the_object_backlog_per_checkout(monkeypatch, capsys):

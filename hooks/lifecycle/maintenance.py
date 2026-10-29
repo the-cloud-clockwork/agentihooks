@@ -1,4 +1,3 @@
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -8,7 +7,8 @@ from hooks.lifecycle.lease import admin_dir
 from hooks.lifecycle.timer import _live_home
 from hooks.lifecycle.worktrees import discover
 
-NO_SCHEDULER = "skipped: no systemd timers or crontab on this host"
+NO_SCHEDULER_ERROR = "neither systemd timers nor"
+NO_SCHEDULER = "skipped: no scheduler on this host"
 
 
 def primaries(worktrees: list[Path]) -> list[Path]:
@@ -39,10 +39,12 @@ def objects(primary: Path) -> dict:
 
 def register(primary: Path) -> str:
     live = _live_home()
-    if live and not (shutil.which("systemctl") or shutil.which("crontab")):
-        return NO_SCHEDULER
     result = git(primary, "maintenance", "start" if live else "register")
-    return "registered" if result.returncode == 0 else f"failed: {result.stderr.strip()}"
+    if result.returncode == 0:
+        return "registered"
+    if live and NO_SCHEDULER_ERROR in result.stderr:
+        return NO_SCHEDULER
+    return f"failed: {result.stderr.strip()}"
 
 
 def _entry(primary: Path, registered: bool, act: bool) -> dict:
