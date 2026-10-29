@@ -416,6 +416,12 @@ def test_an_existing_class_that_gains_a_method_is_graded(tmp_path):
     assert _grade(tmp_path, {"scripts/tools.py": GROUPED}, head) == (1, [_groups("scripts/tools.py::Tools")])
 
 
+def test_an_existing_class_that_renames_a_method_is_graded(tmp_path):
+    before = "class Tools:\n    def run(self) -> int:\n        return 1\n"
+    head = {"scripts/tools.py": before.replace("def run", "def go")}
+    assert _grade(tmp_path, {"scripts/tools.py": before}, head) == (1, [_groups("scripts/tools.py::Tools")])
+
+
 def _impl(name: str, methods: str, bases: str = "") -> str:
     return f"class {name}{bases}:\n    def __init__(self) -> None:\n        self.n = 1\n{methods}\n\n"
 
