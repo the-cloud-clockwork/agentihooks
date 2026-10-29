@@ -76,10 +76,10 @@ def edit(world, rel, **extra):
 
 
 @pytest.mark.parametrize("field", ["title", "description"])
-def test_task_text_rewrite_requires_a_fresh_trace(world, tmp_path, field):
+def test_task_text_rewrite_requires_a_fresh_trace(world, field):
     task = {"id": TASK, "title": "Build the doghouse", "description": "Keep the dog warm"}
     doc = {"tasks": [task]}
-    legacy_page.store(tmp_path / "ledgers", SLUG, doc)
+    legacy_page.store(world.repo.parent / "ledgers", SLUG, doc)
     world.plan()
     pieces = trace_plan.parse(DOGHOUSE, TASK)
     record = trace_plan.load(world.folder)
@@ -87,7 +87,7 @@ def test_task_text_rewrite_requires_a_fresh_trace(world, tmp_path, field):
     trace_plan.save(world.folder, record)
     assert edit(world, "doghouse/light/lamp.py").allowed
     task[field] += " rewritten"
-    legacy_page.store(tmp_path / "ledgers", SLUG, doc)
+    legacy_page.store(world.repo.parent / "ledgers", SLUG, doc)
     decision = edit(world, "doghouse/light/lamp.py")
     assert not decision.allowed
     assert "no verdict for its current text" in decision.reason

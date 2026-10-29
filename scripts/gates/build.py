@@ -110,7 +110,7 @@ def _patch_targets(call, key):
     return [target.strip() for target in found] or [call.tool_input.get(key)]
 
 
-def plan_areas(folder: Path, who: Who, registered: tuple[str, ...], intent: dict) -> tuple[str, str | list[str]]:
+def plan_areas(folder: Path, who: Who, registered: tuple[str, ...], state: dict) -> tuple[str, str | list[str]]:
     """(pass, the kept pieces' areas), (unchecked, []) or (fail, the refusal)."""
     trace = f"agentihooks swarm {who.swarm} trace-plan"
     try:
@@ -123,7 +123,7 @@ def plan_areas(folder: Path, who: Who, registered: tuple[str, ...], intent: dict
     except ValueError as exc:
         return trace_plan.FAIL, f"build gate: {exc}, then run {trace}"
     record = trace_plan.load(folder)
-    if record.get("plan_hash") != trace_plan.plan_hash(pieces, intent):
+    if record.get("plan_hash") != trace_plan.plan_hash(pieces, state):
         return trace_plan.FAIL, f"build gate: plan.md has no verdict for its current text. Run {trace}"
     if record["verdict"] == trace_plan.UNCHECKED:
         return trace_plan.UNCHECKED, []
