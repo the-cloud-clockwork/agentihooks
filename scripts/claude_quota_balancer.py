@@ -702,11 +702,15 @@ def _metric(value: float | None) -> float:
     return -1.0 if value is None else value
 
 
+def refused(result: ProbeResult) -> bool:
+    return result.provider_status in ("rejected", REVOKED)
+
+
 def account_cap(
     result: ProbeResult, now: float | None = None, include_fable: bool = False, ceiling: int | None = None
 ) -> int | None:
     """Live sessions the account may hold under the session bands; None without a full reading."""
-    if result.provider_status in ("rejected", REVOKED):
+    if refused(result):
         return 0
     timestamp = time.time() if now is None else now
     weeks = [result.seven_day, *([result.fable] if include_fable else [])]
