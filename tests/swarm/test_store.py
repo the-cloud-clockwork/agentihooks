@@ -173,6 +173,24 @@ def test_a_projection_that_keeps_racing_is_refused_after_five_attempts(store, mo
     assert len(raced) == 5
 
 
+def test_a_projection_retries_when_the_agent_list_changes_under_it(store, monkeypatch):
+    store.create(config())
+    owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
+    original, calls = store._project_row, []
+
+    def racing(pipe, slug, agent, previous):
+        calls.append(agent.name)
+        if len(calls) == 1:
+            store.redis.hset(store.key(slug, "agents"), "other", "{}")
+        original(pipe, slug, agent, previous)
+
+    monkeypatch.setattr(store, "_project_row", racing)
+    store.project_agent("smoke", owner)
+
+    assert calls == ["owner", "owner"]
+    assert store.redis.hexists(store.key("smoke", "agents"), "owner")
+
+
 def test_an_update_that_keeps_the_status_keeps_its_state_since(store):
     from dataclasses import replace
 

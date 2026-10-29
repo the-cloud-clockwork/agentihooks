@@ -61,3 +61,16 @@ def test_an_imported_execution_without_launch_details_reads_as_empty(store):
     [agent] = ExecutionRegistry(store).agents("fixture")
 
     assert (agent.hive, agent.transport, agent.remote_control) == ("", "", {})
+
+
+def test_latest_keeps_the_highest_generation_and_lets_a_later_seat_row_break_a_tie():
+    from scripts.swarm.execution import latest
+
+    rows = [
+        {"seat": "s", "name": "a", "generation": 2, "row": 1},
+        {"seat": "s", "name": "a", "generation": 1, "row": 2},
+        {"seat": "s", "name": "a", "generation": 2, "row": 3},
+    ]
+
+    assert latest(rows, "seat") == {"s": rows[2]}
+    assert latest(rows, "name") == {"a": rows[0]}
