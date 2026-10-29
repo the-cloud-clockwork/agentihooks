@@ -92,6 +92,16 @@ def _done_urls(events, tasks, span):
     return [tasks[tid]["pr_url"] for tid in done if tasks.get(tid, {}).get("pr_url")]
 
 
+def doctor_findings(store, slug):
+    from scripts.doctor.priming import doctor_slug
+
+    doctor = doctor_slug(slug)
+    if store.peer(doctor) != slug or not store.redis.hget(store.key(doctor, "doctor-timer"), "last"):
+        return None
+    raw = store.redis.hgetall(store.key(doctor, "doctor-findings"))
+    return {finding_id: json.loads(record) for finding_id, record in raw.items()}
+
+
 def load(store, ledger, slug, span, run=subprocess.run, home=SWARM_HOME):
     state = ledger.state(slug)
     events = state.get("_meta", {}).get("events", [])
@@ -106,4 +116,5 @@ def load(store, ledger, slug, span, run=subprocess.run, home=SWARM_HOME):
         corrections=_timed(injection_trace.corrections()),
         pulls=pulls(store.redis, slug, _done_urls(events, tasks, span), run),
         inbox=read.inbox_items(InboxStore(store.redis), slug),
+        doctor_findings=doctor_findings(store, slug),
     )

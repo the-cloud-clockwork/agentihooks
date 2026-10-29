@@ -403,6 +403,7 @@ def test_rates_names_every_coordination_failure():
         "stale claim",
         "premature completion",
         "inbox no outcome",
+        "telemetry stale",
     ]
 
 
