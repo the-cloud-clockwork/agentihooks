@@ -5,6 +5,7 @@ import time
 from dataclasses import asdict, replace
 from pathlib import Path
 
+from scripts.swarm import successor_retry
 from scripts.swarm.store import SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError
 
@@ -94,9 +95,10 @@ def read(job: dict, now_ms: int) -> Placed | None:
 
 
 def pending(store, slug: str, launch, placed: Placed) -> None:
-    store.redis.hset(
-        store.key(slug, KEY), launch.record.name, json.dumps({"task": launch.task, "placed": asdict(placed)})
-    )
+    entry = {"task": launch.task, "placed": asdict(placed)}
+    if launch.task.get("handoff"):
+        entry["primed"] = launch.primed
+    store.redis.hset(store.key(slug, KEY), launch.record.name, json.dumps(entry))
     store.record_launch(slug, launch.record, STATE)
 
 
@@ -129,6 +131,17 @@ def completed(picked: Placed, placed: Placed) -> Placed:
     )
 
 
+def _failure(exc: Exception, picked: Placed, name: str) -> SpawnError:
+    error = exc if isinstance(exc, SpawnError) else SpawnError(str(exc))
+    if not error.harness:
+        error.harness = picked.harness
+    if not error.pane_id:
+        from scripts.swarm.runtime import _opened_pane
+
+        error.pane_id = _opened_pane(name, picked.launch_job["started_at"])
+    return error
+
+
 def collect(run) -> tuple[list[str], set[str]]:
     from scripts.swarm import tick as engine
     from scripts.swarm_v2.runtime import codex
@@ -153,13 +166,11 @@ def collect(run) -> tuple[list[str], set[str]]:
                 placed = codex.complete(run.config, name, placed, run.runtime.reap_name)
                 launched = codex.admit_legacy(run.store, run.slug, engine.placed_record(agent, placed), run.runtime)
         except Exception as exc:
-            error = exc if isinstance(exc, SpawnError) else SpawnError(str(exc))
-            if not error.harness:
-                error.harness = picked.harness
-            if not error.pane_id:
-                from scripts.swarm.runtime import _opened_pane
-
-                error.pane_id = _opened_pane(name, picked.launch_job["started_at"])
+            said, error = successor_retry.relaunch(run, agent, saved, _failure(exc, picked, name))
+            if said:
+                actions.append(said)
+                waiting.add(name)
+                continue
             run.runtime.reap_name(name)
             actions += engine._spawn_failed(
                 run.slug, run.store, run.ledger, run.runtime, run.rows, engine.Failed(agent, task, error), run.now_ms

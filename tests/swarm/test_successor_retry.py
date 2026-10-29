@@ -137,3 +137,102 @@ def test_a_retried_workstation_successor_reopens_at_the_end_of_its_first_launch_
     tick("sw", store, ledger, runtime, now_ms=301_000)
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
     assert store.launch_failure("sw", "t1") == "workstation launch job timed out"
+
+
+def test_steered_moves_both_avoid_fields_to_the_failed_harness_and_marks_the_retry():
+    from scripts.swarm.successor_retry import RETRIED, steered
+
+    primed = {"id": "t1", "transfer": {"avoid_harness": "codex", "reason": "exit"}}
+    assert steered(primed, "claude") == {
+        "id": "t1",
+        "avoid_harness": "claude",
+        RETRIED: True,
+        "transfer": {"avoid_harness": "claude", "reason": "exit"},
+    }
+    assert primed["transfer"]["avoid_harness"] == "codex"
+    assert steered({"id": "t1", "transfer": {}}, "codex") == {
+        "id": "t1",
+        "transfer": {},
+        "avoid_harness": "codex",
+        RETRIED: True,
+    }
+
+
+@pytest.mark.parametrize(
+    "task,primed,error,harness",
+    [
+        ({"handoff": "h"}, {}, SpawnError("refused", harness="codex"), "codex"),
+        ({}, {}, SpawnError("refused", harness="codex"), ""),
+        ({"handoff": "h"}, {"successor_retried": True}, SpawnError("refused", harness="codex"), ""),
+        ({"handoff": "h"}, {}, RuntimeError("refused"), ""),
+        ({"handoff": "h"}, {}, None, ""),
+        ({"handoff": "h"}, {}, SpawnError("down", "unavailable", harness="codex"), ""),
+    ],
+)
+def test_due_names_the_harness_only_for_a_first_refused_successor_spawn(task, primed, error, harness):
+    from scripts.swarm.successor_retry import due
+
+    assert due(task, primed, error) == harness
+
+
+def test_note_holds_the_failed_pane_and_records_the_failure_without_a_reaper(store):
+    from scripts.swarm import failed_panes
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.successor_retry import note
+
+    record = AgentRecord("engineer@x-1", "eng", "t1")
+    said = note("sw", store, object(), record, SpawnError("route refused", pane_id="w:p4", harness="codex"), 9)
+    assert said == "retrying engineer@x-1 for t1 away from codex after: route refused"
+    held = {"w:p4": {"agent": "engineer@x-1", "task": "t1", "failed_at": 9, "reason": ""}}
+    assert failed_panes.held(store, "sw") == held
+    assert (store.launch_failure("sw", "t1"), store.failed_harness("sw", "t1")) == ("route refused", "codex")
+
+
+def _relaunch_run(store, tmp_path, spawn):
+    from types import SimpleNamespace
+
+    from scripts.swarm.store import AgentRecord, SwarmConfig
+
+    result = tmp_path / "engineer.json"
+    result.write_text("{}")
+    saved = {
+        "task": {"id": "t1", "handoff": "h"},
+        "primed": {"id": "t1", "handoff": "h"},
+        "placed": {"launch_job": {"path": str(result), "started_at": 1000}},
+    }
+    runtime = SimpleNamespace(spawn=spawn, reap_name=lambda name: True)
+    run = SimpleNamespace(slug="sw", store=store, runtime=runtime, config=SwarmConfig("sw", "/repo", 1, 1), now_ms=5)
+    return run, AgentRecord("engineer", "eng", "t1"), saved, result
+
+
+@pytest.mark.parametrize(
+    "spawned,message,status,harness",
+    [
+        (Placed("w:p1", "codex"), "a retried successor launch ran outside a workstation job", "refused", "codex"),
+        (RuntimeError("boom"), "boom", "refused", ""),
+        (SpawnError("down", "unavailable", harness="codex"), "down", "unavailable", "codex"),
+    ],
+)
+def test_a_failed_relaunch_returns_its_own_error_for_the_reopen(store, tmp_path, spawned, message, status, harness):
+    from scripts.swarm.successor_retry import relaunch
+
+    def spawn(config, lane, name, task):
+        if isinstance(spawned, Exception):
+            raise spawned
+        return spawned
+
+    run, agent, saved, result = _relaunch_run(store, tmp_path, spawn)
+    said, error = relaunch(run, agent, saved, SpawnError("route refused", harness="claude"))
+    assert said == ""
+    assert (str(error), error.status, error.harness) == (message, status, harness)
+    assert not result.exists()
+    assert not store.redis.hgetall(store.key("sw", launch_job.KEY))
+
+
+def test_relaunch_leaves_a_job_without_a_saved_launch_to_the_reopen(store, tmp_path):
+    from scripts.swarm.successor_retry import relaunch
+
+    run, agent, saved, result = _relaunch_run(store, tmp_path, None)
+    first = SpawnError("route refused", harness="claude")
+    assert relaunch(run, agent, {**saved, "primed": {}}, first) == ("", first)
+    assert result.exists()
