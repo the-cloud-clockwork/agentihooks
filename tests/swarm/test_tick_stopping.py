@@ -42,3 +42,18 @@ def test_stopping_keeps_an_awaiting_decision_seat_while_a_master_can_decide(stor
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     assert store.config("sw").state == "stopping"
     assert {a.name for a in store.agents("sw")} == {ENGINEER, "master@a1b2c3-0002"}
+
+
+def test_a_finished_master_left_after_a_refused_retire_does_not_keep_the_awaiting_seat(store):  # noqa: F811
+    master = "master@a1b2c3-0002"
+    runtime, ledger = FakeRuntime(), tasks(("t1", "eng"))
+    runtime.stuck.add(master)
+    store.put_agent("sw", _awaiting(ENGINEER, "eng", "t1"))
+    store.put_agent("sw", AgentRecord(master, MASTER, MASTER, state="finished", started_at=1))
+    store.update("sw", state="stopping")
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert store.config("sw").state == "stopping"
+    assert [a.name for a in store.agents("sw")] == [master]
+    runtime.stuck.clear()
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert store.config("sw").state == "stopped"

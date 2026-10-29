@@ -1926,7 +1926,7 @@ def _settle(slug, config, store, ledger, rows, doc):
 
 
 def _end_undecided(slug, store, ledger, rows, agents):
-    if any(a.lane == MASTER for a in agents):
+    if any(a.lane == MASTER and a.state != "finished" for a in agents):
         return agents
     for agent in agents:
         if agent.state == resume.AWAITING:
