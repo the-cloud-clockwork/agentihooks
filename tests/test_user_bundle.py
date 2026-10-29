@@ -46,7 +46,7 @@ def test_a_link_records_the_owner_of_the_bundles_origin(trees):
 
     state = _state()
     assert state["bundle"]["owner"] == "the-owner"
-    assert state["user_bundle"]["owner"] == ""
+    assert "owner" not in state["user_bundle"]
 
 
 def test_unlinking_the_user_bundle_keeps_the_root_and_its_files(trees):

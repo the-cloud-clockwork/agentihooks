@@ -724,3 +724,40 @@ class TestHookProcess:
         )
         assert proc.returncode == code, proc.stderr
         assert ("[condition stop-idle.sh] your task is still claimed" in proc.stderr) == (code == 2)
+
+
+def _origin(folder: Path, url: str) -> Path:
+    folder.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=folder, check=True)
+    subprocess.run(["git", "remote", "add", "origin", url], cwd=folder, check=True)
+    return folder
+
+
+@pytest.fixture
+def stranger_repo(tmp_path, monkeypatch):
+    monkeypatch.setattr("hooks.config.CONDITIONS_TRUSTED_OWNERS", "")
+    return _origin(tmp_path / "stranger", "git@github.com:stranger/x.git")
+
+
+@pytest.mark.parametrize("recorded", ["stranger", "Stranger"])
+def test_a_bundle_out_of_sight_lends_its_recorded_owner_to_trust(stranger_repo, tmp_path, recorded):
+    state = {"bundle": {"path": str(tmp_path / "absent"), "owner": recorded}}
+    assert conditions.directory_trust(stranger_repo, state) == (True, "stranger")
+
+
+@pytest.mark.parametrize("link", [{"owner": "other"}, {"owner": ""}, {}])
+def test_a_bundle_out_of_sight_without_the_repo_owner_recorded_refuses(stranger_repo, tmp_path, link):
+    state = {"bundle": {"path": str(tmp_path / "absent"), **link}}
+    assert conditions.directory_trust(stranger_repo, state) == (False, "stranger")
+
+
+def test_a_visible_bundle_decides_by_its_remote_over_the_recorded_owner(stranger_repo, tmp_path):
+    bundle = _origin(tmp_path / "bundle", "git@github.com:other/bundle.git")
+    state = {"bundle": {"path": str(bundle), "owner": "stranger"}}
+    assert conditions.directory_trust(stranger_repo, state) == (False, "stranger")
+
+
+def test_no_profile_state_trusts_only_a_listed_owner(stranger_repo, monkeypatch):
+    assert conditions.directory_trust(stranger_repo, {}) == (False, "stranger")
+    monkeypatch.setattr("hooks.config.CONDITIONS_TRUSTED_OWNERS", "someone, Stranger")
+    assert conditions.directory_trust(stranger_repo, {}) == (True, "stranger")

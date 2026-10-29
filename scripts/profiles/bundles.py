@@ -104,9 +104,10 @@ def link(bundle_dir: Path | None, user: bool = False) -> None:
 
     state[key] = {
         "path": str(bundle_dir),
-        "owner": conditions._remote_owner(bundle_dir) or "",
         "linked_at": datetime.now(timezone.utc).isoformat(),
     }
+    if not user:
+        state[key]["owner"] = conditions._remote_owner(bundle_dir) or ""
 
     _i._save_state(state)
 
