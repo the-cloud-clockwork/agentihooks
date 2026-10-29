@@ -87,9 +87,9 @@ def test_a_change_that_leaves_the_sorted_document_alone_writes_nothing(state):
 
     scheduler = Scheduler(state, machine="proof")
     key = scheduler.name("entries")
-    state.create(key, b'{"retired": {}, "entries": {}}')
+    written = state.create(key, b'{"retired": {}, "entries": {}}')
     assert scheduler.change(lambda document: "kept") == "kept"
-    assert state.get(key).value == b'{"retired": {}, "entries": {}}'
+    assert (state.get(key).value, state.get(key).revision) == (b'{"retired": {}, "entries": {}}', written)
 
 
 def test_a_scheduler_write_that_never_settles_is_refused(state, monkeypatch):

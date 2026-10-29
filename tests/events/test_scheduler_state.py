@@ -192,6 +192,9 @@ def test_a_migration_that_never_settles_is_refused(redis_state, monkeypatch):
 
 
 def test_a_redis_wake_keeps_only_the_latest_delivery(redis_state):
+    redis_state.redis.rpush("wake:key", "s1", "s2", "s3")
+    scheduler_state.wake(redis_state, "wake:key", "d0")
+    assert redis_state.redis.lrange("wake:key", 0, -1) == ["d0"]
     for delivery in ("d1", "d2", "d3"):
         scheduler_state.wake(redis_state, "wake:key", delivery)
     assert redis_state.redis.lrange("wake:key", 0, -1) == ["d3"]
