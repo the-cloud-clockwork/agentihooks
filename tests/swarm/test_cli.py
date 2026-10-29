@@ -1120,13 +1120,8 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     assert timer.ensure("/bin/agentihooks", tmp_path, run=run)
     calls.clear()
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    names = [
-        "agentihooks-scheduler.service",
-        "agentihooks-inbox-waker.service",
-        "agentihooks-quota-prober.service",
-        "agentihooks-tick-watch.service",
-        "agentihooks-swarm-waits.timer",
-    ]
+    names = [f"agentihooks-{name}" for name in ("scheduler.service", "inbox-waker.service", "quota-prober.service")]
+    names += ["agentihooks-tick-watch.service", "agentihooks-swarm-waits.timer"]
     assert calls == [(["systemctl", "--user", "is-enabled", "--quiet", name], kw) for name in names]
 
     calls.clear()
