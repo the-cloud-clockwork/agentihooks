@@ -1898,7 +1898,7 @@ jobs:
 
       # Sonar takes a leg's branch coverage in place of this artifact, so a leg uploads its database once.
       - name: Upload coverage
-        if: matrix.python-version == '3.12' && (github.base_ref != 'dev' || github.event.pull_request.head.repo.full_name != github.repository || hashFiles('branch-record/record.json') == '')
+        if: matrix.python-version == '3.12' && (github.base_ref != 'dev' || github.event.pull_request.head.repo.full_name != github.repository || hashFiles('branch-record/record.json') == '' || hashFiles('.coverage') == '')
         uses: ./.github/actions/retry-upload
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.leg }}

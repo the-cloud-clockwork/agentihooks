@@ -563,18 +563,24 @@ def test_combine_adds_every_carried_branch_database_that_holds_data(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("values", "recorded", "uploaded"),
+    ("values", "recorded", "measured", "uploaded"),
     [
-        ({}, True, False),
-        ({}, False, True),
-        ({"github.base_ref": "main"}, True, True),
-        ({"github.event.pull_request.head.repo.full_name": "fork/r"}, True, True),
+        ({}, True, True, False),
+        ({}, False, True, True),
+        ({}, True, False, True),
+        ({"github.base_ref": "main"}, True, True, True),
+        ({"github.event.pull_request.head.repo.full_name": "fork/r"}, True, True, True),
     ],
 )
-def test_a_selected_leg_uploads_its_coverage_once_when_its_branch_coverage_carries_it(values, recorded, uploaded):
+def test_a_selected_leg_uploads_its_coverage_once_when_its_branch_coverage_carries_it(
+    values, recorded, measured, uploaded
+):
     step = _step("unit-selected", "Upload coverage")
-    hashed = repr("abc" if recorded else "")
-    condition = step["if"].replace("hashFiles('branch-record/record.json')", hashed)
+    condition = (
+        step["if"]
+        .replace("hashFiles('branch-record/record.json')", repr("abc" if recorded else ""))
+        .replace("hashFiles('.coverage')", repr("def" if measured else ""))
+    )
     assert _evaluate(condition, {**SAME_REPO, "matrix.python-version": "3.12", **values}) is uploaded
     assert not _evaluate(condition, {**SAME_REPO, "matrix.python-version": "3.13", **values})
 
