@@ -163,7 +163,7 @@ from scripts.swarm.store import redis_client
 
 client = redis_client()
 member = os.environ["MEMBER_ID"]
-assert client.exists(f"{auth.PREFIX}:member:{member}")
+assert auth.member(client, member) is not None
 [sent] = InboxStore(client, world=member).pending_items("master@proof")
 assert relay.relay(client) == []
 assert InboxStore(client, world=member).get(sent.id).reason == relay.FOREIGN_SENDER

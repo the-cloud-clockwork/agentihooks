@@ -571,3 +571,58 @@ def test_a_message_check_reads_the_ledger_of_the_swarm_it_names(monkeypatch):
     monkeypatch.setattr(ledger_client, "LedgerClient", Client)
 
     assert master_fence._ledger_state(SLUG) == {"slug": SLUG}
+
+
+def test_a_refilled_seat_leaves_the_front_door_the_claimants_its_retirement_handed_over(world):
+    table = masters.MasterSeats(world.redis)
+    assert table.owners(SLUG, world.doc())["p2"] == SECOND
+    world.down(SECOND_NAME)
+    table.retire(SLUG, SECOND, 1)
+    assert table.owners(SLUG, world.doc()) == {"p1": LEAD, "p2": LEAD}
+
+    table.keep_retired(SLUG, 2, 2)
+    world.seat(world.store.names.next(SLUG, "master"), SECOND)
+
+    assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD, SECOND]
+    assert table.owners(SLUG, world.doc()) == {"p1": SECOND, "p2": LEAD}
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+    assert world.refusals() == 0
+
+
+def test_a_retirement_leaves_its_phase_notice_to_the_retire_handoff_and_records_what_it_handed(world):
+    table = masters.MasterSeats(world.redis)
+    table.owners(SLUG, world.doc())
+    world.down(SECOND_NAME)
+
+    table.retire(SLUG, SECOND, 1)
+    table.owners(SLUG, world.doc())
+
+    assert inbox(world).inbox(LEAD) == []
+    assert json.loads(world.redis.hget(table.key(SLUG), masters.HANDED)) == ["p2"]
+
+
+def test_a_rebalance_tells_both_masters_each_phase_that_changes_owner(world):
+    table = masters.MasterSeats(world.redis)
+    world.redis.hset(
+        table.key(SLUG), mapping={"owners": json.dumps({"p1": LEAD, "p2": LEAD}), "seats": json.dumps([LEAD])}
+    )
+
+    assert table.owners(SLUG, world.doc()) == {"p1": LEAD, "p2": SECOND}
+    table.owners(SLUG, world.doc())
+
+    text = f"Master phase owners of swarm {SLUG} changed: p2 moved from {LEAD} to {SECOND}."
+    assert [item.text for item in inbox(world).inbox(LEAD)] == [text]
+    assert [item.text for item in inbox(world).inbox(SECOND)] == [text]
+
+
+def test_one_owner_change_item_names_every_moved_phase_and_skips_uncounted_seats(world):
+    gone = f"master-3@{SLUG}"
+    moved = {"p1": (gone, LEAD), "p2": (gone, LEAD)}
+
+    masters.tell(world.redis, SLUG, moved, [LEAD, SECOND])
+
+    text = (
+        f"Master phase owners of swarm {SLUG} changed: p1 moved from {gone} to {LEAD}; p2 moved from {gone} to {LEAD}."
+    )
+    assert [item.text for item in inbox(world).inbox(LEAD)] == [text]
+    assert inbox(world).inbox(gone) == inbox(world).inbox(SECOND) == []
