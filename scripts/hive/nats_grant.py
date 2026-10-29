@@ -59,9 +59,12 @@ MEMBER_PUBLISH = (
     *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets.NAMES),
     *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets.NAMES),
 )
+SCHEDULER_BUCKET = "scheduler"
+SCHEDULER_STREAM_VERBS = ("INFO", "MSG.GET", "CREATE")
 CONTROLLER_BUCKETS = (
     *buckets.NAMES,
     *slots.BUCKETS,
+    SCHEDULER_BUCKET,
     "hub-versions",
     "hub-leases",
     "hub-hive-loss",
@@ -143,6 +146,18 @@ def swarm_publish(swarm: str) -> list[str]:
     ]
 
 
+def scheduler_publish(member: str, swarms: tuple[str, ...] | None) -> list[str]:
+    bucket = f"{SCHEDULER_BUCKET}-{member}"
+    if swarms is None:
+        return [f"$KV.{bucket}.>", *(f"$JS.API.STREAM.{verb}.KV_{bucket}" for verb in SCHEDULER_STREAM_VERBS)]
+    streams = [
+        name
+        for swarm in swarms
+        for name in (subjects.stream_name(swarm, f"STATE_{bucket}"), legacy_stream_name(swarm, f"STATE_{bucket}"))
+    ]
+    return [f"$JS.API.STREAM.{verb}.{stream}" for stream in streams for verb in SCHEDULER_STREAM_VERBS]
+
+
 def from_environ(environ: Mapping[str, str]) -> Signer | None:
     path = environ.get(SIGNER_ENV)
     if not path:
@@ -204,13 +219,15 @@ def user_claims() -> dict:
 
 
 def member_claims(user: str, swarms: tuple[str, ...] | None = None, member: str = ANY_HIVE) -> dict:
+    own = [] if member == ANY_HIVE else scheduler_publish(member, swarms)
     if swarms is None:
         return {
             **user_claims(),
-            "pub": {"allow": [*MEMBER_PUBLISH, f"{subjects.SLOTS}.*.{member}"]},
+            "pub": {"allow": [*MEMBER_PUBLISH, f"{subjects.SLOTS}.*.{member}", *own]},
             "sub": {"allow": [f"{subjects.inbox(user)}.>"]},
         }
     publish = [subject for swarm in swarms for subject in (*swarm_publish(swarm), subjects.slot_request(swarm, member))]
+    publish += own
     return {
         **user_claims(),
         "pub": {"allow": publish} if publish else {"deny": [">"]},
