@@ -11,6 +11,7 @@ import re
 import secrets
 import subprocess
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
 from scripts.events import state
@@ -272,9 +273,12 @@ class NameRegistry:
     """Global: each swarm code with its swarm, ledger and repo, and each name with its type, number, session and
     spawn and retire times."""
 
-    def __init__(self, redis, mint=None, shared=None):
+    def __init__(self, redis, mint=None):
         self.redis, self.mint = redis, mint or (lambda: _mint())
-        self.names_state = NameState(redis, shared)
+
+    @cached_property
+    def names_state(self):
+        return NameState(self.redis)
 
     @staticmethod
     def key(*parts):
