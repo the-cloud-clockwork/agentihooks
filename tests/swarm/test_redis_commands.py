@@ -690,6 +690,69 @@ def test_a_moved_credentials_store_moves_its_published_keys(monkeypatch):
     ]
 
 
+def test_the_hive_registry_store_keys_name_the_probe_hive():
+    base = f"{ROOT}:swarm:state:hive-probe"
+    keys = redis_commands.store_keys(redis_commands.STORES["hive registry"])
+    assert keys == [f"{base}:current", f"{base}:revision", f"{base}:history:probe"]
+
+
+STATE_FILES = {
+    "scripts/events/__init__.py": "",
+    "scripts/events/bus.py": "class StateStore:\n    def get(self, key): ...\n\n    def watch(self, key): ...\n",
+    "scripts/events/redis_state.py": """
+class RedisStateStore:
+    def __init__(self, redis: "Redis"):
+        self.redis = redis
+
+    def get(self, key):
+        return self.redis.hget("current", key)
+
+    def watch(self, key):
+        with self.redis.pipeline() as pipe:
+            pipe.watch("current")
+            pipe.multi()
+            pipe.rpush("history", key)
+            pipe.execute()
+
+    def get_many(self, keys):
+        return self.redis.hmget("current", keys)
+""",
+}
+
+
+def test_a_store_publishes_its_keys_and_protocol_commands_where_its_opener_is_reached(monkeypatch, tree):
+    from types import SimpleNamespace
+
+    for name, text in STATE_FILES.items():
+        (tree / name).write_text(text)
+    opened = SimpleNamespace(_current="s:current", _revision="s:revision", _history="s:history:")
+    monkeypatch.setattr(
+        redis_commands,
+        "CONSUMERS",
+        {
+            "app": redis_commands.Consumer("worker", ("scripts.app:later",)),
+            "skipper": redis_commands.Consumer("worker", ("scripts.app:later",)),
+        },
+    )
+    monkeypatch.setattr(
+        redis_commands,
+        "STORES",
+        {
+            "kept": redis_commands.Store("scripts.app:later", lambda: opened, ("skipper",)),
+            "unopened": redis_commands.Store("scripts.pkg.deep.leaf:main", lambda: opened),
+        },
+    )
+    consumers = redis_commands.consumer_map("distributed", tree)["consumers"]
+    sender = "scripts.events.redis_state:RedisStateStore."
+    assert consumers["app"]["stores"] == {
+        "kept": {
+            "keys": ["s:current", "s:revision", "s:history:probe"],
+            "commands": {"HGET": [f"{sender}get"], "RPUSH": [f"{sender}watch"], "WATCH": [f"{sender}watch"]},
+        }
+    }
+    assert consumers["skipper"]["stores"] == {}
+
+
 def test_every_consumer_but_the_worker_reaches_redis(published):
     assert all(consumer["commands"] for name, consumer in published.items() if name != "worker")
 

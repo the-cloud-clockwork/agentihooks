@@ -31,6 +31,7 @@ CONSUMERS = {
     "hooks": Consumer("worker", ("hooks.hook_manager:main",)),
 }
 STATE_STORE = "scripts.events.redis_state:RedisStateStore."
+PROTOCOL = "scripts.events.bus:StateStore."
 KEYLESS = frozenset({"MULTI", "EXEC"})
 
 
@@ -72,7 +73,7 @@ def scheduler_keys(deployment: str) -> dict[str, str]:
 def store_keys(store: Store) -> list[str]:
     from scripts.hive import hive_state
 
-    with mock.patch.object(hive_state, "on_redis", return_value=True):
+    with mock.patch.object(hive_state, "on_redis", lambda: True):
         opened = store.open()
     return [opened._current, opened._revision, f"{opened._history}probe"]
 
@@ -82,7 +83,8 @@ def consumer_map(deployment: str, root: Path = ROOT) -> dict:
     keys of each hive state store it opens with the commands the store sends on them."""
     program = Program(parse(root))
     keys = scheduler_keys(deployment)
-    found = program.commands(unit for unit in program.units if unit.startswith(STATE_STORE))
+    protocol = tuple(STATE_STORE + unit.removeprefix(PROTOCOL) for unit in program.units if unit.startswith(PROTOCOL))
+    found = program.commands(program.reach(protocol))
     store_commands = {command: sorted(units) for command, units in sorted(found.items()) if command not in KEYLESS}
     consumers = {}
     for name, consumer in CONSUMERS.items():
