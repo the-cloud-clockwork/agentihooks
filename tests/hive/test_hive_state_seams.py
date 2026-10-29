@@ -406,8 +406,11 @@ def test_legacy_member_issuance_preserves_the_legacy_record(on_redis, client):
     assert client.hgetall(f"{auth.PREFIX}:member:m1") == before
     assert auth._store(client).get("member.m1") is None
     assert auth.agent_member(client, token, "alpha", "engineer@1") == "m1"
-    client.delete(f"{auth.PREFIX}:ledger:d")
+    auth.revoke(client, "m1")
     assert auth.agent_member(client, token, "alpha", "engineer@1") is None
+    assert auth.member(client, "m1") is None
+    assert auth._store(client).get("ledger.d").value == b""
+    assert auth._store(client).get("member.m1").value == b""
 
 
 @pytest.mark.parametrize("backend", ["bus", "on_redis"])
