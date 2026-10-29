@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from scripts.swarm import idle, outage, profile_choice, prompt, resume
+from scripts.swarm import fencing, idle, outage, profile_choice, prompt, resume
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.tick import Placed, SpawnError, tick
 from scripts.swarm_ledger import ledger_workspace
@@ -250,14 +250,13 @@ def test_a_new_task_generation_fences_the_recovery_pass(store):
         "generation": 1,
         "lease_deadline_ms": 20 * MINUTE,
     }
-    key = store.key("sw", "task-authority", agent.task)
-    store.redis.set(key, json.dumps(authority))
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({agent.task: authority}))
     outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
     rows = {task["id"]: task for task in ledger.state("sw")["tasks"]}
     resume.track_outages("sw", store, runtime, rows, 8 * MINUTE)
     assert resume.recovery_pending(store, "sw", agent)
     authority["generation"] += 1
-    store.redis.set(key, json.dumps(authority))
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({agent.task: authority}))
     outage.observe("sw", "provider", [], 9 * MINUTE)
     resume.recover_outages("sw", store, ledger, runtime, rows, 9 * MINUTE)
     assert not resume.recovery_pending(store, "sw", agent)
@@ -348,7 +347,7 @@ def test_an_owner_that_loses_its_task_drops_its_pending_recovery(store, tmp_path
             "generation": 0,
             "lease_deadline_ms": 20 * MINUTE if released else 10 * MINUTE,
         }
-        store.redis.set(store.key("sw", "task-authority", agent.task), json.dumps(authority))
+        fencing.write(store, "sw", lambda doc: doc["claims"].update({agent.task: authority}))
     resume.track_outages("sw", store, runtime, rows, 10 * MINUTE)
     assert recovery_state(store, agent.name) is None
     assert not resume.recovery_pending(store, "sw", agent)
@@ -391,7 +390,7 @@ def test_an_unchanged_owner_does_not_stop_rerecording_a_later_owner_with_a_new_i
         "generation": 1,
         "lease_deadline_ms": 20 * MINUTE,
     }
-    store.redis.set(store.key("sw", "task-authority", last.task), json.dumps(authority))
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({last.task: authority}))
     assert not resume.recovery_pending(store, "sw", last)
     resume.track_outages("sw", store, runtime, rows_of(ledger), 9 * MINUTE)
     assert resume.recovery_pending(store, "sw", agents[0])

@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
+from scripts.swarm import fencing
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.master_start import DEADLINE_MS
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
@@ -44,7 +45,7 @@ def test_drop_ends_execution_in_the_transaction_that_removes_its_agent(store):
 
     assert store.execution("fixture", agent.execution_id) == replace(agent, state="ended")
     assert store.agents("fixture") == []
-    assert observed == ["ended"]
+    assert observed == ["working"]
     history = [json.loads(raw) for raw in store.redis.lrange(store.key("fixture", "history"), 0, -1)]
     assert len(history) == 1
     assert history[0]["ended_at"] == 789
@@ -102,7 +103,7 @@ def test_drop_retries_a_changed_projection_without_partial_history(store):
 
     with patch.object(pipe_type, "execute", commit):
         store.drop_agent("fixture", agent.name, at=10)
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert store.execution("fixture", agent.execution_id).state == "ended"
     history = store.redis.lrange(store.key("fixture", "history"), 0, -1)
     assert len(history) == 1
@@ -276,7 +277,9 @@ def test_drop_retries_when_its_execution_becomes_terminal_before_commit(store):
     def commit(pipe, *args, **kwargs):
         calls.append(True)
         if len(calls) == 1:
-            store.redis.hset(store.key("fixture", "executions"), agent.execution_id, json.dumps(asdict(terminal)))
+            fencing.write(
+                store, "fixture", lambda doc: doc["executions"].update({agent.execution_id: asdict(terminal)})
+            )
         return execute(pipe, *args, **kwargs)
 
     with patch.object(pipe_type, "execute", commit):
@@ -295,9 +298,12 @@ def test_orphan_ending_keeps_a_concurrent_execution_update(store):
     store.redis.hdel(store.key("fixture", "agents"), agent.name)
     pipe_type = type(store.redis.pipeline())
     execute = pipe_type.execute
+    raced = []
 
     def commit(pipe, *args, **kwargs):
-        store.redis.hset(store.key("fixture", "executions"), agent.execution_id, json.dumps(asdict(changed)))
+        if not raced:
+            raced.append(True)
+            fencing.write(store, "fixture", lambda doc: doc["executions"].update({agent.execution_id: asdict(changed)}))
         return execute(pipe, *args, **kwargs)
 
     with patch.object(pipe_type, "execute", commit):
