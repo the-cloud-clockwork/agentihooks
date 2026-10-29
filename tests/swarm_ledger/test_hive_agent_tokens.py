@@ -7,6 +7,7 @@ import pytest
 from scripts.hive import auth
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger import ledger_authority as authority
+from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.api import routes
 from scripts.swarm_ledger.api.errors import APIError
 from tests.swarm_ledger.api_fakes import as_services
@@ -217,9 +218,12 @@ def test_a_page_route_with_a_hive_token_while_every_hive_permit_is_held_answers_
     from scripts.swarm_ledger import hive_work
     from tests.swarm_ledger.test_hive_work import every_permit_held
 
+    read = []
     monkeypatch.setattr(hive_work, "WAIT_S", 0.05)
+    monkeypatch.setattr(ledger_server, "swarm_status", lambda slug: read.append(slug))
     with every_permit_held():
         status, body, kind = send(
             live, "GET", f"/api/swarm/{SLUG}", **{"X-Ledger-Token": "hive.m.t", "X-Ledger-Agent": WORKER}
         )
     assert (status, body, kind) == (503, b"The ledger is busy with other hive credential requests", "text/plain")
+    assert read == []
