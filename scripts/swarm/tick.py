@@ -736,15 +736,15 @@ def _lost(slug, store, ledger, runtime, rows, agent, now_ms):
 def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
     """A remote agent is judged by its own runtime, never by this host's process table: no answer keeps it suspect,
     holding its claim, neither retired nor dropped."""
-    store.refresh(slug, agent.task, agent.name, LEASE_MS)
-    if runtime.observe(agent).state == "unknown":
+    timing.timed(store.refresh, slug, agent.task, agent.name, LEASE_MS)
+    if timing.timed(_observe, runtime, agent).state == "unknown":
         if agent.state == SUSPECT:
             return []
-        store.put_agent(slug, replace(agent, state=SUSPECT))
+        timing.timed(store.put_agent, slug, replace(agent, state=SUSPECT))
         return [f"suspect {agent.name}: its runtime did not answer"]
     if agent.state == SUSPECT:
         agent = replace(agent, state="working")
-        store.put_agent(slug, agent)
+        timing.timed(store.put_agent, slug, agent)
     return _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms)
 
 
@@ -813,10 +813,10 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     from scripts.swarm import automated_gc
 
     observed = timing.timed(_observe, runtime, agent)
-    if _refusal_due(slug, store, rows, agent, observed, now_ms):
+    if timing.timed(_refusal_due, slug, store, rows, agent, observed, now_ms):
         return _free_refused(slug, store, ledger, runtime, rows, agent, now_ms)
-    store.redis.set(store.key(slug, "pane-state", agent.name), observed.state, ex=idle_state.BEAT_TTL_S)
-    outage.mark_pane(store, slug, agent.name, observed.provider_error, now_ms)
+    timing.timed(store.redis.set, store.key(slug, "pane-state", agent.name), observed.state, ex=idle_state.BEAT_TTL_S)
+    timing.timed(outage.mark_pane, store, slug, agent.name, observed.provider_error, now_ms)
     if observed.provider_error and not observed.prompt_title and not observed.typed:
         observed = replace(observed, state=idle_state.IDLE)
     if observed.state == idle_state.WAITING:
@@ -825,46 +825,48 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         ticks = agent.input_ticks + 1 if same else 1
         input_wait.mark(store, slug, agent.name, now_ms, same)
         waiting = replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0)
-        store.put_agent(slug, waiting)
+        timing.timed(store.put_agent, slug, waiting)
         return master_questions.dismiss(slug, store, ledger, runtime, waiting, now_ms) if agent.lane == MASTER else []
     if agent.input_prompt:
         input_wait.clear(store, slug, agent.name)
         if agent.lane == MASTER:
             master_questions.drop(store, slug, agent.name)
     agent = replace(agent, input_prompt="", input_ticks=0)
-    held = outage.held(store, slug, agent.name)
-    exhausted = resume.recovery_exhausted(store, slug, agent)
-    pending = resume.recovery_pending(store, slug, agent)
-    if _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):
+    held = timing.timed(outage.held, store, slug, agent.name)
+    exhausted = timing.timed(resume.recovery_exhausted, store, slug, agent)
+    pending = timing.timed(resume.recovery_pending, store, slug, agent)
+    if timing.timed(_stuck_on_provider, slug, store, agent, observed, exhausted, now_ms):
         return _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms)
     claimant = rows.get(agent.task, {}).get("claimed_by") == agent.name
-    nudged = _stale_nudge(slug, store, agent, observed, pending, now_ms) if claimant else []
+    nudged = timing.timed(_stale_nudge, slug, store, agent, observed, pending, now_ms) if claimant else []
     if agent.lane == MASTER or (held and not exhausted):
-        store.put_agent(slug, agent)
+        timing.timed(store.put_agent, slug, agent)
         return nudged
     state = idle_state.verdict(
         observed.state,
-        idle_state.heartbeat(store.redis, slug, agent.name),
-        idle_state.wait(store.redis, slug, agent.name),
+        timing.timed(idle_state.heartbeat, store.redis, slug, agent.name),
+        timing.timed(idle_state.wait, store.redis, slug, agent.name),
         now_ms,
     )
     if state in {idle_state.WAITING, idle_state.WORKING}:
-        store.put_agent(slug, replace(agent, idle_ticks=0))
+        timing.timed(store.put_agent, slug, replace(agent, idle_ticks=0))
         return nudged
     if (
-        _operator_at_pane(slug, store, agent, observed, now_ms)
-        or ledger_probe.holding(store, slug)
-        or automated_gc.owned(slug, agent)
+        timing.timed(_operator_at_pane, slug, store, agent, observed, now_ms)
+        or timing.timed(ledger_probe.holding, store, slug)
+        or timing.timed(automated_gc.owned, slug, agent)
     ):
-        store.put_agent(slug, agent)
+        timing.timed(store.put_agent, slug, agent)
         return nudged
     idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
-    store.put_agent(slug, idle)
+    timing.timed(store.put_agent, slug, idle)
     who = Who(name=agent.name, task=agent.task)
-    gate_log.append(
-        slug, gate_log.Row.of(IDLE_TICKS, "count", who, reason=f"idle tick {idle.idle_ticks}", now_ms=now_ms)
+    timing.timed(
+        gate_log.append,
+        slug,
+        gate_log.Row.of(IDLE_TICKS, "count", who, reason=f"idle tick {idle.idle_ticks}", now_ms=now_ms),
     )
-    if resume.recovery_holds(store, slug, agent, now_ms):
+    if timing.timed(resume.recovery_holds, store, slug, agent, now_ms):
         return nudged
     if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, homes=reaper.scratch_homes(slug, idle.task)):
         why = f"; outage recovery could not proceed: {resume.recovery_blocker(store, slug, agent)}" if pending else ""
