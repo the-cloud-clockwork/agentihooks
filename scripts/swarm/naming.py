@@ -324,6 +324,11 @@ class NameRegistry:
     def key(*parts):
         return ":".join((PREFIX, *parts))
 
+    def watched(self, *parts):
+        """The Redis keys a transaction watches to see this registry key change, its legacy key and the store."""
+        shared = getattr(self.shared, "watch_key", None)
+        return [self.key(*parts), *([shared] if shared and self.legacy is not None else [])]
+
     def _views(self, reader):
         if reader is None or self.legacy is None:
             return self.shared, self.legacy

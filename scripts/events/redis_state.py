@@ -29,6 +29,10 @@ class RedisStateStore:
         self._revision = f"{base}:revision"
         self._history = f"{base}:history:"
 
+    @property
+    def watch_key(self) -> str:
+        return self._current
+
     def get(self, key: str) -> StateEntry | None:
         return _entry(key, self.redis.hget(self._current, key))
 
