@@ -88,7 +88,7 @@ _WRAPPER = (
     r"|rye|npx|pnpx|bunx|pnpm|yarn|npm|bun|xargs|sudo|nice|time|timeout|env|exec|run|command|nohup|stdbuf|coverage"
     r"|import|from|sh|bash|zsh|dash|ksh|which|type))"
 )
-_RUNNER_ARGS = r"(?=\s*$|\s*[;&|)<>`'\"]|\s+(?:-|\d*[<>]|(?:[^\s\d]\S*)?[/.:]|(?:\S*[/_.-])?tests?\b))"
+_RUNNER_ARGS = r"(?=\s*$|\s*[;&|)<>`'\"]|\s+(?:-|\d*[<>]|(?:[^\s\d]\S*)?[/.:]|(?:\S*[/_.-])?test))"
 _NAME_LITERAL = re.compile(r"([\"'`])\w+\1")
 _FORMAT_PREFIX = re.compile(r"(?i)(?<!\w)[rb]?f[rb]?$")
 _READERS = frozenset({"getsource", "getsourcelines", "getsourcefile", "getfile", "getdoc", "signature"})

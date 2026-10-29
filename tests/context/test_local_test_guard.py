@@ -708,6 +708,8 @@ def test_a_script_that_launches_gh_and_names_a_runner_in_data_passes(tmp_path, m
         "os.system('pytest > out.log')",
         "os.system('pytest>out.log')",
         "os.system('pytest .')",
+        "os.system('pytest tests_unit')",
+        "os.system('pytest testdir')",
         "os.system('python -W ignore -m pytest')",
         "os.system('python3 -X dev -B -m unittest discover')",
     ],
