@@ -155,17 +155,18 @@ def test_done_on_a_group_lead_closes_its_members_with_the_lead_pull_request(env,
     url = "https://github.com/o/r/pull/9"
     ledger.rows["t1"]["pr_url"] = url
     ledger.updates, slugs = [], []
-    original, listed = ledger.update_task, ledger.tasks
+    original, by_id = ledger.update_task, ledger.task
     ledger.update_task = lambda slug, task_id, fields, **kw: (
         ledger.updates.append((slug, task_id, kw["by"])) or original(slug, task_id, fields, **kw)
     )
-    ledger.tasks = lambda slug: slugs.append(slug) or listed(slug)
+    ledger.task = lambda slug, task_id: slugs.append((slug, task_id)) or by_id(slug, task_id)
+    ledger.tasks = lambda slug: pytest.fail("done read the whole tasks collection")
     assert run("sw", "done", "--finding", "one pull request") == 0
     assert (ledger.rows["t3"]["state"], ledger.rows["t3"]["pr_url"]) == ("done", url)
     assert ledger.rows["t3"]["proof"] == {"finding": "one pull request"}
     agent = "engineer@a1b2c3-0001"
     assert ledger.updates == [("sw", "t1", agent), ("sw", "t3", agent)]
-    assert set(slugs) == {"sw"}
+    assert {("sw", "t1"), ("sw", "t3"), ("sw", "t4")} <= set(slugs)
 
 
 def test_done_on_a_code_task_waits_for_its_pull_request_to_merge(env, monkeypatch, capsys):
