@@ -387,6 +387,47 @@ def test_a_run_already_handled_is_not_read_for_jobs_again(store):
     assert len(calls) == 1 and ledger.added == [] and ledger.raised == []
 
 
+def test_a_run_read_again_after_the_master_closed_its_alert_raises_no_fresh_alert(store):
+    ledger = Ledger()
+    refresh(store, ledger, gh([RED], JOBS))
+    ledger.close_alert(SLUG, ledger.alerts[0]["id"], "judged")
+    store.redis.delete(promotion_watch.key(SLUG, "seen"))
+    assert refresh(store, ledger, gh([RED], JOBS), NOW * 2) == []
+    assert len(ledger.raised) == 1
+
+
+def test_a_closed_alert_for_another_run_does_not_hold_a_run_whose_number_extends_it(store):
+    alert = {"id": "al-0", "source": "promotion", "state": "done", "text": "Dev promotion is red: push run 90 at x"}
+    ledger = Ledger(alerts=[alert])
+    refresh(store, ledger, gh([RED], [{"name": "lint", "conclusion": "cancelled"}]))
+    assert len(ledger.raised) == 1
+
+
+def test_a_job_newly_failing_on_a_run_whose_alert_was_closed_raises_an_alert_naming_it(store):
+    alert = {
+        "id": "al-0",
+        "source": "promotion",
+        "state": "done",
+        "text": f"Dev promotion is red: push run 900 at commit {SHA} failed in helm-kind. url",
+    }
+    ledger = Ledger([{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open"}], [alert])
+    store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-900-0", "helm-kind")
+    store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-900-1", "unit (3.11, 1)")
+    ledger.tasks.append({"id": "promo-900-1", "title": "Promotion red: unit", "state": "open"})
+    refresh(store, ledger, gh([RED], JOBS))
+    assert len(ledger.raised) == 1 and "unit (3.11, 1)" in ledger.raised[0][2]
+
+
+def test_a_former_owner_closed_alert_for_the_run_holds_it_too(store, monkeypatch):
+    text = f"Dev promotion is red: push run 900 at commit {SHA} failed. url"
+    former = Ledger(alerts=[{"id": "al-0", "source": "promotion", "text": text, "state": "done"}])
+    ledger = Ledger()
+    ledger.state = lambda slug: former.doc()
+    monkeypatch.setattr(promotion_watch.promotion_owner, "history", lambda repo, redis: {SLUG, "former"})
+    refresh(store, ledger, gh([RED], [{"name": "lint", "conclusion": "cancelled"}]))
+    assert ledger.raised == []
+
+
 @pytest.mark.parametrize("slug", ["proof-323133-cxc9-1", "proof-ed3ec8-t12-3"])
 def test_a_proof_swarm_never_reads_promotion_runs_or_files_fixers(store, slug):
     calls, ledger = [], Ledger()
