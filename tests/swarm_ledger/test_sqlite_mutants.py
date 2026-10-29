@@ -123,6 +123,17 @@ def test_release_reader_removes_and_closes_only_its_connection():
     other.close.assert_not_called()
 
 
+def test_release_reader_closes_a_connection_absent_from_the_held_map():
+    connection, other = Mock(), Mock()
+    held = {other: Mock()}
+
+    sqlite.release_reader(held, connection)
+
+    assert list(held) == [other]
+    connection.close.assert_called_once_with()
+    other.close.assert_not_called()
+
+
 def test_close_all_releases_every_reader_while_callbacks_remove_them():
     connections = [Mock(), Mock()]
     held = {
