@@ -110,6 +110,24 @@ def test_process_fails_closed_when_shared_memory_runs_low(tmp_path, monkeypatch)
     assert f"5000 {memory / 'browser'}\n" in log.read_text()
 
 
+def test_process_fails_closed_when_shared_memory_cannot_be_measured(tmp_path, monkeypatch):
+    memory = tmp_path / "shm"
+    memory.mkdir()
+    monkeypatch.setattr(runner, "SHARED_MEMORY", memory)
+    calls = []
+
+    def usage(path):
+        calls.append(path)
+        if len(calls) > 1:
+            raise OSError("gone")
+        return SimpleNamespace(free=4 * runner.MEMORY_FLOOR)
+
+    monkeypatch.setattr(runner.shutil, "disk_usage", usage)
+    log = tmp_path / "process.log"
+    assert run_process([sys.executable, "-c", "pass"], tmp_path, 10, log) == 1
+    assert "fell below" in log.read_text()
+
+
 def _two_groups(tmp_path):
     for path in ("hooks/sample.py", "scripts/ci_mutation/identity.py"):
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)

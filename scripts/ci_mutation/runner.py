@@ -45,23 +45,29 @@ def memory_usage(root: Path, depth: int = 6, top: int = 30) -> str:
 
 @contextmanager
 def memory_temp():
-    # SQLite fsyncs on every commit and schema step, which dominates ledger test time on runner disks.
     if not SHARED_MEMORY.is_dir() or shutil.disk_usage(SHARED_MEMORY).free < 4 * MEMORY_FLOOR:
         yield None
         return
     folder = Path(tempfile.mkdtemp(prefix="mutation-tmp-", dir=SHARED_MEMORY))
-    low, done = threading.Event(), threading.Event()
+    low: list[str] = []
+    done = threading.Event()
+
+    def check() -> None:
+        try:
+            free = shutil.disk_usage(folder).free
+        except OSError:
+            free = 0
+        if not low and free < MEMORY_FLOOR:
+            low.append(memory_usage(SHARED_MEMORY))
 
     def watch():
         while not done.wait(0.1):
-            if not low.is_set() and shutil.disk_usage(folder).free < MEMORY_FLOOR:
-                low.usage = memory_usage(SHARED_MEMORY)
-                low.set()
+            check()
 
     watcher = threading.Thread(target=watch, daemon=True)
     watcher.start()
     try:
-        yield folder, low
+        yield folder, low, check
     finally:
         done.set()
         watcher.join()
@@ -84,9 +90,11 @@ def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
             return None
-        if temp and temp[1].is_set():
-            stream.write(f"temporary folder {temp[0]} fell below {MEMORY_FLOOR} free bytes\n{temp[1].usage}\n")
-            return status or 1
+        if temp:
+            temp[2]()
+            if temp[1]:
+                stream.write(f"temporary folder {temp[0]} fell below {MEMORY_FLOOR} free bytes\n{temp[1][0]}\n")
+                return status or 1
         return status
 
 
