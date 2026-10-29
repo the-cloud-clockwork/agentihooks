@@ -41,7 +41,7 @@ def runner(*pages, total=None, code=0, jobs=None):
         if "/jobs?" in path:
             listed = (jobs or {}).get(int(path.split("/runs/")[1].split("/")[0]), [[]])
             page = listed[int(path.rsplit("page=", 1)[1]) - 1]
-            body = {"total_count": sum(map(len, listed)), "jobs": [{"conclusion": c} for c in page]}
+            body = {"total_count": sum(map(len, listed)), "jobs": [c if isinstance(c, dict) else {"name": "unit", "conclusion": c} for c in page]}
         elif "/commits/" in path:
             body = {"commit": {"committer": {"date": COMMITTED}}}
         else:
@@ -160,6 +160,22 @@ def test_a_head_with_no_group_run_since_it_landed_may_queue():
     run = runner([run_of(8, "failure"), run_of(7, None, run_id=2)])
     assert queue_exit.require_fresh(URL, "abc", run) is None
     assert run.calls == [["gh", "api", "repos/o/r/commits/abc"], ["gh", "api", FRESH]]
+
+@pytest.mark.parametrize("conclusion", ["failure", "timed_out", "startup_failure"])
+@pytest.mark.parametrize("name", ["Queue gate summary", "unit (3.12, 0)", "Gate — Required"])
+def test_a_cancelled_last_group_only_ignores_the_aggregate_cancellation_failure(name, conclusion):
+    jobs = [{"name": name, "conclusion": conclusion}, {"name": "unit (3.12, 1)", "conclusion": "cancelled"}]
+    run = runner([run_of(7, "cancelled", run_id=5)], jobs={5: [jobs]})
+    if name == "Queue gate summary" and conclusion == "failure":
+        assert queue_exit.require_fresh(URL, "abc", run) is None
+    else:
+        with pytest.raises(SwarmError, match="head abc failed its last merge group run"):
+            queue_exit.require_fresh(URL, "abc", run)
+    assert run.calls == [
+        ["gh", "api", "repos/o/r/commits/abc"],
+        ["gh", "api", FRESH],
+        ["gh", "api", jobs_path(5)],
+    ]
 
 
 def test_a_head_whose_last_group_had_a_failed_job_is_refused_naming_the_run():
