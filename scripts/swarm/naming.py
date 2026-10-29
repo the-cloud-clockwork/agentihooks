@@ -465,3 +465,20 @@ class NameRegistry:
             if row.get("type") == parsed.kind and not row.get("retired_at"):
                 return other
         return ""
+
+
+def registry():
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    return NameRegistry(redis) if redis is not None else None
+
+
+def registered_slug(name):
+    """The swarm of a name from the registry, None without one; raises when its alias cannot be read, where slug_of
+    would swallow the failure."""
+    names = registry()
+    if names is None:
+        return None
+    names.redis.get(names.key("alias", name))
+    return names.slug_of(name)

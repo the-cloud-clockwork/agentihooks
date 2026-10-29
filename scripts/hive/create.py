@@ -164,7 +164,7 @@ def _invite(tools: Tools, options: Options) -> str:
     listing = Listing(_signer_path(tools.environ), member_swarms.swarms(tools.redis, ()))
     member = _member(tools).get(invite.HIVE_ID)
     where = f"OpenBao {openbao_kv.MOUNT}/{tools.state['record']}"
-    if member and tools.redis.exists(f"{auth.PREFIX}:member:{member}"):
+    if member and auth.member(tools.redis, member) is not None:
         done = f"kept hive member {member} in {where}"
     elif options.dry_run:
         done, member = f"would mint a hive member into {where} like {options.like}", "the new member"
