@@ -208,14 +208,20 @@ def ledger_member(redis, credential: str) -> str | None:
 
 
 def issue_agent(redis, member_id: str, slug: str, name: str) -> str:
+    found = member(redis, member_id)
+    if found is None:
+        raise HiveError("Hive membership was revoked")
+    digest = found["ledger"]
+    store = _store(redis)
+    current = hive_state.read(store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}")))
+    if current != member_id:
+        raise HiveError("Hive membership was revoked")
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"
-
-    def record(current: dict | None) -> dict:
-        if current is None:
-            raise HiveError("Hive membership was revoked")
-        return {**current, "agents": {**current.get("agents", {}), _digest(token): [slug, name]}}
-
-    hive_state.amend(_store(redis), f"member.{member_id}", record, _legacy(redis, _legacy_member(member_id)))
+    key = f"agent.{member_id}.{_digest(token)}"
+    hive_state.amend(store, key, lambda _: {"ledger": digest, "scope": [slug, name]})
+    if agent_member(redis, token, slug, name) != member_id:
+        hive_state.amend(store, key, lambda _: None)
+        raise HiveError("Hive membership was revoked")
     return token
 
 
@@ -277,12 +283,15 @@ def revoke(redis, member_id: str) -> None:
     if not found:
         raise HiveError(f"no hive member {member_id}")
     store = _store(redis)
+    digest = found["ledger"]
     try:
-        hive_state.amend(store, f"ledger.{found['ledger']}", lambda _: None)
+        hive_state.amend(
+            store, f"ledger.{digest}", lambda _: None, _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
+        )
         hive_state.indexed(redis, member_id, False)
         redis_acl.drop(redis, f"hive-{member_id}")
         redis_acl.save(redis)
-        hive_state.amend(store, f"member.{member_id}", lambda _: None)
+        hive_state.amend(store, f"member.{member_id}", lambda _: None, _legacy(redis, _legacy_member(member_id)))
     except _refusals() as exc:
         raise HiveError(
             f"revoking {member_id} is incomplete and a Redis restart before it completes revives its Redis user; "
