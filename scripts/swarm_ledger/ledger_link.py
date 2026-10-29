@@ -9,6 +9,7 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
 
 from scripts.swarm_ledger import hosted_probe, ledger_route
@@ -84,7 +85,7 @@ def guard(url: str, headers: dict) -> None:
         )
 
 
-def reachable(url: str, environ=os.environ) -> bool:
+def reachable(url: str, environ: Mapping[str, str] = os.environ) -> bool:
     parts = urllib.parse.urlsplit(url)
     host = parts.hostname
     if str(host).endswith(CLUSTER_SUFFIXES) and not environ.get("KUBERNETES_SERVICE_HOST"):
