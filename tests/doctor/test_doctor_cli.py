@@ -738,7 +738,11 @@ def test_the_swarm_tick_closes_a_quiet_doctor_with_its_note(env, monkeypatch):
     doctor.main([WATCHED, "start"])
     detecting(monkeypatch)
     monkeypatch.setenv("AGENTIHOOKS_DOCTOR_QUIET_MINUTES", "0")
-    assert any("no new finding" in action for action in tick(store, rt))
+    from scripts.swarm import refresh_job
+
+    assert not any("no new finding" in action for action in tick(store, rt))
+    actions = refresh_job.refreshes(store, DOCTOR, FileLedger(), swarm_cli.now_ms())[0]()
+    assert any("no new finding" in action for action in actions)
     closed = state(DOCTOR)
     assert closed["closed_at"] and "two hours with no new finding" in closed["overview"]
     assert store.agents(DOCTOR) == [] and store.config(DOCTOR).state == "stopped"
@@ -811,6 +815,10 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
     assert STALE.id in sent(store) and UNTRACED.id not in sent(store)
     doctor.loop.reset(store, DOCTOR)
     scheduled(store, rt)
+    assert reads == [] and passes[1:] == []
+    from scripts.swarm import refresh_job
+
+    refresh_job.refreshes(store, DOCTOR, FileLedger(), swarm_cli.now_ms())[0]()
     assert len(reads) == 1 and passes[1:] == [every]
     assert UNTRACED.id in sent(store)
 

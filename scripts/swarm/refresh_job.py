@@ -52,10 +52,12 @@ def start(store, slug):
 
 def refreshes(store, slug, ledger, now_ms):
     from scripts.ci_budget import defects, flakes
+    from scripts.doctor import cli as doctor
     from scripts.swarm import ci_speed, grafana_alerts, langfuse, queue_priority
 
     config = store.config(slug)
-    return [
+    doctor_pass = [lambda: doctor.timer(store, slug, now_ms, True)] if config.template == "doctor" else []
+    return doctor_pass + [
         lambda: queue_priority.refresh(store, slug, ledger.state(slug)["tasks"], ledger),
         lambda: ci_speed.refresh(slug, config, store, now_ms),
         lambda: defects.refresh(slug, config, store, now_ms),

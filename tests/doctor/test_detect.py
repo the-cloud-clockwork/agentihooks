@@ -289,7 +289,8 @@ def test_the_health_detector_judges_only_what_the_current_health_pass_reports(mo
     assert seen[-1] == (store, "bare", "config of bare", [], [])
 
 
-def test_health_reuses_fresh_published_findings_without_recomputing(monkeypatch):
+@pytest.mark.parametrize("at", [1000, 301000])
+def test_health_reuses_fresh_published_findings_without_recomputing(monkeypatch, at):
     import json
 
     import fakeredis
@@ -300,7 +301,7 @@ def test_health_reuses_fresh_published_findings_without_recomputing(monkeypatch)
     store.redis.set(
         store.key("s", "published"), json.dumps({"status": {"last_tick": 1000, "findings": [{"id": "current"}]}})
     )
-    monkeypatch.setattr(detect.status, "now_ms", lambda: 301000)
+    monkeypatch.setattr(detect.status, "now_ms", lambda: at)
     assert detect.reported(store, object(), "s") == {"current"}
     store.redis.set(store.key("s", "published"), json.dumps({"status": {"last_tick": 1000, "findings": []}}))
     assert detect.reported(store, object(), "s") == set()
