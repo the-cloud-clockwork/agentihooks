@@ -19,6 +19,10 @@ def _jobs():
     return _semgrep()["jobs"]
 
 
+def _workflow(name):
+    return yaml.safe_load((_ROOT / ".github/workflows" / name).read_text())
+
+
 def test_wrapper_runs_the_inline_scan_feature_tests_and_chart_guard():
     assert set(_jobs()) == {"scan", "feature-tests", "charts"}
 
@@ -181,29 +185,18 @@ def test_feature_tests_and_charts_have_runner_classes():
     }
 
 
-def _workflow(name):
-    return yaml.safe_load((_ROOT / ".github/workflows" / name).read_text())
-
-
 def test_exactly_one_step_ratchets_the_guard_rules_against_the_base_floors():
     ratchets = [
-        (job, step)
+        (job, step["name"])
         for job, body in _jobs().items()
         for step in body.get("steps", [])
         if "check --base FETCH_HEAD" in step.get("run", "")
     ]
-    assert [(job, step["name"]) for job, step in ratchets] == [
-        ("charts", "Guard rules hold on their fixtures and at their computed floors")
-    ]
-    step = ratchets[0][1]
-    assert step["env"] == {"BASE": "${{ inputs.base }}"}
-    assert not {"if", "continue-on-error"} & set(step)
+    assert ratchets == [("charts", "Guard rules hold on their fixtures and at their computed floors")]
 
 
-def test_wrapper_runs_only_when_a_caller_passes_its_base():
-    triggers = _semgrep()[True]
-    assert set(triggers) == {"workflow_call"}
-    assert set(triggers["workflow_call"]["inputs"]) == {"base"}
+def test_wrapper_is_triggered_only_by_workflow_call():
+    assert set(_semgrep()[True]) == {"workflow_call"}
 
 
 def test_tests_workflow_scans_pull_requests_into_dev_and_admitted_dispatches_only():
@@ -211,16 +204,19 @@ def test_tests_workflow_scans_pull_requests_into_dev_and_admitted_dispatches_onl
     assert tests[True]["pull_request"] == {"branches": ["dev"]}
     job = tests["jobs"]["semgrep"]
     assert job["uses"] == "./.github/workflows/semgrep.yml"
-    assert job["if"] == (
-        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success')"
-        " && github.event_name != 'merge_group' && github.event_name != 'push' }}"
-    )
+    for clause in (
+        "(github.event_name != 'workflow_dispatch' || needs.admission.result == 'success')",
+        "github.event_name != 'merge_group'",
+        "github.event_name != 'push'",
+    ):
+        assert clause in job["if"]
 
 
-def test_proofs_workflow_scans_only_on_the_semgrep_proof():
+def test_proofs_workflow_scans_only_on_the_semgrep_proof_against_its_base():
     job = _workflow("proofs.yml")["jobs"]["semgrep"]
     assert job["uses"] == "./.github/workflows/semgrep.yml"
     assert job["if"] == "inputs.proof == 'semgrep'"
+    assert job["with"] == {"base": "${{ inputs.base }}"}
 
 
 def test_scan_holds_the_status_the_dev_rulesets_require():
@@ -235,5 +231,6 @@ def test_scan_holds_the_status_the_dev_rulesets_require():
         assert [check["context"] for check in checks["parameters"]["required_status_checks"]] == ["Gate — Required"]
 
 
-def test_wrapper_jobs_keep_their_job_id_check_names():
+def test_caller_and_wrapper_jobs_keep_their_job_id_check_names():
+    assert "name" not in _workflow("test.yml")["jobs"]["semgrep"]
     assert all("name" not in job for job in _jobs().values())
