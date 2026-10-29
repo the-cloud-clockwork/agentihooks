@@ -1,5 +1,5 @@
 {
-  "hooks/context/brain_adapter.py:hooks.context.brain_adapter.x__publish_entries__mutmut_8:3146b56615fb0b6d7c9264c34dbc3ebc3abd23efd543581c79ad999c7c5c6031": {
+  "hooks/context/brain_adapter.py:hooks.context.brain_adapter.x__publish_entries:3146b56615fb0b6d7c9264c34dbc3ebc3abd23efd543581c79ad999c7c5c6031": {
     "reader": "standards_reader",
     "reason": "The probe dict only feeds broadcast._msg_hash to key the in-run dedup map new_hashes; _msg_hash reads msg.get('channel') and the channel is constant within one run, so renaming the key collapses it to None for every entry and leaves the entry partition and insertion order unchanged."
   }
