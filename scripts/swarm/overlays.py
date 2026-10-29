@@ -1,6 +1,7 @@
 """Which overlays a swarm agent wears: the task's own list, else its base role's default in the swarm config."""
 
 import subprocess
+import sys
 
 import yaml
 
@@ -70,9 +71,10 @@ def revision() -> str:
     root = _head(bundle)
     if not root:
         return root
-    team = _head(shared) if shared is not None else None
+    team = _head(shared) if shared is not None else ""
     if shared is not None and not team:
-        return ""
+        print(f"WARNING: the shared bundle at {shared} has no commit to record; launching without it", file=sys.stderr)
+        shared = None
     mine = _head(user) if user is not None else ""
     if user is not None and not mine:
         return ""
