@@ -229,8 +229,8 @@ def test_status_ignores_coordination_messages_on_the_brain_channel(brain_env, mo
     monkeypatch.setattr(
         "hooks.context.broadcast._load_broadcasts",
         lambda cleanup=False: [
-            {"channel": adapter.feed_channel(), "source": "brain-adapter"},
-            {"channel": adapter.feed_channel(), "source": "mcp-channel"},
+            {"channel": f"brain@{adapter.brain_id()}", "source": "brain-adapter"},
+            {"channel": f"brain@{adapter.brain_id()}", "source": "mcp-channel"},
             {"channel": "brain@url-other", "source": "brain-adapter"},
         ],
     )

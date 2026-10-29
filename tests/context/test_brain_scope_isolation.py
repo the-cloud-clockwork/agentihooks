@@ -132,6 +132,20 @@ def test_a_route_change_never_republishes_the_old_brain_feed(brains, monkeypatch
     assert any("personal only" in m for m in feed_seen("personal-session"))
 
 
+def test_a_publish_retires_unscoped_feed_entries_left_by_an_older_install(brains, monkeypatch):
+    two_feeds(brains)
+    broadcast.reconcile_channel_broadcasts(
+        "brain", [{"message": "[Mine]\nlegacy personal", "source": "brain-adapter", "persistent": True}]
+    )
+    broadcast.create_broadcast("coordination", channel="brain")
+
+    publish(brains, monkeypatch, SWARM, swarm=True)
+
+    assert not any("legacy personal" in m for m in feed_seen("swarm-session"))
+    assert [m["message"] for m in broadcast._load_broadcasts() if m.get("channel") == "brain"] == ["coordination"]
+    assert broadcast.retire_channel_source("brain", "brain-adapter") == 0
+
+
 def test_a_wildcard_subscriber_never_reads_another_brain_feed(brains, monkeypatch):
     two_feeds(brains)
     publish(brains, monkeypatch, PERSONAL)

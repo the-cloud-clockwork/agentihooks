@@ -552,6 +552,16 @@ def reconcile_channel_broadcasts(channel: str, desired: list[dict]) -> dict:
     }
 
 
+def retire_channel_source(channel: str, source: str) -> int:
+    path = _broadcast_path()
+    with _file_lock(path):
+        current = _read_broadcasts()
+        kept = [m for m in current if not (m.get("channel") == channel and m.get("source") == source)]
+        if len(kept) != len(current):
+            _save_broadcasts(kept)
+    return len(current) - len(kept)
+
+
 def cache_fleet_broadcasts(entries: list[dict]) -> int:
     """Cache fleet revisions claimed for one session each, keeping only the newest revision per session; entries
     without a ``fleet`` tag are local broadcasts and stay untouched. Returns how many new entries the file kept."""

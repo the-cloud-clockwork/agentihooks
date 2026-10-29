@@ -389,6 +389,7 @@ def _publish_entries(entries: list[BrainEntry]) -> dict:
     """Publish brain entries to the broadcast channel."""
     try:
         from hooks.config import (
+            BRAIN_CHANNEL,
             BRAIN_HOT_ARCS_TOP_N,
             BRAIN_PAYLOAD_MAX_BYTES,
         )
@@ -396,7 +397,7 @@ def _publish_entries(entries: list[BrainEntry]) -> dict:
         return {"changed": False, "created": 0, "created_ids": [], "removed": 0, "active": 0}
     channel = feed_channel()
 
-    from hooks.context.broadcast import _msg_hash, reconcile_channel_broadcasts
+    from hooks.context.broadcast import _msg_hash, reconcile_channel_broadcasts, retire_channel_source
     from hooks.telemetry import span_ctx
 
     entries = [_shrink_entry(e, BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES) for e in entries]
@@ -440,6 +441,7 @@ def _publish_entries(entries: list[BrainEntry]) -> dict:
                 for entry in new_hashes.values()
             ],
         )
+        retire_channel_source(BRAIN_CHANNEL, "brain-adapter")
         span.set_attrs(
             {
                 "published_count": result["created"],
