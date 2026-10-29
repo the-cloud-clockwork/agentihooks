@@ -79,7 +79,7 @@ jobs:
         shell: bash
         run: |
           python -m pytest tests/swarm_ledger/test_postgres_writer_lock.py tests/swarm_ledger/test_postgres_outbox.py tests/swarm_ledger/test_postgres_writer_floor.py tests/swarm_ledger/test_postgres_repository.py tests/test_memory_postgres_parity.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/writer-lock.log"
-          grep -q ' 16 passed' "$RUNNER_TEMP/writer-lock.log" || { echo '::error::The writer lock, outbox, writer floor, repository and session memory parity scenarios did not run.'; exit 1; }
+          grep -q ' 19 passed' "$RUNNER_TEMP/writer-lock.log" || { echo '::error::The writer lock, outbox, writer floor, repository and session memory parity scenarios did not run.'; exit 1; }
 
       - name: Save the passed input key
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'

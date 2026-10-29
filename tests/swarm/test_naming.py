@@ -283,22 +283,24 @@ def test_a_proof_swarm_space_is_closed_and_renamed_by_its_slug(proof_store):
     assert runtime.close_space(proof_store.config(PROOF)) is False
 
 
-def test_resolve_many_reads_every_alias_in_one_round_trip(store, redis, monkeypatch):
+def test_resolve_many_reads_the_store_once_then_the_legacy_keys_it_lacks_once(store, redis, monkeypatch):
     new = store.next_name("sw", "eng")
     store.names.alias("sw-eng-1", new)
     reads = []
-    mget = redis.mget
+    mget, hmget = redis.mget, redis.hmget
     monkeypatch.setattr(redis, "get", lambda key: reads.append(key))
+    monkeypatch.setattr(redis, "hget", lambda *a: reads.append(a))
+    monkeypatch.setattr(redis, "hmget", lambda key, fields: reads.append("hmget") or hmget(key, fields))
     monkeypatch.setattr(redis, "mget", lambda keys: reads.append(list(keys)) or mget(keys))
-    keys = [f"{naming.PREFIX}:alias:{name}" for name in ("sw-eng-1", new, "stranger")]
+    expected = ["hmget", [f"{naming.PREFIX}:alias:{name}" for name in (new, "stranger")]]
     assert naming.NameRegistry(redis).resolve_many(["sw-eng-1", new, "stranger"]) == {
         "sw-eng-1": new,
         new: new,
         "stranger": "stranger",
     }
-    assert reads == [keys]
+    assert reads == expected
     assert naming.NameRegistry(redis).resolve_many([]) == {}
-    assert reads == [keys]
+    assert reads == expected
 
 
 def test_names_batches_alias_and_record_reads_without_changing_rows(store, redis, monkeypatch):
@@ -320,9 +322,7 @@ def test_names_batches_alias_and_record_reads_without_changing_rows(store, redis
 
     assert store.names.names("sw") == expected
     direct.assert_not_called()
-    aliases.assert_called_once_with(
-        [store.names.key("alias", name) for name in [*names, "old-agent", "missing", names[0]]]
-    )
+    aliases.assert_called_once_with([store.names.key("alias", name) for name in [*names, "missing"]])
     pipeline.assert_called_once_with(transaction=False)
 
 
@@ -397,10 +397,10 @@ def test_slugs_of_answers_slug_of_for_every_name_with_one_legacy_read_for_codes_
         monkeypatch.setattr(redis, command, lambda *a, real=real, command=command: reads.append(command) or real(*a))
     assert naming.NameRegistry(redis).slugs_of(names) == expected
     assert expected == {"sw-eng-1": "sw", mine: "sw", theirs: "other", "sw-ci-2": "sw", "stranger": "", orphan: ""}
-    assert reads == ["mget", "hmget", "hmget"]
+    assert reads == ["hmget", "mget", "hmget", "hmget"]
     reads.clear()
     assert naming.NameRegistry(redis).slugs_of(["stranger"]) == {"stranger": ""}
-    assert reads == ["mget"]
+    assert reads == ["hmget", "mget"]
 
 
 def test_resolve_names_needs_no_redis(monkeypatch):

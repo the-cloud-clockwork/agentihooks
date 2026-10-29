@@ -171,6 +171,9 @@ httpGet:
   path: /healthz
   port: http
   scheme: {{ if .Values.ledger.tls.secretName }}HTTPS{{ else }}HTTP{{ end }}
+  httpHeaders:
+    - name: Host
+      value: {{ printf "127.0.0.1:%v" .Values.ledger.port | quote }}
 {{- end -}}
 
 {{- define "swarm.homeSource" -}}

@@ -35,7 +35,7 @@ class SeenMarks:
         for _ in range(MOVE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(NameRegistry.key("alias", name))
+                    pipe.watch(*NameRegistry(self.redis).watched("alias", name))
                     resolved = NameRegistry(pipe).resolve(name)
                     pipe.watch(owner_key(resolved))
                     if pipe.get(owner_key(resolved)) is not None:

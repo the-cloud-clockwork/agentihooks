@@ -44,3 +44,36 @@ def test_the_server_ends_an_idle_writer_lock_holder_and_the_waiting_writer_commi
     finally:
         holder.close()
         thread.join(PATIENCE)
+
+
+def holds(first_lock, second_lock, patience=5.0):
+    first = postgres.Connection(URL)
+    got = threading.Event()
+
+    def second():
+        with postgres.Connection(URL) as writer:
+            second_lock(writer)
+            got.set()
+
+    try:
+        first_lock(first)
+        thread = threading.Thread(target=second, daemon=True)
+        thread.start()
+        granted = got.wait(patience)
+    finally:
+        first.close()
+    thread.join(PATIENCE)
+    return granted
+
+
+def test_writers_of_two_ledgers_hold_their_locks_at_once():
+    assert holds(lambda c: c.lock_ledger("one"), lambda c: c.lock_ledger("two"))
+
+
+def test_a_second_writer_of_the_same_ledger_waits():
+    assert not holds(lambda c: c.lock_ledger("one"), lambda c: c.lock_ledger("one"), patience=2.0)
+
+
+def test_a_whole_store_writer_and_a_ledger_writer_exclude_each_other():
+    assert not holds(lambda c: c.execute(sqlite.BEGIN_IMMEDIATE), lambda c: c.lock_ledger("one"), patience=2.0)
+    assert not holds(lambda c: c.lock_ledger("one"), lambda c: c.execute(sqlite.BEGIN_IMMEDIATE), patience=2.0)

@@ -506,6 +506,7 @@ def test_a_slow_launch_that_never_starts_is_recorded_against_the_launch_not_the_
 
 def test_a_doctor_timer_slower_than_the_lease_keeps_it_through_the_merge_pass(env, clock, monkeypatch):  # noqa: F811
     from scripts.doctor import cli as doctor
+    from scripts.swarm import refresh_job
 
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
@@ -524,8 +525,12 @@ def test_a_doctor_timer_slower_than_the_lease_keeps_it_through_the_merge_pass(en
     monkeypatch.setattr(cli.ready, "merge_pass", lambda *args: events.append("merge") or [])
     started = clock[0]
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert events == ["merge"]
+    callback = refresh_job.refreshes(store, "sw", ledger, clock[0])[0]
+    monkeypatch.setattr(refresh_job, "refreshes", lambda *args: [callback])
+    refresh_job.run(store, "sw", ledger, clock[0])
     assert clock[0] - started > lease.ttl_ms()
-    assert events == [True, True, "merge"]
+    assert events == ["merge", True, True]
     assert lease.current(store, "sw").epoch == 1
 
 
@@ -536,7 +541,7 @@ def test_scheduler_delivery_reaches_the_doctor_timer(env, clock, monkeypatch, tm
 
     from scripts.doctor import cli as doctor
     from scripts.scheduler.core import Scheduler
-    from scripts.swarm import scheduled_tick, timer
+    from scripts.swarm import refresh_job, scheduled_tick, timer
 
     store, ledger, runtime = env
     monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
@@ -545,6 +550,7 @@ def test_scheduler_delivery_reaches_the_doctor_timer(env, clock, monkeypatch, tm
     monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
     callback = Mock(return_value=[])
     monkeypatch.setattr(doctor, "timer", lambda *args: callback(*args))
+    monkeypatch.setattr(refresh_job, "spawn", lambda slug: refresh_job.refreshes(store, slug, ledger, clock[0])[0]())
     monkeypatch.setattr("scripts.swarm.langfuse.refresh", lambda *args: [])
     monkeypatch.setattr(timer, "entry_point", lambda: "/agentihooks")
     monkeypatch.setattr(scheduled_tick, "runtime_dir", lambda: tmp_path)
