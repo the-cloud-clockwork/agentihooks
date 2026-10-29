@@ -1056,7 +1056,7 @@ def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypa
         )
         == "owner exited"
     )
-    timer.assert_called_once_with(trace_flush.POLL_SEC, redis=None)
+    timer.assert_called_once_with(trace_flush.POLL_SEC, state=None)
 
 
 @pytest.mark.parametrize("failure", ["timeout", "connection"])
