@@ -9,8 +9,6 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from dotenv import dotenv_values
-
 from scripts.events import state
 from scripts.hive import hive_state, redis_acl
 from scripts.swarm.keyspace import ROOT
@@ -294,6 +292,8 @@ def write_env(home: Path | str, url: str, grant: dict) -> Path:
 
 
 def kept_bus(home: Path | str, member_id: str) -> dict | None:
+    from dotenv import dotenv_values
+
     creds, saved = Path(home) / NATS_CREDS_FILE, Path(home) / ENV_FILE
     if not creds.is_file():
         return None
