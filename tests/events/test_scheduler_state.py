@@ -106,9 +106,8 @@ def _document(state, key="entries"):
 
 
 def test_the_redis_backend_opens_the_named_bucket(monkeypatch):
-    from scripts.swarm import store
-
     from scripts.events import redis_state
+    from scripts.swarm import store
 
     client, opened = Mock(), Mock()
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
