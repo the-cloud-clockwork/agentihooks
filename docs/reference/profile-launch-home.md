@@ -56,11 +56,8 @@ default the canary wait gets the rest of the launch deadline, never
 `--route-timeout`.
 
 The wait counts from the route report, so it also covers the harness's own
-start before it reads the opening prompt. On 29 October a hive's Claude
-sessions spent 55 to 78 seconds in session start while the hosted ledger timed
-out, and the fixed 120 second canary wait that applied then failed them with
-about 150 seconds of the launch deadline unused. Earlier fixed waits were 120
-seconds for Claude and 90 for Codex.
+start before it reads the opening prompt; a slow session start uses launch
+time, never a separate fixed canary allowance.
 
 Pass `--canary-timeout <seconds>` to cap the wait for one launch:
 

@@ -673,7 +673,7 @@ def _binding_deferred(environ: dict[str, str]) -> list[str]:
     return ["profile_validation=pending", f"profile_report={environ[binding.REPORT]}"]
 
 
-def _profile_canary(args, agent: str, environ: dict[str, str], launch, route: dict) -> list[str]:
+def _profile_canary(args, environ: dict[str, str], launch, route: dict) -> list[str]:
     if args.defer_canary and (deferred := _binding_deferred(environ)):
         return deferred
     canary = float("inf") if args.canary_timeout is None else args.canary_timeout
@@ -1246,7 +1246,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         return 3
     try:
         _route_reported(active_env, args.route_timeout, route)
-        report += _profile_canary(args, agent, active_env, launch, route)
+        report += _profile_canary(args, active_env, launch, route)
     except (OSError, ValueError) as exc:
         _refuse_binding(active_env, exc)
         print("\n".join([*report, "profile_validation=failed"]))

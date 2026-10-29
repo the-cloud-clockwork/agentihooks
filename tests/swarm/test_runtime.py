@@ -971,7 +971,10 @@ def test_spawn_passes_the_pinned_claim_to_the_shared_launcher(tmp_path):
     assert json.loads(args[args.index("--claim-fence") + 1]) == fence
 
 
-@pytest.mark.parametrize(("task", "flag"), [({"launch_until_ms": 1793300000000}, ["1793300000000"]), ({}, [])])
+@pytest.mark.parametrize(
+    ("task", "flag"),
+    [({"launch_until_ms": 1793300000000}, ["1793300000000"]), ({"launch_until_ms": 0}, ["0"]), ({}, [])],
+)
 def test_spawn_passes_the_order_launch_end_to_the_shared_launcher(tmp_path, task, flag):
     seen = {}
 

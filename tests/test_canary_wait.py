@@ -78,6 +78,7 @@ def test_the_launch_until_help_names_its_unit():
     (action,) = [a for a in init_agent._parser()._actions if "--launch-until" in a.option_strings]
     assert action.help == "Epoch milliseconds by which the launch must return; bounds the launch deadline"
     assert action.default is None
+    assert action.type is int
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
