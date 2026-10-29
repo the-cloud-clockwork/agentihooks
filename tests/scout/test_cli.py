@@ -119,6 +119,18 @@ def test_an_unavailable_classifier_keeps_the_scout_going_to_the_round_cap(wired,
     assert len(_printed(capsys)["items"]) == 2
 
 
+def test_the_classifier_is_asked_after_a_round_that_found_nothing(wired, capsys):
+    runner = FakeRunner([], [PEP])
+    classifier = FakeClassifier(0.0, 1.0)
+    wired(runner, classifier)
+
+    assert cli.main([QUESTION, "--until", UNTIL, "--rounds", "3"]) == 0
+
+    assert len(runner.calls) == 2
+    assert classifier.calls[0]["state"]["evidence"]["items"] == []
+    assert len(classifier.calls) == 2
+
+
 def test_without_an_until_condition_the_classifier_is_never_asked(wired, capsys):
     runner = FakeRunner([PEP])
     classifier = FakeClassifier(1.0)

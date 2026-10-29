@@ -10,6 +10,7 @@ SCOUTER = Path(__file__).resolve().parents[2] / "profiles" / "package" / "agents
 DEFAULT_ROUNDS = 3
 EFFORT = "low"
 PURPOSE = "scout-until"
+MET = 0.5
 FIELDS = ("claim", "source", "excerpt", "retrieved_at")
 REPLY_SCHEMA = {
     "type": "object",
@@ -72,7 +73,7 @@ def until_met(scout: Scout, items: list[dict]) -> bool:
         result = decide(state, {"met": question}, purpose=PURPOSE, harness=scout.harness)
     except ClassifierError:
         return False
-    return (result.answers["met"].noul or 0.0) >= 0.5
+    return (result.answers["met"].noul or 0.0) >= MET
 
 
 def run(scout: Scout) -> dict:
@@ -83,6 +84,6 @@ def run(scout: Scout) -> dict:
             prompt, round_input(scout, items), REPLY_SCHEMA, READ_ONLY, scout.tier, EFFORT, scout.harness
         )
         items = merged(items, reply["items"])
-        if scout.until and items and until_met(scout, items):
+        if scout.until and until_met(scout, items):
             break
     return {"items": items}
