@@ -210,6 +210,7 @@ def main() -> int:
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as stream:
             stream.write(f"shards={json.dumps(list(range(plan['shards'])))}\n")
+            stream.write(f"probe={json.dumps(bool(plan['splits']))}\n")
     return 0
 
 

@@ -1717,9 +1717,10 @@ def cmd_pr(store, args):
     row.update(scoped)
     fields.update(scoped)
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
-    if not keeps_main and row.get("pr_url") != args.url:
-        lift.drop_task(args.slug, agent.task, store=store)
+    drop_lifts = not keeps_main and row.get("pr_url") != args.url
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    if drop_lifts:
+        lift.drop_task(args.slug, agent.task, store=store)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
 
 
