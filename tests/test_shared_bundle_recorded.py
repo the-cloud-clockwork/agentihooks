@@ -68,7 +68,7 @@ def test_recording_pins_the_shared_bundle_beside_the_root_and_the_user_bundle(th
         assert pinned is not None and pinned != three["shared"] and pinned.is_relative_to(out)
         assert (pinned / ".claude" / "rules" / "team.md").read_text() == "TEAM\n"
         assert bundle_copy.identity(pinned / ".claude" / "rules" / "team.md") == (
-            Path(bundle_copy.SHARED_FOLDER) / three["shared"].name / ".claude" / "rules" / "team.md"
+            three["shared"] / ".claude" / "rules" / "team.md"
         )
 
     assert bundle_copy.current_shared() is None
