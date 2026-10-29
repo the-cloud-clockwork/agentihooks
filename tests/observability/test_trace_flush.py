@@ -1059,12 +1059,13 @@ def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypa
     timer.assert_called_once_with(trace_flush.POLL_SEC, state=None)
 
 
-@pytest.mark.parametrize("failure", ["timeout", "connection"])
+@pytest.mark.parametrize("failure", ["timeout", "connection", "conflict"])
 def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tmp_path, monkeypatch, failure):
     from unittest.mock import Mock, call
 
     from redis.exceptions import ConnectionError, TimeoutError
 
+    from scripts.events.bus import StateConflict
     from scripts.scheduler import process_timer
 
     transcript = tmp_path / "transcript.jsonl"
@@ -1081,7 +1082,7 @@ def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tm
         clock.sleep(trace_flush.POLL_SEC)
         if not timers:
             timers.append(None)
-            error = TimeoutError if failure == "timeout" else ConnectionError
+            error = {"timeout": TimeoutError, "connection": ConnectionError, "conflict": StateConflict}[failure]
             raise error("scheduler did not answer")
         entry = Mock(state="fired", id=f"timer-{len(timers)}", scheduler=scheduler)
         timers.append(entry)
