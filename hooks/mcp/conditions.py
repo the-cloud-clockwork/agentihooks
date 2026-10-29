@@ -149,7 +149,7 @@ def register(mcp):
         Args:
             file: the condition's file name.
             session_id: your session id (from the SessionStart banner).
-            scope: "global", "user", "profile" or "directory" when the name exists in several layers.
+            scope: "global", "shared", "user", "profile" or "directory" when the name exists in several layers.
             cwd: as in condition_list.
         """
         try:
