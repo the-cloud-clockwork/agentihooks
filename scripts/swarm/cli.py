@@ -323,7 +323,14 @@ def _intent_pass(inbox, store, slug, doc, ledger, config):
 @scope.one_pass()
 @outage.guard_tick
 @ledger_route.service
-def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
+def run_tick(
+    store: RedisStore,
+    slug: str,
+    ledger: LedgerClient | None = None,
+    runtime: object | None = None,
+    messenger: object | None = None,
+    scheduled: bool = False,
+) -> list[str]:
     from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
 
     if not ledger_link.local_mode(os.environ) and not scheduled:
