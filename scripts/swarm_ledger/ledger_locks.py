@@ -1,5 +1,4 @@
 import threading
-from collections import Counter
 
 
 class LedgerLock:
@@ -7,7 +6,7 @@ class LedgerLock:
         self.state = threading.Condition()
         self.whole = False
         self.waiting = 0
-        self.held = Counter()
+        self.held = set()
 
     def acquire(self, blocking: bool = True) -> bool:
         with self.state:
@@ -47,19 +46,17 @@ class Ledger:
         self.lock, self.slug = lock, slug
 
     def acquire(self) -> bool:
-        state, held = self.lock.state, self.lock.held
-        with state:
-            state.wait_for(lambda: not self.lock.whole and not self.lock.waiting and not held[self.slug])
-            held[self.slug] += 1
+        lock = self.lock
+        with lock.state:
+            lock.state.wait_for(lambda: not lock.whole and not lock.waiting and self.slug not in lock.held)
+            lock.held.add(self.slug)
         return True
 
     def release(self) -> None:
-        state, held = self.lock.state, self.lock.held
-        with state:
-            held[self.slug] -= 1
-            if not held[self.slug]:
-                del held[self.slug]
-            state.notify_all()
+        lock = self.lock
+        with lock.state:
+            lock.held.discard(self.slug)
+            lock.state.notify_all()
 
     def __enter__(self) -> bool:
         return self.acquire()
