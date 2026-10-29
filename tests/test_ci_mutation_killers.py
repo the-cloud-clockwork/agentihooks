@@ -23,6 +23,30 @@ def test_a_function_without_a_recorded_kill_keeps_the_duration_order(tmp_path):
     assert memory.order("scripts.a.x_f__mutmut_1", TESTS) == TESTS
 
 
+def test_tests_covering_the_changed_lines_run_before_faster_fallback_tests(tmp_path):
+    memory = killers.KillMemory(tmp_path / "killers", {"tests/test_c.py::slow"})
+    tests = [*TESTS, "tests/test_c.py::slow_too"]
+    assert memory.order("scripts.a.x_f__mutmut_1", tests) == [
+        "tests/test_c.py::slow",
+        "tests/test_a.py::fast",
+        "tests/test_b.py::middle",
+        "tests/test_c.py::slow_too",
+    ]
+    parametrized = ["tests/test_a.py::fast", "tests/test_c.py::slow[2]", "tests/test_c.py::slow[1]"]
+    assert memory.order("scripts.a.x_f__mutmut_1", parametrized) == [
+        "tests/test_c.py::slow[2]",
+        "tests/test_c.py::slow[1]",
+        "tests/test_a.py::fast",
+    ]
+    memory.mutant = "scripts.a.x_f__mutmut_1"
+    memory.pytest_runtest_logreport(_report("tests/test_b.py::middle"))
+    assert memory.order("scripts.a.x_f__mutmut_2", TESTS) == [
+        "tests/test_b.py::middle",
+        "tests/test_c.py::slow",
+        "tests/test_a.py::fast",
+    ]
+
+
 def test_the_test_that_killed_a_mutant_runs_first_for_every_later_mutant_of_its_function(tmp_path):
     memory = killers.KillMemory(tmp_path / "killers")
     memory.mutant = "scripts.a.x_f__mutmut_1"
@@ -109,7 +133,9 @@ def test_a_memory_that_prepared_no_mutant_keeps_the_collected_order(tmp_path):
 def test_the_selection_runner_orders_by_kills_and_records_them_only_for_mutants(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     selection_file = tmp_path / "selection.json"
-    selection_file.write_text(json.dumps({"scripts/a.py": {"lines": [2], "tests": ["tests/test_a.py"]}}))
+    selection_file.write_text(
+        json.dumps({"scripts/a.py": {"lines": [2], "tests": ["tests/test_a.py"], "direct": ["tests/test_b.py::middle"]}})
+    )
     runs = []
 
     class PytestRunner:
@@ -141,8 +167,8 @@ def test_the_selection_runner_orders_by_kills_and_records_them_only_for_mutants(
         monkeypatch.setitem(sys.modules, name, sys.modules[name])
     selection.run_selected(selection_file, (0, 1))
     assert runs == [
-        (TESTS, 1),
-        (["tests/test_c.py::slow", "tests/test_a.py::fast", "tests/test_b.py::middle"], 1),
+        (["tests/test_b.py::middle", "tests/test_a.py::fast", "tests/test_c.py::slow"], 1),
+        (["tests/test_c.py::slow", "tests/test_b.py::middle", "tests/test_a.py::fast"], 1),
         (["tests/test_x.py::t"], 0),
     ]
     assert (tmp_path / "killers" / _digest("scripts.a.x_f")).read_text() == "tests/test_c.py::slow"
