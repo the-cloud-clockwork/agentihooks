@@ -52,6 +52,28 @@ def test_a_minted_member_has_a_ledger_credential_and_a_redis_acl_user(admin, red
     assert not auth.PREFIX.startswith(f"{ROOT}:")
 
 
+def test_a_member_can_drop_task_lifts_from_either_worker_version(redis_lib):
+    import fakeredis
+
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    grant = auth.mint(admin, "mixed-worker", PUBLIC)
+    member = fakeredis.FakeRedis(
+        server=server,
+        decode_responses=True,
+        username=f"hive-{grant['id']}",
+        password=redis_lib.connection.parse_url(grant["redis_url"])["password"],
+    )
+    task_lifts = f"{ROOT}:swarm:proof:gate-lifts:tasks:t1"
+    drops = f"{ROOT}:swarm:proof:gate-lift-drops"
+    admin.hset(task_lifts, "subagents", "{}")
+
+    assert member.delete(task_lifts) == 1
+    assert admin.exists(task_lifts) == 0
+    assert member.hset(drops, "t1", "100.000005") == 1
+    assert admin.hget(drops, "t1") == "100.000005"
+
+
 def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patterns():
     calls = []
 
@@ -99,6 +121,7 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:dev-red",
                     f"~{ROOT}:swarm:*:prerequisite-waits",
                     f"~{ROOT}:swarm:*:stage-covers",
+                    f"~{ROOT}:swarm:*:gate-lifts:tasks:*",
                     f"~{ROOT}:swarm:*:gate-lift-drops",
                     f"~{ROOT}:swarm:*:ledger-ready",
                     f"~{ROOT}:seat:*:recaps",
@@ -163,7 +186,7 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("swarm:proof:stage-covers", True),
         ("swarm:proof:ledger-ready", True),
         ("swarm:proof:gate-lift-drops", True),
-        ("swarm:proof:gate-lifts:tasks:t1", False),
+        ("swarm:proof:gate-lifts:tasks:t1", True),
         ("swarm:proof:gate-lifts:agents:engineer@0001-0001", False),
         ("swarm:proof:execution-publishing", True),
         ("swarm:proof:codex-transport", True),
@@ -663,7 +686,7 @@ def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts
     host.put_gate_lift("proof", "agents", "t1", "subagents", {"at": 1.0})
     assert host.gate_lift("proof", "agents", "t1", "subagents") == {"at": 1.0}
     with pytest.raises(NoPermissionError):
-        member.hset(host.key("proof", "gate-lifts", "tasks", "t1"), "subagents", "{}")
+        member.hset(host.key("proof", "gate-lifts", "agents", "t1"), "subagents", "{}")
 
 
 def test_a_member_credential_records_its_pull_request_before_a_lift_cleanup_refusal(monkeypatch):
