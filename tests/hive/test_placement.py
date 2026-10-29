@@ -273,3 +273,44 @@ def test_round_robin_gives_the_agent_to_the_chosen_hive_running_the_fewest_agent
     assert placement.choose("eng", "claude", "acct", "subscription", REPO, spread, NOW) == placement.Choice(
         "worker-one"
     )
+
+
+def ranked(hive_id: str, first_room: int, first_refusal: str = "", **fields) -> dict:
+    record = hive(hive_id, ui="no", excluded=["master"], prefer={"eng": 1}, max_agents=4, **fields)
+    return {**record, "first_room": first_room, "first_refusal": first_refusal}
+
+
+def test_a_spill_past_the_first_ranked_hive_names_it_and_its_measured_refusal():
+    from scripts.hive.placement import Choice, Spill, choose
+
+    refused = "ram: pod 3900 of 19600 MB available, 81 percent used, at or above the 80 percent line"
+    hives = [ranked("worker", 0, refused, room=4), hive("spare", ui="no", excluded=["master"], max_agents=4)]
+    assert choose("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Choice(
+        "spare", spill=Spill("worker", refused)
+    )
+    assert Spill("worker", refused).record() == {"preferred": "worker", "refusal": refused}
+
+
+def test_a_spill_on_a_missing_slot_names_the_slot_refusal():
+    from scripts.hive.placement import Choice, Spill, choose
+
+    hives = [ranked("worker", 4, slots=[]), hive("spare", ui="no", excluded=["master"], max_agents=4)]
+    assert choose("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Choice(
+        "spare", spill=Spill("worker", "no hive for eng advertises the claude slot acct")
+    )
+
+
+def test_the_first_ranked_hive_takes_the_launch_on_its_first_room_without_a_spill():
+    from scripts.hive.placement import Choice, choose
+
+    hives = [ranked("worker", 2, room=0, refusal="cpu: full"), hive("spare", ui="no", excluded=["master"])]
+    assert choose("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Choice("worker")
+
+
+def test_round_robin_spread_ignores_the_first_room():
+    from scripts.hive.placement import SPREAD, choose
+
+    worker = {**ranked("worker", 2, room=0, refusal="cpu: full"), SPREAD: 0}
+    spare = {**hive("spare", ui="no", excluded=["master"]), SPREAD: 1}
+    found = choose("eng", "claude", "acct", "subscription", REPO, [worker, spare], NOW)
+    assert (found.hive, found.spill) == ("spare", None)

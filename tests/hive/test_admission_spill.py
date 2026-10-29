@@ -132,3 +132,76 @@ def test_prompt_failure_releases_the_admission_selected_after_spill(setup, monke
     with pytest.raises(RuntimeError, match="prompt failed"):
         launcher.spawn(request_for(setup))
     assert admission.pending(setup.store.redis, "spare") == 0
+
+
+def _load(launched, hive_id, **fields):
+    key = headroom.key(hive_id)
+    store = launched.store
+    store.redis.set(key, json.dumps({**json.loads(store.redis.get(key)), **fields}))
+
+
+def test_the_first_ranked_hive_takes_a_launch_under_cpu_load_below_the_memory_line(setup, capsys):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1})
+    write_hive(setup, id="spare")
+    _load(setup, "remote", cpus=1, load5=2.0)
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    assert setup.launcher.spawn(request).status is Status.PENDING
+    order = setup.launcher.orders_for(request.task["id"])
+    assert order.hive == "remote"
+    assert "placement_spill" not in setup.store.execution_registry.get("fixture", order.execution_id).profile_decision
+    assert "hive_placement_spill" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("in_pass", [False, True])
+def test_a_spill_past_the_first_ranked_hive_records_its_memory_refusal(setup, capsys, in_pass):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1})
+    write_hive(setup, id="spare")
+    _load(setup, "remote", available_mb=20_000)
+    launcher = setup.launcher
+    launcher.placement_cache = {} if in_pass else None
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    assert launcher.spawn(request).status is Status.PENDING
+    order = launcher.orders_for(request.task["id"])
+    assert order.hive == "spare"
+    refused = "ram: 20000 of 100000 MB available, 80 percent used, at or above the 80 percent line"
+    spill = {"preferred": "remote", "refusal": refused}
+    assert (
+        setup.store.execution_registry.get("fixture", order.execution_id).profile_decision["placement_spill"] == spill
+    )
+    logged = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    assert logged == [
+        {
+            "event": "hive_placement_spill",
+            "slug": "fixture",
+            "task": "task",
+            "name": request.name,
+            "hive": "spare",
+            **spill,
+        }
+    ]
+
+
+def test_a_reservation_refused_on_the_first_ranked_hive_records_it_on_the_spill(setup, monkeypatch, capsys):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1})
+    write_hive(setup, id="spare")
+    launcher = setup.launcher
+    reserve = launcher.reserve_room
+    refused = "no hive for eng has room: remote ram: full"
+    monkeypatch.setattr(
+        launcher,
+        "reserve_room",
+        lambda request, selected: refused if selected.hive == "remote" else reserve(request, selected),
+    )
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    assert launcher.spawn(request).status is Status.PENDING
+    order = launcher.orders_for(request.task["id"])
+    assert order.hive == "spare"
+    spill = {"preferred": "remote", "refusal": refused}
+    assert (
+        setup.store.execution_registry.get("fixture", order.execution_id).profile_decision["placement_spill"] == spill
+    )
+    events = [json.loads(line)["event"] for line in capsys.readouterr().err.splitlines()]
+    assert events == ["hive_admission_refused", "hive_placement_spill"]
