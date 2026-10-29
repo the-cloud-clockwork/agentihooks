@@ -209,7 +209,9 @@ def test_publisher_records_only_ancestor_history(tmp_path, restored):
     }
 
     def git(*args):
-        return subprocess.run(["git", *args], cwd=repo, env=env, text=True, capture_output=True, check=True).stdout.strip()
+        return subprocess.run(
+            ["git", *args], cwd=repo, env=env, text=True, capture_output=True, check=True
+        ).stdout.strip()
 
     git("init")
     (repo / "hooks").mkdir()
@@ -235,7 +237,9 @@ def test_publisher_records_only_ancestor_history(tmp_path, restored):
         data.add_lines({"hooks/example.py": {1}})
         data.write()
     script = next(step["run"] for step in job["steps"] if step.get("name") == "Compute the coverage baseline")
-    result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", script], cwd=repo, env=env, text=True, capture_output=True)
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", script], cwd=repo, env=env, text=True, capture_output=True
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     value = json.loads(target.read_text())
     assert value["commit"] == head
