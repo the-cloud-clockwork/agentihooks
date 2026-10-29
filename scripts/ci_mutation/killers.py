@@ -28,7 +28,7 @@ class KillMemory:
             return None
         try:
             return json.loads(path.read_text())
-        except json.JSONDecodeError:
+        except ValueError:
             # The cache merges every shard's copy of one record in parallel, which can leave a torn file.
             return None
 

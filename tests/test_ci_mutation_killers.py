@@ -223,3 +223,7 @@ def test_a_torn_cached_record_reads_as_missing(tmp_path, monkeypatch):
         path.write_text(path.read_text() + "1}")
     assert memory.cost(mutant, TESTS) is None
     assert memory.split("scripts.a.x_f", TESTS) is None
+    for path in [*memory.folder.glob("*.cost"), *memory.folder.glob("*.split")]:
+        path.write_bytes(b'{"seconds": "\xe2\x82')
+    assert memory.cost(mutant, TESTS) is None
+    assert memory.split("scripts.a.x_f", TESTS) is None
