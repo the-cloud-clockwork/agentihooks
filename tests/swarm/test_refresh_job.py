@@ -63,6 +63,19 @@ def test_the_job_runs_every_refresh_with_its_own_arguments(store, called):
     assert not store.redis.exists(refresh_job.lock_key(store, "sw"))
 
 
+def test_doctor_detection_runs_in_the_background_job(store, called, monkeypatch):
+    from dataclasses import replace
+
+    from scripts.doctor import cli as doctor
+
+    store.update(replace(store.config("sw"), template="doctor"))
+    seen = []
+    monkeypatch.setattr(doctor, "timer", lambda *args: seen.append(args) or ["detected"])
+    assert refresh_job.run(store, "sw", Ledger(), 5) == ["detected", "applied", "updated", "filed", "fired"]
+    assert seen == [(store, "sw", 5, True)]
+    assert len(called) == 6
+
+
 def test_a_failing_refresh_ends_the_job_and_frees_its_lock(store, called, monkeypatch):
     def broken(*args):
         raise RuntimeError("gh is gone")

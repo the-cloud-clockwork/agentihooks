@@ -289,6 +289,41 @@ def test_the_health_detector_judges_only_what_the_current_health_pass_reports(mo
     assert seen[-1] == (store, "bare", "config of bare", [], [])
 
 
+def test_health_reuses_fresh_published_findings_without_recomputing(monkeypatch):
+    import json
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.redis.set(
+        store.key("s", "published"), json.dumps({"status": {"last_tick": 1000, "findings": [{"id": "current"}]}})
+    )
+    monkeypatch.setattr(detect.status, "now_ms", lambda: 301000)
+    assert detect.reported(store, object(), "s") == {"current"}
+    store.redis.set(store.key("s", "published"), json.dumps({"status": {"last_tick": 1000, "findings": []}}))
+    assert detect.reported(store, object(), "s") == set()
+
+
+def test_health_recomputes_when_the_published_findings_are_stale(monkeypatch):
+    import json
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.redis.set(
+        store.key("s", "published"), json.dumps({"status": {"last_tick": 1000, "findings": [{"id": "stale"}]}})
+    )
+    monkeypatch.setattr(detect.status, "now_ms", lambda: 301001)
+    ledger = type("Ledger", (), {"state": lambda self, slug: {}})()
+    monkeypatch.setattr(store, "config", lambda slug: None)
+    monkeypatch.setattr(detect.status, "findings", lambda *args: [{"id": "current"}])
+    assert detect.reported(store, ledger, "s") == {"current"}
+
+
 def _canonical(call):
     import json
 
