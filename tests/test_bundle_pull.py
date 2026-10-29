@@ -1,9 +1,13 @@
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
-from scripts import install
 from scripts.profiles import bundles
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+import install  # noqa: E402, I001
 
 _FLAGS = {"root": {}, "user": {"user": True}, "shared": {"shared": True}}
 _GETTERS = {"root": "_get_bundle_path", "user": "_get_user_bundle_path", "shared": "_get_shared_bundle_path"}
