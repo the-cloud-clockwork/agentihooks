@@ -225,8 +225,8 @@ jobs:
         env:
           LATEST: ${{ needs.image.outputs.latest }}
         run: |
-          docker push "$IMAGE:${RELEASE#v}"
           if [[ "$LATEST" == true ]]; then
             docker tag "$IMAGE:${RELEASE#v}" "$IMAGE:release"
             docker push "$IMAGE:release"
           fi
+          docker push "$IMAGE:${RELEASE#v}"
