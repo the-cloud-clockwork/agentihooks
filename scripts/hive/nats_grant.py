@@ -60,6 +60,7 @@ MEMBER_PUBLISH = (
     *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets.NAMES),
 )
 SCHEDULER_BUCKET = "scheduler"
+SCHEDULER_STREAM_VERBS = ("INFO", "MSG.GET", "CREATE")
 CONTROLLER_BUCKETS = (
     *buckets.NAMES,
     *slots.BUCKETS,
@@ -148,13 +149,13 @@ def swarm_publish(swarm: str) -> list[str]:
 def scheduler_publish(member: str, swarms: tuple[str, ...] | None) -> list[str]:
     bucket = f"{SCHEDULER_BUCKET}-{member}"
     if swarms is None:
-        return [f"$KV.{bucket}.>", *(f"$JS.API.STREAM.{verb}.KV_{bucket}" for verb in ("INFO", "MSG.GET", "CREATE"))]
+        return [f"$KV.{bucket}.>", *(f"$JS.API.STREAM.{verb}.KV_{bucket}" for verb in SCHEDULER_STREAM_VERBS)]
     streams = [
         name
         for swarm in swarms
         for name in (subjects.stream_name(swarm, f"STATE_{bucket}"), legacy_stream_name(swarm, f"STATE_{bucket}"))
     ]
-    return [f"$JS.API.STREAM.{verb}.{stream}" for stream in streams for verb in ("INFO", "MSG.GET", "CREATE")]
+    return [f"$JS.API.STREAM.{verb}.{stream}" for stream in streams for verb in SCHEDULER_STREAM_VERBS]
 
 
 def from_environ(environ: Mapping[str, str]) -> Signer | None:
