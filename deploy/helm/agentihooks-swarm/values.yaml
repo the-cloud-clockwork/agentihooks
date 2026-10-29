@@ -278,7 +278,7 @@ workers:
     enabled: false
     namespace: default
     leaseName: agentihooks-hive-rollout
-    drainSeconds: 300
+    drainSeconds: 1200
     # Release image the image updater writes; each new value rolls the hives one at a time through the lease.
     release: ""
   excluded: [master]
