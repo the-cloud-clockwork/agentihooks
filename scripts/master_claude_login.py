@@ -524,7 +524,9 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
         shared = any(owner != name for owner in holders(folder)) and (target / binding.FILE).is_file()
         if not shared:
             target = _rebuild(folder, rendered, config=claude_json(environ))
-        _write(folder / RENDERS, {**_read(folder / RENDERS), name: profile_chain.rendered_overlays(rendered)})
+        renders = folder / f".{RENDERS}.tmp"
+        _write(renders, {**_read(folder / RENDERS), name: profile_chain.rendered_overlays(rendered)})
+        renders.replace(folder / RENDERS)
         if environ.get(binding.REPORT):
             binding.rehome(Path(environ[binding.REPORT]), target, shared=shared)
         if not shared:
