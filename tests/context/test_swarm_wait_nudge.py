@@ -307,7 +307,11 @@ def test_a_full_run_view_is_refused_to_every_swarm_agent(worker, monkeypatch, ca
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
     with pytest.raises(hook_manager.BlockAction, match="one REST call per job") as blocked:
         _pre(capsys, _bash(command))
-    assert "gh run view <id> --json status,conclusion,jobs" in str(blocked.value)
+    assert str(blocked.value) == (
+        "gh run view without --json, --log, --log-failed or --job reads the annotations of every job, "
+        "one REST call per job, from the shared GitHub hourly quota. "
+        "Ask for what you need: gh run view <id> --json status,conclusion,jobs, --log-failed, or --job <job id>."
+    )
 
 
 @pytest.mark.parametrize(
