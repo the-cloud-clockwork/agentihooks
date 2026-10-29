@@ -78,3 +78,9 @@ def elsewhere(redis: "Redis", harness: str, now: float, own: str) -> dict[str, i
         if name.startswith(f"{harness}:"):
             slots[name] = slots.get(name, 0) + count
     return {name.split(":", 1)[1]: count for name, count in slots.items()}
+
+
+def held_elsewhere(harness: str, now: float, own: str) -> dict[str, int]:
+    from scripts.swarm.store import redis_client
+
+    return elsewhere(redis_client(), harness, now, own)
