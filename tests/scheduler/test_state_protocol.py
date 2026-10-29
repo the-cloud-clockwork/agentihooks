@@ -179,3 +179,12 @@ def test_claiming_marks_only_active_entries_due_by_now(monkeypatch):
         "later": {"state": "active", "due": 6, "signal": "timeout", "slots": []},
         "ready": {"state": "ready", "due": 0, "signal": "timeout", "slots": []},
     }
+
+
+def test_finishing_a_non_pending_entry_leaves_it_untouched():
+    from scripts.scheduler import core
+
+    entry = {"state": "active", "due": 5}
+    before = dict(entry)
+    assert core.Scheduler._finish(entry, 10) is None
+    assert entry == before

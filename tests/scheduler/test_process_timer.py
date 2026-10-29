@@ -356,6 +356,16 @@ def test_a_scheduler_that_cannot_start_leaves_no_timer_behind(state, monkeypatch
     assert scheduler.document()["entries"] == {}
 
 
+def test_closing_an_already_closed_timer_does_not_retire_it_again(state, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    with process_timer.Timer(0, state=state) as timer:
+        pass
+    assert timer.closed is True
+    retired_after_exit = dict(Scheduler(state).document()["retired"])
+    timer.close()
+    assert Scheduler(state).document()["retired"] == retired_after_exit
+
+
 def test_a_fired_timer_survives_a_paused_consumer(state, monkeypatch):
     monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     with process_timer.Timer(0, state=state) as timer:
