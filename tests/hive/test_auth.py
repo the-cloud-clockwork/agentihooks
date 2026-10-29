@@ -98,7 +98,8 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:dev-red",
                     f"~{ROOT}:swarm:*:prerequisite-waits",
                     f"~{ROOT}:swarm:*:stage-covers",
-                    f"~{ROOT}:swarm:*:gate-lifts:tasks:*",
+                    f"~{ROOT}:swarm:*:gate-lift-drops",
+                    f"~{ROOT}:swarm:*:ledger-ready",
                     f"~{ROOT}:seat:*:recaps",
                     f"~{ROOT}:seat:*:learned",
                     f"~{ROOT}:seat-of:*:exit",
@@ -159,7 +160,9 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("swarm:proof:dev-red", True),
         ("swarm:proof:prerequisite-waits", True),
         ("swarm:proof:stage-covers", True),
-        ("swarm:proof:gate-lifts:tasks:t1", True),
+        ("swarm:proof:ledger-ready", True),
+        ("swarm:proof:gate-lift-drops", True),
+        ("swarm:proof:gate-lifts:tasks:t1", False),
         ("swarm:proof:gate-lifts:agents:engineer@0001-0001", False),
         ("swarm:proof:execution-publishing", True),
         ("swarm:proof:codex-transport", True),
@@ -594,9 +597,11 @@ def test_a_member_credential_runs_a_checked_wait_and_a_cover_and_no_other_writes
             member.set(forbidden, "write")
 
 
-def test_a_member_credential_drops_its_task_gate_lifts_on_swarm_pr_and_writes_no_agent_lift():
+def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts(monkeypatch):
     import fakeredis
     from redis.exceptions import NoPermissionError
+
+    from scripts.swarm import cli as swarm_cli
 
     server = fakeredis.FakeServer()
     admin = fakeredis.FakeRedis(server=server, decode_responses=True)
@@ -608,14 +613,54 @@ def test_a_member_credential_drops_its_task_gate_lifts_on_swarm_pr_and_writes_no
         keys=auth._acl_keys("m1"),
         channels=auth.ACL_PATTERNS,
     )
-    member = fakeredis.FakeRedis(server=server, decode_responses=True, username="hive-m1")
+    reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "HVALS", "HMGET"}
+
+    # fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client.
+    class Member(fakeredis.FakeRedis):
+        def execute_command(self, *args, **options):
+            if str(args[0]).upper() in reads:
+                return admin.execute_command(*args, **options)
+            return super().execute_command(*args, **options)
+
+    member = Member(server=server, decode_responses=True, username="hive-m1")
     member.auth("", username="hive-m1")
+    host = store.RedisStore(admin)
+    host.create(store.SwarmConfig("proof", "/repo", 1, 0, "running"))
+    host.put_agent("proof", store.AgentRecord(name="engineer@0001-0001", lane="eng", task="t1"))
+    host.put_gate_lift("proof", "tasks", "t1", "subagents", {"at": 1.0})
+    url = "https://github.com/o/r/pull/3"
+    updates = []
+
+    class Ledger:
+        def state(self, slug):
+            return {"tasks": [{"id": "t1", "lane": "eng", "state": "claimed"}], "phases": []}
+
+        def update_task(self, slug, task, fields, by=None):
+            updates.append((task, fields, by))
+
     swarm = store.RedisStore(member)
-    tasks = swarm.key("proof", "gate-lifts", "tasks", "t1")
-    admin.hset(tasks, "intent", "{}")
+    # The agent listing reads through a read only Lua pipeline that fakeredis checks without the %R~ grant.
+    swarm.agents = host.agents
+    member.time = lambda: (100, 5)
+    monkeypatch.setattr(swarm_cli, "connect", lambda: swarm)
+    monkeypatch.setattr(swarm_cli, "LedgerClient", Ledger)
+    monkeypatch.setattr(swarm_cli, "pull_branch", lambda pull: ("", ""))
+    monkeypatch.setattr("scripts.gates.intent.stamp_body", lambda *args, **kwargs: False)
 
-    swarm.drop_task_lifts("proof", "t1")
+    assert swarm_cli.main(["proof", "--as", "engineer@0001-0001", "pr", url]) == 0
 
-    assert not admin.exists(tasks)
+    assert updates == [("t1", {"state": "pr", "awaiting": "", "pr_url": url}, "engineer@0001-0001")]
+    assert host.gate_lift("proof", "tasks", "t1", "subagents") == {}
+    assert admin.hget(host.key("proof", "gate-lift-drops"), "t1") == "100.000005"
+    for record in ({"at": 100.000005}, {"url": url}):
+        host.put_gate_lift("proof", "tasks", "t1", "subagents", record)
+        assert host.gate_lift("proof", "tasks", "t1", "subagents") == {}
+    host.put_gate_lift("proof", "tasks", "t1", "subagents", {"at": 100.00001})
+    assert host.gate_lift("proof", "tasks", "t1", "subagents") == {"at": 100.00001}
+    admin.hset(host.key("proof", "gate-lift-drops"), "t2", "0.5")
+    host.put_gate_lift("proof", "tasks", "t2", "subagents", {"url": url})
+    assert host.gate_lift("proof", "tasks", "t2", "subagents") == {}
+    host.put_gate_lift("proof", "agents", "t1", "subagents", {"at": 1.0})
+    assert host.gate_lift("proof", "agents", "t1", "subagents") == {"at": 1.0}
     with pytest.raises(NoPermissionError):
-        swarm.put_gate_lift("proof", "agents", "engineer@0001-0001", "intent", {})
+        member.hset(host.key("proof", "gate-lifts", "tasks", "t1"), "subagents", "{}")
