@@ -43,6 +43,7 @@ BUDGETS = {
     "kind-due": 60,
     "helm-kind": 480,
     "gate-required": 60,
+    "promotion-ready": 60,
     "test-summary": 60,
     "refresh-durations": 120,
     "coverage-baseline": 120,

@@ -54,8 +54,9 @@ jobs:
           fi
       - name: Preserve complete access inventory
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
+          after-cancel: true
           name: runner-access-inventory
           path: access-report.json
           if-no-files-found: error

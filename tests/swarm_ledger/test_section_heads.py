@@ -165,10 +165,35 @@ def test_sections_toggle_sits_under_the_overview_and_flips_every_section(tab):
 def test_sections_toggle_leaves_comments_and_outline_alone(tab):
     probe = """() => Object.fromEntries([...document.querySelectorAll("details[data-key], #outline details.fold")]
              .map((d) => [d.dataset.key || d.id, d.open]))"""
+    tab.evaluate(
+        """() => {
+          window.sectionTasks = 0;
+          const postTask = scheduler.postTask.bind(scheduler);
+          scheduler.postTask = (...args) => {
+            window.sectionTasks++;
+            return postTask(...args).finally(() => { window.sectionTasks--; });
+          };
+        }"""
+    )
+
+    def toggle():
+        tab.evaluate(
+            """async () => {
+              const button = document.getElementById("sections-all");
+              const open = button.textContent === "Expand all";
+              const boxes = document.querySelectorAll(".col > section[data-outline]:not(#sec-overview) > details.fold");
+              const toggled = [...boxes].filter(box => box.open !== open).map(box =>
+                new Promise(resolve => box.addEventListener("toggle", resolve, {once: true})));
+              button.click();
+              await Promise.all(toggled);
+            }"""
+        )
+        tab.wait_for_function("() => window.sectionTasks === 0")
+
+    toggle()
     before = tab.evaluate(probe)
-    tab.click("#sections-all")
-    tab.click("#sections-all")
-    settle(tab)
+    toggle()
+    toggle()
     after = tab.evaluate(probe)
     assert before.items() <= after.items()
     assert all(v is False for k, v in after.items() if k not in before)

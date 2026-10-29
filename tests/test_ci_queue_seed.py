@@ -268,6 +268,7 @@ def test_dispatch_runs_restore_durations_and_the_base_baseline_on_the_app_token(
         "Find the dev push run of the dispatched base",
         "Download the dev durations",
         "Download the dispatched base's coverage baseline",
+        "Check out the upload action for artifact republishing",
         "Republish the dev durations",
         "Republish the dispatched base's coverage baseline",
         "Mark the dev artifacts restored",

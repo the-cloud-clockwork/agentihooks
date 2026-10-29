@@ -10,6 +10,7 @@ CI_MANIFESTO_REFRESH_EVERY.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -56,8 +57,12 @@ _DEFAULT_PR_SIGNALS = [
 
 def _manifesto_paths() -> list[Path]:
     from hooks.config import _resolve_manifesto_paths
+    from hooks.context import profile_chain
 
-    return [Path(path).expanduser() for path in _resolve_manifesto_paths()]
+    state = profile_chain.read_state()
+    bundle = None if os.getenv("AGENTIHOOKS_BUNDLE_ROOT") else profile_chain.bundle_path(state)
+    found = _resolve_manifesto_paths(bundle, user_root=profile_chain.user_bundle_path(state))
+    return [Path(path).expanduser() for path in found]
 
 
 def _load() -> dict:

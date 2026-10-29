@@ -23,7 +23,7 @@ The `promote` job in `.github/workflows/test.yml` is the last job of a `dev` pus
 
 Pull request and merge queue runs never promote. A dispatched Tests run never promotes.
 
-Every `dev` push run shares the concurrency group `promotion-dev` with `cancel-in-progress` off and a single pending slot. A running run always finishes and, when green, promotes the revision it graded even after `dev` has moved on. A newer push only replaces the run still waiting in the pending slot, so a burst of merges grades the running head and the newest head, not every head in between. Runs in the group never overlap, so promotions land in push order.
+Every `dev` push run has its own concurrency group, `tests-push-<run id>`, with `cancel-in-progress` off, so no push waits behind an older run and a red run never holds a newer green head. A green run promotes the revision it graded even after `dev` has moved on. The promotion job's `release-version` group serializes the writes, and a graded revision that is not ahead of the last promoted one is refused, so an older run never overwrites a newer `main`.
 
 ## What a promotion does
 
@@ -202,7 +202,7 @@ Immediately after a green push run promotes, `main` carries the graded `dev` tre
 | `TCC_CI_CLIENT_ID`, `TCC_CI_APP_PRIVATE_KEY` | repository secrets, passed by `test.yml` | Mint the App token that creates and deletes the snapshot branch, opens and merges the promotion pull request, pushes the tag and creates the release |
 | `release` environment | `.github/environments/release.json` | Deployment only from `dev`; the promotion job and `release.yml` both use it |
 | `version-tags.json` ruleset | `.github/rulesets/` | A `v*` tag cannot be moved, force pushed or deleted |
-| `main-prod-lockdown` ruleset | `.github/rulesets/` | `main` needs a pull request and linear history, which the squash merge satisfies |
+| `main-prod-lockdown` ruleset | `.github/rulesets/` | `main` needs a pull request, linear history and `Gate — Required` from the `tcc-main-ci` App on the snapshot; the squash merge and the grade status satisfy them |
 | `promote` budget | `scripts/ci_budget` | Matches the job's ten minute timeout |
 
 The environment and ruleset payloads and how to apply them are in `.github/rulesets/README.md`.

@@ -79,7 +79,15 @@ my-tools/                                   <- the bundle directory
 3. Profiles inside `profiles/` are **auto-discovered** by `--list-profiles`
 4. `agentihooks init --profile <name>` checks built-in profiles first, then bundle
 
-Only **one bundle** can be linked at a time.
+Only **one root bundle** can be linked at a time. A second, personal **user bundle** is linked beside it:
+
+```bash
+agentihooks bundle link --user ~/dev/my-user-bundle      # or: agentihooks init --user-bundle <path>
+agentihooks bundle list --user
+agentihooks bundle unlink --user                         # the root link and every bundle file stay
+```
+
+The root bundle holds shared configuration; the user bundle holds personal configuration. Sources apply in the order package, root bundle, user bundle, profile chain, so a user-bundle file wins over a root-bundle file of the same name. A configured user bundle whose directory is missing is reported on `init` and not applied. `AGENTIHOOKS_USER_BUNDLE_PATH` names a user bundle when none is linked.
 
 ## 3-Layer Merge
 
@@ -89,13 +97,14 @@ When `agentihooks init` runs, skills, agents, commands, rules, and MCP servers a
 |-------|--------|-------------|
 | 1 (base) | agentihooks `.claude/` | Built-in assets from the agentihooks repo |
 | 2 (bundle) | bundle `.claude/` | Bundle-global customizations |
+| 2b (user bundle) | user bundle `.claude/` | Personal customizations, applied after the root bundle |
 | 3 (profile) | `profiles/<name>/.claude/` | Profile-specific overrides |
 
 Later layers override earlier ones. This lets you start with the agentihooks base, add team customizations via the bundle, and fine-tune per profile.
 
-For settings, the merge order is: `_base/settings.base.json` -> profile `.claude/settings.overrides.json` -> OTEL.
+For settings, the merge order is: `_base/settings.base.json` -> bundle -> user bundle -> profile `.claude/settings.overrides.json` -> OTEL. Hook arrays append in that order.
 
-For MCP servers: agentihooks + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`.
+For MCP servers: agentihooks + bundle `.claude/.mcp.json` + user bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`.
 
 ## Shared `CLAUDE.md`
 
@@ -105,7 +114,7 @@ For MCP servers: agentihooks + bundle `.claude/.mcp.json` + profile `.claude/.mc
 [ bundle .claude/CLAUDE.md ]  ->  [ profile CLAUDE.md (one per chained profile) ]  ->  [ all enabled bundle manifestos ]
 ```
 
-An **optional** `<bundle>/.claude/CLAUDE.md` holds directives every profile should
+An **optional** `<bundle>/.claude/CLAUDE.md` (and the user bundle's, after it) holds directives every profile should
 share, so they are written once instead of duplicated into each profile. It is
 prepended exactly once per install — including for a chained
 `--profile a,b` — inside these markers:
@@ -120,15 +129,21 @@ Because profile content is written *after* the shared block, a profile can still
 override shared guidance by restating it. Keep profile `CLAUDE.md` files to what
 is genuinely profile-specific.
 
+A worker pod and a remote hive carry only the root bundle, so a seat is refused, before any order or pod is created, when a user bundle is registered on the host that launches it and the seat would run on another machine (`bundle unlink --user` clears it). A seat on the launching hive keeps its user bundle. The refusal applies to new placements: a launch order published before the user bundle was registered is answered as it stands and is not revoked, so unlink before launching to be sure nothing is placed remotely without its user source.
+
+A pinned render (`--bundle-revision`, used by swarm overlay launches) rebuilds from the recorded root and user commits, copies both into the profile home and records both in its render stamp. It never reads the live user bundle, and refuses a revision that names no user commit while a user bundle is linked.
+
 Re-running `agentihooks init` replaces the block in place — it never stacks. If the
 bundle has no `.claude/CLAUDE.md`, or no profile in the chain has a `CLAUDE.md` to
 prepend onto, the step is a no-op.
 
-Every `*.md` file under the linked bundle's `manifestos/` directory is appended
+Every `*.md` file under the linked bundle's `manifestos/` directory, and under the user bundle's `manifestos/` directory, is appended
 in filename order; `README.md` is excluded. Set
 `AGENTIHOOKS_SKIP_MANIFESTO=uno,dos,tres` to omit named manifestos. Names may
 include or omit `.md`. `CI_MANIFESTO_PATH` remains a single-file compatibility
-override, and `MANIFESTOS_DIR` can replace the bundle directory.
+override, and `MANIFESTOS_DIR` can replace the bundle directory. A user-bundle manifesto replaces a root-bundle manifesto with the same file stem; `MANIFESTOS_DIR` and `CI_MANIFESTO_PATH` bypass the user bundle.
+
+`deps.json` is read from the root bundle and then the user bundle; a user-bundle entry replaces the root entry with the same `id`, and the dependency stamp is invalidated by a change to either file.
 
 A manifesto may open with front matter naming the package roles that receive it:
 
@@ -164,9 +179,11 @@ When you run `agentihooks init --profile X`:
 
 1. Check `profiles/X` in the agentihooks repo (built-in)
 2. Check `profiles/X` in the linked bundle
-3. Error if not found
+3. Check `profiles/X` in the linked user bundle
+4. Check profiles registered with `link-profile`, then the packaged base roles
+5. Error if not found
 
-Built-in profiles always take precedence. Name your bundle profiles to avoid conflicts.
+Built-in profiles always take precedence. Name your bundle profiles to avoid conflicts; a name defined in both the root and the user bundle resolves to the root's and `init` warns.
 
 ## Permission Tiers
 

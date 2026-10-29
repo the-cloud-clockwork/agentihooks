@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, github_app_cli, master_claude_login, session_bands
-from scripts.hive import quota_refresh, registry
+from scripts.hive import bundle_refresh, quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm.commands import hive_id
@@ -58,17 +58,15 @@ def beat(redis: "Redis", local_id: str) -> None:
     # them. A member misdetected as the controller gets ACL's NoPermissionError on that write; it is never fatal,
     # since the hub already indexes the member at join, refresh and revoke.
     member = local_id == os.environ.get("AGENTIHOOKS_HIVE_ID")
-    registry.migrate(redis, local_id)
     if not member:
         _index_hive(redis, local_id)
+    fields = {name: report[name] for name in ("slots", "interactive", "repos")}
+    fields["master_login"] = {"claude": master_claude_login.signed_in()}
+    fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
+    beat_ms = int(time.time() * 1000)
+    fields["heartbeat_at"] = beat_ms
+    registry.beat(redis, local_id, fields)
     with redis.pipeline() as pipe:
-        registry.seed(pipe, local_id)
-        fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
-        fields["master_login"] = json.dumps({"claude": master_claude_login.signed_in()})
-        fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
-        beat_ms = int(time.time() * 1000)
-        fields["heartbeat_at"] = str(beat_ms)
-        pipe.hset(key, mapping=fields)
         for field in ("sessions", "quota"):
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
         pipe.execute()
@@ -126,8 +124,10 @@ def fill_operator_env() -> None:
 def _index_hive(redis: "Redis", local_id: str) -> None:
     from redis.exceptions import NoPermissionError
 
+    from scripts.hive import hive_state
+
     try:
-        redis.sadd(registry.INDEX, local_id)
+        hive_state.indexed(redis, local_id, True)
     except NoPermissionError:
         pass
 
@@ -155,7 +155,10 @@ def _slot_errors() -> tuple[type[Exception], ...]:
 def adopt_capabilities(redis: "Redis", local_id: str) -> None:
     """Launches inherit the daemon environment, so a render sees the capabilities this hive's record declares."""
     os.environ.pop(profile_chain.HIVE_CAPABILITIES, None)
-    declared = json.loads(redis.hget(registry.key(local_id), "capabilities") or "[]")
+    try:
+        declared = (registry.show(redis, local_id) or {}).get("capabilities", [])
+    except registry.HiveError as exc:
+        raise ValueError(str(exc)) from exc
     os.environ[profile_chain.HIVE_CAPABILITIES] = ",".join(declared)
 
 
@@ -212,7 +215,8 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
     while not stop.is_set():
         try:
             scheduled_wait(HEADROOM_SECONDS, redis=waiter, timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
-        except (ConnectionError, TimeoutError):
+        except (ConnectionError, TimeoutError) as exc:
+            print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
             return
         if stop.is_set():
             return
@@ -225,6 +229,27 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
 
 
+def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
+    """Only the hive that hosts the operator's interface runs the master herdr client, so only it publishes."""
+    from redis.exceptions import ConnectionError, RedisError, TimeoutError
+
+    from scripts.hive import herdr_stats
+
+    while not stop.is_set():
+        try:
+            scheduled_wait(herdr_stats.EVERY_S, redis=waiter, timeout=herdr_stats.EVERY_S + WAKE_SLACK_S)
+        except (ConnectionError, TimeoutError) as exc:
+            print(f"hive herdr stats wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+            return
+        if stop.is_set():
+            return
+        try:
+            if (registry.show(redis, local_id) or {}).get("ui") == "yes":
+                herdr_stats.publish(redis, local_id, int(time.time() * 1000))
+        except (RedisError, ValueError, KeyError) as exc:
+            print(f"hive herdr stats publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
 def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
@@ -232,19 +257,23 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     fill_operator_env()
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
-    renewed = time.time()
+    renewed = bundled = time.time()
     failures = 0
     while True:
         stop = threading.Event()
         try:
             redis, waiter = connect()
             local_id = hive_id()
-            threading.Thread(target=publish_headroom, args=(redis, waiter, local_id, stop), daemon=True).start()
+            helpers = {}
             while True:
                 started = time.monotonic()
+                _keep_helpers(helpers, (redis, waiter, local_id, stop))
                 worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
                 renewed = github_app_cli.renew(renewed, time.time())
+                bundled = bundle_refresh.refresh(bundled, time.time(), os.environ)
                 beat(redis, local_id)
+                if marker := os.environ.get("HIVE_READY_FILE"):
+                    Path(marker).touch()
                 elapsed = time.monotonic() - started
                 delay = max(0, BEAT_SECONDS - max(WAKE_SLACK_S, elapsed))
                 scheduled_wait(delay, redis=waiter, timeout=max(delay, BEAT_SECONDS - elapsed - WAKE_SLACK_S / 2))
@@ -255,6 +284,13 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
             failures += 1
         finally:
             stop.set()
+
+
+def _keep_helpers(helpers: dict, args: tuple) -> None:
+    for target in (publish_headroom, publish_herdr_stats):
+        if target not in helpers or not helpers[target].is_alive():
+            helpers[target] = threading.Thread(target=target, args=args, daemon=True)
+            helpers[target].start()
 
 
 def _back_off(exc: Exception, failures: int) -> None:
@@ -588,10 +624,11 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
     report = {"names": sorted(herdr.live_names()), "panes": {}, "executions": {}}
     if not hosted:
         return report
-    from scripts.swarm_v2.runtime.process import local_namespace
+    from scripts.swarm_v2.runtime.process import local_namespace, started_ms
 
     report["observed_at"] = int(time.time() * 1000)
     report["process_namespace"] = local_namespace()
+    report["started_at"] = started_ms()
     report["pane_ids"] = _pane_ids(herdr)
     facts = herdr.bindings([agent for _, agent in hosted])
     report["panes"] = herdr.conversations() or {}

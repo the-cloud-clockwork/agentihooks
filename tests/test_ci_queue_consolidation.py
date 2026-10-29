@@ -19,7 +19,9 @@ def test_container_proofs_share_one_runner_without_losing_commands():
             assert step["with"]["context"] == "."
             assert step["with"]["load"] is True
             commands.append(f"docker build -t {step['with']['tags']} .")
-        elif step.get("run") in {
+        elif step.get("run", "").replace(
+            ' \\\n  ${LAYERS_FROM:+--cache-from "$LAYERS_FROM"} ${LAYERS_TO:+--cache-to "$LAYERS_TO"}', ""
+        ) in {
             "docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed .",
             """docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &
 build=$!
@@ -50,6 +52,8 @@ exit "$status"
         " scripts/packaging/swarm-init-smoke.sh",
         "bash scripts/packaging/hive-launch-attestation-proof.sh",
         "bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check",
+        'rm -rf "$RUNNER_TEMP/swarm-smoke-layers"\n'
+        'mv "$RUNNER_TEMP/swarm-smoke-layers-next" "$RUNNER_TEMP/swarm-smoke-layers"\n',
     ]
     assert sum(step.get("uses") == "actions/checkout@v4" for step in steps) == 1
     for step in steps:
@@ -59,6 +63,8 @@ exit "$status"
             assert "if" not in step
         elif step.get("id") == "build":
             assert "if" not in step
+        elif step.get("name") == "Keep the swarm smoke layers":
+            assert step["if"] == "steps.layers.outputs.cache-hit != 'true'"
         elif "run" in step:
             assert step["if"] == "${{ !cancelled() && steps.build.outcome == 'success' }}"
         assert not step.get("continue-on-error", False)

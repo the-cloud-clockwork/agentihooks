@@ -1,0 +1,88 @@
+Ledger page rollback rehearsal on Anton, issue 8385.
+
+Rollback: pull request 8460 reverts the page-only change of pull request 8268.
+Merged into dev as d9ef55c1abd8c3bda74a3521cd6ec021723872c3; gh pr view 8460 mergedAt 2026-10-28T21:08:57Z.
+Promotion: dev push Tests run 40769492318 graded d9ef55c1a green; promotion pull request 8509
+(head promotion/d9ef55c1a) released v2.17.457 at 2026-10-28T22:02:04Z. Promotion pull request 8510
+(Tests run 40771579115, graded 60523b8d0) released v2.17.458 at 2026-10-28T22:03:15Z; the ledger rolled to v2.17.458.
+Check: git rev-parse v2.17.458:scripts/swarm_ledger/static/js/layout.js = 4da63342bca19223e766cf4db385ff1c592951f5 (v2.17.456 = 03b6beccbc2e04e8f64fab08b7a3cf5f2a46b9e5).
+
+Observer: kubectl get pods per namespace (uid, start, restarts, image) and a read-only
+REPEATABLE READ row count per public table of the swarm store, run from ledger-1.
+
+label=baseline at=2026-10-28T18:23:46Z
+agentihooks-swarm NAME                                                UID                                    START                  RESTARTS   READY            IMAGE
+agentihooks-swarm agentihooks-swarm-controller-8578c78d8f-56pn6       b2e2ea39-e0fe-4dd5-8bf4-472c5ae8c948   2026-10-28T18:00:59Z   0,0        true,true        ghcr.io/the-cloud-clockwork/agentihooks-worker:release,ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.453
+agentihooks-swarm agentihooks-swarm-github-webhook-58849cf7d5-gd8xp   59ffe95b-555e-495e-b930-6ecc6a4aa60b   2026-10-28T18:00:57Z   0          true             ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.453
+agentihooks-swarm agentihooks-swarm-hive-join-58bf5c7698-swvbd        8c869ab7-5d84-4fc7-91cb-ad0dc1c1c54b   2026-10-28T18:00:57Z   0          true             ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.453
+agentihooks-swarm agentihooks-swarm-hub-68bc8677bf-gnrq8              38a02e53-bfaf-4f19-bfc6-a2edddf1b59d   2026-10-28T18:00:57Z   0          true             ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.453
+agentihooks-swarm agentihooks-swarm-hub-68bc8677bf-qrs4z              be5b16e0-ef20-4896-97f2-39d03fdaad13   2026-10-28T18:01:16Z   0          true             ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.453
+agentihooks-swarm agentihooks-swarm-ledger-0                          5abfde08-3878-43ef-8ba3-d61dd4585c03   2026-10-28T18:01:34Z   0          true             ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.453
+agentihooks-swarm agentihooks-swarm-ledger-1                          4f51f374-b45d-4a2f-82bf-94a0f6252cfd   2026-10-28T18:01:10Z   0          true             ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.453
+agentihooks-swarm agentihooks-swarm-nats-0                            07832c0c-0e7e-49ad-b711-dd89774756dd   2026-10-25T01:40:18Z   0,0,0      true,true,true   nats:2.15.0-alpine,natsio/nats-server-config-reloader:0.23.0,natsio/prometheus-nats-exporter:0.20.1
+agentihooks-swarm agentihooks-swarm-nats-1                            c032acba-5af4-4bda-893c-829bc5f6295c   2026-10-25T01:39:55Z   0,0,0      true,true,true   nats:2.15.0-alpine,natsio/nats-server-config-reloader:0.23.0,natsio/prometheus-nats-exporter:0.20.1
+agentihooks-swarm agentihooks-swarm-nats-2                            93bd9c3d-5d97-492b-a144-71f6cc92edc5   2026-10-25T01:39:19Z   0,0,0      true,true,true   nats:2.15.0-alpine,natsio/nats-server-config-reloader:0.23.0,natsio/prometheus-nats-exporter:0.20.1
+agentihooks-swarm agentihooks-swarm-postgres-0                        8ed30489-0a10-4620-ab91-b9570c3d4e2a   2026-10-27T14:54:00Z   0          true             mirror.gcr.io/library/postgres:16
+agentihooks-swarm agentihooks-swarm-redis-tls-0                       f5045c1e-9364-4cb8-bfd7-5f1c6c0fb54b   2026-10-27T18:04:57Z   0          true             redis:7
+agentihooks-swarm hive-home-grow-7btjv                                026233d4-9238-4d15-a95b-e28bd062fcb9   2026-10-27T13:02:08Z   0          true             alpine:3.20
+agentihooks-swarm hive-home-grow-fwx4v                                203461ee-fe4d-4480-b81f-ada57b7562b6   2026-10-27T13:02:08Z   0          true             alpine:3.20
+agentihooks-swarm hive-home-local-k6hdz                               c2a7ed87-8e2d-458e-9154-866519c565f0   2026-10-27T15:06:01Z   0          true             alpine:3.20
+agentihooks-swarm hive-home-local-klwd8                               bba38eaa-076d-4b77-a982-a7f6217384de   2026-10-26T21:56:03Z   0          true             alpine:3.20
+agentihooks-swarm hive-home-local-l59rc                               4ff04e89-a999-4c9c-aaaa-6cbe24888d7e   2026-10-26T21:56:03Z   0          true             alpine:3.20
+agentihooks-swarm hive-home-nfs-576f9c54f9-mknwn                      27f6b77b-1b04-496e-81e8-794012d615d6   2026-10-27T14:54:00Z   0          true             itsthenetwork/nfs-server-alpine:12
+agentihooks-swarm-workers NAME   UID   START   RESTARTS   READY   IMAGE
+swarm-hive-001 NAME                                                            UID                                    START                  RESTARTS   READY   IMAGE
+swarm-hive-001 swarm-hive-001-agentihooks-swarm-worker-hive-7c4bbfc7b4-kcrjd   4d47f05a-628c-44d4-a5ec-7450e18fac21   2026-10-28T05:56:21Z   2          true    ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:release
+swarm-hive-002 NAME                                                            UID                                    START                  RESTARTS   READY   IMAGE
+swarm-hive-002 swarm-hive-002-agentihooks-swarm-worker-hive-749fcf6f55-pnhhp   ee6849d0-6f9a-4cfc-b65b-68d2f491cf81   2026-10-28T05:56:24Z   1          true    ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:release
+swarm-hive-003 NAME                                                            UID                                    START                  RESTARTS   READY   IMAGE
+swarm-hive-003 swarm-hive-003-agentihooks-swarm-worker-hive-7bff46d594-qvq95   59371f7b-3b9f-4acd-a77d-e60917fb103e   2026-10-28T06:05:47Z   0          true    ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:release
+{"at": "2026-10-28T18:23:48.759793+00:00", "public_table_rows": {"artifact_files": 91, "events": 15623, "fields": 367338, "ledgers": 67, "media_files": 57, "outbox": 5, "outbox_sent": 5, "registry": 64, "relay_journal": 0, "resources": 207118, "revisions": 208, "row_changes": 1092, "seed_base": 67704, "seed_deltas": 1412, "threads": 150292, "work_dependencies": 2957, "work_nodes": 6378, "writer_floor": 1}}
+
+label=rollback at=2026-10-28T22:06:49Z
+agentihooks-swarm NAME                                                UID                                    START                  RESTARTS   READY            IMAGE
+agentihooks-swarm agentihooks-swarm-controller-84885b686-w2mzv        a41ebadb-6ee9-4e4a-9997-9ad7aa8a730e   2026-10-28T22:06:04Z   0,0        true,true        ghcr.io/the-cloud-clockwork/agentihooks-worker:release,ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.458
+agentihooks-swarm agentihooks-swarm-github-webhook-645f856df8-2tz9s   43dc232e-61ca-456d-bf90-6a1c967b0f33   2026-10-28T22:05:51Z   0          true             ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.458
+agentihooks-swarm agentihooks-swarm-hive-join-57f884fdb5-nrjmq        9542b88e-47a5-440d-b980-37699a1cd4b4   2026-10-28T22:05:51Z   0          true             ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.458
+agentihooks-swarm agentihooks-swarm-hub-5b99c4fdfb-cbj5h              dbe73b5b-e6ed-43ef-8a94-7928b05dd989   2026-10-28T22:06:03Z   0          true             ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.458
+agentihooks-swarm agentihooks-swarm-hub-5b99c4fdfb-gmllj              c8342a13-b7db-4d4c-b6ac-fa93ac4e859d   2026-10-28T22:05:50Z   0          true             ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.458
+agentihooks-swarm agentihooks-swarm-ledger-0                          12823556-36f0-42ad-9e56-0a5f6e51319b   2026-10-28T22:06:31Z   0          true             ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.458
+agentihooks-swarm agentihooks-swarm-ledger-1                          19483d39-51f2-4128-963b-3f1277466734   2026-10-28T22:06:01Z   0          true             ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.17.458
+agentihooks-swarm agentihooks-swarm-nats-0                            07832c0c-0e7e-49ad-b711-dd89774756dd   2026-10-25T01:40:18Z   0,0,0      true,true,true   nats:2.15.0-alpine,natsio/nats-server-config-reloader:0.23.0,natsio/prometheus-nats-exporter:0.20.1
+agentihooks-swarm agentihooks-swarm-nats-1                            c032acba-5af4-4bda-893c-829bc5f6295c   2026-10-25T01:39:55Z   0,0,0      true,true,true   nats:2.15.0-alpine,natsio/nats-server-config-reloader:0.23.0,natsio/prometheus-nats-exporter:0.20.1
+agentihooks-swarm agentihooks-swarm-nats-2                            93bd9c3d-5d97-492b-a144-71f6cc92edc5   2026-10-25T01:39:19Z   0,0,0      true,true,true   nats:2.15.0-alpine,natsio/nats-server-config-reloader:0.23.0,natsio/prometheus-nats-exporter:0.20.1
+agentihooks-swarm agentihooks-swarm-postgres-0                        8ed30489-0a10-4620-ab91-b9570c3d4e2a   2026-10-27T14:54:00Z   0          true             mirror.gcr.io/library/postgres:16
+agentihooks-swarm agentihooks-swarm-redis-tls-0                       f5045c1e-9364-4cb8-bfd7-5f1c6c0fb54b   2026-10-27T18:04:57Z   0          true             redis:7
+agentihooks-swarm hive-home-grow-7btjv                                026233d4-9238-4d15-a95b-e28bd062fcb9   2026-10-27T13:02:08Z   0          true             alpine:3.20
+agentihooks-swarm hive-home-grow-fwx4v                                203461ee-fe4d-4480-b81f-ada57b7562b6   2026-10-27T13:02:08Z   0          true             alpine:3.20
+agentihooks-swarm hive-home-local-k6hdz                               c2a7ed87-8e2d-458e-9154-866519c565f0   2026-10-27T15:06:01Z   0          true             alpine:3.20
+agentihooks-swarm hive-home-local-klwd8                               bba38eaa-076d-4b77-a982-a7f6217384de   2026-10-26T21:56:03Z   0          true             alpine:3.20
+agentihooks-swarm hive-home-local-l59rc                               4ff04e89-a999-4c9c-aaaa-6cbe24888d7e   2026-10-26T21:56:03Z   0          true             alpine:3.20
+agentihooks-swarm hive-home-nfs-576f9c54f9-mknwn                      27f6b77b-1b04-496e-81e8-794012d615d6   2026-10-27T14:54:00Z   0          true             itsthenetwork/nfs-server-alpine:12
+agentihooks-swarm-workers NAME   UID   START   RESTARTS   READY   IMAGE
+swarm-hive-001 NAME                                                            UID                                    START                  RESTARTS   READY   IMAGE
+swarm-hive-001 swarm-hive-001-agentihooks-swarm-worker-hive-558d8b7b74-sq4dp   cf3c7cd7-5dff-47b4-bd37-5206903149a8   2026-10-28T21:43:49Z   0          true    ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:release
+swarm-hive-002 NAME                                                           UID                                    START                  RESTARTS   READY   IMAGE
+swarm-hive-002 swarm-hive-002-agentihooks-swarm-worker-hive-dc98b5786-bgqlm   128e25d2-cd7e-4b7e-bc38-f9fb1c8fcbab   2026-10-28T19:26:41Z   0          true    ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:release
+swarm-hive-003 NAME                                                            UID                                    START                  RESTARTS   READY   IMAGE
+swarm-hive-003 swarm-hive-003-agentihooks-swarm-worker-hive-576c897c7b-6nhf7   98ef78b0-dcef-4f78-9017-55435c998d26   2026-10-28T19:26:45Z   0          true    ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:release
+{"at": "2026-10-28T22:06:52.590264+00:00", "public_table_rows": {"artifact_files": 91, "events": 14534, "fields": 369466, "ledgers": 68, "media_files": 57, "outbox": 1, "outbox_sent": 1, "registry": 65, "relay_journal": 0, "resources": 208378, "revisions": 208, "row_changes": 1112, "seed_base": 67704, "seed_deltas": 1412, "threads": 151052, "work_dependencies": 2966, "work_nodes": 6410, "writer_floor": 1}}
+
+Reading:
+- Ledger pods moved from 2.17.453 to 2.17.458 and started 22:06:01Z and 22:06:31Z, zero restarts, ready.
+- Hive worker pods were replaced between the two observations (new UIDs, started 19:26:41Z,
+  19:26:45Z and 21:43:49Z). Every one started before the ledger roll at 22:06Z and shows zero restarts, so the ledger roll restarted no worker.
+- Swarm store: the store took writes during the window (ledgers 67 to 68, registry 64 to 65,
+  work_nodes 6378 to 6410), so it was not frozen. Every other table holds equal or more rows. Three tables are lower:
+  outbox and outbox_sent, both 5 to 1, and events, 15623 to 14534. Hypothesis for outbox: relayed
+  rows are pruned after sending. Hypothesis for events: the retention trim in
+  scripts/swarm_ledger/repository/events.py (retained(), keeping ledger_core.EVENTS_KEPT = 2000 per
+  ledger within EVENTS_WINDOW_MS) runs on each ledger write. These counts were taken 3h43m apart and carry no per ledger event split, so neither
+  drop is proven; the observer now records events per ledger
+  for later passes.
+
+Named gaps in this rollback pass:
+- Worker identity across the roll itself is not bracketed: the baseline is 3h43m before the roll and
+  the workers changed identity in between, before the roll. The restore pass brackets its roll with
+  observations taken minutes apart so worker UIDs can be compared directly.
+- The events drop is not attributed per ledger (see Reading). The restore pass records events per ledger.

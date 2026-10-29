@@ -8,6 +8,7 @@ import zipfile
 import zlib
 from datetime import datetime, timezone
 
+from scripts import gh_audit
 from scripts.ci_mutation.merge import merge_reports
 from scripts.swarm import github_reads
 from scripts.swarm.lost_runner import home as _backoff_home
@@ -65,7 +66,8 @@ def _api(endpoint, binary=False, caller="mutation_wait"):
     if backing_off():
         raise RateLimited(f"gh api {endpoint}: GitHub API rate limited until {_stamp(_held_until())}")
     try:
-        done = subprocess.run(["gh", "api", endpoint], capture_output=True, timeout=20)
+        with gh_audit.uncharged():
+            done = subprocess.run(["gh", "api", endpoint], capture_output=True, timeout=20)
     except (OSError, subprocess.SubprocessError) as error:
         raise Unreachable(f"gh api {endpoint}: {error}") from error
     github_reads.charge(caller, endpoint, _now())

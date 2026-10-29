@@ -84,3 +84,13 @@ def test_no_single_shared_lan_address_is_a_refusal(services, named):
     with pytest.raises(auth.HiveError) as refused:
         create_render.lan_address(services)
     assert str(refused.value) == f"the agentihooks-swarm LAN services name {named}; expected one"
+
+
+def test_paths_names_every_file_of_one_hive():
+    template = f"{TEMPLATE}#@ file: k8s/manifests/${{name}}/home.yaml  \n#@ file: k8s/${{other}}/${{name}}.yaml\n"
+    assert create_render.paths(template, "swarm-hive-004") == {
+        "k8s/argocd/apps/swarm-hive-004.yaml",
+        "k8s/manifests/swarm-hive-004/hive.yaml",
+        "k8s/manifests/swarm-hive-004/home.yaml",
+        "k8s/${other}/swarm-hive-004.yaml",
+    }

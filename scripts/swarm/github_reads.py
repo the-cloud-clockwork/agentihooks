@@ -11,13 +11,18 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import subprocess
+import time
 from collections import Counter
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from scripts.swarm.lost_runner import home as _agentihooks_home
 
+CALLER = ContextVar("github_caller", default="swarm.rest")
 RUN_TTL_S = 60
 TERMINAL = "completed"
 TOKENS = ("GH_TOKEN", "GITHUB_TOKEN")
@@ -110,6 +115,46 @@ def snapshot(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
         return found
 
 
+def _conditional_page(caller: str, endpoint: str, fetch: Callable) -> dict:
+    entry = home() / f"{_key(f'etag {endpoint}')}.json"
+    try:
+        cached = json.loads(entry.read_text())
+    except (OSError, ValueError):
+        cached = {}
+    args = [endpoint, "--include"]
+    if cached.get("etag"):
+        args += ["-H", f"If-None-Match: {cached['etag']}"]
+    try:
+        with calling(caller):
+            output = fetch(*args)
+    except subprocess.CalledProcessError as error:
+        if not _not_modified(error.stdout):
+            raise
+        output = error.stdout
+    header, _, body = output.replace("\r\n", "\n").partition("\n\n")
+    lines = header.splitlines()
+    status = int(lines[0].split()[1])
+    if status == 304:
+        return cached
+    if status != 200:
+        raise subprocess.CalledProcessError(1, ["gh", "api", *args], output=output)
+    headers = {key.lower(): value.strip() for key, _, value in (line.partition(":") for line in lines[1:])}
+    links = re.findall(r'<([^>]+)>;\s*rel="next"', header)
+    found = {"body": json.loads(body), "etag": headers.get("etag", ""), "next": links[0] if links else ""}
+    _write(entry, found)
+    return found
+
+
+def conditional_pages(caller: str, endpoint: str, fetch: Callable) -> list[dict]:
+    pages = {}
+    while endpoint and endpoint not in pages:
+        current = endpoint
+        page = snapshot(f"conditional {current}", time.time(), lambda: _conditional_page(caller, current, fetch))
+        pages[current] = page["body"]
+        endpoint = page["next"]
+    return list(pages.values())
+
+
 def _write(path, body):
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -120,6 +165,15 @@ def _write(path, body):
         pass
 
 
+@contextmanager
+def calling(caller: str):
+    token = CALLER.set(caller)
+    try:
+        yield
+    finally:
+        CALLER.reset(token)
+
+
 def charge(caller: str, endpoint: str, now: float) -> None:
     try:
         home().mkdir(parents=True, exist_ok=True)
@@ -127,6 +181,57 @@ def charge(caller: str, endpoint: str, now: float) -> None:
             log.write(json.dumps({"at": now, "caller": caller, "source": source(), "endpoint": endpoint}) + "\n")
     except OSError:
         pass
+
+
+def _rest_pages(
+    caller: str, endpoint: str, output: str | bytes | None, include: bool, incomplete: bool = False
+) -> str | bytes | None:
+    if output is None:
+        return output
+    pattern = rb"(?:(?<=\A\[)|(?<=\n,)|\A|\r?\n)HTTP/[\d.]+ \d{3}[^\r\n]*\r?\n(?:[^\r\n]+:[^\r\n]*\r?\n)+\r?\n"
+    cleaned, pages = re.subn(
+        pattern.decode() if isinstance(output, str) else pattern, "" if isinstance(output, str) else b"", output
+    )
+    for _ in range(max(0, pages - 1)):
+        charge(caller, endpoint, time.time())
+    newline = "\n" if isinstance(cleaned, str) else b"\n"
+    if incomplete and (cleaned == newline or cleaned.endswith(newline * 2)):
+        cleaned = cleaned[:-1]
+        charge(caller, endpoint, time.time())
+    return output if include else cleaned
+
+
+def _not_modified(output: str | bytes | None) -> bool:
+    if output is None:
+        return False
+    pattern = rb"HTTP/\S+ 304\b" if isinstance(output, bytes) else r"HTTP/\S+ 304\b"
+    return bool(re.match(pattern, output))
+
+
+def rest(caller: str, args: list[str], run: Callable = subprocess.run, **options) -> subprocess.CompletedProcess:
+    from scripts import gh_audit
+
+    path = gh_audit.endpoint(["gh", *args]) if args[0] == "api" else None
+    if path is None:
+        return run(["gh", *args], **options)
+    endpoint = next(word for word in args[1:] if word.split("?")[0].removeprefix("/") == path)
+    paginate = "--paginate" in args
+    include = "--include" in args or "-i" in args
+    command = ["gh", *args] if include or not paginate else ["gh", *args, "--include"]
+    try:
+        with gh_audit.uncharged():
+            result = run(command, **options)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        if not _not_modified(exc.stdout):
+            charge(caller, endpoint, time.time())
+        if paginate:
+            exc.stdout = _rest_pages(caller, endpoint, exc.stdout, include, incomplete=True)
+        raise
+    if not _not_modified(result.stdout):
+        charge(caller, endpoint, time.time())
+    if paginate:
+        result.stdout = _rest_pages(caller, endpoint, result.stdout, include)
+    return result
 
 
 def counts(since: float, until: float) -> dict[str, int]:

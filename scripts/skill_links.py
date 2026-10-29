@@ -23,7 +23,6 @@ def repair() -> None:
             return
         state = install._load_state()
         installed = install._global_record(state, "claude").get("profile", "default")
-        bundle = install._get_bundle_path()
         records = []
         removed = []
         for link in links:
@@ -31,8 +30,7 @@ def repair() -> None:
             if link.parent.parent != Path.home() / ".claude":
                 profile = os.environ.get("AGENTIHOOKS_PROFILE", installed)
             roots = [install.PACKAGE_FEATURES_DIR]
-            if bundle:
-                roots.append(bundle / ".claude")
+            roots.extend(root / ".claude" for _, root in install._bundle_roots())
             roots.extend(directory / ".claude" for _, directory in install._resolve_profile_chain(profile))
             candidates = [root / "skills" / link.name for root in roots]
             current = next((item for item in reversed(candidates) if (item / "SKILL.md").is_file()), None)

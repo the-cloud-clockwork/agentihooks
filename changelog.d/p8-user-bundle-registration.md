@@ -1,0 +1,1 @@
+The user bundle can be linked beside the root bundle with `agentihooks bundle link --user` or `agentihooks init --user-bundle`; its profiles resolve after the root bundle's and `--force` keeps both links.

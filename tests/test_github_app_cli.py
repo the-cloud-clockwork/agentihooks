@@ -1,4 +1,5 @@
 import io
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -232,3 +233,148 @@ def test_a_failed_renewal_keeps_the_old_file_and_retries(monkeypatch, tmp_path):
     mint.side_effect = github_app_cli.GitAuthRefused(github_app_cli.REFUSED)
     assert github_app_cli.renew(0.0, 99999.0) == 0.0
     assert path.read_text() == "old\n"
+
+
+def gh_exec(monkeypatch, remaining, arguments, command="/usr/bin/gh", get=None):
+    monkeypatch.setattr(github_app_cli, "token", Mock(return_value="fixture"))
+    reply = Mock(
+        headers={
+            "X-RateLimit-Remaining": str(remaining),
+            "X-RateLimit-Limit": "5000",
+            "X-RateLimit-Reset": "1793160000",
+        }
+    )
+    read = get or Mock(return_value=reply)
+    monkeypatch.setattr(github_app_cli.requests, "get", read)
+    execute = Mock()
+    monkeypatch.setattr(github_app_cli.os, "execvpe", execute)
+    return github_app_cli.main(["exec", command, *arguments]), read, execute
+
+
+def test_exec_accepts_the_command_delimiter(monkeypatch):
+    monkeypatch.setattr(github_app_cli, "token", Mock(return_value="fixture"))
+    execute = Mock()
+    monkeypatch.setattr(github_app_cli.os, "execvpe", execute)
+    assert github_app_cli.main(["exec", "--", "/bin/true"]) == 0
+    assert execute.call_args.args[:2] == ("/bin/true", ["/bin/true"])
+
+
+def test_exec_missing_command_is_not_reported_as_credentials_failure(monkeypatch, capsys):
+    monkeypatch.setattr(github_app_cli, "token", Mock(return_value="fixture"))
+    monkeypatch.setattr(github_app_cli.os, "execvpe", Mock(side_effect=FileNotFoundError("private detail")))
+    assert github_app_cli.main(["exec", "missing"]) == 127
+    assert capsys.readouterr().err == "GitHub credential wrapper could not execute the command\n"
+
+
+READS = [
+    ["api", "repos/{owner}/{repo}/actions/artifacts?name=flake-budget&per_page=100"],
+    ["api", "--paginate", "repos/o/r/actions/runs"],
+    ["api", "-X", "GET", "search/issues", "-f", "q=repo:o/r"],
+    ["api", "--method=get", "repos/o/r/pulls"],
+    ["api", "graphql", "-f", "query=query { viewer { login } }"],
+    ["api", "graphql", "-f", 'query=query { user(login: "a@b.c") { id } }'],
+    ["api", "graphql", "-f", 'query=query { search(query: "mutation", type: ISSUE) { issueCount } }'],
+    ["run", "list"],
+    ["run", "download", "123"],
+    ["pr", "view", "8"],
+    ["pr", "checks", "8"],
+    ["search", "prs", "flaky"],
+    ["api", "-XGET", "repos/o/r/actions/artifacts/1/zip"],
+    ["api", "repos/o/r/pulls", "-X"],
+]
+WRITES = [
+    ["pr", "merge", "8", "--squash"],
+    ["pr", "create", "--base", "dev"],
+    ["api", "-X", "POST", "repos/o/r/actions/jobs/1/rerun"],
+    ["api", "--method", "PUT", "repos/o/r/pulls/8/merge"],
+    ["api", "repos/o/r/issues/8/comments", "-f", "body=done"],
+    ["api", "repos/o/r/dispatches", "--input", "body.json"],
+    ["api", "graphql", "-f", "query=mutation { enqueuePullRequest(input: {}) { clientMutationId } }"],
+    ["api", "-XPOST", "repos/o/r/actions/jobs/1/rerun"],
+    ["api", "-fbody=done", "repos/o/r/issues/8/comments"],
+    ["api", "graphql", "-F", "query=@enqueue.graphql"],
+    ["api", "graphql", "--input", "enqueue.json"],
+    ["workflow", "run", "publish-pypi.yml"],
+    ["api", "repos/o/r/actions/jobs/1/rerun", "-X", "POST"],
+    ["api", "--method=POST", "repos/o/r/actions/jobs/1/rerun"],
+    ["api", "graphql", "-f", "query= mutation { enqueuePullRequest(input: {}) { clientMutationId } }"],
+    ["api", "graphql", "-f", 'query=mutation { addComment(input: {body: "a=b=c"}) { clientMutationId } }'],
+]
+UNCHECKED = [
+    *WRITES,
+    ["api", "rate_limit"],
+    ["api", "/rate_limit"],
+    ["auth", "status"],
+    ["config", "list"],
+    ["pr"],
+    [],
+]
+
+
+@pytest.mark.parametrize("arguments", READS)
+def test_a_read_below_the_reserve_is_refused_naming_the_reset(monkeypatch, capsys, arguments):
+    status, read, execute = gh_exec(monkeypatch, 999, arguments)
+    assert status == 3
+    execute.assert_not_called()
+    read.assert_called_once_with(
+        "https://api.github.com/rate_limit",
+        headers={"Authorization": "Bearer fixture", "Accept": "application/vnd.github+json"},
+        timeout=10,
+    )
+    assert capsys.readouterr().err == (
+        "GitHub read refused: the shared App limit has 999 of 5000 calls left, below the reserve of 1000 kept for "
+        "launches, queueing and merges; reads resume after the reset at 2026-10-28T04:00:00Z\n"
+    )
+
+
+@pytest.mark.parametrize("arguments", READS)
+def test_a_read_at_the_reserve_runs(monkeypatch, arguments):
+    status, _, execute = gh_exec(monkeypatch, 1000, arguments)
+    assert status == 0
+    execute.assert_called_once()
+    assert execute.call_args.args[1] == ["/usr/bin/gh", *arguments]
+
+
+@pytest.mark.parametrize("arguments", UNCHECKED)
+def test_writes_and_local_commands_run_below_the_reserve_without_a_budget_read(monkeypatch, arguments):
+    status, read, execute = gh_exec(monkeypatch, 0, arguments)
+    assert status == 0
+    read.assert_not_called()
+    execute.assert_called_once()
+
+
+def test_other_commands_never_read_the_budget(monkeypatch):
+    status, read, execute = gh_exec(monkeypatch, 0, ["run", "list"], command="bash")
+    assert status == 0
+    read.assert_not_called()
+    execute.assert_called_once()
+
+
+def test_the_reserve_is_set_by_environment(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_GITHUB_READ_RESERVE", "50")
+    assert gh_exec(monkeypatch, 50, ["run", "list"])[0] == 0
+    assert gh_exec(monkeypatch, 49, ["run", "list"])[0] == 3
+
+
+def test_the_reset_time_is_named_in_utc_whatever_the_local_zone(monkeypatch, capsys):
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    try:
+        gh_exec(monkeypatch, 0, ["run", "list"])
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+    assert capsys.readouterr().err.endswith("reset at 2026-10-28T04:00:00Z\n")
+
+
+@pytest.mark.parametrize("failure", ["error", "headers"])
+def test_an_unreadable_budget_lets_the_read_run(monkeypatch, failure):
+    unreadable = (
+        Mock(side_effect=github_app_cli.requests.ConnectionError("down"))
+        if failure == "error"
+        else Mock(return_value=Mock(headers={}))
+    )
+    status, read, execute = gh_exec(monkeypatch, 0, ["run", "list"], get=unreadable)
+    assert status == 0
+    read.assert_called_once()
+    execute.assert_called_once()

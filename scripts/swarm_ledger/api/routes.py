@@ -1,4 +1,3 @@
-import io
 import json
 import logging
 import os
@@ -7,6 +6,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from scripts.swarm_ledger import ledger_closed, ports
 
+from ..repository.fragments import Fragment, exported, members
 from ..repository.rows import children, encode
 from . import resources, schemas, task_list
 from .errors import APIError
@@ -135,6 +135,16 @@ def workspace(services: Services, slug: str, task_id: str) -> dict:
     return {"data": tails, "revision": resources.revision(tails)}
 
 
+def global_read(services: Services, name: str) -> dict:
+    if name == "tips":
+        from scripts.swarm_ledger import page_tips
+
+        return {"data": page_tips.values()}
+    from . import monitor
+
+    return monitor.route(services)
+
+
 def global_resource(handler: object, services: Services, parts: list) -> dict:
     from . import admin, routing
 
@@ -148,10 +158,8 @@ def global_resource(handler: object, services: Services, parts: list) -> dict:
         from . import hives
 
         return hives.route(handler, services, parts, body)
-    if parts == ["tips"] and handler.command == "GET":
-        from scripts.swarm_ledger import page_tips
-
-        return {"data": page_tips.values()}
+    if parts in (["tips"], ["monitor"]) and handler.command == "GET":
+        return global_read(services, parts[0])
     if parts == ["layout"]:
         return admin.layout(handler, services, None if handler.command == "GET" else body(handler, services))
     if handler.command == "GET" and parts[0] in ("ledgers", "bin"):
@@ -207,7 +215,7 @@ PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 def export(handler: object, services: Services, slug: str, path: str, payload: dict) -> dict | None:
     if path == "export" and isinstance(payload, dict) and "since" in payload:
         schemas.validate(SINCE_SCHEMA, payload)
-        generation, body = services.repository.export_since(slug, payload["since"], export_bytes, export_changes)
+        generation, body = services.repository.export_since(slug, payload["since"], export_text, export_changes)
         body = body if isinstance(body, bytes) else body.encode()
         return handler.send_export(b'{"generation":' + str(generation).encode() + b"," + body[1:])
     schemas.validate({"type": "object", "maxProperties": 0}, payload)
@@ -216,15 +224,7 @@ def export(handler: object, services: Services, slug: str, path: str, payload: d
         if status is None:
             raise APIError(404, "swarm_missing", "No swarm for this ledger")
         return {"data": status}
-    return handler.send_export(services.repository.encoded_view(slug, export_bytes))
-
-
-def export_bytes(state: dict) -> bytes:
-    meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
-    with io.BytesIO() as stream:
-        for chunk in json.JSONEncoder(ensure_ascii=False).iterencode({"data": {**state, "_meta": meta}}):
-            stream.write(chunk.encode())
-        return stream.getvalue()
+    return handler.send_export(services.repository.export_since(slug, 0, export_text, export_changes)[1])
 
 
 SINCE_SCHEMA = {
@@ -235,6 +235,15 @@ SINCE_SCHEMA = {
 }
 HIDDEN_META = ("seeds", "api_operations")
 HIDDEN_PATHS = [[key] for key in HIDDEN_META]
+
+
+def export_text(fragments: Fragment) -> bytes:
+    meta = members({key: part for key, part in fragments.parts["_meta"].parts.items() if key not in HIDDEN_META})
+    body = b",".join(
+        encode(key).encode() + b":" + (meta if key == "_meta" else exported(part))
+        for key, part in fragments.parts.items()
+    )
+    return b'{"data":{' + body + b"}}"
 
 
 def change_unit(path: str) -> tuple | None:

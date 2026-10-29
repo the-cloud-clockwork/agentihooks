@@ -5,6 +5,7 @@ agentihooks swarm init NAME [--plan FILE] [--content FILE] [--repo DIR]  the one
 agentihooks swarm names check NAME [--plan FILE]                  valid or invalid against the swarm name rule, with suggestions
 agentihooks swarm <id> create --repo DIR [--template NAME]         proof and demo swarms only; init calls it for every other swarm
 agentihooks swarm <id> start | pause | stop [--now] | status
+agentihooks swarm <id> probe
 agentihooks swarm <id> names [--json]                              the swarm code, its herdr space and every agent name it gave
 agentihooks swarm <id> url                                        print the ledger page link (create and start print it last)
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
@@ -84,6 +85,7 @@ from scripts.swarm import (
     agent_up,
     bottleneck,
     bottleneck_status,
+    claim_lost,
     clearance,
     control_notifications,
     default_models,
@@ -210,6 +212,7 @@ NO_API_ADDRESS = "api-url takes an http or https address with a host and no cred
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
 HIVE_PLACEMENT = "hive-placement"
 ON_OFF = {"on": True, "off": False}
+PLACEMENT_NODES = "placement-nodes"
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
@@ -218,6 +221,8 @@ CONFIG_KEYS = {
     HIVE_PLACEMENT: "hive_placement",
     "engine": "engine",
     "watchdog-address": "watchdog_address",
+    "placement-mode": "placement_mode",
+    PLACEMENT_NODES: "placement_nodes",
 }
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
@@ -528,8 +533,16 @@ def _reconcile_services():
         print(f"warning: the swarm user services could not be installed or enabled{why}", file=sys.stderr)
 
 
-@ledger_route.tick
 def run_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
+    from scripts.swarm_ledger import authority_context
+
+    with ledger_route.scoped(slug, ledger_route.configured(store, slug)):
+        if ledger_link.remote(slug=slug) and not authority_context.tick_headers(slug):
+            return []
+        return _end_waits(store, slug, ledger)
+
+
+def _end_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
     from scripts.swarm import commands, lease
 
     held = lease.acquire(store, slug, commands.hive_id())
@@ -763,7 +776,7 @@ def _state(store, args, state):
             "run agentihooks swarm tick yourself",
             file=sys.stderr,
         )
-    for action in run_tick(store, args.slug):
+    for action in getattr(args, "tick", run_tick)(store, args.slug):
         print(action)
     print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state}))
 
@@ -930,7 +943,6 @@ def cmd_master(store, args):
     if store.config(args.slug).state in ("stopped", "stopping"):
         store.update(args.slug, state="paused")
         timer.ensure(timer.entry_point())
-    ledger.join(args.slug, launched.master, "orchestrator")
     print(json.dumps(asdict(launched)))
 
 
@@ -942,12 +954,20 @@ def cmd_agent_up(store, args):
 def cmd_exit(store, args):
     name = store.names.resolve(args.name or Who.from_env().name)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
-    if agent and agent.lane != MASTER and store.claimant(args.slug, agent.task) != name:
+    if agent and agent.lane != MASTER and _claimless(store, args.slug, agent):
         _retire(store, args.slug, agent, "finished its session without a claim")
     else:
         agent_up.retire(store, args.slug, name, now_ms())
     print(json.dumps({"exited": name}), flush=True)
     HerdrRuntime().reap_name(name)
+
+
+def _claimless(store, slug, agent):
+    from scripts.hive import scope
+
+    if store.claimant(slug, agent.task) != agent.name:
+        return True
+    return claim_lost.lost(agent.name, LedgerClient().task(slug, agent.task), bool(scope.member()))
 
 
 def gate_mode(key, value):
@@ -1031,11 +1051,26 @@ def api_address(value):
 
 
 def config_value(key, value):
-    if key in default_models.KEYS or key in TRANSPORT_KEYS or key in ("engine", "watchdog-address"):
+    if key in default_models.KEYS or key in TRANSPORT_KEYS or key in ("engine", "watchdog-address", "placement-mode"):
         return value
     if key == HIVE_PLACEMENT:
         return on_off(value)
+    if key == PLACEMENT_NODES:
+        if not value.isdigit():
+            raise SwarmError("placement-nodes takes a whole number of hives, 0 for no limit")
+        return int(value)
     return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
+
+
+def _engine_origin(config, changes):
+    if changes.get("engine") != "events" or config.repo_origin:
+        return changes
+    from scripts.hive.daemon import origin
+
+    identity = origin(Path(config.repo))
+    if not identity:
+        raise SwarmError("events engine requires a checkout with a Git origin or a stored repository origin")
+    return {**changes, "repo_origin": identity}
 
 
 def on_off(value):
@@ -1120,6 +1155,7 @@ def cmd_set(store, args):
                 f"or {', '.join(LANE_KEYS)}=<value>, engine=legacy|events"
             )
         changes[SETTABLE[key]] = int(value)
+    changes = _engine_origin(store.config(args.slug), changes)
     config = ledger_cutover.settings(store, args.slug, {**changes, **_pinned(changes)})
     _store_master_counts(store, args.slug, counts, hives)
     _store_master_rules(store, args.slug, rules)
@@ -1151,6 +1187,8 @@ def cmd_set(store, args):
                 "swap_full_share": config.swap_full_share,
                 "swap_floor_mb": config.swap_floor_mb,
                 "hive_placement": config.hive_placement,
+                "placement_mode": config.placement_mode,
+                "placement_nodes": config.placement_nodes,
                 "local_max_agents": config.local_max_agents,
                 "api_url": config.api_url,
                 "codex_inbox_transport": config.codex_inbox_transport,
@@ -1239,6 +1277,13 @@ def cmd_ledger_ready(store: RedisStore, args: argparse.Namespace) -> None:
     print(json.dumps(ledger_cutover.readiness(store, args.slug)))
 
 
+def probe_command(store, args):
+    from scripts.swarm import probe
+
+    for found in probe.run(store, args.slug, LedgerClient(), now_ms()):
+        print(found.line())
+
+
 def cmd_status(store, args):
     if args.json:
         store.config(args.slug)
@@ -1266,7 +1311,7 @@ def cmd_status(store, args):
     from scripts.swarm import capacity, incidents, quota_view
     from scripts.swarm_ledger import ledger_freezes
 
-    quota = quota_view.lines(capacity.read(store, args.slug), now_ms())
+    quota = quota_view.lines(capacity.read(store, args.slug), now_ms(), quota_view.live(agents), config.scaling)
     held = spawn_holds(store, args.slug) + failed_panes.status_lines(store, args.slug)
     held += incidents.status_lines(store, args.slug)
     from scripts.hive import admission, placement_waits
@@ -1673,7 +1718,7 @@ def cmd_pr(store, args):
     fields.update(scoped)
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
     if not keeps_main and row.get("pr_url") != args.url:
-        lift.drop_task(args.slug, agent.task)
+        lift.drop_task(args.slug, agent.task, store=store)
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
 
@@ -2291,6 +2336,7 @@ def build_parser():
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
+    sub.add_parser("probe").set_defaults(handler=probe_command)
     sub.add_parser("ledger-ready")
     for verb in ("freeze", "focus", "unfreeze"):
         frozen = sub.add_parser(verb)
@@ -2426,6 +2472,10 @@ def main(argv):
         from scripts.swarm import swarm_init
 
         return swarm_init.check(argv[2:])
+    if argv[:1] == ["brain-place"]:
+        from scripts.swarm import brain_place
+
+        return brain_place.main(argv[1:])
     return dispatch(argv)
 
 
@@ -2452,7 +2502,7 @@ def dispatch(argv):
         elif len(argv) == 3 and argv[2] == "up" and argv[1] != "master":
             argv = [argv[0], "agent-up", argv[1]]
         args = build_parser().parse_args(argv)
-        handler = globals()[f"cmd_{args.command.replace('-', '_')}"]
+        handler = vars(args).get("handler") or globals()[f"cmd_{args.command.replace('-', '_')}"]
     who = Who.from_env()
     if text := refusal(vars(args).get("name"), who):
         print(f"swarm: {text}", file=sys.stderr)

@@ -126,13 +126,43 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
     return result, log.read_text() if log.exists() else "", home, tmp_path / "repos/checkout"
 
 
+def test_a_container_restart_clears_the_previous_readiness_marker(tmp_path, monkeypatch):
+    marker = tmp_path / "ready"
+    marker.touch()
+    monkeypatch.setenv("HIVE_READY_FILE", str(marker))
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "hive run" in commands
+    assert not marker.exists()
+
+
 RUN = [
     "bundle unlink",
     "init",
     "deps ensure",
-    "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= max-agents=20",
+    "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= max-agents=20 prefer=",
     "hive run",
 ]
+
+
+def test_the_charted_placement_rank_is_registered_on_every_start(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIVE_PREFER", "eng:1,ci:1,plan:1")
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (
+        "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        "max-agents=20 prefer=eng:1,ci:1,plan:1"
+    ) in commands.splitlines()
+
+
+def test_the_charted_release_name_is_registered_on_every_start(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIVE_NAME", "swarm-hive-002")
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (
+        "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        "max-agents=20 prefer= name=swarm-hive-002"
+    ) in commands.splitlines()
 
 
 def test_mounted_member_clones_repo_and_configures_before_run(tmp_path):
