@@ -14,7 +14,7 @@ AgentiHooks ships a package rule, `delivery-tiers`, that every installed profile
 |---|---|---|---|
 | **Pull request** | `pull_request` on each head push | lint, format, size and complexity, static analysis, coverage and mutation on changed lines, the tests the change touches | entry to the merge queue |
 | **Queue** | `merge_group` | the unit suite, once per merge group | the merge into the integration branch, usually `dev` |
-| **Promotion** | `push` to the integration branch, each push in its own `concurrency` group, so a red run never holds a newer green head | whole module coverage and mutation, image builds and smoke tests, cluster and load tests, stage and shard time budget reports, then promotion | the release branch, usually `main`, and the release tag and images built from it |
+| **Promotion** | `push` to the integration branch, in three `concurrency` lanes where a running run finishes and a newer push replaces only the pending run of its lane | whole module coverage and mutation, image builds and smoke tests, cluster and load tests, stage and shard time budget reports, then promotion | the release branch, usually `main`, and the release tag and images built from it |
 
 Each tier has a wall time budget. A check that does not fit the pull request or queue budget moves to promotion.
 
@@ -46,9 +46,11 @@ its last promoted tree while ordinary pull requests keep merging into `dev`.
 
 ### Scheduling and runner isolation
 
-Tests gives every dev push its own `tests-push-<run id>` concurrency group
-with `cancel-in-progress: false`. Each pushed head is graded at once and none
-waits behind an older run, so a red run never holds a newer green head. The
+Tests puts every dev push in one of three promotion lanes,
+`promotion-dev-a`, `-b` or `-c`, picked by the last digit of the run id, with
+`queue: single` and `cancel-in-progress: false`. A running run always finishes;
+a newer push replaces only the pending run of its lane. At most three dev push
+runs compete for runners, and a red run holds only its own lane. The
 promotion job's `release-version` group serializes the release writes, and a
 graded head that is not ahead of the last promoted revision is refused, so an
 older run cannot overwrite a newer `main`. A running proof is not cancelled
@@ -150,7 +152,7 @@ completed before and after timing comparison or a ten minute runtime guarantee.
 | `Gate — Required` is green but `promote` is skipped | Read `hierarchy-cpu / grade` and all other promotion dependencies. The hierarchy proof must succeed independently of the gate |
 | A hierarchy pair or load pair fails before grading | Read the failing job's Redis readiness, dependency installation and probe logs; setup failure is not a measured CPU regression |
 | `grade` reports a CPU or response regression | Follow [hierarchy troubleshooting](ledger-load-gate.md#troubleshooting-a-hierarchy-red), retain pair artifacts and fix through a pull request into `dev` |
-| A dev push has no proof jobs | Inspect that push's own `tests-push-<run id>` run. A pull request, merge group or Tests dispatch skips the proof by design |
+| A dev push has no proof jobs | Check whether it was replaced while pending in its `promotion-dev-<lane>` group; inspect the newest admitted run of that lane. A pull request, merge group or Tests dispatch skips the proof by design |
 | Proof jobs queue while merge queue jobs run | Compare the returned labels and runner times. Batch jobs do not request queue runners; investigate the named pool's capacity before attributing the wait |
 
 A red promotion receives a fixer task under the [delivery tiers rule](#rules).
