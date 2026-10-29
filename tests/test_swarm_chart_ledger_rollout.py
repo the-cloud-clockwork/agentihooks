@@ -7,6 +7,7 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
 SMOKE = ROOT / "deploy" / "helm" / "agentihooks-swarm" / "ci" / "kind-smoke.sh"
+CHART = ROOT / "deploy" / "helm" / "agentihooks-swarm"
 
 
 def test_the_kind_proof_checks_the_ledger_rollout_before_any_cluster_starts():
@@ -23,3 +24,11 @@ def test_the_ledger_answers_every_extra_host_the_values_list():
 
     assert yaml.safe_load((chart / "values.yaml").read_text())["ledger"]["allowedHosts"] == []
     assert ".Values.ledger.allowedHosts" in template
+
+
+def test_the_ledger_probes_hit_the_port_directly_instead_of_forking_a_python_client():
+    helpers = (CHART / "templates" / "_helpers.tpl").read_text()
+    healthz = helpers.split('{{- define "swarm.healthz" -}}', 1)[1].split("{{- end -}}", 1)[0]
+
+    assert "exec" not in healthz
+    assert "httpGet" in healthz and "path: /healthz" in healthz and "port: http" in healthz

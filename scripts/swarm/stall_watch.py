@@ -297,7 +297,7 @@ def _alert(watch, mail, task, case, minutes, action, limit):
     row["item"] = inbox.send(SENDER, address, text, ref=f"{watch.slug}:stall:{tid}").id
     watch.store.redis.hset(_key(watch, ALERTS), tid, json.dumps(row))
     for item in earlier:
-        inbox.close(item, SENDER, DONE, f"superseded by a new stall alert on task {tid}")
+        inbox.settle(item, SENDER, DONE, f"superseded by a new stall alert on task {tid}")
     return [f"stall: task {tid} {CASES[case]} for {minutes} minutes, {action}; told {address}"]
 
 
@@ -362,7 +362,7 @@ def _escalate(watch, rows):
         moot = _unclaimed_moot(watch, rows, row, task, decision) if row["case"] == UNCLAIMED else ""
         is_open = _open(inbox, row["item"])
         if moot and is_open:
-            inbox.close(row["item"], SENDER, DONE, moot)
+            inbox.settle(row["item"], SENDER, DONE, moot)
         if moot or not is_open:
             watch.store.redis.hdel(key, tid)
             continue

@@ -17,6 +17,7 @@ PROBER = "agentihooks-quota-prober"
 WAITS = "agentihooks-swarm-waits"
 TICK_WATCH = "agentihooks-tick-watch"
 SPOKE = "agentihooks-spoke"
+SCHEDULER = "agentihooks-scheduler"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 RETIRED = (f"{UNIT}.timer", f"{UNIT}.service")
 DRAIN_S = 30
@@ -67,7 +68,18 @@ def units(binary):
         "Restart=always\nRestartSec=5\nNotifyAccess=main\nWatchdogSec=600\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
+    scheduler = (
+        "[Unit]\nDescription=agentihooks scheduler, apart from the units that start it\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=AGENTIHOOKS_SCHEDULER_UNIT=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{sys.executable}" -m scripts.scheduler.service supervise\n'
+        "Restart=always\nRestartSec=5\nRestartPreventExitStatus=2\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
     return {
+        f"{SCHEDULER}.service": scheduler,
         f"{WAITS}.service": wait_service,
         f"{WAITS}.timer": wait_timer,
         f"{WAKER}.service": waker,

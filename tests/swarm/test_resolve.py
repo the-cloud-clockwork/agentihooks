@@ -142,7 +142,9 @@ def test_the_headless_critic_is_read_only_and_answers_one_resolution(monkeypatch
     calls = []
     monkeypatch.setattr(runner, "run", lambda *a: calls.append(a) or {"resolution": "scale it"})
     assert resolve.headless_critic("the prompt") == ("headless high tier read only critic", "scale it")
-    assert calls == [(resolve.CRITIC_PROFILE, "the prompt", resolve.CRITIC_SCHEMA, "read-only", "high", "medium")]
+    assert calls == [
+        (resolve.CRITIC_PROFILE, "the prompt", resolve.CRITIC_SCHEMA, "read-only", "high", "medium", "auto")
+    ]
 
 
 def test_a_critic_that_does_not_answer_is_a_swarm_error(monkeypatch):
@@ -152,6 +154,20 @@ def test_a_critic_that_does_not_answer_is_a_swarm_error(monkeypatch):
     monkeypatch.setattr(runner, "run", down)
     with pytest.raises(SwarmError, match="^the blind critic did not answer: claude exited 1$"):
         resolve.headless_critic("p")
+
+
+def test_a_critic_refused_a_codex_route_answers_on_claude(monkeypatch):
+    asked = []
+
+    def run(*a):
+        asked.append(a[6])
+        if a[6] != "claude":
+            raise runner.RouteRefused("codex", "every session is taken")
+        return {"resolution": "scale it"}
+
+    monkeypatch.setattr(runner, "run", run)
+    assert resolve.headless_critic("p") == ("headless high tier read only critic", "scale it")
+    assert asked == ["auto", "claude"]
 
 
 def test_the_ledger_client_reads_one_item_and_writes_one_step(monkeypatch):
