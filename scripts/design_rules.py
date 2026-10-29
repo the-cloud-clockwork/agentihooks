@@ -12,7 +12,8 @@ ROOTS = frozenset(
     {"ABC", "Protocol", "NamedTuple", "TypedDict", "Generic", "Enum", "IntEnum", "StrEnum", "Flag", "IntFlag"}
 )
 PLAIN_DICTS = frozenset({"dict", "Dict", "Mapping", "MutableMapping"})
-CONFIG_NAME = re.compile(r"(^|_)(config|conf|cfg|settings|options|opts|params)$")
+UNIONS = frozenset({"Optional", "Union"})
+CONFIG_NAME = re.compile(r"(^|_)(config|conf|cfg|settings|options|opts|params)(_|$)")
 RECEIVERS = frozenset({"self", "cls"})
 
 
@@ -98,11 +99,15 @@ def resolve(index: Index, module: str, base: ast.expr) -> tuple[str, str] | None
         return resolve(index, module, base.value)
     if isinstance(base, ast.Name):
         return _lookup(index, module, base.id)
-    if isinstance(base, ast.Attribute) and isinstance(base.value, ast.Name):
-        source = index.get(module).imports.get(base.value.id)
-        if source is not None:
-            return _lookup(index, source[0] if source[1] is None else f"{source[0]}.{source[1]}", base.attr)
-    return None
+    chain = []
+    while isinstance(base, ast.Attribute):
+        chain.insert(0, base.attr)
+        base = base.value
+    source = index.get(module).imports.get(base.id) if chain and isinstance(base, ast.Name) else None
+    if source is None:
+        return None
+    prefix = source[0] if source[1] is None else f"{source[0]}.{source[1]}"
+    return _lookup(index, ".".join([prefix, *chain[:-1]]), chain[-1])
 
 
 def _terminal(expr: ast.expr) -> str:
@@ -136,10 +141,9 @@ def shareable(index: Index, target: tuple[str, str], seen: frozenset = frozenset
     if _declared_free(node):
         return True
     for base in node.bases:
-        name = _terminal(base)
-        if name in ROOTS or _builtin_exception(name):
-            return True
         project = resolve(index, target[0], base)
+        if project is None and (_terminal(base) in ROOTS or _builtin_exception(_terminal(base))):
+            return True
         if project is not None and shareable(index, project, seen | {target}):
             return True
     return False
@@ -150,7 +154,7 @@ def _signature(node: ast.AST) -> tuple[str, ...]:
         parts = [*node.decorator_list, *node.bases, *node.keywords]
     else:
         parts = [*node.decorator_list, node.args, *([node.returns] if node.returns else [])]
-    return tuple(ast.dump(part) for part in parts)
+    return (type(node).__name__, *(ast.dump(part) for part in parts))
 
 
 def units(syntax: ast.Module, rel: str) -> dict[str, Unit]:
@@ -167,7 +171,8 @@ def units(syntax: ast.Module, rel: str) -> dict[str, Unit]:
             seen[name] = seen.get(name, 0) + 1
             if seen[name] > 1:
                 name = f"{name}#{seen[name]}"
-            visible = public and not child.name.startswith("_")
+            dunder = child.name.startswith("__") and child.name.endswith("__")
+            visible = public and (dunder or not child.name.startswith("_"))
             found[f"{rel}::{name}"] = Unit(_signature(child), child, visible)
             walk(child, f"{name}.", visible and isinstance(child, ast.ClassDef))
 
@@ -185,11 +190,22 @@ def untyped(unit: Unit) -> list[str]:
     return missing + ([] if unit.node.returns else ["return"])
 
 
+def _annotated(annotation: ast.expr) -> set[str]:
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        return _annotated(ast.parse(annotation.value, mode="eval").body)
+    if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+        return _annotated(annotation.left) | _annotated(annotation.right)
+    if isinstance(annotation, ast.Subscript) and _terminal(annotation) in UNIONS:
+        members = annotation.slice.elts if isinstance(annotation.slice, ast.Tuple) else [annotation.slice]
+        return set().union(*map(_annotated, members))
+    return {_terminal(annotation)}
+
+
 def plain_configs(unit: Unit) -> list[str]:
     args = unit.node.args
     found = []
     for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs):
-        if arg.annotation is not None and _terminal(arg.annotation) in PLAIN_DICTS and CONFIG_NAME.search(arg.arg):
+        if arg.annotation is not None and _annotated(arg.annotation) & PLAIN_DICTS and CONFIG_NAME.search(arg.arg):
             found.append(arg.arg)
     return found + ([f"**{args.kwarg.arg}"] if args.kwarg else [])
 

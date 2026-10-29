@@ -108,6 +108,7 @@ def test_methods_skip_the_receiver_but_grade_every_other_parameter(tmp_path):
     assert _errors(tmp_path, {"scripts/job.py": source}) == [
         "untyped: public scripts/job.py::Job.parse lacks type hints on text",
         "untyped: public scripts/job.py::Job.stop lacks type hints on n",
+        "untyped: public scripts/job.py::Job.__init__ lacks type hints on n, return",
     ]
 
 
@@ -137,8 +138,21 @@ def test_every_plain_configuration_of_one_function_is_named(tmp_path):
     ]
 
 
-@pytest.mark.parametrize("annotation", ["dict", "dict[str, int]", "typing.Dict[str, int]", "Mapping[str, int]"])
-@pytest.mark.parametrize("name", ["config", "settings", "job_options", "cfg", "params", "opts", "conf"])
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        "dict",
+        "dict[str, int]",
+        "typing.Dict[str, int]",
+        "Mapping[str, int]",
+        "'dict'",
+        "dict | None",
+        "None | dict",
+        "typing.Optional[dict]",
+        "Union[int, dict]",
+    ],
+)
+@pytest.mark.parametrize("name", ["config", "settings", "job_options", "cfg", "params", "opts", "conf", "config_map"])
 def test_a_configuration_parameter_typed_as_a_plain_dict_is_red(tmp_path, annotation, name):
     source = f"import typing\n\ndef run({name}: {annotation}) -> None:\n    pass\n"
     assert _errors(tmp_path, {"scripts/job.py": source}) == [
@@ -147,7 +161,16 @@ def test_a_configuration_parameter_typed_as_a_plain_dict_is_red(tmp_path, annota
 
 
 @pytest.mark.parametrize(
-    "parameter", ["config: Settings", "rows: dict[str, int]", "configured: dict", "reconfig: dict", "config: 'dict'"]
+    "parameter",
+    [
+        "config: Settings",
+        "rows: dict[str, int]",
+        "configured: dict",
+        "reconfig: dict",
+        "config: 'Settings'",
+        "config: Settings | None",
+        "config: list[dict]",
+    ],
 )
 def test_a_typed_configuration_or_a_plain_data_dict_is_green(tmp_path, parameter):
     source = f"class Settings:\n    pass\n\ndef run({parameter}) -> None:\n    pass\n"
@@ -208,12 +231,34 @@ def test_a_package_reexport_and_a_parent_relative_import_resolve(tmp_path):
     ]
 
 
-def test_a_dotted_attribute_base_is_not_resolved(tmp_path):
+def test_a_dotted_attribute_base_resolves_through_its_imported_root(tmp_path):
     head = {
         "scripts/store.py": CONCRETE,
-        "scripts/cache.py": "import scripts\n\nclass Cache(scripts.store.Store):\n    pass\n",
+        "scripts/cache.py": (
+            "import scripts\n\nclass Cache(scripts.store.Store):\n    pass\n\n"
+            "class Made(make().Store):\n    pass\n\nclass Loose(unknown.Store):\n    pass\n"
+        ),
     }
-    assert _errors(tmp_path, head, {"scripts/store.py": CONCRETE}) == []
+    assert _errors(tmp_path, head, {"scripts/store.py": CONCRETE}) == [
+        _inherits("scripts/cache.py::Cache", "scripts.store.Store")
+    ]
+
+
+def test_a_concrete_project_class_named_like_a_root_is_red(tmp_path):
+    parent = "class Enum:\n    pass\n"
+    head = {
+        "scripts/base.py": parent,
+        "scripts/child.py": "from scripts.base import Enum\n\nclass Child(Enum):\n    pass\n",
+    }
+    assert _errors(tmp_path, head, {"scripts/base.py": parent}) == [
+        _inherits("scripts/child.py::Child", "scripts.base.Enum")
+    ]
+
+
+def test_turning_a_function_async_grades_it(tmp_path):
+    assert _errors(tmp_path, {"scripts/job.py": "async " + UNTYPED}, {"scripts/job.py": UNTYPED}) == [
+        "untyped: public scripts/job.py::load lacks type hints on path, return"
+    ]
 
 
 @pytest.mark.parametrize("hops, errors", [(5, 1), (6, 0)])
