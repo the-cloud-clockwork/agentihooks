@@ -1158,12 +1158,18 @@ def _spawn_stop(slug, config, store, runtime, now_ms, in_flight=0):
 class _LaunchClock:
     def __init__(self):
         self.begun, self.tried, self.forgiven, self.free, self.failing = time.monotonic(), 0, 0, 0.0, ""
+        self.preparations, self.preparing = 0, 0.0
 
-    def spent(self, task):
+    def spent(self, task, batch):
         spent, charged = time.monotonic() - self.begun - self.free, self.tried - self.forgiven
-        if charged and spent + spent / charged >= SPAWN_BUDGET_S:
+        launches = spent / charged if charged and not batch else 0.0
+        preparing = self.preparing / self.preparations if self.preparations else 0.0
+        if self.preparations and spent + max(launches, preparing) >= SPAWN_BUDGET_S:
             return f"spent this pass's {SPAWN_BUDGET_S} second launch budget, {task['id']} waits a pass"
         return None
+
+    def prepared(self, at):
+        self.preparations, self.preparing = self.preparations + 1, self.preparing + time.monotonic() - at
 
     def charge(self, at, errors, launches):
         self.tried += 1
@@ -1231,12 +1237,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     clock, batch = _LaunchClock(), []
     for lane, task in order:
         stop = held or [
-            timing.timed(_spawn_stop, slug, config, store, runtime, now_ms, len(batch))
-            or (not batch and clock.spent(task))
+            timing.timed(_spawn_stop, slug, config, store, runtime, now_ms, len(batch)) or clock.spent(task, batch)
         ]
         if any(stop):
             return actions + _launch_all(run, clock, batch) + stop
+        at = time.monotonic()
         launch, prepared = _prepare(run, lane, task, taken, clock.failing, {peer.record.name for peer in batch})
+        clock.prepared(at)
         actions += prepared
         batch += [launch] if launch else []
         if batch and len(batch) >= _launch_room(runtime, config):
