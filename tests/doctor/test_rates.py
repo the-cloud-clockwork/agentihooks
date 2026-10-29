@@ -404,3 +404,25 @@ def test_rates_names_every_coordination_failure():
         "premature completion",
         "inbox no outcome",
     ]
+
+
+def test_telemetry_stale_rates_count_distinct_incidents_first_seen_in_the_window():
+    from types import SimpleNamespace
+
+    found = {
+        "telemetry-stale/early.1": {"seen_at": 99 * MIN},
+        "telemetry-stale/start.2": {"seen_at": 100 * MIN},
+        "telemetry-stale/last.3": {"seen_at": 199 * MIN},
+        "telemetry-stale/end.4": {"seen_at": 200 * MIN},
+        "exporter-backlog/other.5": {"seen_at": 150 * MIN},
+    }
+    records = SimpleNamespace(**vars(recs()), doctor_findings=found)
+    assert rates.rates(records, WIN)["telemetry stale"] == {"findings": 2, "per hour": 1.2}
+
+
+def test_telemetry_stale_rates_distinguish_missing_history_from_no_findings():
+    from types import SimpleNamespace
+
+    assert rates.rates(recs(), WIN)["telemetry stale"] == {"findings": None, "per hour": None}
+    records = SimpleNamespace(**vars(recs()), doctor_findings={})
+    assert rates.rates(records, WIN)["telemetry stale"] == {"findings": 0, "per hour": 0.0}
