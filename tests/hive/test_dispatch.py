@@ -163,6 +163,35 @@ def test_dispatch_capacity_never_queues_children_or_drops_pending_orders(setup, 
     assert start.call_count == dispatch.LIMIT
 
 
+@pytest.mark.parametrize("other_hive", [0, 32])
+def test_dispatch_counts_inflight_children_even_after_their_orders_leave_the_stream(setup, monkeypatch, other_hive):
+    from unittest.mock import Mock
+
+    from scripts.hive import dispatch
+
+    process = SimpleNamespace(poll=lambda: None)
+    dispatch._workers.update({("host", f"removed-{i}"): process for i in range(31)})
+    dispatch._workers.update({("another", f"other-{i}"): process for i in range(other_hive)})
+    start = Mock(return_value=process)
+    monkeypatch.setattr(dispatch.subprocess, "Popen", start)
+    setup.orders.send("host", setup.order)
+    setup.orders.send("host", setup.order)
+    dispatch.poll(setup.consumer)
+    assert start.call_count == 1
+    assert len(dispatch._workers) == 32 + other_hive
+
+
+def test_dispatch_bounds_the_redis_read_before_starting_children(setup, monkeypatch):
+    from unittest.mock import Mock
+
+    from scripts.hive import dispatch
+
+    read = Mock(wraps=setup.redis.xrange)
+    monkeypatch.setattr(setup.redis, "xrange", read)
+    dispatch.poll(setup.consumer)
+    read.assert_called_once_with(setup.orders.stream("host"), count=32)
+
+
 def test_dead_child_replay_keeps_the_single_application_fence(setup, monkeypatch):
     from unittest.mock import Mock
 
@@ -193,16 +222,18 @@ def test_child_consumes_only_its_delivery_with_parent_pod_and_closes_redis(setup
 
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "host")
     monkeypatch.setattr(store, "redis_client", lambda: setup.redis)
-    monkeypatch.setattr(Consumer, "local", lambda *args: setup.consumer)
+    local = Mock(return_value=setup.consumer)
+    monkeypatch.setattr(Consumer, "local", local)
     closed = Mock()
     monkeypatch.setattr(setup.redis, "close", closed)
-    setup.orders.send("host", setup.order)
-    setup.orders.send("host", setup.order)
-    item = setup.redis.xrange(setup.orders.stream("host"))[0][0]
-    dispatch.run("host", item, "parent-pod")
+    for _ in range(3):
+        setup.orders.send("host", setup.order)
+    items = [item for item, _ in setup.redis.xrange(setup.orders.stream("host"))]
+    dispatch.run("host", items[1], "parent-pod")
+    local.assert_called_once_with(setup.redis, "host")
     assert setup.consumer.pod == "parent-pod"
     assert setup.redis.hget(setup.orders.receipt(setup.order), "pod") == "parent-pod"
-    assert setup.redis.xlen(setup.orders.stream("host")) == 1
+    assert [item for item, _ in setup.redis.xrange(setup.orders.stream("host"))] == [items[0], items[2]]
     assert setup.orders.ack(setup.order).status == "live"
     setup.runtime.spawn.assert_called_once()
     closed.assert_called_once_with()
@@ -303,7 +334,9 @@ def test_retirement_during_preparation_prevents_runtime_creation(setup, monkeypa
         worker.join(10)
     assert not worker.is_alive()
     setup.runtime.spawn.assert_not_called()
-    assert setup.orders.ack(setup.order).failure == "retired"
+    from scripts.hive.orders import Ack
+
+    assert setup.orders.ack(setup.order) == Ack("failed", {}, "retired")
 
 
 def test_retirement_for_another_generation_cannot_cancel_a_launch(setup):

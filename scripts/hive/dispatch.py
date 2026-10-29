@@ -19,7 +19,7 @@ def poll(consumer: "Consumer") -> None:
         if key in _workers:
             continue
         if active >= LIMIT:
-            break
+            return
         _workers[key] = subprocess.Popen(
             [sys.executable, "-m", "scripts.hive.dispatch", consumer.hive, item, consumer.pod],
             stdin=subprocess.DEVNULL,
