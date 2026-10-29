@@ -97,6 +97,20 @@ def test_a_live_home_without_systemd_or_crontab_skips_maintenance_without_callin
     ]
 
 
+def test_a_live_home_with_only_systemctl_still_starts_maintenance(repo, monkeypatch):
+    calls = []
+
+    def fake(path, *args, timeout=120):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "count: 0\npacks: 0", "")
+
+    monkeypatch.setattr(maintenance, "_live_home", lambda: True)
+    monkeypatch.setattr(maintenance.shutil, "which", lambda name: "/usr/bin/systemctl" if name == "systemctl" else None)
+    monkeypatch.setattr(maintenance, "git", fake)
+    assert maintenance.register(repo.primary) == "registered"
+    assert calls == [("maintenance", "start")]
+
+
 def test_a_registration_off_the_live_home_ignores_the_missing_scheduler(repo, monkeypatch):
     monkeypatch.setattr(maintenance, "_live_home", lambda: False)
     monkeypatch.setattr(maintenance.shutil, "which", lambda name: None)
