@@ -3661,7 +3661,7 @@ def _reseed_managed_mcp_sources() -> None:
         except Exception as exc:
             _cprint(f"  [WARN] Could not reseed the agentihooks MCP server: {exc}")
 
-    # Layer 2: bundle .mcp.json, root then user
+    # Layer 2: bundle .mcp.json, root, shared, then user
     for kind, bundle_dir in _bundle_roots():
         for candidate in (bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME):
             if candidate.exists():
@@ -4588,7 +4588,7 @@ def _collect_all_managed_mcp_servers() -> dict:
     mcp_config = _build_mcp_config("all")
     merged.update(mcp_config["mcpServers"])
 
-    # --- 2. Bundle .mcp.json, root then user ---
+    # --- 2. Bundle .mcp.json, root, shared, then user ---
     for _kind, bundle_dir in _bundle_roots():
         for candidate in [bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME]:
             if candidate.exists():

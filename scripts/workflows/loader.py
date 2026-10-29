@@ -1,4 +1,4 @@
-"""Workflow layers: package, bundle, user bundle, each chained profile, then the project; a later layer wins by name."""
+"""Workflow layers: package, bundle, shared bundle, user bundle, each chained profile, then the project; a later layer wins by name."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 ### Added
 
 - A shared bundle slot between the root and the user bundle, for a team's common configuration. `agentihooks bundle link --shared <path>`, `unlink --shared`, `list --shared` and `pull --shared` manage it, `AGENTIHOOKS_SHARED_BUNDLE_PATH` names one when none is linked, and `init --force` keeps the link. Content is later-wins in the order root, shared, user across settings, hooks, skills, rules, MCP servers, enforcements, conditions (with a `shared` scope), workflows, lifecycle roots, `deps.json`, manifestos and the compiled persona. Profile names are first-wins in the same order, so a shared or personal bundle cannot shadow a core profile, and `init` warns on a name defined in more than one bundle. `agentihooks status` and `init` name the shared bundle.
-- A render revision with three parts whenever a shared bundle is linked, `<root>:<shared>:<user>`, with an empty user field when no user bundle is linked, plus a `shared_bundle_commit` stamp. A three-part revision never parses as `<root>:<user>`. A linked shared bundle never refuses a swarm launch or a remote hive; a host without the recorded shared bundle warns and renders without it.
+- A render revision with three parts whenever a shared bundle is linked, `<root>:<shared>:<user>`, with an empty user field when no user bundle is linked, plus a `shared_bundle_commit` stamp. A three-part revision never parses as `<root>:<user>`. A linked shared bundle never refuses a swarm launch or a remote hive; a host without the recorded shared bundle warns and renders without it, and a shared bundle with no commit to record is left out of the revision with one warning.
 
 ### Changed
 

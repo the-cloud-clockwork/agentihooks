@@ -1,7 +1,7 @@
 """`agentihooks deps check|ensure` — the bundle's dev-environment dependencies, checked and installed before launch.
 
-The manifest is ``<bundle>/deps.json``, read from the root bundle and then the user bundle; an
-entry of the user bundle replaces the root entry with the same id. Each entry declares how to check
+The manifest is ``<bundle>/deps.json``, read from the root bundle, then the shared bundle, then the user
+bundle; a later entry replaces an earlier one with the same id. Each entry declares how to check
 itself and, unless its kind is ``system``, how to install itself. System dependencies need the
 operator (sudo, a package manager), so they are only reported.
 """
