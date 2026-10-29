@@ -13,7 +13,6 @@ import json
 import os
 import re
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -39,6 +38,7 @@ from scripts.swarm_ledger import (
     ledger_blockers,
     ledger_freezes,
     ledger_groups,
+    ledger_locks,
     ledger_phases,
     ledger_plans,
     ledger_rank,
@@ -84,7 +84,7 @@ EVENTS_KEPT = 2000
 EVENTS_CEILING = 10000
 EVENTS_WINDOW_MS = 24 * 60 * 60 * 1000
 MAX_TEXT = 20000
-LOCK = threading.Lock()
+LOCK = ledger_locks.LedgerLock()
 
 EXTENSION_OPS = {
     name: module

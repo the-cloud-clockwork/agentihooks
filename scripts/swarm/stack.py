@@ -259,7 +259,7 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     top = worktree()
     _issue_ready(row)
     open_ = _open_dependencies(row, rows)
-    found = handoff_check.problems(text, Resolver(slug, store.redis, ledger.state))
+    found = handoff_check.problems(text, Resolver(slug, store.redis, ledger.item))
     if found:
         raise SwarmError(handoff_check.refusal(found))
     foreign = _foreign(open_)
@@ -288,7 +288,7 @@ def park_read_only(store, slug: str, agent, text: str, ledger, rows: dict) -> di
     open_ = [rows.get(d, {"id": d}) for d in deps if d in held or rows.get(d, {}).get("state") != "done"]
     if not open_:
         raise SwarmError("the task waits on no open dependency; finish it, or hand it off for its window")
-    found = handoff_check.problems(text, Resolver(slug, store.redis, ledger.state))
+    found = handoff_check.problems(text, Resolver(slug, store.redis, ledger.item))
     if found:
         raise SwarmError(handoff_check.refusal(found))
     ledger.comment(slug, agent.task, _read_only_note(open_), by=agent.name)

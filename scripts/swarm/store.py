@@ -693,7 +693,11 @@ class RedisStore:
         keys = (
             sorted(own) + self.seats.swarm_keys(slug) + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
         )
-        return {"keys": _dump(self.redis, keys), "members": {f"{PREFIX}:index": [slug], **members}}
+        return {
+            "keys": _dump(self.redis, keys),
+            "members": {f"{PREFIX}:index": [slug], **members},
+            "names": self.names.export(slug),
+        }
 
     def restore(self, slug, state):
         """Replace the swarm's own keys with the exported ones and write back its seats and inbox."""
@@ -706,6 +710,7 @@ class RedisStore:
             for key, found in state["members"].items():
                 pipe.sadd(key, *found)
             pipe.execute()
+        self.names.names_state.restore(state.get("names", {}))
         self.ensure_code(slug)
 
 
