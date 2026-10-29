@@ -123,12 +123,20 @@ def test_an_active_timer_sleeps_until_its_recheck(monkeypatch):
     assert slept == [process_timer.POLL_S, process_timer.POLL_S]
 
 
-def test_the_recheck_never_passes_the_deadline(monkeypatch):
-    monkeypatch.setattr(process_timer.time, "monotonic", lambda: 10.0)
-    assert process_timer._recheck(None) == process_timer.RECHECK_S
-    assert process_timer._recheck(12.5) == 2.5
-    assert process_timer._recheck(10.5) == 0.5
-    assert process_timer._recheck(5.0) == 0.0
+def test_the_recheck_never_passes_the_deadline():
+    assert process_timer._recheck(None, 10.0) == process_timer.RECHECK_S
+    assert process_timer._recheck(12.5, 10.0) == 2.5
+    assert process_timer._recheck(10.5, 10.0) == 0.5
+    assert process_timer._recheck(5.0, 10.0) == 0.0
+
+
+def test_a_bounded_wait_reaches_its_deadline_on_one_clock_reading(monkeypatch):
+    readings = iter([10.0, 10.0, 10.5, 12.0, 12.0])
+    monkeypatch.setattr(process_timer.time, "monotonic", lambda: next(readings))
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: pytest.fail("restarted the scheduler"))
+    timer = _bare_timer(_Entry(fired_after=10**9))
+    monkeypatch.setattr(timer.cancelled, "wait", lambda timeout: None)
+    timer.wait(timeout=2)
 
 
 def test_a_timer_entry_carries_its_delay(state, monkeypatch):

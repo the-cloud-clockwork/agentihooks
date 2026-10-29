@@ -21,10 +21,10 @@ def wake(event: dict, delivery_id: str, state: "StateStore") -> None:
     wake_legacy(state, json.loads(event["payload"])["key"], delivery_id)
 
 
-def _recheck(deadline: float | None) -> float:
+def _recheck(deadline: float | None, now: float) -> float:
     if deadline is None:
         return RECHECK_S
-    return min(RECHECK_S, max(0.0, deadline - time.monotonic()))
+    return min(RECHECK_S, max(0.0, deadline - now))
 
 
 class Timer:
@@ -49,7 +49,8 @@ class Timer:
     def wait(self, timeout: float | None = None) -> None:
         deadline = None if timeout is None else time.monotonic() + timeout
         while True:
-            recheck = time.monotonic() + _recheck(deadline)
+            now = time.monotonic()
+            recheck = now + _recheck(deadline, now)
             while time.monotonic() < recheck:
                 if self.cancelled.is_set() or self._rang():
                     return
