@@ -711,6 +711,9 @@ def test_the_swarm_tick_reports_a_finding_and_task_turns_its_verdict_into_ledger
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     detecting(monkeypatch, STALE)
     doctor.main([WATCHED, "start"])
+    from scripts.swarm import refresh_job
+
+    refresh_job.refreshes(store, DOCTOR, FileLedger(), swarm_cli.now_ms())[0]()
     [item] = InboxStore(store.redis).inbox(f"master@{DOCTOR}")
     assert f"agentihooks doctor {WATCHED} verdict {STALE.id}" in item.text
     assert not any("new finding" in action for action in tick(store, rt))
@@ -811,15 +814,15 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "scheduled tick",
     }
     assert doctor.main([WATCHED, "start"]) == 0
-    assert reads == [] and passes == [every - {"trace"}]
-    assert STALE.id in sent(store) and UNTRACED.id not in sent(store)
+    assert reads == [] and passes == []
+    assert STALE.id not in sent(store) and UNTRACED.id not in sent(store)
     doctor.loop.reset(store, DOCTOR)
     scheduled(store, rt)
     assert reads == [] and passes[1:] == []
     from scripts.swarm import refresh_job
 
     refresh_job.refreshes(store, DOCTOR, FileLedger(), swarm_cli.now_ms())[0]()
-    assert len(reads) == 1 and passes[1:] == [every]
+    assert len(reads) == 1 and passes == [every]
     assert UNTRACED.id in sent(store)
 
 
@@ -1042,6 +1045,9 @@ def test_the_task_command_gives_a_returned_finding_a_fresh_pair_once_its_earlier
     store, rt, _ = env
     detecting(monkeypatch, STALE)
     doctor.main([WATCHED, "start"])
+    from scripts.swarm import refresh_job
+
+    refresh_job.refreshes(store, DOCTOR, FileLedger(), swarm_cli.now_ms())[0]()
     assert doctor.main([WATCHED, "verdict", STALE.id, "established", "--note", "checked"]) == 0
     assert doctor.main([WATCHED, "task", STALE.id, "--fix", "tune"]) == 0
     earlier = [t["id"] for t in state(DOCTOR)["tasks"]]
