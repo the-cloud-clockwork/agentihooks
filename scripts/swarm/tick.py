@@ -673,10 +673,22 @@ def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
     return [f"retired {agent.name}"]
 
 
+def _live_names(runtime):
+    return runtime.live_names()
+
+
+def _name_pane(runtime, agent):
+    runtime.name_pane(agent)
+
+
+def _observe(runtime, agent):
+    return runtime.observe(agent)
+
+
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     from scripts.hub.reconciler import legacy_agents
 
-    live, actions = timing.timed(runtime.live_names), []
+    live, actions = timing.timed(_live_names, runtime), []
     for agent in timing.timed(legacy_agents, store, slug):
         if (
             agent.state == "awaiting-decision"
@@ -695,7 +707,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
         elif agent.runtime_backend != "local" or reports.host(agent):
             actions += timing.timed(_watch_remote, slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live and agent.lane == MASTER:
-            timing.timed(runtime.name_pane, agent)
+            timing.timed(_name_pane, runtime, agent)
             actions += timing.timed(_watch_agent, slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live:
             timing.timed(_restore_owner, slug, store, ledger, rows, agent)
@@ -803,7 +815,7 @@ def _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms):
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     from scripts.swarm import automated_gc
 
-    observed = timing.timed(runtime.observe, agent)
+    observed = timing.timed(_observe, runtime, agent)
     if _refusal_due(slug, store, rows, agent, observed, now_ms):
         return _free_refused(slug, store, ledger, runtime, rows, agent, now_ms)
     store.redis.set(store.key(slug, "pane-state", agent.name), observed.state, ex=idle_state.BEAT_TTL_S)

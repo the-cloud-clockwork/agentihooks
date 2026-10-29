@@ -104,15 +104,15 @@ def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
         tick("sw", store, ledger, runtime, now_ms=2_000)
     steps = [row["step"] for row in finished(capsys)]
     parts = [
-        timing.named(FakeRuntime.live_names),
+        timing.named(tick_module._live_names),
         timing.named(legacy_agents),
         timing.named(tick_module._acknowledging),
         timing.named(tick_module._remote_gone_reason),
         timing.named(tick_module._restore_owner),
-        timing.named(FakeRuntime.observe),
+        timing.named(tick_module._observe),
         timing.named(tick_module._watch_agent),
     ]
     assert [part for part in parts if part not in steps] == []
     reap = steps.index(timing.named(tick_module._reap))
     assert all(steps.index(part) < reap for part in parts)
-    assert steps.count(timing.named(tick_module._watch_agent)) == 1
+    assert steps.count(timing.named(tick_module._observe)) == steps.count(timing.named(tick_module._watch_agent))
