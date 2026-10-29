@@ -130,7 +130,7 @@ def race_at_multi(store, monkeypatch, change):
     monkeypatch.setattr(store.redis, "pipeline", pipeline)
 
 
-@pytest.mark.parametrize("kind", ["lease", "agents", "executions", "task-authority", "claim-journal"])
+@pytest.mark.parametrize("kind", ["lease", "agents", "executions"])
 def test_lease_repair_rejects_a_concurrent_ownership_change(store, monkeypatch, kind):
     import json
     from dataclasses import asdict, replace
@@ -140,22 +140,26 @@ def test_lease_repair_rejects_a_concurrent_ownership_change(store, monkeypatch, 
     store.create(config())
     owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
     store.put_agent("smoke", owner)
-    row = asdict(replace(owner, started_at=2_000, execution_id="new-execution", generation=2))
+    fired = []
+
+    def admit_concurrently():
+        if not fired:
+            fired.append(True)
+            store.start_execution("smoke", owner)
+
     changes = {
         "lease": lambda: store.redis.set(store.key("smoke", "claim", "t1"), "successor"),
         "agents": lambda: store.redis.hset(
             store.key("smoke", "agents"), owner.name, json.dumps(asdict(replace(owner, started_at=2_000)))
         ),
-        "executions": lambda: store.redis.hset(store.key("smoke", "executions"), "new-execution", json.dumps(row)),
-        "task-authority": lambda: store.redis.set(store.key("smoke", "task-authority", "t1"), "new-authority"),
-        "claim-journal": lambda: store.redis.set(store.key("smoke", "claim-journal", "t1"), "new-journal"),
+        "executions": admit_concurrently,
     }
     race_at_multi(store, monkeypatch, changes[kind])
     assert not store.ensure_claim("smoke", owner, 60_000)
     assert store.claimant("smoke", "t1") == ("successor" if kind == "lease" else None)
 
 
-@pytest.mark.parametrize("kind", ["lease", "generation", "ready", "task-authority", "claim-journal"])
+@pytest.mark.parametrize("kind", ["lease", "generation", "ready"])
 def test_ready_cleanup_rejects_a_concurrent_ownership_change(store, monkeypatch, kind):
     store.create(config())
     store.claim("smoke", "t1", "owner", 60_000)
@@ -166,8 +170,6 @@ def test_ready_cleanup_rejects_a_concurrent_ownership_change(store, monkeypatch,
         "lease": lambda: store.redis.set(key, "successor"),
         "generation": lambda: store.redis.incr(f"{key}:generation"),
         "ready": lambda: store.redis.hset(ready_key, "t1", "successor-ready"),
-        "task-authority": lambda: store.redis.set(store.key("smoke", "task-authority", "t1"), "new-authority"),
-        "claim-journal": lambda: store.redis.set(store.key("smoke", "claim-journal", "t1"), "new-journal"),
     }
     race_at_multi(store, monkeypatch, changes[kind])
     assert not store.release_ready("smoke", "t1", "owner", generation, "old-ready")
@@ -323,8 +325,6 @@ def test_a_held_claim_refund_refuses_a_second_refund_for_the_same_claimant_and_g
         ("claim", lambda redis, key: redis.incr(f"{key}:generation"), 1),
         ("claim", lambda redis, key: redis.set(f"{key}:refunded", redis.get(f"{key}:generation")), 1),
         ("started-lives", lambda redis, key: redis.hset(key, "t1", 5), 5),
-        ("task-authority", lambda redis, key: redis.set(key, "hub"), 1),
-        ("claim-journal", lambda redis, key: redis.set(key, "hub"), 1),
     ],
 )
 def test_a_held_claim_refund_refuses_when_a_watched_key_moves_during_the_watch(
@@ -346,12 +346,15 @@ def test_a_held_claim_refund_refuses_when_a_watched_key_moves_during_the_watch(
     assert store.claims("smoke", "t1") == lives
 
 
-@pytest.mark.parametrize("guard", ["task-authority", "claim-journal"])
+@pytest.mark.parametrize("guard", ["claims", "journals"])
 def test_a_held_claim_refund_refuses_while_a_claim_guard_is_set(store, guard):
+    from scripts.swarm import fencing
+
     store.count_claim("smoke", "t1")
     store.claim("smoke", "t1", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
-    store.redis.set(store.key("smoke", guard, "t1"), "hub")
+    seed = {} if guard == "claims" else []
+    fencing.write(store, "smoke", lambda doc: doc[guard].update({"t1": seed}))
 
     assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
     assert store.claims("smoke", "t1") == 1
@@ -473,6 +476,8 @@ def test_agent_registry_and_sequence(store):
 def test_history_rows_carry_the_execution_placement_of_the_ended_life(store):
     from dataclasses import asdict, replace
 
+    from scripts.swarm import fencing
+
     store.create(config())
     remote = AgentRecord("ci@remote", "ci", "t1", pane_id="w2:pD", seat="ci-1@smoke", started_at=5)
     local = AgentRecord("ci@local", "ci", "t2", pane_id="w2:pE", started_at=6)
@@ -481,8 +486,13 @@ def test_history_rows_carry_the_execution_placement_of_the_ended_life(store):
     run = replace(remote, execution_id="exe-1", generation=1, hive="h6", runtime_backend="kubernetes")
     earlier = replace(run, execution_id="exe-0", started_at=2, hive="h8")
     successor = replace(run, name="ci@next", execution_id="exe-2", generation=2, started_at=8, hive="h9")
-    for key, life in (("executions", run), ("executions-archive", earlier), ("executions", successor)):
-        store.redis.hset(store.key("smoke", key), life.execution_id, json.dumps(asdict(life)))
+
+    def seed(doc):
+        doc["executions"][run.execution_id] = asdict(run)
+        doc["executions"][successor.execution_id] = asdict(successor)
+        doc["archive"][earlier.execution_id] = asdict(earlier)
+
+    fencing.write(store, "smoke", seed)
     store.drop_agent("smoke", remote.name, at=9)
     store.drop_agent("smoke", local.name, at=10)
     rows = {row["name"]: row for row in map(json.loads, store.redis.lrange(store.key("smoke", "history"), 0, -1))}
