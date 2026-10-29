@@ -827,6 +827,26 @@ def test_tests_dispatch_concurrency_keeps_the_hosted_lane(change):
     assert bool(lanes.problems(updated, baseline)) == (change is not None)
 
 
+@pytest.mark.parametrize("change", [None, "lane", "queue", "cancel", "untrusted"])
+def test_tests_dev_pushes_may_share_three_promotion_lanes(change):
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "test.yml").read_text())
+    updated = copy.deepcopy(baseline)
+    block = updated["concurrency"]
+    block["group"] = lanes.TESTS_GROUPS[1]
+    if change == "lane":
+        block["group"] = block["group"].replace("promotion-dev", "promotion")
+    elif change == "queue":
+        block["queue"] = "${{ github.event_name == 'workflow_dispatch' && 'max' || 'max' }}"
+    elif change == "cancel":
+        block["cancel-in-progress"] = "${{ github.event_name != 'workflow_dispatch' }}"
+    elif change == "untrusted":
+        baseline = None
+    assert bool(lanes.problems(updated, baseline)) == (change is not None)
+    assert "github.event_name == 'push' && format('promotion-dev-{0}', " in lanes.TESTS_GROUPS[1]
+
+
 @pytest.mark.parametrize(("job", "stage", "index"), [("stats", "stats", "part"), ("mutation-shard", "shard", "shard")])
 @pytest.mark.parametrize("change", [None, "runs-on", "queue", "cancel", "stage", "index", "group", "untrusted"])
 def test_a_trusted_mutation_leg_may_move_to_a_group_of_its_own_run(job, stage, index, change):
