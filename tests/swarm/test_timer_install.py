@@ -977,3 +977,33 @@ def test_a_foreign_supervisor_is_recycled_and_the_timer_and_finding_clear_on_its
     assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
     assert ensured == [2, 4]
     assert order == ["drain 4242", "supervise", "supervise", "supervise"]
+
+
+def test_the_scheduler_is_its_own_restarting_user_service_apart_from_the_units_that_start_it(monkeypatch):
+    monkeypatch.setattr(timer.sys, "executable", "/installed/bin/python")
+    text = timer.units("/installed/bin/agentihooks")["agentihooks-scheduler.service"]
+    assert text == (
+        "[Unit]\nDescription=agentihooks scheduler, apart from the units that start it\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=AGENTIHOOKS_SCHEDULER_UNIT=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        'ExecStart="/installed/bin/python" -m scripts.scheduler.service supervise\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+
+
+def test_ensure_writes_and_enables_the_scheduler_unit(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer.sys, "executable", "/installed/bin/python")
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=run)
+    assert (tmp_path / "agentihooks-scheduler.service").read_text() == timer.units("/installed/bin/agentihooks")[
+        "agentihooks-scheduler.service"
+    ]
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-scheduler.service"] in calls

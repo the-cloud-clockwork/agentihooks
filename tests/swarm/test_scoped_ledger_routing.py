@@ -436,3 +436,50 @@ def test_staging_fields_default_for_a_record_without_them_and_clear_with_the_des
     monkeypatch.setattr(lease, "now_ms", lambda *_: 4321)
     assert store.update("other", pending_api_url=HOSTED).ledger_staged_at == 4321
     assert store.update("other", pending_api_url="").ledger_staged_at == 0
+
+
+IN_CLUSTER = "http://agentihooks-swarm-controller.agentihooks-swarm.svc:8780"
+
+
+@pytest.fixture
+def workstation(monkeypatch):
+    for name in ("KUBERNETES_SERVICE_HOST", "AGENTIHOOKS_DEPLOYMENT", "LEDGER_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.parametrize(
+    ("address", "routed"),
+    [
+        (IN_CLUSTER, ""),
+        ("https://agentihooks-swarm-controller.agentihooks-swarm.svc.cluster.local:8780", ""),
+        ("https://agentihooks-swarm-controller.agentihooks-swarm.svc", ""),
+        ("http://ledger.invalid:8765", ""),
+        ("https://hosted.example", "https://hosted.example"),
+        ("http://127.0.0.1:8765", "http://127.0.0.1:8765"),
+    ],
+)
+def test_the_workstation_tick_routes_only_to_a_ledger_address_it_reaches_without_cleartext(
+    store, workstation, address, routed
+):
+    store.redis.hset(store.key("other", "config"), "api_url", address)
+    assert ledger_route.configured(store, "other") == routed
+
+
+def test_an_in_cluster_ledger_address_is_routed_inside_the_cluster(store, workstation, monkeypatch):
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+    address = "https://agentihooks-swarm-controller.agentihooks-swarm.svc:8780"
+    store.redis.hset(store.key("other", "config"), "api_url", address)
+    assert ledger_route.configured(store, "other") == address
+
+
+def test_a_tick_of_a_swarm_holding_the_in_cluster_address_uses_the_default_ledger_base(store, workstation):
+    store.redis.hset(store.key("other", "config"), "api_url", IN_CLUSTER)
+    seen = []
+
+    @ledger_route.tick
+    def work(store, slug):
+        seen.append(ledger_link.base(slug=slug))
+
+    work(store, "other")
+    assert seen == [ledger_link.base(slug="other")]
+    assert "svc" not in seen[0]
