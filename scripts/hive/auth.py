@@ -58,6 +58,7 @@ NATS_CREDS_FILE = "hive.creds"
 # Below the home, where the hooks' *.env autoload never puts it into other processes.
 CONTROLLER_ENV_FILE = "controller/credential.env"
 SERVICE_TTL_S = 300
+AGENT_TOKEN_TTL_S = 3600
 
 
 class HiveError(Exception):
@@ -209,20 +210,26 @@ def ledger_member(redis, credential: str) -> str | None:
 
 def issue_agent(redis, member_id: str, slug: str, name: str) -> str:
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"
+    issued = int(time.time())
 
     def record(current: dict | None) -> dict:
         if current is None:
             raise HiveError("Hive membership was revoked")
-        return {**current, "agents": {**current.get("agents", {}), _digest(token): [slug, name]}}
+        kept = {digest: scope for digest, scope in current.get("agents", {}).items() if _live(scope, issued)}
+        return {**current, "agents": {**kept, _digest(token): [slug, name, issued]}}
 
     hive_state.amend(_store(redis), f"member.{member_id}", record, _legacy(redis, _legacy_member(member_id)))
     return token
 
 
+def _live(scope: list, now: int) -> bool:
+    return len(scope) > 2 and now - scope[2] < AGENT_TOKEN_TTL_S
+
+
 def agent_member(redis, token: str, slug: str, name: str) -> str | None:
     member_id = token.removeprefix("hive.").partition(".")[0]
     scope = (member(redis, member_id) or {}).get("agents", {}).get(_digest(token))
-    return member_id if scope == [slug, name] else None
+    return member_id if scope and scope[:2] == [slug, name] else None
 
 
 def issue_controller(redis) -> str:
