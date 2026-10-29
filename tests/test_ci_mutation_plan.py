@@ -232,6 +232,9 @@ def test_a_kept_split_wider_than_the_shard_limit_is_cut_again(tmp_path):
     assert split[function]["costs"] == pytest.approx(
         [plan.MUTANT_SECONDS + 1.25 * (1.0 + 150.0), plan.MUTANT_SECONDS + 1.25 * (1.0 + 300.0)]
     )
+    names = [f"{function}__mutmut_{index}" for index in (1, 2)]
+    planned = measured.measured_plan([(names, [{"tests": {function: nodes}, "durations": durations}])], memory, 2)
+    assert planned["splits"][function]["slices"] == [["a"], ["b", "c"]]
 
 
 def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_its_traced_sum(tmp_path):
