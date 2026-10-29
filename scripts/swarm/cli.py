@@ -59,6 +59,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import asdict, replace
@@ -933,7 +934,7 @@ def cmd_take_master(store, args):
     store.clear_handoff(args.slug, MASTER)
 
 
-def on_ledger_host(slug, environ=os.environ):
+def on_ledger_host(slug: str, environ: MutableMapping[str, str] = os.environ) -> None:
     from scripts.swarm_ledger import hosted_probe, storage
 
     if environ.get(hosted_probe.HOSTED_ENV) and storage.default().token(slug):
