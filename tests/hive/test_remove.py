@@ -188,7 +188,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
         "openbao: deleted OpenBao secret/k8s/agentihooks-hive-anton-9",
     ]
     assert [item.text for item in _orders(store, SEAT)] == [remove.ORDER.format(hive=member, slug=SLUG)]
-    assert not store.redis.exists(remove.member_key(member))
+    assert not auth.member(store.redis, member)
     assert f"hive-{member}" not in store.redis.acl_users()
     assert member not in store.redis.smembers(registry.INDEX)
     assert not store.redis.keys(f"{registry.key(member)}*")
@@ -334,7 +334,7 @@ def test_a_hive_whose_agents_stay_is_left_draining_with_its_member(store, tmp_pa
     )
     assert (clock.now, clock.slept) == (30, 2)
     assert registry.show(store.redis, member)["draining"] == "yes"
-    assert store.redis.exists(remove.member_key(member))
+    assert auth.member(store.redis, member)
 
 
 def test_the_hive_is_named_by_its_member_or_its_name_and_a_gone_name_stands_for_both(store):
@@ -581,7 +581,7 @@ def test_remove_of_hive_three_leaves_live_hive_two_untouched(store, tmp_path):
         ["herdr", "machine", "remove", "p3"]
     ]
     assert [argv[2] for argv, _ in run.calls if argv[0] == "ssh-keygen"] == ["[10.10.30.207]:2225"]
-    assert store.redis.exists(remove.member_key(two))
+    assert auth.member(store.redis, two)
     assert two in store.redis.smembers(registry.INDEX)
 
 
