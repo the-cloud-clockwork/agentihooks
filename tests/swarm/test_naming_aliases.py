@@ -193,3 +193,27 @@ def test_a_registered_slug_raises_a_failed_store_read(client, on_redis, monkeypa
     with pytest.raises(OSError) as raised:
         naming.registered_slug("master@abcdef-0001")
     assert raised.value is failure
+
+
+def test_export_lists_the_swarm_aliases_as_store_rows_that_restore_writes_back(client, agent):
+    names, new = agent
+    quiet = names.next("sw", "eng")
+    names.alias("sw-eng-1", new)
+    client.set(_legacy("alias", "sw-eng-2"), new)
+    client.sadd(_legacy("aliases-of", new), "sw-eng-2")
+    others = naming.NameRegistry(client, mint=lambda: "123456")
+    others.mint_code("other", "other", "/repo")
+    others.alias("other-eng-1", others.next("other", "eng"))
+    rows = names.export("sw")
+    assert rows == {
+        name_state.state_key("aliases-of", new): ["sw-eng-1", "sw-eng-2"],
+        name_state.state_key("alias", "sw-eng-1"): new,
+        name_state.state_key("alias", "sw-eng-2"): new,
+    }
+    assert name_state.state_key("aliases-of", quiet) not in rows
+    assert names.export("missing") == {}
+    client.delete(_legacy("alias", "sw-eng-2"), _legacy("aliases-of", new))
+    client.delete(RedisStateStore(client, name_state.BUCKET).watch_key)
+    names.names_state.restore(json.loads(json.dumps(rows)))
+    assert names.resolve("sw-eng-2") == new
+    assert names.aliases(new) == ["sw-eng-1", "sw-eng-2"]
