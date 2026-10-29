@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -372,6 +373,20 @@ def sample_cpu(pid: int, deadline: float, results: dict) -> None:
         results["errors"].append(f"server sampler: {type(exc).__name__}: {exc}")
 
 
+def preflight(api: ResourceClient, name: str, item: str) -> None:
+    op = {"op": "add", "thread": f"{item}/comments", "id": f"c-{uuid.uuid4().hex[:10]}", "by": name}
+    try:
+        reply = api.mutate(SLUG, [{**op, "text": "Load check write preflight landed."}])
+    except urllib.error.HTTPError as exc:
+        raise SystemExit(
+            f"write preflight refused: HTTP {exc.code} {exc.reason}: {exc.read().decode(errors='replace')}"
+        )
+    except Exception as exc:  # any refusal fails the gate before the timed window
+        raise SystemExit(f"write preflight refused: {type(exc).__name__}: {exc}")
+    if rejected := (reply.get("data") or reply).get("rejected"):
+        raise SystemExit(f"write preflight refused: write rejected: {rejected}")
+
+
 def load(port: int, token: str, pid: int, seconds: float) -> dict:
     base = f"http://127.0.0.1:{port}"
     results = {"writes": [], "reads": [], "item_reads": [], "errors": [], "cpu": [], "resources": []}
@@ -382,6 +397,7 @@ def load(port: int, token: str, pid: int, seconds: float) -> dict:
         api = ResourceClient(base, credentials, TIMEOUT_S)
         api.mutate(SLUG, [{"op": "join", "id": f"join-{uuid.uuid4().hex[:10]}", "by": name, "role": "member"}])
         apis.append((api, name, f"tasks/t{n * (TASKS // CLIENTS)}"))
+    preflight(*apis[0])
     began = time.monotonic()
     deadline = began + seconds
     threads = [
