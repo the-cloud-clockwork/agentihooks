@@ -1,5 +1,4 @@
 import ast
-import functools
 import os
 import posixpath
 import re
@@ -134,7 +133,6 @@ def _launches(source: str, comment: str) -> bool:
     return bool(_LAUNCH.search(_strip(source, comment, _named_literal)))
 
 
-@functools.cache
 def _launched_literal(runners: re.Pattern) -> re.Pattern:
     runner, attached = runners.pattern, runners.pattern.removeprefix(r"\b")
     return re.compile(
@@ -148,8 +146,7 @@ def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
     launched = _launched_literal(runners)
 
     def keep(text: str, match: re.Match) -> bool:
-        quote = match["q"]
-        return quote is not None and bool(launched.search(text[match.end("q") : match.end() - len(quote)]))
+        return match["q"] is not None and bool(launched.search(text[match.end("q") : match.end()]))
 
     kept = _strip(source, comment, keep)
     return bool(runners.search(kept) or launched.search(kept))
