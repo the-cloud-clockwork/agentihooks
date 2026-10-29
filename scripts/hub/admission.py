@@ -75,10 +75,11 @@ class Admission:
         self.store.seats.occupy(seat, name, now)
         task = tick.primed(self.store, slug, seat, {**row, **live})
         identity = {"execution_id": agent.execution_id, "execution_generation": agent.generation}
+        avoid = self.store.failed_harness(slug, task_id)
         admitted = {
             "hive": request["hive"],
             "name": name,
-            "task": {**task, **identity},
+            "task": {**task, **identity, **({"avoid_harness": avoid} if avoid else {})},
         }
         self.store.redis.set(self._key(slug, request), json.dumps(admitted), px=ADMITTED_MS)
         return admitted
@@ -120,5 +121,19 @@ class Admission:
         self.store.redis.delete(key)
         return True
 
+    def failed(self, slug: str, request: dict) -> bool:
+        key = self._key(slug, request)
+        held = self.store.redis.get(key)
+        admitted = json.loads(held) if held else None
+        if not admitted or admitted["hive"] != request["hive"]:
+            return False
+        task_id, harness, reason = request["task"], request["harness"], request["reason"]
+        self.store.note_launch_failure(slug, task_id, reason, harness)
+        if harness:
+            admitted["task"]["avoid_harness"] = harness
+            self.store.redis.set(key, json.dumps(admitted), keepttl=True)
+            print(f"hub: events steering swarm={slug} task={task_id} avoid={harness}: {reason}", file=sys.stderr)
+        return True
 
-OPERATIONS = ("admit", "reopen")
+
+OPERATIONS = ("admit", "reopen", "failed")

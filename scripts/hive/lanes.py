@@ -27,7 +27,7 @@ class LaneTasks:
     def __init__(self, bus, hive: str, configs: Callable[[str], object]):
         self.bus, self.hive, self.configs = bus, hive, configs
 
-    def _ask(self, op: str, event: Envelope):
+    def _ask(self, op: str, event: Envelope, **fields):
         ask = account_slots.asker(self.bus.for_swarm(event.swarm), event.swarm, self.hive)
         request = {
             "op": op,
@@ -35,6 +35,7 @@ class LaneTasks:
             "task": event.key,
             "lane": event.data["lane"],
             "generation": event.version,
+            **fields,
         }
         return ask(request)
 
@@ -49,6 +50,9 @@ class LaneTasks:
 
     def reopen(self, event: Envelope) -> None:
         self._ask("reopen", event)
+
+    def failed(self, event: Envelope, harness: str, reason: str) -> None:
+        self._ask("failed", event, harness=harness, reason=reason)
 
 
 def lanes(excluded: str | None) -> tuple[str, ...]:
