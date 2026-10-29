@@ -25,14 +25,15 @@
     "accepted": "shadow proofs stored by ConsumerRoutes.qualify with state accepted",
     "committed": "route revisions in the fixture route store written by switch and rollback",
     "externally_verified": "none; no deployed consumer was switched and no live catalog was replayed",
-    "observed": "case outputs in the a, b and c result files from CI on the tested commit"
+    "observed": "case outputs in the a, b and c result files, graded by the touched tests of Mutation preflight 40810720708 on the tested commit"
   },
   "package": "SV2-MIG-04",
-  "pull_request": "pending",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/8578",
   "remaining_limitations": [
     "The questions are reconstructed from repository history over the sanitized session tools fixture; replaying live historical sessions needs read access to the hosted catalog.",
     "No consumer outside agentihooks routes through ConsumerRoutes yet.",
-    "Route changes are authorized by the caller grant; the route store has no separate operator role."
+    "Route changes are authorized by the caller grant; the route store has no separate operator role.",
+    "A cited range is expanded in one page of up to 200 records; a larger citation counts as unexpandable, so qualification fails closed."
   ],
   "repeat": "case A runs a second fixture whose session identities differ from the first, in its own folder, and compares the outcomes with operation ids set aside",
   "rollback_rehearsal": "case C switched the consumer, restarted the route store, captured a new turn, rolled back to local.v1 at revision 2, replayed the rollback with the same result, kept the shadow proof and refused the stale switch",
@@ -45,5 +46,10 @@
     ],
     "session_tools_schema": "2.0"
   },
-  "tested_commit": "8969d39475b52b3671fe6ecde14ca2cb005468a2"
+  "test_outputs": {
+    "green": "Mutation preflight 40810720708 attempt 2 on the tested commit: touched tests 24 passed and 3 passed; changed line mutation 4 complete shards, 100 of 100 mutants killed in each, no clearances; attempt 1 lost its stats runner",
+    "red": "Mutation preflight 40627140712 on a57726f46: ModuleNotFoundError No module named hooks.memory.cutover"
+  },
+  "tested_commit": "6ad7648d3aadd22286e0ac96b9ae864d207cf216",
+  "tested_commit_note": "the tested commit holds all code; the commit after it changes only this record and the manifest"
 }
