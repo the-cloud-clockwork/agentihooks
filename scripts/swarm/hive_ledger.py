@@ -70,8 +70,10 @@ def observe(store: RedisStore, slug: str, now_ms: int) -> None:
     from scripts.swarm import outage
 
     rows = {agent.name: read(store.redis, slug, agent.name) for agent in store.agents(slug)}
-    ok = max((row["ok_at"] for row in rows.values() if "ok_at" in row), default=-1)
-    failed = sorted((at, code, name) for name, row in rows.items() for at, code in row.get("failed", []) if at > ok)
+    ok = max((row["ok_at"] for row in rows.values() if "ok_at" in row), default=None)
+    failed = sorted(
+        (at, code, name) for name, row in rows.items() for at, code in row.get("failed", []) if ok is None or at > ok
+    )
     ongoing = [record["started_at"] for record in outage.open_records(slug) if record["kind"] == KIND]
     fresh = [row for row in failed if row[0] >= now_ms - WINDOW_MS]
     opened = len(fresh) >= THRESHOLD or bool(ongoing and failed and failed[0][0] <= ongoing[0])
