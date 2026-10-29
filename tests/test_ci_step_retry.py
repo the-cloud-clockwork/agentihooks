@@ -1,3 +1,4 @@
+import hashlib
 import os
 import subprocess
 import time
@@ -26,21 +27,28 @@ def _steps(job):
 
 
 _APP = {"client-id": "${{ secrets.TCC_CI_CLIENT_ID }}", "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}"}
+_REFETCH = "steps.primary.outcome == 'failure' || steps.verify.outcome == 'failure'"
+_SPLIT_VERIFY = "python3 -c 'import json, sys; [json.loads(open(path).read()) for path in sys.argv[1:]]' ~/dev-durations/.test_durations*"
+_SHARD_VERIFY = '[[ "$(sha256sum .test_durations | cut -d \' \' -f 1)" == "$(< durations.sha256)" ]]'
 
 
 def _fallback():
     return next(s for s in _action()["runs"]["steps"] if s.get("name") == "Download through the REST artifacts API")
 
 
-def test_one_download_then_a_rest_fallback_only_when_it_fails():
-    primary, mint, fallback = _action()["runs"]["steps"]
+def test_one_download_then_a_rest_fallback_only_when_it_fails_or_arrives_torn():
+    primary, verify, mint, fallback = _action()["runs"]["steps"]
     assert primary["uses"] == "actions/download-artifact@v4"
     assert primary["continue-on-error"] is True and "if" not in primary
     assert primary["with"] == {"name": "${{ inputs.name }}", "path": "${{ inputs.path || github.workspace }}"}
+    assert verify["id"] == "verify"
+    assert verify["if"] == "steps.primary.outcome == 'success' && inputs.verify != ''"
+    assert verify["continue-on-error"] is True
+    assert verify["env"]["VERIFY"] == "${{ inputs.verify }}"
     assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
-    assert mint["if"].startswith("steps.primary.outcome == 'failure'")
+    assert mint["if"].startswith(f"({_REFETCH}) && ")
     assert mint["with"]["permission-actions"] == "read"
-    assert fallback["if"] == "steps.primary.outcome == 'failure'"
+    assert fallback["if"] == _REFETCH
     assert fallback["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     assert "continue-on-error" not in fallback
     assert "actions/artifacts/$id/zip" in fallback["run"]
@@ -111,15 +119,56 @@ def test_the_rest_fallback_without_an_app_token_stays_red(tmp_path):
         (
             "split",
             "Download the queued run's dev durations",
-            {"name": "dev-durations", "path": "~/dev-durations", **_APP},
+            {"name": "dev-durations", "path": "~/dev-durations", "verify": _SPLIT_VERIFY, **_APP},
         ),
-        ("unit", "Download the durations this run splits on", {"name": "split-${{ matrix.python-version }}", **_APP}),
+        (
+            "unit",
+            "Download the durations this run splits on",
+            {"name": "split-${{ matrix.python-version }}", "verify": _SHARD_VERIFY, **_APP},
+        ),
     ],
 )
 def test_the_durations_downloads_retry_in_place(job, name, given):
     step = next(s for s in _steps(job) if s.get("name") == name)
     assert step["uses"] == _RETRY
     assert step["with"] == given
+
+
+def _verify(tmp_path, command):
+    step = next(s for s in _action()["runs"]["steps"] if s.get("id") == "verify")
+    env = {**os.environ, **step["env"], "VERIFY": command, "ARTIFACT": "split-3.12", "HOME": str(tmp_path)}
+    return subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+_TORN = '{\n    "t.py::a": 2.0,\n    "t.py::b'
+
+
+@pytest.mark.parametrize("torn", [False, True])
+def test_the_split_verify_refetches_only_a_torn_dev_durations_file(tmp_path, torn):
+    folder = tmp_path / "dev-durations"
+    folder.mkdir()
+    (folder / ".test_durations").write_text('{"t.py::a": 2.0}')
+    (folder / ".test_durations-3.12").write_text(_TORN if torn else '{"t.py::a": 3.0}')
+    done = _verify(tmp_path, _SPLIT_VERIFY)
+    assert done.returncode == (1 if torn else 0), done.stdout + done.stderr
+    assert ("downloaded torn" in done.stdout) is torn
+
+
+@pytest.mark.parametrize("torn", [False, True])
+def test_the_shard_verify_refetches_durations_whose_hash_does_not_match(tmp_path, torn):
+    whole = '{"t.py::a": 2.0}\n'
+    (tmp_path / "durations.sha256").write_text(hashlib.sha256(whole.encode()).hexdigest() + "\n")
+    (tmp_path / ".test_durations").write_text(_TORN if torn else whole)
+    done = _verify(tmp_path, _SHARD_VERIFY)
+    assert done.returncode == (1 if torn else 0), done.stdout + done.stderr
+    assert ("downloaded torn" in done.stdout) is torn
 
 
 _UPLOAD_WITH = {
