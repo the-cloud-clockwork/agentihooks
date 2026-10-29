@@ -37,8 +37,16 @@ def committed(tmp_path_factory) -> Path:
     archive = subprocess.run(["git", "-C", str(_ROOT), "archive", "HEAD"], capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         tar.extractall(root, filter="data")
+    source = subprocess.run(
+        ["git", "-C", str(_ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir", "HEAD^{tree}"],
+        capture_output=True,
+        check=True,
+        text=True,
+    ).stdout.split()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
-    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    # Hashing every file with git add outran the worker timeout on loaded shards; index HEAD's tree instead.
+    (root / ".git/objects/info/alternates").write_text(f"{source[0]}/objects\n")
+    subprocess.run(["git", "-C", str(root), "read-tree", source[1]], check=True)
     return root
 
 
