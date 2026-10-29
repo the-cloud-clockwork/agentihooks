@@ -183,25 +183,28 @@ class Consumer:
         return cls(redis, hive, LocalHerdrRuntime(HerdrRuntime()))
 
     def poll(self) -> int:
-        from redis.exceptions import NoPermissionError
-
         entries = self.store.redis.xrange(self.orders.stream(self.hive), count=32)
         for item, fields in entries:
-            try:
-                order = LaunchOrder(**json.loads(fields["order"]))
-                if order.hive != self.hive:
-                    self._drop(item, "identity")
-                    continue
-                ack = self.orders.ack(order)
-                if ack is None:
-                    ack = self.apply(order)
-                if ack is not None:
-                    self.orders.finish(self.hive, item, order, ack)
-            except (KeyError, TypeError, ValueError):
-                self._drop(item, "invalid_order")
-            except NoPermissionError:
-                self._drop(item, "refused")
+            self.consume(item, fields)
         return len(entries)
+
+    def consume(self, item: str, fields: dict) -> None:
+        from redis.exceptions import NoPermissionError
+
+        try:
+            order = LaunchOrder(**json.loads(fields["order"]))
+            if order.hive != self.hive:
+                self._drop(item, "identity")
+                return
+            ack = self.orders.ack(order)
+            if ack is None:
+                ack = self.apply(order)
+            if ack is not None:
+                self.orders.finish(self.hive, item, order, ack)
+        except (KeyError, TypeError, ValueError):
+            self._drop(item, "invalid_order")
+        except NoPermissionError:
+            self._drop(item, "refused")
 
     def _drop(self, item: str, failure: str) -> None:
         with self.store.redis.pipeline() as pipe:

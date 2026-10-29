@@ -66,7 +66,7 @@ def test_beat_exports_the_registered_capabilities_before_launching(redis, monkey
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
     monkeypatch.setattr(
-        daemon, "poll_orders", lambda consumer: seen.append(daemon.os.environ[profile_chain.HIVE_CAPABILITIES])
+        daemon.dispatch, "poll", lambda consumer: seen.append(daemon.os.environ[profile_chain.HIVE_CAPABILITIES])
     )
     monkeypatch.setenv(profile_chain.HIVE_CAPABILITIES, "headed")
     registry.update(redis, "machine", ["name=Worker"])
@@ -1719,6 +1719,8 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
     herdr.observe.return_value = PaneObservation("idle", typed="half")
     herdr.reported.return_value = True
     consumer = Mock(runtime=Mock(herdr=herdr))
+    launched = Mock()
+    monkeypatch.setattr(daemon.dispatch, "poll", launched)
     monkeypatch.setattr(orders.Consumer, "local", lambda redis, hive: consumer)
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
@@ -1754,7 +1756,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
         },
     }
     assert redis.ttl(reports.key("machine")) == 45
-    consumer.poll.assert_called_once_with()
+    launched.assert_called_once_with(consumer)
     consumer.poll_commands.assert_called_once_with()
 
 
