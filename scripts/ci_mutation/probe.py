@@ -59,6 +59,8 @@ def probe_elapsed(stats: SharedStats | None) -> float:
 
 def mark_probe_results(work: Path, results: dict) -> dict:
     early, _ = read_probe_results(work / "shard-plan.json")
+    if not early:
+        return results
     for values in results.values():
         for row in values:
             if early.get(row["name"]) == "killed":
