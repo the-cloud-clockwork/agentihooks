@@ -62,6 +62,7 @@ def configured(bus: Bus, clock: lease.Clock = lease.wall_ms) -> Registry:
     from scripts.hub.hive_loss import HiveLoss
     from scripts.hub.inbox_wake import InboxWake
     from scripts.hub.lifecycle import Lifecycle
+    from scripts.hub.preemption import Preemption
     from scripts.hub.pulls import Pulls
     from scripts.hub.readiness import Readiness
     from scripts.hub.reconciler import Reconciler
@@ -79,6 +80,7 @@ def configured(bus: Bus, clock: lease.Clock = lease.wall_ms) -> Registry:
             Lifecycle(bus).reactor(),
             Reconciler(bus, clock=clock).reactor(),
             Readiness(bus, clock=clock).reactor(),
+            Preemption(clock=clock).reactor(),
             Pulls(bus, clock=clock).reactor(),
         ]
     )
