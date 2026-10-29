@@ -696,10 +696,11 @@ def test_repoint_published_plan_moves_all_phase_references_without_another_issue
     )
     uploads = []
     monkeypatch.setattr(ledger, "upload_artifact", lambda *a: uploads.append(a[3]) or file)
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "plan")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK")
     path = [str(tmp_path / "plan.md")] if local_copy else []
     cli(monkeypatch, plan_ledger, "publish-plan", *path, "--phase", "p1", "--repoint")
-    assert uploads == ([{"task": "plan", "title": "Rollout", "plan": True}] if local_copy else [])
+    assert uploads == ([{"task": "", "title": "Rollout", "plan": True}] if local_copy else [])
     state = core.sync(plan_ledger)[0]
     target = f"https://ledger.example/artifacts/{plan_ledger}/{file['id']}"
     assert state["plans"] == [{"id": plan_id, "title": "Rollout", "artifact": target, "url": PLAN}]
