@@ -278,7 +278,7 @@ workers:
     enabled: false
     namespace: default
     leaseName: agentihooks-hive-rollout
-    drainSeconds: 300
+    drainSeconds: 1200
     # Optional pod stamp; each new value rolls the hives one at a time. Release hives leave it unset and roll on the chart version.
     release: ""
   excluded: [master]

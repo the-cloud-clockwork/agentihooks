@@ -27,6 +27,7 @@ BUDGETS = {
     "lint": 240,
     "docs": 120,
     "sonar": 240,
+    "dep-manifest": 120,
     "coverage-ratchet": 90,
     "queue-fail-fast": 60,
     "mutation-plan": 60,
