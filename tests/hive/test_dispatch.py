@@ -266,3 +266,59 @@ def test_retirement_during_validation_fences_a_later_successful_spawn(setup):
     assert ack.failure == "retired"
     assert setup.runtime.terminate.call_count == 2
     assert setup.runtime.terminate.call_args.args[0].runtime_target["pid"] == 12
+
+
+def test_retirement_during_preparation_prevents_runtime_creation(setup, monkeypatch):
+    from scripts import serena_router_daemon
+    from scripts.hive.orders import CommandOrder
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    entered, release = threading.Event(), threading.Event()
+
+    def prepare():
+        entered.set()
+        assert release.wait(10)
+        return True
+
+    monkeypatch.setattr(serena_router_daemon, "ensure", prepare)
+    setup.runtime.terminate.return_value = Outcome("terminate", Status.OK, "local")
+    setup.orders.send("host", setup.order)
+    worker = threading.Thread(target=setup.consumer.poll)
+    worker.start()
+    try:
+        assert entered.wait(3)
+        command = CommandOrder(
+            "retire",
+            "retire",
+            "fixture",
+            execution_id=setup.agent.execution_id,
+            generation=setup.agent.generation,
+        )
+        assert setup.consumer.command(command).status == "done"
+        receipt = setup.orders.receipt(setup.order)
+        assert setup.redis.hget(receipt, "retired") == "1"
+        assert 0 < setup.redis.ttl(receipt) <= 86400
+    finally:
+        release.set()
+        worker.join(10)
+    assert not worker.is_alive()
+    setup.runtime.spawn.assert_not_called()
+    assert setup.orders.ack(setup.order).failure == "retired"
+
+
+def test_retirement_for_another_generation_cannot_cancel_a_launch(setup):
+    from scripts.hive.orders import CommandOrder
+
+    command = CommandOrder(
+        "retire",
+        "retire",
+        "fixture",
+        execution_id=setup.agent.execution_id,
+        generation=setup.agent.generation + 1,
+    )
+    assert setup.consumer.command(command).status == "failed"
+    assert not setup.redis.hexists(setup.orders.receipt(setup.order), "retired")
+    setup.orders.send("host", setup.order)
+    setup.consumer.poll()
+    assert setup.orders.ack(setup.order).status == "live"
+    setup.runtime.terminate.assert_not_called()

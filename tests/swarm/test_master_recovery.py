@@ -322,7 +322,7 @@ def _beat(store, monkeypatch, runtime):  # noqa: F811
     monkeypatch.setattr(orders.Consumer, "local", classmethod(lambda cls, redis, hive: cls(redis, hive, runtime)))
     monkeypatch.setattr(daemon.time, "time", lambda: NOW / 1000 + 5)
     polled = []
-    monkeypatch.setattr(orders.Consumer, "poll", lambda self: polled.append(self.hive) or 0)
+    monkeypatch.setattr(daemon.dispatch, "poll", lambda consumer: polled.append(consumer.hive))
     daemon.beat(store.redis, "lost")
     return polled
 

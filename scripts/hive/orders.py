@@ -257,6 +257,11 @@ class Consumer:
         if order.action == "name":
             return _done(self.runtime.herdr.name_pane(agent))
         if order.action == "retire":
+            receipt = self.orders.launch_receipt(self.hive, order.slug, order.execution_id, order.generation)
+            with self.store.redis.pipeline() as pipe:
+                pipe.hset(receipt, "retired", "1")
+                pipe.expire(receipt, RECEIPT_SECONDS)
+                pipe.execute()
             outcome = self.runtime.terminate(agent, tuple(reaper.scratch_homes(order.slug, agent.task)))
         elif order.action == "nudge":
             outcome = self.runtime.command(agent, order.text)
@@ -383,6 +388,8 @@ class Consumer:
             task["workspace"] = str(ledger_workspace.materialize(order.slug, order.task, task.get(SEEDS) or {}))
         if not serena_router_daemon.ensure():
             return Ack("failed", {}, "serena")
+        if self.store.redis.hexists(self.orders.receipt(order), "retired"):
+            return Ack("failed", {}, "retired")
         outcome = self.runtime.spawn(SpawnRequest(config, order.lane, agent.name, task))
         if not outcome.ok:
             return Ack("failed", {}, _failure(outcome))
@@ -393,6 +400,8 @@ class Consumer:
         except SwarmError:
             return Ack("failed", {"host_id": self.hive}, "ambiguous")
         live = replace(agent, runtime_target=target, pane_id=placed.pane_id)
+        if self.store.redis.hexists(self.orders.receipt(order), "retired"):
+            return self._stop(live, "retired")
         if order.expires_at <= lease.now_ms(self.store):
             return self._stop(live, "expired")
         resolved = resolved_master_login(order, placed.account, placed.placement, placed.profile_decision)
