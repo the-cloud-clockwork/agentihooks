@@ -584,9 +584,16 @@ def test_refresh_writes_the_bus_credential_beside_the_member_env(tmp_path):
     assert oct(creds.stat().st_mode & 0o777) == "0o600"
     assert env.endswith(f"AGENTIHOOKS_BUS_CREDENTIALS={creds}\nAGENTIHOOKS_BUS_BIND=1\n")
     env = auth.write_env(tmp_path, "https://hive", {**grant, "nats_credentials": None}).read_text()
+    assert creds.read_text() == "creds text"
+    assert env.endswith(f"AGENTIHOOKS_BUS_CREDENTIALS={creds}\nAGENTIHOOKS_BUS_BIND=1\n")
+
+
+def test_a_grant_without_a_bus_credential_and_no_saved_one_names_none(tmp_path):
+    grant = {"id": "m1", "ledger_credential": "l", "redis_url": "r", "nats_credentials": None}
+    env = auth.write_env(tmp_path, "https://hive", grant).read_text()
     assert "AGENTIHOOKS_BUS_CREDENTIALS" not in env
     assert "AGENTIHOOKS_BUS_BIND" not in env
-    assert not creds.exists()
+    assert not (tmp_path / auth.NATS_CREDS_FILE).exists()
 
 
 @pytest.fixture
