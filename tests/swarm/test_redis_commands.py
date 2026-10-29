@@ -723,6 +723,7 @@ class RedisStateStore:
 def test_a_store_publishes_its_keys_and_protocol_commands_where_its_opener_is_reached(monkeypatch, tree):
     from types import SimpleNamespace
 
+    (tree / "scripts/events").mkdir()
     for name, text in STATE_FILES.items():
         (tree / name).write_text(text)
     opened = SimpleNamespace(_current="s:current", _revision="s:revision", _history="s:history:")
