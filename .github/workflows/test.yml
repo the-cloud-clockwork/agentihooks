@@ -2193,7 +2193,7 @@ jobs:
         uses: actions/download-artifact@v4
         with: *sonar-download-selected-branch-coverage
 
-      # A leg's newest attempt holds the coverage of the run that passed it.
+      # A leg's newest attempt with a database supersedes the shard an older attempt uploaded.
       - name: Take each selected leg's branch coverage as its shard coverage
         if: *selected-branch-coverage
         shell: bash
@@ -2201,10 +2201,15 @@ jobs:
           shards=$GITHUB_WORKSPACE/.coverage-shards
           mkdir -p "$shards" "$RUNNER_TEMP/branch-shards"
           cd "$RUNNER_TEMP/branch-shards"
+          declare -A seen
           while IFS= read -r name; do
             rest=${name#branch-coverage-3.12-}
             leg=${rest%-*}
-            [[ -e "$shards/coverage-3.12-$leg" ]] || mv "$name" "$shards/coverage-3.12-$leg"
+            [[ -z "${seen[$leg]:-}" ]] || continue
+            seen[$leg]=1
+            [[ -f "$name/.coverage" ]] || continue
+            rm -rf "$shards/coverage-3.12-$leg"
+            mv "$name" "$shards/coverage-3.12-$leg"
           done < <(find . -mindepth 1 -maxdepth 1 -type d -name 'branch-coverage-3.12-*' -printf '%f\n' | sort -t- -k5,5nr)
 
       - name: Mint the token that reads the pull request runs' coverage

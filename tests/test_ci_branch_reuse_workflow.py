@@ -570,11 +570,14 @@ def test_sonar_takes_each_selected_legs_newest_branch_coverage_as_its_shard(tmp_
     assert download["with"]["pattern"] == "branch-coverage-3.12-*"
     assert names.index("Download shard coverage") < names.index(take["name"]) < names.index("Merge shard coverage")
     temp = tmp_path / "temp"
-    for name, text in (("1-1", "old"), ("1-2", "new"), ("12-1", "twelve"), ("3-1", "branch")):
+    for name, text in (("1-1", "old"), ("1-2", "new"), ("12-1", "twelve"), ("3-2", "branch"), ("5-1", "stale")):
         (temp / "branch-shards" / f"branch-coverage-3.12-{name}").mkdir(parents=True)
         (temp / "branch-shards" / f"branch-coverage-3.12-{name}" / ".coverage").write_text(text)
-    (tmp_path / ".coverage-shards/coverage-3.12-3").mkdir(parents=True)
-    (tmp_path / ".coverage-shards/coverage-3.12-3/.coverage").write_text("uploaded")
+    (temp / "branch-shards/branch-coverage-3.12-5-2").mkdir(parents=True)
+    (temp / "branch-shards/branch-coverage-3.12-5-2/elapsed.json").write_text("{}")
+    for leg, text in (("3", "attempt one"), ("5", "uploaded")):
+        (tmp_path / f".coverage-shards/coverage-3.12-{leg}").mkdir(parents=True)
+        (tmp_path / f".coverage-shards/coverage-3.12-{leg}/.coverage").write_text(text)
     result = subprocess.run(
         ["bash", "-c", take["run"]],
         cwd=tmp_path,
@@ -583,7 +586,12 @@ def test_sonar_takes_each_selected_legs_newest_branch_coverage_as_its_shard(tmp_
     )
     assert result.returncode == 0, result.stderr
     found = {path.parent.name: path.read_text() for path in (tmp_path / ".coverage-shards").glob("*/.coverage")}
-    assert found == {"coverage-3.12-1": "new", "coverage-3.12-12": "twelve", "coverage-3.12-3": "uploaded"}
+    assert found == {
+        "coverage-3.12-1": "new",
+        "coverage-3.12-12": "twelve",
+        "coverage-3.12-3": "branch",
+        "coverage-3.12-5": "uploaded",
+    }
 
 
 def test_combine_adds_every_carried_branch_database_that_holds_data(tmp_path):
