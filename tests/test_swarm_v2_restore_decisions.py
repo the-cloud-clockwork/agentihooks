@@ -31,7 +31,8 @@ def pending():
         recovery.handle(old.execution_id, "node_lost")
         slug = recovery.slug
         world.store.put_agent(slug, AgentRecord("coordinator", "master", ""))
-        world.store.redis.hset(f"{auth.PREFIX}:member:fixture", "host", "fixture")
+        world.store.redis.hset(f"{auth.PREFIX}:member:fixture", mapping={"host": "fixture", "ledger": "fixture"})
+        world.store.redis.set(f"{auth.PREFIX}:ledger:fixture", "fixture")
         token = auth.issue_agent(world.store.redis, "fixture", slug, "coordinator")
         service = ControlService(
             world.store,
@@ -435,6 +436,7 @@ def test_finished_or_removed_master_cannot_decide_recovery(pending):
     status, result = post(pending, pending.token, {"agent": "coordinator", "choice": "fresh"})
     assert (status, result["error_class"]) == (403, "forbidden_scope")
     pending.world.store.put_agent(slug, AgentRecord("coordinator", "master", ""))
+    auth.hive_state.amend(auth._store(pending.world.store.redis), "ledger.fixture", lambda _: None)
     auth.hive_state.amend(auth._store(pending.world.store.redis), "member.fixture", lambda _: None)
     status, result = post(pending, pending.token, {"agent": "coordinator", "choice": "fresh"})
     assert (status, result["error_class"]) == (401, "unauthenticated")
