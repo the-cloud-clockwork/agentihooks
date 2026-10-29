@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.478 · 2026-10-29
+
+### 2026-10-29 · 1959413b8276 · #8756 · @agenticore-app
+
+**Upload each selected leg's coverage database once**
+
+Each selected pull-request leg was uploading its coverage database to Sonar twice, once for branch coverage and again for shard coverage, wasting roughly five seconds per leg across 139 runs. The fix skips the shard upload whenever the branch upload already carries the same database, letting Sonar reuse the branch coverage download as that leg's shard coverage instead. Fork pull requests, other base branches, and legs lacking a branch record still upload shard coverage as before, so correctness is preserved while same-repo dev pull requests get faster, cheaper CI runs.
+
 ## v2.17.477 · 2026-10-29
 
 ### 2026-10-29 · 1a78d66d05b5 · #8708 · @agenticore-app
