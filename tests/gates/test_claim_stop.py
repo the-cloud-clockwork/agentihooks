@@ -259,6 +259,39 @@ def test_a_stop_after_the_merge_is_blocked(rig):
     assert not decision.allowed and "merged: close the task now" in decision.reason
 
 
+@pytest.mark.parametrize("on", [None, {"kind": "checks", "target": URL}])
+def test_a_merged_task_stops_on_a_live_wait_until_it_expires(rig, on):
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL] = MERGED
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "ledger recovery", rig.clock[0], on=on)
+    assert rig.stop().allowed
+    rig.clock[0] += 60_000
+    assert not rig.stop().allowed
+
+
+def test_a_recorded_ledger_outage_passes_until_recovery(rig):
+    from scripts.swarm import outage
+
+    outage.observe(SLUG, "ledger", ["ledger HTTP 502"], rig.clock[0])
+    assert rig.stop().allowed
+    outage.observe(SLUG, "ledger", [], rig.clock[0] + 1)
+    assert not rig.stop().allowed
+
+
+def test_another_swarms_ledger_outage_does_not_release_the_claim(rig):
+    from scripts.swarm import outage
+
+    outage.observe("other-swarm", "ledger", ["ledger HTTP 502"], rig.clock[0])
+    assert not rig.stop().allowed
+
+
+def test_a_nonledger_outage_does_not_release_the_claim(rig):
+    from scripts.swarm import outage
+
+    outage.observe(SLUG, "provider", ["provider unavailable"], rig.clock[0])
+    assert not rig.stop().allowed
+
+
 @pytest.mark.parametrize("generation", [None, 4])
 @pytest.mark.parametrize("offset", [1, 60_000])
 def test_future_verification_stop_passes_and_releases_its_claim(rig, offset, generation):
