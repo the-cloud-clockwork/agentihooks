@@ -198,6 +198,22 @@ def test_a_freshness_refusal_records_the_head_reason_and_cancellation_classifica
     ]
 
 
+def test_an_incomplete_job_listing_records_an_unknown_cancellation_classification():
+    records = []
+    pages = [["success"] * 100] * queue_exit.PAGES + [["success"]]
+    run = runner([run_of(7, "cancelled", run_id=5)], jobs={5: pages})
+    with pytest.raises(SwarmError) as refused:
+        queue_exit.require_fresh(URL, "abc", run, record=records.append)
+    assert records == [
+        {
+            "pull": URL,
+            "head": "abc",
+            "reason": str(refused.value),
+            "cancelled_without_failed_test": None,
+        }
+    ]
+
+
 def test_an_admitted_cancelled_group_records_no_refusal():
     records = []
     jobs = [{"name": "Queue gate summary", "conclusion": "failure"}, {"name": "unit", "conclusion": "cancelled"}]

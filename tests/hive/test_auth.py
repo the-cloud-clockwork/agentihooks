@@ -94,6 +94,7 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:findings",
                     f"~{ROOT}:swarm:*:checks:*",
                     f"~{ROOT}:swarm:*:merge-stall",
+                    f"~{ROOT}:swarm:*:queue-refusals",
                     f"~{ROOT}:swarm:*:merge-stall-notice",
                     f"~{ROOT}:swarm:*:hive-placement-waits",
                     f"~{ROOT}:swarm:*:dev-red",
@@ -156,6 +157,7 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("swarm:proof:checks:approval:https://github.com/o/r/pull/1", True),
         ("swarm:proof:checks:green:https://github.com/o/r/pull/1", True),
         ("swarm:proof:merge-stall", True),
+        ("swarm:proof:queue-refusals", True),
         ("swarm:proof:merge-stall-notice", True),
         ("swarm:proof:hive-placement-waits", True),
         ("swarm:proof:dev-red", True),
@@ -203,6 +205,28 @@ def test_a_member_writes_the_keys_swarm_block_and_swarm_learned_write():
 
     for key in (dev_red.key("proof"), SeatMemory(None).key("eng-1@proof", "learned")):
         assert any(fnmatchcase(key, pattern) for pattern in patterns), key
+
+
+@pytest.mark.parametrize("role", ["member", "swarm"])
+def test_queue_refusal_records_are_writable_by_distributed_credentials(role):
+    from pathlib import Path
+
+    import fakeredis
+
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    if role == "member":
+        admin.acl_setuser(role, enabled=True, nopass=True, categories=auth.ACL_CATEGORIES, keys=auth._acl_keys("m1"))
+    else:
+        template = Path(__file__).resolve().parents[2] / "deploy/compose/redis/users.acl.template"
+        line = next(line for line in template.read_text().splitlines() if line.startswith("user swarm "))
+        rules = line.replace("@SWARM_REDIS_DENY@", "").split()[4:]
+        admin.execute_command("ACL", "SETUSER", role, "on", "nopass", *rules)
+    member = fakeredis.FakeRedis(server=server, decode_responses=True, username=role)
+    member.auth("", username=role)
+    key = store.RedisStore(admin).key("proof", "queue-refusals")
+    assert member.rpush(key, "refusal") == 1
+    assert admin.lrange(key, 0, -1) == ["refusal"]
 
 
 def test_the_grant_sizes_and_member_record(admin, redis_lib):
