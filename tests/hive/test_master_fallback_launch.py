@@ -410,11 +410,15 @@ def test_master_waits_when_its_only_private_login_probe_is_revoked(setup, monkey
     assert setup.launcher.select(setup.config, "master", task) == placement.Wait("no live hive takes master")
 
 
-def test_a_rejected_account_does_not_remove_a_hive_without_a_private_login(setup, monkeypatch):
+@pytest.mark.parametrize("login", [{}, {"claude": ""}])
+def test_a_rejected_account_does_not_remove_a_hive_without_a_private_login(setup, monkeypatch, login):
     from scripts import claude_quota_balancer as balancer
     from scripts.hive import launch
 
     task = {**master(setup), "seat": "master@fixture"}
+    hives = setup.launcher.hives()
+    hives[0]["master_login"] = login
+    monkeypatch.setattr(setup.launcher, "hives", lambda: hives)
     result = balancer.revoked_result("XXXX", 100)
     monkeypatch.setattr(balancer, "cached_observations", lambda **_: [(100, result)])
     selected = setup.launcher.select(setup.config, "master", task)
