@@ -22,7 +22,7 @@ def test_ready_intent_is_delivered_before_a_slow_runtime_launch(env, monkeypatch
     monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
 
     def view(url):
-        launching.wait(10)
+        launching.wait()
         return {"title": "Ready", "body": "", "files": [], "head": "h1"}
 
     monkeypatch.setattr(intent, "pr_view", view)
@@ -31,7 +31,9 @@ def test_ready_intent_is_delivered_before_a_slow_runtime_launch(env, monkeypatch
         delivered.append(clock[0])
         return {"verdict": "pass", "reason": "the phase can use it"}
 
-    launch, intent_pass, passed = runtime.spawn, cli._intent_pass, threading.Event()
+    launch = runtime.spawn
+    intent_pass = cli._intent_pass
+    passed = threading.Event()
 
     def observed_pass(*args):
         try:
