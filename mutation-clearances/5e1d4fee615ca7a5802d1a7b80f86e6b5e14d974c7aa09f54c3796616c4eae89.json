@@ -1,0 +1,6 @@
+{
+  "scripts/hive/auth.py:scripts.hive.auth.x_revoke__mutmut_20:fea847c3e3c2db34a480c84f1723563ef55b4400f238e02d323006ae924e03da": {
+    "reader": "standards_reader",
+    "reason": "The present flag of hive_state.indexed is read only for truthiness, so None behaves exactly like False; no record, index or Redis set differs."
+  }
+}

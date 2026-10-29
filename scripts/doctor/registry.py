@@ -218,15 +218,22 @@ def _read_binding(get, slug: str, binding: dict, known: Known, kept: dict, page:
         "limit": TRACES_LIMIT,
         "page": 1,
     }
-    found = [_correlated(get, row, known.roots) for row in get("traces", params)["data"]]
+    rows = get("traces", params)["data"]
+    found = [_correlated(get, row, known.roots) for row in rows]
     own = binding["session_id"]
     current = next((t for t in found if t["session_id"] == own), None) if own else (found or [None])[0]
     if current is None:
         return {"read": True, "traces": found, "remote": None}
     prior = known.marks.get(current["id"], {})
-    mark = _freshness(get, current["id"], prior, page)
+    updated = rows[found.index(current)].get("updatedAt")
+    if updated and prior.get("updated_at") == updated:
+        mark, total = prior, prior["observations"]
+    else:
+        mark = _freshness(get, current["id"], prior, page)
+        total = get("observations", {"traceId": current["id"], "limit": 1, "page": 1})["meta"].get("totalItems") or 0
+    if updated:
+        mark.update(updated_at=updated, observations=int(total))
     kept[current["id"]] = mark
-    total = get("observations", {"traceId": current["id"], "limit": 1, "page": 1})["meta"].get("totalItems") or 0
     from scripts.doctor.observation_reconciliation import reconcile
 
     listed = partial(_cached_listing, prior, mark, int(total))

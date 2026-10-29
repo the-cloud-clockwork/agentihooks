@@ -2420,6 +2420,59 @@ def test_hive_workers_are_admitted_more_at_high_quota_and_fewer_near_a_limit(mon
     assert high + 2 > session_bands.TOP_BAND
 
 
+@pytest.mark.parametrize("status", [balancer.REVOKED, "rejected"])
+def test_aggregate_capacity_closes_a_claude_account_the_probe_reads_refused(monkeypatch, status):
+    from scripts.routing import aggregate
+
+    quota = {
+        "observed_at": 100,
+        "five_hour": {"used": 4, "resets_at": 500},
+        "seven_day": {"used": 2, "resets_at": 600},
+    }
+    records = {
+        name: {"harness": harness, "account": "a", "kind": "pool", "sessions": 3, "quota": quota}
+        for harness, name in (("claude", "claude:a"), ("codex", "codex:a"))
+    }
+    refused = replace(balancer.revoked_result("a", 100), provider_status=status)
+    allowed = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 90, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=0)
+    )
+    env = {"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}
+    monkeypatch.setattr(
+        balancer, "cached_observations", lambda **kw: [(90, allowed), (95, refused)] if kw["environ"] is env else []
+    )
+    monkeypatch.setattr(aggregate, "current", lambda now: records)
+    rows = capacity.accounts(env, 100, refresh=False)
+    assert {row.harness: (row.state, row.cap, row.sessions, capacity.free_seats(row)) for row in rows} == {
+        "claude": ("CLOSED", 0, 3, 0),
+        "codex": ("OPEN", 6, 3, 3),
+    }
+
+
+@pytest.mark.parametrize("revoked_at,cached_first", [(90, False), (95, True)])
+def test_aggregate_capacity_reopens_a_claude_account_whose_later_probe_is_allowed(
+    monkeypatch, revoked_at, cached_first
+):
+    from scripts.routing import aggregate
+
+    quota = {
+        "observed_at": 100,
+        "five_hour": {"used": 4, "resets_at": 500},
+        "seven_day": {"used": 2, "resets_at": 600},
+    }
+    record = {"harness": "claude", "account": "a", "kind": "pool", "sessions": 3, "quota": quota}
+    allowed = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 90, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=0)
+    )
+    revoked = balancer.revoked_result("a", 100)
+    readings = [(95, allowed), (revoked_at, revoked)]
+    readings = readings[::-1] if cached_first else readings
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: readings)
+    monkeypatch.setattr(aggregate, "current", lambda now: {"claude:a": record})
+    (row,) = capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100, refresh=False)
+    assert (row.state, row.cap) == ("OPEN", 11)
+
+
 def test_two_names_holding_one_token_offer_one_account(monkeypatch, tmp_path):
     env = {
         "AGENTIHOOKS_HOME": str(tmp_path),

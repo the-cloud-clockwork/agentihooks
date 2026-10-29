@@ -78,7 +78,7 @@ def created_mutations(filename: str, source: str) -> tuple[object, list, list]:
     ignored = get_ignored_lines(filename, source, wrapper)
     graded = Visitor(
         ignored,
-        lambda node: all(map(is_dataclass, node.decorators)) if isinstance(node, cst.ClassDef) else is_property(node),
+        lambda node: all(map(is_dataclass, node.decorators)) if isinstance(node, cst.ClassDef) else True,
     )
     possible = Visitor(ignored, lambda node: True)
     module = wrapper.visit(graded)
@@ -94,29 +94,42 @@ def is_dataclass(decorator) -> bool:
     return isinstance(name, cst.Name) and name.value == "dataclass"
 
 
-def is_property(node) -> bool:
+def binding_decorators(node) -> list:
     import libcst.matchers as m
 
-    return len(node.decorators) == 1 and m.matches(
-        node.decorators[0].decorator,
-        m.Name("property") | m.Name("cached_property") | m.Attribute(m.Name("functools"), m.Name("cached_property")),
-    )
+    return [
+        decorator
+        for decorator in node.decorators
+        if m.matches(decorator.decorator, m.Name("staticmethod") | m.Name("classmethod"))
+    ]
 
 
 def plain_copies(code: str) -> str:
     import libcst as cst
+    import libcst.matchers as m
 
-    # mutmut copies a method with its decorators, and the trampoline cannot call a copied property object.
+    # Wrappers belong on the trampoline once; copied implementations retain only method binding.
     def plain(node):
-        if isinstance(node, cst.FunctionDef) and "__mutmut_" in node.name.value and is_property(node):
-            return node.with_changes(decorators=[])
+        if isinstance(node, cst.FunctionDef) and "__mutmut_" in node.name.value:
+            return node.with_changes(decorators=binding_decorators(node))
+        if (
+            isinstance(node, cst.FunctionDef)
+            and node.decorators
+            and m.matches(node.decorators[-1].decorator, m.Call(func=m.Name("_mutmut_mutated"), args=[m.DoNotCare()]))
+            and any(m.matches(decorator.decorator, m.Name("classmethod")) for decorator in node.decorators)
+        ):
+            # mutmut flags a class method trampoline only when classmethod is its sole decorator.
+            *outer, trampoline = node.decorators
+            flag = cst.Arg(cst.Name("True"), keyword=cst.Name("is_classmethod"))
+            call = trampoline.decorator.with_changes(args=[*trampoline.decorator.args, flag])
+            return node.with_changes(decorators=[*outer, trampoline.with_changes(decorator=call)])
         return node
 
     module = cst.parse_module(code)
     body = [
         statement.with_changes(body=statement.body.with_changes(body=[plain(node) for node in statement.body.body]))
         if isinstance(statement, cst.ClassDef)
-        else statement
+        else plain(statement)
         for statement in module.body
     ]
     return module.with_changes(body=body).code
@@ -150,7 +163,7 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
     module, selected = changed_mutations(filename, source, changed)
     code, names = combine_mutations_to_source(module, selected)
     if any(
-        mutation.contained_by_top_level_function and is_property(mutation.contained_by_top_level_function)
+        mutation.contained_by_top_level_function and mutation.contained_by_top_level_function.decorators
         for mutation in selected
     ):
         code = plain_copies(code)
@@ -548,12 +561,16 @@ LIGHT_BOOTSTRAP = (
 
 
 def run_unit(
-    run_tests, runner, mutant_name: str | None, tests: list[str], chosen: list[str], memory: KillMemory
+    run_tests, runner, mutant_name: str | None, tests: list[str], chosen: list[str], memory: KillMemory, engine
 ) -> int:
     if tests and not chosen:
         # Each unit runs the head and one slice and together they cover every test, so a unit with none votes survived.
         return 0
-    return run_tests(runner, mutant_name=mutant_name, tests=memory.prepare(mutant_name, chosen))
+    try:
+        return run_tests(runner, mutant_name=mutant_name, tests=memory.prepare(mutant_name, chosen))
+    except engine.BadTestExecutionCommandsException:
+        # The stats shards collected these node ids, so a usage error here means the mutant changed which tests exist.
+        return 1
 
 
 def forked_children():
@@ -659,7 +676,7 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
                 # The stats shards proved these node ids collect, so a usage error here is the forced failure at import.
                 return 1
         tests = list(tests)
-        return run_unit(run_tests, self, mutant_name, tests, shard_tests(tests, mutant_name, shard[0]), memory)
+        return run_unit(run_tests, self, mutant_name, tests, shard_tests(tests, mutant_name, shard[0]), memory, runner)
 
     memory = KillMemory(Path.cwd() / "killers")
 
