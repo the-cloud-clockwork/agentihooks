@@ -77,7 +77,7 @@ def _github_watch(tokens: list[str]) -> bool:
 def _full_run_view(tokens: list[str]) -> bool:
     args = _gh_args(tokens)
     return args[:2] == ["run", "view"] and not any(
-        arg.split("=")[0] in NARROW_VIEWS or arg[:2] in ("-j", "-w") for arg in args[2:]
+        arg.split("=")[0] in NARROW_VIEWS or arg[:2] == "-j" for arg in args[2:]
     )
 
 
