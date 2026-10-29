@@ -83,6 +83,12 @@ _LAUNCH = re.compile(
     r"|\b(?:eval|compile|Function|vm|_?run_module\w*|run_path|__import__|import_module|child_process)\b"
     r"|\brequire\s*\(\s*[A-Za-z_$]"
 )
+_WRAPPER = (
+    r"(?:\S+=\S*|--\S+\s+[^-\s]\S*|-\S*|\d\S*|(?:[\w.$~{}-]*/)*(?:python[\d.]*|pypy[\d.]*|uvx?|poetry|pipenv|hatch|pdm"
+    r"|rye|npx|pnpx|bunx|pnpm|yarn|npm|bun|xargs|sudo|nice|time|timeout|env|exec|run|command|nohup|stdbuf|coverage"
+    r"|import|from|sh|bash|zsh|dash|ksh|which|type))"
+)
+_RUNNER_ARGS = r"(?=\s*$|\s*[;&|)<>`'\"]|\s+(?:-|\d*[<>]|(?:[^\s\d]\S*)?[/.:]|(?:\S*[/_.-])?test))"
 _NAME_LITERAL = re.compile(r"([\"'`])\w+\1")
 _FORMAT_PREFIX = re.compile(r"(?i)(?<!\w)[rb]?f[rb]?$")
 _READERS = frozenset({"getsource", "getsourcelines", "getsourcefile", "getfile", "getdoc", "signature"})
@@ -129,8 +135,24 @@ def _launches(source: str, comment: str) -> bool:
     return bool(_LAUNCH.search(_strip(source, comment, _named_literal)))
 
 
+def _launched_literal(runners: re.Pattern) -> re.Pattern:
+    runner, attached = runners.pattern, runners.pattern.removeprefix(r"\b")
+    return re.compile(
+        rf"(?m)(?:^|[;&|`'\"]|\$\()\s*(?:{_WRAPPER}\s+)*(?:[\w.$~{{}}-]*/)*(?:{runner}){_RUNNER_ARGS}"
+        rf"|(?:^|[;&|`'\"]|\$\()\s*(?:\S+\s+(?:-[WXQ]\s+\S+\s+|-[^\sm-]\S*\s+)*)?-m\s*(?:{attached})"
+    )
+
+
 def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
-    return bool(runners.search(source if _launches(source, comment) else _strip(source, comment, _module_literal)))
+    if not _launches(source, comment):
+        return bool(runners.search(_strip(source, comment, _module_literal)))
+    launched = _launched_literal(runners)
+
+    def keep(text: str, match: re.Match) -> bool:
+        return match["q"] is not None and bool(launched.search(text[match.end("q") : match.end()]))
+
+    kept = _strip(source, comment, keep)
+    return bool(runners.search(kept) or launched.search(kept))
 
 
 def _imports(tree: ast.Module) -> list[tuple[str, str]]:
