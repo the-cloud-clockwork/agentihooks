@@ -1061,7 +1061,7 @@ def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypa
 
 @pytest.mark.parametrize("failure", ["timeout", "connection"])
 def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tmp_path, monkeypatch, failure):
-    from unittest.mock import Mock
+    from unittest.mock import Mock, call
 
     from redis.exceptions import ConnectionError, TimeoutError
 
@@ -1073,28 +1073,21 @@ def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tm
     clock, state, accepted = Clock(), {"alive": True}, []
     clock.hooks += [(1, lambda: _grow(transcript)), (20, lambda: _grow(transcript))]
     clock.hooks += [(40, lambda: state.update(alive=False))]
-    clients = []
-
-    def connect():
-        client = Mock()
-        clients.append(client)
-
-        def pop(key, timeout):
-            assert key.startswith("wake:")
-            assert timeout == process_timer.RECHECK_S
-            clock.sleep(trace_flush.POLL_SEC)
-            if len(clients) == 1:
-                error = TimeoutError if failure == "timeout" else ConnectionError
-                raise error("scheduler did not answer")
-            return key, "delivered"
-
-        client.blpop.side_effect = pop
-        return client
-
+    timers = []
     scheduler = Mock()
-    scheduler.key.side_effect = lambda key: key
-    scheduler.timer.return_value.scheduler = scheduler
-    monkeypatch.setattr(process_timer, "blocking_client", connect)
+
+    def timer(**kwargs):
+        assert kwargs["delay"] == trace_flush.POLL_SEC
+        clock.sleep(trace_flush.POLL_SEC)
+        if not timers:
+            timers.append(None)
+            error = TimeoutError if failure == "timeout" else ConnectionError
+            raise error("scheduler did not answer")
+        entry = Mock(state="fired", id=f"timer-{len(timers)}", scheduler=scheduler)
+        timers.append(entry)
+        return entry
+
+    scheduler.timer.side_effect = timer
     monkeypatch.setattr(process_timer, "Scheduler", Mock(return_value=scheduler))
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
 
@@ -1110,12 +1103,10 @@ def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tm
         )
         == "owner exited"
     )
-    assert len(clients) > 1
+    assert len(timers) > 1
     assert len(accepted) == 3
     assert accepted[0] < accepted[1] < accepted[2] == transcript.stat().st_size
-    for client in clients:
-        client.close.assert_called_once_with()
-    assert scheduler.retire.call_count == len(clients)
+    assert scheduler.retire.call_args_list == [call(entry.id) for entry in timers[1:]]
 
 
 @pytest.mark.parametrize("failure", ["timeout", "connection"])
