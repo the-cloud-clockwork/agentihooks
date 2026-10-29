@@ -299,6 +299,9 @@ def test_sonar_builds_and_uploads_the_manifest_that_nothing_caches():
     assert upload["with"]["name"] == "dep-manifest"
     assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/manifest.json"
     assert not any("cache/save" in step.get("uses", "") for step in _job("sonar")["steps"])
+
+
+def test_the_coverage_baseline_carries_no_dependency_manifest_step():
     baseline = _job("coverage-baseline")["steps"]
     assert not any("dependency manifest" in step.get("name", "") for step in baseline)
     assert not any("dep-manifest" in str(step.get("with", {})) for step in baseline)
