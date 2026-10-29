@@ -98,6 +98,32 @@ def test_a_launched_successor_missing_from_the_live_names_is_absent(setup):
     assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "absent"
 
 
+@pytest.mark.parametrize(("generation", "state"), [(3, "live"), (2, "absent")])
+def test_a_hive_successor_is_bound_by_its_hive_execution_report(setup, monkeypatch, generation, state):
+    from scripts.hive import reports
+
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.setenv("SWARM_HIVE_ID", "workstation")
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(
+        old,
+        name="sw-eng-2",
+        state="working",
+        launched_at=40,
+        runtime_target={"host_id": "hive-b"},
+        execution_id="x2",
+        generation=3,
+    )
+    store.put_agent("sw", new)
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    report = {"names": [], "panes": {}, "executions": {"x2": {"name": new.name, "generation": generation}}}
+    store.redis.set(reports.key("hive-b"), json.dumps(report))
+    transfers.observe(store, "sw", set())
+    assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == state
+
+
 def test_a_live_binding_is_kept_when_the_successor_later_leaves_the_live_names(setup):
     store, old = setup
     transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
