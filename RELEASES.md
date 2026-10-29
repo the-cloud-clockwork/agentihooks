@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.479 · 2026-10-29
+
+### 2026-10-29 · e00e4d101c45 · #8759 · @agenticore-app
+
+**Index the threshold pins committed copy from HEAD's tree**
+
+The `committed` module fixture was running `git add -A` over a 7168-file archive copy, which on busy dev shards blew past the 45s faulthandler and 60s thread timeouts and crashed worker gw3, forcing the rebound-pin test to pass only on retry. This change replaces that slow staging step with `git read-tree` pulling the index directly from HEAD's tree via an objects alternate on the source repo, with `threshold_pins.tracked` now relying solely on `git ls-files`. Verified runs show the suite completing in under 19s with zero reruns, eliminating the flaky retries entirely.
+
 ## v2.17.478 · 2026-10-29
 
 ### 2026-10-29 · 1959413b8276 · #8756 · @agenticore-app
