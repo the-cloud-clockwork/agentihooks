@@ -56,7 +56,9 @@ def refreshes(store, slug, ledger, now_ms):
     from scripts.swarm import ci_speed, grafana_alerts, langfuse, queue_priority
 
     config = store.config(slug)
-    doctor_pass = [lambda: doctor.timer(store, slug, now_ms, True)] if config.template == "doctor" else []
+    from scripts.swarm import timing
+
+    doctor_pass = [lambda: timing.call(doctor.timer, store, slug, now_ms, True)] if config.template == "doctor" else []
     return doctor_pass + [
         lambda: queue_priority.refresh(store, slug, ledger.state(slug)["tasks"], ledger),
         lambda: ci_speed.refresh(slug, config, store, now_ms),
@@ -78,10 +80,13 @@ def run(store, slug, ledger, now_ms):
     key, token = lock_key(store, slug), uuid.uuid4().hex
     if not store.redis.set(key, token, nx=True, px=LOCK_MS):
         return None
+    from scripts.swarm import timing
+
     actions = []
     try:
-        for refresh in refreshes(store, slug, ledger, now_ms):
-            actions += refresh()
+        with lease.kept(store, slug, held), timing.tick(slug):
+            for refresh in refreshes(store, slug, ledger, now_ms):
+                actions += refresh()
         return actions
     finally:
         snapshot_job._release(store, key, token)
