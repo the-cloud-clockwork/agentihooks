@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.494 · 2026-10-29
+
+### 2026-10-29 · 82bf4260e98f · #8810 · @nestorcolt
+
+**Give hive launches the rest of an order-bound deadline for the profile canary**
+
+This change fixes agent launches timing out before completing their startup canary: instead of a fixed 120s (Claude) or 90s (Codex) wait counted from route report, `init-agent` now waits for the rest of the actual launch deadline, bounded by a new `--launch-until` flag. `Consumer.launch` computes this from the order's expiry minus a 15s acknowledgement margin, converted to the hive's wall clock, so a late-starting launch no longer runs past its order's lifetime and gets wrongly marked expired. Docs were updated to match, and tests confirm queued orders under realistic timing no longer expire.
+
+### 2026-10-29 · 71a1784e74ea · #8813 · @nestorcolt
+
+**Write hive agent tokens without rewriting member maps**
+
+This change stops hive agent token issuance from rewriting the entire member record, which previously meant touching tens of thousands of digests for a single new token. Instead, tokens now get their own small credential record carrying the current ledger digest plus exact scope, with a safety check that clears the new record if a revocation happens concurrently, so member contents and revision history stay intact. Revocation now writes tombstones for legacy-only records to keep old tokens properly invalidated under the new scheme. This reduces write amplification and risk during issuance while preserving compatibility with existing readers.
+
+### 2026-10-29 · fb368cb4dac6 · #8806 · @nestorcolt
+
+**Time the parts of agent record writes inside the tick**
+
+This change adds fine-grained timing around agent record writes inside the tick, breaking down ExecutionRegistry.put and update into their transaction bodies and individual Redis pipeline commits, so we can see where the previously unexplained 4.3-second median write time actually goes. It's a diagnostic step toward the tick-pass speedup goal: since neither CPU contention nor Redis slowlog accounts for the slowness, these new step records should reveal whether the write-lock wait, retry commits, or something else is the real bottleneck. No behavior changes, just added visibility to guide the next optimization.
+
 ## v2.17.493 · 2026-10-29
 
 ### 2026-10-29 · 7551daf897c7 · #8787 · @nestorcolt
