@@ -382,7 +382,7 @@ def test_a_class_that_only_groups_functions_is_red_naming_it(tmp_path):
     [
         "    def keep(self, n: int) -> None:\n        self.n = n\n",
         "    def read(self) -> int:\n        return len([self])\n",
-        "    def read(this) -> int:\n        return this.n\n",
+        "    def read(self) -> int:\n        return (lambda: self.n)()\n",
     ],
 )
 def test_a_method_that_uses_its_receiver_keeps_the_class_green(tmp_path, method):
