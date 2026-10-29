@@ -295,6 +295,14 @@ def test_a_refused_binding_never_lands_markers_on_the_personal_path(brains, monk
     assert brains.received[PERSONAL] == []
 
 
+def test_a_bound_endpoint_with_a_malformed_port_buffers_under_an_invalid_brain(brains, monkeypatch):
+    client(monkeypatch, SWARM, swarm=True)
+    binding = {"status": brain_binding.BOUND, "api": "https://brain.swarm.example:notaport", "api_env": "SWARM_TOKEN"}
+    monkeypatch.setenv(brain_binding.VARIABLE, json.dumps(binding))
+    writer._write_to_outbox([MARKER], "swarm-session", str(brains.outbox))
+    assert [f.parent.name for f in brains.outbox.rglob("*.json")] == ["swarm-invalid"]
+
+
 def test_a_swarm_drain_holds_while_the_ambient_brain_differs_from_the_binding(brains, monkeypatch):
     client(monkeypatch, SWARM, swarm=True)
     brains.down.add(SWARM)

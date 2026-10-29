@@ -114,7 +114,11 @@ def _destination() -> dict | None:
     binding = brain_binding.current(os.environ)
     if binding is not None:
         api = binding.get("api", "") if binding.get("status") == brain_binding.BOUND else ""
-        return {"brain": brain_identity(url=api), "audience": "swarm", "reference": binding.get("api_env", "")}
+        try:
+            brain = brain_identity(url=api)
+        except ValueError:
+            brain = "invalid"
+        return {"brain": brain, "audience": "swarm", "reference": binding.get("api_env", "")}
     if not brain_http_enabled():
         return None
     try:
