@@ -75,6 +75,7 @@ from scripts.handoff import check as handoff_check
 from scripts.handoff import envelope as handoff_envelope
 from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
+from scripts.hive import scope
 from scripts.inbox import exits, outbox, relay, wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
@@ -319,9 +320,17 @@ def _intent_pass(inbox, store, slug, doc, ledger, config):
 
 
 @timing.instrument_tick
+@scope.one_pass()
 @outage.guard_tick
 @ledger_route.service
-def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
+def run_tick(
+    store: RedisStore,
+    slug: str,
+    ledger: LedgerClient | None = None,
+    runtime: object | None = None,
+    messenger: object | None = None,
+    scheduled: bool = False,
+) -> list[str]:
     from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
 
     if not ledger_link.local_mode(os.environ) and not scheduled:
@@ -394,11 +403,6 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 finally:
                     view, checked = judged.result()
             actions += checked
-            if store.config(slug).template == "doctor":
-                from scripts.doctor import cli as doctor
-
-                with lease.kept(store, slug, held):
-                    actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
             timing.call(delivery.migrate_outbox, store, slug, inbox)
             agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
             skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
@@ -1659,7 +1663,7 @@ def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
     ledger = LedgerClient()
     task = {}
     try:
-        task = next((row for row in ledger.tasks(args.slug) if row.get("id") == agent.task), {})
+        task = ledger.task(args.slug, agent.task) or {}
         if args.command == "prepare":
             return publish.prepare(args.slug, agent, repo, ledger)
         return publish.publish(args.slug, agent, repo, ledger, args.message, args.files)
@@ -1801,7 +1805,7 @@ def cmd_done(store, args):
         return _dispatcher_done(store, args.slug, agent)
     done_gate.require_local(store, args.slug, agent.task)
     ledger = LedgerClient()
-    row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
+    row = ledger.task(args.slug, agent.task) or {}
     proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}
     if ledger_kinds.kind(row) == "workflow":
         if (found := _workflow_proof(store, args.slug, agent, ledger, row)) is None:
@@ -1880,18 +1884,20 @@ def _dispatcher_done(store, slug, agent):
 
 
 def _close_members(ledger, slug, agent, lead, fields):
-    members = set(lead.get("group_members") or [])
-    for task in ledger.tasks(slug):
-        if task["id"] in members and task["state"] != "done":
-            ledger.update_task(slug, task["id"], fields, by=agent.name)
+    for member in lead.get("group_members") or []:
+        task = ledger.task(slug, member)
+        if task is not None and task["state"] != "done":
+            ledger.update_task(slug, member, fields, by=agent.name)
 
 
 def cmd_block(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
-    rows = {task["id"]: task for task in ledger.tasks(args.slug)}
-    for dependency in prerequisite_wait.dependencies(store, args.slug, agent, rows[agent.task], args.note):
-        if rows[dependency]["state"] != "done":
+    row = ledger.task(args.slug, agent.task)
+    if row is None:
+        raise SwarmError(f"ledger {args.slug} has no task {agent.task}")
+    for dependency in prerequisite_wait.dependencies(store, args.slug, agent, row, args.note):
+        if (ledger.task(args.slug, dependency) or {}).get("state") != "done":
             held = waits.on("task", dependency)
             at = now_ms()
             until = at + waits.CHECKED_MINUTES * 60_000
@@ -1901,10 +1907,10 @@ def cmd_block(store, args):
             return
     from scripts.swarm import publish
 
-    refused = "" if args.dev_red else _block_refusal(store, args.slug, rows[agent.task])
+    refused = "" if args.dev_red else _block_refusal(store, args.slug, row)
     if refused:
         raise SwarmError(refused)
-    pushed = publish.pushed_branches(_local_repo(store, args.slug), rows[agent.task], agent)
+    pushed = publish.pushed_branches(_local_repo(store, args.slug), row, agent)
     red_run = _dev_red_run(store, args.slug) if args.dev_red else None
     if pushed:
         ledger.update_task(args.slug, agent.task, pushed, by=agent.name)
@@ -2043,7 +2049,7 @@ def cmd_handoff(store, args):
     agent = _me(store, args)
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
-    found = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.state))
+    found = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.item))
     if found:
         raise SwarmError(handoff_check.refusal(found))
     envelope, transfer = _hand_off(store, args.slug, agent, text, args.reason, ledger)
@@ -2065,7 +2071,7 @@ def _hand_off(store, slug, agent, text, reason, ledger):
         f"## {heading}\n{handoff_check.section(text, heading)}" for heading in ("Done", "Stopped at", "Next")
     )
     waits.settle_notices(InboxStore(store.redis), agent, "a handoff")
-    envelope = handoff_envelope.build(store, slug, agent, reason, _ledger_rows(ledger, slug), now_ms())
+    envelope = handoff_envelope.build(store, slug, agent, reason, _own_rows(ledger, slug, agent.task), now_ms())
     store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope)
     transfer = transfers.record(store, slug, agent, reason, text, now_ms())
@@ -2095,7 +2101,7 @@ def cmd_ready(store, args):
     done_gate.require_local(store, args.slug, agent.task)
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
-    row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
+    row = ledger.task(args.slug, agent.task) or {}
     found = ready.check(
         row,
         agent,
@@ -2104,7 +2110,7 @@ def cmd_ready(store, args):
         now_ms(),
         ready.continuation(store, args.slug, agent.task),
     )
-    problems = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.state))
+    problems = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.item))
     if problems:
         raise SwarmError(handoff_check.refusal(problems))
     ready.release(store, args.slug, agent.task, found, ledger, agent.name, ledger_events.view)
@@ -2157,11 +2163,12 @@ def cmd_restore_decision(store, args):
     print(json.dumps(asdict(outcome)))
 
 
-def _ledger_rows(ledger, slug):
+def _own_rows(ledger, slug, task_id):
     try:
-        return ledger.tasks(slug)
+        row = ledger.task(slug, task_id)
     except SwarmError:
         return None
+    return [row] if row else []
 
 
 def cmd_learned(store, args):

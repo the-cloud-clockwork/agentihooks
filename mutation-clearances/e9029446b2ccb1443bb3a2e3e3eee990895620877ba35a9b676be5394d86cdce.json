@@ -1,0 +1,6 @@
+{
+  "scripts/hive/auth.py:scripts.hive.auth.x_kept_bus:d597f3f0775ff734d914012b889d64bdc3f3ca1d23ec56d652527c77248ec597": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: python-dotenv DotEnv stores interpolate as self.interpolate and dict() reads it only as if self.interpolate:, so None and False are both falsy, take the same branch and return the same mapping for every env file; no input distinguishes them."
+  }
+}

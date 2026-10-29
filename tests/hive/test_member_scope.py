@@ -117,6 +117,20 @@ def test_a_member_knows_its_own_agents_without_reading_member_records(redis, swa
     assert scope.host(redis, "fixture", other) == ""
 
 
+def test_one_pass_reads_the_member_records_once_per_redis_client(redis, swarm, monkeypatch):
+    from scripts.hive import auth, scope
+
+    reads = []
+    monkeypatch.setattr(auth, "members", lambda client: reads.append(client) or {"m1": {}})
+    placed = place(swarm, "m1")
+
+    with scope.one_pass():
+        assert [scope.host(redis, "fixture", placed) for _ in range(3)] == ["m1"] * 3
+    assert reads == [redis]
+    assert scope.host(redis, "fixture", placed) == "m1"
+    assert reads == [redis, redis]
+
+
 def test_the_controller_ends_a_member_agents_wait_below_its_member(redis, swarm, monkeypatch):
     from scripts.swarm import idle, waits
 

@@ -55,7 +55,9 @@ def repositories(tmp_path, monkeypatch):
         bundle=roots[1],
         task=task,
         agent=AgentRecord("engineer@test", "eng", "t1"),
-        ledger=SimpleNamespace(tasks=lambda slug: [task], update_task=update),
+        ledger=SimpleNamespace(
+            task=lambda slug, task_id: task if (slug, task_id) == ("swarm", "t1") else None, update_task=update
+        ),
         updates=updates,
     )
 
