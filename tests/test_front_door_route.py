@@ -147,6 +147,7 @@ def test_front_login_checks_the_claim_and_releases_it_on_auth_failure(tmp_path, 
     monkeypatch.setattr(login, "prepare", prepare)
     monkeypatch.setattr(login, "child", build)
     monkeypatch.setattr(native_login, "check", authenticate)
+    monkeypatch.setattr(native_login, "rejected", lambda *_: False)
     monkeypatch.setattr(login, "release", release)
     monkeypatch.setattr(login, "numbers", lambda: [1, 2])
     monkeypatch.setattr(login, "home", lambda number: tmp_path / {1: "one", 2: "two"}[number])
@@ -161,6 +162,26 @@ def test_front_login_checks_the_claim_and_releases_it_on_auth_failure(tmp_path, 
     prepare.assert_called_once_with(environ, tmp_path)
     build.assert_called_once_with(environ, target, "two")
     authenticate.assert_called_once_with(child, "two")
+
+
+def test_front_login_refuses_a_revoked_login_that_passes_the_local_status(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    environ = {"AGENTIHOOKS_AGENT_NAME": "master@next"}
+    target = tmp_path / "two"
+    child = {"CLAUDE_CONFIG_DIR": str(target)}
+    probed = Mock(return_value=True)
+    release = Mock()
+    monkeypatch.setattr(login, "prepare", lambda *_: (target, "two"))
+    monkeypatch.setattr(login, "child", lambda *_: child)
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
+    monkeypatch.setattr(native_login, "rejected", probed)
+    monkeypatch.setattr(login, "release", release)
+    with pytest.raises(login.LoginRefused) as refused:
+        claude_ai._front(environ, tmp_path)
+    assert str(refused.value) == native_login.EXPIRED
+    probed.assert_called_once_with(child, "two")
+    release.assert_called_once_with(target, environ)
 
 
 @pytest.mark.parametrize("named", [False, True])

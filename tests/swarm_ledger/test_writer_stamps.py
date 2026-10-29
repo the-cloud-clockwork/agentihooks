@@ -2,6 +2,7 @@ import copy
 
 import pytest
 
+from scripts.swarm_ledger.repository import entry as entry_module
 from scripts.swarm_ledger.repository import fragments, sqlite, writer_copy
 from scripts.swarm_ledger.repository.entry import Entry
 from scripts.swarm_ledger.repository.fragments import document, encoded
@@ -246,6 +247,80 @@ def test_a_reloaded_entry_holds_no_writer_copy_and_copies_on_write(tmp_path):
     assert writing == reloaded.state
     assert writing is not reloaded.state
     assert writing["tasks"] is not reloaded.state["tasks"]
+
+
+def test_an_entry_refreshed_after_another_writer_keeps_an_independent_writer_copy(tmp_path, monkeypatch):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    held = cached(repo)
+    assert held.writer is not None
+    other = sqlite.SQLiteLedgerRepository(repo.path)
+    other.apply_ops("ledger", ops=[CHAT])
+    entry = cached(repo)
+    assert entry is not held
+    assert held.writer is None
+    writer = entry.writer
+    assert writer == entry.state == other.get_document("ledger")
+    assert writer["_meta"]["events"]
+    stamps = {id(record) for record in entry.state["_meta"]["stamps"].values()}
+    assert set(containers(writer, {})) & set(containers(entry.state, {})) <= stamps
+    before = copy.deepcopy(entry.state)
+    for task in writer["tasks"]:
+        task["title"] = "changed by the writer"
+    writer["chat"].append({"id": "m9", "text": "writer only"})
+    writer["_meta"]["events"][0]["rev"] = -1
+    assert entry.state == before
+    copied = []
+    monkeypatch.setattr(entry_module, "thawed", lambda value: copied.append(value) or value)
+    assert entry.for_write() is writer
+    assert copied == []
+
+
+def test_an_entry_refreshed_without_a_held_copy_copies_on_write(tmp_path):
+    repo = store(tmp_path)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    reader = sqlite.SQLiteLedgerRepository(repo.path)
+    assert cached(reader).writer is None
+    repo.apply_ops("ledger", ops=[CHAT])
+    entry = cached(reader)
+    assert entry.writer is None
+    reader.apply_ops("ledger", ops=[{**CHAT, "id": "m2", "text": "again"}])
+    assert repo.get_document("ledger") == reader.get_document("ledger")
+    assert [message["text"] for message in reader.get_document("ledger")["chat"]][-2:] == ["hello", "again"]
+
+
+@pytest.mark.parametrize("held, built", [({"_meta": {}}, True), (None, True), ({"_meta": {}}, None)])
+def test_refreshed_rebuilds_the_held_copy_by_the_same_paths_and_releases_it(monkeypatch, held, built):
+    calls = []
+
+    def fake(connection, slug, value, paths):
+        calls.append((connection, slug, value, paths))
+        return None if built is None else {**value, "paths": paths}
+
+    monkeypatch.setattr(writer_copy.refresh, "refreshed", fake)
+    cached = Entry(1, None, {"state": 1}, writer=held)
+    state, writer = writer_copy.refreshed("db", "ledger", cached, {"p"})
+    assert cached.writer is None
+    if built is None:
+        assert (state, writer) == (None, None)
+        assert calls == [("db", "ledger", {"state": 1}, {"p"})]
+    elif held is None:
+        assert (state, writer) == ({"state": 1, "paths": {"p"}}, None)
+        assert len(calls) == 1
+    else:
+        assert state == {"state": 1, "paths": {"p"}}
+        assert writer == {"_meta": {}, "paths": {"p"}}
+        assert calls[1] == ("db", "ledger", {"_meta": {}}, {"p"})
+
+
+def test_refreshed_reads_the_stored_events_into_the_rebuilt_copy_only_when_it_keeps_events(monkeypatch):
+    monkeypatch.setattr(writer_copy.refresh, "refreshed", lambda connection, slug, value, paths: copy.deepcopy(value))
+    monkeypatch.setattr(writer_copy, "read_events", lambda connection, slug: [{"rev": 2, "from": (connection, slug)}])
+    held = {"_meta": {"events": [{"rev": 1}]}}
+    _, writer = writer_copy.refreshed("db", "ledger", Entry(1, None, {"_meta": {}}, writer=held), {"p"})
+    assert writer == {"_meta": {"events": [{"rev": 2, "from": ("db", "ledger")}]}}
+    _, plain = writer_copy.refreshed("db", "ledger", Entry(1, None, {"_meta": {}}, writer={"_meta": {"rev": 1}}), {"p"})
+    assert plain == {"_meta": {"rev": 1}}
 
 
 def two_states():

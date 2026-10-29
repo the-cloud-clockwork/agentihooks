@@ -1,6 +1,13 @@
 {{- define "swarm.workerHive" }}
 {{- $root := .root }}
 {{- $workers := deepCopy .workers }}
+{{- $drain := int $workers.drainSeconds }}
+{{- if $root.Values.workers.rollout.enabled }}
+{{- $drain = int $root.Values.workers.rollout.drainSeconds }}
+{{- if or (lt $drain 0) (gt $drain 300) }}
+{{- fail "workers.rollout.drainSeconds must be between 0 and 300" }}
+{{- end }}
+{{- end }}
 {{- range $swarm := ($workers.masterSwarms | default list) }}
 {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*$" (toString $swarm)) }}
 {{- fail "each workers.masterSwarms entry must be a swarm slug: letters, digits, dots, dashes or underscores" }}
@@ -68,11 +75,16 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "swarm.fullname" $root }}-worker-hive{{ $suffix }}
+  {{- if $root.Values.workers.rollout.enabled }}
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ .wave | quote }}
+  {{- end }}
   labels:
     {{- include "swarm.labels" $root | nindent 4 }}
     app.kubernetes.io/component: worker-hive{{ $suffix }}
 spec:
   replicas: {{ $workers.replicas }}
+  progressDeadlineSeconds: 600
   {{- if not (hasKey $workers.homeVolume "emptyDir") }}
   strategy:
     type: Recreate
@@ -101,17 +113,28 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      terminationGracePeriodSeconds: {{ add $workers.drainSeconds 30 }}
+      terminationGracePeriodSeconds: {{ add $drain 30 }}
       containers:
         - name: worker-hive
           image: {{ include "swarm.image" (dict "Values" (dict "image" $workers.image)) }}
           imagePullPolicy: {{ $workers.image.pullPolicy }}
+          {{- if $root.Values.workers.rollout.enabled }}
+          readinessProbe:
+            exec:
+              command: ["python3", "-m", "scripts.hive.rollout", "ready"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+          {{- end }}
           lifecycle:
             preStop:
               exec:
-                command: ["sh", "-c", {{ printf "agentihooks hive drain --wait %d >>/proc/1/fd/1 2>&1" (int $workers.drainSeconds) | quote }}]
+                command: ["sh", "-c", {{ printf "agentihooks hive drain --wait %d >>/proc/1/fd/1 2>&1" $drain | quote }}]
           {{- include "swarm.containerSecurity" $root | nindent 10 }}
           env:
+            {{- if $root.Values.workers.rollout.enabled }}
+            - name: HIVE_READY_FILE
+              value: /tmp/hive-ready
+            {{- end }}
             {{- if $github.secretName }}
             - name: HIVE_GITHUB_AUTH_MODE
               value: {{ $github.mode | quote }}
@@ -133,6 +156,8 @@ spec:
                   fieldPath: metadata.name
             - name: AGENTIHOOKS_DEPLOYMENT
               value: {{ $root.Values.deployment | quote }}
+            - name: HIVE_NAME
+              value: {{ printf "%s%s" $root.Release.Name $suffix | quote }}
             - name: HIVE_EXCLUDED
               value: {{ join "," $workers.excluded | quote }}
             - name: HIVE_MASTER_SWARMS
@@ -247,6 +272,11 @@ metadata:
   annotations:
     helm.sh/hook: pre-install,pre-upgrade
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- if $root.Values.workers.rollout.enabled }}
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "-2"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    {{- end }}
 spec:
   backoffLimit: 6
   template:
@@ -360,7 +390,7 @@ spec:
 {{- $_ := set $homes $home true }}
 {{- $hives = append $hives (dict "suffix" (printf "-%s" $name) "workers" $hive) }}
 {{- end }}
-{{- range $hives }}
+{{- range $index, $hive := $hives }}
 ---
-{{- include "swarm.workerHive" (dict "root" $ "workers" .workers "suffix" .suffix) }}
+{{- include "swarm.workerHive" (dict "root" $ "workers" $hive.workers "suffix" $hive.suffix "wave" (add $index 1)) }}
 {{- end }}

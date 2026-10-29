@@ -113,18 +113,23 @@ def repo_root(cwd: str | Path | None) -> Path | None:
 def layer_dirs(state: dict, cwd: str | Path | None = None) -> tuple[list[tuple[str, Path]], list[Path]]:
     """Condition dirs in layer order, plus every profile-dir candidate probed to find them."""
     bundle = profile_chain.bundle_path(state)
+    user = profile_chain.user_bundle_path(state)
     profile_csv = profile_chain.active_profile(state)
     linked = profile_chain.linked_profiles(state)
     layers: list[tuple[str, Path]] = [("package", profile_chain.BUILT_IN_PROFILES / "package" / "conditions")]
     if bundle is not None:
         layers.append(("bundle", bundle / ".claude" / "conditions"))
-    for name, profile_dir in profile_chain.profile_dirs(bundle, profile_csv, linked):
+    if user is not None:
+        layers.append(("user-bundle", user / ".claude" / "conditions"))
+    for name, profile_dir in profile_chain.profile_dirs(bundle, profile_csv, linked, user):
         layers.append((f"profile:{name}", profile_dir / ".claude" / "conditions"))
     layers.append(("runtime", runtime_dir()))
     root = repo_root(cwd)
     if root is not None:
         layers.append(("directory", root / ".agentihooks" / "conditions"))
-    probed = [path for _, paths in profile_chain.profile_candidates(bundle, profile_csv, linked) for path in paths]
+    probed = [
+        path for _, paths in profile_chain.profile_candidates(bundle, profile_csv, linked, user) for path in paths
+    ]
     return layers, probed
 
 
@@ -983,7 +988,7 @@ _LANGUAGES = {
     "python": (".py", "#!/usr/bin/env python3\n", 0o755),
     "filter": (FILTER_SUFFIX, "", 0o644),
 }
-_SCOPES = ("global", "profile", "directory")
+_SCOPES = ("global", "user", "profile", "directory")
 
 
 def _check_filter(script: str, run_async: bool) -> None:
@@ -1056,9 +1061,17 @@ def target_dir(scope: str, profile: str = "", cwd: str | Path | None = None) -> 
     if scope == "global":
         bundle = profile_chain.bundle_path(state)
         return ("bundle", bundle / ".claude" / "conditions") if bundle else ("runtime", runtime_dir())
+    if scope == "user":
+        user = profile_chain.user_bundle_path(state)
+        if user is None:
+            raise ConditionError("scope 'user' needs a linked user bundle")
+        return "user-bundle", user / ".claude" / "conditions"
     if scope == "profile":
         chain = profile_chain.profile_dirs(
-            profile_chain.bundle_path(state), profile_chain.active_profile(state), profile_chain.linked_profiles(state)
+            profile_chain.bundle_path(state),
+            profile_chain.active_profile(state),
+            profile_chain.linked_profiles(state),
+            profile_chain.user_bundle_path(state),
         )
         if not chain:
             raise ConditionError("no active profile chain")
