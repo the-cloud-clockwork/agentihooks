@@ -102,17 +102,20 @@ def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
     capsys.readouterr()
     with timing.tick("sw"):
         tick("sw", store, ledger, runtime, now_ms=2_000)
-    steps = [row["step"] for row in finished(capsys)]
-    parts = [
-        timing.named(tick_module._live_names),
-        timing.named(legacy_agents),
+    rows = finished(capsys)
+    reap = next(row for row in rows if row["step"] == timing.named(tick_module._reap))
+    inside = [row for row in rows if reap["started"] <= row["started"] and row is not reap]
+    inside = [row for row in inside if row["started"] + row["wall_s"] <= reap["started"] + reap["wall_s"]]
+    pass_wide = [timing.named(tick_module._live_names), timing.named(legacy_agents)]
+    per_agent = [
         timing.named(tick_module._acknowledging),
         timing.named(tick_module._remote_gone_reason),
         timing.named(tick_module._restore_owner),
         timing.named(tick_module._observe),
         timing.named(tick_module._watch_agent),
     ]
-    assert [part for part in parts if part not in steps] == []
-    reap = steps.index(timing.named(tick_module._reap))
-    assert all(steps.index(part) < reap for part in parts)
-    assert steps.count(timing.named(tick_module._observe)) == steps.count(timing.named(tick_module._watch_agent))
+    agent = "engineer@a1b2c3-0001"
+    named = {row["step"] for row in inside if row["step"] in pass_wide + per_agent and row.get("agent") == agent}
+    assert sorted(named) == sorted(per_agent)
+    assert [sorted(row) for row in inside if row["step"] in pass_wide] == [sorted(reap)] * 2
+    assert "agent" not in reap
