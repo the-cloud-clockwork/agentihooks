@@ -9,6 +9,7 @@ from pathlib import Path
 # Every xdist worker of a shard rewrites each file it collects, while stored durations split between workers; measured.
 SECONDS_PER_SOURCE_BYTE = 3e-6
 FIRST_SHARD_FILES = frozenset({"tests/routing/test_codex_api.py"})
+OWNER_COPIES = 2
 
 
 def discover_test_files(root: Path) -> list[str]:
@@ -138,6 +139,22 @@ def slowest_first(nodeids: list[str], durations: dict[str, float], floor: float)
     seconds.update({nodeid: slowest[group] for nodeid, group in groups.items()})
     slow = sorted((nodeid for nodeid in nodeids if seconds[nodeid] >= floor), key=lambda nodeid: -seconds[nodeid])
     return slow + [nodeid for nodeid in nodeids if seconds[nodeid] < floor]
+
+
+def assign_owners(seconds: dict[str, float], grouped: set[str], workers: int, copies: int) -> list[set[str]]:
+    # A named group runs on one worker, so every grouped file shares the same owners whatever group it names.
+    units = {path: [path] for path in seconds if path not in grouped}
+    if grouped:
+        units[min(grouped)] = sorted(grouped)
+    copies = min(copies, workers)
+    loads = [0.0] * workers
+    owned: list[set[str]] = [set() for _ in range(workers)]
+    for unit, paths in sorted(units.items(), key=lambda item: (-sum(seconds[path] for path in item[1]), item[0])):
+        cost = sum(seconds[path] for path in paths)
+        for worker in sorted(range(workers), key=lambda w: (loads[w], w))[:copies]:
+            loads[worker] += cost / copies
+            owned[worker].update(paths)
+    return owned
 
 
 def warm_imports(modules: list[str], workers: int) -> list[int]:

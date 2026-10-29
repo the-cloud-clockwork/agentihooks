@@ -17,6 +17,11 @@ def _no_pytest(self, params, **kwargs):
     return 0
 
 
+def _refuse_named(mutant_name, error):
+    if mutant_name == "refused":
+        raise error(mutant_name)
+
+
 @pytest.mark.parametrize("lines", [{1}, {2}, {2, 5}])
 def test_gate_runs_only_changed_line_mutants_including_untested_code(tmp_path, monkeypatch, lines):
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
@@ -220,12 +225,14 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     engine.duration_by_test["tests/test_other.py::test_o"] = 3
     engine.duration_by_test["tests/test_sample.py::TestCase::test_m"] = 0
     test_calls = []
+    refused = type("Refused", (Exception,), {})
 
     class PytestRunner:
         execute_pytest = _no_pytest
 
         def run_tests(self, *, mutant_name, tests):
             assert isinstance(self, PytestRunner)
+            _refuse_named(mutant_name, refused)
             test_calls.append((mutant_name, tests))
             return 9
 
@@ -236,6 +243,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         SourceFileMutationData=mutation_data,
         Config=SimpleNamespace(get=lambda: config),
         PytestRunner=PytestRunner,
+        BadTestExecutionCommandsException=refused,
         mutmut=engine,
     )
     mutmut = SimpleNamespace(__main__=runner)
@@ -318,6 +326,9 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
             ("m", ["tests/test_y.py::t"]),
         ]
         _assert_units_run_their_own_tests(monkeypatch, selection_module, runner, test_calls)
+        with monkeypatch.context() as planned:
+            planned.setattr(selection_module, "shard_tests", lambda tests, name, index: tests)
+            assert runner.PytestRunner().run_tests(mutant_name="refused", tests=["tests/test_z.py::t"]) == 1
         data.exit_code_by_key = {}
         with pytest.raises(SystemExit) as empty:
             runner.collect_or_load_stats(test_runner)
@@ -577,6 +588,9 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
     namespace = {"__name__": "scripts.sample"}
     exec(compile(generated, "<sample>", "exec"), namespace)
     shape = namespace["Shape"]
+    copies = generated.split("def xǁShapeǁdouble__mutmut_")
+    assert len(copies) > 2
+    assert all(chunk.rstrip().endswith("@staticmethod") for chunk in copies[:-1])
 
     def measure():
         return shape(3).area, shape(3).perimeter, shape.double(3), shape.unit().side, shape(3).twice
@@ -590,6 +604,114 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
         except TypeError:
             outcomes.add(name)
     assert (9, 12, 6, 2, 6) not in outcomes
+
+
+@pytest.mark.parametrize(
+    "decorator, expected",
+    [
+        ("@functools.lru_cache(maxsize=2)", 6),
+        ("@cache", 6),
+        ("@wrapped", 16),
+        ("@wrapped\n@functools.lru_cache(maxsize=None)", 16),
+    ],
+)
+@pytest.mark.parametrize("method", [False, True])
+def test_wrapped_function_bodies_are_planned_and_their_mutants_run(monkeypatch, decorator, expected, method):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutant_names, selected_mutants
+
+    monkeypatch.setattr(
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1, use_setproctitle=False),
+    )
+    prefix = (
+        "import functools\n"
+        "from functools import cache\n"
+        "decorations = []\n"
+        "def wrapped(function):\n"
+        "    decorations.append(function.__name__)\n"
+        "    def call(*args, **kwargs):\n"
+        "        return function(*args, **kwargs) + 10\n"
+        "    return call\n"
+    )
+    indent = "    " if method else ""
+    signature = "self, value" if method else "value"
+    source = prefix + ("class Box:\n" if method else "")
+    source += "\n".join(f"{indent}{line}" for line in decorator.splitlines()) + "\n"
+    source += f"{indent}def doubled({signature}):\n{indent}    return value * 2\n"
+    line = len(source.splitlines())
+    found, ungraded = mutation_counts("scripts/sample.py", source, {line})
+    assert found == 2
+    assert ungraded == []
+    generated, names = selected_mutants("scripts/sample.py", source, {line})
+    assert len(names) == found
+    assert selected_mutant_names("scripts/sample.py", source, {line}) == names
+
+    def measure():
+        namespace = {"__name__": "scripts.sample"}
+        exec(compile(generated, "<sample>", "exec"), namespace)
+        assert namespace["decorations"] == (["doubled"] if "@wrapped" in decorator else [])
+        function = namespace["Box"]().doubled if method else namespace["doubled"]
+        return function(3)
+
+    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    assert measure() == expected
+    for name in names:
+        monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
+        assert measure() != expected
+
+
+def test_cached_static_and_class_method_bodies_keep_their_binding_when_mutated(monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutants
+
+    monkeypatch.setattr(
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1, use_setproctitle=False),
+    )
+    source = (
+        "import functools\n"
+        "class Box:\n"
+        "    @staticmethod\n"
+        "    @functools.cache\n"
+        "    def doubled(value):\n"
+        "        return value * 2\n"
+        "    @classmethod\n"
+        "    @functools.lru_cache(maxsize=2)\n"
+        "    def tripled(cls, value):\n"
+        "        return value * 3\n"
+        "    @classmethod\n"
+        "    @functools.lru_cache(4)\n"
+        "    def quadrupled(cls, value):\n"
+        "        return value * 4\n"
+    )
+    for line in (6, 10):
+        found, ungraded = mutation_counts("scripts/sample.py", source, {line})
+        assert found > 0
+        assert ungraded == []
+    generated, names = selected_mutants("scripts/sample.py", source, {6, 10})
+    assert {name.split("__mutmut_")[0] for name in names} == {"xǁBoxǁdoubled", "xǁBoxǁtripled"}
+    assert generated.count("is_classmethod = True") == 1
+    for copy, binding in (("doubled", "@staticmethod"), ("tripled", "@classmethod")):
+        chunks = generated.split(f"def xǁBoxǁ{copy}__mutmut_")
+        assert len(chunks) > 2
+        assert all(chunk.rstrip().endswith(binding) for chunk in chunks[:-1])
+
+    def measure():
+        namespace = {"__name__": "scripts.sample"}
+        exec(compile(generated, "<sample>", "exec"), namespace)
+        box = namespace["Box"]
+        return box.doubled(3), box().doubled(3), box.tripled(3), box().tripled(3), box.quadrupled(3)
+
+    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    assert measure() == (6, 6, 9, 9, 12)
+    for name in names:
+        monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
+        assert measure() != (6, 6, 9, 9, 12)
 
 
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
@@ -1235,6 +1357,24 @@ def test_gate_mutates_a_function_its_module_calls_at_import(tmp_path, monkeypatc
     (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n\nLOADED = value(1)\n")
     (tmp_path / "tests/test_sample.py").write_text(
         "from scripts.sample import LOADED, value\n\ndef test_value():\n    assert LOADED == 2\n    assert value(1) == 2\n"
+    )
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
+    assert report["not_mutated"] == []
+    assert report["failed"] is False
+    assert report["files"][0]["counts"] == {"killed": 2}
+
+
+def test_a_mutant_that_renames_its_selected_test_ids_is_killed_within_the_budget(tmp_path, monkeypatch):
+    _gate_tree(tmp_path, monkeypatch)
+    (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n")
+    (tmp_path / "tests/test_sample.py").write_text(
+        "import os\nimport threading\n\nimport pytest\n\nfrom scripts.sample import value\n\n"
+        "NUMBER = value(1)\n"
+        # A test server thread left running keeps a mutant child alive unless it leaves through os._exit.
+        "if '__mutmut_' in os.environ.get('MUTANT_UNDER_TEST', ''):\n"
+        "    threading.Thread(target=threading.Event().wait).start()\n\n"
+        "@pytest.mark.parametrize('number', [NUMBER])\n"
+        "def test_value(number):\n    assert number == 2\n"
     )
     report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
     assert report["not_mutated"] == []

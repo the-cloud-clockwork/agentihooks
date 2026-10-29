@@ -88,14 +88,12 @@ def test_an_inbox_read_in_small_batches_keeps_every_batch_and_registry_named_age
     assert max(len(row["history"]) for row in rows) >= 3
 
 
-def test_an_inbox_listing_whose_item_is_gone_is_refused(redis):
-    from scripts.inbox.store import InboxError
-
+def test_an_inbox_listing_whose_item_is_gone_is_skipped_and_dropped(redis):
     box = InboxStore(redis)
-    box.send(f"{SLUG}-eng-1", "operator", "kept")
+    kept = box.send(f"{SLUG}-eng-1", "operator", "kept")
     redis.zadd(box.key("address", "operator"), {"gone": 1})
-    with pytest.raises(InboxError, match="no message gone"):
-        read.inbox_items(box, SLUG)
+    assert [row["id"] for row in read.inbox_items(box, SLUG)] == [kept.id]
+    assert redis.zrange(box.key("address", "operator"), 0, -1) == [kept.id]
 
 
 def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_the_swarm(redis):

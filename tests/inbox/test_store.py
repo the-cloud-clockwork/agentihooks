@@ -475,13 +475,13 @@ def test_open_index_keeps_delivered_and_read_until_closed(store, monkeypatch):
     assert [i.id for i in store.open_items("receiver")] == [first.id, second.id, third.id]
     store.close(first.id, "receiver", "done", "finished")
     seen = []
-    original = store.get
+    original = store._rows
 
-    def get(item_id):
-        seen.append(item_id)
-        return original(item_id)
+    def rows(item_ids):
+        seen.extend(item_ids)
+        return original(item_ids)
 
-    monkeypatch.setattr(store, "get", get)
+    monkeypatch.setattr(store, "_rows", rows)
     index = store._index_open
 
     def rebuild(address):
@@ -706,12 +706,11 @@ def test_new_withdrawal_does_not_read_closed_mail_on_the_next_sweep(store, monke
     assert seen == []
 
 
-def test_open_index_names_a_missing_item(store):
+def test_open_index_skips_and_drops_a_missing_item(store):
     item = store.send("sender", "receiver", "work")
     store.redis.delete(store.key("item", item.id))
-    with pytest.raises(InboxError) as error:
-        store.open_items("receiver")
-    assert str(error.value) == f"no message {item.id}"
+    assert store.open_items("receiver") == []
+    assert store.redis.zrange(store.key("address", "receiver"), 0, -1) == []
 
 
 def test_quiet_names_only_indexed_addresses_without_open_mail(store):

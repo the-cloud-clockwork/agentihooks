@@ -1002,15 +1002,21 @@ def claim_view(slug, store, rows, doc, dispatched=None):
 
 
 def _launch_order(slug, store, tasks, dispatched=None):
-    failed = store.launch_failures(slug)
+    demoted = _demoted(slug, store, [task["id"] for task in tasks])
     return sorted(
         tasks,
         key=lambda task: (
             dispatched(task)[0] if dispatched else ledger_rank.order(task),
-            bool(failed.get(task["id"])),
+            task["id"] in demoted,
             not claim_order.resumed(task),
         ),
     )
+
+
+def _demoted(slug, store, task_ids):
+    failed = store.launch_failures(slug)
+    held = [task_id for task_id in task_ids if failed.get(task_id)]
+    return set(held) - store.handoff_tasks(slug, held) if held else set()
 
 
 def _parked(task, rows):
@@ -1557,10 +1563,11 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
 
 
 def _ranked(slug, store, queue, dispatched):
+    demoted = _demoted(slug, store, [entry[2]["id"] for entry in queue])
     queue.sort(
         key=lambda entry: (
             dispatched(entry[2])[0] if dispatched else ledger_rank.order(entry[2]),
-            bool(store.launch_failure(slug, entry[2]["id"])),
+            entry[2]["id"] in demoted,
             entry[0],
         )
     )

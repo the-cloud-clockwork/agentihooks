@@ -44,16 +44,9 @@ def joined(redis: "Redis") -> list[str]:
 
 def members(redis: "Redis") -> list[str]:
     """The hives in the index that joined as members; a member's own Redis user cannot read the member records."""
-    from scripts.hive.auth import PREFIX
+    from scripts.hive import auth
 
-    hives = sorted(redis.smembers(registry.INDEX))
-    if not hives:
-        return []
-    with redis.pipeline(transaction=False) as pipe:
-        for hive in hives:
-            pipe.exists(f"{PREFIX}:member:{hive}")
-        records = pipe.execute()
-    return [hive for hive, record in zip(hives, records, strict=True) if record]
+    return sorted(auth.members(redis))
 
 
 def readings(redis: "Redis", slug: str, name: str) -> str:

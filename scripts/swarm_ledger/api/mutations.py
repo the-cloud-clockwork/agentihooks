@@ -1,8 +1,12 @@
+from urllib.parse import unquote
+
 from scripts.swarm_ledger import ledger_task_duplicates, ports
 
 from . import receipts, resources, schemas
 from .errors import APIError
 from .services import LedgerCore, Services
+
+WRITES = ("add", "edit", "add_item", "retext")
 
 
 class GuardedOperations:
@@ -72,9 +76,30 @@ class GuardedOperations:
         return accepted
 
 
-def apply(services: Services, slug: str, principal: str, payload: dict) -> dict:
+def writer(headers) -> str:
+    return unquote(headers.get(schemas.WORKTREE_HEADER, ""))
+
+
+def _stamp(op, worktree: str):
+    if not isinstance(op, dict) or op.get("op") not in WRITES:
+        return op
+    bare = {key: value for key, value in op.items() if key != "worktree"}
+    return {**bare, "worktree": worktree} if worktree else bare
+
+
+def stamped(payload: dict, worktree: str) -> dict:
+    if not isinstance(payload.get("ops"), list):
+        return payload
+    return {**payload, "ops": [_stamp(op, worktree) for op in payload["ops"]]}
+
+
+def apply(services: Services, slug: str, principal: str, payload: dict, worktree: str = "") -> dict:
     doc = services.repository.current(slug).state
-    operations = schemas.check_operations(payload, services.ledger.core, tuple(t["id"] for t in doc.get("tasks", [])))
+    task_ids = tuple(t["id"] for t in doc.get("tasks", []))
+    operations = [
+        {key: value for key, value in op.items() if key != "worktree"}
+        for op in schemas.check_operations(stamped(payload, worktree), services.ledger.core, task_ids)
+    ]
     refusals = [reason for op in operations if (reason := services.ledger.authority.refusal(principal, op))]
     if principal and payload.get("changes"):
         raise APIError(403, "forbidden", "Checkbox changes need the operator")
