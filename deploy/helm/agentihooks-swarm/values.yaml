@@ -279,7 +279,7 @@ workers:
     namespace: default
     leaseName: agentihooks-hive-rollout
     drainSeconds: 1200
-    # Release image the image updater writes; each new value rolls the hives one at a time through the lease.
+    # Optional pod stamp; each new value rolls the hives one at a time. Release hives leave it unset and roll on the chart version.
     release: ""
   excluded: [master]
   # Swarms whose masters this hive takes although it excludes master; every other swarm still sees masters excluded.
