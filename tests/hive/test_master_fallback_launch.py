@@ -410,6 +410,18 @@ def test_master_waits_when_its_only_private_login_probe_is_revoked(setup, monkey
     assert setup.launcher.select(setup.config, "master", task) == placement.Wait("no live hive takes master")
 
 
+def test_a_rejected_account_does_not_remove_a_hive_without_a_private_login(setup, monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+    from scripts.hive import launch
+
+    task = {**master(setup), "seat": "master@fixture"}
+    result = balancer.revoked_result("XXXX", 100)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **_: [(100, result)])
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert isinstance(selected, launch.Selection)
+    assert (selected.hive, selected.account.name, selected.route_kind) == ("remote", "account", "subscription")
+
+
 def test_a_master_login_without_a_hive_slot_holds_no_account_cap(setup):
     from scripts.swarm.capacity import Account
 
