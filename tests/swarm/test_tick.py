@@ -1118,6 +1118,54 @@ def test_a_second_slow_failed_launch_spends_the_budget(store, monkeypatch):
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
 
 
+class PooledLaunches(FakeRuntime):
+    def launch_room(self, config):
+        return 8
+
+
+class PooledFailures(FailingFor):
+    def launch_room(self, config):
+        return 8
+
+
+def _slow_preparation(monkeypatch, clock, seconds):
+    from scripts.swarm import tick as tick_module
+
+    prepare = tick_module._prepare
+
+    def slow(*args):
+        clock[0] += seconds
+        return prepare(*args)
+
+    monkeypatch.setattr(tick_module, "_prepare", slow)
+
+
+def test_a_slow_preparation_stops_the_pass_at_the_launch_budget(store, monkeypatch):
+    ids = [f"t{n}" for n in range(1, 9)]
+    store.update("sw", max_eng=len(ids))
+    ledger, runtime = tasks(*((i, "eng") for i in ids)), PooledLaunches()
+    clock = _slow_launches(monkeypatch, runtime, 0)
+    _slow_preparation(monkeypatch, clock, 18)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
+    assert ledger.rows["t2"]["state"] == "open"
+    assert not store.redis.exists(store.key("sw", "claim", "t2"))
+
+
+def test_a_pass_over_many_agents_with_failing_launches_ends_under_the_tick_deadline(store, monkeypatch):
+    from scripts.swarm.tick_stop import DEADLINE_S
+
+    ids = [f"t{n}" for n in range(1, 33)]
+    store.update("sw", max_eng=len(ids))
+    ledger, runtime = tasks(*((i, "eng") for i in ids)), PooledFailures(*ids)
+    clock = _slow_launches(monkeypatch, runtime, 20)
+    _slow_preparation(monkeypatch, clock, 18)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.tried == ["t1"]
+    assert clock[0] < DEADLINE_S
+
+
 def test_a_spawn_claims_its_task_for_one_lease_and_records_its_seat_at_launch_time(store):
     from scripts.swarm.tick import LEASE_MS
 
