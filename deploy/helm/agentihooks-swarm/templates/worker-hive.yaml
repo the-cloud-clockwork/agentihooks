@@ -156,6 +156,8 @@ spec:
                   fieldPath: metadata.name
             - name: AGENTIHOOKS_DEPLOYMENT
               value: {{ $root.Values.deployment | quote }}
+            - name: HIVE_NAME
+              value: {{ printf "%s%s" $root.Release.Name $suffix | quote }}
             - name: HIVE_EXCLUDED
               value: {{ join "," $workers.excluded | quote }}
             - name: HIVE_MASTER_SWARMS

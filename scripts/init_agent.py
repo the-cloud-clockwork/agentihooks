@@ -538,7 +538,7 @@ def _write_launcher(
         )
         held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
         command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} -- {prompt_arg}"
-    cleanup = [str(launcher), *([] if app_server else inputs)]
+    cleanup = [str(launcher), *([] if app_server or prompt_file is None else [str(prompt_file)])]
     shell = environ.get("SHELL") or "/bin/bash"
     launcher.write_text(
         "#!/usr/bin/env bash\n"

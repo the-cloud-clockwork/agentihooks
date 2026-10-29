@@ -17,8 +17,11 @@ rules:
   - id: feature-front-door-no-token
     languages: [python]
     severity: ERROR
-    message: Ordered 2026-10-27, front door launch and Claude AI routing must never set or pass token credentials or launch_token.
+    message: Ordered 2026-10-27, front door launch and Claude AI routing must never set or pass token credentials or launch_token; ordered 2026-10-28, an expired front door login alone falls back to the master token route.
     patterns:
+      - pattern-not-inside: |
+          if front and str($EXC) == native_login.EXPIRED:
+            ...
       - pattern-either:
           - pattern-inside: |
               def _agent_command(...):

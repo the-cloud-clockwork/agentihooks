@@ -410,20 +410,23 @@ def recover(target: Path, environ: Mapping[str, str]) -> bool:
     return number is not None and restore(stored(openbao_kv.from_env(environ), number), target, force=True)
 
 
-def checked(target: Path, environ: Mapping[str, str], found: str) -> bool:
+def _usable(target: Path, environ: Mapping[str, str], found: str) -> bool:
     from scripts.routing import native_login
 
     try:
         native_login.check(child(environ, target), found)
     except native_login.LoginError:
-        with _locked(target.parent) as folder:
-            if len(holders(folder)) < 2 and not recover(target, environ):
-                return False
-        try:
-            native_login.check(child(environ, target), found)
-        except native_login.LoginError:
+        return False
+    return not native_login.rejected(child(environ, target), found)
+
+
+def checked(target: Path, environ: Mapping[str, str], found: str) -> bool:
+    if _usable(target, environ, found):
+        return True
+    with _locked(target.parent) as folder:
+        if len(holders(folder)) < 2 and not recover(target, environ):
             return False
-    return True
+    return _usable(target, environ, found)
 
 
 def stored(bao: openbao_kv.OpenBao | None, number: int | None = None) -> dict[str, str]:
@@ -665,12 +668,14 @@ def _token_lock(environ: Mapping[str, str]):
 def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from hooks.context.account_sessions import sessions_by_account
     from scripts import master_login_chain as chain
-    from scripts.claude_quota_balancer import API_ACCOUNT, launch_environment, select_credential
+    from scripts.claude_quota_balancer import API_ACCOUNT, launch_environment, select_master_credential
     from scripts.hive.account_slots import execute
     from scripts.install import _claude_command, _write_route_report
 
     with _token_lock(environ):
-        decision = select_credential(environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,))
+        decision = select_master_credential(
+            environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,)
+        )
         target = token_home(environ)
         child_env = {**launch_environment(decision, environ), **dict.fromkeys(SELECTORS, str(target))}
         chain.notification(target, "token", "routed")
