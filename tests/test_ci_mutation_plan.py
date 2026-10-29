@@ -180,7 +180,7 @@ def test_a_kept_split_is_reused_so_its_unit_costs_stay_observed_when_durations_d
     from scripts.ci_mutation import killers, measured
 
     function = "scripts.sample.x_f"
-    names = [f"{function}__mutmut_{index}" for index in range(2)]
+    names = [f"{function}__mutmut_{index}" for index in range(3)]
     nodes = ["fast", *(f"t{index}" for index in range(6))]
     memory = killers.KillMemory(tmp_path)
 
