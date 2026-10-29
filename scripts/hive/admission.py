@@ -133,13 +133,9 @@ def _pod(measured: dict, pending: int) -> list[tuple[int, str, str]]:
 
 
 def _first(measured: dict, pending: int) -> list[tuple[int, str, str]]:
-    """A hive ranked first for the role is refused only once its memory is at the line or an agent no longer fits."""
     held = _held(pending)
     limits = []
-    for free, size, prefix, bound in (
-        ("available_mb", "total_mb", "", "host"),
-        ("pod_available_mb", "pod_total_mb", "pod ", "pod"),
-    ):
+    for free, size, prefix in (("available_mb", "total_mb", ""), ("pod_available_mb", "pod_total_mb", "pod ")):
         if free not in measured or size not in measured:
             continue
         available, total = measured[free], measured[size]
@@ -148,9 +144,9 @@ def _first(measured: dict, pending: int) -> list[tuple[int, str, str]]:
         if available * 100 <= (100 - HOST_PERCENT) * total:
             limits.append((0, RAM, f"{shown}, at or above the {HOST_PERCENT} percent line"))
         else:
-            fits = f"{shown}, {AGENT_MB} MB per agent{held}, fits {{}} more in the {bound} memory"
-            limits.append((available // AGENT_MB - pending, RAM, fits))
-    return limits
+            fits = max(1, _ram_room(available, total, 0)) - pending
+            limits.append((fits, RAM, f"{shown}, {AGENT_MB} MB per agent{held}, fits {{}} more {LINE}"))
+    return limits or [(0, MISSING, "no memory reading")]
 
 
 def _swarm(measured: dict, agents: int, max_agents: int | None) -> list[tuple[int, str, str]]:
@@ -179,9 +175,7 @@ def room(
     free, floor = measured.get("disk_free_gb"), measured.get("disk_floor_gb")
     if free is not None and floor is not None and free < floor:
         return Room(0, DISK, f"{free} GB free on the agent home, below the {floor} GB worktree floor")
-    limits = _first(measured, pending) if first else []
-    if not limits:
-        limits = _host(measured, pending) + _pod(measured, pending)
+    limits = _first(measured, pending) if first else _host(measured, pending) + _pod(measured, pending)
     if swarm_agents is not None and all(field in measured for field in RAM_FIELDS):
         limits += _swarm(measured, swarm_agents, max_agents)
     count, reason, detail = min(limits, key=lambda limit: limit[0])

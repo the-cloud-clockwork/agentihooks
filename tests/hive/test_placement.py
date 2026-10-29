@@ -280,7 +280,7 @@ def test_round_robin_gives_the_agent_to_the_chosen_hive_running_the_fewest_agent
 
 
 def ranked(hive_id: str, first_room: int, first_refusal: str = "", **fields) -> dict:
-    record = hive(hive_id, ui="no", excluded=["master"], prefer={"eng": 1}, max_agents=4, **fields)
+    record = hive(hive_id, **{"ui": "no", "excluded": ["master"], "prefer": {"eng": 1}, "max_agents": 4, **fields})
     return {**record, "first_room": first_room, "first_refusal": first_refusal}
 
 
@@ -318,3 +318,29 @@ def test_round_robin_spread_ignores_the_first_room():
     spare = {**hive("spare", ui="no", excluded=["master"]), SPREAD: 1}
     found = choose("eng", "claude", "acct", "subscription", REPO, [worker, spare], NOW)
     assert (found.hive, found.spill) == ("spare", None)
+
+
+@pytest.mark.parametrize(
+    ("fields", "refusal"),
+    [
+        ({"draining": "yes"}, "it is draining"),
+        ({"heartbeat_at": NOW - registry.LIVE_MS - 1}, "its heartbeat is older than 90 seconds"),
+        ({"excluded": ["master", "eng"], "prefer": {"ci": 1}}, None),
+    ],
+    ids=["draining", "stale", "unranked"],
+)
+def test_a_spill_past_an_unhosted_first_ranked_hive_names_why_it_was_left_out(fields, refusal):
+    from scripts.hive.placement import choose
+
+    hives = [ranked("worker", 4, **fields), hive("spare", ui="no", excluded=["master"])]
+    found = choose("eng", "claude", "acct", "subscription", REPO, hives, NOW)
+    assert found.hive == "spare"
+    assert (found.spill and found.spill.record()) == (refusal and {"preferred": "worker", "refusal": refusal})
+
+
+def test_an_excluding_first_ranked_hive_names_the_excluded_role():
+    from scripts.hive.placement import choose
+
+    hives = [ranked("worker", 4, excluded=["master", "eng"]), hive("spare", ui="no", excluded=["master"])]
+    found = choose("eng", "claude", "acct", "subscription", REPO, hives, NOW)
+    assert found.spill.record() == {"preferred": "worker", "refusal": "it excludes eng"}

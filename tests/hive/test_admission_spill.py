@@ -205,3 +205,31 @@ def test_a_reservation_refused_on_the_first_ranked_hive_records_it_on_the_spill(
     )
     events = [json.loads(line)["event"] for line in capsys.readouterr().err.splitlines()]
     assert events == ["hive_admission_refused", "hive_placement_spill"]
+
+
+def test_a_second_launch_in_one_pass_spills_with_the_placed_count(setup):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1})
+    write_hive(setup, id="spare")
+    _load(setup, "remote", available_mb=20_000 + admission.AGENT_MB)
+    launcher = setup.launcher
+    launcher.placement_cache = {}
+    assert launcher.select(setup.config, "eng", {"id": "first"}).hive == "remote"
+    second = launcher.select(setup.config, "eng", {"id": "second"})
+    assert second.hive == "spare"
+    assert second.spill.record() == {
+        "preferred": "remote",
+        "refusal": "placement: 1 launches placed on it this pass took its last room",
+    }
+
+
+def test_a_local_slot_cap_limits_the_first_room_and_keeps_first_mode():
+    from scripts.hive import launch, placement
+
+    hive = {"room": 5, "refusal": "", placement.FIRST_ROOM: 6, placement.FIRST_REFUSAL: ""}
+    assert launch._local_capped(hive, 2, 4) == {**hive, "room": 2, placement.FIRST_ROOM: 2}
+    full = launch._local_capped(hive, 4, 4)
+    assert (full[placement.FIRST_ROOM], full[placement.FIRST_REFUSAL]) == (
+        0,
+        "max agents: 4 of 4 agents on the hive, fits 0 more",
+    )
+    assert launch._local_capped({"room": 1, "refusal": ""}, 0, 4) == {"room": 1, "refusal": ""}

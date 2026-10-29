@@ -2,9 +2,9 @@
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from scripts.hive.registry import MASTER_NAME, UI_ROLES, live
+from scripts.hive.registry import LIVE_MS, MASTER_NAME, UI_ROLES, live
 from scripts.master_claude_login import ROUTE as MASTER_LOGIN
 
 MASTER = "master"
@@ -153,6 +153,20 @@ def _pick(
     return Choice(chosen, spill=Spill(preferred["id"], skipped) if skipped else None)
 
 
+def _unhosted(role: str, hives: list[dict], candidates: list[dict], now: int) -> Spill | None:
+    ranked = [hive for hive in hives if SPREAD not in hive and role in hive.get("prefer", {})]
+    if not ranked:
+        return None
+    preferred = min(ranked, key=_order(role))
+    if preferred in candidates:
+        return None
+    if not live(preferred, now):
+        return Spill(preferred["id"], f"its heartbeat is older than {LIVE_MS // 1000} seconds")
+    if preferred.get("draining") == YES:
+        return Spill(preferred["id"], "it is draining")
+    return Spill(preferred["id"], f"it excludes {role}")
+
+
 def choose(
     role: str, harness: str, slot: str, route_kind: str, repo: str, hives: list[dict], now: int
 ) -> Choice | Wait:
@@ -161,7 +175,10 @@ def choose(
         return Wait(f"no live hive takes {role}")
     ui_first = role in UI_ROLES
     if not ui_first:
-        return _pick(role, harness, slot, route_kind, repo, candidates)
+        picked = _pick(role, harness, slot, route_kind, repo, candidates)
+        if isinstance(picked, Choice) and picked.spill is None:
+            return replace(picked, spill=_unhosted(role, hives, candidates, now))
+        return picked
     first = [hive for hive in candidates if (hive["ui"] == YES) == ui_first]
     rest = [hive for hive in candidates if (hive["ui"] == YES) != ui_first]
     if not rest:

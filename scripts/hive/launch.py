@@ -173,6 +173,17 @@ def _matched_origin(hives: list[dict], hive: str, repo: str) -> str | placement.
     return found.get(orders.ORIGIN, "")
 
 
+def _local_capped(hive: dict, taken: int, bound: int) -> dict:
+    capped = dict(hive)
+    for room, refusal in (("room", "refusal"), (placement.FIRST_ROOM, placement.FIRST_REFUSAL)):
+        if room not in hive:
+            continue
+        limited = admission.capped(admission.Room(hive[room], **ROOM_DETAILS), taken, bound)
+        if limited.room < hive[room]:
+            capped.update({room: limited.room, refusal: admission.refusal(limited)})
+    return capped
+
+
 def _first_choice(
     candidates: list[capacity.Account], choose: Callable[[str], placement.Choice | placement.Wait]
 ) -> tuple[capacity.Account, placement.Choice] | placement.Wait:
@@ -246,9 +257,14 @@ class HiveLaunch:
             for hive in self._pass_hives[1]:
                 if hive["id"] == selected.hive:
                     hive["room"] -= 1
+                    hive[placement.PLACED] = hive.get(placement.PLACED, 0) + 1
                     if placement.FIRST_ROOM in hive:
                         hive[placement.FIRST_ROOM] -= 1
-                    hive[placement.PLACED] = hive.get(placement.PLACED, 0) + 1
+                        if hive[placement.FIRST_ROOM] <= 0:
+                            hive[placement.FIRST_REFUSAL] = (
+                                f"{admission.PLACEMENT}: {hive[placement.PLACED]} launches placed on it this pass "
+                                "took its last room"
+                            )
         return selected
 
     def _withdraw(self, request: SpawnRequest, selected: Selection, refused: str) -> placement.Wait:
@@ -298,10 +314,7 @@ class HiveLaunch:
                 if hive["id"] == hive_id():
                     bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
                     taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
-                    limited = admission.capped(admission.Room(hive["room"], **ROOM_DETAILS), taken, bound)
-                    if limited.room < hive["room"]:
-                        kept = {key: value for key, value in hive.items() if key != placement.FIRST_ROOM}
-                        hives[index] = {**kept, "room": limited.room, "refusal": admission.refusal(limited)}
+                    hives[index] = _local_capped(hive, taken, bound)
         placing = _Placing(config, task, saved, decision, role, rows, hives, now)
         found = self._account_selection(placing, harness)
         if auto and harness == "codex" and isinstance(found, placement.Wait):
@@ -431,7 +444,8 @@ class HiveLaunch:
             if isinstance(selected, placement.Wait):
                 return self._record_wait(request.lane, request.task, waited)
             refusal = placement.Spill(previous.hive, refused) if previous.first else None
-            selected = replace(selected, spill=previous.spill or refusal or selected.spill)
+            spill = previous.spill or refusal or selected.spill
+            selected = replace(selected, spill=None if spill and spill.preferred == selected.hive else spill)
             if self.placement_cache is not None:
                 selected = self._spend(selected)
                 self.placement_cache[(request.lane, request.task["id"])] = selected
@@ -634,7 +648,9 @@ class HiveLaunch:
         local = selected.hive == hive_id() and request.lane != placement.MASTER
         if local:
             running = local_slots.running(self.store, self.slug, request.task["id"])
-            bound = local_slots.maximum(self.store, self.slug, running + admission.room(reading).room)
+            bound = local_slots.maximum(
+                self.store, self.slug, running + admission.room(reading, first=selected.first).room
+            )
             taken = local_slots.claim(self.store, selected.hive, self.slug, request.task["id"], request.name, bound)
             if taken >= bound:
                 refused = f"no hive has room{placement.LOCAL_FULL}{taken} of its {bound} agents"
