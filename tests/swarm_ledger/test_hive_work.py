@@ -90,7 +90,7 @@ def test_hive_credential_work_that_cannot_start_in_time_is_refused_busy(monkeypa
     }
 
 
-def test_a_busy_refusal_leaves_the_client_half_its_request_timeout_to_retry():
+def test_the_busy_wait_is_half_the_client_request_timeout():
     from scripts.swarm_ledger import hive_work
 
     assert hive_work.WAIT_S == ledger.REQUEST_TIMEOUT / 2
