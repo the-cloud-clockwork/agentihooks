@@ -1,10 +1,13 @@
+import json
 from dataclasses import replace
 
 import pytest
 
+from scripts.hive import reports
 from scripts.inbox import exits, wake
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm import idle
+from scripts.swarm.store import APP_SERVER_TRANSPORT, MASTER, AgentRecord, RedisStore, SwarmConfig
 from tests.inbox.test_wake import FakeHerdr, FakeLedger
 
 pytestmark = pytest.mark.unit
@@ -70,12 +73,81 @@ def test_the_wake_pass_escalates_a_member_agents_unread_mail_to_the_controller_m
     assert raised.ref == f"inbox-escalation:{item.id}"
 
 
-def test_the_wake_pass_types_no_wake_into_a_pane_on_another_host(redis, agent, mail):
+def hive_wakes(redis, hive="m1"):
+    from scripts.hive.orders import CommandOrder, Orders
+
+    entries = redis.xrange(Orders(redis).commands(hive))
+    return [CommandOrder(**json.loads(fields["order"])) for _, fields in entries]
+
+
+def remote_codex(redis, agent, transport=""):
+    redis.set(reports.key("m1"), json.dumps({}))
+    return replace(agent, harness="codex", transport=transport, pane_id="p1", runtime_target={"host_id": "m1"})
+
+
+def test_the_wake_pass_orders_the_hive_to_wake_its_idle_legacy_codex_pane(redis, agent, mail):
     member, item = mail
-    remote = replace(agent, harness="codex", pane_id="p1", runtime_target={"host_id": "m1"})
+    remote = remote_codex(redis, agent)
+    idle.beat(redis, "sw", remote.name, idle.IDLE, item.created_at)
     herdr = FakeHerdr({"p1": "idle"})
     wake.wake_pass(InboxStore(redis), "sw", [remote], herdr, FakeLedger(), item.created_at + 1, 300_000)
     assert herdr.prompts == []
+    [order] = hive_wakes(redis)
+    assert (order.action, order.slug, order.name, order.text) == ("nudge", "sw", remote.name, wake.WAKE_TEXT)
+    assert (order.execution_id, order.generation) == (remote.execution_id, remote.generation)
+    assert order.id.startswith(f"wake:{remote.execution_id}:{remote.generation}:")
+    assert wake.WOKEN in [e.get("event") for e in member.history(item.id)]
+
+
+def test_the_waker_orders_the_hive_the_moment_mail_lands_for_its_idle_legacy_codex_pane(redis, agent, mail):
+    _, item = mail
+    remote = remote_codex(redis, agent)
+    idle.beat(redis, "sw", remote.name, idle.IDLE, item.created_at)
+    wake.wake_now(InboxStore(redis), "sw", [remote], FakeHerdr({}), item.created_at + 1, 300_000)
+    assert [(order.action, order.slug) for order in hive_wakes(redis)] == [("nudge", "sw")]
+
+
+def test_a_working_hive_codex_pane_gets_no_wake_and_escalates_as_before(redis, agent, mail):
+    _, item = mail
+    remote = remote_codex(redis, agent)
+    idle.beat(redis, "sw", remote.name, idle.WORKING, item.created_at)
+    agents = [remote, AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm")]
+    actions = wake.wake_pass(InboxStore(redis), "sw", agents, FakeHerdr({}), FakeLedger(), item.created_at + 10, 1)
+    assert hive_wakes(redis) == []
+    assert f"raised message {item.id} to {MASTER_NAME}" in actions
+
+
+def test_a_hive_codex_pane_with_no_heartbeat_gets_no_wake(redis, agent, mail):
+    _, item = mail
+    wake.wake_now(InboxStore(redis), "sw", [remote_codex(redis, agent)], FakeHerdr({}), item.created_at + 1, 300_000)
+    assert hive_wakes(redis) == []
+
+
+def test_a_hive_codex_pane_whose_working_beat_went_stale_gets_its_wake(redis, agent, mail):
+    _, item = mail
+    remote = remote_codex(redis, agent)
+    now = item.created_at + 1
+    idle.beat(redis, "sw", remote.name, idle.WORKING, now - idle.STALE_MS)
+    wake.wake_now(InboxStore(redis), "sw", [remote], FakeHerdr({}), now, 300_000)
+    assert [order.action for order in hive_wakes(redis)] == ["nudge"]
+
+
+def test_a_hive_that_stopped_reporting_gets_no_wake_order_and_the_wake_stays_unspent(redis, agent, mail):
+    member, item = mail
+    remote = remote_codex(redis, agent)
+    redis.delete(reports.key("m1"))
+    idle.beat(redis, "sw", remote.name, idle.IDLE, item.created_at)
+    wake.wake_pass(InboxStore(redis), "sw", [remote], FakeHerdr({}), FakeLedger(), item.created_at + 1, 300_000)
+    assert hive_wakes(redis) == []
+    assert wake.WOKEN not in [e.get("event") for e in member.history(item.id)]
+
+
+def test_a_hive_codex_pane_with_a_push_pump_gets_no_typed_wake(redis, agent, mail):
+    member, item = mail
+    remote = remote_codex(redis, agent, APP_SERVER_TRANSPORT)
+    idle.beat(redis, "sw", remote.name, idle.IDLE, item.created_at)
+    wake.wake_pass(InboxStore(redis), "sw", [remote], FakeHerdr({}), FakeLedger(), item.created_at + 1, 300_000)
+    assert hive_wakes(redis) == []
     assert wake.WOKEN not in [e.get("event") for e in member.history(item.id)]
 
 

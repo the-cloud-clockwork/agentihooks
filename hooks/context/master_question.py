@@ -9,6 +9,7 @@ from hooks.context import master_coding, operator_mode
 from hooks.observability.transcript import iter_complete_records
 
 WINDOW_SEC = 600
+GATE = "question"
 MOVED = (
     "The operator has not typed in this pane for ten minutes, so the question tool did not open and your questions "
     "were moved to his Priorities as ledger questions: {asked} Do not ask them again. Keep working and act on his "
@@ -16,19 +17,23 @@ MOVED = (
 )
 
 
-def move(payload: dict, ledger=None, environ=None, now: float | None = None) -> str:
-    """The denial naming the moved questions, or empty when the question tool may open."""
+def move(payload: dict, ledger=None, environ=None, now: float | None = None, store=None) -> str:
+    """The denial naming the moved questions, or empty when the question tool may open; each decision is a gate log
+    row naming the operator's last typed turn it read, and an opened prompt's questions are held for the tick."""
     session = payload.get("session_id")
     if payload.get("tool_name") != operator_mode.QUESTION_TOOL or not master_coding.is_master(session):
         return ""
     now = time.time() if now is None else now
-    typed = operator_mode._load(session).get("turn_at")
-    if typed is not None and now - typed < WINDOW_SEC:
-        return ""
-    questions = [q for q in (payload.get("tool_input") or {}).get("questions") or [] if q.get("question")]
-    if not questions or not _deliberate(payload):
-        return ""
     slug, name = operator_mode._binding(os.environ if environ is None else environ, session)
+    typed = operator_mode._load(session).get("turn_at")
+    questions = [q for q in (payload.get("tool_input") or {}).get("questions") or [] if q.get("question")]
+    if _recent(typed, now):
+        _record(slug, name, "count", f"opened: the operator typed {_ago(typed, now)}", now)
+        _hold(slug, name, questions, store)
+        return ""
+    if not questions or not _deliberate(payload):
+        _record(slug, name, "count", f"left to the operator presence check: typed {_ago(typed, now)}", now)
+        return ""
     if ledger is None:
         from scripts.swarm.ledger_client import LedgerClient
 
@@ -36,7 +41,53 @@ def move(payload: dict, ledger=None, environ=None, now: float | None = None) -> 
     for question in questions:
         text = _text(question)
         ledger.question(slug, text, name, hashlib.sha256(f"{session}:{typed}:{text}".encode()).hexdigest()[:32])
+    _record(slug, name, "deny", f"moved {len(questions)} questions: the operator typed {_ago(typed, now)}", now)
     return MOVED.format(asked=" ".join(q["question"] for q in questions))
+
+
+def refusal(payload: dict, now: float | None = None) -> str:
+    """The refusal of a master's question tool when the operator has not typed in the pane inside the window, on the
+    paths move leaves to the presence check."""
+    session = payload.get("session_id")
+    if payload.get("tool_name") != operator_mode.QUESTION_TOOL or not master_coding.is_master(session):
+        return ""
+    now = time.time() if now is None else now
+    return "" if _recent(operator_mode._load(session).get("turn_at"), now) else operator_mode.MASTER_ASK_REFUSAL
+
+
+def _recent(typed: float | None, now: float) -> bool:
+    return typed is not None and now - typed < WINDOW_SEC
+
+
+def _hold(slug: str, name: str, questions: list[dict], store) -> None:
+    import redis
+
+    from scripts.swarm import master_questions
+    from scripts.swarm.store import Unreachable, connect
+
+    if slug == "<slug>" or not questions:
+        return
+    try:
+        master_questions.hold(store or connect(), slug, name, [_text(q) for q in questions])
+    except (Unreachable, redis.RedisError):
+        _record(slug, name, "count", "opened but not held for the tick: the swarm store was unreachable", time.time())
+
+
+def _ago(typed: float | None, now: float) -> str:
+    if typed is None:
+        return "never since his last turn ended"
+    return f"at {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(typed))}, {int(now - typed)} seconds ago"
+
+
+def _record(slug: str, name: str, kind: str, reason: str, now: float) -> None:
+    from scripts.gates import log
+    from scripts.gates.base import Who
+
+    if slug != "<slug>":
+        row = log.Row.of(
+            GATE, kind, Who(name=name, task="master"), operator_mode.QUESTION_TOOL, reason, int(now * 1000)
+        )
+        log.append(slug, row)
 
 
 def _deliberate(payload: dict) -> bool:

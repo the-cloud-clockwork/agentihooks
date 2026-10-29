@@ -384,6 +384,7 @@ def _app_server_command(
         spec.seat,
         *[f"--overlay={overlay}" for overlay in spec.overlays],
         *([f"--bundle-revision={spec.bundle_revision}"] if spec.bundle_revision else []),
+        *([f"--home={spec.home}"] if spec.home else []),
         *(["--exclude", spec.exclude] if spec.exclude else []),
         "--report",
         str(report),
@@ -477,6 +478,9 @@ def _agent_command(
         *_model_args("claude", agent_args, environ),
         *agent_args,
     ]
+    from scripts import front_door_route
+
+    command = [*command[:2], *front_door_route.check(spec.profile, spec.title or name, command[2:])]
     # A server on MCP revision 2026-07-28 never registers as a channel.
     before = "export MCP_PROTOCOL_NEGOTIATION=legacy\n" if spec.channel else ""
     return _profile_command(command, spec), before
@@ -534,7 +538,7 @@ def _write_launcher(
         )
         held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
         command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} -- {prompt_arg}"
-    cleanup = [str(launcher), *([] if app_server else inputs)]
+    cleanup = [str(launcher), *([] if app_server or prompt_file is None else [str(prompt_file)])]
     shell = environ.get("SHELL") or "/bin/bash"
     launcher.write_text(
         "#!/usr/bin/env bash\n"
@@ -601,7 +605,7 @@ def _plain_codex_handoff(flags: list[str], session_id: str) -> list[str]:
 
 def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], environ: dict[str, str]) -> list[str]:
     from scripts.profiles import binding
-    from scripts.select_profile import BUNDLE_REVISION, OVERLAYS, RECORDED_HOME, prepare
+    from scripts.select_profile import BUNDLE_REVISION, OVERLAYS, PUSH, RECORDED_HOME, prepare
 
     continuing = args.handoff or args.resume or "--resume" in flags or (agent == "codex" and flags[:1] == ["resume"])
     if not args.profile and continuing:
@@ -618,7 +622,8 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
         flags = binding.continuation(flags, agent, environ)
     environ[BUNDLE_REVISION] = args.bundle_revision
     environ.pop(RECORDED_HOME, None)
-    profile_env, flags = prepare(args.profile, agent, "", "", flags, environ, args.overlay)
+    pushed = {**environ, PUSH: "1"} if agent == "codex" and args.codex_transport == APP_SERVER else environ
+    profile_env, flags = prepare(args.profile, agent, "", "", flags, pushed, args.overlay)
     environ.update(profile_env)
     return flags
 
@@ -1044,6 +1049,13 @@ def _launch_seconds(args) -> float:
     return LAUNCH_DEADLINE_S
 
 
+def _auth_request(args: argparse.Namespace, environ: dict[str, str]) -> None:
+    from scripts.gates.entry import native
+
+    if args.auth and native("sign-ins", "init-agent-auth", environ):
+        raise ValueError("explicit authentication refused by the sign ins gate")
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
     launch = LaunchDeadline(_launch_seconds(args))
@@ -1051,6 +1063,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
     operator_env.fill(active_env)
     try:
+        _auth_request(args, active_env)
         directory = _resolve_directory(args.dir, active_env)
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8") if args.prompt_file else args.prompt
         name = args.name or f"s-{time.strftime('%y%m%d-%H%M%S')}"

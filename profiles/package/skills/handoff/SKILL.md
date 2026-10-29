@@ -48,6 +48,9 @@ exit or operator. Follow the transfer command supplied by the runtime directive.
 4. **Restore continuity.** As successor, read the runtime envelope and body,
    then walk Read first in rank order before older recaps. Read the supplied
    culture, latest derived recap and learned notes; preserve each named gap.
+   For history the handoff does not carry, query the recall archive
+   (`recall_search`, `recall_get`) before reading ledger files; recall holds
+   swarm and ledger history, the brain holds fleet lessons.
    Confirm the first Next action exactly as written, using the transfer id
    supplied in priming:
 
@@ -70,6 +73,8 @@ exit or operator. Follow the transfer command supplied by the runtime directive.
    Use `fresh` only for that explicit choice. After a crash the runtime authors
    the recovery handoff and marks it recovery; preserve its unknowns. A learned
    note needs a `because` clause explaining its reason and keeps its maturity.
+   Keep what a later occupant needs in learned notes and the handoff, never in
+   harness project memory.
    Done when the chosen recovery has its continuity and binding outcomes
    recorded, or the seat remains visibly awaiting decision with its cause.
 

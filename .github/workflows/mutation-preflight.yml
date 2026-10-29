@@ -21,7 +21,7 @@ permissions:
 jobs:
   plan:
     if: ${{ github.event_name != 'push' || !github.event.deleted }}
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
     timeout-minutes: 10
     env:
       BASE: ${{ inputs.base || 'origin/dev' }}
@@ -86,7 +86,19 @@ jobs:
 
       - name: Install dependencies
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Restore measured statistics timings
+        if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutation-test-stats-v2-${{ runner.os }}-
+            mutation-test-stats-v1-${{ runner.os }}-
 
       - name: Size mutation shards from stored timings
         id: plan
@@ -142,7 +154,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.open.outputs.open == 'false'
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Select the tests the branch touches
         if: steps.open.outputs.open == 'false'
@@ -153,11 +165,14 @@ jobs:
           from pathlib import Path
 
           from scripts.ci_mutation.browser import needs_browser
-          from scripts.ci_select import changed_files, is_test
+          from scripts.ci_select import changed_files, is_test, selected_tests
           from scripts.ci_touched_tests import worker_count
 
           root = Path.cwd()
-          tests = [path for path in changed_files(root, "origin/dev", "HEAD") if is_test(path) and (root / path).is_file()]
+          changed = changed_files(root, "origin/dev", "HEAD")
+          tests = [path for path in changed if is_test(path) and (root / path).is_file()]
+          javascript = [path for path in changed if Path(path).suffix == ".js"]
+          tests = sorted(set(tests) | selected_tests(root, javascript, False))
           browser = str(bool(tests) and needs_browser(root, tests)).lower()
           workers = worker_count(tests) if tests else 1
           print("Touched tests:", *tests or ["none"], sep="\n")
@@ -223,7 +238,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
         uses: actions/download-artifact@v4
@@ -268,26 +283,30 @@ jobs:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
+      - name: Keep only the test stats this part wrote
+        if: success() && strategy.job-total != 1
+        env:
+          PART: ${{ matrix.part }}
+        run: mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \;
+
       - name: Upload this part's test stats cache
         if: success() && strategy.job-total != 1
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: mutation-test-stats-cache-${{ matrix.part }}
-          path: .mutation-stats-cache/
+          path: .mutation-stats-fresh/
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 1
-          overwrite: true
 
       - name: Upload mutation stats part
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: mutation-stats-${{ matrix.part }}
           path: .mutation-stats/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
-          overwrite: true
 
       - name: Restore the tests that killed this branch's earlier mutants
         if: strategy.job-total == 1
@@ -333,6 +352,10 @@ jobs:
     outputs:
       shards: ${{ steps.refine.outputs.shards }}
     steps:
+      - name: Record refinement start
+        id: refinement-start
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -348,7 +371,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Restore the tests that killed this branch's earlier mutants
         uses: actions/cache/restore@v4
@@ -364,6 +387,13 @@ jobs:
           path: .mutation-stats
           merge-multiple: true
 
+      - name: Restore the merged test stats
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-test-stats-v2-${{ runner.os }}-
+
       - name: Download every part's test stats cache
         uses: actions/download-artifact@v4
         with:
@@ -371,12 +401,8 @@ jobs:
           path: .mutation-stats-cache
           merge-multiple: true
 
-      - name: Save the merged test stats
-        if: success() && hashFiles('.mutation-stats-cache/**') != ''
-        uses: actions/cache/save@v4
-        with:
-          path: .mutation-stats-cache
-          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Cap the merged test stats
+        run: python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap; print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")' .mutation-stats-cache
 
       - name: Download planned mutation test selection
         uses: actions/download-artifact@v4
@@ -398,6 +424,46 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      - name: Check cache preparation budget
+        id: cache-preparation-budget
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          REFINEMENT_STARTED_AT: ${{ steps.refinement-start.outputs.started }}
+        run: if (( $(date +%s) - REFINEMENT_STARTED_AT < 180 )); then echo available=true >> "$GITHUB_OUTPUT"; fi
+
+      - name: Check for merged test stats
+        id: merged-stats
+        if: steps.cache-preparation-budget.outputs.available == 'true'
+        timeout-minutes: 1
+        continue-on-error: true
+        run: if [[ -n "$(find .mutation-stats-cache -type f -print -quit 2>/dev/null)" ]]; then echo found=true >> "$GITHUB_OUTPUT"; fi
+
+      - name: Check cache transfer budget
+        id: cache-budget
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          REFINEMENT_STARTED_AT: ${{ steps.refinement-start.outputs.started }}
+        run: if (( $(date +%s) - REFINEMENT_STARTED_AT < 120 )); then echo available=true >> "$GITHUB_OUTPUT"; fi
+
+      - name: Save the merged test stats
+        id: save-merged-stats
+        if: success() && steps.merged-stats.outputs.found == 'true' && steps.cache-budget.outputs.available == 'true'
+        timeout-minutes: 1
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with: &refinement-test-stats-cache
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save the merged test stats, attempt 2
+        if: "!cancelled() && steps.save-merged-stats.outcome == 'failure'"
+        timeout-minutes: 1
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with: *refinement-test-stats-cache
 
   mutation-shard:
     needs: [plan, stats, refine]
@@ -428,12 +494,26 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
+        id: download-planned-mutation-test-selection
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &download-planned-mutation-test-selection
           name: mutation-selection
+
+      - name: Download planned mutation test selection, wait before attempt 2
+        if: steps.download-planned-mutation-test-selection.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download planned mutation test selection failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download planned mutation test selection, attempt 2
+        if: steps.download-planned-mutation-test-selection.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *download-planned-mutation-test-selection
 
       - name: Install the pinned nats server for the bus backend tests
         timeout-minutes: 3
@@ -452,11 +532,25 @@ jobs:
           exit 1
 
       - name: Download the shared mutation stats
+        id: download-the-shared-mutation-stats
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
           merge-multiple: true
+
+      - name: Download the shared mutation stats, wait before attempt 2
+        if: steps.download-the-shared-mutation-stats.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the shared mutation stats failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the shared mutation stats, attempt 2
+        if: steps.download-the-shared-mutation-stats.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
         uses: actions/cache/restore@v4
@@ -466,10 +560,24 @@ jobs:
           restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
 
       - name: Download the measured mutation plan
+        id: download-the-measured-mutation-plan
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &download-the-measured-mutation-plan
           name: mutation-plan
           path: .mutation-stats
+
+      - name: Download the measured mutation plan, wait before attempt 2
+        if: steps.download-the-measured-mutation-plan.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the measured mutation plan failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the measured mutation plan, attempt 2
+        if: steps.download-the-measured-mutation-plan.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *download-the-measured-mutation-plan
 
       - name: Mutate changed Python files
         env:
@@ -488,31 +596,41 @@ jobs:
 
       - name: Upload the tests that killed mutants
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
+          after-cancel: true
           name: mutation-killers-${{ matrix.shard }}
           path: .mutation-killers/
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 1
-          overwrite: true
+
+      - name: Stage shard replay evidence
+        if: always()
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
+        run: |
+          mkdir -p .mutation-gate
+          mv .mutation-gate .mutation-workspaces
+          python -m scripts.ci_mutation.evidence stage --output .mutation-workspaces --bundle .mutation-gate --shard "$SHARD" --shards "$SHARDS"
 
       - name: Upload shard mutation evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
+          after-cancel: true
           name: mutation-preflight-shard-${{ matrix.shard }}
           path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
           include-hidden-files: true
           retention-days: 7
-          overwrite: true
 
   # Readers take one report and the check named mutation, so every shard ends here.
   mutation:
     needs: [plan, stats, refine, mutation-shard]
     if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
       BASE: ${{ inputs.base || 'origin/dev' }}
     steps:
@@ -526,10 +644,25 @@ jobs:
 
       - name: Download every mutation shard report
         if: needs.plan.outputs.changed != '0'
+        id: download-every-mutation-shard-report
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &download-every-mutation-shard-report
           pattern: mutation-preflight-shard-*
           path: .mutation-shards
+
+      - name: Download every mutation shard report, wait before attempt 2
+        if: steps.download-every-mutation-shard-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download every mutation shard report failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+          rm -rf .mutation-shards
+
+      - name: Download every mutation shard report, attempt 2
+        if: steps.download-every-mutation-shard-report.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *download-every-mutation-shard-report
 
       - name: Restore the tests that killed this branch's earlier mutants
         if: needs.plan.outputs.changed != '0'
@@ -541,11 +674,25 @@ jobs:
 
       - name: Download the tests that killed mutants
         if: needs.plan.outputs.changed != '0'
+        id: download-the-tests-that-killed-mutants
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &download-the-tests-that-killed-mutants
           pattern: mutation-killers-*
           path: .mutation-stats/killers
           merge-multiple: true
+
+      - name: Download the tests that killed mutants, wait before attempt 2
+        if: steps.download-the-tests-that-killed-mutants.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the tests that killed mutants failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the tests that killed mutants, attempt 2
+        if: steps.download-the-tests-that-killed-mutants.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *download-the-tests-that-killed-mutants
 
       - name: Keep the tests that killed mutants for this branch's next plan
         if: needs.plan.outputs.changed != '0' && hashFiles('.mutation-stats/killers/*') != ''
@@ -566,13 +713,13 @@ jobs:
 
       - name: Upload complete mutation evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
+          after-cancel: true
           name: mutation-preflight-report
           path: .mutation-gate/
           include-hidden-files: true
           retention-days: 7
-          overwrite: true
 
       - name: Fail when a shard did not finish
         if: needs.plan.outputs.changed != '0' && needs.mutation-shard.result != 'success'

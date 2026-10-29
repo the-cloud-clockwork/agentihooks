@@ -11,8 +11,14 @@ pytestmark = pytest.mark.unit
 class Ledger:
     def __init__(self):
         self.doc = {"_meta": {"rev": 1, "events": []}, "followups": [], "questions": [], "tasks": []}
-        self.followups = []
+        self.followups, self.alerts = [], []
         self.now = 0
+
+    def raise_alert(self, slug, source, text, item=None):
+        self.alerts.append((source, item))
+
+    def close_item_alerts(self, slug, item, outcome):
+        pass
 
     def state(self, slug):
         return self.doc
@@ -182,12 +188,12 @@ def test_an_unreferenced_message_is_preserved(crew):
     assert herdr.prompts == []
 
 
-def test_an_unread_master_item_yields_one_follow_up_that_never_returns_to_the_master(crew):
+def test_an_unread_master_item_yields_one_alert_that_never_returns_to_the_master(crew):
     store, inbox, ledger, _ = crew
     item = inbox.send("sw-eng-1", "master@sw", "Check the deployment")
     for n in range(1, 25):
         ledger.now = item.created_at + n * 300_000
         wake(crew, ledger.now)
         event_pass(inbox, store, "sw", ledger.doc, ledger, ledger.now)
-    assert len(ledger.followups) == 1
+    assert ledger.alerts == [("inbox", item.id)] and ledger.followups == []
     assert [i.id for i in inbox.inbox("master@sw")] == [item.id]

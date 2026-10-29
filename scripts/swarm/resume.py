@@ -203,6 +203,7 @@ def requested(store, slug: str, agent, choice: str, now_ms: int) -> Outcome:
 
 RECOVERY = "outage-resumes"
 RECOVERY_ATTEMPTS = 3
+RECOVERY_HOLD_MS = 10 * 60 * 1000
 STUCK_HANDOFF = """## Intent
 Continue task {task}; the swarm retired {name} while its turns kept failing on a provider error.
 
@@ -326,6 +327,18 @@ def recovery_exhausted(store: RedisStore, slug: str, agent: AgentRecord) -> bool
     return record.get("state") == "exhausted" and record["identity"] == _recovery_identity(store, slug, agent)
 
 
+def recovery_holds(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> bool:
+    return recovery_pending(store, slug, agent) and any(
+        record["ended_at"] is None or now_ms - record["ended_at"] < RECOVERY_HOLD_MS
+        for record in outage.read(slug).values()
+    )
+
+
+def recovery_blocker(store: RedisStore, slug: str, agent: AgentRecord) -> str:
+    record = _recovery_record(store, slug, agent)
+    return record.get("blocked") or f"{record['attempts']} of {RECOVERY_ATTEMPTS} resume attempts made"
+
+
 def _recovery_current(store, slug, agent, context):
     rows = {task["id"]: task for task in context.ledger.state(slug)["tasks"]}
     record = _recovery_record(store, slug, agent)
@@ -345,6 +358,18 @@ def _recovery_text(slug, agent, task):
     )
 
 
+def _hold_reason(store, slug, agent, context, live, observed):
+    if not _recovery_current(store, slug, agent, context):
+        return "its task ownership changed"
+    if not live or (not observed.provider_error and observed.state == idle.WORKING):
+        return ""
+    if observed.typed or observed.prompt_title:
+        return "its pane holds input"
+    if observed.state not in {idle.IDLE, idle.WORKING} and not observed.provider_error:
+        return f"its pane reads {observed.state}"
+    return ""
+
+
 def recover_outages(
     slug: str, store: RedisStore, ledger: "Ledger", runtime: "Runtime", rows: dict, now_ms: int
 ) -> list[str]:
@@ -358,16 +383,14 @@ def recover_outages(
             continue
         record = _recovery_record(store, slug, agent)
         observed = runtime.observe(agent)
-        if record["last_at"] == now_ms or not _recovery_current(store, slug, agent, context):
+        if record["last_at"] == now_ms:
             continue
+        if held := _hold_reason(store, slug, agent, context, agent.name in live, observed):
+            store.redis.hset(key, agent.name, json.dumps({**record, "blocked": held}))
+            continue
+        record.pop("blocked", None)
         if agent.name in live and not observed.provider_error and observed.state == idle.WORKING:
             record["state"] = "done"
-        elif agent.name in live and (
-            observed.typed
-            or observed.prompt_title
-            or (observed.state not in {idle.IDLE, idle.WORKING} and not observed.provider_error)
-        ):
-            continue
         else:
             record["attempts"] += 1
             record["last_at"] = now_ms

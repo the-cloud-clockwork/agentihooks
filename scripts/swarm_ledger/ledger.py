@@ -207,7 +207,7 @@ def launch_token(slug, name):
         )
     client = ResourceClient(base(slug), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
     try:
-        return client.request(slug, "agent-token", {})["data"]["token"]
+        return retried(lambda: client.request(slug, "agent-token", {}), REMOTE_READ_ATTEMPTS)["data"]["token"]
     except urllib.error.HTTPError as exc:
         if exc.code not in (401, 403):
             raise
@@ -301,6 +301,8 @@ def talk(ops):
 
 
 def queue(slug, ops, service):
+    if outbox.holds(ops[0]["id"]):
+        return {"queued": ops[0]["id"]}
     who = Who.from_env()
     try:
         outbox.append(outbox.ledger_record(slug, ops, who.name if who.pinned else "", service))
@@ -603,10 +605,16 @@ def cmd_plan(args):
     phases = ledger_phase_cli.append_phases(
         plan, [phase["id"] for phase in resource(args.slug, "phases", collection=True)]
     )
-    send(args, "phase_append", phases=phases)
+    state = send(args, "phase_append", phases=phases)
+    repeats = ledger_phase_cli.repeats(state.get("_meta", {}).get("warnings", []), phases)
+    for warning in repeats.values():
+        print(warning, file=sys.stderr)
     print(
         json.dumps(
-            {"appended": [phase["phase"] for phase in phases], "planning": {p["phase"]: p["planning"] for p in phases}}
+            {
+                "appended": [phase["phase"] for phase in phases if phase["phase"] not in repeats],
+                "planning": {p["phase"]: p["planning"] for p in phases if p["phase"] not in repeats},
+            }
         )
     )
 
@@ -644,6 +652,7 @@ def cmd_followup(args):
             list="followups",
             text=args.value,
             **({"needs_operator": True} if args.needs_operator else {}),
+            **({"not_duplicate": args.not_duplicate} if args.not_duplicate else {}),
             **hive_fields(args),
             **({"task": task} if (task := os.environ.get("AGENTIHOOKS_SWARM_TASK")) else {}),
         )
@@ -871,7 +880,16 @@ def _task_set_fields(values):
     fields = dict(value.split("=", 1) for value in values if "=" in value)
     if len(fields) != len(values):
         sys.exit("task set takes FIELD=VALUE pairs")
-    for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls", "needs", "doc_items"):
+    for key in (
+        "depends_on",
+        "parked_on",
+        "territory",
+        "overlays",
+        "repositories",
+        "split_pulls",
+        "needs",
+        "doc_items",
+    ):
         if key in fields:
             fields[key] = task_list(key, fields[key])
     for key in [key for key in ("artifact", "follow_up", "workstation") if key in fields]:
@@ -891,6 +909,23 @@ def _task_set_fields(values):
     return fields
 
 
+def task_branch_fields(args: argparse.Namespace, fields: dict) -> dict:
+    if "branch" not in fields:
+        return fields
+    swarm = ports.swarm()
+    try:
+        repo = swarm.store.connect().config(args.slug).repo
+    except swarm.store.SwarmError:
+        return fields
+    task = resource(args.slug, f"tasks/{args.id}")
+    branches = {**task.get("repository_branches", {}), **fields.get("repository_branches", {})}
+    if fields["branch"]:
+        branches[repo] = fields["branch"]
+    else:
+        branches.pop(repo, None)
+    return {**fields, "repository_branches": branches}
+
+
 def cmd_task(args):
     refuse_unset_quote(args)
     if args.action == "add":
@@ -907,6 +942,7 @@ def cmd_task(args):
         return
     fields = _task_set_fields(args.values)
     refuse_plain_objects(fields)
+    fields = task_branch_fields(args, fields)
     quote = vars(args).get("quote")
     send(args, "task_update", item=f"tasks/{args.id}", fields=fields, **({"quote": quote} if quote else {}))
     print(json.dumps({"task": args.id, **fields}))
@@ -988,12 +1024,20 @@ def build_parser():
     phase.add_argument("--depends-on", default="")
     phase.add_argument("--planning", choices=["manual", "auto"], default=ledger_phases.PLANNING_DEFAULT)
     phase.add_argument("--release", action="store_true")
+    phase.add_argument(
+        "--not-duplicate", default="", help="why the phase differs from the one it resembles; skips the duplicate check"
+    )
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
     followup.add_argument("value")
     followup.add_argument("--status")
     followup.add_argument("--needs-operator", action="store_true")
     followup.add_argument("--hive", help="hive whose master owns the new follow up")
+    followup.add_argument(
+        "--not-duplicate",
+        default="",
+        help="why the follow up differs from the item it resembles; skips the duplicate check",
+    )
     question = sub.add_parser("question")
     question.add_argument("action", choices=["add"])
     question.add_argument("text")

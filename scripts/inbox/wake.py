@@ -1,20 +1,23 @@
 """Wake pass run by the swarm tick: prompt idle herdr panes holding pending inbox items, escalate items nobody reads.
 
 Ladder per pending item: up to three wakes one retry window apart, then an inbox item for the swarm master,
-then a follow-up on the ledger page. Every step is appended to the item's history, so the count survives restarts.
+then an alert on the ledger page, closed when the item closes. Every step is appended to the item's history, so the
+count survives restarts.
 """
 
+import uuid
 from dataclasses import dataclass, replace
 
+from scripts.hive import reports
 from scripts.inbox import addresses, exits
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.inbox.store import Item, redelivery_ms
+from scripts.inbox.store import CLOSED, Item, redelivery_ms
 from scripts.swarm import capabilities, idle, outage
 from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER, RedisStore, SwarmError
-from scripts.swarm_ledger import ledger_comments
+from scripts.swarm_ledger import ledger_alerts, ledger_comments
 
 MAX_WAKES = 3
 WINDOW_ENV = "AGENTIHOOKS_INBOX_RETRY_WINDOW_S"
@@ -28,6 +31,8 @@ WAKE_TEXT = (
     "msg reply or the swarm commands, never as text in this terminal, and close the rest."
 )
 WOKEN, TO_MASTER, TO_OPERATOR = "woken", "escalated_master", "escalated_operator"
+PASSED, FROZEN = "passed_master", "frozen"
+ALERTED = "alerted"
 
 
 def window_ms(environ):
@@ -39,11 +44,8 @@ def quiet_ms(environ):
 
 
 def typed_wake(inbox, agent):
-    from scripts.hive import reports
-
     return (
         bool(agent.pane_id)
-        and not reports.host(agent)
         and agent.lane != MASTER
         and not capabilities.of_agent(agent).push_inbox
         and not Dispatcher(inbox).owner(agent.name)
@@ -51,8 +53,9 @@ def typed_wake(inbox, agent):
 
 
 def decide(item, pane, history, now_ms, window, slug, since=0):
-    """pane is the receiver's herdr status, None when it sits outside herdr; the window clock skips the swarm's
-    outage time since the item's last step, and starts no earlier than since. since None holds the item."""
+    """pane is the receiver's herdr status, None when it sits outside herdr, FROZEN for a master waiting on an input
+    prompt while another master is live; the window clock skips the swarm's outage time since the item's last step,
+    and starts no earlier than since. since None holds the item."""
     if item.state != "pending" or item.fyi or since is None:
         return None
     steps = [e.get("event") for e in history]
@@ -60,6 +63,8 @@ def decide(item, pane, history, now_ms, window, slug, since=0):
         return None
     last = max(since, *(e["at"] for e in history))
     due = now_ms - last - outage.paused_ms(slug, last, now_ms) >= window
+    if pane == FROZEN:
+        return PASSED if due else None
     if TO_MASTER in steps:
         return TO_OPERATOR if due else None
     wakes = steps.count(WOKEN)
@@ -114,6 +119,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
         for action in _wake_world(
             world, slug, agents, herdr, ledger, _Clock(now_ms, window, quiet), _ladder(world, slug)
         )
+        + clear_alerts(world, slug, ledger)
     ]
 
 
@@ -142,11 +148,10 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(inbox, a)}
     boss = next((a for a in agents if a.lane == MASTER), None)
-    master = (boss.seat or boss.name) if boss else ""
+    master = _escalation_seat(inbox, slug, agents, boss)
     marks = SeenMarks(inbox.redis)
     statuses, prompted = {}, set()
-    actions = []
-    reads = _wake_inputs(inbox, slug, items, names, config, marks)
+    reads, actions = _pass_frozen(inbox, slug, agents, _wake_inputs(inbox, slug, items, names, config, marks), clock)
     doc = None
     for item in reads.items:
         receiver, held = reads.receivers[item.address]
@@ -164,20 +169,66 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
             statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
         since = reads.clocks[item.address]
         step = decide(item, statuses.get(receiver), reads.histories[item.id], now_ms, window, slug, since)
-        if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
+        if step == WOKEN and _still_held(inbox, held) and _wake(inbox.redis, slug, herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
-        elif step == TO_MASTER and master and receiver != boss.name and not _sent_from(inbox, item, boss, master):
+        elif (
+            step == TO_MASTER
+            and master not in ("", item.address)
+            and receiver != boss.name
+            and not _sent_from(inbox, item, boss, master)
+        ):
             raised = inbox.send(BY, master, _master_text(item), ref=f"inbox-escalation:{item.id}")
             inbox.note(item.id, TO_MASTER, BY, raised_note(master, raised.id), now_ms)
             actions.append(f"raised message {item.id} to {master}")
         elif step in (TO_MASTER, TO_OPERATOR):
-            if not post(inbox, item, lambda: ledger.followup(slug, _operator_text(item), needs_operator=True)):
+            notice = item.sender == ledger_alerts.SENDER
+            if not notice and not _alert(inbox, slug, ledger, item):
                 actions.append(f"the ledger page refused message {item.id}, closed it")
                 continue
-            inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)
+            shown = "its alert is already on the ledger page" if notice else "shown to the operator on the ledger page"
+            inbox.note(item.id, TO_OPERATOR, BY, shown, now_ms)
             actions.append(f"raised message {item.id} to the operator")
     return actions
+
+
+def _escalation_seat(inbox, slug, agents, boss):
+    """The lead master's seat, or a live master's while the lead waits on an input prompt."""
+    if boss is None:
+        return ""
+    return _spare_master(inbox, slug, agents, boss.name) or boss.seat or boss.name
+
+
+def _spare_master(inbox, slug, agents, receiver):
+    """A live master seat to take the mail of receiver, a master waiting on an input prompt; '' for anyone else."""
+    if not any(a.name == receiver and a.lane == MASTER and a.input_prompt for a in agents):
+        return ""
+    from scripts.inbox.pool import live_masters
+
+    return (live_masters(inbox.redis, slug, agents) or [""])[0]
+
+
+def _pass_frozen(inbox, slug, agents, reads, clock):
+    """Items whose receiver is a master waiting on an input prompt move to a live master's seat once their window
+    passes; the rest go on to the wake ladder."""
+    actions, kept, spares = [], [], {}
+    for item in reads.items:
+        receiver = reads.receivers[item.address][0]
+        if receiver not in spares:
+            spares[receiver] = _spare_master(inbox, slug, agents, receiver)
+        history, since = reads.histories[item.id], reads.clocks[item.address]
+        if spares[receiver] and decide(item, FROZEN, history, clock.now_ms, clock.window, slug, since) == PASSED:
+            actions += _pass(inbox, item, receiver, spares[receiver])
+        else:
+            kept.append(item)
+    return replace(reads, items=kept), actions
+
+
+def _pass(inbox, item, receiver, seat):
+    reason = f"{receiver} waits on an input prompt; passed to {seat}, a live master"
+    if inbox.redirect(item.id, BY, seat, reason, expected_receiver=None) is None:
+        return []
+    return [f"passed message {item.id} from {receiver} to {seat}"]
 
 
 def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
@@ -187,15 +238,19 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
     for agent in agents:
         if agent.harness != "codex" or not typed_wake(inbox, agent) or outage.open_records(slug):
             continue
-        mail = inbox.pending_mail(agent.name)
+        mail = [(world, item) for world in inbox.worlds() for item in world.pending_mail(agent.name)]
         if not mail:
             continue
         state = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
-        due = [item for item in mail if _wake_due(inbox, item, state, (names, config), (now_ms, window, slug))]
-        if not due or not _wake(herdr, agent, set()):
+        due = [
+            (world, item)
+            for world, item in mail
+            if _wake_due(world, item, state, (names, config), (now_ms, window, slug))
+        ]
+        if not due or not _wake(inbox.redis, slug, herdr, agent, set()):
             continue
-        for item in due:
-            inbox.note(item.id, WOKEN, BY, f"prompted {agent.name} to read its inbox", now_ms)
+        for world, item in due:
+            world.note(item.id, WOKEN, BY, f"prompted {agent.name} to read its inbox", now_ms)
             actions.append(f"woke {agent.name} for message {item.id}")
     return actions
 
@@ -269,14 +324,22 @@ def _status(herdr, agent):
 
 
 def _pane_state(redis, slug, herdr, agent, now_ms, quiet):
-    """A ready pane counts as in use while the operator prompted it inside the quiet window or its input line holds text."""
-    state = _status(herdr, agent)
+    """A ready pane counts as in use while the operator prompted it inside the quiet window or its input line holds text.
+    A remote pane is read from its hook heartbeat; the local herdr cannot see it."""
+    remote = reports.host(agent)
+    state = _beat_state(redis, slug, agent, now_ms) if remote else _status(herdr, agent)
     if state not in READY:
         return state
     last = idle.last_prompt(redis, slug, agent.name)
     if last is not None and now_ms - last < quiet:
         return IN_USE
-    return IN_USE if _typing(herdr, agent) else state
+    return IN_USE if not remote and _typing(herdr, agent) else state
+
+
+def _beat_state(redis, slug, agent, now_ms):
+    beat = idle.heartbeat(redis, slug, agent.name) or {"state": idle.WORKING, "at": now_ms}
+    busy = beat.get("state") == idle.WORKING and now_ms - beat["at"] < idle.STALE_MS
+    return idle.WORKING if busy else idle.IDLE
 
 
 def _typing(herdr, agent):
@@ -286,15 +349,28 @@ def _typing(herdr, agent):
         return ""
 
 
-def _wake(herdr, agent, prompted):
+def _wake(redis, slug, herdr, agent, prompted):
     if agent.name in prompted:
         return True
     try:
-        herdr.prompt(agent, WAKE_TEXT)
+        if host := reports.host(agent):
+            if reports.Reports(redis).read(host) is None:
+                return False
+            _hive_wake(redis, host, slug, agent)
+        else:
+            herdr.prompt(agent, WAKE_TEXT)
     except Exception:
         return False
     prompted.add(agent.name)
     return True
+
+
+def _hive_wake(redis, host, slug, agent):
+    from scripts.hive.orders import CommandOrder, Orders
+
+    order_id = f"wake:{agent.execution_id}:{agent.generation}:{uuid.uuid4().hex}"
+    order = CommandOrder(order_id, "nudge", slug, agent.name, agent.execution_id, agent.generation, WAKE_TEXT)
+    Orders(redis).command(host, order)
 
 
 def _gist(item):
@@ -313,3 +389,24 @@ def _operator_text(item):
     plain = f"A message from {item.sender} to {item.address} is still unread after every wake and escalation"
     quoted = f"{plain}: {_gist(item)}"
     return plain + "." if ledger_comments.problems(quoted, "item") else quoted
+
+
+def _alert(inbox, slug, ledger, item):
+    text = f"{_operator_text(item)} (message {item.id})"
+    inbox.redis.sadd(inbox.key(ALERTED, slug), item.id)
+    return post(inbox, item, lambda: ledger.raise_alert(slug, ledger_alerts.INBOX, text, item=item.id))
+
+
+def clear_alerts(inbox, slug, ledger):
+    """Close the ledger alert of each escalated item that has since closed or gone."""
+    key, actions = inbox.key(ALERTED, slug), []
+    for item_id in sorted(inbox.redis.smembers(key)):
+        if inbox.redis.exists(inbox.key("item", item_id)) and inbox.get(item_id).state not in CLOSED:
+            continue
+        try:
+            ledger.close_item_alerts(slug, item_id, "The message was closed.")
+        except SwarmError:
+            continue
+        inbox.redis.srem(key, item_id)
+        actions.append(f"cleared the ledger alert for message {item_id}")
+    return actions

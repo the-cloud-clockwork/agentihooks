@@ -202,7 +202,80 @@ def test_a_wait_under_a_second_before_the_deadline_still_waits(monkeypatch, cloc
     assert len(clock) == 1 and 0 < clock[0] <= 0.5
 
 
+BUDGET = "HTTP/2.0 200 OK\nX-Ratelimit-Limit: 5000\nX-Ratelimit-Remaining: 4321\nX-Ratelimit-Reset: 0\n\n{}"
+
+
+def _budget(monkeypatch, stdout=BUDGET, error=None):
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append((command, kwargs))
+        if error:
+            raise error
+        return subprocess.CompletedProcess(command, 0, stdout=stdout)
+
+    monkeypatch.setattr(rate_limit.subprocess, "run", run)
+    return commands
+
+
+def test_budget_prints_the_remaining_calls_and_reset_from_the_headers(monkeypatch, capsys):
+    commands = _budget(monkeypatch)
+    rate_limit.budget("Queue verification", "start")
+    assert commands == [
+        (["gh", "api", "--include", "rate_limit"], {"capture_output": True, "check": True, "timeout": 30, "text": True})
+    ]
+    assert capsys.readouterr() == (
+        "",
+        "Queue verification start: 4321 of 5000 App API calls left, resets 1970-01-01T00:00:00Z\n",
+    )
+
+
+@pytest.mark.parametrize(
+    "stdout, error",
+    [
+        ("HTTP/2.0 200 OK\nX-Ratelimit-Limit: 5000\n\n{}", None),
+        ("HTTP/2.0 200 OK\nX-Ratelimit-Limit: 5000\nX-Ratelimit-Remaining: 1\nX-Ratelimit-Reset: soon\n\n{}", None),
+        ("", subprocess.CalledProcessError(1, ["gh"], stderr="gh: Bad credentials (HTTP 401)")),
+        ("", subprocess.TimeoutExpired(["gh"], 30)),
+        ("", FileNotFoundError("gh")),
+        (
+            "HTTP/2.0 200 OK\nX-Ratelimit-Limit: 5000\nX-Ratelimit-Remaining: 1\nX-Ratelimit-Reset: 1000000000000000000000000000000\n",
+            None,
+        ),
+        (
+            "HTTP/2.0 200 OK\nX-Ratelimit-Limit: 5000\nX-Ratelimit-Remaining: 1\nX-Ratelimit-Reset: 999999999999999\n",
+            None,
+        ),
+    ],
+)
+def test_an_unreadable_budget_is_named_without_failing_the_gate(monkeypatch, capsys, stdout, error):
+    _budget(monkeypatch, stdout, error)
+    rate_limit.budget("Shard verification", "end")
+    assert capsys.readouterr() == ("", "Shard verification end: App API budget unreadable\n")
+
+
+def test_budget_reads_header_names_in_any_case(monkeypatch, capsys):
+    _budget(monkeypatch, "HTTP/2.0 200 OK\nx-ratelimit-limit: 10\nx-ratelimit-remaining: 2\nx-ratelimit-reset: 60\n\n")
+    rate_limit.budget("Shard verification", "start")
+    assert (
+        capsys.readouterr().err == "Shard verification start: 2 of 10 App API calls left, resets 1970-01-01T00:01:00Z\n"
+    )
+
+
+def test_budget_prints_the_reset_in_utc_whatever_the_runner_zone(monkeypatch, capsys):
+    _budget(monkeypatch)
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    rate_limit.time.tzset()
+    try:
+        rate_limit.budget("Shard verification", "start")
+    finally:
+        monkeypatch.undo()
+        rate_limit.time.tzset()
+    assert capsys.readouterr().err.endswith("resets 1970-01-01T00:00:00Z\n")
+
+
 def test_the_queue_gate_reports_its_calls(monkeypatch, capsys):
+    _budget(monkeypatch)
     monkeypatch.setattr(rate_limit, "calls", 4)
     monkeypatch.setattr(ci_gate_queue, "watch", lambda *args: None)
     for name, value in {
@@ -216,10 +289,15 @@ def test_the_queue_gate_reports_its_calls(monkeypatch, capsys):
     }.items():
         monkeypatch.setenv(name, value)
     ci_gate_queue.main()
-    assert capsys.readouterr().err == "Queue verification made 4 GitHub API calls\n"
+    assert capsys.readouterr().err == (
+        "Queue verification start: 4321 of 5000 App API calls left, resets 1970-01-01T00:00:00Z\n"
+        "Queue verification end: 4321 of 5000 App API calls left, resets 1970-01-01T00:00:00Z\n"
+        "Queue verification made 4 GitHub API calls\n"
+    )
 
 
 def test_the_shard_check_reports_its_calls(monkeypatch, capsys):
+    _budget(monkeypatch)
     monkeypatch.setattr(rate_limit, "calls", 5)
     monkeypatch.setattr(ci_gate_shards, "watch", lambda *args, **kwargs: None)
     for name, value in {
@@ -230,7 +308,48 @@ def test_the_shard_check_reports_its_calls(monkeypatch, capsys):
     }.items():
         monkeypatch.setenv(name, value)
     ci_gate_shards.main()
-    assert capsys.readouterr().err == "Shard verification made 5 GitHub API calls\n"
+    assert capsys.readouterr().err == (
+        "Shard verification start: 4321 of 5000 App API calls left, resets 1970-01-01T00:00:00Z\n"
+        "Shard verification end: 4321 of 5000 App API calls left, resets 1970-01-01T00:00:00Z\n"
+        "Shard verification made 5 GitHub API calls\n"
+    )
+
+
+def _fail(*args, **kwargs):
+    raise TimeoutError("verification timed out")
+
+
+def test_a_failed_queue_verification_still_logs_its_end_budget(monkeypatch, capsys):
+    _budget(monkeypatch)
+    monkeypatch.setattr(ci_gate_queue, "watch", _fail)
+    for name, value in {
+        "GITHUB_EVENT_NAME": "merge_group",
+        "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_RUN_ID": "1",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "QUEUE_PLAN": "[]",
+        "GITHUB_REF": "refs/queue",
+        "GITHUB_SHA": "head",
+    }.items():
+        monkeypatch.setenv(name, value)
+    with pytest.raises(TimeoutError):
+        ci_gate_queue.main()
+    assert "Queue verification end: 4321 of 5000 App API calls left" in capsys.readouterr().err
+
+
+def test_a_failed_shard_check_still_logs_its_end_budget(monkeypatch, capsys):
+    _budget(monkeypatch)
+    monkeypatch.setattr(ci_gate_shards, "watch", _fail)
+    for name, value in {
+        "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_RUN_ID": "1",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "SHARDS": "[]",
+    }.items():
+        monkeypatch.setenv(name, value)
+    with pytest.raises(TimeoutError):
+        ci_gate_shards.main()
+    assert "Shard verification end: 4321 of 5000 App API calls left" in capsys.readouterr().err
 
 
 def test_the_test_planner_reports_its_calls(monkeypatch, capsys, tmp_path):
@@ -239,3 +358,42 @@ def test_the_test_planner_reports_its_calls(monkeypatch, capsys, tmp_path):
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     ci_test_plan.main(["--repository", "o/r", "--head", "h", "--out", str(tmp_path / "plan.json"), "--before", "t"])
     assert capsys.readouterr().err == "The test planner made 6 GitHub API calls\n"
+
+
+@pytest.mark.parametrize("status, expected", [(200, 2), (304, 1)])
+def test_each_conditional_retry_attempt_is_attributed_without_charging_304(
+    monkeypatch, tmp_path, clock, status, expected
+):
+    from scripts.swarm import github_reads
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("GH_TOKEN", "conditional-retry-test-token")
+    commands = []
+    outputs = iter(["secondary rate limit", f"HTTP/2.0 {status}\r\nETag: test\r\n\r\n{{}}"])
+    monkeypatch.setattr(rate_limit.subprocess, "run", _gh(outputs, commands))
+    with github_reads.calling("lost_runner.jobs"):
+        rate_limit.gh_api(["repos/o/r/jobs", "--include", "-H", "If-None-Match: test"], timeout=60, text=True)
+    assert clock == [60]
+    assert len(commands) == 2
+    assert github_reads.counts(1_000, 1_001) == {"lost_runner.jobs": expected}
+
+
+def test_paginated_retry_helper_counts_every_page_without_audit_duplicates(monkeypatch, tmp_path, clock):
+    from scripts import gh_audit
+    from scripts.swarm import github_reads
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    commands = []
+    raw = 'HTTP/2.0 200\r\nX-Page: 1\r\n\r\n{"jobs": [1]}\n\nHTTP/2.0 200\r\nX-Page: 2\r\n\r\n{"jobs": [2]}'
+
+    def run(command, **kwargs):
+        commands.append(command)
+        gh_audit.audit("subprocess.Popen", (command[0], command, None, None))
+        return subprocess.CompletedProcess(command, 0, stdout=raw)
+
+    monkeypatch.setattr(rate_limit.subprocess, "run", run)
+    with github_reads.calling("lost_runner.jobs"):
+        result = rate_limit.gh_api(["--paginate", "repos/o/r/jobs"], timeout=60, text=True)
+    assert commands == [["gh", "api", "--paginate", "repos/o/r/jobs", "--include"]]
+    assert result.stdout == '{"jobs": [1]}\n{"jobs": [2]}'
+    assert github_reads.counts(1_000, 1_001) == {"lost_runner.jobs": 2}

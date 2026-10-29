@@ -1,0 +1,27 @@
+{
+  "corpus": "engineering",
+  "aliases": {"/work/agentihooks": "agentihooks"},
+  "batch_size": 2,
+  "grant": {"principal": "operator", "projects": ["agentihooks"]},
+  "private_label": "Drain the runner pool",
+  "sources": [
+    {"provider": "claude", "installation": "laptop", "native_session_id": "s-shared", "location": "laptop-copy-a/s-shared.jsonl", "raw": "laptop-copy-a/s-shared.jsonl"},
+    {"provider": "claude", "installation": "laptop", "native_session_id": "s-shared", "location": "laptop-copy-b/s-shared.jsonl", "raw": "laptop-copy-b/s-shared.jsonl"},
+    {"provider": "claude", "installation": "laptop", "native_session_id": "s-shared", "location": "legacy-redis/laptop/s-shared", "preview": [
+      {"entry_type": "user", "timestamp": "2026-03-02T09:00:00Z", "content": "List the open migration tasks.", "tool_names": [], "uuid": "l-u1"}
+    ]},
+    {"provider": "claude", "installation": "desktop", "native_session_id": "s-shared", "location": "desktop/s-shared.jsonl", "raw": "desktop/s-shared.jsonl"},
+    {"provider": "claude", "installation": "laptop", "native_session_id": "s-preview", "location": "legacy-redis/laptop/s-preview", "preview": [
+      {"entry_type": "user", "timestamp": "2025-11-20T07:30:00Z", "content": "Pin the chart version.", "tool_names": [], "uuid": "p-u1"},
+      {"entry_type": "assistant", "timestamp": "2025-11-20T07:30:04Z", "content": "Pinned the chart to the release tag.", "tool_names": ["Edit"], "uuid": "p-a1"}
+    ]},
+    {"provider": "claude", "installation": "laptop", "native_session_id": "s-vector", "location": "legacy-vectors/laptop/s-vector", "vectors": [
+      {"chunk_idx": 1, "timestamp": "2025-10-02T12:00:09Z", "text_preview": "User: Retry the sync.\nAssistant: The sync finished.\n"},
+      {"chunk_idx": 0, "timestamp": "2025-10-02T12:00:00Z", "text_preview": "User: Show the sync state.\nAssistant: The sync is stuck.\n"}
+    ]},
+    {"provider": "claude", "installation": "laptop", "native_session_id": "s-missing", "location": "legacy-index/laptop/s-missing"},
+    {"provider": "claude", "installation": "laptop", "native_session_id": "s-conflict", "location": "laptop-copy-a/s-conflict.jsonl", "raw": "laptop-copy-a/s-conflict.jsonl"},
+    {"provider": "claude", "installation": "laptop", "native_session_id": "s-conflict", "location": "laptop-copy-b/s-conflict.jsonl", "raw": "laptop-copy-b/s-conflict.jsonl"},
+    {"provider": "claude", "installation": "laptop", "native_session_id": "s-forged", "location": "laptop-copy-a/s-forged.jsonl", "raw": "laptop-copy-a/s-forged.jsonl", "raw_sha256": "0000000000000000000000000000000000000000000000000000000000000000"}
+  ]
+}

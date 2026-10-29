@@ -4,7 +4,7 @@ from scripts import quota_freshness, quota_state
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import capacity, quota_view
 from scripts.swarm.health.findings import MINUTE_MS, Finding, Limits
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import MASTER, RedisStore
 
 
 def draining(account: dict, limits: Limits, now: float) -> bool:
@@ -37,6 +37,8 @@ def findings(store: RedisStore, slug: str, limits: Limits, now_ms: int) -> list[
         if agent.state != "working" or agent.idle_ticks or agent.name not in warned:
             continue
         if account is None or not draining(account, limits, now_ms / 1000):
+            continue
+        if agent.lane == MASTER and account.get("reserved"):
             continue
         try:
             warned_at = inbox.get(warned[agent.name]).created_at

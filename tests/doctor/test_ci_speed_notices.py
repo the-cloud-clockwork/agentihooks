@@ -44,8 +44,9 @@ def test_finished_runs_are_mentioned_once_when_group_members_join_leave_or_retur
                 loop.verdicts(store, DOCTOR).judge(identity, "established", "investigated", "reader", NOW)
     batch[:] = [second, finished(103, kind, "cancelled"), finished(104, kind, "superseded")]
     loop.speed(RedisStore(store.redis), DOCTOR, WATCHED, NOW + 60000)
+    expected = {"101": 1} if judged else {"101": 1, "102": 1}
     for slug in (DOCTOR, WATCHED):
-        assert mentions(store, slug, kind) == {"101": 1, "102": 1}
+        assert mentions(store, slug, kind) == expected
     state = json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))
     group = next(entry for entry in state["groups"].values() if entry["kind"] == kind)
     assert {member["run"] for member in group["members"].values()} == {"101", "102"}
@@ -54,7 +55,7 @@ def test_finished_runs_are_mentioned_once_when_group_members_join_leave_or_retur
     batch[:] = [first, second]
     loop.speed(RedisStore(store.redis), DOCTOR, WATCHED, NOW + 3660000)
     for slug in (DOCTOR, WATCHED):
-        assert mentions(store, slug, kind) == {"101": 1, "102": 1}
+        assert mentions(store, slug, kind) == expected
 
 
 def test_an_unconfirmed_group_does_not_hide_finished_groups_later_in_the_pass(store, monkeypatch):  # noqa: F811

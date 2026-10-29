@@ -298,6 +298,10 @@ def main(
         return listing()
     if options.remove is not None:
         return removal(options.remove, options.openbao, environ, Deps(console=console, opener=opener))
+    from scripts.gates.entry import native
+
+    if native("sign-ins", "claude-login", environ):
+        return 2
     if options.master:
         return master(options.openbao, environ, Deps(console=console, opener=opener), options.slot)
     raw = _raw_slug(options.slug, console, parser)

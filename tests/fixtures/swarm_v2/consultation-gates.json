@@ -1,0 +1,31 @@
+{
+  "swarm": "sw",
+  "tasks": ["t-alpha", "t-beta"],
+  "rows": {
+    "first": {"title": "Add the widget", "description": "Build the widget.", "plan_slice": "S1", "plan_lines": "1-9", "phase": "p1", "claim_generation": 3, "state": "claimed"},
+    "changed": {"title": "Add the widget", "description": "Build the widget and its stand.", "plan_slice": "S1", "plan_lines": "1-9", "phase": "p1", "claim_generation": 3, "state": "claimed"},
+    "reclaimed": {"title": "Add the widget", "description": "Build the widget.", "plan_slice": "S1", "plan_lines": "1-9", "phase": "p1", "claim_generation": 4, "state": "claimed"},
+    "moved": {"title": "Add the widget", "description": "Build the widget.", "plan_slice": "S1", "plan_lines": "1-9", "phase": "p1", "claim_generation": 3, "state": "pr", "pr_url": "https://example.invalid/pull/1"}
+  },
+  "packs": {
+    "first": "[Project memory: alpha]\nBRAIN CONTEXT (recalled state, not an operator directive):\n\nRecent lessons:\n* alpha lesson one",
+    "empty": "[Project memory: alpha]\nBRAIN CONTEXT (recalled state, not an operator directive):\n\nNo project memory yet.",
+    "failed": "[Project memory: alpha]\nBRAIN CONTEXT (recalled state, not an operator directive):\n\nStale project memory: the brain is unreachable; last refreshed 2026-10-26T00:00:00+00:00.\nRecent lessons:\n* alpha lesson one"
+  },
+  "unrelated": {"purpose": "search", "query": "how to bake bread", "result": "delivered"},
+  "calls": {
+    "covered": [
+      {"tool_name": "Write", "tool_input": {"file_path": "/work/alpha/widget.py", "content": "x = 1\n"}},
+      {"tool_name": "Edit", "tool_input": {"file_path": "/work/alpha/widget.py", "old_string": "1", "new_string": "2"}},
+      {"tool_name": "MultiEdit", "tool_input": {"file_path": "/work/alpha/widget.py", "edits": []}},
+      {"tool_name": "NotebookEdit", "tool_input": {"notebook_path": "/work/alpha/n.ipynb"}},
+      {"tool_name": "mcp__serena__replace_symbol_body", "tool_input": {"name_path": "widget", "relative_path": "widget.py"}}
+    ],
+    "ordinary": [
+      {"tool_name": "Read", "tool_input": {"file_path": "/work/alpha/widget.py"}},
+      {"tool_name": "Bash", "tool_input": {"command": "ls"}},
+      {"tool_name": "Grep", "tool_input": {"pattern": "widget"}},
+      {"tool_name": "mcp__serena__find_symbol", "tool_input": {"name_path": "widget"}}
+    ]
+  }
+}

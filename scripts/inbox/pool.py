@@ -27,8 +27,8 @@ def number(address: str) -> int:
     return 1 if seat == MASTER else int(seat.removeprefix(f"{MASTER}-"))
 
 
-def live_masters(redis, slug: str) -> list[str]:
-    agents = RedisStore(redis).agents(slug)
+def live_masters(redis, slug: str, agents: list | None = None) -> list[str]:
+    agents = RedisStore(redis).agents(slug) if agents is None else agents
     waiting = {agent.name for agent in agents if agent.input_prompt}
     return [seat for seat, name in masters.held(redis, slug, agents).items() if is_seat(seat) and name not in waiting]
 

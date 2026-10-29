@@ -400,6 +400,9 @@ def test_a_relayed_rank_needs_three_of_his_words_naming_the_rank(quote, warning)
     [
         ("urgent", "do this one next please", True),
         ("urgent", "make it urgent now", True),
+        ("urgent", "I need you to prioritize urgency: healthy hives", True),
+        ("urgent", "fix the hives urgently please", True),
+        ("high", "prioritize urgency on hives", False),
         ("high", "make it highest now", False),
         ("low", "low", False),
         ("normal", "keep it normal", True),

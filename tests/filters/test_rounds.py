@@ -217,8 +217,10 @@ def test_conditions_surface_fourth_write_as_flag_context(filtered, filters_dir):
     ]
 
 
-def test_classifier_cleared_target_resets_rounds(filtered, stub):
+def test_classifier_cleared_target_resets_rounds(filtered, stub, monkeypatch):
     from pathlib import Path
+
+    monkeypatch.setenv("AGENTIHOOKS_FILTER_CACHE_TTL_S", "0")
 
     path = Path(filtered["path"])
     path.write_text(path.read_text().replace("mode: finders", "mode: both"))

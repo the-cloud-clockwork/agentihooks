@@ -193,12 +193,12 @@ def waiting_of(tasks, **doc):
     return seconds_of(found)
 
 
-def test_the_tick_readiness_exempts_the_doctor_fix_phase_from_a_focus_and_needs_no_task_list():
+def test_tick_readiness_keeps_own_focus_nonexclusive_and_needs_no_task_list():
     from scripts.doctor import loop
 
     task = {"id": "t3", "state": "open", "phase": loop.FIX_PHASE}
     doc = {"tasks": [task], "freezes": [{"verb": "focus", "target": "tasks/t9"}]}
-    assert [stages.claimable(doc, loop.FIX_PHASE)(task), stages.claimable(doc, "")(task)] == [True, False]
+    assert [stages.claimable(doc, loop.FIX_PHASE)(task), stages.claimable(doc, "")(task)] == [True, True]
     assert stages.claimable({}, "")({"id": "t3", "state": "open"}) is True
 
 

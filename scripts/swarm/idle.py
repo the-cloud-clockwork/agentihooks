@@ -64,13 +64,15 @@ def remember_wait(redis, slug: str, name: str, entry: dict, end: int, prefix: st
 
 
 def wait_history(redis, slug: str, name: str) -> list[dict]:
+    from scripts.hive import scope
     from scripts.swarm.naming import NameRegistry
 
     names = NameRegistry(redis)
     name, prefix = _resolved(redis, slug, name)
+    sources = dict.fromkeys((PREFIX, prefix, *(f"{scope.root(hive)}:swarm" for hive in scope.joined(redis))))
     entries = {}
     for candidate in [*names.aliases(name), name]:
-        for source in dict.fromkeys((PREFIX, prefix)):
+        for source in sources:
             entries.update(redis.hgetall(key(slug, "wait-history", candidate, source)))
     return sorted((json.loads(raw) for raw in entries.values()), key=lambda held: held["at"])
 

@@ -105,6 +105,10 @@ def main(
 ) -> int:
     environ = os.environ if environ is None else environ
     options = _parser().parse_args(args)
+    from scripts.gates.entry import native
+
+    if native("sign-ins", "codex-login", environ):
+        return 2
     print(term_colors.blue(aicode_tokens.SLUG_NOTE.format(prefix=CODEX_TOKEN_PREFIX)))
     try:
         slug = aicode_tokens.slug(options.slug)

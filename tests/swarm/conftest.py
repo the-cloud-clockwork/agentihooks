@@ -2,7 +2,16 @@ import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
 from scripts.gates import intent
-from scripts.swarm import host_budget, model_pick, priority_sweep, profile_choice, runtime, slice_screen, trace_plan
+from scripts.swarm import (
+    cli,
+    host_budget,
+    model_pick,
+    priority_sweep,
+    profile_choice,
+    runtime,
+    slice_screen,
+    trace_plan,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +42,12 @@ def roomy_host(monkeypatch, request):
     monkeypatch.setattr(runtime.HerdrRuntime, "host", lambda self: sample)
     if request.module.__name__.rpartition(".")[2] != "test_host_budget":
         monkeypatch.setattr(host_budget, "read_host", lambda: sample)
+
+
+@pytest.fixture(autouse=True)
+def below_the_blocker_gate(monkeypatch, request):
+    if request.module.__name__.rpartition(".")[2] != "test_block_gate":
+        monkeypatch.setattr(cli, "_block_refusal", lambda store, slug, task: "")
 
 
 @pytest.fixture

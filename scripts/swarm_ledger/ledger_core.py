@@ -36,6 +36,7 @@ import ledger_verdict
 import orjson
 
 from scripts.swarm_ledger import (
+    ledger_blockers,
     ledger_freezes,
     ledger_groups,
     ledger_phases,
@@ -108,6 +109,7 @@ EXTENSION_OPS = {
         ledger_time_left,
         ledger_freezes,
         ledger_events_ack,
+        ledger_blockers,
     )
     for name in module.OPS
 }

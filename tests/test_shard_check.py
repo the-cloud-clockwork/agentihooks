@@ -226,3 +226,118 @@ def test_supplied_collection_is_verified_without_installed_dependencies(tmp_path
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "2 collected tests, 0 ran zero times or more than once" in result.stdout
+
+
+LEG = [
+    "tests/test_a.py::one",
+    "tests/test_a.py::two",
+    "tests/test_a.py::three",
+    "tests/test_b.py::four",
+    "tests/test_b.py::five",
+    "tests/test_b.py::six",
+]
+
+
+def _branch_plan(tmp_path, tests):
+    path = tmp_path / "reused-branch.json"
+    run = {"run": 5, "attempt": 1, "commit": "c" * 40, "head": "d" * 40, "tests": tests}
+    path.write_text(json.dumps({"version": 1, "runs": [run], "tests": tests}))
+    return path
+
+
+def _grade(tmp_path, shards, *args, collected=ALL, hashed=True):
+    collection = tmp_path / "collected.json"
+    collection.write_text(json.dumps(collected))
+    paths = []
+    for index, nodeids in enumerate(shards, 1):
+        path = tmp_path / f"durations-3.12-{index}" / "durations.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps(dict.fromkeys(nodeids, 0.1)))
+        if hashed:
+            (path.parent / "durations.sha256").write_text("a" * 64 + "\n")
+        paths.append(str(path))
+    return subprocess.run(
+        [sys.executable, "-m", "tests.shard_check", *paths, "--collected", str(collection), *args],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_a_single_dev_plan_prints_exactly_the_line_it_printed_before(tmp_path):
+    plan = _plan(tmp_path, [ALL[0], ALL[2]])
+    result = _grade(tmp_path, [[ALL[1]], [ALL[3]]], "--reused", str(plan))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "4 collected tests, 0 ran zero times or more than once, 2 reused\n"
+
+
+def test_dev_and_pull_request_plans_together_skip_their_tests_and_the_rest_run_once(tmp_path):
+    dev, branch = _plan(tmp_path, [ALL[0]]), _branch_plan(tmp_path, [ALL[2]])
+    result = _grade(tmp_path, [[ALL[1]], [ALL[3]]], "--reused", str(dev), "--reused", str(branch))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "4 collected tests, 0 ran zero times or more than once, 2 reused" in result.stdout
+
+
+def test_a_test_reused_from_a_pull_request_run_that_ran_is_red(tmp_path):
+    dev, branch = _plan(tmp_path, [ALL[0]]), _branch_plan(tmp_path, [ALL[2]])
+    result = _grade(tmp_path, [ALL[1:2], ALL[2:]], "--reused", str(dev), "--reused", str(branch))
+    assert result.returncode == 1
+    assert f"{ALL[2]} ran 1 times though reused" in result.stdout
+
+
+def test_a_test_neither_plan_reuses_must_still_run(tmp_path):
+    dev, branch = _plan(tmp_path, [ALL[0]]), _branch_plan(tmp_path, [ALL[2]])
+    result = _grade(tmp_path, [[ALL[1]]], "--reused", str(dev), "--reused", str(branch))
+    assert result.returncode == 1
+    assert f"{ALL[3]} ran 0 times" in result.stdout
+
+
+def test_one_leg_is_graded_against_its_own_files_and_counts_both_reuse_sources(tmp_path):
+    dev, branch = _plan(tmp_path, [LEG[0], LEG[3]]), _branch_plan(tmp_path, [LEG[1], LEG[4]])
+    args = ["--reused", str(dev), "--reused", str(branch), "--within", "tests/test_a.py", "--leg", "3"]
+    result = _grade(tmp_path, [[LEG[2]]], *args, collected=LEG, hashed=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines() == [
+        "3 collected tests, 0 ran zero times or more than once, 2 reused",
+        "Leg 3: ran 1, reused 1 from dev, 1 from pull request runs",
+    ]
+
+
+def test_a_leg_is_red_for_its_own_test_that_did_not_run_and_silent_on_other_legs(tmp_path):
+    dev, branch = _plan(tmp_path, [LEG[0]]), _branch_plan(tmp_path, [LEG[1]])
+    args = ["--reused", str(dev), "--reused", str(branch), "--within", "tests/test_a.py", "--leg", "3"]
+    result = _grade(tmp_path, [[]], *args, collected=LEG, hashed=False)
+    assert result.returncode == 1
+    assert f"{LEG[2]} ran 0 times" in result.stdout
+    assert "test_b.py" not in result.stdout
+
+
+def test_a_leg_whose_files_hold_no_collected_test_is_red(tmp_path):
+    result = _grade(tmp_path, [[LEG[0]]], "--within", "tests/test_gone.py", collected=LEG, hashed=False)
+    assert result.returncode == 1
+    assert "::error::No collected test is in tests/test_gone.py" in result.stdout
+
+
+def test_a_leg_file_given_with_a_leading_dot_slash_still_names_its_tests(tmp_path):
+    dev = _plan(tmp_path, [LEG[0], LEG[1]])
+    args = ["--reused", str(dev), "--within", "./tests/test_a.py", "--leg", "1"]
+    result = _grade(tmp_path, [[LEG[2]]], *args, collected=LEG, hashed=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Leg 1: ran 1, reused 2 from dev, 0 from pull request runs" in result.stdout
+
+
+def test_a_deselect_output_counts_its_branch_tests_as_reused_from_pull_request_runs(tmp_path):
+    deselected = tmp_path / "reused.json"
+    deselected.write_text(json.dumps({"tests": [LEG[0], LEG[1]], "files": [], "branch": [LEG[1]]}))
+    args = ["--reused", str(deselected), "--within", "tests/test_a.py", "--leg", "2"]
+    result = _grade(tmp_path, [[LEG[2]]], *args, collected=LEG, hashed=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Leg 2: ran 1, reused 1 from dev, 1 from pull request runs" in result.stdout
+
+
+def test_an_unreadable_pull_request_plan_is_red_and_named(tmp_path):
+    dev, branch = _plan(tmp_path, [ALL[0]]), tmp_path / "reused-branch.json"
+    branch.write_text(json.dumps({"runs": []}))
+    result = _grade(tmp_path, [ALL[1:]], "--reused", str(dev), "--reused", str(branch))
+    assert result.returncode == 1
+    assert f"::error::Cannot read the test plan at {branch}" in result.stdout

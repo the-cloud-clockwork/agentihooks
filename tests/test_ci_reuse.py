@@ -267,13 +267,15 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
     assert steps in [
-        diagnostic(
-            forward(
-                finish(
-                    rerun(
-                        ci_reuse.inline_mutation(
-                            ci_reuse.postgres_required(
-                                ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+        ci_reuse.test_only_sonar(
+            diagnostic(
+                forward(
+                    finish(
+                        rerun(
+                            ci_reuse.inline_mutation(
+                                ci_reuse.postgres_required(
+                                    ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+                                )
                             )
                         )
                     )
@@ -441,6 +443,19 @@ def test_a_source_run_must_be_a_completed_successful_required_run(full_source, t
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=false" in result.stdout
     assert f"Refused run 7: {field} is {value}\n" in result.stdout
+
+
+@pytest.mark.parametrize("expired", [False, True])
+def test_a_pull_request_run_that_reused_its_earlier_runs_never_feeds_the_queue(full_source, tmp_path, expired):
+    root, base, _, queue, env, responses, _ = full_source
+    body = responses[ARTIFACTS]
+    body["artifacts"].append({"id": 60, "name": "reused-branch-3.12", "expired": expired})
+    body["total_count"] = len(body["artifacts"])
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "branch.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
+    assert "Refused run 7: it reused tests from earlier runs of its pull request\n" in result.stdout
 
 
 def test_the_protected_script_runs_in_isolated_cli_mode(reuse_repo, tmp_path):

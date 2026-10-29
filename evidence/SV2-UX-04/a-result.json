@@ -1,0 +1,56 @@
+{
+  "case": "T-SV2-UX-04-A",
+  "checks": {
+    "independent_runs_agree": true,
+    "inferred_intent_labelled": true,
+    "lesson_revision_expands": true,
+    "no_failures": true,
+    "record_range_expands": true,
+    "superseded_labelled": true
+  },
+  "evidence_class": "mocked: a fakeredis swarm store holding the fixture's delivered pack and its evidence records, read through the ledger page projection and the evidence expand path a ledger API read calls; no ledger HTTP server, browser, brain or cluster runs",
+  "input_sha256": {
+    "context-evidence.json": "94f47557b84005cbf5bc5b98019dba4cc7467464b76b4de955a738eebf134a45"
+  },
+  "observed": {
+    "expanded": {
+      "decision:queue-v1": {
+        "range": [
+          null,
+          null
+        ],
+        "revision": 1,
+        "state": "expanded"
+      },
+      "session:s-41": {
+        "range": [
+          120,
+          124
+        ],
+        "revision": null,
+        "state": "expanded"
+      }
+    },
+    "labels": {
+      "arc:merge-queue": [
+        "brain synthesis"
+      ],
+      "decision:queue-v1": [
+        "brain synthesis",
+        "superseded by decision:queue-v2"
+      ],
+      "lesson:operator-intent-7": [
+        "inferred intent"
+      ],
+      "private": [
+        "transcript evidence"
+      ],
+      "session:s-41": [
+        "transcript evidence"
+      ]
+    },
+    "ledger_evidence_expand_failures": {},
+    "receipt": "fresh"
+  },
+  "state": "passed"
+}

@@ -227,7 +227,7 @@ class PushStop:
                 self.record(store, ledger, who, tree, branch)
             owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
             progress = progress or (
-                doc and tree.own and not own_pull(tree, task) and self.unrecorded(store, doc, who, tree)
+                doc and tree.own and not own_pull(tree, task) and self.unrecorded(store, doc, who, found)
             )
         if not (owed or progress):
             self.settle(store, who)
@@ -264,14 +264,14 @@ class PushStop:
             return False
         return waits.dependency(on, task, {row.get("id"): row for row in doc["tasks"]}, None)
 
-    def unrecorded(self, store, doc, who, tree):
+    def unrecorded(self, store, doc, who, found):
         from scripts.gates.progress import Progress
 
         mark = Progress(store.redis, who.swarm).read(who.name)
         return (
             mark.outcome == PUSHED
             and not spoke_since(doc.get("_meta", {}).get("events", []), who.name, mark.outcome_at)
-            and not self._preflight(store, who, tree)
+            and not any(self._preflight(store, who, tree) for tree in found)
         )
 
     def _preflight(self, store, who, tree):

@@ -6,6 +6,7 @@ from scripts.inbox import outbox
 OPS = ("alert_claim", "alert_close", "alert_raise")
 SIZE, SYNC, PROMOTION, RELEASE = "size", "sync", "promotion", "release"
 SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
+INBOX, SETUP = "inbox", "setup"
 WRITER = "writer"
 TARGETS = {
     WRITER: "master",
@@ -16,8 +17,11 @@ TARGETS = {
     SEAT: "master",
     SPAWN: "master",
     MERGE: "master",
+    INBOX: "master",
+    SETUP: "master",
 }
-RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE)
+RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE, INBOX, SETUP)
+ITEMIZED = (INBOX, SETUP)
 OPEN, CLAIMED, DONE = "open", "claimed", "done"
 OPERATOR = "operator"
 SENDER = "ledger"
@@ -27,21 +31,32 @@ SENT_TTL_S = 30 * 24 * 3600
 
 
 def check_raise(op):
-    by, text = op.get("by"), op.get("text")
+    by, text, item = op.get("by"), op.get("text"), op.get("item", "")
     if (
-        set(op) != {"op", "id", "by", "source", "text"}
+        set(op) - {"item"} != {"op", "id", "by", "source", "text"}
         or op["source"] not in RAISED
         or not isinstance(by, str)
         or not by.strip()
         or not isinstance(text, str)
         or not text.strip()
         or len(text) > MAX_OUTCOME
+        or not isinstance(item, str)
+        or ("item" in op or op["source"] in ITEMIZED)
+        and not (op["source"] in ITEMIZED and item)
     ):
-        raise ValueError(f"alert_raise takes by, a source among {RAISED} and a text of up to {MAX_OUTCOME} characters")
+        raise ValueError(
+            f"alert_raise takes by, a source among {RAISED}, a text of up to {MAX_OUTCOME} characters "
+            f"and, for {' and '.join(ITEMIZED)}, an item"
+        )
 
 
-def raise_source(doc, ctx, source, text):
-    if not any(a["source"] == source and a["state"] != DONE for a in doc.setdefault("alerts", [])):
+def raise_source(doc, ctx, source, text, item=None):
+    rows = doc.setdefault("alerts", [])
+    if any(a["source"] == source and a.get("item") == item and a["state"] != DONE for a in rows):
+        return True
+    if item:
+        new_alert(doc, ctx, source, text, TARGETS[source])["item"] = item
+    else:
         raise_warning(doc, ctx, (source, text), [])
     return True
 
@@ -49,12 +64,15 @@ def raise_source(doc, ctx, source, text):
 def check(op):
     if op["op"] == "alert_raise":
         return check_raise(op)
-    allowed = {"op", "id", "target", "by", *(("outcome",) if op["op"] == "alert_close" else ())}
-    if set(op) - allowed or not isinstance(op.get("target"), str) or not op["target"]:
-        raise ValueError(f"{op['op']} takes target, an alert id, and an optional by")
+    closing = op["op"] == "alert_close"
+    allowed = {"op", "id", "target", "by", *(("outcome", "item") if closing else ())}
+    keys = [key for key in ("target", "item") if key in op]
+    if set(op) - allowed or len(keys) != 1 or not isinstance(op[keys[0]], str) or not op[keys[0]]:
+        instead = ", or an inbox item instead of target" if closing else ""
+        raise ValueError(f"{op['op']} takes target, an alert id, and an optional by{instead}")
     if "by" in op and (not isinstance(op["by"], str) or not op["by"].strip()):
         raise ValueError(f"{op['op']} by must be a name")
-    if op["op"] == "alert_close":
+    if closing:
         outcome = op.get("outcome")
         if not isinstance(outcome, str) or not outcome.strip() or len(outcome) > MAX_OUTCOME:
             raise ValueError(f"alert_close needs an outcome of up to {MAX_OUTCOME} characters")
@@ -62,7 +80,9 @@ def check(op):
 
 def apply(doc, op, ctx):
     if op["op"] == "alert_raise":
-        return raise_source(doc, ctx, op["source"], op["text"].strip())
+        return raise_source(doc, ctx, op["source"], op["text"].strip(), op.get("item"))
+    if "item" in op:
+        return close_item(doc, op, ctx)
     alert = next((a for a in doc.setdefault("alerts", []) if a["id"] == op["target"]), None)
     if alert is None or alert["state"] == DONE:
         return False
@@ -76,6 +96,15 @@ def apply(doc, op, ctx):
     outcome = op["outcome"].strip()
     alert.update(state=DONE, closed_by=who, closed_at=ctx.at, outcome=outcome)
     ctx.record(who, "alert closed", target, text=outcome)
+    return True
+
+
+def close_item(doc, op, ctx):
+    who, outcome = op.get("by", OPERATOR), op["outcome"].strip()
+    for alert in doc.setdefault("alerts", []):
+        if alert["source"] in ITEMIZED and alert.get("item") == op["item"] and alert["state"] != DONE:
+            alert.update(state=DONE, closed_by=who, closed_at=ctx.at, outcome=outcome)
+            ctx.record(who, "alert closed", f"alerts/{alert['id']}", text=outcome)
     return True
 
 
@@ -132,19 +161,25 @@ def raise_warning(doc: dict, ctx: object, warning: tuple, before: list) -> None:
         return
     if matching and text in before and not owner:
         return
+    alert = new_alert(doc, ctx, source, text, writer if writer and writer != OPERATOR else TARGETS[source])
+    if source == SYNC:
+        alert.update(writer=writer, item=target_item, last_refused_at=ctx.at)
+
+
+def new_alert(doc, ctx, source, text, target):
+    rows = doc["alerts"]
     alert = {
         "id": f"al-{ctx.rev}-{len(rows)}",
         "text": text,
         "source": source,
-        "target": writer if writer and writer != OPERATOR else TARGETS[source],
+        "target": target,
         "state": OPEN,
         "at": ctx.at,
         "rev": ctx.rev,
     }
-    if source == SYNC:
-        alert.update(writer=writer, item=target_item, last_refused_at=ctx.at)
     rows.append(alert)
     ctx.dirty = True
+    return alert
 
 
 def derive(doc, ctx, raised, before):
@@ -160,15 +195,20 @@ def derive(doc, ctx, raised, before):
         doc["alerts"] = [a for a in rows if id(a) not in gone]
 
 
-def message(slug, alert):
+def message(slug, alert, tier="", doc=None):
+    from scripts.swarm_ledger import ledger_blockers
+
+    item = alert.get("item") or "<the item it concerns>"
+    row = ledger_blockers.find(doc, item) if doc and ledger_blockers.ITEM_RE.match(item) else None
+    step = ledger_blockers.notice(slug, tier, item, ledger_blockers.record(row))
     return (
         f"On ledger {slug}: alert {alert['id']} ({alert['source']}): {alert['text']}. Claim it with agentihooks "
         f"ledger --slug {slug} --as <you> alert claim {alert['id']}, then close it with alert close "
-        f'{alert["id"]} "<outcome>".'
+        f'{alert["id"]} "<outcome>". {step}'
     )
 
 
-def deliver(inbox, slug, alerts, rev, master, since=None):
+def deliver(inbox, slug, alerts, rev, master, since=None, render=message):
     """Send each alert raised from since through rev to its target's inbox, once."""
     since = rev if since is None else since
     sent = []
@@ -179,7 +219,7 @@ def deliver(inbox, slug, alerts, rev, master, since=None):
         if inbox.redis.exists(mark):
             continue
         address = master if alert["target"] in ("master", OPERATOR) else alert["target"]
-        notice = outbox.Post(SENDER, address, message(slug, alert), item=outbox.stable_id("alert", slug, alert["id"]))
+        notice = outbox.Post(SENDER, address, render(slug, alert), item=outbox.stable_id("alert", slug, alert["id"]))
         item = outbox.post(inbox, notice)
         inbox.redis.set(mark, 1, ex=SENT_TTL_S)
         sent += [item] if item else []

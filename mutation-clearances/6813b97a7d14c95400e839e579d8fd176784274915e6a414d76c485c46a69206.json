@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/github_reads.py:scripts.swarm.github_reads.x_rest__mutmut_67:1b411d2a480911a96eb4970eb7d6fd1f96db30d3200c8bfe432bc0362ce92241": {
+    "reader": "standards_reader",
+    "reason": "Covered, not equivalent: test_paginated_responses_charge_each_page[False] runs a successful two page paginated rest call, so _rest_pages charges one extra row, and its charged endpoints assertion requires that row's endpoint, which the mutant writes as null; the branch Mutation preflight 40720690156 killed it on identical code. It survived only in the Tests tier run 40731161969, whose reused mutation stats list only the [True] variant of that test."
+  }
+}

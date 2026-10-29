@@ -143,11 +143,13 @@ def test_a_hive_named_by_its_id_shows_its_member_name_and_a_set_name_wins(store)
 
     store.redis.hset(f"{auth.PREFIX}:member:desk", mapping={"name": "workstation"})
     store.redis.hset(f"{auth.PREFIX}:member:pod", mapping={"name": "anton pod"})
-    store.redis.hset(registry.key("pod"), "name", "Pod one")
     reply = dispatch(request("GET", token=None, slug=None), store)
-    assert [(hive["id"], hive["name"]) for hive in reply["data"]] == [("desk", "workstation"), ("pod", "Pod one")]
-    store.redis.delete(f"{auth.PREFIX}:member:desk")
-    assert dispatch(request("GET", token=None, slug=None), store)["data"][0]["name"] == "desk"
+    assert [(hive["id"], hive["name"]) for hive in reply["data"]] == [("desk", "swarm-master"), ("pod", "anton pod")]
+    store.redis.hset(registry.key("pod"), "name", "Pod one")
+    assert dispatch(request("GET", token=None, slug=None), store)["data"][1]["name"] == "Pod one"
+    store.redis.delete(f"{auth.PREFIX}:member:pod")
+    store.redis.hdel(registry.key("pod"), "name")
+    assert dispatch(request("GET", token=None, slug=None), store)["data"][1]["name"] == "pod"
 
 
 def test_a_hive_that_beat_at_this_moment_is_listed_as_live(store):
@@ -204,12 +206,14 @@ def test_the_operator_writes_settings_through_the_hive_registry(store):
     reply = dispatch(request("PATCH", "/api/v1/hives/desk", body), store)
     stored = registry.show(store.redis, "desk")
     assert (stored["name"], stored["excluded"], stored["prefer"], stored["max_agents"]) == (
-        "Desk",
+        registry.MASTER_NAME,
         ["qa"],
         {"eng": 2, "ci": 1},
         6,
     )
-    assert reply["data"]["name"] == "Desk"
+    assert reply["data"]["name"] == registry.MASTER_NAME
+    dispatch(request("PATCH", "/api/v1/hives/pod", {"name": "Pod one"}), store)
+    assert registry.show(store.redis, "pod")["name"] == "Pod one"
     assert reply["data"]["master"] == {"slug": "sw", "name": store.agents("sw")[0].name}
 
 

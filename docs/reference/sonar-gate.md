@@ -1,6 +1,6 @@
 # Sonar quality gate
 
-The `sonar` job in the Tests workflow is a pull request requirement of `Gate — Required`. It scans the current pull request head and fails when the SonarQube quality gate fails. The merge queue runs the unit suite and test count checks; it does not repeat Sonar or the other pull request checks. Promotion owns the slower integration checks, and a red promotion holds release while `dev` keeps merging. See [Delivery tiers](/docs/reference/delivery-tiers/) for the three tiers.
+The `sonar` job in the Tests workflow is a pull request requirement of `Gate — Required`, except on a [test only pull request](#test-only-pull-requests). It scans the current pull request head and fails when the SonarQube quality gate fails. The merge queue runs the unit suite and test count checks; it does not repeat Sonar or the other pull request checks. Promotion owns the slower integration checks, and a red promotion holds release while `dev` keeps merging. See [Delivery tiers](/docs/reference/delivery-tiers/) for the three tiers.
 
 agentihooks is bound to the `Delivery L2` gate, defined and bound in antoncore's SonarQube stack config (`stacks/sonarqube/config/gates/delivery-l2.json` and `projects.json`). Its conditions on new code:
 
@@ -19,6 +19,78 @@ The job's `Hold the Delivery L2 conditions` step runs after the quality gate ste
 - bugs or vulnerabilities were not graded.
 
 Sonar leaves a condition out of the result when its metric has no value on the change (no new coverable lines, no hotspots), and skips coverage and duplication on a change under 20 new lines; a planted fault must therefore add at least 20 coverable lines. The scan token cannot read the project binding itself (HTTP 403 on `api/qualitygates/get_by_project`), so a rebind to a gate whose conditions are a subset of these five passes the step; the binding is kept by antoncore's `projects.json`, applied on every SonarQube stack deploy. Gate thresholds change only through the antoncore config.
+
+## Test only pull requests
+
+A pull request into `dev` whose every changed path sits under `tests/` skips the `sonar` job. `sonar-project.properties` excludes `tests/**` from the sources Sonar grades, so such a change has no new code to grade, and the empty job cost about 13 seconds of runner pickup and 21 seconds of run before `Gate — Required` could start.
+
+The `select` job decides in its `Select the tests the change reaches` step. On an event other than `pull_request`, or when the grader checkout lacks `scripts/ci_select.py`, the step writes only `scope=full`, `legs=[]` and `count=0` and exits, so no `sonar` output exists. Otherwise it lists the paths that differ between the pull request's base commit and the merge commit under test and writes `sonar` before `scripts.ci_select` writes the scope, legs and count outputs. The `sonar` part of the step:
+
+```bash
+git -C "$GITHUB_WORKSPACE" diff --no-ext-diff --no-renames --name-only -z "$PR_BASE" "$GITHUB_SHA" > "$RUNNER_TEMP/changed-paths"
+sonar=run
+if [[ -s "$RUNNER_TEMP/changed-paths" ]]; then
+  sonar=skip
+  while IFS= read -r -d '' path; do
+    [[ "$path" == tests/* ]] || sonar=run
+  done < "$RUNNER_TEMP/changed-paths"
+fi
+echo "sonar=$sonar" >> "$GITHUB_OUTPUT"
+```
+
+| Change | `select.outputs.sonar` | `sonar` job | `Gate — Required` on `sonar` |
+|---|---|---|---|
+| Pull request touching only `tests/` | `skip` | skipped | must be skipped |
+| Pull request touching any path outside `tests/`, such as `docs/` or `.github/` | `run` | runs | must succeed |
+| Pull request with an empty diff | `run` | runs | must succeed |
+| Pull request whose grader lacks `scripts/ci_select.py` | empty | runs | must succeed |
+| Merge group | empty | skipped as before | must be skipped |
+| Dev push or dispatch | empty | runs | must succeed |
+
+`--no-renames` lists both sides of a rename, so moving a file from `scripts/` into `tests/` still runs Sonar. The `sonar` job's `if` adds `needs.select.outputs.sonar != 'skip'`; only the exact value `skip` turns it off.
+
+`Gate — Required` removes `sonar` from the pull request's required job list only when `select.outputs.sonar` is `skip`. Every job outside the required list must be skipped, so on a test only pull request a `sonar` that ran turns the gate red, and on any other pull request a skipped `sonar` turns it red. The gate's aggregation step is a protected form: the `Gate — Protected` check runs the base branch's `scripts.gate_protected`, which admits the step either unchanged or as rendered by `scripts.ci_reuse.test_only_sonar`, and admits a `select` job whose outputs gain only `sonar: ${{ steps.select.outputs.sonar }}`. The grader change was announced and merged before the workflow change, so pull requests already open kept a valid required check.
+
+There is no setting. To make Sonar run on a test only change, touch a path outside `tests/`. To change which paths count as test only, edit the `select` step, the gate aggregation in `scripts.ci_reuse` and its admission in `scripts.gate_protected` together through reviewed pull requests.
+
+### Checking a run
+
+Read the `sonar`, `select` and `Gate — Required` jobs of the pull request's Tests run:
+
+```bash
+R=the-cloud-clockwork/agentihooks
+PR=7852
+SHA=$(gh pr view "$PR" -R "$R" --json headRefOid --jq .headRefOid)
+RUN=$(gh api "repos/$R/actions/runs?head_sha=$SHA&event=pull_request" \
+  --jq '[.workflow_runs[] | select(.name == "Tests")][0].id')
+[[ -n "$RUN" && "$RUN" != null ]] || { echo "no Tests run for $SHA" >&2; exit 1; }
+gh api "repos/$R/actions/runs/$RUN/jobs" --paginate \
+  --jq '.jobs[] | select(.name == "sonar" or .name == "select" or .name == "Gate — Required" or (.name | startswith("unit-selected"))) | [.name, .conclusion, .started_at, .completed_at] | @tsv'
+gh pr view "$PR" -R "$R" --json files --jq '.files[].path'
+```
+
+On pull request 7852, which changed only test files, run 40542648681 printed `sonar` as `skipped` and `Gate — Required` as `success`.
+
+| Symptom | Cause and fix |
+|---|---|
+| `Every gate required for this event must succeed and other gates must be skipped.` with `sonar` skipped | The head's gate step still requires `sonar` while `select` wrote `skip`. Render the gate step from `scripts.ci_reuse` so it carries the test only form |
+| Sonar skipped but the change touched code | Read the changed paths in the `select` step log; that list alone decides, and any path outside `tests/` writes `run` |
+| `Gate — Protected` rejects the gate step | The head's aggregation differs from every rendering `scripts.gate_protected` admits. Render it from `scripts.ci_reuse` instead of editing it by hand |
+| Gate still starts long after the selected tests | On a test only change Sonar is skipped, so the gate's start is set by the last other job it needs. Compare the gate's `started_at` with that job's `completed_at`; a gap with no job finishing is runner pickup |
+
+### Test only delivery evidence
+
+[Pull request #7580](https://github.com/the-cloud-clockwork/agentihooks/pull/7580) delivered the workflow change. Before it, [#7572](https://github.com/the-cloud-clockwork/agentihooks/pull/7572) announced the grader and [#7568](https://github.com/the-cloud-clockwork/agentihooks/pull/7568) merged the grader change; [issue #7567](https://github.com/the-cloud-clockwork/agentihooks/issues/7567) names the seams. Before the change, tests to required gate on test only pull requests had a median of 52 seconds with none of 12 runs under 40 seconds, over 25 October 17:21 to 26 October 15:49 UTC.
+
+The first three test only runs after the merge skipped Sonar and passed `Gate — Required`:
+
+| Run | Pull request | Scope | Last required job done | Gate started | Gap |
+|---|---|---|---|---|---|
+| 40539354877 | 7899 | full | 16:31:29 `shard-check (3.12)` | 16:34:23 | 174 s |
+| 40540834415 | 7847 | selected | 16:32:51 `unit-selected (3.12, 1)` | 16:35:38 | 167 s |
+| 40542648681 | 7852 | selected | 16:42:58 `unit-selected (3.12, 1)` | 16:45:21 | 143 s |
+
+No required job finished inside those gaps, so on these samples the 40 second target was not met and the remaining wait is gate pickup. A median over a full window has not been recorded yet.
 
 ## False positives
 

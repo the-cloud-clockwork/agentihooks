@@ -8,7 +8,8 @@ import pytest
 from scripts.swarm_v2 import contracts
 from scripts.swarm_v2.artifacts.base import ABSENT, VERIFIED, ArtifactRef
 from scripts.swarm_v2.checkpoints import model, native, publisher, redaction
-from tests.sv2_ckp04_cases import MEMORY, LostAck, checkpoint, files, make, pointers, run_case, scratch
+from tests.sv2_ckp02_cases import MEMORY, scratch
+from tests.sv2_ckp04_cases import LostAck, checkpoint, files, make, pointers, run_case
 
 pytestmark = pytest.mark.unit
 

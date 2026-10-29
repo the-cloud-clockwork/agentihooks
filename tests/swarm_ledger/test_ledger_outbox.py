@@ -613,3 +613,11 @@ def test_a_server_wide_busy_answer_holds_every_later_ledger_record(server, monke
     with pytest.raises(outbox.LedgerBusy) as busy:
         outbox.apply_ledger(None, ENG, queued()[0])
     assert busy.value.targets == frozenset()
+
+
+def test_a_post_retried_while_the_server_is_down_waits_in_the_outbox_once(server):
+    server.stop()
+    post = {"op": "add", "thread": "chat", "id": "relay-1", "by": BOSS, "text": "All merged", "to": "operator"}
+    assert ledger.call(SLUG, [post]) == {"queued": "relay-1"}
+    assert ledger.call(SLUG, [post]) == {"queued": "relay-1"}
+    assert [entry["item"] for entry in queued()] == ["relay-1"]

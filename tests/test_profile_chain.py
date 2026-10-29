@@ -447,3 +447,64 @@ def test_worn_refuses_any_overlay_on_a_chain_without_a_base_role(overlay_profile
     with pytest.raises(ValueError) as refused:
         profile_chain.worn([("eng", tmp_path / "e")], ["a"], resolve)
     assert str(refused.value) == "overlay a needs a chain with a package base role"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("", set()), (" headed , ,gpu ", {"headed", "gpu"}), ("headed", {"headed"})],
+)
+def test_hive_capabilities_reads_the_named_setting(value, expected):
+    assert profile_chain.hive_capabilities({profile_chain.HIVE_CAPABILITIES: value, "OTHER": "x"}) == expected
+    assert profile_chain.hive_capabilities({}) == set()
+
+
+def test_require_capabilities_names_each_missing_one(tmp_path):
+    overlay, base = tmp_path / "headed", tmp_path / "engineer"
+    overlay.mkdir()
+    base.mkdir()
+    (overlay / "profile.yml").write_text("kind: overlay\nrequired_capabilities: [headed, gpu]\n")
+    dirs = [("engineer", base), ("headed", overlay)]
+    profile_chain.require_capabilities(dirs, {"headed", "gpu"})
+    with pytest.raises(ValueError, match=r"^overlay headed requires hive capabilities: gpu, headed$"):
+        profile_chain.require_capabilities(dirs, set())
+    for manifest in ("required_capabilities: [' ']\n", "- headed\n"):
+        (overlay / "profile.yml").write_text(manifest)
+        with pytest.raises(
+            ValueError, match=r"^profile headed required_capabilities must be a list of nonempty strings$"
+        ):
+            profile_chain.require_capabilities(dirs, {"headed"})
+
+
+def test_card_reads_description_and_capabilities_once_each(tmp_path):
+    (tmp_path / "profile.yml").write_text(
+        "description: Reviews pull requests\ncapabilities: [review, python, review]\nrequired_capabilities: [headed]\n"
+    )
+    assert profile_chain.card("reviewer", tmp_path) == {
+        "name": "reviewer",
+        "description": "Reviews pull requests",
+        "capabilities": ["review", "python"],
+    }
+
+
+@pytest.mark.parametrize("manifest", [None, "", "extends: [engineer]\n"])
+def test_card_of_a_profile_without_card_fields_is_empty(tmp_path, manifest):
+    if manifest is not None:
+        (tmp_path / "profile.yml").write_text(manifest)
+    assert profile_chain.card("plain", tmp_path) == {"name": "plain", "description": "", "capabilities": []}
+
+
+@pytest.mark.parametrize(
+    ("manifest", "message"),
+    [
+        ("description: [a]\n", r"^profile odd description must be a string$"),
+        ("description: 3\n", r"^profile odd description must be a string$"),
+        ("capabilities: review\n", r"^profile odd capabilities must be a list of nonempty strings$"),
+        ("capabilities: [' ']\n", r"^profile odd capabilities must be a list of nonempty strings$"),
+        ("capabilities: [1]\n", r"^profile odd capabilities must be a list of nonempty strings$"),
+        ("- review\n", r"^profile odd profile\.yml must be a mapping$"),
+    ],
+)
+def test_card_refuses_a_malformed_field(tmp_path, manifest, message):
+    (tmp_path / "profile.yml").write_text(manifest)
+    with pytest.raises(ValueError, match=message):
+        profile_chain.card("odd", tmp_path)

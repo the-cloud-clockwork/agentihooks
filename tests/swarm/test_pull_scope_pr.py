@@ -13,7 +13,7 @@ def test_swarm_pr_records_the_scope_each_staged_or_prerequisite_pull_request_del
     _, ledger, stamped = started
     assert run("sw", "pr", FIRST, "--prerequisite", " tests that accept both gate states ") == 0
     first = {FIRST: {"kind": "prerequisite", "scope": "tests that accept both gate states"}}
-    assert ledger.rows["t1"]["pull_scopes"] == first
+    assert (ledger.rows["t1"]["pull_scopes"], ledger.rows["t1"]["pr_url"]) == (first, FIRST)
     assert stamped[-1][2]["pull_scopes"] == first
     assert run("sw", "pr", SECOND, "--stage", "the gate") == 0
     both = {**first, SECOND: {"kind": "stage", "scope": "the gate"}}
@@ -59,3 +59,13 @@ def test_swarm_pr_refuses_a_declaration_on_a_url_that_is_no_pull_request(started
     assert run("sw", "pr", other, "--stage", "the gate") != 0
     assert capsys.readouterr().err.strip().endswith(f"--stage needs a GitHub pull request URL, not {other}")
     assert stamped == [] and not ledger.rows["t1"].get("pr_url")
+
+
+def test_a_prerequisite_recorded_after_the_main_pull_request_keeps_the_main_one(started, monkeypatch):  # noqa: F811
+    _, ledger, _ = started
+    monkeypatch.setattr(cli, "pull_branch", lambda url: (f"head-{url[-2:]}", "o/r"))
+    assert run("sw", "pr", FINAL) == 0
+    assert run("sw", "pr", FIRST, "--prerequisite", "the announcement") == 0
+    row = ledger.rows["t1"]
+    assert (row["pr_url"], row["branch"]) == (FINAL, "head-11")
+    assert row["pull_scopes"] == {FIRST: {"kind": "prerequisite", "scope": "the announcement"}}

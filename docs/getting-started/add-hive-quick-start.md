@@ -106,4 +106,4 @@ agentihooks hive show <member id>
 | The hive never shows `live` | `systemctl --user status agentihooks-hive` on a machine, or the worker pod logs in a cluster; check the NATS address from `--bus-url` is reachable from the hive |
 | Launches wait with no hive listing a repository | Clone the repository under `HIVE_REPO_ROOT` on the hive, then check `hive show` |
 
-Remove a hive with `agentihooks hive remove <id>`, which drains its agents before revoking the member.
+Remove a hive with `agentihooks hive remove <name>`, which drains its agents before revoking the member; `--dry-run` prints every step first.

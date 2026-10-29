@@ -356,6 +356,6 @@ def test_a_codex_master_gets_the_backstop_through_its_inbox_and_an_unread_one_re
         wake.wake_now(inbox, "sw", [codex], herdr, at, wake.window_ms({}))
         wake.wake_pass(inbox, "sw", [codex], herdr, ledger, at, wake.window_ms({}))
     assert herdr.prompts == []
-    assert ledger.flagged == [True]
-    assert "still unread" in ledger.followups[0][1]
+    assert ledger.alert_keys[0][0] == "inbox"
+    assert "still unread" in ledger.alerts[0][1] and ledger.followups == []
     assert sent == []

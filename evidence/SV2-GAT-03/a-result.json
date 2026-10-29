@@ -1,0 +1,39 @@
+{
+  "case": "T-SV2-GAT-03-A",
+  "evidence_class": "mocked for the fixture cases: hooks run in a temporary agentihooks home with the brain refresh and project retrieval patched to return the fixture packs, through the Claude and Codex target emitters; live: one Claude and one Codex session on a hive worker ran the branch hooks with an isolated agentihooks home",
+  "input_sha256": {
+    "task-context-hooks.json": "af5c49ace45c0caff54d07734c71e396462e7a51deaa0c838e34c14ff1776b8a"
+  },
+  "observed": {
+    "tests": [
+      "test_a_each_target_receives_the_scoped_pack_with_a_receipt[claude]",
+      "test_a_each_target_receives_the_scoped_pack_with_a_receipt[codex]",
+      "test_a_second_independent_fixture_does_not_lean_on_the_first",
+      "test_codex_post_tool_use_delivers_the_held_pack",
+      "test_status_reports_delivery_outcomes"
+    ],
+    "claude": {
+      "SessionStart": "delivered with receipt",
+      "PreToolUse": "delivered with receipt",
+      "context_delivery_outcomes_by_target": {
+        "delivered": 2
+      }
+    },
+    "codex": {
+      "SessionStart": "delivered with receipt",
+      "PreToolUse": "held",
+      "PostToolUse": "delivered with receipt",
+      "context_delivery_outcomes_by_target": {
+        "delivered": 2
+      }
+    },
+    "second_fixture_identical": true,
+    "live": {
+      "claude_session": "8415c8ec",
+      "codex_session": "01a17930",
+      "delivered_at": "SessionStart",
+      "pack_in_transcript": true
+    }
+  },
+  "state": "passed"
+}

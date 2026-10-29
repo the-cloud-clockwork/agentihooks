@@ -47,6 +47,40 @@ def ask(**fields):
     return {"hive": "hive-a", "task": "t1", "lane": "eng", "generation": 0, **fields}
 
 
+@pytest.mark.parametrize("lives", [3, 4])
+def test_events_admission_blocks_spent_claim_lives_before_creating_an_execution(rig, lives, capsys):
+    from scripts.gates.claims import refusal
+
+    rig.ledger.comments = []
+    rig.ledger.comment = lambda *args, **kwargs: rig.ledger.comments.append((args, kwargs))
+    for _ in range(lives):
+        rig.store.count_claim(SLUG, "t1")
+    rig.store.put_handoff(SLUG, "t1", "handoff", envelope={"reason": "recycle"})
+
+    assert rig.admitter.admit(SLUG, ask()) is None
+
+    assert rig.rows["t1"]["state"] == "blocked"
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert rig.store.claims(SLUG, "t1") == 0
+    reason = refusal(lives, "recycle", "none", SLUG, "t1")
+    assert rig.ledger.comments == [((SLUG, "t1", reason), {"by": "swarm"})]
+    assert f"hub: events claim cap swarm={SLUG} task=t1: blocked t1: {reason}" in capsys.readouterr().err.splitlines()
+
+
+@pytest.mark.parametrize("lives, mode", [(2, "enforce"), (3, "observe"), (3, "off")])
+def test_events_admission_preserves_the_third_life_and_nonblocking_gate_modes(rig, lives, mode):
+    rig.store.update(SLUG, gates={"claims": mode})
+    for _ in range(lives):
+        rig.store.count_claim(SLUG, "t1")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert rig.rows["t1"]["state"] == "claimed"
+    assert rig.store.claims(SLUG, "t1") == lives
+
+
 def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_claimed(rig):
     admitted = rig.admitter.admit(SLUG, ask())
 
@@ -141,6 +175,35 @@ def test_a_ledger_outage_during_the_claim_releases_the_claim_and_the_agent(rig):
         rig.admitter.admit(SLUG, ask())
     assert rig.store.claimant(SLUG, "t1") is None
     assert rig.store.agents(SLUG) == []
+
+
+def test_a_seat_whose_earlier_execution_ended_is_admitted_at_the_next_generation(rig):
+    first = rig.admitter.admit(SLUG, ask())
+    earlier = rig.store.execution(SLUG, first["task"]["execution_id"])
+    assert rig.admitter.reopen(SLUG, ask()) is True
+
+    admitted = rig.admitter.admit(SLUG, ask(generation=rig.rows["t1"]["claim_generation"]))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.name, agent.seat) == (admitted["name"], "eng-1@sw")
+    assert agent.generation == earlier.generation + 1 == 2
+    assert agent.execution_id != earlier.execution_id
+    assert rig.store.execution_occupants(SLUG)["eng-1@sw"].execution_id == agent.execution_id
+    assert (admitted["task"]["execution_id"], admitted["task"]["execution_generation"]) == (agent.execution_id, 2)
+
+
+def test_a_refused_execution_start_releases_the_claim_and_the_agent(rig, monkeypatch):
+    from scripts.swarm.store import SwarmError
+
+    def refuse(slug, agent, previous_execution_id=""):
+        raise SwarmError("refused start")
+
+    monkeypatch.setattr(rig.store, "start_execution", refuse)
+    with pytest.raises(SwarmError, match="^refused start$"):
+        rig.admitter.admit(SLUG, ask())
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert rig.ledger.writes == []
 
 
 def test_reopen_returns_an_admitted_task_to_open_and_forgets_its_admission(rig):

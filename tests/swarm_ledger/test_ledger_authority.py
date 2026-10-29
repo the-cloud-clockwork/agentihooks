@@ -551,3 +551,33 @@ def test_mutation_receiver_returns_exact_stale_epoch_error():
     assert error.value.status == 409
     assert error.value.code == "stale_controller"
     assert error.value.envelope() == {"error": {"code": "stale_controller", "message": "the controller lease is stale"}}
+
+
+def test_a_doctor_engineer_on_a_hive_is_issued_a_token_for_the_watched_ledger(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.doctor.priming import doctor_slug
+    from scripts.swarm_ledger import ports
+    from scripts.swarm_ledger.api import routes
+    from scripts.swarm_ledger.api.errors import APIError
+
+    placed = {doctor_slug("watched"): [SimpleNamespace(name=WORKER, hive="member-1")]}
+    store = SimpleNamespace(agents=lambda slug: placed.get(slug, []))
+    monkeypatch.setitem(ports.BOUND, "swarm", SimpleNamespace(store=SimpleNamespace(connect=lambda: store)))
+    server = SimpleNamespace(
+        authority=SimpleNamespace(
+            hive_member=lambda credential: credential,
+            hive_agent=authority.hive_agent,
+            hive_agent_token=lambda member, slug, name: f"{member} {slug} {name}",
+        )
+    )
+
+    def mint(credential, slug):
+        headers = {"X-Hive-Credential": credential, "X-Ledger-Agent": WORKER}
+        return routes.agent_token(SimpleNamespace(headers=headers), as_services(server), slug)
+
+    assert mint("member-1", "watched") == {"data": {"agent": WORKER, "token": f"member-1 watched {WORKER}"}}
+    for credential, slug in (("member-2", "watched"), ("member-1", "unrelated")):
+        with pytest.raises(APIError) as refused:
+            mint(credential, slug)
+        assert str(refused.value) == "Agent is not placed on this member's hive"

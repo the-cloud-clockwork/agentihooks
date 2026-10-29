@@ -62,6 +62,33 @@ def test_reusing_every_test_with_no_change_keeps_the_dev_arcs_exactly(tmp_path):
     assert _arcs(out) == _arcs(source)
 
 
+def test_files_only_executed_by_changed_tests_do_not_break_the_carried_coverage_merge(tmp_path):
+    from coverage import Coverage
+
+    kept = str(tmp_path / "kept.py")
+    missing = str(tmp_path / "sample.py")
+    Path(kept).write_text("value = 1\n")
+    for arcs in (True, False):
+        source = tmp_path / f"source-{arcs}.coverage"
+        data = CoverageData(basename=str(source))
+        record = data.add_arcs if arcs else data.add_lines
+        data.set_context("tests/test_a.py::kept|run")
+        record({kept: [(-1, 1), (1, -1)] if arcs else [1]})
+        data.set_context("tests/test_a.py::changed|run")
+        record({missing: [(-1, 1), (1, -1)] if arcs else [1]})
+        data.write()
+        out = tmp_path / f"carry-{arcs}" / ".coverage"
+
+        assert reused_coverage.keep(source, out, {"tests/test_a.py::kept"}, {}) == 1
+        merged = Coverage(data_file=str(tmp_path / f"merged-{arcs}.coverage"), config_file=False)
+        merged.combine(data_paths=[str(out)], keep=True)
+        merged.xml_report(outfile=str(tmp_path / f"coverage-{arcs}.xml"))
+        assert merged.get_data().measured_files() == {kept}
+        assert merged.get_data().measured_contexts() == {"tests/test_a.py::kept|run"}
+        data.read()
+        assert data.measured_files() == {kept, missing}
+
+
 def test_the_command_remaps_files_changed_since_the_dev_commit(tmp_path):
     repo = tmp_path / "repo"
     (repo / "hooks").mkdir(parents=True)
@@ -82,6 +109,26 @@ def test_the_command_remaps_files_changed_since_the_dev_commit(tmp_path):
     args += ["--captures", str(tmp_path / "none"), "--captures-out", str(tmp_path / "js")]
     assert reused_coverage.main([*args, "--out", str(out)]) == 0
     assert _arcs(out) == {"hooks/a.py": {(-4, 5), (5, -4)}}
+
+
+def test_the_dev_carry_leaves_out_tests_reused_from_pull_request_runs(tmp_path, monkeypatch):
+    source = tmp_path / "dev.coverage"
+    _record(
+        source,
+        {
+            "tests/test_a.py::dev|run": {"hooks/a.py": [(-1, 2), (2, -1)]},
+            "tests/test_a.py::branch@grp|run": {"hooks/a.py": [(-5, 6), (6, -5)]},
+        },
+    )
+    reused = tmp_path / "reused.json"
+    tests = ["tests/test_a.py::branch", "tests/test_a.py::dev"]
+    reused.write_text(json.dumps({"tests": tests, "files": [], "branch": ["tests/test_a.py::branch"]}))
+    monkeypatch.setattr(reused_coverage, "moved_lines", lambda repo, commit, head: {})
+    out = tmp_path / "out" / ".coverage"
+    args = ["--coverage", str(source), "--commit", "a" * 40, "--reused", str(reused)]
+    args += ["--captures", str(tmp_path / "none"), "--captures-out", str(tmp_path / "js")]
+    assert reused_coverage.main([*args, "--out", str(out)]) == 0
+    assert _arcs(out) == {"hooks/a.py": {(-1, 2), (2, -1)}}
 
 
 def _truncate(path: Path) -> None:

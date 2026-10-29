@@ -2,6 +2,7 @@
 or occupy a seat, and a remote hive makes no service ledger reads."""
 
 import json
+import sys
 from types import SimpleNamespace
 
 from scripts.hub import lease
@@ -44,6 +45,11 @@ class Admission:
         view = self.source.snapshot(slug)
         if readiness.withdrawal(SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view):
             return None
+        from scripts.swarm import tick
+
+        if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
+            print(f"hub: events claim cap swarm={slug} task={task_id}: {reason}", file=sys.stderr)
+            return None
         return self._claim(slug, request, view.rows[task_id])
 
     def _claim(self, slug: str, request: dict, row: dict) -> dict | None:
@@ -56,10 +62,16 @@ class Admission:
         taken = {agent.seat for agent in self.store.agents(slug)}
         seat = tick._free_seat(slug, lane, taken, self.store.handoff_seat(slug, task_id))
         record = AgentRecord(name, lane, task_id, seat=seat, state="starting", started_at=now, hive=request["hive"])
-        agent = self.store.start_execution(slug, record)
+        previous = self.store.execution_occupants(slug).get(seat)
+        try:
+            agent = self.store.start_execution(slug, record, previous.execution_id if previous else "")
+        except Exception:
+            self._unclaim(slug, task_id, name)
+            raise
         live = self._mark(slug, request, row, name)
         if live is None:
             return None
+        self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))
         self.store.seats.occupy(seat, name, now)
         task = tick.primed(self.store, slug, seat, {**row, **live})
         identity = {"execution_id": agent.execution_id, "execution_generation": agent.generation}
@@ -96,6 +108,7 @@ class Admission:
         if not held or json.loads(held)["hive"] != request["hive"]:
             return False
         name = json.loads(held)["name"]
+        self.store.cancel_pending_life(slug, request["task"])
         self._unclaim(slug, request["task"], name)
         self.ledger.update_task(
             slug,

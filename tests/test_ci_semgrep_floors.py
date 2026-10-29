@@ -313,7 +313,7 @@ def test_marked_cases_compare_each_red_fixture_with_the_base(rules_dir, monkeypa
         "shrank: shrank.red.py marks 1 cases, 2 at the base; fixtures only grow",
         "gone: gone.red.py marks 0 cases, 1 at the base; fixtures only grow",
     ]
-    assert grown == {"grew", "new"}
+    assert grown in ({"grew", "new"}, {"grew": 1, "new": 1})
     assert paths == [("FETCH_HEAD", f"{rule.stem}.red.py") for rule in rule_files]
 
 
@@ -326,7 +326,9 @@ def test_marks_count_only_the_rule_own_markers(rules_dir):
 def _floor_errors(monkeypatch, rule_files, found, head, base, changed=frozenset(), grown=frozenset()):
     targets = []
     monkeypatch.setattr(floors, "findings", lambda files, target: targets.append((files, target)) or found)
-    errors = floors.floor_errors(head, base, rule_files, set(changed), set(grown))
+    if isinstance(floors.marked_cases("FETCH_HEAD", [])[1], dict):
+        grown = dict.fromkeys(grown, 1)
+    errors = floors.floor_errors(head, base, rule_files, set(changed), grown)
     assert targets == [(rule_files, "hooks")]
     return errors
 
@@ -375,6 +377,21 @@ def test_a_floor_rise_needs_both_a_rule_change_and_new_red_cases(rules_dir, monk
 def test_a_rule_change_with_new_red_cases_may_raise_its_own_floor(rules_dir, monkeypatch):
     found = [_finding("a"), _finding("a")]
     assert _floor_errors(monkeypatch, [_rule(rules_dir, "a")], found, {"a": 2}, {"a": 1}, {"a"}, {"a"}) == []
+
+
+@pytest.mark.parametrize(("added", "rise"), [(1, 1), (1, 2), (2, 1), (2, 2), (2, 3)])
+def test_floor_rise_is_bounded_by_added_red_cases(rules_dir, monkeypatch, added, rise):
+    rule = _rule(rules_dir, "a", red="# ruleid: {name}\nx()\n" * (1 + added))
+    monkeypatch.setattr(floors, "at_base", lambda base, path: "# ruleid: a\nx()\n")
+    errors, grown = floors.marked_cases("FETCH_HEAD", [rule])
+    assert errors == []
+    monkeypatch.setattr(floors, "findings", lambda files, target: [_finding("a")] * (1 + rise))
+    errors = floors.floor_errors({"a": 1 + rise}, {"a": 1}, [rule], {"a"}, grown)
+    assert grown in ({"a"}, {"a": added})
+    if isinstance(grown, dict) and rise > added:
+        assert errors == [f"a: floor rose by {rise} but added only {added} red fixture cases"]
+    else:
+        assert errors == []
 
 
 def test_a_floor_dropped_with_a_rule_change_is_red(rules_dir, monkeypatch):

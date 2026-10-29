@@ -15,14 +15,14 @@ from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
+from tests.swarm.memory_fixture import tmp_path
+from tests.swarm.profile_fixture import validated
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm.test_tick_lock import hold_tick
 
 real_reconcile = timer.reconcile
-
-
-from tests.swarm.profile_fixture import validated
+_fixture = tmp_path
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def env(monkeypatch, tmp_path):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
     ledger.said = []
-    ledger.comments = []
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda _, *args: ledger.join(*args))
     ledger.say = lambda slug, text, by=None: ledger.said.append((text, by))
     ledger.relay = lambda slug, text, by, op_id="", reply_to="": ledger.said.append((text, by))
     ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
@@ -1238,7 +1238,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         "anchors": [],
         "overlays": [],
         "bundle_revision": "",
-    }
+    } | {"automated": {"swarm": "sw", "seat": ""}}
     assert placed == runtime.Placed(
         "w3:p1",
         "codex",
@@ -1697,9 +1697,9 @@ def test_status_text_logs_a_base_miss_as_enforced_with_a_finding(env, capsys):
     out = capsys.readouterr().out.splitlines()
     assert "launch  engineer@a1b2c3-0001  failed  60000ms" in out
     assert "  base  enforced  expected package:engineer; observed engineer" in out
-    assert (
-        "finding  launch check  engineer@a1b2c3-0001/base: engineer@a1b2c3-0001 failed its launch check on base" in out
-    )
+    (finding,) = launch_check.findings(store, "sw")
+    assert finding.subject.startswith("base/19700101T00-")
+    assert f"finding  launch check  {finding.subject}: engineer@a1b2c3-0001 failed the launch check on base" in out
 
 
 def test_status_text_logs_enforced_and_passed_launch_checks(env, capsys):
@@ -1715,9 +1715,9 @@ def test_status_text_logs_enforced_and_passed_launch_checks(env, capsys):
     assert "launch  engineer@a1b2c3-0001  failed  60000ms" in out
     assert "  name  enforced  expected a; observed b" in out
     assert "launch  engineer@a1b2c3-0002  passed  2000ms" in out
-    assert (
-        "finding  launch check  engineer@a1b2c3-0001/name: engineer@a1b2c3-0001 failed its launch check on name" in out
-    )
+    (finding,) = launch_check.findings(store, "sw")
+    assert finding.subject.startswith("name/19700101T00-")
+    assert f"finding  launch check  {finding.subject}: engineer@a1b2c3-0001 failed the launch check on name" in out
 
 
 def test_status_text_lists_a_closed_failed_launch_pane_with_its_lines(env, capsys):

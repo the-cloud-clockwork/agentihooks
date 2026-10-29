@@ -4,11 +4,32 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pytest
 
 from scripts.ci_cpu_quota import quota_cpus, worker_count
 from scripts.ci_mutation.runner import prepare_workspace
+
+REPORT_ARTIFACT = "proof-reports"
+SPLIT_ALGORITHM = "least_duration"
+
+
+def nested_report(result: subprocess.CompletedProcess, junit: Path) -> str:
+    log = junit.with_suffix(".log")
+    log.write_text(result.stdout + result.stderr)
+    counts = "no junit report"
+    if junit.is_file():
+        root = ElementTree.parse(junit).getroot()
+        suites = [root] if root.tag == "testsuite" else list(root)
+        counts = " ".join(
+            f"{key} {sum(int(suite.get(key, 0)) for suite in suites)}"
+            for key in ("tests", "failures", "errors", "skipped")
+        )
+    return (
+        f"nested pytest exited {result.returncode}; {counts}; "
+        f"read {junit.name} and {log.name} in the {REPORT_ARTIFACT} artifact"
+    )
 
 
 @pytest.mark.parametrize(
@@ -39,6 +60,9 @@ def test_full_selection_reads_the_same_repository_inputs(tmp_path, stage, group)
                 elif source.is_file():
                     (baseline / name).parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, baseline / name)
+    reports = Path(os.environ.get("PROOF_REPORT_DIR") or tmp_path)
+    reports.mkdir(parents=True, exist_ok=True)
+    junit = reports / f"{stage}-{group}.xml"
     result = subprocess.run(
         [
             sys.executable,
@@ -50,18 +74,25 @@ def test_full_selection_reads_the_same_repository_inputs(tmp_path, stage, group)
             str(worker_count(os.cpu_count() or 1, quota_cpus())),
             "--splits",
             "8",
+            "--splitting-algorithm",
+            SPLIT_ALGORITHM,
+            "-p",
+            "tests.split_fallback",
             "--group",
             str(group),
             "--dist",
             "loadgroup",
             "--tb=short",
+            "--junitxml",
+            str(junit),
         ],
         cwd=baseline,
         capture_output=True,
         text=True,
         env={**os.environ, "PYTEST_ADDOPTS": ""},
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    returncode = result.returncode
+    assert returncode == 0, nested_report(result, junit)
 
 
 def test_statistics_keep_declared_inputs_and_the_trusted_published_map(tmp_path, monkeypatch):

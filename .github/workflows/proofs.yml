@@ -68,7 +68,7 @@ jobs:
           enable-cache: false
       - name: Install shared dependencies
         working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Observe base receipt request times
         working-directory: base
         run: |
@@ -111,7 +111,7 @@ jobs:
           enable-cache: false
       - name: Install dependencies shared by both revisions
         working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Replay base on the shared runner
         working-directory: base
         env:
@@ -302,7 +302,7 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
 
       - name: Install the pinned nats server for the bus backend tests
         timeout-minutes: 3
@@ -331,6 +331,31 @@ jobs:
       - name: Run selected tests
         env:
           PYTHONUNBUFFERED: '1'
+          PROOF_REPORT_DIR: ${{ runner.temp }}/proof-reports
         run: |
+          set -o pipefail
           read -r -a paths <<< "$TEST_PATHS"
-          workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup -p tests.flake_ledger --tb=short
+          log="$RUNNER_TEMP/focused-proof.log"
+          status=0
+          workers=$(python -m scripts.ci_cpu_quota)
+          python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup -p tests.flake_ledger --tb=short 2>&1 | tee "$log" || status=$?
+          python -m scripts.ci_proof_outcome "$log" || status=1
+          exit "$status"
+
+      - name: Retain nested proof reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-reports
+          path: ${{ runner.temp }}/proof-reports
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Retain focused browser screenshots
+        if: always() && inputs.browser
+        uses: actions/upload-artifact@v4
+        with:
+          name: focused-browser-screenshots
+          path: test-results/*.png
+          if-no-files-found: ignore
+          retention-days: 7

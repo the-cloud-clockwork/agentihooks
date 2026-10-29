@@ -1,7 +1,7 @@
 workflow:
   name: simple-workflow
   intent: Build the change the case asks for, backed by scouted evidence and a blind verdict.
-  head: build
+  head: scout
   max_iterations: 3
   exit: build-verdict.pass
   on_exhausted: block

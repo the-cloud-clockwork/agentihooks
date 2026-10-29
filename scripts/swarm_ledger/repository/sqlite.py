@@ -8,12 +8,13 @@ from pathlib import Path
 
 from scripts.swarm_ledger import request_metrics
 
-from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
+from . import artifact_files, heap, hierarchy, media_files, outbox, refresh, writer_copy
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
 from .rows import TABLES, assemble, diff, encode, flatten, load, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
+from .writer_copy import written
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS registry (slug TEXT, path TEXT, value TEXT, PRIMARY KEY(slug,path));
@@ -399,6 +400,7 @@ class SQLiteLedgerRepository:
         self._cache = {}
         self._loads = {}
         self._guard = threading.Lock()
+        self._readers = threading.local()
 
     @property
     def domain(self):
@@ -426,6 +428,14 @@ class SQLiteLedgerRepository:
 
     @contextmanager
     def connect(self):
+        _, connection = self._open()
+        try:
+            connection.set_trace_callback(self.trace)
+            yield connection
+        finally:
+            connection.close()
+
+    def _open(self) -> tuple:
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(path, timeout=30)
@@ -434,10 +444,18 @@ class SQLiteLedgerRepository:
             if path not in self._ready:
                 self._set_up(connection, path)
             connection.execute("PRAGMA synchronous=FULL")
-            connection.set_trace_callback(self.trace)
-            yield connection
-        finally:
+        except BaseException:
             connection.close()
+            raise
+        return path, connection
+
+    @contextmanager
+    def _reader(self):
+        held = getattr(self._readers, "held", None)
+        if held is None or held[0] != self.path:
+            held = self._readers.held = self._open()
+        held[1].set_trace_callback(self.trace)
+        yield held[1]
 
     def _set_up(self, connection, path: Path) -> None:
         with self._guard:
@@ -468,22 +486,24 @@ class SQLiteLedgerRepository:
             cached = self._cache.get(self._key(slug))
             if cached is not None and cached.generation >= row[0]:
                 return cached
-            state = None if cached is None else self._refreshed(connection, slug, cached, row[0])
+            state, writer = self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
                 state = load(connection, slug)
             if "events" in state["_meta"]:
                 state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
             fragments = document(state, None if whole else cached.fragments)
-            entry = Entry(row[0], None, fragments.value, fragments)
+            entry = Entry(row[0], None, fragments.value, fragments, writer)
             self._remember(slug, entry)
         if whole:
             heap.release()
         return entry
 
-    def _refreshed(self, connection, slug: str, cached: Entry, generation: int) -> dict | None:
+    def _refreshed(self, connection, slug: str, cached: Entry | None, generation: int) -> tuple:
+        if cached is None:
+            return None, None
         paths = refresh.changed_paths(connection, slug, cached.generation, generation, CHANGES_KEPT)
-        return None if paths is None else refresh.refreshed(connection, slug, cached.state, paths)
+        return (None, None) if paths is None else writer_copy.refreshed(connection, slug, cached, paths)
 
     def _remember(self, slug: str, entry: Entry) -> None:
         with self._guard:
@@ -522,7 +542,7 @@ class SQLiteLedgerRepository:
 
     def exists(self, slug: str) -> bool:
         self._adopt(slug)
-        with self.connect() as connection:
+        with self._reader() as connection:
             return connection.execute(STORED, (slug,)).fetchone() is not None
 
     def get_document(self, slug: str) -> dict:
@@ -553,6 +573,28 @@ class SQLiteLedgerRepository:
                     heap.release()
         return entry.views[view]
 
+    def export_since(self, slug: str, since: int, view, changes) -> tuple[int, str | bytes]:
+        """(generation, text) of the stored ledger: changes(state, paths) when the database recorded every row
+        change after generation since, else view(fragments) of the stored ledger, built as encoded_view builds."""
+        self._adopt(slug)
+        with self.connect() as connection, connection:
+            connection.execute(BEGIN)
+            entry = self._entry(connection, slug)
+            paths = (
+                refresh.changed_paths(connection, slug, since, entry.generation, CHANGES_KEPT)
+                if 0 < since <= entry.generation
+                else None
+            )
+        text = None if paths is None else changes(entry.state, paths)
+        if text is not None:
+            return entry.generation, text
+        if view not in entry.views:
+            with VIEW_BUILD:
+                if view not in entry.views:
+                    entry.views[view] = view(entry.fragments)
+                    heap.release()
+        return entry.generation, entry.views[view]
+
     def read(self, slug: str, *keys: str) -> dict:
         """Only the named parts of a ledger, such as `overview`, `_meta.members` or `tasks/t1`."""
         self._adopt(slug)
@@ -562,7 +604,7 @@ class SQLiteLedgerRepository:
 
     def token(self, slug: str) -> str | None:
         self._adopt(slug)
-        with self.connect() as connection:
+        with self._reader() as connection:
             row = connection.execute(TOKEN, (slug,)).fetchone()
         return None if row is None else row[0]
 
@@ -570,7 +612,7 @@ class SQLiteLedgerRepository:
         """(generation, `_meta` task revision fields, task rows) as stored now, reusing each row of since that no
         write reached; since is a tuple this returned earlier."""
         self._adopt(slug)
-        with self.connect() as connection, connection:
+        with self._reader() as connection, connection:
             connection.execute(BEGIN)
             row = connection.execute(GENERATION, (slug,)).fetchone()
             if row is None:
@@ -579,6 +621,9 @@ class SQLiteLedgerRepository:
                 return since
             values = dict(connection.execute(TASK_REVISION, (slug, *TASK_REVISION_PATHS)))
             meta = {json.loads(path)[1]: json.loads(value) for path, value in values.items()}
+            cached = self._cache.get(self._key(slug))
+            if cached is not None and cached.generation == row[0]:
+                return row[0], meta, cached.state.get("tasks") or []
             paths = None
             if since is not None and since[0] < row[0]:
                 paths = refresh.changed_paths(connection, slug, since[0], row[0], CHANGES_KEPT)
@@ -604,7 +649,7 @@ class SQLiteLedgerRepository:
             with connection:
                 request_metrics.begin(connection, BEGIN_IMMEDIATE)
                 entry = self._entry(connection, slug)
-                state = entry.mutable()
+                state = entry.for_write()
                 rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
                 written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
             artifact_files.drop(slug, ctx.unstored)
@@ -619,7 +664,7 @@ class SQLiteLedgerRepository:
             if state.get("tasks", []) != entry.state.get("tasks", [])
             else previous.get("task_revision", previous["rev"])
         )
-        fragments = document(state, entry.fragments)
+        fragments, writer = written(state, entry.fragments)
         state = fragments.value
         before, after = diff(*(without_events(value) for value in (entry.state, state)))
         paths = write_rows(connection, slug, before, after)
@@ -635,7 +680,7 @@ class SQLiteLedgerRepository:
             UPDATE,
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),
         )
-        return Entry(generation, None, state, fragments)
+        return Entry(generation, None, state, fragments, writer)
 
     def _insert(self, connection, slug: str, state: dict, token: str, seeds: dict | None = None) -> None:
         previous = connection.execute(GENERATION, (slug,)).fetchone()

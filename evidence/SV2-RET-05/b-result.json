@@ -1,0 +1,116 @@
+{
+  "case": "B",
+  "collect": {
+    "committed": true,
+    "foreign_domain_objects": 1,
+    "garbage_collection_bytes": 215,
+    "mode": "collect",
+    "protected": {
+      "active_index": [],
+      "altered": [
+        "3e6c6ee4bbaf5bb2aea17471684e9ea2295045c9121e03c78e9c5ae43414fef0"
+      ],
+      "authoritative": [
+        "8dbf2fb83578f7d9a5152e0ce688ca7b8bafec1d081da94aef3fdd97abbfb9c6",
+        "99639dc23adb593831ca06cf12aee9decadf687d27de0b96b77a42b7e685abe6"
+      ],
+      "index_in_use": [],
+      "live": [
+        "83390061808c6bd5d8fe6bbb4c79a7cd635622b759d1a1bf27cb42403e7262a9"
+      ],
+      "missing": [],
+      "rebound": [],
+      "unowned": [
+        "a18ef8bbb2629d5cae59bfa37da2084923eec61d16a6b5d4773c96cae4582aab",
+        "stray.tmp"
+      ]
+    },
+    "reclaimed": {
+      "index_generations": [
+        "fixture-embed-v1"
+      ],
+      "uploads": [
+        "4e474a02ffb78243765d55b7116c21b91660f26ab5dcd402beac41ef53c4ad2e",
+        "805e0a61b8e427ade7541540f65b9963450d18f92ceeab2027eb065909af277b",
+        "96882622e17a0431332446e5b7fc75831c34043118df66155a1d51ff1616ecdc"
+      ]
+    },
+    "unsafe_delete_rejections": 4
+  },
+  "early": {
+    "committed": true,
+    "foreign_domain_objects": 1,
+    "garbage_collection_bytes": 0,
+    "mode": "collect",
+    "protected": {
+      "active_index": [],
+      "altered": [],
+      "authoritative": [
+        "8dbf2fb83578f7d9a5152e0ce688ca7b8bafec1d081da94aef3fdd97abbfb9c6",
+        "99639dc23adb593831ca06cf12aee9decadf687d27de0b96b77a42b7e685abe6"
+      ],
+      "index_in_use": [],
+      "live": [
+        "3e6c6ee4bbaf5bb2aea17471684e9ea2295045c9121e03c78e9c5ae43414fef0",
+        "4e474a02ffb78243765d55b7116c21b91660f26ab5dcd402beac41ef53c4ad2e",
+        "805e0a61b8e427ade7541540f65b9963450d18f92ceeab2027eb065909af277b",
+        "83390061808c6bd5d8fe6bbb4c79a7cd635622b759d1a1bf27cb42403e7262a9",
+        "96882622e17a0431332446e5b7fc75831c34043118df66155a1d51ff1616ecdc"
+      ],
+      "missing": [],
+      "rebound": [],
+      "unowned": [
+        "a18ef8bbb2629d5cae59bfa37da2084923eec61d16a6b5d4773c96cae4582aab",
+        "stray.tmp"
+      ]
+    },
+    "reclaimed": {
+      "index_generations": [],
+      "uploads": []
+    },
+    "unsafe_delete_rejections": 3
+  },
+  "inventory": {
+    "committed": false,
+    "foreign_domain_objects": 1,
+    "garbage_collection_bytes": 137,
+    "mode": "inventory",
+    "protected": {
+      "active_index": [],
+      "altered": [
+        "3e6c6ee4bbaf5bb2aea17471684e9ea2295045c9121e03c78e9c5ae43414fef0"
+      ],
+      "authoritative": [
+        "8dbf2fb83578f7d9a5152e0ce688ca7b8bafec1d081da94aef3fdd97abbfb9c6",
+        "99639dc23adb593831ca06cf12aee9decadf687d27de0b96b77a42b7e685abe6"
+      ],
+      "index_in_use": [],
+      "live": [
+        "83390061808c6bd5d8fe6bbb4c79a7cd635622b759d1a1bf27cb42403e7262a9"
+      ],
+      "missing": [],
+      "rebound": [],
+      "unowned": [
+        "a18ef8bbb2629d5cae59bfa37da2084923eec61d16a6b5d4773c96cae4582aab",
+        "stray.tmp"
+      ]
+    },
+    "reclaimed": {
+      "index_generations": [],
+      "uploads": [
+        "4e474a02ffb78243765d55b7116c21b91660f26ab5dcd402beac41ef53c4ad2e",
+        "805e0a61b8e427ade7541540f65b9963450d18f92ceeab2027eb065909af277b",
+        "96882622e17a0431332446e5b7fc75831c34043118df66155a1d51ff1616ecdc"
+      ]
+    },
+    "unsafe_delete_rejections": 4
+  },
+  "lookalike_kept": true,
+  "refusals": {
+    "bad_digest": "an upload reservation must name a sha256 hex digest",
+    "retire_active": "the active index generation cannot be retired",
+    "wrong_object": "the archive entry names an object other than the one reserved; nothing was committed"
+  },
+  "refusals_inventory_and_early_left_state_unchanged": true,
+  "stray_kept": true
+}

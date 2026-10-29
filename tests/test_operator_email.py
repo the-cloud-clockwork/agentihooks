@@ -1,23 +1,18 @@
-import httpx
 import pytest
 
 from hooks.integrations import mailer
 from hooks.integrations.mailer import EmailClient, EmailResult
 from scripts.swarm import operator_email
 
-ENV = {"AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com", "NOTIFICATIONS_API_KEY": "k"}
-
-
-class Answer:
-    def __init__(self, status_code):
-        self.status_code = status_code
+ENV = {"AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com", "MCP_KEY_GATEWAY": "k", "LANGFUSE_MCP_URL": "https://gw/mcp/"}
+SENT = {"status": "sent", "message_id": "m1"}
 
 
 @pytest.fixture
 def sent(monkeypatch):
-    calls = {"smtp": [], "api": []}
+    calls = {"smtp": [], "gateway": []}
     monkeypatch.setattr(mailer, "send_email", lambda *a, **k: calls["smtp"].append((a, k)) or EmailResult(True, 1))
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: calls["api"].append((a, k)) or Answer(200))
+    monkeypatch.setattr(operator_email, "gateway_send", lambda *a: calls["gateway"].append(a) or SENT)
     EmailClient.clear_cache()
     yield calls
     EmailClient.clear_cache()
@@ -30,60 +25,55 @@ def _reachable(monkeypatch, up):
 def test_a_reachable_relay_sends_once_through_smtp(sent, monkeypatch):
     _reachable(monkeypatch, True)
     assert operator_email.send("S", "T", ENV, ".") == ""
-    assert sent == {"smtp": [(("op@example.com", "S"), {"body": "T"})], "api": []}
+    assert sent == {"smtp": [(("op@example.com", "S"), {"body": "T"})], "gateway": []}
 
 
-def test_an_unreachable_relay_sends_once_through_the_notifications_api(sent, monkeypatch):
+def test_an_unreachable_relay_sends_once_through_the_gateway_notifications_tool(sent, monkeypatch):
     _reachable(monkeypatch, False)
     assert operator_email.send("S", "T", ENV, ".") == ""
     assert sent == {
         "smtp": [],
-        "api": [
-            (
-                ("https://email.homeofanton.com/api/v1/send",),
-                {
-                    "headers": {"Authorization": "Bearer k"},
-                    "json": {"to": "op@example.com", "subject": "S", "body": "T"},
-                    "timeout": 10,
-                },
-            )
-        ],
+        "gateway": [("https://gw/mcp/", "k", {"to": "op@example.com", "subject": "S", "body": "T"})],
     }
 
 
-def test_the_notifications_url_is_overridable(sent, monkeypatch):
+def test_no_gateway_url_is_a_named_refusal(sent, monkeypatch):
     _reachable(monkeypatch, False)
-    env = {**ENV, "AGENTIHOOKS_NOTIFICATIONS_URL": "http://notify.local/send"}
-    assert operator_email.send("S", "T", env, ".") == ""
-    assert [call[0] for call in sent["api"]] == [("http://notify.local/send",)]
-
-
-def test_no_reachable_transport_is_a_named_refusal(sent, monkeypatch):
-    _reachable(monkeypatch, False)
-    env = {"AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com"}
+    env = {**ENV, "LANGFUSE_MCP_URL": ""}
     assert operator_email.send("S", "T", env, ".") == (
-        "email failed: the SMTP relay is unreachable and NOTIFICATIONS_API_KEY is not set"
+        "email failed: the SMTP relay is unreachable and LANGFUSE_MCP_URL is not set"
     )
-    assert sent == {"smtp": [], "api": []}
+    assert sent == {"smtp": [], "gateway": []}
 
 
-def test_a_refused_api_answer_is_reported(sent, monkeypatch):
+def test_no_gateway_key_is_a_named_refusal(sent, monkeypatch):
     _reachable(monkeypatch, False)
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: sent["api"].append(a) or Answer(500))
-    assert operator_email.send("S", "T", ENV, ".") == "email failed: notifications answered 500"
-    assert len(sent["api"]) == 1
+    env = {"AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com", "LANGFUSE_MCP_URL": "https://gw/mcp/"}
+    assert operator_email.send("S", "T", env, ".") == (
+        "email failed: the SMTP relay is unreachable and MCP_KEY_GATEWAY is not set"
+    )
+    assert sent == {"smtp": [], "gateway": []}
 
 
-def test_an_api_transport_error_is_reported(sent, monkeypatch):
+def test_an_unsent_gateway_reply_is_reported(sent, monkeypatch):
+    _reachable(monkeypatch, False)
+    monkeypatch.setattr(operator_email, "gateway_send", lambda *a: sent["gateway"].append(a) or {"status": "queued"})
+    assert operator_email.send("S", "T", ENV, ".") == 'email failed: the gateway answered {"status": "queued"}'
+    assert len(sent["gateway"]) == 1
+
+
+def test_a_gateway_error_is_reported(sent, monkeypatch):
     _reachable(monkeypatch, False)
 
-    def down(*a, **k):
-        sent["api"].append(a)
-        raise httpx.ConnectError("no route")
+    def down(*a):
+        sent["gateway"].append(a)
+        raise RuntimeError("401 Unauthorized")
 
-    monkeypatch.setattr(httpx, "post", down)
-    assert operator_email.send("S", "T", ENV, ".") == "email failed: no route"
-    assert len(sent["api"]) == 1
+    monkeypatch.setattr(operator_email, "gateway_send", down)
+    assert operator_email.send("S", "T", ENV, ".") == (
+        "email failed: the gateway notifications tool raised 401 Unauthorized"
+    )
+    assert len(sent["gateway"]) == 1
 
 
 def _probe(monkeypatch, up):

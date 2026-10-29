@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import socket
 import ssl
@@ -206,6 +207,45 @@ def test_a_plain_http_client_on_the_tls_port_is_dropped_quietly(tls_ledger, caps
 
 def test_the_health_check_answers_over_tls(tls_ledger):
     assert ledger_link.serving(timeout=5, url=tls_ledger["base"]) == str(core.LEDGER_DIR)
+
+
+@pytest.mark.parametrize("body", [b"{}", b"{}" + b" " * (ledger_server.MAX_BODY - 2)], ids=["small", "at-the-limit"])
+@pytest.mark.parametrize(
+    ("path", "reason"),
+    [("agent-token", "Missing or wrong hive credential"), ("ops", "Missing or wrong ledger credential")],
+)
+def test_a_refusal_with_an_unread_body_answers_with_its_status_over_tls(tls_ledger, path, reason, body):
+    request = urllib.request.Request(
+        f"{tls_ledger['base']}/api/v1/ledgers/{SLUG}/{path}",
+        body,
+        {"Content-Type": "application/json", "X-Ledger-Agent": "engineer@323133-0256"},
+        method="POST",
+    )
+    context = ssl.create_default_context(cadata=os.environ["LEDGER_CA_PEM"])
+
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(request, timeout=5, context=context)
+
+    assert refused.value.code == 403
+    assert json.loads(refused.value.read())["error"]["message"] == reason
+
+
+def test_a_refusal_over_a_body_past_the_drain_limit_still_answers_over_tls(tls_ledger, monkeypatch):
+    monkeypatch.setattr(ledger_server, "MAX_BODY", 16)
+    request = urllib.request.Request(
+        f"{tls_ledger['base']}/api/v1/ledgers/{SLUG}/agent-token",
+        b"{}" + b" " * 4096,
+        {"Content-Type": "application/json", "X-Ledger-Agent": "engineer@323133-0256"},
+        method="POST",
+    )
+    context = ssl.create_default_context(cadata=os.environ["LEDGER_CA_PEM"])
+
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(request, timeout=5, context=context)
+
+    assert refused.value.code == 403
+    assert refused.value.headers["Connection"] == "close"
+    assert json.loads(refused.value.read())["error"]["message"] == "Missing or wrong hive credential"
 
 
 def trusted(monkeypatch, cert):

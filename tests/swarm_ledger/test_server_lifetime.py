@@ -133,7 +133,7 @@ def test_detached_server_stop_deadline_excludes_startup_after_pid_publication(tm
         return popen(*args, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", start)
-    test_detached_server_stops_when_its_run_ends(tmp_path, "kill", True, "--ensure", ledger_port)
+    test_detached_server_stops_when_its_run_ends(tmp_path, "kill", True, "--serve", ledger_port)
     assert (tmp_path / "startup-paused").read_text() == "yes"
 
 

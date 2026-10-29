@@ -64,3 +64,37 @@ def test_a_preflight_does_not_release_a_refused_unpushed_commit(rig, monkeypatch
     wait_on(rig, on)
     assert not rig.stop().allowed
     assert push_stop.count(rig.tree, "HEAD", "--not", "--remotes=origin") == 1
+
+
+def other_repo(rig):
+    origin, seed = rig.root.parent / "other.git", rig.root.parent / "other-seed"
+    git(rig.root.parent, "init", "--bare", "-b", "dev", str(origin))
+    git(rig.root.parent, "clone", str(origin), str(seed))
+    (seed / "readme").write_text("other\n")
+    git(seed, "add", "readme")
+    git(seed, "commit", "-m", "seed")
+    git(seed, "push", "origin", "HEAD:refs/heads/dev")
+    tree = rig.root / "other" / BRANCH
+    git(seed, "worktree", "add", "-b", BRANCH, str(tree), "origin/dev")
+    (tree / "chart").write_text("chart")
+    git(tree, "add", "chart")
+    git(tree, "commit", "-m", "chart")
+    git(tree, "push", "-u", "origin", BRANCH)
+    git(seed, "remote", "set-url", "origin", "https://github.com/o/other.git")
+    git(seed, "remote", "set-url", "--push", "origin", str(origin))
+    return tree
+
+
+def test_a_matching_preflight_releases_progress_debt_across_the_agents_other_repositories(rig):
+    on = preflight(rig)
+    other_repo(rig)
+    wait_on(rig, on)
+    assert rig.stop().allowed
+    assert rig.inbox() == []
+
+
+def test_a_stale_preflight_still_refuses_progress_debt_with_another_repository(rig):
+    on = preflight(rig)
+    other_repo(rig)
+    wait_on(rig, {**on, "head": "stale"})
+    assert not rig.stop().allowed

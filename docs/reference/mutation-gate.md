@@ -19,6 +19,47 @@ gh workflow run proofs.yml \
 
 For a stacked branch, set `base` to its dependency branch. Branch pushes run Mutation preflight before the first draft pull request; wait for its current head to pass. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
 
+## Required gate proof
+
+`mutation-plan`, `mutation-stats` and `mutation` are needs of `Gate — Required`
+in Tests, and `Gate — Required` is the required status check of both dev
+rulesets (`.github/rulesets/dev-history.json`, `dev-no-delete.json`). On a pull
+request into dev `mutation-plan` must succeed; `mutation-stats` must succeed
+unless a reused plan forwards its result; `mutation` must succeed unless the
+plan grades inline in `mutation-stats`.
+
+The both-ways proof is two full Tests dispatches with `gate_plant=true` on the
+plant branches `diffcheck/ci-323133-2650-t9-green` and
+`diffcheck/ci-323133-2650-t9-red`. Both plant branches add `bright()` to
+`scripts/term_colors.py`; they differ only in the assertion of
+`test_bright_shifts_a_colour_to_its_bright_code`:
+
+| Run | Assertion | Mutation result | Gate — Required |
+|---|---|---|---|
+| [Green 40460927967](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40460927967), head `461504b` | `colors.bright("31") == "91"` | 4 killed | success |
+| [Red 40460931731](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40460931731), head `a4a1bb2` | `colors.bright("31")` (truthiness only) | 3 survived, 1 killed on the changed line | failure, `mutation-stats` the only red need |
+
+## Red rate in pull request runs
+
+70 completed, non cancelled Tests pull request runs between
+2026-10-26 15:22Z and 23:03Z carried 17 red mutation jobs:
+
+| Cause | Runs | Kind |
+|---|---|---|
+| Surviving mutants on changed lines | 8 | Real: the gate doing its job |
+| Selected tests failing on the unmutated head | 2 | Real: the pull request broke a test |
+| Dependabot pull requests: no Dependabot secrets, so `Mint the tcc main ci App token` gets an empty client id | 6 | Tool: every token minting job in those runs fails, not only mutation |
+| Shard ran the full 1080 second budget on eight large swarm files | 1 | Tool: budget; files print `not mutated, over budget` and the shard exits 1, so the gate goes red |
+
+The audit's 38% (15 of 40) predates mutation moving into Tests. Excluding
+Dependabot runs, one of 64 runs (1.6%) was a mutation tool failure. Cancelled
+runs are outside the count. Separately, after the counted window, mutation
+planning was killed for memory (exit 137, Tests run 40424698293) between
+2026-10-26 23:45Z and 2026-10-27 00:22Z.
+
+The tool failures are routed as swarm follow ups: Dependabot secrets for the
+App token, the shard budget for large swarm files, and planner memory.
+
 ## Covering tests through production helpers
 
 Mutation planning supplements matching and importing test modules with recorded
@@ -1425,7 +1466,7 @@ mutmut stops a mutant at its first failing test, and a shard runs the test that 
 
 For example, a function traced by tests of 2, 8 and 30 seconds costs 55.6 worker seconds per mutant without a killer. Once the 2 second test has killed one of its mutants, each mutant costs 8.1. Durations follow the same rules as split planning: the maximum observed duration, at least 5.6 seconds or the largest observed duration when a test has none. Shard sizing, the shard target and limit, and the 1080 second shard budget are unchanged; a lower estimate places more mutants on fewer shards.
 
-The preflight `stats` parts also keep each test file's statistics in one merged `mutation-test-stats-v2-<os>-` cache per run, which every part restores, so an unchanged test file is not traced again even when it moves to another part. A single part saves the cache itself; with more parts each uploads its cache folder and `refine` merges them and saves the cache once after all parts finish. An entry is reused when the gate code, configuration, runner options, installed packages (the project itself by its release, since its build number changes with every commit), the test file and everything it imports or names as a file are unchanged, together with the changed lines of each source among them. A file that reaches a dynamic import whose target is not a literal is also checked against every repository module its statistics bucket loaded and what those import or name; a collection that recorded no modules falls back to every Python module in the repository. Each part prints `Mutation stats cache: reused N test files; collect M` in its **Collect one stats part for every mutation shard** step.
+The preflight `stats` parts also keep each test file's statistics in one merged `mutation-test-stats-v2-<os>-` cache per run, which every part restores, so an unchanged test file is not traced again even when it moves to another part. A single part saves the cache itself; with more parts each uploads its cache folder and `refine` merges them and saves the cache once after all parts finish. An entry is reused when the gate code, configuration, runner options, installed packages (the project itself by its release, since its build number changes with every commit), the test file and everything it imports or names as a file are unchanged (except `.test_durations`, which CI rewrites from dev on every run and which only orders and splits tests), together with the changed lines of each source among them. A file that reaches a dynamic import whose target is not a literal is also checked against every repository module its statistics bucket loaded and what those import or name; a collection that recorded no modules falls back to every Python module in the repository. Each part prints `Mutation stats cache: reused N test files; collect M` in its **Collect one stats part for every mutation shard** step. The pull request `mutation-stats` parts of the Tests workflow keep the same merged cache; with more parts each uploads only the entries it wrote, and the first `mutation` shard restores the previous merged cache, lays the parts over it and saves it. When a lookup misses, a second line, `Mutation stats cache: misses {...}; changed inputs [...]`, counts each miss reason and names the five inputs that changed most often.
 
 Only the branch preflight (`mutation-preflight.yml`) carries killing tests between runs. A kill is recorded per function as the failing test's node id, in a file named by a digest of the function name. The preflight keeps them per branch in an actions cache:
 
@@ -1741,11 +1782,11 @@ cat mutation-report/reuse.json
 
 Mutmut 3 mutates functions and methods. Files without mutable functions are reported explicitly with a zero count. A surviving or uncovered mutant fails when its original source lines intersect added or changed hunk lines. Incomplete, timed out and unexpected mutant outcomes fail regardless of their line. Generated trampolines and function relative diffs are mapped back to the original source, including decorators and methods.
 
-A Standards reader clears an exact survivor with one JSON file under `mutation-clearances/`. Each file holds one key combining the source file, mutant name and fingerprint from the report. The filename is the SHA256 of that complete key followed by `.json`, so different rulings can be added by concurrent pull requests without editing a shared object. Every entry requires the reader and its reason. The runner also reads the legacy root `mutation-cleared.txt`; identical duplicates are accepted and conflicting rulings fail. The fingerprint binds the original function and mutant, so a changed function invalidates an old clearance.
+A Standards reader clears an exact survivor with one JSON file under `mutation-clearances/`. Each file holds one key combining the source file, the mutated function name without its mutmut number and the mutant identity from the report. The filename is the SHA256 of that complete key followed by `.json`, so different rulings can be added by concurrent pull requests without editing a shared object. Every entry requires the reader and its reason. The runner also reads the legacy root `mutation-cleared.txt`; identical duplicates are accepted and conflicting rulings fail. The identity hashes only the lines the mutant changes, with how often those original lines already appeared earlier in the function so identical mutants on repeated lines stay apart, so a clearance survives unrelated edits on other lines of its function, such as a new argument that renumbers its mutants, unless the edit adds an earlier copy of the mutant's original lines, and a change to the mutant's own lines invalidates it. Older clearances keyed by mutant name and whole function fingerprint still match the exact mutant they were written for.
 
 ```json
 {
-  "hooks/example.py:hooks.example.x_example__mutmut_1:FINGERPRINT": {
+  "hooks/example.py:hooks.example.x_example:IDENTITY": {
     "reader": "Standards",
     "reason": "The changed argument does not change the observed output."
   }

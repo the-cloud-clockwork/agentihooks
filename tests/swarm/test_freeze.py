@@ -87,6 +87,22 @@ def test_claimed_pull_request_and_blocked_work_is_never_held(state):
     assert not held(task(state=state), record("plans/b", "focus"))
 
 
+@pytest.mark.parametrize("target", ["plans/b", "phases/p2", "lane:ci", "kind:research"])
+def test_claim_gate_never_holds_an_unfocused_task(target):
+    row = task()
+    found = doc(record(target, "focus"), tasks=[row])
+    assert not freeze.claim_gate(row, found, hierarchy.project(found)[0], "")
+    assert held(row, record(target, "focus"))
+
+
+def test_claim_gate_still_holds_a_frozen_or_watched_task():
+    row = task()
+    frozen_doc = doc(record("plans/a"), tasks=[row])
+    assert freeze.claim_gate(row, frozen_doc, hierarchy.project(frozen_doc)[0], "")
+    watched_doc = {**doc(tasks=[row]), freeze.WATCHED: ["the focus elsewhere"]}
+    assert freeze.claim_gate(row, watched_doc, hierarchy.project(watched_doc)[0], "")
+
+
 def test_a_cycle_in_the_parent_links_ends_the_walk():
     row = task()
     graph = {
@@ -246,15 +262,15 @@ def test_a_group_member_follows_its_leads_freeze(target):
     assert ledger_stats.frozen(found, rows, {}) == set()
 
 
-def test_a_focused_plan_lets_an_urgent_task_outside_it_be_claimed_and_holds_a_normal_one(store):
+def test_a_focused_plan_elsewhere_still_claims_an_urgent_task_and_a_normal_one(store):
     ledger = FrozenLedger(
         [{"id": "normal", "phase": "p2"}, {"id": "urgent", "phase": "p2", "rank": "urgent"}],
         record("plans/a", "focus"),
     )
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert spawned(runtime) == ["urgent"]
-    assert ledger.rows["normal"]["state"] == "open"
+    assert spawned(runtime) == ["urgent", "normal"]
+    assert ledger.rows["normal"]["state"] != "open"
 
 
 def test_a_claimed_task_under_a_new_freeze_keeps_its_agent(store):
@@ -280,13 +296,23 @@ def test_a_doctor_swarm_claims_its_fix_task_under_a_focus(store):
         [{"id": "fix", "phase": loop.FIX_PHASE}, {"id": "watch", "phase": "p1"}], record("lane:ci", "focus")
     )
     _, ready = capacity.ready_work("sw", store, ledger.state("sw"))
-    assert [t["id"] for t in ready["eng"]] == ["fix"]
+    assert [t["id"] for t in ready["eng"]] == ["fix", "watch"]
 
 
 def test_autoscale_demand_counts_no_held_task(store):
     ledger = FrozenLedger([{"id": "t1", "phase": "p1"}, {"id": "t2", "phase": "p2"}], record("plans/a"))
     _, ready = capacity.ready_work("sw", store, ledger.state("sw"))
     assert [t["id"] for t in ready["eng"]] == ["t2"]
+
+
+def test_a_frozen_task_is_never_ready_but_an_unfocused_and_a_focused_task_both_are(store):
+    ledger = FrozenLedger(
+        [{"id": "cold", "phase": "p2"}, {"id": "hot", "phase": "p1"}, {"id": "plain", "phase": "p1"}],
+        record("plans/b"),
+        record("tasks/hot", "focus"),
+    )
+    _, ready = capacity.ready_work("sw", store, ledger.state("sw"))
+    assert {t["id"] for t in ready["eng"]} == {"hot", "plain"}
 
 
 def test_only_held_work_drains_with_a_notice_naming_the_freezes_and_unfreezing_runs_again(store):

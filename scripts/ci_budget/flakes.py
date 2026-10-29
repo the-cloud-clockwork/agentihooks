@@ -59,7 +59,7 @@ def text(test: dict) -> str:
     module = " ".join([*folders, PurePosixPath(path).stem.removeprefix("test_")]).replace("_", " ").lower()
     return (
         f"The test {function} in the {module} tests passed only on a retry in {len(test['runs'])} dev runs "
-        "within seven days."
+        "within seven days. Proposed fix: make it pass on the first run."
     )
 
 

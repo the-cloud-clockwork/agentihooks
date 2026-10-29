@@ -225,8 +225,9 @@ def test_publish_refuses_a_registered_branch_mismatch_before_any_mutation(
     from scripts.swarm.store import SwarmError
 
     root = publication.root
-    git(root, "push", "origin", "HEAD:prerequisite")
     original = git(root, "rev-parse", "HEAD")
+    diverged = git(root, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Prerequisite work")
+    git(root, "push", "origin", f"{diverged}:refs/heads/prerequisite")
     publication.task["branch"] = "prerequisite"
     if repository_branch:
         publication.task["branch"] = "engineer-test"
@@ -242,7 +243,7 @@ def test_publish_refuses_a_registered_branch_mismatch_before_any_mutation(
     assert git(root, "diff", "--cached") == ""
     assert (root / "chosen.txt").read_text() == "after"
     assert publication.updates == []
-    assert git(root, "ls-remote", "origin", "refs/heads/prerequisite").split()[0] == original
+    assert git(root, "ls-remote", "origin", "refs/heads/prerequisite").split()[0] == diverged
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
@@ -477,12 +478,20 @@ def test_prepare_stacks_on_the_recorded_branch_and_publish_pushes_its_current_br
         ("MERGED", False, "another-branch"),
     ],
 )
+@pytest.mark.parametrize(
+    "continuation",
+    [(hint, continued) for hint in ("handoff_envelope", "reclaim") for continued in ("predecessor", "kept")],
+)
 def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
-    repository, tmp_path, monkeypatch, state, deleted, head
+    repository, tmp_path, monkeypatch, state, deleted, head, continuation
 ):
     from scripts.swarm import publish, stack
+    from scripts.swarm_ledger import ledger_tasks
+
+    hint, continued = continuation
 
     git(repository, "push", "origin", "HEAD:predecessor")
+    git(repository, "push", "origin", "HEAD:kept")
     old_head = git(repository, "rev-parse", "HEAD")
     fresh = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "New dev")
     git(repository, "push", "origin", f"{fresh}:refs/heads/dev")
@@ -508,7 +517,7 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
         "branch": "predecessor",
         "pr_url": pr_url,
         "repository_branches": {str(repository): "predecessor"},
-        "handoff_envelope": {"continue_from": "origin/predecessor", "source": "origin/predecessor"},
+        hint: {"continue_from": f"origin/{continued}", "source": "origin/predecessor"},
     }
     native = publish.execute
     native_git = publish.git
@@ -527,26 +536,28 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
         return native(command, root)
 
     monkeypatch.setattr(publish, "execute", execute)
-    ledger = SimpleNamespace(
-        tasks=lambda slug: [task], update_task=lambda slug, task_id, fields, by: task.update(fields)
-    )
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: head if state == "OPEN" else "")
+
+    def update_task(slug, task_id, fields, by):
+        ledger_tasks.check({"op": "task_update", "item": f"tasks/{task_id}", "fields": fields, "by": by})
+        task.update(fields)
+
+    ledger = SimpleNamespace(tasks=lambda slug: [task], update_task=update_task)
     agent = AgentRecord("engineer@test", "ci", "t1")
 
     result = publish.prepare("swarm", agent, str(repository), ledger)
 
     retired = state == "MERGED" and head == "predecessor"
+    registered = "predecessor" if state == "OPEN" else "engineer-test"
+    upstream = "origin/dev" if retired else "origin/predecessor"
     assert git(worktree, "rev-parse", "HEAD") == (fresh if retired else old_head)
     assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == (
-        "origin/dev" if retired else "origin/predecessor"
+        "origin/kept" if continued == "kept" and state != "OPEN" else upstream
     )
-    assert result["branch"] == task["branch"] == "engineer-test"
-    assert task["repository_branches"] == {str(repository): "engineer-test"}
+    assert result["branch"] == task["branch"] == registered
+    assert task["repository_branches"] == {str(repository): registered}
     assert task["pr_url"] == ("" if retired else pr_url)
-    assert task["handoff_envelope"] == (
-        {"source": "origin/predecessor"}
-        if retired
-        else {"continue_from": "origin/predecessor", "source": "origin/predecessor"}
-    )
+    assert task[hint] == {"continue_from": f"origin/{continued}", "source": "origin/predecessor"}
     assert publish.prepare("swarm", agent, str(repository), ledger) == result
 
 
@@ -1211,6 +1222,67 @@ def test_cli_prepares_and_publishes_from_the_primary_checkout(publication, monke
     assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
 
 
+@pytest.mark.parametrize("command", ["prepare", "publish"])
+@pytest.mark.parametrize(
+    "recording,branch",
+    [
+        ("map", "recorded-delivery"),
+        ("legacy", "engineer-test"),
+        ("unrecorded", ""),
+        ("missing", ""),
+        ("lookup-refused", ""),
+    ],
+)
+def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(
+    publication, monkeypatch, command, recording, branch
+):
+    import syslog
+
+    from scripts.swarm import cli, publish
+
+    p = publication
+    if recording == "map":
+        p.task["repository_branches"] = {str(p.repo): "recorded-delivery"}
+    if recording == "unrecorded":
+        p.task.pop("branch")
+    if recording == "missing":
+        monkeypatch.setattr(p.ledger, "tasks", lambda slug: [])
+    reason = (
+        "publication requires this agent's claimed task" if recording == "missing" else "recorded branch is missing"
+    )
+    monkeypatch.setattr(cli, "_worker", lambda store, args: p.agent)
+    monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(p.repo))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: p.ledger)
+    opened, logged = [], []
+    monkeypatch.setattr(syslog, "openlog", lambda ident: opened.append(ident))
+    monkeypatch.setattr(syslog, "syslog", lambda priority, message: logged.append((priority, json.loads(message))))
+
+    def refuse(*args):
+        raise publish.SwarmError("recorded branch is missing")
+
+    if recording == "lookup-refused":
+        monkeypatch.setattr(p.ledger, "tasks", refuse)
+    elif recording != "missing":
+        monkeypatch.setattr(publish, command, refuse)
+    args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
+    with pytest.raises(publish.SwarmError, match=reason):
+        getattr(cli, f"cmd_{command}")(None, args)
+    assert opened == ["agentihooks-swarm"]
+    assert logged == [
+        (
+            syslog.LOG_WARNING,
+            {
+                "event": "swarm_publication_refused",
+                "slug": "swarm",
+                "command": command,
+                "task": "t1",
+                "branch": branch,
+                "reason": reason,
+            },
+        )
+    ]
+
+
 def test_publication_preserves_the_enforced_build_gate(publication, monkeypatch):
     import fakeredis
 
@@ -1360,6 +1432,44 @@ def test_a_continuation_publishes_its_registered_branch_regardless_of_its_pull_r
     assert git(root, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test"
 
 
+def test_a_pull_request_on_another_host_is_never_looked_up(monkeypatch):
+    from scripts.swarm import merge_queue, publish_queue
+
+    monkeypatch.setattr(merge_queue, "graphql", lambda *args: pytest.fail("looked up"))
+    assert publish_queue.open_head("/srv/remote.git", "https://github.com/example/repo/pull/7") == ""
+    assert publish_queue.open_head("git@github.com:example/repo.git", "") == ""
+
+
+def test_a_recorded_url_that_names_no_pull_request_keeps_the_current_branch(monkeypatch):
+    from scripts.swarm import merge_queue, publish_queue
+
+    monkeypatch.setattr(merge_queue, "graphql", lambda document, variables: {"resource": None})
+    assert publish_queue.open_head("git@github.com:example/repo.git", "https://github.com/example/repo/issues/7") == ""
+
+
+@pytest.mark.parametrize(
+    "pull, expected",
+    [
+        ({"state": "OPEN", "isCrossRepository": False, "repository": {"nameWithOwner": "Example/Repo"}}, "task"),
+        ({"state": "MERGED", "isCrossRepository": False, "repository": {"nameWithOwner": "example/repo"}}, ""),
+        ({"state": "OPEN", "isCrossRepository": True, "repository": {"nameWithOwner": "example/repo"}}, ""),
+        ({"state": "OPEN", "isCrossRepository": False, "repository": {"nameWithOwner": "example/other"}}, ""),
+    ],
+)
+def test_open_head_names_only_an_open_pull_request_in_the_same_repository(monkeypatch, pull, expected):
+    from scripts.swarm import merge_queue, publish_queue
+
+    url = "https://github.com/example/repo/pull/7"
+
+    def graphql(document, variables):
+        assert document == publish_queue.HEAD
+        assert variables == {"url": url}
+        return {"resource": {**pull, "headRefName": "task"}}
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
+    assert publish_queue.open_head("git@github.com:example/repo.git", url) == expected
+
+
 def test_a_missing_branch_never_descends_and_prints_nothing(publication, capfd):
     from scripts.swarm import publish
 
@@ -1381,6 +1491,218 @@ def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_p
 
     assert result["branch"] == publication.task["branch"] == "engineer-test"
     assert publication.task["repository_branches"] == {str(repository): "engineer-test"}
+
+
+def test_prepare_and_publish_keep_the_open_pull_requests_delivery_branch(publication, monkeypatch):
+    from scripts.swarm import publish
+
+    p = publication
+    git(p.root, "push", "origin", "HEAD:predecessor")
+    p.task.update(
+        branch="predecessor",
+        repository_branches={str(p.repo): "predecessor"},
+        pr_url="https://github.com/example/repo/pull/7",
+    )
+
+    def open_head(remote, url):
+        assert remote == str(p.repo.parent / "remote.git")
+        assert url == "https://github.com/example/repo/pull/7"
+        return "predecessor"
+
+    monkeypatch.setattr(publish.publish_queue, "open_head", open_head)
+    result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
+    assert result["worktree"] == str(p.root)
+    assert git(p.root, "branch", "--show-current") == "engineer-test"
+    assert p.task["branch"] == "predecessor"
+    assert p.task["repository_branches"] == {str(p.repo): "predecessor"}
+    monkeypatch.chdir(p.repo)
+    published = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue pull request", ["chosen.txt"])
+    assert published["branch"] == p.task["branch"] == "predecessor"
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == published["head"]
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+def test_prepare_registers_the_open_pull_requests_head_over_the_successor_branch(publication, monkeypatch):
+    from scripts.swarm import publish
+
+    p = publication
+    git(p.root, "push", "origin", "HEAD:pull-head")
+    p.task.update(pr_url="https://github.com/example/repo/pull/7", state="pr")
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "pull-head" if url else "")
+
+    result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
+
+    assert result["branch"] == p.task["branch"] == "pull-head"
+    assert p.task["repository_branches"] == {str(p.repo): "pull-head"}
+    assert git(p.root, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/pull-head"
+
+
+def test_prepare_refuses_an_open_pull_request_head_the_worktree_does_not_descend_from(publication, monkeypatch):
+    from scripts.swarm import publish
+
+    p = publication
+    diverged = git(p.root, "commit-tree", "HEAD^{tree}", "-p", "origin/dev", "-m", "Unrelated pull request work")
+    git(p.root, "push", "origin", f"{diverged}:refs/heads/pull-head")
+    p.task.update(pr_url="https://github.com/example/repo/pull/7", state="pr")
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "pull-head" if url else "")
+
+    with pytest.raises(publish.SwarmError, match="delivers branch pull-head.*on branch engineer-test"):
+        publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
+    assert p.task["branch"] == "engineer-test"
+    assert p.updates == []
+
+
+@pytest.mark.parametrize("checkout", ["recorded", "own"])
+def test_a_fresh_continuation_on_the_recorded_branch_publishes_past_an_unpushed_predecessor_entry(
+    publication, monkeypatch, checkout
+):
+    from scripts.swarm import publish
+
+    p = publication
+    continuation = p.root
+    if checkout == "recorded":
+        continuation = p.repo.parent / "worktrees" / "repo" / "recorded"
+        git(p.repo, "worktree", "add", "-b", "recorded", str(continuation), "dev")
+        git(continuation, "push", "-u", "origin", "recorded")
+        (continuation / "scripts" / "ci_prepush" / "__main__.py").write_text(
+            (p.root / "scripts" / "ci_prepush" / "__main__.py").read_text()
+        )
+        git(continuation, "add", "scripts/ci_prepush/__main__.py")
+        git(continuation, "commit", "-qm", "Install gate fixture")
+        (continuation / "chosen.txt").write_text("after")
+    else:
+        git(continuation, "push", "origin", "HEAD:recorded")
+    p.task.update(
+        branch="recorded",
+        repository_branches={str(p.repo): "predecessor"},
+        pr_url="https://github.com/example/repo/pull/7",
+    )
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "recorded")
+    monkeypatch.chdir(continuation)
+    published = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue pull request", ["chosen.txt"])
+    assert published["branch"] == p.task["branch"] == "recorded"
+    assert p.task["repository_branches"] == {str(p.repo): "recorded"}
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/recorded").split()[0] == published["head"]
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor") == ""
+
+
+@pytest.mark.parametrize(
+    "pushed,expected", [((), "predecessor"), (("recorded",), "recorded"), (("predecessor", "recorded"), "predecessor")]
+)
+def test_continuation_takes_the_recorded_branch_only_over_an_unpushed_entry(publication, pushed, expected):
+    from scripts.swarm import publish
+
+    p = publication
+    for name in pushed:
+        git(p.root, "push", "origin", f"HEAD:{name}")
+    task = {**p.task, "branch": "recorded", "branch_repo": str(p.repo.parent / "remote.git")}
+    scoped = {**task, "branch": "predecessor"}
+    assert publish.continuation_task(p.repo, task, scoped, "engineer-test")["branch"] == expected
+    assert publish.continuation_task(p.repo, task, scoped, "predecessor") == scoped
+
+
+@pytest.mark.parametrize("open_branch,diverged", [("", True), ("another-task", False), ("predecessor", True)])
+def test_publish_refuses_unverified_or_diverged_retained_delivery(publication, monkeypatch, open_branch, diverged):
+    from scripts.swarm import publish
+
+    p = publication
+    commit = git(p.root, "rev-parse", "HEAD")
+    if diverged:
+        commit = git(p.root, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Unrelated retained work")
+    git(p.root, "push", "origin", f"{commit}:refs/heads/predecessor")
+    p.task.update(branch="predecessor", pr_url="https://github.com/example/repo/pull/7")
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: open_branch)
+    monkeypatch.chdir(p.root)
+    before = git(p.root, "rev-parse", "HEAD")
+    with pytest.raises(publish.SwarmError, match="differs from registered branch predecessor"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Keep unrelated work", ["chosen.txt"])
+    assert git(p.root, "rev-parse", "HEAD") == before
+    assert git(p.root, "diff", "--cached", "--name-only") == ""
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == commit
+
+
+@pytest.mark.parametrize("command", ["prepare", "publish"])
+def test_missing_pull_request_publishes_the_successor_branch_and_keeps_the_retained_one(
+    publication, monkeypatch, command
+):
+    from scripts.swarm import publish
+
+    p = publication
+    git(p.root, "push", "origin", "HEAD:predecessor")
+    retained = git(p.root, "rev-parse", "HEAD")
+    p.task["branch"] = "predecessor"
+
+    def open_head(remote, url):
+        assert remote == str(p.repo.parent / "remote.git")
+        assert url == ""
+        return ""
+
+    monkeypatch.setattr(publish.publish_queue, "open_head", open_head)
+    monkeypatch.chdir(p.repo)
+    if command == "prepare":
+        result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
+    else:
+        result = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Do not redirect", ["chosen.txt"])
+    assert result["branch"] == p.task["branch"] == "engineer-test"
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == retained
+
+
+@pytest.mark.parametrize("command", ["prepare", "publish"])
+def test_hive_successor_publishes_its_own_branch_over_the_predecessor_hive_key(publication, monkeypatch, command):
+    from scripts.swarm import publish
+
+    p = publication
+    git(p.root, "push", "origin", "HEAD:predecessor")
+    hive_key = f"/hive/predecessor/{p.repo.name}"
+    older = f"/hive/older/{p.repo.name}"
+    p.task.update(
+        branch="predecessor",
+        repository_branches={hive_key: "predecessor", older: "older-task", "/hive/bundle": "kept"},
+    )
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "")
+    monkeypatch.chdir(p.repo)
+
+    if command == "prepare":
+        result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
+    else:
+        result = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue as successor", ["chosen.txt"])
+        assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == result["head"]
+
+    assert result["branch"] == p.task["branch"] == "engineer-test"
+    assert p.task["repository_branches"] == {str(p.repo): "engineer-test", "/hive/bundle": "kept"}
+    assert git(p.root, "rev-parse", "--abbrev-ref", "HEAD") == "engineer-test"
+
+
+@pytest.mark.parametrize("state", ["OPEN", "CLOSED", "MERGED"])
+def test_successor_publishes_past_a_settled_pull_request_only(publication, monkeypatch, state):
+    from scripts.swarm import publish
+
+    p = publication
+    git(p.root, "push", "origin", "HEAD:predecessor")
+    url = "https://github.com/example/repo/pull/7"
+    p.task.update(branch="predecessor", pr_url=url)
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, pull: "")
+    native = publish.execute
+    viewed = []
+
+    def execute(argv, root):
+        if argv[:3] == ["gh", "pr", "view"]:
+            assert argv == ["gh", "pr", "view", url, "--json", "state"]
+            assert root == p.root
+            viewed.append(argv)
+            return json.dumps({"state": state})
+        return native(argv, root)
+
+    monkeypatch.setattr(publish, "execute", execute)
+    monkeypatch.chdir(p.root)
+    if state == "OPEN":
+        with pytest.raises(publish.SwarmError, match="differs from registered branch predecessor"):
+            publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue as successor", ["chosen.txt"])
+        assert p.updates == []
+    else:
+        result = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue as successor", ["chosen.txt"])
+        assert result["branch"] == p.task["branch"] == "engineer-test"
+    assert len(viewed) == 1
 
 
 def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):

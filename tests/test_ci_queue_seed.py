@@ -24,7 +24,7 @@ def _duration_steps():
     jobs = _jobs()
     steps = jobs.get("durations", jobs["select"])["steps"]
     end = next(index for index, step in enumerate(steps) if step.get("id") == "republished")
-    return steps[: end + 1]
+    return [step for step in steps[: end + 1] if not step.get("name", "").endswith("attempt 2")]
 
 
 def _step(steps, name):
@@ -35,7 +35,7 @@ def test_publisher_uploads_the_passed_dev_baseline_for_queue_runs():
     job = _jobs()["coverage-baseline"]
     save = _step(job["steps"], "Save the passed dev coverage baseline")
     upload = _step(job["steps"], "Publish the passed dev coverage baseline")
-    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["uses"] == "./.github/actions/retry-upload"
     assert upload["with"]["name"] == "coverage-baseline"
     assert upload["with"]["path"] == save["with"]["path"] == "~/coverage-baseline"
     assert upload["with"]["if-no-files-found"] == "error"
@@ -87,7 +87,11 @@ def test_queue_runs_restore_the_latest_dev_durations_on_the_app_token():
 
 def test_no_queue_run_carries_a_baseline_from_the_latest_dev_run():
     jobs = _jobs()
-    baselines = [s for s in jobs.get("durations", jobs["select"])["steps"] if "baseline" in s.get("name", "")]
+    baselines = [
+        s
+        for s in jobs.get("durations", jobs["select"])["steps"]
+        if "baseline" in s.get("name", "") and not s["name"].endswith("attempt 2")
+    ]
     assert baselines and not [s for s in baselines if _runs_on(s, "merge_group")]
     assert "dev-coverage-baseline" not in (_ROOT / ".github/workflows/test.yml").read_text()
 
@@ -204,6 +208,7 @@ def test_a_dev_run_without_a_baseline_still_restores_its_durations(lookup):
         "swarm-image",
         "brain-smoke",
         "writer-lock",
+        "install-smoke",
         "ledger-load",
         "kind-due",
         "coverage-ratchet",
@@ -263,6 +268,7 @@ def test_dispatch_runs_restore_durations_and_the_base_baseline_on_the_app_token(
         "Find the dev push run of the dispatched base",
         "Download the dev durations",
         "Download the dispatched base's coverage baseline",
+        "Check out the upload action for artifact republishing",
         "Republish the dev durations",
         "Republish the dispatched base's coverage baseline",
         "Mark the dev artifacts restored",

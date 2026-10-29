@@ -89,8 +89,8 @@ def test_promotion_reuses_the_release_environment_and_never_dispatches_or_publis
     assert "workflow_call" in workflow.get("on", workflow.get(True))
     job = workflow["jobs"]["promote"]
     assert job["environment"] == "release"
-    assert job["timeout-minutes"] == 10
-    assert ci_budget.BUDGETS["promote"] == job["timeout-minutes"] * 60
+    assert job["timeout-minutes"] == 40
+    assert ci_budget.BUDGETS["promote"] == 10 * 60
     assert job["concurrency"] == {"group": "release-version", "cancel-in-progress": False}
     commands = "\n".join(step.get("run", "") for step in job["steps"])
     assert "--generate-notes" in commands
@@ -102,6 +102,23 @@ def test_promotion_reuses_the_release_environment_and_never_dispatches_or_publis
     assert mint["with"]["permission-metadata"] == "read"
     assert mint["with"]["permission-contents"] == "write"
     assert mint["with"]["permission-pull-requests"] == "write"
+
+
+def test_promotion_publishes_the_verified_tag_through_the_same_app_rest_token():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/promote.yml").read_text())
+    step = next(
+        step
+        for step in workflow["jobs"]["promote"]["steps"]
+        if step.get("name") == "Tag and verify the promoted package"
+    )
+    assert step["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    commands = step["run"]
+    assert commands.index("ci_release.sh tag") < commands.index("ci_release.sh verify") < commands.index("gh api")
+    assert '"repos/$GITHUB_REPOSITORY/git/refs"' in commands
+    assert "--method POST" in commands
+    assert '-f "ref=refs/tags/v$NEXT"' in commands
+    assert '-f "sha=$RELEASE_SHA"' in commands
+    assert "git push" not in commands
 
 
 def test_abandoned_promotion_cleanup_runs_last_as_the_app_even_after_a_failed_promotion():

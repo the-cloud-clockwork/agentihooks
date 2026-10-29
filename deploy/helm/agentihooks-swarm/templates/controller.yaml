@@ -3,6 +3,11 @@
 {{- $workers := .Values.controller.workers }}
 {{- $ca := .Values.controller.terminalCa | default dict }}
 {{- $jump := .Values.controller.jump | default dict }}
+{{- with $workers.kubernetesProofSwarm }}
+{{- if not (and $api.enabled $workers.apiUrl (eq . $api.swarm) (regexMatch "^proof-[0-9a-f]{6}-[a-z0-9]+-[0-9]+$" (toString .))) }}
+{{- fail "controller.workers.kubernetesProofSwarm must name the served proof controller.api.swarm with its API and Kubernetes workers enabled" }}
+{{- end }}
+{{- end }}
 {{- if and $jump.enabled (not (and $ca.secretName $ca.key $jump.address)) }}
 {{- fail "controller.jump needs controller.terminalCa and an address: the jump trusts the user CA and records the address the operator dials" }}
 {{- end }}
@@ -304,6 +309,10 @@ spec:
             {{- end }}
             {{- end }}
             {{- if $workers.apiUrl }}
+            {{- with $workers.kubernetesProofSwarm }}
+            - name: AGENTIHOOKS_CONTROL_KUBERNETES_PROOF
+              value: {{ . | quote }}
+            {{- end }}
             - name: AGENTIHOOKS_CONTROL_API_URL
               value: {{ $workers.apiUrl | quote }}
             - name: AGENTIHOOKS_POD_POLICY_FILE
