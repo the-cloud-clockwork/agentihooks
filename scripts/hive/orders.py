@@ -351,7 +351,7 @@ class Consumer:
             return ""
         if (
             order.route_kind != master_claude_login.ROUTE
-            and self.store.redis.hget(registry.key(self.hive), "ui") == "yes"
+            and (registry.show(self.store.redis, self.hive) or {}).get("ui") == "yes"
         ):
             return ""
         return master_claude_login.unusable()
