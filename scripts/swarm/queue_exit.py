@@ -40,7 +40,10 @@ def _failed(repo: str, item: dict, run) -> bool:
         jobs += body["jobs"]
         if len(jobs) >= body["total_count"] or not body["jobs"]:
             break
-    return len(jobs) < body["total_count"] or any(job["conclusion"] in FAILED_JOB for job in jobs)
+    return len(jobs) < body["total_count"] or any(
+        job["conclusion"] in FAILED_JOB and (job["name"], job["conclusion"]) != ("Queue gate summary", "failure")
+        for job in jobs
+    )
 
 
 def own_failures(url: str, since_ms: int, run=subprocess.run) -> list[str] | None:

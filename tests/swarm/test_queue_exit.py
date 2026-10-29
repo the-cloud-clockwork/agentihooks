@@ -182,6 +182,30 @@ def test_a_cancelled_last_group_only_ignores_the_aggregate_cancellation_failure(
     ]
 
 
+@pytest.mark.parametrize("incomplete", [False, True])
+def test_a_freshness_refusal_records_the_head_reason_and_cancellation_classification(incomplete):
+    records = []
+    run = runner([run_of(7, "cancelled", run_id=5)], [], total=5 if incomplete else None, jobs={5: [["failure"]]})
+    with pytest.raises(SwarmError) as refused:
+        queue_exit.require_fresh(URL, "abc", run, record=records.append)
+    assert records == [
+        {
+            "pull": URL,
+            "head": "abc",
+            "reason": str(refused.value),
+            "cancelled_without_failed_test": None if incomplete else False,
+        }
+    ]
+
+
+def test_an_admitted_cancelled_group_records_no_refusal():
+    records = []
+    jobs = [{"name": "Queue gate summary", "conclusion": "failure"}, {"name": "unit", "conclusion": "cancelled"}]
+    run = runner([run_of(7, "cancelled", run_id=5)], jobs={5: [jobs]})
+    assert queue_exit.require_fresh(URL, "abc", run, record=records.append) is None
+    assert records == []
+
+
 def test_a_head_whose_last_group_had_a_failed_job_is_refused_naming_the_run():
     older = run_of(7, "success", run_id=1, group="g0", created="2026-10-20T08:30:00Z")
     last = run_of(7, "cancelled", run_id=5, group="g1")
