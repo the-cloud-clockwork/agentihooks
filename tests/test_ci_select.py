@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from scripts import ci_select
+from scripts import ci_select, locked_tests
 from tests.shard_budget import step_seconds
 
 pytestmark = pytest.mark.unit
@@ -292,6 +292,12 @@ def test_workflow_and_runner_changes_select_routing_contracts(repo, changed):
     scope, legs = decide(repo, [changed])
     assert scope == "selected"
     assert set().union(*map(set, legs)) == contracts
+
+
+@pytest.mark.parametrize("changed", [*locked_tests.LOCKED, locked_tests.MANIFEST.as_posix()])
+def test_locked_test_and_manifest_changes_select_the_manifest_agreement_test(repo, changed):
+    write(repo, {"tests/test_locked_tests.py": "import os\n", changed: "VALUE = 1\n"})
+    assert "tests/test_locked_tests.py" in ci_select.selected_tests(repo, [changed], False)
 
 
 def test_a_python_source_is_not_selected_by_its_bare_file_name(repo):
