@@ -14,6 +14,10 @@ never compared. Package record: `evidence/SV2-MIG-04/result.json`.
 | `ConsumerRoutes.rollback` | Undoes the switch at the given revision by restoring the route accepted before it, as a new revision. Only a switch can be rolled back, so a second rollback never reinstates the route just left. Capture, the catalog and stored proofs are untouched. Replaying the same rollback returns the same route. |
 | `ConsumerRoutes.call` | Dispatches a consumer request to the session endpoint its route names, refusing an endpoint the caller does not serve and a request whose protocol major differs from the endpoint version. A consumer routed to `local.v1` keeps calling its own local path unchanged; `call` never dispatches or rewrites a local request. Expiring aliases stay enforced by `hooks.memory.api.records`, removal deadline `2027-01-31T00:00:00Z`. |
 
+The operator reads and rolls back a route with `python -m hooks.memory.cutover route <routes> <consumer> --corpus
+<corpus>` and `python -m hooks.memory.cutover rollback <routes> <consumer> <revision> --corpus <corpus>`, in the
+operator role named by `hooks.memory.migrations.OPERATOR`. Each prints the route as JSON and exits 1 on a refusal.
+
 Supported endpoint versions: `local.v1` (the last qualified local path, the default route) and `session.v1`
 (session tools protocol 1 requests, answered by the protocol 2.0 tools).
 

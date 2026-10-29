@@ -257,6 +257,38 @@ def test_dispatch_refuses_a_request_of_another_protocol(bank, tmp_path, version)
     routes.close()
 
 
+def cli(capsys, *argv) -> tuple[int, dict]:
+    code = cutover.main([str(arg) for arg in argv])
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_the_command_line_shows_and_rolls_back_a_route(bank, tmp_path, capsys):
+    location = tmp_path / "routes.sqlite3"
+    corpus = bank.inputs["grant"]["corpus"]
+    assert cli(capsys, "route", location, "keeper", "--corpus", corpus) == (
+        0,
+        {"consumer": "keeper", "endpoint": "local.v1", "revision": 0, "action": "initial", "operation_id": None},
+    )
+    code, refused = cli(capsys, "rollback", location, "keeper", 0, "--corpus", corpus)
+    assert (code, refused) == (1, {"state": "rejected", "error": "there is no switched route to roll back"})
+    routes = ConsumerRoutes(location)
+    allowed = grant(bank.inputs)
+    proof = routes.qualify(bank.tools, allowed, "keeper", questions(bank), 5000.0)["operation_id"]
+    routes.switch(allowed, "keeper", "session.v1", 0, proof)
+    routes.close()
+    code, restored = cli(capsys, "rollback", location, "keeper", 1, "--corpus", corpus)
+    assert (code, restored["endpoint"], restored["revision"], restored["action"]) == (0, "local.v1", 2, "rollback")
+    code, shown = cli(capsys, "route", location, "keeper", "--corpus", corpus)
+    assert (code, shown) == (0, restored)
+
+
+@pytest.mark.parametrize("argv", [["route", "routes.sqlite3", "keeper"], ["rollback", "routes.sqlite3", "keeper", "1"]])
+def test_the_command_line_requires_a_corpus(tmp_path, monkeypatch, argv):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit):
+        cutover.main(argv)
+
+
 @pytest.mark.parametrize("case", ["A", "B", "C"])
 def test_package_cases_match_committed_evidence(tmp_path, case):
     observed = json.loads(json.dumps(cases.run_case(case, tmp_path)))

@@ -5,12 +5,14 @@ the caller's own grant; ranking scores are never compared. Routes are durable co
 rollback restores the previous accepted route without touching capture or the recorded qualification evidence.
 """
 
+import argparse
 import json
 import sqlite3
 from pathlib import Path
 
 from hooks.memory.api import records
 from hooks.memory.api.ingest import SCHEMA_VERSION, Grant, Rejected, digest
+from hooks.memory.migrations import OPERATOR
 
 LOCAL, SESSION = "local.v1", "session.v1"
 PROTOCOLS = {SESSION: "1"}
@@ -175,3 +177,32 @@ class ConsumerRoutes:
         if str(request.get("schema_version")).split(".")[0] != PROTOCOLS[endpoint]:
             raise ValueError(f"endpoint {endpoint!r} accepts only protocol {PROTOCOLS[endpoint]} requests")
         return records.call(endpoints[endpoint], name, grant, {**request, "schema_version": SCHEMA_VERSION}, now)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("route", "rollback"):
+        command = commands.add_parser(name)
+        command.add_argument("routes")
+        command.add_argument("consumer")
+        command.add_argument("--corpus", required=True)
+    commands.choices["rollback"].add_argument("revision", type=int)
+    args = parser.parse_args(argv)
+    grant = Grant(OPERATOR, args.corpus, frozenset())
+    routes = ConsumerRoutes(args.routes)
+    try:
+        if args.command == "rollback":
+            result = routes.rollback(grant, args.consumer, args.revision)
+        else:
+            result = routes.route(grant, args.consumer)
+    except ValueError as error:
+        result = {"state": "rejected", "error": str(error)}
+    finally:
+        routes.close()
+    print(json.dumps(result))
+    return 1 if result.get("state") == "rejected" else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
