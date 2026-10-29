@@ -67,9 +67,7 @@ def estimate(
         stale, drifted, paths = drift
         units, unrecorded = changed_recorded_units(root, manifest, changes)
         if "lines" in manifest:
-            covering = line_covering_tests(root, manifest, changes, paths)
-            if direct is not None:
-                direct.update(direct_tests(root, manifest, changes))
+            covering = line_covering_tests(root, manifest, changes, paths, direct)
         else:
             covering = covering_tests(manifest, units | drifted, paths)
         recorded = {}
@@ -526,8 +524,16 @@ def table_reads(tree: ast.Module, tables: dict[str, bool]) -> set[int]:
     }
 
 
-def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]], paths: set[str]) -> set[str]:
+def line_covering_tests(
+    root: Path,
+    manifest: dict,
+    changes: dict[str, set[int]],
+    paths: set[str],
+    direct: dict[str, list[str]] | None = None,
+) -> set[str]:
     lines, fallback, tables = recorded_lines(root, manifest, changes)
+    if direct is not None:
+        direct.update(direct_tests(manifest, lines, changes))
     return {
         node(test).partition("[")[0]
         for test, found in manifest["tests"].items()
@@ -542,8 +548,7 @@ def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]]
     }
 
 
-def direct_tests(root: Path, manifest: dict, changes: dict[str, set[int]]) -> dict[str, list[str]]:
-    lines, _, _ = recorded_lines(root, manifest, changes)
+def direct_tests(manifest: dict, lines: dict[str, set[int]], changes: dict[str, set[int]]) -> dict[str, list[str]]:
     return {
         path: sorted(
             {
