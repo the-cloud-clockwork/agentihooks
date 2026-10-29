@@ -43,6 +43,9 @@ restart of the route store.
 
 ## Limitations
 
+- A cited range is expanded in one page of up to 200 records (`hooks.memory.api.records.MAX_RECORDS`). A citation
+  with more records is counted as unexpandable, so the qualification fails closed.
+
 - The questions are reconstructed from repository history over the sanitized session tools fixture. A replay of
   live historical sessions needs read access to the hosted catalog and is not part of this record.
 - No consumer outside agentihooks is routed through `ConsumerRoutes` yet; each consumer moves when it adopts it.

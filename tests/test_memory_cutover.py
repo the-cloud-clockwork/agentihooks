@@ -6,6 +6,7 @@ import pytest
 
 from hooks.memory import cutover
 from hooks.memory.api import records
+from hooks.memory.api.ingest import Rejected
 from hooks.memory.cutover import ConsumerRoutes, shadow
 from tests import sv2_mig04_cases as cases
 from tests.sv2_idx04_cases import grant
@@ -55,11 +56,12 @@ def test_shadow_resolves_source_ranges_in_two_independent_catalogs(bank, tmp_pat
         assert answer["unresolved_ranges"] == 0
 
 
-def test_shadow_pages_through_every_cited_record(bank, tmp_path, monkeypatch):
+def test_cited_range_larger_than_one_page_is_refused(bank, tmp_path, monkeypatch):
     monkeypatch.setattr(cutover, "RECORD_PAGE", 1)
     routes = ConsumerRoutes(tmp_path / "routes.sqlite3")
     proof = routes.qualify(bank.tools, grant(bank.inputs), "keeper", questions(bank), 5000.0)
-    assert (proof["state"], proof["recalled_ranges"]) == ("accepted", 1)
+    assert (proof["state"], proof["recalled_ranges"]) == ("rejected", 0)
+    assert proof["unexpandable_results"] > 0
     routes.close()
 
 
@@ -139,10 +141,10 @@ def test_expanded_records_outside_the_grant_are_counted_and_refuse(bank, monkeyp
 
 
 def test_failed_search_counts_as_unexpandable(bank, monkeypatch):
-    def refused(tools, name, granted, request, now, embedder=None):
-        return {"state": "rejected", "error": {"class": "dependency_unavailable"}}
+    def refused(granted, request, embedder=None):
+        raise Rejected("dependency_unavailable", "the catalog failed before answering")
 
-    monkeypatch.setattr(records, "call", refused)
+    monkeypatch.setattr(bank.tools, "session_search", refused)
     answer = replay(bank)
     assert answer["state"] == "rejected"
     assert (answer["unexpandable_results"], answer["unauthorized_results"], answer["unresolved_ranges"]) == (1, 0, 1)
@@ -226,7 +228,7 @@ def test_consumer_dispatch_uses_versioned_route_and_expiring_aliases(bank, tmp_p
 def test_rollback_restores_the_last_accepted_route_before_the_switch(bank, tmp_path):
     routes = ConsumerRoutes(tmp_path / "routes.sqlite3")
     allowed = grant(bank.inputs)
-    with pytest.raises(ValueError, match="no switched route to roll back"):
+    with pytest.raises(ValueError, match="^there is no switched route to roll back$"):
         routes.rollback(allowed, "keeper", 0)
     proof = routes.qualify(bank.tools, allowed, "keeper", questions(bank), 5000.0)["operation_id"]
     routes.switch(allowed, "keeper", "session.v1", 0, proof)
@@ -234,7 +236,7 @@ def test_rollback_restores_the_last_accepted_route_before_the_switch(bank, tmp_p
         with pytest.raises(ValueError, match="the route changed since the given revision"):
             routes.rollback(allowed, "keeper", stale)
     assert routes.rollback(allowed, "keeper", 1)["endpoint"] == "local.v1"
-    with pytest.raises(ValueError, match="no switched route to roll back"):
+    with pytest.raises(ValueError, match="^there is no switched route to roll back$"):
         routes.rollback(allowed, "keeper", 2)
     routes.switch(allowed, "keeper", "session.v1", 2, proof)
     routes.switch(allowed, "keeper", "local.v1", 3, proof)

@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 
 from hooks.memory.api import records
-from hooks.memory.api.ingest import SCHEMA_VERSION, Grant, digest
+from hooks.memory.api.ingest import SCHEMA_VERSION, Grant, Rejected, digest
 
 LOCAL, SESSION = "local.v1", "session.v1"
 PROTOCOLS = {SESSION: "1"}
@@ -52,19 +52,17 @@ def _ranges(question: dict) -> list[tuple]:
 
 def _expand(tools: records.SessionTools, grant: Grant, cited: dict, now: float) -> list[dict] | None:
     asked = {"schema_version": SCHEMA_VERSION, "access_domain": grant.corpus, "citation": cited, "limit": RECORD_PAGE}
-    expanded, found = records.call(tools, "session_records", grant, asked, now), []
-    while expanded["state"] == "answered":
-        found += expanded["records"]
-        if expanded["next_cursor"] is None:
-            return found
-        expanded = records.call(tools, "session_records", grant, {**asked, "cursor": expanded["next_cursor"]}, now)
-    return None
+    expanded = records.call(tools, "session_records", grant, asked, now)
+    if expanded["state"] != "answered" or not expanded["complete"]:
+        return None
+    return expanded["records"]
 
 
 def _held(tools: records.SessionTools, grant: Grant, text: str, now: float) -> tuple[set, int, int]:
     request = {"schema_version": SCHEMA_VERSION, "access_domain": grant.corpus, "query": text, "limit": SEARCH_LIMIT}
-    found = records.call(tools, "session_search", grant, request, now)
-    if found["state"] != "answered":
+    try:
+        found = tools.session_search(grant, request)
+    except Rejected:
         return set(), 1, 0
     held, refused, foreign = set(), 0, 0
     for result in found["results"]:
