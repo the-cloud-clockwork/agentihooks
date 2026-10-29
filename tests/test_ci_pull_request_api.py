@@ -218,6 +218,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/chart_nats.py",
         "tests/chart_network.py",
         "tests/chart_redis.py",
+        "tests/chart_scheduler_state.py",
         "tests/chart_scratch_swarms.py",
         "tests/chart_secrets.py",
         "tests/chart_workers.py",
