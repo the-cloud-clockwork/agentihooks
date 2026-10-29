@@ -75,6 +75,7 @@ from scripts.handoff import check as handoff_check
 from scripts.handoff import envelope as handoff_envelope
 from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
+from scripts.hive import scope
 from scripts.inbox import exits, outbox, relay, wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
@@ -319,6 +320,7 @@ def _intent_pass(inbox, store, slug, doc, ledger, config):
 
 
 @timing.instrument_tick
+@scope.one_pass()
 @outage.guard_tick
 @ledger_route.service
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):

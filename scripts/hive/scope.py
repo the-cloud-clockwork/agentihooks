@@ -2,7 +2,9 @@
 it runs live there; the controller finds them below the member each agent's execution record places it on."""
 
 import os
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 from scripts.hive import registry
@@ -10,6 +12,8 @@ from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
     from redis import Redis
+
+PASS = ContextVar("hive_members_pass", default=None)
 
 
 def member(environ: Mapping[str, str] | None = None) -> str:
@@ -46,7 +50,22 @@ def members(redis: "Redis") -> list[str]:
     """The hives in the index that joined as members; a member's own Redis user cannot read the member records."""
     from scripts.hive import auth
 
-    return sorted(auth.members(redis))
+    memo = PASS.get()
+    if memo is None:
+        return sorted(auth.members(redis))
+    if id(redis) not in memo:
+        memo[id(redis)] = sorted(auth.members(redis))
+    return memo[id(redis)]
+
+
+@contextmanager
+def one_pass() -> Iterator[None]:
+    """Reads the member records once per Redis client until the block ends."""
+    token = PASS.set({})
+    try:
+        yield
+    finally:
+        PASS.reset(token)
 
 
 def readings(redis: "Redis", slug: str, name: str) -> str:
