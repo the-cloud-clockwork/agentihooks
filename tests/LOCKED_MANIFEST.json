@@ -279,14 +279,6 @@
    "493f09721675007f"
   ]
  },
- "tests/context/test_branch_guard.py::TestPRBaseGuard::test_protected_pr_base_blocked_with_signal": {
-  "assertions": 1,
-  "calls": 1,
-  "cases": 3,
-  "texts": [
-   "53f3dbf80027421e"
-  ]
- },
  "tests/context/test_branch_guard.py::TestPrSignalResetsCounter::test_set_pr_signal_clears_counter": {
   "assertions": 2,
   "calls": 7,
@@ -294,6 +286,57 @@
   "texts": [
    "bd392d079fd81fe9",
    "df5be10d7bd0d63a"
+  ]
+ },
+ "tests/context/test_branch_guard.py::TestProtectedPrBase::_blocked": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 1,
+  "texts": [
+   "493f09721675007f"
+  ]
+ },
+ "tests/context/test_branch_guard.py::TestProtectedPrBase::test_bypass_without_signal_blocked": {
+  "assertions": 2,
+  "calls": 3,
+  "cases": 3,
+  "texts": [
+   "430cbfc606d7e7a8",
+   "dc08ff01c1e67b87"
+  ]
+ },
+ "tests/context/test_branch_guard.py::TestProtectedPrBase::test_counter_limit_holds_under_bypass": {
+  "assertions": 2,
+  "calls": 5,
+  "cases": 3,
+  "texts": [
+   "430cbfc606d7e7a8",
+   "45d6a84bbc398b1e"
+  ]
+ },
+ "tests/context/test_branch_guard.py::TestProtectedPrBase::test_dev_needs_no_signal_and_leaves_the_counter": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1,
+  "texts": [
+   "77d95633de2d4ff7"
+  ]
+ },
+ "tests/context/test_branch_guard.py::TestProtectedPrBase::test_no_signal_blocked": {
+  "assertions": 2,
+  "calls": 2,
+  "cases": 3,
+  "texts": [
+   "430cbfc606d7e7a8",
+   "dc08ff01c1e67b87"
+  ]
+ },
+ "tests/context/test_branch_guard.py::TestProtectedPrBase::test_signal_allows_and_counts": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 3,
+  "texts": [
+   "f81e737df00eb27d"
   ]
  },
  "tests/context/test_branch_guard.py::TestResolveCwd::test_a_cd_prefix_expands_home_and_variables": {
