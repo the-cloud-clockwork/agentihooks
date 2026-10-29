@@ -108,6 +108,15 @@ def test_old_failures_open_nothing_but_an_open_outage_waits_for_a_success(store)
     assert [record["started_at"] for record in outage.open_records("sw")] == [1_000 + hive_ledger.WINDOW_MS]
 
 
+def test_an_open_outage_holds_while_a_failure_that_opened_it_postdates_every_success(store):
+    for at in (1, 2, 3):
+        failed(store, NAME, at)
+    hive_ledger.observe(store, "sw", 3)
+    hive_ledger.record(store.redis, "sw", OTHER, None, 2)
+    hive_ledger.observe(store, "sw", 4)
+    assert [record["started_at"] for record in outage.open_records("sw")] == [3]
+
+
 def test_a_hive_agent_reports_each_write_result_in_its_own_readings(store, hive):
     key = f"{registry.key('h1')}:swarm:sw:ledger-writes:{NAME}"
     assert hive_ledger.report(502, redis=store.redis, now_ms=1_000) is True
