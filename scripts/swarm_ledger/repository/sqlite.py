@@ -482,7 +482,7 @@ class SQLiteLedgerRepository:
             return cached
         with self._guard:
             loading = self._loads.setdefault(self._key(slug), threading.Lock())
-        with loading:
+        with request_metrics.locked(loading):
             cached = self._cache.get(self._key(slug))
             if cached is not None and cached.generation >= row[0]:
                 return cached
