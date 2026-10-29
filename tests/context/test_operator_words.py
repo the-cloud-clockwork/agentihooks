@@ -697,6 +697,17 @@ def test_overlapping_history_publishers_keep_recording_available(shared, monkeyp
     assert operator_words.matching("master@a1-2", "keep recording words", within=None) == "Keep recording words"
 
 
+def test_words_once_published_to_redis_lists_republish_into_the_state_store(shared, monkeypatch):
+    with monkeypatch.context() as offline:
+        offline.setattr(operator_words, "_shared", lambda: None)
+        operator_words.record("master@a1-1", "Mark it urgent", now=100, swarm="demo")
+        with operator_words._store() as connection:
+            connection.execute("CREATE TABLE IF NOT EXISTS published (entry INTEGER PRIMARY KEY)")
+            connection.execute("INSERT INTO published VALUES (1)")
+    assert operator_words.recorded("master@*") == ["master@a1-1"]
+    assert operator_words._shared_rows("master@a1-1") == [{"swarm": "demo", "at": 100.0, "words": "Mark it urgent"}]
+
+
 def test_partial_history_publication_checkpoints_success_before_retry(shared, monkeypatch):
     with monkeypatch.context() as offline:
         offline.setattr(operator_words, "_shared", lambda: None)
