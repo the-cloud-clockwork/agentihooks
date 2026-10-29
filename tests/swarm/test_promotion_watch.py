@@ -777,13 +777,31 @@ def test_the_same_cause_on_a_held_job_files_nothing_and_stays_quiet_while_its_al
     assert len(master_items(store)) == 1
 
 
+def test_a_new_run_whose_every_cause_has_an_open_fixer_raises_no_alert_after_the_master_closed_the_last(store):
+    ledger = Ledger()
+    refresh(store, ledger, smoke_run("Build the image", ["layer 3 failed"]))
+    ledger.close_alert(SLUG, ledger.alerts[0]["id"], "judged")
+    assert refresh(store, ledger, smoke_run("Build the image", ["layer 4 failed"], 901), NOW * 2) == []
+    assert len(ledger.added) == 1 and len(ledger.raised) == 1
+    assert len(master_items(store)) == 1
+
+
+def test_a_newly_failing_job_beside_held_ones_on_a_new_run_still_files_and_alerts(store):
+    ledger = Ledger()
+    refresh(store, ledger, gh([RED], JOBS))
+    ledger.close_alert(SLUG, ledger.alerts[0]["id"], "judged")
+    jobs = [*JOBS, {"name": "ledger-load / load", "conclusion": "failure"}]
+    actions = refresh(store, ledger, gh([{**RED, "id": 901}], jobs), NOW * 2)
+    assert [fields["task"] for _, fields, _ in ledger.added][-1:] == ["promo-901-1"]
+    assert len(ledger.raised) == 2 and "ledger-load / load" in ledger.raised[1][2]
+    assert "raised the promotion alert for dev push run 901" in actions
+
+
 def test_a_fixer_filed_before_causes_were_kept_still_holds_its_job(store):
     store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-800-0", "swarm-image / smoke")
     ledger = Ledger([{"id": "promo-800-0", "title": "Promotion red: swarm-image smoke", "state": "claimed"}])
-    assert refresh(store, ledger, smoke_run("Build the image", ["layer failed"])) == [
-        "raised the promotion alert for dev push run 900"
-    ]
-    assert ledger.added == [] and master_items(store) == []
+    assert refresh(store, ledger, smoke_run("Build the image", ["layer failed"])) == []
+    assert ledger.added == [] and ledger.raised == [] and master_items(store) == []
 
 
 def test_a_long_cause_is_cut_so_the_alert_fits_the_ledger_and_keeps_the_run_link(store):
