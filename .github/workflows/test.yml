@@ -3494,6 +3494,7 @@ jobs:
       reused: ${{ steps.reuse.outputs.reused || 'false' }}
       forwarded: ${{ (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0') && 'true' || 'false' }}
       selection: ${{ steps.contract.outputs.selection || 'false' }}
+      durations: ${{ steps.durations.outputs.cache-matched-key }}
     env:
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: maintenance.auto
@@ -3564,6 +3565,7 @@ jobs:
         run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest>=8.0,<9.2" "pyyaml>=6.0" "tomlkit>=0.12"
 
       - name: Restore latest dev durations
+        id: durations
         if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
         uses: actions/cache/restore@v4
         env:
@@ -3733,14 +3735,14 @@ jobs:
           exit 1
 
       - name: Restore latest dev durations
-        if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'
+        if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.durations != ''
         uses: actions/cache/restore@v4
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/dev-durations
-          key: durations-merged-${{ github.event.pull_request.base.sha }}
-          restore-keys: durations-merged-
+          key: ${{ needs.mutation-plan.outputs.durations }}
+          fail-on-cache-miss: true
 
       - name: Adopt latest dev durations
         if: needs.mutation-plan.outputs.forwarded != 'true'
