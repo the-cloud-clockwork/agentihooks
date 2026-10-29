@@ -232,6 +232,8 @@ class ExecutionRegistry:
                         self.update(slug, agent)
                         return
                     previous = pipe.hget(self.store.key(slug, "agents"), agent.name)
+                    if previous and json.loads(previous)["state"] == "finished" and agent.state != "ended":
+                        agent = replace(agent, state="finished")
                     pipe.multi()
                     _write_projection(pipe, self.store, slug, agent)
                     self.write_status(pipe, slug, agent, previous)

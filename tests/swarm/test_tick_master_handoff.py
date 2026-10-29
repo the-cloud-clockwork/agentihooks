@@ -42,5 +42,5 @@ def test_a_finished_agent_is_never_written_back_to_working(store):
     assert [(a.state, a.idle_ticks) for a in masters(store)] == [("finished", 2)]
     registry = store.execution_registry
     assert isinstance(registry, ExecutionRegistry)
-    registry.update("sw", replace(old, state="ended"))
-    assert registry.get("sw", old.execution_id).state == "ended"
+    store.put_agent("sw", replace(old, state="ended"))
+    assert [a.state for a in masters(store)] == ["ended"]
