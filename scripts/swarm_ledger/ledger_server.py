@@ -943,7 +943,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Origin") not in (None, FILE_ORIGIN, *ALLOWED_ORIGINS):
             return self.send(403, "origin not allowed", "text/plain") or True
         if slug is not None:
-            self.principal = authority.caller(self.headers, repository.token(slug), slug)
+            from scripts.swarm_ledger.api.errors import APIError
+
+            try:
+                self.principal = authority.caller(self.headers, repository.token(slug), slug)
+            except APIError as exc:
+                return self.send(exc.status, str(exc), "text/plain") or True
             if self.principal is None:
                 return self.send(403, "missing or wrong ledger token", "text/plain") or True
         return False
