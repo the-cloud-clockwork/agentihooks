@@ -11,7 +11,6 @@ from scripts.swarm import fencing
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend", "transport")
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
 PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control", "desired_route_kind")
-ARCHIVE = "executions-archive"
 WRITES: dict[str, threading.RLock] = {}
 
 
@@ -39,6 +38,14 @@ def latest(rows, by: str) -> dict:
         elif by == "seat" and row["generation"] == previous["generation"]:
             found[row[by]] = row
     return found
+
+
+def _archivable(row: dict) -> bool:
+    return (
+        isinstance(row.get("name"), str)
+        and isinstance(row.get("seat"), str)
+        and isinstance(row.get("generation"), int | float)
+    )
 
 
 class ExecutionRegistry:
@@ -74,10 +81,11 @@ class ExecutionRegistry:
         listed = self.store.listed(slug)
 
         def move(doc):
-            heads = latest(doc["executions"].values(), "seat")
+            rows = {key: row for key, row in doc["executions"].items() if _archivable(row)}
+            heads = latest(rows.values(), "seat")
             old = [
                 key
-                for key, row in doc["executions"].items()
+                for key, row in rows.items()
                 if row["generation"] < heads[row["seat"]]["generation"] and row["name"] not in listed
             ]
             for key in old:
@@ -222,7 +230,7 @@ class ExecutionRegistry:
 
         shown = fencing.write(self.store, slug, change)
         if shown is not None:
-            self.store.project_agent(slug, *shown)
+            self.store.project_agent(slug, *shown, listed_only=True)
 
     def reconcile(self, slug: str, runtime: Runtime, now_ms: int) -> list[str]:
         self.archive(slug)
