@@ -658,7 +658,6 @@ def _warn(message: str) -> None:
 
 
 def _shared_pin(shared: Path | None, revision: str | None, root_revision: str) -> tuple[Path | None, str]:
-    """The shared bundle to pin and the commit to pin it at, from the shared field of a recorded revision."""
     if revision == bundle_copy.UNPINNED:
         _warn("the launch recorded no commit for the shared bundle; rendering without it")
         return None, ""
