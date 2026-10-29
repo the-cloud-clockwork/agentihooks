@@ -22,6 +22,7 @@ VARIABLE = "AGENTIHOOKS_SWARM_BRAIN"
 FILE_VARIABLE = "AGENTIHOOKS_SWARM_BRAIN_BINDING"
 REPORT = "brain_binding"
 SERVER = "agentibrain"
+OVERLAY = "swarm-brain"
 BOUND, REFUSED = "bound", "refused"
 KINDS = ("api", "mcp")
 REFERENCES = {"api": "SWARM_BRAIN_API_TOKEN", "mcp": "SWARM_BRAIN_MCP_KEY"}
