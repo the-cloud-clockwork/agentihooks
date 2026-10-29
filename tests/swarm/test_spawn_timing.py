@@ -192,7 +192,7 @@ def test_an_idle_watch_times_each_read_inside_the_watch_step(store, capsys):
         timing.named(resume.recovery_exhausted),
         timing.named(resume.recovery_pending),
         timing.named(tick_module._stuck_on_provider),
-        timing.named(tick_module._stale_nudge),
+        timing.named(outage.open_records),
         timing.named(idle_state.heartbeat),
         timing.named(idle_state.wait),
         timing.named(NameRegistry.resolve),
