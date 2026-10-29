@@ -202,10 +202,15 @@ def _concurrency(event, run_id, number=None):
     )
 
 
-def test_each_dev_push_grades_in_its_own_group_without_cancelling_another():
-    first, second = _concurrency("push", 1000), _concurrency("push", 1061)
+def test_dev_pushes_share_three_promotion_lanes_without_cancelling_a_running_run():
     expected = {"queue": "single", "cancel-in-progress": False}
-    assert (first, second) == (dict(expected, group="tests-push-1000"), dict(expected, group="tests-push-1061"))
+    groups = {run_id: _concurrency("push", run_id) for run_id in (1000, 1061, 1004, 1009)}
+    assert groups == {
+        1000: dict(expected, group="promotion-dev-a"),
+        1061: dict(expected, group="promotion-dev-a"),
+        1004: dict(expected, group="promotion-dev-b"),
+        1009: dict(expected, group="promotion-dev-c"),
+    }
 
 
 @pytest.mark.parametrize("event,number", [("merge_group", None), ("pull_request", 7)])
