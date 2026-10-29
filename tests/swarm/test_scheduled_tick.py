@@ -342,3 +342,17 @@ def test_a_minute_due_while_the_supervisor_recycles_fires_once_on_the_restarted_
     assert scheduler.run_due(now=due + 31) == 0
     assert fired == [due]
     assert scheduler.get(entry_id).record["due"] == due + 60
+
+
+def test_the_opened_scheduler_runs_on_the_swarm_store_connection_for_this_machine(monkeypatch):
+    import socket
+
+    from scripts.scheduler.core import Scheduler
+    from scripts.swarm import store
+
+    client = object()
+    monkeypatch.setattr(store, "redis_client", lambda: client)
+    opened = scheduled_tick.open_scheduler()
+    assert type(opened) is Scheduler
+    assert opened.redis is client
+    assert opened.machine == socket.gethostname()

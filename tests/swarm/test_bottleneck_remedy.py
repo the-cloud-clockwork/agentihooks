@@ -41,6 +41,15 @@ def store():
     return saved
 
 
+@pytest.fixture(params=[(), ("runner-eng", "runner-ci")], ids=["no-runner-agents", "runner-agents"])
+def runner_agents(request, monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts import terminate_agent
+
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [SimpleNamespace(name=name) for name in request.param])
+
+
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
@@ -218,8 +227,9 @@ def test_launch_failure_without_one_failing_harness_is_proposed(store, home, shi
 def hive_only(store, monkeypatch, excluded="eng", herdr=True, deployment="local"):
     from scripts import herdr_host
     from scripts.hive import registry
-    from scripts.swarm import commands
+    from scripts.swarm import commands, local_slots
 
+    monkeypatch.setattr(local_slots, "live", set)
     store.update(SLUG, hive_placement=True)
     if excluded:
         registry.update(store.redis, "ws", [f"excluded={excluded}"])
@@ -281,6 +291,7 @@ def test_launch_failure_moves_a_lane_the_workstation_excludes_without_hive_place
     assert run(store) == [text]
 
 
+@pytest.mark.usefixtures("runner_agents")
 @pytest.mark.parametrize(("limit", "occupied", "moves"), [(1, 0, False), (2, 0, True), (3, 1, True), (3, 2, False)])
 def test_workstation_only_move_requires_room_for_the_lane(store, home, shipped, monkeypatch, limit, occupied, moves):
     from scripts.swarm import local_slots
@@ -298,6 +309,7 @@ def test_workstation_only_move_requires_room_for_the_lane(store, home, shipped, 
     assert lane_of(store, "eng") == (("codex", "auto") if moves else ("claude", "opus"))
 
 
+@pytest.mark.usefixtures("runner_agents")
 @pytest.mark.parametrize(
     ("agent", "limit", "moves"),
     [
@@ -325,6 +337,7 @@ def test_workstation_only_move_counts_existing_local_lane_workers_once(
     assert lane_of(store, "eng") == (("codex", "auto") if moves else ("claude", "opus"))
 
 
+@pytest.mark.usefixtures("runner_agents")
 @pytest.mark.parametrize("task", ["None", "XXXX"])
 def test_workstation_only_move_counts_other_lane_workers_for_any_task_name(store, home, shipped, monkeypatch, task):
     from scripts.swarm import local_slots
@@ -340,6 +353,7 @@ def test_workstation_only_move_counts_other_lane_workers_for_any_task_name(store
     assert lane_of(store, "eng") == ("claude", "opus")
 
 
+@pytest.mark.usefixtures("runner_agents")
 @pytest.mark.parametrize(("count", "moves"), [(2, True), (3, False)])
 def test_workstation_only_move_does_not_credit_workers_above_the_lane_limit(
     store, home, shipped, monkeypatch, count, moves

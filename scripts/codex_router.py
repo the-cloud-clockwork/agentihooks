@@ -53,6 +53,11 @@ ATTEMPTS_FILE = "codex-probe-attempts.json"
 READING_MAX_AGE_ENV = "AGENTIHOOKS_CODEX_READING_MAX_AGE_H"
 READING_MAX_AGE_H = 6.0
 HOUR_S = 3600
+TOKEN_MIN_LIFE_ENV = "AGENTIHOOKS_CODEX_TOKEN_MIN_LIFE_H"
+TOKEN_MIN_LIFE_H = 6.0
+EXPIRING = (
+    "{env} expires in under {hours:g} h; the refresh authority renews it, else run agentihooks codex login {name}"
+)
 # A running app-server daemon answers account/read with its own auth, so a token session must not attach to it.
 NO_DAEMON = "--no-daemon"
 ACCOUNT_ID_ENV = envs.CHATGPT_ACCOUNT_ID_ENV
@@ -147,7 +152,27 @@ def refusal(account: CodexAccount, environ: Mapping[str, str]) -> str:
         credential_kind(account, environ)
     except RoutingError as exc:
         return str(exc)
-    return ""
+    return expiry_refusal(account, environ, time.time())
+
+
+def expiry_refusal(account: CodexAccount, environ: Mapping[str, str], now: float) -> str:
+    if not expiring(account, environ, now):
+        return ""
+    return EXPIRING.format(env=account.env_name, hours=_min_life(environ) / HOUR_S, name=account.name)
+
+
+def _min_life(environ: Mapping[str, str]) -> float:
+    try:
+        return max(0.0, float(environ.get(TOKEN_MIN_LIFE_ENV) or TOKEN_MIN_LIFE_H)) * HOUR_S
+    except ValueError:
+        return TOKEN_MIN_LIFE_H * HOUR_S
+
+
+def expiring(account: CodexAccount, environ: Mapping[str, str], now: float) -> bool:
+    """A routed session holds only the bearer token and cannot refresh it, so it dies at the token's exp."""
+    token = environ.get(account.env_name)
+    exp = _claims(token).get("exp") if token else None
+    return isinstance(exp, int | float) and exp - now < _min_life(environ)
 
 
 def bearer_overrides() -> list[str]:
@@ -334,7 +359,7 @@ def duplicates(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str
             groups.setdefault(found, []).append(account)
     repeated = {}
     for group in groups.values():
-        kept = min(group, key=lambda account: _routed_rank(account, environ))
+        kept = min(group, key=lambda account: (bool(refusal(account, environ)), _routed_rank(account, environ)))
         repeated.update({account.name: kept.name for account in group if account is not kept})
     return repeated
 
@@ -534,6 +559,8 @@ def select(
             if account.name == route:
                 if not account.signed_in:
                     raise RoutingError(f"Codex account '{route}' is not signed in; run codex login")
+                if expired := expiry_refusal(account, environ or {}, now):
+                    raise RoutingError(expired)
                 return account, "forced", None
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")
@@ -549,7 +576,8 @@ def select(
     if seat is None:
         refused = [text for account in token_accounts(environ or {}) if (text := refusal(account, environ or {}))]
         no_seat = "no signed in Codex account has a fresh reading and a free session under its quota band"
-        raise RoutingError("; ".join([no_seat, *refused]))
+        closed = place.closure(codex_api.CodexApiSource(sessions), "codex", environ or {}, now)
+        raise RoutingError("; ".join([no_seat, *refused, *closed]))
     if seat.kind == API:
         return api_account(environ or {}), "open", seat
     return by_name[seat.account], "open", seat

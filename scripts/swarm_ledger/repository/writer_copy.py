@@ -1,4 +1,6 @@
+from . import refresh
 from .entry import thawed
+from .events import read_events
 from .fragments import Fragment, document
 
 
@@ -9,6 +11,17 @@ def written(state: dict, previous: Fragment | None) -> tuple[Fragment, dict]:
     if stamps is not None and isinstance(stamps.parts, dict):
         writer["_meta"]["stamps"] = dict(stamps.value)
     return fragment, writer
+
+
+def refreshed(connection, slug: str, cached, paths: set) -> tuple[dict | None, dict | None]:
+    state = refresh.refreshed(connection, slug, cached.state, paths)
+    writer, cached.writer = cached.writer, None
+    if state is None or writer is None:
+        return state, None
+    writer = refresh.refreshed(connection, slug, writer, paths)
+    if writer is not None and "events" in writer["_meta"]:
+        writer["_meta"]["events"] = read_events(connection, slug)
+    return state, writer
 
 
 def detached(fragment: Fragment, previous: Fragment | None, value: object) -> tuple[Fragment, object]:
