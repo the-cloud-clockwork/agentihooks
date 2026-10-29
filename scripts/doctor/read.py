@@ -47,7 +47,8 @@ def inbox_items(inbox, slug):
     grouped = []
     for key, group in zip(keys, listed):
         items, gone = _present(group, [raws[item_id] for item_id in group])
-        inbox.drop_gone(key.removeprefix(prefix), gone)
+        if gone:
+            inbox.drop_gone(key.removeprefix(prefix), gone)
         grouped.append(sorted(items, key=_order))
     named = sorted({name for group in grouped for item in group for name in (item.address, item.sender)})
     slugs = NameRegistry(redis).slugs_of(named)

@@ -249,14 +249,14 @@ def test_a_send_racing_the_back_fill_is_in_the_result_and_the_set(store, monkeyp
     monkeypatch.setattr(module, "now_ms", lambda: 1000)
     old = store.send("alice", "bob", "before the change")
     store.redis.delete(store.key("pending", "bob"), store.key("indexed"))
-    real, raced = module._item, []
+    real, raced = module._parsed, []
 
-    def racing(raw, item_id):
+    def racing(raw):
         if not raced:
             raced.append(store.send("carol", "bob", "raced"))
-        return real(raw, item_id)
+        return real(raw)
 
-    monkeypatch.setattr(module, "_item", racing)
+    monkeypatch.setattr(module, "_parsed", racing)
     assert [i.id for i in store.pending_items("bob")] == [old.id, raced[0].id]
     assert sorted(pending_ids(store, "bob")) == sorted([old.id, raced[0].id])
     assert store.redis.sismember(store.key("indexed"), "bob")
