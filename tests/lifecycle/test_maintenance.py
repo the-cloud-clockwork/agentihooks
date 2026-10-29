@@ -72,11 +72,36 @@ def test_the_live_home_schedules_maintenance_and_reports_a_failed_start(repo, mo
         return subprocess.CompletedProcess(args, 1 if failed else 0, "", "no scheduler" if failed else "")
 
     monkeypatch.setattr(maintenance, "_live_home", lambda: True)
+    monkeypatch.setattr(maintenance.shutil, "which", lambda name: f"/usr/bin/{name}" if name == "crontab" else None)
     monkeypatch.setattr(maintenance, "git", fake)
     report = maintenance.maintain([repo.primary], act=True)
     assert ("maintenance", "start") in calls and ("maintenance", "register") not in calls
     assert report[0]["registered"] is False and report[0]["outcome"] == "failed: no scheduler"
     assert report[0]["loose"] is None and report[0]["packs"] is None
+
+
+def test_a_live_home_without_systemd_or_crontab_skips_maintenance_without_calling_git(repo, monkeypatch):
+    calls = []
+
+    def fake(path, *args, timeout=120):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "count: 4\npacks: 2", "")
+
+    monkeypatch.setattr(maintenance, "_live_home", lambda: True)
+    monkeypatch.setattr(maintenance.shutil, "which", lambda name: None)
+    monkeypatch.setattr(maintenance, "git", fake)
+    report = maintenance.maintain([repo.primary], act=True)
+    assert calls == [("count-objects", "-v")]
+    assert report == [
+        {"path": str(repo.primary), "registered": False, "outcome": maintenance.NO_SCHEDULER, "loose": 4, "packs": 2}
+    ]
+
+
+def test_a_registration_off_the_live_home_ignores_the_missing_scheduler(repo, monkeypatch):
+    monkeypatch.setattr(maintenance, "_live_home", lambda: False)
+    monkeypatch.setattr(maintenance.shutil, "which", lambda name: None)
+    assert maintenance.register(repo.primary) == "registered"
+    assert str(repo.primary.resolve()) in _registered()
 
 
 def test_a_git_error_is_reported_without_aborting_the_sweep(repo, monkeypatch):
@@ -144,6 +169,14 @@ def test_setup_marks_a_failed_registration(monkeypatch):
     failed = [{"path": "/r/a", "registered": False, "outcome": "failed: no git", "loose": None, "packs": None}]
     monkeypatch.setattr(maintenance, "maintain", lambda paths, act: failed)
     assert maintenance.setup() == ["[!!] git maintenance failed: no git for /r/a"]
+
+
+def test_setup_marks_a_host_without_a_scheduler_as_skipped_not_failed(monkeypatch):
+    monkeypatch.setattr(maintenance, "load_roots", lambda: [])
+    monkeypatch.setattr(maintenance, "discover", lambda roots: [])
+    skipped = [{"path": "/r/a", "registered": False, "outcome": maintenance.NO_SCHEDULER, "loose": 1, "packs": 0}]
+    monkeypatch.setattr(maintenance, "maintain", lambda paths, act: skipped)
+    assert maintenance.setup() == ["[--] git maintenance skipped: no systemd timers or crontab on this host for /r/a"]
 
 
 def test_gc_prints_the_object_backlog_per_checkout(monkeypatch, capsys):

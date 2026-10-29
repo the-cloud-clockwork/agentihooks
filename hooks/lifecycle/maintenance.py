@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -6,6 +7,8 @@ from hooks.lifecycle.gitstate import git
 from hooks.lifecycle.lease import admin_dir
 from hooks.lifecycle.timer import _live_home
 from hooks.lifecycle.worktrees import discover
+
+NO_SCHEDULER = "skipped: no systemd timers or crontab on this host"
 
 
 def primaries(worktrees: list[Path]) -> list[Path]:
@@ -35,7 +38,10 @@ def objects(primary: Path) -> dict:
 
 
 def register(primary: Path) -> str:
-    result = git(primary, "maintenance", "start" if _live_home() else "register")
+    live = _live_home()
+    if live and not (shutil.which("systemctl") or shutil.which("crontab")):
+        return NO_SCHEDULER
+    result = git(primary, "maintenance", "start" if live else "register")
     return "registered" if result.returncode == 0 else f"failed: {result.stderr.strip()}"
 
 
@@ -54,10 +60,14 @@ def maintain(paths: list[Path], act: bool) -> list[dict]:
     return [_entry(primary, str(primary.resolve()) in known, act) for primary in paths]
 
 
+def _mark(item: dict) -> str:
+    if item["registered"]:
+        return "OK"
+    return "--" if item["outcome"] == NO_SCHEDULER else "!!"
+
+
 def setup() -> list[str]:
     report = maintain(primaries([path for path, _root in discover(load_roots())]), act=True)
     return [
-        f"[{'OK' if item['registered'] else '!!'}] git maintenance {item['outcome']} for {item['path']}"
-        for item in report
-        if item["outcome"]
+        f"[{_mark(item)}] git maintenance {item['outcome']} for {item['path']}" for item in report if item["outcome"]
     ]
