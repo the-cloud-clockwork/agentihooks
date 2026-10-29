@@ -43,7 +43,7 @@ def prepare(case: str, folder: Path) -> dict:
             target = source / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(zipfile.read(name))
-    direct = {path: change.get("direct", []) for path, change in scope.items()}
+    direct = {path: change["direct"] for path, change in scope.items() if "direct" in change}
     (source / ".mutation-direct.json").write_text(json.dumps(direct))
     tests = sorted({test for change in scope.values() for test in change["tests"]})
     hashes = {name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in [*scope, *tests]}
