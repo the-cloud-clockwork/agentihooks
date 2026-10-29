@@ -656,3 +656,68 @@ def test_runner_use_beside_an_inspection_is_blocked(command, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
     with pytest.raises(BlockAction, match="draft pull request"):
         check_local_tests(normalize_payload({"tool_name": "exec", "tool_input": {"cmd": command}}))
+
+
+GH_JOB_READER = (
+    "import json\n"
+    "import subprocess\n"
+    "out = subprocess.run(['gh', 'api', 'repos/o/r/actions/runs/1/jobs'], capture_output=True, text=True).stdout\n"
+    "wanted = ('unit pytest shard 1', 'Tests / unit (pytest 3.12)', 'mutation stats', 'pytest shard 1', 'pytest 3.12')\n"
+    "print('Re-run locally with python -m pytest')\n"
+    "for job in json.loads(out)['jobs']:\n"
+    "    if job['name'] in wanted:\n"
+    "        print(f\"{job['name']} pytest {job['conclusion']}\")\n"
+)
+
+
+def test_a_script_that_launches_gh_and_names_a_runner_in_data_passes(tmp_path, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    (tmp_path / "measure.py").write_text(GH_JOB_READER)
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": "python3 measure.py"}, "cwd": str(tmp_path)})
+    check_local_tests(
+        {"tool_name": "Bash", "tool_input": {"command": f"cat > m.py <<'EOF'\n{GH_JOB_READER}EOF\npython3 m.py"}}
+    )
+    (tmp_path / "noted.py").write_text(f"{GH_JOB_READER}subprocess.run(['ls'])  # filters pytest jobs\n")
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": "python3 noted.py"}, "cwd": str(tmp_path)})
+
+
+@pytest.mark.parametrize(
+    "launch",
+    [
+        "subprocess.run(['pytest', '-q'])",
+        "subprocess.run([sys.executable, '-m', 'pytest'])",
+        "subprocess.run(['python3', '-m', 'unittest', 'discover'])",
+        "subprocess.run(['python', '-m', 'scripts.ci_mutation'])",
+        "subprocess.run(['mutmut', 'run'])",
+        "subprocess.run('cd tests && pytest -q', shell=True)",
+        "subprocess.run('uv run pytest tests', shell=True)",
+        "os.system('timeout 60 .venv/bin/pytest -x')",
+        "subprocess.run(f'{sys.executable} -m pytest', shell=True)",
+        "subprocess.run('{} -m pytest'.format(sys.executable), shell=True)",
+        "subprocess.run(['python', '-mpytest', 'tests'])",
+        "os.system('%s -m pytest' % sys.executable)",
+        "os.system('$PY -m pytest')",
+        "os.system('bash -c pytest')",
+        "os.system('sh -lc pytest')",
+        "os.system('$(which pytest) -q')",
+        "os.system('uv run --extra dev pytest')",
+        "os.system('pytest tests/context')",
+        "os.system('pytest 2>&1')",
+        "os.system('pytest > out.log')",
+        "os.system('pytest>out.log')",
+        "os.system('pytest .')",
+        "os.system('pytest tests_unit')",
+        "os.system('pytest testdir')",
+        "os.system('python -W ignore -m pytest')",
+        "os.system('python3 -X dev -B -m unittest discover')",
+    ],
+)
+def test_a_gh_reader_that_also_launches_a_runner_is_blocked(launch, tmp_path, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    (tmp_path / "runs.py").write_text(f"import os\nimport sys\n{GH_JOB_READER}{launch}\n")
+    with pytest.raises(BlockAction, match="draft pull request"):
+        check_local_tests({"tool_name": "Bash", "tool_input": {"command": "python3 runs.py"}, "cwd": str(tmp_path)})
