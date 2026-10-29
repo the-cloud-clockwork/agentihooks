@@ -13,7 +13,8 @@ from hooks.memory.api import records
 from hooks.memory.api.ingest import SCHEMA_VERSION, Grant, digest
 
 LOCAL, SESSION = "local.v1", "session.v1"
-ENDPOINTS = frozenset({LOCAL, SESSION})
+PROTOCOLS = {SESSION: "1"}
+ENDPOINTS = frozenset({LOCAL, *PROTOCOLS})
 SEARCH_LIMIT = 50
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS consumer_route (
@@ -40,11 +41,11 @@ def _holder(grant: Grant) -> str:
 def _ranges(question: dict) -> list[tuple]:
     expected = question.get("expected")
     if not isinstance(expected, list) or not expected:
-        raise ValueError(f"question {question.get('id')!r} names no expected source range")
+        raise ValueError(f"question {question['id']!r} names no expected source range")
     keys = ("session_uid", "source_generation", "first_sequence", "last_sequence")
     ranges = [tuple(item[key] for key in keys) for item in expected]
     if not all(isinstance(first, int) and isinstance(last, int) and 1 <= first <= last for *_, first, last in ranges):
-        raise ValueError(f"question {question.get('id')!r} names a range that is not positive and ordered")
+        raise ValueError(f"question {question['id']!r} names a range that is not positive and ordered")
     return ranges
 
 
@@ -97,7 +98,6 @@ def shadow(tools: records.SessionTools, grant: Grant, questions: list[dict], now
 class ConsumerRoutes:
     def __init__(self, path: Path) -> None:
         self.db = sqlite3.connect(path, isolation_level=None)
-        self.db.execute("PRAGMA busy_timeout=5000")
         for statement in SCHEMA:
             self.db.execute(statement)
 
@@ -119,7 +119,7 @@ class ConsumerRoutes:
         answer = shadow(tools, grant, questions, now)
         operation = f"shadow-{digest([consumer, _holder(grant), questions, now, answer])[:16]}"
         proof = {"operation_id": operation, "consumer": consumer, "observed_at": now, **answer}
-        self.db.execute(RECORD, (grant.corpus, operation, _holder(grant), json.dumps(proof, sort_keys=True)))
+        self.db.execute(RECORD, (grant.corpus, operation, _holder(grant), json.dumps(proof)))
         return self.evidence(grant, operation)
 
     def evidence(self, grant: Grant, operation: str) -> dict:
@@ -129,15 +129,12 @@ class ConsumerRoutes:
         return json.loads(row[1])
 
     def _write(self, grant: Grant, consumer: str, expected: int, change: tuple) -> dict:
-        self.db.execute("BEGIN IMMEDIATE")
         try:
             if self.route(grant, consumer)["revision"] != expected:
-                raise ValueError("the route changed since the given revision; read it again")
+                raise sqlite3.IntegrityError
             self.db.execute(WRITE, (grant.corpus, consumer, expected + 1, *change, grant.principal))
-            self.db.execute("COMMIT")
-        except BaseException:
-            self.db.execute("ROLLBACK")
-            raise
+        except sqlite3.IntegrityError:
+            raise ValueError("the route changed since the given revision; read it again") from None
         return self.route(grant, consumer)
 
     def switch(self, grant: Grant, consumer: str, endpoint: str, expected: int, operation: str) -> dict:
@@ -156,9 +153,9 @@ class ConsumerRoutes:
         current = self.route(grant, consumer)
         if current["revision"] == expected + 1 and current["action"] == "rollback":
             return current
-        row = self.db.execute(PREVIOUS, (grant.corpus, consumer, expected - 1)).fetchone()
-        if expected < 1 or (expected > 1 and row is None):
+        if expected < 1:
             raise ValueError("there is no earlier route to restore")
+        row = self.db.execute(PREVIOUS, (grant.corpus, consumer, expected - 1)).fetchone()
         previous = row[0] if row else LOCAL
         return self._write(grant, consumer, expected, (previous, "rollback", current["operation_id"]))
 
@@ -166,7 +163,6 @@ class ConsumerRoutes:
         endpoint = self.route(grant, consumer)["endpoint"]
         if endpoint not in endpoints:
             raise ValueError(f"consumer {consumer!r} routes to {endpoint!r}, which this caller does not serve")
-        protocol = endpoint.rsplit(".v", 1)[1]
-        if str(request.get("schema_version", "")).split(".")[0] != protocol:
-            raise ValueError(f"endpoint {endpoint!r} accepts only protocol {protocol} requests")
+        if str(request.get("schema_version")).split(".")[0] != PROTOCOLS[endpoint]:
+            raise ValueError(f"endpoint {endpoint!r} accepts only protocol {PROTOCOLS[endpoint]} requests")
         return records.call(endpoints[endpoint], name, grant, {**request, "schema_version": SCHEMA_VERSION}, now)

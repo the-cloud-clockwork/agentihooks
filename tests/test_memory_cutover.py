@@ -83,9 +83,15 @@ def test_unauthorized_expectation_cannot_be_recalled(bank):
     assert bank.uid("lock") not in json.dumps(answer)
 
 
-@pytest.mark.parametrize("asked", [[], [{"id": "empty", "text": "anything", "expected": []}]])
-def test_empty_baseline_cannot_qualify(bank, asked):
-    with pytest.raises(ValueError):
+@pytest.mark.parametrize(
+    ("asked", "reason"),
+    [
+        ([], "at least one question"),
+        ([{"id": "empty", "text": "anything", "expected": []}], "'empty' names no expected"),
+    ],
+)
+def test_empty_baseline_cannot_qualify(bank, asked, reason):
+    with pytest.raises(ValueError, match=reason):
         shadow(bank.tools, grant(bank.inputs), asked, 5000.0)
 
 
@@ -93,8 +99,36 @@ def test_empty_baseline_cannot_qualify(bank, asked):
 def test_unordered_expected_range_cannot_qualify(bank, bounds):
     asked = questions(bank)
     asked[0]["expected"][0]["first_sequence"], asked[0]["expected"][0]["last_sequence"] = bounds
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="'catalog-lock' names a range that is not positive and ordered"):
         shadow(bank.tools, grant(bank.inputs), asked, 5000.0)
+
+
+def test_expanded_records_outside_the_grant_are_counted_and_refuse(bank, monkeypatch):
+    original, expansions = records.call, []
+
+    def with_foreign(tools, name, granted, request, now, embedder=None):
+        answer = original(tools, name, granted, request, now, embedder)
+        if name == "session_records":
+            expansions.append(name)
+            foreign = {**answer["records"][0], "project_id": "github.com/elsewhere/other"}
+            answer["records"] = [foreign, foreign, *answer["records"]]
+        return answer
+
+    monkeypatch.setattr(records, "call", with_foreign)
+    answer = replay(bank)
+    assert answer["state"] == "rejected"
+    assert answer["unauthorized_results"] == 2 * len(expansions) > 0
+    assert answer["recalled_ranges"] == answer["expected_ranges"] == 1
+
+
+def test_failed_search_counts_as_unexpandable(bank, monkeypatch):
+    def refused(tools, name, granted, request, now, embedder=None):
+        return {"state": "rejected", "error": {"class": "dependency_unavailable"}}
+
+    monkeypatch.setattr(records, "call", refused)
+    answer = replay(bank)
+    assert answer["state"] == "rejected"
+    assert (answer["unexpandable_results"], answer["unauthorized_results"], answer["unresolved_ranges"]) == (1, 0, 1)
 
 
 def test_route_requires_bound_qualification_and_compare_and_set(bank, tmp_path):
@@ -167,6 +201,35 @@ def test_consumer_dispatch_uses_versioned_route_and_expiring_aliases(bank, tmp_p
         routes.switch(allowed, "keeper", "unsupported.v2", 1, proof["operation_id"])
     routes.rollback(allowed, "keeper", 1)
     with pytest.raises(ValueError):
+        routes.call({"session.v1": bank.tools}, allowed, "keeper", "session_search", request, 5000.0)
+    routes.close()
+
+
+def test_rollback_restores_the_route_held_before_the_given_revision(bank, tmp_path):
+    routes = ConsumerRoutes(tmp_path / "routes.sqlite3")
+    allowed = grant(bank.inputs)
+    with pytest.raises(ValueError, match="no earlier route to restore"):
+        routes.rollback(allowed, "keeper", 0)
+    proof = routes.qualify(bank.tools, allowed, "keeper", questions(bank), 5000.0)
+    routes.switch(allowed, "keeper", "session.v1", 0, proof["operation_id"])
+    with pytest.raises(ValueError, match="no earlier route to restore"):
+        routes.rollback(allowed, "keeper", 0)
+    with pytest.raises(ValueError, match="the route changed since the given revision"):
+        routes.rollback(allowed, "keeper", 2)
+    assert routes.rollback(allowed, "keeper", 1)["endpoint"] == "local.v1"
+    again = routes.rollback(allowed, "keeper", 2)
+    assert (again["endpoint"], again["revision"], again["action"]) == ("session.v1", 3, "rollback")
+    routes.close()
+
+
+@pytest.mark.parametrize("version", ["2.0", None])
+def test_dispatch_refuses_a_request_of_another_protocol(bank, tmp_path, version):
+    routes = ConsumerRoutes(tmp_path / "routes.sqlite3")
+    allowed = grant(bank.inputs)
+    proof = routes.qualify(bank.tools, allowed, "keeper", questions(bank), 5000.0)
+    routes.switch(allowed, "keeper", "session.v1", 0, proof["operation_id"])
+    request = {"schema_version": version, "access_domain": allowed.corpus, "query": "locked"}
+    with pytest.raises(ValueError, match="endpoint 'session.v1' accepts only protocol 1 requests"):
         routes.call({"session.v1": bank.tools}, allowed, "keeper", "session_search", request, 5000.0)
     routes.close()
 
