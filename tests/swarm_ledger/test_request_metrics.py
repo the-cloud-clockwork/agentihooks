@@ -156,6 +156,8 @@ def test_bounded_snapshot_names_capacity_and_restart_gaps(monkeypatch):
     monkeypatch.setattr(metrics, "time", clock)
     monkeypatch.setattr(metrics, "STARTED_AT", clock.time() - 86400.0, raising=False)
     monkeypatch.setattr(metrics, "EVICTED_THROUGH", float("-inf"), raising=False)
+    monkeypatch.setattr(metrics, "HELD_SINCE", None)
+    monkeypatch.setattr(metrics, "LOST", [])
     for wall in range(1, 21):
         clock.wall += 1.0
         metrics.record("POST", "/api/v1/ledgers/:slug/operations", float(wall), 0.25, 1.0)
