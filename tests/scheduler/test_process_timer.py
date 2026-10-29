@@ -131,12 +131,13 @@ def test_the_recheck_never_passes_the_deadline():
 
 
 def test_a_bounded_wait_reaches_its_deadline_on_one_clock_reading(monkeypatch):
-    readings = iter([10.0, 10.0, 10.5, 12.0, 12.0])
-    monkeypatch.setattr(process_timer.time, "monotonic", lambda: next(readings))
+    clock = [10.0]
+    monkeypatch.setattr(process_timer.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: pytest.fail("restarted the scheduler"))
     timer = _bare_timer(_Entry(fired_after=10**9))
-    monkeypatch.setattr(timer.cancelled, "wait", lambda timeout: None)
+    monkeypatch.setattr(timer.cancelled, "wait", lambda timeout: clock.__setitem__(0, clock[0] + 1.0))
     timer.wait(timeout=2)
+    assert clock == [12.0]
 
 
 def test_a_timer_entry_carries_its_delay(state, monkeypatch):
