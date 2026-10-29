@@ -72,17 +72,14 @@ def test_scoped_join_credentials_allow_each_hub_configured_swarm(admin, signer, 
     assert _violations(scoped, credentials, act) == []
 
 
-def test_unlisted_member_gets_no_swarm_permissions(admin, signer):
+def test_the_hive_endpoint_refuses_to_mint_for_a_member_the_hub_record_does_not_list(admin, signer):
     member = auth.mint(admin, "h1", PUBLIC)
     scoped = replace(signer, member_swarms={"another-member": ("rig",)})
-    credentials = _refresh(admin, scoped, member["ledger_credential"])["nats_credentials"]
-
-    async def act(nc):
-        await nc.publish("swarm.rig.queue.eng", b"{}")
-
-    assert _violations(scoped, credentials, act, refused=True) == [
-        'nats: permissions violation for publish to "swarm.rig.queue.eng"'
-    ]
+    grant = _refresh(admin, scoped, member["ledger_credential"])
+    assert grant == {
+        "error": f"the hub record lists no member swarms for hive member {member['id']}; "
+        "it mints no unscoped bus credential"
+    }
 
 
 def test_scoped_claims_keep_the_member_reply_inbox(signer):
@@ -91,8 +88,35 @@ def test_scoped_claims_keep_the_member_reply_inbox(signer):
     assert nkey.claims(jwt)["nats"]["sub"]["allow"] == ["swarm.rig.>", f"_INBOX.{user.public}.>"]
 
 
+def test_member_credentials_hold_no_grant_on_the_hub_owned_account_buckets():
+    from scripts.hive.nats_grant import MEMBER_PUBLISH, member_claims
+
+    claims = member_claims("member", ("rig",), member="m1")
+    for granted in (claims["pub"]["allow"], MEMBER_PUBLISH):
+        assert not [value for value in granted if "account-slots" in value or "hive-slot-accounts" in value]
+    assert not [value for value in claims["pub"]["allow"] if value.startswith("$KV.") or ".KV_" in value]
+
+
+@pytest.mark.parametrize(
+    ("swarms", "slots"), [(None, ["slots.*.m1"]), (("rig", "other"), ["slots.rig.m1", "slots.other.m1"])]
+)
+def test_a_member_credential_publishes_only_the_slot_subject_of_its_own_hive(swarms, slots):
+    from scripts.hive.nats_grant import member_claims
+
+    claims = member_claims("member", swarms, member="m1")
+    assert [value for value in claims["pub"]["allow"] if "slots" in value] == slots
+
+
+def test_scoped_claims_refuse_to_grant_every_hive_slot_subject():
+    from scripts.hive.nats_grant import member_claims
+
+    with pytest.raises(ValueError, match=r"^invalid event subject token '\*'$"):
+        member_claims("member", ("rig",))
+
+
+@pytest.mark.parametrize("legacy", [False, True])
 @pytest.mark.parametrize("kind", ["EVENTS", "DEAD", "QUEUE_eng", "STATE_spoke-work"])
-def test_scoped_credentials_use_their_own_stream_and_consumer(signer, kind):
+def test_scoped_credentials_use_their_own_stream_and_consumer(signer, kind, legacy):
 
     import nats as nats_client
     from nats.js import api
@@ -102,7 +126,9 @@ def test_scoped_credentials_use_their_own_stream_and_consumer(signer, kind):
 
     scoped = replace(signer, member_swarms={"m1": ("rig",)})
     credentials = nats_grant.mint(scoped, "m1")
-    stream = f"AGENTIHOOKS_726967_{kind}"
+    from scripts.events.subjects import stream_name
+
+    stream = f"AGENTIHOOKS_726967_{kind}" if legacy else stream_name("rig", kind)
     subject = "swarm.rig." + kind.lower().replace("_", ".")
 
     async def act(nc):
@@ -160,17 +186,19 @@ def test_hub_record_refuses_malformed_member_swarm_membership(monkeypatch, membe
 
 
 @pytest.mark.parametrize("signer", [4096], indirect=True)
-def test_scoped_credentials_require_more_than_the_default_control_line(signer):
+def test_scoped_credentials_require_more_than_the_default_control_line(signer, tmp_path):
     import nats as nats_client
 
     from scripts.events import nats
     from scripts.events.config import BusConfig
+    from tests.events import nats_server
 
     scoped = replace(signer, member_swarms={"m1": ("rig",)})
     credentials = nats_grant.mint(scoped, "m1")
-    with pytest.raises(nats_client.errors.Error) as error:
+    with pytest.raises((nats_client.errors.Error, ConnectionResetError)) as error:
         nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credentials, provision=False))
-    assert str(error.value) == "nats: 'maximum control line exceeded'"
+    assert isinstance(error.value, ConnectionResetError) or str(error.value) == "nats: 'maximum control line exceeded'"
+    nats_server.wait_logged(tmp_path / "nats.log", "maximum control line exceeded")
 
 
 def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
@@ -188,9 +216,12 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
         "STATE_hive-executions",
         "STATE_execution-starts",
     )
-    expected = {"swarm.rig.>"}
-    for resource in resources:
-        stream = f"AGENTIHOOKS_726967_{resource}"
+    expected = {"swarm.rig.>", "slots.rig.m1"}
+    from scripts.events.subjects import stream_name
+
+    for stream in [
+        name for resource in resources for name in (f"AGENTIHOOKS_726967_{resource}", stream_name("rig", resource))
+    ]:
         expected.update(
             (
                 f"$JS.API.STREAM.INFO.{stream}",
@@ -207,13 +238,22 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
     assert claims["sub"] == {"allow": ["swarm.rig.>", f"_INBOX.{user.public}.>"]}
 
 
-@pytest.mark.parametrize("memberships", [{}, {"another": ("rig",)}, {"m1": ()}])
-def test_unlisted_or_empty_membership_carries_an_explicit_publish_deny(signer, memberships):
-    scoped = replace(signer, member_swarms=memberships)
+def test_empty_membership_carries_an_explicit_publish_deny(signer):
+    scoped = replace(signer, member_swarms={"m1": ()})
     jwt, user = nkey.parse_creds(nats_grant.mint(scoped, "m1"))
     claims = nkey.claims(jwt)["nats"]
     assert claims["pub"] == {"deny": [">"]}
     assert claims["sub"] == {"allow": [f"_INBOX.{user.public}.>"]}
+
+
+@pytest.mark.parametrize("memberships", [{}, {"another": ("rig",)}])
+def test_unlisted_membership_mints_no_credential(signer, memberships):
+    scoped = replace(signer, member_swarms=memberships)
+    with pytest.raises(auth.HiveError) as error:
+        nats_grant.mint(scoped, "m1")
+    assert str(error.value) == (
+        "the hub record lists no member swarms for hive member m1; it mints no unscoped bus credential"
+    )
 
 
 @pytest.mark.parametrize(

@@ -27,8 +27,10 @@ def number(address: str) -> int:
     return 1 if seat == MASTER else int(seat.removeprefix(f"{MASTER}-"))
 
 
-def live_masters(redis, slug: str) -> list[str]:
-    return [seat for seat in masters.held(redis, slug, RedisStore(redis).agents(slug)) if is_seat(seat)]
+def live_masters(redis, slug: str, agents: list | None = None) -> list[str]:
+    agents = RedisStore(redis).agents(slug) if agents is None else agents
+    waiting = {agent.name for agent in agents if agent.input_prompt}
+    return [seat for seat, name in masters.held(redis, slug, agents).items() if is_seat(seat) and name not in waiting]
 
 
 def turn(live: list[str], last: str, skip: str | None) -> str:
@@ -55,7 +57,7 @@ class MasterPool:
         live = live_masters(self.redis, slug)
         if any(self.inbox.home(seat) != self.inbox.world for seat in live):
             return []
-        return live if len(live) > 1 else []
+        return live if len(live) > 1 or (live and address not in live) else []
 
     def stage_add(self, pipe, item) -> None:
         """pipe is in MULTI; the score is the item's place in its front door's arrival order."""
@@ -132,7 +134,7 @@ class MasterPool:
         """None with intent grouping off; else the matched master per waiting item, None leaving it to round robin."""
         if not intent.enabled():
             return None
-        items = [self.inbox.get(item_id) for item_id, _ in self.redis.zscan_iter(self.key(slug))]
+        items = self.inbox.listed_in(self.key(slug), [item_id for item_id, _ in self.redis.zscan_iter(self.key(slug))])
         return intent.routes(self, slug, items, live)
 
     def _claim_next(self, slug, live, routed):

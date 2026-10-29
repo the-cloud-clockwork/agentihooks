@@ -35,6 +35,10 @@ ROWS = [
     "overlays-box",
     "agents-box",
     "handoff-box",
+    "recovery-box",
+    "context-box",
+    "freeze-box",
+    "architecture-box",
 ]
 
 
@@ -48,6 +52,7 @@ def status(**changes):
             "max_ci": 1,
             "max_plan": 1,
             "masters_step": 12,
+            "focus_weight": 50,
             "autonomy": "delegate",
             "effort_min": "medium",
             "effort_max": "high",
@@ -180,7 +185,7 @@ def open_page(browser):
         page.context.close()
 
 
-def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_with_no_health_panel():
+def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_recovery_with_no_health_panel():
     page = page_source()
     box = page.split('<div id="swarm-box">', 1)[1].split('<aside id="stats-column"', 1)[0]
     positions = [box.index(f'id="{row}"') for row in ROWS]
@@ -188,6 +193,7 @@ def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_with_no_h
     assert 'id="command-log"' not in box
     assert '<details class="fold sw-fold" id="overlays-fold" open>' in box
     assert '<details class="fold sw-fold" id="quota-fold" open>' in box
+    assert '<details class="fold sw-fold" id="recovery-fold" open>' in box
     for gone in (
         "crew",
         "needs-you",
@@ -235,7 +241,7 @@ def test_header_names_the_swarm_state_tick_controls_and_autonomy(open_page):
         "#swarm-modes button", "bs => bs.map(b => [b.textContent, b.getAttribute('aria-pressed')])"
     )
     assert modes == [["manual", "false"], ["assist", "false"], ["delegate", "true"], ["full", "false"]]
-    page.tab.get_by_role("button", name="manual").click()
+    page.tab.get_by_role("group", name="Autonomy").get_by_role("button", name="manual").click()
     page.tab.wait_for_function("() => !document.querySelector('#swarm-modes button').disabled")
     assert page.puts == [{"action": "set", "autonomy": "manual"}]
 
@@ -278,6 +284,25 @@ def test_alert_line_shows_only_while_a_finding_is_open_with_the_live_caps(open_p
     assert page.text("#alert-live").split() == ["eng", "1/3", "ci", "0/1", "plan", "0/1"]
 
 
+def test_alert_line_names_each_open_stale_claim_with_its_claimant_and_last_nudge(open_page):
+    stale = {
+        "id": "stale-claim/pb10",
+        "kind": "stale claim",
+        "subject": "pb10",
+        "summary": "no progress for 44 minutes",
+        "evidence": ["task Build", "claimed by eng-58", "last stale nudge 3 minutes ago"],
+        "threshold": "30 minutes without progress",
+        "seen_at": NOW_MS - 240_000,
+        "verdict": None,
+    }
+    page = open_page(status(findings=[stale]), width=1920)
+    page.tab.set_viewport_size({"width": 1920, "height": 1080})
+    assert page.tab.locator("#alert-stale span").all_inner_texts() == [
+        "pb10 · claimed by eng-58 · last stale nudge 3 minutes ago"
+    ]
+    assert page.text("#alert-kinds") == "stale claim"
+
+
 def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
     page = open_page()
     fields = {lane: page.tab.locator(f"#cap-{lane}") for lane in ("eng", "ci", "plan", "compact")}
@@ -299,6 +324,29 @@ def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
         page.tab.wait_for_timeout(100)
     assert page.puts == [{"action": "set", "max_eng": 5, "max_ci": 2, "compact_limit": 750}]
     assert apply.is_disabled()
+
+
+def test_focus_weight_reads_persisted_value_and_apply_sends_the_change(open_page):
+    payload = status()
+    payload["config"]["focus_weight"] = 30
+    page = open_page(payload)
+    field = page.tab.get_by_role("textbox", name="Focus weight", exact=True)
+    assert field.input_value() == "30"
+    page.tab.set_viewport_size({"width": 1920, "height": 1080})
+    screenshot = Path("test-results/focus-panel-1920.png")
+    screenshot.parent.mkdir(exist_ok=True)
+    page.tab.screenshot(path=str(screenshot))
+    field.fill("50")
+    page.tab.get_by_role("button", name="Apply capacity", exact=True).click()
+    assert page.puts == [{"action": "set", "focus_weight": 50}]
+
+
+def test_an_older_swarm_without_focus_weight_keeps_its_supported_controls(open_page):
+    payload = status()
+    payload["config"].pop("focus_weight")
+    page = open_page(payload)
+    assert page.tab.get_by_role("textbox", name="Focus weight", exact=True).count() == 0
+    assert page.tab.get_by_role("textbox", name="Engineer cap", exact=True).input_value() == "3"
 
 
 def test_the_masters_step_stepper_drafts_and_apply_sends_it(open_page):
@@ -402,8 +450,8 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
           };
         }"""
     )
-    assert len(boxes["row"]) == 11
-    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][9:]
+    assert len(boxes["row"]) == 13
+    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][11:]
     middle = (caps[0][0] + caps[0][1]) / 2
     assert all(top <= middle <= bottom for top, bottom in caps)
     last = (affinity[0] + affinity[1]) / 2
@@ -820,7 +868,7 @@ def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(op
         ["luna", "claude", "SUBSCRIPTION", "—", "64%", "2h05m", "51%", "6d00h", "—", "1", "—", "4", "MASTER"],
         ["default", "codex", "SUBSCRIPTION", "—", "—", "—", "61%", "3d10h", "—", "0", "—", "—", ""],
     ]
-    assert page.text("#quota-count").lower() == "3 accounts · probed 2m ago"
+    assert page.text("#quota-fold > summary").strip().lower() == "quota"
 
 
 def test_the_quota_table_fits_its_box_at_1920(open_page):
@@ -845,7 +893,7 @@ def test_the_sessions_cell_reads_the_plain_session_count(open_page):
 def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_page):
     page = open_page()
     order = page.tab.eval_on_selector_all(
-        "#capacity-box .sw-cap:not(.sw-affinity):not(.sw-model)",
+        "#capacity-box .sw-cap:not(.sw-affinity):not(.sw-model):not(.sw-scaling)",
         """caps => caps.map(c => [c.querySelector('.sw-cap-name').innerText,
           [...c.children].slice(1).map(e => e.matches('.sw-field') ? e.querySelector('input').value + (e.querySelector('.sw-unit')?.innerText || '') : e.innerText)])""",
     )
@@ -857,6 +905,7 @@ def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_
         ["compact limit", ["−", "600k", "+"]],
         ["effort min", ["−", "medium", "+"]],
         ["effort max", ["−", "high", "+"]],
+        ["focus weight", ["−", "50%", "+"]],
     ]
 
 
@@ -873,10 +922,11 @@ def test_the_refresh_icon_beside_the_title_probes_every_account_and_redraws(open
     )
     assert look == [True, "rgba(0, 0, 0, 0)", "none"]
     fresh = status()
-    fresh["quota"] = {**fresh["quota"], "probed_at": NOW_S}
+    fresh["quota"]["rows"][0]["five_hour_left"] = 88
     page.payload = fresh
     button.click()
-    page.tab.wait_for_function("() => document.querySelector('#quota-count').textContent.includes('probed 0s ago')")
+    page.tab.wait_for_function("() => document.querySelector('#swarm-quota').textContent.includes('88%')")
+    assert page.tab.locator("#quota-fold").get_attribute("open") is not None
     assert page.puts == [{"action": "quota_refresh"}]
 
 

@@ -8,6 +8,7 @@ import yaml
 
 MODES = ("finders", "classifier", "both")
 ACTIONS = ("send-back", "strip", "flag")
+FIELDS = ("text", "evidence", "case", "content", "new_string", "new_source", "edits")
 DEFAULT_QUESTION = "Does this finding go against the filter intent?"
 _FINDER_KEYS = frozenset({"regex", "reason", "script"})
 
@@ -26,6 +27,7 @@ class Finder:
 @dataclass(frozen=True)
 class FilterSpec:
     paths: tuple[str, ...] = ()
+    fields: tuple[str, ...] = ()
     finders: tuple[Finder, ...] = ()
     mode: str = "both"
     intent: str = ""
@@ -59,6 +61,13 @@ def _rounds(value: object) -> int:
     return value
 
 
+def _fields(value: tuple[str, ...]) -> tuple[str, ...]:
+    unknown = sorted(set(value) - set(FIELDS))
+    if unknown:
+        raise FilterSchemaError(f"fields must name input keys from {', '.join(FIELDS)}, got {', '.join(unknown)}")
+    return value
+
+
 def _finder(index: int, raw: object) -> Finder:
     if not isinstance(raw, dict) or len({"regex", "script"} & raw.keys()) != 1:
         raise FilterSchemaError(f"finder {index} must be a mapping with exactly one regex or script")
@@ -86,6 +95,7 @@ def _finders(value: object) -> tuple[Finder, ...]:
 
 _FIELDS = {
     "paths": lambda v: _strings("paths", v),
+    "fields": lambda v: _fields(_strings("fields", v)),
     "finders": _finders,
     "mode": lambda v: _choice("mode", v, MODES),
     "intent": lambda v: _text("intent", v),

@@ -352,7 +352,7 @@ def test_take_master_prints_the_full_master_priming(taker, capsys):
         "Left the docs task waiting on review",
         "Continue from the master handoff notes",
         "Your standing duties:",
-        "agentihooks swarm sw --as master@a1b2c3-0001 say --to operator",
+        "Never write to the operator first",
     ):
         assert part in out, part
     assert store.handoff("sw", "master") == ""

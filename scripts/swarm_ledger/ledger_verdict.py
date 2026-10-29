@@ -44,5 +44,6 @@ def apply(doc, op, ctx):
     item["comments"].append({"id": op["id"], "by": "operator", "at": ctx.at, "text": said})
     ctx.record("operator", "comment added", op["item"], id=op["id"], text=said)
     ctx.stamp(f"{op['item']}/comments", "operator")
-    ledger_priorities.apply(doc, {"op": ledger_priorities.OPS[1], "target": op["item"]}, ctx)
+    if ask is not None:
+        ledger_priorities.apply(doc, {"op": ledger_priorities.OPS[1], "target": op["item"]}, ctx)
     return True

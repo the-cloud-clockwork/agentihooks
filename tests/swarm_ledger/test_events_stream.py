@@ -170,3 +170,18 @@ def test_serve_resets_a_lagging_reader_once_and_resumes_patches(monkeypatch):
     assert events[2][1]["rev"] == 5
     assert len(handler.wfile.marks) == 3
     assert hub.watched() == []
+
+
+def test_serve_ends_the_response_cleanly_when_the_hub_drains(monkeypatch):
+    monkeypatch.setattr(stream, "HEARTBEAT_S", 30)
+    hub = Hub()
+
+    def drain(flush):
+        if flush == 1:
+            hub.drain()
+
+    handler = Handler(Sink(5, drain))
+    assert bounded(stream.serve, handler, hub, SLUG, lambda: {"ledger": ledger(1)}, limit=10)[0] is None
+    events = list(stream.parse(handler.wfile.getvalue().decode().splitlines()))
+    assert [name for name, _, _ in events] == ["snapshot"]
+    assert hub.watched() == []

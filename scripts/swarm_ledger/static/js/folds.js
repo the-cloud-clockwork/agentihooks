@@ -51,10 +51,19 @@ export function collapsible(box) {
   if (typeof saved[box.id] === "boolean") box.open = saved[box.id];
   box.querySelector(":scope > summary").addEventListener("click", (ev) => { if (ev.target.closest("button, a")) ev.preventDefault(); });
   box.addEventListener("toggle", () => {
+    if ("fresh" in box.dataset) return void delete box.dataset.fresh;
     const state = foldSaved();
     state[box.id] = box.open;
     try { localStorage.setItem(FOLD_KEY, JSON.stringify(state)); } catch (e) { /* storage blocked: defaults return on reload */ }
   });
+}
+
+export function closeComplete(boxes, complete) {
+  const saved = foldSaved();
+  for (const box of boxes) if (box.open && typeof saved[box.id] !== "boolean" && complete(box)) {
+    box.dataset.fresh = "";
+    box.open = false;
+  }
 }
 
 export function setAllComments(section, open) {

@@ -26,16 +26,30 @@ CLOSED = PullRequest("CLOSED", None, 1, False, True)
 class FakeLedger:
     def __init__(self, task):
         self.rows = {task["id"]: task}
-        self.comments, self.updates = [], []
+        self.comments, self.updates, self.reads = [], [], []
 
     def tasks(self, slug):
-        return list(self.rows.values()) if slug == SLUG else []
+        raise AssertionError(f"read every task of {slug!r} on a Stop")
 
-    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
-        if if_state and self.rows[task_id].get("state") not in if_state:
-            return
+    def task(self, slug, task_id):
+        assert slug == SLUG
+        self.reads.append(task_id)
+        return self.rows.get(task_id)
+
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
+        assert slug == SLUG
+        row = self.rows[task_id]
+        if if_state and row.get("state") not in if_state:
+            return row
+        if if_match and any(
+            row.get(key, 0 if key == "claim_generation" else "") != value for key, value in if_match.items()
+        ):
+            return row
         self.updates.append((slug, task_id, fields, by))
-        self.rows[task_id].update(fields)
+        if "claimed_by" in fields and fields["claimed_by"] != row.get("claimed_by", ""):
+            row["claim_generation"] = row.get("claim_generation", 0) + 1
+        row.update(fields)
+        return row
 
     def comment(self, slug, task_id, text, by):
         self.comments.append((slug, task_id, text, by))
@@ -243,6 +257,127 @@ def test_a_stop_after_the_merge_is_blocked(rig):
     rig.pulls[URL] = MERGED
     decision = rig.stop()
     assert not decision.allowed and "merged: close the task now" in decision.reason
+
+
+@pytest.mark.parametrize("generation", [None, 4])
+@pytest.mark.parametrize("offset", [1, 60_000])
+def test_future_verification_stop_passes_and_releases_its_claim(rig, offset, generation):
+    rig.task.update(
+        state="pr",
+        pr_url=URL,
+        kind="ops",
+        awaiting="verify",
+        contract={"after": "yes", "after_at": str(rig.clock[0] + offset)},
+    )
+    rig.pulls[URL] = MERGED
+    if generation is not None:
+        rig.task["claim_generation"] = generation
+    other = AgentRecord(name="other", lane="eng", task="t2", state="working")
+    rig.store.put_agent(SLUG, other)
+    assert rig.stop().allowed
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert next(a for a in rig.store.agents(SLUG) if a.name == "other") == other
+    assert next(a for a in rig.store.agents(SLUG) if a.name == ME).state == "finished"
+    assert rig.task["awaiting"] == "verify"
+    assert rig.task["state"] == "open"
+    assert rig.task["claimed_by"] == ""
+    assert rig.task["claim_generation"] == (generation or 0) + 1
+    assert rig.rows() == []
+
+
+@pytest.mark.parametrize("kind", ["ops", "code"])
+@pytest.mark.parametrize("after_at", ["", "999999", "1000000"])
+def test_due_or_unscheduled_verification_stop_still_owes_contract(rig, after_at, kind):
+    rig.task.update(
+        state="pr",
+        pr_url=URL,
+        kind=kind,
+        awaiting="verify",
+        contract={"after": "yes", "after_at": after_at},
+    )
+    rig.pulls[URL] = MERGED
+    decision = rig.stop()
+    assert not decision.allowed
+    assert "contract" in decision.reason
+    assert rig.store.claimant(SLUG, "t1") == ME
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"state": "done"},
+        {"claimed_by": "successor"},
+        {"pr_url": "https://github.com/o/r/pull/8"},
+        {"awaiting": "merge"},
+        {"claim_generation": 2},
+    ],
+)
+def test_verification_release_preserves_a_changed_task(rig, monkeypatch, changed):
+    rig.task.update(
+        state="pr",
+        pr_url=URL,
+        kind="ops",
+        awaiting="verify",
+        claim_generation=1,
+        contract={"after": "yes", "after_at": "1000001"},
+    )
+    rig.pulls[URL] = MERGED
+    update = rig.ledger.update_task
+
+    def race(slug, task_id, fields, **kwargs):
+        rig.task.update(changed)
+        return update(slug, task_id, fields, **kwargs)
+
+    monkeypatch.setattr(rig.ledger, "update_task", race)
+    decision = rig.stop()
+    if "pr_url" not in changed and "awaiting" not in changed:
+        assert not decision.allowed
+    assert rig.store.claimant(SLUG, "t1") == ME
+    assert rig.store.agents(SLUG)[0].state == "working"
+    assert rig.ledger.updates == []
+    assert all(rig.task[key] == value for key, value in changed.items())
+
+
+def test_a_future_contract_without_verification_still_owes_its_proof(rig):
+    rig.task.update(state="pr", pr_url=URL, kind="code", contract={"after": "yes", "after_at": "1000001"})
+    rig.pulls[URL] = MERGED
+    decision = rig.stop()
+    assert not decision.allowed and "contract" in decision.reason
+    assert '--command "<command>" --output "<its output>"' in decision.reason
+    assert rig.store.claimant(SLUG, "t1") == ME
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"state": "pr", "claimed_by": "", "claim_generation": 2},
+        {"state": "open", "claimed_by": "successor", "claim_generation": 2},
+        {"state": "open", "claimed_by": "", "claim_generation": 1},
+        {"state": "open", "claimed_by": ""},
+    ],
+)
+def test_an_unconfirmed_verification_release_keeps_the_owner(rig, monkeypatch, reply):
+    rig.task.update(
+        state="pr",
+        pr_url=URL,
+        kind="ops",
+        awaiting="verify",
+        claim_generation=1,
+        contract={"after": "yes", "after_at": "1000001"},
+    )
+    rig.pulls[URL] = MERGED
+    monkeypatch.setattr(rig.ledger, "update_task", lambda *args, **kwargs: reply)
+    assert not rig.stop().allowed
+    assert rig.store.claimant(SLUG, "t1") == ME
+    assert rig.store.agents(SLUG)[0].state == "working"
+
+
+def test_verification_release_accepts_a_legacy_missing_pull_field(rig):
+    rig.task.update(state="pr", kind="ops", awaiting="verify", contract={"after_at": "1000001"})
+    del rig.task["pr_url"]
+    assert rig.stop().allowed
+    assert rig.task["state"] == "open"
+    assert rig.store.claimant(SLUG, "t1") is None
 
 
 def test_a_merged_first_half_clears_the_active_pull_request_and_the_second_half_stops_on_a_wait(rig):
@@ -481,8 +616,31 @@ def test_only_a_pinned_worker_with_a_task_is_gated(rig, who):
     def unread(slug):
         raise AssertionError(f"read the ledger of {slug!r} for an agent the gate skips")
 
-    rig.ledger.tasks = unread
+    rig.ledger.task = lambda slug, task_id: unread(slug)
     assert rig.stop(who).allowed
+
+
+def test_a_stop_reads_only_its_own_task(rig):
+    rig.ledger.rows["other"] = {"id": "other", "state": "open"}
+    rig.stop()
+    assert rig.ledger.reads == ["t1"]
+
+
+def test_a_wait_on_a_task_reads_only_that_dependency(rig):
+    rig.ledger.rows["d0"] = {"id": "d0", "state": "claimed"}
+    idle.declare_wait(
+        rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "task d0", rig.clock[0], on={"kind": "task", "target": "d0"}
+    )
+    assert rig.stop().allowed
+    assert rig.ledger.reads == ["t1", "d0"]
+
+
+@pytest.mark.parametrize("on", [{"kind": "task"}, {"kind": "merge", "target": "d0"}])
+def test_a_wait_naming_no_task_reads_no_dependency(rig, on):
+    rig.ledger.rows["d0"] = {"id": "d0", "state": "claimed"}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "waiting", rig.clock[0], on=on)
+    rig.stop()
+    assert rig.ledger.reads == ["t1"]
 
 
 def test_a_ci_worker_is_gated(rig):

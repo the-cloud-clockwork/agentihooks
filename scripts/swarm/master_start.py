@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from scripts.handoff import transfers
 from scripts.swarm import master_alarm, reaper
-from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2 import masters as master_seats
 
 if TYPE_CHECKING:
@@ -39,10 +39,22 @@ def begin(store: RedisStore, slug: str, name: str, task: dict, at: int) -> None:
     save(store, slug, state)
 
 
+def withdraw(store: RedisStore, slug: str, pending: dict) -> None:
+    if pending:
+        save(store, slug, pending)
+    else:
+        store.redis.delete(store.key(slug, "master-start"))
+
+
 def blocked(pending: dict, at: int) -> bool:
     if pending.get("alerted"):
         return at - pending["at"] < RETRY_MS
     return bool(pending.get("name"))
+
+
+def deadline_ms(agent: AgentRecord) -> int:
+    """A deferred launch returns before its login, so its hook may come as late as the launch budget it carries."""
+    return max(DEADLINE_MS, agent.profile_decision.get("validation", {}).get("deadline_ms", DEADLINE_MS))
 
 
 def failed(store: RedisStore, slug: str, error: str, at: int) -> list[str]:
@@ -74,7 +86,7 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
         store.clear_handoff(slug, MASTER)
         store.redis.delete(store.key(slug, "master-start"))
         return []
-    if (pending.get("alerted") and not agent) or at - pending["at"] < DEADLINE_MS:
+    if (pending.get("alerted") and not agent) or at - pending["at"] < (deadline_ms(agent) if agent else DEADLINE_MS):
         return []
     if agent:
         master_alarm.failed(store, slug, NO_HOOK.format(name=agent.name), at)

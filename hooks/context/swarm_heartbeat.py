@@ -20,6 +20,10 @@ def beat(state, environ=None, redis=None, now_ms=None):
 
         redis = redis_client(env)
     idle.beat(redis, slug, name, state, time.time_ns() // 1_000_000 if now_ms is None else now_ms)
+    if state == idle.IDLE:
+        from scripts.swarm.health import activity
+
+        activity.end_turn(slug, name)
     return True
 
 
@@ -74,14 +78,35 @@ def outcome(payload, environ=None, redis=None, now_ms=None):
     if not (slug and name):
         return False
     from scripts.gates.progress import Progress, outcome_of
+    from scripts.swarm import pr_wait
 
     command = (payload.get("tool_input") or {}).get("command") if payload.get("tool_name") == "Bash" else None
     kind = outcome_of(command)
-    if not kind:
+    if not (kind or (env.get("AGENTIHOOKS_SWARM_TASK") and pr_wait.triggered(command))):
         return False
     if redis is None:
         from scripts.swarm.store import redis_client
 
         redis = redis_client(env)
-    Progress(redis, slug).outcome(name, kind, now_ms)
+    if kind:
+        Progress(redis, slug).outcome(name, kind, now_ms)
+    push_mark(payload, env, redis, now_ms)
+    return bool(kind)
+
+
+def push_mark(payload, environ=None, redis=None, now_ms=None):
+    env = os.environ if environ is None else environ
+    slug, name = env.get("AGENTIHOOKS_SWARM"), env.get("AGENTIHOOKS_AGENT_NAME")
+    command = (payload.get("tool_input") or {}).get("command") if payload.get("tool_name") == "Bash" else None
+    from scripts.swarm import pr_wait
+
+    if not (slug and name and env.get("AGENTIHOOKS_SWARM_TASK") and pr_wait.triggered(command)):
+        return False
+    if redis is None:
+        from scripts.swarm.store import redis_client
+
+        redis = redis_client(env)
+    repo, branch = pr_wait.pushed_where(command, payload.get("cwd") or ".")
+    at = int(time.time() * 1000) if now_ms is None else now_ms
+    pr_wait.mark(redis, slug, name, at, repo, branch)
     return True

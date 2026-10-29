@@ -63,6 +63,25 @@ def test_past_window_separates_unread_delivery_from_receiver_backlog_and_labels_
     assert unread.measure == delivered.measure == read.measure == 10
 
 
+def test_past_window_names_a_pending_operator_item_a_missed_page_relay():
+    row = copy.deepcopy(recorded()["items"][0])
+    row.update(address="operator", created_at=MIN, state="pending")
+    row["history"] = [{"state": "pending", "at": MIN}]
+    receivers = {"operator": inbox.Receiver()}
+    [missed] = inbox.past_window([row], 9 * MIN, WINDOW, receivers)
+    assert missed.summary == "page relay missed; sent 8 minutes ago"
+    relay = "addressed to the operator, reached only through the ledger page relay"
+    assert relay in missed.evidence
+    assert "recipient has no live occupant" not in missed.evidence
+    row.update(state="cancelled", reason="cancelled")
+    [closed] = inbox.no_outcome([row], receivers)
+    assert relay in closed.evidence
+    row.update(state="pending", reason="")
+    row["address"] = "engineer@x-1"
+    [unread] = inbox.past_window([row], 9 * MIN, WINDOW, {"engineer@x-1": inbox.Receiver()})
+    assert unread.summary == "unread delivery; sent 8 minutes ago"
+
+
 def test_planted_fault_an_escalated_item_names_each_step():
     rec = recorded()
     items = copy.deepcopy(rec["items"])
@@ -184,3 +203,12 @@ def test_an_empty_seat_item_does_not_hide_a_later_live_occupant_item():
         live["address"]: inbox.Receiver(live=True, occupant="demo-eng-2", quiet_ms=WINDOW),
     }
     assert [f.subject for f in inbox.past_window([empty, live], 20 * MIN, WINDOW, receivers)] == ["live"]
+
+
+def test_a_seat_item_waits_one_window_from_its_live_occupant_binding_before_it_is_raised():
+    row = {**_delivered(), "id": "carried", "state": "pending", "fyi": False}
+    bound = row["created_at"] + 42 * MIN
+    fresh = {row["address"]: inbox.Receiver(live=True, occupant="demo-eng-2", bound_at=bound)}
+    assert inbox.past_window([row], bound + WINDOW - 1, WINDOW, fresh) == []
+    [found] = inbox.past_window([row], bound + WINDOW + MIN, WINDOW, fresh)
+    assert found.summary == "unread delivery; sent 48 minutes ago"

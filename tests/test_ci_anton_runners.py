@@ -28,6 +28,8 @@ def pool(label):
 
 
 MOVED = {
+    ("changelog.yml", "changelog"): LIGHT,
+    ("changelog-seed.yml", "seed"): LIGHT,
     ("chaos.yml", "chaos"): STANDARD,
     ("chart-release.yml", "publish"): LIGHT,
     ("mutation-line-selection-proof.yml", "compare"): BATCH,
@@ -42,6 +44,7 @@ MOVED = {
     ("coverage-stability.yml", "compare"): BATCH,
     ("equivalence.yml", "ledger-equivalence"): STANDARD,
     ("helm-kind.yml", "kind"): QUEUED,
+    ("helm-kind-published.yml", "kind"): STANDARD,
     ("hierarchy-cpu.yml", "grade"): LIGHT,
     ("hierarchy-cpu.yml", "hierarchy"): BATCH,
     ("hierarchy-cpu.yml", "load"): BATCH,
@@ -51,7 +54,8 @@ MOVED = {
     ("ledger-row-memory.yml", "replay"): BATCH,
     ("mutation-preflight.yml", "mutation"): LIGHT,
     ("mutation-preflight.yml", "mutation-shard"): BATCH,
-    ("mutation-preflight.yml", "plan"): LIGHT,
+    ("mutation-preflight.yml", "plan"): STANDARD,
+    ("mutation-preflight.yml", "probe"): BATCH,
     ("mutation-preflight.yml", "refine"): LIGHT,
     ("mutation-replay.yml", "plan"): LIGHT,
     ("mutation-replay.yml", "grade"): BATCH,
@@ -61,6 +65,8 @@ MOVED = {
     ("proofs.yml", "operations-cpu"): BATCH,
     ("proofs.yml", "operations-receipts"): BATCH,
     ("proofs.yml", "tests"): STANDARD,
+    ("semgrep.yml", "charts"): LIGHT,
+    ("semgrep.yml", "feature-tests"): LIGHT,
     ("semgrep.yml", "scan"): LIGHT,
     ("startup-stages.yml", "measure"): STANDARD,
     ("swarm-image.yml", "publish"): STANDARD,
@@ -87,6 +93,7 @@ MOVED = {
     ("test.yml", "mutation"): BATCH,
     ("test.yml", "mutation-plan"): LIGHT,
     ("test.yml", "mutation-stats"): BATCH,
+    ("test.yml", "mutation-stats-seed"): LIGHT,
     ("test.yml", "queue-fail-fast"): LIGHT,
     ("test.yml", "refresh-durations"): QUEUED,
     ("count-record.yml" if (WORKFLOWS / "count-record.yml").exists() else "test.yml", "count-record"): QUEUED,
@@ -108,6 +115,8 @@ MOVED = {
 }
 if (WORKFLOWS / "actions-storage.yml").exists():
     MOVED[("actions-storage.yml", "prune")] = LIGHT
+if (WORKFLOWS / "ci-minutes.yml").exists():
+    MOVED[("ci-minutes.yml", "measure")] = LIGHT
 
 # These exchange a GitHub OIDC token, which the Anton runners have timed out fetching.
 OIDC = {("pages.yml", "deploy"), ("publish-pypi.yml", "publish")}
@@ -124,6 +133,7 @@ CLASSED = {
     ("ci-templates.yml", "actionlint"),
     ("pages.yml", "build"),
     ("promote.yml", "promote"),
+    ("test.yml", "promotion-ready"),
     ("publish-pypi.yml", "verify"),
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),
@@ -144,6 +154,10 @@ CONSOLIDATED = {
 
 def workflows():
     return {path.name: yaml.safe_load(path.read_text()) for path in sorted(WORKFLOWS.glob("*.yml"))}
+
+
+if "install-smoke" in workflows()["test.yml"]["jobs"]:
+    MOVED[("test.yml", "install-smoke")] = LIGHT
 
 
 def runner_jobs():

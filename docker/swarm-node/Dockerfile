@@ -46,12 +46,13 @@ COPY docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2
 COPY profiles/ /opt/agentihooks/templates/
 COPY profiles/package/roles/ /opt/agentihooks/templates/
 ARG SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.revision=$SOURCE_REVISION
 RUN python /opt/swarm-node/worker_image.py manifest --architecture "$TARGETARCH" --source-revision "$SOURCE_REVISION" \
     && chmod -R a-w /opt/agentihooks/templates /opt/swarm-node \
     && find /opt/venv \! -type l -perm /222 -exec chmod a-w {} + \
     && chmod a+x /opt/swarm-node/entrypoint.sh /opt/swarm-node/ssh/start.sh \
     && groupadd --gid 10001 worker \
-    && useradd --uid 10001 --gid worker --create-home worker \
+    && useradd --uid 10001 --gid worker --create-home --shell /bin/bash worker \
     && chown worker:worker /home/worker \
     && rm -r /build
 USER 10001:10001

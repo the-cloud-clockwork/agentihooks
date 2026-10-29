@@ -14,7 +14,11 @@ LANED = {"group": GROUP, "queue": "max", "cancel-in-progress": False}
 
 
 def _workflow(concurrency=None, **jobs):
-    workflow = {"name": "Replay", "on": {"workflow_dispatch": None}, "jobs": jobs or {"replay": {"runs-on": "x"}}}
+    workflow = {
+        "name": "Replay",
+        "on": {"workflow_dispatch": None},
+        "jobs": jobs or {"replay": {"runs-on": "ubuntu-latest"}},
+    }
     if concurrency is not None:
         workflow["concurrency"] = concurrency
     return workflow
@@ -166,7 +170,7 @@ def test_removing_the_lane_from_an_existing_workflow_is_refused(tmp_path, monkey
 
 def test_existing_dev_concurrency_is_preserved_while_job_steps_change(tmp_path, monkeypatch):
     trusted = {"group": "${{ github.workflow }}", "cancel-in-progress": False}
-    updated = _workflow(trusted, replay={"runs-on": "x", "steps": [{"run": "echo changed"}]})
+    updated = _workflow(trusted, replay={"runs-on": "ubuntu-latest", "steps": [{"run": "echo changed"}]})
     base, head, sha = _repo(tmp_path, {"replay.yml": updated})
     (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(_workflow(trusted)))
     monkeypatch.chdir(head)
@@ -175,8 +179,8 @@ def test_existing_dev_concurrency_is_preserved_while_job_steps_change(tmp_path, 
 
 @pytest.mark.parametrize("trusted", [None, {"group": "existing-dev-policy"}])
 def test_existing_job_concurrency_is_preserved_while_steps_change(tmp_path, monkeypatch, trusted):
-    baseline = _workflow(replay={"runs-on": "x", "concurrency": trusted})
-    updated = _workflow(replay={"runs-on": "x", "concurrency": trusted, "steps": [{"run": "echo changed"}]})
+    baseline = _workflow(replay={"runs-on": "ubuntu-latest", "concurrency": trusted})
+    updated = _workflow(replay={"runs-on": "ubuntu-latest", "concurrency": trusted, "steps": [{"run": "echo changed"}]})
     base, head, sha = _repo(tmp_path, {"replay.yml": updated})
     (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
     monkeypatch.chdir(head)
@@ -190,6 +194,15 @@ def test_unchanged_workflows_are_not_selected_as_edits(tmp_path, monkeypatch):
     (base / lanes.WORKFLOWS / "test.yml").write_text("name: Changed\n")
     monkeypatch.chdir(head)
     assert lanes.branch_only(sha, base, include_edits=True) == []
+
+
+def test_unchanged_workflows_do_not_fetch_ancestry(tmp_path, monkeypatch):
+    _, repo, head = _repo(tmp_path, {})
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(
+        lanes, "trusted_ancestor", lambda *_: pytest.fail("unchanged workflows must not fetch ancestry")
+    )
+    assert lanes.refused(head, repo) == {}
 
 
 @pytest.mark.parametrize("change", ["override", "rename"])
@@ -209,8 +222,8 @@ def test_an_edit_cannot_escape_trusted_concurrency(tmp_path, monkeypatch, change
 
 
 def test_an_edited_workflow_cannot_add_an_uncapped_job(tmp_path, monkeypatch):
-    baseline = _workflow(allowed={"runs-on": "x", "concurrency": LANED})
-    updated = _workflow(allowed={"runs-on": "x", "concurrency": LANED}, escape={"runs-on": "x"})
+    baseline = _workflow(allowed={"runs-on": "ubuntu-latest", "concurrency": LANED})
+    updated = _workflow(allowed={"runs-on": "ubuntu-latest", "concurrency": LANED}, escape={"runs-on": "ubuntu-latest"})
     base, head, sha = _repo(tmp_path, {"replay.yml": updated})
     (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
     monkeypatch.chdir(head)
@@ -219,13 +232,107 @@ def test_an_edited_workflow_cannot_add_an_uncapped_job(tmp_path, monkeypatch):
     }
 
 
+@pytest.mark.parametrize("added", [False, True])
+@pytest.mark.parametrize("shallow", [False, True])
+def test_unchanged_ancestor_jobs_stay_trusted_without_admitting_new_jobs(tmp_path, monkeypatch, added, shallow):
+    inherited = _workflow(promote={"runs-on": "ubuntu-latest", "steps": [{"run": "echo inherited"}]})
+    _, repo, ancestor = _repo(tmp_path, {"replay.yml": inherited})
+    monkeypatch.chdir(repo)
+    lanes.git("checkout", "-qb", "branch")
+    branch = _workflow(
+        promote=inherited["jobs"]["promote"],
+        proof={"runs-on": "ubuntu-latest", "concurrency": LANED},
+    )
+    if added:
+        branch["jobs"]["z_escape"] = {"runs-on": "ubuntu-latest"}
+    workflow = repo / lanes.WORKFLOWS / "replay.yml"
+    workflow.write_text(yaml.safe_dump(branch))
+    lanes.git("add", ".")
+    lanes.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "branch")
+    head = lanes.git("rev-parse", "HEAD").strip()
+    lanes.git("checkout", "-qb", "dev", ancestor)
+    current = _workflow(promote={"runs-on": "ubuntu-latest", "concurrency": LANED})
+    current["on"]["push"] = None
+    workflow.write_text(yaml.safe_dump(current))
+    lanes.git("add", ".")
+    lanes.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "dev")
+    if shallow:
+        clone = tmp_path / "shallow"
+        subprocess.run(["git", "clone", "--quiet", "--depth", "1", repo.as_uri(), str(clone)], check=True)
+        monkeypatch.chdir(clone)
+        lanes.git("fetch", "--quiet", "--depth", "1", "origin", head)
+        repo = clone
+    expected = (
+        {f"{lanes.WORKFLOWS}/replay.yml": ["job z_escape has no shared hosted lane concurrency group"]} if added else {}
+    )
+    assert lanes.refused(head, repo) == expected
+
+
+@pytest.mark.parametrize("fault", ["none", "steps", "events", "name", "concurrency", "copy"])
+def test_ancestor_trust_requires_the_same_job_and_execution_context(fault):
+    ancestor = _workflow(
+        {"group": "trusted"}, promote={"runs-on": "ubuntu-latest", "steps": [{"run": "echo inherited"}]}
+    )
+    workflow = yaml.safe_load(yaml.safe_dump(ancestor))
+    current = _workflow(promote={"runs-on": "ubuntu-latest", "concurrency": LANED})
+    current["on"]["push"] = None
+    if fault == "steps":
+        workflow["jobs"]["promote"]["steps"][0]["run"] = "echo changed"
+    elif fault == "events":
+        workflow["on"]["push"] = None
+    elif fault == "name":
+        workflow["name"] = "Copy"
+    elif fault == "concurrency":
+        workflow["concurrency"] = {"group": "branch-only"}
+    elif fault == "copy":
+        workflow["jobs"]["copy"] = workflow["jobs"].pop("promote")
+    expected = (
+        []
+        if fault == "none"
+        else [f"job {'copy' if fault == 'copy' else 'promote'} has no shared hosted lane concurrency group"]
+    )
+    assert lanes.grade(yaml.safe_dump(workflow), yaml.safe_dump(current), yaml.safe_dump(ancestor)) == expected
+
+
+@pytest.mark.parametrize("shallow", [False, True])
+def test_trusted_ancestor_uses_the_requested_checkout_outside_the_current_directory(tmp_path, monkeypatch, shallow):
+    _, repo, head = _repo(tmp_path, {})
+    lanes.git("-C", str(repo), "branch", "-m", "dev")
+    if shallow:
+        clone = tmp_path / "clone"
+        subprocess.run(["git", "clone", "--quiet", "--depth", "1", repo.as_uri(), str(clone)], check=True)
+        repo = clone
+    monkeypatch.chdir(tmp_path)
+    assert lanes.trusted_ancestor(head, repo) == head
+
+
+def test_shallow_ancestor_fetch_preserves_the_requested_refs_and_excludes_tags(tmp_path, monkeypatch):
+    (tmp_path / ".git").mkdir()
+    commands = []
+
+    def git(*args):
+        commands.append(args)
+        if "rev-parse" in args:
+            return "true\n"
+        if "merge-base" in args:
+            return "ancestor\n"
+        return ""
+
+    monkeypatch.setattr(lanes, "git", git)
+    assert lanes.trusted_ancestor("branch-head", tmp_path) == "ancestor"
+    fetch = next(command for command in commands if "fetch" in command)
+    assert fetch[:2] == ("-C", str(tmp_path))
+    assert "--no-tags" in fetch
+    assert fetch[-3:] == ("origin", "dev", "branch-head")
+
+
 @pytest.mark.parametrize("called_block, unsafe", [(CALLED, True), (LANED, False)])
 def test_an_edited_trusted_workflow_grades_new_reusable_calls(tmp_path, monkeypatch, called_block, unsafe):
     trusted = {"group": "trusted-${{ github.run_id }}", "cancel-in-progress": False}
-    baseline = _workflow(concurrency=trusted, allowed={"runs-on": "x"})
+    baseline = _workflow(concurrency=trusted, allowed={"runs-on": "ubuntu-latest"})
     updated = _workflow(
         concurrency=trusted,
-        allowed={"runs-on": "x"},
+        allowed={"runs-on": "ubuntu-latest"},
         escape={"uses": "./.github/workflows/branch.yml"},
     )
     baseline["name"] = updated["name"] = "Trusted"
@@ -400,7 +507,7 @@ def test_only_refused_workflows_the_push_can_trigger_are_waited_for(tmp_path, mo
 
 
 def test_an_unquoted_on_key_is_read_as_the_push_trigger(tmp_path, monkeypatch):
-    body = "name: Replay\non:\n  push:\njobs:\n  replay:\n    runs-on: x\n"
+    body = "name: Replay\non:\n  push:\njobs:\n  replay:\n    runs-on: ubuntu-latest\n"
     base, head, sha = _repo(tmp_path, {"fired.yml": body})
     monkeypatch.chdir(base)
     monkeypatch.setenv("GIT_DIR", str(head / ".git"))
@@ -564,7 +671,7 @@ def test_an_edit_cannot_widen_the_events_of_a_trusted_conditional_lane(tmp_path,
 def test_equivalent_event_key_spellings_preserve_trusted_concurrency(tmp_path, monkeypatch, quoted_head):
     block = {"group": "${{ github.workflow }}", "queue": "max"}
     baseline = _workflow(block)
-    updated = _workflow(block, replay={"runs-on": "x", "steps": [{"run": "echo changed"}]})
+    updated = _workflow(block, replay={"runs-on": "ubuntu-latest", "steps": [{"run": "echo changed"}]})
     unquoted = baseline if quoted_head else updated
     unquoted[True] = unquoted.pop("on")
     base, head, sha = _repo(tmp_path, {"replay.yml": updated})
@@ -587,6 +694,160 @@ def test_a_second_event_key_spelling_cannot_widen_a_trusted_conditional_lane(tmp
     assert lanes.refused(sha, base) == {
         f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
     }
+
+
+FILTERED = {"pull_request": {"branches": ["dev"], "paths": ["scripts/**"], "paths-ignore": ["docs/**"]}}
+
+
+@pytest.mark.parametrize(
+    "on",
+    [
+        {"pull_request": {"branches": ["dev"]}},
+        {"pull_request": {"branches": ["dev"], "paths-ignore": ["docs/**"]}},
+        {"pull_request": {"branches": ["dev"], "paths": ["scripts/**"]}},
+    ],
+)
+def test_deleting_pull_request_path_filters_keeps_the_base_trusted(tmp_path, monkeypatch, on):
+    baseline = _workflow()
+    baseline["on"] = FILTERED
+    updated = _workflow()
+    updated["on"] = on
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {}
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"steps": [{"run": "echo changed"}]},
+        {"runs-on": "ubuntu-24.04"},
+        {"permissions": {"contents": "write"}},
+        {"env": {"MODE": "changed"}},
+    ],
+)
+def test_deleting_path_filters_with_any_other_change_loses_the_base_trust(tmp_path, monkeypatch, change):
+    baseline = _workflow()
+    baseline["on"] = FILTERED
+    updated = _workflow(replay={"runs-on": "ubuntu-latest", **change})
+    updated["on"] = {"pull_request": {"branches": ["dev"]}}
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
+    }
+
+
+@pytest.mark.parametrize("change", ["job", "permissions"])
+def test_deleting_path_filters_with_a_new_job_or_workflow_key_loses_the_base_trust(tmp_path, monkeypatch, change):
+    baseline = _workflow()
+    baseline["on"] = FILTERED
+    updated = _workflow()
+    updated["on"] = {"pull_request": {"branches": ["dev"]}}
+    if change == "job":
+        updated["jobs"]["extra"] = {"runs-on": "ubuntu-latest"}
+    else:
+        updated["permissions"] = {"contents": "write"}
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    refused = lanes.refused(sha, base)[f"{lanes.WORKFLOWS}/replay.yml"]
+    assert "job replay has no shared hosted lane concurrency group" in refused
+
+
+def test_deleting_the_only_pull_request_filter_keeps_the_base_trusted(tmp_path, monkeypatch):
+    jobs = "jobs:\n  replay:\n    runs-on: ubuntu-latest\n"
+    base, head, sha = _repo(tmp_path, {"replay.yml": f"name: Replay\non:\n  pull_request:\n{jobs}"})
+    baseline = f"name: Replay\non:\n  pull_request:\n    paths: [scripts/**]\n{jobs}"
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(baseline)
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {}
+
+
+@pytest.mark.parametrize(
+    ("base_on", "head_on"),
+    [
+        (FILTERED, {"pull_request": {"branches": ["main"]}}),
+        (FILTERED, {"pull_request": {"branches": ["dev"], "types": ["opened"]}}),
+        (FILTERED, {"pull_request": {"branches": ["dev"]}, "workflow_dispatch": None}),
+        (FILTERED, {"pull_request_target": {"branches": ["dev"]}}),
+        ({"push": {"branches": ["dev"], "paths": ["scripts/**"]}}, {"push": {"branches": ["dev"]}}),
+        ({"pull_request_target": {"paths": ["scripts/**"]}}, {"pull_request_target": None}),
+        ({"pull_request": {"branches": ["dev"]}}, FILTERED),
+        ({"pull_request": None}, {"pull_request": {"paths": ["scripts/**"]}}),
+        ({"pull_request": {"paths": ["scripts/**"]}}, {"pull_request": {"paths": ["hooks/**"]}}),
+        ({"pull_request": {"paths": ["scripts/**"]}}, {"pull_request": {"paths-ignore": ["docs/**"]}}),
+    ],
+)
+def test_any_other_event_change_still_loses_the_base_trust(tmp_path, monkeypatch, base_on, head_on):
+    baseline = _workflow()
+    baseline["on"] = base_on
+    updated = _workflow()
+    updated["on"] = head_on
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
+    }
+
+
+@pytest.mark.parametrize("change", [None, "group", "queue", "cancel", "extra", "name", "events", "untrusted", "job"])
+def test_tests_dispatch_concurrency_keeps_the_hosted_lane(change):
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "test.yml").read_text())
+    updated = copy.deepcopy(baseline)
+    updated["concurrency"]["group"] = (
+        "${{ github.event_name == 'workflow_dispatch' && "
+        "format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || "
+        "endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || "
+        "endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || "
+        "format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
+    )
+    block = updated["concurrency"]
+    if change == "group":
+        block["group"] = block["group"].replace("'workflow_dispatch'", "'push'")
+    elif change == "queue":
+        block["queue"] = "single"
+    elif change == "cancel":
+        block["cancel-in-progress"] = True
+    elif change == "extra":
+        block["extra"] = True
+    elif change == "name":
+        updated["name"] = "Other"
+    elif change == "events":
+        updated.setdefault("on", updated.get(True, {}))["schedule"] = [{"cron": "0 * * * *"}]
+    elif change == "untrusted":
+        baseline = None
+    elif change == "job":
+        updated["jobs"]["untrusted"] = {"concurrency": {"group": "other"}}
+    assert bool(lanes.problems(updated, baseline)) == (change is not None)
+
+
+@pytest.mark.parametrize("change", [None, "lane", "queue", "cancel", "untrusted"])
+def test_tests_dev_pushes_may_share_three_promotion_lanes(change):
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "test.yml").read_text())
+    updated = copy.deepcopy(baseline)
+    block = updated["concurrency"]
+    block["group"] = lanes.TESTS_GROUPS[1]
+    if change == "lane":
+        block["group"] = block["group"].replace("promotion-dev", "promotion")
+    elif change == "queue":
+        block["queue"] = "${{ github.event_name == 'workflow_dispatch' && 'max' || 'max' }}"
+    elif change == "cancel":
+        block["cancel-in-progress"] = "${{ github.event_name != 'workflow_dispatch' }}"
+    elif change == "untrusted":
+        baseline = None
+    assert bool(lanes.problems(updated, baseline)) == (change is not None)
+
+
+def test_the_promotion_lanes_apply_only_to_dev_pushes():
+    assert "github.event_name == 'push' && format('promotion-dev-{0}', " in lanes.TESTS_GROUPS[1]
 
 
 @pytest.mark.parametrize(("job", "stage", "index"), [("stats", "stats", "part"), ("mutation-shard", "shard", "shard")])
@@ -615,6 +876,53 @@ def test_a_trusted_mutation_leg_may_move_to_a_group_of_its_own_run(job, stage, i
     elif change == "untrusted":
         baseline = None
     found = [problem for problem in lanes.problems(updated, baseline) if problem.startswith(f"job {job} ")]
+    assert bool(found) == (change is not None)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        None,
+        "group",
+        "queue",
+        "cancel",
+        "name",
+        "events",
+        "job",
+        "untrusted",
+        "trusted-name",
+        "trusted-events",
+        "extra-job",
+    ],
+)
+def test_only_the_trusted_chart_release_may_leave_the_shared_proof_lane(change):
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "chart-release.yml").read_text())
+    baseline["concurrency"] = {"group": lanes.GROUP, "queue": "max", "cancel-in-progress": False}
+    updated = copy.deepcopy(baseline)
+    updated["concurrency"] = {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
+    if change == "group":
+        updated["concurrency"]["group"] = "chart-release-other"
+    elif change == "queue":
+        updated["concurrency"]["queue"] = "single"
+    elif change == "cancel":
+        updated["concurrency"]["cancel-in-progress"] = True
+    elif change == "name":
+        updated["name"] = "Other release"
+    elif change == "events":
+        updated[True]["workflow_dispatch"] = None
+    elif change == "job":
+        updated["jobs"]["publish"]["runs-on"] = "ubuntu-latest"
+    elif change == "untrusted":
+        baseline = None
+    elif change == "trusted-name":
+        baseline["name"] = updated["name"] = "Other release"
+    elif change == "trusted-events":
+        baseline[True] = updated[True] = {"workflow_dispatch": None}
+    elif change == "extra-job":
+        baseline["jobs"]["other"] = updated["jobs"]["other"] = {"runs-on": "ubuntu-latest"}
+    found = lanes.problems(updated, baseline)
     assert bool(found) == (change is not None)
 
 

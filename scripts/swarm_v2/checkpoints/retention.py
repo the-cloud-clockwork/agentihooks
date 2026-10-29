@@ -1,0 +1,301 @@
+"""Checkpoint and corpus collection: the plan is journaled before any delete and every delete re-decides its object."""
+
+import argparse
+import json
+import os
+import time
+from collections import Counter
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Protocol
+
+from hooks.memory.retention import CLASSES, UNTIL_EXPIRY, Policies
+
+METRIC = "retention_protected_objects"
+SWITCH = "SWARM_RETENTION_DESTRUCTIVE"
+ELIGIBLE = "eligible"
+ACTIVE_RESTORE = "active_restore"
+EVIDENCE_HOLD = "evidence_hold"
+LATEST_CHECKPOINT = "latest_checkpoint"
+REFERENCED = "referenced"
+NO_POLICY = "no_policy"
+NOT_EXPIRED = "not_expired"
+UNKNOWN_CLASS = "unknown_class"
+PLANNED, DELETED, SKIPPED, ABSENT = "planned", "deleted", "skipped", "absent"
+
+
+class RetentionRefused(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class StoredObject:
+    object_id: str
+    corpus: str
+    data_class: str
+    created_at: float
+    retention: str = UNTIL_EXPIRY
+
+
+@dataclass(frozen=True)
+class Checkpoint:
+    """The manifest is itself a stored object whose id is the checkpoint id."""
+
+    checkpoint_id: str
+    task_id: str
+    sequence: int
+    complete: bool
+    objects: tuple[str, ...] = ()
+
+
+class Inventory(Protocol):
+    def objects(self) -> list[StoredObject]: ...
+
+    def checkpoints(self) -> list[Checkpoint]: ...
+
+    def remove(self, object_id: str) -> None: ...
+
+
+class Holds(Protocol):
+    """A restore registers its checkpoint here before it reads the manifest and releases it after the last read."""
+
+    def restoring(self) -> frozenset[str]: ...
+
+    def evidence(self) -> frozenset[str]: ...
+
+    def active_tasks(self) -> frozenset[str]: ...
+
+
+class Journal(Protocol):
+    def entries(self, run_id: str) -> list[dict]: ...
+
+    def append(self, run_id: str, entry: dict) -> None: ...
+
+
+class FileJournal:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def entries(self, run_id: str) -> list[dict]:
+        if not self.path.exists():
+            return []
+        found = []
+        for line in self.path.read_bytes().splitlines():
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if entry.get("run_id") == run_id:
+                found.append(entry)
+        return found
+
+    def append(self, run_id: str, entry: dict) -> None:
+        torn = self.path.exists() and self.path.read_bytes()[-1:] not in (b"", b"\n")
+        line = json.dumps({**entry, "run_id": run_id}, sort_keys=True).encode() + b"\n"
+        with self.path.open("ab") as handle:
+            handle.write(b"\n" + line if torn else line)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+
+def destructive_enabled(env: Mapping[str, str] = os.environ) -> bool:
+    return env.get(SWITCH) != "off"
+
+
+def _latest(checkpoints: list[Checkpoint], active: frozenset[str]) -> set[str]:
+    best: dict[str, Checkpoint] = {}
+    for checkpoint in checkpoints:
+        if checkpoint.complete and checkpoint.task_id in active:
+            held = best.get(checkpoint.task_id)
+            if held is None or checkpoint.sequence > held.sequence:
+                best[checkpoint.task_id] = checkpoint
+    return {checkpoint.checkpoint_id for checkpoint in best.values()}
+
+
+def _pinned(checkpoints: list[Checkpoint], restoring: frozenset[str], latest: set[str]) -> dict[str, str]:
+    pinned: dict[str, str] = {}
+    for checkpoint in checkpoints:
+        if checkpoint.checkpoint_id in restoring:
+            reason = ACTIVE_RESTORE
+        elif checkpoint.checkpoint_id in latest:
+            reason = LATEST_CHECKPOINT
+        else:
+            continue
+        for object_id in (checkpoint.checkpoint_id, *checkpoint.objects):
+            if pinned.get(object_id) != ACTIVE_RESTORE:
+                pinned[object_id] = reason
+    return pinned
+
+
+@dataclass(frozen=True)
+class Report:
+    run_id: str
+    decisions: dict[str, str]
+    destructive: bool
+    deleted: tuple[str, ...] = ()
+    skipped: dict[str, str] = field(default_factory=dict)
+
+    def eligible(self) -> list[str]:
+        return [object_id for object_id, reason in self.decisions.items() if reason == ELIGIBLE]
+
+    def metrics(self) -> dict[str, dict[str, int]]:
+        return {METRIC: dict(sorted(Counter(r for r in self.decisions.values() if r != ELIGIBLE).items()))}
+
+
+class Collector:
+    def __init__(
+        self,
+        inventory: Inventory,
+        holds: Holds,
+        policies: Policies,
+        journal: Journal,
+        clock: Callable[[], float],
+        destructive: bool | None = None,
+    ) -> None:
+        self.inventory, self.holds, self.policies = inventory, holds, policies
+        self.journal, self.clock = journal, clock
+        self.destructive = destructive_enabled() if destructive is None else destructive
+
+    def plan(self, run_id: str = "") -> Report:
+        """A dry run: the eligibility of every stored object, deleting nothing and writing no journal entry."""
+        return Report(run_id, self._decisions(), False)
+
+    def delete(self, object_id: str) -> None:
+        reason = self._decisions().get(object_id, ABSENT)
+        if reason != ELIGIBLE:
+            raise RetentionRefused(f"object {object_id} is not eligible for deletion: {reason}")
+        if not self.destructive:
+            raise RetentionRefused(f"destructive collection is off; object {object_id} is kept")
+        self.inventory.remove(object_id)
+
+    def collect(self, run_id: str) -> Report:
+        report = self.plan(run_id)
+        entries = self.journal.entries(run_id)
+        if not entries:
+            planned = _ordered(report.eligible(), self.inventory.checkpoints())
+            self.journal.append(
+                run_id,
+                {
+                    "op": PLANNED,
+                    "eligible": planned,
+                    "protected": report.metrics()[METRIC],
+                    "policies": self.policies.versions(),
+                    "at": self.clock(),
+                },
+            )
+            entries = self.journal.entries(run_id)
+        if not self.destructive:
+            return report
+        return self._execute(run_id, entries)
+
+    def _execute(self, run_id: str, entries: list[dict]) -> Report:
+        settled = {entry["object_id"] for entry in entries[1:]}
+        decisions = self._decisions()
+        for object_id in entries[0]["eligible"]:
+            if object_id in settled:
+                continue
+            reason = self._decisions().get(object_id, ABSENT)
+            if reason == ABSENT:
+                self.journal.append(run_id, {"op": ABSENT, "object_id": object_id})
+            elif reason != ELIGIBLE:
+                self.journal.append(run_id, {"op": SKIPPED, "object_id": object_id, "reason": reason})
+            else:
+                self.inventory.remove(object_id)
+                self.journal.append(run_id, {"op": DELETED, "object_id": object_id})
+        final = self.journal.entries(run_id)[1:]
+        deleted = tuple(entry["object_id"] for entry in final if entry["op"] == DELETED)
+        skipped = {entry["object_id"]: entry["reason"] for entry in final if entry["op"] == SKIPPED}
+        return Report(run_id, decisions, True, deleted, skipped)
+
+    def _decisions(self) -> dict[str, str]:
+        now, objects, checkpoints = self.clock(), self.inventory.objects(), self.inventory.checkpoints()
+        pinned = _pinned(checkpoints, self.holds.restoring(), _latest(checkpoints, self.holds.active_tasks()))
+        evidence = self.holds.evidence()
+        decisions = {item.object_id: self._own(item, now, pinned, evidence) for item in objects}
+        for checkpoint in checkpoints:
+            if decisions.get(checkpoint.checkpoint_id) in (None, ELIGIBLE):
+                continue
+            for object_id in checkpoint.objects:
+                if decisions.get(object_id) == ELIGIBLE:
+                    decisions[object_id] = REFERENCED
+        return dict(sorted(decisions.items()))
+
+    def _own(self, item: StoredObject, now: float, pinned: dict[str, str], evidence: frozenset[str]) -> str:
+        if item.object_id in pinned:
+            return pinned[item.object_id]
+        if item.object_id in evidence:
+            return EVIDENCE_HOLD
+        if item.data_class not in CLASSES:
+            return UNKNOWN_CLASS
+        policy = self.policies.get(item.corpus)
+        if policy is None:
+            return NO_POLICY
+        if not policy.expired(item.data_class, item.created_at, now, item.retention):
+            return NOT_EXPIRED
+        return ELIGIBLE
+
+
+def _ordered(eligible: list[str], checkpoints: list[Checkpoint]) -> list[str]:
+    """Manifests are deleted before the objects they name."""
+    manifests = {checkpoint.checkpoint_id for checkpoint in checkpoints}
+    return sorted(eligible, key=lambda object_id: (object_id not in manifests, object_id))
+
+
+class DocumentInventory:
+    """One JSON document holding policies, objects, checkpoints and holds; each removal rewrites it."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def _doc(self) -> dict:
+        return json.loads(self.path.read_bytes())
+
+    def policies(self) -> Policies:
+        return Policies.parse(self._doc()["policies"])
+
+    def objects(self) -> list[StoredObject]:
+        return [StoredObject(**item) for item in self._doc()["objects"]]
+
+    def checkpoints(self) -> list[Checkpoint]:
+        return [Checkpoint(**{**item, "objects": tuple(item["objects"])}) for item in self._doc()["checkpoints"]]
+
+    def remove(self, object_id: str) -> None:
+        doc = self._doc()
+        doc["objects"] = [item for item in doc["objects"] if item["object_id"] != object_id]
+        self.path.write_bytes(json.dumps(doc).encode())
+
+    def restoring(self) -> frozenset[str]:
+        return frozenset(self._doc()["holds"]["restoring"])
+
+    def evidence(self) -> frozenset[str]:
+        return frozenset(self._doc()["holds"]["evidence"])
+
+    def active_tasks(self) -> frozenset[str]:
+        return frozenset(self._doc()["holds"]["active_tasks"])
+
+
+def main(argv: list[str] | None = None, clock: Callable[[], float] = time.time) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", choices=("plan", "collect"))
+    parser.add_argument("document", type=Path)
+    parser.add_argument("--journal", type=Path, required=True)
+    parser.add_argument("--run-id", default="")
+    args = parser.parse_args(argv)
+    store = DocumentInventory(args.document)
+    collector = Collector(store, store, store.policies(), FileJournal(args.journal), clock)
+    report = collector.plan(args.run_id) if args.command == "plan" else collector.collect(args.run_id)
+    summary = {
+        "run_id": report.run_id,
+        "destructive": report.destructive,
+        "decisions": report.decisions,
+        "deleted": list(report.deleted),
+        "skipped": report.skipped,
+        **report.metrics(),
+    }
+    print(json.dumps(summary))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

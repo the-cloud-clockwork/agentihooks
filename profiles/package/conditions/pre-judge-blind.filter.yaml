@@ -1,0 +1,11 @@
+finders:
+  - script: judge_cues
+mode: both
+action: strip
+intent: >-
+  The judge sees the case and the facts of its evidence only. Nothing tells it which agent, seat, profile or
+  model did the work, which iteration, round or attempt this is, what an earlier verdict said, or how sure the
+  author is of the work.
+question: >-
+  Is this finding a cue about who or what made the work, which attempt it is, an earlier verdict or the author's
+  confidence, rather than content of the case?

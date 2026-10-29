@@ -33,13 +33,13 @@ The queue groups with `ALLGREEN`: every entry is built on dev plus the
 entries ahead of it and merges only on its own passing run, so a red pull
 request never lands. A failing entry leaves the queue and the entries behind
 it rebuild without it. Merge groups run on the `anton-oss-queue` pool, which
-serves only merge queue runs. The queue builds up to three entries at a time
+serves only merge queue runs. The queue builds up to five entries at a time
 and merges groups of up to five, waits at most one minute for a group to fill, and a
 check that has not reported within 45 minutes fails the entry. Build
 concurrency counts entries, not groups, and under `ALLGREEN` each entry
-merges only on its own passing run. `max_entries_to_build` is three to limit
-simultaneous full unit suites competing for the capped queue runner pool;
-`max_entries_to_merge` remains five.
+merges only on its own passing run, so `max_entries_to_build` is five. At one,
+from 23:15 UTC on 24 October to 00:15 UTC on 25 October the queue merged 7
+pull requests in 7 merge group runs while 37 waited.
 An entry ejected only because a unit shard lost its runner is requeued once by
 the Queue retry workflow; see
 [Lost runner requeue](../../docs/reference/delivery-tiers.md#lost-runner-requeue).
@@ -50,21 +50,18 @@ this repository's dev and reads both back on every
 antoncore dev push or dispatch, so a change here goes live on the next
 antoncore dev push or a dispatch of that workflow. The reconcile requires the
 required check to name its source, `integration_id` 15368 for GitHub Actions.
-The operator applies the
-other payloads. Agents cannot mutate remote rulesets. From a checkout
-containing the reviewed payloads:
-
-```bash
-gh api \
-  --method PUT \
-  repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 \
-  --input .github/rulesets/main-prod-lockdown.json
-```
+The same workflow applies `main-prod-lockdown.json` and reads back the
+effective main rules. Main requires `Gate — Required` from the `tcc-main-ci`
+App, `integration_id` 5243008, which the promotion workflow reports on the
+snapshot commit it opens as the promotion pull request head, so promotion
+cannot merge with the grade missing, pending or red.
+Agents cannot mutate remote rulesets.
 
 Verify the effective rules and bypass lists:
 
 ```bash
 gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/dev
+gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/main
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/16090886 --jq .bypass_actors
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/25468405 --jq .bypass_actors
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 --jq .bypass_actors

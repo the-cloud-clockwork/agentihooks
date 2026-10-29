@@ -119,6 +119,7 @@ def assert_failed_cleanly(store, server, error_class):
 def test_a_launch_admits_one_server_binds_its_thread_and_opens_once(store, server, clock, root, tmp_path):
     started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
     record, agent = started.record, started.agent
+    assert started.slot_hive == ""
     path = Path(record.endpoint_ref.removeprefix("unix://"))
     assert path == root / agent.execution_id.removeprefix("exe-")[:16] / "s"
     assert server.commands == [["codex", "app-server", "--listen", f"unix://{path}"]]
@@ -159,6 +160,100 @@ def test_a_launch_admits_one_server_binds_its_thread_and_opens_once(store, serve
     assert server.methods().index("thread/name/set") < server.methods().index("turn/start")
     assert not BindingStore(store).claim_opening(SLUG, agent.execution_id, 2000)
     assert all(connection.closed for connection in server.connections)
+
+
+def test_a_hive_app_server_reserves_its_resolved_account_before_the_subprocess(
+    store, server, clock, root, tmp_path, monkeypatch
+):
+    from dataclasses import replace
+
+    from scripts.hive import account_slots
+
+    spec = launch_spec(store, server, tmp_path)
+    spec = replace(
+        spec, environ={**spec.environ, account_slots.HIVE_ENV: "hive-a", account_slots.EXECUTION_ENV: "pending"}
+    )
+    admitted = []
+
+    def execute(harness, account, environ, invoke):
+        assert server.spawns == []
+        assert harness == "codex"
+        assert account == "default"
+        assert environ[account_slots.HIVE_ENV] == "hive-a"
+        assert environ[account_slots.EXECUTION_ENV] != "pending"
+        admitted.append(environ[account_slots.EXECUTION_ENV])
+        return invoke(
+            {
+                key: value
+                for key, value in environ.items()
+                if key not in (account_slots.HIVE_ENV, account_slots.EXECUTION_ENV)
+            }
+        )
+
+    monkeypatch.setattr(account_slots, "execute", execute)
+    started = supervisor.launch(store, spec, deps(server, clock, root))
+    assert admitted == [started.agent.execution_id]
+    assert len(server.spawns) == 1
+    assert account_slots.HIVE_ENV not in server.spawns[0]["env"]
+    assert account_slots.EXECUTION_ENV not in server.spawns[0]["env"]
+    released = []
+    monkeypatch.setattr(account_slots, "release", lambda *args: released.append(args))
+    supervisor.finish(store, SLUG, started, 2000)
+    assert released == [("hive-a", started.agent.execution_id, "codex", "default")]
+
+
+def test_failed_hive_app_server_start_returns_the_canonical_account_slot(
+    store, server, clock, root, tmp_path, monkeypatch
+):
+    from dataclasses import replace
+
+    from scripts.hive import account_slots
+
+    spec = launch_spec(store, server, tmp_path)
+    spec = replace(spec, environ={**spec.environ, account_slots.HIVE_ENV: "hive-a"})
+    monkeypatch.setattr(account_slots, "execute", lambda harness, account, env, invoke: invoke(env))
+    released = []
+    monkeypatch.setattr(account_slots, "release", lambda *args: released.append(args))
+
+    def failed(*args):
+        raise RuntimeError("startup failed")
+
+    monkeypatch.setattr(supervisor, "_connect_bound", failed)
+    with pytest.raises(RuntimeError, match="^startup failed$"):
+        supervisor.launch(store, spec, deps(server, clock, root))
+    assert server.processes[0].stopped
+    assert released == [("hive-a", only_record(store).execution_id, "codex", "default")]
+
+
+def test_a_failed_cleanup_keeps_the_launch_failure(store, server, clock, root, tmp_path, monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    def failed(*args):
+        raise RuntimeError("startup failed")
+
+    def denied(*args, **kwargs):
+        raise NoPermissionError("No permissions to access a key")
+
+    monkeypatch.setattr(supervisor, "_connect_bound", failed)
+    monkeypatch.setattr(store, "drop_agent", denied)
+    with pytest.raises(RuntimeError) as raised:
+        supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    assert str(raised.value) == "startup failed"
+    assert "NoPermissionError" in raised.value.__notes__[0]
+    assert only_record(store).state == FAILED
+
+
+def test_unmanaged_app_server_failure_never_releases_a_hive_slot(store, server, clock, root, tmp_path, monkeypatch):
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(account_slots, "release", lambda *args: pytest.fail("unmanaged launch released a slot"))
+
+    def failed(*args):
+        raise RuntimeError("startup failed")
+
+    monkeypatch.setattr(supervisor, "_connect_bound", failed)
+    with pytest.raises(RuntimeError, match="^startup failed$"):
+        supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
 
 
 def test_local_codex_app_server_admission_records_the_root_hive(store, server, clock, root, tmp_path, monkeypatch):
@@ -749,8 +844,9 @@ def test_failed_process_stop_still_removes_execution_folder(store, server, clock
         monkeypatch.setattr(process, "wait", refused_wait)
         return process
 
-    with pytest.raises(OSError, match="process wait failed"):
+    with pytest.raises(supervisor.LaunchFailure, match=f"^{supervisor.NEVER_ANSWERED}") as raised:
         supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root, popen=spawn))
+    assert "process wait failed" in raised.value.__notes__[0]
     assert server.processes[0].poll() is not None
     assert list(root.iterdir()) == []
     assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
@@ -959,3 +1055,96 @@ def test_the_opening_watch_ends_at_its_deadline(store, server, clock, root, tmp_
 
     assert len(server.params("turn/start")) == 1
     assert started.record.state == CONNECTED
+
+
+def hive_admitted(store, spec, **changes):
+    fields = {
+        "state": "launching",
+        "harness": "codex",
+        "transport": APP_SERVER_TRANSPORT,
+        "hive": "m1",
+        "runtime_target": {"host_id": "m1"},
+        **changes,
+    }
+    return store.start_execution(SLUG, replace(spec.agent, **fields), "")
+
+
+def test_a_hive_member_serves_the_execution_its_controller_admitted(store, server, clock, root, tmp_path, monkeypatch):
+    from tests.swarm.test_dispatch_seat import hive_member
+
+    spec = launch_spec(store, server, tmp_path)
+    admitted = hive_admitted(store, replace(spec, agent=replace(spec.agent, model="", effort="")))
+    hive_member(monkeypatch)
+    started = supervisor.launch(store, replace(spec, execution_id=admitted.execution_id), deps(server, clock, root))
+    assert started.agent.execution_id == started.record.execution_id == admitted.execution_id
+    assert [agent.execution_id for agent in store.executions(SLUG, SEAT)] == [admitted.execution_id]
+    current = store.execution(SLUG, admitted.execution_id)
+    assert (current.generation, current.transport, current.runtime_target) == (
+        1,
+        APP_SERVER_TRANSPORT,
+        {"host_id": "m1"},
+    )
+    assert (current.conversation_id, current.model, current.effort) == ("thread-new", "gpt-6.1-sol", "high")
+    assert only_record(store).state == CONNECTED
+    assert len(server.commands) == 1
+
+
+@pytest.mark.parametrize("change", [{"transport": ""}, {"hive": "other-hive"}, {"harness": "claude"}])
+def test_a_hive_member_refuses_an_execution_it_was_not_admitted_to_serve(
+    store, server, clock, root, tmp_path, monkeypatch, change
+):
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "m1")
+    spec = launch_spec(store, server, tmp_path)
+    admitted = hive_admitted(store, spec, **change)
+    failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+    assert str(failure) == (
+        f"execution {admitted.execution_id} is not this seat's launching Codex app-server execution on this hive"
+    )
+    assert server.commands == []
+
+
+def test_a_hive_member_refuses_an_execution_no_longer_launching(store, server, clock, root, tmp_path, monkeypatch):
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "m1")
+    spec = launch_spec(store, server, tmp_path)
+    admitted = hive_admitted(store, spec)
+    store.execution_registry.update(SLUG, replace(admitted, state="working"))
+    failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+    assert server.commands == []
+
+
+def test_a_hive_member_refuses_a_replaced_execution(store, server, clock, root, tmp_path, monkeypatch):
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "m1")
+    spec = launch_spec(store, server, tmp_path)
+    first = hive_admitted(store, spec)
+    store.start_execution(SLUG, replace(first, execution_id="", generation=0), first.execution_id)
+    failed(store, server, clock, root, replace(spec, execution_id=first.execution_id), "execution")
+    assert server.commands == []
+
+
+def test_a_hive_member_refuses_an_archived_execution(store, server, clock, root, tmp_path, monkeypatch):
+    from dataclasses import asdict
+
+    from scripts.swarm import commands
+    from scripts.swarm.execution import ARCHIVE
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "m1")
+    spec = launch_spec(store, server, tmp_path)
+    archived = replace(
+        spec.agent,
+        execution_id="exe-archived",
+        generation=1,
+        state="launching",
+        harness="codex",
+        transport=APP_SERVER_TRANSPORT,
+        hive="m1",
+        runtime_target={"host_id": "m1"},
+    )
+    store.redis.hset(store.key(SLUG, ARCHIVE), "exe-archived", json.dumps(asdict(archived)))
+    failed(store, server, clock, root, replace(spec, execution_id="exe-archived"), "execution")
+    assert server.commands == []

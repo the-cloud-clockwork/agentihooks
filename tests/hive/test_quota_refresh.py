@@ -176,3 +176,43 @@ def test_a_hive_planted_without_a_cache_reports_a_nonzero_cap_after_start(monkey
         daemon.run(lambda: (object(), object()))
     assert beats[0] == [{"harness": "claude", "account": "one", "kind": "subscription", "cap": 9}]
     probe.assert_called_once()
+
+
+def test_stale_codex_refresh_restores_each_routed_slot(cached, monkeypatch, capsys):
+    from scripts import codex_router, codex_usage
+    from scripts.codex_quota import CodexQuota
+
+    pool = [codex_router.CodexAccount(name, f"AH_CX_TOKEN_{name}") for name in ("alpha", "beta")]
+    environ = {"AH_CX_TOKEN_alpha": "alpha-sentinel", "AH_CX_TOKEN_beta": "beta-sentinel"}
+    monkeypatch.setattr(codex_router, "accounts", lambda env: pool)
+    monkeypatch.setattr(daemon, "claude_signed_in", lambda: False)
+    monkeypatch.setattr(daemon, "_native_accounts", lambda *args: set())
+    monkeypatch.setattr(daemon, "_claude_snapshots", lambda observed: None)
+    monkeypatch.setattr(codex_router, "_registry", lambda: {})
+    for account in pool:
+        codex_usage.store(
+            account.name, CodexQuota(NOW - 74 * 3600, "pro", seven_day=balancer.QuotaWindow(20, NOW + 86400))
+        )
+    counts = {"claude": {}, "codex": {}}
+    assert [slot["cap"] for slot in daemon._subscriptions(environ, counts, NOW)[0]] == [0, 0]
+
+    def probe(account, env, run):
+        used = 20 if account.name == "alpha" else 99
+        reading = CodexQuota(NOW, "pro", seven_day=balancer.QuotaWindow(used, NOW + 86400))
+        codex_usage.store(account.name, reading)
+        return reading
+
+    probing = Mock(side_effect=probe)
+    monkeypatch.setattr(codex_router, "probe", probing)
+    assert quota_refresh.due(environ, NOW) is True
+    assert quota_refresh.refresh(environ, NOW) is True
+    slots, readings = daemon._subscriptions(environ, counts, NOW)
+    assert [(slot["account"], slot["cap"]) for slot in slots] == [("alpha", 6), ("beta", 0)]
+    assert {name: row["observed_at"] for name, row in readings.items()} == {"codex:alpha": NOW, "codex:beta": NOW}
+    assert [call.args[0].name for call in probing.call_args_list] == ["alpha", "beta"]
+    assert quota_refresh.due(environ, NOW) is False
+    assert quota_refresh.refresh(environ, NOW) is False
+    assert probing.call_count == 2
+    captured = capsys.readouterr()
+    assert "alpha-sentinel" not in captured.out + captured.err
+    assert "beta-sentinel" not in captured.out + captured.err

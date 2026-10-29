@@ -175,6 +175,20 @@ def test_a_failed_spawn_leaves_no_seat_record():
     assert seats(store) == []
 
 
+@pytest.mark.parametrize(
+    "refused",
+    [
+        "no hive for dispatch has room: remote cpu: five minute load 1.17 on 8 CPUs, fits 0 more",
+        "no hive has room, and the local machine runs 4 of its 4 agents",
+        ", and the local machine runs 4 of its 4 agents: cpu: five minute load 1.17 on 8 CPUs",
+    ],
+)
+def test_a_refused_hive_reservation_waits_instead_of_failing_the_spawn(refused):
+    store, runtime = swarm(), FakeRuntime(crash=tick_module.SpawnError(refused, "unavailable"))
+    assert run(store, runtime, doc(priority())) == [f"the dispatcher waits: {refused}"]
+    assert seats(store) == []
+
+
 class PriorityLedger(FakeLedger):
     def state(self, slug):
         return {**super().state(slug), "priorities": [priority()]}
@@ -294,14 +308,15 @@ The tick woke you because its deterministic passes could not settle these trigge
 - The priority on tasks/t5 is unresolved after 15 minutes: Pick the release day
 Your seat dispatcher@{SLUG} has no history yet: no handoff document, no recap and no learned notes.
 
-Before anything else, run once: {LED} join. Then read the ledger with agentihooks ledger --slug {SLUG} show and \
-each trigger's item in it.
+Before anything else, run once: {LED} join. Read each trigger's item through the ledger API with \
+agentihooks ledger --slug {SLUG} get <item> (priorities/<id>, tasks/<id> or followups/<id>).
 Settle each trigger within the swarm's autonomy with the agentihooks commands, the classifiers and read only sub \
 agents: comment on its item with {LED} comment <item> "<text>", close a decided follow up, rank a task, and clear the \
 priority once it is resolved with {LED} priority clear <priority id>.
-For a decision only the operator can make, tell the master and hand its priority to the operator with {LED} priority \
-add <item> "<the ask in plain words>": it stays in his Priorities and no longer counts as your trigger. Never ask the \
-operator yourself. You never edit code or config files, commit, merge or claim a task.
+For a decision only the operator can make, tell the master by inbox and leave the trigger open. Never ask the \
+operator yourself: the ledger refuses every agent question, priority and needs operator follow up. Send anything he \
+must decide to the front door master by inbox: agentihooks msg send master@{SLUG} "<text>". You never edit code or \
+config files, commit, merge or claim a task.
 After each trigger, tell the master what you did: agentihooks msg send master@{SLUG} "<plain words>".
 New triggers arrive as inbox messages: answer one with agentihooks msg reply <id> "<text>", or close it with \
 agentihooks msg close <id> done "<where the work went>".
@@ -607,10 +622,12 @@ REPORT = {
 
 
 def held(store, named="review", ticks=3):
-    from scripts.swarm import bottleneck, lane_split
+    from scripts.swarm import bottleneck
 
     store.redis.set(store.key(SLUG, bottleneck.KEY), json.dumps({**REPORT, "bottleneck": named}))
-    store.redis.set(store.key(SLUG, lane_split.KEY), json.dumps({"named": named, "ticks": ticks, "at": REPORT["at"]}))
+    store.redis.set(
+        store.key(SLUG, dispatch_seat.STREAK), json.dumps({"named": named, "ticks": ticks, "at": REPORT["at"]})
+    )
 
 
 def test_a_bottleneck_no_lane_rule_covers_spawns_a_seat_naming_it():
@@ -629,12 +646,58 @@ def test_a_bottleneck_no_lane_rule_covers_spawns_a_seat_naming_it():
     assert report.startswith("bottleneck review and queue: 50 percent")
 
 
-@pytest.mark.parametrize(("named", "ticks"), [("review", 2), ("ci", 3), ("engineering", 4), ("", 3)])
+@pytest.mark.parametrize(("named", "ticks"), [("review", 2), ("", 3)])
 def test_a_short_or_covered_bottleneck_is_no_trigger(named, ticks):
     store = swarm()
     held(store, named, ticks)
     assert dispatch_seat.uncovered(store, SLUG, NOW) == []
     assert dispatch_seat.uncovered(swarm(), SLUG, NOW) == []
+
+
+@pytest.mark.parametrize("named", ["ci", "engineering", "host"])
+def test_a_lane_bottleneck_is_a_trigger_since_no_pass_moves_seats(named):
+    store = swarm()
+    held(store, named, 3)
+    assert [t["id"] for t in dispatch_seat.uncovered(store, SLUG, NOW)] == [f"bottleneck:{named}"]
+
+
+def report_at(store, named, at):
+    from scripts.swarm import bottleneck
+
+    store.redis.set(store.key(SLUG, bottleneck.KEY), json.dumps({**REPORT, "bottleneck": named, "at": at}))
+
+
+def streak_of(store):
+    return json.loads(store.redis.get(store.key(SLUG, dispatch_seat.STREAK)) or "{}")
+
+
+@pytest.mark.parametrize("named", ["review", "ci", "engineering", "host"])
+def test_three_fresh_reports_naming_one_share_trigger_and_a_repeat_counts_once(named):
+    store = swarm()
+    for n in range(2):
+        report_at(store, named, NOW - (3 - n) * MINUTE)
+        assert dispatch_seat.uncovered(store, SLUG, NOW) == []
+    assert dispatch_seat.uncovered(store, SLUG, NOW) == []
+    assert streak_of(store) == {"named": named, "ticks": 2, "at": NOW - 2 * MINUTE}
+    report_at(store, named, NOW - MINUTE)
+    assert [t["ticks"] for t in dispatch_seat.uncovered(store, SLUG, NOW)] == [3]
+
+
+def test_another_share_restarts_the_streak_and_a_read_only_call_writes_nothing():
+    store = swarm()
+    report_at(store, "review", NOW - 2 * MINUTE)
+    dispatch_seat.uncovered(store, SLUG, NOW)
+    report_at(store, "ci", NOW - MINUTE)
+    dispatch_seat.uncovered(store, SLUG, NOW, write=False)
+    assert streak_of(store) == {"named": "review", "ticks": 1, "at": NOW - 2 * MINUTE}
+    dispatch_seat.uncovered(store, SLUG, NOW)
+    assert streak_of(store) == {"named": "ci", "ticks": 1, "at": NOW - MINUTE}
+
+
+def test_no_report_leaves_the_streak_unwritten():
+    store = swarm()
+    assert dispatch_seat.uncovered(store, SLUG, NOW) == []
+    assert store.redis.get(store.key(SLUG, dispatch_seat.STREAK)) is None
 
 
 @pytest.mark.parametrize("ci_agent", ["auto", "claude"])

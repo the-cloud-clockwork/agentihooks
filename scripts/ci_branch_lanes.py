@@ -8,12 +8,36 @@ from pathlib import Path
 import yaml
 
 WORKFLOWS = ".github/workflows"
+PUBLIC_RUNNER = re.compile(r"anton-oss(-[\w.-]+)?|(ubuntu|windows|macos)-[\w.-]+", re.IGNORECASE)
+PUBLIC_GROUPS = ("anton-oss",)
+SELECTED = re.compile(r"(?:&&|\|\||\$\{\{)\s*'((?:''|[^'])*)'")
+LITERAL = re.compile(r"'(?:''|[^'])*'")
+NAME = re.compile(r"[A-Za-z_][\w-]*(?:\.[\w-]+)*")
+FIXED_NAMES = frozenset(
+    {
+        "github.event.pull_request.head.repo.full_name",
+        "github.event_name",
+        "github.ref",
+        "github.repository",
+    }
+)
+ACTOR_TEST = re.compile(
+    r"contains\(fromJSON\(\),\s*github\.(?:triggering_)?actor\)|github\.(?:triggering_)?actor\s*[!=]="
+)
 LANE = (
     "format('hosted-lane-{0}', "
     "((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || "
     "((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c')"
 )
 GROUP = "${{ " + LANE + " }}"
+TESTS_GROUPS = tuple(
+    "${{ github.event_name == 'workflow_dispatch' && "
+    + LANE
+    + promotion
+    + " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
+    for promotion in ("", " || github.event_name == 'push' && " + LANE.replace("hosted-lane", "promotion-dev"))
+)
+PATH_FILTERS = ("paths", "paths-ignore")
 
 
 def git(*args: str) -> str:
@@ -73,6 +97,33 @@ def events(workflow: dict) -> list:
     return [workflow[key] for key in ("on", True) if key in workflow]
 
 
+def unfiltered(on: object) -> object:
+    if not isinstance(on, dict) or not isinstance(on.get("pull_request"), dict):
+        return on
+    kept = {key: value for key, value in on["pull_request"].items() if key not in PATH_FILTERS}
+    return {**on, "pull_request": kept or None}
+
+
+def deletes_path_filters(base: object, head: object) -> bool:
+    old, new = (on.get("pull_request") if isinstance(on, dict) else None for on in (base, head))
+    return not isinstance(new, dict) or all(
+        key not in new or isinstance(old, dict) and old.get(key) == new[key] for key in PATH_FILTERS
+    )
+
+
+def same_events(baseline: dict, workflow: dict) -> bool:
+    if events(baseline) == events(workflow):
+        return True
+    # Deleting a pull request path filter from an otherwise identical workflow only runs it on more pull requests.
+    return without_path_filters(baseline) == without_path_filters(workflow) and all(
+        deletes_path_filters(old, new) for old, new in zip(events(baseline), events(workflow))
+    )
+
+
+def without_path_filters(workflow: dict) -> dict:
+    return {key: unfiltered(value) if key in ("on", True) else value for key, value in workflow.items()}
+
+
 def per_run_mutation_group(name: str, block: object, job: dict, trusted: dict) -> bool:
     stages = {"stats": ("stats", "part"), "mutation-shard": ("shard", "shard")}
     baseline = (trusted.get("jobs") or {}).get(name)
@@ -91,7 +142,17 @@ def per_run_mutation_group(name: str, block: object, job: dict, trusted: dict) -
     return block in ({"group": group}, superseded)
 
 
-def problems(workflow: object, baseline: object = None) -> list[str]:
+def dedicated_chart_group(name: str, block: object, job: dict, trusted: dict) -> bool:
+    return (
+        trusted.get("name") == "Helm chart release"
+        and events(trusted) == [{"release": {"types": ["published"]}}]
+        and name in {"publish", "kind"}
+        and job == (trusted.get("jobs") or {}).get(name)
+        and block == {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
+    )
+
+
+def problems(workflow: object, baseline: object = None, ancestor: object = None) -> list[str]:
     if not isinstance(workflow, dict):
         return ["is not a workflow mapping"]
     jobs = workflow.get("jobs") or {}
@@ -101,16 +162,42 @@ def problems(workflow: object, baseline: object = None) -> list[str]:
         baseline
         if isinstance(baseline, dict)
         and baseline.get("name") == workflow.get("name")
-        and events(baseline) == events(workflow)
+        and same_events(baseline, workflow)
+        else {}
+    )
+    inherited = (
+        ancestor
+        if isinstance(ancestor, dict)
+        and ancestor.get("name") == workflow.get("name")
+        and same_events(ancestor, workflow)
+        and ancestor.get("concurrency") == workflow.get("concurrency")
         else {}
     )
     found = []
     for name, job in jobs.items():
         job = job if isinstance(job, dict) else {}
+        if name in (inherited.get("jobs") or {}) and job == inherited["jobs"][name]:
+            continue
         block = job.get("concurrency", workflow.get("concurrency"))
         base_job = (trusted.get("jobs") or {}).get(name, {})
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
+        if dedicated_chart_group(name, block, job, trusted):
+            continue
         if per_run_mutation_group(name, block, job, trusted):
+            continue
+        if (
+            trusted.get("name") == "Tests"
+            and name in (trusted.get("jobs") or {})
+            and any(
+                block
+                == {
+                    "group": group,
+                    "queue": "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}",
+                    "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+                }
+                for group in TESTS_GROUPS
+            )
+        ):
             continue
         if trusted and (name in (trusted.get("jobs") or {}) or base_block is not None) and block == base_block:
             continue
@@ -120,9 +207,47 @@ def problems(workflow: object, baseline: object = None) -> list[str]:
     return found
 
 
-def grade(text: str, baseline: str | None = None) -> list[str]:
+def runner_labels(runner: object) -> list[str]:
+    if isinstance(runner, dict):
+        group = runner.get("group")
+        labels = runner.get("labels") or []
+        runner = [
+            *([] if group is None or group in PUBLIC_GROUPS else [f"group {group}"]),
+            *([labels] if isinstance(labels, str) else labels),
+        ]
+    if isinstance(runner, str):
+        runner = [runner]
+    found = []
+    for item in runner if isinstance(runner, list) else []:
+        text = str(item)
+        bare = ACTOR_TEST.sub("", LITERAL.sub("", text))
+        fixed = "[" not in bare and set(NAME.findall(bare)) <= FIXED_NAMES
+        selected = SELECTED.findall(text) if "${{" in text and fixed else []
+        found += selected or [text]
+    return found
+
+
+def private_runners(runner: object) -> list[str]:
+    return [label for label in runner_labels(runner) if not PUBLIC_RUNNER.fullmatch(label)]
+
+
+def runner_problems(workflow: object) -> list[str]:
+    jobs = workflow.get("jobs") if isinstance(workflow, dict) else None
+    return [
+        f"job {name} asks for private runner label {', '.join(found)}"
+        for name, job in (jobs.items() if isinstance(jobs, dict) else [])
+        if isinstance(job, dict) and (found := private_runners(job.get("runs-on")))
+    ]
+
+
+def grade(text: str, baseline: str | None = None, ancestor: str | None = None) -> list[str]:
     try:
-        return problems(yaml.safe_load(text), yaml.safe_load(baseline) if baseline is not None else None)
+        workflow = yaml.safe_load(text)
+        return problems(
+            workflow,
+            yaml.safe_load(baseline) if baseline is not None else None,
+            yaml.safe_load(ancestor) if ancestor is not None else None,
+        ) + runner_problems(workflow)
     except yaml.YAMLError:
         return ["does not parse as YAML"]
 
@@ -155,10 +280,28 @@ def reusable_problems(head: str, root: Path, workflow: object, seen: tuple[str, 
     return found
 
 
+def trusted_ancestor(head: str, root: Path) -> str | None:
+    if not (root / ".git").exists():
+        return None
+    prefix = ("-C", str(root))
+    if git(*prefix, "rev-parse", "--is-shallow-repository").strip() == "true":
+        git(*prefix, "fetch", "--no-tags", "--unshallow", "origin", "dev", head)
+    return git(*prefix, "merge-base", "HEAD", head).strip()
+
+
 def refused(head: str, root: Path) -> dict[str, list[str]]:
+    paths = branch_only(head, root, include_edits=True)
+    if not paths:
+        return {}
+    ancestor = trusted_ancestor(head, root)
+    inherited = set(git("ls-tree", "-r", "--name-only", ancestor, "--", WORKFLOWS).splitlines()) if ancestor else set()
     graded = {
-        path: grade(git("show", f"{head}:{path}"), (root / path).read_text() if (root / path).exists() else None)
-        for path in branch_only(head, root, include_edits=True)
+        path: grade(
+            git("show", f"{head}:{path}"),
+            (root / path).read_text() if (root / path).exists() else None,
+            git("show", f"{ancestor}:{path}") if path in inherited else None,
+        )
+        for path in paths
     }
     for path, found in graded.items():
         if "does not parse as YAML" not in found:

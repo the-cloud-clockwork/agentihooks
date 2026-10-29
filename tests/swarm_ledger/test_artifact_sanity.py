@@ -23,7 +23,7 @@ def good_markdown(**changes):
         "page_overflow": False,
         "body_overflow": False,
         "close_visible": True,
-        "json_folds": 0,
+        "json_nodes": 0,
         "ch": 8.0,
         "width": 1440.0,
         "font_px": 13.0,
@@ -143,10 +143,10 @@ class TestCheck:
             "1 table cells under 8ch, first Async rewake hook",
         ]
 
-    def test_json_needs_folds(self):
+    def test_json_needs_nested_blocks(self):
         base = {"page_overflow": False, "body_overflow": False, "close_visible": True}
-        assert sanity.check({**base, "kind": "json", "json_folds": 3}) == []
-        assert sanity.check({**base, "kind": "json", "json_folds": 0}) == ["the JSON viewer shows no folds"]
+        assert sanity.check({**base, "kind": "json", "json_nodes": 3}) == []
+        assert sanity.check({**base, "kind": "json", "json_nodes": 0}) == ["the JSON viewer shows no nested blocks"]
 
     def test_images_must_load_inside_the_viewer(self):
         base = {"page_overflow": False, "body_overflow": False, "close_visible": True, "kind": "image"}

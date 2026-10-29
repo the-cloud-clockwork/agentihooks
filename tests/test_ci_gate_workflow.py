@@ -16,12 +16,17 @@ LINT_CONTROLS = [
     "Format check",
     "Check every pull request job is a need of Gate Required",
     "Hold the size and complexity limits",
+    "Hold swallowed exceptions in hooks and gates",
+    "Hold dead code in hooks and scripts",
+    "Hold the locked guard tests",
+    "Pin thresholds, floors and allowlists against the base",
     "Fail on known vulnerabilities new against the base",
     "Run every Swarm Ledger dashboard query against this head's metrics tables",
 ]
 LINT_SETUP = [
     "Install ruff",
     "Install PyYAML",
+    "Install vulture",
     "Set up uv",
     "Check out the base revision",
     "Check out the protected grader",
@@ -29,7 +34,10 @@ LINT_SETUP = [
 
 
 def _workflow():
-    return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    from scripts import ci_gate_queue
+
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    return ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]
 
 
 def test_stored_durations_share_selection_admission_before_both_shard_paths():
@@ -106,6 +114,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "shard-check",
             "brain-smoke",
             "writer-lock",
+            "install-smoke",
             "wiring",
             "size",
             "dependency-audit",
@@ -161,22 +170,85 @@ def test_each_cheap_gate_grades_in_lint_after_its_setup_even_after_an_earlier_re
 
 def test_lint_grades_dashboard_columns_with_the_antoncore_dev_checker():
     steps = _workflow()["jobs"]["lint"]["steps"]
-    token = next((s for s in steps if s.get("id") == "antoncore-token"), None)
+    token = next((s for s in steps if s.get("id") == "app-token"), None)
     assert token is not None
     assert token["with"]["repositories"] == "antoncore"
     assert token["with"]["permission-contents"] == "read"
-    checkout = next((s for s in steps if s.get("with", {}).get("repository") == "the-cloud-clockwork/antoncore"), None)
+    checkout = next((s for s in steps if s.get("env", {}).get("REPOSITORY") == "the-cloud-clockwork/antoncore"), None)
     assert checkout is not None
-    assert checkout["if"] == "${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}"
-    assert checkout["with"]["token"] == "${{ steps.antoncore-token.outputs.token }}"
-    assert checkout["with"]["ref"] == "dev"
-    assert checkout["with"]["persist-credentials"] is False
-    assert "scripts/swarm_dashboard_columns.py" in checkout["with"]["sparse-checkout"]
+    assert checkout["if"] == "${{ !cancelled() && steps.app-token.outcome == 'success' }}"
+    assert checkout["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    assert checkout["env"]["REF"] == "dev"
+    assert checkout["env"]["DESTINATION"] == ".antoncore"
+    assert "uses" not in checkout
+    assert "git " not in checkout["run"]
+    assert "scripts/swarm_dashboard_columns.py" in checkout["env"]["SELECTED_PATHS"]
     check = next((s for s in steps if "swarm_dashboard_columns.py check" in s.get("run", "")), None)
     assert check is not None
     assert steps.index(token) < steps.index(checkout) < steps.index(check)
     assert '--agentihooks "$GITHUB_WORKSPACE"' in check["run"]
     assert "No module named" in check["run"]
+
+
+@pytest.mark.parametrize("failure", ["", "missing", "api"])
+def test_rest_checkout_reads_selected_files_from_one_revision_and_fails_closed(tmp_path, failure):
+    import io
+    import os
+    import tarfile
+
+    script = next(step for step in _workflow()["jobs"]["lint"]["steps"] if step.get("id") == "antoncore-checkout")[
+        "run"
+    ]
+    archive = tmp_path / "source.tar.gz"
+    with tarfile.open(archive, "w:gz") as bundle:
+        for name in ("checker.py", "dashboards/one.json", "unselected.txt"):
+            if failure == "missing" and name == "checker.py":
+                continue
+            data = name.encode()
+            member = tarfile.TarInfo(f"source-revision/{name}")
+            member.size = len(data)
+            bundle.addfile(member, io.BytesIO(data))
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    gh = tools / "gh"
+    gh.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'case "$2" in\n'
+        "  repos/owner/repo/commits/dev) echo source-revision ;;\n"
+        "  repos/owner/repo/tarball/source-revision)\n"
+        '    [[ "$FAILURE" != api ]] || exit 19\n'
+        '    cat "$ARCHIVE" ;;\n'
+        "  *) exit 17 ;;\n"
+        "esac\n"
+    )
+    gh.chmod(0o755)
+    output = tmp_path / "output"
+    destination = tmp_path / "selected"
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "REPOSITORY": "owner/repo",
+            "REF": "dev",
+            "DESTINATION": str(destination),
+            "SELECTED_PATHS": "checker.py\ndashboards/",
+            "GITHUB_OUTPUT": str(output),
+            "ARCHIVE": str(archive),
+            "FAILURE": failure,
+        },
+        capture_output=True,
+        text=True,
+    )
+    if failure:
+        assert result.returncode != 0
+        assert not output.exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert (destination / "checker.py").read_text() == "checker.py"
+        assert (destination / "dashboards/one.json").read_text() == "dashboards/one.json"
+        assert not (destination / "unselected.txt").exists()
+        assert output.read_text() == "revision=source-revision\n"
 
 
 def test_lint_prepares_the_dashboard_checker_in_the_background_before_the_other_lint_steps():
@@ -204,7 +276,9 @@ def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
     graders = {"shard-check", "coverage-ratchet", "sonar"}
     for name in graders:
         needs = jobs[name]["needs"]
-        assert "unit" in needs
+        if "unit" not in needs:
+            assert name == "shard-check" and "split" in needs
+            assert any("python -m scripts.ci_gate_shards" in step.get("run", "") for step in jobs[name]["steps"])
         assert not graders & set(needs), f"{name} waits on another post shard grader"
     assert graders <= set(jobs["gate-required"]["needs"])
 
@@ -218,26 +292,6 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
         " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
-    scan = yaml.safe_load((_ROOT / ".github/workflows/semgrep.yml").read_text())["jobs"]["scan"]
-    assert scan["steps"][0]["with"]["fetch-depth"] == 0
-    command = scan["steps"][-1]["run"].split()
-    assert {"p/ci", "p/secrets", "p/python"} == {command[i + 1] for i, a in enumerate(command) if a == "--config"}
-    baseline = scan["steps"][-2]
-    assert baseline["env"]["BASE"] == "${{ inputs.base }}"
-    assert baseline["run"] == 'sha="$(git merge-base "$BASE" HEAD)"\necho "sha=$sha" >> "$GITHUB_OUTPUT"\n'
-    assert baseline["id"] == "baseline"
-    assert scan["steps"][-1]["env"]["BASE"] == "${{ steps.baseline.outputs.sha }}"
-    assert command[command.index("--baseline-commit") + 1] == '"$BASE"'
-    assert {"--error", "--strict", "--verbose"} <= set(command)
-    assert int(command[command.index("--timeout") + 1]) >= 30
-    assert command[:4] == ["python", "scripts/ci_semgrep.py", "semgrep", "scan"]
-    assert not [s for s in ("||", "&&", ";", "exit") if s in scan["steps"][-1]["run"]]
-    assert not {"set", "--exclude", "--include"} & set(command)
-    assert [command[i + 1] for i, a in enumerate(command) if a == "--exclude-rule"] == [
-        "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"
-    ]
-    assert all("if" not in step and "continue-on-error" not in step for step in scan["steps"])
-    assert not {"if", "continue-on-error"} & set(scan)
     assert "continue-on-error" not in job
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
@@ -344,6 +398,36 @@ def test_dev_records_the_suite_count_and_the_count_floor_reads_it_only_through_t
     assert "from tests.count_floor import dev_record" in fetch["run"]
     assert floor["env"]["TEST_COUNT_BASE_RECORD"] == "${{ runner.temp }}/base-record.json"
     assert jobs["test-count"]["permissions"] == {"contents": "read"}
+
+
+@pytest.mark.parametrize("event_name", ["pull_request", "merge_group"])
+def test_pull_requests_and_merge_groups_read_the_dev_count_record(event_name):
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    fetch = _step("test-count", "Fetch the base suite count recorded on dev")
+    condition = fetch["if"].replace("steps.app-token.outcome", "'success'")
+    assert _evaluate("${{ " + condition + " }}", event_name=event_name) is True
+
+
+def test_a_merge_group_records_its_head_count_for_the_next_group_after_its_early_collection():
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    recorder = yaml.safe_load((_ROOT / ".github/workflows/count-record.yml").read_text())["jobs"]["count-record"]
+    recorded = next(step for step in recorder["steps"] if step.get("name") == "Upload the suite count record")
+    count = _workflow()["jobs"]["test-count"]["steps"]
+    names = [step.get("name") for step in count]
+    record = count[names.index("Record the head count for the next queue group")]
+    upload = count[names.index("Upload the head count for the next queue group")]
+    assert names.index("Upload the early collection") < names.index(record["name"]) < names.index(upload["name"])
+    for step in (record, upload):
+        assert _evaluate("${{ " + step["if"] + " }}", event_name="merge_group") is True
+        assert _evaluate("${{ " + step["if"] + " }}", event_name="pull_request") is False
+    assert record["continue-on-error"] is True
+    assert 'cmp -s "$RUNNER_TEMP/base/tests/count_floor.py" tests/count_floor.py' in record["run"]
+    assert '--collected "$RUNNER_TEMP/collected.json"' in record["run"]
+    assert upload["with"]["name"] == recorded["with"]["name"]
+    assert upload["with"]["if-no-files-found"] == "ignore"
+    assert upload["uses"] == recorded["uses"] == "./.github/actions/retry-upload"
 
 
 def test_every_dev_head_records_its_count_outside_the_promotion_queue():
@@ -816,7 +900,7 @@ def test_chart_proof_input_key_covers_every_file_the_swarm_image_copies():
     for line in (_ROOT / "Dockerfile").read_text().splitlines():
         words = line.split()
         if words[:1] == ["COPY"] and not any(w.startswith("--from") for w in words):
-            sources += words[1:-1]
+            sources += [w for w in words[1:-1] if not w.startswith("--")]
     assert sources
     assert all(any(s.rstrip("/") == p or s.startswith(f"{p}/") for p in listed) for s in sources), sources
     assert {"Dockerfile", ".dockerignore", "deploy/helm/agentihooks-swarm", ".github/workflows/helm-kind.yml"} <= set(

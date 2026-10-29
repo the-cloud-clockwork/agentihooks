@@ -33,6 +33,7 @@ def setup():
     store.redis.sadd(registry.INDEX, "remote")
     publish_room(store, "remote", hive["max_agents"])
     herdr = Mock(spec=HerdrRuntime)
+    herdr.pass_memo = None
     herdr.choose = Mock()
     herdr._profile_decision.return_value = ProfileDecision("engineer", "task", "engineer")
     herdr._quota_accounts = [Account("claude", "account", "room", 0, 80, 80, 6)]
@@ -68,7 +69,9 @@ def test_codex_assignment_waits_for_its_own_placement_chain(setup):
     from scripts.hive.placement import Wait
 
     config = replace(setup.config, lanes={"eng": {"agent": "codex"}})
-    assert setup.launcher.select(config, "eng", {"id": "task"}) == Wait("Codex hive placement is not enabled")
+    assert setup.launcher.select(config, "eng", {"id": "task"}) == Wait(
+        "no Codex account has room after hive sessions: "
+    )
 
 
 def test_no_advertised_slot_does_not_probe_controller_credentials(setup):
@@ -163,6 +166,104 @@ def test_publishes_fenced_order_after_host_admission(setup, monkeypatch):
         profile_decision={"validation": {"pid": 12}, "host_overlays": ["engineer-host"]},
         execution=outcome.value.execution,
     )
+
+
+def test_refuses_an_order_the_hive_queue_cannot_serve_before_its_deadline(setup):
+    from scripts.hive import admission, launch, placement_waits
+    from scripts.hive.orders import Orders
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    store, slug = setup.store, setup.config.slug
+    name = store.next_name(slug, "eng")
+    record = AgentRecord(name, "eng", "task", seat=f"eng-1@{slug}", state="starting")
+    store.put_agent(slug, record)
+    store.seats.occupy(record.seat, name, 0)
+    stream = Orders(store.redis).stream("remote")
+    for _ in range(4):
+        store.redis.xadd(stream, {"order": "{}"})
+    task = {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch}
+    outcome = setup.launcher.spawn(SpawnRequest(setup.config, "eng", name, task))
+    refused = (
+        "no hive for eng has room: remote holds 4 queued launches, "
+        "the most its 300 second launch deadline serves at 75 seconds each"
+    )
+    assert outcome == Outcome("spawn", Status.UNAVAILABLE, launch.HIVE, detail=refused)
+    row = placement_waits.read(store, slug)["task"]
+    assert (row["lane"], row["reason"]) == ("eng", refused)
+    assert store.redis.xlen(stream) == 4
+    assert setup.launcher.orders_for("task") is None
+    assert admission.reserve(store.redis, "remote", f"{slug}/{name}", 1) == (True, 0)
+
+
+def test_a_queue_below_the_deadline_budget_is_not_refused(setup):
+    from scripts.hive.orders import Orders
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    stream = Orders(setup.store.redis).stream("remote")
+    for _ in range(3):
+        setup.store.redis.xadd(stream, {"order": "{}"})
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+    request = SpawnRequest(setup.config, "eng", "eng-name", {"id": "task"})
+    assert setup.launcher.queue_refusal(request, selected, 3) == ""
+
+
+def test_a_master_login_order_is_held_to_its_own_launch_deadline(setup):
+    from scripts.hive import placement
+    from scripts.master_login_chain import BUDGET
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    selected = replace(setup.launcher.select(setup.config, "eng", {"id": "task"}), route_kind=placement.MASTER_LOGIN)
+    request = SpawnRequest(setup.config, "master", "master-name", {"id": "task"})
+    fits = BUDGET.order_ttl_ms // 75000
+    assert fits > 4
+    assert setup.launcher.queue_refusal(request, selected, fits - 1) == ""
+    assert setup.launcher.queue_refusal(request, selected, fits) == (
+        f"no hive for master has room: remote holds {fits} queued launches, "
+        f"the most its {BUDGET.order_ttl_ms // 1000} second launch deadline serves at 75 seconds each"
+    )
+
+
+def test_an_order_racing_another_controller_into_a_full_queue_is_refused(setup):
+    from scripts.hive import launch, placement_waits
+    from scripts.hive.orders import Orders
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    store, slug = setup.store, setup.config.slug
+    name = store.next_name(slug, "eng")
+    record = AgentRecord(name, "eng", "task", seat=f"eng-1@{slug}", state="starting")
+    store.put_agent(slug, record)
+    store.seats.occupy(record.seat, name, 0)
+    stream = Orders(store.redis).stream("remote")
+    for _ in range(3):
+        store.redis.xadd(stream, {"order": "{}"})
+    checked = setup.launcher.queue_refusal
+    calls = []
+
+    def racing(request, selected, queued):
+        calls.append(queued)
+        if len(calls) == 2:
+            store.redis.xadd(stream, {"order": "{}"})
+        return checked(request, selected, queued)
+
+    setup.launcher.queue_refusal = racing
+    task = {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch}
+    outcome = setup.launcher.spawn(SpawnRequest(setup.config, "eng", name, task))
+    assert outcome == Outcome(
+        "spawn",
+        Status.UNAVAILABLE,
+        launch.HIVE,
+        detail="no hive for eng has room: remote holds 4 queued launches, "
+        "the most its 300 second launch deadline serves at 75 seconds each",
+    )
+    assert calls == [3, 3, 4]
+    row = placement_waits.read(store, slug)["task"]
+    assert (row["lane"], row["reason"]) == ("eng", outcome.detail)
+    assert store.redis.xlen(stream) == 4
+    assert setup.launcher.orders_for("task") is None
+    endings = [json.loads(raw)["reason"] for raw in store.redis.hvals(store.key(slug, launch.ENDINGS))]
+    assert endings == [outcome.detail]
 
 
 def test_local_mode_keeps_the_original_spawn_call(setup):
@@ -308,6 +409,20 @@ def test_admit_keeps_the_claim_timestamp_the_tick_wrote_before_the_launch(setup)
     assert admitted.started_at == claimed_at
     agents = {agent.name: agent for agent in setup.store.agents(setup.config.slug)}
     assert agents[name].started_at == claimed_at
+
+
+@pytest.mark.parametrize(
+    "harness,transport,recorded",
+    [("codex", "app_server", "app_server"), ("codex", "legacy", "legacy"), ("claude", "app_server", "")],
+)
+def test_admit_records_the_codex_transport_the_member_serves(setup, harness, transport, recorded):
+    request = request_for(setup)
+    request = replace(request, config=replace(request.config, codex_inbox_transport=transport))
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+    selected = replace(selected, account=replace(selected.account, harness=harness))
+    admitted = setup.launcher.admit(request, selected)
+    assert admitted.transport == recorded
+    assert setup.store.execution("fixture", admitted.execution_id).transport == recorded
 
 
 def test_disabled_hive_never_falls_back_to_local_spawn(setup):
@@ -560,19 +675,20 @@ def test_reservation_contention_ends_the_unlaunched_execution(setup):
     from scripts.swarm_v2.runtime.base import Status
 
     request = request_for(setup)
-    from unittest.mock import patch
-
     setup.launcher.wait = Mock(return_value="pending")
-    with patch.object(type(setup.launcher.slots), "reserve", return_value=False):
-        result = setup.launcher.spawn(request)
+    for index in range(6):
+        assert setup.launcher.slots.reserve("claude:account", f"other-{index}", 6, 300000)
+    result = setup.launcher.spawn(request)
+    refused = "account reservation is full: account=claude:account sessions=6 cap=6 five_left=80 week_left=80"
     assert result.status is Status.UNAVAILABLE
-    assert result.detail == "account reservation is full"
+    assert result.detail == refused
+    assert result.value == {"harness": "claude"}
     assert result.operation == "spawn"
     assert result.backend == "hive"
     ended = setup.store.execution_registry.records("fixture")[0]
     assert ended.state == "ended"
     assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), ended.execution_id)) == {
-        "reason": "account reservation is full",
+        "reason": refused,
         "generation": ended.generation,
     }
     assert setup.store.redis.xrange(setup.launcher.orders.stream("remote")) == []
@@ -697,6 +813,205 @@ def live_order(setup, route="subscription"):
     return request, order, ack
 
 
+@pytest.mark.parametrize("task_state", ["blocked", "open", "claimed", "pr", "done"])
+@pytest.mark.parametrize("restart", ["reclaimed", ""])
+def test_a_finished_worker_receipt_is_collected_once_without_reviving_it(setup, restart, task_state):
+    from scripts.swarm import controller
+    from scripts.swarm.tick import ACKNOWLEDGING, _collect_acks
+
+    request, order, ack = live_order(setup)
+    store, slug = setup.store, setup.config.slug
+    worker = store.execution_registry.get(slug, order.execution_id)
+    worker = replace(worker, state="finished")
+    store.put_agent(slug, worker)
+    store.record_launch(slug, worker, ACKNOWLEDGING)
+    store.mark_restart(slug, worker.task, restart)
+    store.redis.hset(store.key(slug, "launch-assignments"), worker.task, "assignment")
+    lives = store.claims(slug, worker.task)
+    task = {"id": worker.task, "lane": "eng", "state": task_state, "claimed_by": worker.name}
+    doc = {"tasks": [task]}
+    ledger = Mock()
+    routed = Mock()
+    routed.hive_launch = setup.launcher
+    routed.spawn.side_effect = AssertionError("collection must not launch another worker")
+    runtime = controller.FencedRuntime(store, slug, setup.held, routed, "compose")
+
+    actions = _collect_acks(slug, setup.config, store, ledger, runtime, doc, 2_000)
+
+    assert actions == [f"{worker.name} finished task before the tick collected its hive acknowledgement"]
+    assert task == {"id": "task", "lane": "eng", "state": task_state, "claimed_by": worker.name}
+    assert store.execution_registry.get(slug, order.execution_id) == replace(
+        worker,
+        runtime_target=ack.target,
+        pane_id=ack.execution["pane_id"],
+        launched_at=ack.execution["launched_at"],
+        launch_timings=ack.execution["launch_timings"],
+    )
+    assert [(row["agent"], row["state"], row["error"], row["after"]) for row in store.launches(slug)] == [
+        (worker.name, "started", "", restart)
+    ]
+    assert store.claims(slug, worker.task) == lives + 1
+    assert store.spawns(slug) == {"claude": 1}
+    assert store.take_restart(slug, worker.task) == ""
+    assert store.redis.hget(store.key(slug, "launch-assignments"), worker.task) is None
+    assert _collect_acks(slug, setup.config, store, ledger, runtime, doc, 3_000) == []
+    assert store.claims(slug, worker.task) == lives + 1
+    assert store.spawns(slug) == {"claude": 1}
+    assert setup.launcher.slots.counts() == {}
+    ledger.task_set.assert_not_called()
+
+
+@pytest.mark.parametrize("task_state", ["blocked", "claimed"])
+def test_a_live_worker_on_a_blocked_task_still_collects_its_runtime(setup, task_state):
+    from scripts.swarm import controller
+    from scripts.swarm.tick import ACKNOWLEDGING, _collect_acks
+
+    _, order, _ = live_order(setup)
+    store, slug = setup.store, setup.config.slug
+    worker = store.execution_registry.get(slug, order.execution_id)
+    store.record_launch(slug, worker, ACKNOWLEDGING)
+    task = {"id": worker.task, "lane": "eng", "state": task_state, "claimed_by": worker.name}
+    routed = Mock()
+    routed.hive_launch = setup.launcher
+    runtime = controller.FencedRuntime(store, slug, setup.held, routed, "compose")
+
+    actions = _collect_acks(
+        slug, replace(setup.config, autonomy="manual"), store, Mock(), runtime, {"tasks": [task]}, 2_000
+    )
+
+    assert actions == [f"spawned {worker.name} for task"]
+    live = store.execution_registry.get(slug, order.execution_id)
+    assert (live.state, live.pane_id) == ("working", "pane")
+    assert task["state"] == task_state
+
+
+@pytest.mark.parametrize("task_state", ["claimed", "blocked", "open", "pr", "done"])
+def test_finished_receipt_collection_returns_the_exact_outcome_whatever_the_task_state(setup, task_state):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    request, order, _ = live_order(setup)
+    worker = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.put_agent("fixture", replace(worker, state="finished"))
+    request = replace(request, task={**request.task, "state": task_state})
+    assert setup.launcher.collect(request) == Outcome("spawn", Status.OK, "hive")
+
+
+def test_a_finished_receipt_marks_its_admission_reservation_joined(setup):
+    from scripts.hive import admission
+
+    request, order, _ = live_order(setup)
+    worker = setup.store.execution_registry.get("fixture", order.execution_id)
+    admission.record(setup.store.redis, order.hive, f"fixture/{worker.name}")
+    setup.store.put_agent("fixture", replace(worker, state="finished"))
+    assert setup.launcher.collect(request).ok
+    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == [f"fixture/{worker.name}{admission.JOINED}"]
+
+
+def test_an_ended_worker_receipt_is_still_refused(setup):
+    from scripts.hive.launch import GONE
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    request, order, _ = live_order(setup)
+    worker = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.put_agent("fixture", replace(worker, state="ended"))
+    request = replace(request, task={**request.task, "state": "open"})
+    assert setup.launcher.collect(request) == Outcome("spawn", Status.REFUSED, "hive", detail=GONE)
+
+
+def test_all_successful_finished_blocked_collections_are_counted_in_one_pass(setup):
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import ACKNOWLEDGING, _collect_acks
+
+    store, slug = setup.store, setup.config.slug
+    workers = []
+    tasks = []
+    for number in (1, 2):
+        worker = AgentRecord(
+            store.next_name(slug, "eng"),
+            "eng",
+            f"task-{number}",
+            seat=f"eng-{number}@{slug}",
+            state="finished",
+            harness="claude",
+        )
+        store.put_agent(slug, worker)
+        worker = next(agent for agent in store.agents(slug) if agent.name == worker.name)
+        store.record_launch(slug, worker, ACKNOWLEDGING)
+        workers.append(worker)
+        tasks.append({"id": worker.task, "state": "blocked"})
+    runtime = Mock()
+    runtime.collect.return_value = None
+
+    actions = _collect_acks(slug, setup.config, store, Mock(), runtime, {"tasks": tasks}, 2_000)
+
+    assert actions == [
+        f"{worker.name} finished {worker.task} before the tick collected its hive acknowledgement" for worker in workers
+    ]
+    assert runtime.collect.call_count == 2
+    assert store.spawns(slug) == {"claude": 2}
+    assert all(store.claims(slug, worker.task) == 1 for worker in workers)
+
+
+@pytest.mark.parametrize(("receipt", "detail"), [("missing", None), ("failed", "hive launch failed: identity")])
+def test_a_finished_blocked_worker_without_a_successful_receipt_is_refused(setup, receipt, detail):
+    from scripts.hive.launch import GONE
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    detail = detail or GONE
+
+    request, order, ack = live_order(setup)
+    worker = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.put_agent("fixture", replace(worker, state="finished"))
+    request = replace(request, task={**request.task, "state": "blocked"})
+    if receipt == "missing":
+        setup.store.redis.hdel(setup.launcher.orders.receipt(order), "ack")
+    else:
+        setup.store.redis.hset(
+            setup.launcher.orders.receipt(order), "ack", replace(ack, status="failed", failure="identity").encode()
+        )
+    assert setup.launcher.collect(request) == Outcome("spawn", Status.REFUSED, "hive", detail=detail)
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "finished"
+
+
+@pytest.mark.parametrize("bad", ["claimant", "seat", "generation", "ack host", "request epoch", "order epoch"])
+def test_a_finished_blocked_worker_receipt_keeps_the_launch_fences(setup, bad):
+    from scripts.swarm.store import SwarmError
+
+    request, order, ack = live_order(setup)
+    worker = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.put_agent("fixture", replace(worker, state="finished"))
+    request = replace(request, task={**request.task, "state": "blocked"})
+    if bad == "claimant":
+        request = replace(request, name="other")
+    elif bad == "seat":
+        request = replace(request, task={**request.task, "seat": "eng-2@fixture"})
+    elif bad == "generation":
+        order = replace(order, generation=order.generation + 1)
+        setup.store.redis.hset(
+            setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__)
+        )
+    elif bad == "ack host":
+        setup.store.redis.hset(
+            setup.launcher.orders.receipt(order), "ack", replace(ack, target={"host_id": "other"}).encode()
+        )
+    elif bad == "request epoch":
+        request = replace(request, task={**request.task, "controller_epoch": setup.held.epoch + 1})
+    else:
+        order = replace(order, epoch=setup.held.epoch + 1)
+        setup.store.redis.hset(
+            setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__)
+        )
+    with pytest.raises(SwarmError) as raised:
+        setup.launcher.collect(request)
+    if bad.endswith("epoch"):
+        assert str(raised.value) == "the controller lease is stale"
+    else:
+        assert str(raised.value).startswith(
+            f"hive launch acknowledgement does not match the live execution: {bad} expected "
+        )
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "finished"
+
+
 @pytest.mark.parametrize("route", ["subscription", "interactive"])
 def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
     from scripts.swarm.tick import Placed
@@ -725,6 +1040,16 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
         ),
     )
     assert (live.launched_at, live.overlays, live.launch_timings) == (1234, ["tuner"], {"harness_at": 1300})
+
+
+def test_a_live_acknowledgement_marks_its_admission_reservation_joined(setup):
+    from scripts.hive import admission
+
+    _, order, ack = live_order(setup)
+    name = setup.store.execution_registry.get("fixture", order.execution_id).name
+    admission.record(setup.store.redis, order.hive, f"fixture/{name}")
+    assert setup.launcher.complete(order, ack).ok
+    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == [f"fixture/{name}{admission.JOINED}"]
 
 
 @pytest.mark.parametrize(
@@ -1032,7 +1357,11 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
 
     from scripts.hive import launch
     from scripts.hive.placement import Wait
+    from scripts.swarm.capacity import Account
 
+    if harness == "codex":
+        setup.herdr._quota_accounts.append(Account("codex", "account", "room", 0, None, 80, 6))
+        write_hive(setup, slots=[{"harness": "codex", "account": "account", "kind": "subscription"}])
     saved = {"profile": "engineer", "harness": harness, "account": "account"}
     task = {"id": "task", "launch_assignment": saved}
     config = replace(setup.config, lanes={"eng": {"agent": "codex", "profile": "engineer"}})
@@ -1044,27 +1373,17 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
     )
     assert not isinstance(selected, Wait)
     assert (selected.hive, selected.account.name) == ("remote", "account")
-    assert selected.fallback == ("no hive places the saved codex harness" if harness == "codex" else "")
+    assert selected.account.harness == ("claude" if harness == "auto" else harness)
+    assert selected.fallback == ""
 
 
-def test_a_saved_codex_task_with_no_codex_placement_launches_on_claude(setup):
-    from scripts.swarm.capacity import Account
+def test_a_saved_codex_task_with_no_codex_placement_waits_for_codex(setup):
+    from scripts.hive.placement import Wait
 
     saved = {"profile": "engineer", "harness": "codex", "account": "a-codex-account"}
-    setup.herdr._quota_accounts.append(Account("claude", "a-codex-account", "room", 0, 80, 80, 6))
-    setup.herdr.planned_account.return_value = "account"
-    write_hive(
-        setup,
-        slots=[*setup.hive["slots"], {"harness": "claude", "account": "a-codex-account", "kind": "subscription"}],
-    )
-    request = request_for(setup)
-    request = replace(request, task={**request.task, "launch_assignment": saved})
-    setup.launcher.wait = Mock(return_value="pending")
-    assert setup.launcher.spawn(request) == "pending"
-    order = setup.launcher.orders_for("task")
-    assert (order.harness, order.slot, order.hive) == ("claude", "account", "remote")
-    agent = setup.store.execution_occupants("fixture")[request.task["seat"]]
-    assert agent.profile_decision["placement_fallback"] == "no hive places the saved codex harness"
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task", "launch_assignment": saved})
+    assert selected == Wait("no Codex account has room after hive sessions: ; pinned to a-codex-account")
+    assert setup.store.execution_registry.records("fixture") == []
 
 
 def test_handoff_assignment_is_forwarded_to_profile_resolution(setup):
@@ -1102,6 +1421,42 @@ def test_initial_placement_reads_global_account_reports_without_a_credential_pro
     accounts.assert_called_once_with(environ, now / 1000, refresh=False)
 
 
+def test_placement_shares_accounts_in_a_pass_and_rereads_in_the_next_pass(setup):
+    from unittest.mock import patch
+
+    from scripts.hive import launch, placement
+
+    rows = setup.herdr._quota_accounts
+    del setup.herdr._quota_accounts
+    with patch.object(launch.capacity, "accounts", side_effect=[rows, []]) as accounts:
+        assert setup.launcher.select(setup.config, "eng", {"id": "first"}).hive == "remote"
+        assert setup.launcher.select(setup.config, "eng", {"id": "second"}).hive == "remote"
+        accounts.assert_called_once()
+        next_pass = launch.HiveLaunch(setup.store, setup.config.slug, setup.held, setup.herdr)
+        assert isinstance(next_pass.select(setup.config, "eng", {"id": "first"}), placement.Wait)
+        assert isinstance(next_pass.select(setup.config, "eng", {"id": "second"}), placement.Wait)
+    assert accounts.call_count == 2
+
+
+@pytest.mark.parametrize("available", [False, True])
+def test_runtime_quota_snapshot_supersedes_the_placement_fallback(setup, available):
+    from unittest.mock import patch
+
+    from scripts.hive import launch, placement
+
+    rows = setup.herdr._quota_accounts
+    del setup.herdr._quota_accounts
+    with patch.object(launch.capacity, "accounts", return_value=rows) as accounts:
+        assert setup.launcher.select(setup.config, "eng", {"id": "first"}).hive == "remote"
+        setup.herdr._quota_accounts = rows if available else []
+        selected = setup.launcher.select(setup.config, "eng", {"id": "second"})
+    accounts.assert_called_once()
+    if available:
+        assert selected.hive == "remote"
+    else:
+        assert isinstance(selected, placement.Wait)
+
+
 @pytest.mark.parametrize("pin", ["saved", "planned"])
 def test_selected_account_is_frozen_ahead_of_less_used_accounts(setup, pin):
     from scripts.swarm.capacity import Account
@@ -1129,7 +1484,7 @@ def test_hive_sessions_force_a_full_account_to_fall_back_to_one_with_room(setup,
     monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
     setup.herdr._quota_accounts = [
-        Account("claude", "full_on_hives", "room", 0, 80, 80, 6),
+        Account("claude", "full_on_hives", "room", 6, 80, 80, 6),
         Account("claude", "account", "room", 1, 80, 80, 6),
     ]
     write_hive(
@@ -1155,10 +1510,10 @@ def test_full_hive_accounts_report_local_and_remote_session_counts(setup, monkey
     monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
     setup.herdr._quota_accounts = [
-        Account("claude", "account", "room", 2, 80, 80, 6),
+        Account("claude", "account", "room", 6, 80, 80, 6),
         Account("codex", "other", "room", 0, 80, 80, 6),
-        Account("claude", "second", "room", 3, 80, 80, 4),
-        Account("claude", "third", "room", 1, 80, 80, 2),
+        Account("claude", "second", "room", 4, 80, 80, 4),
+        Account("claude", "third", "room", 2, 80, 80, 2),
     ]
     setup.store.redis.set(
         f"{registry.key('remote')}:sessions", '{"claude:account": 4, "claude:second": 1, "claude:third": 1}'
@@ -1169,11 +1524,23 @@ def test_full_hive_accounts_report_local_and_remote_session_counts(setup, monkey
 
     assert isinstance(result, placement.Wait)
     assert result.reason == (
-        "no Claude account has room after hive sessions: account 2 here and 4 on hives of 6, "
-        "second 3 here and 1 on hives of 4, third 1 here and 1 on hives of 2"
-        + ("; pinned to account" if account else "")
+        "no Claude account has room after hive sessions: account 6 sessions of 6, "
+        "second 4 sessions of 4, third 2 sessions of 2" + ("; pinned to account" if account else "")
     )
     assert result.role == "eng"
+
+
+def test_launch_counts_remote_sessions_already_in_capacity_once(setup, monkeypatch):
+    from scripts.hive import registry
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
+    setup.herdr._quota_accounts = [Account("claude", "account", "room", 5, 80, 80, 6)]
+    write_hive(setup, max_agents=10)
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", '{"claude:account": 4}')
+
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}).account.name == "account"
 
 
 def test_account_selection_orders_room_by_usage_then_name(setup):
@@ -1192,7 +1559,7 @@ def test_account_selection_orders_room_by_usage_then_name(setup):
 
 @pytest.mark.parametrize(
     ("row", "seats"),
-    [(("codex", 0, 6), ""), (("claude", 6, 6), "account 6 here and 0 on hives of 6")],
+    [(("codex", 0, 6), ""), (("claude", 6, 6), "account 6 sessions of 6")],
 )
 def test_non_claude_and_full_accounts_cannot_place_a_worker(setup, row, seats):
     from scripts.hive.placement import Wait
@@ -1210,7 +1577,7 @@ def test_non_claude_and_full_accounts_cannot_place_a_worker(setup, row, seats):
     [
         ("yes", False, "remote"),
         ("yes", True, "no live hive takes frontend"),
-        ("no", False, "no live UI hive takes frontend"),
+        ("no", False, "no live swarm-master takes frontend"),
     ],
 )
 def test_ui_profiles_take_only_a_live_ui_hive_that_does_not_exclude_them(setup, ui, stale, expected):
@@ -1646,7 +2013,7 @@ def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead
     placement = Placement("kubernetes", master_seats=lambda: frozenset(("master-2",)))
     original = RoutedRuntime(setup.herdr, RuntimeRouter([backend], disabled=disabled, placement=placement))
     fenced = FencedRuntime(setup.store, "fixture", setup.held, original, "distributed")
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: False)
     task = {"id": "master-2"}
     refused = (
         DISABLED.format(backend="hive")
@@ -1657,7 +2024,7 @@ def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead
     with pytest.raises(SwarmError, match=refused):
         fenced.spawn(setup.config, "master", "master name", task)
     backend.spawn.assert_not_called()
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: True)
     assert fenced.placement_refusal("master", task) == ""
 
 
@@ -1683,7 +2050,7 @@ def test_controller_ci_lane_cannot_replace_a_pinned_codex_harness_with_claude(se
     setup.store.redis.hset(setup.store.key("fixture", "config"), "lanes", json.dumps(config.lanes))
     setup.herdr._profile_decision.return_value = ProfileDecision("cicd", "lane", "ci")
     fenced = FencedRuntime(setup.store, "fixture", setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose")
-    assert fenced.placement_refusal("ci", {"id": "task"}) == "Codex hive placement is not enabled"
+    assert fenced.placement_refusal("ci", {"id": "task"}) == "no Codex account has room after hive sessions: "
 
 
 def test_spawn_honors_the_ci_lane_harness_before_admission(setup):
@@ -1695,7 +2062,7 @@ def test_spawn_honors_the_ci_lane_harness_before_admission(setup):
     setup.herdr._profile_decision.return_value = ProfileDecision("cicd", "lane", "ci")
     setup.launcher.sleep = Mock(side_effect=AssertionError("a rejected harness must not launch"))
     assert setup.launcher.spawn(request) == Outcome(
-        "spawn", Status.UNAVAILABLE, "hive", detail="Codex hive placement is not enabled"
+        "spawn", Status.UNAVAILABLE, "hive", detail="no Codex account has room after hive sessions: "
     )
     assert setup.store.execution_registry.records("fixture") == []
 
@@ -1977,8 +2344,10 @@ def test_unsupported_harness_wait_records_its_lane(setup):
     from scripts.hive import placement_waits
     from scripts.hive.placement import Wait
 
-    config = replace(setup.config, lanes={"ci": {"agent": "codex"}})
-    assert setup.launcher.select(config, "ci", {"id": "task"}) == Wait("Codex hive placement is not enabled")
+    config = replace(setup.config, lanes={"ci": {"agent": "unsupported"}})
+    selected = setup.launcher.select(config, "ci", {"id": "task"})
+    assert selected == Wait("unsupported hive harness: unsupported")
+    assert selected.role == "eng"
     assert placement_waits.read(setup.store, setup.config.slug)["task"]["lane"] == "ci"
 
 

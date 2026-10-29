@@ -13,11 +13,13 @@ from pathlib import Path
 from hooks import config as hooks_config
 from hooks.context.account_sessions import API_MARKER, INTERACTIVE_PREFIX, TOKEN_PREFIX
 from scripts import aicode_tokens, openbao_kv
+from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import binding
 from scripts.routing import master_account
 from scripts.routing.settings import SettingsStore, open_store
 
 ROUTE = "master-login"
+ORDER_ENV = "AGENTIHOOKS_MASTER_LOGIN_ORDER"
 LANE = "master"
 SETTINGS = ["--settings", '{"forceLoginMethod":"claudeai"}']
 LOGIN = ["auth", "login"]
@@ -107,7 +109,7 @@ def signed_in() -> str:
 def unusable() -> str:
     if hooks_config.MASTER_CLAUDE_LOGIN is not True:
         return OFF
-    return "" if any(logins().values()) else NO_LOGIN
+    return ""
 
 
 def slot() -> int:
@@ -228,21 +230,31 @@ def build(rendered: Path, report: str | None = None) -> Path:
     return target
 
 
-def _rebuild(folder: Path, rendered: Path) -> Path:
+def _rebuild(folder: Path, rendered: Path, linked: tuple[str, ...] = (), config: Path | None = None) -> Path:
     target, staging = folder / "claude", folder / "staging"
     kept = _private(target)
     grant = kept.read_bytes() if kept else None
     account = _read(target / CONFIG).get(ACCOUNT)
     shutil.rmtree(staging, ignore_errors=True)
     shutil.copytree(
-        rendered, staging, symlinks=True, ignore=lambda found, _: [CREDENTIALS] if Path(found) == rendered else []
+        rendered,
+        staging,
+        symlinks=True,
+        ignore=lambda found, _: [CREDENTIALS, *linked] if Path(found) == rendered else [],
     )
     staging.chmod(PRIVATE_DIR)
+    for name in linked:
+        shared = (rendered / name).resolve()
+        shared.mkdir(parents=True, exist_ok=True)
+        (staging / name).symlink_to(shared)
+        copied = target / name
+        if copied.is_dir() and not copied.is_symlink():
+            shutil.copytree(copied, shared, ignore=_links, dirs_exist_ok=True, copy_function=_copy_newer)
     if grant is not None:
         (staging / CREDENTIALS).write_bytes(grant)
         (staging / CREDENTIALS).chmod(PRIVATE_FILE)
-    config = {key: value for key, value in _read(staging / CONFIG).items() if key != ACCOUNT}
-    _write(staging / CONFIG, {**config, **({ACCOUNT: account} if account else {})})
+    kept_config = {key: value for key, value in _read(config or staging / CONFIG).items() if key != ACCOUNT}
+    _write(staging / CONFIG, {**kept_config, **({ACCOUNT: account} if account else {})})
     evidence = _read(staging / binding.FILE)
     (staging / binding.FILE).write_text(json.dumps({**evidence, "home": str(target.resolve())}) + "\n")
     for name in MANIFESTS:
@@ -251,6 +263,16 @@ def _rebuild(folder: Path, rendered: Path) -> Path:
     shutil.rmtree(target, ignore_errors=True)
     staging.rename(target)
     return target
+
+
+def _copy_newer(source: str, destination: str) -> None:
+    found = Path(destination)
+    if not found.exists() or Path(source).stat().st_mtime > found.stat().st_mtime:
+        shutil.copy2(source, destination)
+
+
+def _links(folder: str, names: list[str]) -> list[str]:
+    return [name for name in names if (Path(folder) / name).is_symlink()]
 
 
 def _adopt() -> None:
@@ -340,7 +362,10 @@ def _claim(
     held = _read(folder / OWNER)
     holders = {owner: found for owner, found in (held.get("holders") or {}).items() if alive(found)}
     others = sorted(owner for owner, found in holders.items() if found != pid)
-    blocker = next((owner for owner in (name, held.get("alone"), *(others if alone else ())) if owner in others), None)
+    exclusive = held.get("alone", "")
+    if not alone and exclusive.startswith("master@"):
+        exclusive = ""
+    blocker = next((owner for owner in (name, exclusive, *(others if alone else ())) if owner in others), None)
     if blocker:
         raise LoginRefused(HELD.format(owner=blocker))
     epoch = max(int(held.get("epoch", 0)), floor) + 1
@@ -366,12 +391,42 @@ def publish(bao: openbao_kv.OpenBao, target: Path, epoch: int, number: int | Non
     return True
 
 
-def restore(stored: Mapping[str, str], target: Path) -> bool:
-    if (target / CREDENTIALS).exists() or not stored.get("grant"):
+def restore(stored: Mapping[str, str], target: Path, force: bool = False) -> bool:
+    if not stored.get("grant"):
         return False
-    _write(target / CREDENTIALS, {GRANT: json.loads(stored["grant"])})
+    grant = json.loads(stored["grant"])
+    local = _read(target / CREDENTIALS).get(GRANT) or {}
+    if grant == local:
+        return False
+    if local and not force and int(local.get("expiresAt", 0)) >= int(stored.get("generation", 0)):
+        return False
+    _write(target / CREDENTIALS, {GRANT: grant})
     _write(target / CONFIG, {**_read(target / CONFIG), ACCOUNT: json.loads(stored["account"])})
     return True
+
+
+def recover(target: Path, environ: Mapping[str, str]) -> bool:
+    number = next((number for number in numbers() if home(number) == target), None)
+    return number is not None and restore(stored(openbao_kv.from_env(environ), number), target, force=True)
+
+
+def _usable(target: Path, environ: Mapping[str, str], found: str) -> bool:
+    from scripts.routing import native_login
+
+    try:
+        native_login.check(child(environ, target), found)
+    except native_login.LoginError:
+        return False
+    return not native_login.rejected(child(environ, target), found)
+
+
+def checked(target: Path, environ: Mapping[str, str], found: str) -> bool:
+    if _usable(target, environ, found):
+        return True
+    with _locked(target.parent) as folder:
+        if len(holders(folder)) < 2 and not recover(target, environ):
+            return False
+    return _usable(target, environ, found)
 
 
 def stored(bao: openbao_kv.OpenBao | None, number: int | None = None) -> dict[str, str]:
@@ -407,8 +462,19 @@ def _offered(bao: openbao_kv.OpenBao | None) -> dict[int, dict[str, str]]:
     return {number: copy for number, copy in copies.items() if _private(home(number)) or copy.get("grant")}
 
 
+def _preferred() -> dict[str, int]:
+    ranks: dict[str, int] = {}
+    for name in os.environ.get(ORDER_ENV, "").split(","):
+        try:
+            ranks.setdefault(aicode_tokens.slug(name.strip()), len(ranks))
+        except aicode_tokens.SlugError:
+            continue
+    return ranks
+
+
 def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str, str]]:
     from scripts import master_logins
+    from scripts.routing import reservation
 
     offered = _offered(bao)
     if not offered:
@@ -422,11 +488,20 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
     now, held = time.time(), []
     order = list(offered)
     if len(offered) > 1:
-        order.sort(key=lambda number: (-master_logins.left(named[number], now), number != slot(), number))
+        ranks = _preferred()
+        order.sort(
+            key=lambda number: (
+                master_logins.usage(named[number], now)[1] >= reservation.MASTER_LEAVES,
+                ranks.get(named[number], len(ranks)),
+                -master_logins.left(named[number], now),
+                number != slot(),
+                number,
+            )
+        )
     for number in order:
         with _locked(root(number)) as folder:
             try:
-                epoch = _claim(folder, name, os.getpid(), _alive, int(offered[number].get("epoch", 0)), True)[0]
+                epoch = _claim(folder, name, os.getpid(), _alive, int(offered[number].get("epoch", 0)))[0]
             except LoginRefused:
                 held.append(f"{named[number] or number} by {', '.join(sorted(holders(folder)))}")
                 continue
@@ -435,30 +510,204 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
 
 
 def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
-    rendered = Path(environ["CLAUDE_CONFIG_DIR"])
+    rendered = claude_home(environ)
     refused = refusal(rendered, cwd)
     if refused:
         raise LoginRefused(refused)
     bao = openbao_kv.from_env(environ)
-    number, epoch, copy = _take(environ["AGENTIHOOKS_AGENT_NAME"], bao)
+    name = environ["AGENTIHOOKS_AGENT_NAME"]
+    number, epoch, copy = _take(name, bao)
     with _locked(root(number)) as folder:
-        target = _rebuild(folder, rendered)
-    if environ.get(binding.REPORT):
-        binding.rehome(Path(environ[binding.REPORT]), target, shared=False)
-    restore(copy, target)
+        target = home(number)
+        shared = any(owner != name for owner in holders(folder)) and (target / binding.FILE).is_file()
+        if not shared:
+            target = _rebuild(folder, rendered, config=claude_json(environ))
+        if environ.get(binding.REPORT):
+            binding.rehome(Path(environ[binding.REPORT]), target, shared=shared)
+        if not shared:
+            restore(copy, target)
     found = account(target, environ, number=number)
     keep(bao, target, epoch, number)
     return target, found
 
 
+def browser_home(environ: Mapping[str, str]) -> Path:
+    for number in numbers():
+        with _locked(root(number)) as folder:
+            if _private(home(number)) or holders(folder):
+                continue
+            _claim(folder, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), _alive, 0, True)
+            return _rebuild(folder, claude_home(environ), config=claude_json(environ))
+    raise LoginRefused(FULL.format(cap=MAX_SLOTS))
+
+
+def release(target: Path, environ: Mapping[str, str]) -> None:
+    name = environ["AGENTIHOOKS_AGENT_NAME"]
+    with _locked(target.parent) as folder:
+        held = _read(folder / OWNER)
+        held["holders"] = {
+            owner: pid for owner, pid in (held.get("holders") or {}).items() if (owner, pid) != (name, os.getpid())
+        }
+        if held.get("alone") == name and name not in held["holders"]:
+            held.pop("alone")
+        _write(folder / OWNER, held)
+
+
+def claimed_home(environ: Mapping[str, str]) -> Path | None:
+    name = environ["AGENTIHOOKS_AGENT_NAME"]
+    return next(
+        (home(number) for number in numbers() if holders(root(number)).get(name) == os.getpid()),
+        None,
+    )
+
+
+def _alert(environ: Mapping[str, str], outcome: str, cwd: Path) -> None:
+    from scripts import master_login_chain as chain
+
+    alerted = _token_folder(environ) / "claude"
+    alerted.parent.mkdir(mode=PRIVATE_DIR, parents=True, exist_ok=True)
+    refused = chain.alert(environ, alerted, outcome, str(cwd))
+    if refused:
+        print(f"[agenti] operator login email refused: {refused}", file=sys.stderr)
+
+
+def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | None:
+    from scripts import master_login_chain as chain
+
+    target, reported = None, None
+
+    def current():
+        nonlocal target
+        try:
+            if target is None:
+                target, found = prepare(environ, cwd)
+            else:
+                number = next(number for number in numbers() if home(number) == target)
+                found = account(target, environ, number=number)
+                if environ.get(binding.REPORT):
+                    binding.rehome(Path(environ[binding.REPORT]), target)
+                epoch = int(_read(target.parent / OWNER)["epoch"])
+                keep(openbao_kv.from_env(environ), target, epoch, number)
+        except LoginRefused as exc:
+            if str(exc) == NO_LOGIN or str(exc).startswith("every stored master claude ai login is held"):
+                target = target or claimed_home(environ)
+                return None
+            raise
+        if not checked(target, environ, found):
+            return None
+        chain.notification(target, "current", "success")
+        return target, found
+
+    def browser():
+        nonlocal target, reported
+        try:
+            target = target or browser_home(environ)
+        except LoginRefused:
+            reported = "failure"
+            return reported
+        chain.notification(target, "current", "unavailable")
+        reported = chain.authorize(environ, target)
+        return reported
+
+    def token():
+        if target is not None:
+            release(target, environ)
+        if reported in ("captcha", "failure"):
+            _alert(environ, reported, cwd)
+        return None
+
+    return chain.run(current, browser, token)
+
+
+def _token_folder(environ: Mapping[str, str]) -> Path:
+    return Path(hooks_config.AGENTIHOOKS_HOME) / "master-token" / aicode_tokens.slug(environ["AGENTIHOOKS_AGENT_NAME"])
+
+
+def token_home(environ: Mapping[str, str]) -> Path:
+    folder = _token_folder(environ)
+    with _locked(folder):
+        target = _rebuild(folder, claude_home(environ), config=claude_json(environ))
+        (target / CREDENTIALS).unlink(missing_ok=True)
+        path = target / "settings.json"
+        settings = _read(path)
+        settings.pop("forceLoginMethod", None)
+        path.unlink(missing_ok=True)
+        _write(path, settings)
+    if environ.get(binding.REPORT):
+        binding.rehome(Path(environ[binding.REPORT]), target)
+    return target
+
+
+def _token_args(args: list[str]) -> list[str]:
+    result = []
+    index = 0
+    flags = ("--remote-control", "--remote-control-session-name-prefix")
+    while index < len(args):
+        argument = args[index]
+        index += 1
+        if argument.split("=", 1)[0] in flags:
+            if "=" not in argument and index < len(args) and not args[index].startswith("--"):
+                index += 1
+        else:
+            result.append(argument)
+    return result
+
+
+def _token_lock(environ: Mapping[str, str]):
+    import fcntl
+
+    from scripts.claude_quota_balancer import _cache_path
+
+    path = _cache_path(environ).with_name("claude-route.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = path.open("a+", encoding="utf-8")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    return lock
+
+
+def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
+    from hooks.context.account_sessions import sessions_by_account
+    from scripts import master_login_chain as chain
+    from scripts.claude_quota_balancer import API_ACCOUNT, launch_environment, select_master_credential
+    from scripts.hive.account_slots import execute
+    from scripts.install import _claude_command, _write_route_report
+
+    with _token_lock(environ):
+        decision = select_master_credential(
+            environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,)
+        )
+        target = token_home(environ)
+        child_env = {**launch_environment(decision, environ), **dict.fromkeys(SELECTORS, str(target))}
+        chain.notification(target, "token", "routed")
+        _write_route_report(
+            report, status="routed", account=decision.account, placement="fallback", remote_control="off"
+        )
+        print(f"[agenti] account={decision.account} route=token-fallback remote-control=off", flush=True)
+        execute(
+            "claude",
+            decision.account,
+            child_env,
+            lambda env: os.execvpe(binary, _claude_command(binary, _token_args(args)), env),
+        )
+
+
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from scripts.claude_quota_balancer import RoutingError
+    from scripts.hive.account_slots import execute
     from scripts.install import _claude_command, _write_route_report
 
     try:
-        target, found = prepare(environ, Path.cwd())
+        prepared = prepare_launch(environ, Path.cwd())
     except LoginRefused as exc:
         raise RoutingError(str(exc)) from exc
+    if prepared is None:
+        return launch_token(binary, args, environ, report)
+    target, found = prepared
     _write_route_report(report, status="routed", account=found, placement="forced")
     print(f"[agenti] account={found} route={ROUTE}", flush=True)
-    os.execvpe(binary, _claude_command(binary, [*SETTINGS, *args]), child(environ, target, found))
+    execute(
+        "claude",
+        found,
+        child(environ, target, found),
+        lambda env: os.execvpe(binary, _claude_command(binary, [*SETTINGS, *args]), env),
+    )

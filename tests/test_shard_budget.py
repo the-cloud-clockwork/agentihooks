@@ -149,8 +149,13 @@ def test_an_elapsed_time_over_the_budget_is_red(tmp_path):
 
 def test_the_shard_check_job_grades_the_budget_on_the_stored_durations():
     steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["shard-check"]["steps"]
-    step = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_budget"))
-    assert step["run"] == "python -m tests.shard_budget $REPORT shard-durations/*/durations.json"
+    commands = ("python -m tests.shard_budget", "python3 -m tests.shard_budget")
+    step = next(step for step in steps if step.get("run", "").startswith(commands))
+    assert step["run"] in (
+        f"{command} $REPORT {path}/durations.json"
+        for command in commands
+        for path in ("shard-durations/*", "shard-reports/durations-*")
+    )
     assert step["if"] == "github.event_name != 'merge_group'"
 
 

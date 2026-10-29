@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/publish.py:scripts.swarm.publish.x_open_pull_head__mutmut_23:ec1bcfdafc66ec7961aebecf4a082ade6a83d634e6bff8dbc9030f1e4ea425b9": {
+    "reader": "standards_reader",
+    "reason": "Drops the head name from the fetch of the open pull request branch (survivor reported by the mutation job on head c694102). Under the default +refs/heads/* refspec both forms update refs/remotes/origin/<head>, force-pushed heads included, and that ref is all descends and set-upstream-to read; under a narrowed refspec tracking setup fails either way, so the named head only adds a FETCH_HEAD entry nothing reads."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/codex_session/supervisor.py:scripts.codex_session.supervisor.x_launch__mutmut_17:ec9217bbbf6bb99bdd7da728d6bc6e8cb34f048c4ec3192a210438c9a0834a27": {
+    "reader": "standards-reader",
+    "reason": "Existing slot hive values are unchanged. When absent, both the empty string and None reach only _release_slot, whose truthiness check skips both. Cleanup and the reraised exception are identical."
+  }
+}

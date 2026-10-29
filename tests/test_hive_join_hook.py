@@ -146,3 +146,61 @@ def test_hive_hook_reports_defaults_for_the_named_agent_once(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@nobody")
     assert hive_join.run({"session_id": "next"}, "start") is None
     assert len(calls) == 1
+
+
+def test_failed_startup_ledger_checks_recover_in_the_same_agent_session(monkeypatch):
+    from unittest.mock import Mock
+
+    from fakeredis import FakeRedis
+
+    from hooks.context import hive_join
+    from scripts.hive import join_checks, join_report
+    from scripts.swarm import launch_check, ledger_client, store
+
+    client = store.RedisStore(FakeRedis(decode_responses=True))
+    client.create(store.SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    agent = client.start_execution(
+        "sw", store.AgentRecord(client.next_name("sw", "eng"), "eng", "task", hive="worker", seat="eng-1@sw")
+    )
+    client.put_agent("sw", agent)
+    for key, value in {
+        "AGENTIHOOKS_HIVE_ID": "worker",
+        "AGENTIHOOKS_SWARM": "sw",
+        "AGENTIHOOKS_AGENT_NAME": agent.name,
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(store, "connect", lambda: client)
+    monkeypatch.setattr(hive_join.time, "time", lambda: 1000.0)
+    healthy = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
+    monkeypatch.setattr(join_checks, "cheap", lambda *args: healthy)
+    monkeypatch.setattr(join_checks, "github_ready", lambda: True)
+    ledger = Mock()
+    ledger.join.side_effect = [RuntimeError("temporary refusal"), None]
+    ledger._call.side_effect = [RuntimeError("temporary refusal"), {"applied": True}]
+    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: ledger)
+    payload = {"session_id": "session"}
+    hive_join.run(payload, "start")
+    before = join_report.read(client.redis, agent)
+    assert set(before["misses"]) == {"ledger_join", "ledger_write"}
+    monkeypatch.setattr(hive_join.time, "time", lambda: 1030.0)
+    hive_join.run(payload, "tool")
+    after = join_report.read(client.redis, agent)
+    assert after["grade"] == "complete"
+    assert after["started_at"] == before["started_at"]
+    assert after["session_id"] == "session"
+    assert launch_check.misses(client, "sw", agent, {}, {}, False, []) == {}
+    hive_join.run(payload, "tool")
+    assert ledger.join.call_count == 2
+    assert ledger._call.call_count == 2
+
+
+def test_posttool_dispatch_rechecks_the_agent_hive_report(monkeypatch):
+    from hooks import hook_manager
+
+    events = []
+    monkeypatch.setattr(hook_manager, "_swarm_outcome", lambda payload: events.append(("outcome", payload)))
+    monkeypatch.setattr(hook_manager, "_hive_join", lambda payload, event: events.append((event, payload)))
+    monkeypatch.setattr(hook_manager, "_swarm_ledger", lambda payload: events.append(("ledger", payload)))
+    payload = {"session_id": "session"}
+    hook_manager._swarm_after_tool(payload)
+    assert events == [("outcome", payload), ("tool", payload), ("ledger", payload)]

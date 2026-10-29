@@ -70,7 +70,7 @@ def test_served_execution_runs_a_pump_that_resumes_and_delivers_then_retires(tmp
     spec = SimpleNamespace(slug=slug, cwd=str(tmp_path), environ=child_env)
 
     def spawn(command, **kwargs):
-        assert command == [sys.executable, "-m", "scripts.inbox.codex", slug, execution]
+        assert command == [sys.executable, "-P", "-m", "scripts.inbox.codex", slug, execution]
         assert kwargs == {"cwd": spec.cwd, "env": child_env}
         process = popen(command, **kwargs)
         pumps.append(process)

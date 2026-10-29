@@ -21,6 +21,11 @@ TEMPLATE = (
     "You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull request. "
     "If not, update the issue and the pull request and record progress on the ledger."
 )
+PROGRESS = (
+    "Pushed work has no recorded progress since the push. "
+    'Run agentihooks swarm {swarm} progress --doing "Describe current work" --ends-when "Describe completion". '
+    "A checks wait does not waive recording progress."
+)
 SENDER = "swarm"
 SETTLED = "a later stop passed with the work committed, on origin and recorded"
 PUSHED = "pushed"
@@ -146,6 +151,13 @@ def record_text(remote, branch, head):
     return f"The stop hook pushed the task branch {web}/tree/{branch} with its head at {web}/commit/{head}"
 
 
+def own_pull(tree, task):
+    """Whether the task's pull request sits in the worktree's own repository; any counts for an origin off GitHub."""
+    url = (task.get("pr_url") or "").lower()
+    found = GITHUB_RE.search(git(tree.path, "remote", "get-url", "origin").stdout.strip())
+    return bool(url) and (not found or f"github.com/{found[1]}/{found[2]}/pull/".lower() in url)
+
+
 def spoke_since(events, name, at):
     return any(event.get("by") == name and event["at"] > at for event in events)
 
@@ -165,7 +177,15 @@ def default_root():
 
 
 def is_notice(item):
-    return item.sender == SENDER and item.text == TEMPLATE
+    return item.sender == SENDER and (
+        item.text == TEMPLATE
+        or item.text.startswith(
+            (
+                "Pushed work has no recorded progress since the push.",
+                TEMPLATE + " Pushed work has no recorded progress since the push.",
+            )
+        )
+    )
 
 
 def left(name, exit_text):
@@ -199,21 +219,26 @@ class PushStop:
         task = next((t for t in doc["tasks"] if t.get("id") == who.task), None) if doc else {}
         if task is None or ledger_kinds.kind(task) == "plan":
             return Decision()
-        store, owed, failed, found = self.connect(), False, [], trees(self.root(), who.name)
+        store, owed, progress, failed, found = self.connect(), False, False, [], trees(self.root(), who.name)
         for tree in found:
             if tree.unpushed and (refused := self.held(tree)):
                 failed.append(refused)
             elif tree.unpushed and push(tree, branch := target(tree, task), self.left() + RESERVE_S - FLOOR_S):
                 self.record(store, ledger, who, tree, branch)
             owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
-            owed = owed or (doc and tree.own and not task.get("pr_url") and self.unrecorded(store, doc, who))
-        if not owed:
+            progress = progress or (
+                doc and tree.own and not own_pull(tree, task) and self.unrecorded(store, doc, who, found)
+            )
+        if not (owed or progress):
             self.settle(store, who)
             return Decision()
         if self.waiting(store, who, doc, task, any(tree.dirty for tree in found)):
             return Decision()
-        self.notify(store, who)
-        return Decision.deny(" ".join([TEMPLATE, *failed]))
+        reason = " ".join(
+            filter(None, [TEMPLATE if owed else "", PROGRESS.format(swarm=who.swarm) if progress else ""])
+        )
+        self.notify(store, who, reason)
+        return Decision.deny(" ".join([reason, *failed]))
 
     def held(self, tree):
         """Why HEAD stays off origin: its pre push gate refused, or less than the reserve is left for the push."""
@@ -239,12 +264,32 @@ class PushStop:
             return False
         return waits.dependency(on, task, {row.get("id"): row for row in doc["tasks"]}, None)
 
-    def unrecorded(self, store, doc, who):
+    def unrecorded(self, store, doc, who, found):
         from scripts.gates.progress import Progress
 
         mark = Progress(store.redis, who.swarm).read(who.name)
-        return mark.outcome == PUSHED and not spoke_since(
-            doc.get("_meta", {}).get("events", []), who.name, mark.outcome_at
+        return (
+            mark.outcome == PUSHED
+            and not spoke_since(doc.get("_meta", {}).get("events", []), who.name, mark.outcome_at)
+            and not any(self._preflight(store, who, tree) for tree in found)
+        )
+
+    def _preflight(self, store, who, tree):
+        from scripts.swarm import idle, mutation_wait
+
+        held = idle.wait(store.redis, who.swarm, who.name)
+        if not held or held["until"] <= self.now():
+            return False
+        on = held.get("on") or {}
+        if on.get("kind") != "mutation" or on.get("task") != who.task:
+            return False
+        run = mutation_wait.RUN_URL.fullmatch(on["target"])
+        remote = GITHUB_RE.search(git(tree.path, "remote", "get-url", "origin").stdout.strip())
+        if not run or not remote:
+            return False
+        return (
+            run[1].lower() == f"{remote[1]}/{remote[2]}".lower()
+            and on.get("head") == git(tree.path, "rev-parse", "HEAD").stdout.strip()
         )
 
     def record(self, store, ledger, who, tree, branch):
@@ -259,20 +304,20 @@ class PushStop:
         except SwarmError:
             pass
 
-    def notify(self, store, who):
+    def notify(self, store, who, text):
         from scripts.inbox.store import CLOSED, InboxStore
 
         inbox = InboxStore(store.redis)
         address = inbox.names.resolve(who.name)
-        if not any(item.text == TEMPLATE and item.state not in CLOSED for item in inbox.inbox(address)):
-            inbox.send(SENDER, address, TEMPLATE)
+        if not any(item.text == text and item.state not in CLOSED for item in inbox.inbox(address)):
+            inbox.send(SENDER, address, text)
 
     def settle(self, store, who):
         from scripts.inbox.store import CLOSED, InboxStore
 
         inbox = InboxStore(store.redis)
         for item in inbox.inbox(inbox.names.resolve(who.name)):
-            if item.text == TEMPLATE and item.state not in CLOSED:
+            if is_notice(item) and item.state not in CLOSED:
                 inbox.close(item.id, SENDER, "done", SETTLED)
 
     def root(self):

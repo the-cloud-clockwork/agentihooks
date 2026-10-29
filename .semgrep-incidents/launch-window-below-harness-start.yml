@@ -1,0 +1,43 @@
+rules:
+  - id: launch-window-below-harness-start
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A launch window is hard coded under seventy seconds. The largest measured time from route report to profile
+      canary is 69.9 seconds for Claude and 56.6 for Codex, and hive harnesses start slower still; on 27 October hive
+      launches were refused because the harness did not report its route within thirty seconds. Derive the window
+      from the measured launch budget or set it above the measured start time.
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: '[..., "$FLAG", $WINDOW, ...]'
+              - pattern: $PARSER.add_argument("$FLAG", ..., default=$WINDOW, ...)
+          - metavariable-regex:
+              metavariable: $FLAG
+              regex: ^--(route|canary|launch)-timeout$
+          - metavariable-pattern:
+              metavariable: $WINDOW
+              pattern-either:
+                - patterns:
+                    - pattern: $SECONDS
+                    - metavariable-regex:
+                        metavariable: $SECONDS
+                        regex: ^"?([0-9]|[1-6][0-9])(\.[0-9]+)?"?$
+          - focus-metavariable: $WINDOW
+      - patterns:
+          - pattern: $NAME = $SECONDS
+          - metavariable-regex:
+              metavariable: $NAME
+              regex: ^(.*_)?(ROUTE|CANARY|LAUNCH)(_[A-Z]+)*_(TIMEOUT|WINDOW)(_S|_SECONDS)?$
+          - metavariable-comparison:
+              metavariable: $SECONDS
+              comparison: $SECONDS < 70
+      - patterns:
+          - pattern: '$NAME = {..., $HARNESS: $SECONDS, ...}'
+          - metavariable-regex:
+              metavariable: $NAME
+              regex: ^(.*_)?(ROUTE|CANARY|LAUNCH)(_[A-Z]+)*_(TIMEOUT|WINDOW)(_S|_SECONDS)?$
+          - metavariable-comparison:
+              metavariable: $SECONDS
+              comparison: $SECONDS < 70
+          - focus-metavariable: $SECONDS

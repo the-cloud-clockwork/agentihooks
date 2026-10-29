@@ -179,3 +179,30 @@ def test_transcript_probe_needs_the_folder_itself(tmp_path):
 
     assert join_checks.transcript_ready(str(tmp_path)) is True
     assert join_checks.checked(lambda: join_checks.transcript_ready(str(tmp_path / "missing"))) is False
+
+
+@pytest.mark.parametrize("joined,written", [(False, False), (True, False), (False, True), (True, True)])
+def test_ledger_checks_retry_only_unproven_capabilities(monkeypatch, joined, written):
+    from types import SimpleNamespace
+
+    from scripts.hive import join_checks
+    from scripts.swarm import ledger_client
+
+    calls = []
+
+    def join(slug, name, role):
+        assert (slug, name, role) == ("swarm", "engineer", "member")
+        calls.append("join")
+
+    def write(slug, ops):
+        assert slug == "swarm"
+        assert len(ops) == 1
+        assert ops[0]["id"].startswith("ack-")
+        assert {key: value for key, value in ops[0].items() if key != "id"} == {"op": "ack", "by": "engineer", "rev": 0}
+        calls.append("write")
+        return {"applied": True}
+
+    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: SimpleNamespace(join=join, _call=write))
+    report = {"slug": "swarm", "agent": "engineer", "checks": {"ledger_join": joined, "ledger_write": written}}
+    assert join_checks.ledger_checks(report) == {"ledger_join": True, "ledger_write": True}
+    assert calls == (["join"] if not joined else []) + (["write"] if not written else [])

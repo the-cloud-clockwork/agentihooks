@@ -64,13 +64,13 @@ def speakers(by):
     return list(dict.fromkeys([*names, *crew, *watched_masters(by)]))
 
 
-def verified(by, quote):
+def verified(by, quote, within=None):
     """The quoted span, as the operator wrote it, of recorded words from any master or planner of the relaying agent's swarm."""
     operator_words = ports.hooks().operator_words
 
     if len(quote.split()) < 3:
         return ""
-    words = next((w for name in speakers(by) if (w := operator_words.matching(name, quote, within=None))), "")
+    words = next((w for name in speakers(by) if (w := operator_words.matching(name, quote, within=within))), "")
     found = re.search(r"\s+".join(map(re.escape, quote.split())), words, re.IGNORECASE)
     return found.group(0) if found else ""
 
@@ -85,12 +85,20 @@ def apply(doc, op, ctx):
     name, item_id = op["item"].split("/")
     item = next((i for i in doc[name] if i["id"] == item_id), None)
     if item is None:
+        ctx.refused.append(f"relay on {op['item']} refused: the entry does not exist")
         return False
     thread = "answers" if name == "questions" else "comments"
     if any(e["id"] == op["id"] for e in item[thread]):
         return True
-    words = relayed(op, ctx.meta)
+    if ctx.meta["members"].get(op["by"], {}).get("role") != "orchestrator":
+        ctx.refused.append(f"relay on {op['item']} refused: {op['by']} is not an orchestrator of this ledger")
+        return False
+    words = verified(op["by"], op["quote"])
     if not words:
+        ctx.refused.append(
+            f"relay on {op['item']} refused: the server could not verify at least three quoted operator words "
+            "in its recorded prompts or answers"
+        )
         return False
     marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
     text = op["text"].strip()

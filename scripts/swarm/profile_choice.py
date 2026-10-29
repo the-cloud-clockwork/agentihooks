@@ -88,7 +88,7 @@ def transfer(task: dict) -> dict:
     saved = (task.get("handoff_envelope") or {}).get("launch")
     if task.get(FRESH) or (not task.get("handoff") and not saved):
         return {}
-    if not saved or not all(saved.get(key) for key in ("profile", "harness", "model", "effort")):
+    if not saved or not all(saved.get(key) for key in ("profile", "harness")):
         raise SpawnError("unsupported handoff: original profile and run options are missing", "unsupported")
     if saved["harness"] not in ("claude", "codex"):
         raise SpawnError(f"unsupported handoff harness: {saved['harness']}", "unsupported")

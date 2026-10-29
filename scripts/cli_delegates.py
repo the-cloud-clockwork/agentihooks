@@ -2,12 +2,15 @@ import importlib
 from collections.abc import Callable
 
 DELEGATED_CLIS = {
+    "agents": "scripts.agents.cli",
     "msg": "scripts.inbox.cli",
     "recall": "scripts.recall.cli",
     "trace": "scripts.trace_cli",
     "deps": "scripts.deps_preflight",
     "quota": "scripts.agents_quota",
     "plan": "scripts.swarm_ledger.plan_read",
+    "workflow": "scripts.workflows.cli",
+    "headless": "scripts.headless.cli",
     "hive": "scripts.hive.cli",
     "hub": "scripts.hub.runner",
     "github-webhook": "scripts.hub.github_webhooks",
@@ -19,6 +22,8 @@ DELEGATED_CLIS = {
     "timer": "scripts.scheduler.cli:timer",
     "stopwatch": "scripts.scheduler.cli:stopwatch",
     "cron": "scripts.scheduler.cli:cron",
+    "judge": "scripts.judge.cli",
+    "scout": "scripts.scout.cli",
 }
 
 

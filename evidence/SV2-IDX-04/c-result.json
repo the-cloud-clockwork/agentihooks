@@ -1,0 +1,210 @@
+{
+  "case": "T-SV2-IDX-04-C",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic concept embedder stand in for the session service, the central database, the archive bucket and the embedding provider; no model, HTTP server, vector database or Pod runs",
+  "input_sha256": {
+    "session-search.json": "a8d3c56f8710490765686d36fb367d571edf1f1d9280a0d2168992908ee650b8"
+  },
+  "observed": {
+    "before_index": {
+      "mode": "lexical_only",
+      "results": [
+        "lock:0:turn",
+        "lock:0:tool"
+      ],
+      "vector": {
+        "reason": "no_active_index",
+        "state": "unavailable"
+      }
+    },
+    "outage": {
+      "mode": "lexical_only",
+      "results": [
+        {
+          "context": {
+            "after": [
+              "lock:0:tool"
+            ],
+            "before": []
+          },
+          "explain": {
+            "fused": 0.016393,
+            "lexical": {
+              "matched": [
+                "database is locked",
+                "ingest"
+              ],
+              "rank": 1,
+              "score": 3.583519
+            },
+            "vector": null
+          },
+          "label": "lock:0:turn"
+        },
+        {
+          "context": {
+            "after": [
+              "lock:1:turn"
+            ],
+            "before": [
+              "lock:0:turn"
+            ]
+          },
+          "explain": {
+            "fused": 0.016129,
+            "lexical": {
+              "matched": [
+                "database is locked"
+              ],
+              "rank": 2,
+              "score": 1.504077
+            },
+            "vector": null
+          },
+          "label": "lock:0:tool"
+        }
+      ],
+      "state": "answered",
+      "vector": {
+        "reason": "provider_unavailable",
+        "state": "unavailable"
+      }
+    },
+    "outage_operation_id_stable": true,
+    "outage_replay_identical": true,
+    "protected_state_unchanged": true,
+    "restored": {
+      "mode": "hybrid",
+      "results": [
+        {
+          "context": {
+            "after": [
+              "lock:0:tool"
+            ],
+            "before": []
+          },
+          "explain": {
+            "fused": 0.032787,
+            "lexical": {
+              "matched": [
+                "database is locked",
+                "ingest"
+              ],
+              "rank": 1,
+              "score": 3.583519
+            },
+            "vector": {
+              "rank": 1,
+              "score": 1.0
+            }
+          },
+          "label": "lock:0:turn"
+        },
+        {
+          "context": {
+            "after": [
+              "lock:1:turn"
+            ],
+            "before": [
+              "lock:0:turn"
+            ]
+          },
+          "explain": {
+            "fused": 0.032258,
+            "lexical": {
+              "matched": [
+                "database is locked"
+              ],
+              "rank": 2,
+              "score": 1.504077
+            },
+            "vector": {
+              "rank": 2,
+              "score": 1.0
+            }
+          },
+          "label": "lock:0:tool"
+        },
+        {
+          "context": {
+            "after": [
+              "lock:1:tool"
+            ],
+            "before": [
+              "lock:0:tool"
+            ]
+          },
+          "explain": {
+            "fused": 0.015873,
+            "lexical": null,
+            "vector": {
+              "rank": 3,
+              "score": 0.707107
+            }
+          },
+          "label": "lock:1:turn"
+        }
+      ],
+      "state": "answered",
+      "vector": {
+        "index_generation": "fixture-search-v1",
+        "model": "fixture-concept-embedder-4",
+        "state": "used"
+      }
+    },
+    "restored_replay_identical": true,
+    "rollback_rehearsal": {
+      "capture_during_rollback": {
+        "durable_through": 12,
+        "state": "committed"
+      },
+      "next_generation_answer": {
+        "mode": "hybrid",
+        "vector": {
+          "index_generation": "fixture-search-v2",
+          "model": "fixture-concept-embedder-next-4",
+          "state": "used"
+        }
+      },
+      "next_model_after_rollback": {
+        "mode": "lexical_only",
+        "vector": {
+          "reason": "model_mismatch",
+          "state": "unavailable"
+        }
+      },
+      "rolled_back_to": {
+        "index_generation": "fixture-search-v1",
+        "revision": 3,
+        "revision_returned": 3
+      },
+      "routed_back_answer": {
+        "mode": "hybrid",
+        "vector": {
+          "index_generation": "fixture-search-v1",
+          "model": "fixture-concept-embedder-4",
+          "state": "used"
+        }
+      },
+      "routed_back_matches_first_generation": true,
+      "stale_rollback_refused": {
+        "detail": "the index cutover revision is stale; nothing changed",
+        "error": "Conflict"
+      }
+    },
+    "semantic_hits_missing_during_outage": [
+      "lock:1:turn"
+    ],
+    "session_search_relevance": {
+      "outage": {
+        "recall": 0.0,
+        "reciprocal_rank": 0.0
+      },
+      "restored": {
+        "recall": 1.0,
+        "reciprocal_rank": 0.333333
+      }
+    },
+    "session_search_scope_rejections": 0
+  },
+  "state": "passed"
+}

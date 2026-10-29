@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 MODULES = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "static" / "js"
 SHELL = MODULES.parents[1] / "shell.html"
 PAGE_URL = "http://127.0.0.1:9/ledger"
+NAVIGATION_MS = 15000
 ORDER = (
     "config",
     "dom",
@@ -32,6 +33,7 @@ ORDER = (
 )
 ORDER += (
     "outline",
+    "walk",
     "folds",
     "layout",
     "chat",
@@ -39,6 +41,8 @@ ORDER += (
     "roles",
     "agent_cells",
     "swarm",
+    "recovery",
+    "context",
     "hives",
     "architecture",
     "controls",
@@ -50,8 +54,11 @@ ORDER += (
 def serve_modules(target, ledger=None, swarm=None):
     """Answer every /static/<version>/ asset the shells load, and with a ledger the event stream that carries it."""
     if ledger is not None:
+        snapshot_body(ledger, swarm)
         target.route(lambda url: is_events(url), lambda route: fulfill_events(route, ledger, swarm))
     from scripts.swarm_ledger import ledger_core
+
+    ledger_core.static_assets()
 
     def answer(route):
         name = urlsplit(route.request.url).path.split("/", 3)[3]
@@ -61,7 +68,11 @@ def serve_modules(target, ledger=None, swarm=None):
         ctype = "text/css" if path.suffix == ".css" else "text/javascript"
         return route.fulfill(body=path.read_text(encoding="utf-8"), content_type=f"{ctype}; charset=utf-8")
 
+    from scripts.swarm_ledger import page_tips
+
+    tips = page_tips.values()
     target.route("**/static/*/**", answer)
+    target.route("**/api/v1/tips", lambda route: route.fulfill(json={"data": tips}))
 
 
 def shell_html(title="Ledger"):
@@ -81,10 +92,16 @@ def snapshot_body(ledger=None, swarm=None):
 def served_ledger(ledger):
     if not isinstance(ledger, dict):
         return ledger
+    from scripts.swarm import phase_state
     from scripts.swarm_ledger import ledger_server
 
     meta = {"limits": ledger_server.PAGE_LIMITS, **ledger.get("_meta", {})}
-    return {"marks": {"frozen": [], "held": []}, **ledger, "_meta": meta}
+    closed = ledger.get("_meta", {}).get("closed", {})
+    hidden = [{"id": pid, "done": True} for pid in closed.get("phases", {}).get("ids", [])]
+    plans = [{"phase": pid, "kind": "plan", "state": "done"} for pid in closed.get("tasks", {}).get("plan_phases", [])]
+    full = {**ledger, "phases": [*ledger.get("phases", []), *hidden], "tasks": [*ledger.get("tasks", []), *plans]}
+    status = {key: item for key, item in phase_state.status(full).items() if key not in {p["id"] for p in hidden}}
+    return {"marks": {"frozen": [], "held": []}, "phase_status": status, **ledger, "_meta": meta}
 
 
 def is_events(url):
@@ -100,7 +117,7 @@ def fulfill_events(route, ledger=None, swarm=None):
 def show(tab, html, url=PAGE_URL, ledger=None, swarm=None):
     tab.route(url, lambda route: route.fulfill(body=html, content_type="text/html; charset=utf-8"))
     serve_modules(tab, ledger, swarm)
-    tab.goto(url)
+    tab.goto(url, timeout=NAVIGATION_MS)
     if ledger is not None:
         loaded(tab)
 
@@ -124,8 +141,7 @@ def reload_after_folds(tab, selector):
     state = tab.locator(selector).evaluate_all(
         """boxes => boxes.map(box => ({
           id: box.id,
-          key: box.dataset.key || (box.matches(".plan-fold,.phase-fold")
-            ? box.closest("[id^=item-]").id.slice(5).replace("-", "/") + "/row" : null),
+          key: box.dataset.key || null,
           open: box.open
         }))"""
     )
@@ -147,7 +163,7 @@ def reload_after_folds(tab, selector):
         }""",
         arg={"boxes": state, "keys": keys},
     )
-    tab.reload()
+    tab.reload(timeout=NAVIGATION_MS)
     loaded(tab)
 
 
@@ -182,10 +198,15 @@ def page_source():
     return page
 
 
+class JoinedServer(ThreadingHTTPServer):
+    # Non daemon request threads are joined by server_close, so none outlives its test and imports a module mid flight.
+    daemon_threads = False
+
+
 @contextlib.contextmanager
 def served(server):
     """A live ledger server thread on a spare port, answering for the module the test patched."""
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd = JoinedServer(("127.0.0.1", 0), server.Handler)
     host = f"127.0.0.1:{httpd.server_port}"
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     with patch.object(server, "ALLOWED_HOSTS", {host}), patch.object(server, "ALLOWED_ORIGINS", {f"http://{host}"}):

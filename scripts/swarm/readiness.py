@@ -1,4 +1,7 @@
-"""Which tasks a lane may claim, offered to the lane's work queue once per claim generation."""
+"""Which tasks a lane may claim, offered to the lane's work queue on every hub pass.
+
+An offer's id carries the task's claim generation, so the bus drops a repeat only inside its dedupe window.
+"""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -7,9 +10,9 @@ from scripts.events import subjects
 from scripts.events.bus import Bus, Delivery, WorkQueue
 from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
-from scripts.swarm import apply_wait, claim_hold, freeze, release_wait
+from scripts.swarm import apply_wait, claim_hold, fleet_red, freeze, release_wait
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.store import RedisStore, connect
+from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmError, connect
 from scripts.swarm_ledger.repository import hierarchy
 
 AUTHOR = "readiness"
@@ -26,23 +29,41 @@ class Snapshot:
     admits: Callable[[dict], bool]
 
 
+def _on_events(store: RedisStore, slug: str) -> bool:
+    try:
+        return store.config(slug).engine == EVENTS_ENGINE
+    except SwarmError:
+        return False
+
+
 class Source:
     def __init__(self, store: RedisStore | None = None, ledger: LedgerClient | None = None):
         self._store = store
         self._ledger = ledger or LedgerClient(service=True)
+        self._exported: dict[str, tuple[int, dict]] = {}
 
     def slugs(self) -> list[str]:
         self._store = self._store or connect()
-        return self._store.slugs()
+        found = [slug for slug in self._store.slugs() if _on_events(self._store, slug)]
+        self._exported = {slug: kept for slug, kept in self._exported.items() if slug in found}
+        return found
+
+    def state(self, slug: str) -> dict:
+        rev = self._ledger.metadata(slug)["_meta"]["rev"]
+        kept = self._exported.get(slug)
+        if kept is None or kept[0] != rev:
+            kept = self._exported[slug] = (rev, self._ledger.state(slug))
+        return kept[1]
 
     def snapshot(self, slug: str) -> Snapshot:
         self._store = self._store or connect()
         config = self._store.config(slug)
-        doc = self._ledger.state(slug)
+        doc = self.state(slug)
         rows = {task["id"]: task for task in doc["tasks"]}
         owned = {agent.task for agent in self._store.agents(slug) if agent.state != "finished"}
         released = release_wait.checker(config.repo)
         applied = apply_wait.checker(config, rows)
+        unshared = fleet_red.checker()
         return Snapshot(
             slug,
             rows,
@@ -50,7 +71,7 @@ class Source:
             hierarchy.project(doc)[0],
             freeze.fix_phase(config),
             lambda task_id: task_id in owned or self._store.claimant(slug, task_id) is not None,
-            lambda task: config.state == "running" and released(task) and applied(task),
+            lambda task: config.state == "running" and released(task) and applied(task) and unshared(task),
         )
 
 
@@ -131,10 +152,11 @@ def withdrawal(event: Envelope, view: Snapshot) -> str:
     return "" if view.admits(task) else "a release or apply wait holds it"
 
 
-def take(queue: WorkQueue, view: Snapshot | Callable[[], Snapshot], timeout_ms: int) -> Delivery | None:
+def take(queue: WorkQueue, view: Snapshot | Callable[[], Snapshot | None], timeout_ms: int) -> Delivery | None:
+    """A view that yields no snapshot leaves the recheck to the hub, which admits the offer."""
     while (delivery := queue.take(timeout_ms)) is not None:
         current = view() if callable(view) else view
-        if not withdrawal(delivery.event, current):
+        if current is None or not withdrawal(delivery.event, current):
             return delivery
         delivery.term()
     return None

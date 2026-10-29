@@ -520,6 +520,7 @@ def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue(
         "head": "abc",
         "queued": False,
         "entry": None,
+        "merge_commit": None,
     }
     assert len(calls) == 6
     assert "mergePullRequest(input:" in calls[4][4]
@@ -721,6 +722,22 @@ def test_queue_reports_rest_transport_failure(error):
     assert str(exc.value) == f"GitHub API: {error}"
 
 
+def test_a_job_log_read_allows_escape_sequences_and_returns_text():
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        log = command[2].endswith("/logs")
+        return subprocess.CompletedProcess(command, 0, "\x1b[31mFAILED\x1b[0m\n" if log else "{}", "")
+
+    assert merge_queue.rest("repos/o/r/actions/jobs/5/logs", run) == "\x1b[31mFAILED\x1b[0m\n"
+    assert merge_queue.rest("repos/o/r/actions/runs/5", run) == {}
+    assert calls == [
+        ["gh", "api", "repos/o/r/actions/jobs/5/logs", "--allow-escape-sequences"],
+        ["gh", "api", "repos/o/r/actions/runs/5"],
+    ]
+
+
 def test_dequeue_removes_the_pull_request_then_reports_its_state():
     run, calls = runner(
         {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
@@ -762,12 +779,12 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
     seen = []
 
     def operate(verb, url, **kwargs):
-        seen.append((verb, url, kwargs["journal"].url))
+        seen.append((verb, url, kwargs["journal"].url, kwargs.get("attempts")))
         return {"queued": True}
 
     monkeypatch.setattr(merge_queue, "operate", operate)
     assert cli.main(["sw", "merge", action, URL]) == 0
-    assert seen == [(action, URL, URL)]
+    assert seen == [(action, URL, URL, 40 if action == "queue" else None)]
     assert capsys.readouterr().out == '{"queued": true}\n'
 
 
@@ -919,7 +936,7 @@ def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys,
     queued, events = [], []
     monkeypatch.setattr(intent.log, "append", lambda slug, row, home=None: events.append((slug, row, home)))
 
-    def operate(action, url, admit, journal):
+    def operate(action, url, admit, journal, attempts):
         assert journal.url == URL
         admit("abc")
         queued.append(url)

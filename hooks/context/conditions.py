@@ -113,18 +113,23 @@ def repo_root(cwd: str | Path | None) -> Path | None:
 def layer_dirs(state: dict, cwd: str | Path | None = None) -> tuple[list[tuple[str, Path]], list[Path]]:
     """Condition dirs in layer order, plus every profile-dir candidate probed to find them."""
     bundle = profile_chain.bundle_path(state)
+    user = profile_chain.user_bundle_path(state)
     profile_csv = profile_chain.active_profile(state)
     linked = profile_chain.linked_profiles(state)
     layers: list[tuple[str, Path]] = [("package", profile_chain.BUILT_IN_PROFILES / "package" / "conditions")]
     if bundle is not None:
         layers.append(("bundle", bundle / ".claude" / "conditions"))
-    for name, profile_dir in profile_chain.profile_dirs(bundle, profile_csv, linked):
+    if user is not None:
+        layers.append(("user-bundle", user / ".claude" / "conditions"))
+    for name, profile_dir in profile_chain.profile_dirs(bundle, profile_csv, linked, user):
         layers.append((f"profile:{name}", profile_dir / ".claude" / "conditions"))
     layers.append(("runtime", runtime_dir()))
     root = repo_root(cwd)
     if root is not None:
         layers.append(("directory", root / ".agentihooks" / "conditions"))
-    probed = [path for _, paths in profile_chain.profile_candidates(bundle, profile_csv, linked) for path in paths]
+    probed = [
+        path for _, paths in profile_chain.profile_candidates(bundle, profile_csv, linked, user) for path in paths
+    ]
     return layers, probed
 
 
@@ -137,13 +142,38 @@ def _remote_owner(repo: Path) -> str | None:
             text=True,
             timeout=3,
         )
+        if out.returncode not in (0, 1):
+            return None
+        url = out.stdout.strip()
+    except FileNotFoundError:
+        url = _config_origin(repo)
     except (OSError, subprocess.TimeoutExpired):
         return None
-    url = out.stdout.strip()
+    if url is None:
+        return None
     if not url:
         return ""
     match = re.search(r"[:/]([^/:]+)/[^/]+?/?$", url)
     return match.group(1).lower() if match else None
+
+
+def _config_origin(repo: Path) -> str | None:
+    """Origin url read from the repo's own git config, for hosts that have no git binary."""
+    marker = repo / ".git"
+    try:
+        gitdir = marker if marker.is_dir() else repo / marker.read_text().removeprefix("gitdir:").strip()
+        if (gitdir / "commondir").is_file():
+            gitdir = gitdir / (gitdir / "commondir").read_text().strip()
+        lines = (gitdir / "config").read_text().splitlines()
+    except (OSError, ValueError):
+        return None
+    section = url = ""
+    for line in map(str.strip, lines):
+        if line.startswith("["):
+            section = line
+        elif section == '[remote "origin"]' and line.partition("=")[0].strip() == "url":
+            url = line.partition("=")[2].strip()
+    return url
 
 
 def directory_trust(repo: Path, state: dict) -> tuple[bool, str]:
@@ -156,8 +186,10 @@ def directory_trust(repo: Path, state: dict) -> tuple[bool, str]:
     bundle = profile_chain.bundle_path(state)
     if bundle is not None:
         bundle_owner = _remote_owner(bundle)
-        if bundle_owner:
-            owners.add(bundle_owner)
+    else:
+        bundle_owner = (state.get("bundle") or {}).get("owner")
+    if bundle_owner:
+        owners.add(bundle_owner.lower())
     owner = _remote_owner(repo)
     if owner == "":
         return True, ""
@@ -343,6 +375,10 @@ def _kill_group(proc: subprocess.Popen) -> None:
         pass
 
 
+def _is_filter(entry: dict) -> bool:
+    return entry["file"].lower().endswith(FILTER_SUFFIX)
+
+
 def _run_filter(entry: dict, step: str, payload: dict, timeout: float) -> dict:
     from hooks.filters import runner
 
@@ -362,7 +398,7 @@ def _run_filter(entry: dict, step: str, payload: dict, timeout: float) -> dict:
 
 def execute(entry: dict, step: str, payload: dict, timeout: float) -> dict:
     """Run one condition; never raises."""
-    if entry["file"].lower().endswith(FILTER_SUFFIX):
+    if _is_filter(entry):
         return _run_filter(entry, step, payload, timeout)
     cmd = _command(entry)
     if cmd is None:
@@ -410,6 +446,31 @@ def _run_all(entries: list[dict], step: str, payload: dict) -> list[dict]:
 
     with ThreadPoolExecutor(max_workers=min(CONDITIONS_MAX_PARALLEL, len(entries))) as pool:
         return list(pool.map(lambda entry: execute(entry, step, payload, CONDITIONS_TIMEOUT_SEC), entries))
+
+
+def _run_chained(entries: list[dict], step: str, payload: dict) -> list[dict]:
+    from hooks.config import CONDITIONS_TIMEOUT_SEC
+
+    runs, patch = [], {}
+    for entry in entries:
+        current = {**payload, "tool_input": {**payload["tool_input"], **patch}} if patch else payload
+        run = execute(entry, step, current, CONDITIONS_TIMEOUT_SEC)
+        rewritten = _parse_stdout(run["stdout"]).get("tool_input") if run.get("returncode") == 0 else None
+        if isinstance(rewritten, dict):
+            patch.update(rewritten)
+        runs.append(run)
+    return runs
+
+
+def _run_synchronous(entries: list[dict], step: str, payload: dict) -> list[dict]:
+    chained = [entry for entry in entries if step == "pre" and _is_filter(entry)]
+    if len(chained) < 2:
+        return _run_all(entries, step, payload)
+    rest = [entry for entry in entries if not _is_filter(entry)]
+    runs = dict(zip(map(id, chained), _run_chained(chained, step, payload)))
+    if rest:
+        runs.update(zip(map(id, rest), _run_all(rest, step, payload)))
+    return [runs[id(entry)] for entry in entries]
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +597,7 @@ def run_step(step: str, payload: dict) -> StepResult | None:
     synchronous = [entry for entry in entries if not entry["async"]]
     if not synchronous:
         return None
-    return merge(step, payload, list(zip(synchronous, _run_all(synchronous, step, payload))))
+    return merge(step, payload, list(zip(synchronous, _run_synchronous(synchronous, step, payload))))
 
 
 # ---------------------------------------------------------------------------
@@ -954,7 +1015,7 @@ _LANGUAGES = {
     "python": (".py", "#!/usr/bin/env python3\n", 0o755),
     "filter": (FILTER_SUFFIX, "", 0o644),
 }
-_SCOPES = ("global", "profile", "directory")
+_SCOPES = ("global", "user", "profile", "directory")
 
 
 def _check_filter(script: str, run_async: bool) -> None:
@@ -1027,9 +1088,17 @@ def target_dir(scope: str, profile: str = "", cwd: str | Path | None = None) -> 
     if scope == "global":
         bundle = profile_chain.bundle_path(state)
         return ("bundle", bundle / ".claude" / "conditions") if bundle else ("runtime", runtime_dir())
+    if scope == "user":
+        user = profile_chain.user_bundle_path(state)
+        if user is None:
+            raise ConditionError("scope 'user' needs a linked user bundle")
+        return "user-bundle", user / ".claude" / "conditions"
     if scope == "profile":
         chain = profile_chain.profile_dirs(
-            profile_chain.bundle_path(state), profile_chain.active_profile(state), profile_chain.linked_profiles(state)
+            profile_chain.bundle_path(state),
+            profile_chain.active_profile(state),
+            profile_chain.linked_profiles(state),
+            profile_chain.user_bundle_path(state),
         )
         if not chain:
             raise ConditionError("no active profile chain")

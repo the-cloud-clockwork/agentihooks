@@ -1,0 +1,134 @@
+{{- $workers := .Values.workers }}
+{{- if and $workers.rollout.enabled (or (gt (int $workers.replicas) 0) (gt (len $workers.hives) 0)) }}
+{{- $name := printf "%s-rollout" (include "swarm.fullname" .) }}
+{{- $namespace := required "workers.rollout.namespace is required" $workers.rollout.namespace }}
+{{- $lease := required "workers.rollout.leaseName is required" $workers.rollout.leaseName }}
+{{- $deployments := list }}
+{{- if gt (int $workers.replicas) 0 }}
+{{- $deployments = append $deployments (printf "%s-worker-hive" (include "swarm.fullname" .)) }}
+{{- end }}
+{{- range $workers.hives }}
+{{- $deployments = append $deployments (printf "%s-worker-hive-%s" (include "swarm.fullname" $) .name) }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "-3"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ printf "%s-%s-lease" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $namespace }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "-3"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [{{ $lease | quote }}]
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-%s-lease" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $namespace }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "-2"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ printf "%s-%s-lease" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "-3"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: {{ $deployments | toJson }}
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "-2"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- range $phase, $action := dict "PreSync" "acquire" "PostSync" "release" }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-{{ $action }}
+  annotations:
+    argocd.argoproj.io/hook: {{ $phase }}
+    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  activeDeadlineSeconds: 1900
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: true
+      {{- include "swarm.podSecurityContext" $ | nindent 6 }}
+      containers:
+        - name: rollout
+          image: {{ include "swarm.image" (dict "Values" (dict "image" $workers.image)) }}
+          imagePullPolicy: {{ $workers.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" $ | nindent 10 }}
+          command:
+            - python3
+            - -m
+            - scripts.hive.rollout
+            - {{ $action }}
+            - --namespace
+            - {{ $namespace | quote }}
+            - --name
+            - {{ $lease | quote }}
+            - --owner
+            - {{ printf "%s/%s" $.Release.Namespace $.Release.Name | quote }}
+            - --hive-namespace
+            - {{ $.Release.Namespace | quote }}
+            - --deployment
+            - {{ join "," $deployments | quote }}
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+{{- end }}
+{{- end }}

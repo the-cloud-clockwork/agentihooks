@@ -1,0 +1,66 @@
+{
+  "grant": {
+    "principal": "tools-fixture",
+    "corpus": "swarm-fixture",
+    "projects": ["github.com/the-cloud-clockwork/agentihooks", "github.com/the-cloud-clockwork/agentibrain-kernel"]
+  },
+  "narrow_grant": {
+    "principal": "tools-fixture-narrow",
+    "projects": ["github.com/the-cloud-clockwork/agentibrain-kernel"]
+  },
+  "project": "github.com/the-cloud-clockwork/agentihooks",
+  "foreign_corpus": "personal-corpus",
+  "provider": "claude",
+  "retention": "retain-until-deleted",
+  "policies": {"current": {"version": "turn-v1", "max_chars": 2000}},
+  "limits": {"batch_size": 4, "batch_chars": 8000, "max_batches": 8},
+  "clock": {"now": 5000.0, "later": 5600.0, "expired": 5901.0},
+  "queries": {"hit": "\"database is locked\"", "readme": "readme headings"},
+  "sessions": [
+    {
+      "name": "lock",
+      "session_uid": "swarm-fixture:claude:worker-a:tools-lock",
+      "source_generation": "device-3:inode-51:anchor-0",
+      "origin": "worker-a:projects/agentihooks/tools-lock.jsonl",
+      "project": "github.com/the-cloud-clockwork/agentihooks",
+      "turns": [
+        [
+          {"kind": "user_text", "text": "the ingest batch failed with sqlite3.OperationalError: database is locked", "timestamp": "2026-10-20T09:00:00Z", "task_id": "fixture-lock"},
+          {"kind": "tool_call", "tool_name": "Bash", "tool_input": {"command": "pytest tests/test_memory_catalog.py"}, "tool_use_id": "toolu_tools_run", "timestamp": "2026-10-20T09:00:05Z", "task_id": "fixture-lock"},
+          {"kind": "tool_result", "tool_result": "sqlite3.OperationalError: database is locked", "tool_use_id": "toolu_tools_run", "is_error": true, "timestamp": "2026-10-20T09:00:09Z", "task_id": "fixture-lock"},
+          {"kind": "assistant_text", "text": "Two writers raced on the catalog file.", "timestamp": "2026-10-20T09:00:12Z", "task_id": "fixture-lock"}
+        ],
+        [
+          {"kind": "user_text", "text": "fix the concurrent writers", "timestamp": "2026-10-20T09:05:00Z", "task_id": "fixture-lock"},
+          {"kind": "assistant_text", "text": "Set PRAGMA busy_timeout=5000 in Catalog.__init__ so a second writer waits.", "timestamp": "2026-10-20T09:05:30Z", "task_id": "fixture-lock"}
+        ]
+      ]
+    },
+    {
+      "name": "readme",
+      "session_uid": "swarm-fixture:codex:worker-b:tools-readme",
+      "source_generation": "device-4:inode-52:anchor-0",
+      "origin": "worker-b:projects/agentihooks/tools-readme.jsonl",
+      "project": "github.com/the-cloud-clockwork/agentihooks",
+      "turns": [
+        [
+          {"kind": "user_text", "text": "format the readme headings", "timestamp": "2026-10-21T10:00:00Z", "task_id": "fixture-readme"},
+          {"kind": "assistant_text", "text": "Formatted the readme headings.", "timestamp": "2026-10-21T10:00:20Z", "task_id": "fixture-readme"}
+        ]
+      ]
+    },
+    {
+      "name": "kernel",
+      "session_uid": "swarm-fixture:claude:worker-c:tools-kernel",
+      "source_generation": "device-5:inode-53:anchor-0",
+      "origin": "worker-c:projects/agentibrain-kernel/tools-kernel.jsonl",
+      "project": "github.com/the-cloud-clockwork/agentibrain-kernel",
+      "turns": [
+        [
+          {"kind": "user_text", "text": "the kernel feed is empty"},
+          {"kind": "assistant_text", "text": "The brain tick had not run yet."}
+        ]
+      ]
+    }
+  ]
+}

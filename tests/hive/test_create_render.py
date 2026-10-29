@@ -17,12 +17,6 @@ port: ${ssh_port}
 node: ${node}
 ip: ${lan_ip}
 """
-NFS = """      - name: homes
-        env:
-        - name: HIVES
-          value: agentihooks-hive agentihooks-hive-anton-2
-        command:
-"""
 
 
 def test_render_splits_the_template_into_its_named_files_with_every_placeholder_filled():
@@ -47,22 +41,6 @@ def test_render_splits_the_template_into_its_named_files_with_every_placeholder_
 def test_render_refuses_a_template_it_cannot_fill_or_split(template, reason):
     with pytest.raises(auth.HiveError, match=reason):
         create_render.render(template, HIVE)
-
-
-def test_with_home_appends_the_hive_to_the_nfs_home_list():
-    assert create_render.with_home(NFS, HIVE.name) == NFS.replace(
-        "agentihooks-hive-anton-2\n", "agentihooks-hive-anton-2 swarm-hive-1800000000\n"
-    )
-
-
-def test_with_home_keeps_a_list_that_already_holds_the_hive():
-    once = create_render.with_home(NFS, HIVE.name)
-    assert create_render.with_home(once, HIVE.name) == once
-
-
-def test_with_home_refuses_a_manifest_without_the_list():
-    with pytest.raises(auth.HiveError, match="has no HIVES list"):
-        create_render.with_home("kind: Deployment\n", HIVE.name)
 
 
 def _service(ip, *ports):
@@ -106,3 +84,13 @@ def test_no_single_shared_lan_address_is_a_refusal(services, named):
     with pytest.raises(auth.HiveError) as refused:
         create_render.lan_address(services)
     assert str(refused.value) == f"the agentihooks-swarm LAN services name {named}; expected one"
+
+
+def test_paths_names_every_file_of_one_hive():
+    template = f"{TEMPLATE}#@ file: k8s/manifests/${{name}}/home.yaml  \n#@ file: k8s/${{other}}/${{name}}.yaml\n"
+    assert create_render.paths(template, "swarm-hive-004") == {
+        "k8s/argocd/apps/swarm-hive-004.yaml",
+        "k8s/manifests/swarm-hive-004/hive.yaml",
+        "k8s/manifests/swarm-hive-004/home.yaml",
+        "k8s/${other}/swarm-hive-004.yaml",
+    }

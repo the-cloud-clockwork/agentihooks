@@ -66,15 +66,19 @@ class ClosedAfterTheTickRead(FakeLedger):
 
 def test_the_exit_sweep_settles_from_the_live_task_state_not_the_tick_snapshot(redis):
     store, inbox = RedisStore(redis), InboxStore(redis)
-    store.create(SwarmConfig("sw", "/repo", 0, 0))
-    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
-    item = inbox.send("sender", "sw-eng-1", "contract")
-    ledger = ClosedAfterTheTickRead([{"id": "t1", "state": "pr", "claimed_by": "sw-eng-1"}])
-    tick("sw", store, ledger, FakeRuntime(), 1_000)
-    assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("sw-eng-1", "cancelled")
-    assert inbox.mailbox("eng-1@sw") == []
-    [notice] = inbox.pending_items("sender")
-    assert item.id in notice.text
+    for _ in range(2):
+        try:
+            store.create(SwarmConfig("sw", "/repo", 0, 0))
+            store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+            item = inbox.send("sender", "sw-eng-1", "contract")
+            ledger = ClosedAfterTheTickRead([{"id": "t1", "state": "pr", "claimed_by": "sw-eng-1"}])
+            tick("sw", store, ledger, FakeRuntime(), 1_000)
+            assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("sw-eng-1", "cancelled")
+            assert inbox.mailbox("eng-1@sw") == []
+            [notice] = inbox.pending_items("sender")
+            assert item.id in notice.text
+        finally:
+            redis.flushdb()
 
 
 def test_a_live_closed_task_withdraws_late_mail_even_after_an_exit_to_the_seat_was_recorded(redis):
@@ -334,7 +338,6 @@ def test_the_sweep_settles_departed_peer_task_mail_after_seat_reassignment(redis
         "unknown sender",
         "master sender",
         "information",
-        "unreceived",
         "unknown task",
         "empty seat",
         "closed",
@@ -437,7 +440,7 @@ def test_the_sweep_continues_past_retained_mail_and_finished_or_unseated_agents(
     store.seats.occupy("eng-1@sw", "sw-eng-2", read.created_at + 1)
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(general.id).state == "pending"
-    assert inbox.get(unreceived.id).state == "pending"
+    assert inbox.get(unreceived.id).state == "cancelled"
     assert inbox.get(read.id).state == "cancelled"
     assert inbox.get(read.id).reason == "cancelled: sw-eng-1 left its seat and task t1 before closing it"
 
@@ -532,7 +535,7 @@ def test_unreceived_task_mail_is_not_cancelled_as_a_new_occupant_receives_it(red
 
     monkeypatch.setattr(inbox, "withdraw", receive_then_withdraw)
     exits.sweep(inbox, "sw", store, dict)
-    assert inbox.get(item.id).state == "pending"
+    assert inbox.get(item.id).state == "read"
     assert inbox.inbox("sw-eng-3") == []
 
 

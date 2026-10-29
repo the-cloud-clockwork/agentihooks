@@ -173,16 +173,30 @@ def wait(report: Path, timeout: float) -> dict:
 
 def fields(data: dict, profile: str, target: str) -> dict:
     result = json.loads(data.get("profile_binding", "{}"))
-    if (
-        not isinstance(result, dict)
-        or data.get("profile_validation") != "validated"
-        or result.get("state") != "validated"
-    ):
+    if not isinstance(result, dict) or data.get("profile_validation") != "validated":
+        raise ValueError("mounted profile validation is missing or failed")
+    return checked(result, profile, target)
+
+
+def checked(result: dict, profile: str, target: str) -> dict:
+    if result.get("state") != "validated":
         raise ValueError("mounted profile validation is missing or failed")
     if result.get("profile") != profile or result.get("harness") != target:
         raise ValueError("validated live profile differs from requested choice")
     if not all(result.get(key) for key in ("pid", "home", "persona", "sources")):
         raise ValueError("validated profile lacks process or rendered source evidence")
+    return result
+
+
+def confirm(report: Path, profile: str, target: str, account: str) -> dict:
+    data = json.loads(report.read_text())
+    if data["state"] == "failed":
+        raise ValueError(data["reason"])
+    if data["state"] != "validated":
+        return {}
+    result = checked(data["validation"], profile, target)
+    if account and result.get("account") != account:
+        raise ValueError("live process account differs from requested route")
     return result
 
 

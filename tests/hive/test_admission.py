@@ -72,6 +72,18 @@ def test_a_machine_without_cpu_or_load_refuses_on_missing_telemetry(measured):
     assert admission.refusal(found) == "missing telemetry: no fresh headroom reading"
 
 
+def test_a_hive_below_its_worktree_floor_refuses_on_disk():
+    found = admission.room(reading(disk_free_gb=9, disk_floor_gb=50), 0, 0, 6)
+    assert found == admission.Room(0, admission.DISK, "9 GB free on the agent home, below the 50 GB worktree floor")
+    assert admission.refusal(found) == "disk: 9 GB free on the agent home, below the 50 GB worktree floor"
+    assert admission.category(f"no hive for eng has room: anton {admission.refusal(found)}") == admission.DISK
+
+
+def test_a_hive_at_its_worktree_floor_or_without_a_disk_reading_keeps_its_room():
+    assert admission.room(reading(disk_free_gb=50, disk_floor_gb=50)) == admission.room(reading())
+    assert admission.room(reading(disk_free_gb=9)).room == admission.room(reading(disk_floor_gb=50)).room == 25
+
+
 def test_a_reading_from_a_hive_not_yet_republishing_total_mb_is_read_on_cpu_alone():
     found = admission.room({"cpus": 4, "load5": 0.0, "available_mb": 1000})
     assert (found.room, found.reason) == (6, admission.CPU)
@@ -109,6 +121,39 @@ def test_the_workstation_host_line_wins_when_it_is_tighter_than_the_swarm_share(
 
 def test_the_workstation_swarm_share_never_goes_negative():
     assert admission.room(reading(cpus=16), swarm_agents=40).room == 0
+
+
+def test_the_swarm_share_never_binds_below_the_hive_max_agents_on_a_quiet_host():
+    found = admission.room(reading(cpus=16, load5=4.32), swarm_agents=12, max_agents=20)
+    assert found == admission.Room(
+        16,
+        admission.CPU,
+        "five minute load 4.32 on 16 CPUs, 0.5 CPU per agent, fits 16 more under the 80 percent line",
+    )
+
+
+def test_the_swarm_share_still_binds_when_it_equals_the_hive_slots_left():
+    found = admission.room(reading(cpus=16), swarm_agents=10, max_agents=12)
+    assert found == admission.Room(
+        2,
+        admission.CPU,
+        "10 swarm agents at 0.5 CPU each on 16 CPUs, fits 2 more under the 40 percent swarm share",
+    )
+
+
+def test_the_host_cpu_line_still_binds_under_the_hive_max_agents():
+    found = admission.room(reading(cpus=16, load5=12.0), swarm_agents=12, max_agents=20)
+    assert (found.room, found.reason) == (1, admission.CPU)
+    assert found.detail == "five minute load 12.00 on 16 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line"
+
+
+def test_the_host_ram_line_still_binds_under_the_hive_max_agents():
+    found = admission.room(reading(cpus=64, available_mb=13 * GB, total_mb=64 * GB), swarm_agents=12, max_agents=20)
+    assert found == admission.Room(
+        0,
+        admission.RAM,
+        "13312 of 65536 MB available, 700 MB per agent, fits 0 more under the 80 percent line",
+    )
 
 
 def test_pending_reservations_use_up_the_room():
@@ -203,7 +248,16 @@ def test_status_counts_refusals_by_reason_in_a_fixed_order():
     }
     assert admission.status_lines(waits) == ["admission refusals  cpu 2  ram 1  quota 1"]
     assert admission.status_lines({}) == []
-    assert admission.REASONS == ("cpu", "ram", "quota", "placement", "node cap", "max agents", "missing telemetry")
+    assert admission.REASONS == (
+        "cpu",
+        "ram",
+        "disk",
+        "quota",
+        "placement",
+        "node cap",
+        "max agents",
+        "missing telemetry",
+    )
 
 
 def test_status_report_carries_refusal_counts_for_the_ledger_page(env):
@@ -363,3 +417,139 @@ def test_the_max_agents_cap_binds_only_when_tighter_than_the_headroom():
 def test_a_max_agents_refusal_falls_in_its_own_reason():
     assert admission.category("no hive for eng has room: remote max agents: 3 of 3 agents") == admission.MAX_AGENTS
     assert admission.MAX_AGENTS in admission.REASONS
+
+
+def launched_ago(redis, machine, member, ago_ms):
+    seconds, micros = redis.time()
+    now = int(seconds) * 1000 + int(micros) // 1000
+    redis.zadd(admission.key(machine), {member: now - ago_ms + admission.PENDING_MS})
+    return now
+
+
+def test_a_joined_agent_older_than_one_load_window_no_longer_uses_room_while_an_unjoined_launch_does(redis):
+    measured = reading(cpus=8, load5=3.65)
+    launched_ago(redis, "hive-two", "s/joined", admission.LOAD_WINDOW_MS + 1000)
+    launched_ago(redis, "hive-two", "s/unjoined", admission.LOAD_WINDOW_MS + 1000)
+    assert admission.room(measured, pending=admission.pending(redis, "hive-two")).room == 3
+    admission.joined(redis, "hive-two", "s/joined")
+    assert admission.pending(redis, "hive-two") == 1
+    assert admission.room(measured, pending=admission.pending(redis, "hive-two")) == admission.Room(
+        4,
+        admission.CPU,
+        "five minute load 3.65 on 8 CPUs, 0.5 CPU per agent with 1 pending launches, "
+        "fits 4 more under the 80 percent line",
+    )
+    assert admission.HOST_PERCENT == 80
+
+
+def test_a_joined_agent_still_uses_room_until_one_load_window_after_its_launch(redis):
+    now = launched_ago(redis, "anton", "s/one", 60_000)
+    admission.joined(redis, "anton", "s/one")
+    assert admission.pending(redis, "anton") == 1
+    assert redis.zscore(admission.key("anton"), "s/one") is None
+    expiry = redis.zscore(admission.key("anton"), "s/one" + admission.JOINED) - now
+    assert expiry == admission.LOAD_WINDOW_MS - 60_000
+
+
+def test_joining_twice_keeps_the_first_join_window(redis):
+    now = launched_ago(redis, "anton", "s/one", 60_000)
+    admission.joined(redis, "anton", "s/one")
+    admission.joined(redis, "anton", "s/one")
+    assert redis.zrange(admission.key("anton"), 0, -1, withscores=True) == [
+        ("s/one" + admission.JOINED, now + admission.LOAD_WINDOW_MS - 60_000)
+    ]
+
+
+def test_joining_a_launch_without_a_reservation_adds_none(redis):
+    admission.joined(redis, "anton", "s/none")
+    assert redis.exists(admission.key("anton")) == 0
+
+
+def test_a_release_frees_a_joined_reservation(redis):
+    admission.reserve(redis, "anton", "s/one", 2)
+    admission.reserve(redis, "anton", "s/two", 2)
+    admission.joined(redis, "anton", "s/one")
+    admission.release(redis, "anton", "s/one")
+    assert redis.zrange(admission.key("anton"), 0, -1) == ["s/two"]
+
+
+def test_a_new_launch_of_a_joined_name_replaces_its_joined_reservation(redis):
+    launched_ago(redis, "anton", "s/one", 60_000)
+    admission.joined(redis, "anton", "s/one")
+    assert admission.reserve(redis, "anton", "s/one", 1) == (True, 0)
+    assert redis.zrange(admission.key("anton"), 0, -1) == ["s/one"]
+    assert admission.pending(redis, "anton") == 1
+
+
+def test_the_load_window_is_five_minutes():
+    assert (admission.LOAD_WINDOW_MS, admission.JOINED) == (300_000, "#joined")
+
+
+def test_a_first_ranked_hive_ignores_cpu_load_below_the_memory_line():
+    found = admission.room(reading(cpus=16, load5=12.1, available_mb=19 * GB, total_mb=64 * GB), first=True)
+    assert found == admission.Room(
+        9,
+        admission.RAM,
+        "19456 of 65536 MB available, 71 percent used, 700 MB per agent, fits 9 more under the 80 percent line",
+    )
+
+
+def test_a_first_ranked_hive_under_the_line_takes_one_more_agent():
+    found = admission.room(reading(available_mb=2100, total_mb=10000), first=True)
+    assert (found.room, found.reason) == (1, admission.RAM)
+
+
+def test_pending_launches_hold_the_last_room_of_a_first_ranked_hive():
+    found = admission.room(reading(available_mb=2100, total_mb=10000), pending=2, first=True)
+    assert found == admission.Room(
+        0,
+        admission.RAM,
+        "2100 of 10000 MB available, 79 percent used, 700 MB per agent with 2 pending launches, "
+        "fits 0 more under the 80 percent line",
+    )
+
+
+def test_a_first_ranked_hive_refuses_at_eighty_percent_host_memory():
+    found = admission.room(reading(available_mb=2000, total_mb=10000), first=True)
+    assert admission.refusal(found) == (
+        "ram: 2000 of 10000 MB available, 80 percent used, at or above the 80 percent line"
+    )
+
+
+def test_a_first_ranked_hive_refuses_at_eighty_percent_pod_memory():
+    measured = reading(pod_available_mb=3900, pod_total_mb=19600, pod_cpus=4, pod_load=8.0)
+    found = admission.room(measured, first=True)
+    assert admission.refusal(found) == (
+        "ram: pod 3900 of 19600 MB available, 81 percent used, at or above the 80 percent line"
+    )
+
+
+def test_a_first_ranked_hive_counts_pending_launches_against_pod_memory():
+    measured = reading(pod_available_mb=5000, pod_total_mb=19600, pod_cpus=4, pod_load=8.0)
+    found = admission.room(measured, pending=7, first=True)
+    assert found == admission.Room(
+        0,
+        admission.RAM,
+        "pod 5000 of 19600 MB available, 75 percent used, 700 MB per agent with 7 pending launches, "
+        "fits 0 more under the 80 percent line",
+    )
+
+
+def test_a_first_ranked_hive_without_a_memory_reading_is_refused_as_missing_telemetry():
+    found = admission.room({"cpus": 8, "load5": 6.2}, first=True)
+    assert admission.refusal(found) == "missing telemetry: no memory reading"
+
+
+def test_a_first_ranked_hive_still_refuses_below_the_disk_floor_and_without_a_reading():
+    assert admission.room(reading(disk_free_gb=1, disk_floor_gb=50), first=True).reason == admission.DISK
+    assert admission.room(None, first=True).reason == admission.MISSING
+
+
+def test_a_first_ranked_hive_reads_pod_memory_alone_when_the_host_reading_is_partial():
+    measured = {"cpus": 4, "load5": 8.0, "available_mb": 5000, "pod_available_mb": 9000, "pod_total_mb": 19600}
+    found = admission.room(measured, first=True)
+    assert found == admission.Room(
+        7,
+        admission.RAM,
+        "pod 9000 of 19600 MB available, 55 percent used, 700 MB per agent, fits 7 more under the 80 percent line",
+    )

@@ -1,8 +1,8 @@
-import json
 import threading
 from types import SimpleNamespace
 
 from scripts.swarm_ledger.events.publishing import Publishing
+from scripts.swarm_ledger.repository.entry import Entry
 
 
 class Store:
@@ -13,7 +13,7 @@ class Store:
     def current(self, slug):
         self.calls.append(("current", slug))
         state = {"_meta": {"rev": self.generation + 1}, "read": slug}
-        return SimpleNamespace(generation=self.generation, text=json.dumps(state), state=state)
+        return Entry(self.generation, "unparsed: reads copy the cached state", state)
 
     def apply_ops(self, slug, changes=None, ops=None, gate=None):
         self.calls.append(("apply", slug, changes, ops, gate))

@@ -1,0 +1,6 @@
+{
+  "scripts/master_claude_login.py:scripts.master_claude_login.x__token_lock__mutmut_20:d27f7e74377ceeeff2f73a1996e15e0c5a0031feb0394fa6b5cebe8f5d827194": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 identify the same codec."
+  }
+}

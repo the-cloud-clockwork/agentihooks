@@ -169,6 +169,25 @@ def test_an_agent_skipped_first_does_not_hide_a_later_one(skip):
     assert [f.subject for f in found] == ["engineer@abc-0001"]
 
 
+@pytest.mark.parametrize(
+    "reserved,subjects",
+    [("held for 2 live masters", ["engineer@abc-0001"]), ("", ["director@abc-0000", "engineer@abc-0001"])],
+)
+def test_a_master_on_a_master_reserved_account_is_skipped_while_a_worker_there_still_fires(reserved, subjects):
+    store = _drain_swarm()
+    decision = json.loads(store.redis.get(store.key(SLUG, "quota-capacity")))
+    decision["accounts"][0]["reserved"] = reserved
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(decision))
+    master = AgentRecord("director@abc-0000", "master", "", harness="claude", account="alpha", state="working")
+    store.put_agent(SLUG, master)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("swarm", master.name, "QUOTA HANDOFF WARNING")
+    store.redis.hset(inbox.key("item", item.id), "created_at", 1_000_000)
+    store.redis.hset(store.key(SLUG, "quota-warnings"), master.name, item.id)
+    found = drain_watch.findings(store, SLUG, Limits(), 1_000_000 + 12 * MINUTE)
+    assert [f.subject for f in found] == subjects
+
+
 def test_the_grace_follows_its_health_setting():
     assert Limits().drain_minutes == 10
     assert limits({"AGENTIHOOKS_HEALTH_DRAIN_MINUTES": "25"}).drain_minutes == 25
@@ -193,7 +212,7 @@ def test_swarm_status_prints_the_capacity_decision_and_the_drain_finding(env, ca
     run("sw", "status")
     out = capsys.readouterr().out.splitlines()
     line = "quota account claude alpha  closed  routing 7.5% left, read 1m ago  sessions 1"
-    assert out[out.index(line) - 1] == (
+    assert out[out.index(line) - 2] == (
         "quota capacity eng 2 of 4, ci 1 of 1, plan 0 of 1, changed 12 minutes ago, because accounts are closed; "
         "Claude has 1 free seats and Codex has 0 free seats"
     )

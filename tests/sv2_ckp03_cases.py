@@ -3,13 +3,13 @@ import io
 import json
 import sqlite3
 import tarfile
-import tempfile
 from contextlib import closing
 from pathlib import Path
 
 from scripts.swarm_v2.artifacts import base, local
 from scripts.swarm_v2.auth_context import Registration
 from scripts.swarm_v2.checkpoints import model, native
+from tests.sv2_ckp02_cases import scratch
 
 ROOT = Path(__file__).parent
 TRANSCRIPT = ROOT / "fixtures" / "swarm_v2" / "checkpoints" / "context-only.json"
@@ -189,8 +189,8 @@ def _positive_fixture(root: Path) -> dict:
 
 
 def _positive() -> tuple[dict, bool]:
-    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
-        observed = {"fixture": _positive_fixture(Path(one)), "second_fixture": _positive_fixture(Path(two))}
+    with scratch() as (one, two):
+        observed = {"fixture": _positive_fixture(one), "second_fixture": _positive_fixture(two)}
     first = observed["fixture"]
     checks = [observed["fixture"] == observed["second_fixture"]]
     for harness, seen in first.items():
@@ -287,8 +287,8 @@ def _rejection_fixture(root: Path) -> dict:
 
 
 def _rejection() -> tuple[dict, bool]:
-    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
-        observed = {"fixture": _rejection_fixture(Path(one)), "second_fixture": _rejection_fixture(Path(two))}
+    with scratch() as (one, two):
+        observed = {"fixture": _rejection_fixture(one), "second_fixture": _rejection_fixture(two)}
     first = observed["fixture"]
     unavailable = [result["outcome"] == native.UNAVAILABLE for result in first["capture_attempts"].values()]
     restored = [result["outcome"] == native.UNAVAILABLE for result in first["restores"].values()]
@@ -408,8 +408,8 @@ def _recovery_fixture(root: Path) -> dict:
 
 
 def _recovery() -> tuple[dict, bool]:
-    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
-        observed = {"fixture": _recovery_fixture(Path(one)), "second_fixture": _recovery_fixture(Path(two))}
+    with scratch() as (one, two):
+        observed = {"fixture": _recovery_fixture(one), "second_fixture": _recovery_fixture(two)}
     first = observed["fixture"]
     active = first["active_database"]
     checks = [

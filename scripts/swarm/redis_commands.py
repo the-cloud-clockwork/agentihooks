@@ -24,6 +24,7 @@ class Consumer:
 CONSUMERS = {
     "controller": Consumer("controller", ("scripts.swarm.controller:main",)),
     "tick": Consumer("controller", ("scripts.swarm.scheduled_tick:main", "scripts.swarm.cli:cmd_tick")),
+    "hub": Consumer("controller", ("scripts.hub.runner:main",)),
     "ledger server": Consumer("ledger", ("scripts.swarm_ledger:run", "scripts.swarm_ledger.ledger_server:main")),
     "worker": Consumer("worker", ("scripts.swarm_v2.worker.start:main",)),
     "hooks": Consumer("worker", ("hooks.hook_manager:main",)),

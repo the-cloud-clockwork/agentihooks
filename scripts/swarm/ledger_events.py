@@ -12,12 +12,13 @@ import functools
 import json
 import re
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import merge_queue, mutation_wait, outage
+from scripts.swarm import github_reads, idle, merge_queue, mutation_wait, outage
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
@@ -128,6 +129,7 @@ def pull_request(raw):
     started = any(
         suite.get("workflowRun")
         and suite.get("status") != "COMPLETED"
+        and suite.get("conclusion") != "CANCELLED"
         and not _superseded(suite, newest)
         and (not raw.get("gated") or not required_runs or _run_key(suite) in required_runs)
         for suite in suites
@@ -321,6 +323,7 @@ def view(url, run=subprocess.run, required_checks=None):
     if mutation_wait.backing_off():
         return None
     try:
+        github_reads.charge("swarm.checks.fresh", "graphql", time.time())
         done = run(
             ["gh", "api", "graphql", "-f", f"query={PULL_QUERY.replace('$number', number)}", "-f", f"url={url}"],
             capture_output=True,
@@ -351,7 +354,12 @@ def _merged_without_rollup(result):
 def head(url, run=subprocess.run):
     try:
         owner, repo, _, number = url.split("/")[-4:]
-        return merge_queue.rest(f"repos/{owner}/{repo}/pulls/{number}", run)["head"]["sha"]
+        path = f"repos/{owner}/{repo}/pulls/{number}"
+        with github_reads.calling("swarm.head"):
+            read = github_reads.snapshot(
+                f"head {path}", time.time(), lambda: {"sha": merge_queue.rest(path, run)["head"]["sha"]}
+            )
+        return read["sha"]
     except SwarmError as error:
         return None if mutation_wait.rate_limited(str(error)) else ""
     except (ValueError, KeyError, TypeError):
@@ -408,8 +416,8 @@ def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=
         if checks is None or suites is None:
             return None
         raw["commits"] = commits
-        raw["statusCheckRollup"] = checks
-        raw["checkSuites"] = suites
+        raw["statusCheckRollup"] = [check for check in checks if check]
+        raw["checkSuites"] = [suite for suite in suites if suite]
         if required_checks is not None:
             return _required_pull_request(raw, required_checks)
         files = _gate_files(commit.get("file")) if gate_workflows is None else gate_workflows
@@ -450,7 +458,12 @@ def views(
             f"p{i}:" + selection.replace("$url", json.dumps(url)).replace("$number", _number(url))
             for i, url in enumerate(batch)
         ]
-        data = _graphql("{" + " ".join(fields) + "}", run)
+        query = "{" + " ".join(fields) + "}"
+        data = (
+            github_reads.snapshot(query, time.time(), lambda: _graphql(query, run))
+            if cache is not None
+            else _graphql(query, run)
+        )
         gates = _workflow_gates(data, run, cache)
         for i, url in enumerate(batch):
             raw = data.get(f"p{i}")
@@ -464,6 +477,7 @@ def views(
 
 
 def _graphql(query, run, **variables):
+    github_reads.charge("swarm.checks", "graphql", time.time())
     try:
         done = run(
             ["gh", "api", "graphql", "-f", f"query={query}"]
@@ -521,7 +535,9 @@ def _workflow_gates(data, run, cache):
     return gates
 
 
-def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[str], PullRequest | None]:
+def tick_view(
+    inbox: object, store: object, slug: str, doc: dict, earlier: Callable | None = None
+) -> Callable[[str], PullRequest | None]:
     from scripts.swarm import metrics_outbox, metrics_swarm
 
     urls = [
@@ -533,12 +549,14 @@ def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[s
         urls.extend(url for url, _ in metrics_swarm.pull_targets(doc, at, recent))
     notices = store.redis.hgetall(store.key(slug, "red-notices"))
     urls += [url for item_id, url in notices.items() if _open(inbox, item_id)]
-    snapshots = views(list(dict.fromkeys(urls)), cache=store.redis)
+    known = {url: pr for url, pr in getattr(earlier, "snapshots", {}).items() if pr is not None}
+    snapshots = {**known, **views([url for url in dict.fromkeys(urls) if url not in known], cache=store.redis)}
 
     @functools.cache
     def lookup(url):
         return snapshots[url] if url in snapshots else view(url)
 
+    lookup.snapshots = snapshots
     return lookup
 
 
@@ -637,10 +655,11 @@ def _settle_red_notices(mail, github):
         if not how:
             continue
         try:
-            mail.inbox.close(item_id, SENDER, "done", f"pull request {url} {how}")
+            closed = mail.inbox.settle(item_id, SENDER, "done", f"pull request {url} {how}")
         except InboxError:
             continue
-        settled.append(f"closed the red notice {item_id}: {url} {how}")
+        if closed:
+            settled.append(f"closed the red notice {item_id}: {url} {how}")
         mail.store.redis.hdel(index, item_id)
     return settled
 
@@ -798,16 +817,26 @@ def _priorities(mail, doc, raised):
         if item in seen or row.get("by") == SENDER or not _by_agent(mail, row):
             continue
         if not seeding and item not in raised:
-            text = (
-                f"New priority on ledger {mail.slug} for {item}: {row['text']}\n"
-                "Triage it: resolve it if the call is yours, else leave it for the operator."
-            )
+            from scripts.swarm_ledger import ledger_blockers
+
+            rec = ledger_blockers.record(ledger_blockers.find(doc, item))
+            step = ledger_blockers.notice(mail.slug, mail.store.config(mail.slug).autonomy, item, rec)
+            text = f"New priority on ledger {mail.slug} for {item}: {row['text']}\n{step}"
             owner = mail.owner(item)
             mail.inbox.send(SENDER, owner, text, ref=f"{mail.slug}:priority:{item}")
             sent.append(f"told {owner}: priority {item}")
         mail.store.redis.sadd(key, item)
     mail.store.redis.set(marker, 1)
     return sent
+
+
+def _merged_held(mail, task, now_ms):
+    after = (task.get("contract") or {}).get("after_at")
+    if after and int(after) > now_ms:
+        return True
+    holder = task.get("claimed_by")
+    held = idle.wait(mail.store.redis, mail.slug, holder) if holder else None
+    return bool(held and held["until"] > now_ms)
 
 
 def _pull_requests(mail, tasks, now_ms, github, ledger):
@@ -821,6 +850,8 @@ def _pull_requests(mail, tasks, now_ms, github, ledger):
             continue
         title = f"task {task['id']} ({task.get('title', 'no title')})"
         if found.state == "MERGED" and found.merged_at:
+            if _merged_held(mail, task, now_ms):
+                continue
             age = now_ms - found.merged_at
             if age >= MERGED_ENGINEER_MS:
                 text = (

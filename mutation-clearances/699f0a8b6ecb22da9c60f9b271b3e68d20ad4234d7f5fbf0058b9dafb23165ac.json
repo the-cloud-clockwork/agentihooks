@@ -1,0 +1,6 @@
+{
+  "scripts/recall/store.py:scripts.recall.store.xǁSQLiteRecallStoreǁsources__mutmut_21:c8fac457105f13efb468472734f0cf741bd2d395dfb5707f77233074574c28c2": {
+    "reader": "standards_reader",
+    "reason": "Lowercasing the second half of the aggregate query leaves the 'archived' literal intact, and the SQL is otherwise identical in meaning."
+  }
+}

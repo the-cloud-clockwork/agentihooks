@@ -532,7 +532,7 @@ def test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone
     store.count_claim("sw", "t1")
     lives = store.claims("sw", "t1")
     ledger.update_task("sw", "t1", {"state": "open", "claimed_by": ""})
-    store.refund_claim("sw", "t1")
+    store.redis.hincrby(store.key("sw", "started-lives"), "t1", -1)
 
     tick_module._drop("sw", store, ledger, rows, agent, refund=True)
 
@@ -574,6 +574,26 @@ def test_a_tick_drop_refunds_nothing_when_the_live_task_is_gone(store):
 
     assert store.claims("sw", "t1") == lives
     assert read == [("sw", "t1")]
+
+
+def test_a_tick_drop_refunds_nothing_when_the_hub_settles_after_the_live_task_read(store):
+    ledger, runtime, agent = prepared_recovery(store)
+    rows = {"t1": dict(ledger.rows["t1"])}
+    store.count_claim("sw", "t1")
+    lives = store.claims("sw", "t1")
+    read = ledger.task
+
+    def settled_after_read(slug, task_id):
+        row = dict(read(slug, task_id))
+        assert store.release(slug, task_id, agent.name)
+        ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""})
+        return row
+
+    ledger.task = settled_after_read
+
+    tick_module._drop("sw", store, ledger, rows, agent, refund=True)
+
+    assert store.claims("sw", "t1") == lives
 
 
 def test_reap_reports_every_lost_engineer_in_the_pass(store):

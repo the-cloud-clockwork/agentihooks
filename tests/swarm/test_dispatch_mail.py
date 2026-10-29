@@ -5,7 +5,7 @@ import pytest
 from scripts.inbox import cli
 from scripts.inbox.store import InboxStore
 from scripts.swarm import dispatch_seat
-from tests.swarm.test_dispatch_seat import NOW, SLUG, doc, run, seats, swarm
+from tests.swarm.test_dispatch_seat import NOW, SLUG, doc, priority, run, seats, swarm
 from tests.swarm.test_tick import FakeRuntime
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group(name="dispatch_mail")]
@@ -230,6 +230,134 @@ def test_a_failed_consumer_launch_retries_without_losing_accepted_mail(mailbox, 
     assert len(runtime.spawned) == 1
     [seat] = seats(store)
     assert inbox.deliver(sent["id"], seat.name).state == "delivered"
+
+
+@pytest.mark.parametrize("disposition", ["missing", "done", "cancel"])
+@pytest.mark.parametrize("remaining", ["none", "mail", "priority"])
+@pytest.mark.parametrize("boundary", ["capacity", "prepare"])
+def test_launch_rechecks_mail_after_capacity_checks(mailbox, monkeypatch, capsys, disposition, remaining, boundary):
+    store, inbox = mailbox
+    runtime = FakeRuntime()
+    assert cli.main(["send", f"dispatcher@{SLUG}", "Consider obsolete evidence"]) == 0
+    stale = json.loads(capsys.readouterr().out)["id"]
+    expected = []
+    if remaining == "mail":
+        assert cli.main(["send", f"dispatcher@{SLUG}", "Consider current evidence"]) == 0
+        current = json.loads(capsys.readouterr().out)["id"]
+        expected = [f"inbox:{current}"]
+
+    def settle_mail(*args):
+        if disposition == "missing":
+            store.redis.delete(inbox.key("item", stale))
+        else:
+            closer = inbox.seats.occupant(f"dispatcher@{SLUG}").occupant
+            inbox.close(stale, closer, disposition, "Evidence considered; ranking unchanged")
+        return ""
+
+    if boundary == "capacity":
+        monkeypatch.setattr(dispatch_seat.seat_spawn, "host_hold", settle_mail)
+    else:
+        from scripts.swarm import tick
+
+        primed = tick.primed
+
+        def settle_during_prepare(*args):
+            task = primed(*args)
+            settle_mail()
+            return task
+
+        monkeypatch.setattr(tick, "primed", settle_during_prepare)
+    ledger = doc() if remaining != "priority" else doc(priority("p1"))
+    if remaining == "priority":
+        expected = ["p1"]
+    actions = run(store, runtime, ledger)
+    if remaining == "none":
+        assert actions == []
+        assert runtime.spawned == []
+        assert seats(store) == []
+    else:
+        assert len(runtime.spawned) == 1, actions
+        assert [trigger["id"] for trigger in runtime.tasks[0]["triggers"]] == expected
+        assert store.redis.hkeys(store.key(SLUG, dispatch_seat.SENT)) == expected
+
+
+@pytest.mark.parametrize("change", ["closed", "withdrawn", "read", "confirmed", "redirected", "delivered"])
+@pytest.mark.parametrize("boundary", ["before", "capacity", "prepare"])
+def test_launch_needs_mail_still_waiting_for_the_dispatcher(mailbox, monkeypatch, capsys, change, boundary):
+    store, inbox = mailbox
+    runtime = FakeRuntime()
+    assert cli.main(["send", f"dispatcher@{SLUG}", "Consider evidence already taken up"]) == 0
+    item = json.loads(capsys.readouterr().out)["id"]
+
+    def settle(*args):
+        occupant = inbox.seats.occupant(f"dispatcher@{SLUG}").occupant
+        if change == "closed":
+            assert inbox.close(item, occupant, "done", "Evidence considered").state == "done"
+        elif change == "withdrawn":
+            assert inbox.withdraw(item, "swarm", "its sending master retired").state == "cancelled"
+        elif change == "read":
+            assert inbox.read(item, occupant).state == "read"
+        elif change == "redirected":
+            assert inbox.redirect(item, "swarm", "alice", "taken up by alice").address == "alice"
+        else:
+            assert inbox.deliver(item, occupant).state == "delivered"
+        if change == "confirmed":
+            assert inbox.confirm(item, occupant).state == "confirmed"
+        return ""
+
+    if boundary == "before":
+        settle()
+    elif boundary == "capacity":
+        monkeypatch.setattr(dispatch_seat.seat_spawn, "host_hold", settle)
+    else:
+        from scripts.swarm import tick
+
+        primed = tick.primed
+
+        def settle_during_prepare(*args):
+            task = primed(*args)
+            settle()
+            return task
+
+        monkeypatch.setattr(tick, "primed", settle_during_prepare)
+    launches = change == "delivered"
+    assert bool(run(store, runtime, doc())) == launches
+    assert len(runtime.spawned) == int(launches)
+    assert len(seats(store)) == int(launches)
+
+
+def test_launch_moves_dispatcher_mail_into_the_hive_its_new_occupant_runs_on(mailbox, capsys):
+    from dataclasses import replace
+
+    from scripts.hive import auth
+
+    store, inbox = mailbox
+    assert cli.main(["send", f"dispatcher@{SLUG}", "Please rank the checks fix up"]) == 0
+    item = json.loads(capsys.readouterr().out)["id"]
+    runtime = FakeRuntime()
+    spawn = runtime.spawn
+
+    def on_hive(config, lane, name, task):
+        placed = spawn(config, lane, name, task)
+        store.redis.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "m1", "ledger": "digest"})
+        store.redis.sadd(auth.INDEX, "m1")
+        record = next(agent for agent in store.agents(SLUG) if agent.name == name)
+        return replace(placed, execution=store.start_execution(SLUG, replace(record, hive="m1")))
+
+    runtime.spawn = on_hive
+    actions = run(store, runtime, doc())
+    assert len(seats(store)) == 1, actions
+    [seat] = seats(store)
+    assert actions == [f"spawned dispatcher {seat.name} for 1 trigger"]
+    member = InboxStore(store.redis, world="m1")
+    assert [i.id for i in member.open_mail(seat.name)] == [item]
+    assert InboxStore(store.redis, world="").inbox(f"dispatcher@{SLUG}") == []
+    moved = member.history(item)[-1]
+    assert (moved["state"], moved["by"], moved["reason"]) == (
+        "pending",
+        "swarm",
+        f"moved to hive m1, where {seat.name} runs dispatcher@{SLUG}",
+    )
 
 
 @pytest.mark.parametrize("lane,state", [("eng", "working"), ("dispatch", "finished")])

@@ -1,0 +1,3 @@
+{"type": "user", "uuid": "l-u1", "sessionId": "s-shared", "cwd": "/work/agentihooks", "version": "2.1.0", "timestamp": "2026-03-02T09:00:00Z", "message": {"role": "user", "content": "List the open migration tasks."}}
+{"type": "assistant", "uuid": "l-a1", "sessionId": "s-shared", "cwd": "/work/agentihooks", "version": "2.1.0", "timestamp": "2026-03-02T09:00:05Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Three migration tasks are open."}]}}
+{"type": "user", "uuid": "l-u2", "sessionId": "s-shared", "cwd": "/work/agentihooks", "version": "2.1.0", "timestamp": "2026-03-02T09:01:00Z", "message": {"role": "user", "content": "Start with the backfill."}}

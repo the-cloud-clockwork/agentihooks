@@ -23,7 +23,7 @@ def test_concurrent_readers_share_one_generation_load(tmp_path, monkeypatch, sta
     entered, duplicate, release = threading.Event(), threading.Event(), threading.Event()
     start = threading.Barrier(8)
     loads = []
-    owner, name = (sqlite.refresh, "refreshed") if state == "external_write" else (sqlite, "read_rows")
+    owner, name = (sqlite.refresh, "refreshed") if state == "external_write" else (sqlite, "load")
     original = getattr(owner, name)
 
     def blocked_load(connection, slug, *rest):

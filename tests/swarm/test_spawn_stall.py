@@ -144,6 +144,22 @@ def test_unanswered_alarm_notifies_the_operator_after_ten_further_minutes(stalle
     assert len(ledger.notes) == 1
 
 
+def test_an_alarm_whose_record_is_gone_is_treated_as_closed(stalled, capsys):
+    store, ledger, _, clock, _ = stalled
+    tick_failure(stalled)
+    clock[0] += 600_000
+    tick_failure(stalled)
+    (item,) = InboxStore(store.redis).pending_mail("master@sw")
+    store.redis.delete(InboxStore(store.redis).key("item", item.id))
+    clock[0] += 600_000
+    tick_failure(stalled)
+    assert ledger.notes == []
+    assert (
+        f"agentihooks inbox: {spawn_stall.REF} holds message {item.id} whose record is gone; skipped it"
+        in capsys.readouterr().err.splitlines()
+    )
+
+
 def test_answered_alarm_never_notifies_the_operator(stalled):
     store, ledger, _, clock, _ = stalled
     tick_failure(stalled)
@@ -569,9 +585,9 @@ def test_a_doctor_held_by_the_watched_focus_is_not_a_spawn_stall(stalled, monkey
 HIVE_FULL = "no hive for eng has room"
 CPU_GATE = {"id": "anton-1", "refusal": admission.refusal(admission.Room(0, admission.CPU, "five minute load 9.00"))}
 MAX_GATE = {"id": "anton-2", "refusal": admission.refusal(admission.capped(admission.Room(1, "", ""), 3, 3))}
-CPU_WAIT = placement._refused(HIVE_FULL, [CPU_GATE])
+CPU_WAIT = placement._refused(HIVE_FULL, [CPU_GATE], "eng")
 FULL_WAIT = placement.overflow(
-    "engineer", placement.Wait(placement._refused(HIVE_FULL, [CPU_GATE, MAX_GATE])), 8, 8
+    "engineer", placement.Wait(placement._refused(HIVE_FULL, [CPU_GATE, MAX_GATE], "eng")), 8, 8
 ).reason
 REFUSALS = (
     "Admission refusals, latest first: local cap on ws (8 of 8 agents), cpu on anton-1 (2 tasks), "
@@ -589,6 +605,77 @@ def quiet_watch(stalled):
     store, ledger, runtime, clock, _ = stalled
     with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
         pass
+
+
+@pytest.mark.parametrize("reason", ["Codex hive placement is not enabled", CPU_WAIT])
+def test_current_placement_holds_explain_the_spawn_wait(stalled, reason):
+    store, ledger, _, clock, _ = stalled
+    for _ in range(2):
+        for task in ledger.rows.values():
+            placement_waits.observe(store, "sw", task["lane"], task["id"], reason, clock[0])
+        quiet_watch(stalled)
+        clock[0] += 600_000
+    assert spawn_stall.findings(store, "sw") == []
+    assert InboxStore(store.redis).pending_mail("master@sw") == []
+
+
+def test_a_repeated_hold_uses_its_latest_observation(stalled):
+    store, _, _, clock, _ = stalled
+    placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0] - 1)
+    for _ in range(2):
+        placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0])
+        quiet_watch(stalled)
+        clock[0] += 600_000
+    assert spawn_stall.findings(store, "sw") == []
+
+
+def test_a_legacy_hold_without_seen_at_uses_its_start(stalled):
+    import json
+
+    store, _, _, clock, _ = stalled
+    row = {"lane": "eng", "reason": CPU_WAIT, "started_at": clock[0]}
+    store.redis.hset(store.key("sw", placement_waits.WAITS), "t1", json.dumps(row))
+    quiet_watch(stalled)
+    assert "since" not in spawn_stall.read(store, "sw")
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci"])
+def test_an_unheld_task_keeps_the_stall_alarm_eligible(stalled, lane):
+    store, ledger, _, clock, _ = stalled
+    store.update("sw", max_ci=1)
+    ledger.rows["t3"] = {**ledger.rows["t1"], "id": "t3", "lane": lane}
+    for _ in range(2):
+        for task in ("t1", "t2"):
+            row = ledger.rows[task]
+            placement_waits.observe(store, "sw", row["lane"], task, CPU_WAIT, clock[0])
+        quiet_watch(stalled)
+        clock[0] += 600_000
+    assert len(spawn_stall.findings(store, "sw")) == 1
+
+
+def test_an_expired_placement_hold_starts_a_new_stall_interval(stalled):
+    store, _, _, clock, _ = stalled
+    placement_waits.observe(store, "sw", "eng", "t1", CPU_WAIT, clock[0])
+    quiet_watch(stalled)
+    clock[0] += 1
+    quiet_watch(stalled)
+    clock[0] += 1
+    quiet_watch(stalled)
+    clock[0] += 599_999
+    quiet_watch(stalled)
+    assert spawn_stall.findings(store, "sw") == []
+    clock[0] += 1
+    quiet_watch(stalled)
+    assert len(spawn_stall.findings(store, "sw")) == 1
+
+
+def test_a_wait_recorded_for_another_lane_does_not_hide_ready_work(stalled):
+    store, _, _, clock, _ = stalled
+    for _ in range(2):
+        placement_waits.observe(store, "sw", "ci", "t1", CPU_WAIT, clock[0])
+        quiet_watch(stalled)
+        clock[0] += 600_000
+    assert len(spawn_stall.findings(store, "sw")) == 1
 
 
 def capped_watch(stalled, refused=True):
@@ -649,7 +736,8 @@ def test_a_local_cap_refusal_reads_the_refusing_machine(stalled, monkeypatch):
 
 
 def test_admission_refusals_without_a_failed_launch_are_named_in_the_alarm(stalled):
-    store, _, _, clock, _ = stalled
+    store, ledger, _, clock, _ = stalled
+    ledger.rows["t3"] = {**ledger.rows["t1"], "id": "t3"}
     quiet_watch(stalled)
     seed_refusals(store, clock)
     clock[0] += 600_000
@@ -664,7 +752,8 @@ def test_admission_refusals_without_a_failed_launch_are_named_in_the_alarm(stall
 
 
 def test_a_fresh_failed_launch_follows_the_admission_refusals(stalled):
-    store, _, _, clock, _ = stalled
+    store, ledger, _, clock, _ = stalled
+    ledger.rows["t3"] = {**ledger.rows["t1"], "id": "t3"}
     tick_failure(stalled)
     seed_refusals(store, clock)
     clock[0] += 600_000
@@ -723,7 +812,7 @@ def test_a_legacy_wait_without_a_seen_time_counts_from_its_start():
 def test_a_refusal_orders_by_its_latest_sighting_across_tasks():
     waits = {
         "t1": {"reason": CPU_WAIT, "started_at": 1, "seen_at": 9},
-        "t2": {"reason": placement._refused(HIVE_FULL, [MAX_GATE]), "started_at": 1, "seen_at": 5},
+        "t2": {"reason": placement._refused(HIVE_FULL, [MAX_GATE], "eng"), "started_at": 1, "seen_at": 5},
         "t3": {"reason": CPU_WAIT, "started_at": 1, "seen_at": 1},
     }
     assert spawn_stall.refusals(waits, {}, 0) == (
@@ -732,7 +821,7 @@ def test_a_refusal_orders_by_its_latest_sighting_across_tasks():
 
 
 def test_a_refusal_first_seen_at_zero_keeps_its_place():
-    waits = {"t1": {"reason": placement._refused(HIVE_FULL, [MAX_GATE]), "started_at": 0, "seen_at": 0}}
+    waits = {"t1": {"reason": placement._refused(HIVE_FULL, [MAX_GATE], "eng"), "started_at": 0, "seen_at": 0}}
     local = {"machine": "ws", "taken": 8, "maximum": 8, "at": 0}
     assert spawn_stall.refusals(waits, local, 0) == (
         "Admission refusals, latest first: local cap on ws (8 of 8 agents), max agents on anton-2 (1 task)"

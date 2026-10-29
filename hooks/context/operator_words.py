@@ -1,6 +1,7 @@
 """The operator's own words in an append only log, indexed by normalized line hashes.
 
 A relay to the ledger is accepted only when it quotes words recorded here for a master or planner of its swarm.
+Swarm entries are mirrored into the shared swarm key value store, where a hosted ledger server reads them.
 """
 
 import hashlib
@@ -17,6 +18,10 @@ from hooks.context.swarm_heartbeat import is_operator_prompt
 
 TTL_SEC = 3600
 KEPT = 50
+BUCKET = "operator-words"
+NAMES_KEY = "names"
+AMEND_TRIES = 8
+_SHARED = []
 
 
 def _dir():
@@ -50,11 +55,14 @@ def _store(migrate=True):
             "name TEXT NOT NULL, hash TEXT NOT NULL, entry INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE);"
             "CREATE INDEX IF NOT EXISTS line_hash ON lines(name, hash);"
             "CREATE TABLE IF NOT EXISTS legacy (name TEXT PRIMARY KEY);"
+            "CREATE TABLE IF NOT EXISTS stored ("
+            "entry INTEGER PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE);"
         )
         if migrate:
             _migrate(connection)
         with connection:
             yield connection
+        _publish_pending(connection)
     finally:
         connection.close()
 
@@ -74,38 +82,123 @@ def _append(connection, swarm, name, at, words):
     )
 
 
+def _shared():
+    from scripts.events import state
+
+    if not _SHARED:
+        errors = state.unavailable()
+        try:
+            _SHARED.append(state.open_state(BUCKET))
+        except errors:
+            return None
+    return _SHARED[0]
+
+
+def _shared_call(action, default):
+    from scripts.events import state
+
+    shared = _shared()
+    if shared is None:
+        return default
+    try:
+        return action(shared)
+    except state.unavailable():
+        return default
+
+
+def _rows_key(name):
+    return "name." + hashlib.sha256(name.encode()).hexdigest()
+
+
+def _read(shared, key):
+    entry = shared.get(key)
+    return [] if entry is None else json.loads(entry.value)
+
+
+def _amend(shared, key, change):
+    from scripts.events.bus import StateConflict
+
+    for attempt in range(AMEND_TRIES):
+        entry = shared.get(key)
+        value = json.dumps(change([] if entry is None else json.loads(entry.value))).encode()
+        try:
+            if entry is None:
+                shared.create(key, value)
+            else:
+                shared.update(key, value, entry.revision)
+            return True
+        except StateConflict as conflict:
+            if attempt == AMEND_TRIES - 1:
+                raise StateConflict(f"state key {key!r} kept changing") from conflict
+
+
+def _mirror(swarm, name, at, words):
+    def push(shared):
+        _amend(shared, NAMES_KEY, lambda names: names if name in names else [*names, name])
+        row = {"swarm": swarm, "at": at, "words": words}
+        return _amend(shared, _rows_key(name), lambda rows: rows if row in rows else [*rows, row])
+
+    return _shared_call(push, False)
+
+
+def _publish_pending(connection):
+    rows = connection.execute(
+        "SELECT id, swarm, name, at, words FROM entries WHERE swarm != '' "
+        "AND id NOT IN (SELECT entry FROM stored) ORDER BY at, id"
+    ).fetchall()
+    published = []
+    for entry, swarm, name, at, words in rows:
+        if not _mirror(swarm, name, at, words):
+            break
+        published.append((entry,))
+    with connection:
+        connection.executemany("INSERT OR IGNORE INTO stored VALUES (?)", published)
+
+
+def _shared_rows(name):
+    rows = _shared_call(lambda shared: _read(shared, _rows_key(name)), [])
+    return sorted(rows, key=lambda row: row["at"], reverse=True)
+
+
+def _shared_match(name, needle, since):
+    for row in _shared_rows(name):
+        if (since is None or row["at"] > since) and needle in _norm(row["words"]):
+            return (row["words"],)
+    return None
+
+
+def _shared_forget(swarm):
+    def drop(shared):
+        for name in _read(shared, NAMES_KEY):
+            _amend(shared, _rows_key(name), lambda rows: [row for row in rows if row["swarm"] != swarm])
+
+    _shared_call(drop, None)
+
+
 def _offline_swarm(name):
     from scripts.swarm.naming import legacy_slug, parse
 
     return None if parse(name) else legacy_slug(name)
 
 
-def _legacy_swarms(paths, redis):
-    from redis.exceptions import RedisError
-
-    from scripts.swarm.naming import NameRegistry
+def _legacy_swarms(paths):
+    from scripts.swarm.naming import registered_slug
+    from scripts.swarm.store import store_errors
 
     swarms = dict.fromkeys(paths)
-    registry = NameRegistry(redis)
     for path in paths:
-        if redis is None:
-            swarms[path] = _offline_swarm(path.stem)
-            continue
         try:
-            # slug_of swallows a failed alias lookup; this read raises it so the name stays pending.
-            redis.get(registry.key("alias", path.stem))
-            swarms[path] = registry.slug_of(path.stem)
-        except RedisError:
+            swarm = registered_slug(path.stem)
+        except store_errors():
             break
+        swarms[path] = _offline_swarm(path.stem) if swarm is None else swarm
     return swarms
 
 
 def _migrate(connection):
-    from hooks._redis import get_redis
-
     if connection.execute("SELECT 1 FROM legacy WHERE name = ''").fetchone():
         return
-    swarms = _legacy_swarms([path for path in _dir().glob("*.json") if _load(path.stem)["rows"]], get_redis())
+    swarms = _legacy_swarms([path for path in _dir().glob("*.json") if _load(path.stem)["rows"]])
     clean = {}
     with connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -136,6 +229,7 @@ def _line_match(connection: sqlite3.Connection, name: str, needle: str, since: f
 def forget(swarm: str) -> None:
     with _store() as connection:
         connection.execute("DELETE FROM entries WHERE swarm = ?", (swarm,))
+    _shared_forget(swarm)
 
 
 def _load(name):
@@ -149,7 +243,8 @@ def _load(name):
 def recorded(pattern: str) -> list[str]:
     with _store() as connection:
         names = connection.execute("SELECT DISTINCT name FROM entries").fetchall()
-    return sorted(name for (name,) in names if fnmatchcase(name, pattern))
+    shared = set(_shared_call(lambda state: _read(state, NAMES_KEY), []))
+    return sorted(name for name in {name for (name,) in names} | shared if fnmatchcase(name, pattern))
 
 
 def _save(name, data):
@@ -184,6 +279,7 @@ def matching(name: str, quote: str, now: float | None = None, within: float | No
                 "AND (? IS NULL OR at > ?) ORDER BY at DESC, id DESC LIMIT 1",
                 (name, needle, since, since),
             ).fetchone()
+    row = row or _shared_match(name, needle, since)
     return row[0] if row else ""
 
 

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from scripts import agent_choice
 from scripts.handoff import transfers
-from scripts.swarm import deliberate_exit, idle, outage, profile_choice, snapshot
+from scripts.swarm import deliberate_exit, idle, outage, profile_choice
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
 
@@ -18,6 +18,12 @@ AWAITING = "awaiting-decision"
 RESUMED, FRESH = "resumed", "fresh"
 KUBERNETES = "kubernetes"
 RECOVERY_REQUESTS = "recovery-requests"
+RESUME, NATIVE, CONTEXT = "resume", "native", "context"
+CHOICES = (RESUME, NATIVE, CONTEXT, FRESH)
+UNCHOSEN = "Choose native, context, fresh or resume"
+LOCAL_CONTEXT = (
+    "a local swarm keeps no checkpoint to continue from; a fresh start primes the successor with the seat handoff"
+)
 REOPENED = "own conversation reopened"
 RESTORED = (
     "The swarm {slug} was restored from a snapshot and reopened this conversation of yours as {name}, on task {task}. "
@@ -36,10 +42,16 @@ class Outcome:
     conversation_id: str = ""
     at: int = 0
     transfer: str = ""
+    decided: bool = False
+    awaited_at: int = 0
 
 
 def account_quota(harness, account):
     return agent_choice.account_has_quota(harness, account, dict(os.environ))
+
+
+def quota_ignored(harness, account):
+    return True
 
 
 def blocker(agent, worktree, exists=os.path.isdir, has_quota=account_quota):
@@ -137,6 +149,8 @@ def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledge
         raise SwarmError("This agent is not awaiting a restore decision")
     if agent.execution_id and agent.runtime_backend == KUBERNETES:
         return requested(store, slug, agent, choice, now_ms)
+    if choice == CONTEXT:
+        raise SwarmError(LOCAL_CONTEXT)
     previous = next(r for r in store.restored(slug) if r["name"] == name)
     if choice == "fresh":
         transfers.fresh(store, slug, previous["transfer"], now_ms)
@@ -152,11 +166,14 @@ def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledge
             at=now_ms,
             transfer=previous["transfer"],
         )
-    elif choice == "resume":
+    elif choice in (RESUME, NATIVE):
         from scripts.swarm.snapshot import ledger_source
 
         worktrees = json.loads(store.redis.get(store.key(slug, "restore-worktrees")) or "{}")
         worktree = store.config(slug).repo if agent.lane == MASTER else worktrees.get(name, "")
+        lost = blocker(agent, worktree, has_quota=quota_ignored)
+        if choice == NATIVE and lost:
+            raise SwarmError(lost)
         outcome = _attempt(
             store,
             slug,
@@ -166,7 +183,10 @@ def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledge
             transfers.get(store, slug, previous["transfer"]),
         )
     else:
-        raise SwarmError("Choose resume or fresh")
+        raise SwarmError(UNCHOSEN)
+    outcome = replace(
+        outcome, decided=outcome.outcome != AWAITING, awaited_at=previous.get("awaited_at") or previous["at"]
+    )
     store.put_restored(slug, [asdict(outcome) if r["name"] == name else r for r in store.restored(slug)])
     return outcome
 
@@ -174,8 +194,8 @@ def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledge
 def requested(store, slug: str, agent, choice: str, now_ms: int) -> Outcome:
     """A Pod attempt's choice is only requested here; the controller applies it under its lease on its next pass,
     and a repeated request for the same attempt replaces the pending one instead of queueing a second."""
-    if choice not in ("resume", "fresh"):
-        raise SwarmError("Choose resume or fresh")
+    if choice not in CHOICES:
+        raise SwarmError(UNCHOSEN)
     store.redis.hset(store.key(slug, RECOVERY_REQUESTS), agent.execution_id, choice)
     reason = f"Recovery requested: {choice}"
     return Outcome(agent.name, agent.lane, agent.task, AWAITING, reason, agent.conversation_id, now_ms)
@@ -183,6 +203,7 @@ def requested(store, slug: str, agent, choice: str, now_ms: int) -> Outcome:
 
 RECOVERY = "outage-resumes"
 RECOVERY_ATTEMPTS = 3
+RECOVERY_HOLD_MS = 10 * 60 * 1000
 STUCK_HANDOFF = """## Intent
 Continue task {task}; the swarm retired {name} while its turns kept failing on a provider error.
 
@@ -306,6 +327,18 @@ def recovery_exhausted(store: RedisStore, slug: str, agent: AgentRecord) -> bool
     return record.get("state") == "exhausted" and record["identity"] == _recovery_identity(store, slug, agent)
 
 
+def recovery_holds(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> bool:
+    return recovery_pending(store, slug, agent) and any(
+        record["ended_at"] is None or now_ms - record["ended_at"] < RECOVERY_HOLD_MS
+        for record in outage.read(slug).values()
+    )
+
+
+def recovery_blocker(store: RedisStore, slug: str, agent: AgentRecord) -> str:
+    record = _recovery_record(store, slug, agent)
+    return record.get("blocked") or f"{record['attempts']} of {RECOVERY_ATTEMPTS} resume attempts made"
+
+
 def _recovery_current(store, slug, agent, context):
     rows = {task["id"]: task for task in context.ledger.state(slug)["tasks"]}
     record = _recovery_record(store, slug, agent)
@@ -325,6 +358,18 @@ def _recovery_text(slug, agent, task):
     )
 
 
+def _hold_reason(store, slug, agent, context, live, observed):
+    if not _recovery_current(store, slug, agent, context):
+        return "its task ownership changed"
+    if not live or (not observed.provider_error and observed.state == idle.WORKING):
+        return ""
+    if observed.typed or observed.prompt_title:
+        return "its pane holds input"
+    if observed.state not in {idle.IDLE, idle.WORKING} and not observed.provider_error:
+        return f"its pane reads {observed.state}"
+    return ""
+
+
 def recover_outages(
     slug: str, store: RedisStore, ledger: "Ledger", runtime: "Runtime", rows: dict, now_ms: int
 ) -> list[str]:
@@ -338,16 +383,14 @@ def recover_outages(
             continue
         record = _recovery_record(store, slug, agent)
         observed = runtime.observe(agent)
-        if record["last_at"] == now_ms or not _recovery_current(store, slug, agent, context):
+        if record["last_at"] == now_ms:
             continue
+        if held := _hold_reason(store, slug, agent, context, agent.name in live, observed):
+            store.redis.hset(key, agent.name, json.dumps({**record, "blocked": held}))
+            continue
+        record.pop("blocked", None)
         if agent.name in live and not observed.provider_error and observed.state == idle.WORKING:
             record["state"] = "done"
-        elif agent.name in live and (
-            observed.typed
-            or observed.prompt_title
-            or (observed.state not in {idle.IDLE, idle.WORKING} and not observed.provider_error)
-        ):
-            continue
         else:
             record["attempts"] += 1
             record["last_at"] = now_ms
@@ -369,6 +412,7 @@ def recover_outages(
 
 
 def _recover_process(store, slug, agent, task, context, text):
+    from scripts.swarm import snapshot
     from scripts.swarm.tick import SpawnError
 
     worktree = snapshot.worktrees(store.config(slug).repo, [agent.name]).get(agent.name, "")

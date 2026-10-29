@@ -167,9 +167,25 @@ def test_timer_prechecks_and_waits_resolve_the_selected_route(store, monkeypatch
     assert seen == [("selected", "https://hosted.example"), ("other", ledger.BASE or ledger_link.base())]
     seen.clear()
     monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: seen.append((slug, ledger.base())))
-    assert cli.run_waits(store, "selected") == []
-    assert cli.run_waits(store, "other") == []
+    with authority_context.bound("trusted-tick-fixture"):
+        assert cli.run_waits(store, "selected") == []
+        assert cli.run_waits(store, "other") == []
     assert seen == [("selected", "https://hosted.example"), ("other", ledger.BASE or ledger_link.base())]
+
+
+def test_the_wait_command_skips_a_remote_swarm_and_finishes_the_local_one(store, monkeypatch, capsys):
+    from argparse import Namespace
+
+    monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli.timer, "guard", lambda binary: True)
+    acquired = []
+    monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: acquired.append(slug))
+    with authority_context.bound(None):
+        cli.cmd_waits(store, Namespace())
+    assert acquired == ["other"]
+    assert capsys.readouterr() == ("", "")
 
 
 @pytest.mark.parametrize("active", [False, True])
@@ -420,3 +436,65 @@ def test_staging_fields_default_for_a_record_without_them_and_clear_with_the_des
     monkeypatch.setattr(lease, "now_ms", lambda *_: 4321)
     assert store.update("other", pending_api_url=HOSTED).ledger_staged_at == 4321
     assert store.update("other", pending_api_url="").ledger_staged_at == 0
+
+
+IN_CLUSTER = "http://agentihooks-swarm-controller.agentihooks-swarm.svc:8780"
+
+
+@pytest.fixture
+def workstation(monkeypatch):
+    for name in ("KUBERNETES_SERVICE_HOST", "AGENTIHOOKS_DEPLOYMENT", "LEDGER_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.parametrize(
+    ("address", "routed"),
+    [
+        (IN_CLUSTER, ""),
+        ("https://agentihooks-swarm-controller.agentihooks-swarm.svc.cluster.local:8780", ""),
+        ("https://agentihooks-swarm-controller.agentihooks-swarm.svc", ""),
+        ("http://ledger.invalid:8765", ""),
+        ("https://hosted.example", "https://hosted.example"),
+        ("http://127.0.0.1:8765", "http://127.0.0.1:8765"),
+    ],
+)
+def test_the_workstation_tick_routes_only_to_a_ledger_address_it_reaches_without_cleartext(
+    store, workstation, address, routed
+):
+    store.redis.hset(store.key("other", "config"), "api_url", address)
+    assert ledger_route.configured(store, "other") == routed
+
+
+def test_an_in_cluster_ledger_address_is_routed_inside_the_cluster(store, workstation, monkeypatch):
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+    address = "https://agentihooks-swarm-controller.agentihooks-swarm.svc:8780"
+    store.redis.hset(store.key("other", "config"), "api_url", address)
+    assert ledger_route.configured(store, "other") == address
+
+
+def test_a_tick_of_a_swarm_holding_the_in_cluster_address_uses_the_default_ledger_base(store, workstation):
+    store.redis.hset(store.key("other", "config"), "api_url", IN_CLUSTER)
+    seen = []
+
+    @ledger_route.tick
+    def work(store, slug):
+        seen.append(ledger_link.base(slug=slug))
+
+    work(store, "other")
+    assert seen == [ledger_link.base(slug="other")]
+    assert "svc" not in seen[0]
+
+
+def test_a_pinned_ledger_command_of_a_swarm_holding_the_in_cluster_address_uses_the_default_ledger_base(
+    store, workstation, monkeypatch
+):
+    seen = []
+    store.redis.hset(store.key("selected", "config"), "api_url", IN_CLUSTER)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "selected")
+    monkeypatch.delenv("SWARM_URL", raising=False)
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+    monkeypatch.setattr(ledger, "cmd_url", lambda args: seen.append(ledger_link.base(slug=args.slug)))
+    with patch("sys.argv", ["ledger", "--slug", "selected", "url"]):
+        ledger.main()
+    assert seen == [ledger_link.base(slug="selected")]
+    assert "svc" not in seen[0]

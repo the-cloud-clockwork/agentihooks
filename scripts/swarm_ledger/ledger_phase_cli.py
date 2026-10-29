@@ -12,6 +12,7 @@ def operation(args) -> tuple[str, dict]:
             "depends_on": comma_list(args.depends_on),
             "planning": args.planning,
             "release": args.release,
+            **({"not_duplicate": args.not_duplicate} if args.not_duplicate else {}),
         }
     fields = dict(value.split("=", 1) for value in args.values if "=" in value)
     if len(fields) != len(args.values):
@@ -57,6 +58,16 @@ def phase_entry(position: int, entry: dict, ids: list[str]) -> dict:
         "depends_on": depends_on,
         "planning": entry.get("planning", ledger_phases.PLANNING_DEFAULT),
     }
-    if "release" in entry:
-        phase["release"] = entry["release"]
+    for key in ("release", "not_duplicate"):
+        if key in entry:
+            phase[key] = entry[key]
     return phase
+
+
+def repeats(warnings: list[str], phases: list[dict]) -> dict:
+    return {
+        phase["phase"]: warning
+        for phase in phases
+        for warning in warnings
+        if warning.startswith(f"phase {phase['phase']} repeats ")
+    }

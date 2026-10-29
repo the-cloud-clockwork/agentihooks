@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.hive.placement import Wait
-from scripts.swarm import commands
+from scripts.swarm import commands, lease
 from scripts.swarm.tick import SpawnError
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
@@ -25,7 +25,7 @@ def test_preselected_root_requests_share_the_last_configured_slot(setup, monkeyp
     write_hive(setup, id="workstation", ui="yes", max_agents=8)
     setup.store.update(setup.config.slug, local_max_agents=2)
     local_agents(setup, 1)
-    selected = SimpleNamespace(hive="workstation", master_placement=None)
+    selected = SimpleNamespace(hive="workstation", master_placement=None, first=False)
     first = SimpleNamespace(name="first", lane="eng", task={"id": "first"})
     second = SimpleNamespace(name="second", lane="eng", task={"id": "second"})
     assert setup.launcher.reserve_room(first, selected) == ""
@@ -37,7 +37,7 @@ def test_a_root_reservation_consumes_the_same_slot_as_overflow(setup, monkeypatc
     fill_anton(setup)
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
     write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=1)
-    selected = SimpleNamespace(hive="workstation", master_placement=None)
+    selected = SimpleNamespace(hive="workstation", master_placement=None, first=False)
     request = SimpleNamespace(name="first", lane="eng", task={"id": "first"})
     assert setup.launcher.reserve_room(request, selected) == ""
     setup.herdr._quota_accounts = []
@@ -52,6 +52,21 @@ def test_local_deployment_obeys_the_workstation_cap(setup, monkeypatch):
     local_agents(setup, 8)
     with pytest.raises(SpawnError, match="the local machine runs"):
         fenced.spawn(setup.config, "ci", "next", {"id": "task"})
+
+
+def test_local_deployment_logs_the_workstation_cap_as_the_task_wait(setup):
+    from scripts.hive import placement_waits
+    from scripts.hive.placement import LOCAL_FULL
+    from scripts.swarm.controller import FencedRuntime
+
+    fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+    local_agents(setup, 8)
+    before = lease.now_ms(setup.store)
+    refused = fenced.placement_refusal("ci", {"id": "task"})
+    row = placement_waits.read(setup.store, setup.config.slug)["task"]
+    assert LOCAL_FULL in refused
+    assert (row["lane"], row["reason"]) == ("ci", refused)
+    assert before <= row["started_at"] == row["seen_at"] <= lease.now_ms(setup.store)
 
 
 def test_failed_root_publication_releases_the_shared_local_reservation(setup, monkeypatch):
@@ -134,7 +149,7 @@ def test_a_root_resource_refusal_releases_only_its_local_claim(setup, monkeypatc
     publish_room(setup.store, "workstation", 1)
     admission.reserve(setup.store.redis, "workstation", "other/pending", 1)
     request = request_for(setup)
-    selected = SimpleNamespace(hive="workstation", master_placement=None)
+    selected = SimpleNamespace(hive="workstation", master_placement=None, first=False)
     assert "ram:" in setup.launcher.reserve_room(request, selected)
     assert setup.store.redis.hgetall(local_slots.key("workstation")) == {}
     assert admission.pending(setup.store.redis, "workstation") == 1
@@ -150,7 +165,7 @@ def test_an_existing_task_cannot_inflate_resource_room_during_a_pending_launch(s
     publish_room(setup.store, "workstation", 1)
     setup.store.put_agent(setup.config.slug, AgentRecord("self", "eng", "task"))
     local_slots.claim(setup.store, "workstation", setup.config.slug, "other", "pending", 8)
-    selected = SimpleNamespace(hive="workstation", master_placement=None)
+    selected = SimpleNamespace(hive="workstation", master_placement=None, first=False)
     request = SimpleNamespace(name="self", lane="eng", task={"id": "task"})
     assert "1 of its 1" in setup.launcher.reserve_room(request, selected)
 
@@ -214,3 +229,91 @@ def test_an_explicit_route_master_ignores_worker_caps_but_reserves_resources(set
     assert setup.launcher.reserve_room(SimpleNamespace(name="master", lane="master", task=task), selected) == ""
     assert setup.store.redis.hgetall(local_slots.key("workstation")) == {}
     assert admission.pending(setup.store.redis, "workstation") == 1
+
+
+def local_fenced(setup, monkeypatch, cpus, load5=0.0):
+    from scripts.hive import headroom
+    from scripts.swarm.controller import FencedRuntime
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    reading = {"cpus": cpus, "load5": load5, "available_mb": 10**6, "total_mb": 10**6}
+    monkeypatch.setattr(headroom, "measure", lambda pending, now, previous: reading)
+    return FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci", "plan"])
+def test_a_local_launch_over_the_swarm_share_is_refused_with_its_reason(setup, monkeypatch, lane):
+    fenced = local_fenced(setup, monkeypatch, 3)
+    local_agents(setup, 2)
+    reason = (
+        ", and the local machine runs 2 of its 2 agents: cpu: 2 swarm agents at 0.5 CPU each on 3 CPUs, "
+        "fits 0 more under the 40 percent swarm share"
+    )
+    assert fenced.placement_refusal(lane, {"id": "task"}) == reason
+    with pytest.raises(SpawnError) as raised:
+        fenced.spawn(setup.config, lane, "next", {"id": "task"})
+    assert (str(raised.value), raised.value.status) == (reason, "unavailable")
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_a_quiet_workstation_admits_past_the_swarm_share_up_to_the_root_hive_max_agents(setup, monkeypatch):
+    fenced = local_fenced(setup, monkeypatch, 16, load5=4.32)
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=20)
+    setup.store.update(setup.config.slug, local_max_agents=20)
+    local_agents(setup, 12)
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+    assert fenced.spawn(setup.config, "eng", "next", {"id": "task"}) == setup.herdr.spawn.return_value
+
+
+def test_a_local_launch_over_the_host_line_is_refused_when_it_is_tighter_than_the_share(setup, monkeypatch):
+    fenced = local_fenced(setup, monkeypatch, 10, load5=8.0)
+    with pytest.raises(SpawnError) as raised:
+        fenced.spawn(setup.config, "eng", "next", {"id": "task"})
+    assert str(raised.value) == (
+        ", and the local machine runs 0 of its 0 agents: cpu: five minute load 8.00 on 10 CPUs, "
+        "0.5 CPU per agent, fits 0 more under the 80 percent line"
+    )
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_an_over_budget_local_master_still_starts_and_counts_against_the_workstation(setup, monkeypatch):
+    from scripts.hive import admission
+
+    fenced = local_fenced(setup, monkeypatch, 10, load5=8.0)
+    assert fenced.placement_refusal("master", {"id": "master"}) == ""
+    assert fenced.spawn(setup.config, "master", "master-new", {"id": "master"}) == setup.herdr.spawn.return_value
+    assert admission.pending(setup.store.redis, "workstation") == 1
+    assert fenced.placement_refusal("eng", {"id": "task"}).endswith(
+        "0.5 CPU per agent with 1 pending launches, fits 0 more under the 80 percent line"
+    )
+
+
+def test_a_hybrid_master_falling_back_to_the_workstation_counts_against_it(setup, monkeypatch):
+    from scripts.hive import admission
+
+    fenced = hybrid(setup, monkeypatch)
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    assert fenced.spawn(setup.config, "master", "master-new", {"id": "master"}) == "placed on the workstation"
+    assert admission.pending(setup.store.redis, "workstation") == 1
+
+
+def test_a_mixed_batch_counts_launched_agents_still_starting_after_their_claim_window(setup, monkeypatch):
+    from scripts import terminate_agent
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=6)
+    local_agents(setup, 3, state="starting", pane_id="w:p")
+    selected = SimpleNamespace(hive="workstation", master_placement=None, first=False)
+    for name in ("root-1", "root-2"):
+        assert setup.launcher.reserve_room(SimpleNamespace(name=name, lane="eng", task={"id": name}), selected) == ""
+    setup.herdr._quota_accounts = []
+    assert fenced.spawn(setup.config, "eng", "over-1", {"id": "over-1", "seat": "eng-1@fixture"}) == (
+        "placed on the workstation"
+    )
+    with pytest.raises(SpawnError, match="the local machine runs 6 of its 6 agents"):
+        fenced.spawn(setup.config, "eng", "over-2", {"id": "over-2", "seat": "eng-2@fixture"})
+    third = SimpleNamespace(name="root-3", lane="eng", task={"id": "root-3"})
+    assert "runs 6 of its 6 agents" in setup.launcher.reserve_room(third, selected)

@@ -1,13 +1,16 @@
 """Shared test fixtures for agentihooks."""
 
 import errno
+import importlib
 import json
 import os
 import re
 import socket
 import sys
+import tempfile
 import time
 import zlib
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,9 +21,13 @@ for _redis_name in list(os.environ):
         os.environ.pop(_redis_name)
 
 from tests import installer_isolation, ledger_guard, mutation_trace, redis_key_guard, swarm_v2_isolation
+from tests.flake_ledger import WORKER_FILES
 from tests.shards import (
     FIRST_SHARD_FILES,
+    OWNER_COPIES,
+    SECONDS_PER_SOURCE_BYTE,
     assign_nodes,
+    assign_owners,
     discover_test_files,
     grouped_files,
     setup_nodes_in_parallel,
@@ -28,6 +35,7 @@ from tests.shards import (
     source_sizes,
     warm_imports,
 )
+from tests.workflow_commands import refuse_commands
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
@@ -73,9 +81,14 @@ def _reused(config) -> tuple[frozenset[str], frozenset[str]]:
 @pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node):
     node.workerinput["ci_reused"] = node.config.stash[REUSED_SOURCE]
+    # A replacement worker gets a new id and no share, so it collects the whole shard and can run any test.
+    shares = node.config.stash.get(WORKER_FILES, None)
+    if shares and node.gateway.id in shares:
+        node.workerinput["owned_files"] = shares[node.gateway.id]
 
 
 def pytest_collection_modifyitems(config, items):
+    refuse_commands([item.nodeid for item in items])
     reused = _reused(config)[0]
     if reused:
         kept = [item for item in items if re.sub(r"@[^\[\]]*$", "", item.nodeid) not in reused]
@@ -125,14 +138,18 @@ def _shard_files(config) -> frozenset[str]:
         for node, shard in config.stash[NODE_SHARDS].items():
             owners.setdefault(node.split("::", 1)[0], set()).add(shard)
         config.stash[FILE_SHARDS] = {path: sorted(shards) for path, shards in owners.items()}
-        config.stash[FILE_SHARDS].update({path: [0] for path in pinned})
         known = {node.split("::", 1)[0] for node in measured}
-        files = {node.split("::", 1)[0] for node in parts[index - 1]} | (set(files) - known)
+        config.stash[FILE_SHARDS].update({path: [zlib.crc32(path.encode()) % shards] for path in set(files) - known})
+        config.stash[FILE_SHARDS].update({path: [0] for path in pinned})
+        files = {path for path in files if index - 1 in config.stash[FILE_SHARDS].get(path, ())}
         config.stash[SHARD_FILES] = frozenset(files) | (pinned if index == 1 else frozenset())
     return config.stash[SHARD_FILES]
 
 
 def pytest_configure(config):
+    # A cold import that a request thread interrupts drops redis.asyncio but keeps its submodules, breaking fakeredis.
+    importlib.import_module("redis.asyncio")
+    importlib.import_module("fakeredis")
     _reused(config)
     config.args.sort(key=lambda arg: (Path(arg.split("::", 1)[0]).parent.parts, arg))
     workers = getattr(config.option, "numprocesses", None)
@@ -143,6 +160,20 @@ def pytest_configure(config):
     NodeManager.setup_nodes = setup_nodes_in_parallel
     modules = [path.removesuffix(".py").replace("/", ".") for path in sorted(_shard_files(config))]
     config.stash[WARM_PIDS] = warm_imports(modules, workers)
+    config.stash[WORKER_FILES] = _worker_files(config, workers)
+
+
+def _worker_files(config, workers: int) -> dict[str, list[str]]:
+    index = int(config.getoption("shard").split("/")[0]) - 1
+    files = sorted(_shard_files(config))
+    durations = json.loads((config.rootpath / ".test_durations").read_text())
+    seconds = {path: size * SECONDS_PER_SOURCE_BYTE for path, size in source_sizes(config.rootpath, files).items()}
+    for node, shard in config.stash[NODE_SHARDS].items():
+        path = node.split("::", 1)[0]
+        if shard == index and path in seconds:
+            seconds[path] += durations.get(node, 0.0)
+    owned = assign_owners(seconds, set(grouped_files(config.rootpath, files)), workers, OWNER_COPIES)
+    return {f"gw{worker}": sorted(paths) for worker, paths in enumerate(owned)}
 
 
 # Importing Playwright here would put it in every test's import closure, so the browser check would turn on greenlet
@@ -170,7 +201,11 @@ def pytest_ignore_collect(collection_path, config):
     spec = config.getoption("shard")
     if not spec or collection_path.suffix != ".py" or not collection_path.name.startswith("test_"):
         return None
-    if collection_path.relative_to(config.rootpath).as_posix() not in _shard_files(config):
+    path = collection_path.relative_to(config.rootpath).as_posix()
+    if path not in _shard_files(config):
+        return True
+    owned = getattr(config, "workerinput", {}).get("owned_files")
+    if owned is not None and path not in owned:
         return True
     return None
 
@@ -265,6 +300,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     monkeypatch.delenv("REDIS_URL", raising=False)
     monkeypatch.setattr("hooks._redis._redis_client", None)
     monkeypatch.setattr("hooks._redis._redis_checked", False)
+    monkeypatch.setattr("hooks.context.operator_words._SHARED", [])
     monkeypatch.setenv("REDIS_KEY_PREFIX", swarm_v2_isolation.RUN_PREFIX)
     for _prefixed in (
         "hooks._redis._KEY_PREFIX",
@@ -418,6 +454,22 @@ def _real_ledger_folder_guard():
 
 
 @pytest.fixture(autouse=True)
+def _no_runner_git_config(monkeypatch):
+    # CI jobs export maintenance.auto through these; tests that build git config environments start from none.
+    for name in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_item_node_id():
+    # The mutation worker's pytest 9.2 node id alias is process wide; a test that runs it in process takes it back.
+    added = "_nodeid" not in vars(pytest.Item)
+    yield
+    if added and "_nodeid" in vars(pytest.Item):
+        del pytest.Item._nodeid
+
+
+@pytest.fixture(autouse=True)
 def _production_redis_key_guard(monkeypatch):
     # The isolation fixture above drops every AGENTIHOOKS_ variable; subprocesses need the prefix back.
     monkeypatch.setenv(redis_key_guard.keyspace.ENV, redis_key_guard.keyspace.ROOT)
@@ -430,6 +482,31 @@ def _production_redis_key_guard(monkeypatch):
 def ledger_port():
     with ledger_guard.reserve_port() as hold:
         yield hold.getsockname()[1]
+
+
+@contextmanager
+def memory_folder(settle_s=5.0):
+    folder = tempfile.TemporaryDirectory(dir="/dev/shm")
+    try:
+        yield Path(folder.name)
+    finally:
+        # Children a test started can still write into its home while the folder is removed.
+        deadline = time.monotonic() + settle_s
+        while True:
+            try:
+                folder.cleanup()
+                break
+            except OSError as error:
+                if error.errno != errno.ENOTEMPTY or time.monotonic() > deadline:
+                    raise
+                time.sleep(0.05)
+
+
+@pytest.fixture
+def memory_path():
+    """A scratch folder on tmpfs, so a ledger database there commits without waiting on runner disk fsync."""
+    with memory_folder() as path:
+        yield path
 
 
 @pytest.fixture(autouse=True)
@@ -461,10 +538,58 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _switch_interval_restored():
+    before = sys.getswitchinterval()
+    yield
+    sys.setswitchinterval(before)
+
+
+@pytest.fixture(autouse=True)
 def _swarm_tick_reaps_no_real_process(tmp_path, monkeypatch):
     from scripts.swarm import tick_reaper
 
     monkeypatch.setattr(tick_reaper, "PROC", tmp_path / "no-proc")
+
+
+@pytest.fixture(autouse=True)
+def _native_login_probe_runs_no_model(monkeypatch):
+    """The provider probe of a native login starts a real model turn; tests read it as accepted. Its own tests import
+    the real function at collection, before this stub applies."""
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(native_login, "rejected", lambda environ, account, run=None: False)
+
+
+@pytest.fixture(autouse=True)
+def _workstation_headroom_is_roomy(monkeypatch):
+    """Workstation admission reads a roomy fixed machine instead of the test runner's own load."""
+    from scripts.hive import headroom
+
+    measure = headroom.measure
+
+    def roomy(pending, now_ms, proc=None, previous=None):
+        if proc is not None:
+            return measure(pending, now_ms, proc, previous)
+        return {
+            "cpus": 1000,
+            "load5": 0.0,
+            "available_mb": 10**7,
+            "total_mb": 10**7,
+            "pending": pending,
+            "measured_at": now_ms,
+        }
+
+    monkeypatch.setattr(headroom, "measure", roomy)
+
+
+@pytest.fixture(autouse=True)
+def _codex_resumes_find_their_rollout(request, monkeypatch):
+    """A fake Codex resume finds its rollout unless the test is marked codex_rollouts."""
+    if request.node.get_closest_marker("codex_rollouts"):
+        return
+    from scripts.profiles import render
+
+    monkeypatch.setattr(render, "has_codex_rollout", lambda name, overlays, conversation_id: True)
 
 
 @pytest.fixture(autouse=True)

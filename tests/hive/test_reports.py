@@ -191,16 +191,16 @@ def test_a_hive_is_lost_only_after_its_heartbeat_outlives_the_grace_window(remot
     _beat_hive(remote, age)
     if reporting:
         _publish(remote)
-    assert remote.runtime.hive.lost(remote.agent, NOW) is lost
+    assert remote.runtime.hive.lost(remote.agent, NOW, LOST) is lost
     here = replace(remote.agent, runtime_target={"host_id": "controller"})
-    assert remote.runtime.hive.lost(here, NOW) is False
+    assert remote.runtime.hive.lost(here, NOW, LOST) is False
 
 
 def test_an_unreadable_hive_record_holds_its_workers(remote):
     from scripts.hive import registry
 
     remote.redis.hset(registry.key(HIVE), "heartbeat_at", "garbled")
-    assert remote.runtime.hive.lost(remote.agent, NOW) is False
+    assert remote.runtime.hive.lost(remote.agent, NOW, LOST) is False
 
 
 @pytest.mark.parametrize(
@@ -252,6 +252,44 @@ def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat
         assert actions == ([] if reopened else [f"could not retire {remote.agent.name}, retrying next tick"])
         assert [(a.name, a.state) for a in remote.store.agents("fixture")] == [(remote.agent.name, SUSPECT)]
         assert remote.store.claimant("fixture", "task") == remote.agent.name
+
+
+@pytest.mark.parametrize(
+    ("finished", "past_live", "beat_age", "action"),
+    [
+        (True, 1, LOST + 1, "retired"),
+        (True, 1, 0, "retired"),
+        (True, 0, LOST + 1, "retry"),
+        (True, None, LOST + 1, "retry"),
+        (False, 1, LOST + 1, "held"),
+    ],
+)
+def test_tick_drops_a_finished_worker_once_its_hive_misses_the_live_window(
+    remote, finished, past_live, beat_age, action
+):
+    from scripts.hive import registry
+    from scripts.swarm import idle, tick
+    from scripts.swarm.tick import SUSPECT
+
+    remote.agent = replace(remote.agent, state="finished" if finished else SUSPECT)
+    remote.store.put_agent("fixture", remote.agent)
+    _beat_hive(remote, None if past_live is None else registry.LIVE_MS + past_live)
+    idle.beat(remote.redis, "fixture", remote.agent.name, idle.WORKING, NOW - beat_age)
+    remote.store.claim("fixture", "task", remote.agent.name, 60000)
+    rows = {"task": {"state": "done" if finished else "claimed", "claimed_by": remote.agent.name}}
+    remote.runtime.retire = Mock(return_value=False)
+
+    actions = tick._reap("fixture", remote.store, Mock(), remote.runtime, rows, NOW)
+
+    expected = {
+        "retired": [f"retired {remote.agent.name}: its hive stopped reporting"],
+        "retry": [f"could not retire {remote.agent.name}, retrying next tick"],
+        "held": [],
+    }[action]
+    assert actions == expected
+    assert remote.runtime.retire.call_count == (1 if action == "retry" else 0)
+    kept = [a.name for a in remote.store.agents("fixture")]
+    assert kept == ([] if action == "retired" else [remote.agent.name])
 
 
 def test_lost_hive_worker_leaves_a_task_awaiting_merge_in_pull_request(remote):
@@ -880,3 +918,235 @@ def test_the_hive_controller_reads_hive_reports_from_its_store(remote):
     remote.runtime.hive = None
     hive_controller(routed(environ={}, herdr=remote.runtime), remote.store, "fixture", held)
     assert remote.runtime.hive.redis is remote.redis
+
+
+@pytest.mark.parametrize("handoff", [False, True])
+def test_finished_removed_hive_workers_settle_after_an_absence_lease(remote, handoff):
+    from scripts.hive import registry
+    from scripts.hive.orders import Orders
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import retire_watch, tick
+
+    remote.agent = replace(remote.agent, state="finished")
+    remote.store.put_agent("fixture", remote.agent)
+    remote.redis.srem(registry.INDEX, HIVE)
+    if handoff:
+        remote.store.put_handoff("fixture", "task", "continue the task")
+    rows = {"task": {"state": "claimed" if handoff else "done", "claimed_by": remote.agent.name}}
+    ledger = Mock()
+    ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
+
+    for now in (NOW, NOW + registry.LIVE_MS - 1):
+        assert tick._reap("fixture", remote.store, ledger, remote.runtime, rows, now) == [
+            f"could not retire {remote.agent.name}, retrying next tick"
+        ]
+        assert len(remote.store.agents("fixture")) == 1
+    assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
+
+    actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW + registry.LIVE_MS)
+
+    assert actions == [f"retired {remote.agent.name}"]
+    assert remote.store.agents("fixture") == []
+    assert retire_watch.rows(remote.store, "fixture") == []
+    assert remote.store.claimant("fixture", "task") is None
+    assert remote.store.execution_registry.occupants("fixture")[remote.agent.seat].state == "finished"
+    exit_record = InboxStore(remote.redis).seats.exit_of(remote.agent.name)
+    assert exit_record["reason"] == "exited"
+    assert exit_record["seat"] == (remote.agent.seat if handoff else "")
+    assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
+
+
+@pytest.mark.parametrize("protection", ["indexed", "heartbeat", "report", "working", "local", "unreadable"])
+def test_removed_hive_retirement_requires_expired_host_evidence(remote, protection, monkeypatch):
+    from scripts.hive import registry
+    from scripts.swarm import tick
+
+    remote.agent = replace(remote.agent, state="finished")
+    remote.store.put_agent("fixture", remote.agent)
+    remote.redis.srem(registry.INDEX, HIVE)
+    rows = {"task": {"state": "done"}}
+    ledger = Mock()
+    tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW)
+    if protection == "indexed":
+        remote.redis.sadd(registry.INDEX, HIVE)
+    elif protection == "heartbeat":
+        remote.redis.hset(registry.key(HIVE), "heartbeat_at", NOW + registry.LIVE_MS)
+    elif protection == "report":
+        _publish(remote)
+    elif protection == "working":
+        remote.agent = replace(remote.agent, state="working")
+        remote.store.put_agent("fixture", remote.agent)
+        rows["task"] = {"state": "claimed", "claimed_by": remote.agent.name}
+    elif protection == "local":
+        monkeypatch.setenv("SWARM_HIVE_ID", HIVE)
+    else:
+        remote.redis.hset(registry.key(HIVE), "heartbeat_at", "unknown")
+
+    tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW + registry.LIVE_MS)
+
+    assert len(remote.store.agents("fixture")) == 1
+    ledger.update_task.assert_not_called()
+
+
+@pytest.mark.parametrize("signal", ["index", "heartbeat", "report"])
+def test_a_returning_hive_resets_the_absence_lease(remote, signal):
+    from scripts.hive import registry
+    from scripts.swarm import tick
+
+    remote.agent = replace(remote.agent, state="finished")
+    remote.store.put_agent("fixture", remote.agent)
+    remote.redis.srem(registry.INDEX, HIVE)
+    rows = {"task": {"state": "done"}}
+    ledger = Mock()
+    tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW)
+    if signal == "index":
+        remote.redis.sadd(registry.INDEX, HIVE)
+    elif signal == "heartbeat":
+        remote.redis.hset(registry.key(HIVE), "heartbeat_at", NOW + registry.LIVE_MS)
+    else:
+        _publish(remote)
+    tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW + registry.LIVE_MS)
+    remote.redis.srem(registry.INDEX, HIVE)
+    remote.redis.delete(registry.key(HIVE), remote.reports.key(HIVE))
+    tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW + registry.LIVE_MS * 2)
+    assert len(remote.store.agents("fixture")) == 1
+
+    tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW + registry.LIVE_MS * 3)
+
+    assert remote.store.agents("fixture") == []
+
+
+@pytest.mark.parametrize("identity", ["execution", "generation"])
+def test_a_later_execution_cannot_inherit_a_removed_hive_absence_lease(remote, identity):
+    from scripts.hive import registry
+
+    first = replace(remote.agent, state="finished")
+    remote.redis.srem(registry.INDEX, HIVE)
+    assert not remote.runtime.hive.removed(first, NOW)
+    assert remote.runtime.hive.removed(first, NOW + registry.LIVE_MS)
+    remote.redis.sadd(registry.INDEX, HIVE)
+    remote.redis.srem(registry.INDEX, HIVE)
+    successor = (
+        replace(first, execution_id="later")
+        if identity == "execution"
+        else replace(first, generation=first.generation + 1)
+    )
+
+    assert not remote.runtime.hive.removed(successor, NOW + registry.LIVE_MS * 2)
+    assert not remote.runtime.hive.removed(successor, NOW + registry.LIVE_MS * 3 - 1)
+    assert remote.runtime.hive.removed(successor, NOW + registry.LIVE_MS * 3)
+
+
+@pytest.mark.parametrize("state", ["working", "starting", "retiring", "awaiting-decision"])
+def test_absent_hive_evidence_cannot_settle_a_nonfinished_execution(remote, state):
+    from scripts.hive import registry
+
+    remote.redis.srem(registry.INDEX, HIVE)
+    agent = replace(remote.agent, state=state)
+
+    assert not remote.runtime.hive.removed(agent, NOW)
+    assert not remote.runtime.hive.removed(agent, NOW + registry.LIVE_MS)
+
+
+def test_forgetting_a_hive_clears_its_pending_absence_observation(remote):
+    from scripts.hive import registry
+    from scripts.hive.remove import forget
+
+    remote.redis.srem(registry.INDEX, HIVE)
+    agent = replace(remote.agent, state="finished")
+    assert not remote.runtime.hive.removed(agent, NOW)
+
+    assert forget(remote.redis, HIVE) == ["deleted 1 registry records of remote"]
+
+    assert not remote.runtime.hive.removed(agent, NOW + registry.LIVE_MS)
+    assert remote.runtime.hive.removed(agent, NOW + registry.LIVE_MS * 2)
+
+
+LAUNCHED = 5_000
+
+
+@pytest.mark.parametrize(
+    ("listed", "observed_after", "pod_started_after", "retired"),
+    [
+        (False, 0, None, True),
+        (False, -1, None, False),
+        (True, 0, None, False),
+        (True, 0, 1, True),
+        (True, 0, 0, False),
+        (True, 0, -1, False),
+        (False, -1, 1, True),
+        (None, 0, None, False),
+        (None, 0, 1, True),
+    ],
+)
+@pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED}], indirect=True)
+def test_a_paneless_hive_worker_whose_process_or_pod_is_gone_is_retired_and_its_seat_freed(
+    remote, listed, observed_after, pod_started_after, retired
+):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import tick
+
+    agent = replace(remote.agent, pane_id="")
+    remote.store.put_agent("fixture", agent)
+    _publish(remote, state="unknown")
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    report.update(
+        names={True: [agent.name], False: ["someone-else"], None: []}[listed],
+        pane_ids=[],
+        process_namespace="theirs",
+        observed_at=LAUNCHED + remote.reports.STARTUP_MS + observed_after,
+    )
+    if pod_started_after is not None:
+        report["started_at"] = LAUNCHED + pod_started_after
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report))
+    remote.store.claim("fixture", "task", agent.name, 60000)
+    rows = {"task": {"state": "open", "claimed_by": ""}}
+    remote.runtime.retire = Mock(side_effect=AssertionError("a gone hive process needs no remote command"))
+
+    actions = tick._reap("fixture", remote.store, Mock(), remote.runtime, rows, LAUNCHED + 10**9)
+
+    if retired:
+        assert actions == [f"retired {agent.name}: its hive pane is gone"]
+        assert remote.store.agents("fixture") == []
+        assert remote.store.claimant("fixture", "task") is None
+        assert remote.store.execution_registry.occupants("fixture")[agent.seat].state == "ended"
+        exit_record = InboxStore(remote.redis).seats.exit_of(agent.name)
+        assert (exit_record["reason"], exit_record["seat"]) == ("stopped", "")
+    else:
+        assert [found.name for found in remote.store.agents("fixture")] == [agent.name]
+        assert remote.store.claimant("fixture", "task") == agent.name
+
+
+def test_hive_report_carries_the_pod_start_time(remote, monkeypatch):
+    from scripts.hive import daemon
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm_v2.runtime import process
+
+    monkeypatch.setattr(process, "local_namespace", lambda: "pod-namespace")
+    monkeypatch.setattr(process, "started_ms", lambda: 4321)
+    herdr = Mock()
+    herdr.live_names.return_value = set()
+    herdr.bindings.return_value = {}
+    herdr.conversations.return_value = {}
+    herdr.observe.return_value = PaneObservation("unknown")
+    herdr.reported.return_value = False
+    herdr.herdr.return_value = {"panes": []}
+
+    assert daemon.execution_report(remote.redis, HIVE, herdr)["started_at"] == 4321
+
+
+def test_the_pod_start_time_is_process_one_start_after_boot(tmp_path, monkeypatch):
+    from scripts.swarm_v2.runtime import process
+
+    (tmp_path / "stat").write_text("cpu  1 2 3\nbtime 1700000000\nprocesses 9\n")
+    (tmp_path / "1").mkdir()
+    fields = ["S", *["0"] * 18, "250"]
+    (tmp_path / "1" / "stat").write_text(
+        f"1 (init) 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 proc) {' '.join(fields)} 0 0\n"
+    )
+    monkeypatch.setattr(process.os, "sysconf", lambda name: 3 if name == "SC_CLK_TCK" else 0)
+
+    started = process.started_ms(tmp_path)
+    assert started == 1700000000 * 1000 + 83333
+    assert type(started) is int
+    assert process.started_ms(tmp_path / "missing") == 0

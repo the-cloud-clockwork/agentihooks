@@ -81,6 +81,30 @@ def test_observe_preserves_living_agent(supervisor, monkeypatch):
     assert supervisor.exits == {}
 
 
+def test_observe_keeps_the_exit_code_a_wrapper_writes_just_before_it_exits(supervisor, monkeypatch):
+    monkeypatch.setattr(runtime.trees, "reap", lambda: [])
+    protocol.write(supervisor.root / "agent.json", {**supervisor.scope, "pid": 123, "pid_start": 7})
+
+    def exited(*_):
+        protocol.write(supervisor.root / "agent.exit.json", {**supervisor.scope, "exit_code": 0})
+
+    monkeypatch.setattr(runtime, "_process", exited)
+    supervisor.observe()
+    assert supervisor.exits == {"agent": 0}
+
+
+@pytest.mark.parametrize("bound, pid", [(False, 123), (True, "123")])
+def test_observe_ignores_an_unbound_or_nonnumeric_agent_receipt(supervisor, monkeypatch, bound, pid):
+    monkeypatch.setattr(runtime.trees, "reap", lambda: [])
+    probe = Mock(return_value=None)
+    monkeypatch.setattr(runtime, "_process", probe)
+    scope = supervisor.scope if bound else {}
+    protocol.write(supervisor.root / "agent.json", {**scope, "pid": pid, "pid_start": 7})
+    supervisor.observe()
+    assert supervisor.exits == {}
+    probe.assert_not_called()
+
+
 def test_wait_observes_after_bounded_sleep(supervisor, monkeypatch):
     sleep = Mock()
     observe = Mock()
@@ -388,7 +412,7 @@ def test_running_prioritizes_requested_termination(supervisor, monkeypatch):
 def test_quiesce_excludes_exporter_and_bounds_descendants(supervisor, monkeypatch, forced):
     supervisor.children["exporter"] = SimpleNamespace(pid=321)
     remaining = [SimpleNamespace(pid=123)]
-    living = Mock(side_effect=[remaining, remaining if forced else [], []] if forced else [remaining, []])
+    living = Mock(side_effect=[remaining, remaining, remaining, []] if forced else [remaining, [], []])
     monkeypatch.setattr(runtime.trees, "living", living)
     send = Mock()
     monkeypatch.setattr(runtime.trees, "send", send)
@@ -860,7 +884,7 @@ def test_main_routes_the_admitted_paths(monkeypatch, tmp_path, implicit):
 
 def test_forced_quiescence_waits_for_the_kill_window(supervisor, monkeypatch):
     remaining = {123: SimpleNamespace(pid=123)}
-    monkeypatch.setattr(runtime.trees, "living", Mock(side_effect=[remaining, remaining, []]))
+    monkeypatch.setattr(runtime.trees, "living", Mock(side_effect=[remaining, remaining, remaining, []]))
     monkeypatch.setattr(runtime.trees, "send", lambda *_: None)
     monkeypatch.setattr(runtime.time, "monotonic", Mock(side_effect=[0, 1, 1, 1]))
     wait = Mock()

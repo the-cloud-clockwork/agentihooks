@@ -265,7 +265,7 @@ def test_the_launcher_waits_its_grace_before_the_agent_command(tmp_path):
     grace = lines.index("sleep 3")
     assert any(line.endswith(".started") for line in lines[:grace])
     assert "claude" in lines[grace + 1] and lines[grace + 2] == "native_status=$?"
-    assert "scripts.session_exit" in lines[grace + 3] and lines[grace + 4].startswith("rm -f ")
+    assert "-P -m scripts.session_exit" in lines[grace + 3] and lines[grace + 4].startswith("rm -f ")
 
 
 def test_the_launcher_sources_the_shared_list_before_its_own_exports(tmp_path):

@@ -25,8 +25,21 @@ process. The interface is `scripts.swarm_v2.ledger_writer`.
   before it touches the folder. Each refusal appends one line to `.ledger-writer-conflicts.jsonl`;
   `conflicts_total(dir)` reads it as `ledger_writer_conflicts_total`.
 - The kernel drops the lease when the holder exits, crashes or is killed, so a restart needs no cleanup.
-  A code reload (`SWARM_RELOAD=1`) re-executes the same process; the lock descriptor closes on exec and
-  the new image takes the lease again.
+  A code reload (`SWARM_RELOAD=1` on changed code content, or `ledger_server.py --reload`) starts a successor
+  that inherits the listening socket, loads the open ledgers and the event stream views of the ledgers a page
+  watches, and reports ready; a hangup is answered on its own thread, so it hands over even when the watch loop
+  has stopped. The old server then stops
+  accepting, ends its event streams, finishes its requests, hands over the ledgers written since and releases
+  the lease, and the successor takes it within `LEASE_WAIT_S`. Connections that arrive meanwhile wait in the
+  socket's backlog. The successor imports the modules the old server had loaded before it reports ready.
+  Requests still running when the drain bound ends keep the lease until the old process exits; the successor
+  then refreshes every stream view it built. Once the successor reported ready the old server does not take
+  the socket back, so a successor that fails after ready leaves the port closed until the next start.
+- The compose service runs `server_supervisor.py` as the container's main process. It adopts the successor the
+  old server leaves behind and exits once no server remains, so a handoff keeps the container up.
+  `ledger_server.py --reload` applies the compose service first, then hands off. A server whose parent is the
+  container runtime itself (a container started before the supervisor) restarts in place instead: its
+  socket closes until the new code binds and its requests and streams end.
 - `flock` coordinates processes that share one kernel's view of the volume: a local disk or a
   `ReadWriteOnce` volume. It does not coordinate writers across NFS or another shared network
   filesystem; never put the ledger folder on one.
@@ -47,9 +60,17 @@ process. The interface is `scripts.swarm_v2.ledger_writer`.
 
 ## Chart
 
-`ledger.replicas` in the `agentihooks-swarm` chart must be 1. Any other value fails `helm template`
-with `ledger.replicas must be 1`, and the chart proof (`ci/kind-smoke.sh`) checks that refusal. A
-replica forced past the chart still meets the lease and exits.
+A folder ledger runs one replica: `ledger.replicas` above 1 fails `helm template` with `ledger.replicas
+above 1 needs the shared database` unless `AGENTIHOOKS_SWARM_DATABASE_URL` is set in `ledger.secretEnv`
+or non-empty in `ledger.env`. A replica forced past the chart onto one folder still meets the lease and exits.
+
+On the shared database each server skips the folder lease and follows the generations other servers
+write, so several replicas serve one ledger. With more than one, the chart adds a PodDisruptionBudget
+allowing one replica down, `minReadySeconds: 5` so a rollout moves on only after the new replica has
+served, an eight second preStop pause so the Service drops a stopping replica before its server
+ends, and a twenty second grace period that leaves the server its drain after the pause. A rollout
+then replaces one replica at a time while the other answers. `ci/kind-smoke.sh` runs
+`tests/chart_ledger_rollout.py`, which checks both refusals and the rendered rollout.
 
 ## Snapshots and backups
 

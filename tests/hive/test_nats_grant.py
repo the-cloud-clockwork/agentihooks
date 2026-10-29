@@ -44,12 +44,13 @@ def signer(tmp_path, request):
     config = tmp_path / "nats.conf"
     config.write_text(
         f"host: 127.0.0.1\nport: {port}\nmax_control_line: {getattr(request, 'param', 65536)}\n"
+        f'log_file: "{tmp_path / "nats.log"}"\n'
         f"operator: {nkey.encode_jwt(operator, operator.public, 'op', claims)}\n"
         f"system_account: {system.public}\n"
         f'jetstream: {{store_dir: "{tmp_path / "js"}"}}\n'
         f'resolver: {{type: full, dir: "{tmp_path / "jwt"}"}}\n'
         f"resolver_preload: {{\n  {system.public}: {system_jwt}\n"
-        f"  {account.public}: {nats_grant.account_jwt(signed, {})}\n}}\n"
+        f"  {account.public}: {nats_grant.account_jwt(operator, account, {})}\n}}\n"
     )
     process = subprocess.Popen(
         [nats_server.binary(), "-c", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -243,6 +244,52 @@ def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_dur
     assert f"permissions violation for publish to {durable}" in refused
 
 
+def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin, signer, capfd):
+    from scripts.events import nats
+    from scripts.hive import account_slots, buckets
+    from scripts.hub import slots
+
+    hub = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "hub")))
+    members = [
+        nats.open_bus(
+            BusConfig(backend="nats", url=signer.url, credentials=nats_grant.mint(signer, name), provision=False)
+        )
+        for name in ("m1", "m2")
+    ]
+    try:
+        buckets.provision(hub)
+        slots.serve(hub, clock=lambda: 1000)
+        report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
+        first = account_slots.Remote(account_slots.asker(members[0], "rig", "m1"), "m1", lambda: report)
+        second = account_slots.Remote(account_slots.asker(members[1], "other", "m2"), "m2", lambda: report)
+        assert first.take("one", "claude") == "a"
+        assert second.take("two", "claude") is None
+        posing = account_slots.Remote(account_slots.asker(members[1], "rig", "m1", 500), "m1")
+        with pytest.raises(TimeoutError, match="^no responders for 'slots.rig.m1'$"):
+            posing.release("one", "claude", "a")
+        refusal = "slot request names hive 'm2' but the sending credential is bound to hive 'm1'"
+        with pytest.raises(account_slots.Unavailable, match=f"^{refusal}$"):
+            account_slots.Remote(account_slots.asker(members[0], "rig", "m1"), "m2").release("one", "claude", "a")
+        assert f"hub: refused a release in swarm rig: {refusal}\n" in capfd.readouterr().err
+        assert second.take("two", "claude") is None
+        first.release("one", "claude", "a")
+        assert second.take("two", "claude") == "a"
+    finally:
+        for member in members:
+            member.close()
+        hub.close()
+
+
+@pytest.mark.parametrize("bucket", ["account-slots", "hive-slot-accounts"])
+def test_a_member_credential_cannot_read_the_hub_owned_account_buckets(signer, bucket):
+    async def act(nc):
+        await nc.publish(f"$JS.API.STREAM.INFO.KV_{bucket}", b"")
+        await nc.publish(f"$KV.{bucket}.key", b"")
+
+    seen = " ".join(_violations(signer, nats_grant.mint(signer, "m1"), act, refused=True)).lower()
+    assert f'permissions violation for publish to "$js.api.stream.info.kv_{bucket}"' in seen
+
+
 def test_a_hive_endpoint_without_a_signer_mints_no_bus_credential(admin):
     member = auth.mint(admin, "h1", PUBLIC)
     grant = _refresh(admin, None, member["ledger_credential"])
@@ -255,6 +302,11 @@ def test_removing_a_member_revokes_its_bus_credential(admin, signer):
     other = auth.mint(admin, "h2", PUBLIC)
     creds = _refresh(admin, signer, member["ledger_credential"])["nats_credentials"]
     kept = _refresh(admin, signer, other["ledger_credential"])["nats_credentials"]
+    assert remove.revoke(admin, member["id"], signer, dry_run=True) == [
+        f"would revoke the NATS credential of {member['id']}",
+        f"would revoke member {member['id']} and its Redis user",
+    ]
+    assert admin.hgetall(nats_grant.REVOKED) == {}
     lines = remove.revoke(admin, member["id"], signer)
     assert lines == [
         f"revoked the NATS credential of {member['id']}",
@@ -262,7 +314,10 @@ def test_removing_a_member_revokes_its_bus_credential(admin, signer):
     ]
     assert not _opens(signer, creds)
     assert _opens(signer, kept)
-    assert set(admin.hgetall(nats_grant.REVOKED)) == {nats_grant.member_user(signer, member["id"]).public}
+    revoked = admin.hgetall(nats_grant.REVOKED)
+    assert set(revoked) == {nats_grant.member_user(signer, member["id"]).public}
+    assert remove.revoke(admin, member["id"], signer) == [f"{member['id']} holds no member credential"]
+    assert admin.hgetall(nats_grant.REVOKED) == revoked
 
 
 def test_a_claims_update_the_server_refuses_raises(signer):
@@ -270,7 +325,8 @@ def test_a_claims_update_the_server_refuses_raises(signer):
         nats_grant.push(signer, "not.a.jwt")
 
 
-def test_a_failed_push_keeps_the_revocation_for_the_next_push(admin, signer):
+def test_a_failed_push_keeps_the_revocation_for_the_next_push(admin, signer, monkeypatch):
+    monkeypatch.setattr(nats_grant, "PUSH_TIMEOUT_S", 0.05)
     unreachable = nats_grant.Signer(
         signer.operator,
         signer.account,
@@ -278,7 +334,7 @@ def test_a_failed_push_keeps_the_revocation_for_the_next_push(admin, signer):
         f"nats://127.0.0.1:{nats_server.free_port()}",
         signer.trusted_operator,
     )
-    with pytest.raises(Exception):
+    with pytest.raises(TimeoutError):
         nats_grant.revoke(admin, unreachable, "m1")
     assert set(admin.hgetall(nats_grant.REVOKED)) == {nats_grant.member_user(signer, "m1").public}
 
@@ -454,6 +510,72 @@ def test_a_signer_reference_needs_openbao_settings():
         nats_grant.from_environ({nats_grant.SIGNER_ENV: SIGNER_PATH, nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED})
 
 
+def _signer_dir(tmp_path, record: dict):
+    folder = tmp_path / "nats-signer"
+    folder.mkdir()
+    for name, value in record.items():
+        (folder / name).write_text(value)
+    (folder / "..data").mkdir()
+    return folder
+
+
+def test_the_signer_comes_from_the_synced_record_folder_named_by_file(tmp_path, monkeypatch):
+    operator, account = nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)
+    reads = []
+    monkeypatch.setattr(openbao_kv, "read", lambda bao, found: reads.append(found))
+    folder = _signer_dir(tmp_path, _signer_record(operator, account))
+    environ = {nats_grant.SIGNER_ENV: f"file:{folder}", nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED}
+    assert nats_grant.FILE_SCHEME == "file:"
+    assert nats_grant.from_environ(environ) == nats_grant.Signer(operator, account, "c", "u", TRUSTED)
+    assert reads == []
+
+
+def test_a_synced_signer_record_reads_its_member_swarms_as_json(tmp_path):
+    record = {
+        **_signer_record(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)),
+        "member_swarms": '{"h1": ["s1"]}',
+    }
+    folder = _signer_dir(tmp_path, record)
+    environ = {nats_grant.SIGNER_ENV: f"file:{folder}", nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED}
+    assert nats_grant.from_environ(environ).member_swarms == {"h1": ("s1",)}
+
+
+def test_a_synced_signer_needs_the_trusted_operator(tmp_path):
+    folder = _signer_dir(tmp_path, _signer_record(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT)))
+    with pytest.raises(auth.HiveError) as refused:
+        nats_grant.from_environ({nats_grant.SIGNER_ENV: f"file:{folder}"})
+    assert str(refused.value) == (
+        "AGENTIHOOKS_NATS_SIGNER is set, so AGENTIHOOKS_NATS_TRUSTED_OPERATOR must name "
+        "the operator public key the NATS server trusts"
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda record: record.pop("system_credentials"),
+        lambda record: record.update(operator_seed="nope"),
+        lambda record: record.update(member_swarms="{"),
+        lambda record: record.update(member_swarms="[]"),
+    ],
+)
+def test_an_unusable_synced_signer_record_is_refused(tmp_path, change):
+    record = _signer_record(nkey.create(nkey.OPERATOR), nkey.create(nkey.ACCOUNT))
+    change(record)
+    folder = _signer_dir(tmp_path, record)
+    environ = {nats_grant.SIGNER_ENV: f"file:{folder}", nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED}
+    with pytest.raises(
+        auth.HiveError, match=f"^(the NATS signer file {folder} cannot be used \\(|member_swarms must map)"
+    ):
+        nats_grant.from_environ(environ)
+
+
+def test_a_missing_synced_signer_folder_is_refused(tmp_path):
+    environ = {nats_grant.SIGNER_ENV: f"file:{tmp_path / 'gone'}", nats_grant.TRUSTED_OPERATOR_ENV: TRUSTED}
+    with pytest.raises(auth.HiveError, match=f"^the NATS signer file {tmp_path / 'gone'} cannot be used \\("):
+        nats_grant.from_environ(environ)
+
+
 def test_refresh_writes_the_bus_credential_beside_the_member_env(tmp_path):
     grant = {"id": "m1", "ledger_credential": "l", "redis_url": "r", "nats_credentials": "creds text"}
     env = auth.write_env(tmp_path, "https://hive", grant).read_text()
@@ -486,7 +608,7 @@ def test_hive_revoke_revokes_the_bus_credential_then_the_member(admin, wired, ca
     assert cli.main(["revoke", member["id"]]) == 0
     assert capsys.readouterr().out == f"bus\nrevoked {member['id']}\n"
     assert revoked == [(admin, signed, member["id"])]
-    assert not admin.exists(remove.member_key(member["id"]))
+    assert auth.member(admin, member["id"]) is None
 
 
 def test_hive_remove_and_serve_carry_the_signer(admin, wired, monkeypatch):
@@ -505,7 +627,7 @@ def test_hive_remove_and_serve_carry_the_signer(admin, wired, monkeypatch):
     monkeypatch.setattr(server, "make_server", make_server)
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://own:6379/0")
     assert cli.main(["serve"]) == 0
-    assert served == [signed]
+    assert [loader() for loader in served] == [signed]
 
 
 def test_remove_revokes_with_the_plan_signer(admin, monkeypatch):
@@ -516,8 +638,8 @@ def test_remove_revokes_with_the_plan_signer(admin, monkeypatch):
     monkeypatch.setattr(remove, "revoke", lambda *args: (calls.append(args), ["revoked"])[1])
     store = SimpleNamespace(redis=admin)
     plan = remove.Plan("m1", "h1", "k8s/agentihooks-hive-h1", signer=signed)
-    assert remove.remove(store, None, plan, remove.Host()) == ["revoked"]
-    assert calls == [(admin, "m1", signed)]
+    assert remove.remove(store, None, plan, remove.Host()) == ["member: revoked"]
+    assert calls == [(admin, "m1", signed, False)]
 
 
 def _claims(jwt: str) -> dict:
@@ -537,19 +659,31 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
     jwt, user = nkey.parse_creds(nats_grant.mint(signed, "m1"))
     claims = _claims(jwt)
     assert (claims["iss"], claims["sub"], claims["name"]) == (signed.account.public, user.public, "hive-m1")
-    buckets = ("spoke-work", "spoke-pending", "hive-presence", "hive-executions", "execution-starts")
+    buckets = (
+        "spoke-work",
+        "spoke-pending",
+        "hive-presence",
+        "hive-executions",
+        "execution-starts",
+    )
     publish = [
         "swarm.*.execution.>",
         "dead.*",
         "dead.*.*",
         "$JS.API.INFO",
+        "$JS.API.STREAM.MSG.GET.AGENTIHOOKS-DEAD",
         "$JS.API.STREAM.MSG.GET.AGENTIHOOKS_DEAD",
+        "$JS.API.STREAM.INFO.AGENTIHOOKS-EVENTS",
+        "$JS.API.STREAM.INFO.AGENTIHOOKS_EVENTS",
+        "$JS.API.STREAM.INFO.AGENTIHOOKS-DEAD",
+        "$JS.API.STREAM.INFO.AGENTIHOOKS_DEAD",
         "$JS.API.CONSUMER.INFO.>",
         "$JS.API.CONSUMER.MSG.NEXT.>",
         "$JS.ACK.>",
         *(f"$KV.{bucket}.>" for bucket in buckets),
         *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets),
         *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets),
+        "slots.*.m1",
     ]
     assert claims["nats"] == {
         "type": "user",
@@ -578,7 +712,7 @@ def test_a_role_credential_keeps_the_unrestricted_user_claims():
 @pytest.mark.parametrize("revocations", [{}, {"UA": 7}])
 def test_the_account_jwt_carries_exactly_the_account_claims(revocations):
     signed = _offline_signer()
-    claims = _claims(nats_grant.account_jwt(signed, revocations))
+    claims = _claims(nats_grant.account_jwt(signed.operator, signed.account, revocations))
     assert (claims["iss"], claims["sub"], claims["name"]) == (signed.operator.public, signed.account.public, "SWARM")
     assert claims["nats"] == {
         "type": "account",
@@ -627,3 +761,21 @@ def test_a_push_connects_once_without_reconnecting_and_bounds_both_waits(monkeyp
         "request": ("$SYS.REQ.CLAIMS.UPDATE", b"a.b.c", {"timeout": 10}),
         "closed": True,
     }
+
+
+def test_a_push_cancels_the_initial_connection_retry_loop(monkeypatch):
+    import asyncio
+
+    import nats as nats_client
+
+    from scripts.events import nats
+
+    async def connect(*args, **kwargs):
+        await asyncio.sleep(0.1)
+        raise AssertionError("connection retry outlived the push deadline")
+
+    monkeypatch.setattr(nats_client, "connect", connect)
+    monkeypatch.setattr(nats, "auth_options", lambda credentials: {})
+    monkeypatch.setattr(nats_grant, "PUSH_TIMEOUT_S", 0.01)
+    with pytest.raises(TimeoutError):
+        nats_grant.push(_offline_signer(), "a.b.c")

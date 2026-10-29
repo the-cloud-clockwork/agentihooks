@@ -8,7 +8,7 @@ has_children: true
 
 AgentiHooks is organised around four pillars: Identity, Guardrails, Context Intelligence, Fleet Command. Each pillar covers one axis of running Claude Code and Codex agents.
 
-The [swarm guide](swarm.md) covers fleet task execution, including [ready on a task of any kind](swarm.md#ready-on-a-task-of-any-kind), [ready handoffs for tasks split across pull requests](swarm.md#ready-handoffs-for-split-tasks), [labelled halves for tasks without a plan](swarm.md#labelled-halves-for-tasks-without-a-plan) and [what the ready merge pass does when a pull request leaves the merge queue](swarm.md#ready-merge-pass-queue-exits), and [what it does when a pull request is marked unmergeable](swarm.md#unmergeable-entries).
+The [swarm guide](swarm.md) covers fleet task execution, including [changing the kind of an existing task](swarm.md#changing-the-kind-of-an-existing-task), [ready on a task of any kind](swarm.md#ready-on-a-task-of-any-kind), [ready handoffs for tasks split across pull requests](swarm.md#ready-handoffs-for-split-tasks), [labelled halves for tasks without a plan](swarm.md#labelled-halves-for-tasks-without-a-plan) and [what the ready merge pass does when a pull request leaves the merge queue](swarm.md#ready-merge-pass-queue-exits), and [what it does when a pull request is marked unmergeable](swarm.md#unmergeable-entries).
 
 See [recovering a released task after red checks](swarm.md#recovering-a-released-task-after-red-checks) for the handoff and branch continuation, configuration, owner safeguards and measured recovery time.
 
@@ -48,7 +48,9 @@ See [hive endpoint limits](hives.md#hive-endpoint-limits) for the hive endpoint 
 
 See [headroom](hives.md#headroom) for what a hive's headroom reading holds, how it stays fresh while a launch runs, and why a hive with no fresh reading has no room.
 
-See [promotion fixer intake](swarm.md#promotion-fixer-intake) for how one swarm per repository files and closes promotion fixer tasks, hands intake over and shows its owner, and [runner outage runs](swarm.md#runner-outage-runs) for the one task filed when failed jobs lost their runner, with the jobs that failed for want of a lost unit shard's output in [jobs that failed for want of shard output](swarm.md#jobs-that-failed-for-want-of-shard-output). See [red dev workflows outside the promotion gate](swarm.md#red-dev-workflows-outside-the-promotion-gate) for the Doctor finding raised when any other workflow fails five dev push runs in a row.
+See [promotion fixer intake](swarm.md#promotion-fixer-intake) for how one swarm per repository files and closes promotion fixer tasks, hands intake over and shows its owner, and [runner outage runs](swarm.md#runner-outage-runs) for the alert raised without a task when failed jobs failed on CI infrastructure, with the jobs that failed for want of a lost unit shard's output in [jobs that failed for want of shard output](swarm.md#jobs-that-failed-for-want-of-shard-output). See [red dev workflows outside the promotion gate](swarm.md#red-dev-workflows-outside-the-promotion-gate) for the Doctor finding raised when any other workflow fails five dev push runs in a row.
+
+See [independent consumer failures beside a lost shard](swarm.md#independent-consumer-failures-beside-a-lost-shard) for mixed Sonar and shard check examples, separate fixer tasks and the fixed folding rules.
 
 See [agent status comments](swarm.md#agent-status-comments) for when an agent's status comment amends its earlier one and when it posts a new comment at the end.
 

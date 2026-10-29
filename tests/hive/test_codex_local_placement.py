@@ -6,7 +6,12 @@ from tests.hive.test_local_overflow import HIVE_FULL, fill_anton, hybrid
 
 
 def test_codex_local_fallback_uses_the_same_admission_path_as_claude(setup, monkeypatch):
+    from scripts.swarm.capacity import Account
+    from tests.hive.test_controller_launch import write_hive
+
+    setup.herdr._quota_accounts.append(Account("codex", "account", "room", 0, None, 80, 6))
     fenced = hybrid(setup, monkeypatch)
+    write_hive(setup, id="anton", slots=[{"harness": "codex", "account": "account", "kind": "subscription"}])
     fill_anton(setup)
     refused = "the workstation admission refused the launch"
     overflow = Mock(return_value=refused)

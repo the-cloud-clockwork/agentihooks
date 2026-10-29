@@ -62,7 +62,7 @@ from hooks.config import (
     BROADCAST_MIN_INTERVAL_SEC,
     BROADCAST_PERSISTENT_THROTTLE,
 )
-from hooks.context import injection_trace, quarantine
+from hooks.context import injection_trace, quarantine, worker_mode
 
 _SEVERITY_RANK = {"nuclear": 0, "critical": 1, "alert": 2, "warning": 3, "info": 4, "resolved": 5}
 
@@ -339,7 +339,13 @@ def _get_session_channels(session_id: str) -> list[str]:
     `env` block: profile default → repo override → repo-local override →
     container launch env.
     """
-    return list(BASE_CHANNELS)
+    from hooks.config import BRAIN_CHANNEL
+    from hooks.context.brain_adapter import feed_channel
+
+    channels = list(BASE_CHANNELS)
+    if BRAIN_CHANNEL in channels or "*" in channels:
+        channels.append(feed_channel())
+    return channels
 
 
 def _message_matches_channel(msg: dict, session_channels: list[str]) -> bool:
@@ -355,6 +361,10 @@ def _message_matches_channel(msg: dict, session_channels: list[str]) -> bool:
     # Global messages (no channel) → always deliver
     if not msg_channel:
         return True
+    from hooks.config import BRAIN_CHANNEL
+
+    if msg_channel.startswith(f"{BRAIN_CHANNEL}@"):
+        return msg_channel in session_channels
     # Wildcard subscription → deliver everything
     if "*" in session_channels:
         return True
@@ -540,6 +550,16 @@ def reconcile_channel_broadcasts(channel: str, desired: list[dict]) -> dict:
         "removed": len(existing) - len(kept_ids),
         "active": len(resolved),
     }
+
+
+def retire_channel_source(channel: str, source: str) -> int:
+    path = _broadcast_path()
+    with _file_lock(path):
+        current = _read_broadcasts()
+        kept = [m for m in current if not (m.get("channel") == channel and m.get("source") == source)]
+        if len(kept) != len(current):
+            _save_broadcasts(kept)
+    return len(current) - len(kept)
 
 
 def cache_fleet_broadcasts(entries: list[dict]) -> int:
@@ -1150,7 +1170,7 @@ def format_critical_context(msgs: list[dict], session_id: str = "") -> str:
 
 
 def check_and_inject_broadcasts(session_id: str) -> None:
-    if not BROADCAST_ENABLED:
+    if not BROADCAST_ENABLED or worker_mode.active():
         return
 
     try:
@@ -1213,7 +1233,7 @@ def context_kind(context: str) -> str:
 def get_pretool_context(session_id: str, *, claim_unseen: bool = True) -> str | None:
     # get_pretool_broadcasts owns the BROADCAST_CRITICAL_ON_PRETOOL gate; this
     # layer only checks whether broadcasts are enabled at all.
-    if not BROADCAST_ENABLED:
+    if not BROADCAST_ENABLED or worker_mode.active():
         return None
 
     try:
@@ -1236,7 +1256,7 @@ def get_posttool_context(session_id: str) -> str | None:
 
 def get_broadcast_context(session_id: str, message_ids: list[str]) -> str | None:
     wanted = set(message_ids)
-    if not wanted:
+    if not wanted or worker_mode.active():
         return None
     pending = [message for message in get_pending_broadcasts(session_id) if message.get("id") in wanted]
     pending.sort(key=lambda message: _SEVERITY_RANK.get(message.get("severity", "info"), 9))

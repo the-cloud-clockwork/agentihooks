@@ -1,4 +1,4 @@
-"""agentihooks hive add|invite|create|refresh|revoke|remove|controller|serve|set|show|list|run|install|bundle-origin|setup."""
+"""agentihooks hive add|invite|scope|create|refresh|revoke|remove|controller|serve|set|show|list|run|install|bundle-origin|setup."""
 
 import argparse
 import contextlib
@@ -51,6 +51,7 @@ def refresh_env(environ: MutableMapping[str, str]) -> str:
     join.save(registry.home(environ), url, {**grant, "ledger_credential": credential}, saved)
     ledger_ca.place(registry.home(environ), grant.get("ledger_ca"), environ)
     environ["AGENTIHOOKS_HIVE_REDIS_URL"] = grant["redis_url"]
+    environ["AGENTIHOOKS_HIVE_ID"] = grant["id"]
     return grant["id"]
 
 
@@ -107,13 +108,13 @@ def _post(url: str, path: str, body: dict, action: str, environ: Mapping[str, st
         raise auth.HiveError(f"the hive at {url} answered with a body that is not JSON") from exc
 
 
-def _add(args: argparse.Namespace, label: str) -> dict:
+def _add(args: argparse.Namespace, redis: "Redis", label: str) -> dict:
     from scripts.hive import machine
     from scripts.swarm.commands import hive_id
     from scripts.swarm.store import redis_url
 
     return machine.add(
-        redis_client(),
+        redis,
         hive_id(),
         args.target,
         label,
@@ -122,8 +123,10 @@ def _add(args: argparse.Namespace, label: str) -> dict:
 
 
 def _invite(args: argparse.Namespace) -> str:
+    from dataclasses import replace
+
     from scripts import openbao_kv
-    from scripts.hive import invite
+    from scripts.hive import invite, member_swarms
     from scripts.swarm.store import redis_url
 
     bao = openbao_kv.from_env(os.environ)
@@ -139,7 +142,24 @@ def _invite(args: argparse.Namespace) -> str:
         ledger_ca.served(),
         bus_url=args.bus_url,
     )
-    return invite.invite(redis_client(), bao, request, redis_url(os.environ))
+    redis = redis_client()
+    if signer_path := member_swarms.signer_path(os.environ):
+        request = replace(request, signer_path=signer_path, swarms=member_swarms.swarms(redis, args.swarm))
+    return invite.invite(redis, bao, request, redis_url(os.environ))
+
+
+def _scope(args: argparse.Namespace) -> str:
+    from scripts import openbao_kv
+    from scripts.hive import member_swarms, nats_grant
+
+    bao = openbao_kv.from_env(os.environ)
+    path = member_swarms.signer_path(os.environ)
+    if bao is None or path is None:
+        raise auth.HiveError(
+            f"{openbao_kv.URL_ENV}, {openbao_kv.TOKEN_ENV} and {nats_grant.SIGNER_ENV} naming an OpenBao record "
+            f"under {nats_grant.HUB_PATH} must all be set to list member swarms"
+        )
+    return member_swarms.backfill(redis_client(), bao, path, args.swarm)
 
 
 def _create(args: argparse.Namespace) -> str:
@@ -153,22 +173,41 @@ def _create(args: argparse.Namespace) -> str:
     if bao is None:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
     tools = create.Tools(redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served())
-    given = {"repo": args.repo, "base": args.base, "like": args.like, "node": args.node, "timeout_s": args.timeout}
+    given = {
+        "repo": args.repo,
+        "base": args.base,
+        "like": args.like,
+        "node": args.node,
+        "timeout_s": args.timeout,
+        "name": args.name,
+    }
     options = create.Options(**{key: value for key, value in given.items() if value is not None}, dry_run=args.dry_run)
     return create.create(tools, options)
 
 
 def _remove(args: argparse.Namespace) -> list[str]:
     from scripts import openbao_kv
-    from scripts.hive import invite, remove
+    from scripts.hive import invite, machine, remove
     from scripts.swarm.store import RedisStore
 
     bao = openbao_kv.from_env(os.environ)
-    if bao is None:
+    if bao is None and not args.dry_run:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
     store = RedisStore(redis_client())
-    label = args.label or remove.label(store.redis, args.id)
-    plan = remove.Plan(args.id, label, args.path or invite.default_path(label), args.antoncore, args.wait, _signer())
+    if args.label:
+        hive, label = machine.named_member(store.redis, args.id) or args.id, args.label
+    else:
+        hive, label = remove.resolve(store.redis, args.id)
+    given = {"repo": args.repo, "base": args.base}
+    plan = remove.Plan(
+        hive,
+        label,
+        args.path or invite.default_path(label),
+        **{key: value for key, value in given.items() if value is not None},
+        wait_s=args.wait,
+        signer=_signer(),
+        dry_run=args.dry_run,
+    )
     return remove.remove(store, bao, plan, remove.Host())
 
 
@@ -199,6 +238,23 @@ def _signer() -> "Signer | None":
     return nats_grant.from_environ(os.environ)
 
 
+def _nats_trust(args: argparse.Namespace) -> str:
+    import yaml
+
+    from scripts import openbao_kv
+    from scripts.hive import nats_trust
+
+    bao = openbao_kv.from_env(os.environ)
+    if bao is None:
+        raise auth.HiveError(
+            f"nats-trust writes OpenBao, so {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must be set"
+        )
+    users, retired = nats_trust.load_users(args.users), nats_trust.load_retired(args.users)
+    values, lines = nats_trust.bootstrap(bao, redis_client(), users, args.url, retired)
+    Path(args.values).write_text(yaml.safe_dump(values, sort_keys=False))
+    return "\n".join([*lines, f"wrote the public operator trust to {args.values}"])
+
+
 def _serve(args: argparse.Namespace) -> int:
     from scripts.swarm.store import redis_url
 
@@ -207,6 +263,7 @@ def _serve(args: argparse.Namespace) -> int:
     tls = (args.tls_cert, args.tls_key) if args.tls_cert else None
     redis = redis_client()
     auth.regrant(redis)
+    _signer()
     httpd = server.make_server(
         redis,
         args.redis_url or redis_url(os.environ),
@@ -214,7 +271,7 @@ def _serve(args: argparse.Namespace) -> int:
         args.port,
         tls,
         ledger_ca=ledger_ca.served(),
-        signer=_signer(),
+        signer=_signer,
     )
     scheme = "https" if tls else "http"
     print(f"hive endpoint on {scheme}://{args.host}:{httpd.server_address[1]}{server.REFRESH_PATH}", flush=True)
@@ -237,11 +294,17 @@ def _parser() -> argparse.ArgumentParser:
     invited.add_argument("--redis-url", help="Redis URL the new hive connects to")
     invited.add_argument("--swarm-url", help="ledger address the new hive reaches")
     invited.add_argument("--bus-url", help="NATS address the new hive reaches; copied from --like when omitted")
+    invited.add_argument(
+        "--swarm", action="append", default=[], help="swarm the member's bus credential reaches; every swarm if omitted"
+    )
+    scoped = sub.add_parser("scope", help="List member swarms in the hub NATS signer record for every unlisted member")
+    scoped.add_argument("--swarm", action="append", default=[], help="swarm to list; every swarm if omitted")
     created = sub.add_parser("create", help="Create a Kubernetes hive from nothing and add it to herdr")
     created.add_argument("--repo", help="GitOps repository of the hive; defaults to antoncore")
     created.add_argument("--base", help="branch the hive pull request merges into; defaults to dev")
     created.add_argument("--like", help="OpenBao record to copy; defaults to the workstation hive's")
     created.add_argument("--node", help="node the hive pod runs on; defaults to worker-001")
+    created.add_argument("--name", help="hive name to create; defaults to the next unused swarm-hive name")
     created.add_argument("--timeout", type=int, help="seconds each wait may take; defaults to 1800")
     created.add_argument("--dry-run", action="store_true", help="Print every step and file, and write nothing")
     joined = sub.add_parser("join", help="Join this host with one invite file from hive invite")
@@ -251,11 +314,15 @@ def _parser() -> argparse.ArgumentParser:
     removed = sub.add_parser(
         "remove", help="Drain a hive, then delete it from Redis, herdr, known hosts, OpenBao and antoncore"
     )
-    removed.add_argument("id")
+    removed.add_argument("id", metavar="NAME", help="hive name or member id")
     removed.add_argument("--label", help="herdr label and manifest name; defaults to the member's name")
     removed.add_argument("--path", help="OpenBao record under the secret mount; defaults to k8s/agentihooks-hive-LABEL")
-    removed.add_argument("--antoncore", type=Path, help="antoncore checkout to remove the hive's manifests from")
+    removed.add_argument(
+        "--repo", help="repository holding the hive manifests; defaults to the-cloud-clockwork/antoncore"
+    )
+    removed.add_argument("--base", help="branch the removal pull request merges into; defaults to dev")
     removed.add_argument("--wait", type=int, default=3600, help="seconds to wait for its agents to hand off")
+    removed.add_argument("--dry-run", action="store_true", help="Print every step, and write nothing")
     drained = sub.add_parser("drain", help="Take no new agents on this hive and wait until its agents finish")
     drained.add_argument("--wait", type=int, default=3600, help="seconds to wait for its agents to finish")
     sub.add_parser(
@@ -271,6 +338,16 @@ def _parser() -> argparse.ArgumentParser:
     settings.add_argument("--keep", action="store_true", help="Leave max-agents, excluded, ui and ephemeral as stored")
     settings.add_argument("id")
     settings.add_argument("settings", nargs="*", metavar="key=value")
+    trust = sub.add_parser(
+        "nats-trust", help="Create the swarm NATS operator trust once and sign the service users of a users file"
+    )
+    trust.add_argument(
+        "--users",
+        required=True,
+        help="YAML file listing each service user and its OpenBao record, and the retired users to revoke",
+    )
+    trust.add_argument("--url", required=True, help="NATS address the hive join endpoint pushes account updates to")
+    trust.add_argument("--values", required=True, help="Helm values file to write the public operator trust to")
     sub.add_parser("show", help="Print a hive's record as JSON").add_argument("id")
     sub.add_parser("list", help="One line per hive with its liveness")
     sub.add_parser("run", help="Publish hive telemetry every fifteen seconds")
@@ -303,8 +380,10 @@ def _list() -> None:
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
         room = headroom.summary(headroom.read(redis, record["id"], now))
+        label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
         print(
-            f"{record['id']}\t{state}\tui={record['ui']}\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}"
+            f"{record['id']}{label}\t{state}\tui={record['ui']}"
+            f"\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}"
         )
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))
@@ -356,9 +435,13 @@ def _registry(args: argparse.Namespace) -> None:
 
 
 def _daemon(command: str) -> int:
-    from scripts.hive import daemon
+    from scripts.hive import daemon, lanes
 
-    actions = {"run": lambda: daemon.run(lambda: daemon.clients(redis_client())), "install": daemon.install}
+    def run():
+        lanes.serve(os.environ)
+        return daemon.run(lambda: daemon.clients(redis_client()))
+
+    actions = {"run": run, "install": daemon.install}
     result = actions[command]()
     return 1 if result is False else 0
 
@@ -402,15 +485,25 @@ def _setup(args: argparse.Namespace) -> str:
 
 def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "create":
+        from scripts.gates.entry import native
+
+        if native("node-caps", "hive-create"):
+            return 2
+    return _run(args)
+
+
+def _run(args: argparse.Namespace) -> int:
     try:
         if args.command == "add":
             from scripts.hive import machine
 
-            label = machine.label(time.time())
-            grant = _add(args, label)
+            redis = redis_client()
+            label = machine.name(redis, machine.host(args.target))
+            grant = _add(args, redis, label)
             print(f"added {args.target} to herdr as {label}; its hive member is {grant['id']}")
-        elif args.command in ("invite", "create"):
-            print((_invite if args.command == "invite" else _create)(args))
+        elif args.command in ("invite", "create", "scope"):
+            print({"invite": _invite, "create": _create, "scope": _scope}[args.command](args))
         elif args.command in ("join", "refresh"):
             from scripts.hive import join
 
@@ -431,8 +524,8 @@ def main(argv: list[str]) -> int:
             _registry(args)
         elif args.command == "bundle-origin":
             print(bundle_origin.publish(os.environ, args.path))
-        elif args.command == "setup":
-            print(_setup(args))
+        elif args.command in ("setup", "nats-trust"):
+            print((_setup if args.command == "setup" else _nats_trust)(args))
         else:
             return _serve(args)
     except auth.HiveError as exc:

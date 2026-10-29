@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/loop.py:scripts.doctor.loop.x_speed__mutmut_19:4b55333ac9292362ac66d5b44ead62907b85b726d88246ada4ef558d596e6924": {
+    "reader": "Standards reader /root/standards_reader",
+    "reason": "Independent review of preflight 40061207916: this newly introduced private Redis key has no other consumers. Renaming its namespace preserves Doctor and recipient scope and changes both reads and writes together, leaving notice delivery and persisted deduplication behavior identical."
+  }
+}

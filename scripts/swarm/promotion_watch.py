@@ -1,8 +1,9 @@
 """Dev promotion watch: the newest finished push run of Tests on dev files one urgent ci task per failed job and
-raises a ledger alert; the failed jobs that lost their runner, and the failed jobs whose own error is the missing
-output of a unit shard that lost its runner, share one runner outage task instead. The next green run closes those
-tasks and the alert. A run whose only failure is the Sonar job finding dev already moved past its commit is reported as superseded and files
-nothing.
+raises a ledger alert; the failed jobs that failed on CI infrastructure (a lost runner, a fetch timeout, a server
+outage), and the failed jobs whose own error is the missing output of such a unit shard, share one infrastructure
+outage that the alert names and that files no task. The next green run whose promote job succeeded closes those
+tasks and the alert. A run whose only failure is the Sonar job finding dev already moved
+past its commit is reported as superseded and files nothing.
 
 The minute tick calls it; CI runners cannot reach the ledger, so the fixer tasks are filed from the machine that can.
 """
@@ -18,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from scripts.ci_budget import GATE
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity, dev_red, naming, promotion_owner
+from scripts.swarm import capacity, dev_red, github_reads, naming, promotion_owner
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_alerts, ledger_comments
@@ -33,13 +34,15 @@ FAILED = ("failure", "timed_out")
 SUPERSEDED_STEP = "Check dev still points at this commit"
 SUPERSEDED = "Dev advanced before Sonar analysis; this unscanned revision cannot be promoted."
 STEP_EXIT = "Process completed with exit code 1."
-OUTAGE = "runner outage"
+OUTAGE = "infrastructure outage"
 OUTAGE_SIGNS = (
     "Failed to resolve action download info",
     "Failed to download action",
     "Failed to download archive",
     "lost communication with the server",
     "The operation was canceled",
+    *(f"The requested URL returned error: {code}" for code in (408, 502, 503, 504)),
+    "this is not a code verdict",
 )
 SETUP_STEP = "Set up job"
 TEST_STEP = "Run tests"
@@ -58,6 +61,7 @@ MISSING_SHARD_SIGNS = (
     "head shard coverage missing: ",
     "baseline shard coverage missing: ",
     "No flake reports under ",
+    "Wait for every planned shard",
 )
 REFRESH_JOB = "refresh-durations"
 LOST_SAMPLES_SIGN = "kept no samples from durations-"
@@ -79,6 +83,8 @@ CLOSABLE = ("open", "blocked")
 WORKING = ("claimed", "pr")
 CLEARED = "A later dev push run of Tests passed, so the swarm closed this promotion task."
 REPLACED = "Dev push run {run_id} of Tests failed on a new cause, so the swarm raised a new promotion alert."
+PROMOTE_JOB = "promote"
+HELD = "dev push run {run_id} passed but its promote job did not succeed, so the promotion red stays open"
 
 
 def key(slug: str, part: str) -> str:
@@ -86,8 +92,10 @@ def key(slug: str, part: str) -> str:
 
 
 def _read(repo_dir: str, endpoint: str, jq: str, run: Callable) -> list[dict]:
-    output = run(
-        ["gh", "api", endpoint, "--paginate", "--jq", jq],
+    output = github_reads.rest(
+        "swarm.promotion_watch",
+        ["api", endpoint, "--paginate", "--jq", jq],
+        run,
         cwd=repo_dir,
         capture_output=True,
         text=True,
@@ -149,7 +157,7 @@ def outages(causes: list[tuple[str, str]], named: dict[str, dict]) -> list[tuple
     signs = [sign for sign in OUTAGE_SIGNS if any(sign in why for _, why in gone)]
     because = "; ".join(signs) or f"{SETUP_STEP} failed or {TEST_STEP} never ran"
     names = ", ".join(job for job, _ in gone)
-    why = f"{OUTAGE}: the jobs {names} lost their runner infrastructure ({because})"
+    why = f"{OUTAGE}: the jobs {names} failed on CI infrastructure, so no code change is due ({because})"
     if starved:
         why += f"; the jobs {', '.join(job for job, _ in starved)} failed for want of their unit shard output"
     return [(OUTAGE, why), *[cause for cause in causes if cause not in gone and cause not in starved]]
@@ -160,8 +168,10 @@ def failing_tests(repo: str, job: dict, run: Callable) -> set[str]:
         return set()
     if not any(s["name"] == TEST_STEP and s.get("conclusion") in FAILED for s in job.get("steps") or []):
         return set()
-    log = run(
-        ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job['id']}/logs"],
+    log = github_reads.rest(
+        "swarm.promotion_watch",
+        ["api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job['id']}/logs", "--allow-escape-sequences"],
+        run,
         cwd=repo,
         capture_output=True,
         text=True,
@@ -225,6 +235,11 @@ def failed_jobs(found: list[dict]) -> list[str]:
     return [name for name in failed if name != GATE] or failed
 
 
+def promoted(found: list[dict]) -> bool:
+    runs = [j["conclusion"] for j in found if j["name"].split(" / ")[0] == PROMOTE_JOB]
+    return bool(runs) and all(conclusion == "success" for conclusion in runs)
+
+
 def title(job: str) -> str:
     named = "Promotion red: " + " ".join(re.sub(r"[—–_/]", " ", job).split())
     return UNNAMED if ledger_comments.problems(named, "item") else named
@@ -249,29 +264,31 @@ def _held_causes(redis, slug: str, doc: dict) -> set[str]:
 def _red(slug, store, ledger, doc, last, causes, repo):
     redis, run_id, sha, url = store.redis, last["id"], last["head_sha"], last["html_url"]
     held, present = _held_causes(redis, slug, doc), {t["id"] for t in doc.get("tasks", [])}
+    alerted = bool(_live_alerts(doc))
     for previous in promotion_owner.history(repo, redis) - {slug}:
-        held.update(_held_causes(redis, previous, ledger.state(previous)))
+        state = ledger.state(previous)
+        held.update(_held_causes(redis, previous, state))
+        alerted = alerted or bool(_live_alerts(state))
     lane, actions, new = "", [], []
+    outage = [(OUTAGE, why) for job, why in causes if job == OUTAGE]
     for n, (job, why) in enumerate(causes):
         task_id = f"{TASK_PREFIX}{run_id}-{n}"
-        if normal(job, why) in held or job in held or task_id in present:
+        if job == OUTAGE or normal(job, why) in held or job in held or task_id in present:
             continue
         detail = why.removeprefix(job).removeprefix(": ").removesuffix(".")
-        where = "lost its runner infrastructure" if job == OUTAGE else f"failed in the job {job}"
         description = (
-            f"The dev push run {run_id} of Tests {where} at commit {sha}: {url}. "
+            f"The dev push run {run_id} of Tests failed in the job {job} at commit {sha}: {url}. "
             + (f"Its cause: {detail}. " if detail else "")
-            + ("No code change is due" if job == OUTAGE else "Fix it on dev")
-            + "; the swarm closes this task when a later dev push run passes."
+            + "Fix it on dev; the swarm closes this task when a later dev push run passes."
         )
         lane = lane or _lane(store, slug)
         fields = {"task": task_id, "title": title(job), "lane": lane, "kind": "ci", "rank": "urgent"}
-        redis.hset(key(slug, "jobs"), task_id, OUTAGE if job == OUTAGE else normal(job, why))
+        redis.hset(key(slug, "jobs"), task_id, normal(job, why))
         ledger.add_task(slug, {**fields, "description": description, "not_duplicate": NOT_DUPLICATE}, SENDER)
         actions.append(f"filed {task_id} for the failed dev job {job}")
         new.append((task_id, why))
-    if new or not _live_alerts(doc):
-        named = [why.removesuffix(": ").removesuffix(".") for _, why in new] or [job for job, _ in causes]
+    if new or not alerted:
+        named = [why.removesuffix(": ").removesuffix(".") for _, why in outage + new] or [job for job, _ in causes]
         actions += _alert(slug, ledger, doc, last, named)
     if new:
         actions += _tell_master(slug, store, last, [task_id for task_id, _ in new], lane)
@@ -348,7 +365,7 @@ def _refresh(
         last = dev_red.latest(config.repo, run)
         if last is None or int(redis.get(key(slug, "seen")) or 0) >= last["id"]:
             return []
-        found = jobs(config.repo, last["id"], run) if last["conclusion"] == "failure" else []
+        found = jobs(config.repo, last["id"], run)
         failed = failed_jobs(found)
         stale = bool(failed) and all(superseded(config.repo, j, run) for j in found if j["name"] in failed)
         named = {j["name"]: j for j in found}
@@ -362,6 +379,8 @@ def _refresh(
         actions = [f"dev push run {last['id']} was superseded before Sonar analysis"]
     elif last["conclusion"] == "failure":
         actions = _red(slug, store, ledger, doc, last, causes, config.repo)
+    elif not promoted(found):
+        actions = [HELD.format(run_id=last["id"])]
     else:
         actions = _recover(slug, redis, ledger, doc, last, config.repo)
     redis.set(key(slug, "seen"), last["id"])

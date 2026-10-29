@@ -1,5 +1,6 @@
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,129 @@ def test_measured_costs_merge_mappings_keep_slowest_durations_and_cover_missing_
     ]
     assert measured_costs(names, results) == pytest.approx({names[0]: 18.4125, names[1]: 80.6, names[2]: 5.9125})
     assert measured_costs([names[1]], []) == {names[1]: 80.6}
+
+
+def test_observed_mutant_execution_costs_drive_balanced_existing_workers(tmp_path, monkeypatch):
+    from scripts.ci_mutation import killers
+    from scripts.ci_mutation.measured import measured_costs, plan_shards
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
+    memory = killers.KillMemory(tmp_path)
+    names = [f"scripts.sample.x_f__mutmut_{index}" for index in range(8)]
+    observations = [20.0, 20.0, 20.0, 20.0, 1.0, 1.0, 1.0, 1.0]
+    ticks = iter(value for seconds in observations for value in [100.0, 100.0 + seconds])
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    for name in names:
+        memory.prepare(name, ["test"])
+        assert memory.wrap(lambda *args, **kwargs: 0)(object(), ["test"]) == 0
+    results = [{"tests": {"scripts.sample.x_f": ["test"]}, "durations": {"test": 100.0}}]
+    costs = measured_costs(names, results, memory)
+    assert costs == dict(zip(names, observations, strict=True))
+    plan = plan_shards(costs, target=1, limit=4)
+    assert plan["shards"] == 4
+    assert plan["shard_worker_seconds"] == [21.0] * 4
+    assert set(plan["assignments"]) == set(names)
+    assert plan == plan_shards(dict(reversed(list(costs.items()))), target=1, limit=4)
+    assert measured_costs(names[:1], results) == {names[0]: 130.6}
+    assert measured_costs(names[:1], [], memory) == {names[0]: 80.6}
+    changed = [{"tests": {"scripts.sample.x_f": ["different"]}, "durations": {"different": 2.0}}]
+    assert measured_costs(names[:1], changed, memory) == {names[0]: 8.1}
+
+
+def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_path, monkeypatch):
+    from scripts.ci_mutation import killers, measured
+    from scripts.ci_mutation.mutant_shards import unit_cost, unit_count
+
+    function = "scripts.sample.x_f"
+    names = [f"{function}__mutmut_{index}" for index in range(3)]
+    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0]}
+    memory = killers.KillMemory(tmp_path)
+    ticks = iter([0.0, 9.0, 20.0, 21.0, 30.0, 39.0, 40.0, 41.0])
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(measured, "measured_splits", lambda *args: {function: split})
+    for name in names[:2]:
+        for tests in [["fast", "left"], ["fast", "right"]]:
+            memory.prepare(name, tests)
+            assert memory.wrap(lambda *args, **kwargs: 0)(object(), tests) == 0
+        assert memory.cost(name, ["left", "fast"]) == 9.0
+        assert memory.cost(name, ["fast", "right"]) == 1.0
+    results = [
+        {"tests": {function: ["fast", "left", "right"]}, "durations": {"fast": 1.0, "left": 100.0, "right": 100.0}}
+    ]
+    plan = measured.measured_plan([(names, results)], memory, limit=2)
+    assert plan["shards"] == 2
+    assert unit_count(plan) == 6
+    assert plan["unit_costs"] == {names[0]: [9.0, 1.0], names[1]: [9.0, 1.0], names[2]: [100.0, 100.0]}
+    assert plan["shard_worker_seconds"] == [110.0, 110.0]
+    for name, assignment in plan["assignments"].items():
+        assert sorted(assignment) == [0, 1]
+        for position, index in enumerate(assignment):
+            assert unit_cost(plan, name, index) == plan["unit_costs"][name][position]
+    assert measured.measured_plan([(list(reversed(names)), results)], memory, limit=2) == plan
+    mixed = measured.measured_plan([(["scripts.sample.x_plain__mutmut_1", *names], results)], memory, limit=2)
+    assert mixed["unit_costs"] == plan["unit_costs"]
+    assert "scripts.sample.x_plain__mutmut_1" in mixed["assignments"]
+
+
+def test_a_kept_split_is_reused_so_its_unit_costs_stay_observed_when_durations_drift(tmp_path, monkeypatch):
+    from scripts.ci_mutation import killers, measured
+
+    function = "scripts.sample.x_f"
+    names = [f"{function}__mutmut_{index}" for index in range(3)]
+    nodes = ["fast", *(f"t{index}" for index in range(6))]
+    memory = killers.KillMemory(tmp_path)
+
+    def results(durations):
+        return [{"tests": {function: nodes}, "durations": {"fast": 1.0, **durations}}]
+
+    even = results({f"t{index}": 100.0 for index in range(6)})
+    drifted_durations = results({"t0": 250.0, **{f"t{index}": 50.0 for index in range(1, 6)}})
+    first = measured.measured_plan([(names, even)], memory, limit=3)
+    memory.keep_splits(first["splits"])
+    ticks = iter(float(value) for value in range(100))
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    for name in names:
+        for chosen in first["splits"][function]["slices"]:
+            tests = [*first["splits"][function]["head"], *chosen]
+            memory.prepare(name, tests)
+            assert memory.wrap(lambda *args, **kwargs: 0)(object(), tests) == 0
+    drifted = measured.measured_plan([(names, drifted_durations)], memory, limit=3)
+    assert drifted["splits"][function]["head"] == first["splits"][function]["head"]
+    assert drifted["splits"][function]["slices"] == first["splits"][function]["slices"]
+    assert drifted["unit_costs"] == {name: [1.0] * 3 for name in names}
+    slices = first["splits"][function]["slices"]
+    seconds = drifted_durations[0]["durations"]
+    expected = [plan.MUTANT_SECONDS + 1.25 * (1.0 + sum(seconds[node] for node in chosen)) for chosen in slices]
+    assert drifted["splits"][function]["costs"] == pytest.approx(expected)
+    fresh = measured.measured_plan([(names, drifted_durations)], killers.KillMemory(tmp_path / "empty"), limit=3)
+    assert fresh["splits"][function]["slices"] != first["splits"][function]["slices"]
+    changed = [{"tests": {function: [*nodes, "t6"]}, "durations": {**drifted_durations[0]["durations"], "t6": 50.0}}]
+    assert 1.0 not in measured.measured_plan([(names, changed)], memory, limit=3)["unit_costs"][names[0]]
+
+
+def test_a_kept_split_wider_than_the_shard_limit_is_cut_again(tmp_path):
+    from scripts.ci_mutation import killers, measured
+
+    function = "scripts.sample.x_f"
+    nodes = ["fast", "a", "b", "c"]
+    memory = killers.KillMemory(tmp_path)
+    memory.keep_splits({function: {"head": ["fast"], "slices": [["a"], ["b"], ["c"]], "costs": [1.0] * 3}})
+    durations = {"fast": 1.0, "a": 150.0, "b": 150.0, "c": 150.0}
+    split = measured.measured_splits(
+        [f"{function}__mutmut_1"], [{"tests": {function: nodes}, "durations": durations}], 2, memory
+    )
+    assert split[function]["slices"] == [["a", "c"], ["b"]]
+    memory.keep_splits({function: {"head": ["fast"], "slices": [["a"], ["b", "c"]], "costs": [1.0] * 2}})
+    split = measured.measured_splits(
+        [f"{function}__mutmut_1"], [{"tests": {function: nodes}, "durations": durations}], 2, memory
+    )
+    assert split[function]["slices"] == [["a"], ["b", "c"]]
+    assert split[function]["costs"] == pytest.approx(
+        [plan.MUTANT_SECONDS + 1.25 * (1.0 + 150.0), plan.MUTANT_SECONDS + 1.25 * (1.0 + 300.0)]
+    )
+    names = [f"{function}__mutmut_{index}" for index in (1, 2)]
+    planned = measured.measured_plan([(names, [{"tests": {function: nodes}, "durations": durations}])], memory, 2)
+    assert planned["splits"][function]["slices"] == [["a"], ["b", "c"]]
 
 
 def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_its_traced_sum(tmp_path):
@@ -283,12 +407,32 @@ def test_splits_cover_untimed_tests_cap_at_ten_slices_and_reach_the_refined_plan
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("mutmut.configuration._config", None)
     _project(tmp_path, {})
+    (tmp_path / "scripts/sample.py").write_text("def f(a, b):\n    return a - b + 1 - 2 + 3 - 4 + 5 - 6\n")
     selected = {"scripts/sample.py": ({2}, ["tests/test_sample.py"])}
     stats = SharedStats(tmp_path / "stats", "head")
     write_part(stats.group(0).folder / "part-0.json", stats_key("head", selected), (0, 1), results)
     refined = measured.refine_plan(tmp_path, selected, stats)
     assert list(refined["splits"]) == ["scripts.sample.x_f"]
-    assert refined["assignments"] and all(len(shards) == 10 for shards in refined["assignments"].values())
+    assert len(refined["assignments"]) >= 10 and refined["shards"] == 10
+    assert all(len(shards) == 10 for shards in refined["assignments"].values())
+
+
+def test_a_change_with_fewer_mutants_than_the_limit_plans_no_more_shards_than_mutants_and_covers_every_test():
+    from scripts.ci_mutation.measured import measured_plan
+
+    nodes = [f"tests/test_sample.py::t{i:02}" for i in range(13)]
+    results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": dict.fromkeys(nodes[:12], 130.0)}]
+    single = measured_plan([(["scripts.sample.x_f__mutmut_1"], results)])
+    assert single["shards"] == 1 and single["assignments"] == {"scripts.sample.x_f__mutmut_1": 0}
+    assert not single["splits"]
+    for count, shards in ((2, 2), (3, 3), (10, 10), (11, 10)):
+        names = [f"scripts.sample.x_f__mutmut_{i}" for i in range(1, count + 1)]
+        plan = measured_plan([(names, results)])
+        assert plan["shards"] == shards
+        assert all(sorted(plan["assignments"][name]) == list(range(shards)) for name in names)
+        split = plan["splits"]["scripts.sample.x_f"]
+        assert sorted([*split["head"], *(node for chosen in split["slices"] for node in chosen)]) == nodes
+    assert measured_plan([])["shards"] == 1
 
 
 def test_each_unit_runs_the_head_and_its_own_slice_and_only_on_its_shard(tmp_path, monkeypatch):
@@ -345,6 +489,27 @@ def test_measured_cli_requires_bases_and_statistics(monkeypatch, args):
     with pytest.raises(SystemExit) as error:
         measured.main()
     assert error.value.code == 2
+
+
+@pytest.mark.parametrize(("splits", "flag"), [({}, "false"), ({"scripts.sample.x_f": {"head": ["early"]}}, "true")])
+def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path, monkeypatch, splits, flag):
+    from scripts.ci_mutation import measured
+
+    monkeypatch.chdir(tmp_path)
+    folder = tmp_path / "stats"
+    folder.mkdir()
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(measured, "discover_changes", lambda *args: {})
+    monkeypatch.setattr(measured.subprocess, "check_output", lambda *args, **kwargs: "revision\n")
+    monkeypatch.setattr(
+        measured,
+        "refine_plan",
+        lambda *args: {"estimated_worker_seconds": 1.0, "shards": 2, "assignments": {}, "splits": splits},
+    )
+    monkeypatch.setattr("sys.argv", ["measured", "--bases", "base", "--stats", str(folder)])
+    assert measured.main() == 0
+    assert output.read_text() == f"shards=[0, 1]\nprobe={flag}\n"
 
 
 @pytest.mark.parametrize("identity_only", [False, True])
@@ -449,7 +614,7 @@ def test_measured_cli_refines_complete_statistics_and_rejects_another_head(tmp_p
         assert all(name.startswith("scripts.sample.x_f__mutmut_") for name in result["assignments"])
         assert set(result["costs"].values()) == {55.6}
         assert result["units"] == "worker seconds"
-        assert output.read_text() == "shards=[0]\n"
+        assert output.read_text() == "shards=[0]\nprobe=false\n"
         text = capsys.readouterr().out
         assert "Measured mutation worker seconds:" in text
         assert f"Measured mutation shards: 1; assigned mutants: {len(result['assignments'])}" in text
@@ -625,6 +790,32 @@ def test_stats_parts_read_the_stored_durations_once(tmp_path, monkeypatch):
     assert len(reads) == 1
 
 
+@pytest.mark.parametrize(("target", "limit", "expected"), [(81, 10, (2, 80)), (41, 10, (4, 40)), (5, 3, (2, 80))])
+def test_statistics_parts_balance_recorded_cases_within_one_file(tmp_path, target, limit, expected):
+    (tmp_path / "tests").mkdir()
+    test = "tests/test_sample.py"
+    (tmp_path / test).write_text("def test_value(): pass\n")
+    (tmp_path / ".test_durations").write_text(
+        json.dumps({f"{test}::test_value[{value}]@shared": 40 for value in range(4)})
+    )
+    parts, wall = plan.stats_part_count(tmp_path, [test], target, limit)
+    assert (parts, wall) == (expected[0], pytest.approx(expected[1], abs=0.1))
+
+
+def test_statistics_parts_use_traced_timings_when_units_underestimate_collection(tmp_path, monkeypatch):
+    (tmp_path / "tests").mkdir()
+    test = "tests/test_sample.py"
+    (tmp_path / test).write_text("def test_value(): pass\n")
+    nodes = [f"{test}::test_value[{value}]" for value in range(4)]
+    (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(nodes, 1)))
+    cache = tmp_path / ".mutation-stats-cache"
+    cache.mkdir()
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
+    (cache / "successful.json").write_text(json.dumps({"status": 0, "durations": dict.fromkeys(nodes, 40)}))
+    (cache / "failed.json").write_text(json.dumps({"status": 1, "durations": dict.fromkeys(nodes, 1000)}))
+    assert plan.stats_part_count(tmp_path, [test], 41, 10) == (4, pytest.approx(40, abs=0.1))
+
+
 def _project(tmp_path, durations):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
@@ -681,6 +872,64 @@ def test_estimate_names_the_file_whose_pragma_is_broken(tmp_path, monkeypatch):
         plan.estimate(tmp_path, {"scripts/broken.py": {3}})
 
 
+@pytest.mark.parametrize("decorator, refused", [("@opaque\n", True), ("@dataclasses.dataclass\n", False)])
+def test_estimate_refuses_changed_function_lines_that_produce_no_mutant(tmp_path, monkeypatch, decorator, refused):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    source = f"import dataclasses\n\n{decorator}class Box:\n    def doubled(self, value):\n        return value * 2\n"
+    (tmp_path / "scripts/cached.py").write_text(source)
+    (tmp_path / "tests/test_cached.py").write_text("from scripts.cached import Box\n")
+    line = source.splitlines().index("        return value * 2") + 1
+    if refused:
+        with pytest.raises(SystemExit) as refusal:
+            plan.estimate(tmp_path, {"scripts/cached.py": {line}})
+        assert str(refusal.value) == "scripts/cached.py: not mutated, changed functions produce no mutants: doubled"
+    else:
+        assert plan.estimate(tmp_path, {"scripts/cached.py": {line}})[1] == 2
+    assert plan.estimate(tmp_path, {"scripts/cached.py": {1}})[1] == 0
+
+
+@pytest.mark.parametrize("decorator", ["@functools.lru_cache(maxsize=1)", "@functools.cache"])
+def test_estimate_plans_cached_function_body_mutants(tmp_path, monkeypatch, decorator):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    source = f"import functools\n\n{decorator}\ndef doubled(value):\n    return value * 2\n"
+    (tmp_path / "scripts/cached.py").write_text(source)
+    (tmp_path / "tests/test_cached.py").write_text("from scripts.cached import doubled\n")
+    assert plan.estimate(tmp_path, {"scripts/cached.py": {5}})[1:] == (2, ["tests/test_cached.py"])
+
+
+@pytest.mark.parametrize("decorator, refused", [("@opaque\nclass Box:\n    ", True), ("", False)])
+def test_estimate_refuses_an_ungraded_changed_function_beside_a_graded_one(tmp_path, monkeypatch, decorator, refused):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    source = f"import functools\n\n\ndef tripled(value):\n    return value * 3\n\n\n{decorator}def doubled(value):\n{'    ' if refused else ''}    return value * 2\n"
+    (tmp_path / "scripts/mixed.py").write_text(source)
+    (tmp_path / "tests/test_mixed.py").write_text("from scripts.mixed import doubled, tripled\n")
+    lines = {5, next(index for index, line in enumerate(source.splitlines(), 1) if line.strip() == "return value * 2")}
+    if refused:
+        with pytest.raises(SystemExit) as refusal:
+            plan.estimate(tmp_path, {"scripts/mixed.py": lines})
+        assert str(refusal.value) == "scripts/mixed.py: not mutated, changed functions produce no mutants: doubled"
+    else:
+        assert plan.estimate(tmp_path, {"scripts/mixed.py": lines})[1] == 4
+
+
+def test_estimate_names_each_ungraded_function_in_source_order(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    source = "\n\n@opaque\nclass Box:\n    def tripled(value):\n        return value * 3\n\n\n    def doubled(value):\n        return value * 2\n"
+    (tmp_path / "scripts/mixed.py").write_text(source)
+    (tmp_path / "tests/test_mixed.py").write_text("from scripts.mixed import doubled, tripled\n")
+    with pytest.raises(SystemExit) as refusal:
+        plan.estimate(tmp_path, {"scripts/mixed.py": {6, 10}})
+    assert str(refusal.value) == "scripts/mixed.py: not mutated, changed functions produce no mutants: tripled, doubled"
+
+
 def _budget_project(tmp_path, monkeypatch, seconds, timed):
     _project(tmp_path, {})
     tests = _timed_tests(tmp_path, timed)
@@ -725,6 +974,62 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     assert "Mutation bases: earlier merged\nChanged line mutants: 40\n" in text
     assert "Estimated mutation seconds: 1601, slowest stats bucket: 121\n" in text
     assert "Mutation shards: 4\nStats parts: 3\n" in text
+
+
+@pytest.mark.parametrize("changed", [{}, {"scripts/sample.py": {2}}])
+def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, monkeypatch, capsys, changed):
+    _project(tmp_path, {})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["plan", "--base", "base", "--repository", "owner/repo"])
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "github-output"))
+    calls = []
+
+    def discover(root, bases, head):
+        calls.append(("discover", root, bases, head))
+        return changed
+
+    started = threading.Event()
+
+    def record(repository):
+        started.set()
+        return None, ""
+
+    def bases(*args):
+        # The record read is already running while the bases are worked out.
+        assert not changed or started.wait(10)
+        return ["base"]
+
+    monkeypatch.setattr(plan, "read_record", record)
+    monkeypatch.setattr(plan, "touches_code", lambda *args: calls.append(("touches", *args)) or bool(changed))
+    monkeypatch.setattr(plan, "own_bases", bases)
+    monkeypatch.setattr(plan, "discover_changes", discover)
+    assert plan.main() == 0
+    assert calls == [("touches", tmp_path, "base", "HEAD"), ("discover", tmp_path, ["base"], "HEAD")]
+    assert started.is_set() is bool(changed)
+    assert f"changed={len(changed)}\n" in (tmp_path / "github-output").read_text()
+    if not changed:
+        assert "No change remains to mutate, so the recorded dev coverage is not read.\n" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "changed, touched",
+    [
+        ("scripts/sample.py", True),
+        ("hooks/sample.py", True),
+        ("scripts/caf\u00e9.py", True),
+        ("scripts/notes.txt", False),
+        ("tests/test_x.py", False),
+    ],
+)
+def test_touches_code_names_only_hooks_or_scripts_python_changes(tmp_path, changed, touched):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "base")
+    _git(tmp_path, "branch", "base")
+    (tmp_path / changed).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / changed).write_text("VALUE = 1\n")
+    _git(tmp_path, "add", changed)
+    _git(tmp_path, "commit", "-qm", "change")
+    assert plan.touches_code(tmp_path, "base", "HEAD") is touched
 
 
 @pytest.mark.parametrize("source, matched", [("sample", False), ("sample", True), ("plain", False)])
@@ -786,6 +1091,46 @@ def test_planning_checks_selected_test_collection_and_worker_contracts(
         assert "stats_parts=" in output.read_text()
 
 
+def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_path, monkeypatch):
+    from tests import test_collection_imports as contracts
+
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/lazy.py").write_text("def load():\n    import mcp\n")
+    group = 'pytestmark = pytest.mark.xdist_group("mcp-sdk")\n'
+    (tmp_path / "tests/test_a.py").write_text("from scripts.lazy import load\n" + group)
+    (tmp_path / "tests/test_b.py").write_text("from scripts.lazy import load\n")
+    plan.validate_tests(tmp_path, ["tests/test_a.py::test_one"])
+    with pytest.raises(SystemExit, match="tests/test_b.py: loads the MCP SDK without the mcp-sdk worker group"):
+        plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
+
+
+def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(tmp_path, monkeypatch):
+    from tests import test_collection_imports as contracts
+
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/leaf.py").write_text("")
+    (tmp_path / "scripts/clean.py").write_text("def run():\n    import scripts.leaf\n")
+    (tmp_path / "tests/test_a.py").write_text("from scripts.clean import run\n")
+    (tmp_path / "tests/test_b.py").write_text("from scripts.clean import run\n")
+    walks = []
+    loads_heavy = contracts.loads_heavy
+
+    def counted(name, seen):
+        if name not in seen:
+            walks.append(name)
+        return loads_heavy(name, seen)
+
+    monkeypatch.setattr(contracts, "loads_heavy", counted)
+    plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
+    assert walks.count("scripts.leaf") == 1
+
+
 def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
     from tests import test_collection_imports as contracts
 
@@ -805,13 +1150,13 @@ def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
     ("seconds", "timed", "shards", "parts"),
     [
         (0, {}, "[0]", "[0]"),
-        (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0, 1]"),
+        (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0]"),
         (480, {"a": 1}, "[0]", "[0]"),
         (481, {"a": 1}, "[0, 1]", "[0]"),
         (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(10))), json.dumps(list(range(10)))),
     ],
 )
-def test_main_defaults_to_origin_dev_a_two_minute_target_a_half_minute_stats_bucket_and_ten_shards(
+def test_main_defaults_to_origin_dev_a_two_minute_target_a_one_minute_stats_bucket_and_ten_shards(
     tmp_path, monkeypatch, seconds, timed, shards, parts
 ):
     monkeypatch.chdir(tmp_path)
@@ -897,3 +1242,78 @@ def test_mutation_lane_cli_requires_capacity_width_and_run(missing, monkeypatch)
     with pytest.raises(SystemExit) as error:
         main()
     assert error.value.code == 2
+
+
+def test_the_import_scan_finds_imports_nested_in_every_statement_body():
+    source = """
+import a
+from . import sibling
+def f():
+    import b
+class C:
+    from c import d
+if x:
+    import e
+else:
+    import f2
+for i in y:
+    pass
+else:
+    import g
+while z:
+    import h
+try:
+    import i
+except E:
+    import j
+else:
+    import k
+finally:
+    import l
+with m:
+    import n
+match v:
+    case 1:
+        import o
+async def q():
+    async with r:
+        import s
+value = lambda: __import__("t")
+"""
+    names = plan._imported("scripts/pkg/mod.py", source)
+    imported = {"a", "b", "e", "f2", "g", "h", "i", "j", "k", "l", "n", "o", "s"}
+    assert set(names) == imported | {"scripts.pkg", "scripts.pkg.sibling", "c", "c.d"}
+    assert len(names) == len(imported) + 4
+    assert plan._imported("scripts/x.py", "def broken(:\n") == []
+
+
+def test_narrowing_keeps_the_covering_tests_of_a_fully_recorded_file_and_whole_other_files(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_recorded.py").write_text(
+        "def test_a():\n    pass\nclass TestB:\n    def test_c(self):\n        pass\n"
+    )
+    (tests / "test_partial.py").write_text("def test_d():\n    pass\ndef test_e():\n    pass\n")
+    (tests / "test_stale.py").write_text("def test_f():\n    pass\n")
+    chosen = ["tests/test_partial.py", "tests/test_recorded.py", "tests/test_stale.py"]
+    covering = {"tests/test_recorded.py::TestB::test_c", "tests/test_partial.py::test_d", "tests/test_other.py::test_x"}
+    recorded = {
+        "tests/test_recorded.py": {"test_a", "TestB::test_c"},
+        "tests/test_partial.py": {"test_d"},
+        "tests/test_stale.py": {"test_f"},
+    }
+    assert plan.narrow(tmp_path, chosen, covering, recorded, {"tests/test_stale.py"}) == [
+        "tests/test_partial.py",
+        "tests/test_recorded.py::TestB::test_c",
+        "tests/test_stale.py",
+    ]
+    assert plan.narrow(tmp_path, ["tests/test_recorded.py"], set(), recorded, set()) == ["tests/test_recorded.py"]
+
+
+def test_defined_tests_name_test_functions_and_methods_but_not_their_nested_helpers(tmp_path):
+    path = tmp_path / "test_sample.py"
+    path.write_text(
+        "def test_one():\n    def helper():\n        pass\n"
+        "class TestGroup:\n    def test_two(self):\n        pass\n    def setup(self):\n        pass\n"
+    )
+    assert plan.defined_tests(path) == {"test_one", "TestGroup.test_two"}

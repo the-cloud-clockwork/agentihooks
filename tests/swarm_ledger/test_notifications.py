@@ -89,7 +89,7 @@ class Notifications(unittest.TestCase):
         core.sync(
             SLUG,
             ops=[
-                {"op": "add", "thread": "chat", "id": "m2", "by": "boss", "long": True, "to": "operator", "text": long}
+                {"op": "add", "thread": "chat", "id": "m2", "by": "boss", "long": True, "reply_to": "m1", "text": long}
             ],
         )
         self.assertEqual(notes()[0]["text"], long[:280])

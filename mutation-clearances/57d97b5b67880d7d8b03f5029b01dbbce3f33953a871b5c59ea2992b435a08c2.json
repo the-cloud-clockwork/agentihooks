@@ -1,0 +1,6 @@
+{
+  "scripts/master_claude_login.py:scripts.master_claude_login.x__claim__mutmut_14:972f14efb3f64e172d15686339be6ff4a343157c9680376f89496aa5b7286c44": {
+    "reader": "Standards reader /root/standards_reader",
+    "reason": "Independent review of preflight 40208846565: the assignment runs only for a legacy master exclusive owner with alone false. The blocker candidates are name and the cleared sentinel. Empty string and None either fail membership or produce a falsy blocker; neither changes the exception, persisted owner record, epoch or return value, even with an empty-string holder key."
+  }
+}

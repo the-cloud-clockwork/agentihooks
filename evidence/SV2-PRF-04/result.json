@@ -1,0 +1,58 @@
+{
+  "package": "SV2-PRF-04",
+  "dependencies": ["SV2-PRF-03"],
+  "dependency_evidence": "evidence/SV2-PRF-03/result.json records the preceding performance package; the ranking contract the packers follow is the kernel's SV2-CTX-02 retrieval rank and SV2-CTX-03 packing, which stay unchanged",
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7432",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7434",
+  "package_complete": false,
+  "evidence_class": "mocked: a fixed held out corpus with human review labels and in process packers that follow the kernel ranking contract stand in for brain-api, its graph store and a live model; no embedding, HTTP server or agent runs, and usefulness is the share of injected items a reviewer labelled useful, not a model judgement",
+  "interfaces": [
+    "tests.evaluation.brain_context.evaluate.pack(policy, task, fixture, budget) packs one held out task under one policy: feed_only ranks the fleet by heat with no scope, scoped admits only lexical matches inside the fixture grant after superseded guidance yields to a visible successor, graph adds one hop from source to target over accepted resolved_by, decided_by and related edges whose target is inside the grant; every pack names its omitted superseded and over budget items",
+    "evaluate.score grades a pack against the task's expected sources and review labels; out of scope items are counted as scope_leakage and never named, including in the omission lists",
+    "evaluate.totals gives context_source_recall, reviewed_usefulness, repeated_mistakes_avoided, scope_leakage, irrelevant_injection, stale_injection, arcs, context_tokens, context_tokens_per_found_source and context_tokens_per_task together",
+    "evaluate.qualify(accepted, candidate) qualifies a policy only on a gain in recall, usefulness or repeated mistakes avoided with no regression and no leakage; a change in arcs or context tokens is reported as volume_delta and is never a gain",
+    "evaluate.Registry holds the accepted ranking and packing policy for one corpus revision under a file lock: a request carries the whole report, the registry recomputes it from its own corpus and refuses a mismatch, qualifies its totals against the accepted totals itself and ignores any caller verdict, a revert needs the report hash the policy was accepted with, every change is compare and set on the sequence, a reused operation id replays its earlier result and a staged write that never published is discarded on recover",
+    "python -m tests.evaluation.brain_context.evaluate [--fixture alpha|beta] [--policy NAME ...] prints the totals for each policy"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "corpus": "sv2-prf-04-corpus-1, two independent fixtures of four held out tasks each",
+    "ranking_contract": "kernel retrieval rank policy revision 2 semantics without semantic or heat sources: scope before scoring, heat never admits, accepted edges only, edges followed in their stored direction, supersedes is not a similarity edge; the graph_wide and scoped_padded rejection policies break this contract on purpose"
+  },
+  "states": {
+    "observed": "Cases A, B and C each ran in CI (Tests run 40276331653 on 1c69f9f25) from fresh temporary folders and matched their committed records; case A ran both fixtures, whose corpus hashes differ.",
+    "accepted": "A policy is accepted when the registry publishes a record with the next sequence for the same corpus revision; a qualified verdict alone is not acceptance.",
+    "committed": "The accepted record is written to a staged file, flushed with fsync and renamed over the record; a staged file that was never renamed is not committed.",
+    "externally_verified": "Not yet: no deployed brain-api, graph store or agent consumed these packs; a live comparison on real task outcomes belongs to the G10 rollout gate."
+  },
+  "metrics": {
+    "context_source_recall": "expected supporting sources present in the pack over expected sources, summed over the fixture's held out tasks",
+    "reviewed_usefulness": "injected items a reviewer labelled useful over all injected items, out of scope items included; an unlabelled item counts as not useful",
+    "repeated_mistakes_avoided": "share of incident and superseded guidance tasks whose pack holds every expected source and no stale guidance",
+    "context_tokens": "sum of the fixture's token sizes for the injected items, tracked beside usefulness and never used as a gain"
+  },
+  "results": {
+    "alpha": {"scoped": {"context_source_recall": 0.6, "reviewed_usefulness": 0.8, "context_tokens": 520}, "graph": {"context_source_recall": 1.0, "reviewed_usefulness": 0.8571, "context_tokens": 720}},
+    "beta": {"scoped": {"context_source_recall": 0.6, "reviewed_usefulness": 0.8, "context_tokens": 760}, "graph": {"context_source_recall": 1.0, "reviewed_usefulness": 0.8571, "context_tokens": 960}}
+  },
+  "cases": {
+    "a": "evidence/SV2-PRF-04/a-result.json",
+    "b": "evidence/SV2-PRF-04/b-result.json",
+    "c": "evidence/SV2-PRF-04/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Restore the last accepted ranking and packing policy: case C promotes graph, interrupts a revert to scoped after staging, restarts the registry, applies the revert by the same operation id and replays it once more.",
+    "authoritative_objects": "The corpus file and its review labels and the published accepted record are authoritative; reports are derived and recomputed from the corpus revision.",
+    "proof": "evidence/SV2-PRF-04/c-result.json rollback_rehearsal and reproducible"
+  },
+  "remaining_limitations": [
+    "The packers mirror the kernel ranking contract rather than calling brain-api; semantic similarity and heat sources are not modelled, so the comparison grades lexical seeds and graph expansion only.",
+    "The held out questions are authored from incidents, decisions and superseded guidance recorded in this fleet's seat lessons and swarm culture, not sampled from live brain arcs.",
+    "The review labels were written by the implementing agent and await human review, recorded in the corpus labels block; usefulness comes from those labels, no agent consumed a pack and no task outcome was measured.",
+    "Eight held out tasks over two fixtures are a qualification floor, not a statistically powered sample.",
+    "Context tokens are fixture token sizes, not tokenizer counts of rendered pack text."
+  ],
+  "compatibility": "Explicitly local compatibility path: no production module changes; the feed only policy reproduces today's fleet hot arc feed and the scoped policy is the accepted baseline the graph policy is compared against.",
+  "authority": "Each fixture grant names the actor, role and allowed projects; packs and scores read scope only from that grant, never from an item title or display label."
+}

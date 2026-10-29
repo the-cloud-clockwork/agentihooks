@@ -7,10 +7,11 @@ from collections.abc import Callable, Container
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO
+from urllib.parse import quote
 
 import yaml
 
-from scripts.ci_queue_retry import _api, base_name, dependents
+from scripts.ci_queue_retry import _api, base_name, dependents, job_names, polling_jobs
 
 WORKFLOWS = Path(".github/workflows")
 OPEN = ("in_progress", "queued", "pending", "waiting", "requested")
@@ -83,11 +84,17 @@ def lost_jobs(jobs: list[dict], runners: set[str], now: datetime, grace: timedel
         and job["runner_name"] not in runners
         and job.get("runner_group_name") != HOSTED_GROUP
         and now - datetime.fromisoformat(job["started_at"]) >= grace
+        and not _ran_every_step(job)
     ]
 
 
+def _ran_every_step(job: dict) -> bool:
+    steps = job.get("steps") or []
+    return bool(steps) and all(step["status"] == "completed" for step in steps)
+
+
 def job_ids(workflow: dict) -> dict[str, str]:
-    return {base_name(spec.get("name", job_id)): job_id for job_id, spec in workflow["jobs"].items()}
+    return {base_name(name): job_id for job_id, name in job_names(workflow).items()}
 
 
 def stalled(jobs: list[dict], lost: list[dict], workflow: dict) -> tuple[bool, str]:
@@ -100,7 +107,7 @@ def stalled(jobs: list[dict], lost: list[dict], workflow: dict) -> tuple[bool, s
     for job in jobs:
         if job in lost or job["status"] == "completed":
             continue
-        if job["status"] == "in_progress":
+        if job["status"] == "in_progress" and base_name(job["name"]) not in polling_jobs(workflow):
             return False, f"{job['name']} still runs on a live runner"
         if base_name(job["name"]) not in blocked:
             return False, f"{job['name']} still waits for a runner"
@@ -133,8 +140,20 @@ def stop(repo: str, run_id: int, recovery: dict) -> dict:
     return run
 
 
-def jobs_of(repo: str, run_id: int) -> list[dict]:
+def superseded(repo: str, run: dict) -> bool:
+    if run.get("event") != "pull_request":
+        return False
+    branch = quote(run["head_branch"], safe="")
+    url = f"repos/{repo}/actions/workflows/{run['workflow_id']}/runs?event=pull_request&branch={branch}&per_page=1"
+    return json.loads(_api(url))["workflow_runs"][0]["id"] != run["id"]
+
+
+def jobs_of(repo: str, run_id: int, cached: bool = False) -> list[dict]:
     url = f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"
+    if cached:
+        from scripts.swarm.github_reads import conditional_pages
+
+        return [job for page in conditional_pages("lost_runner.jobs", url, _api) for job in page["jobs"]]
     return [json.loads(line) for line in _api("--paginate", url, "--jq", JOBS).splitlines()]
 
 
@@ -147,9 +166,9 @@ def open_runs(repo: str, workflow: str) -> list[dict]:
 
 
 def assess(
-    repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners
+    repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners, cached: bool = False
 ) -> tuple[bool, str, list[dict]]:
-    jobs = jobs_of(repo, run["id"])
+    jobs = jobs_of(repo, run["id"], cached)
     lost = lost_jobs(jobs, source(repo.split("/")[0]), datetime.now(UTC), grace)
     stuck, reason = stalled(jobs, lost, workflow)
     return stuck, reason, jobs
@@ -162,7 +181,7 @@ def report(run: dict, action: str, reason: str) -> dict:
 def first_look(repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners) -> dict | None:
     if run["status"] == "completed":
         return report(run, "none", f"run completed with conclusion {run['conclusion']}")
-    stuck, reason, _ = assess(repo, run, workflow, grace, source)
+    stuck, reason, _ = assess(repo, run, workflow, grace, source, cached=True)
     return None if stuck else report(run, "none", reason)
 
 
@@ -174,6 +193,8 @@ def watch(repo: str, run: dict, workflow: dict, grace: timedelta, source: Source
     action, why = decide(run, jobs)
     if run_state(repo, run["id"])["run_attempt"] != run["run_attempt"]:
         return report(run, "none", "the run was rerun meanwhile")
+    if superseded(repo, run):
+        return report(run, "none", "a newer run of its pull request superseded it")
     recovery = report(run, action, f"{reason}; {why}") | {
         "detected_at": detected_at,
         "force_cancel_requested_at": None,

@@ -994,6 +994,7 @@ def test_the_worker_image_profiles_are_the_default_and_every_package_role():
         "dispatcher",
         "documentation",
         "engineer",
+        "judge",
         "master",
         "planner",
         "qa",
@@ -1065,7 +1066,8 @@ class Herdr:
         return Placed(f"pane-{name}", "claude")
 
 
-def test_the_tick_runtime_launches_placed_spawns_with_the_swarm_api_address(world):
+def test_the_tick_runtime_launches_placed_spawns_with_the_swarm_api_address(world, monkeypatch):
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda *args: None)
     herdr, name = Herdr(), world.store.next_name(SLUG, "eng")
     runtime = routed(
         {},
@@ -1182,7 +1184,7 @@ def test_hive_live_counts_refuse_a_launch_before_the_runtime(world):
 
     redis = world.store.redis
     registry.update(redis, "hive", ["max-agents=4"])
-    redis.hset(registry.key("hive"), "heartbeat_at", world.clock[0])
+    registry.beat(redis, "hive", {"heartbeat_at": world.clock[0]})
     redis.set(f"{registry.key('hive')}:sessions", json.dumps({f"claude:{ACCOUNT}": 1}), ex=45)
     launch = world.launch(FIRST)
     assert launch.outcome.status is Status.UNAVAILABLE
@@ -1196,7 +1198,7 @@ def test_hive_launch_registration_and_exit_keep_one_global_slot(world):
 
     redis = world.store.redis
     registry.update(redis, "hive", ["max-agents=4"])
-    redis.hset(registry.key("hive"), "heartbeat_at", world.clock[0])
+    registry.beat(redis, "hive", {"heartbeat_at": world.clock[0]})
     redis.set(f"{registry.key('hive')}:sessions", "{}", ex=45)
     launch = world.launch(FIRST)
     slots = reservation.LaunchSlots(redis)
@@ -1214,7 +1216,7 @@ def test_tick_launch_reserves_the_selected_harness(world, harness, live):
 
     redis = world.store.redis
     registry.update(redis, "hive", ["max-agents=4"])
-    redis.hset(registry.key("hive"), "heartbeat_at", world.clock[0])
+    registry.beat(redis, "hive", {"heartbeat_at": world.clock[0]})
     redis.set(f"{registry.key('hive')}:sessions", json.dumps({f"{harness}:{ACCOUNT}": live}), ex=45)
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(

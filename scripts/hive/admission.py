@@ -1,5 +1,6 @@
 """Admit each launch by the measured headroom of the machine it lands on; a pending reservation counts against the room
-for fifteen minutes, three five minute load windows."""
+for fifteen minutes, three five minute load windows, until its agent joins; a joined agent's load shows in the five
+minute load one window after launch, so its reservation ends there."""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -11,13 +12,15 @@ if TYPE_CHECKING:
     from redis import Redis
 
 CPU, RAM, QUOTA, PLACEMENT, NODE_CAP, MISSING = "cpu", "ram", "quota", "placement", "node cap", "missing telemetry"
-MAX_AGENTS = "max agents"
-REASONS = (CPU, RAM, QUOTA, PLACEMENT, NODE_CAP, MAX_AGENTS, MISSING)
+MAX_AGENTS, DISK = "max agents", "disk"
+REASONS = (CPU, RAM, DISK, QUOTA, PLACEMENT, NODE_CAP, MAX_AGENTS, MISSING)
 HOST_PERCENT = 80
 SWARM_PERCENT = 40
 AGENT_CPU = 0.5
 AGENT_MB = MEMORY_PER_AGENT_MB
 PENDING_MS = 900_000
+LOAD_WINDOW_MS = 300_000
+JOINED = "#joined"
 NO_READING = "no fresh headroom reading"
 # cpus/load5 shipped with the first headroom reading; a hive daemon still on an older image before total_mb
 # joined the schema still publishes them, so a reading missing only the RAM fields is read, not refused.
@@ -32,8 +35,9 @@ _RESERVE = """
 local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', millis)
+if redis.call('ZSCORE', KEYS[1], ARGV[1]) then return {1, redis.call('ZCARD', KEYS[1])} end
+redis.call('ZREM', KEYS[1], ARGV[1] .. ARGV[4])
 local held = redis.call('ZCARD', KEYS[1])
-if redis.call('ZSCORE', KEYS[1], ARGV[1]) then return {1, held} end
 if held >= tonumber(ARGV[2]) then return {0, held} end
 redis.call('ZADD', KEYS[1], millis + tonumber(ARGV[3]), ARGV[1])
 redis.call('PEXPIRE', KEYS[1], ARGV[3])
@@ -44,6 +48,14 @@ _PENDING = """
 local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 return redis.call('ZCOUNT', KEYS[1], '(' .. millis, '+inf')
+"""
+
+_JOIN = """
+local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if not score then return 0 end
+redis.call('ZREM', KEYS[1], ARGV[1])
+redis.call('ZADD', KEYS[1], tonumber(score) - tonumber(ARGV[2]), ARGV[1] .. ARGV[3])
+return 1
 """
 
 _RECORD = """
@@ -120,23 +132,51 @@ def _pod(measured: dict, pending: int) -> list[tuple[int, str, str]]:
     return limits
 
 
-def _swarm(measured: dict, agents: int) -> list[tuple[int, str, str]]:
+def _first(measured: dict, pending: int) -> list[tuple[int, str, str]]:
+    held = _held(pending)
+    limits = []
+    for free, size, prefix in (("available_mb", "total_mb", ""), ("pod_available_mb", "pod_total_mb", "pod ")):
+        if all(name in measured for name in (free, size)):
+            available, total = measured[free], measured[size]
+            used = 100 - available * 100 // total
+            shown = f"{prefix}{available} of {total} MB available, {used} percent used"
+            if available * 100 <= (100 - HOST_PERCENT) * total:
+                limits.append((0, RAM, f"{shown}, at or above the {HOST_PERCENT} percent line"))
+            else:
+                fits = max(1, _ram_room(available, total, 0)) - pending
+                limits.append((fits, RAM, f"{shown}, {AGENT_MB} MB per agent{held}, fits {{}} more {LINE}"))
+    return limits or [(0, MISSING, "no memory reading")]
+
+
+def _swarm(measured: dict, agents: int, max_agents: int | None) -> list[tuple[int, str, str]]:
     cpus, total = measured["cpus"], measured["total_mb"]
     cpu = int(SWARM_PERCENT * cpus / (100 * AGENT_CPU)) - agents
     ram = SWARM_PERCENT * total // (100 * AGENT_MB) - agents
     share = f"under the {SWARM_PERCENT} percent swarm share"
-    return [
+    limits = [
         (cpu, CPU, f"{agents} swarm agents at {AGENT_CPU:g} CPU each on {cpus} CPUs, fits {{}} more {share}"),
         (ram, RAM, f"{agents} swarm agents at {AGENT_MB} MB each in {total} MB, fits {{}} more {share}"),
     ]
+    if max_agents is None:
+        return limits
+    return [limit for limit in limits if limit[0] >= max_agents - agents]
 
 
-def room(measured: dict | None, swarm_agents: int | None = None, pending: int = 0) -> Room:
+def room(
+    measured: dict | None,
+    swarm_agents: int | None = None,
+    pending: int = 0,
+    max_agents: int | None = None,
+    first: bool = False,
+) -> Room:
     if measured is None or any(field not in measured for field in CORE_FIELDS):
         return Room(0, MISSING, NO_READING)
-    limits = _host(measured, pending) + _pod(measured, pending)
+    free, floor = measured.get("disk_free_gb"), measured.get("disk_floor_gb")
+    if free is not None and floor is not None and free < floor:
+        return Room(0, DISK, f"{free} GB free on the agent home, below the {floor} GB worktree floor")
+    limits = _first(measured, pending) if first else _host(measured, pending) + _pod(measured, pending)
     if swarm_agents is not None and all(field in measured for field in RAM_FIELDS):
-        limits += _swarm(measured, swarm_agents)
+        limits += _swarm(measured, swarm_agents, max_agents)
     count, reason, detail = min(limits, key=lambda limit: limit[0])
     count = max(0, count)
     return Room(count, reason, detail.format(count))
@@ -158,7 +198,7 @@ def key(machine: str) -> str:
 
 
 def reserve(redis: "Redis", machine: str, member: str, limit: int, ttl_ms: int = PENDING_MS) -> tuple[bool, int]:
-    admitted, held = redis.eval(_RESERVE, 1, key(machine), member, limit, ttl_ms)
+    admitted, held = redis.eval(_RESERVE, 1, key(machine), member, limit, ttl_ms, JOINED)
     return bool(admitted), int(held)
 
 
@@ -170,12 +210,16 @@ def pending(redis: "Redis", machine: str) -> int:
     return int(redis.eval(_PENDING, 1, key(machine)))
 
 
+def joined(redis: "Redis", machine: str, member: str) -> None:
+    redis.eval(_JOIN, 1, key(machine), member, PENDING_MS - LOAD_WINDOW_MS, JOINED)
+
+
 def release(redis: "Redis", machine: str, member: str) -> None:
-    redis.zrem(key(machine), member)
+    redis.zrem(key(machine), member, member + JOINED)
 
 
 def category(reason: str) -> str:
-    for found in (CPU, RAM, MAX_AGENTS, MISSING):
+    for found in (CPU, RAM, DISK, MAX_AGENTS, MISSING):
         if f"{found}: " in reason:
             return found
     if NODE_CAP in reason:

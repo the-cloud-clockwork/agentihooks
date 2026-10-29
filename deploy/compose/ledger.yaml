@@ -3,7 +3,7 @@ name: agentihooks-ledger
 services:
   ledger:
     image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
-    command: [python, "${LEDGER_CODE}/scripts/swarm_ledger/ledger_server.py", --serve]
+    command: [python, "${LEDGER_CODE}/scripts/swarm_ledger/server_supervisor.py"]
     working_dir: ${LEDGER_CODE:?set by ledger_server.py --ensure}
     user: ${LEDGER_UID:-1000}:${LEDGER_GID:-1000}
     network_mode: host

@@ -23,6 +23,7 @@ from scripts.scheduler import Scheduler
 from scripts.scheduler.service import ensure_running
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import RedisStore, SwarmError, redis_client
+from scripts.swarm_ledger import ledger_alerts
 from scripts.swarm_v2.deployed import POLICY_ENV, pod_policy
 from scripts.swarm_v2.herdr import publications
 from scripts.swarm_v2.herdr.attach import ClientHome, Run
@@ -42,6 +43,7 @@ POLICY_KEY = "pod-policy.json"
 ANTONCORE_ENV = "AGENTIHOOKS_ANTONCORE_DIR"
 # Not a top level *.env: the hooks autoload ~/.agentihooks/*.env into every agent session.
 FOLDER = "swarm-terminal"
+SETUP_ITEM = "operator-terminal-setup"
 UNIT = "agentihooks-swarm-terminal.service"
 TIMER = "agentihooks-swarm-terminal.timer"
 SYNC = "agentihooks-swarm-terminal-sync.service"
@@ -56,6 +58,8 @@ REDIS_FIELD = "redis_password"
 REDIS_USER = "swarm"
 ADDRESS_ENV = "AGENTIHOOKS_HIVE_REDIS_ADDRESS"
 URL_FILE_ENV = "AGENTIHOOKS_HIVE_REDIS_URL_FILE"
+OPENBAO_NAMES = (openbao_kv.URL_ENV, openbao_kv.TOKEN_ENV)
+OPENBAO_FILES = "~/.agentihooks/.env or a *.env companion beside it, such as ~/.agentihooks/openbao.env"
 
 
 class SetupRefused(SwarmError):
@@ -187,15 +191,32 @@ def place(home: Path, bao: openbao_kv.OpenBao, antoncore: Path, address: str = "
     if placement.redis_url.exists():
         env += f"{URL_FILE_ENV}={placement.redis_url}\n"
     _stage(placement.env, env.encode()).replace(placement.env)
-    placement.alarm.unlink(missing_ok=True)
+    clear_alarm(placement)
     return report
+
+
+def clear_alarm(placement: Placement) -> None:
+    try:
+        raised = json.loads(placement.alarm.read_text()).get("raised", [])
+    except (OSError, ValueError):
+        raised = []
+    ledger = LedgerClient() if raised else None
+    for slug in raised:
+        try:
+            ledger.close_item_alerts(slug, SETUP_ITEM, "The operator terminal setup succeeded.")
+        except SwarmError:
+            continue
+    placement.alarm.unlink(missing_ok=True)
 
 
 def setup(root: Path, environ: Mapping[str, str], antoncore: str | None = None) -> int:
     try:
         bao = openbao_kv.from_env(environ)
         if bao is None:
-            raise SetupRefused(f"it needs {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV}")
+            raise SetupRefused(
+                f"it needs {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV}, set in the agentihooks env files: "
+                + OPENBAO_FILES
+            )
         report = place(root, bao, antoncore_dir(environ, antoncore), environ.get(ADDRESS_ENV, ""))
     except SwarmError as refused:
         message = f"operator terminal setup refused: {refused}"
@@ -226,24 +247,36 @@ def _raised(placement: Placement, message: str) -> set[str]:
     return set(entry["raised"]) if entry.get("message") == message else set()
 
 
+def _swarms(environ: Mapping[str, str], placed: Mapping[str, str]) -> list[str]:
+    from redis.exceptions import RedisError
+
+    try:
+        return publications.connect(transport(environ, placed)).slugs()
+    except (OSError, RedisError, SwarmError):
+        pass
+    try:
+        return RedisStore(redis_client()).slugs()
+    except (OSError, RedisError, SwarmError):
+        return []
+
+
 def alarm(root: Path, environ: Mapping[str, str], message: str) -> None:
     placement = Placement(root / FOLDER)
     try:
         placed = settings(root)
     except OSError:
         placed = {}
-    try:
-        slugs = publications.connect(transport(environ, placed)).slugs()
-    except (OSError, SwarmError):
+    slugs = _swarms(environ, placed)
+    if not slugs:
         return
     raised = _raised(placement, message)
     ledger = LedgerClient()
     for slug in sorted(set(slugs) - raised):
         try:
-            if ledger.followup(slug, message, needs_operator=True):
-                raised.add(slug)
+            ledger.raise_alert(slug, ledger_alerts.SETUP, message, item=SETUP_ITEM)
         except SwarmError:
             continue
+        raised.add(slug)
     entry = {"message": message, "raised": sorted(raised)}
     _stage(placement.alarm, json.dumps(entry).encode()).replace(placement.alarm)
 
@@ -312,7 +345,8 @@ def shell_environ() -> dict[str, str]:
 
 
 def _setup_environ(address: str) -> dict[str, str]:
-    environ = shell_environ()
+    inherited = {name: value for name, value in os.environ.items() if name not in OPENBAO_NAMES}
+    environ = {**inherited, **operator_env.values(os.environ)}
     if address:
         environ[ADDRESS_ENV] = address
     return environ
@@ -411,12 +445,14 @@ def remove_units(unit_dir: Path, run: Callable = subprocess.run) -> None:
 
 
 def _scheduler() -> Scheduler:
-    from redis.exceptions import RedisError
+    from scripts.events import state
 
     try:
-        return Scheduler(redis_client())
-    except RedisError as error:
-        raise SetupRefused(f"the scheduler Redis is unreachable: {type(error).__name__}") from None
+        scheduler = Scheduler()
+        scheduler.document()
+        return scheduler
+    except state.unavailable() as error:
+        raise SetupRefused(f"the scheduler store is unreachable: {type(error).__name__}") from None
 
 
 def _unit_dir() -> Path:
@@ -465,7 +501,8 @@ def main(
     environ = os.environ if environ is None else environ
     root = home or Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
     try:
-        outside_agent(Who.from_env() if who is None else who)
+        if args.command != "install":
+            outside_agent(Who.from_env() if who is None else who)
     except SetupRefused as refused:
         print(f"operator terminal {args.command} refused: {refused}", file=sys.stderr)
         return 1

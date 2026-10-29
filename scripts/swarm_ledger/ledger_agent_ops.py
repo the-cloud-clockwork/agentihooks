@@ -52,10 +52,20 @@ def _check_text(op, kind, task_ids):
         and (op["list"] != "followups" or not isinstance(op["needs_operator"], bool))
     ):
         raise ValueError("needs_operator is a boolean flag on a follow-up")
+    if (
+        kind == "add_item"
+        and "not_duplicate" in op
+        and (op["list"] != "followups" or not (isinstance(op["not_duplicate"], str) and op["not_duplicate"].strip()))
+    ):
+        raise ValueError("not_duplicate must say in plain words why the follow up differs from the item it resembles")
     if kind == "retext" and (not TEXT_ITEM_RE.match(str(op.get("item"))) or not _text(op.get("text"))):
         raise ValueError("retext needs item questions/<id> or followups/<id> and text")
+    followup = (kind == "add_item" and op["list"] == "followups") or (
+        kind == "retext" and op["item"].startswith("followups/")
+    )
+    worktree = ledger_comments.worktree(op, followup)
     if kind in ("add_item", "retext"):
-        op["text"] = _screened(op["text"])
+        op["text"] = _screened(op["text"], worktree)
         ledger_comments.check(op["text"], "item", task_ids=task_ids)
 
 
@@ -91,11 +101,11 @@ def check_task(op):
         raise ValueError("task needs a task id of up to 128 letters, digits, dots, underscores or hyphens")
 
 
-def _screened(text):
+def _screened(text, worktree=None):
     LEDGER_WRITE = ports.hooks().conditions.LEDGER_WRITE
     filters = ports.hooks().filters
 
-    return filters.screen(LEDGER_WRITE, text)
+    return filters.screen(LEDGER_WRITE, text, worktree)
 
 
 def _text(value):
@@ -112,6 +122,8 @@ def _join(doc, op, ctx):
     members = ctx.meta["members"]
     known = members.get(op["by"])
     role = op.get("role", known["role"] if known else "member")
+    if known and known["role"] == "orchestrator" and ports.swarm().naming.lane_of(op["by"]) == "master":
+        role = "orchestrator"
     members[op["by"]] = {
         "role": role,
         "joined_at": known["joined_at"] if known else ctx.at,
@@ -204,7 +216,7 @@ def _add_item(doc, op, ctx):
         return True
     item = {"id": op["id"], "text": op["text"], "comments": []}
     item.update({"done": False} if op["list"] == "followups" else {"answers": []})
-    for field in ("hive", "task"):
+    for field in ("hive", "task", "not_duplicate"):
         if field in op:
             item[field] = op[field]
     if op.get("needs_operator"):

@@ -15,6 +15,7 @@ from dataclasses import dataclass, fields
 
 from scripts.gates.base import Who
 from scripts.gates.enforcement import STALL_WATCH
+from scripts.hive import join_report
 from scripts.inbox import exits
 from scripts.inbox.store import CLOSED, InboxError, InboxStore
 from scripts.swarm import capacity, idle, outage, ready, waits
@@ -46,7 +47,7 @@ CASES = {
     "unclaimed": "ready and unclaimed while its lane is full",
 }
 REOPENED = "reopened the task for the next engineer with its handoff and branch"
-ALERTED = "alert only; the lane split owns the cause"
+ALERTED = "alert only; lane caps belong to the operator and the master"
 ALERT = (
     "Stall on swarm {slug}: task {task} ({title}) is {case} for {minutes} minutes. Pull request: {pr}. Owner: {owner}. "
     "Action: {action}. Answer by closing this item; still open in {wait} minutes, it goes to the operator."
@@ -180,9 +181,15 @@ def _stall(watch, task, pull, marks, seen, agent):
         return None, None
     if pull.resolved and not pull.red and not pull.queued and not pull.draft:
         return "green", _since(watch, marks, seen, f"{tid}:green")
-    if task.get("claimed_by") not in watch.live:
+    if task.get("claimed_by") not in watch.live and not _hive_live(watch, agent):
         return "owner", _since(watch, marks, seen, f"{tid}:owner")
     return None, None
+
+
+def _hive_live(watch, agent):
+    report = join_report.read(watch.store.redis, agent) if agent is not None else {}
+    beat = report.get("heartbeat_at") if report.get("status") == "running" else None
+    return beat is not None and watch.now_ms - beat <= 2 * join_report.HEARTBEAT_MS
 
 
 def _pull_request(watch, mail, task, limit, marks, seen):
@@ -290,7 +297,7 @@ def _alert(watch, mail, task, case, minutes, action, limit):
     row["item"] = inbox.send(SENDER, address, text, ref=f"{watch.slug}:stall:{tid}").id
     watch.store.redis.hset(_key(watch, ALERTS), tid, json.dumps(row))
     for item in earlier:
-        inbox.close(item, SENDER, DONE, f"superseded by a new stall alert on task {tid}")
+        inbox.settle(item, SENDER, DONE, f"superseded by a new stall alert on task {tid}")
     return [f"stall: task {tid} {CASES[case]} for {minutes} minutes, {action}; told {address}"]
 
 
@@ -355,7 +362,7 @@ def _escalate(watch, rows):
         moot = _unclaimed_moot(watch, rows, row, task, decision) if row["case"] == UNCLAIMED else ""
         is_open = _open(inbox, row["item"])
         if moot and is_open:
-            inbox.close(row["item"], SENDER, DONE, moot)
+            inbox.settle(row["item"], SENDER, DONE, moot)
         if moot or not is_open:
             watch.store.redis.hdel(key, tid)
             continue

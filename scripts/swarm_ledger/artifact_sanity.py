@@ -44,7 +44,7 @@ MEASURE = """
     page_overflow: document.documentElement.scrollWidth > window.innerWidth,
     body_overflow: body.scrollWidth > body.clientWidth + 1,
     close_visible: close.width > 0 && close.left >= 0 && close.right <= window.innerWidth && close.top >= 0,
-    json_folds: body.querySelectorAll(".json-tree details").length,
+    json_nodes: body.querySelectorAll(".json-tree .json-node").length,
   };
   const img = body.querySelector("img");
   if (img) out.image = { loaded: img.complete && img.naturalWidth > 0, inside: inside(img) };
@@ -141,8 +141,8 @@ def check(measure: dict, expected: Counter | None = None) -> list[str]:
     kind = measure["kind"]
     if kind == "markdown":
         failures += _markdown(measure, expected or Counter())
-    elif kind == "json" and not measure["json_folds"]:
-        failures.append("the JSON viewer shows no folds")
+    elif kind == "json" and not measure["json_nodes"]:
+        failures.append("the JSON viewer shows no nested blocks")
     elif kind == "image" and not (measure["image"]["loaded"] and measure["image"]["inside"]):
         failures.append("the image did not load inside the viewer")
     elif kind == "none":

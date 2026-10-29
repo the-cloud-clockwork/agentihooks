@@ -15,13 +15,47 @@ import pytest
 from xdist.dsession import get_default_max_worker_restart
 from xdist.scheduler import LoadGroupScheduling, LoadScopeScheduling
 
+from tests.shards import slowest_first
+
+WORKER_FILES = pytest.StashKey[dict[str, list[str]]]()
+
 
 class RefillingLoadGroupScheduling(LoadGroupScheduling):
     # A worker runs a test only once it holds the next one or is shut down, and a replacement
     # worker after a crash gets a single work unit, so keep every worker at two queued tests.
     # Workers read pytest-rerunfailures' crash count from a controller thread, so a crashed test
     # stays held until FlakeLedger.pytest_handlecrashitem runs after that count is recorded.
+    # A sharded run's workers collect only their owned files, so a worker gets only units it collected.
     holding = False
+
+    def _owned(self):
+        return bool(getattr(self.config, "stash", {}).get(WORKER_FILES, None))
+
+    def _collected(self, node):
+        cache = self.__dict__.setdefault("_collected_sets", {})
+        if node not in cache:
+            cache[node] = frozenset(self.registered_collections[node])
+        return cache[node]
+
+    def add_node_collection(self, node, collection):
+        if not self._owned():
+            return super().add_node_collection(node, collection)
+        self.registered_collections[node] = list(collection)
+
+    def schedule(self):
+        if self.collection is not None or not self._owned():
+            return super().schedule()
+        durations = json.loads((self.config.rootpath / ".test_durations").read_text())
+        union = dict.fromkeys(nodeid for collection in self.registered_collections.values() for nodeid in collection)
+        self.collection = slowest_first(list(union), durations, 0.1)
+        units = {}
+        for nodeid in self.collection:
+            units.setdefault(self._split_scope(nodeid), {})[nodeid] = False
+        order = sorted(units, key=lambda scope: -len(units[scope])) if self.config.option.loadscopereorder else units
+        self.workqueue.update((scope, units[scope]) for scope in order)
+        self.config.pluginmanager.getplugin("dsession")._session.testscollected = len(self.collection)
+        for node in self.nodes:
+            self._reschedule(node)
 
     def remove_node(self, node):
         self.holding = True
@@ -33,6 +67,15 @@ class RefillingLoadGroupScheduling(LoadGroupScheduling):
     def release(self):
         for node in self.nodes:
             self._reschedule(node)
+
+    def _assign_work_unit(self, node):
+        collected = self._collected(node)
+        scope = next((scope for scope, unit in self.workqueue.items() if collected.issuperset(unit)), None)
+        if scope is None:
+            node.shutdown()
+            return
+        self.workqueue.move_to_end(scope, last=False)
+        super()._assign_work_unit(node)
 
     def _reschedule(self, node):
         # A replacement worker still collecting gets its work from schedule() once it has collected.
@@ -67,6 +110,8 @@ class FlakeLedger:
         self.path = path
         self.attempts = {}
         self.errors = {}
+        self.tracebacks = {}
+        self.reports = []
         self.retrying = set()
         self.failed = set()
         self.crashes = {}
@@ -100,6 +145,7 @@ class FlakeLedger:
         else:
             return
         self.errors.setdefault(report.nodeid, []).append(_error(report))
+        self.tracebacks.setdefault(report.nodeid, []).append(report.longreprtext)
         if report.nodeid in self.crashing:
             self.crashing.discard(report.nodeid)
             self.pytest_runtest_logfinish(report.nodeid)
@@ -125,6 +171,12 @@ class FlakeLedger:
             failed = self.crash_failed.get(nodeid, True)
             self._write(nodeid, self.attempts[nodeid], failed, self.errors[nodeid], crashes=crashes)
 
+    def pytest_terminal_summary(self, terminalreporter):
+        for report in self.reports:
+            terminalreporter.write_sep("=", f"Retry failure reports: {report['test']}")
+            for traceback in report["tracebacks"]:
+                terminalreporter.write_line(traceback)
+
     def _write(self, nodeid, attempts, failed, errors, **extra):
         record = {
             "test": nodeid,
@@ -133,8 +185,11 @@ class FlakeLedger:
             "attempts": attempts,
             "outcome": "failed" if failed else "flaky",
             "errors": errors,
+            "tracebacks": self.tracebacks.pop(nodeid, []),
             **extra,
         }
+        if not failed:
+            self.reports.append(record)
         with self.path.open("a") as ledger:
             ledger.write(json.dumps(record) + "\n")
 

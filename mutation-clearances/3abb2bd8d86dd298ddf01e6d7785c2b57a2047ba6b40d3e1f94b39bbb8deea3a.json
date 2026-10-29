@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_shards.py:scripts.ci_gate_shards.x_watch__mutmut_42:c70a876f2ed527a97c5db8de480c1b3a51b255f5c21ebff279e5466e44143bef": {
+    "reader": "standards-reader",
+    "reason": "Diagnostic capitalization only; timeout still raises RuntimeError before evidence acceptance, preserving failure and timing."
+  }
+}

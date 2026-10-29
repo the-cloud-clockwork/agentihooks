@@ -1,5 +1,5 @@
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import pytest
 
@@ -67,6 +67,79 @@ def test_a_failed_launch_stamps_its_absent_binding_when_it_fails(setup, monkeypa
     assert result["binding"] == {"state": "absent", "at": 101, "session": "sw-eng-2", "reason": "Launch failed"}
     retry = next(r for r in transfers.list_transfers(store, "sw") if r.get("retry_of") == transfer["id"])
     assert retry["at"] == 101
+
+
+@pytest.mark.parametrize("state", ["starting", "launching"])
+@pytest.mark.parametrize("lane", ["eng", "ci", "master"])
+def test_a_successor_whose_launch_is_unrecorded_keeps_a_pending_binding(setup, state, lane):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2", lane=lane, state=state)
+    store.put_agent("sw", new)
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    runtime = FakeRuntime()
+    transfers.observe(store, "sw", runtime.live_names())
+    assert transfers.get(store, "sw", transfer["id"])["binding"] == {"state": "pending"}
+    store.put_agent("sw", replace(new, state="working", launched_at=40))
+    runtime.live.add(new.name)
+    transfers.observe(store, "sw", runtime.live_names())
+    assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "live"
+
+
+def test_a_launched_successor_missing_from_the_live_names_is_absent(setup):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2", state="working", launched_at=40)
+    store.put_agent("sw", new)
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    transfers.observe(store, "sw", set())
+    assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "absent"
+
+
+@pytest.mark.parametrize(("generation", "state"), [(3, "live"), (2, "absent")])
+def test_a_hive_successor_is_bound_by_its_hive_execution_report(setup, monkeypatch, generation, state):
+    from scripts.hive import reports
+
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.setenv("SWARM_HIVE_ID", "workstation")
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(
+        old,
+        name="sw-eng-2",
+        state="working",
+        launched_at=40,
+        runtime_target={"host_id": "hive-b"},
+        execution_id="x2",
+        generation=3,
+    )
+    store.redis.hset(store.key("sw", "executions"), new.execution_id, json.dumps(asdict(new)))
+    store.redis.hset(store.key("sw", "agents"), new.name, json.dumps(asdict(new)))
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    report = {"names": [], "panes": {}, "executions": {"x2": {"name": new.name, "generation": generation}}}
+    store.redis.set(reports.key("hive-b"), json.dumps(report))
+    transfers.observe(store, "sw", set())
+    assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == state
+
+
+def test_a_live_binding_is_kept_when_the_successor_later_leaves_the_live_names(setup):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2", state="working", launched_at=40)
+    store.put_agent("sw", new)
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    runtime = FakeRuntime()
+    runtime.live.add(new.name)
+    transfers.observe(store, "sw", runtime.live_names())
+    bound = transfers.get(store, "sw", transfer["id"])["binding"]
+    runtime.live.discard(new.name)
+    transfers.observe(store, "sw", runtime.live_names())
+    assert transfers.get(store, "sw", transfer["id"])["binding"] == bound
+    assert bound["state"] == "live"
 
 
 def test_detach_frees_only_the_waiting_spawns_unbound_transfers(setup):

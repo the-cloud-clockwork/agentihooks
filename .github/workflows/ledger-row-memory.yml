@@ -36,7 +36,7 @@ jobs:
           enable-cache: false
       - name: Install the revision under measurement
         working-directory: replay
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint ../proof/.github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Replay the same requests for twenty minutes
         working-directory: replay
         env:
@@ -54,3 +54,4 @@ jobs:
           name: row-memory-${{ matrix.revision }}
           path: row-memory-${{ matrix.revision }}.json
           if-no-files-found: error
+          retention-days: 7

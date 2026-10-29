@@ -203,10 +203,10 @@ def test_watchdog_failures_and_fast_probes_form_one_incident_per_tick(store, mon
     plant(host.proc, host.argv)
     (host.folder / ".server.pid").write_text(str(PID))
 
-    def refused(pid, sig):
+    def refused(*args, **kw):
         raise PermissionError("restart refused")
 
-    host.kill = refused
+    host.run = host.kill = refused
     monkeypatch.setattr(ledger_watchdog, "default_host", lambda: host)
     ledger, runtime = ProbedLedger(Clock()), FakeRuntime()
     for _ in range(bad_ticks):

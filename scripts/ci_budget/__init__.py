@@ -31,6 +31,7 @@ BUDGETS = {
     "queue-fail-fast": 60,
     "mutation-plan": 60,
     "mutation-stats": 210,
+    "mutation-stats-seed": 300,
     "mutation": 480,
     "worker-image": 300,
     "swarm-image": 180,
@@ -39,9 +40,11 @@ BUDGETS = {
     "hierarchy-cpu": 15 * 60,
     "brain-smoke": 90,
     "writer-lock": 180,
+    "install-smoke": 180,
     "kind-due": 60,
     "helm-kind": 480,
     "gate-required": 60,
+    "promotion-ready": 60,
     "test-summary": 60,
     "refresh-durations": 120,
     "coverage-baseline": 120,
@@ -55,14 +58,20 @@ def seconds(stamp: str) -> float:
 
 
 def stage_of(name: str) -> str:
-    return "gate-required" if name == GATE else name.split(" / ")[0].split(" (")[0]
+    return {GATE: "gate-required", "Queue gate summary": "test-summary"}.get(name, name.split(" / ")[0].split(" (")[0])
 
 
 def stages(jobs: list[dict]) -> dict[str, float]:
     spans: dict[str, tuple[float, float]] = {}
+    queue_pair = any(job["name"] == "Queue gate summary" for job in jobs)
     for job in jobs:
         stage = stage_of(job["name"])
-        if stage == WATCHER or job.get("conclusion") == "skipped" or not job.get("completed_at"):
+        if (
+            stage == WATCHER
+            or (queue_pair and job["name"] == GATE)
+            or job.get("conclusion") == "skipped"
+            or not job.get("completed_at")
+        ):
             continue
         begin, end = seconds(job["created_at"]), seconds(job["completed_at"])
         first, last = spans.get(stage, (begin, end))

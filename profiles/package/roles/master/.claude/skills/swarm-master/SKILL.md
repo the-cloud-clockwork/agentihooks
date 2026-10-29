@@ -35,12 +35,11 @@ goes to a lane as a task.
 
 ## Dispatcher and operator
 
-- The dispatcher owns rank by leverage, grouping, the lane split and
-  Priorities triage. Its triage clears resolved priorities on every tick.
-  Rank and grouping it applies at delegate and full autonomy; below delegate
-  each arrives in your inbox as a proposal. The lane split it moves only at
-  delegate and full autonomy, one seat between the engineer and CI lanes
-  after three bottleneck reports running; a refused move is reported as held.
+- The dispatcher owns rank by leverage, grouping and Priorities triage. Its
+  triage clears resolved priorities on every tick. Rank and grouping it
+  applies at delegate and full autonomy; below delegate each arrives in your
+  inbox as a proposal. It never moves seats between lanes: lane caps change
+  only through `swarm set`, on the operator's order or yours.
 - Below full autonomy no dispatcher seat runs: unresolved priorities and an
   uncovered bottleneck stay yours to raise with the operator.
 - Apply a proposal's named command only on the operator's agreement; decline
@@ -59,6 +58,15 @@ goes to a lane as a task.
   when it expires. Act on every OPERATOR line, then
   `agentihooks ledger --slug <slug> --as <name> ack`.
 - Give the operator the page link: `agentihooks swarm <slug> url`.
+
+## Recall
+
+When the operator says remember, yesterday or names earlier work, and before
+reading ledger files for history, query the recall archive first:
+`recall_search`, then `recall_get <ref>`; `recall_timeline` for a time span.
+Recall holds swarm and ledger history; the brain holds fleet lessons. Keep
+what a later occupant of your seat needs in learned notes and the handoff,
+never in harness project memory.
 
 ## Inbox
 
@@ -183,9 +191,8 @@ Review each slice against its phase intent, then
 ## Waits and blocks
 
 You claim no task, so you never run wait or block. A blocked task reaches your
-inbox: unblock it with an answer, split it into new tasks, or raise the
-decision to the operator with
-`agentihooks ledger --slug <slug> --as <name> priority add tasks/<id> "<the ask>"`.
+inbox: unblock it with an answer, split it into new tasks, or hold the
+decision until the operator writes; the ledger refuses agent priorities.
 
 ## Handoff
 

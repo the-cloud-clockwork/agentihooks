@@ -267,7 +267,26 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
     assert steps in [
-        finish(rerun(ci_reuse.inline_mutation(ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss))))
+        ci_reuse.test_only_sonar(
+            diagnostic(
+                forward(
+                    finish(
+                        rerun(
+                            ci_reuse.inline_mutation(
+                                ci_reuse.postgres_required(
+                                    ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        for diagnostic, forward in (
+            (list, list),
+            (ci_reuse.selection_diagnostic, list),
+            (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
+        )
         for form in forms
         for summary in (False, True)
         for watcher_loss in (False, True)
@@ -424,6 +443,19 @@ def test_a_source_run_must_be_a_completed_successful_required_run(full_source, t
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=false" in result.stdout
     assert f"Refused run 7: {field} is {value}\n" in result.stdout
+
+
+@pytest.mark.parametrize("expired", [False, True])
+def test_a_pull_request_run_that_reused_its_earlier_runs_never_feeds_the_queue(full_source, tmp_path, expired):
+    root, base, _, queue, env, responses, _ = full_source
+    body = responses[ARTIFACTS]
+    body["artifacts"].append({"id": 60, "name": "reused-branch-3.12", "expired": expired})
+    body["total_count"] = len(body["artifacts"])
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "branch.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
+    assert "Refused run 7: it reused tests from earlier runs of its pull request\n" in result.stdout
 
 
 def test_the_protected_script_runs_in_isolated_cli_mode(reuse_repo, tmp_path):
@@ -1172,6 +1204,35 @@ def test_documentation_gate_requires_a_successful_build_on_pull_requests(status)
         event="pull_request",
     )
     assert (result.returncode == 0) == (status == "success"), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+@pytest.mark.parametrize("status", ["success", "failure", "skipped", "cancelled", None])
+def test_postgres_gate_requires_the_writer_lock_scenario_only_on_pull_requests(event, status):
+    from scripts import ci_reuse
+
+    required = (
+        {"select", "test-count", "lint", "docs", "semgrep", "sonar"}
+        if event == "pull_request"
+        else {"select", "split", "unit", "shard-check", "test-count", "queue-fail-fast"}
+    )
+    needs = {name: {"result": "success"} for name in required}
+    needs["select"]["outputs"] = {"scope": "none"}
+    if status is not None:
+        needs["writer-lock"] = {"result": status}
+    canonical = ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True, summary=True)
+    steps = ci_reuse.postgres_required(canonical)
+    assert steps[0]["run"] == canonical[0]["run"].replace('"sonar"]', '"sonar", "writer-lock"]')
+    assert steps[0]["run"].count('"writer-lock"') == 1
+    assert steps[1:] == canonical[1:] and len(steps) > 1
+    assert {**steps[0], "run": canonical[0]["run"]} == canonical[0]
+    result = _gate(
+        ci_reuse.postgres_required(ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True)),
+        needs,
+        event=event,
+    )
+    green = status == "success" if event == "pull_request" else status in ("skipped", None)
+    assert (result.returncode == 0) == green, result.stdout + result.stderr
 
 
 def test_the_canonical_gate_still_needs_the_standalone_ratchet_in_the_queue():

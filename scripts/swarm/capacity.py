@@ -141,7 +141,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     counts = account_sessions.codex_sessions_by_account()
     found = source.readings(pool, environ, now)
     known = {account.name for account in pool}
-    live = codex_router.live_accounts(pool, counts)
+    live = codex_router.routed_live(pool, counts, environ)
     found.update(codex_router.quotas(live, environ))
     rows = []
     for account in pool + live:
@@ -173,6 +173,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
 def _global(environ: dict, now: float) -> list[Account]:
     from scripts.routing import aggregate
 
+    refused = _refused(environ)
     rows = []
     for row in aggregate.current(now).values():
         quota = row["quota"]
@@ -189,6 +190,8 @@ def _global(environ: dict, now: float) -> list[Account]:
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)
             cap, weight = policy.cap, policy.weight
+        if (row["harness"], row["account"]) in refused:
+            cap = 0
         rows.append(
             Account(
                 row["harness"],
@@ -206,6 +209,15 @@ def _global(environ: dict, now: float) -> list[Account]:
             )
         )
     return rows
+
+
+def _refused(environ: dict) -> set[tuple[str, str]]:
+    """Claude accounts whose latest local probe the provider refused; hive quota reports carry no probe status."""
+    latest = {
+        result.account: result
+        for _, result in sorted(balancer.cached_observations(environ=environ), key=lambda seen: seen[0])
+    }
+    return {(balancer.HARNESS, account) for account, result in latest.items() if balancer.refused(result)}
 
 
 def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
@@ -450,9 +462,7 @@ def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = Non
     }
     demand = inputs.demand or dict.fromkeys(LANES, 0)
     free = _placeable(_open(inputs.observations, inputs.warned))
-    decision = autoscale.calculate(
-        _busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous, config.lane_shift
-    )
+    decision = autoscale.calculate(_busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous)
     caps = decision["ceilings"]
     scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])
     return scaled, {**decision, "host": host}
@@ -616,6 +626,22 @@ def _prepared(store, slug: str, task: dict) -> dict:
     }
 
 
+def _placement_ready(store, slug: str, ready: dict, now_ms: int) -> tuple[dict, list[str]]:
+    from scripts.hive import placement_waits
+
+    refused = placement_waits.read(store, slug)
+    eligible, actions = {}, []
+    for lane, tasks in ready.items():
+        eligible[lane] = []
+        for task in tasks:
+            wait = refused.get(task["id"])
+            if wait and wait["lane"] == lane and now_ms - wait["seen_at"] < placement_waits.FRESH_MS:
+                actions.append(f"capacity skipped {lane} task {task['id']}: fresh placement refusal: {wait['reason']}")
+            else:
+                eligible[lane].append(task)
+    return eligible, actions
+
+
 def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     reader = getattr(runtime, "quota_capacity", None)
     if reader is None:
@@ -624,6 +650,7 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     from scripts.swarm.tick import _ended
 
     rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
+    ready, skipped = _placement_ready(store, slug, ready, now_ms)
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     requirements = None
     if hasattr(runtime, "quota_requirements"):
@@ -654,4 +681,4 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
                 ledger.comment(slug, task["id"], text, by="swarm")
         except LedgerRefused as exc:
             print(f"swarm notice dropped, the ledger refused it: {exc}", file=sys.stderr)
-    return [text] if changed else []
+    return skipped + ([text] if changed else [])

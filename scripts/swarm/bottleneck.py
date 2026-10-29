@@ -5,7 +5,7 @@ from scripts.swarm import metrics_outbox
 from scripts.swarm.store import RedisStore
 
 WINDOW_MS = 4 * 60 * 60 * 1000
-SAMPLE_GAP_MS = 5 * 60 * 1000
+SAMPLE_GAP_MS = 20 * 60 * 1000
 KEY = "bottleneck"
 OPEN = ("claimed", "pr")
 SOURCES = ("agent_events", "delivery_events", "ci_runs", "host_samples")

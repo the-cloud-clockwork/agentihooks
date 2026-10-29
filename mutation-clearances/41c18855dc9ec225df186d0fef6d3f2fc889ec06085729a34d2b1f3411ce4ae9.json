@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/stack.py:scripts.swarm.stack.x_restack__mutmut_2:5255f9c3188f06c68859df00fdd2880d2515399002079a169512b7662a8f7bbd": {
+    "reader": "standards_reader",
+    "reason": "In _fetch_origin, branch is read only through `[branch] if branch else []` and `branch or '*'`; None and the empty string are both falsy there, so the mutant produces identical fetch argv and refspecs and changes no output."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/hive/daemon.py:scripts.hive.daemon.x__native_accounts__mutmut_32:5fac2e2ea2da47f6b3fd587fe6cf158fd2b1d9d57a2318484168a21d08fce64f": {
+    "reader": "standards-reader",
+    "reason": "The sole consumer _subscriptions calls account_cap, whose only provider status comparison is against rejected. The changed value remains unequal to rejected. Emitted capacity, account, quota windows and timestamp are identical."
+  }
+}

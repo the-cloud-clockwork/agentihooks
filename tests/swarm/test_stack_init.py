@@ -260,8 +260,7 @@ def test_the_adoption_override_serves_the_host_folder_as_the_host_user():
     )
     assert swarm["command"] == [
         "python",
-        "${SWARM_ADOPT_CODE:?run agentihooks swarm init --adopt}/scripts/swarm_ledger/ledger_server.py",
-        "--serve",
+        "${SWARM_ADOPT_CODE:?run agentihooks swarm init --adopt}/scripts/swarm_ledger/server_supervisor.py",
     ]
     assert swarm["working_dir"] == "${SWARM_ADOPT_CODE}"
     assert swarm["environment"] == {

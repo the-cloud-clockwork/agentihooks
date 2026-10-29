@@ -263,11 +263,11 @@ def materialize(attempt: Path, target: str) -> None:
     roots = ([bundle] if bundle is not None else []) + [path for _, path in dirs]
     adapter = get_adapter(target)
     native = _settings(target, bundle, dirs)
+    endpoints = {**request["endpoints"], broadcast_bridge.GRANT_FILE: str(broadcast_bridge.grant_path(attempt))}
     if target == "claude":
         claude_environment(native, dirs)
-    native.setdefault("_agentihooks", {}).setdefault("env", {}).update(
-        {**request["endpoints"], broadcast_bridge.GRANT_FILE: str(broadcast_bridge.grant_path(attempt))}
-    )
+        native["env"].update(endpoints)
+    native.setdefault("_agentihooks", {}).setdefault("env", {}).update(endpoints)
     adapter.write_settings(native)
     for subdir, keep in (
         ("skills", _i._skill_dir_filter()),

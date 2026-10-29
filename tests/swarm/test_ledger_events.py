@@ -205,12 +205,25 @@ def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store)
     (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
     assert item.text == (
         "New priority on ledger sw for tasks/t1: Blocked: the deploy key is missing\n"
-        "Triage it: resolve it if the call is yours, else leave it for the operator."
+        "Autonomy delegate: take the decision yourself, with no question to the operator. On a blocker, the next "
+        'protocol step is to attempt 1 of 2: agentihooks swarm sw resolve attempt tasks/t1 --tried "<what you tried>" '
+        '--command "<the command run>" --output "<its output>".'
     )
     assert item.ref == "sw:priority:tasks/t1" and not item.fyi
     assert actions == [f"told {MASTER_SEAT}: priority tasks/t1"]
     assert store.redis.smembers(store.key("sw", "priorities-sent")) == {"tasks/t1"}
     assert texts(store, ENG_SEAT) == []
+
+
+def test_a_new_priority_names_the_step_its_item_record_has_reached(store):
+    run(store, with_priorities())
+    doc = with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing"))
+    doc["tasks"] = [{"id": "t1", "blocker": {"attempts": [{}, {}], "critic": None, "escalation": None}}]
+    run(store, doc)
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert item.text.endswith(
+        "the next protocol step is to launch the blind critic: agentihooks swarm sw resolve critic tasks/t1."
+    )
 
 
 def test_a_priority_on_a_follow_up_the_swarm_raised_for_the_operator_sends_the_master_no_notice(store):
@@ -421,6 +434,57 @@ def test_a_task_left_in_pr_after_its_merge_goes_to_its_engineer_then_the_master(
         run(store, in_pr(), now_ms=merged.merged_at + minutes * MINUTE, github=lambda url: merged)
     assert len(texts(store, MASTER_SEAT)) == 1 and "Build the thing" in texts(store, MASTER_SEAT)[0]
     assert len(texts(store, ENG_SEAT)) == 1
+
+
+@pytest.mark.parametrize("hold", ["deadline", "wait"])
+def test_merged_reminders_wait_for_the_after_window_then_deliver_once(store, hold):
+    from scripts.swarm import idle
+
+    merged = answer("merged")
+    now = merged.merged_at + 21 * MINUTE
+    due = now + MINUTE
+    doc = in_pr()
+    if hold == "deadline":
+        doc["tasks"][0]["contract"] = {"after_at": str(due)}
+    else:
+        idle.declare_wait(store.redis, "sw", "sw-eng-1", due, "after measurement", now)
+    run(store, recorded())
+    assert run(store, doc, now_ms=now, github=lambda url: merged) == []
+    assert texts(store, ENG_SEAT) == []
+    assert texts(store, MASTER_SEAT) == []
+    for stamp in (due, due + 1):
+        run(store, doc, now_ms=stamp, github=lambda url: merged)
+        assert len(texts(store, ENG_SEAT)) == 1
+        assert len(texts(store, MASTER_SEAT)) == 1
+
+
+@pytest.mark.parametrize("deadline", [None, "", 0, -1])
+def test_due_or_absent_after_windows_keep_merged_reminders(store, deadline):
+    merged = answer("merged")
+    now = merged.merged_at + 21 * MINUTE
+    doc = in_pr()
+    if deadline is not None:
+        doc["tasks"][0]["contract"] = {"after_at": str(now + deadline) if deadline else ""}
+    run(store, recorded())
+    run(store, doc, now_ms=now, github=lambda url: merged)
+    assert len(texts(store, ENG_SEAT)) == 1
+    assert len(texts(store, MASTER_SEAT)) == 1
+
+
+def test_a_held_merged_task_does_not_delay_later_merged_reminders(store):
+    merged = answer("merged")
+    now = merged.merged_at + 21 * MINUTE
+    doc = in_pr()
+    doc["tasks"][0]["contract"] = {"after_at": now + MINUTE}
+    later = "https://github.com/o/r/pull/10"
+    doc["tasks"].append({**doc["tasks"][0], "id": "t2", "pr_url": later, "contract": {}})
+    run(store, recorded())
+    assert run(store, doc, now_ms=now, github=lambda url: merged) == [
+        f"told {ENG_SEAT}: {later}:merged:engineer",
+        f"told {MASTER_SEAT}: {later}:merged:master",
+    ]
+    assert len(texts(store, ENG_SEAT)) == 1
+    assert len(texts(store, MASTER_SEAT)) == 1
 
 
 def test_a_pull_request_closed_unmerged_goes_to_its_engineer_once(store):
@@ -723,7 +787,7 @@ def test_a_red_notice_whose_close_races_stays_indexed_and_closes_next_pass(store
     red, item = red_notice(store)
     store.redis.hset(store.key("sw", "red-notices"), "gone", URL)
 
-    def changed_meanwhile(self, item_id, closer, kind, detail=""):
+    def changed_meanwhile(self, item_id, closer, kind, detail="", only_from=None):
         raise ledger_events.InboxError(f"message {item_id} changed meanwhile")
 
     with monkeypatch.context() as patched:
@@ -1125,6 +1189,27 @@ def test_dead_gate_resolution_is_red_but_reminders_still_require_actual_failure(
 def test_a_pull_request_reports_whether_checks_still_run(rollup, suites, running):
     raw = {"state": "OPEN", "statusCheckRollup": rollup, "checkSuites": suites}
     assert ledger_events.pull_request(raw).running is running
+
+
+@pytest.mark.parametrize(
+    ("status", "conclusion", "running"),
+    [
+        ("COMPLETED", "CANCELLED", False),
+        ("QUEUED", "CANCELLED", False),
+        ("IN_PROGRESS", "CANCELLED", False),
+        ("QUEUED", None, True),
+        ("IN_PROGRESS", None, True),
+    ],
+)
+def test_cancelled_suite_conclusions_end_running_state(status, conclusion, running):
+    raw = {
+        "state": "OPEN",
+        "statusCheckRollup": [{"name": "unit", "status": "COMPLETED", "conclusion": "CANCELLED"}],
+        "checkSuites": [{"status": status, "conclusion": conclusion, "workflowRun": {"databaseId": 1}}],
+    }
+    found = ledger_events.pull_request(raw)
+    assert found.running is running
+    assert found.started is running
 
 
 @pytest.mark.parametrize(

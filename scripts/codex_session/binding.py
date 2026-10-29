@@ -14,6 +14,7 @@ STOOD_DOWN = "stood_down"
 RECORDS, ENDPOINTS, OPENINGS = "codex-transport", "codex-endpoints", "codex-openings"
 VIEWERS = "codex-viewers"
 PUBLISHING = "execution-publishing"
+RESERVE_ATTEMPTS = 5
 IDENTITY = ("execution_id", "execution_generation", "seat", "agent_name", "task_id", "endpoint_ref", "transport")
 
 
@@ -60,6 +61,18 @@ def decode(raw: str) -> TransportRecord:
     return TransportRecord(**row)
 
 
+def transport_records() -> list[str] | None:
+    """Every swarm's raw transport records; None while no store is configured."""
+    from hooks._redis import get_redis
+    from scripts.swarm.store import RedisStore
+
+    redis = get_redis()
+    if redis is None:
+        return None
+    store = RedisStore(redis)
+    return [raw for slug in store.slugs() for raw in redis.hvals(store.key(slug, RECORDS))]
+
+
 class BindingStore:
     def __init__(self, store: "RedisStore") -> None:
         self.store = store
@@ -70,22 +83,22 @@ class BindingStore:
 
         records, endpoints = self.store.key(slug, RECORDS), self.store.key(slug, ENDPOINTS)
         record = replace(record, state=STARTING)
-        with self.redis.pipeline() as pipe:
-            try:
-                pipe.watch(records, endpoints)
-                if pipe.hexists(records, record.execution_id):
-                    raise BindingError("duplicate launch: the execution already has a transport record")
-                if pipe.hget(endpoints, record.endpoint_ref):
-                    raise BindingError("the endpoint already belongs to another execution")
-                pipe.multi()
-                pipe.hset(records, record.execution_id, json.dumps(asdict(record)))
-                pipe.hset(endpoints, record.endpoint_ref, record.execution_id)
-                pipe.execute()
-            except WatchError:
-                raise BindingError(
-                    "a concurrent launch changed the transport records; this launch was refused"
-                ) from None
-        return record
+        for _ in range(RESERVE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(records, endpoints)
+                    if pipe.hexists(records, record.execution_id):
+                        raise BindingError("duplicate launch: the execution already has a transport record")
+                    if pipe.hget(endpoints, record.endpoint_ref):
+                        raise BindingError("the endpoint already belongs to another execution")
+                    pipe.multi()
+                    pipe.hset(records, record.execution_id, json.dumps(asdict(record)))
+                    pipe.hset(endpoints, record.endpoint_ref, record.execution_id)
+                    pipe.execute()
+                    return record
+                except WatchError:
+                    continue
+        raise BindingError("a concurrent launch changed the transport records; this launch was refused")
 
     def get(self, slug: str, execution_id: str) -> TransportRecord | None:
         raw = self.redis.hget(self.store.key(slug, RECORDS), execution_id)

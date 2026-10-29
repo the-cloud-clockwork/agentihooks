@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import time
 
 import pytest
 
@@ -89,8 +90,27 @@ def test_progress_reads_generated_and_accepted_progress_and_the_oldest_unaccepte
         "accepted_at": 1791360010000,
         "exporter_alive": False,
         "requested_at": T0 + 3_000,
+        "stopped": False,
     }
     assert 0 < found["accepted_bytes"] < size
+
+
+@pytest.mark.parametrize(
+    ("reason", "turns", "stopped"),
+    [("start", 1, False), ("compact", 1, False), ("stop", 1, True), ("end", 0, True), ("start", 2, True)],
+)
+def test_a_turn_is_completed_once_a_stop_is_requested_or_a_second_prompt_is_seen(cursors, reason, turns, stopped):
+    _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1, buffered_turns=turns)
+    path = trace_flush.request_path("sid")
+    path.write_text(json.dumps({**json.loads(path.read_text()), "reason": reason}))
+    assert registry.progress("sid", "claude")["stopped"] is stopped
+
+
+def test_a_stop_recorded_before_a_later_request_still_completes_the_turn(cursors):
+    _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1, buffered_turns=1)
+    path = trace_flush.request_path("sid")
+    path.write_text(json.dumps({**json.loads(path.read_text()), "reason": "compact", "stopped": True}))
+    assert registry.progress("sid", "claude")["stopped"] is True
 
 
 def test_accepted_observations_paged_out_of_the_cursor_still_count_as_accepted(cursors):
@@ -112,7 +132,12 @@ def test_a_lost_acknowledgement_after_paging_is_a_stale_finding(cursors):
         **registry.bindings([{**AGENT, "conversation_id": "sid", "started_at": now - 600_000}])[0],
         "read": True,
         "traces": [],
-        "remote": {"trace": "tr-1", "fresh_ms": now - 130_000, "observations": 44},
+        "remote": {
+            "trace": "tr-1",
+            "fresh_ms": now - 130_000,
+            "observations": 44,
+            "reconciliation": {"accepted": 46, "missing": ["lost"], "drift": 0},
+        },
         "local": local,
     }
     record = {"slug": "s", "now_ms": now, "active": [binding]}
@@ -217,7 +242,16 @@ class Langfuse:
     def __call__(self, path, params):
         self.calls.append((path, dict(params)))
         if path == "traces":
-            return {"data": self.traces, "meta": {"page": 1, "totalPages": 1}}
+            io = "io" in params["fields"].split(",")
+            rows = [{key: v for key, v in t.items() if io or key not in ("metadata", "input")} for t in self.traces]
+            return {"data": rows, "meta": {"page": 1, "totalPages": 1}}
+        if params.get("type") == "AGENT":
+            roots = [
+                {"id": f"root-{t['id']}", "type": "AGENT", "metadata": t["metadata"]}
+                for t in self.traces
+                if "metadata" in t
+            ]
+            return {"data": [r for r in roots if r["id"] == f"root-{params['traceId']}"], "meta": {}}
         if params["limit"] == 1:
             return {"data": self.observations[:1], "meta": {"totalItems": self.total}}
         since = params.get("fromStartTime")
@@ -244,13 +278,17 @@ def test_read_joins_the_newest_trace_and_reads_freshness_from_a_watermark(cursor
         "traces",
         {
             "tags": ["swarm:s", "agent:engineer@1-0001"],
-            "fields": "core,io",
+            "fields": "core",
             "orderBy": "timestamp.desc",
             "limit": registry.TRACES_LIMIT,
             "page": 1,
         },
     )
-    assert langfuse.calls[1] == ("observations", {"traceId": "tr-new", "limit": 50, "page": 1})
+    assert langfuse.calls[1:3] == [
+        ("observations", {"traceId": "tr-new", "type": "AGENT", "limit": 1, "page": 1}),
+        ("observations", {"traceId": "tr-old", "type": "AGENT", "limit": 1, "page": 1}),
+    ]
+    assert langfuse.calls[3] == ("observations", {"traceId": "tr-new", "limit": 50, "page": 1})
     assert found["read"] is True and found["session_id"] == "sid-new"
     assert found["remote"] == {"trace": "tr-new", "fresh_ms": 1791360040000, "observations": 40}
     assert found["traces"][0] == {
@@ -351,6 +389,17 @@ def test_a_failure_before_the_budget_ends_keeps_its_text(cursors, read_clock):
     assert failures == [f"active read of engineer@1-0001 failed at {read_clock}: ConnectionError: refused{_at(get, 3)}"]
 
 
+def test_a_failure_line_carries_every_note_of_its_exception_in_order():
+    try:
+        raise TimeoutError("timed out")
+    except TimeoutError as exc:
+        exc.add_note("first note")
+        exc.add_note("second note")
+        line, raised_at = registry.failure(exc), exc.__traceback__.tb_lineno
+    assert line.startswith("TimeoutError: timed out at ")
+    assert line.endswith(f":{raised_at}; first note; second note")
+
+
 def test_no_retry_starts_after_the_budget_ends(cursors):
     release, retried = threading.Event(), threading.Event()
     tries = []
@@ -380,17 +429,35 @@ def test_bindings_are_read_at_the_same_time(cursors):
     assert failures == [] and [b["read"] for b in found] == [True, True]
 
 
-def test_every_binding_is_read_in_one_round(cursors):
-    agents = [{**AGENT, "name": f"engineer@1-{n:04d}"} for n in range(1, 25)]
-    langfuse = Langfuse([], [])
-    everyone = threading.Barrier(len(agents), timeout=5)
+def test_at_most_readers_bindings_are_read_at_once(cursors):
+    agents = [{**AGENT, "name": f"engineer@1-{n:04d}"} for n in range(1, registry.READERS + 4)]
+    langfuse, lock, full = Langfuse([], []), threading.Lock(), threading.Event()
+    flight = {"now": 0, "peak": 0}
 
     def get(path, params):
-        everyone.wait()
+        with lock:
+            flight["now"] += 1
+            flight["peak"] = max(flight["peak"], flight["now"])
+            if flight["now"] == registry.READERS:
+                full.set()
+        full.wait(5)
+        time.sleep(0.1)
+        with lock:
+            flight["now"] -= 1
         return langfuse(path, params)
 
     found, failures = registry.read("s", agents, get, {}, 15, 50)
     assert failures == [] and all(b["read"] for b in found)
+    assert flight["peak"] == registry.READERS
+
+
+def test_a_trace_without_a_root_observation_reads_empty_correlation(cursors):
+    langfuse = Langfuse([{"id": "tr-orphan", "sessionId": "sid"}], [])
+    [found], failures = registry.read("s", [AGENT], langfuse, {}, 15, 50)
+    assert failures == []
+    assert found["traces"] == [
+        {"id": "tr-orphan", "session_id": "sid", "life": "", "seat": "", "task": "", "harness": "", "profile": ""}
+    ]
 
 
 def test_no_bindings_read_nothing(cursors):
@@ -502,6 +569,7 @@ def test_a_cursor_with_nothing_staged_has_no_generated_progress(cursors):
         "accepted_at": 0,
         "exporter_alive": False,
         "requested_at": 0,
+        "stopped": False,
     }
 
 
@@ -516,8 +584,8 @@ def test_sub_millisecond_times_round_down(cursors):
 
 
 def test_a_trace_row_missing_fields_reads_as_empty(cursors):
-    row = {"id": "tr", "metadata": {"attributes": {"agentihooks.correlation.task": "t1"}}}
-    assert registry._remote_trace(row) == {
+    root = {"metadata": {"attributes": {"agentihooks.correlation.task": "t1"}}}
+    assert registry._remote_trace({"id": "tr"}, root) == {
         "id": "tr",
         "session_id": "",
         "life": "",
@@ -533,7 +601,7 @@ def test_a_scan_with_no_new_observations_keeps_its_watermark_and_counts_a_missin
     langfuse = Langfuse([_trace("tr", "sid")], observations)
     state = {}
     registry.read("s", [AGENT], langfuse, state, 15, 50)
-    assert langfuse.calls[2] == ("observations", {"traceId": "tr", "limit": 1, "page": 1})
+    assert langfuse.calls[3] == ("observations", {"traceId": "tr", "limit": 1, "page": 1})
     langfuse.observations = []
     langfuse.total = None
     [found], _ = registry.read("s", [AGENT], langfuse, state, 15, 50)
@@ -584,3 +652,183 @@ def test_unreadable_exporter_progress_is_a_failure_line_not_a_crash(cursors, rea
     )
     assert failure.startswith(f"{reason} at {registry.__file__}:")
     assert failure.rpartition(":")[2].isdigit()
+
+
+def _read_order(monkeypatch, agents, state):
+    monkeypatch.setattr(registry, "READERS", 1)
+    langfuse = Langfuse([_trace("tr", "sid")], [])
+    found, failures = registry.read("s", agents, langfuse, state, 15, 50)
+    assert failures == []
+    return [params["tags"][1] for path, params in langfuse.calls if path == "traces"], found
+
+
+def test_bindings_are_read_largest_trace_first_and_reported_in_their_own_order(cursors, monkeypatch):
+    small, large = AGENT, {**AGENT, "name": "engineer@1-0002"}
+    state = {"sizes": {"engineer@1-0001": 31, "engineer@1-0002": 700}}
+    order, found = _read_order(monkeypatch, [small, large], state)
+    assert order == ["agent:engineer@1-0002", "agent:engineer@1-0001"]
+    assert [b["agent"] for b in found] == ["engineer@1-0001", "engineer@1-0002"]
+    assert state["sizes"] == {"engineer@1-0001": 40, "engineer@1-0002": 40}
+
+
+def test_a_master_with_no_known_size_is_read_first_and_other_unknown_bindings_last(cursors, monkeypatch):
+    known, master, unknown = AGENT, {**AGENT, "name": "master@1-0001"}, {**AGENT, "name": "engineer@1-0003"}
+    order, _ = _read_order(monkeypatch, [known, unknown, master], {"sizes": {"engineer@1-0001": 300, "gone": 9}})
+    assert order == ["agent:master@1-0001", "agent:engineer@1-0001", "agent:engineer@1-0003"]
+
+
+def test_an_unknown_binding_starts_after_a_binding_known_to_hold_one_observation(cursors, monkeypatch):
+    unknown, one = AGENT, {**AGENT, "name": "engineer@1-0002"}
+    order, _ = _read_order(monkeypatch, [unknown, one], {"sizes": {"engineer@1-0002": 1}})
+    assert order == ["agent:engineer@1-0002", "agent:engineer@1-0001"]
+
+
+def test_an_unread_binding_keeps_its_last_known_size(cursors, read_clock):
+    state = {"sizes": {"engineer@1-0001": 700, "gone": 9}}
+    registry.read("s", [AGENT], Langfuse([], []), state, 0, 50)
+    assert state["sizes"] == {"engineer@1-0001": 700}
+
+
+def _root_reads(langfuse):
+    return [params["traceId"] for path, params in langfuse.calls if params.get("type") == "AGENT"]
+
+
+def test_a_later_scan_reads_no_root_of_a_known_trace_and_reads_the_root_of_a_new_one(cursors):
+    langfuse = Langfuse([_trace("tr-new", "sid-new"), _trace("tr-old", "sid-old")], [])
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert _root_reads(langfuse) == ["tr-new", "tr-old"]
+    langfuse.calls.clear()
+    langfuse.traces = [_trace("tr-next", "sid-next", life="engineer@1-0001#2"), *langfuse.traces]
+    [found], failures = registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert failures == [] and _root_reads(langfuse) == ["tr-next"]
+    assert [(t["id"], t["session_id"], t["life"], t["profile"]) for t in found["traces"]] == [
+        ("tr-next", "sid-next", "engineer@1-0001#2", "engineer"),
+        ("tr-new", "sid-new", f"engineer@1-0001#{T0}", "engineer"),
+        ("tr-old", "sid-old", f"engineer@1-0001#{T0}", "engineer"),
+    ]
+    assert sorted(state["roots"]) == ["tr-new", "tr-next", "tr-old"]
+
+
+def test_a_trace_without_a_root_observation_is_read_again_at_the_next_scan(cursors):
+    langfuse = Langfuse([{"id": "tr-orphan", "sessionId": "sid"}], [])
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert _root_reads(langfuse) == ["tr-orphan", "tr-orphan"]
+    assert state["roots"] == {}
+
+
+def test_a_root_missing_one_attribute_is_read_again_until_every_attribute_is_present(cursors):
+    partial = _trace("tr", "sid")
+    partial["metadata"]["attributes"]["agentihooks.correlation.profile.resolved"] = ""
+    langfuse = Langfuse([partial], [])
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert state["roots"] == {}
+    langfuse.traces = [_trace("tr", "sid")]
+    [found], _ = registry.read("s", [AGENT], langfuse, state, 15, 50)
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert _root_reads(langfuse) == ["tr", "tr"]
+    assert found["traces"][0]["profile"] == "engineer"
+
+
+def test_a_known_root_on_a_trace_row_without_a_session_reads_an_empty_session(cursors):
+    known = {"life": "l", "seat": "s", "task": "t", "harness": "h", "profile": "p"}
+    assert registry._correlated(None, {"id": "tr"}, {"tr": known}) == {"id": "tr", "session_id": "", **known}
+
+
+def test_a_rescan_of_an_unchanged_binding_with_two_traces_costs_three_requests(cursors):
+    langfuse = Langfuse([_trace("tr-new", "sid-new"), _trace("tr-old", "sid-old")], [])
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert len(langfuse.calls) == 5
+    langfuse.calls.clear()
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert [path for path, _ in langfuse.calls] == ["traces", "observations", "observations"]
+
+
+def test_a_full_read_drops_roots_of_traces_no_longer_listed_and_a_failed_read_keeps_them(cursors, read_clock):
+    known = {"life": "x", "seat": "", "task": "", "harness": "", "profile": ""}
+    state = {"roots": {"gone": known}}
+    registry.read("s", [AGENT], Langfuse([_trace("tr-1", "sid")], []), state, 15, 50)
+    assert list(state["roots"]) == ["tr-1"]
+
+    def down(path, params):
+        raise ConnectionError("refused")
+
+    registry.read("s", [AGENT], down, state, 15, 50)
+    assert list(state["roots"]) == ["tr-1"]
+
+
+class Timed:
+    def __init__(self, changed, seconds=0.0):
+        self.changed, self.seconds, self.calls, self.scan = changed, seconds, [], 0
+
+    def __call__(self, path, params):
+        time.sleep(self.seconds)
+        self.calls.append(path)
+        if path == "traces":
+            agent = params["tags"][1].removeprefix("agent:")
+            stamp = self.scan if agent in self.changed else 0
+            row = {"id": f"tr-{agent}", "sessionId": "", "updatedAt": f"2026-10-28T17:00:{stamp:02d}.000Z"}
+            return {"data": [row], "meta": {}}
+        if params.get("type") == "AGENT":
+            return {"data": [{"metadata": _trace("x", "")["metadata"]}], "meta": {}}
+        row = {"startTime": f"2026-10-28T17:00:{self.scan:02d}.000Z", "endTime": None}
+        return {"data": [row], "meta": {"totalItems": 10 + self.scan}}
+
+
+def _fleet(count):
+    return [{**AGENT, "name": f"engineer@1-{n:04d}"} for n in range(count)]
+
+
+def test_a_rescan_of_a_trace_with_an_unchanged_update_time_costs_one_request(cursors):
+    langfuse = Timed(changed=set())
+    state = {}
+    [first], _ = registry.read("s", _fleet(1), langfuse, state, 15, 50)
+    langfuse.calls.clear()
+    langfuse.scan = 1
+    [again], failures = registry.read("s", _fleet(1), langfuse, state, 15, 50)
+    assert failures == [] and langfuse.calls == ["traces"]
+    assert (
+        again["remote"]
+        == first["remote"]
+        == {"trace": "tr-engineer@1-0000", "fresh_ms": 1793206800000, "observations": 10}
+    )
+
+
+def test_a_trace_whose_update_time_moved_is_read_again(cursors):
+    langfuse = Timed(changed={"engineer@1-0000"})
+    state = {}
+    registry.read("s", _fleet(1), langfuse, state, 15, 50)
+    langfuse.calls.clear()
+    langfuse.scan = 1
+    [again], _ = registry.read("s", _fleet(1), langfuse, state, 15, 50)
+    assert langfuse.calls == ["traces", "observations", "observations"]
+    assert again["remote"]["observations"] == 11 and again["remote"]["fresh_ms"] == 1793206801000
+
+
+def test_the_update_time_is_taken_from_the_binding_own_trace_not_a_newer_sibling(cursors):
+    sibling = {**_trace("tr-new", "sid-new"), "updatedAt": "2026-10-28T17:00:00.000Z"}
+    own = {**_trace("tr-own", "sid-own"), "updatedAt": "2026-10-28T17:00:00.000Z"}
+    older = {**_trace("tr-old", "sid-old"), "updatedAt": "2026-10-28T17:00:00.000Z"}
+    langfuse = Langfuse([sibling, own, older], [{"startTime": "2026-10-28T17:00:00.000Z", "endTime": None}])
+    state = {}
+    registry.read("s", [{**AGENT, "conversation_id": "sid-own"}], langfuse, state, 15, 50)
+    langfuse.calls.clear()
+    langfuse.traces = [sibling, {**own, "updatedAt": "2026-10-28T17:00:09.000Z"}, older]
+    [found], _ = registry.read("s", [{**AGENT, "conversation_id": "sid-own"}], langfuse, state, 15, 50)
+    assert [p.get("traceId") for _, p in langfuse.calls] == [None, "tr-own", "tr-own"]
+    assert found["remote"]["trace"] == "tr-own"
+
+
+def test_recorded_latencies_of_a_missed_pass_fit_the_budget_when_unchanged_traces_are_not_read_again(cursors):
+    fleet = _fleet(24)
+    langfuse = Timed(changed={b["name"] for b in fleet[:8]})
+    state = {}
+    registry.read("s", fleet, langfuse, state, 15, 50)
+    recorded_request_seconds, budget_seconds, scale = 1.4, 15, 0.07
+    langfuse.scan, langfuse.seconds = 1, recorded_request_seconds * scale
+    found, failures = registry.read("s", fleet, langfuse, state, budget_seconds * scale, 50)
+    assert failures == [] and all(b["read"] for b in found)

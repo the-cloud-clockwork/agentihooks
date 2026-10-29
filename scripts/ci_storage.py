@@ -8,7 +8,9 @@ newest successful run, so both are kept at any age.
 import argparse
 import json
 import subprocess
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
@@ -16,6 +18,9 @@ from urllib.parse import quote
 LONG_LIVED = frozenset({"dev", "main", "master"})
 RUNS_PER_WORKFLOW = 3
 ATTEMPTS = 3
+WORKERS = 8
+# A REST DELETE costs 5 of the 900 secondary rate limit points GitHub allows per minute.
+DELETES_PER_MINUTE = 120
 MB = 1000**2
 # Docker build actions upload one record per build under a random name that no run reads back.
 BUILD_RECORD = ".dockerbuild"
@@ -139,18 +144,38 @@ def delete(repo: str, row: dict) -> bool:
     return done.returncode == 0 or "(HTTP 404)" in done.stderr
 
 
+def delete_all(work: list[tuple[str, dict]], per_minute: int = DELETES_PER_MINUTE) -> set[tuple[str, int]]:
+    gap, lock, slot = 60 / per_minute, threading.Lock(), [time.monotonic()]
+
+    def paced(item: tuple[str, dict]) -> bool:
+        with lock:
+            now = time.monotonic()
+            wait, slot[0] = slot[0] - now, max(slot[0], now) + gap
+        if wait > 0:
+            time.sleep(wait)
+        return delete(*item)
+
+    with ThreadPoolExecutor(WORKERS) as pool:
+        done = list(pool.map(paced, work))
+    return {(name, row["id"]) for (name, row), ok in zip(work, done) if ok}
+
+
 def _survey(args: argparse.Namespace, now: datetime) -> tuple[dict, list[str]]:
-    plans, unread = {}, []
-    for repo in billed(args.owner):
+    def read(repo: dict) -> tuple | None:
         name = repo["full_name"]
         try:
             found = artifacts(name)
             branches = kept_branches(repo)
             passed = passed_runs(name, branches & {_branch(row) for row in found})
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            unread.append(name)
-            continue
-        plans[name] = (found, *plan(found, branches, passed, now, timedelta(hours=args.keep_hours)))
+            return None
+        return (found, *plan(found, branches, passed, now, timedelta(hours=args.keep_hours)))
+
+    repos = billed(args.owner)
+    with ThreadPoolExecutor(WORKERS) as pool:
+        read_plans = list(pool.map(read, repos))
+    plans = {repo["full_name"]: done for repo, done in zip(repos, read_plans) if done is not None}
+    unread = [repo["full_name"] for repo, done in zip(repos, read_plans) if done is None]
     return plans, unread
 
 
@@ -173,12 +198,14 @@ def prune(args: argparse.Namespace, now: datetime) -> dict:
         doomed.append((name, row))
         total -= row["size_in_bytes"]
     ranked = sorted(doomed, key=lambda item: (item[1]["expired"], -item[1]["size_in_bytes"]))
-    chosen = {(name, row["id"]) for name, row in ranked[: args.budget]}
+    budgeted = ranked[: args.budget]
+    chosen = {(name, row["id"]) for name, row in budgeted}
+    gone = delete_all(budgeted) if args.apply else chosen
     report = []
     for name, (found, _, _) in plans.items():
         mine = [row for row_name, row in doomed if row_name == name]
         picked = [row for row in mine if (name, row["id"]) in chosen]
-        deleted = [row for row in picked if not args.apply or delete(name, row)]
+        deleted = [row for row in picked if (name, row["id"]) in gone]
         report.append(
             {
                 "repository": name,

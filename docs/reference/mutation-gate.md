@@ -19,6 +19,47 @@ gh workflow run proofs.yml \
 
 For a stacked branch, set `base` to its dependency branch. Branch pushes run Mutation preflight before the first draft pull request; wait for its current head to pass. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
 
+## Required gate proof
+
+`mutation-plan`, `mutation-stats` and `mutation` are needs of `Gate — Required`
+in Tests, and `Gate — Required` is the required status check of both dev
+rulesets (`.github/rulesets/dev-history.json`, `dev-no-delete.json`). On a pull
+request into dev `mutation-plan` must succeed; `mutation-stats` must succeed
+unless a reused plan forwards its result; `mutation` must succeed unless the
+plan grades inline in `mutation-stats`.
+
+The both-ways proof is two full Tests dispatches with `gate_plant=true` on the
+plant branches `diffcheck/ci-323133-2650-t9-green` and
+`diffcheck/ci-323133-2650-t9-red`. Both plant branches add `bright()` to
+`scripts/term_colors.py`; they differ only in the assertion of
+`test_bright_shifts_a_colour_to_its_bright_code`:
+
+| Run | Assertion | Mutation result | Gate — Required |
+|---|---|---|---|
+| [Green 40460927967](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40460927967), head `461504b` | `colors.bright("31") == "91"` | 4 killed | success |
+| [Red 40460931731](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40460931731), head `a4a1bb2` | `colors.bright("31")` (truthiness only) | 3 survived, 1 killed on the changed line | failure, `mutation-stats` the only red need |
+
+## Red rate in pull request runs
+
+70 completed, non cancelled Tests pull request runs between
+2026-10-26 15:22Z and 23:03Z carried 17 red mutation jobs:
+
+| Cause | Runs | Kind |
+|---|---|---|
+| Surviving mutants on changed lines | 8 | Real: the gate doing its job |
+| Selected tests failing on the unmutated head | 2 | Real: the pull request broke a test |
+| Dependabot pull requests: no Dependabot secrets, so `Mint the tcc main ci App token` gets an empty client id | 6 | Tool: every token minting job in those runs fails, not only mutation |
+| Shard ran the full 1080 second budget on eight large swarm files | 1 | Tool: budget; files print `not mutated, over budget` and the shard exits 1, so the gate goes red |
+
+The audit's 38% (15 of 40) predates mutation moving into Tests. Excluding
+Dependabot runs, one of 64 runs (1.6%) was a mutation tool failure. Cancelled
+runs are outside the count. Separately, after the counted window, mutation
+planning was killed for memory (exit 137, Tests run 40424698293) between
+2026-10-26 23:45Z and 2026-10-27 00:22Z.
+
+The tool failures are routed as swarm follow ups: Dependabot secrets for the
+App token, the shard budget for large swarm files, and planner memory.
+
 ## Covering tests through production helpers
 
 Mutation planning supplements matching and importing test modules with recorded
@@ -759,7 +800,7 @@ variable can lower the planned workers but never raise them above four.
 | Planner call | Step | Effect of fewer workers |
 |---|---|---|
 | `shard_count` | **Size mutation shards from stored timings** (`plan`, target 120 s) and **Refine mutation shards from measured statistics** (`refine`, target 240 s) | Shards = `ceil(worker seconds / (workers * target))`, capped by the shard limit of ten and the mutant count, so more shards are planned for the same work |
-| `slowest_bucket` and `stats_part_count` | **Size mutation shards from stored timings** | Each statistics part forks one bucket per worker; the slowest bucket grows, so the step can choose more `Stats parts` to stay within the 30 s statistics target |
+| `slowest_bucket` and `stats_part_count` | **Size mutation shards from stored timings** | Each statistics part forks one bucket per worker; the slowest bucket grows, so the step can choose more `Stats parts` to stay within the 60 s statistics target |
 | `plan_shards` | **Refine mutation shards from measured statistics** | The measured plan records the count in its `workers` field |
 
 For example, a measured plan of 2880 worker seconds with the 240 second
@@ -974,6 +1015,293 @@ needed its `mutation` job skipped and the inline step successful. Other
 mutation changes merged between the two windows, so the 62 s drop in the median
 is not attributable to this change alone.
 
+## Planning input reuse
+
+Mutation sizing reuses expensive inputs while building a plan and checking
+statistics cache entries. This happens automatically in branch preflight and
+the pull request **Size mutation shards from stored timings** step.
+
+| Input | Work retained and reused | Boundary |
+|---|---|---|
+| Recorded dev coverage | The planner reads a record before estimating changed files and passes the manifest into selection. Job lookup requests 100 jobs per page, reducing pagination on large dev runs | One planner invocation; a read failure can trigger the [coverage retry](#unreadable-coverage-record). More than 100 jobs still require another page |
+| Test import index | `mentions` caches Unicode-normalized tokens and relative import detection. `imported_names` caches parsed imports by test text and package. `select_tests` parses a file only when it names a reached module's last component or contains a relative import; its import walk visits statements | In-process reuse by content and package, including repeated selection for changed sources. Each selection still reads test text; unrelated files avoid AST parsing |
+| Test duration map | `stats_part_count` computes `file_seconds` once, then passes the same map to every candidate part count and worker bucket. `partition` splits the files using that map without rereading durations | One statistics part sizing calculation. A new plan reads its current duration input |
+| Statistics dependency fingerprints | `StatsInputs.for_test` retains a test file's dependency trace when multiple selectors name that file. `test_inputs` materializes each module's AST walk once while recording its dependencies | One `StatsInputs` instance, separately for measured and unmeasured dependencies. Recorded coverage and dynamically loaded inputs still participate in validation |
+
+These in-memory values reduce repeated planning work. The persisted statistics
+cache still validates its inputs before reusing collected results, as described
+in [Measured shards and split mutants](#measured-shards-and-split-mutants).
+[Report reuse](#reused-and-empty-pull-request-runs) is a separate decision that
+can skip planning altogether.
+
+### Planning reuse configuration and usage
+
+There is no enable switch, new cache directory or cache lifetime setting for
+this reuse. The workflows supply the repository, base and stored durations.
+The existing command, shown here with its default sizing values, runs in CI:
+
+```bash
+python -m scripts.ci_mutation.plan \
+  --base "$BASE" \
+  --head HEAD \
+  --repository "$GITHUB_REPOSITORY" \
+  --target 120 \
+  --stats-target 60 \
+  --limit 10
+```
+
+`--target` and `--stats-target` are target seconds for mutation shards and
+statistics parts; `--limit` caps their counts. They control sizing, not whether
+inputs are reused. The planner reads `.test_durations` as JSON when present;
+`file_seconds` starts each selected entry at 0.01 seconds and adds matching
+recorded test durations. Without the file, that starting estimate remains.
+Omitting `--repository` uses import selection without the recorded dev lookup.
+The repository lookup needs the workflow's `GH_TOKEN` for `gh api`.
+
+Use the [focused mutation proof](#pull-request-mutation-gate) on a pushed branch
+to exercise planning in CI. For a completed run, inspect the log and job step
+times without executing tests locally:
+
+```bash
+gh run view RUN_ID --log
+
+gh api repos/OWNER/REPO/actions/runs/RUN_ID/jobs --paginate \
+  --jq '.jobs[] | {name, steps: [.steps[] | select(.name == "Size mutation shards from stored timings") | {name, started_at, completed_at}]}'
+```
+
+Compare equal head, base, recorded manifest and duration inputs when measuring
+planning changes. Inspect the [selection artifact](#inspect-the-selection)
+to confirm that the same tests remain selected.
+
+### Planning reuse limits and troubleshooting
+
+- A syntax error in an unrelated test module may no longer be found during
+  import selection because that file is never parsed. Its own test run still
+  fails on the syntax error; a green plan does not validate every test file.
+- Missing coverage and unreadable coverage follow the existing
+  [record lookup outcomes](#retry-and-fallback). Reuse does not remove the
+  retry or the conservative selection after two failed reads.
+- A slow first plan can still spend time downloading and parsing the dev
+  manifest, reading test files and tracing dependencies before cache lookup.
+  Check those phases and the selected test set before attributing the delay
+  to mutation execution. Reuse does not guarantee a fixed total step time.
+
+### Planning reuse delivery evidence
+
+[Pull request 5462](https://github.com/the-cloud-clockwork/agentihooks/pull/5462)
+closed [issue 5352](https://github.com/the-cloud-clockwork/agentihooks/issues/5352).
+Its paired diagnostic used the original 57-mutant change with the same head,
+base, recorded manifest and live dev record, alternating before, after, after,
+before. The pull request records these observed seconds:
+
+| Phase | Before 1 | Before 2 | After 1 | After 2 |
+|---|---:|---:|---:|---:|
+| Record lookup | 11.22 | 10.95 | 8.68 | 8.79 |
+| Rest of sizing: selection, mutants and durations | 9.43 | 9.34 | 2.51 | 2.26 |
+| Statistics fingerprint startup, in the stats job | 18.40 | 17.98 | 14.29 | 13.31 |
+
+Selection matched the uploaded artifact in all four diagnostics. The separate
+CI sizing steps were 35 and 29 seconds for the original 57-mutant runs
+[39425710887](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39425710887)
+and [39426673491](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39426673491),
+and 25 and 27 seconds for the delivered branch's larger 145- and 153-mutant runs
+[39553508079](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39553508079)
+and [39554889987](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39554889987).
+Those CI runs used different inputs and are not a paired speed comparison.
+The delivery report identified download and parsing of the 13 MB dev record
+as most of the remaining sizing step time at that point.
+
+[Red Proofs 39553034360](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39553034360)
+observed nine job requests, 120 duration reads, unrelated module parsing and a
+duplicate file trace across the four failing seam tests.
+[Green Proofs 39553523380](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39553523380)
+passed all four, plus the plan, scope, stats cache, selection and test plan
+files. These are delivery measurements, not a current runner speed guarantee.
+
+## Plan job dependencies
+
+The `mutation-plan` job of the Tests run installs only the third party
+packages that the shard planner and the empty change grade import: mutmut,
+pytest, pyyaml and tomlkit, at the specifiers `pyproject.toml` declares. Before
+[pull request 5439](https://github.com/the-cloud-clockwork/agentihooks/pull/5439)
+the job installed the whole project with `.[dev,all]`, 95 packages, only to
+size shards. It now resolves and installs 20 packages in about one second. The
+plan outputs, the shard and part counts, the graded bases and the planned test
+selection are unchanged. The `mutation-stats`, `mutation` and unit test jobs
+still install `.[dev,all]`.
+
+### What the step runs
+
+```yaml
+      - name: Install dependencies
+        if: steps.reuse.outputs.reused != 'true'
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+```
+
+| Package | Specifier | Declared in `pyproject.toml` | Planner module that imports it at module level |
+|---|---|---|---|
+| `mutmut` | `==3.6.0` | `dev` extra | `scripts.ci_mutation.selection` |
+| `pytest` | `>=8.0` | `dev` extra | `scripts.ci_mutation.killers`, `tests.test_collection_imports` |
+| `pyyaml` | `>=6.0` | project dependencies | `tests.dep_manifest` (imported as `yaml`) |
+| `tomlkit` | `>=0.12` | project dependencies | `scripts.ci_mutation.runner` |
+
+- The packages go into the runner's system Python 3.12. The project itself is
+  not installed: **Size mutation shards from stored timings** runs
+  `python -m scripts.ci_mutation.plan` and **Grade the empty change set** runs
+  `python -m scripts.ci_mutation` from the checkout root.
+- The step runs only when **Reuse the branch preflight report graded on this
+  head and base** reused nothing. A reused run skips the install and the
+  planning, as described under
+  [Reused and empty pull request runs](#reused-and-empty-pull-request-runs).
+- `pypi-retry.sh` comes from the workflow revision through **Take the helper
+  scripts from the workflow revision**. It retries the install only when the
+  output names a package index or network outage, waiting 5 s and doubling to
+  at most 30 s, until `PYPI_RETRY_SECONDS` (default 150) of backoff has passed.
+  Any other failure fails the step at once.
+
+### Adding a planner dependency
+
+`test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pins`
+in `tests/test_ci_workflow.py` keeps the step, the planner and `pyproject.toml`
+in agreement. `PLANNER_PACKAGES` in the same file maps each installed
+distribution to its import name:
+
+```python
+PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "tomlkit": "tomlkit"}
+```
+
+The test makes two checks:
+
+1. The step's `run` line equals the retry wrapper followed by
+   `uv pip install --system` and the `pyproject.toml` specifier of every
+   `PLANNER_PACKAGES` distribution, quoted and sorted by distribution name.
+   Specifiers are looked up in the project dependencies and the `dev` extra.
+2. The third party top level modules imported by `scripts.ci_mutation.plan`,
+   `scripts.ci_mutation.__main__` and every `scripts` or `tests` module they
+   reach equal the `PLANNER_PACKAGES` import names. Module level imports count,
+   including those inside `if`, `try`, `with` and class blocks. Inside a
+   function only `scripts` and `tests` imports are followed, because a third
+   party import there loads only when that function runs.
+
+When a planner module gains a module level import of another third party
+package, change three places in one pull request:
+
+1. Declare the package in the project dependencies or the `dev` extra of
+   `pyproject.toml`, if it is not there yet.
+2. Add it to `PLANNER_PACKAGES`, distribution name to import name.
+3. Add its `pyproject.toml` specifier to the step, in sorted order. For a
+   hypothetical `packaging>=24.0` dependency the step becomes:
+
+```yaml
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "packaging>=24.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+```
+
+A changed specifier in `pyproject.toml`, such as a new mutmut pin, also needs
+the same change in the step, or the test fails.
+
+### Inspect the plan job
+
+List the plan job's steps with their times:
+
+```bash
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/RUN_ID/attempts/1/jobs?per_page=100" --paginate \
+  --jq '.jobs[] | select(.name == "mutation-plan") | .steps[] | [.name, .conclusion, .started_at, .completed_at] | @tsv'
+```
+
+The job log shows the install and the plan it fed:
+
+```bash
+JOB_ID=$(gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/RUN_ID/attempts/1/jobs?per_page=100" --paginate \
+  --jq '.jobs[] | select(.name == "mutation-plan") | .id')
+gh api "repos/the-cloud-clockwork/agentihooks/actions/jobs/$JOB_ID/logs" \
+  | grep -E "Resolved|Installed|Mutation shards|Stats parts"
+```
+
+On run 39550510897, the first sampled run after the change:
+
+```text
+Resolved 20 packages in 273ms
+Installed 20 packages in 23ms
+Mutation shards: 1
+Stats parts: 1
+```
+
+### Plan job dependency troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| **Size mutation shards from stored timings** or **Grade the empty change set** fails with `ModuleNotFoundError` | A planner path imports a package the step does not install. A module level import also fails the contract test; an import inside a function does not. Add the package as described in [Adding a planner dependency](#adding-a-planner-dependency). |
+| The contract test fails on the `run` line | The step and `pyproject.toml` disagree on a specifier, the order or the retry wrapper. Copy the specifier from `pyproject.toml` into the step. |
+| The contract test fails on the import set | A planner module gained or dropped a third party import. Add or remove the package in `PLANNER_PACKAGES` and in the step. |
+| The test raises `KeyError` with a package name | A `PLANNER_PACKAGES` entry is declared in neither the project dependencies nor the `dev` extra. Declare it there. |
+| **Install dependencies** is skipped | The job reused the branch preflight report; no plan was computed. |
+| The step fails with `Python package index unavailable` | The package index did not answer within the retry window. This is not a code verdict; rerun the job. |
+
+### Plan job dependency delivery evidence
+
+Pull request 5439 merged on 21 October 2026 at 05:02 UTC and closed
+[issue 5437](https://github.com/the-cloud-clockwork/agentihooks/issues/5437).
+Its [red run 39543828313](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39543828313)
+on the tests only head failed only the new contract test, which found the full
+`.[dev,all]` install. Its
+[green run 39544257187](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39544257187)
+installed 20 packages in about one second in a 54 s plan job and passed Gate
+Required. The retry wrapper came later, with
+[pull request 5665](https://github.com/the-cloud-clockwork/agentihooks/pull/5665);
+[pull request 6020](https://github.com/the-cloud-clockwork/agentihooks/pull/6020)
+then took the helper from the workflow revision.
+
+Both samples are ten successful first attempts of pull request Tests runs
+whose plan job ran **Install dependencies**, with one statistics part and the
+`mutation` job skipped. Plan to grade is the time from the plan job's start to
+the end of `mutation-stats (0)`.
+
+| Measure | Before, median and mean | After, median and mean |
+|---|---|---|
+| Plan job wall | 60.5 s, 61.1 s | 49.5 s, 51.6 s |
+| **Install dependencies** step | 8.5 s, 8.3 s | 1.0 s, 0.9 s |
+| Plan to grade | 82.5 s, 88.2 s | 77.5 s, 93.6 s |
+
+Before runs, recorded by the source task, were created on 21 October from
+00:00 to 03:13 UTC: 39518577449, 39521917584, 39521996438, 39524995859,
+39529046356, 39529540156, 39529843243, 39530006213, 39536567127 and
+39537333298. After runs, sampled for this page, were created on 21 October
+from 05:36 to 11:02 UTC: 39550510897, 39551689495, 39554637694, 39554885886,
+39555030857, 39571379733, 39574555819, 39578496930, 39580532724 and
+39588941249.
+
+The install fell by about 7.5 s per run. The plan job wall fell by 11 s at the
+median, more than the install saving, so runner variation also moved it. Most
+of the job is not the install: on run 39550510897 the 44 s job spent 9 s in
+job setup, 12 s in checkout, 1 s installing and 14 s in **Size mutation shards
+from stored timings**. Plan to grade is dominated by the statistics job, which ran 50 to
+163 s from plan start in the after sample, and shows no change attributable
+to this pull request.
+
+To repeat the measurement on another window, list the runs and compute the
+three numbers per run:
+
+```bash
+R=repos/the-cloud-clockwork/agentihooks
+gh api "$R/actions/workflows/test.yml/runs?event=pull_request&status=success&created=2026-10-21T05:02:17Z..2026-10-21T16:00:00Z&per_page=100" --paginate \
+  --jq '.workflow_runs[] | select(.run_attempt == 1) | .id' |
+while read -r id; do
+  gh api "$R/actions/runs/$id/attempts/1/jobs?per_page=100" --paginate --jq '.jobs[] | select(.name | startswith("mutation"))' |
+    jq -rs --arg id "$id" 'def t: fromdateiso8601;
+      (map(select(.name == "mutation-plan"))[0]) as $p
+      | (map(select(.name == "mutation-stats (0)"))[0]) as $s
+      | (map(select(.name == "mutation"))[0]) as $m
+      | ([$p.steps[]? | select(.name == "Install dependencies")][0]) as $i
+      | select($p and $s and $m and $m.conclusion == "skipped" and $i.conclusion == "success")
+      | "\($id) plan=\(($p.completed_at|t) - ($p.started_at|t)) install=\(($i.completed_at|t) - ($i.started_at|t)) grade=\(($s.completed_at|t) - ($p.started_at|t))"'
+done
+```
+
+The `mutation` job is skipped only when the plan had one shard and one part,
+so the filter keeps one shard runs and drops plans with more statistics
+parts. The same expressions reproduce the source task's before figures, for
+example 69, 9 and 99 s on run 39537333298.
+
 ## Suite speed contracts in the branch preflight
 
 A branch push that changes a test module runs the suite speed contracts in the
@@ -1137,6 +1465,8 @@ mutmut stops a mutant at its first failing test, and a shard runs the test that 
 | The function is split into units | The unit costs above, unchanged |
 
 For example, a function traced by tests of 2, 8 and 30 seconds costs 55.6 worker seconds per mutant without a killer. Once the 2 second test has killed one of its mutants, each mutant costs 8.1. Durations follow the same rules as split planning: the maximum observed duration, at least 5.6 seconds or the largest observed duration when a test has none. Shard sizing, the shard target and limit, and the 1080 second shard budget are unchanged; a lower estimate places more mutants on fewer shards.
+
+The preflight `stats` parts also keep each test file's statistics in one merged `mutation-test-stats-v2-<os>-` cache per run, which every part restores, so an unchanged test file is not traced again even when it moves to another part. A single part saves the cache itself; with more parts each uploads its cache folder and `refine` merges them and saves the cache once after all parts finish. An entry is reused when the gate code, configuration, runner options, installed packages (the project itself by its release, since its build number changes with every commit), the test file and everything it imports or names as a file are unchanged (except `.test_durations`, which CI rewrites from dev on every run and which only orders and splits tests), together with the changed lines of each source among them. A file that reaches a dynamic import whose target is not a literal is also checked against every repository module its statistics bucket loaded and what those import or name; a collection that recorded no modules falls back to every Python module in the repository. Each part prints `Mutation stats cache: reused N test files; collect M` in its **Collect one stats part for every mutation shard** step. The pull request `mutation-stats` parts of the Tests workflow keep the same merged cache; with more parts each uploads only the entries it wrote, and the first `mutation` shard restores the previous merged cache, lays the parts over it and saves it. When a lookup misses, a second line, `Mutation stats cache: misses {...}; changed inputs [...]`, counts each miss reason and names the five inputs that changed most often.
 
 Only the branch preflight (`mutation-preflight.yml`) carries killing tests between runs. A kill is recorded per function as the failing test's node id, in a file named by a digest of the function name. The preflight keeps them per branch in an actions cache:
 
@@ -1452,11 +1782,11 @@ cat mutation-report/reuse.json
 
 Mutmut 3 mutates functions and methods. Files without mutable functions are reported explicitly with a zero count. A surviving or uncovered mutant fails when its original source lines intersect added or changed hunk lines. Incomplete, timed out and unexpected mutant outcomes fail regardless of their line. Generated trampolines and function relative diffs are mapped back to the original source, including decorators and methods.
 
-A Standards reader clears an exact survivor with one JSON file under `mutation-clearances/`. Each file holds one key combining the source file, mutant name and fingerprint from the report. The filename is the SHA256 of that complete key followed by `.json`, so different rulings can be added by concurrent pull requests without editing a shared object. Every entry requires the reader and its reason. The runner also reads the legacy root `mutation-cleared.txt`; identical duplicates are accepted and conflicting rulings fail. The fingerprint binds the original function and mutant, so a changed function invalidates an old clearance.
+A Standards reader clears an exact survivor with one JSON file under `mutation-clearances/`. Each file holds one key combining the source file, the mutated function name without its mutmut number and the mutant identity from the report. The filename is the SHA256 of that complete key followed by `.json`, so different rulings can be added by concurrent pull requests without editing a shared object. Every entry requires the reader and its reason. The runner also reads the legacy root `mutation-cleared.txt`; identical duplicates are accepted and conflicting rulings fail. The identity hashes only the lines the mutant changes, with how often those original lines already appeared earlier in the function so identical mutants on repeated lines stay apart, so a clearance survives unrelated edits on other lines of its function, such as a new argument that renumbers its mutants, unless the edit adds an earlier copy of the mutant's original lines, and a change to the mutant's own lines invalidates it. Older clearances keyed by mutant name and whole function fingerprint still match the exact mutant they were written for.
 
 ```json
 {
-  "hooks/example.py:hooks.example.x_example__mutmut_1:FINGERPRINT": {
+  "hooks/example.py:hooks.example.x_example:IDENTITY": {
     "reader": "Standards",
     "reason": "The changed argument does not change the observed output."
   }

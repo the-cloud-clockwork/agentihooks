@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -11,7 +12,7 @@ from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
 from scripts.hive import admission, execution_events, headroom, presence
 from scripts.swarm import readiness
-from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest
+from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest, Status
 
 
 class Tasks(Protocol):
@@ -20,6 +21,8 @@ class Tasks(Protocol):
         ...
 
     def reopen(self, event: Envelope) -> None: ...
+
+    def failed(self, event: Envelope, harness: str, reason: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -45,7 +48,7 @@ class Spoke:
         clock: Callable[[], int] | None = None,
         view: Callable[[], readiness.Snapshot] | None = None,
     ):
-        self.config, self.bus, self.runtime, self.tasks = config, bus, runtime, tasks
+        self.config, self.bus, self.runtime, self.tasks = config, bus.for_swarm(config.swarm.slug), runtime, tasks
         self._previous = None
         self.measure = measure or self._measure
         self.clock = clock or presence.now_ms
@@ -66,7 +69,13 @@ class Spoke:
             with presence.Heartbeat(self.bus, self.config.hive, self.clock) as heartbeat:
                 return self._poll(timeout_ms, heartbeat)
         except Exception:
-            return "retry"
+            return self._failed()
+
+    def _failed(self) -> str:
+        exc = sys.exception()
+        swarm, lane = self.config.swarm.slug, self.config.lane
+        print(f"hive spoke for swarm {swarm} lane {lane} poll failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+        return "retry"
 
     def _poll(self, timeout_ms: int, heartbeat: presence.Heartbeat) -> str:
         recovered = self._recover()
@@ -79,13 +88,14 @@ class Spoke:
             queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
             delivery = readiness.take(queue, self.view, timeout_ms)
         except Exception:
-            return "retry"
+            return self._failed()
         if delivery is None:
             return recovered or "empty"
         try:
             heartbeat.check()
             return self._apply(delivery, heartbeat)
         except Exception:
+            self._failed()
             return self._retry(delivery)
 
     def _retry(self, delivery: Delivery) -> str:
@@ -93,7 +103,7 @@ class Spoke:
             if delivery.attempt >= self.config.policy.max_deliver:
                 return self._exhaust(delivery)
         except Exception:
-            pass
+            self._failed()
         steps = self.config.policy.backoff_ms or (self.config.policy.ack_wait_ms,)
         delivery.nak(steps[min(delivery.attempt - 1, len(steps) - 1)])
         return "retry"
@@ -218,12 +228,22 @@ class Spoke:
             return None
         intent = json.dumps({"state": "launching", "owner": self.config.hive, "name": request.name}).encode()
         revision = claims.update(key, intent, revision)
-        request = replace(request, task={**request.task, "claim_fence": {"key": key, "revision": revision}})
+        request = replace(
+            request,
+            task={
+                **request.task,
+                "claim_fence": {"key": key, "revision": revision},
+                "account_slot_hive": self.config.hive,
+            },
+        )
         execution_events.prepare(self.bus, event.swarm, request.name, generation)
         outcome = self.runtime.spawn(request)
         if not outcome.ok:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
-            raise RuntimeError
+            if outcome.status is not Status.UNAVAILABLE:
+                harness = outcome.value.get("harness", "") if isinstance(outcome.value, dict) else ""
+                self.tasks.failed(event, harness, outcome.detail)
+            raise RuntimeError(f"spawn {outcome.status}: {outcome.detail}")
         placed = outcome.value
         started = Envelope(
             id=f"started:{key}",

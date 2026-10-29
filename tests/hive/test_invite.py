@@ -76,7 +76,7 @@ def _redis(admin, env):
 
 
 def _members(admin):
-    return sorted(key.rsplit(":", 1)[1] for key in admin.keys(f"{auth.PREFIX}:member:*"))
+    return sorted(auth.members(admin))
 
 
 def test_the_default_record_is_named_after_the_label():
@@ -105,7 +105,7 @@ def test_like_copies_the_addresses_and_ca_of_another_hive_and_mints_a_new_member
     assert env["AGENTIHOOKS_HIVE_URL"] == URL
     assert _redis(admin, env) == ("rediss", f"hive-{member}", "hive.example", 6380, "/2")
     assert auth.ledger_member(admin, env["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"]) == member
-    assert admin.hget(f"{auth.PREFIX}:member:{member}", "name") == "lab"
+    assert auth.member(admin, member)["name"] == "lab"
     assert fake.records[LIKE] == _sample()
     assert message == (
         f"invited hive member {member} as lab; OpenBao secret/{RECORD}: wrote ca_pem, credential, swarm_url "
@@ -200,6 +200,7 @@ def test_the_invite_parser_names_its_record_and_addresses():
         (["--redis-url"], "redis_url", "Redis URL the new hive connects to"),
         (["--swarm-url"], "swarm_url", "ledger address the new hive reaches"),
         (["--bus-url"], "bus_url", "NATS address the new hive reaches; copied from --like when omitted"),
+        (["--swarm"], "swarm", "swarm the member's bus credential reaches; every swarm if omitted"),
     ]
 
 

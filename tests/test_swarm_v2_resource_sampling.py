@@ -1,7 +1,9 @@
 import gc
 import os
 import sys
+import threading
 import time
+import tracemalloc
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +17,7 @@ pytestmark = pytest.mark.unit
 WORKLOADS = Path(__file__).parent / "performance" / "swarm_v2" / "workloads"
 COMM = "w (x) y"
 PGRP = 999
+TRACE_FRAMES = 4
 
 
 def killed(pid: int) -> bool:
@@ -228,16 +231,34 @@ def test_size_of_a_vanished_entry_is_zero(tmp_path):
     assert sampling._size(tmp_path / "gone") == 0
 
 
+def allocated_here(source) -> bool:
+    if source is None:
+        return True
+    trace = tracemalloc.get_object_traceback(source)
+    return trace is not None and any(frame.filename in (__file__, sampling.__file__) for frame in trace)
+
+
 def test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd):
-    command = [sys.executable, str(WORKLOADS / "memory.py"), "--children", "2", "--mib", "48", "--hold", "1.5"]
+    command = [sys.executable, str(WORKLOADS / "memory.py"), "--children", "2", "--mib", "48", "--hold", "2"]
     gc.collect()
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        result = sampling.measure(command, tmp_path, {"PATH": os.environ["PATH"]}, 0.05, 60)
-        gc.collect()
-    assert [w for w in caught if issubclass(w.category, ResourceWarning)] == [], "\n".join(
-        f"{w.category.__name__}: {w.message} at {w.filename}:{w.lineno}" for w in caught
-    )
+    limit = tracemalloc.get_traceback_limit() if tracemalloc.is_tracing() else 0
+    tracemalloc.stop()
+    tracemalloc.start(TRACE_FRAMES)
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = sampling.measure(command, tmp_path, {"PATH": os.environ["PATH"]}, 0.05, 60)
+            gc.collect()
+        leaks = [
+            f"{w.category.__name__}: {w.message} at {w.filename}:{w.lineno}"
+            for w in caught
+            if issubclass(w.category, ResourceWarning) and allocated_here(w.source)
+        ]
+    finally:
+        tracemalloc.stop()
+        if limit:
+            tracemalloc.start(limit)
+    assert leaks == [], " | ".join(leaks)
     assert result["exit_code"] == 0 and not result["timed_out"]
     assert 3 <= result["peak_processes"] < 10
     assert 96 <= result["peak_rss_mib"] < 2048
@@ -261,32 +282,53 @@ def leaked_file(path):
     cycle.append(cycle)
 
 
+FOREIGN_LEAK = compile("cycle = [open(path, 'w')]\ncycle.append(cycle)", "<another test's thread>", "exec")
+
+
+def leaked_by_another_thread(path):
+    thread = threading.Thread(target=exec, args=(FOREIGN_LEAK, {"path": str(path)}))
+    thread.start()
+    thread.join()
+
+
 @pytest.mark.flaky(reruns=0)
-@pytest.mark.parametrize("inherited", [True, False], ids=["inherited", "new-leak"])
-def test_live_workload_resource_audit_owns_only_sampling_leaks(tmp_path, capfd, monkeypatch, inherited):
+@pytest.mark.parametrize("case", ["inherited", "foreign", "new-leak"])
+def test_live_workload_resource_audit_owns_only_sampling_leaks(tmp_path, capfd, monkeypatch, case):
     enabled = gc.isenabled()
     gc.disable()
-    leak = tmp_path / ("inherited-resource" if inherited else "sampling-resource")
+    leak = tmp_path / f"{case}-resource"
     try:
-        if inherited:
+        if case == "inherited":
             leaked_file(leak)
+            test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd)
+        elif case == "foreign":
+            measure = sampling.measure
+
+            def measure_beside_another_thread(*args, **kwargs):
+                result = measure(*args, **kwargs)
+                leaked_by_another_thread(leak)
+                return result
+
+            monkeypatch.setattr(sampling, "measure", measure_beside_another_thread)
             test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd)
         else:
             measure = sampling.measure
 
             def leaking_measure(*args, **kwargs):
                 result = measure(*args, **kwargs)
+                leaked_by_another_thread(tmp_path / "foreign")
                 leaked_file(leak)
                 return result
 
             monkeypatch.setattr(sampling, "measure", leaking_measure)
             with pytest.raises(AssertionError) as failure:
                 test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd)
-            message = str(failure.value)
-            assert "ResourceWarning" in message
-            assert "unclosed file" in message
-            assert str(leak) in message
-            assert __file__ in message
+            summary = str(failure.value).splitlines()[0]
+            assert "ResourceWarning" in summary
+            assert "unclosed file" in summary
+            assert str(leak) in summary
+            assert __file__ in summary
+            assert str(tmp_path / "foreign") not in summary
     finally:
         gc.collect()
         if enabled:

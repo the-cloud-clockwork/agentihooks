@@ -9,6 +9,7 @@ from pathlib import Path
 # Every xdist worker of a shard rewrites each file it collects, while stored durations split between workers; measured.
 SECONDS_PER_SOURCE_BYTE = 3e-6
 FIRST_SHARD_FILES = frozenset({"tests/routing/test_codex_api.py"})
+OWNER_COPIES = 2
 
 
 def discover_test_files(root: Path) -> list[str]:
@@ -22,13 +23,16 @@ def source_sizes(root: Path, files: list[str]) -> dict[str, int]:
 def grouped_files(root: Path, files: list[str]) -> dict[str, str]:
     grouped = {}
     for path in files:
+        source = (root / path).read_text()
+        if "xdist_group" not in source:
+            continue
         names = {
             ast.unparse(
                 node.args[0]
                 if node.args
                 else next((kw.value for kw in node.keywords if kw.arg == "name"), ast.Constant("default"))
             )
-            for node in ast.walk(ast.parse((root / path).read_text()))
+            for node in ast.walk(ast.parse(source))
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "xdist_group"
         }
         if names:
@@ -61,8 +65,8 @@ def assign_nodes(
     workers: int,
     sizes: dict[str, int] | None = None,
 ) -> list[list[str]]:
-    # A named group's tests in one file reuse what its first test built, which another shard would build again; a
-    # group longer than an even shard share still splits, since one shard cannot hold it.
+    # Every shard that holds one of a file's tests collects all of them, and a named group's tests reuse what its first
+    # test built, so a file stays on one shard; a file longer than an even shard share still splits.
     share = sum(durations.values()) / shards
     file_seconds: dict[str, float] = {}
     for node, duration in durations.items():
@@ -71,7 +75,7 @@ def assign_nodes(
     units: dict[str, list[str]] = {}
     for node in durations:
         path = node.split("::", 1)[0]
-        together = isinstance(grouped, dict) and path in grouped and file_seconds[path] <= share
+        together = file_seconds[path] <= share
         units.setdefault(path if together else node, []).append(node)
     seconds = {unit: sum(durations[node] for node in nodes) for unit, nodes in units.items()}
     files = {unit: unit.split("::", 1)[0] for unit in units}
@@ -93,6 +97,8 @@ def _assign_work(
 ) -> list[list[str]]:
     loads = [0.0] * shards
     serial_loads: list[dict[str, float]] = [{} for _ in range(shards)]
+    # Serial loads only grow, so each shard's largest one is kept instead of rescanned for every unit.
+    serial_peaks = [0.0] * shards
     collection_loads = [0.0] * shards
     collected: list[set[str]] = [set() for _ in range(shards)]
     groups: list[list[str]] = [[] for _ in range(shards)]
@@ -104,7 +110,7 @@ def _assign_work(
             key=lambda i: (
                 max(
                     (loads[i] + seconds[path]) / workers,
-                    max(serial_loads[i].values(), default=0.0),
+                    serial_peaks[i],
                     serial_loads[i].get(group, 0.0) + serial[path],
                 )
                 + collection_loads[i]
@@ -113,7 +119,9 @@ def _assign_work(
             ),
         )
         loads[lightest] += seconds[path]
-        serial_loads[lightest][group] = serial_loads[lightest].get(group, 0.0) + serial[path]
+        total = serial_loads[lightest].get(group, 0.0) + serial[path]
+        serial_loads[lightest][group] = total
+        serial_peaks[lightest] = max(serial_peaks[lightest], total)
         if file not in collected[lightest]:
             collection_loads[lightest] += collection[path]
             collected[lightest].add(file)
@@ -131,6 +139,22 @@ def slowest_first(nodeids: list[str], durations: dict[str, float], floor: float)
     seconds.update({nodeid: slowest[group] for nodeid, group in groups.items()})
     slow = sorted((nodeid for nodeid in nodeids if seconds[nodeid] >= floor), key=lambda nodeid: -seconds[nodeid])
     return slow + [nodeid for nodeid in nodeids if seconds[nodeid] < floor]
+
+
+def assign_owners(seconds: dict[str, float], grouped: set[str], workers: int, copies: int) -> list[set[str]]:
+    # A named group runs on one worker, so every grouped file shares the same owners whatever group it names.
+    units = {path: [path] for path in seconds if path not in grouped}
+    if grouped:
+        units[min(grouped)] = sorted(grouped)
+    copies = min(copies, workers)
+    loads = [0.0] * workers
+    owned: list[set[str]] = [set() for _ in range(workers)]
+    for unit, paths in sorted(units.items(), key=lambda item: (-sum(seconds[path] for path in item[1]), item[0])):
+        cost = sum(seconds[path] for path in paths)
+        for worker in sorted(range(workers), key=lambda w: (loads[w], w))[:copies]:
+            loads[worker] += cost / copies
+            owned[worker].update(paths)
+    return owned
 
 
 def warm_imports(modules: list[str], workers: int) -> list[int]:

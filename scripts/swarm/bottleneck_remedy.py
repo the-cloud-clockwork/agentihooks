@@ -4,13 +4,11 @@ stage's last action.
 """
 
 import os
-from collections.abc import Callable
 from dataclasses import dataclass
-from functools import partial
 
 from scripts import agent_choice
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, bottleneck_status, capacity, dispatcher, lane_split, stage_cover, templates
+from scripts.swarm import bottleneck, bottleneck_status, capacity, dispatcher, stage_cover, templates
 from scripts.swarm.health import standing
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import SENDER, Mail
@@ -19,12 +17,10 @@ from scripts.swarm.store import DELEGATE, FULL, RedisStore, SwarmError
 KEY = "bottleneck-remedies"
 RULE = "bottleneck-remedy"
 URGENT = "urgent"
-SEATS = {"seat_wait": ("ci", "eng")}
 HARNESS = ("launch_failure", "quota_hold")
 PINNABLE = ("eng", "ci")
 HIVE_HARNESS = "claude"
 FIX = "Bottleneck fix for the {label} stage"
-SHIFTED = "Moved one seat from the {giver} lane to the {taker} lane after {targeted}: engineers {eng}, CI {ci}."
 MOVED = "Moved the {lane} lane from {source} to {target} after {targeted}."
 RAISED = "Raised task {task} to urgent after {targeted}."
 PROPOSED = "Proposed a task to the master after {targeted}: {why}."
@@ -62,7 +58,6 @@ def remedy_pass(
     store: RedisStore,
     ledger,
     doc: dict,
-    lanes: Callable[[], lane_split.Lanes],
     now_ms: int,
 ) -> list[str]:
     key = store.key(slug, KEY)
@@ -72,7 +67,7 @@ def remedy_pass(
         for row in standing.read(store.redis, slug).values():
             if not _due(row, last, now_ms) or stage_cover.covered(store, slug, doc, row["stage"]):
                 continue
-            action = _remedy(slug, store, ledger, doc, lanes, _stage(row), now_ms)
+            action = _remedy(slug, store, ledger, doc, _stage(row))
             if action is None:
                 continue
             store.redis.hset(key, row["stage"], now_ms)
@@ -95,11 +90,11 @@ def _due(row: dict, last: dict, now_ms: int) -> bool:
     return row["stage"] not in last or now_ms - int(last[row["stage"]]) >= bottleneck.WINDOW_MS
 
 
-def _remedy(slug, store, ledger, doc, lanes, stage, now_ms):
+def _remedy(slug, store, ledger, doc, stage):
     config, fixer = store.config(slug), _fixer(doc, stage)
     if config.autonomy not in (DELEGATE, FULL):
         return None if _settled(fixer) else _propose(slug, store, stage, BELOW.format(autonomy=config.autonomy), fixer)
-    found = _mechanical(slug, config, store, lanes, stage, now_ms)
+    found = _mechanical(slug, config, store, stage)
     if isinstance(found, dispatcher.Action) or _settled(fixer):
         return _taken(found)
     if fixer is not None:
@@ -115,10 +110,8 @@ def _settled(fixer):
     return fixer is not None and fixer.get("rank") == URGENT
 
 
-def _mechanical(slug, config, store, lanes, stage, now_ms):
+def _mechanical(slug, config, store, stage):
     try:
-        if stage.name in SEATS:
-            return _shift(slug, config, store, lanes, stage, now_ms)
         if stage.name in HARNESS:
             return _move(slug, config, store, stage)
     except SwarmError as exc:
@@ -138,19 +131,6 @@ def _raise(slug, ledger, task, stage):
         return f"the ledger kept the rank of task {task['id']}: {exc}"
     text = RAISED.format(task=task["id"], targeted=stage.targeted)
     return dispatcher.Action(RULE, "apply", text + dispatcher._comment(slug, ledger, task, text), task)
-
-
-def _shift(slug, config, store, lanes, stage, now_ms):
-    giver, taker = SEATS[stage.name]
-    caps, shift = lane_split._capacity(config, store, slug)
-    moved = {giver: caps[giver] - 1, taker: caps[taker] + 1}
-    text = SHIFTED.format(giver=giver, taker=taker, targeted=stage.targeted, eng=moved["eng"], ci=moved["ci"])
-    if reason := lane_split.refusal(config, caps, giver, taker, lanes()) or lane_split.gate_hold(
-        slug, config, text, now_ms
-    ):
-        return reason
-    lane_split._apply(slug, config, store, moved, shift + moved["ci"] - caps["ci"])
-    return dispatcher.Action(RULE, "apply", text, {})
 
 
 def _move(slug, config, store, stage):
@@ -226,4 +206,4 @@ def _propose(slug, store, stage, why, fixer):
 
 
 def step(slug: str, store: RedisStore, ledger, doc: dict, now_ms: int) -> list[str]:
-    return remedy_pass(slug, store, ledger, doc, partial(lane_split._lanes, slug, store, doc, now_ms), now_ms)
+    return remedy_pass(slug, store, ledger, doc, now_ms)

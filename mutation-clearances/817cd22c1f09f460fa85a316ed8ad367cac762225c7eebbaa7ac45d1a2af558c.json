@@ -1,0 +1,6 @@
+{
+  "scripts/ci_budget/rate_limit.py:scripts.ci_budget.rate_limit.x_budget__mutmut_27:a6834865e544e3639e38a657383b9464cc8e2e770a2cd788b3e15bf23fe2ac84": {
+    "reader": "Standards standards-reader",
+    "reason": "Equivalent. Each X-RateLimit header line returned by gh api include rate_limit holds exactly one colon, so partition and rpartition split it identically. Lines that split differently are other headers with extra colons and the single line JSON body, whose keys never equal the three looked up names. A standalone probe on LF and CRLF samples with a Date header and a JSON body returned identical limit, remaining and reset values for both methods."
+  }
+}

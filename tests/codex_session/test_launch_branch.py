@@ -37,7 +37,7 @@ def test_the_app_server_branch_runs_the_supervisor_with_the_opening_prompt_file(
     )
     launcher, prompt_file, argv = launched(tmp_path, spec)
     split = argv.index("--")
-    assert argv[:4] == [sys.executable, "-m", "scripts.codex_session", "serve"]
+    assert argv[:5] == [sys.executable, "-P", "-m", "scripts.codex_session", "serve"]
     assert argv[argv.index("--cwd") + 1] == str(tmp_path)
     assert argv[argv.index("--profile") + 1] == "engineer"
     assert argv[argv.index("--seat") + 1] == "eng-1@sw"
@@ -114,8 +114,13 @@ def test_the_parser_takes_the_transport_seat_and_predecessor():
 
 def test_the_transport_flags_default_to_empty_and_take_legacy():
     args = init_agent._parser().parse_args([])
-    assert (args.codex_transport, args.seat, args.previous_execution) == ("", "", "")
+    assert (args.codex_transport, args.seat, args.previous_execution, args.execution) == ("", "", "", "")
     assert init_agent._parser().parse_args(["--codex-transport", "legacy"]).codex_transport == "legacy"
+
+
+def test_the_execution_flag_names_the_admitted_execution_in_its_help():
+    [action] = [action for action in init_agent._parser()._actions if action.dest == "execution"]
+    assert action.help == "Codex app-server: the admitted execution this launch serves"
 
 
 def test_the_transport_refusals_name_the_flag_exactly():
@@ -166,12 +171,50 @@ def test_main_hands_the_transport_seat_and_predecessor_to_the_launcher(tmp_path,
         "eng-1@sw",
         "--previous-execution",
         "exe-prev",
+        "--execution",
+        "exe-admitted",
         "--dry-run",
     ]
     assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 2
     assert capsys.readouterr().err == "agentihooks init-agent: captured\n"
     [spec] = built
     assert (spec.transport, spec.seat, spec.previous_execution) == (init_agent.APP_SERVER, "eng-1@sw", "exe-prev")
+    assert spec.execution == "exe-admitted"
+
+
+def test_the_app_server_command_names_the_admitted_execution_only_when_given(tmp_path):
+    admitted = init_agent._app_server_command(
+        app_server_spec(execution="exe-admitted"), tmp_path / "route", [], {}, tmp_path, None
+    )
+    assert admitted[admitted.index("--execution") + 1] == "exe-admitted"
+    assert admitted.index("--execution") < admitted.index("--")
+    plain = init_agent._app_server_command(app_server_spec(), tmp_path / "route", [], {}, tmp_path, None)
+    assert "--execution" not in plain
+
+
+def imported_scripts(interpreter, directory):
+    shadow = directory / "scripts"
+    shadow.mkdir(parents=True)
+    (shadow / "__init__.py").write_text("")
+    probe = [*interpreter[: interpreter.index("-m")], "-c", "import scripts; print(scripts.__file__)"]
+    import scripts
+
+    environ = {**os.environ, "PYTHONPATH": os.path.dirname(os.path.dirname(scripts.__file__))}
+    return subprocess.run(probe, cwd=directory, env=environ, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_the_app_server_imports_the_launching_package_never_the_agent_directory(tmp_path):
+    import scripts
+
+    _, _, argv = launched(tmp_path, app_server_spec())
+    assert imported_scripts(argv, tmp_path) == scripts.__file__
+
+
+def test_the_viewer_imports_the_launching_package_never_the_agent_directory(tmp_path):
+    import scripts
+
+    line = init_agent._viewer_lines("serve", tmp_path / "x.sh", "engineer@abc-0001", {"AGENTIHOOKS_SWARM": "sw"}, [])
+    assert imported_scripts(shlex.split(line.splitlines()[1]), tmp_path) == scripts.__file__
 
 
 @pytest.mark.parametrize(("transport", "served"), [("app_server", True), ("legacy", False)])

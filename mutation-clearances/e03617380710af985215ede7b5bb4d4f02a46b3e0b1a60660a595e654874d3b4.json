@@ -1,0 +1,6 @@
+{
+  "scripts/headless/codex.py:scripts.headless.codex.x_toml_string__mutmut_11:961a7956df33c60eeccbf6a4f87645fdd7f3d28eb6b986f63461d744afcfe44f": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: Python hex escapes are case insensitive, so the mutated literal is the same one character string U+007F and every output is unchanged."
+  }
+}

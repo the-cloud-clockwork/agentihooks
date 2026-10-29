@@ -1,0 +1,71 @@
+{
+  "case": "T-SV2-IDX-01-A",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket; no HTTP server, Pod or worker runs",
+  "input_sha256": {
+    "session-archive.json": "337562c5125122cb55e6d813e92d7f62b40266371edf097663b67779a6849596"
+  },
+  "observed": {
+    "acknowledged": [
+      "committed",
+      "committed"
+    ],
+    "every_source_range_exact": true,
+    "evidence": {
+      "complete": true,
+      "revision": 1,
+      "sources": [
+        {
+          "archive": [
+            {
+              "byte_end": 5871,
+              "byte_size": 5871,
+              "byte_start": 0,
+              "object_digest": "7bb4c3c1621c45d60c231dcc0db9d86d8411610a0b5ce2e63de9c25c28c3c99d"
+            },
+            {
+              "byte_end": 18216,
+              "byte_size": 12345,
+              "byte_start": 5871,
+              "object_digest": "8a5a17a4ec40687525253dba13d0b530b292d22e81b2073879b669617321994d"
+            }
+          ],
+          "events": 12,
+          "source_generation": "device-1:inode-11:anchor-0"
+        },
+        {
+          "archive": [
+            {
+              "byte_end": 12045,
+              "byte_size": 12045,
+              "byte_start": 0,
+              "object_digest": "df02f18241228a457a27e3b54f6d43a516cddaa1a208f6968de171d1919e21c0"
+            },
+            {
+              "byte_end": 18216,
+              "byte_size": 6171,
+              "byte_start": 12045,
+              "object_digest": "66cc43c3e18b4a3d95b24a7919dad8f40d26cf01f4925462fbe39c991cf4659c"
+            }
+          ],
+          "events": 12,
+          "source_generation": "device-1:inode-9:anchor-0"
+        }
+      ],
+      "state": "retained"
+    },
+    "legacy_preview_chars": 4000,
+    "metrics": {
+      "access_domain": "swarm-fixture",
+      "archive_integrity_failures_total": 0,
+      "ingest_duplicate_events_total": 0
+    },
+    "preview": {
+      "complete": false,
+      "omitted_chars": 27619,
+      "session_uid": "swarm-fixture:claude:worker-a:session-long"
+    },
+    "text_chars": 31608,
+    "worker_folder_deleted": true
+  },
+  "state": "passed"
+}

@@ -1,0 +1,503 @@
+import json
+import os
+import time
+from pathlib import Path
+
+import pytest
+
+from scripts import master_claude_login as login
+from scripts import master_logins, openbao_kv, quota_state
+from scripts.profiles import binding
+from scripts.routing import claude_ai, native_login
+
+PREFERRED = {"emailAddress": "nestor.colt@gmail.com"}
+SECOND = {"emailAddress": "thecloudclockwork@gmail.com"}
+GRANT = {"accessToken": "access", "refreshToken": "refresh", "expiresAt": 2000}
+ORDER = "nestor.colt@gmail.com,thecloudclockwork@gmail.com"
+
+
+@pytest.fixture(autouse=True)
+def ah(tmp_path, monkeypatch):
+    monkeypatch.setattr(login, "MANAGED", tmp_path / "no-managed-settings.json")
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", tmp_path / "ah")
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.setenv(login.ORDER_ENV, ORDER)
+    monkeypatch.chdir(tmp_path)
+    return tmp_path / "ah"
+
+
+@pytest.fixture
+def rendered(tmp_path):
+    out = tmp_path / "profiles" / "engineer" / "claude"
+    out.mkdir(parents=True)
+    (out / "settings.json").write_text("{}")
+    (out / "CLAUDE.md").write_text("engineer persona")
+    (out / ".claude.json").write_text(json.dumps({"mcpServers": {}}))
+    (out / ".credentials.json").symlink_to(tmp_path / "operator-credentials.json")
+    return out
+
+
+@pytest.fixture
+def checked(monkeypatch):
+    seen = []
+
+    def check(environ, account, run=None):
+        seen.append((account, environ[claude_ai.STORE], environ["CLAUDE_CONFIG_DIR"]))
+        return dict(native_login.PROOF)
+
+    monkeypatch.setattr(native_login, "check", check)
+    return seen
+
+
+@pytest.fixture
+def executed(monkeypatch):
+    calls = []
+    monkeypatch.setattr(claude_ai.os, "execvpe", lambda binary, argv, env: calls.append((binary, argv, env)))
+    return calls
+
+
+def _slot(number, account, grant=GRANT):
+    home = login.home(number)
+    home.mkdir(parents=True)
+    (home / login.CREDENTIALS).write_text(json.dumps({login.GRANT: grant}))
+    (home / login.CONFIG).write_text(json.dumps({login.ACCOUNT: account}))
+    return home
+
+
+def _left(values):
+    def left(account, now):
+        assert abs(now - time.time()) < 60
+        return values[account]
+
+    return left
+
+
+def _environ(rendered, **extra):
+    return {"CLAUDE_CONFIG_DIR": str(rendered), "AGENTIHOOKS_AGENT_NAME": "s-251025", **extra}
+
+
+def _master_holds(number):
+    folder = login.root(number)
+    (folder / login.OWNER).write_text(
+        json.dumps({"holders": {"master@rig": os.getpid()}, "epoch": 3, "alone": "master@rig"})
+    )
+    return (folder / login.OWNER).read_bytes()
+
+
+def test_the_launcher_table_routes_claude_ai_to_the_standalone_launcher():
+    from scripts import install
+
+    assert install.ROUTE_LAUNCHERS["claude-ai"] == "scripts.routing.claude_ai"
+    assert claude_ai.ROUTE == "claude-ai"
+
+
+def test_the_preferred_login_wins_over_the_one_with_more_room(rendered, monkeypatch, checked, executed):
+    _slot(1, SECOND)
+    _slot(2, PREFERRED)
+    monkeypatch.setattr(
+        master_logins, "left", _left({"thecloudclockworkatgmail_com": 90.0, "nestor_coltatgmail_com": 40.0})
+    )
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert [account for account, _, _ in checked] == ["nestor_coltatgmail_com"]
+    assert executed[0][2][claude_ai.STORE] == str(login.home(2))
+    home = executed[0][2]["CLAUDE_CONFIG_DIR"]
+    assert json.loads((Path(home) / login.CONFIG).read_text())[login.ACCOUNT] == PREFERRED
+
+
+def test_a_spent_login_falls_to_the_next_in_order(rendered, monkeypatch, checked, executed, capsys):
+    _slot(1, PREFERRED)
+    _slot(2, SECOND)
+    monkeypatch.setattr(
+        master_logins,
+        "left",
+        _left({"nestor_coltatgmail_com": float(quota_state.DRAIN_LEFT), "thecloudclockworkatgmail_com": 10.5}),
+    )
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert [account for account, _, _ in checked] == ["thecloudclockworkatgmail_com"]
+    assert executed[0][2][claude_ai.STORE] == str(login.home(2))
+    assert capsys.readouterr().out == "[agenti] account=thecloudclockworkatgmail_com route=claude-ai slot=2\n"
+
+
+def test_a_login_that_fails_its_native_check_falls_to_the_next(rendered, monkeypatch, executed):
+    _slot(1, PREFERRED)
+    _slot(2, SECOND)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 80.0)
+    tried = []
+
+    def check(environ, account, run=None):
+        tried.append(account)
+        if account == "nestor_coltatgmail_com":
+            raise native_login.LoginError(native_login.EXPIRED)
+        return dict(native_login.PROOF)
+
+    monkeypatch.setattr(native_login, "check", check)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert tried == ["nestor_coltatgmail_com", "thecloudclockworkatgmail_com"]
+    assert executed[0][2][claude_ai.STORE] == str(login.home(2))
+
+
+class _Stdout:
+    def __init__(self):
+        self.text, self.flushed = "", ""
+
+    def write(self, text):
+        self.text += text
+
+    def flush(self):
+        self.flushed = self.text
+
+
+def test_the_session_shares_a_held_master_slot_without_claiming_it(rendered, monkeypatch, checked, executed, tmp_path):
+    from scripts import install
+
+    _slot(1, PREFERRED)
+    held = _master_holds(1)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    report, slots, out = tmp_path / "route", [], _Stdout()
+
+    def execute(harness, account, environ, invoke):
+        slots.append((harness, account, out.flushed))
+        return invoke(environ)
+
+    monkeypatch.setattr("scripts.hive.account_slots.execute", execute)
+    monkeypatch.setattr("sys.stdout", out)
+    claude_ai.launch_claude(
+        "/opt/claude", ["--model", "opus"], _environ(rendered, CLAUDE_CODE_OAUTH_TOKEN="x"), str(report)
+    )
+    binary, argv, env = executed[0]
+    assert slots == [
+        ("claude", "nestor_coltatgmail_com", "[agenti] account=nestor_coltatgmail_com route=claude-ai slot=1\n")
+    ]
+    target = login.root(1).parent / "claude-ai" / "s_251025" / "claude"
+    assert (login.root(1) / login.OWNER).read_bytes() == held
+    assert login.holders(login.root(1)) == {"master@rig": os.getpid()}
+    assert env["CLAUDE_CONFIG_DIR"] == str(target)
+    assert env[claude_ai.STORE] == str(login.home(1))
+    assert not (target / login.CREDENTIALS).exists()
+    assert json.loads((target / login.CONFIG).read_text()) == {"mcpServers": {}, login.ACCOUNT: PREFERRED}
+    assert (target / "CLAUDE.md").read_text() == "engineer persona"
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
+    assert env["AH_ROUTE_INTERACTIVE_nestor_coltatgmail_com"] == "1"
+    assert binary == "/opt/claude"
+    assert argv == install._claude_command(
+        "/opt/claude", ["--settings", '{"forceLoginMethod":"claudeai"}', "--model", "opus"]
+    )
+    assert report.read_text().splitlines() == ["status=routed", "account=nestor_coltatgmail_com", "placement=forced"]
+
+
+def test_a_master_claim_after_a_standalone_launch_takes_the_slot_alone(rendered, monkeypatch, checked, executed):
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert login.holders(login.root(1)) == {}
+    assert login.claim("master@rig", os.getpid(), floor=0, alone=True) == 1
+
+
+def test_a_stored_copy_restores_into_a_free_slot_home(rendered, monkeypatch, checked, executed):
+    copy = {"grant": json.dumps(GRANT), "account": json.dumps(PREFERRED), "epoch": "2"}
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao" if environ.get("OPENBAO_URL") else None)
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if (bao, number) == ("bao", 3) else {})
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered, OPENBAO_URL="u"), "")
+    assert json.loads((login.home(3) / login.CREDENTIALS).read_text()) == {login.GRANT: GRANT}
+    assert executed[0][2][claude_ai.STORE] == str(login.home(3))
+    assert checked == [("nestor_coltatgmail_com", str(login.home(3)), executed[0][2]["CLAUDE_CONFIG_DIR"])]
+    assert login.home(3).stat().st_mode & 0o777 == login.PRIVATE_DIR
+
+
+def test_a_stored_copy_restores_into_an_empty_slot_folder(rendered, monkeypatch, checked, executed):
+    copy = {"grant": json.dumps(GRANT), "account": json.dumps(PREFERRED), "epoch": "2"}
+    login.home(1).mkdir(parents=True)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if number == 1 else {})
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert json.loads((login.home(1) / login.CREDENTIALS).read_text()) == {login.GRANT: GRANT}
+
+
+def test_a_stored_copy_never_restores_into_a_slot_a_master_holds(rendered, monkeypatch, checked, executed):
+    copy = {"grant": json.dumps(GRANT), "account": json.dumps(PREFERRED), "epoch": "2"}
+    login.root(1).mkdir(parents=True)
+    _master_holds(1)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if number == 1 else {})
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert not (login.home(1) / login.CREDENTIALS).exists()
+
+
+def test_unranked_logins_follow_the_ranked_ones_by_slot_number(rendered, monkeypatch, checked, executed):
+    _slot(1, {"emailAddress": "zed@example.com"})
+    _slot(2, {"emailAddress": "amy@example.com"})
+    _slot(3, SECOND)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    monkeypatch.delenv(login.ORDER_ENV)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert [account for account, _, _ in checked] == ["thecloudclockworkatgmail_com", "zedatexample_com"]
+
+
+def test_no_usable_login_refuses_with_every_reason_and_never_routes_a_token(rendered, monkeypatch, executed):
+    from scripts.claude_quota_balancer import RoutingError
+
+    _slot(1, PREFERRED)
+    _slot(2, SECOND)
+    monkeypatch.setattr(
+        master_logins, "left", _left({"nestor_coltatgmail_com": 3.0, "thecloudclockworkatgmail_com": 60.0})
+    )
+
+    def check(environ, account, run=None):
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    monkeypatch.setattr(native_login, "check", check)
+    with pytest.raises(RoutingError) as refused:
+        claude_ai.launch_claude("/opt/claude", [], _environ(rendered, AH_CC_TOKEN_workeratexample_com="x"), "")
+    assert str(refused.value) == (
+        "no usable claude ai login: nestor_coltatgmail_com has 3% left; "
+        f"thecloudclockworkatgmail_com: {native_login.EXPIRED}"
+    )
+    assert executed == []
+
+
+def test_no_stored_login_refuses_naming_the_login_command(rendered, executed):
+    from scripts.claude_quota_balancer import RoutingError
+
+    with pytest.raises(RoutingError, match="^no claude ai login is stored: run agentihooks claude login --master$"):
+        claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert executed == []
+
+
+def test_settings_that_bring_back_a_credential_refuse_before_any_login_is_read(rendered, monkeypatch, executed):
+    from scripts.claude_quota_balancer import RoutingError
+
+    _slot(1, PREFERRED)
+    (rendered / "settings.json").write_text('{"apiKeyHelper": "/bin/key"}')
+    monkeypatch.setattr(master_logins, "left", lambda account, now: pytest.fail("quota read before refusal"))
+    with pytest.raises(RoutingError, match="sets apiKeyHelper$"):
+        claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+
+
+def test_a_launch_without_an_agent_name_builds_a_home_by_process(rendered, monkeypatch, checked, executed):
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", [], {"CLAUDE_CONFIG_DIR": str(rendered)}, "")
+    assert executed[0][2]["CLAUDE_CONFIG_DIR"] == str(
+        login.root(1).parent / "claude-ai" / f"pid_{os.getpid()}" / "claude"
+    )
+
+
+def test_the_launch_report_is_rehomed_to_the_standalone_home(rendered, monkeypatch, checked, executed):
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    seen = []
+    monkeypatch.setattr(binding, "rehome", lambda report, home, shared=False: seen.append((str(report), home, shared)))
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered, AGENTIHOOKS_PROFILE_REPORT="/run/report"), "")
+    assert seen == [("/run/report", login.root(1).parent / "claude-ai" / "s_251025" / "claude", False)]
+
+
+def test_the_claude_launcher_hands_the_route_over_without_holding_the_route_lock(tmp_path, monkeypatch):
+    import fcntl
+
+    from scripts import install
+
+    seen = []
+    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    monkeypatch.setattr("scripts.deps_preflight.ensure", lambda: None)
+    monkeypatch.setattr("scripts.claude_quota_balancer._cache_path", lambda _: tmp_path / "quota.json")
+    monkeypatch.setattr(install.shutil, "which", lambda name: f"/opt/{name}")
+
+    def launch(*args):
+        with (tmp_path / "claude-route.lock").open("a+") as waiting:
+            fcntl.flock(waiting, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        seen.append(args)
+
+    monkeypatch.setattr(claude_ai, "launch_claude", launch)
+    install.cmd_claude(["--route", "claude-ai", "--agentihooks-fallback-bare", "--version"])
+    assert seen == [("/opt/claude", ["--version"], install.os.environ, "")]
+
+
+def test_the_interactive_route_still_launches_under_the_route_lock(tmp_path, monkeypatch):
+    import fcntl
+
+    from scripts import install
+    from scripts.routing import interactive
+
+    seen = []
+    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    monkeypatch.setattr("scripts.deps_preflight.ensure", lambda: None)
+    monkeypatch.setattr("scripts.claude_quota_balancer._cache_path", lambda _: tmp_path / "quota.json")
+    monkeypatch.setattr(install.shutil, "which", lambda name: f"/opt/{name}")
+
+    def launch(*args):
+        with (tmp_path / "claude-route.lock").open("a+") as waiting, pytest.raises(BlockingIOError):
+            fcntl.flock(waiting, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        seen.append(args)
+
+    monkeypatch.setattr(interactive, "launch_claude", launch)
+    install.cmd_claude(["--route", "interactive", "--version"])
+    assert seen == [("/opt/claude", ["--version"], install.os.environ, "")]
+
+
+def _plain_shell(tmp_path, monkeypatch):
+    operator, decoy = tmp_path / "operator", tmp_path / "process-claude"
+    (operator / ".claude").mkdir(parents=True)
+    (operator / ".claude" / "settings.json").write_text("{}")
+    (operator / ".claude" / "CLAUDE.md").write_text("operator persona")
+    (operator / ".claude.json").write_text(json.dumps({"hasCompletedOnboarding": True}))
+    decoy.mkdir()
+    (decoy / "settings.json").write_text('{"apiKeyHelper": "/bin/decoy"}')
+    (decoy / "CLAUDE.md").write_text("process persona")
+    (decoy / ".claude.json").write_text(json.dumps({"decoy": True}))
+    monkeypatch.setenv("HOME", str(operator))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: operator))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(decoy))
+    for name in ("CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    return operator
+
+
+def test_prepare_with_no_claude_config_dir_picks_a_stored_login_from_the_default_home(tmp_path, monkeypatch, checked):
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    child, found, number = claude_ai.prepare({"HOME": str(operator), "AGENTIHOOKS_AGENT_NAME": "s-251026"}, tmp_path)
+    target = login.root(1).parent / "claude-ai" / "s_251026" / "claude"
+    assert (found, number) == ("nestor_coltatgmail_com", 1)
+    assert child["CLAUDE_CONFIG_DIR"] == str(target)
+    assert child[claude_ai.STORE] == str(login.home(1))
+    assert (target / "CLAUDE.md").read_text() == "operator persona"
+    assert json.loads((target / login.CONFIG).read_text()) == {
+        "hasCompletedOnboarding": True,
+        login.ACCOUNT: PREFERRED,
+    }
+
+
+def test_default_home_settings_that_bring_back_a_credential_refuse(tmp_path, monkeypatch, executed):
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    (operator / ".claude" / "settings.json").write_text('{"apiKeyHelper": "/bin/key"}')
+    with pytest.raises(login.LoginRefused) as refused:
+        claude_ai.prepare({"HOME": str(operator)}, tmp_path)
+    assert str(refused.value) == login.API_HELPER.format(path=operator / ".claude" / "settings.json")
+
+
+def test_the_resume_flag_passes_through_from_a_plain_shell(tmp_path, monkeypatch, checked, executed):
+    from scripts import install
+
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", ["-r"], {"HOME": str(operator)}, "")
+    assert executed[0][1] == install._claude_command("/opt/claude", [*login.SETTINGS, "-r"])
+
+
+def test_a_conversation_written_under_the_route_home_survives_the_next_launch(tmp_path, monkeypatch, checked, executed):
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    environ = {"HOME": str(operator), "AGENTIHOOKS_AGENT_NAME": "s-251026"}
+    claude_ai.launch_claude("/opt/claude", [], environ, "")
+    target = Path(executed[0][2]["CLAUDE_CONFIG_DIR"])
+    for name in ("projects", "sessions"):
+        assert (target / name).readlink() == operator / ".claude" / name
+    (target / "projects" / "repo").mkdir()
+    (target / "projects" / "repo" / "conversation.jsonl").write_text("resumed\n")
+    (target / "sessions" / "1.json").write_text("{}")
+    claude_ai.launch_claude("/opt/claude", ["-r"], environ, "")
+    assert Path(executed[1][2]["CLAUDE_CONFIG_DIR"]) == target
+    assert (target / "projects" / "repo" / "conversation.jsonl").read_text() == "resumed\n"
+    assert (operator / ".claude" / "projects" / "repo" / "conversation.jsonl").read_text() == "resumed\n"
+    assert (operator / ".claude" / "sessions" / "1.json").read_text() == "{}"
+
+
+def test_the_route_home_links_a_rendered_home_folder_to_where_it_points(
+    rendered, tmp_path, monkeypatch, checked, executed
+):
+    shared = tmp_path / "operator-claude" / "projects"
+    (rendered / "projects").symlink_to(shared)
+    (rendered / "plugins" / "kit" / "sessions").mkdir(parents=True)
+    (rendered / "plugins" / "kit" / "sessions" / "notes.json").write_text("{}")
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    target = Path(executed[0][2]["CLAUDE_CONFIG_DIR"])
+    assert (target / "projects").readlink() == shared
+    assert shared.is_dir()
+    assert (target / "sessions").readlink() == rendered / "sessions"
+    assert (rendered / "sessions").is_dir()
+    assert (target / "plugins" / "kit" / "sessions").is_dir()
+    assert not (target / "plugins" / "kit" / "sessions").is_symlink()
+    assert (target / "plugins" / "kit" / "sessions" / "notes.json").read_text() == "{}"
+
+
+def test_conversations_copied_into_an_older_route_home_move_to_the_default_folder(
+    tmp_path, monkeypatch, checked, executed
+):
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    shared = operator / ".claude" / "projects" / "repo"
+    shared.mkdir(parents=True)
+    (shared / "kept.jsonl").write_text("operator\n")
+    folder = login.root(1).parent / "claude-ai" / "s_251026"
+    older = login._rebuild(folder, operator / ".claude")
+    assert not (older / "projects").is_symlink()
+    (shared / "appended.jsonl").write_text("operator\n")
+    os.utime(shared / "appended.jsonl", (1000, 1000))
+    (older / "projects" / "repo" / "kept.jsonl").write_text("same age\n")
+    os.utime(older / "projects" / "repo" / "kept.jsonl", (2000, 2000))
+    os.utime(shared / "kept.jsonl", (2000, 2000))
+    (older / "projects" / "repo" / "appended.jsonl").write_text("operator\nresumed\n")
+    os.utime(older / "projects" / "repo" / "appended.jsonl", (3000, 3000))
+    (older / "projects" / "repo" / "resumed.jsonl").write_text("resumed\n")
+    (older / "projects" / "repo" / "link.jsonl").symlink_to(tmp_path / "gone.jsonl")
+    (tmp_path / "outside.jsonl").write_text("outside\n")
+    (older / "projects" / "repo" / "outside.jsonl").symlink_to(tmp_path / "outside.jsonl")
+    (older / "projects" / "repo" / "kept-link.jsonl").symlink_to(tmp_path / "outside.jsonl")
+    (shared / "kept-link.jsonl").write_text("operator\n")
+    (older / "sessions").mkdir()
+    (older / "sessions" / "1.json").write_text("{}")
+    claude_ai.launch_claude("/opt/claude", [], {"HOME": str(operator), "AGENTIHOOKS_AGENT_NAME": "s-251026"}, "")
+    target = Path(executed[0][2]["CLAUDE_CONFIG_DIR"])
+    assert target == older
+    assert (target / "projects").readlink() == operator / ".claude" / "projects"
+    assert (shared / "kept.jsonl").read_text() == "operator\n"
+    assert (shared / "kept.jsonl").stat().st_mtime == 2000
+    assert (shared / "resumed.jsonl").read_text() == "resumed\n"
+    assert (shared / "appended.jsonl").read_text() == "operator\nresumed\n"
+    assert not (shared / "link.jsonl").is_symlink()
+    assert not (shared / "outside.jsonl").exists()
+    assert (shared / "kept-link.jsonl").read_text() == "operator\n"
+    assert (operator / ".claude" / "sessions" / "1.json").read_text() == "{}"
+
+
+def _front_door(rendered):
+    return _environ(rendered, AGENTIHOOKS_PROFILE="master")
+
+
+def test_an_expired_front_door_login_falls_back_to_a_quota_token_route(rendered, monkeypatch, executed, capsys):
+    def expired(environ, cwd):
+        raise login.LoginRefused(native_login.EXPIRED)
+
+    tokens = []
+    monkeypatch.setattr(claude_ai, "_front", expired)
+    monkeypatch.setattr(login, "launch_token", lambda *args: tokens.append(args))
+    environ = _front_door(rendered)
+    args = ["--name", "master 1 · rig", "--remote-control", "master 1 · rig"]
+    claude_ai.launch_claude("/opt/claude", args, environ, "/run/route")
+    assert tokens == [("/opt/claude", args, environ, "/run/route")]
+    assert executed == []
+    assert capsys.readouterr() == ("", f"[agenti] claude ai login refused: {native_login.EXPIRED}\n")
+
+
+def test_a_refused_login_outside_the_front_door_still_fails_the_route(rendered, monkeypatch):
+    from scripts.claude_quota_balancer import RoutingError
+
+    def expired(environ, cwd):
+        raise login.LoginRefused(native_login.EXPIRED)
+
+    monkeypatch.setattr(claude_ai, "prepare", expired)
+    monkeypatch.setattr(login, "launch_token", lambda *args: pytest.fail("token fallback outside the front door"))
+    with pytest.raises(RoutingError) as raised:
+        claude_ai.launch_claude("/opt/claude", ["--name", "master 2 · rig"], _front_door(rendered), "")
+    assert str(raised.value) == native_login.EXPIRED

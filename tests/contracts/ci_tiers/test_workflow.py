@@ -23,7 +23,7 @@ UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-requir
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = (
     UNIT
-    | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
+    | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation", "writer-lock"}
     | ({"docs"} if "docs" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"] else set())
 )
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
@@ -33,7 +33,9 @@ PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lin
     "coverage-ratchet",
     "coverage-baseline",
     "promote",
+    "promotion-ready",
     "refresh-durations",
+    "mutation-stats-seed",
     "count-record",
     "flake-budget",
     "swarm-image",
@@ -94,10 +96,12 @@ def jobs_for(event, base_ref="dev", scope="full"):
                 outputs=SimpleNamespace(
                     due="true",
                     reused="false",
+                    forwarded="false",
                     scope=scope if runs else "",
                     analysis="A1" if runs else "",
                     shards="[0, 1]",
                     stats_parts="[0, 1]",
+                    sonar="run",
                 ),
             )
             del pending[name]
@@ -112,7 +116,10 @@ def jobs_for(event, base_ref="dev", scope="full"):
 def test_each_event_runs_only_its_tier_jobs(event, expected):
     if event == "push" and (ROOT / ".github/workflows/count-record.yml").exists():
         expected = expected - {"count-record"}
-    assert jobs_for(event) == expected
+    if event == "push":
+        assert jobs_for(event) in (expected, expected | {"install-smoke"})
+    else:
+        assert jobs_for(event) == expected
 
 
 def test_selected_pull_requests_run_the_selected_leg_instead_of_the_shards():
@@ -133,13 +140,24 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     steps = jobs["gate-required"]["steps"]
     steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
     assert steps in [
-        finish(
-            rerun(
-                ci_reuse.inline_mutation(
-                    ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True)
+        ci_reuse.test_only_sonar(
+            ci_reuse.selection_diagnostic(
+                forward(
+                    finish(
+                        rerun(
+                            ci_reuse.inline_mutation(
+                                ci_reuse.postgres_required(
+                                    ci_reuse.gate_steps(
+                                        queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True
+                                    )
+                                )
+                            )
+                        )
+                    )
                 )
             )
         )
+        for forward in (list, ci_reuse.forwarded_stats)
         for summary in (False, True)
         for rerun in (list, ci_reuse.lost_rerun)
         for finish in (list, ci_reuse.pipefail_summary)
@@ -171,7 +189,10 @@ def test_the_shard_time_budget_grades_pull_requests_and_reports_on_promotion():
     flag = budget["env"]["REPORT"]
     assert _resolve({"group": flag}, event_name="push")["group"] == "--report"
     assert _resolve({"group": flag}, event_name="pull_request")["group"] == ""
-    assert budget["run"] == "python -m tests.shard_budget $REPORT shard-durations/*/durations.json"
+    assert re.fullmatch(
+        r"python3? -m tests\.shard_budget \$REPORT (shard-durations/\*|shard-reports/durations-\*)/durations\.json",
+        budget["run"],
+    )
 
 
 def _concurrency(event, run_id, number=None):
@@ -181,9 +202,15 @@ def _concurrency(event, run_id, number=None):
     )
 
 
-def test_dev_pushes_preserve_the_running_promotion_and_replace_only_the_pending_run():
-    first, second = _concurrency("push", 1000), _concurrency("push", 1061)
-    assert first == second == {"group": "promotion-dev", "queue": "single", "cancel-in-progress": False}
+def test_dev_pushes_share_three_promotion_lanes_without_cancelling_a_running_run():
+    expected = {"queue": "single", "cancel-in-progress": False}
+    groups = {run_id: _concurrency("push", run_id) for run_id in (1000, 1061, 1004, 1009)}
+    assert groups == {
+        1000: dict(expected, group="promotion-dev-a"),
+        1061: dict(expected, group="promotion-dev-a"),
+        1004: dict(expected, group="promotion-dev-b"),
+        1009: dict(expected, group="promotion-dev-c"),
+    }
 
 
 @pytest.mark.parametrize("event,number", [("merge_group", None), ("pull_request", 7)])

@@ -44,17 +44,17 @@
   "function-lines": 304
  },
  "hooks/hook_manager.py::on_pre_tool_use": {
-  "C901": 78,
-  "PLR0912": 83,
-  "function-lines": 511
+  "C901": 77,
+  "PLR0912": 82,
+  "function-lines": 507
  },
  "hooks/hook_manager.py::on_session_end": {
   "C901": 19,
   "PLR0912": 18
  },
  "hooks/hook_manager.py::on_session_start": {
-  "C901": 31,
-  "PLR0912": 30
+  "C901": 30,
+  "PLR0912": 29
  },
  "hooks/hook_manager.py::on_stop": {
   "C901": 23,
@@ -107,14 +107,6 @@
  "hooks/mcp/enforcement.py::register.enforcement_set": {
   "PLR0913": 8
  },
- "hooks/memory/transcript_reader.py::_iter_codex_records": {
-  "C901": 15,
-  "PLR0912": 14
- },
- "hooks/memory/transcript_reader.py::_iter_copilot_records": {
-  "C901": 19,
-  "PLR0912": 18
- },
  "hooks/quota.py::fmt_quota": {
   "C901": 15,
   "PLR0912": 14
@@ -155,7 +147,7 @@
   "PLR0912": 27
  },
  "scripts/install.py": {
-  "file-lines": 6900
+  "file-lines": 6799
  },
  "scripts/install.py::_clean_state_dir": {
   "C901": 14,
@@ -188,8 +180,8 @@
   "PLR0912": 16
  },
  "scripts/install.py::_install_global_inner": {
-  "C901": 29,
-  "PLR0912": 28
+  "C901": 28,
+  "PLR0912": 27
  },
  "scripts/install.py::_link_profile_link": {
   "C901": 17,
@@ -221,8 +213,8 @@
  "scripts/install.py::main": {
   "C901": 67,
   "PLR0912": 70,
-  "PLR0915": 317,
-  "function-lines": 658
+  "PLR0915": 315,
+  "function-lines": 654
  },
  "scripts/install.py::uninstall_global": {
   "C901": 35,

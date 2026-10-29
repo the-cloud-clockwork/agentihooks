@@ -3,6 +3,7 @@ from argparse import Namespace
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.swarm import cli, timer
 from scripts.swarm.store import SwarmError
 
@@ -27,7 +28,7 @@ def scheduler(monkeypatch):
 
     redis = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(store, "redis_client", lambda: redis)
-    return Scheduler(redis)
+    return Scheduler(RedisStateStore(redis, "scheduler"))
 
 
 @pytest.fixture
@@ -77,14 +78,14 @@ def test_a_distributed_install_cancels_a_minute_tick_registered_before_and_a_sec
 
     owned = scheduler.owned(scheduled_tick.OWNER)
     assert owned and [entry.state for entry in owned] == ["cancelled"] * len(owned)
-    assert scheduler.redis.get(scheduler.key("swarm-tick")) is None
-    assert scheduler.redis.zcard(scheduler.key("due")) == 0
+    assert scheduler.read("swarm-tick") == ""
+    assert [entry for entry in scheduler.records() if entry["state"] == "active"] == []
     records = scheduler.records()
 
     assert timer.ensure(BINARY, tmp_path, run=systemctl([]))
 
     assert scheduler.records() == records
-    assert scheduler.redis.get(scheduler.key("swarm-tick")) is None
+    assert scheduler.read("swarm-tick") == ""
 
 
 def test_a_distributed_install_without_redis_still_enables_the_spoke(tmp_path, distributed, monkeypatch, capsys):
@@ -196,8 +197,10 @@ def test_the_spoke_command_is_refused_where_the_workstation_runs_the_engine(monk
 
 
 def test_the_spoke_command_serves_master_work_as_this_hive_and_closes_the_bus(monkeypatch, distributed):
+    import os
+
     from scripts.events import factory
-    from scripts.hive import workstation
+    from scripts.hive import lanes, workstation
     from scripts.swarm import commands
 
     bus, served = type("Bus", (), {"closed": False, "close": lambda self: setattr(self, "closed", True)})(), []
@@ -207,10 +210,13 @@ def test_the_spoke_command_serves_master_work_as_this_hive_and_closes_the_bus(mo
     monkeypatch.setattr(factory, "open_bus", lambda config: configs.append(config) or bus)
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation-1")
     monkeypatch.setattr(workstation, "run", lambda *args: served.append(args))
+    lane_spokes = []
+    monkeypatch.setattr(lanes, "serve", lambda environ: lane_spokes.append(environ is os.environ))
     store = object()
 
     cli.cmd_spoke(store, Namespace())
 
+    assert lane_spokes == [True]
     [(seen_store, seen_bus, runtime, hive)] = served
     assert (seen_store, seen_bus, hive, type(runtime).__name__) == (store, bus, "workstation-1", "LocalHerdrRuntime")
     assert isinstance(runtime.herdr, cli.HerdrRuntime)

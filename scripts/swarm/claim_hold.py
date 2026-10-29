@@ -5,7 +5,10 @@ Every claim filter asks here, so the urgent hold health finding reports exactly 
 
 from time import time
 
+from scripts.inbox.seats import seat_address
+from scripts.inbox.store import InboxStore
 from scripts.swarm import freeze, phase_state
+from scripts.swarm.store import MASTER
 from scripts.swarm_ledger import task_dependencies
 
 PHASES = {
@@ -33,6 +36,35 @@ def verification(task: dict) -> str:
     return ""
 
 
+def verification_notices(slug: str, store: object, doc: dict, at: int) -> list[str]:
+    actions = []
+    stamps = doc.get("_meta", {}).get("stamps", {})
+    for task in doc["tasks"]:
+        if task.get("state") != "open" or task.get("out_of_scope") or task.get("awaiting") != "verify":
+            continue
+        task_id = task["id"]
+        since_key = store.key(slug, f"verification-hold:{task_id}")
+        if (task.get("contract") or {}).get("after_at"):
+            store.redis.delete(since_key)
+            continue
+        mark = max(stamps.get(f"tasks/{task_id}/{field}", {}).get("at") or 0 for field in ("awaiting", "contract"))
+        store.redis.set(since_key, mark or at, nx=True)
+        since = max(int(store.redis.get(since_key)), mark)
+        notice_key = store.key(slug, f"verification-notice:{task_id}")
+        last = store.redis.get(notice_key)
+        if at - since <= 3_600_000 or (last is not None and at - int(last) < 86_400_000):
+            continue
+        text = (
+            f"Task {task_id} ({task.get('title') or task_id}) awaits verification without a proof window "
+            "for more than an hour. Set contract.after_at to its proof time, or reopen it with "
+            f"agentihooks ledger --slug {slug} --as master task set {task_id} awaiting="
+        )
+        InboxStore(store.redis).send("swarm", seat_address(slug, MASTER), text)
+        store.redis.set(notice_key, at)
+        actions.append(f"told the master about verification hold {task_id}")
+    return actions
+
+
 def phased(task: dict, doc: dict) -> str:
     if phase_state.admits(task, doc):
         return ""
@@ -41,7 +73,7 @@ def phased(task: dict, doc: dict) -> str:
 
 
 def frozen(task: dict, doc: dict, graph: dict, fix: str) -> str:
-    if not freeze.held(task, doc, graph, fix):
+    if not freeze.claim_gate(task, doc, graph, fix):
         return ""
     return freezes(task, doc, graph) or FOCUS
 

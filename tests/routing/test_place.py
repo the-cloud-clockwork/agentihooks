@@ -101,6 +101,36 @@ def test_api_side_applies_the_harness_policy_to_every_api_slot(monkeypatch):
     assert seen == [("codex", {"K": "v"})]
 
 
+def test_closure_names_an_api_side_closed_by_settings(monkeypatch):
+    seen = []
+
+    def invalid(harness, environ):
+        seen.append((harness, environ))
+        raise place.SettingsError("routing setting codex-api-weight is invalid")
+
+    monkeypatch.setattr(place, "policy", invalid)
+    found = [Slot("codex", "api", 0, 0, kind=API, provider="openai-key")]
+    asked = []
+
+    class Recording(_Source):
+        def slots(self, environ, now):
+            asked.append((environ, now))
+            return self.found
+
+    assert place.closure(Recording(found), "codex", {"K": "v"}, NOW) == [
+        "api side closed: routing setting codex-api-weight is invalid"
+    ]
+    assert seen == [("codex", {"K": "v"})]
+    assert asked == [({"K": "v"}, NOW)]
+
+
+def test_closure_is_empty_without_an_api_slot_or_with_readable_settings(monkeypatch):
+    monkeypatch.setattr(place, "policy", lambda harness, environ: pytest.fail("policy read without an api slot"))
+    assert place.closure(_Source([]), "claude", {}, NOW) == []
+    monkeypatch.setattr(place, "policy", lambda harness, environ: place.ApiPolicy(10, 2))
+    assert place.closure(_Source([_api()]), "claude", {}, NOW) == []
+
+
 def test_policy_defaults_to_weight_zero_and_an_unbounded_cap(monkeypatch, tmp_path):
     monkeypatch.setattr(place, "_client", lambda environ: None)
     assert place.policy("claude", {"AGENTIHOOKS_HOME": str(tmp_path)}) == place.ApiPolicy(0, API_UNBOUNDED)
@@ -118,18 +148,31 @@ def test_policy_reads_each_harness_weight_and_cap_from_the_store(monkeypatch, tm
     assert place.policy("codex", env) == place.ApiPolicy(80, API_UNBOUNDED)
 
 
-def test_policy_reads_the_swarm_redis_when_it_answers(monkeypatch, tmp_path):
+def test_policy_reads_the_state_store_the_routing_client_opens(monkeypatch, tmp_path):
+    from scripts.events import memory, state
+    from scripts.events.config import BusConfig
+
+    routing = memory.open_bus(BusConfig()).state(settings.BUCKET)
+    settings.open_store(routing, {}).set("codex-api-max-sessions", 0, "operator", NOW)
+    seen = []
+    monkeypatch.setattr(state, "open_state", lambda bucket, environ: seen.append((bucket, environ)) or routing)
+    env = {"AGENTIHOOKS_HOME": str(tmp_path / "ah")}
+    assert place.policy("codex", env) == place.ApiPolicy(0, 0)
+    assert seen == [("routing", env)]
+    assert not (tmp_path / "ah").exists()
+
+
+def test_the_routing_client_is_the_redis_state_store_by_default(monkeypatch):
     import fakeredis
 
+    from scripts.events.redis_state import RedisStateStore
     from scripts.swarm import store
 
     fake = fakeredis.FakeStrictRedis(decode_responses=True)
-    settings.open_store(fake, {}).set("codex-api-max-sessions", 0, "operator", NOW)
-    seen = []
-    monkeypatch.setattr(store, "redis_client", lambda environ: seen.append(environ) or fake)
-    env = {"AGENTIHOOKS_HOME": str(tmp_path)}
-    assert place.policy("codex", env) == place.ApiPolicy(0, 0)
-    assert seen == [env]
+    monkeypatch.setattr(store, "redis_client", lambda environ: fake)
+    opened = place._client({})
+    assert isinstance(opened, RedisStateStore)
+    assert opened.redis is fake
 
 
 @pytest.mark.parametrize("error", ["OSError", "ConnectionError"])
@@ -228,7 +271,7 @@ def test_a_redis_read_failure_is_a_settings_error(monkeypatch, tmp_path):
     import redis
 
     class Failing:
-        def hgetall(self, key):
+        def get(self, key):
             raise redis.TimeoutError("slow")
 
     monkeypatch.setattr(place, "_client", lambda environ: Failing())

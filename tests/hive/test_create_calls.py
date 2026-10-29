@@ -9,10 +9,10 @@ import pytest
 
 import scripts.swarm.store as swarm_store
 from scripts import openbao_kv
-from scripts.hive import auth, cli, create, create_github, create_render, invite, machine, registry
+from scripts.hive import auth, cli, create, create_github, create_render, invite, machine, nats_grant, registry
 from scripts.hive.bundle_origin import SETTINGS_PATH
 from tests.codex_fakes import http_error
-from tests.hive.test_create import NAME, NFS, NOW, PR, RECORD, REPO, TARGET, TEMPLATE, Run, Store
+from tests.hive.test_create import NAME, NOW, PR, RECORD, REPO, RESYNC, SIGNER, TARGET, TEMPLATE, Run, Store
 from tests.hive.test_invite import LIKE, SWARM, URL, Bao, _bao
 
 pytestmark = pytest.mark.unit
@@ -34,7 +34,9 @@ class Strict(Run):
 
     def plain(self):
         return [
-            [Path(arg).name if argv[0] == "ssh-keygen" and arg.startswith("/") else arg for arg in argv]
+            [Path(arg).name if argv[0] == "ssh-keygen" else "clone" if arg.startswith("/") else arg for arg in argv]
+            if argv[0] in ("ssh-keygen", "git")
+            else argv
             for argv in self.calls
         ]
 
@@ -62,8 +64,14 @@ def world(tmp_path, monkeypatch):
     (tmp_path / ".ssh" / "a.pub").write_text("ssh-ed25519 FIRST a\n")
     (tmp_path / ".ssh" / "b.pub").write_text("ssh-ed25519 SECOND b\n")
     (tmp_path / ".ssh" / "known_hosts").write_text("[other]:22 ssh-ed25519 OTHER\n")
-    bao = Bao({LIKE: {"credential": f"AGENTIHOOKS_HIVE_URL={URL}\n", "swarm_url": SWARM}})
-    environ = {"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(tmp_path / "deep" / "agentihooks")}
+    bao = Bao(
+        {LIKE: {"credential": f"AGENTIHOOKS_HIVE_URL={URL}\n", "swarm_url": SWARM}, SIGNER: {"member_swarms": {}}}
+    )
+    environ = {
+        "HOME": str(tmp_path),
+        "AGENTIHOOKS_HOME": str(tmp_path / "deep" / "agentihooks"),
+        nats_grant.SIGNER_ENV: SIGNER,
+    }
     run, lines, published = Strict(), [], []
     monkeypatch.setattr(create.setup, "publish", lambda *args: published.append(args) or "settings written")
     monkeypatch.setattr(swarm_store, "RedisStore", OneStore)
@@ -102,10 +110,17 @@ def test_a_full_create_makes_exactly_these_calls(world):
 
     member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
     assert world.run.plain() == [
-        ["kubectl", "get", "service", "-A", "-o", "json"],
-        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", NAME, "-f", "host_key"],
+        list(machine.LIST),
         ["gh", "api", "-H", create_github.RAW, f"repos/{REPO}/contents/{create_render.TEMPLATE_PATH}?ref=dev"],
-        ["gh", "api", "-H", create_github.RAW, f"repos/{REPO}/contents/{create_render.NFS_HOMES_PATH}?ref=dev"],
+        ["gh", "api", f"repos/{REPO}/git/trees/dev?recursive=1", "--jq", create_github.TREE],
+        ["gh", "pr", "list", "-R", REPO, "--state", "open", "--limit", "1000", "--json", "headRefName", "--jq"]
+        + [".[].headRefName"],
+        ["kubectl", "get", "service", "-A", "-o", "json"],
+        RESYNC,
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", NAME, "-f", "host_key"],
+        ["git", "init", "-q", "clone"],
+        ["git", "-C", "clone", "remote", "add", "origin", f"https://github.com/{REPO}.git"],
+        ["gh", "api", "-H", create_github.RAW, f"repos/{REPO}/contents/{create_render.TEMPLATE_PATH}?ref=dev"],
         ["gh", "pr", "list", "-R", REPO, "--head", NAME, "--state", "all", "--json", "url,state", "--jq", PENDING],
         [*_gh_api(f"repos/{REPO}/git/ref/heads/dev"), ".object.sha"],
         [*_gh_api(f"repos/{REPO}/git/commits/sha"), ".tree.sha"],
@@ -132,10 +147,8 @@ def test_a_full_create_makes_exactly_these_calls(world):
         ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"],
         list(machine.LIST),
         ["herdr", "machine", "add", "--label", NAME, "--remote-session", "default", TARGET],
-        ["ssh", "-o", "BatchMode=yes", TARGET, machine.DELIVER],
-        ["ssh", "-o", "BatchMode=yes", TARGET, machine.DELIVER_CA],
     ]
-    timeouts = {"kubectl": 60, "ssh-keygen": 60, "gh": 120, "herdr": 300, "ssh": 60}
+    timeouts = {"kubectl": 60, "ssh-keygen": 60, "git": 120, "gh": 120, "herdr": 300}
     for name, kwargs in world.run.kwargs:
         assert {key: kwargs[key] for key in ("capture_output", "text", "timeout", "check")} == {
             **GH,
@@ -151,23 +164,12 @@ def test_a_full_create_makes_exactly_these_calls(world):
                     for path, text in create.create_render.render(
                         TEMPLATE, create_render.Hive(NAME, RECORD, 2225, "worker-001", "10.10.30.207")
                     ).items()
-                ]
-                + [
-                    {
-                        "path": create_render.NFS_HOMES_PATH,
-                        "mode": "100644",
-                        "type": "blob",
-                        "content": create_render.with_home(NFS, NAME),
-                    }
                 ],
             },
         ),
         (f"repos/{REPO}/git/commits", {"message": MESSAGE, "tree": "sha", "parents": ["sha"]}),
         (f"repos/{REPO}/git/refs", {"ref": f"refs/heads/{NAME}", "sha": "sha"}),
     ]
-    stdin = [kwargs["input"] for name, kwargs in world.run.kwargs if name == "ssh"]
-    assert stdin[1] == "LOCAL CA\n"
-    assert f"AGENTIHOOKS_HIVE_URL={URL}\n" in stdin[0]
     record = world.bao.records[RECORD]
     assert record["ca_pem"] == "LOCAL CA\n"
     assert invite._env(record["credential"])[invite.REDIS_URL].endswith("@127.0.0.1:6379/0")
@@ -182,24 +184,29 @@ def test_a_full_create_makes_exactly_these_calls(world):
     assert world.sleeps == []
     assert world.lines == [
         f"hive create {NAME}: invite: invited hive member {member} as {NAME}; "
-        f"OpenBao secret/{RECORD}: wrote ca_pem, credential, swarm_url (3 keys total)",
+        f"OpenBao secret/{RECORD}: wrote ca_pem, credential, swarm_url (3 keys total); "
+        f"listed {member} on the hub signer record {SIGNER} for demo "
+        "and asked the hub's agentihooks-swarm-nats-signer sync to refresh it now",
         f"hive create {NAME}: ssh keys: OpenBao secret/{RECORD}: wrote ssh_authorized_keys, ssh_host_key, "
         "ssh_host_public_key (6 keys total)",
         f"hive create {NAME}: manifests: opened pull request {PR}",
         f"hive create {NAME}: merge: merged {PR}",
         f"hive create {NAME}: settings: settings written",
         f"hive create {NAME}: live: hive {member} is live",
-        f"hive create {NAME}: herdr: added {TARGET} to herdr; its hive member is {json.loads(state.read_text())['added']}",
+        f"hive create {NAME}: herdr: added {TARGET} to herdr; its hive member is {member}",
         f"hive create {NAME}: engineer: engineer@{member} in demo works on the hive",
     ]
 
 
 def test_the_dry_run_names_the_pull_request_files(world):
     create.create(world.tools, create.Options(dry_run=True))
-    files = f"k8s/manifests/{NAME}/ssh-lan.yaml, {create_render.NFS_HOMES_PATH}"
+    files = f"k8s/manifests/{NAME}/ssh-lan.yaml"
     assert f"hive create {NAME}: manifests: would open a pull request into {REPO} dev with {files}" in world.lines
     keys = f"hive create {NAME}: ssh keys: would write a new SSH host key and 2 authorized keys into OpenBao secret/{RECORD}"
     assert keys in world.lines
+    assert (
+        f"hive create {NAME}: herdr: would trust the hive host key and save {TARGET} in herdr as {NAME}" in world.lines
+    )
     assert world.published == [(world.tools.environ, SETTINGS_PATH, True)]
 
 
@@ -215,6 +222,71 @@ def test_a_pull_request_that_never_merges_times_out_naming_it(world):
     world.run.on_merge = lambda: setattr(world.run, "state", "OPEN")
     with pytest.raises(auth.HiveError, match=f"waiting for pull request {PR} to merge; rerun hive create to resume"):
         create.create(world.tools, create.Options(timeout_s=0))
+
+
+ROLLUP = ["gh", "pr", "view", PR, "--json", "statusCheckRollup"]
+STATE = ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"]
+AUTO_REFUSED = "GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)"
+
+
+def _merge_calls(run):
+    return [argv for argv in run.calls if argv[:2] == ["gh", "pr"] and argv[2] in ("view", "merge")]
+
+
+def test_a_refused_auto_merge_waits_for_checks_then_squash_merges(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.checks = [
+        [{"__typename": "CheckRun", "name": "Gate", "status": "QUEUED", "conclusion": ""}],
+        [{"__typename": "CheckRun", "name": "Gate", "status": "COMPLETED", "conclusion": "SUCCESS"}],
+    ]
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    assert _merge_calls(world.run) == [
+        STATE,
+        ["gh", "pr", "merge", PR, "--squash", "--auto"],
+        ROLLUP,
+        ROLLUP,
+        ["gh", "pr", "merge", PR, "--squash"],
+        STATE,
+    ]
+    assert world.sleeps[0] == create.POLL_S
+    assert f"hive create {NAME}: merge: merged {PR}" in world.lines
+
+
+def test_a_failed_check_stops_the_create_without_merging(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.checks = [[{"__typename": "StatusContext", "context": "Gate", "state": "FAILURE"}]]
+    with pytest.raises(auth.HiveError, match=f"pull request {PR} has failed checks: Gate;"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    assert ["gh", "pr", "merge", PR, "--squash"] not in world.run.calls
+
+
+def test_a_failed_check_the_base_does_not_require_still_merges(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.required = ["Gate — Required"]
+    world.run.checks = [
+        [
+            {"__typename": "CheckRun", "name": "Gate — Required", "status": "COMPLETED", "conclusion": "SUCCESS"},
+            {"__typename": "CheckRun", "name": "Gate — Protected", "status": "COMPLETED", "conclusion": "FAILURE"},
+        ]
+    ]
+    create.create(world.tools, create.Options(timeout_s=60))
+    assert ["gh", "pr", "merge", PR, "--squash"] in world.run.calls
+    assert f"hive create {NAME}: merge: merged {PR}" in world.lines
+
+
+def test_checks_that_never_pass_time_out_naming_them(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.checks = [[]]
+    with pytest.raises(auth.HiveError, match=f"waiting for pull request {PR} checks to pass; rerun hive create"):
+        create.create(world.tools, create.Options(timeout_s=0))
+
+
+def test_a_merge_error_other_than_the_auto_merge_refusal_stops_the_create(world):
+    world.run.merge_error = "Pull request is not mergeable"
+    with pytest.raises(auth.HiveError, match="gh pr merge exited 1: Pull request is not mergeable"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    assert ROLLUP not in world.run.calls
 
 
 def test_a_stale_heartbeat_is_not_live(world):
@@ -301,9 +373,17 @@ def test_an_openbao_failure_is_a_refusal_naming_it(world, sealed):
     assert str(refused.value) == "OpenBao HTTP 503: sealed"
 
 
+def test_a_hub_record_that_cannot_be_read_is_a_refusal_naming_it(world):
+    sealed = Sealed(world.bao.records, lambda request: SIGNER in request.full_url)
+    world.tools.bao = openbao_kv.OpenBao(world.tools.bao.url, world.tools.bao.token, sealed)
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(dry_run=True))
+    assert str(refused.value) == "OpenBao HTTP 503: sealed"
+
+
 def test_gh_keeps_leading_space_and_trims_only_trailing_newlines():
     def run(argv, **kwargs):
-        assert kwargs == {"input": '{"a": 1}', **GH}
+        assert kwargs == {"input": '{"a": 1}', **GH, "cwd": None}
         return subprocess.CompletedProcess(argv, 0, "  text X\n\n", "")
 
     assert create_github.gh(run, ["api", "x"], {"a": 1}) == "  text X"

@@ -1,10 +1,13 @@
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from scripts import codex_router
 from scripts.codex_session import serve, supervisor
+from scripts.profiles import binding
 from scripts.routing import codex_api
+from scripts.swarm.store import SwarmError
 
 pytestmark = pytest.mark.unit
 
@@ -83,6 +86,19 @@ def test_serve_refuses_outside_a_swarm_execution_and_reports_the_failure(tmp_pat
     assert report.read_text() == f"status=failed\nerror={reason}\n"
 
 
+def test_serve_refuses_a_launch_without_a_recorded_home_and_never_renders(tmp_path, monkeypatch, capsys):
+    def render(*args):
+        raise AssertionError("serve rendered a profile without the home init agent recorded")
+
+    monkeypatch.setattr(serve.select_profile, "prepare", render)
+    report = tmp_path / "route"
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw", "--report", str(report)]
+    assert serve.main(argv, dict(SWARM_ENV)) == 2
+    assert capsys.readouterr().err == f"agentihooks codex-session: {serve.NO_HOME}\n"
+    assert report.read_text() == f"status=failed\nerror={serve.NO_HOME}\n"
+    assert "--home" in serve.NO_HOME
+
+
 def test_the_serve_parser_reads_every_option_and_its_defaults(capsys):
     parser = serve._parser()
     assert parser.prog == "python -m scripts.codex_session"
@@ -94,9 +110,11 @@ def test_the_serve_parser_reads_every_option_and_its_defaults(capsys):
         "seat": "eng-1@sw",
         "overlay": [],
         "bundle_revision": "",
+        "home": "",
         "exclude": "",
         "report": "",
         "previous_execution": "",
+        "execution": "",
         "resume": "",
         "prompt_file": "",
         "startup_timeout": supervisor.STARTUP_TIMEOUT_S,
@@ -169,10 +187,11 @@ def test_prepare_routes_renders_and_builds_the_launch(tmp_path, monkeypatch):
 
     def prepare(name, agent, model, effort, args, environ, overlays):
         calls["prepare"] = (name, agent, model, effort, args, list(overlays), environ["AGENTIHOOKS_BUNDLE_REVISION"])
+        calls["push"] = environ["AGENTIHOOKS_CODEX_PUSH"]
         return {"CODEX_HOME": str(home)}, ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"', *args]
 
     def route(environ, route, exclude):
-        calls["route"] = (route, exclude, environ["CODEX_HOME"])
+        calls["route"] = (route, exclude, environ["CODEX_HOME"], "AGENTIHOOKS_CODEX_PUSH" in environ)
         return codex_router.CodexAccount("t", "AH_CX_TOKEN_t"), "open", {"CODEX_HOME": str(home), "AH_CX_TOKEN_t": "x"}
 
     monkeypatch.setattr(serve.select_profile, "prepare", prepare)
@@ -188,12 +207,15 @@ def test_prepare_routes_renders_and_builds_the_launch(tmp_path, monkeypatch):
         "eng-1@sw",
         "--overlay=frontend",
         "--bundle-revision=abc",
+        f"--home={home}",
         "--exclude",
         "old",
         "--report",
         str(tmp_path / "route"),
         "--previous-execution",
         "exe-prev",
+        "--execution",
+        "exe-admitted",
         "--resume",
         "thread-kept",
         "--prompt-file",
@@ -204,7 +226,8 @@ def test_prepare_routes_renders_and_builds_the_launch(tmp_path, monkeypatch):
     args = serve._parser().parse_args(argv)
     spec = serve.prepare(args, ["--route", "t", "-c", "x=1"], dict(SWARM_ENV))
     assert calls["prepare"] == ("engineer", "codex", "", "", ["-c", "x=1"], ["frontend"], "abc")
-    assert calls["route"] == ("t", "old", str(home))
+    assert calls["push"] == "1"
+    assert calls["route"] == ("t", "old", str(home), False)
     assert (tmp_path / "route").read_text() == "status=routed\naccount=t\nplacement=open\n"
     assert (spec.slug, spec.agent.name, spec.agent.lane, spec.agent.task, spec.agent.seat) == (
         "sw",
@@ -224,8 +247,43 @@ def test_prepare_routes_renders_and_builds_the_launch(tmp_path, monkeypatch):
     assert spec.server_args == ("-c", 'model="gpt-6.1-sol"', "-c", 'model_reasoning_effort="high"', "-c", "x=1")
     assert (spec.codex_home, spec.cwd, spec.environ["AH_CX_TOKEN_t"]) == (str(home), str(tmp_path), "x")
     assert (spec.previous_execution_id, spec.resume_thread, spec.opening) == ("exe-prev", "thread-kept", "Begin.")
+    assert spec.execution_id == "exe-admitted"
     assert (spec.account_type, spec.allowed_tokens, spec.bundle_revision) == ("", frozenset({"AH_CX_TOKEN_t"}), "abc")
     assert spec.startup_timeout_s == 7.0
+
+
+def test_prepare_mounts_the_home_init_agent_rendered_after_the_bundle_moved(tmp_path, monkeypatch):
+    home = tmp_path / "rendered" / "engineer" / "codex"
+    home.mkdir(parents=True)
+    (home / binding.PERSONAS["codex"]).write_text("persona rendered at launch\n")
+    (home.parent / "codex.sources.json").write_text("{}")
+    recorded = {
+        "profile": "engineer",
+        "harness": "codex",
+        "home": str(home.resolve()),
+        "persona": binding.digest(home / binding.PERSONAS["codex"]),
+        "sources": binding.digest(home.parent / "codex.sources.json"),
+        "canary": "canary-at-launch",
+    }
+    (home / binding.FILE).write_text(json.dumps(recorded))
+    root = tmp_path / "engineer"
+    root.mkdir()
+    (root / "profile.yml").write_text("model: gpt-6.1-sol\neffort: high\n")
+
+    def rerender(*args, **kwargs):
+        raise AssertionError("serve rendered the profile again after the bundle checkout moved")
+
+    monkeypatch.setattr(serve.select_profile.profiles, "_chain", lambda name: [(name, root)])
+    monkeypatch.setattr(serve.select_profile.profiles, "render", rerender)
+    monkeypatch.setattr(serve.select_profile.profiles, "channels", lambda name: "amygdala,brain")
+    monkeypatch.setattr(serve.select_profile.plugins, "claude_only", lambda name: False)
+    monkeypatch.setattr(
+        serve, "route_account", lambda environ, route, exclude: (codex_router.CodexAccount("t"), "open", {})
+    )
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw", f"--home={home}"]
+    spec = serve.prepare(serve._parser().parse_args(argv), [], {**SWARM_ENV, "HOME": str(tmp_path)})
+    assert spec.codex_home == str(home)
+    assert json.loads((home / binding.FILE).read_text())["canary"] == "canary-at-launch"
 
 
 def test_prepare_checks_the_login_of_an_interactive_route_and_opens_nothing_without_a_prompt(tmp_path, monkeypatch):
@@ -237,8 +295,8 @@ def test_prepare_checks_the_login_of_an_interactive_route_and_opens_nothing_with
 
     monkeypatch.setattr(serve.select_profile, "prepare", prepare)
     monkeypatch.setattr(serve, "route_account", route)
-    args = serve._parser().parse_args(["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"])
-    spec = serve.prepare(args, ["--route", serve.INTERACTIVE], dict(SWARM_ENV))
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw", f"--home={tmp_path}"]
+    spec = serve.prepare(serve._parser().parse_args(argv), ["--route", serve.INTERACTIVE], dict(SWARM_ENV))
     assert (spec.account_type, spec.opening, spec.agent.effort) == ("chatgpt", "", "")
 
 
@@ -246,8 +304,8 @@ def _serve_with(tmp_path, monkeypatch, inherited):
     monkeypatch.setattr(serve.select_profile, "prepare", lambda *_: ({"CODEX_HOME": str(tmp_path)}, []))
     account = codex_router.CodexAccount("t", "AH_CX_TOKEN_t")
     monkeypatch.setattr(serve, "route_account", lambda environ, route, exclude: (account, "open", dict(environ)))
-    args = serve._parser().parse_args(["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"])
-    return serve.prepare(args, [], {**SWARM_ENV, **inherited})
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw", f"--home={tmp_path}"]
+    return serve.prepare(serve._parser().parse_args(argv), [], {**SWARM_ENV, **inherited})
 
 
 def test_prepare_pins_the_agentihooks_langfuse_keys_over_inherited_ones(tmp_path, monkeypatch):
@@ -466,9 +524,35 @@ def test_main_reports_a_refused_launch(tmp_path, monkeypatch, capsys):
     def refused(store, spec, deps):
         raise supervisor.LaunchFailure("hooks_missing", "required hooks are missing")
 
-    monkeypatch.setattr(serve, "prepare", lambda args, agent_args, environ: SimpleNamespace(slug="sw"))
+    monkeypatch.setattr(serve, "prepare", lambda args, agent_args, environ: SimpleNamespace(slug="sw", environ={}))
     monkeypatch.setattr(serve, "connect", lambda environ: "store")
     monkeypatch.setattr(supervisor, "launch", refused)
     argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
     assert serve.main(argv, dict(SWARM_ENV)) == 3
     assert "launch refused: required hooks are missing" in capsys.readouterr().err
+
+
+def test_a_refused_launch_fails_the_profile_report_so_init_agent_reports_it_at_once(tmp_path, monkeypatch, capsys):
+    from scripts import init_agent
+    from scripts.profiles import binding
+
+    report = tmp_path / "profile.json"
+    binding.request(report, "engineer", "codex")
+
+    def refused(store, spec, deps):
+        raise SwarmError("replacement does not match the current execution")
+
+    spec = SimpleNamespace(slug="sw", environ={binding.REPORT: str(report)})
+    monkeypatch.setattr(serve, "prepare", lambda args, agent_args, environ: spec)
+    monkeypatch.setattr(serve, "connect", lambda environ: "store")
+    monkeypatch.setattr(supervisor, "launch", refused)
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == 3
+    capsys.readouterr()
+    monkeypatch.setattr(binding.time, "sleep", lambda seconds: pytest.fail("init-agent waited on a refused launch"))
+    env = {binding.REPORT: str(report)}
+    assert init_agent._selection_refused(env)
+    assert init_agent._route_reported(env, 30.0, {}) is None
+    with pytest.raises(ValueError) as failure:
+        init_agent._binding_result(env, 90.0, {})
+    assert str(failure.value) == "codex-session launch refused: replacement does not match the current execution"

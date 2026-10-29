@@ -1,9 +1,11 @@
+import importlib
 import json
 import os
 import re
 import subprocess
 import sys
 import threading
+import zlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -158,6 +160,39 @@ def test_a_grouped_file_longer_than_an_even_shard_share_still_splits():
     assert [len(part) for part in parts] == [2, 2]
 
 
+def test_a_file_shorter_than_an_even_shard_share_stays_on_one_shard():
+    from tests.shards import assign_nodes
+
+    durations = {f"tests/test_{name}.py::test_{case}": 1.0 for name in "abcd" for case in range(4)}
+    parts = assign_nodes(durations, 2, {}, 4)
+    assert all(len({node.split("::")[0] for node in part}) == 2 for part in parts)
+    assert [len(part) for part in parts] == [8, 8]
+    assert sorted(node for part in parts for node in part) == sorted(durations)
+
+
+def test_an_unmeasured_file_is_collected_by_one_shard_that_runs_all_its_cases(tmp_path):
+    (tmp_path / "tests").mkdir()
+    for name in ("test_known.py", "test_new.py"):
+        (tmp_path / "tests" / name).write_text("pass\n")
+    (tmp_path / ".test_durations").write_text(json.dumps({"tests/test_known.py::test_x": 1.0}))
+    nodes = [f"tests/test_new.py::test_{n}" for n in range(8)]
+    collecting = []
+    for shard in range(1, 5):
+        config = SimpleNamespace(
+            getoption=lambda name, shard=shard: f"{shard}/4",
+            stash=pytest.Stash(),
+            rootpath=tmp_path,
+            option=SimpleNamespace(numprocesses=None),
+            workerinput={"workercount": 4},
+        )
+        if conftest.pytest_ignore_collect(tmp_path / "tests/test_new.py", config):
+            continue
+        items = [SimpleNamespace(nodeid=node) for node in nodes]
+        conftest.pytest_collection_modifyitems(config, items)
+        collecting.append({item.nodeid for item in items})
+    assert collecting == [set(nodes)]
+
+
 def test_worker_shards_charge_collection_once_per_file():
     from tests.shards import assign_nodes
 
@@ -310,6 +345,15 @@ def test_grouped_files_reads_real_markers_and_ignores_fixture_strings(tmp_path):
     }
 
 
+def test_grouped_files_parses_only_files_that_name_xdist_group(tmp_path):
+    from tests.shards import grouped_files
+
+    (tmp_path / "grouped.py").write_text('import pytest\npytestmark = pytest.mark.xdist_group("redis")\n')
+    (tmp_path / "unparsable.py").write_text("def test_x(:\n")
+
+    assert grouped_files(tmp_path, ["grouped.py", "unparsable.py"]) == {"grouped.py": "'redis'"}
+
+
 def test_shards_weigh_source_size_since_every_worker_collects_the_whole_shard():
     durations = {"tests/test_a.py::t": 1.0, "tests/test_b.py::t": 1.0, "tests/test_c.py::t": 1.0}
     files = ["tests/test_a.py", "tests/test_b.py", "tests/test_c.py"]
@@ -364,7 +408,8 @@ def test_shard_option_collects_only_that_shards_files(pytestconfig):
         shard - 1
     ]
     known = {node.split("::", 1)[0] for node in durations}
-    expected = {node.split("::", 1)[0] for node in part} | (set(files) - known)
+    unknown = {path for path in set(files) - known if zlib.crc32(path.encode()) % 4 == shard - 1}
+    expected = {node.split("::", 1)[0] for node in part} | unknown
     assert "shard" in vars(pytestconfig.option)
     config = SimpleNamespace(getoption=lambda name: f"{shard}/4", stash=pytest.Stash(), rootpath=_ROOT)
     kept = {path for path in files if not conftest.pytest_ignore_collect(_ROOT / path, config)}
@@ -473,7 +518,8 @@ def test_the_controller_warms_its_shards_test_modules_once_per_worker(monkeypatc
     sizes = conftest.source_sizes(_ROOT, files)
     part = conftest.assign_nodes(durations, 4, conftest.grouped_files(_ROOT, files), 4, sizes=sizes)[1]
     known = {node.split("::", 1)[0] for node in durations}
-    shard = sorted({node.split("::", 1)[0] for node in part} | (set(files) - known))
+    unknown = {path for path in set(files) - known if zlib.crc32(path.encode()) % 4 == 1}
+    shard = sorted({node.split("::", 1)[0] for node in part} | unknown)
     assert calls == [([path.removesuffix(".py").replace("/", ".") for path in shard], 4)]
     reaped = []
     monkeypatch.setattr(conftest.os, "waitpid", lambda pid, flags: reaped.append(pid))
@@ -489,6 +535,14 @@ def test_workers_and_runs_without_workers_warm_nothing(monkeypatch):
 def test_platforms_without_fork_warm_nothing(monkeypatch):
     monkeypatch.delattr(conftest.os, "fork")
     assert _configured(monkeypatch, 4)[0] == []
+
+
+def test_every_pytest_process_imports_the_redis_clients_once_at_start(monkeypatch):
+    imported = []
+    monkeypatch.setattr(importlib, "import_module", imported.append)
+    _configured(monkeypatch, 4, workerinput={})
+    _configured(monkeypatch, None)
+    assert imported == ["redis.asyncio", "fakeredis"] * 2
 
 
 class _Manager:
@@ -541,3 +595,63 @@ def test_workers_and_runs_without_workers_keep_xdists_node_setup(monkeypatch):
     assert NodeManager.setup_nodes is original
     _configured(monkeypatch, None)
     assert NodeManager.setup_nodes is original
+
+
+def test_a_shard_holding_a_serial_group_stays_heavy_for_later_parallel_tests():
+    from tests.shards import assign_nodes
+
+    durations = {"tests/test_a.py::test_a": 100.0, "tests/test_b.py::test_b": 200.0, "tests/test_c.py::test_c": 40.0}
+
+    parts = assign_nodes(durations, 2, {"tests/test_a.py": "a"}, 4)
+
+    assert parts == [["tests/test_a.py::test_a"], ["tests/test_b.py::test_b", "tests/test_c.py::test_c"]]
+
+
+def test_every_file_of_a_shard_is_owned_by_two_workers_and_grouped_files_share_them():
+    from tests.shards import assign_owners
+
+    seconds = {f"tests/test_{n}.py": float(n + 1) for n in range(10)}
+    grouped = {"tests/test_2.py", "tests/test_7.py"}
+    owned = assign_owners(seconds, grouped, 4, 2)
+    assert len(owned) == 4
+    assert all(sum(path in paths for paths in owned) == 2 for path in seconds)
+    assert [("tests/test_2.py" in paths) for paths in owned] == [("tests/test_7.py" in paths) for paths in owned]
+    loads = [sum(seconds[path] for path in paths) / 2 for paths in owned]
+    assert max(loads) - min(loads) <= max(seconds.values())
+    assert assign_owners(seconds, set(), 1, 2) == [set(seconds)]
+
+
+def test_the_controller_hands_each_worker_its_share_of_the_shard_files(monkeypatch):
+    _, config = _configured(monkeypatch, 4)
+    shares = config.stash[conftest.WORKER_FILES]
+    files = conftest._shard_files(config)
+    assert sorted(shares) == ["gw0", "gw1", "gw2", "gw3"]
+    assert all(sum(path in share for share in shares.values()) == 2 for path in files)
+    assert set().union(*shares.values()) == files
+    node = SimpleNamespace(config=config, gateway=SimpleNamespace(id="gw1"), workerinput={})
+    conftest.pytest_configure_node(node)
+    assert node.workerinput["owned_files"] == shares["gw1"]
+    replacement = SimpleNamespace(config=config, gateway=SimpleNamespace(id="gw4"), workerinput={})
+    conftest.pytest_configure_node(replacement)
+    assert "owned_files" not in replacement.workerinput
+
+
+def test_a_worker_collects_only_the_shard_files_it_owns(tmp_path):
+    (tmp_path / "tests").mkdir()
+    for name in "ab":
+        (tmp_path / f"tests/test_{name}.py").write_text("pass\n")
+    durations = {"tests/test_a.py::t": 1.0, "tests/test_b.py::t": 1.0}
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+
+    def ignored(workerinput):
+        config = SimpleNamespace(
+            getoption=lambda name: "1/1",
+            stash=pytest.Stash(),
+            rootpath=tmp_path,
+            option=SimpleNamespace(numprocesses=None),
+            workerinput=workerinput,
+        )
+        return [conftest.pytest_ignore_collect(tmp_path / f"tests/test_{name}.py", config) for name in "ab"]
+
+    assert ignored({"owned_files": ["tests/test_b.py"]}) == [True, None]
+    assert ignored({}) == [None, None]

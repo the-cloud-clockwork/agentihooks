@@ -1,6 +1,12 @@
+import asyncio
+import json
 import subprocess
 
 MAIL_TO = "AGENTIHOOKS_OPERATOR_EMAIL"
+GATEWAY_KEY = "MCP_KEY_GATEWAY"
+GATEWAY_URL = "LANGFUSE_MCP_URL"
+TOOL = "notifications-send_email"
+TIMEOUT_S = 10
 
 
 def send(subject: str, text: str, environ: dict, repo: str) -> str:
@@ -8,10 +14,51 @@ def send(subject: str, text: str, environ: dict, repo: str) -> str:
     to = environ.get(MAIL_TO) or _git_email(repo)
     if not to:
         return f"no operator email: set {MAIL_TO}"
-    from hooks.integrations.mailer import send_email
+    from hooks.integrations import mailer
 
-    result = send_email(to, subject, body=text)
+    if not mailer.EmailClient.get_client().reachable():
+        return _notify(to, subject, text, environ)
+    result = mailer.send_email(to, subject, body=text)
     return "" if result.success else f"email failed: {result.error}"
+
+
+def _notify(to: str, subject: str, text: str, environ: dict) -> str:
+    bearer, url = environ.get(GATEWAY_KEY), environ.get(GATEWAY_URL)
+    for name, value in ((GATEWAY_KEY, bearer), (GATEWAY_URL, url)):
+        if not value:
+            return f"email failed: the SMTP relay is unreachable and {name} is not set"
+    try:
+        reply = gateway_send(url, bearer, {"to": to, "subject": subject, "body": text})
+    except Exception as exc:
+        return f"email failed: the gateway notifications tool raised {exc}"
+    return "" if reply.get("status") == "sent" else f"email failed: the gateway answered {json.dumps(reply)}"
+
+
+async def _send(url: str, bearer: str, arguments: dict) -> dict:
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    from scripts.swarm.langfuse_read import gateway_client
+
+    headers = {"Authorization": f"Bearer {bearer}", "Host": "llm.homeofanton.com", "x-mcp-servers": "notifications"}
+    async with asyncio.timeout(TIMEOUT_S):
+        async with streamablehttp_client(
+            url, headers=headers, timeout=TIMEOUT_S, httpx_client_factory=gateway_client
+        ) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(TOOL, arguments)
+    texts = [item.text for item in result.content if item.type == "text"]
+    if result.isError:
+        raise RuntimeError(texts[0] if texts else "an error")
+    reply = json.loads(texts[0]) if texts else {}
+    if not isinstance(reply, dict):
+        raise RuntimeError(f"a reply that is not an object: {texts[0]}")
+    return reply
+
+
+def gateway_send(url: str, bearer: str, arguments: dict) -> dict:
+    return asyncio.run(_send(url, bearer, arguments))
 
 
 def _git_email(repo: str) -> str:

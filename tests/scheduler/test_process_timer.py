@@ -1,237 +1,291 @@
 import json
-from unittest.mock import Mock, call
+import threading
+import time
+from unittest.mock import Mock
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.scheduler import process_timer
 from scripts.scheduler.core import Scheduler
 
 pytestmark = pytest.mark.unit
+MAX_POLLS = 200
 
 
 @pytest.fixture
-def redis(monkeypatch):
+def redis():
     import fakeredis
 
-    connection = fakeredis.FakeRedis(decode_responses=True)
-    pop = connection.blpop
-
-    def bounded_pop(key, timeout):
-        assert timeout == process_timer.RECHECK_S
-        result = pop(key, timeout=0.2)
-        if result is None:
-            raise TimeoutError("scheduler delivered no wake")
-        return result
-
-    monkeypatch.setattr(connection, "blpop", bounded_pop)
-    return connection
+    return fakeredis.FakeRedis(decode_responses=True)
 
 
-def test_wait_is_released_by_the_scheduler_signal(redis, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", Mock())
-    close = Mock()
-    monkeypatch.setattr(redis, "close", close)
-    with process_timer.Timer(2, redis=redis) as timer:
+@pytest.fixture
+def state(redis):
+    return RedisStateStore(redis, "scheduler")
+
+
+@pytest.fixture(autouse=True)
+def quick_polls(monkeypatch):
+    monkeypatch.setattr(process_timer, "POLL_S", 0.01)
+
+    class BoundedEvent(threading.Event):
+        polls = 0
+
+        def wait(self, timeout=None):
+            self.polls += 1
+            if self.polls > MAX_POLLS:
+                pytest.fail(f"still polling after {MAX_POLLS} polls")
+            return super().wait(timeout)
+
+    monkeypatch.setattr(process_timer, "Event", BoundedEvent)
+
+
+def _starts():
+    started = Mock()
+    started.side_effect = lambda: started.call_count > MAX_POLLS and pytest.fail(f"restarted {MAX_POLLS} times")
+    return started
+
+
+def test_wait_is_released_by_the_scheduler_signal(state, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    with process_timer.Timer(2, state=state) as timer:
         entry = timer.entry
         assert entry.record["delay"] == 2
         assert entry.record["owner"] == "process"
         assert entry.record["state"] == "active"
-        assert entry.record["slots"][0]["reference"] == "scripts.scheduler.process_timer:wake"
-        assert redis.llen(timer.key) == 0
-        scheduler = Scheduler(redis)
+        assert entry.record["slots"] == []
+        scheduler = Scheduler(state)
         assert scheduler.run_due(now=entry.record["due"] - 1) == 0
-        assert redis.llen(timer.key) == 0
+        assert entry.state == "active"
         assert scheduler.run_due(now=entry.record["due"]) == 1
         timer.wait()
-        assert redis.llen(timer.key) == 0
     assert entry.state == "cancelled"
-    assert not redis.exists(timer.key)
     process_timer.service.ensure_running.assert_called_once_with()
-    close.assert_not_called()
 
 
-def test_a_wait_with_no_wake_by_its_recheck_starts_the_scheduler_again(monkeypatch):
-    ensure = Mock()
-    monkeypatch.setattr(process_timer.service, "ensure_running", ensure)
+class _Entry:
+    def __init__(self, fired_after: int):
+        self.reads, self.fired_after = 0, fired_after
+
+    @property
+    def state(self):
+        self.reads += 1
+        return "fired" if self.reads > self.fired_after else "active"
+
+
+def _bare_timer(entry):
+    from threading import Event
+
     timer = process_timer.Timer.__new__(process_timer.Timer)
-    timer.key = "wake"
-    timer.redis = Mock()
-    timer.redis.blpop.side_effect = [None, None, ("wake", "1")]
+    timer.entry, timer.cancelled = entry, Event()
+    return timer
+
+
+def test_a_wait_with_no_ring_by_its_recheck_starts_the_scheduler_again(monkeypatch):
+    timer = _bare_timer(_Entry(fired_after=40))
+    ensure = Mock(side_effect=lambda: timer.entry.reads or pytest.fail("restarted before any read"))
+    monkeypatch.setattr(process_timer.service, "ensure_running", ensure)
+    monkeypatch.setattr(process_timer, "RECHECK_S", 0.03)
     timer.wait()
-    assert timer.redis.blpop.call_args_list == [call("wake", timeout=process_timer.RECHECK_S)] * 3
-    assert ensure.call_args_list == [call(), call()]
+    assert timer.entry.reads == 41
+    assert ensure.call_count >= 1
 
 
-def test_a_bounded_wait_with_no_wake_returns_at_its_deadline(monkeypatch):
+def test_a_bounded_wait_with_no_ring_returns_at_its_deadline(monkeypatch):
     ensure = Mock()
     monkeypatch.setattr(process_timer.service, "ensure_running", ensure)
-    readings = [100, 100, 120, 120, 131]
-    monkeypatch.setattr(process_timer.time, "monotonic", lambda: readings.pop(0) if len(readings) > 1 else readings[0])
-    timer = process_timer.Timer.__new__(process_timer.Timer)
-    timer.key = "wake"
-    timer.redis = Mock()
-    timer.redis.blpop.side_effect = [None, None]
-    assert timer.wait(timeout=31) is None
-    assert timer.redis.blpop.call_args_list == [call("wake", timeout=30), call("wake", timeout=11)]
-    ensure.assert_called_once_with()
+    timer = _bare_timer(_Entry(fired_after=10**9))
+    assert timer.wait(timeout=0.1) is None
+    ensure.assert_not_called()
 
 
-def test_a_bounded_wait_never_asks_redis_to_block_forever(monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", Mock())
-    readings = [100, 105]
-    monkeypatch.setattr(process_timer.time, "monotonic", lambda: readings.pop(0) if len(readings) > 1 else readings[0])
-    timer = process_timer.Timer.__new__(process_timer.Timer)
-    timer.key = "wake"
-    timer.redis = Mock()
-    timer.redis.blpop.side_effect = [None]
-    timer.wait(timeout=1)
-    assert timer.redis.blpop.call_args_list == [call("wake", timeout=process_timer.MIN_POP_S)]
+@pytest.mark.wall_clock
+def test_a_bounded_wait_with_no_ring_takes_its_deadline(monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    timer = _bare_timer(_Entry(fired_after=10**9))
+    started = time.monotonic()
+    timer.wait(timeout=0.1)
+    assert 0.1 <= time.monotonic() - started < process_timer.RECHECK_S
 
 
-def test_wait_passes_its_bound_to_the_timer(redis, monkeypatch):
+def test_a_removed_entry_ends_the_wait():
+    class Gone:
+        @property
+        def state(self):
+            raise KeyError("gone")
+
+    _bare_timer(Gone()).wait(timeout=5)
+
+
+def _frozen_wait(monkeypatch, timer):
+    monkeypatch.setattr(process_timer.time, "monotonic", lambda: 10.0)
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: pytest.fail("restarted the scheduler"))
+    monkeypatch.setattr(timer.cancelled, "wait", lambda timeout: pytest.fail(f"waited {timeout}"))
+    timer.wait(timeout=5)
+
+
+def test_a_removed_entry_ends_the_wait_without_sleeping(monkeypatch):
+    class Gone:
+        @property
+        def state(self):
+            raise KeyError("gone")
+
+    _frozen_wait(monkeypatch, _bare_timer(Gone()))
+
+
+def test_a_rung_timer_ends_the_wait_without_sleeping(monkeypatch):
+    timer = _bare_timer(_Entry(fired_after=0))
+    _frozen_wait(monkeypatch, timer)
+    assert timer.entry.reads == 1
+
+
+def test_an_active_timer_sleeps_until_its_recheck(monkeypatch):
+    timer = _bare_timer(_Entry(fired_after=10**9))
+    slept = []
+    monkeypatch.setattr(process_timer.time, "monotonic", lambda: 10.0 + len(slept))
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: pytest.fail("restarted the scheduler"))
+    monkeypatch.setattr(timer.cancelled, "wait", slept.append)
+    timer.wait(timeout=2)
+    assert slept == [process_timer.POLL_S, process_timer.POLL_S]
+
+
+def test_the_recheck_never_passes_the_deadline():
+    assert process_timer._recheck(None, 10.0) == process_timer.RECHECK_S
+    assert process_timer._recheck(12.5, 10.0) == 2.5
+    assert process_timer._recheck(10.5, 10.0) == 0.5
+    assert process_timer._recheck(5.0, 10.0) == 0.0
+
+
+def test_a_bounded_wait_reaches_its_deadline_on_one_clock_reading(monkeypatch):
+    clock = [10.0]
+    monkeypatch.setattr(process_timer.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: pytest.fail("restarted the scheduler"))
+    timer = _bare_timer(_Entry(fired_after=10**9))
+    monkeypatch.setattr(timer.cancelled, "wait", lambda timeout: clock.__setitem__(0, clock[0] + 1.0))
+    timer.wait(timeout=2)
+    assert clock == [12.0]
+
+
+def test_a_timer_entry_carries_its_delay(state, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    with process_timer.Timer(2, state=state) as timer:
+        assert timer.entry.record["payload"] == '{"delay": 2}'
+
+
+def test_closing_a_timer_twice_retires_its_entry_once(state, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    timer = process_timer.Timer(2, state=state)
+    retire = Mock(wraps=timer.entry.scheduler.retire)
+    monkeypatch.setattr(timer.entry.scheduler, "retire", retire)
+
+    timer.close()
+    timer.close()
+
+    retire.assert_called_once_with(timer.entry.id)
+    assert timer.closed
+    assert timer.entry.state == "cancelled"
+    assert timer.entry.scheduler.document()["retired"][timer.entry.id] is True
+
+
+def test_wait_passes_its_bound_to_the_timer(state, monkeypatch):
     bounds = []
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     monkeypatch.setattr(process_timer.Timer, "wait", lambda timer, timeout=None: bounds.append(timeout))
-    process_timer.wait(2, redis=redis, timeout=3)
+    process_timer.wait(2, state=state, timeout=3)
     assert bounds == [3]
 
 
-def test_interruption_cancels_the_timer_and_cleans_the_wake(redis, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
-    with pytest.raises(KeyboardInterrupt), process_timer.Timer(3, redis=redis) as timer:
+def test_interruption_cancels_the_timer(state, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    with pytest.raises(KeyboardInterrupt), process_timer.Timer(3, state=state) as timer:
         raise KeyboardInterrupt
     assert timer.entry.state == "cancelled"
-    assert not redis.exists(timer.key)
-    assert Scheduler(redis).run_due(now=timer.entry.record["due"]) == 0
+    assert Scheduler(state).run_due(now=timer.entry.record["due"]) == 0
 
 
-def test_wait_uses_the_configured_redis_client(redis, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
-    monkeypatch.setattr(process_timer, "blocking_client", lambda: redis)
-    close = Mock()
-    monkeypatch.setattr(redis, "close", close)
+def test_a_timer_without_a_store_opens_the_scheduler_bucket(state, monkeypatch):
+    from scripts.events import state as states
+
+    opened = []
+    monkeypatch.setattr(states, "open_state", lambda bucket: opened.append(bucket) or state)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     with process_timer.Timer(0) as timer:
-        Scheduler(redis).run_due(now=timer.entry.record["due"])
+        Scheduler(state).run_due(now=timer.entry.record["due"])
         timer.wait()
-    assert not redis.exists(timer.key)
-    close.assert_called_once_with()
+    assert opened == ["scheduler"]
 
 
-def test_duplicate_delivery_keeps_one_wake(redis, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
-    with process_timer.Timer(3, redis=redis) as timer:
-        event = timer.entry.record
-        redis.rpush(timer.key, "pending", "cancelled")
-        process_timer.wake(event, "first", redis)
-        assert redis.lrange(timer.key, 0, -1) == ["first"]
-        process_timer.wake(event, "same", redis)
-        process_timer.wake(event, "same", redis)
-        assert redis.lrange(timer.key, 0, -1) == ["same"]
-        assert redis.ttl(timer.key) == -1
-        assert json.loads(event["payload"])["key"] == timer.key
-    assert not redis.exists(timer.key)
-
-
-def test_blocking_client_keeps_connection_settings_without_a_read_timeout(monkeypatch):
-    import redis
-
-    source = Mock()
-    source.connection_pool.connection_class = object
-    source.connection_pool.connection_kwargs = {"host": "scheduler", "socket_timeout": 10, "decode_responses": True}
-    pool, client = Mock(), Mock()
-    constructor = Mock(return_value=pool)
-    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: source)
-    monkeypatch.setattr(redis, "ConnectionPool", constructor)
-    monkeypatch.setattr(redis, "Redis", Mock(return_value=client))
-    assert process_timer.blocking_client() is client
-    constructor.assert_called_once_with(
-        connection_class=object, host="scheduler", socket_timeout=None, decode_responses=True
-    )
-    source.close.assert_called_once_with()
-
-
-async def test_async_wait_cancels_its_timer_and_unblocks_its_worker(redis, monkeypatch):
+async def test_async_wait_cancels_its_timer_and_unblocks_its_worker(state, monkeypatch):
     import asyncio
 
     started = asyncio.Event()
-    timers, popped = [], []
+    timers = []
     original = process_timer.Timer
-    pop = redis.blpop
-
-    def bounded_pop(key, timeout):
-        result = pop(key, timeout=timeout)
-        popped.append(result)
-        return result
 
     def timer(delay):
-        result = original(delay, redis=redis)
+        result = original(delay, state=state)
         timers.append(result)
         started.set()
         return result
 
-    monkeypatch.setattr(redis, "blpop", bounded_pop)
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     monkeypatch.setattr(process_timer, "Timer", timer)
     task = asyncio.create_task(process_timer.async_wait(60))
     await asyncio.wait_for(started.wait(), timeout=1)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert len(popped) == 1
-    assert popped[0] is not None
-    assert popped[0][0] == timers[0].key
+    assert timers[0].cancelled.is_set()
     assert timers[0].entry.state == "cancelled"
-    assert not redis.exists(timers[0].key)
 
 
 @pytest.mark.parametrize("deployment", ["cloud", "local"])
-def test_member_heartbeat_timer_uses_its_writable_subtree(redis, monkeypatch, deployment):
+def test_member_timer_writes_only_its_writable_subtree(redis, monkeypatch, deployment):
     from fnmatch import fnmatchcase
 
     from scripts.hive.auth import _acl_keys
-    from scripts.swarm.keyspace import ROOT
+    from scripts.scheduler.core import bucket
 
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", deployment)
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
-    with process_timer.Timer(15, redis=redis) as timer:
-        expected = (
-            f"{ROOT}:hive:member:scheduler:"
-            if deployment != "local"
-            else process_timer.Scheduler(redis).key("wake:").rsplit("wake:", 1)[0]
-        )
-        assert timer.key.startswith(expected)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    assert bucket() == ("scheduler-member" if deployment != "local" else "scheduler")
+    state = RedisStateStore(redis, bucket())
+    with process_timer.Timer(15, state=state) as timer:
         if deployment != "local":
             writable = [pattern[1:] for pattern in _acl_keys("member") if pattern.startswith("~")]
+            assert redis.keys("*")
             assert all(any(fnmatchcase(key, pattern) for pattern in writable) for key in redis.keys("*"))
-        Scheduler(redis).run_due(now=timer.entry.record["due"])
+        Scheduler(state).run_due(now=timer.entry.record["due"])
         timer.wait()
 
 
-def test_member_grants_still_refuse_shared_scheduler_writes(redis, monkeypatch):
+def test_member_grants_still_refuse_shared_scheduler_writes(redis):
     from fnmatch import fnmatchcase
 
     from scripts.hive.auth import _acl_keys
 
-    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
-    shared = Scheduler(redis).key("entries")
+    shared = RedisStateStore(redis, "scheduler")
     writable = [pattern[1:] for pattern in _acl_keys("member") if pattern.startswith("~")]
-    assert not any(fnmatchcase(shared, pattern) for pattern in writable)
+    assert not any(fnmatchcase(key, pattern) for key in (shared._current, shared._revision) for pattern in writable)
+    other = RedisStateStore(redis, "scheduler-other")
+    assert not any(fnmatchcase(other._current, pattern) for pattern in writable)
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
-async def test_wait_helpers_consume_and_close_a_fired_timer(redis, monkeypatch, asynchronous):
+async def test_wait_helpers_consume_and_close_a_fired_timer(state, monkeypatch, asynchronous):
     timers = []
     original = process_timer.Timer
 
     def timer(delay, **given):
-        assert given.get("redis") is None
-        result = original(delay, redis=redis)
+        assert given.get("state") is None
+        result = original(delay, state=state)
         timers.append(result)
-        Scheduler(redis).run_due(now=result.entry.record["due"])
+        Scheduler(state).run_due(now=result.entry.record["due"])
         return result
 
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     monkeypatch.setattr(process_timer, "Timer", timer)
     if asynchronous:
         await process_timer.async_wait(2)
@@ -240,117 +294,99 @@ async def test_wait_helpers_consume_and_close_a_fired_timer(redis, monkeypatch, 
     assert len(timers) == 1
     assert timers[0].entry.record["delay"] == 2
     assert timers[0].entry.state == "cancelled"
-    assert not redis.exists(timers[0].key)
 
 
-def test_wait_on_a_given_client_neither_builds_nor_closes_one(redis, monkeypatch):
+def test_wait_on_a_given_store_opens_none(state, monkeypatch):
+    from scripts.events import state as states
+
     original = process_timer.Timer.wait
 
     def fired(timer, timeout=None):
-        Scheduler(redis).run_due(now=timer.entry.record["due"])
+        Scheduler(state).run_due(now=timer.entry.record["due"])
         original(timer, timeout)
 
-    close = Mock()
-    monkeypatch.setattr(redis, "close", close)
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
-    monkeypatch.setattr(process_timer, "blocking_client", Mock(side_effect=AssertionError("built its own client")))
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    monkeypatch.setattr(states, "open_state", Mock(side_effect=AssertionError("opened its own store")))
     monkeypatch.setattr(process_timer.Timer, "wait", fired)
-    process_timer.wait(2, redis=redis)
-    close.assert_not_called()
+    process_timer.wait(2, state=state)
 
 
-def test_controller_namespace_changes_only_in_hosted_mode(redis, monkeypatch):
+def test_controller_namespace_changes_only_in_hosted_mode(monkeypatch):
     from hooks._redis import redis_key
     from scripts.swarm.keyspace import ROOT
 
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "cloud")
     monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
-    assert Scheduler(redis, machine="worker").key("entries") == f"{ROOT}:scheduler:worker:entries"
+    assert Scheduler(None, machine="worker").key("entries") == f"{ROOT}:scheduler:worker:entries"
+    assert Scheduler(None, machine="worker").name("entries") == f"{ROOT}.scheduler.worker.entries"
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT")
-    assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
+    assert Scheduler(None, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
 
 
-def test_member_identity_does_not_change_host_keys_in_local_or_default_mode(redis, monkeypatch):
+def test_member_identity_does_not_change_host_keys_in_local_or_default_mode(monkeypatch):
     from hooks._redis import redis_key
+    from scripts.scheduler.core import bucket
 
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
-    assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
+    assert Scheduler(None, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
+    assert bucket() == "scheduler"
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
-    assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
+    assert Scheduler(None, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
+    assert bucket() == "scheduler"
 
 
-def test_simultaneous_process_timers_have_independent_wake_queues(redis, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
-    with process_timer.Timer(0, redis=redis) as first, process_timer.Timer(0, redis=redis) as second:
-        assert first.key != second.key
+def test_simultaneous_process_timers_ring_independently(state, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    with process_timer.Timer(0, state=state) as first, process_timer.Timer(60, state=state) as second:
         assert first.entry.id != second.entry.id
-        scheduler = Scheduler(redis)
-        scheduler.run_due(now=max(first.entry.record["due"], second.entry.record["due"]))
+        Scheduler(state).run_due(now=first.entry.record["due"])
         first.wait()
-        assert redis.llen(second.key) == 1
-        second.wait()
+        assert second.entry.state == "active"
+        assert second.wait(timeout=0.05) is None
 
 
-def test_process_timer_records_are_bounded_across_repeated_waits(redis, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
-    scheduler = Scheduler(redis)
+def test_process_timer_records_are_bounded_across_repeated_waits(state, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    scheduler = Scheduler(state)
     for _ in range(20):
-        with process_timer.Timer(0, redis=redis) as timer:
+        with process_timer.Timer(0, state=state) as timer:
             scheduler.run_due(now=timer.entry.record["due"])
             timer.wait()
         scheduler.run_due()
-        assert redis.hlen(scheduler.key("entries")) == 0
-        assert not redis.exists(timer.key)
-        assert not redis.exists(scheduler.key("retired"))
+        assert scheduler.document()["entries"] == {}
+        assert scheduler.document()["retired"] == {}
 
 
-def test_a_scheduler_that_cannot_start_leaves_no_timer_behind(redis, monkeypatch):
+def test_a_scheduler_that_cannot_start_leaves_no_timer_behind(state, monkeypatch):
     def unwritable():
         raise PermissionError("cache folder")
 
     monkeypatch.setattr(process_timer.service, "ensure_running", unwritable)
-    scheduler = Scheduler(redis)
+    scheduler = Scheduler(state)
     with pytest.raises(PermissionError):
-        process_timer.Timer(5, redis=redis)
-    assert len(redis.hkeys(scheduler.key("retired"))) == 1
+        process_timer.Timer(5, state=state)
+    assert len(scheduler.document()["retired"]) == 1
     scheduler.run_due()
-    assert redis.hlen(scheduler.key("entries")) == 0
-    assert not redis.keys(scheduler.key("wake:*"))
+    assert scheduler.document()["entries"] == {}
 
 
-def test_delivered_wake_survives_a_paused_consumer(redis, monkeypatch):
-    import time
-
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
-    with process_timer.Timer(0, redis=redis) as timer:
-        Scheduler(redis).run_due(now=timer.entry.record["due"])
+def test_a_fired_timer_survives_a_paused_consumer(state, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    with process_timer.Timer(0, state=state) as timer:
+        Scheduler(state).run_due(now=timer.entry.record["due"])
         now = time.time()
         monkeypatch.setattr(time, "time", lambda: now + 120)
-        assert redis.ttl(timer.key) == -1
         timer.wait()
+        assert timer.entry.state == "fired"
 
 
-def test_retirement_during_dispatch_removes_a_late_wake(redis, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
-    original = process_timer.wake
-    with process_timer.Timer(0, redis=redis) as timer:
-
-        def retire_then_wake(event, delivery_id, connection):
-            timer.close()
-            original(event, delivery_id, connection)
-
-        monkeypatch.setattr(process_timer, "wake", retire_then_wake)
-        Scheduler(redis).run_due(now=timer.entry.record["due"])
-    assert redis.hlen(Scheduler(redis).key("entries")) == 0
-    assert not redis.exists(timer.key)
-
-
-def test_member_schedules_and_consumes_wakes_while_shared_writes_are_refused(monkeypatch):
+def test_member_schedules_and_consumes_while_shared_writes_are_refused(monkeypatch):
     import fakeredis
     from redis.exceptions import NoPermissionError
 
     from scripts.hive import auth
+    from scripts.scheduler.core import bucket
 
     server = fakeredis.FakeServer()
     admin = fakeredis.FakeRedis(server=server, decode_responses=True)
@@ -365,16 +401,14 @@ def test_member_schedules_and_consumes_wakes_while_shared_writes_are_refused(mon
     member = fakeredis.FakeRedis(server=server, decode_responses=True, username="hive-member")
     member.auth("", username="hive-member")
     assert member.acl_whoami() == "hive-member"
-    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
-    shared = Scheduler(admin).key("entries")
+    shared = RedisStateStore(admin, "scheduler")
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "cloud")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
-    with process_timer.Timer(0, redis=member) as timer:
-        assert Scheduler(admin).run_due(now=timer.entry.record["due"]) == 1
-        assert admin.llen(timer.key) == 1
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    with process_timer.Timer(0, state=RedisStateStore(member, bucket())) as timer:
+        assert Scheduler(RedisStateStore(admin, bucket())).run_due(now=timer.entry.record["due"]) == 1
         timer.wait()
-    Scheduler(admin).run_due()
-    assert not admin.exists(timer.key)
+        assert timer.entry.state == "fired"
+    Scheduler(RedisStateStore(admin, bucket())).run_due()
     with pytest.raises(NoPermissionError):
-        member.hset(shared, "forbidden", "write")
+        member.hset(shared._current, "forbidden", json.dumps({"revision": 1, "value": ""}))

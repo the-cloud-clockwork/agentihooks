@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -18,28 +19,53 @@ from tests.shards import (
 WORKERS = 4
 STEP_SECONDS = step_seconds("unit")
 STARTUP_SECONDS = 30
-SLOWDOWN = 1.15
-MAX_SHARDS = 30
+SLOWDOWN = 1.69
+TARGET_SECONDS = 195
+# Five merge groups share the 36 runner queue pool, so each shard's fixed setup costs queue wait for every group.
+MAX_SHARDS = 16
 
 
 def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, int] | None = None) -> list[dict]:
     files = discover_test_files(root)
     grouped = grouped_files(root, files)
     sizes = source_sizes(root, files)
+    target = min(TARGET_SECONDS, STEP_SECONDS / 2)
     result = []
     for version, durations in versions.items():
         count = counts[version] if counts else 12
+        total = sum(seconds for node, seconds in durations.items() if node.split("::", 1)[0] in sizes)
         while True:
+            # Some shard carries at least an even share, so a share over the target by a second, past float rounding, fails.
+            if (
+                not counts
+                and count < MAX_SHARDS
+                and STARTUP_SECONDS + SLOWDOWN * total / (count * WORKERS) > target + 1
+            ):
+                count += 1
+                continue
             predicted = _predicted(durations, count, grouped, sizes)
-            if counts or predicted < STEP_SECONDS / 2 or count == MAX_SHARDS:
+            if counts or predicted < target or count == MAX_SHARDS:
                 break
             count += 1
-        print(f"Python {version}: {count} queue shards, predicted slowest {predicted:.1f}s of {STEP_SECONDS / 2:.0f}s")
+        print(f"Python {version}: {count} queue shards, predicted slowest {predicted:.1f}s of {target:.0f}s")
+        if count == MAX_SHARDS and predicted >= target:
+            _warn_over_target(version, predicted, target)
         result.extend(
             {"python-version": version, "shard": shard, "total": count, "predicted_seconds": predicted}
             for shard in range(1, count + 1)
         )
     return result
+
+
+def _warn_over_target(version: str, predicted: float, target: float) -> None:
+    message = (
+        f"Python {version}: the shard cap of {MAX_SHARDS} predicts the slowest queue shard at {predicted:.1f}s,"
+        f" over the {target:.0f}s target"
+    )
+    print(f"::warning title=Queue shard pool cannot reach the target::{message}")
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with Path(summary).open("a") as handle:
+            handle.write(f"{message}\n")
 
 
 def _predicted(durations: dict[str, float], count: int, grouped: dict[str, str], sizes: dict[str, int]) -> float:
@@ -49,7 +75,7 @@ def _predicted(durations: dict[str, float], count: int, grouped: dict[str, str],
     parts = assign_nodes(measured, count, grouped, WORKERS, sizes=sizes)
     parts[0].extend(pinned)
     peak = max(_seconds(part, {**measured, **pinned}, grouped, sizes) for part in parts)
-    return STARTUP_SECONDS + SLOWDOWN * peak
+    return STARTUP_SECONDS + peak
 
 
 def _seconds(part: list[str], durations: dict[str, float], grouped: dict[str, str], sizes: dict[str, int]) -> float:
@@ -58,8 +84,9 @@ def _seconds(part: list[str], durations: dict[str, float], grouped: dict[str, st
     for node in part:
         if group := grouped.get(node.split("::", 1)[0]):
             serial[group] = serial.get(group, 0.0) + durations[node]
+    # Only the four worker share slows down; measured serial groups ran under their stored time.
     return max(
-        sum(durations[node] for node in part) / WORKERS,
+        SLOWDOWN * sum(durations[node] for node in part) / WORKERS,
         max((durations[node] for node in part), default=0.0),
         max(serial.values(), default=0.0),
     ) + sum(sizes[path] * SECONDS_PER_SOURCE_BYTE for path in files)
@@ -98,6 +125,10 @@ def _combine(argv: list[str]) -> None:
     peak = max(leg["predicted_seconds"] for leg in plan)
     if capped and peak >= STEP_SECONDS:
         print(f"::warning::The capped queue plan predicts {peak:.1f}s, over {STEP_SECONDS}s of the step timeout")
+    elif len(plan) == MAX_SHARDS and peak >= STEP_SECONDS / 2:
+        print(
+            f"::warning::The capped queue plan predicts {peak:.1f}s, over {STEP_SECONDS / 2:.0f}s of the planning budget"
+        )
     elif not capped and peak >= STEP_SECONDS / 2:
         raise SystemExit(f"Queue plan exceeds {STEP_SECONDS / 2:.0f}s of the step timeout: {peak:.1f}s")
     print(f"{len(plan)} queue jobs fit one wave of {MAX_SHARDS} runners; predicted slowest test step {peak:.1f}s")

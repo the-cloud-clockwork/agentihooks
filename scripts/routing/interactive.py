@@ -42,9 +42,15 @@ def account(harness: str, environ: Mapping[str, str], run: Callable = subprocess
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     import os
 
+    from scripts.hive.account_slots import execute
     from scripts.install import _claude_command, _write_route_report
 
     declared = account("claude", environ)
     _write_route_report(report, status="routed", account=declared.slug, placement="forced")
     print(f"[agenti] account={declared.slug} route=interactive", flush=True)
-    os.execvpe(binary, _claude_command(binary, args), envs.claude_interactive_child(environ, declared.slug))
+    execute(
+        "claude",
+        declared.slug,
+        envs.claude_interactive_child(environ, declared.slug),
+        lambda env: os.execvpe(binary, _claude_command(binary, args), env),
+    )

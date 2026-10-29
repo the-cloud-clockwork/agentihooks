@@ -146,4 +146,7 @@ export function wireChatInput() {
   input.addEventListener("input", () => grow(input));
   wireKeys(input, sendChat, () => showChat(false), "chat");
   input.after(attachable("chat", input, input.closest(".chat-compose")));
+  const send = h("button", { class: "sw-btn chat-send", id: "chat-send", type: "button" }, "Send");
+  send.addEventListener("click", () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  input.closest(".chat-compose").append(send);
 }

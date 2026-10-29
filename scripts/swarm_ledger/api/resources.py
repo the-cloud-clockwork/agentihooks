@@ -77,7 +77,7 @@ def collection_revisions(rows: list) -> tuple[str, list]:
 
 
 def read(doc: dict, path: str, query: dict | None = None, cache: dict | None = None) -> dict:
-    if query and ("state" in query or "offset" in query):
+    if query and ("state" in query or "offset" in query or "q" in query):
         return closed_page(doc, path, query)
     raw = value(doc, path)
     if isinstance(raw, list):
@@ -97,6 +97,9 @@ def closed_page(doc: dict, path: str, query: dict) -> dict:
     if path not in ledger_closed.COLLECTIONS or query.get("state") != "done":
         raise APIError(400, "schema_invalid", DONE_ONLY)
     rows = ledger_closed.recent(path, doc.get(path) or [])
+    text = query.get("q", "").casefold()
+    if text:
+        rows = [row for row in rows if text in f"{row.get('id')} {row.get('title') or row.get('text')}".casefold()]
     offset = query.get("offset", 0)
     selected = []
     for row in rows[offset : offset + query.get("limit", ledger_closed.KEPT)]:

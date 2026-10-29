@@ -30,9 +30,11 @@ def master(store: RedisStore, slug: str) -> AgentRecord | None:
 def notify(
     store: RedisStore, args: Namespace, ledger: LedgerClient, before: AgentRecord | None, action: str, detail: str = ""
 ) -> None:
-    by = getattr(args, "name", "") or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    by = vars(args).get("by") or vars(args).get("name") or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
     after = master(store, args.slug)
     if any(a and by == a.name for a in (before, after)):
+        return
+    if action == "verdict" and any(a.name == by for a in store.agents(args.slug)):
         return
     boss = after or before
     address = (boss.seat or boss.name) if boss else seat_address(args.slug, MASTER)
@@ -41,6 +43,8 @@ def notify(
     verb = CONTROLS[action]
     if action == "stop" and args.now:
         verb = "stopped the swarm immediately"
+    if action == "verdict":
+        verb = f"gave the health finding {args.finding} a verdict"
     config = store.config(args.slug)
     result = f"The swarm is {config.state}."
     if action == "set":

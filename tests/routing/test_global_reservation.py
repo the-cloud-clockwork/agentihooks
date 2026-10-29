@@ -34,6 +34,17 @@ def test_concurrent_reservations_at_cap_one_have_one_winner(redis):
     assert slots.counts() == {"claude:one": 1}
 
 
+def test_reservation_reading_retains_the_atomic_refusal_count(redis):
+    slots = reservation.LaunchSlots(redis)
+    assert slots.reserve_reading("claude:one", "first", 2, 1000) == reservation.SlotReading(True, 0)
+    assert slots.reserve("claude:one", "second", 2, 1000) is True
+    refused = slots.reserve_reading("claude:one", "third", 2, 1000)
+    assert slots.release("first") is True
+    assert refused == reservation.SlotReading(False, 2)
+    assert slots.counts() == {"claude:one": 1}
+    assert slots.reserve("claude:one", "third", 2, 1000) is True
+
+
 def test_expiry_and_exit_release_capacity(redis, clock):
     slots = reservation.LaunchSlots(redis)
     assert slots.reserve("claude:one", "first", 1, 1000)
@@ -46,6 +57,24 @@ def test_expiry_and_exit_release_capacity(redis, clock):
     assert not slots.release("second")
     assert slots.counts() == {}
     assert slots.reserve("claude:one", "third", 1, 1000)
+
+
+def test_a_live_hive_keeps_its_session_report_counted_until_its_heartbeat_goes_stale(redis, clock):
+    import json
+
+    from scripts.hive import registry
+
+    redis.sadd(registry.INDEX, "h1")
+    redis.hset(registry.key("h1"), "heartbeat_at", int(clock[0] * 1000))
+    redis.set(f"{registry.key('h1')}:sessions", json.dumps({"codex:one": 6}), ex=45)
+    slots = reservation.LaunchSlots(redis)
+    for _ in range(6):
+        clock[0] += 10
+        registry.touch(redis, "h1", int(clock[0] * 1000))
+    assert slots.reserve_reading("codex:one", "late", 6, 1000) == reservation.SlotReading(False, 6)
+    redis.expire(f"{registry.key('h1')}:sessions", 600)
+    clock[0] += registry.LIVE_MS / 1000 + 1
+    assert slots.reserve_reading("codex:one", "late", 6, 1000) == reservation.SlotReading(True, 0)
 
 
 @pytest.mark.parametrize("cap,ttl", [(-1, 1), (True, 1), (1, 0), (1, 300001), (1, True), (1.0, 1), (1, 1.0)])

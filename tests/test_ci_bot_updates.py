@@ -34,17 +34,19 @@ def test_dev_push_publishes_merged_durations_with_read_permissions():
     assert job["needs"] == ["unit", "lint", "shard-check"]
     assert job["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
     assert job["permissions"] == {"contents": "read"}
-    upload = next(s for s in job["steps"] if s.get("uses") == "actions/upload-artifact@v4")
+    upload = next(s for s in job["steps"] if s.get("uses") == "./.github/actions/retry-upload")
     assert upload["with"]["name"] == "durations-merged"
     assert upload["with"]["path"] == ".test_durations*"
     assert upload["with"]["include-hidden-files"] is True
 
 
-def test_a_newer_dev_push_replaces_only_the_pending_dev_push_run():
+def test_dev_pushes_keep_one_pending_run_per_promotion_lane_without_cancelling():
     concurrency = _workflow("test.yml")["concurrency"]
     assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
     assert concurrency["queue"] == "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}"
-    assert "github.event_name == 'push' && 'promotion-dev'" in concurrency["group"]
+    group = concurrency["group"]
+    assert "github.event_name == 'push' && format('promotion-dev-{0}', " in group
+    assert "format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id)" in group
 
 
 ADOPT = (
@@ -67,6 +69,7 @@ def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run
     download = next(s for s in steps if s.get("name") == "Download the durations this run splits on")
     assert download["with"] == {
         "name": "split-${{ matrix.python-version }}",
+        "verify": '[[ "$(sha256sum .test_durations | cut -d \' \' -f 1)" == "$(< durations.sha256)" ]]',
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
     }
@@ -124,6 +127,48 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert "run" not in restore
     assert adopt["run"] in (ADOPT, PRECOLLECTED_ADOPT)
     assert adopt["env"] == ADOPT_ENV
+
+
+@pytest.mark.parametrize("name", ["mutation-plan", "mutation"])
+def test_mutation_jobs_adopt_dev_durations_before_the_sandbox_copies_the_record(name):
+    steps = _workflow("test.yml")["jobs"][name]["steps"]
+    names = [step.get("name") for step in steps]
+    restore = steps[names.index("Restore latest dev durations")]
+    adopt = steps[names.index("Adopt latest dev durations")]
+    mutate = next(i for i, step in enumerate(steps) if "python -m scripts.ci_mutation" in step.get("run", ""))
+    assert names.index("Restore latest dev durations") + 1 == names.index("Adopt latest dev durations") < mutate
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["with"]["path"] == "~/dev-durations"
+    assert restore["with"]["key"] == "durations-merged-${{ github.event.pull_request.base.sha }}"
+    assert restore["if"].startswith("github.event_name == 'pull_request' && ")
+    assert restore["with"]["restore-keys"] == "durations-merged-"
+    assert "from tests.dev_durations import adopt" in adopt["run"]
+    assert 'Path(".test_durations").write_text' in adopt["run"]
+
+
+def test_every_mutation_stats_part_restores_the_dev_durations_the_plan_matched():
+    jobs = _workflow("test.yml")["jobs"]
+    plan = jobs["mutation-plan"]["steps"]
+    lookup = next(step for step in plan if step.get("name") == "Restore latest dev durations")
+    assert lookup["id"] == "durations"
+    assert jobs["mutation-plan"]["outputs"]["durations"] == "${{ steps.durations.outputs.cache-matched-key }}"
+    steps = jobs["mutation-stats"]["steps"]
+    names = [step.get("name") for step in steps]
+    restore = steps[names.index("Restore latest dev durations")]
+    adopt = steps[names.index("Adopt latest dev durations")]
+    mutate = next(i for i, step in enumerate(steps) if "python -m scripts.ci_mutation" in step.get("run", ""))
+    assert names.index("Restore latest dev durations") + 1 == names.index("Adopt latest dev durations") < mutate
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["with"]["path"] == "~/dev-durations"
+    assert restore["with"]["key"] == "${{ needs.mutation-plan.outputs.durations }}"
+    assert restore["with"]["fail-on-cache-miss"] is True
+    assert "restore-keys" not in restore["with"]
+    assert restore["if"] == (
+        "github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'"
+        " && needs.mutation-plan.outputs.durations != ''"
+    )
+    assert "from tests.dev_durations import adopt" in adopt["run"]
+    assert 'Path(".test_durations").write_text' in adopt["run"]
 
 
 @pytest.mark.parametrize("bump,expected", [("patch", "2.17.1"), ("minor", "2.18.0"), ("major", "3.0.0")])

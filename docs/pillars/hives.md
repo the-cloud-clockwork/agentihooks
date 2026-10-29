@@ -34,11 +34,20 @@ agentihooks hive add ssh://worker@lab-vm:22 \
 agentihooks hive install          # user service that runs agentihooks hive run
 ```
 
-- `hive add <ssh target> --url <url> [--redis-url URL]` names the machine `swarm-hive-<epoch seconds>` from the
-  clock; a typed label is refused. It refuses unless the local hive record has
-  `ui=yes`, with `hive add refused: hive <id> is headless; only a UI hive adds machines`. On a UI hive it runs
-  `herdr machine add --label swarm-hive-<epoch seconds> --remote-session default <target>` (300 second timeout) unless
-  `herdr machine list --json` already holds that target, so a rerun only redelivers the credential; it mints a hive member
+- `hive add <ssh target> --url <url> [--redis-url URL]` names the hive after its machine, the target's host: the
+  first add of a host gives it the lowest free name `swarm-hive-001`, `swarm-hive-002` and so on, kept in the Redis
+  hash `agentihooks-hive:machines`, and every later add of that host reuses the name. A typed label is refused. It
+  refuses unless the local hive record has `ui=yes`, with
+  `hive add refused: hive <id> is headless; only a UI hive adds machines`. One machine runs one hive: a herdr machine
+  already saved on the same host under another label refuses the add with
+  `<host> already runs hive <label>; one machine runs one hive, so grow it with more max agents`. When a hive member
+  already carries the label, the add keeps that member, saves the herdr entry again if it is gone, and mints and
+  delivers nothing: `--url` and `--redis-url` are ignored, and its `added <target> to herdr as <label>` line means
+  the herdr entry is saved, not that a credential was delivered. `hive remove` is the only way a machine's member is
+  retired, so changing the delivered URLs or repairing a lost `hive.env` is `hive remove <id>` (it drains first), then
+  `hive add`. Otherwise
+  it runs `herdr machine add --label <name> --remote-session default <target>` (300 second timeout) unless
+  `herdr machine list --json` already holds that target or label; it mints a hive member
   named after the label, and delivers it: `ssh -o BatchMode=yes <target>` (60 second timeout) writes the member's
   `hive.env` (mode 0600) into `${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/hive.env` on the remote machine. If delivery
   fails, the minted member is revoked and the command exits 1. On success it prints
@@ -67,17 +76,21 @@ agentihooks hive install          # user service that runs agentihooks hive run
   seconds after any exit. `hive run` publishes sessions, quota, slots and repos every fifteen seconds.
 - `agentihooks hive refresh` mints a new Redis credential; `agentihooks hive revoke <id>` deletes a member's
   ledger credential and Redis user.
-- `agentihooks hive remove <id>` takes a hive out of the fleet in one run. It sets `draining=yes`, so placement
-  puts no new agent or master there, and sends every live agent on the hive one inbox order to hand off. Once none
-  is left it revokes the member and its Redis user, removes the herdr machine saved under the hive's label and that
-  machine's host key from `~/.ssh/known_hosts`, deletes the hive record and every key below it, and deletes the
-  OpenBao record (`k8s/agentihooks-hive-<label>`, or `--path`). With `--antoncore <checkout>` it also stages the
-  removal of the hive's Argo application, manifests folder and values overlay there, for a pull request. The label
-  defaults to the member's name (`--label` overrides; a rerun after the member is revoked needs it). After `--wait` seconds (default 3600) with agents still on
-  the hive it stops with their names and leaves the hive draining; run it again to keep waiting. Every step skips a
-  piece that is already gone, so a rerun finishes an interrupted remove. `OPENBAO_URL` and `OPENBAO_TOKEN` must
-  be set.
-- `agentihooks hive list` prints one line per hive: id, `live` or `stale`, ui, max agents, excluded (`none` when
+- `agentihooks hive remove <name>` reverses `hive create` in one run; the name may also be the member id. It runs
+  its steps in order and prints each one: drain sets `draining=yes`, so placement puts no new agent or master there,
+  sends every live agent on the hive one inbox order to hand off and reports the agents that did; member revokes the
+  member and its Redis user; herdr removes the machine saved under the hive's label and its host key from
+  `~/.ssh/known_hosts`; registry deletes the hive record and every key below it, releases the hive name of its node and
+  deletes the `hive create` state that names it; manifests opens a pull request into antoncore `dev` (`--repo`,
+  `--base`) deleting the hive's Argo application, manifests folder and values overlay, and asks GitHub to merge it
+  once its checks pass: the release is the label itself for a `swarm-hive-` name and `agentihooks-hive-<label>`
+  otherwise; openbao deletes the OpenBao record (`k8s/agentihooks-hive-<label>`, or `--path`). `--dry-run` prints
+  every step and writes nothing. The label defaults to the member's name (`--label` overrides; a rerun by member id
+  after the member is revoked needs it, a rerun by name does not). After `--wait` seconds (default 3600) with agents
+  still on the hive it stops with their names and leaves the hive draining; run it again to keep waiting. Every step
+  skips a piece that is already gone, so a rerun finishes an interrupted remove and writes nothing after a completed
+  one. `OPENBAO_URL` and `OPENBAO_TOKEN` must be set.
+- `agentihooks hive list` prints one line per hive: id, `name=<name>` when the hive carries a readable name, `live` or `stale`, ui, max agents, excluded (`none` when
   empty) and its [headroom](#headroom) reading.
   `agentihooks hive show <id>` prints the full record as JSON.
 
@@ -220,7 +233,7 @@ by Redis with `NOPERM`. So every piece of state a member process writes lives be
 | Launch order receipt and acknowledgement | `<root>:hive:<id>:...` | The controller, which records the execution as working. |
 | Inbox items, sequence counters, delivery owners, seen marks and the master pool | `<root>:hive:<id>:inbox:...` | The member's own agents; the controller routes sends to the member's agents there and relays mail out of it. |
 | Session readings: heartbeat, prompt, session model, progress, wait, waited, woke, wait history and stop blocks | `<root>:hive:<id>:swarm:...` | The controller's idle and wait checks, and the progress and stop gates, for agents placed on that member. |
-| Sessions report, including the executions it runs | `<root>:hive:<id>:sessions` | The controller's launch slot refresh. |
+| Sessions report, including the executions it runs | `<root>:hive:<id>:sessions` | The controller's launch slot refresh, and every launch reservation's account count; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
 
 ### Which keys a process uses
 
@@ -260,6 +273,32 @@ agentihooks msg reply <id> "thanks, take the next task"
 # The reply is written into the member's inbox keys, where the engineer reads it
 ```
 
+### Seat mail follows its occupant
+
+A send to a seat writes into the inbox of the agent occupying it at send time. A send to an empty seat, such as
+`dispatcher@<slug>` between two dispatchers, lands in the controller keys. When the next occupant starts on a
+member, its mail would sit in keys it never reads.
+
+Every swarm tick's exit sweep moves that mail. For each live agent that is the current occupant of a lane seat
+(`eng-N@<slug>`, `ci-N@<slug>`, `plan-N@<slug>`) or the dispatcher seat (`dispatcher@<slug>`), the sweep moves every
+open item addressed to the seat from any other reachable inbox into the inbox that holds the agent: the member keys
+of the hive it runs on, or the controller keys when it runs on the swarm host. A moved item:
+
+- keeps its id, sender, text, history and ledger entry;
+- turns pending at the same seat address, so the occupant's next inbox read delivers it;
+- gains a history entry by `swarm` with the reason `moved to hive <id>, where <agent> runs <seat>`, or
+  `moved to the controller, where <agent> runs <seat>`.
+
+Master seats never move: their mail stays with the master pool of its inbox. An inbox whose Redis times out or
+drops is skipped for that pass, and the sweep moves its mail on a later tick.
+
+To see a moved item, run on the hive where the occupant runs, as that occupant:
+
+```bash
+agentihooks msg inbox            # the item shows pending, with its original id
+agentihooks msg read <id>        # its history ends with the move and its reason
+```
+
 ### Launch slot rows
 
 Launch slot rows count how many executions hold each account slot. Only the controller writes them; a member never
@@ -276,6 +315,49 @@ member executions from what each member reports:
    ticks and the slot is free for the next launch.
 
 `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` sets the tick, and with it the refresh lifetime.
+
+### Sessions report and the account cap
+
+Every launch that takes an account slot reserves it against the account's cap in one Redis script. The script
+counts the account's sessions as:
+
+1. the sessions every live hive reports for the account in its sessions report, `<root>:hive:<id>:sessions`, where
+   live means a heartbeat no older than ninety seconds;
+2. plus every launch slot row for the account that is not exited and whose execution no hive report lists;
+3. minus every exited launch slot row whose execution a hive report still lists.
+
+When the count reaches the cap the launch is not started, and the launch reports
+
+```text
+account reservation is full: account=<harness>:<account> sessions=<count> cap=<cap> five_left=<pct> week_left=<pct>
+```
+
+The hive's beat writes the sessions report every 15 seconds with a 45 second expiry. Between beats the headroom
+publisher, every 10 seconds, moves the hive's `heartbeat_at` forward and extends the sessions report's expiry to the
+90 second live window. While the headroom publisher runs, a sessions report therefore counts for as long as its
+hive reads live: while the beat stalls, for example while it waits inside a launch, the hive keeps its last report
+and its sessions still count against the cap. Once both the beat and the headroom publisher stop, the heartbeat
+goes stale ninety seconds after the last write, and the report expires 45 seconds after that write if the beat made
+it, or ninety seconds after it if the headroom publisher made it, so the hive's sessions stop counting and free the slots.
+
+A beat stalled during a launch therefore holds the cap at the last reported count until the next beat refreshes it,
+which can count a session the hive has since lost. Before this, the report expired 45 seconds after the last beat
+while the headroom heartbeat kept the hive live, so the reservation counted none of that hive's sessions and
+admitted launches past the cap: Doctor finding `failed-spawn/t2015` recorded a Codex account at eight live sessions
+against a cap of six.
+
+Read a hive's report and its remaining lifetime on the swarm Redis:
+
+```bash
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:hive:lab-vm:sessions
+# {"codex:one": 6, "_executions": {"codex:one": ["...", "..."]}}
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" PTTL agentihooks:hive:lab-vm:sessions
+# up to 90000 while the hive is live
+```
+
+The ledger monitor reads the report only for live hives. The Hives panel reads it for every hive seen in the last 24
+hours whether or not the hive is live, so it shows a dead hive's counts for up to ninety seconds after its last
+heartbeat.
 
 ### Checking a member's scope
 
@@ -301,9 +383,10 @@ the member's own keys.
 
 ### Limitations
 
-- The controller's wake and escalation pass, exit sweep, swarm status, handoff mailbox and swarm removal read only
-  the controller inbox. Mail held for an agent a member runs gets no wake, escalation or exit settlement, and the
-  controller's seen marks for such agents stay in the controller keys.
+- The controller's wake and escalation pass, exit sweep, swarm status, handoff mailbox and swarm removal read every
+  joined member's inbox as well as the controller's. Mail sent to a seat while it was empty still waits in the
+  controller keys until the next tick's [seat mail move](#seat-mail-follows-its-occupant), and master seat mail
+  never moves.
 - A member-hosted agent cannot yet complete a life: its agent record writes, such as order consumer binding, take
   master, done, handoff and seat exits, sit outside its keys and are refused.
 - A member's master pool, filled while every live master sat on that member, drains only on the next send there.
@@ -318,7 +401,10 @@ the member's own keys.
 | A member item closes as `refused: the hive member that sent it does not run its sender` | The sender named on the item is not an agent placed on that member. | Send from the agent's own session on the member; the sender is the session, never an argument. |
 | A member process fails a write with `NOPERM` | The process writes outside its hive key, such as an agent record or a launch slot row. | Expected for agent record writes, see Limitations; anything else is a bug to file with the key named. |
 | The controller shows a member agent idle though it works | The agent's execution record names a hive with no member record, so the controller reads its readings from the controller keys. | Check `agentihooks hive show <id>` lists the hive and that it was added with `hive add`. |
+| A hive-run dispatcher or lane agent never sees mail sent to its seat while the seat was empty | The item waits in the controller keys until the next tick's exit sweep moves it. | Wait one tick, then run `agentihooks msg inbox` as the occupant on its hive. Mail to a master seat does not move. |
 | A slot stays taken after a member lost an agent | The member still reports the execution. | The row lapses within two ticks once the execution leaves the member's sessions report. |
+| An account runs more live sessions than its cap | A live hive's sessions report is missing: `redis-cli GET <root>:hive:<id>:sessions` returns nothing while `agentihooks hive list` shows the hive live. | Upgrade the hive to a release whose headroom heartbeat extends the report, then restart its hive service; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
+| Launches report `account reservation is full` though the account runs fewer sessions | A hive's beat is stalled and its last sessions report still counts. | The count corrects on the hive's next beat, or within ninety seconds after both its beat and its headroom publisher stop. |
 
 ## Settings
 
@@ -327,17 +413,35 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 
 | Setting | Values | Default | Meaning |
 |---|---|---|---|
-| `name` | text | the hive id | Display name. |
+| `name` | text | the hive id | Display name. A hive with `ui=yes`, where the masters run, is always named `swarm-master`. |
 | `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. |
 | `ephemeral` | `yes`, `no` | `no` | The machine can disappear, such as a pod. Placement prefers lasting hives on a tie. |
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
+| `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
 | `max-agents` | whole number, 1 or more | `20` on `ui=no`, `10` on `ui=yes` | Working agents the hive runs at once. Masters do not count against it. |
+| `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
 Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
 role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded` or
 `max-agents` follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
 stored `max-agents`, on its next `hive set` or heartbeat, and reads under the defaults until then.
+
+### Capabilities and task needs
+
+A hive declares what it offers with `capabilities`, and a task names what it requires with `needs`:
+
+```bash
+agentihooks hive set desk capabilities=headed
+agentihooks ledger --slug <slug> --as <name> task add browse "Check the logged in page" --lane eng --needs headed
+agentihooks ledger --slug <slug> --as <name> task set browse needs=headed
+```
+
+Placement keeps only the live hives whose capabilities cover every name in the task's `needs`. When none does, the
+task waits with `the task needs a hive with headed, and no hive declares it`, shown with the other placement waits
+in `swarm status`. Overflow to the local machine and a local swarm take such a task only when the local hive record
+declares the capabilities too, and runtime placement keeps it off a backend that cannot declare them. `swarm status`
+prints each agent's hive in its Hive column, and the ledger page agents table names it under the agent.
 
 ### Excluded and prefer: the operator's layout
 
@@ -380,6 +484,14 @@ login. Each step that empties the list names its reason, and the launch waits wi
 
 Among the hives left, placement picks the lowest `prefer` rank for the role, then the most room, then a lasting
 hive over an ephemeral one, then the hive id.
+
+`agentihooks swarm <id> set placement-mode=round-robin placement-nodes=N` switches a swarm's worker launches from
+this default, `anton-first`, to round robin for load runs: placement keeps only the first `N` live hives by id
+that list the swarm's repo, local or cloud (`placement-nodes=0`, the default, keeps every such hive), ignores
+`prefer`, and gives each agent to the kept hive running the fewest agents, counting launches already placed in the
+same tick. When every kept hive is full the launch waits rather than use another hive. The UI roles, `master`, `qa`
+and `frontend`, and tasks pinned to a hive or to the workstation keep `anton-first`. `placement-mode=anton-first`
+switches back on the next tick.
 
 `eng`, `ci`, `plan` and `dispatch` prefer headless hives, and `master`, `qa` and `frontend` prefer UI hives.
 Placement tries the preferred kind first and takes the other kind only when no preferred hive taking the role has
@@ -424,21 +536,34 @@ each limit, and the smallest limit wins.
 
 - **Every beat,** right after the heartbeat is written and before launch orders, herdr reports and execution reports,
   stamped with the heartbeat time. A beat that fails after the heartbeat still leaves a fresh reading.
-- **Every 10 seconds on its own thread,** started for each Redis connection. A launch inside a beat can run
-  `init-agent` for minutes; the thread keeps the reading fresh while it does, and also renews the daemon's order
-  consumer marker (45 seconds), so a launch it still holds is not taken for an orphan. The thread paces with the
-  scheduler process timer, like the beat. A Redis error, or a reading that cannot be parsed, prints
-  `hive headroom publish failed (<error>: <detail>)` to stderr and the thread keeps going. When its timer connection
-  is lost the thread ends, and the reconnect starts a new one. Any other error ends the thread with a traceback until
-  the next reconnect; the beat still publishes on its own path, but a launch longer than 30 seconds then lapses the
-  reading.
+- **Every 10 seconds on its own thread.** A launch inside a beat can run `init-agent` for minutes; the thread keeps
+  the reading fresh while it does, and also renews the daemon's order consumer marker (45 seconds), so a launch it
+  still holds is not taken for an orphan. The thread paces with the scheduler process timer, like the beat. A Redis
+  error, or a reading that cannot be parsed, prints `hive headroom publish failed (<error>: <detail>)` to stderr and
+  the thread keeps going. A lost or timed out timer wait prints `hive headroom wait failed (<error>: <detail>)` and
+  ends the thread; any other error ends it with a traceback.
+
+The daemon checks its helper threads, the headroom publisher and the herdr stats publisher, at the start of every
+beat and starts again each one that has ended, so a helper is back within one beat of ending without waiting for the
+beat loop's own Redis connection to drop. Each check starts at most one thread per helper, so a Redis that stays down
+cannot make the daemon spin. A reconnect starts both helpers fresh on the new connection. The herdr stats thread logs
+a lost wait the same way, as `hive herdr stats wait failed (<error>: <detail>)`.
+
+Between a helper ending and the next beat, only the beat path publishes. A beat that holds a launch longer than 30
+seconds, the reading's expiry, therefore still lapses the reading once, until that beat ends and the next one
+restarts the thread.
 
 `hive list` appends the reading to each hive's line, its fields separated by tabs (shown aligned here):
 
 ```bash
 agentihooks hive list
 # vm  live  ui=no  max-agents=20  excluded=none  cpus=8  load5=1.42  available-mb=21034  pending=0
+# anton-2  live  ui=no  max-agents=8  excluded=master  cpus=16  load5=4.73  available-mb=2576  pod-limit-mb=4200  pending=0
 ```
+
+A hive in a pod with a cgroup memory limit shows `available-mb` as the tighter of the node and pod figures, and
+`pod-limit-mb` names the pod limit; admission counts the pod memory room as one more limit and launches by the
+tightest of them.
 
 Hive workers load code at start. A hive still on code from before the 10 second publisher writes headroom only
 after the beat's launch poll, so its reading lapses during a long launch; restart its `agentihooks-hive` service,
@@ -448,6 +573,7 @@ or roll its pod, to pick up the publisher.
 |---|---|---|
 | `hive list` shows `headroom=missing` on a `live` hive | `journalctl --user -u agentihooks-hive`, or the pod log, for `hive headroom publish failed` | Fix the error it names; a Redis error clears when the connection returns. |
 | A launch waits with `missing telemetry` while another launch runs on that hive | The hive's agentihooks version | Upgrade and restart the hive service so the 10 second publisher runs. |
+| `headroom=missing` comes and goes on a `live` hive, with readings only as often as its beats | The log for `hive headroom wait failed`, and the hive's agentihooks version: code from before the helper restart loses its headroom thread on the first failed wait until the beat loop reconnects | Upgrade and restart the hive service, or roll its pod. |
 | Room reads 0 with a fresh reading | The refusal detail: `cpu`, `ram` or `max agents` | The named limit is spent; wait for agents to finish or raise `max-agents` when the host has room. |
 
 ### Account caps on every hive
@@ -540,6 +666,68 @@ Limitations:
 | A member is missing from `agentihooks hive list` | The hive index no longer holds it, and a member's beat never adds itself back. | Run `agentihooks hive refresh` on the member; refresh adds it to the index again. |
 | A member is refused an agent token | The agent's record names another hive, or no hive. | Read the agent's `hive` field with `HGET agentihooks:swarm:<slug>:agents <name>`; only the controller places an agent. |
 
+## Pulling work from the hub
+
+A swarm on the `events` engine (see [Event driven engine](swarm.md#event-driven-engine)) places no agent on a
+hive. Hives pull offers from the hub over NATS JetStream instead, through one spoke per swarm and lane (see
+[Running a spoke](#running-a-spoke)). On every pass a spoke:
+
+1. Recovers its own unfinished claims.
+2. Checks the hive's admission room.
+3. Takes one offer from the lane work queue, has it admitted and launches the agent.
+
+A master spoke rechecks its offer against the ledger itself. An eng, ci or plan spoke asks the hub to admit it,
+because a member's Redis user cannot claim a task, name an agent or take a seat, and a remote hive makes no service
+ledger reads. The hub answers `admit` on the same `slots.<swarm>.<hive>` request subject as account slots, which a
+member's credential may publish only for its own hive; a request naming another hive than its subject is refused. It rechecks the offer against the ledger, claims the task,
+starts the execution on that hive, occupies a seat, marks the task claimed (or back in `pr`) and returns the primed
+spawn task. A repeat from the same hive returns the same admission, so a retried launch keeps its agent; any other
+hive gets none. When the offer runs out of deliveries, the spoke sends `reopen`, which returns the task to `open`.
+Unlike a tick launch, a hub admission scaffolds no task work folder on the hub and resolves no reclaim continuation,
+stack base, overlaps or group; the spawn task carries the seat's handoff, recaps and learned notes.
+
+The hub creates the hive buckets; members are not allowed to create them:
+
+| Bucket | Holds |
+|---|---|
+| `spoke-work` | One claim per task and generation, keyed by a hash of swarm, task and generation. On the main path its state goes `claimed`, `launching`, `started`, then `exiting` and `exited`. A claim can also be `ready`, `withdrawn`, `dead_pending` or `dead`. |
+| `spoke-pending` | The launch slot a spoke reserves before it starts an agent. |
+| `hive-presence` | Each hive's heartbeat. |
+| `hive-executions` | What each hive reports about its running executions. |
+| `execution-starts` | Every `execution.started`. The tick and the reconciler use it to tell hub launched agents from tick launched ones. |
+| `account-slots` | Per harness and account, the executions holding one of its sessions and each hive's cap for it. A spoke reserves a slot here before launching, so hives sharing an account stay under its cap. |
+| `hive-slot-accounts` | Per hive, the harness and account pairs it has reported, so its beat renews every slot it holds. |
+
+A hive beats `hive-presence` every 15 seconds. A beat expires after 45 seconds.
+
+### When a hive is lost
+
+The hub's `hive-loss` reactor keeps an index of every started execution, by hive. A hive counts as lost when both of
+these hold:
+
+- its presence has expired;
+- this hub has watched presence for a full 45 seconds with no gap longer than one beat.
+
+The hub then publishes `execution.exited` with reason `hive-lost` for each of that hive's executions that are still
+running. The `lifecycle` reactor releases each one and reopens its task, which raises the claim generation, so another
+hive can pull the next offer.
+
+A spoke also ignores a claim or launch held by a hive that is no longer present. Every five minutes, the `reconciler`
+reactor rebuilds any missing `execution.started` from the swarm's agent records. It ends any execution
+that a hive reports gone. An execution on a lost hive ends with reason `lost`.
+
+### Running a spoke
+
+With `AGENTIHOOKS_DEPLOYMENT=distributed`, `agentihooks swarm spoke` runs the master lane spoke on the workstation,
+and `agentihooks hive run`, the worker hive image's last start step, runs beside its telemetry loop an eng, ci and
+plan spoke for every swarm on the `events` engine, leaving out the lanes in `HIVE_EXCLUDED`. The workstation spoke
+runs the same lane spokes for every lane. Legacy engine swarms get no lane spoke. Each new spoke logs
+`hive spoke for swarm <slug> lane <lane> takes swarm.<slug>.ready.<lane>`, and a stopped set of lane spokes logs
+why and starts again after 30 seconds. Spokes take work from the bus and bind to the hub's streams instead of
+creating them. Outside distributed mode `agentihooks swarm spoke` refuses and `agentihooks hive run` starts no
+spoke, because the workstation then runs the swarm engine itself. The bus settings a hive needs arrive with its
+invite; see [The hub and the bus](../reference/deployment-modes.md#the-hub-and-the-bus).
+
 ## Workstation fallback
 
 When no UI hive fits, because none is live, or the live ones lack the repo, or lack both a slot and the interactive
@@ -594,8 +782,10 @@ The controller ends the execution, drops the launch order and reports the spawn 
 A payload that passes is written below the hive's own home, in `~/.agentihooks/swarm/<slug>/tasks/<task id>`:
 
 - `steering.md` is replaced with the controller's copy on every launch.
-- `progress.md` and `proof.md` are written only when the hive does not hold them yet. On a relaunch of the same task
-  on the same hive, its own lines stay and the controller's copy is not merged in.
+- `progress.md`, `proof.md` and every file the controller's folder carries besides them are written when the hive
+  does not hold them yet, and replace the hive's file when it does not already contain the text that was sent. A hive
+  file that holds the sent text and more, such as a `progress.md` the agent kept appending to on a relaunch of the same
+  task on the same hive, stays as it is. A hive file that is a symbolic link is never written.
 
 The agent then starts with `hive_opening` exactly as carried. The hive does not rebuild the prompt from the task.
 
@@ -610,6 +800,53 @@ the live one or else the one started last, is a worker on that hive. Masters are
 When the controller publishes swarm status, each task with a work folder takes its lines from the hive that runs,
 or last ran, its latest execution. A task whose latest execution ran on the controller's own machine is read from
 the local folder. These lines are what the ledger page shows in the task's Contract and proof fold.
+
+### Work folder files on any host
+
+On the same heartbeat each hive writes the files of those folders to `<root>:hive:<hive id>:workspaces:files`,
+expiring after a day so a hive that died still hands its last copy over. The table below lists what travels. On each
+status publish the controller writes each task's copy, from the hive running its latest execution, into its own
+folder. A launch carries the controller's folder to the next hive, added files included, and a file the hive already
+holds is replaced unless it already contains what was sent, so a successor on any host reads what its predecessor
+wrote.
+
+What travels from a task folder:
+
+| File | Travels | Limit |
+|---|---|---|
+| `steering.md` | Only from the controller to the hive, at launch | Whole file |
+| `progress.md`, `proof.md` | Both ways | The last 65,536 characters |
+| Any other file directly in the folder, such as `plan.md`, `measure.sh`, `handoff.md` or `mutation-fix.patch` | Both ways | 32 files, taken in name order; a file over 65,536 bytes is skipped and does not count toward the 32 |
+| Subfolders and the files in them, symbolic links, names that do not start with an ASCII letter or digit, such as hidden names starting with `.`, names whose later characters are not Unicode word characters, `.` or `-`, names over 128 characters, files that are not UTF-8 text | Never | Not carried |
+
+The controller mirrors a task only when its latest execution ran on a hive. A task whose latest execution ran on the
+controller's own machine keeps the controller's folder, and a stale hive copy is not written over it. The mirror
+replaces each file the hive sent with the hive's text and leaves every other controller file in place; a file the
+agent deleted on the hive stays on the controller. Steering in a hive copy is never written back.
+
+The sequence for a task reclaimed from one hive onto another:
+
+1. The first agent, on hive `lab-vm`, appends to `progress.md` and writes `measure.sh` in its task folder.
+2. Within fifteen seconds `lab-vm` writes both files to `agentihooks:hive:lab-vm:workspaces:files`.
+3. On its next status publish the controller writes them into `~/.agentihooks/swarm/<slug>/tasks/<task id>` on its
+   own machine, even when `lab-vm` has stopped beating since, as long as its copy is less than a day old.
+4. The successor launches on hive `lab-vm-2`. Its launch payload carries `steering.md`, `progress.md`, `proof.md` and
+   `measure.sh` from the controller's folder, and `lab-vm-2` writes them below its own home before the agent starts.
+
+Read the copy a hive holds for one task, and how long it has left, on the swarm Redis:
+
+```bash
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:hive:lab-vm:workspaces:files \
+  | jq -r '."rig-grade-swarm"."t945" | keys[]'
+# measure.sh
+# progress.md
+# proof.md
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" TTL agentihooks:hive:lab-vm:workspaces:files
+# up to 86400
+```
+
+A task missing from that output has no execution on that hive as its latest one, or its folder holds none of the files
+that travel. Nothing is configured: the 32 file cap, the 65,536 limit and the one day lifetime are fixed in the code.
 
 ### Resume and recovery prompts
 
@@ -629,13 +866,16 @@ newer hive. Deploy the controller first, then the hives.
 | Launches on one hive end with `hive launch failed: prompt` | The controller predates prompt transport and sends no opening and digest. | Upgrade the controller, then the hive. |
 | Launches on one hive end with `hive launch failed: expired` | The hive picked up the launch order more than 300 seconds after the controller sent it. | Check that the hive beats (`agentihooks hive list` shows `live`) and its `agentihooks-hive` service runs. |
 | A remote task's Contract and proof fold is empty | The hive stopped beating for more than 45 seconds, so its synced copy expired, or the agent has not written a line yet. | Check `agentihooks hive list`. The lines come back on the hive's next heartbeat. |
-| A relaunched agent on the same hive does not see proof lines written on another machine | `progress.md` and `proof.md` already on a hive are kept, never merged. | Copy the missing lines into the hive's work folder, or append them from the agent. |
+| A successor on another host does not see a file its predecessor wrote | The file does not travel: it sits in a subfolder, is a symbolic link, has a hidden or unsupported name, is not UTF-8 text, is over 65,536 bytes, or comes after the first 32 files by name. | Move what the successor needs directly into the task folder as a plain text file under the limit. See [Work folder files on any host](#work-folder-files-on-any-host). |
+| A successor on another host does not see a file its predecessor wrote, and the file is one that travels | The predecessor's hive wrote no copy: it ran a version from before pull request [#7834](https://github.com/the-cloud-clockwork/agentihooks/pull/7834), or its copy expired a day after its last beat. Or the controller runs a version from before #7834 and never writes hive copies into its folders. | Read the key with `redis-cli GET <root>:hive:<id>:workspaces:files`. Upgrade the controller and the hives. A copy that expired is gone; recover the file from the predecessor hive's own folder while that host is up. |
+| Lines a relaunched agent wrote on its hive are replaced by the controller's copy | The hive's file did not contain the text the controller sent, so the controller's copy won. This happens when the hive file was edited rather than appended to. | Append to `progress.md` and `proof.md` instead of rewriting them. |
+| A file deleted on the hive is still in the controller's folder | The mirror writes the files a hive sends and removes none. | Delete the file in the controller's folder too, or leave it: the next launch carries it again. |
 
 ## Failover timing
 
 | Clock | Value | Effect |
 |---|---|---|
-| Hive heartbeat | every 15 seconds | Sessions, quota and reports expire after 45 seconds without a beat. |
+| Hive heartbeat | every 15 seconds | Quota and the other reports expire after 45 seconds without a beat. The sessions report lives as long as the hive reads live; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
 | Headroom | every 10 seconds and every beat | A reading older than 30 seconds counts as missing and the hive's room reads 0; see [Headroom](#headroom). |
 | Live window | 90 seconds | A hive past it is stale and gets no new launches. |
 | Minute tick | 60 seconds (`AGENTIHOOKS_CONTROLLER_TICK_SECONDS`) | Each tick checks the master's hive. |
@@ -769,6 +1009,68 @@ failed with "hive launch failed: `<cause>`".
 | `ambiguous` | The agent may have started but its process could not be identified, or the order was taken 300 seconds ago with no result. |
 | `<status>: <detail>` | The local runtime refused the spawn, such as `refused: <why>` or `unavailable: <why>`, with the runtime's own reason. |
 
+### A worker that finishes before the tick collects its acknowledgement
+
+Until the tick collects a hive launch's `live` acknowledgement, the execution record names only the hive in its
+runtime target (`host_id`). The process identity a retire needs (`process_namespace`, `pid`, `pid_start`), the
+pane, the launch time and the launch timings arrive with the acknowledgement.
+
+A short task can finish between the hive's acknowledgement and the next tick. The tick then collects the
+acknowledgement of an execution already marked `finished`. It checks that the controller epoch, claimant, seat,
+generation and acknowledging hive match the order, and copies the acknowledged runtime target, pane, launch time
+and timings into the execution record. The record stays `finished`, the agent is not revived, the launch is
+recorded as started, and the tick reports the action:
+
+```text
+<agent> finished <task> before the tick collected its hive acknowledgement
+```
+
+When the record already carries the acknowledged target, the tick leaves it unchanged. An acknowledgement that is
+not `live` refuses the spawn and leaves the record `finished`. The refusal reason depends on what the receipt holds:
+
+| Receipt | Spawn refused with |
+|---|---|
+| No acknowledgement | `the hive launch order ended before its acknowledgement` |
+| An acknowledgement with status `failed` | `hive launch failed: <cause>`, the hive's own cause from [Refusal causes](#refusal-causes) |
+
+A failed acknowledgement reads the same here as on a launch the tick collects while the execution still runs, so
+the swarm timer journal and the Doctor's failed spawn finding carry the hive's cause. A Codex worker whose profile
+canary timed out on the hive, for example, is written to the journal as:
+
+```text
+<slug>: spawn failed for <task>: hive launch failed: refused: agentihooks init-agent: mounted profile canary did not validate before timeout: the codex agent reported no canary within 90s
+```
+
+Before [pull request #8039](https://github.com/the-cloud-clockwork/agentihooks/pull/8039) a failed acknowledgement
+on a finished execution was reported with the missing acknowledgement reason. The Doctor finding
+`failed-spawn/t-runners-doc-worker001` read "the hive launch order ended before its acknowledgement" while the
+hive's acknowledgement held the canary timeout above.
+
+With the process identity recorded, the retire order the tick sends for that agent reaches the hive with a process
+it can stop or find already gone, and the retire ends.
+
+Before this, the record kept only `host_id`. Every tick sent a retire order that the hive refused because it could
+not identify a process, the per agent retire count grew each tick, and from the third failing tick
+`agentihooks swarm <id> status` listed a `retire failed` finding with this evidence:
+
+```text
+<agent> is still running after <n> retire attempts
+process 0
+refusal: hive <host> refused retire: runtime target names no process
+```
+
+On the Doctor swarm the finding for one ci agent reached 25 failing ticks and came back after a resolved verdict
+because the count kept growing.
+
+### Troubleshooting
+
+| Symptom | Check | Fix |
+|---|---|---|
+| A `retire failed` finding shows `refusal: hive <host> refused retire: runtime target names no process` | The agent's execution record: does its runtime target carry `process_namespace`, `pid` and `pid_start`, or only `host_id`? | A record collected by a current controller carries the identity, and its retire ends. A record left with only `host_id` by an older controller keeps failing until the tick drops the agent from the swarm, which clears its retire count and the finding. |
+| The tick printed "finished … before the tick collected its hive acknowledgement" | The execution record's state | Expected for a task that finished within one tick; the record stays `finished` and the launch is counted as started. |
+| A spawn failed with `hive launch failed: <cause>` for an execution already `finished` | The cause, against [Refusal causes](#refusal-causes) | The hive acknowledged the launch as failed. Fix the cause on the hive; for a canary timeout see [Profile launch home](../reference/profile-launch-home.md). |
+| A spawn failed with `the hive launch order ended before its acknowledgement` | `agentihooks hive list` for the order's hive | The order's receipt holds no acknowledgement, so the hive never answered it. Check that the hive beats and its `agentihooks-hive` service runs. |
+
 ## Hive placement for one swarm on a local machine
 
 A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks swarm <id> set hive-placement=on`
@@ -795,14 +1097,18 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    and waits for one, up to `HIVE_DELIVERY_WAIT_S` (default 900) seconds, then exits 1 with
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
-5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> max-agents=<workers.maxAgents>`, by
-   default `excluded=master max-agents=20`.
+5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
+   max-agents=<workers.maxAgents> prefer=<workers.prefer>`, by default `excluded=master master-swarms= max-agents=20
+   prefer=`. `workers.prefer` takes `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to
+   the lowest ranked hive while admission leaves it room.
 6. Runs `agentihooks hive run`.
 
 When the pod stops, for an image update, a rollout or a node drain, its preStop runs `agentihooks hive drain --wait
-<workers.drainSeconds>` (default 3600): the hive sets `draining=yes`, so placement sends it no new agent, and waits
-until no agent it hosts is running. The grace period is `workers.drainSeconds` plus 30 seconds, so a Recreate rollout
-starts the new pod only after the old hive's agents finish or the wait runs out.
+<workers.drainSeconds>` (default 3600): the hive sets `draining=yes`, so placement sends it no new agent, sends
+each agent it hosts one inbox order to hand off, so the agent's successor starts on another hive, and waits until no
+agent it hosts is running. The drain writes its result to the pod log. The grace period is `workers.drainSeconds` plus
+30 seconds, so a Recreate rollout starts the new pod as soon as the old hive's agents hand off, or when the wait runs
+out.
 
 The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
 whole record from the workstation with one command:
@@ -840,9 +1146,23 @@ global installs and uv tools land in `~/.local` under the worker home.
 file. It reads the file without executing it, refreshes the member through the
 hive endpoint and saves its Redis and NATS credentials privately. The hub operator
 issues that file with `agentihooks hive invite`, using `--bus-url` for the NATS
-address reachable by the member. A `--like` invite copies that address. Bus and
+address reachable by the member. A `--like` invite copies that address. When
+the NATS signer record lists the member's swarms, the credential reaches only
+those swarms' subjects and streams; see
+[Swarm scoped bus credentials](../reference/swarm-bus-scope.md). Bus and
 ledger addresses survive later credential refreshes. A private hub CA must be
 trusted before joining, for example through `SSL_CERT_FILE`.
+
+Bus credentials become scoped once the hub signer record carries `member_swarms`.
+`agentihooks hive scope`, run with `AGENTIHOOKS_NATS_SIGNER` naming that record,
+creates the entry and lists every existing member with each `--swarm`, or every
+swarm when none is given. From then on the hive endpoint rereads the record on
+each refresh and refuses a member it does not list before rotating its Redis
+password, and `hive invite` lists each new member and marks its invite
+`AGENTIHOOKS_BUS_SCOPED=1`. `hive join` with such an invite refuses an unscoped
+bus credential. Before the backfill, invites and refreshes stay unscoped. The
+join refusal guards a scoped member against a downgrade; the hub refusal is the
+enforcement, since anyone holding the invite file can edit its marker.
 
 The hive only Helm example uses the same invite: create a Secret with
 `kubectl create secret generic hive-invite --from-file=invite=/path/to/invite`,
@@ -877,6 +1197,17 @@ Recreate so two hives never share it. `workers.worktreeMinFreeGb` (default 50), 
 and `workers.worktreeStaleDays` (default 7) reach agents as `WT_MIN_FREE_GB`, `WT_MAX_PER_REPO` and `WT_STALE_DAYS`
 through the release's worktrees ConfigMap: `wt.sh new` evicts the oldest safe worktrees to keep that floor and cap, and
 `agentihooks gc` removes worktrees untouched that many days.
+
+`hiveStorage` keeps hive host folders in one per node setting. `hiveStorage.nodes.<node>` names `homes`, an optional
+`tmp` and an optional `mount` (`path`, `fsType` and `marker`, a path that exists only on the data disk);
+`hiveStorage.default` serves nodes without an entry. A hive that sets `workers.node` is pinned to that node, mounts
+`<homes>/<folder>` as `/home/worker` and `<tmp>/<folder>` as `/tmp` (an emptyDir without `tmp`), where the folder is the
+release name, or `<release>_<name>` for a `workers.hives` entry, which inherits `workers.node`; it replaces `homeVolume`
+and rolls out by Recreate. A pre-install and pre-upgrade Job makes both folders for uid 10001 first, and refuses unless
+`mount.path` is an `fsType` filesystem holding `mount.marker`, so an unmounted data disk never gets hive folders on the
+system drive. `hiveStorage.homeFolders.hives` lists hives whose `homeVolume` is set by hand under `default.homes`; one
+DaemonSet makes their folders on every node `homeFolders.nodeSelector` selects, except the nodes `hiveStorage.nodes`
+lists.
 
 A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
 CI work as Pods while its master, planners and dispatcher stay on the workstation; see

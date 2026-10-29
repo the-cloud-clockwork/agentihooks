@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -n "${HIVE_READY_FILE:-}" ]]; then
+  rm -f -- "$HIVE_READY_FILE"
+fi
+
 if [[ -z "${HIVE_GITHUB_AUTH_MODE:-}" ]]; then
   if [[ -n "${GITHUB_APP_PRIVATE_KEY:-}" ]]; then
     HIVE_GITHUB_AUTH_MODE=app
@@ -23,7 +27,7 @@ venv="$HOME/dev/tcc-ecosystem/.venv"
 git config --global user.name >/dev/null || git config --global user.name "agentihooks hive"
 git config --global user.email >/dev/null || git config --global user.email agentihooks-hive@users.noreply.github.com
 git config --global credential.https://github.com.helper \
-  "!$(command -v python3) -m scripts.github_app_cli credential"
+  "!$(command -v python3) -P -m scripts.github_app_cli credential"
 if [[ "${HIVE_GITHUB_AUTH_MODE:-}" == app ]]; then
   token_file="$AGENTIHOOKS_HOME/github-token"
   python3 -m scripts.github_app_cli token > "$token_file.next"
@@ -46,6 +50,9 @@ bundle_dir="$HIVE_REPO_ROOT/agentihooks-bundle"
 if [[ -n "${HIVE_BUNDLE_URL:-}" && ! -d "$bundle_dir/.git" ]]; then
   git clone --branch "${HIVE_BUNDLE_REF:-dev}" -- "$HIVE_BUNDLE_URL" "$bundle_dir" \
     || echo "worker-hive: bundle clone failed; init runs on the package roles alone" >&2
+elif [[ -n "${HIVE_BUNDLE_URL:-}" ]]; then
+  git -C "$bundle_dir" pull --ff-only -- "$HIVE_BUNDLE_URL" "${HIVE_BUNDLE_REF:-dev}" \
+    || echo "worker-hive: bundle fast forward failed; init runs on the kept clone" >&2
 fi
 
 python3 - <<'PY'
@@ -132,21 +139,10 @@ kept = [line for line in saved.read_text().splitlines() if not line.startswith('
 saved.write_text('\n'.join([f"AGENTIHOOKS_HIVE_URL={os.environ['AGENTIHOOKS_HIVE_URL']}", *kept]) + '\n')
 PY
 fi
-agentihooks hive join "$AGENTIHOOKS_HOME/hive.env"
-bundle=()
-[[ -n "${HIVE_BUNDLE_URL:-}" && -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")
-python3 -m scripts.hive.linked_profiles
-if (( ${#bundle[@]} )) && ! agentihooks init "${bundle[@]}"; then
-  echo "worker-hive: agentihooks init with the bundle failed; init runs on the package roles alone" >&2
-  bundle=()
-fi
-if (( ! ${#bundle[@]} )); then
-  agentihooks bundle unlink
-  agentihooks init
-fi
-# init writes the hosted ledger CA; agents read only this file, never the multi-line LEDGER_CA_PEM.
-if [[ -n "${LEDGER_CA_PEM:-}" ]]; then
-  python3 - <<'PY'
+# Join and agents trust the system roots beside the mounted CA; init rewrites the file, so it is placed twice.
+place_ledger_ca() {
+  if [[ -n "${LEDGER_CA_PEM:-}" ]]; then
+    python3 - <<'PY'
 import os, ssl
 from pathlib import Path
 
@@ -159,11 +155,28 @@ system = Path(roots).read_text()
 if ledger_ca.place(Path(os.environ['AGENTIHOOKS_HOME']), system.rstrip() + '\n' + os.environ['LEDGER_CA_PEM'].strip() + '\n') is None:
     raise SystemExit('worker-hive: LEDGER_CA_PEM holds no valid certificate')
 PY
+  fi
+}
+place_ledger_ca
+env -u LEDGER_CA_PEM agentihooks hive join "$AGENTIHOOKS_HOME/hive.env"
+bundle=()
+[[ -n "${HIVE_BUNDLE_URL:-}" && -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")
+python3 -m scripts.hive.linked_profiles
+if (( ${#bundle[@]} )) && ! agentihooks init "${bundle[@]}"; then
+  echo "worker-hive: agentihooks init with the bundle failed; init runs on the package roles alone" >&2
+  bundle=()
 fi
+if (( ! ${#bundle[@]} )); then
+  agentihooks bundle unlink
+  agentihooks init
+fi
+place_ledger_ca
 unset LEDGER_CA_PEM
 agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
-agentihooks hive set --keep "$member" ui=no ephemeral=yes draining=no \
-  "excluded=${HIVE_EXCLUDED-master}" "max-agents=${HIVE_MAX_AGENTS:-20}"
+set_args=(ui=no ephemeral=yes draining=no "excluded=${HIVE_EXCLUDED-master}" "master-swarms=${HIVE_MASTER_SWARMS-}" \
+  "max-agents=${HIVE_MAX_AGENTS:-20}" "prefer=${HIVE_PREFER-}")
+[[ -n "${HIVE_NAME:-}" ]] && set_args+=("name=${HIVE_NAME}")
+agentihooks hive set --keep "$member" "${set_args[@]}"
 exec agentihooks hive run

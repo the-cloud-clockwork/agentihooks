@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME
+from hooks.context import master_coding, worker_mode
 from scripts.swarm_ledger import plan_read
 
 STATE_DIR = AGENTIHOOKS_HOME / "swarm-refocus"
@@ -14,7 +15,7 @@ DEFAULT_MAX_CHARS = 1500
 
 
 def build_block(ledger, task_id, cap):
-    if task_id == "master":
+    if master_coding.MASTER_TASK.fullmatch(task_id):
         return _master_block(ledger, cap)
     task = next((t for t in ledger.get("tasks", []) if t.get("id") == task_id), None)
     if not task:
@@ -55,7 +56,7 @@ def _master_block(ledger: dict, cap: int) -> str:
 def refocus_context(session_id, event, environ=None):
     env = os.environ if environ is None else environ
     binding = _binding(env)
-    if not (binding and session_id):
+    if not (binding and session_id) or worker_mode.active(env):
         return ""
     ledger = _read_ledger(_ledger_dir(env), *binding)
     block = (
@@ -107,7 +108,7 @@ def _clip(text, limit):
 def _read_ledger(folder, slug, task_id):
     from scripts.swarm_ledger.storage import read_ledger
 
-    focus = ("priorities",) if task_id == "master" else (f"tasks/{task_id}",)
+    focus = ("priorities",) if master_coding.MASTER_TASK.fullmatch(task_id) else (f"tasks/{task_id}",)
     return read_ledger(folder, slug, "title", "overview", "phases", *focus)
 
 

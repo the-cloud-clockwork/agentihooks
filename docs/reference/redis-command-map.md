@@ -27,6 +27,7 @@ No hand-kept list of commands is involved.
 |----------|-----------|--------------|
 | `controller` | `controller` | `scripts.swarm.controller:main` |
 | `tick` | `controller` | `scripts.swarm.scheduled_tick:main`, `scripts.swarm.cli:cmd_tick` |
+| `hub` | `controller` | `scripts.hub.runner:main` |
 | `ledger server` | `ledger` | `scripts.swarm_ledger:run`, `scripts.swarm_ledger.ledger_server:main` |
 | `worker` | `worker` | `scripts.swarm_v2.worker.start:main` |
 | `hooks` | `worker` | `hooks.hook_manager:main` |
@@ -58,11 +59,20 @@ uses it to find the Redis user that consumer connects as.
      `SCRIPT LOAD`), `register_script` (`EVALSHA`, `SCRIPT LOAD`),
      `transaction` (`WATCH`, `MULTI`, `EXEC`) and pipeline `execute`
      (`MULTI`, `EXEC`).
-4. A name counts as a Redis client when the code calls a method on it that
-   redis-py defines and that sends a command, provided no function under
-   `scripts` or `hooks` and none of the standard library types the map
-   recognizes defines a method with that name. This keeps calls such as
-   `dict.get` or `Path.exists` out of the map.
+4. A receiver counts as a Redis client only when its type traces back to a
+   client or pipeline constructor: `Redis(...)`, `StrictRedis(...)`,
+   `Redis.from_url(...)` or `<client>.pipeline()`, a function under `scripts` or
+   `hooks` that returns one (resolved through imports, its own class, or a
+   name only one function defines), a parameter annotated `Redis`,
+   `StrictRedis` or `Pipeline`, or a chained call on a pipeline. A name a
+   function binds is typed from that binding in that function only, so
+   `items = []` keeps `items.append` out of the map even where another
+   function holds a client named `items`. An attribute, a parameter the
+   function does not rebind, a loop target, or a name bound to a call whose
+   callee the map cannot find (such as a function held in a variable) counts
+   when the same name holds a client elsewhere. Comprehension targets,
+   `*args` and `**kwargs` never count. Typing is per function, not per line: a name once bound to a client
+   stays one for the whole function.
 
 ### Scheduler keys
 
@@ -132,7 +142,9 @@ jq -r '.consumers | to_entries[] | "\(.key) \(.value.role) \(.value.commands | l
 ```
 
 On `dev` at the time of writing, the command count per consumer was
-controller 59, tick 58, hooks 48, ledger server 43 and worker 3. The
+controller 58, tick 57, hooks 48, ledger server 43 and worker 0: the
+worker's earlier `GET`, `MULTI` and `EXEC` came from dictionaries and a SQLite
+cursor read as clients, and the worker sends no Redis command. The
 controller's `INCRBY` senders include `scripts.swarm.lease:acquire`, the lease
 acquire behind the 12 October crash loop.
 

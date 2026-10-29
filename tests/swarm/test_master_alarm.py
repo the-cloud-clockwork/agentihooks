@@ -165,7 +165,7 @@ def test_the_notice_tells_an_agent_to_keep_working_and_not_wait():
     text = master_alarm.NOTICE.format(slug="sw", error=BROKEN, name="engineer@a1b2c3-0001")
     assert BROKEN in text
     assert "own task through to merge" in text
-    assert "agentihooks ledger --slug sw --as engineer@a1b2c3-0001 question add" in text
+    assert 'agentihooks msg send master@sw "<text>"' in text
     assert "do not wait on master replies" in text
 
 

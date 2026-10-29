@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts.swarm.naming import pane_label, repo_name
 from scripts.swarm.pane import typed_input
 
 PLACEMENTS = ("tab", "split", "workspace")
@@ -101,14 +102,7 @@ def ensure_server(environ: dict[str, str], timeout: float = 10.0) -> bool:
 
 
 def repo_label(directory: Path) -> str:
-    """The repository name for a checkout or any of its worktrees; the directory name otherwise."""
-    done = subprocess.run(
-        ["git", "-C", str(directory), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        capture_output=True,
-        text=True,
-    )
-    common = Path(done.stdout.strip()) if done.returncode == 0 and done.stdout.strip() else None
-    return common.parent.name if common is not None else directory.name
+    return repo_name(directory)
 
 
 def find_workspace(label: str, environ: dict[str, str]) -> str | None:
@@ -135,7 +129,11 @@ def target_workspace(workspace: str, directory: Path, environ: dict[str, str]) -
     """(existing workspace id or None, label) for a new tab: the named crew workspace,
     else the caller's herdr workspace, else the repository's."""
     if workspace:
-        return find_workspace(workspace, environ), workspace
+        label = pane_label(workspace)
+        existing = find_workspace(workspace, environ)
+        if existing is None and label != workspace:
+            existing = find_workspace(label, environ)
+        return existing, label
     if environ.get("HERDR_WORKSPACE_ID"):
         return environ["HERDR_WORKSPACE_ID"], ""
     label = repo_label(directory)
@@ -150,6 +148,7 @@ def open_pane(
     workspace: str,
     environ: dict[str, str],
 ) -> Placement:
+    title = pane_label(title)
     common = ["--cwd", str(directory), *_env_args(env), "--no-focus"]
     if placement == "split":
         caller = environ.get("HERDR_PANE_ID")
@@ -158,7 +157,7 @@ def open_pane(
         return _placed(_cli(["pane", "split", caller, "--direction", "right", *common], environ)["pane"])
     workspace_id, label = target_workspace(workspace, directory, environ)
     if placement == "workspace" or workspace_id is None:
-        created = _cli(["workspace", "create", "--label", label or title, *common], environ)
+        created = _cli(["workspace", "create", "--label", pane_label(label or title), *common], environ)
         return _placed(created["root_pane"])
     created = _cli(["tab", "create", "--workspace", workspace_id, "--label", title, *common], environ)
     return _placed(created["root_pane"])
@@ -175,7 +174,7 @@ def open_command(directory: Path, title: str, argv: list[str], workspace: str, e
 
 
 def agent_name(name: str) -> str:
-    cleaned = re.sub(r"[^a-z0-9_-]", "-", name.lower()).strip("-_")
+    cleaned = re.sub(r"[^a-z0-9-]", "-", name.lower()).strip("-_")
     cleaned = cleaned if cleaned[:1].isalpha() else f"a-{cleaned}"
     if len(cleaned) <= 32:
         return cleaned

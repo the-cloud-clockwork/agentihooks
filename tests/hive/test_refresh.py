@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.hive import auth, cli, registry, server
 from scripts.swarm import store
 
@@ -107,13 +108,28 @@ def test_a_revoked_member_cannot_refresh(admin):
     assert admin.acl_users() == ["default"]
 
 
+def test_a_refresh_cannot_restore_a_member_revoked_after_its_lookup(admin, monkeypatch):
+    grant = auth.mint(admin, "laptop", PUBLIC)
+    set_user = auth._set_user
+
+    def revoke_before_set(client, member_id, password):
+        auth.revoke(client, member_id)
+        set_user(client, member_id, password)
+
+    monkeypatch.setattr(auth, "_set_user", revoke_before_set)
+    with pytest.raises(auth.HiveError, match="belongs to no hive member"):
+        auth.refresh(admin, grant["ledger_credential"], PUBLIC)
+    assert f"hive-{grant['id']}" not in admin.acl_users()
+    assert grant["id"] not in auth.members(admin)
+
+
 def test_a_redis_refusal_during_refresh_is_reported(admin, redis_lib, monkeypatch):
     grant = auth.mint(admin, "laptop", PUBLIC)
 
     def refuse(self, *args, **kwargs):
         raise redis_lib.exceptions.ResponseError("NOPERM")
 
-    monkeypatch.setattr(redis_lib.client.Pipeline, "execute", refuse)
+    monkeypatch.setattr(admin, "hget", refuse)
 
     with pytest.raises(auth.HiveError, match=r"^Redis refused the refreshed member \(NOPERM\)$"):
         auth.refresh(admin, grant["ledger_credential"], PUBLIC)
@@ -575,3 +591,69 @@ def test_a_workstation_keeps_a_different_member_in_its_env(admin, hive, redis_li
     assert pinged == ["swarm"]
     assert environ["AGENTIHOOKS_HIVE_ID"] == left["id"]
     assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == left["redis_url"]
+
+
+def test_a_saved_member_adopted_after_a_refusal_brings_its_own_id(admin, hive, redis_lib, tmp_path, monkeypatch):
+    left = auth.mint(admin, "pod-before-recreate", PUBLIC)
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    sibling = auth.refresh(admin, grant["ledger_credential"], PUBLIC)
+    auth.write_env(tmp_path, hive, {**sibling, "ledger_credential": grant["ledger_credential"]})
+    _fake_ping(admin, redis_lib, monkeypatch)
+    environ = {**_hive_environ(hive, grant, tmp_path), "AGENTIHOOKS_HIVE_ID": left["id"]}
+
+    store.redis_client(environ)
+
+    assert environ["AGENTIHOOKS_HIVE_ID"] == grant["id"]
+    assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == sibling["redis_url"]
+
+
+def test_a_refreshed_credential_brings_the_id_of_the_member_it_was_made_for(
+    admin, hive, redis_lib, tmp_path, monkeypatch
+):
+    left = auth.mint(admin, "pod-before-recreate", PUBLIC)
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    admin.acl_deluser(f"hive-{grant['id']}")
+    _fake_ping(admin, redis_lib, monkeypatch)
+    environ = {**_hive_environ(hive, grant, tmp_path), "AGENTIHOOKS_HIVE_ID": left["id"]}
+
+    store.redis_client(environ)
+
+    assert environ["AGENTIHOOKS_HIVE_ID"] == grant["id"]
+    assert urllib.parse.urlsplit(environ["AGENTIHOOKS_HIVE_REDIS_URL"]).username == f"hive-{grant['id']}"
+
+
+SCHEDULER_SUFFIXES = ("entries", "due", "pending", "retired", "dispatch-lock")
+
+
+def test_a_daemon_first_start_keys_every_scheduler_key_under_its_redis_member(
+    admin, hive, redis_lib, tmp_path, monkeypatch
+):
+    from scripts.hive import daemon
+    from scripts.scheduler.core import Scheduler, bucket
+    from scripts.swarm.keyspace import ROOT
+
+    left = auth.mint(admin, "pod-before-recreate", PUBLIC)
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    admin.acl_deluser(f"hive-{grant['id']}")
+    _fake_ping(admin, redis_lib, monkeypatch)
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", left["id"])
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: None)
+    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
+    monkeypatch.setattr(daemon.github_app_cli, "renew", lambda renewed, now: renewed)
+    monkeypatch.setattr(daemon, "publish_headroom", lambda redis, waiter, local_id, stop: None)
+    started = []
+
+    def beat(redis, local_id):
+        scheduler = Scheduler(RedisStateStore(redis, bucket()), machine="pod")
+        user = redis.connection_pool.connection_kwargs["username"]
+        started.append((user, local_id, [scheduler.key(suffix) for suffix in SCHEDULER_SUFFIXES]))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(daemon, "beat", beat)
+
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(lambda: daemon.clients(store.redis_client()))
+
+    own = f"{ROOT}:hive:{grant['id']}:scheduler:pod"
+    assert started == [(f"hive-{grant['id']}", grant["id"], [f"{own}:{suffix}" for suffix in SCHEDULER_SUFFIXES])]

@@ -2,9 +2,9 @@
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from scripts.hive.registry import UI_ROLES, live
+from scripts.hive.registry import LIVE_MS, MASTER_NAME, UI_ROLES, live
 from scripts.master_claude_login import ROUTE as MASTER_LOGIN
 
 MASTER = "master"
@@ -13,11 +13,16 @@ YES = "yes"
 NO_UI_HIVE = "no UI hive live"
 HIVE = "hive"
 HEADLESS = "headless hive"
-UI_HIVE = "UI hive"
+UI_HIVE = MASTER_NAME
 LOCAL_MACHINE = "local machine"
 LOCAL_FULL = ", and the local machine runs "
+HAS_ROOM = "has room"
 NEEDS_WORKSTATION = "the task needs the workstation, so no remote hive takes it"
+NEEDS_CAPABILITY = "the task needs a hive with {needs}, and no hive declares it"
+NEEDS_TOGETHER = "the task needs a hive with {needs}, and no single hive declares all of them"
 UNRANKED = math.inf
+SPREAD = "spread"
+PLACED = "placed"
 
 
 @dataclass(frozen=True)
@@ -35,21 +40,69 @@ class MasterPlacement:
 
 
 @dataclass(frozen=True)
+class Spill:
+    preferred: str
+    refusal: str
+
+    def record(self) -> dict:
+        return {"preferred": self.preferred, "refusal": self.refusal}
+
+
+@dataclass(frozen=True)
 class Choice:
     hive: str
     fallback: str = ""
+    spill: Spill | None = None
 
 
 def hosts(role: str, hive: dict, aliases: tuple[str, ...] = ()) -> bool:
     return hive.get("draining") != YES and not {role, *aliases} & set(hive["excluded"])
 
 
-def _room(hive: dict) -> int:
-    return hive["room"]
+def equipped(task: dict, hive: dict | None) -> bool:
+    return set(task.get("needs") or ()) <= set((hive or {}).get("capabilities") or ())
 
 
-def _refused(reason: str, hives: list[dict]) -> str:
-    held = "; ".join(f"{hive['id']} {hive['refusal']}" for hive in hives if hive.get("refusal"))
+def needs_refusal(task: dict, hives: list[dict]) -> str:
+    declared = {name for hive in hives for name in hive.get("capabilities") or ()}
+    needs = task.get("needs") or ()
+    missing = [name for name in needs if name not in declared]
+    return (
+        NEEDS_CAPABILITY.format(needs=", ".join(missing)) if missing else NEEDS_TOGETHER.format(needs=", ".join(needs))
+    )
+
+
+def for_swarm(hives: list[dict], slug: str) -> list[dict]:
+    return [
+        {**hive, "excluded": [role for role in hive["excluded"] if role != MASTER]}
+        if slug in hive.get("master_swarms", ())
+        else hive
+        for hive in hives
+    ]
+
+
+def round_robin(hives: list[dict], nodes: int, repo: str, now: int) -> list[dict]:
+    chosen = sorted((hive for hive in hives if live(hive, now) and repo in hive["repos"]), key=lambda hive: hive["id"])
+    return [{**hive, SPREAD: hive["agents"] + hive.get(PLACED, 0)} for hive in chosen[: nodes or None]]
+
+
+FIRST_ROOM, FIRST_REFUSAL = "first_room", "first_refusal"
+
+
+def first(role: str, hive: dict) -> bool:
+    return SPREAD not in hive and role in hive.get("prefer", {}) and FIRST_ROOM in hive
+
+
+def _room(hive: dict, role: str) -> int:
+    return hive[FIRST_ROOM] if first(role, hive) else hive["room"]
+
+
+def refusal(hive: dict, role: str) -> str | None:
+    return hive[FIRST_REFUSAL] if first(role, hive) else hive.get("refusal")
+
+
+def _refused(reason: str, hives: list[dict], role: str) -> str:
+    held = "; ".join(f"{hive['id']} {refusal(hive, role)}" for hive in hives if refusal(hive, role))
     return f"{reason}: {held}" if held else reason
 
 
@@ -57,7 +110,7 @@ def _checks(
     role: str, harness: str, slot: str, route_kind: str, repo: str, kind: str = HIVE
 ) -> list[tuple[Callable[[dict], bool], str]]:
     return [
-        (lambda hive: role == MASTER or _room(hive) > 0, f"no {kind} for {role} has room"),
+        (lambda hive: role == MASTER or _room(hive, role) > 0, f"no {kind} for {role} {HAS_ROOM}"),
         (
             lambda hive: any(item["harness"] == harness and item["account"] == slot for item in hive["slots"]),
             f"no {kind} for {role} advertises the {harness} slot {slot}",
@@ -76,7 +129,7 @@ def _checks(
 
 def _order(role: str) -> Callable[[dict], tuple]:
     return lambda hive: (
-        hive["prefer"].get(role, UNRANKED),
+        hive[SPREAD] if SPREAD in hive else hive["prefer"].get(role, UNRANKED),
         hive["agents"] / max(hive["max_agents"], 1),
         hive["ephemeral"] == YES,
         hive["id"],
@@ -86,15 +139,43 @@ def _order(role: str) -> Callable[[dict], tuple]:
 def _pick(
     role: str, harness: str, slot: str, route_kind: str, repo: str, candidates: list[dict], kind: str = HIVE
 ) -> Choice | Wait:
+    ranked = [hive for hive in candidates if SPREAD not in hive and role in hive["prefer"]]
+    preferred = min(ranked, key=_order(role)) if ranked else None
+    spill = None
     for index, (check, reason) in enumerate(_checks(role, harness, slot, route_kind, repo, kind)):
         kept = [hive for hive in candidates if check(hive)]
         if not kept:
-            return Wait(_refused(reason, candidates) if index == 0 else reason)
+            return Wait(_refused(reason, candidates, role) if index == 0 else reason)
+        if preferred is not None and spill is None and not check(preferred):
+            spill = Spill(preferred["id"], (refusal(preferred, role) or reason) if index == 0 else reason)
         candidates = kept
-    return Choice(min(candidates, key=_order(role))["id"])
+    return Choice(min(candidates, key=_order(role))["id"], spill=spill)
+
+
+def unhosted(role: str, hives: list[dict], now: int, aliases: tuple[str, ...] = ()) -> Spill | None:
+    ranked = [hive for hive in hives if SPREAD not in hive and role in hive["prefer"]]
+    if not ranked:
+        return None
+    preferred = min(ranked, key=_order(role))
+    if not live(preferred, now):
+        return Spill(preferred["id"], f"its heartbeat is older than {LIVE_MS // 1000} seconds")
+    if preferred.get("draining") == YES:
+        return Spill(preferred["id"], "it is draining")
+    if not hosts(role, preferred, aliases):
+        return Spill(preferred["id"], f"it excludes {role}")
+    return None
 
 
 def choose(
+    role: str, harness: str, slot: str, route_kind: str, repo: str, hives: list[dict], now: int
+) -> Choice | Wait:
+    picked = _choose(role, harness, slot, route_kind, repo, hives, now)
+    if isinstance(picked, Choice) and picked.spill is None:
+        return replace(picked, spill=unhosted(role, hives, now))
+    return picked
+
+
+def _choose(
     role: str, harness: str, slot: str, route_kind: str, repo: str, hives: list[dict], now: int
 ) -> Choice | Wait:
     candidates = [hive for hive in hives if live(hive, now) and hosts(role, hive)]
@@ -122,12 +203,23 @@ def place(role: str, harness: str, slot: str, route_kind: str, repo: str, hives:
     return chosen.hive if isinstance(chosen, Choice) else chosen
 
 
-def overflow(role: str, waited: Wait, local_agents: int, local_max: int) -> Choice | Wait:
+def overflow(role: str, waited: Wait, local_agents: int, local_max: int, reserved: int = 0) -> Choice | Wait:
     if role in UI_ROLES:
         return waited
-    if local_agents >= local_max:
-        return Wait(f"{waited.reason}{LOCAL_FULL}{local_agents} of its {local_max} agents")
+    if local_agents + reserved >= local_max:
+        return local_full(waited, local_agents, local_max, reserved)
     return Choice(LOCAL_MACHINE, waited.reason)
+
+
+def local_full(waited: Wait, local_agents: int, local_max: int, reserved: int) -> Wait:
+    kept = f" with {reserved} kept for waiting workstation tasks" if reserved else ""
+    return Wait(f"{waited.reason}{LOCAL_FULL}{local_agents} of its {local_max} agents{kept}")
+
+
+def _private_master(hive: dict, harness: str, front: bool) -> bool:
+    return front and (
+        bool(hive["master_login"].get(harness)) or (harness == "claude" and hive.get("master_login_enabled") == YES)
+    )
 
 
 def place_master(
@@ -142,11 +234,12 @@ def place_master(
     candidates = []
     for hive in listing:
         headless = hive["ui"] != YES
-        forced = front and hive["master_login"].get(harness)
+        account = hive["master_login"].get(harness, "")
+        forced = _private_master(hive, harness, front)
         if forced:
-            if login in ("", forced):
-                placed = MasterPlacement(hive["id"], forced, MASTER_LOGIN, False)
-                candidates.append((headless, False, _order(MASTER)(hive), forced, placed))
+            if login in ("", account):
+                placed = MasterPlacement(hive["id"], account, MASTER_LOGIN, False)
+                candidates.append((headless, not bool(account), _order(MASTER)(hive), account, placed))
             continue
         native = hive["interactive"].get(harness)
         if native and login in ("", native):

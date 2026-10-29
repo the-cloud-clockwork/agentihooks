@@ -114,6 +114,12 @@ def printed(capsys):
     return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
 
 
+def counted(store, count):
+    from scripts.swarm_v2 import masters as master_seats
+
+    master_seats.MasterSeats(store.redis).set_count("sw", count)
+
+
 def test_the_prompt_shows_the_last_master_and_asks_last_or_new(up, monkeypatch, capsys):
     store, _, rt = up
     name = gone_master(store, harness="codex")
@@ -166,7 +172,7 @@ def test_choice_last_reopens_the_last_masters_own_conversation_in_the_master_sea
     assert run("sw", "master", "up") == 0
     [(resumed, harness, conversation, profile, text)] = rt.resumed
     assert (resumed, harness, conversation, profile) == (name, "codex", "conv-7", "master")
-    assert "master up" in text and "re-read the ledger" in text
+    assert "master up" in text and "agentihooks ledger --slug sw get tasks/<id>" in text
     [record] = masters(store)
     assert (record.name, record.state, record.pane_id, record.seat) == (name, "working", "w2:m9", "master@sw")
     assert record.conversation_id == "conv-7" and record.account == "acct-2" and record.harness == "codex"
@@ -314,6 +320,7 @@ def test_a_last_master_is_never_resumed_onto_a_live_front_door_and_the_new_one_t
     store.put_agent("sw", front)
     rt.live.add(front.name)
     gone_master(store, conversation="conv-new")
+    counted(store, 2)
     asked = answers(monkeypatch, "1", "y")
     assert run("sw", "master", "up") == 0
     out = capsys.readouterr().out
@@ -366,6 +373,7 @@ def test_a_new_master_beside_a_live_front_door_takes_its_own_seat_and_title(up, 
     live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
     store.put_agent("sw", live)
     rt.live.add(live.name)
+    counted(store, 2)
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 0
     launched = printed(capsys)
@@ -384,6 +392,7 @@ def test_a_new_master_skips_every_master_seat_already_held(up, monkeypatch, caps
     for name, seat in (("master@a1b2c3-0005", "master@sw"), ("master@a1b2c3-0006", "master-2@sw")):
         store.put_agent("sw", AgentRecord(name, MASTER, MASTER, harness="claude", seat=seat, started_at=5))
         rt.live.add(name)
+    counted(store, 3)
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 0
     assert printed(capsys)["seat"] == "master-3@sw"
@@ -418,9 +427,71 @@ def test_a_finished_front_door_still_running_keeps_its_seat(up, monkeypatch, cap
     live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="finished", seat="master@sw", started_at=5)
     store.put_agent("sw", live)
     rt.live.add(live.name)
+    counted(store, 2)
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 0
     assert printed(capsys)["seat"] == "master-2@sw"
+
+
+@pytest.mark.parametrize("live", [True, False])
+def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(up, monkeypatch, capsys, live):
+    store, _, rt = up
+    front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="starting", seat="master@sw", started_at=5)
+    store.put_agent("sw", front)
+    if live:
+        rt.live.add(front.name)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 1
+    assert (
+        "the front door master master@a1b2c3-0005 is starting and every master seat is held (master seat count 1)"
+        in capsys.readouterr().err
+    )
+    assert rt.masters == [] and [a.name for a in masters(store)] == [front.name]
+
+
+def test_a_live_front_door_in_a_one_seat_pool_gets_no_second_master(up, monkeypatch, capsys):
+    store, _, rt = up
+    front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="working", seat="master@sw", started_at=5)
+    store.put_agent("sw", front)
+    rt.live.add(front.name)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 1
+    assert (
+        "the front door master master@a1b2c3-0005 is working and every master seat is held (master seat count 1)"
+        in capsys.readouterr().err
+    )
+    assert rt.masters == [] and [a.name for a in masters(store)] == [front.name]
+
+
+def test_a_starting_front_door_with_a_free_counted_seat_gets_its_master_in_that_seat(up, monkeypatch, capsys):
+    from scripts.swarm_v2 import masters as master_seats
+
+    store, _, rt = up
+    front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="starting", seat="master@sw", started_at=5)
+    store.put_agent("sw", front)
+    master_seats.MasterSeats(store.redis).set_count("sw", 2)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 0
+    assert printed(capsys)["seat"] == "master-2@sw"
+    assert {a.seat for a in masters(store) if a.state != "finished"} == {"master@sw", "master-2@sw"}
+
+
+def test_a_finished_master_still_running_holds_its_counted_seat_beside_a_starting_front_door(up, monkeypatch, capsys):
+    from scripts.swarm_v2 import masters as master_seats
+
+    store, _, rt = up
+    front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="suspect", seat="master@sw", started_at=5)
+    held = AgentRecord("master@a1b2c3-0006", MASTER, "master-2", state="finished", seat="master-2@sw", started_at=5)
+    for record in (front, held):
+        store.put_agent("sw", record)
+    rt.live.add(held.name)
+    master_seats.MasterSeats(store.redis).set_count("sw", 2)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 1
+    assert (
+        "master@a1b2c3-0005 is suspect and every master seat is held (master seat count 2)" in capsys.readouterr().err
+    )
+    assert rt.masters == []
 
 
 def test_a_failed_launch_beside_the_front_door_says_why_and_leaves_no_record(up, monkeypatch, capsys):
@@ -428,6 +499,7 @@ def test_a_failed_launch_beside_the_front_door_says_why_and_leaves_no_record(up,
     live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
     store.put_agent("sw", live)
     rt.live.add(live.name)
+    counted(store, 2)
     rt.fail = True
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 1
@@ -514,7 +586,8 @@ def test_a_failed_launch_prints_the_reason_and_exits_non_zero(up, monkeypatch, c
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 1
     assert "the new master could not start: herdr down" in capsys.readouterr().err
-    assert masters(store) == [] and ledger.joined == []
+    assert masters(store) == []
+    assert ledger.joined == [("sw", "master@a1b2c3-0001", "orchestrator")]
 
 
 def test_a_stopped_swarm_is_paused_so_the_tick_keeps_the_master(up, monkeypatch):
@@ -877,7 +950,7 @@ def test_a_new_master_reads_quota_before_it_is_placed(up, monkeypatch):
     assert order == [("spent", 1), ("quota", "sw", AT / 1000), "spawn"]
 
 
-def quota_master(monkeypatch, tmp_path, observed):
+def quota_master(monkeypatch, tmp_path, observed, store):
     monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: observed)
     rt = runtime.HerdrRuntime(
         home=tmp_path / "home", choose=lambda requested, environ: (requested or "claude", "priority")
@@ -889,7 +962,10 @@ def quota_master(monkeypatch, tmp_path, observed):
             "master", "task", "explicit"
         ),
     )
-    monkeypatch.setattr(rt, "live_names", set)
+    live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
+    store.put_agent("sw", live)
+    counted(store, 2)
+    monkeypatch.setattr(rt, "live_names", lambda: {live.name})
     monkeypatch.setattr(rt, "reported", lambda agent: True)
     routes = []
 
@@ -899,15 +975,17 @@ def quota_master(monkeypatch, tmp_path, observed):
         return runtime.Placed("pane", argv[argv.index("--agent") + 1], route)
 
     monkeypatch.setattr(rt, "_launch", launch)
+    rt.quota_capacity(store.config("sw"), store.agents("sw"), AT / 1000)
     return rt, routes
 
 
 def test_a_new_master_leaves_a_warned_account_or_refuses_naming_it(up, monkeypatch, tmp_path):
     store, _, _ = up
-    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("ok")])
-    direct(store, rt, master_launch.NEW)
+    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("ok")], store)
+    launched, _ = direct(store, rt, master_launch.NEW)
     assert routes == ["ok"]
-    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5)])
+    store.drop_agent("sw", launched.master)
+    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5)], store)
     refusal = "no claude or codex account has placeable quota seats: claude w is at its week quota warning"
     with pytest.raises(SwarmError, match=f"^the new master could not start: {refusal}$"):
         direct(store, rt, master_launch.NEW)
@@ -916,7 +994,9 @@ def test_a_new_master_leaves_a_warned_account_or_refuses_naming_it(up, monkeypat
 
 def test_a_new_master_free_to_pick_its_harness_refuses_naming_every_warned_account(up, monkeypatch, tmp_path):
     store, _, _ = up
-    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("cw", harness="codex", left=5)])
+    rt, routes = quota_master(
+        monkeypatch, tmp_path, [account("w", left=5), account("cw", harness="codex", left=5)], store
+    )
     warned = "claude w is at its week quota warning; codex cw is at its week quota warning"
     with pytest.raises(
         SwarmError,

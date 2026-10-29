@@ -65,7 +65,8 @@ class Placement:
         if lane == "master":
             return self.backend if task.get("id") in self.master_seats() else LOCAL
         profile = (task.get("profile_decision") or {}).get("profile") or task.get("profile")
-        placed = not task.get("workstation") and profile not in self.local_profiles and lane in self.lanes
+        anywhere = not task.get("workstation") and (self.backend == "hive" or not task.get("needs"))
+        placed = anywhere and profile not in self.local_profiles and lane in self.lanes
         return self.backend if placed else LOCAL
 
 

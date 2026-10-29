@@ -41,11 +41,25 @@ def source():
     document = doc([row])
     store, ledger = Mock(), Mock()
     store.slugs.return_value = ["rig"]
-    store.config.return_value = SimpleNamespace(slug="rig", state="running", repo="", template="")
+    store.config.return_value = SimpleNamespace(slug="rig", state="running", repo="", template="", engine="events")
     store.agents.return_value = []
     store.claimant.return_value = None
     ledger.state.return_value = document
+    ledger.metadata.side_effect = lambda _: {"_meta": {"rev": id(ledger.state.return_value)}}
     return row, store, ledger
+
+
+class CountingLedger:
+    def __init__(self, document):
+        self.document, self.rev, self.exports, self.read = document, 1, 0, set()
+
+    def state(self, slug):
+        self.exports += 1
+        return self.document
+
+    def metadata(self, slug):
+        self.read.add(slug)
+        return {"_meta": {"rev": self.rev}}
 
 
 def spoke(bus, provider, hive):
@@ -129,6 +143,80 @@ def test_snapshot_uses_live_owners_and_release_and_apply_admission(monkeypatch):
     assert not readiness.claimable(row, "eng", provider.snapshot("rig"))
 
 
+def test_snapshot_holds_a_task_red_only_from_checks_failing_across_its_repository(monkeypatch):
+    from datetime import UTC, datetime
+
+    from scripts.swarm import fleet_red
+
+    monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
+    monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
+    row, store, ledger = source()
+    row["pr_url"] = "https://github.com/x/y/pull/1"
+    at = datetime.now(UTC).isoformat()
+
+    def listing(conclusion):
+        others = [[{"name": "Tests", "conclusion": conclusion, "completedAt": at}]] * 3
+        mine = [{"name": "Tests", "conclusion": "FAILURE", "completedAt": at}]
+        return [
+            {"url": f"https://github.com/x/y/pull/{n}", "statusCheckRollup": checks}
+            for n, checks in enumerate([mine, *others], start=1)
+        ]
+
+    reads = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or listing("FAILURE"))
+    provider = readiness.Source(store, ledger)
+    assert not readiness.claimable(row, "eng", provider.snapshot("rig"))
+    assert reads == ["x/y"]
+    monkeypatch.setattr(fleet_red, "read", lambda repo: listing("SUCCESS"))
+    assert readiness.claimable(row, "eng", provider.snapshot("rig"))
+
+
+def test_readiness_passes_export_a_large_ledger_once_per_revision(monkeypatch):
+    from scripts.hub.readiness import Readiness
+
+    monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
+    monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
+    rows = [task(f"done-{n}", state="done") for n in range(950)] + [task("task-a")]
+    ledger = CountingLedger(doc(rows))
+    _, store, _ = source()
+    provider = readiness.Source(store, ledger)
+    with backend("memory", None) as bus:
+        hub = Readiness(bus, provider)
+        for _ in range(21):
+            hub.poll()
+        unchanged = ledger.exports
+        ledger.document, ledger.rev = doc([*rows, task("task-b")]), 2
+        for _ in range(21):
+            hub.poll()
+        changed = ledger.exports - unchanged
+        assert (unchanged, changed) == (1, 1), (
+            f"exports over 21 passes: {unchanged} unchanged, {changed} after one revision"
+        )
+        assert "task-b" in provider.snapshot("rig").rows
+        assert ledger.exports == 2
+        assert ledger.read == {"rig"}
+
+
+def test_the_source_forgets_the_export_of_a_swarm_that_left_the_events_engine():
+    _, store, _ = source()
+    ledger = CountingLedger(doc([task("task-a")]))
+    engines = {"rig": "events", "kept": "events"}
+    store.slugs.return_value = ["rig", "kept"]
+    store.config.side_effect = lambda slug: SimpleNamespace(
+        slug=slug, state="running", repo="", template="", engine=engines[slug]
+    )
+    provider = readiness.Source(store, ledger)
+    assert provider.slugs() == ["rig", "kept"]
+    provider.state("rig")
+    provider.state("kept")
+    engines["rig"] = "legacy"
+    assert provider.slugs() == ["kept"]
+    provider.state("kept")
+    assert ledger.exports == 2
+    provider.state("rig")
+    assert ledger.exports == 3
+
+
 def test_hub_respects_its_lease_and_passes_clock_to_ready_offers(monkeypatch):
     from scripts.hub.readiness import Readiness
 
@@ -191,6 +279,31 @@ def test_default_source_connects_once_and_reads_fresh_shared_state(monkeypatch):
     connect.assert_called_once_with()
     client.assert_called_once_with(service=True)
     assert ledger.state.call_args_list == [(("rig",),), (("rig",),)]
+
+
+def test_the_source_lists_only_swarms_on_the_events_engine():
+    _, store, ledger = source()
+    store.slugs.return_value = ["one", "two", "three"]
+    engines = {"one": "events", "two": "legacy", "three": "events"}
+    store.config.side_effect = lambda slug: SimpleNamespace(slug=slug, engine=engines[slug])
+    assert readiness.Source(store, ledger).slugs() == ["one", "three"]
+    engines["one"] = "legacy"
+    assert readiness.Source(store, ledger).slugs() == ["three"]
+
+
+def test_the_source_skips_a_swarm_removed_while_it_lists():
+    from scripts.swarm.store import SwarmError
+
+    _, store, ledger = source()
+    store.slugs.return_value = ["gone", "kept"]
+
+    def config(slug):
+        if slug == "gone":
+            raise SwarmError("no swarm gone")
+        return SimpleNamespace(slug=slug, engine="events")
+
+    store.config.side_effect = config
+    assert readiness.Source(store, ledger).slugs() == ["kept"]
 
 
 def test_default_hub_readiness_uses_the_shared_source_and_stops_after_lease_loss(monkeypatch):

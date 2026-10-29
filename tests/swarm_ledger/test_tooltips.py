@@ -81,7 +81,7 @@ COLLECTIONS = {
 
 
 def home_html(view):
-    return server.index_page(view)
+    return server.index_page()
 
 
 def route(r, html):
@@ -207,7 +207,7 @@ def test_the_tip_appears_exactly_one_second_after_the_pointer_rests(tab):
 
 
 ROW_TIPS = {
-    "a.title": ROW_TITLE,
+    ".title a": ROW_TITLE,
     "span.ov": ROW_OVERVIEW,
     "time.when": time.strftime("%Y-%m-%d %H:%M", time.localtime(ROW_AT / 1000)),
 }
@@ -246,9 +246,9 @@ def test_a_home_row_tip_hides_on_click_or_scroll(tab, leave):
 
 def test_an_empty_row_tip_leaves_the_enclosing_control_its_own_tip(tab):
     page = tab(home_html("home"))
-    page.locator("li.row a.title").first.wait_for()
+    page.locator("li.row .title a").first.wait_for()
     found = page.evaluate(
-        """() => { const title = document.querySelector("li.row a.title");
+        """() => { const title = document.querySelector("li.row .title a");
           const empty = document.createElement("span");
           empty.dataset.tip = "";
           title.append(empty);
@@ -266,7 +266,9 @@ def test_ledger_rows_carry_no_native_hover_text(tab, view):
         "(els) => els.map((el) => [el.className, el.getAttribute('title'), el.dataset.tip ?? null])"
     )
     assert [title for _, title, _ in found] == [None] * len(found)
-    assert ["title", None, ROW_TITLE] in found
+    link = page.locator("li.row .title a").first
+    assert link.get_attribute("title") is None
+    assert link.get_attribute("data-tip") == ROW_TITLE
     assert ["ov", None, ROW_OVERVIEW] in found
 
 
@@ -274,7 +276,7 @@ ROW_BUTTONS = {
     "home": (
         ".act.del",
         f"Move {ROW_TITLE} to the bin",
-        "Move this ledger to the bin. Its swarm stops; the bin keeps it thirty days.",
+        "Move this ledger to the bin. Its swarm stops; the bin keeps it 30 days.",
     ),
     "bin": (".act.restore", f"Restore {ROW_TITLE} to HOME", "Restore this ledger from the bin to HOME."),
 }

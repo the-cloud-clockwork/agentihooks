@@ -12,7 +12,9 @@ from pathlib import Path
 import tomlkit
 
 from scripts.ci_mutation.clearances import load_clearances
+from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import holds, split_names, unit_cost
+from scripts.ci_mutation.probe import mark_probe_results, probe_elapsed, probe_results
 from scripts.ci_mutation.report import evaluate, survivor_text
 from scripts.ci_mutation.scope import select_tests
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
@@ -50,6 +52,12 @@ def failing_tests(log: Path) -> list[str]:
     return list(named.values())
 
 
+def echo_cache_report(log: Path) -> None:
+    for line in log.read_text(errors="replace").splitlines() if log.is_file() else []:
+        if line.startswith("Mutation stats cache:"):
+            print(line)
+
+
 def path_parts(node: ast.AST, bindings: dict[str, ast.AST]) -> list[str]:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return [node.value]
@@ -65,7 +73,7 @@ def path_parts(node: ast.AST, bindings: dict[str, ast.AST]) -> list[str]:
         return [
             str(Path(left) / right)
             for left in path_parts(node.left, bindings)
-            for right in path_parts(node.right, bindings)
+            for right in (path_parts(node.right, bindings) or ["**/*"])
         ]
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"Path", "str"} and node.args:
         return path_parts(node.args[0], bindings)
@@ -86,7 +94,7 @@ def read_paths(call: ast.Call, bindings: dict[str, ast.AST]) -> list[str]:
     operation = call.func.attr
     if operation in {"run", "Popen", "call", "check_call", "check_output"}:
         return path_parts(call.args[0], bindings) if call.args else []
-    if operation not in {"read_text", "read_bytes", "open", "glob", "rglob", "iterdir", "is_file", "exists"}:
+    if operation not in {"read_text", "read_bytes", "open", "glob", "rglob", "iterdir", "is_file", "is_dir", "exists"}:
         return []
     paths = path_parts(call.func.value, bindings)
     if operation in {"glob", "rglob", "iterdir"}:
@@ -97,17 +105,19 @@ def read_paths(call: ast.Call, bindings: dict[str, ast.AST]) -> list[str]:
 
 
 def fixture_literals(node: ast.AST) -> list[str]:
+    nodes = list(ast.walk(node))
     bindings = {
         target.id: assignment.value
-        for assignment in ast.walk(node)
+        for assignment in nodes
         if isinstance(assignment, ast.Assign)
         for target in assignment.targets
         if isinstance(target, ast.Name)
         and target.id not in {part.id for part in ast.walk(assignment.value) if isinstance(part, ast.Name)}
     }
-    functions = {function.name: function for function in ast.walk(node) if isinstance(function, ast.FunctionDef)}
+    functions = {function.name: function for function in nodes if isinstance(function, ast.FunctionDef)}
+    calls = [part for part in nodes if isinstance(part, ast.Call)]
     parameters = {}
-    for call in (part for part in ast.walk(node) if isinstance(part, ast.Call)):
+    for call in calls:
         if isinstance(call.func, ast.Name) and call.func.id in functions:
             for parameter, value in zip(functions[call.func.id].args.args, call.args):
                 if parameter.arg not in {part.id for part in ast.walk(value) if isinstance(part, ast.Name)}:
@@ -117,7 +127,7 @@ def fixture_literals(node: ast.AST) -> list[str]:
             if len(names) == 1:
                 bindings[names[0]] = call.args[1]
     bindings.update({name: ast.List(elts=values) for name, values in parameters.items()})
-    return [path for call in ast.walk(node) if isinstance(call, ast.Call) for path in read_paths(call, bindings)]
+    return [path for call in calls for path in read_paths(call, bindings)]
 
 
 def fixture_candidates(root: Path, work: Path, literal: str) -> list[Path]:
@@ -126,26 +136,59 @@ def fixture_candidates(root: Path, work: Path, literal: str) -> list[Path]:
         return []
     if any(len(part) > 255 for part in relative.parts) or relative == Path("pyproject.toml"):
         return []
-    if (work / relative).exists():
-        return []
     target = root / relative
     if any(part.is_symlink() for part in (target, *target.parents) if part != root):
+        return []
+    if target.is_dir():
+        return list(target.rglob("*"))
+    if (work / relative).is_file():
         return []
     return list(root.glob(literal))
 
 
-def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
+def imported_test_modules(root: Path, source: Path) -> set[Path]:
+    if not source.is_file():
+        return set()
+    modules = {
+        name
+        for node in ast.walk(ast.parse(source.read_text()))
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] == "tests"
+        for name in (node.module, *(f"{node.module}.{alias.name}" for alias in node.names))
+    }
+    return {root / Path(*module.split(".")).with_suffix(".py") for module in modules}
+
+
+def selected_sources(root: Path, tests: list[str]) -> set[Path]:
     sources = {root / test.split("::")[0] for test in tests}
     for source in tuple(sources):
+        sources.update(imported_test_modules(root, source))
+    for source in tuple(sources):
         sources.update(parent / "conftest.py" for parent in source.parents if parent.is_relative_to(root))
+    return sources
+
+
+def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
+    sources = selected_sources(root, tests)
+    tracked = (
+        set(subprocess.check_output(["git", "ls-files", "-z"], cwd=root, text=True).split("\0"))
+        if (root / ".git").exists()
+        else None
+    )
     files = set()
+    candidates = {}
     for source in sorted(sources):
         if not source.is_file():
             continue
         for literal in fixture_literals(ast.parse(source.read_text())):
-            for candidate in fixture_candidates(root, work, literal):
+            if literal not in candidates:
+                candidates[literal] = fixture_candidates(root, work, literal)
+            for candidate in candidates[literal]:
                 name = candidate.relative_to(root)
-                if any(part in {".git", "__pycache__", work.name} for part in name.parts):
+                if tracked is not None and name.as_posix() not in tracked:
+                    continue
+                if name == Path("pyproject.toml") or any(
+                    part in {".git", "__pycache__", work.name} for part in name.parts
+                ):
                     continue
                 if candidate.name.startswith(".env") and candidate.suffix not in {
                     ".example",
@@ -159,6 +202,42 @@ def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
                 if candidate.is_file() and candidate.suffix != ".pyc" and not (work / name).exists():
                     files.add(name.as_posix())
     return sorted(files)
+
+
+# mutmut copies the workspace into mutants/ before any test runs, so the workspace itself is only read.
+def link_or_copy(source: str, target: str) -> None:
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
+
+
+def prepare_git_inputs(root: Path, work: Path) -> list[str]:
+    from hooks.context.conditions import _remote_owner
+
+    if not (root / ".git").exists():
+        return []
+    metadata, common = (
+        Path(path)
+        for path in subprocess.check_output(
+            ["git", "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
+            cwd=root,
+            text=True,
+        ).splitlines()
+    )
+    subprocess.run(["git", "init", "--quiet", "--template=", str(work)], check=True)
+    target = work / ".git"
+    (target / "objects/info/alternates").write_text(f"{common / 'objects'}\n")
+    shutil.copy2(metadata / "HEAD", target / "HEAD")
+    for source in (metadata / "index", common / "packed-refs"):
+        if source.is_file():
+            shutil.copy2(source, target / source.name)
+    shutil.copytree(common / "refs", target / "refs", dirs_exist_ok=True)
+    owner = _remote_owner(root)
+    if owner != "":
+        origin = f"https://github.com/{owner}/mutation-sandbox.git" if owner else "unresolved"
+        subprocess.run(["git", "-C", str(work), "config", "remote.origin.url", origin], check=True)
+    return [".git/"]
 
 
 def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]) -> None:
@@ -177,7 +256,12 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
     ):
         source = root / name
         if source.is_dir():
-            shutil.copytree(source, work / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", work.name))
+            shutil.copytree(
+                source,
+                work / name,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", work.name),
+                copy_function=link_or_copy,
+            )
     root_files = sorted(
         path.name
         for path in root.iterdir()
@@ -192,6 +276,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
     for name in extra_files:
         (work / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(root / name, work / name)
+    git_files = prepare_git_inputs(root, work)
     pytest_args = ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
     # pytest would load the plugin from its own mutated copy, whose hooks raise in mutmut's forced fail run.
     if IDENTITY not in paths:
@@ -210,6 +295,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             ".agentihooks/conditions/",
             "deploy/helm/agentihooks-swarm/ci/",
             *root_files,
+            *git_files,
             *(f"{name}/" for name in sorted({Path(path).parts[0] for path in extra_files})),
         ],
         "pytest_add_cli_args_test_selection": tests,
@@ -222,11 +308,15 @@ def seed_measured_shard(stats: SharedStats, key: str, work: Path) -> str:
     plan_path = stats.folder.parent / "plan.json"
     if plan_path.is_file():
         plan = json.loads(plan_path.read_text())
+        probe_results(plan)
         if plan["head"] != stats.head or key not in plan["keys"]:
             return "measured mutation plan stale for this commit or selection"
         shutil.copy(plan_path, work / "shard-plan.json")
     if (killers := stats.folder.parent / "killers").is_dir():
         shutil.copytree(killers, work / "killers")
+    if plan_path.is_file() and plan.get("splits"):
+        # Kept beside the killers, the slices reach the next run's plan through the cache.
+        KillMemory(work / "killers").keep_splits(plan["splits"])
     return ""
 
 
@@ -272,6 +362,7 @@ def mutate_files(
             return {}, f"mutmut failed with exit {status}; failing tests: {'; '.join(failing)}; see {log}"
         return {}, f"mutmut failed with exit {status}; see {log}"
     if stats and stats.part:
+        echo_cache_report(log)
         return {path: [] for path in selected}, ""
     result_path = work / "results.json"
     status = run_process(
@@ -284,7 +375,7 @@ def mutate_files(
         return {}, "over budget"
     if status != 0:
         return {}, f"report failed with exit {status}; see {work / 'report.log'}"
-    return json.loads(result_path.read_text()), ""
+    return mark_probe_results(work, json.loads(result_path.read_text())), ""
 
 
 def record_shard_measurement(
@@ -343,7 +434,7 @@ def run_gate(
     stats: SharedStats | None = None,
 ) -> dict:
     output.mkdir(parents=True, exist_ok=True)
-    started = time.monotonic()
+    started = time.monotonic() - probe_elapsed(stats)
     deadline = started + budget
     cleared = load_clearances(root)
     selection_path = root / ".mutation-selection.json"

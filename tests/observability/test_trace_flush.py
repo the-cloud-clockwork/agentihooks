@@ -604,6 +604,19 @@ def test_request_record_defaults(home, enabled, monkeypatch):
     assert json.loads(trace_flush.request_path("s").read_text())["at"] > first["at"]
 
 
+def test_a_stop_stays_recorded_through_later_requests(home, enabled):
+    def stopped():
+        return json.loads(trace_flush.request_path("s").read_text())["stopped"]
+
+    trace_flush.request("s", "", "start", owner_pid=os.getpid(), spawn=lambda s: None)
+    assert stopped() is False
+    trace_flush.request("s", "", "compact", owner_pid=os.getpid(), spawn=lambda s: None)
+    assert stopped() is False
+    trace_flush.request("s", "", "stop", owner_pid=os.getpid(), spawn=lambda s: None)
+    trace_flush.request("s", "", "compact", owner_pid=os.getpid(), spawn=lambda s: None)
+    assert stopped() is True
+
+
 def test_spawn_detaches_the_exporter(monkeypatch):
     calls = []
     monkeypatch.setattr("hooks._async.fork_and_call", lambda fn, *a, **k: calls.append((fn, a, k)))
@@ -1043,7 +1056,102 @@ def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypa
         )
         == "owner exited"
     )
-    timer.assert_called_once_with(trace_flush.POLL_SEC, redis=None)
+    timer.assert_called_once_with(trace_flush.POLL_SEC, state=None)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "connection"])
+def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tmp_path, monkeypatch, failure):
+    from unittest.mock import Mock, call
+
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    from scripts.scheduler import process_timer
+
+    transcript = tmp_path / "transcript.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    clock, state, accepted = Clock(), {"alive": True}, []
+    clock.hooks += [(1, lambda: _grow(transcript)), (20, lambda: _grow(transcript))]
+    clock.hooks += [(40, lambda: state.update(alive=False))]
+    timers = []
+    scheduler = Mock()
+
+    def timer(**kwargs):
+        assert kwargs["delay"] == trace_flush.POLL_SEC
+        clock.sleep(trace_flush.POLL_SEC)
+        if not timers:
+            timers.append(None)
+            error = TimeoutError if failure == "timeout" else ConnectionError
+            raise error("scheduler did not answer")
+        entry = Mock(state="fired", id=f"timer-{len(timers)}", scheduler=scheduler)
+        timers.append(entry)
+        return entry
+
+    scheduler.timer.side_effect = timer
+    monkeypatch.setattr(process_timer, "Scheduler", Mock(return_value=scheduler))
+    starts = Mock()
+    starts.side_effect = lambda: starts.call_count > 1000 and pytest.fail("restarted the scheduler 1000 times")
+    monkeypatch.setattr(process_timer.service, "ensure_running", starts)
+
+    def send(session, path, timeout, trigger):
+        assert session == "session"
+        assert path == str(transcript)
+        accepted.append(transcript.stat().st_size)
+        return True
+
+    assert (
+        trace_flush.supervise(
+            "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda owner: state["alive"]
+        )
+        == "owner exited"
+    )
+    assert len(timers) > 1
+    assert len(accepted) == 3
+    assert accepted[0] < accepted[1] < accepted[2] == transcript.stat().st_size
+    assert scheduler.retire.call_args_list == [call(entry.id) for entry in timers[1:]]
+
+
+@pytest.mark.parametrize("failure", ["timeout", "connection"])
+def test_scheduler_connection_failures_back_off_before_retrying(monkeypatch, failure):
+    from unittest.mock import Mock, call
+
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    clock = Clock()
+    error = TimeoutError if failure == "timeout" else ConnectionError
+    wait = Mock(side_effect=[error("offline"), error("offline"), None])
+    monkeypatch.setattr(trace_flush, "timer_wait", wait)
+    monkeypatch.setattr(trace_flush.time, "sleep", clock.sleep)
+    for _ in range(3):
+        trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    assert clock.now == 2
+    assert wait.call_args_list == [call(trace_flush.POLL_SEC, timeout=trace_flush.POLL_LIMIT_SEC)] * 3
+
+
+def test_scheduler_wait_preserves_interruption(monkeypatch):
+    from unittest.mock import Mock
+
+    wait = Mock(side_effect=KeyboardInterrupt)
+    sleep = Mock()
+    monkeypatch.setattr(trace_flush, "timer_wait", wait)
+    monkeypatch.setattr(trace_flush.time, "sleep", sleep)
+    with pytest.raises(KeyboardInterrupt):
+        trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    wait.assert_called_once_with(trace_flush.POLL_SEC, timeout=trace_flush.POLL_LIMIT_SEC)
+    sleep.assert_not_called()
+
+
+def test_scheduler_wait_returns_within_its_bound_when_the_timer_never_rings(monkeypatch):
+    waited = []
+
+    def never_rings(delay, timeout=None):
+        if timeout is None:
+            raise AssertionError("an unbounded timer wait hangs the exporter")
+        waited.append(timeout)
+
+    monkeypatch.setattr(trace_flush, "timer_wait", never_rings)
+    trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    assert waited == [trace_flush.POLL_LIMIT_SEC] == [5.0]
 
 
 IDENTITY = {

@@ -188,7 +188,7 @@ def test_every_browser_cache_caller_gives_its_step_both_attempts_and_names_that_
             if step.get("name") == "Report browser setup failure":
                 assert f"{words[minutes]} minute timeout" in step["run"], (workflow, job)
                 reported += 1
-    assert reported == 4
+    assert reported == 5
 
 
 def test_cache_uses_installed_playwright_version_and_absolute_browser_folder():

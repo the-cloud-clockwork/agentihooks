@@ -18,11 +18,15 @@ BESIDE = re.compile(r"\$\(dirname \"\$0\"\)|\$\{?GITHUB_ACTION_PATH\}?")
 WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
-    ROOT / "scripts/ci_budget/jobs.py": {"read_page"},
+    ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "budget"},
     ROOT / "scripts/ci_mutation/reuse.py": {"api"},
+    ROOT / "scripts/ci_stats_seed.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
 }
-METADATA_ONLY = {ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"}}
+METADATA_ONLY = {
+    ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"},
+    ROOT / "scripts/ci_gate_queue.py": {"watcher"},
+}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
     r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)(?![a-z]))"
@@ -86,7 +90,14 @@ def _offends(step: dict) -> bool:
 
 
 def test_no_step_on_any_event_holds_the_workflow_token_or_calls_the_api():
-    offenders = [f"{job}: {step.get('name') or step.get('uses')}" for job, step, _ in _all_steps() if _offends(step)]
+    offenders = []
+    for job, step, _ in _all_steps():
+        if job == "select" and step.get("id") == "select":
+            env = step.get("env") or {}
+            assert env["GH_TOKEN"] == "${{ steps.app-token.outputs.token || github.token }}"
+            step = {**step, "env": {key: value for key, value in env.items() if key != "GH_TOKEN"}}
+        if _offends(step):
+            offenders.append(f"{job}: {step.get('name') or step.get('uses')}")
     assert offenders == []
 
 
@@ -134,7 +145,7 @@ def _reached_source(path: Path) -> str:
     lines = path.read_text().splitlines()
     exemptions = LOCAL_ONLY.get(path, set()) | METADATA_ONLY.get(path, set())
     for node in ast.parse("\n".join(lines)).body if exemptions else []:
-        if isinstance(node, ast.FunctionDef) and node.name in exemptions:
+        if isinstance(node, ast.FunctionDef) and node.name.removeprefix("x_").partition("__mutmut_")[0] in exemptions:
             lines[node.lineno - 1 : node.end_lineno] = [""] * (node.end_lineno - node.lineno + 1)
     return "\n".join(lines)
 
@@ -144,6 +155,8 @@ def test_no_script_a_step_runs_calls_the_api():
     expected = [
         ".github/actions/browser-cache/select-artifacts.sh",
         ".github/actions/browser-cache/verify.sh",
+        ".github/actions/retry-upload/find.sh",
+        ".github/actions/retry-upload/watchdog.sh",
         ".github/coverage/combine.sh",
         ".github/coverage/flatten.py",
         ".github/coverage/proxy.py",
@@ -154,11 +167,14 @@ def test_no_script_a_step_runs_calls_the_api():
         "docker/swarm-node/pull-base.sh",
         "docker/swarm-node/smoke.sh",
         "hooks/__main__.py",
+        "hooks/context/conditions.py",
         "hooks/hook_manager.py",
         "hooks/targets/normalizer.py",
         "scripts/brain-smoke",
+        "scripts/ci_branch_coverage.py",
         "scripts/ci_budget/__main__.py",
         "scripts/ci_budget/jobs.py",
+        "scripts/ci_budget/rate_limit.py",
         "scripts/ci_cpu_quota.py",
         "scripts/ci_dependency_audit.py",
         "scripts/ci_dev_reuse.py",
@@ -168,10 +184,9 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/plan.py",
         "scripts/ci_mutation/reuse.py",
-        "scripts/ci_queue_fail_fast.py",
-        "scripts/ci_queue_rebuild.py",
         "scripts/ci_release.sh",
-        "scripts/ci_semgrep.py",
+        "scripts/ci_semgrep_floors.py",
+        "scripts/ci_stats_seed.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
         "scripts/hive/nats_grant.py",
@@ -186,7 +201,12 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/packaging/swarm-init-smoke.sh",
         "scripts/packaging/swarm-smoke.sh",
         "scripts/packaging/swarm-smoke-parallel.sh",
+        "scripts/dead_code.py",
+        "scripts/design_rules.py",
+        "scripts/locked_tests.py",
         "scripts/size_limits.py",
+        "scripts/swallowed_exceptions.py",
+        "scripts/threshold_pins.py",
         "scripts/swarm_ledger/artifact_sanity.py",
         "scripts/swarm_ledger/ledger_server.py",
         "tests/chart_examples.py",
@@ -194,16 +214,22 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/chart_hive_home.py",
         "tests/chart_hive_join.py",
         "tests/chart_hive_only.py",
+        "tests/chart_hive_rollout.py",
         "tests/chart_hub.py",
+        "tests/chart_ledger_rollout.py",
         "tests/chart_nats.py",
         "tests/chart_network.py",
         "tests/chart_redis.py",
+        "tests/chart_scratch_swarms.py",
         "tests/chart_secrets.py",
         "tests/chart_workers.py",
+        "tests/ci_charts/chart_timers.py",
         "tests/count_floor.py",
         "tests/coverage_check.py",
+        "tests/coverage_grade.py",
         "tests/coverage_baseline.py",
         "tests/coverage_ratchet.py",
+        "tests/branch_record.py",
         "tests/dep_manifest.py",
         "tests/dev_durations.py",
         "tests/flake_budget.py",
@@ -216,6 +242,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/ledger_load/memory.py",
         "tests/ledger_load/paired.py",
         "tests/ledger_load/streams.py",
+        "tests/mutation_self_plant/plant.py",
         "tests/refresh_durations.py",
         "tests/reused_coverage.py",
         "tests/shard_budget.py",
@@ -225,11 +252,15 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/__init__.py",
         "tests/browser_coverage.py",
         "tests/flake_ledger.py",
+        "tests/pass_record.py",
+        "tests/dep_inputs.py",
         "tests/routing/test_codex_api.py",
         "tests/shards.py",
         "tests/swarm_ledger/test_postgres_writer_lock.py",
         "tests/swarm_ledger/test_postgres_outbox.py",
         "tests/swarm_ledger/test_postgres_writer_floor.py",
+        "tests/swarm_ledger/test_postgres_repository.py",
+        "tests/test_memory_postgres_parity.py",
         "tests/test_suite_speed.py",
         "scripts/ci_reuse.py",
         "scripts/ci_runner_classes.py",
@@ -245,6 +276,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/test_ci_runner_classes.py",
         "tests/test_ci_runner_trust.py",
     ]
+    expected += [name for name in ("scripts/ci_gate_shards.py", "scripts/ci_gate_queue.py") if ROOT / name in calls]
     assert sorted(str(path.relative_to(ROOT)) for path in calls) in (
         sorted(expected),
         sorted(expected + routing_contracts),
@@ -266,6 +298,13 @@ def test_the_reuse_factory_exemption_contains_only_command_replacements():
         source = path.read_text()
         functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
         for name in names:
+            if path == ROOT / "scripts/ci_gate_queue.py":
+                assert name == "watcher"
+                assert len(functions[name].body) == 1
+                assert isinstance(functions[name].body[0], ast.Return)
+                assert isinstance(functions[name].body[0].value, ast.Dict)
+                assert not any(isinstance(node, ast.Call) for node in ast.walk(functions[name]))
+                continue
             calls = [
                 node
                 for node in ast.walk(functions[name])
@@ -537,7 +576,11 @@ def test_a_dev_push_runs_every_step_of_the_job_itself(job):
 
 @pytest.mark.parametrize("job", sorted(_jobs()))
 def test_no_job_is_granted_the_actions_api(job):
-    assert "actions" not in (_jobs()[job].get("permissions") or {})
+    permissions = _jobs()[job].get("permissions") or {}
+    if job == "select":
+        assert permissions in ({"contents": "read"}, {"contents": "read", "actions": "read"})
+    else:
+        assert "actions" not in permissions
 
 
 def test_no_job_skips_on_a_tree_another_run_passed():

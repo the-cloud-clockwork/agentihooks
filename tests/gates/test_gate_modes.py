@@ -10,6 +10,7 @@ from scripts.gates.base import Decision
 from scripts.gates.claims import GATE as CLAIMS
 from scripts.gates.enforcement import ENFORCEMENTS
 from scripts.swarm import cli, status
+from scripts.swarm.run_window import GATE as WINDOW
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.trace_plan import GATE as TRACE_PLAN
 from scripts.swarm_ledger import ledger_server
@@ -125,6 +126,7 @@ class TestCatalog:
     def test_every_gate_is_named_with_its_default(self):
         expected = {name: gate.default_mode for name, gate in entry.GATES.items()}
         expected |= {CLAIMS.name: CLAIMS.default_mode, TRACE_PLAN.name: TRACE_PLAN.default_mode}
+        expected |= {WINDOW.name: WINDOW.default_mode}
         expected |= {talk.NAME: talk.DEFAULT_MODE}
         expected |= {name: gate.default_mode for name, gate in ENFORCEMENTS.items()}
         assert catalog.defaults() == expected

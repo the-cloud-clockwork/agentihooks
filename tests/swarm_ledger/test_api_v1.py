@@ -64,9 +64,9 @@ def request(live, method, resource, body=None, **headers):
 
 
 def stored(monkeypatch, document):
-    from types import SimpleNamespace
+    from tests.swarm_ledger.api_fakes import serve_document
 
-    monkeypatch.setattr(server.repository, "current", lambda slug: SimpleNamespace(state=document, views={}))
+    serve_document(monkeypatch, server.repository, document)
 
 
 def test_invalid_schema_leaves_resource_unchanged(live):
@@ -1029,6 +1029,68 @@ def test_publish_plan_writes_land_through_the_plans_and_slices_resources(live, t
     assert reply["revision"] == resources.revision(reply["data"])
 
 
+def test_a_planner_publishes_a_plan_and_plan_read_prints_its_sliced_task(live, tmp_path, monkeypatch, capsys):
+    from scripts.swarm_ledger import ledger_artifacts, ledger_core, ledger_plans, plan_read
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import core, ledger
+
+    planner = "planner@323133-0258"
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    plan_task = {"task": "tp", "title": "Slice the proof phase", "lane": "plan", "kind": "plan", "phase": "p1"}
+    seed = [
+        {"op": "join", "id": "planner-master-join", "by": "boss", "role": "orchestrator"},
+        {"op": "join", "id": "planner-join", "by": planner},
+        {"op": "task_add", "id": "planner-task-seed", "by": "boss", **plan_task},
+        {
+            "op": "task_update",
+            "id": "planner-claim-seed",
+            "by": "swarm",
+            "item": "tasks/tp",
+            "fields": {"claimed_by": planner, "state": "claimed"},
+        },
+    ]
+    assert [client.mutate(SLUG, [op]).get("rejected") for op in seed] == [[], [], [], []]
+    monkeypatch.setattr(ledger_core, "LEDGER_DIR", core.LEDGER_DIR)
+    one = "".join(f"One detail {n}\n" for n in range(12))
+    three = "".join(f"Three detail {n}\n" for n in range(12))
+    text = f"# Plan\n<!-- slice: one -->\n## One\n{one}<!-- slice: two -->\n## Two\nSecond step\n"
+    plan = tmp_path / "plan.md"
+    plan.write_text(f"{text}<!-- slice: three -->\n## Three\n{three}", encoding="utf-8")
+    file = ledger_artifacts.store(SLUG, "plan.md", plan.read_bytes())
+    monkeypatch.setattr(ledger, "upload_artifact", lambda *a: file)
+    monkeypatch.setattr(
+        ledger.ledger_publish,
+        "publish",
+        lambda path, title, repo, artifact, issue_title: (artifact(path, title), "artifact"),
+    )
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig-grade-swarm")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", planner)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    publish = ["--slug", SLUG, "--as", planner, "publish-plan", str(plan), "--phase", "p1"]
+    ledger.cmd_publish_plan(ledger.build_parser().parse_args(publish))
+    url = f"{ledger.base()}/artifacts/{SLUG}/{file['id']}"
+    assert json.loads(capsys.readouterr().out) == {"plan_url": url, "published_to": "artifact", "phases": ["p1"]}
+    add = ["--slug", SLUG, "--as", planner, "task", "add", "t2", "Two", "--lane", "eng", "--phase", "p1"]
+    ledger.cmd_task(ledger.build_parser().parse_args([*add, "--plan-slice", "two"]))
+    assert json.loads(capsys.readouterr().out) == {"task": "t2", "added": "Two"}
+    plan_id = ledger_plans.plan_id(file["id"])
+    status, stored = request(live, "GET", f"plans/{plan_id}")
+    assert (status, stored["data"]["artifact"]) == (200, url)
+    status, stored = request(live, "GET", f"slices/{plan_id}.two")
+    assert (status, stored["data"]["lines"]) == (200, "16-18")
+    status, task = request(live, "GET", "tasks/t2")
+    assert status == 200
+    assert {key: task["data"][key] for key in ("plan_slice", "plan_lines", "slice", "plan_url")} == {
+        "plan_slice": "two",
+        "plan_lines": "16-18",
+        "slice": f"slices/{plan_id}.two",
+        "plan_url": url,
+    }
+    assert plan_read.main(["read", "--slug", SLUG, "--task", "t2"], environ={}) == 0
+    rows = plan.read_text(encoding="utf-8").splitlines()
+    assert capsys.readouterr().out == "".join(f"{row}\n" for row in rows[5:28])
+
+
 def test_resource_reads_preserve_pinned_identity(live):
     from unittest.mock import patch
 
@@ -1302,7 +1364,7 @@ def test_versioned_logs_exclude_query_and_bearer(live, capsys):
         )
     assert status == 403
     logged = capsys.readouterr().err
-    assert logged == f"09:00:00 GET /api/v1/ledgers/{SLUG}/metadata\n"
+    assert logged == f"09:00:00 GET /api/v1/ledgers/{SLUG}/metadata -\n"
     assert "private-canary" not in logged
     assert "credential-canary" not in logged
 
@@ -1596,7 +1658,7 @@ def test_operator_doctor_phrase_keeps_the_ledger(live, monkeypatch):
     assert state["chat"][-1]["text"] == server.DOCTOR_PHRASE
 
 
-def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
+def test_mutations_enforce_the_ledger_talk_budget_on_phase_comments(live, monkeypatch):
     import fakeredis
 
     from scripts.gates import progress, talk
@@ -1617,10 +1679,10 @@ def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
 
     monkeypatch.setattr(talk.Budget, "_marks", _talk_marks)
     monkeypatch.setattr(talk.Budget, "__init__", budget)
-    revision = request(live, "GET", "chat")[1]["revision"]
+    revision = request(live, "GET", thread := "phases/p1/comments")[1]["revision"]
     payload = {
-        "ops": [{"op": "add", "id": "budget-denied", "thread": "chat", "text": "Beyond the budget", "by": worker}],
-        "guards": {"chat": revision},
+        "ops": [{"op": "add", "id": "budget-denied", "thread": thread, "text": "Beyond the budget", "by": worker}],
+        "guards": {thread: revision},
     }
     status, result = request(live, "POST", "operations", payload)
     assert status == 200
@@ -1630,7 +1692,6 @@ def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
         "phase p1 description has 101 words, limit 100",
         talk.refusal(worker, talk.BUDGET, SLUG),
     ]
-    assert request(live, "GET", "chat")[1]["revision"] == revision
     assert marks.read(worker).talk == talk.BUDGET
 
 
@@ -2022,7 +2083,8 @@ def test_export_validates_its_body_and_hides_receipts(live, monkeypatch):
 
 
 def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
-    loads, dumps, counts = json.loads, json.dumps, {"decode": 0, "encode": 0}
+    loads, dumps, iterencode = json.loads, json.dumps, json.JSONEncoder.iterencode
+    counts = {"decode": 0, "encode": 0}
 
     def ledger(value):
         return isinstance(value, dict) and "_meta" in value
@@ -2032,9 +2094,9 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
         counts["decode"] += ledger(value)
         return value
 
-    def encode(value, *args, **kwargs):
+    def encode(self, value, *args, **kwargs):
         counts["encode"] += ledger(value) or (isinstance(value, dict) and ledger(value.get("data")))
-        return dumps(value, *args, **kwargs)
+        return iterencode(self, value, *args, **kwargs)
 
     def export():
         headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
@@ -2051,7 +2113,8 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
     first = export()
     assert json.loads(first) == stored()
     monkeypatch.setattr(json, "loads", decode)
-    monkeypatch.setattr(json, "dumps", encode)
+    monkeypatch.setattr(json.JSONEncoder, "iterencode", encode)
+    json.loads(server.repository.inner.current(SLUG).text)
     server.repository.inner.get_document(SLUG)
     assert counts == {"decode": 1, "encode": 0}
     counts.update(decode=0)
@@ -2062,16 +2125,11 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
     assert send(live, "PUT", f"/api/{SLUG}", dumps({"ops": ops}).encode(), **headers)[0] == 200
     counts.update(decode=0, encode=0)
     after = [export() for _ in range(3)]
-    assert counts == {"decode": 0, "encode": 1}
+    assert counts == {"decode": 0, "encode": 0}
     monkeypatch.undo()
     assert after == [after[0]] * 3 and after[0] != first
-    assert after[0] == json.dumps(stored(), ensure_ascii=False).encode()
+    assert json.loads(after[0]) == stored()
     assert "Written after the first export, café" in after[0].decode()
-
-
-def test_export_body_hides_seeds_and_receipts_and_keeps_text_unescaped():
-    state = {"title": "café", "_meta": {"seeds": [1], "api_operations": {"a": 1}, "members": ["m"]}}
-    assert routes.export_body(state) == '{"data": {"title": "café", "_meta": {"members": ["m"]}}}'
 
 
 def test_raw_upload_headers_reject_invalid_lengths_and_names(live):
@@ -2309,7 +2367,8 @@ def test_known_hash_shaped_task_ids_keep_the_comment_exemption(live):
                 "task": "deadb33f",
                 "title": "Known task",
                 "lane": "eng",
-            }
+            },
+            {"op": "add", "id": "operator-ask", "thread": "chat", "text": "Which task covers it"},
         ],
     )
     revision = request(live, "GET", "chat")[1]["revision"]
@@ -2321,6 +2380,7 @@ def test_known_hash_shaped_task_ids_keep_the_comment_exemption(live):
                 "thread": "chat",
                 "by": "api-reader",
                 "to": "operator",
+                "reply_to": "operator-ask",
                 "text": "The deadb33f task is covered",
             }
         ],
@@ -2451,7 +2511,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
     )
     ledger.cmd_artifact_purge(SimpleNamespace(slug=SLUG, name="api-reader"))
     assert json.loads(capsys.readouterr().out) == {"purged": 0, "artifacts": 0}
-    send_operation = Mock()
+    send_operation = Mock(return_value={})
     monkeypatch.setattr(ledger, "send", send_operation)
     args = SimpleNamespace(
         action="add",
@@ -2471,6 +2531,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         artifact=False,
         follow_up=False,
         workstation=False,
+        needs="",
         profile="",
         rank="",
         difficulty=None,

@@ -1,4 +1,5 @@
 import json
+import sys
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import replace
@@ -21,7 +22,6 @@ class HiveLoss:
     def __init__(self, bus: Bus, clock: lease.Clock = lease.wall_ms):
         self._bus = bus
         self._state = bus.state(BUCKET)
-        self._claims = bus.state("spoke-work")
         self._clock = clock
         self._emit = execution_events.emit
         self._pruned = self._watching = self._polled = clock()
@@ -51,14 +51,17 @@ class HiveLoss:
         prune = now >= self._pruned + PRUNE_MS
         by_hive = defaultdict(list)
         for key, raw in (json.loads(entry.value) if entry else {}).items():
-            by_hive[raw["data"]["hive"]].append((key, Envelope.from_dict(raw)))
-        done = []
-        for hive, starts in by_hive.items():
+            by_hive[(raw["swarm"], raw["data"]["hive"])].append((key, Envelope.from_dict(raw)))
+        done, losses = [], []
+        for (swarm, hive), starts in by_hive.items():
             if not guard():
                 break
-            lost = now - self._watching >= presence.TTL_MS and presence.lost(self._bus, hive, now)
+            lost = now - self._watching >= presence.TTL_MS and presence.lost(self._bus.for_swarm(swarm), hive, now)
             if lost or prune:
-                done += self._settle(starts, lost, now)
+                settled, ended = self._settle(starts, lost, now)
+                done += settled
+                if ended:
+                    losses.append(f"hub: hive {hive} of swarm {swarm} lost; exited {', '.join(ended)}")
         else:
             if prune:
                 self._pruned = now
@@ -71,11 +74,13 @@ class HiveLoss:
                 return bool(found)
 
             self._edit(drop)
+            for line in losses:
+                print(line, file=sys.stderr)
 
-    def _settle(self, starts: list[tuple[str, Envelope]], lost: bool, now: int) -> list[str]:
-        done = []
+    def _settle(self, starts: list[tuple[str, Envelope]], lost: bool, now: int) -> tuple[list[str], list[str]]:
+        done, ended = [], []
         for key, start in starts:
-            claim = self._claims.get(key)
+            claim = self._bus.for_swarm(start.swarm).state("spoke-work").get(key)
             value = json.loads(claim.value) if claim else {}
             running = value.get("state") == "started" and value.get("claim_revision") == start.data["claim_revision"]
             if running and not lost:
@@ -90,8 +95,9 @@ class HiveLoss:
                     data={**start.data, "reason": REASON},
                 )
                 self._emit(self._bus, exited)
+                ended.append(f"execution {start.key} of task {start.data['task']}")
             done.append(key)
-        return done
+        return done, ended
 
     def _edit(self, change: Callable[[dict], bool]) -> None:
         for _ in range(8):

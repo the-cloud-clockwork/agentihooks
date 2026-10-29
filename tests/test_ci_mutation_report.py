@@ -55,6 +55,8 @@ def test_function_offsets_cover_decorated_methods_and_async_functions():
     source = "\nclass Example:\n    @decorator\n    def f(self):\n        return 1\n\nasync def run():\n    return 2\n"
     assert function_start(source, "@decorator\ndef f(self):\n    return 1", "Example") == 3
     assert function_start(source, "async def run():\n    return 2", None) == 7
+    source = "class Example:\n    x = 1\n\n    @property\n    def f(self):\n        return 1\n"
+    assert function_start(source, "def f(self):\n    return 1", "Example") == 4
 
 
 def test_report_reads_real_mutmut_metadata_and_maps_original_lines(tmp_path, monkeypatch):
@@ -153,6 +155,85 @@ def test_clearance_survives_unrelated_line_shift_and_tells_identical_mutants_apa
     report = evaluate("hooks/sample.py", changed, {2, 6}, cleared)
     assert report["cleared"] == []
     assert len(report["failures"]) == 2
+
+
+def _argument_rows(folder, monkeypatch, signature, body, mutants):
+    import json
+
+    from scripts.ci_mutation.report import collect_results
+
+    for name in ("hooks", "scripts", "mutants/hooks"):
+        (folder / name).mkdir(parents=True)
+    (folder / "hooks/sample.py").write_text(f"def value({signature}):\n    first = 1\n    {body}\n")
+    (folder / "setup.cfg").write_text("[mutmut]\nsource_paths=hooks/\n")
+    functions = [("orig", signature, body)] + [(str(n), *mutant) for n, mutant in enumerate(mutants, 1)]
+    (folder / "mutants/hooks/sample.py").write_text(
+        "".join(f"def x_value__mutmut_{n}({args}):\n    first = 1\n    {line}\n\n" for n, args, line in functions)
+    )
+    keys = {f"hooks.sample.x_value__mutmut_{n}": 0 for n in range(1, len(mutants) + 1)}
+    meta = {"exit_code_by_key": keys, "durations_by_key": {}, "estimated_durations_by_key": {}}
+    (folder / "mutants/hooks/sample.py.meta").write_text(json.dumps(meta))
+    monkeypatch.chdir(folder)
+    return {row["name"]: row for row in collect_results(Path("hooks/sample.py"))}
+
+
+def test_clearance_keeps_its_identity_across_an_unrelated_argument_edit(tmp_path, monkeypatch):
+    from scripts.ci_mutation.report import clearance_key, mutant_identity, survivor_text
+
+    base = _argument_rows(tmp_path / "base", monkeypatch, "a", "return a", [("a", "return None")])
+    edited = _argument_rows(
+        tmp_path / "edited", monkeypatch, "a, b=2", "return a", [("a, b=3", "return a"), ("a, b=2", "return None")]
+    )
+    rewritten = _argument_rows(tmp_path / "rewritten", monkeypatch, "a", "return a + 1", [("a", "return None")])
+    survivor = base["hooks.sample.x_value__mutmut_1"]
+    moved = edited["hooks.sample.x_value__mutmut_2"]
+    assert survivor["identity"] == hashlib.sha256(b"0\n-    return a\n+    return None").hexdigest()
+    repeated = "def f(x):\n    if x > 0:\n        return 1\n    if x > 0:\n        return 2"
+    first = mutant_identity(repeated, repeated.replace("x > 0", "x >= 0", 1))
+    second = mutant_identity(repeated, "def f(x):\n    if x > 0:\n        return 1\n    if x >= 0:\n        return 2")
+    assert first == hashlib.sha256(b"0\n-    if x > 0:\n+    if x >= 0:").hexdigest()
+    assert second == hashlib.sha256(b"1\n-    if x > 0:\n+    if x >= 0:").hexdigest()
+    inserted = mutant_identity("def f(x):\n    a = 1\n    return x", "def f(x):\n    a = 1\n    pass\n    return x")
+    assert inserted == hashlib.sha256(b"0\n     a = 1\n+    pass").hexdigest()
+    shifted = "def f(x):\n    b = 2\n    a = 1\n    return x"
+    assert mutant_identity(shifted, "def f(x):\n    b = 2\n    a = 1\n    pass\n    return x") == inserted
+    doubled = "def f(x):\n    a = 1\n    a = 1\n    return x"
+    later = mutant_identity(doubled, "def f(x):\n    a = 1\n    a = 1\n    pass\n    return x")
+    assert later == hashlib.sha256(b"1\n     a = 1\n+    pass").hexdigest()
+    assert survivor["fingerprint"] != moved["fingerprint"]
+    key = clearance_key("hooks/sample.py", survivor)
+    assert key == f"hooks/sample.py:hooks.sample.x_value:{survivor['identity']}"
+    assert clearance_key("hooks/sample.py", moved) == key
+    assert clearance_key("hooks/sample.py", edited["hooks.sample.x_value__mutmut_1"]) != key
+    assert clearance_key("hooks/sample.py", rewritten["hooks.sample.x_value__mutmut_1"]) != key
+    cleared = {key: {"reader": "Standards", "reason": "Returning None is never observed"}}
+    report = evaluate("hooks/sample.py", list(edited.values()), {1, 3}, cleared)
+    assert [row["name"] for row in report["cleared"]] == ["hooks.sample.x_value__mutmut_2"]
+    assert [row["name"] for row in report["failures"]] == ["hooks.sample.x_value__mutmut_1"]
+    assert f"hooks/sample.py:hooks.sample.x_value:{edited['hooks.sample.x_value__mutmut_1']['identity']}" in (
+        survivor_text(report)
+    )
+    report = evaluate("hooks/sample.py", list(rewritten.values()), {3}, cleared)
+    assert report["cleared"] == []
+    legacy = f"hooks/sample.py:hooks.sample.x_value__mutmut_1:{survivor['fingerprint']}"
+    legacy_cleared = {legacy: cleared[key]}
+    assert len(evaluate("hooks/sample.py", list(base.values()), {3}, legacy_cleared)["cleared"]) == 1
+    stale = f"hooks/sample.py:hooks.sample.x_value__mutmut_2:{survivor['fingerprint']}"
+    stale_cleared = {stale: cleared[key]}
+    assert evaluate("hooks/sample.py", list(edited.values()), {3}, stale_cleared)["cleared"] == []
+
+
+def test_mutant_identity_separates_hunks_and_matches_repeated_lines_in_long_functions():
+    from scripts.ci_mutation.report import clearance_keys, mutant_identity
+
+    two = mutant_identity("def f(x):\n    a = 1\n    b = 2\n    c = 3", "def f(x):\n    a = 9\n    b = 2\n    c = 9")
+    assert two == hashlib.sha256(b"0\n-    a = 1\n+    a = 9\x000\n-    c = 3\n+    c = 9").hexdigest()
+    body = "    x += 1\n" * 250
+    long = mutant_identity("def f(x):\n" + body + "    return x", "def g(x):\n" + body + "    return None")
+    expected = b"0\n-def f(x):\n+def g(x):\x000\n-    return x\n+    return None"
+    assert long == hashlib.sha256(expected).hexdigest()
+    row = {"name": "m.x_f__mutmut_old__mutmut_3", "identity": "i", "fingerprint": "f"}
+    assert clearance_keys("p", row) == ["p:m.x_f__mutmut_old:i", "p:m.x_f__mutmut_old__mutmut_3:f"]
 
 
 def test_survivor_text_prints_each_failure_with_its_diff_and_clearance_file():

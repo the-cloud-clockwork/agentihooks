@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.x\u01c1NatsBus\u01c1__init____mutmut_12:9636aeb4a2f11ef7f878485f0f9afe5a14ac6bb0cdabfe831f19aeed86fbda18": {
+    "reader": "standards_reader",
+    "reason": "Installed nats.aio.client treats both -1 and -2 reconnect attempts as unlimited: its limit branches compare the sign. Standards reader verified the installed client comparisons. Evidence: Standards disposition of complete CI report 40201644623."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/master_claude_login.py:scripts.master_claude_login.x__token_args__mutmut_17:e63798b782b560d1754a3720c416f2df4c8c1612b7a54e813d71a43076befc23": {
+    "reader": "Standards",
+    "reason": "Only the first substring before equals is observed, so unlimited and one split yield identical output for every input."
+  }
+}

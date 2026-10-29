@@ -1,0 +1,6 @@
+{
+  "scripts/recall/store.py:scripts.recall.store.xǁSQLiteRecallStoreǁ_mark__mutmut_6:81d9dd8d2dac04f603f820d84bec736cac83f2665bf1fefdb39721539864e614": {
+    "reader": "standards_reader",
+    "reason": "Lowercasing the upsert keywords (insert into, on conflict, do update set, excluded) is a no-op under SQLite's case-insensitive keyword matching, with the bound values unchanged."
+  }
+}

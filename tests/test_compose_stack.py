@@ -64,7 +64,8 @@ def test_hive_join_retries_the_redis_mirror_pull_before_starting_redis():
     assert 'for attempt in $(seq "$attempts"); do' in retry
     assert 'if acquire "$@"; then' in retry
     assert 'if (( attempt == attempts )); then\n    exit "$status"\n  fi' in retry
-    assert "sleep 10" in retry
+    assert 'delay="${PULL_RETRY_SECONDS:-10}"' in retry
+    assert 'sleep "$delay"' in retry
     assert script.index(pull) < script.index(start)
 
 
@@ -74,9 +75,12 @@ def test_swarm_init_ships_the_repository_stack_byte_for_byte():
     assert shipped == [
         "compose.yaml",
         "deploy/compose/adopt.yaml",
+        "deploy/compose/ledger-tailnet.conf.template",
         "deploy/compose/redis/healthcheck.sh",
         "deploy/compose/redis/start.sh",
         "deploy/compose/redis/users.acl.template",
+        "deploy/compose/start-tailnet.sh",
+        "deploy/compose/tailnet.yaml",
     ]
     for name in shipped:
         assert (bundled / name).read_bytes() == (ROOT / name).read_bytes(), name

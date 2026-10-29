@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__exact__mutmut_33:89b4e9e29742fd02839ca37af1d834120c5f4c0d4a4acf1fcc49e08a264b74bf": {
+    "reader": "standards_reader",
+    "reason": "Only the letter case of the ORDER BY, DESC and identifiers changes, which SQLite treats as case-insensitive."
+  }
+}

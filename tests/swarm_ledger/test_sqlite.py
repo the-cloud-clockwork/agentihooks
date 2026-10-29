@@ -6,6 +6,7 @@ import threading
 import pytest
 
 from scripts.swarm_ledger.repository import sqlite
+from scripts.swarm_ledger.repository.entry import Entry
 from scripts.swarm_ledger.repository.sqlite import (
     Missing,
     SQLiteLedgerRepository,
@@ -89,6 +90,18 @@ def test_import_exports_the_source_document_and_survives_a_restart(tmp_path):
     assert restarted.events_since("ledger", 1) == []
     with repo.connect() as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_a_working_copy_comes_from_the_cached_state_without_parsing_the_ledger_text(tmp_path, monkeypatch):
+    repo = store(tmp_path)
+    repo.import_document("ledger", document())
+    expected = repo.get_document("ledger")
+    monkeypatch.setattr(Entry, "text", property(lambda entry: pytest.fail("a read parsed the whole ledger text")))
+    working = repo.get_document("ledger")
+    assert working == expected
+    working["tasks"][1]["comments"].append({"id": "mine"})
+    working["_meta"]["rev"] = 99
+    assert repo.get_document("ledger") == expected
 
 
 def test_import_refuses_an_existing_ledger_unless_replacing(tmp_path):
@@ -251,6 +264,54 @@ def test_a_view_hands_its_freed_heap_back_once_per_generation(tmp_path, monkeypa
     assert released == [True, True]
 
 
+def building_view(calls, active, peak, started, release):
+    def view(state):
+        calls.append(state["_meta"]["rev"])
+        active[0] += 1
+        peak[0] = max(peak[0], active[0])
+        started.set()
+        release.wait(5)
+        active[0] -= 1
+        return json.dumps(state).encode()
+
+    return view
+
+
+def test_a_reader_waiting_on_a_view_build_reuses_it_instead_of_building_its_own(tmp_path):
+    repo = store(tmp_path)
+    repo.create("ledger", CONTENT)
+    calls, active, peak, started, release = [], [0], [0], threading.Event(), threading.Event()
+    view = building_view(calls, active, peak, started, release)
+    readers = [threading.Thread(target=repo.encoded_view, args=("ledger", view)) for _ in range(2)]
+    readers[0].start()
+    assert started.wait(5)
+    readers[1].start()
+    readers[1].join(0.2)
+    release.set()
+    for reader in readers:
+        reader.join(5)
+    assert len(calls) == 1 and peak == [1]
+
+
+def test_views_of_different_generations_never_build_at_once(tmp_path):
+    repo = store(tmp_path)
+    repo.create("ledger", CONTENT)
+    calls, active, peak, started, release = [], [0], [0], threading.Event(), threading.Event()
+    view = building_view(calls, active, peak, started, release)
+    first = threading.Thread(target=repo.encoded_view, args=("ledger", view))
+    first.start()
+    assert started.wait(5)
+    repo.apply_ops("ledger", ops=[chat(1)])
+    second = threading.Thread(target=repo.encoded_view, args=("ledger", view))
+    second.start()
+    second.join(0.2)
+    assert len(calls) == 1
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert len(calls) == 2 and calls[0] != calls[1] and peak == [1]
+
+
 def test_a_reader_of_an_older_revision_keeps_the_newer_copy_for_the_next_writer(tmp_path, monkeypatch):
     repo = store(tmp_path)
     repo.create("ledger", CONTENT)
@@ -392,3 +453,63 @@ def test_concurrent_first_connections_set_up_the_store_once(tmp_path, monkeypatc
         thread.join(5)
     assert errors == []
     assert len(setups) == 1
+
+
+def test_one_thread_reads_existence_credential_and_task_rows_through_one_connection(tmp_path, monkeypatch):
+    writer = store(tmp_path)
+    writer.create("ledger", CONTENT)
+    repo = store(tmp_path)
+    opened, connect = [], sqlite3.connect
+    monkeypatch.setattr(
+        sqlite3, "connect", lambda *args, **kwargs: opened.append(threading.get_ident()) or connect(*args, **kwargs)
+    )
+    generations = []
+
+    def request():
+        assert repo.exists("ledger") is True and repo.exists("other") is False
+        assert repo.token("ledger") is not None and repo.token("other") is None
+        with pytest.raises(Missing):
+            repo.task_rows("other")
+        generation, _, rows = repo.task_rows("ledger")
+        assert [row["title"] for row in rows] == ["first", "second"]
+        generations.append(generation)
+
+    request()
+    reads = len(opened)
+    writer.apply_ops("ledger", ops=[chat(1)])
+    statements = []
+    repo.trace = statements.append
+    request()
+    assert any(statement.startswith("SELECT token FROM ledgers") for statement in statements), statements
+    worker = threading.Thread(target=request)
+    worker.start()
+    worker.join(5)
+    readers = [ident for ident in opened if ident != threading.get_ident()]
+    assert generations[0] < generations[1] == generations[2]
+    assert reads == 1 and len(readers) == 1
+
+
+@pytest.mark.parametrize("read", ["connect", "reader"])
+def test_a_store_setup_failure_closes_the_connection_it_opened(tmp_path, monkeypatch, read):
+    closed = []
+
+    class Closing(sqlite3.Connection):
+        def close(self):
+            closed.append(self)
+            super().close()
+
+    connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", lambda *args, **kwargs: connect(*args, factory=Closing, **kwargs))
+    repo = store(tmp_path)
+
+    def refuse(connection, path):
+        raise sqlite3.OperationalError("disk full")
+
+    monkeypatch.setattr(repo, "_set_up", refuse)
+    with pytest.raises(sqlite3.OperationalError, match="disk full"):
+        if read == "connect":
+            with repo.connect():
+                pass
+        else:
+            repo.exists("ledger")
+    assert len(closed) == 1

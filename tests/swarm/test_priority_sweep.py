@@ -3,7 +3,7 @@ import pytest
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
 from scripts.swarm import priority_sweep
 from scripts.swarm.ledger_events import PullRequest
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import RedisStore, SwarmError
 from tests.doctor.test_doctor_cli import FileLedger, core, new_ledger, state
 
 SLUG = "prio-sweep"
@@ -170,6 +170,18 @@ def test_operator_comment_that_resolves_a_follow_up_clears_it_and_marks_it_done(
     assert "Pick a port for the demo" in question.instructions and ASK in question.instructions
 
 
+def test_a_cleared_blocked_task_priority_stays_cleared_after_the_swarm_comment(env):
+    env[1].update_task(SLUG, "t1", {"state": "blocked"})
+    agent_comment("tasks/t1", "Waiting on the port choice.", cid="c-why")
+    assert priorities()["tasks/t1"]["derived"] is True
+    run(env)
+    agent_comment("tasks/t1", "The port is set to nine thousand, nothing waits now.", cid="c-done")
+    reason = "the classifier judged that the comment from an agent resolves it, at probability 0.90"
+    assert run(env, Judge(yes=0.9)) == [f"cleared the priority on tasks/t1: {reason}"]
+    assert state(SLUG)["tasks"][0]["comments"][-1]["text"] == f"Priority cleared by the swarm: {reason}."
+    assert "tasks/t1" not in priorities()
+
+
 def test_a_no_leaves_the_priority(env):
     path = item("followups")
     raise_priority(env, path)
@@ -241,9 +253,10 @@ def test_an_agent_comment_asking_for_the_approval_never_clears_it(env):
     assert cleared("tasks/t1") == []
 
 
-def test_an_agent_chat_line_naming_an_approval_never_clears_it(env):
+def test_an_agent_chat_line_naming_an_approval_is_refused_and_never_clears_it(env):
     await_approval(env)
-    env[1].say(SLUG, "Approval for t1 is in, merging now.", by="engineer@sw-0001")
+    with pytest.raises(SwarmError):
+        env[1].say(SLUG, "Approval for t1 is in, merging now.", by="engineer@sw-0001")
     judge = Judge(yes=1.0)
     assert run(env, judge) == []
     assert judge.asked == []
@@ -565,7 +578,7 @@ def test_a_cleared_priority_is_not_judged_again_in_the_same_pass():
     events = [write(1, "tasks/t1", "Ship it."), write(2, "tasks/t1", "Really, ship it.")]
     _, calls = dict_pass([row("tasks/t1")], events, judge, tasks=tasks)
     assert asked_texts(judge) == [("Ship", "Ship it.")]
-    assert [c[0] for c in calls] == ["clear_priority", "comment_item"]
+    assert [c[0] for c in calls] == ["comment_item", "clear_priority"]
 
 
 def test_an_even_answer_counts_as_a_yes():

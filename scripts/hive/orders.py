@@ -77,7 +77,7 @@ POD_SECONDS = 45
 
 def build_opening(request: SpawnRequest) -> str:
     """Built where the ledger is, naming the work folder below whichever home the hive runs it in."""
-    config, task = request.config, {**request.task, "harness": "claude"}
+    config, task = request.config, {"harness": "claude", **request.task}
     if task.get("workspace"):
         task["workspace"] = ledger_workspace.portable(config.slug, task["id"])
     role = config.lanes.get(request.lane, {}).get("role")
@@ -156,6 +156,19 @@ class Orders:
         self.redis.delete(self.command_receipt(hive, order_id))
 
 
+def resolved_master_login(order: LaunchOrder, account: str, placement: str, decision: dict) -> bool:
+    validation = decision.get("validation", {})
+    return (
+        order.route_kind == "master-login"
+        and order.lane == MASTER
+        and order.harness == "claude"
+        and bool(account)
+        and placement in ("forced", "fallback")
+        and isinstance(validation, dict)
+        and validation.get("account") == account
+    )
+
+
 class Consumer:
     def __init__(self, redis: "Redis", hive: str, runtime: "LocalHerdrRuntime", pod: str = POD) -> None:
         self.store = RedisStore(redis)
@@ -170,25 +183,28 @@ class Consumer:
         return cls(redis, hive, LocalHerdrRuntime(HerdrRuntime()))
 
     def poll(self) -> int:
-        from redis.exceptions import NoPermissionError
-
         entries = self.store.redis.xrange(self.orders.stream(self.hive), count=32)
         for item, fields in entries:
-            try:
-                order = LaunchOrder(**json.loads(fields["order"]))
-                if order.hive != self.hive:
-                    self._drop(item, "identity")
-                    continue
-                ack = self.orders.ack(order)
-                if ack is None:
-                    ack = self.apply(order)
-                if ack is not None:
-                    self.orders.finish(self.hive, item, order, ack)
-            except (KeyError, TypeError, ValueError):
-                self._drop(item, "invalid_order")
-            except NoPermissionError:
-                self._drop(item, "refused")
+            self.consume(item, fields)
         return len(entries)
+
+    def consume(self, item: str, fields: dict) -> None:
+        from redis.exceptions import NoPermissionError
+
+        try:
+            order = LaunchOrder(**json.loads(fields["order"]))
+            if order.hive != self.hive:
+                self._drop(item, "identity")
+                return
+            ack = self.orders.ack(order)
+            if ack is None:
+                ack = self.apply(order)
+            if ack is not None:
+                self.orders.finish(self.hive, item, order, ack)
+        except (KeyError, TypeError, ValueError):
+            self._drop(item, "invalid_order")
+        except NoPermissionError:
+            self._drop(item, "refused")
 
     def _drop(self, item: str, failure: str) -> None:
         with self.store.redis.pipeline() as pipe:
@@ -241,6 +257,11 @@ class Consumer:
         if order.action == "name":
             return _done(self.runtime.herdr.name_pane(agent))
         if order.action == "retire":
+            receipt = self.orders.launch_receipt(self.hive, order.slug, order.execution_id, order.generation)
+            with self.store.redis.pipeline() as pipe:
+                pipe.hset(receipt, "retired", "1")
+                pipe.expire(receipt, RECEIPT_SECONDS)
+                pipe.execute()
             outcome = self.runtime.terminate(agent, tuple(reaper.scratch_homes(order.slug, agent.task)))
         elif order.action == "nudge":
             outcome = self.runtime.command(agent, order.text)
@@ -338,7 +359,7 @@ class Consumer:
             return ""
         if (
             order.route_kind != master_claude_login.ROUTE
-            and self.store.redis.hget(registry.key(self.hive), "ui") == "yes"
+            and (registry.show(self.store.redis, self.hive) or {}).get("ui") == "yes"
         ):
             return ""
         return master_claude_login.unusable()
@@ -349,7 +370,12 @@ class Consumer:
         config = self.store.config(order.slug)
         chosen = {**config.lanes.get(order.lane, {}), "agent": order.harness, "role": order.profile}
         config = replace(config, repo=task.get(ORIGIN) or config.repo, lanes={**config.lanes, order.lane: chosen})
-        task = {**task, "route_kind": order.route_kind, "controller_epoch": order.epoch}
+        task = {
+            **task,
+            "route_kind": order.route_kind,
+            "controller_epoch": order.epoch,
+            "admitted_execution_id": agent.execution_id,
+        }
         task["launch_assignment"] = {
             "profile": order.profile,
             "harness": order.harness,
@@ -362,6 +388,8 @@ class Consumer:
             task["workspace"] = str(ledger_workspace.materialize(order.slug, order.task, task.get(SEEDS) or {}))
         if not serena_router_daemon.ensure():
             return Ack("failed", {}, "serena")
+        if self.store.redis.hexists(self.orders.receipt(order), "retired"):
+            return Ack("failed", {}, "retired")
         outcome = self.runtime.spawn(SpawnRequest(config, order.lane, agent.name, task))
         if not outcome.ok:
             return Ack("failed", {}, _failure(outcome))
@@ -372,15 +400,21 @@ class Consumer:
         except SwarmError:
             return Ack("failed", {"host_id": self.hive}, "ambiguous")
         live = replace(agent, runtime_target=target, pane_id=placed.pane_id)
+        if self.store.redis.hexists(self.orders.receipt(order), "retired"):
+            return self._stop(live, "retired")
         if order.expires_at <= lease.now_ms(self.store):
             return self._stop(live, "expired")
-        if (placed.harness, placed.profile, placed.account) != (order.harness, order.profile, order.slot):
+        resolved = resolved_master_login(order, placed.account, placed.placement, placed.profile_decision)
+        if (placed.harness, placed.profile) != (order.harness, order.profile) or (
+            placed.account != order.slot and not resolved
+        ):
             return self._stop(live, "identity")
         try:
             lease.require_epoch(self.store, order.slug, order.epoch)
         except SwarmError:
             return self._stop(live, "refused")
         execution = {
+            **({"account": placed.account, "placement": placed.placement} if resolved else {}),
             "pane_id": placed.pane_id,
             "model": placed.model,
             "effort": placed.effort,

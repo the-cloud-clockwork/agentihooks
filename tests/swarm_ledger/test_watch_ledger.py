@@ -104,13 +104,16 @@ def live(monkeypatch):
     monkeypatch.setattr(stream, "HEARTBEAT_S", 0.2)
     monkeypatch.setattr(seen, "marks_for", lambda slug, environ=None: None)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd.daemon_threads = False
     threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
     monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda: base)
     monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{httpd.server_address[1]}"})
     yield base
     httpd.shutdown()
+    server.HUB.drain()
     httpd.server_close()
+    assert server.HUB.watched() == []
 
 
 def test_stream_reads_the_snapshot_with_the_header_credential(live):
@@ -347,6 +350,39 @@ def test_a_patch_that_cannot_apply_reconnects_without_a_cursor(monkeypatch, caps
     with pytest.raises(SystemExit):
         watch_ledger.main()
     assert calls == [None, None]
+
+
+@pytest.mark.parametrize("swallowed", [False, True])
+def test_a_stop_request_survives_an_ignored_exit_exception(monkeypatch, swallowed):
+    make_ledger()
+    handlers = []
+
+    def credentials(slug):
+        with pytest.raises(SystemExit) as stopped:
+            handlers[0]()
+        assert stopped.value.code == 0
+        if not swallowed:
+            raise stopped.value
+        return {}
+
+    def stream(*args):
+        pytest.fail("stream connected after SIGTERM")
+
+    def register(number, handler):
+        assert callable(handler)
+        handlers.append(handler)
+
+    monkeypatch.setattr(watch_ledger.signal, "signal", register)
+    monkeypatch.setattr(watch_ledger.atexit, "register", lambda *args, **kwargs: None)
+    monkeypatch.setattr(watch_ledger, "credentials", credentials)
+    monkeypatch.setattr(watch_ledger, "stream", stream)
+    monkeypatch.setattr(sys, "argv", ["watch_ledger.py", SLUG, "--as", "watcher"])
+    if swallowed:
+        watch_ledger.main()
+    else:
+        with pytest.raises(SystemExit) as stopped:
+            watch_ledger.main()
+        assert stopped.value.code == 0
 
 
 def test_a_comment_on_a_hidden_done_task_still_reaches_its_claimant(capsys):

@@ -22,12 +22,12 @@ THRESHOLD_HOURS = {
 
 @dataclass(frozen=True)
 class Settings:
-    ticks: int = 5
+    ticks: int = 1
     window_ms: int = bottleneck.WINDOW_MS
 
 
 def settings(environ: Mapping[str, str] = os.environ) -> Settings:
-    ticks = int(environ.get("AGENTIHOOKS_STAGE_DETECTOR_TICKS", "5"))
+    ticks = int(environ.get("AGENTIHOOKS_STAGE_DETECTOR_TICKS", "1"))
     hours = float(environ.get("AGENTIHOOKS_STAGE_DETECTOR_WINDOW_HOURS", "4"))
     if ticks < 1 or not 0 < hours <= 12:
         raise ValueError("stage detector needs positive ticks and a window of at most twelve hours")

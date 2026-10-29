@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_shards.py:scripts.ci_gate_shards.x_fetch__mutmut_66:c4a9fdcbba86a60d634bbbb566f91b15b183cfa737e068aea3fa99d7432e5d18": {
+    "reader": "standards-reader",
+    "reason": "Nine rather than eight workers preserves bounded parallel downloading and all evidence/failure semantics; exact-eight tuning is not a correctness contract. This clearance does not certify identical timing."
+  }
+}

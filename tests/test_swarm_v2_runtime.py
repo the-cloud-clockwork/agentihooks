@@ -342,7 +342,9 @@ def test_a_timed_out_spawn_is_ambiguous(tmp_path, monkeypatch):
     outcome = LocalHerdrRuntime(herdr).spawn(
         SpawnRequest(config(tmp_path), "eng", "engineer@x-1", {"id": "t1", "title": "x", "profile": "engineer"})
     )
-    assert outcome == Outcome("spawn", Status.AMBIGUOUS, LOCAL, detail="init-agent timed out for engineer@x-1")
+    assert outcome == Outcome(
+        "spawn", Status.AMBIGUOUS, LOCAL, {"harness": "claude"}, detail="init-agent timed out for engineer@x-1"
+    )
 
 
 @pytest.mark.parametrize("status", ["unsupported", "unavailable", "refused"])
@@ -352,6 +354,18 @@ def test_a_failed_spawn_carries_its_typed_status(status):
 
     outcome = LocalHerdrRuntime(SimpleNamespace(spawn=spawn)).spawn(request())
     assert outcome == Outcome("spawn", Status(status), LOCAL, detail="launch failed")
+
+
+@pytest.mark.parametrize(
+    "pane, harness, value",
+    [("", "codex", {"harness": "codex"}), ("w1:p1", "claude", {"pane_id": "w1:p1", "harness": "claude"})],
+)
+def test_a_failed_spawn_names_the_harness_it_failed_on(pane, harness, value):
+    def spawn(*args):
+        raise SpawnError("launch failed", pane_id=pane, harness=harness)
+
+    outcome = LocalHerdrRuntime(SimpleNamespace(spawn=spawn)).spawn(request())
+    assert outcome == Outcome("spawn", Status.REFUSED, LOCAL, value, detail="launch failed")
 
 
 def test_an_untyped_spawn_error_is_refused():
@@ -569,6 +583,21 @@ def test_a_failed_tick_spawn_or_resume_raises_its_typed_spawn_error(status):
         with pytest.raises(SpawnError) as raised:
             call()
         assert (str(raised.value), raised.value.status) == ("no seat", status)
+
+
+@pytest.mark.parametrize(("metadata", "harness"), [({"harness": "codex"}, "codex"), ({}, ""), (None, "")])
+def test_a_reservation_refusal_retains_the_selected_harness(metadata, harness):
+    def launch(request):
+        return Outcome("spawn", Status.UNAVAILABLE, "hive", metadata, detail="account reservation is full")
+
+    router = SimpleNamespace(spawn_backend=lambda request: "hive")
+    runtime = RoutedRuntime(FakeHerdr(), router, launch=launch)
+    with pytest.raises(SpawnError) as raised:
+        runtime.spawn("cfg", "eng", "engineer", {"id": "t1"})
+    assert raised.value.harness == harness
+    assert str(raised.value) == "account reservation is full"
+    assert raised.value.status is Status.UNAVAILABLE
+    assert raised.value.pane_id == ""
 
 
 def test_a_tick_observation_of_another_backend_is_unknown_and_touches_nothing():

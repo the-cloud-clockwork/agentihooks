@@ -14,12 +14,19 @@ PARAMETERS = re.compile(r"\[.*\]$")
 
 def gather(history: list[dict], reports: list[dict], now_s: float) -> list[dict]:
     kept = [line for line in history if line["at"] > now_s - WINDOW_S]
-    seen = {(line["test"], line["run"]) for line in kept}
+    seen = {(line["test"], line["run"]): line for line in kept}
     for report in reports:
+        if report["outcome"] != "flaky":
+            continue
         line = {"test": PARAMETERS.sub("", report["test"]), "run": str(report["run"]), "at": now_s}
-        if report["outcome"] == "flaky" and (line["test"], line["run"]) not in seen:
-            seen.add((line["test"], line["run"]))
+        key = (line["test"], line["run"])
+        if key not in seen:
+            seen[key] = line
             kept.append(line)
+        if report.get("tracebacks"):
+            evidence = seen[key].setdefault("reports", [])
+            if report not in evidence:
+                evidence.append(report)
     return kept
 
 
@@ -28,6 +35,10 @@ def budget(history: list[dict]) -> dict:
     for line in history:
         runs.setdefault(line["test"], set()).add(line["run"])
     retried = [{"test": test, "count": len(ids), "runs": sorted(ids)} for test, ids in sorted(runs.items())]
+    for test in retried:
+        reports = [report for line in history if line["test"] == test["test"] for report in line.get("reports", [])]
+        if reports:
+            test["reports"] = reports
     over = [{"test": test["test"], "runs": test["runs"]} for test in retried if test["count"] >= BUDGET_RUNS]
     return {"flaky_tests": len(runs), "over_budget": over, "retried": retried}
 

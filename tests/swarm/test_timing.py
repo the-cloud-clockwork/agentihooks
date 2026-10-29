@@ -128,8 +128,9 @@ def test_a_failure_inside_a_timed_call_names_the_call_frame(capsys):
     with pytest.raises(json.JSONDecodeError), timing.tick("sw"):
         timing.call(json.loads, "{")
     finished = json.loads(capsys.readouterr().err.splitlines()[-1])
-    line = timing.call.__code__.co_firstlineno + 3
-    assert finished["raised_at"] == f"scripts/swarm/timing.py:{line} call"
+    original = getattr(timing, "x_call__mutmut_orig", timing.call)
+    line = original.__code__.co_firstlineno + 3
+    assert finished["raised_at"] == f"scripts/swarm/timing.py:{line} {original.__name__}"
 
 
 def _raised_in(root, monkeypatch, name):
@@ -209,3 +210,42 @@ def test_instrumented_tick_preserves_signature_and_arguments(capsys):
     assert all(row["slug"] == "sw" for row in rows)
     assert rows[-1]["outcome"] == "success"
     assert timing.SWARM.get() is None
+
+
+def test_timed_records_a_failure_without_reporting_it_or_keeping_the_tick(capsys):
+    calls = []
+
+    def broken(value, *, scale):
+        raise RuntimeError(value * scale)
+
+    failure = timing.ON_FAILURE.set(lambda step, error: calls.append(("failure", step)))
+    before = timing.BEFORE_STEP.set(lambda: calls.append(("keep",)))
+    try:
+        with timing.tick("sw"), pytest.raises(RuntimeError, match="^6$"):
+            timing.timed(broken, 2, scale=3)
+    finally:
+        timing.ON_FAILURE.reset(failure)
+        timing.BEFORE_STEP.reset(before)
+    assert calls == []
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    assert [(row["phase"], row["step"]) for row in rows] == [
+        (
+            "started",
+            "tests.swarm.test_timing.test_timed_records_a_failure_without_reporting_it_or_keeping_the_tick.<locals>.broken",
+        ),
+        (
+            "finished",
+            "tests.swarm.test_timing.test_timed_records_a_failure_without_reporting_it_or_keeping_the_tick.<locals>.broken",
+        ),
+    ]
+    assert (rows[1]["outcome"], rows[1]["error"]) == ("error", "builtins.RuntimeError")
+
+
+def test_timed_returns_the_result_of_its_call(capsys):
+    with timing.tick("sw"):
+        assert timing.timed(divmod, 7, 2) == (3, 1)
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    assert [(row["phase"], row["step"], row.get("outcome")) for row in rows] == [
+        ("started", "builtins.divmod", None),
+        ("finished", "builtins.divmod", "success"),
+    ]

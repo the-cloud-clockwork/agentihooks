@@ -1,8 +1,11 @@
+import math
 import os
 import sqlite3
 from collections.abc import Mapping
 from functools import partial
 
+from scripts.events import state
+from scripts.events.bus import StateConflict
 from scripts.swarm import (
     bottleneck,
     capacity,
@@ -10,14 +13,16 @@ from scripts.swarm import (
     metrics_fleet,
     metrics_ledger,
     metrics_outbox,
+    metrics_service,
     metrics_swarm,
     stage_detector,
     stages,
     timing,
 )
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import SwarmError, store_errors
 
+BUCKET = "metrics-interval"
 TICKS = metrics_outbox.Table("ticks", (("actions", "Int64"),))
 
 
@@ -35,14 +40,17 @@ def _collect(slug, now_ms, swarm, box, errors, environ):
     seats = capacity.caps(capacity.read(swarm.store, slug), config)
     ready = stages.claimable(watched, freeze.fix_phase(config), seats)
     stage_detector.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []), environ, ready=ready)
-    from redis.exceptions import RedisError
-
     from scripts.swarm_v2 import deployed
 
+    outage = (*store_errors(), *state.unavailable(environ))
     try:
         metrics_fleet.record(box, swarm.store, slug, now_ms, pools=deployed.worker_pools(environ, slug))
-    except (OSError, SwarmError, ValueError, KeyError, RedisError) as exc:
+    except (OSError, SwarmError, ValueError, KeyError, *outage) as exc:
         errors.append(f"fleet metrics failed: {exc}")
+    try:
+        metrics_service.record(box, swarm.store, slug, now_ms)
+    except (ValueError, KeyError, *outage) as exc:
+        errors.append(f"service metrics failed: {exc}")
 
 
 def record(table, rows, now_ms, environ=os.environ, extra=None):
@@ -58,7 +66,7 @@ def record(table, rows, now_ms, environ=os.environ, extra=None):
             timing.call(box.flush, now_ms)
         finally:
             box.close()
-    except (sqlite3.Error, OSError, ValueError) as exc:
+    except (sqlite3.Error, OSError, ValueError, *state.unavailable(environ)) as exc:
         return [f"metrics outbox failed: {exc}"]
     return []
 
@@ -73,10 +81,53 @@ def _ledger(slug, now_ms, errors, box, swarm=None):
         errors.append(f"ledger metrics failed: {exc}")
 
 
+def _interval_ms(environ):
+    every_ms = float(environ.get("AGENTIHOOKS_METRICS_EVERY_MINUTES", "10")) * 60_000
+    if not 1 <= every_ms < math.inf:
+        raise ValueError("metrics collectors need a positive interval in minutes")
+    return int(every_ms)
+
+
+def _claim_interval(slug, store, now_ms, environ):
+    every_ms = _interval_ms(environ)
+    claims = state.for_store(store, BUCKET, environ)
+    entry = claims.get(slug)
+    if entry is not None and int(entry.value) + every_ms > now_ms:
+        return False
+    try:
+        if entry is None:
+            claims.create(slug, str(now_ms).encode())
+        else:
+            claims.update(slug, str(now_ms).encode(), entry.revision)
+    except StateConflict:
+        return False
+    return True
+
+
+def _reopen_interval(slug, store, environ):
+    claims = state.for_store(store, BUCKET, environ)
+    entry = claims.get(slug)
+    if entry is not None:
+        try:
+            claims.update(slug, b"0", entry.revision)
+        except StateConflict:
+            return
+
+
 def _pass(slug, now_ms, swarm, errors, box, environ):
-    timing.call(_ledger, slug, now_ms, errors, box, swarm)
-    if swarm is not None:
+    if swarm is None:
+        timing.call(_ledger, slug, now_ms, errors, box)
+        return
+    if not _claim_interval(slug, swarm.store, now_ms, environ):
+        return
+    reported, failed = len(errors), True
+    try:
+        timing.call(_ledger, slug, now_ms, errors, box, swarm)
         timing.call(_collect, slug, now_ms, swarm, box, errors, environ)
+        failed = len(errors) > reported
+    finally:
+        if failed:
+            _reopen_interval(slug, swarm.store, environ)
 
 
 def record_pass(

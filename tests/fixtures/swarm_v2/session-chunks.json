@@ -1,0 +1,39 @@
+{
+  "grant": {"principal": "chunk-fixture", "corpus": "swarm-fixture", "projects": ["github.com/the-cloud-clockwork/agentihooks"]},
+  "foreign_corpus": "personal-corpus",
+  "session_uid": "swarm-fixture:claude:worker-a:session-chunks",
+  "parent_session_uid": "swarm-fixture:claude:worker-a:session-parent",
+  "provider": "claude",
+  "retention": "retain-until-deleted",
+  "source_generation": "device-1:inode-21:anchor-0",
+  "origin": "worker-a:projects/agentihooks/session-chunks.jsonl",
+  "policies": {
+    "current": {"version": "turn-v1", "max_chars": 2000},
+    "next": {"version": "turn-v2", "max_chars": 600}
+  },
+  "turns": [
+    [
+      {"kind": "user_text", "text": "café: list the memory modules and read the catalog"},
+      {"kind": "assistant_text", "text": "日本 I will list the folder and read the catalog in parallel."},
+      {"kind": "tool_call", "tool_name": "Bash", "tool_input": {"command": "ls hooks/memory"}, "tool_use_id": "toolu_ls"},
+      {"kind": "tool_call", "tool_name": "Read", "tool_input": {"file_path": "hooks/memory/catalog.py"}, "tool_use_id": "toolu_read"},
+      {"kind": "tool_result", "tool_result": "archive.py catalog.py records.py", "tool_use_id": "toolu_ls", "is_error": false},
+      {"kind": "tool_result", "tool_result": [{"type": "text", "text": "class Catalog ✓"}], "tool_use_id": "toolu_read", "is_error": false},
+      {"kind": "token_usage"},
+      {"kind": "assistant_text", "text": "The catalog keeps events, quarantine and the archive manifest."}
+    ],
+    [
+      {"kind": "user_text", "text": "run the build and show the whole log"},
+      {"kind": "tool_call", "tool_name": "Bash", "tool_input": {"command": "make build"}, "tool_use_id": "toolu_build"},
+      {"kind": "tool_result", "tool_result": "long build log line with détails", "repeat": 240, "tool_use_id": "toolu_build", "is_error": true},
+      {"kind": "assistant_text", "text": "The build failed; the log is long and kept whole in the archive."}
+    ],
+    [
+      {"kind": "user_text", "text": "appended turn: check the git status"},
+      {"kind": "tool_call", "tool_name": "Bash", "tool_input": {"command": "git status --short"}, "tool_use_id": "toolu_status"},
+      {"kind": "tool_result", "tool_result": "M hooks/memory/chunking.py", "tool_use_id": "toolu_status", "is_error": false},
+      {"kind": "assistant_text", "text": "One file is modified."}
+    ]
+  ],
+  "appended_turns": 1
+}

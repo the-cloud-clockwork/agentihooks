@@ -191,7 +191,8 @@ def test_independent_worker_proofs_overlap_and_keep_every_check(tmp_path):
     assert "--no-cache-filter" in builds[-1]
     assert builds[-1][builds[-1].index("--no-cache-filter") + 1] == "worker"
     runs = [call for call in calls if call[0] == "run"]
-    assert len(runs) == 12
+    assert len(runs) == 13
+    assert [call[-1] for call in runs if "/opt/probe/code_mode_probe.py" in call] == ["/usr/local/bin/codex"]
     assert all("--read-only" in call and call[call.index("--network") + 1] == "none" for call in runs)
     profiles = [call[-1] for call in runs if "/opt/probe/profile-probe.sh" in call]
     assert sorted(profiles) == ["noexec", "positive", "positive", "recovery", "rejection", "rollback"]
@@ -211,7 +212,7 @@ def test_a_failed_background_worker_check_keeps_the_proof_red(tmp_path, failure,
     assert calls[-1][:2] == ["image", "rm"]
 
 
-@pytest.mark.parametrize("proof,builds,runs", [("startup", 4, 5), ("rebuild", 1, 1), ("profiles", 1, 7)])
+@pytest.mark.parametrize("proof,builds,runs", [("startup", 4, 6), ("rebuild", 1, 1), ("profiles", 1, 7)])
 def test_worker_proof_modes_run_only_their_independent_checks(tmp_path, proof, builds, runs):
     result, calls, state, output = run_proof(tmp_path, "", proof)
     assert result.returncode == 0, result.stderr

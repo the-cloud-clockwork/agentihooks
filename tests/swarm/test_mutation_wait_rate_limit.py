@@ -144,7 +144,7 @@ def test_reads_back_off_until_the_core_quota_reset(github):
     github.now = RESET + 1
     assert waits.resolution(held, {}, None, None, None, False) == ""
     assert held["head"] == "first"
-    assert github.asked[2:] == [RUN, "repos/org/repo/git/ref/heads/feature/x", RUN]
+    assert github.asked[2:] == [RUN, "repos/org/repo/git/ref/heads/feature/x"]
 
 
 def test_a_secondary_limit_backs_off_one_minute_while_core_reports_quota(github):

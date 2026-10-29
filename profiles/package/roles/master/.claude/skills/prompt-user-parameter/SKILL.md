@@ -17,8 +17,8 @@ command that needs it through the environment of a throwaway script and never
 passes through your context, a log, a status file or a command argument.
 
 Run it when the operator asks for the value; no typed phrase and no guard gate
-it. When he is away, add the ask to Priorities with `agentihooks ledger
---slug <slug> --as <name> priority add <item> "<the ask in plain words>"`.
+it. When he is away, wait until he writes: no agent writes to him first, and the
+ledger refuses agent priorities.
 
 ## Steps
 

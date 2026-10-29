@@ -1,0 +1,6 @@
+{
+  "scripts/hive/cli.py:scripts.hive.cli.x__nats_trust__mutmut_16:b71f8d5b06302c54cccf63f0f5e07071b11fa476bbeb84d8f8965d3930f2a2dd": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: PyYAML represent_mapping checks if self.sort_keys, so None and False both keep insertion order."
+  }
+}

@@ -24,6 +24,14 @@ def held(task: dict, doc: dict, graph: dict, fix_phase: str) -> bool:
     )
 
 
+def claim_gate(task: dict, doc: dict, graph: dict, fix_phase: str) -> bool:
+    """A freeze or a watched focus keeps a claim off the task; its own swarm's focus only orders claims (dispatcher)."""
+    if task.get("state") != "open":
+        return False
+    records, chain = doc.get("freezes") or [], ancestry(task, graph)
+    return frozen(task, records, chain) or outside_watched(task, doc, fix_phase)
+
+
 def outside_watched(task: dict, doc: dict, fix_phase: str) -> bool:
     return bool(doc.get(WATCHED)) and not exempt(task, fix_phase)
 

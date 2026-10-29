@@ -7,9 +7,13 @@ import sys
 from pathlib import Path
 from string import Template
 
+import pytest
 import yaml
 
 _ROOT = Path(__file__).resolve().parents[1]
+
+
+_MERGED_STATS_CHECK = 'if [[ -n "$(find .mutation-stats-cache -type f -print -quit 2>/dev/null)" ]]; then echo found=true >> "$GITHUB_OUTPUT"; fi'
 
 
 def _workflow():
@@ -77,7 +81,7 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
     assert "concurrency" not in plan
     assert steps[1]["uses"] == "actions/checkout@v4"
     assert steps[1]["if"] == "steps.open.outputs.open != 'true'"
-    assert steps[1]["with"] == {"fetch-depth": 0, "persist-credentials": False}
+    assert steps[1]["with"] == {"fetch-depth": 0, "filter": "blob:none", "persist-credentials": False}
     scope = steps[names.index("Record the revisions the report grades")]
     assert scope["if"] == "steps.open.outputs.open == 'false'"
     assert '"$(git merge-base origin/dev HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json' in scope["run"]
@@ -105,37 +109,23 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
                 step["if"]
                 == "steps.plan.conclusion == 'success' && steps.plan.outputs.changed != '0' && github.workflow == 'Mutation preflight' && runner.environment == 'self-hosted'"
             )
-        elif (
-            step.get("uses", "").startswith(("actions/setup-python@", "astral-sh/setup-uv@"))
-            or step.get("name") == "Install dependencies"
-        ):
-            assert step["if"] == f"{gated} && steps.suite.outputs.changed != 'true'", step
         else:
             assert step["if"] == gated, step
 
 
-def test_preflight_runs_the_suite_speed_contracts_before_reuse_when_a_test_module_changes():
-    steps, names = _steps(_workflow()["jobs"]["plan"])
-    find_at = names.index("Find a changed test module")
-    find = steps[find_at]
-    assert find_at == 2
-    assert find["id"] == "suite"
-    assert find["if"] == "github.event_name == 'push' && steps.open.outputs.open == 'false'"
-    assert find["run"].startswith('files=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE...HEAD")\n')
-    assert "grep -qE '^tests/(.+/)?test_[^/]*\\.py$' <<< \"$files\"" in find["run"]
+def test_preflight_runs_the_suite_speed_contracts_after_the_touched_tests_when_a_test_module_changes():
+    workflow = _workflow()
+    plan_steps, plan_names = _steps(workflow["jobs"]["plan"])
+    assert "Run the suite speed contracts" not in plan_names
+    assert not any("steps.suite" in step.get("if", "") for step in plan_steps)
+    steps, names = _steps(workflow["jobs"]["touched-tests"])
     run_at = names.index("Run the suite speed contracts")
-    assert run_at < names.index("Record the revisions the report grades")
-    assert run_at < names.index("Reuse a green report when this head only adds tests to it")
-    changed = "steps.suite.outputs.changed == 'true'"
-    assert [step["if"] for step in steps[find_at + 1 : run_at + 1]] == [changed] * (run_at - find_at)
+    assert run_at == names.index("Run the tests the branch touches") + 1
+    assert steps[run_at]["if"] in (
+        "steps.touched.outputs.files != ''",
+        "steps.open.outputs.open == 'false' && steps.touched.outputs.files != ''",
+    )
     assert steps[run_at]["run"] == "python -m pytest tests/test_suite_speed.py --tb=short -p no:cacheprovider"
-    reused = steps[find_at + 1 : run_at]
-    later = steps[names.index("Reuse a green report when this head only adds tests to it") + 1 :]
-    for step in reused:
-        if "uses" in step:
-            assert next(other for other in later if other.get("uses") == step["uses"])["with"] == step["with"], step
-        else:
-            assert step["run"] == steps[names.index("Install dependencies")]["run"]
     assert not any(step.get("continue-on-error") for step in steps)
 
 
@@ -170,7 +160,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
         "open": "${{ steps.open.outputs.open }}",
     }
     steps, names = _steps(plan)
-    assert steps[names.index(None)]["with"] == {"fetch-depth": 0, "persist-credentials": False}
+    assert steps[names.index(None)]["with"] == {"fetch-depth": 0, "filter": "blob:none", "persist-credentials": False}
     sized = steps[names.index("Size mutation shards from stored timings")]
     assert sized["id"] == "plan"
     sized["env"]["UNRELATED_SETTING"] = "ignored"
@@ -186,23 +176,27 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     module = command.index("-m") + 1
     assert command[module] == "scripts.ci_mutation.plan"
     monkeypatch.setattr("sys.argv", command[module:])
-    calls = []
+    calls, records, graders = [], [], []
 
     def bases(root, base, head, *args):
         calls.append((root, base, head))
+        graders.append(args)
         return ["resolved-base"]
 
     def record(repository, *args):
-        calls.append(repository)
+        records.append(repository)
         return None
 
     monkeypatch.setattr(planner, "own_bases", bases)
+    monkeypatch.setattr(planner, "touches_code", lambda *args: True)
     monkeypatch.setattr(planner, "find_record", record)
     monkeypatch.setattr(planner, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert planner.main() == 0
-    assert calls == [(tmp_path, "chosen-base", "HEAD"), "org/repo"]
+    assert calls == [(tmp_path, "chosen-base", "HEAD")]
+    assert records == ["org/repo"]
+    assert graders == [(planner.graded_green,)]
     assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {
         "scripts/sample.py": ["tests/test_sample.py"]
     }
@@ -218,7 +212,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
         "fail-fast": False,
         "matrix": {"part": "${{ fromJSON(needs.plan.outputs.stats_parts) }}"},
     }
-    assert jobs["mutation-shard"]["needs"] == ["plan", "stats", "refine"]
+    assert jobs["mutation-shard"]["needs"] == ["plan", "stats", "refine", "probe"]
     assert jobs["mutation-shard"]["strategy"] == {
         "fail-fast": False,
         "matrix": {"shard": "${{ fromJSON(needs.refine.outputs.shards || needs.stats.outputs.shards) }}"},
@@ -226,8 +220,35 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     assert jobs["mutation-shard"]["if"] == (
         "${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0'"
         " && needs.stats.result == 'success' && (needs.refine.result == 'success'"
-        " || needs.refine.result == 'skipped' && needs.plan.outputs.stats_parts == '[0]') }}"
+        " || needs.refine.result == 'skipped' && needs.plan.outputs.stats_parts == '[0]')"
+        " && (needs.probe.result == 'success' || needs.probe.result == 'skipped') }}"
     )
+
+
+def test_both_mutation_planners_restore_statistics_timings_before_sizing():
+    workflows = [
+        (_workflow(), "plan", "steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'"),
+        (
+            yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text()),
+            "mutation-plan",
+            "steps.reuse.outputs.reused != 'true'",
+        ),
+    ]
+    for workflow, job, condition in workflows:
+        steps, names = _steps(workflow["jobs"][job])
+        restored = names.index("Restore measured statistics timings")
+        assert restored < names.index("Size mutation shards from stored timings")
+        assert steps[restored] == {
+            "name": "Restore measured statistics timings",
+            "if": condition,
+            "uses": "actions/cache/restore@v4",
+            "env": {"SEGMENT_DOWNLOAD_TIMEOUT_MINS": "1"},
+            "with": {
+                "path": ".mutation-stats-cache",
+                "key": "mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}",
+                "restore-keys": "mutation-test-stats-v2-${{ runner.os }}-\nmutation-test-stats-v1-${{ runner.os }}-\n",
+            },
+        }
 
 
 def test_mutation_matrix_and_merge_use_the_plan_refined_after_statistics():
@@ -260,10 +281,42 @@ def test_mutation_matrix_and_merge_use_the_plan_refined_after_statistics():
     assert "needs.refine.outputs.shards || needs.stats.outputs.shards" in shards
 
 
+def test_split_mutants_run_their_early_tests_once_before_the_shards_share_the_result():
+    jobs = _workflow()["jobs"]
+    assert jobs["refine"]["outputs"]["probe"] == "${{ steps.refine.outputs.probe }}"
+    probe = jobs["probe"]
+    assert probe["needs"] == ["plan", "stats", "refine"]
+    assert probe["if"].endswith("&& (needs.refine.outputs.probe || needs.stats.outputs.probe) == 'true' }}")
+    assert probe["strategy"]["matrix"] == jobs["mutation-shard"]["strategy"]["matrix"]
+    steps, names = _steps(probe)
+    run = steps[names.index("Run each mutant's early tests once for every shard")]
+    assert run["run"] == (
+        'python -m scripts.ci_mutation.probe --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
+        " --stats .mutation-stats"
+    )
+    assert names.index("Download the measured mutation plan") < names.index(run["name"])
+    assert steps[-1]["with"]["name"] == "mutation-probe-${{ matrix.shard }}"
+    shard = jobs["mutation-shard"]
+    assert "probe" in shard["needs"]
+    assert shard["if"].endswith("&& (needs.probe.result == 'success' || needs.probe.result == 'skipped') }}")
+    shard_steps, shard_names = _steps(shard)
+    download = shard_steps[shard_names.index("Download the early mutation results")]
+    merge = shard_steps[shard_names.index("Validate every early result and charge its elapsed time")]
+    assert download["if"] == merge["if"] == "needs.probe.result == 'success'"
+    assert download["with"] == {"pattern": "mutation-probe-*", "path": ".mutation-stats", "merge-multiple": True}
+    assert merge["run"] == "python -m scripts.ci_mutation.probe --stats .mutation-stats --merge"
+    plan = shard_names.index("Download the measured mutation plan")
+    assert plan < shard_names.index(download["name"]) < shard_names.index(merge["name"])
+    assert shard_names.index(merge["name"]) < shard_names.index("Mutate changed Python files")
+
+
 def test_a_single_stats_part_refines_inside_the_statistics_worker():
     jobs = _workflow()["jobs"]
     stats = jobs["stats"]
-    assert stats["outputs"] == {"shards": "${{ steps.refine.outputs.shards }}"}
+    assert stats["outputs"] == {
+        "shards": "${{ steps.refine.outputs.shards }}",
+        "probe": "${{ steps.refine.outputs.probe }}",
+    }
     steps, names = _steps(stats)
     refine_steps, refine_names = _steps(jobs["refine"])
     single = "strategy.job-total == 1"
@@ -291,6 +344,124 @@ def test_a_single_stats_part_refines_inside_the_statistics_worker():
     ]
     assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
     assert "Download the shared mutation stats" not in names
+
+
+def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_finish():
+    jobs = _workflow()["jobs"]
+    key = "mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}"
+    steps, names = _steps(jobs["stats"])
+    restore = steps[names.index("Restore the merged test stats")]
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["with"] == {
+        "path": ".mutation-stats-cache",
+        "key": key,
+        "restore-keys": "mutation-test-stats-v2-${{ runner.os }}-",
+    }
+    assert "if" not in restore
+    single = steps[names.index("Save the merged test stats")]
+    assert single["uses"] == "actions/cache/save@v4"
+    assert single["if"] == "success() && strategy.job-total == 1"
+    assert single["with"] == {"path": ".mutation-stats-cache", "key": key}
+    fresh = steps[names.index("Keep only the test stats this part wrote")]
+    assert fresh["if"] == "success() && strategy.job-total != 1"
+    assert fresh["env"] == {"PART": "${{ matrix.part }}"}
+    part = steps[names.index("Upload this part's test stats cache")]
+    assert part["if"] == "success() && strategy.job-total != 1"
+    assert part["uses"] == "./.github/actions/retry-upload"
+    assert part["with"] == {
+        "name": "mutation-test-stats-cache-${{ matrix.part }}",
+        "path": ".mutation-stats-fresh/",
+        "include-hidden-files": True,
+        "if-no-files-found": "ignore",
+        "retention-days": 1,
+    }
+    stats_part = steps[names.index("Upload mutation stats part")]
+    assert "if" not in stats_part
+    assert stats_part["uses"] == part["uses"]
+    assert stats_part["with"] == {
+        "name": "mutation-stats-${{ matrix.part }}",
+        "path": ".mutation-stats/",
+        "include-hidden-files": True,
+        "if-no-files-found": "error",
+        "retention-days": 1,
+    }
+    collect = names.index("Collect one stats part for every mutation shard")
+    assert names.index(restore["name"]) < collect < names.index(single["name"])
+    assert collect < names.index(fresh["name"]) < names.index(part["name"])
+    assert [step for step in steps if step.get("uses", "").startswith("actions/cache/save")] == [single]
+    assert not part["with"]["name"].startswith("mutation-stats-")
+    refine_steps, refine_names = _steps(jobs["refine"])
+    base = refine_steps[refine_names.index("Restore the merged test stats")]
+    assert base == restore
+    download = refine_steps[refine_names.index("Download every part's test stats cache")]
+    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["with"] == {
+        "pattern": "mutation-test-stats-cache-*",
+        "path": ".mutation-stats-cache",
+        "merge-multiple": True,
+    }
+    merged = refine_steps[refine_names.index("Save the merged test stats")]
+    assert merged["uses"] == "actions/cache/save@v4"
+    capped = refine_steps[refine_names.index("Cap the merged test stats")]
+    assert capped["run"] == (
+        "python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap;"
+        ' print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")\' .mutation-stats-cache'
+    )
+    assert (
+        refine_names.index(download["name"]) < refine_names.index(capped["name"]) < refine_names.index(merged["name"])
+    )
+    assert merged["if"] in {
+        "success() && hashFiles('.mutation-stats-cache/**') != ''",
+        "success() && steps.merged-stats.outputs.found == 'true'",
+        "success() && steps.merged-stats.outputs.found == 'true' && steps.cache-budget.outputs.available == 'true'",
+    }
+    if "hashFiles" not in merged["if"]:
+        check = refine_steps[refine_names.index("Check for merged test stats")]
+        assert check["id"] == "merged-stats"
+        assert check["run"] == _MERGED_STATS_CHECK
+        assert (
+            refine_names.index(download["name"])
+            < refine_names.index(check["name"])
+            < refine_names.index(merged["name"])
+        )
+    assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
+    assert refine_names.index(base["name"]) < refine_names.index(download["name"]) < refine_names.index(merged["name"])
+    assert "matrix.part" not in str([restore, single, merged])
+
+
+def test_merged_stats_presence_check_handles_missing_empty_and_nested_caches(tmp_path, monkeypatch):
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    for case in ("missing", "empty", "directories", "empty_file", "populated_file"):
+        root = tmp_path / case
+        root.mkdir()
+        if case != "missing":
+            cache = root / ".mutation-stats-cache" / "nested"
+            cache.mkdir(parents=True)
+            if case in {"empty_file", "populated_file"}:
+                (cache / "stats.json").write_text("{}" if case == "populated_file" else "")
+        output.write_text("")
+        subprocess.run(["bash", "-e", "-c", _MERGED_STATS_CHECK], cwd=root, check=True, timeout=2)
+        assert output.read_text() == ("found=true\n" if case in {"empty_file", "populated_file"} else "")
+
+
+def test_a_stats_part_uploads_only_the_cache_entries_it_wrote(tmp_path):
+    steps, names = _steps(_workflow()["jobs"]["stats"])
+    fresh = steps[names.index("Keep only the test stats this part wrote")]
+    cache = tmp_path / ".mutation-stats-cache"
+    cache.mkdir()
+    stale = cache / "stale.index"
+    stale.write_text("old")
+    os.utime(stale, (1_000_000_000, 1_000_000_000))
+    marker = tmp_path / ".mutation-stats" / "collected-1"
+    marker.parent.mkdir()
+    marker.touch()
+    os.utime(marker, (1_000_000_100, 1_000_000_100))
+    (cache / "fresh.index").write_text("new")
+    subprocess.run(["bash", "-e", "-c", fresh["run"]], cwd=tmp_path, env={**os.environ, "PART": "1"}, check=True)
+    uploaded = tmp_path / ".mutation-stats-fresh"
+    assert sorted(path.name for path in uploaded.iterdir()) == ["fresh.index"]
+    assert (uploaded / "fresh.index").read_text() == "new"
 
 
 def test_preflight_collects_one_stats_part_per_leg_with_the_pull_request_budget():
@@ -411,8 +582,6 @@ def test_only_the_push_preflight_reports_the_check_that_proves_a_commit_graded()
 
 def test_touched_tests_job_selects_and_runs_the_tests_the_branch_touches():
     job = _workflow()["jobs"]["touched-tests"]
-    assert job["needs"] == "plan"
-    assert job["if"] == "${{ !cancelled() && needs.plan.outputs.open == 'false' }}"
     assert job["timeout-minutes"] == 15
     steps, names = _steps(job)
     select = steps[names.index("Select the tests the branch touches")]
@@ -420,14 +589,34 @@ def test_touched_tests_job_selects_and_runs_the_tests_the_branch_touches():
     assert 'changed_files(root, "origin/dev", "HEAD")' in select["run"]
     assert "if is_test(path) and (root / path).is_file()" in select["run"]
     browser = steps[names.index("Install the browser that page tests drive")]
-    assert browser["if"] == "steps.touched.outputs.browser == 'true'"
+    assert browser["if"] in (
+        "steps.touched.outputs.browser == 'true'",
+        "steps.open.outputs.open == 'false' && steps.touched.outputs.browser == 'true'",
+    )
     run = steps[names.index("Run the tests the branch touches")]
-    assert run["if"] == "steps.touched.outputs.files != ''"
+    assert run["if"] in (
+        "steps.touched.outputs.files != ''",
+        "steps.open.outputs.open == 'false' && steps.touched.outputs.files != ''",
+    )
     assert run["env"]["FILES"] == "${{ steps.touched.outputs.files }}"
     assert run["run"] == (
         'read -ra files <<< "$FILES"\npython -m pytest "${files[@]}" -n auto --dist loadgroup --tb=short -p no:cacheprovider\n'
     )
     assert not any(step.get("continue-on-error") for step in steps)
+
+
+def test_touched_tests_admission_preserves_both_supported_job_graphs():
+    jobs = _workflow()["jobs"]
+    job = jobs["touched-tests"]
+    if job.get("needs") == "plan":
+        assert job["if"] == "${{ !cancelled() && needs.plan.outputs.open == 'false' }}"
+        return
+    assert "needs" not in job
+    assert job["if"] == "${{ github.event_name == 'push' && !github.event.deleted }}"
+    assert job["steps"][0] == jobs["plan"]["steps"][0]
+    for step in job["steps"][1:]:
+        assert step["if"].startswith("steps.open.outputs.open == 'false'")
+    assert not any(step.get("continue-on-error") for step in job["steps"])
 
 
 def test_touched_test_selection_supplies_the_automatic_worker_limit():
@@ -483,3 +672,55 @@ def test_touched_tests_keep_one_xdist_group_on_one_worker(tmp_path):
     workers = [path.read_text() for path in sorted(out.iterdir())]
     assert len(workers) == 4, output
     assert len(set(workers)) == 1, (workers, output)
+
+
+@pytest.mark.parametrize("job", ["mutation-plan", "mutation-stats", "mutation"])
+def test_protected_mutation_jobs_install_with_no_branch_lock(tmp_path, job):
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    steps, names = _steps(workflow["jobs"][job])
+    export = steps[names.index("Take the helper scripts from the workflow revision")]["run"]
+    install = steps[names.index("Install dependencies")]["run"]
+    trusted = tmp_path / "workflow"
+    trusted.mkdir()
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_SHA="HEAD")
+    archive = next(line for line in export.splitlines() if line.strip().startswith("git archive"))
+    subprocess.run(["bash", "-euc", archive], cwd=_ROOT, env=env, check=True)
+    branch = tmp_path / "old-branch"
+    branch.mkdir()
+    probe = """
+uv() {
+    [[ "$1 $2 $3 $4" == "pip install --system --constraint" ]] || return 1
+    [[ "$5" == "$RUNNER_TEMP/workflow/.github/test-requirements.lock" ]] || return 1
+    [[ -s "$5" ]] || return 1
+    echo "Trusted dependency lock resolved without a branch lock"
+}
+export -f uv
+"""
+    result = subprocess.run(
+        ["bash", "-euc", probe + install], cwd=branch, env=env, capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Trusted dependency lock resolved without a branch lock" in result.stdout
+
+
+@pytest.mark.parametrize("job", ["mutation-stats", "mutation"])
+def test_mutation_jobs_keep_the_head_lock_when_the_head_has_one(tmp_path, job):
+    steps, names = _steps(yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"][job])
+    install = steps[names.index("Install dependencies")]["run"]
+    helper = tmp_path / "workflow/.github/scripts/pypi-retry.sh"
+    helper.parent.mkdir(parents=True)
+    helper.write_text('shift 2\n"$@"\n')
+    branch = tmp_path / "branch"
+    (branch / ".github").mkdir(parents=True)
+    (branch / ".github/test-requirements.lock").write_text("pytest==8.0\n")
+    probe = 'uv() { echo "constraint=$5"; }\nexport -f uv\n'
+    result = subprocess.run(
+        ["bash", "-euc", probe + install],
+        cwd=branch,
+        env=dict(os.environ, RUNNER_TEMP=str(tmp_path)),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "constraint=./.github/test-requirements.lock"

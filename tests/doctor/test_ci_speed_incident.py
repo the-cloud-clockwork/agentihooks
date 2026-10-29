@@ -232,7 +232,7 @@ def test_grouped_speed_return_uses_the_judged_scope_and_measure(store, change, e
 
 
 @pytest.mark.parametrize("change", ["new run", "worse wait"])
-def test_judged_group_sends_nothing_for_new_evidence_inside_its_range(store, monkeypatch, change):  # noqa: F811
+def test_judged_group_stays_silent_for_new_finished_runs_inside_its_range(store, monkeypatch, change):  # noqa: F811
     status(monkeypatch)
     run = waiting(1, "2026-10-19T16:40:00Z")
     run["jobs"][0].update(
@@ -262,6 +262,7 @@ def test_judged_group_sends_nothing_for_new_evidence_inside_its_range(store, mon
     loop.speed(store, DOCTOR, WATCHED, AFTER + 180000)
     for texts in items(store).values():
         assert len(texts) == 1
+        assert "run 1," in texts[0]
 
 
 def test_a_status_page_read_failure_never_holds_findings(store, monkeypatch):  # noqa: F811

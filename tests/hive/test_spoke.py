@@ -37,6 +37,7 @@ def test_a_spoke_does_not_take_work_until_its_local_cgroup_admits_another_agent(
     from scripts.hive.spoke import Spoke, SpokeConfig
 
     bus, runtime, tasks = Mock(), Mock(), Mock()
+    bus.for_swarm.return_value = bus
     bus.state.return_value.get.return_value = None
     spoke = Spoke(SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a"), bus, runtime, tasks, lambda: measured)
 
@@ -51,6 +52,7 @@ def test_an_admitted_spoke_takes_only_from_its_own_lane_with_the_requested_timeo
     from scripts.hive.spoke import Spoke, SpokeConfig
 
     bus, runtime, tasks = Mock(), Mock(), Mock()
+    bus.for_swarm.return_value = bus
     bus.state.return_value.get.return_value = None
     bus.queue.return_value.take.return_value = None
     policy = QueuePolicy(max_deliver=3, backoff_ms=(10, 20))
@@ -124,7 +126,9 @@ def test_only_one_spoke_can_claim_duplicate_offers_of_the_same_task_generation(r
     assert raced == ["busy"]
     rig.tasks.request.assert_called_once_with(rig.event)
     other_tasks.request.assert_not_called()
-    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
+    rig.runtime.spawn.assert_called_once_with(
+        replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
+    )
 
 
 def test_a_withdrawn_task_is_terminated_without_launching(rig):
@@ -161,7 +165,9 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
     rig.runtime.spawn.side_effect = lambda request: (observed.append("spawn"), rig.runtime.spawn.return_value)[1]
 
     assert rig.spoke.poll() == "started"
-    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
+    rig.runtime.spawn.assert_called_once_with(
+        replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
+    )
     assert observed[0] == "spawn"
     subject, event = observed[1]
     assert subject == "swarm.rig.execution.started"
@@ -214,6 +220,49 @@ def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, fai
     assert rig.runtime.spawn.call_count == (1 if failure == "request" else 2)
 
 
+@pytest.mark.parametrize("status", ["REFUSED", "AMBIGUOUS", "UNSUPPORTED"])
+def test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness(rig, status):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    failed = Outcome("spawn", Status[status], "local", {"harness": "codex"}, detail="launch failed")
+    rig.runtime.spawn.side_effect = [failed, rig.runtime.spawn.return_value]
+
+    assert rig.spoke.poll() == "retry"
+
+    rig.tasks.failed.assert_called_once_with(rig.event, "codex", "launch failed")
+    rig.tasks.reopen.assert_not_called()
+    rig.clock.now = 10
+    assert rig.spoke.poll() == "started"
+    rig.tasks.failed.assert_called_once()
+
+
+def test_a_launch_waiting_for_room_reports_no_failure(rig):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", {"harness": "codex"}, "no room")
+
+    assert rig.spoke.poll() == "retry"
+
+    rig.tasks.failed.assert_not_called()
+
+
+@pytest.mark.parametrize("value", [None, {"pane_id": "w1:p1"}])
+def test_a_launch_failure_naming_no_harness_is_reported_without_one(rig, value):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.runtime.spawn.return_value = Outcome("spawn", Status.REFUSED, "local", value, detail="launch failed")
+
+    assert rig.spoke.poll() == "retry"
+
+    rig.tasks.failed.assert_called_once_with(rig.event, "", "launch failed")
+
+
+def test_a_master_spoke_takes_a_failure_report_without_acting_on_it():
+    from scripts.hive.workstation import MasterTasks
+
+    assert MasterTasks(Mock()).failed(Mock(), "codex", "launch failed") is None
+
+
 def test_a_publication_retry_reuses_the_started_execution_after_a_spoke_restart(rig):
     from scripts.hive.spoke import Spoke
 
@@ -232,7 +281,9 @@ def test_a_publication_retry_reuses_the_started_execution_after_a_spoke_restart(
     rig.clock.now = 10
     restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, reading)
     assert restarted.poll() == "started"
-    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
+    rig.runtime.spawn.assert_called_once_with(
+        replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
+    )
     rig.tasks.request.assert_called_once_with(rig.event)
     rig.tasks.reopen.assert_not_called()
     assert published[0] == published[1]
@@ -334,7 +385,10 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
             spoke = Spoke(config, spoke_bus, runtime, tasks, reading)
             assert spoke.poll(500) == "started"
             runtime.spawn.assert_called_once_with(
-                replace(tasks.request.return_value, task={**tasks.request.return_value.task, "claim_fence": ANY})
+                replace(
+                    tasks.request.return_value,
+                    task={**tasks.request.return_value.task, "claim_fence": ANY, "account_slot_hive": "hive-a"},
+                )
             )
             found = bus.events.consumer("audit", "swarm.rig.execution.started").fetch(1, 500)
             assert len(found) == 1
@@ -373,7 +427,9 @@ def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, bo
     restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, lambda: None)
     assert restarted.poll() == ("started" if boundary == "started" else "dead")
     if boundary == "started":
-        rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
+        rig.runtime.spawn.assert_called_once_with(
+            replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
+        )
         rig.tasks.reopen.assert_not_called()
     else:
         assert rig.runtime.spawn.call_count == 3
@@ -402,6 +458,7 @@ def test_a_restarted_spoke_relaunches_its_own_ambiguous_spawn_under_a_new_claim_
     assert second["key"] == first["key"]
     assert second["revision"] > first["revision"]
     assert claim(rig)["state"] == "started"
+    assert all(call.args[0].task["account_slot_hive"] == "hive-a" for call in rig.runtime.spawn.call_args_list)
     rig.tasks.reopen.assert_not_called()
 
 
@@ -415,7 +472,9 @@ def test_pending_publication_is_recovered_before_taking_new_work_from_a_busy_lan
         rig.queue.offer(replace(rig.event, id=f"offer-{index}", key=f"new-{index}"))
         rig.clock.now += 10
         assert rig.spoke.poll() == "retry"
-    rig.runtime.spawn.assert_called_once_with(replace(rig.request, task={**rig.request.task, "claim_fence": ANY}))
+    rig.runtime.spawn.assert_called_once_with(
+        replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
+    )
     rig.tasks.reopen.assert_not_called()
     rig.bus.events.publish = real_publish
     assert rig.spoke.poll() == "started"
@@ -438,6 +497,7 @@ def test_default_admission_reuses_the_previous_cpu_sample_before_taking_again(mo
     monkeypatch.setattr(spoke.headroom, "measure", measure)
     monkeypatch.setattr(spoke, "time", SimpleNamespace(time_ns=Mock(side_effect=[1_234_000_000, 5_678_000_000])))
     bus = Mock()
+    bus.for_swarm.return_value = bus
     bus.state.return_value.get.return_value = None
     bus.queue.return_value.take.return_value = None
     worker = spoke.Spoke(spoke.SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a"), bus, Mock(), Mock())
@@ -472,6 +532,7 @@ def test_one_remaining_admission_slot_takes_without_waiting_and_reports_queue_fa
     from scripts.hive import spoke
 
     bus = Mock()
+    bus.for_swarm.return_value = bus
     bus.state.return_value.get.return_value = None
     bus.queue.return_value.take.return_value = None
     monkeypatch.setattr(spoke.admission, "room", lambda value: SimpleNamespace(room=1))
@@ -481,6 +542,46 @@ def test_one_remaining_admission_slot_takes_without_waiting_and_reports_queue_fa
     target = bus.queue if boundary == "queue" else bus.queue.return_value.take
     target.side_effect = RuntimeError("unavailable")
     assert worker.poll() == "retry"
+
+
+@pytest.mark.parametrize("boundary", ["queue", "presence"])
+def test_a_failed_poll_is_logged_with_its_swarm_lane_and_error(monkeypatch, capsys, boundary):
+    from scripts.hive import spoke
+
+    bus = Mock()
+    bus.for_swarm.return_value = bus
+    bus.state.return_value.get.return_value = None
+    monkeypatch.setattr(spoke.admission, "room", lambda value: SimpleNamespace(room=1))
+    if boundary == "queue":
+        bus.queue.side_effect = RuntimeError("unavailable")
+    else:
+        monkeypatch.setattr(spoke.presence, "Heartbeat", Mock(side_effect=RuntimeError("unavailable")))
+    worker = spoke.Spoke(spoke.SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a"), bus, Mock(), Mock(), reading)
+
+    assert worker.poll() == "retry"
+    assert "hive spoke for swarm rig lane eng poll failed (RuntimeError: unavailable)" in capsys.readouterr().err
+
+
+def test_a_refused_spawn_is_logged_with_the_runtime_status_and_detail(rig, capsys):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room")
+    assert rig.spoke.poll() == "retry"
+    assert "poll failed (RuntimeError: spawn unavailable: no room)" in capsys.readouterr().err
+
+
+def test_failed_work_and_a_failed_attempt_check_are_logged_before_the_nack(rig, capsys):
+    from unittest.mock import PropertyMock
+
+    rig.tasks.request.side_effect = [RuntimeError("unavailable"), rig.request]
+    assert rig.spoke.poll() == "retry"
+    assert "poll failed (RuntimeError: unavailable)" in capsys.readouterr().err
+
+    delivery = Mock()
+    type(delivery).attempt = PropertyMock(side_effect=[RuntimeError("attempt unreadable"), 1])
+    assert rig.spoke._retry(delivery) == "retry"
+    delivery.nak.assert_called_once()
+    assert "poll failed (RuntimeError: attempt unreadable)" in capsys.readouterr().err
 
 
 def test_claim_and_pending_ownership_are_visible_before_request_loading(rig):
@@ -1114,3 +1215,10 @@ def test_failed_renewal_during_request_loading_prevents_spawn_and_releases_claim
     assert rig.spoke.poll() == "retry"
     rig.runtime.spawn.assert_not_called()
     assert json.loads(rig.bus.state("spoke-work").get(spoke.claim_key(rig.event)).value) == {"state": "ready"}
+
+
+def test_spoke_passes_hive_slot_ownership_to_the_launch_boundary(rig):
+    assert rig.spoke.poll() == "started"
+    request = rig.runtime.spawn.call_args.args[0]
+    assert request.task["account_slot_hive"] == "hive-a"
+    assert request.task["execution_id"] == "execution-a"

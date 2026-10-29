@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.hive import auth
+from scripts.hive import auth, member_swarms
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -27,6 +27,8 @@ class Request:
     swarm_url: str | None = None
     ledger_ca: str | None = None
     bus_url: str | None = None
+    signer_path: str | None = None
+    swarms: tuple[str, ...] = ()
 
 
 def default_path(label: str) -> str:
@@ -52,12 +54,17 @@ def invite(redis: "Redis", bao: openbao_kv.OpenBao, request: Request, local_redi
     bus_url = request.bus_url or sample.get("AGENTIHOOKS_BUS_URL")
     if bus_url:
         member_settings.update(AGENTIHOOKS_BUS="nats", AGENTIHOOKS_BUS_URL=bus_url)
-    entries[CREDENTIAL] = auth.env_text(url, grant) + "".join(
-        f"{key}={value}\n" for key, value in member_settings.items() if value
-    )
     try:
+        scoped = bool(request.signer_path) and member_swarms.listing(bao, request.signer_path)
+        if scoped:
+            member_settings["AGENTIHOOKS_BUS_SCOPED"] = "1"
+        entries[CREDENTIAL] = auth.env_text(url, grant) + "".join(
+            f"{key}={value}\n" for key, value in member_settings.items() if value
+        )
         total = openbao_kv.merge(bao, request.path, entries)
-    except openbao_kv.OpenBaoError as exc:
+        if scoped:
+            member_swarms.assign(bao, request.signer_path, [grant["id"]], request.swarms)
+    except (openbao_kv.OpenBaoError, auth.HiveError) as exc:
         try:
             auth.revoke(redis, grant["id"])
         except auth.HiveError as revoked:

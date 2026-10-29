@@ -65,6 +65,7 @@ class Finding:
     basis: str = dataclasses.field(default="", compare=False)
     links: tuple = ()
     evidence_identity: tuple | None = None
+    metrics: tuple = ()
 
     @property
     def id(self):
@@ -72,7 +73,7 @@ class Finding:
 
     def as_dict(self):
         found = asdict(self)
-        del found["measure"], found["basis"], found["evidence_identity"]
+        del found["measure"], found["basis"], found["evidence_identity"], found["metrics"]
         if not self.links:
             del found["links"]
         else:
@@ -100,6 +101,7 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
         *failed_launches(events, tasks),
         *idle_with_claim(agents, tasks, limits, waiting),
         *waiting_on_input(agents, tasks),
+        *master_blocked_on_prompt(agents),
         *stalled(agents, limits),
         *master_rc(agents),
         *master_fallback_auth(agents),
@@ -326,6 +328,24 @@ def waiting_on_input(agents: list[dict], tasks: dict[str, dict]) -> list[Finding
     return found
 
 
+def master_blocked_on_prompt(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        if agent.get("lane") != "master" or not agent.get("input_prompt") or agent["input_ticks"] <= 3:
+            continue
+        found.append(
+            Finding(
+                "master blocked on prompt",
+                agent.get("seat") or agent["name"],
+                f"the master pane has waited on a question prompt for {agent['input_ticks']} ticks",
+                (f"prompt: {agent['input_prompt']}", f"agent {agent['name']}"),
+                "more than 3 consecutive ticks on a question prompt",
+                agent["input_ticks"],
+            )
+        )
+    return found
+
+
 def stalled(agents: list[dict], limits: Limits) -> list[Finding]:
     found = []
     for agent in agents:
@@ -400,7 +420,7 @@ def master_headless(agents: list[dict]) -> list[Finding]:
                 agent.get("seat") or agent["name"],
                 "master runs on a headless hive",
                 (f"hive: {placed['hive']}", f"agent {agent['name']}"),
-                "the master has no UI hive",
+                "the master is not on swarm-master",
                 1,
             )
         )
@@ -418,12 +438,19 @@ def stale_claims(agents, tasks, limits):
                 "stale claim",
                 a["task"],
                 f"no progress for {_plural(quiet, 'minute')}",
-                (f"task {_title(tasks, a['task'])}", f"claimed by {a['name']}"),
+                (f"task {_title(tasks, a['task'])}", f"claimed by {a['name']}", _last_nudge(a)),
                 f"{_plural(limits.stale_minutes, 'minute')} without progress",
                 quiet,
             )
         )
     return found
+
+
+def _last_nudge(agent):
+    minutes = agent.get("last_nudge_minutes")
+    if minutes is None:
+        return "no stale nudge sent"
+    return f"last stale nudge {_plural(minutes, 'minute')} ago"
 
 
 def watch_limits(by, limits):

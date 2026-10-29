@@ -1,0 +1,15 @@
+{
+  "cases": [
+    "T-SV2-GAT-02-A",
+    "T-SV2-GAT-02-B",
+    "T-SV2-GAT-02-C"
+  ],
+  "evidence_class": "mocked: an in-process fake brain HTTP surface answering the fixture's scoped, legacy, empty, refused and outage responses stands in for brain-api; hooks run in a temporary home with a fake clock; no network call runs",
+  "inputs": {
+    "tests/fixtures/swarm_v2/scoped-feeds.json": "072e77b1454d026189f8322afc471dc4c58e9a831faee6ac558a663bb1931e70"
+  },
+  "package": "SV2-GAT-02",
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40308048760",
+  "tested_commit": "4d538173375ce3f161598a7e23bb2f17649d8742",
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40312321843"
+}

@@ -61,7 +61,7 @@ def test_the_installed_secret_only_reaches_the_default_host(monkeypatch):
         return httpx.Response(200, json={"data": SWARM}, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(traces_read, "_through_ingress", through_ingress)
-    monkeypatch.setattr(traces_read.httpx, "get", lambda *a, **kw: pytest.fail("the caller host was used"))
+    monkeypatch.setattr(traces_read, "_direct", lambda *a, **kw: pytest.fail("the caller host was used"))
     traces_read.measured_client(CALLER)
     assert sent == [(f"{traces_read.DEFAULT_HOST}/api/public/projects", INSTALLED_KEYS, {})]
 
@@ -135,7 +135,11 @@ def test_the_trace_detector_reads_through_the_client_it_is_given(monkeypatch):
         raise RuntimeError(WRONG)
 
     monkeypatch.setattr(traces_read, "client", lambda environ: pytest.fail("the default client was used"))
-    store = type("Store", (), {"redis": object(), "agents": lambda self, slug: []})()
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     ledger = type("Ledger", (), {"tasks": lambda self, slug: []})()
     reader = detect.readers(store, ledger, "s", 1, environ=CALLER, telemetry=refusing)["trace"]
     with pytest.raises(RuntimeError, match=WRONG):

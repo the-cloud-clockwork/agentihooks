@@ -44,9 +44,13 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
         'if [[ "$1" == init ]]; then\n'
         '  printf "hosted ledger CA\\n" > "$AGENTIHOOKS_HOME/ledger-ca.pem"\n'
         '  [[ "$*" != "init --bundle "* ]] || printf %s "$3" > "$AGENTIHOOKS_HOME/linked-bundle"\n'
+        '  [[ "$*" != "init --bundle "* ]] || git -C "$3" rev-parse HEAD > "$AGENTIHOOKS_HOME/bundle-head-at-init"\n'
         '  [[ "$REFUSE" != init ]] || exit 7\n'
         '  [[ "$REFUSE" != bundle-init || "$*" == init ]] || exit 7\nfi\n'
-        'if [[ "$1 ${2:-}" == "hive join" ]]; then [[ "$REFUSE" != join ]] || exit 9; fi\n'
+        'if [[ "$1 ${2:-}" == "hive join" ]]; then\n'
+        '  printf %s "${LEDGER_CA_PEM:+set}" > "$AGENTIHOOKS_HOME/hive-join-ca-pem"\n'
+        '  [[ ! -f "$AGENTIHOOKS_HOME/ledger-ca.pem" ]] || cp "$AGENTIHOOKS_HOME/ledger-ca.pem" "$AGENTIHOOKS_HOME/hive-join-ca-file"\n'
+        '  [[ "$REFUSE" != join ]] || exit 9\nfi\n'
         'if [[ "$*" == "deps ensure" ]]; then [[ "$REFUSE" != deps ]] || exit 4; fi\n'
         'if [[ "$*" == "hive run" ]]; then printf %s "${LEDGER_CA_PEM:+set}" > "$AGENTIHOOKS_HOME/hive-run-ca-pem"; fi\n'
         'if [[ "$*" == "hive run" && "${GH_TOKEN:-}" == "$GITHUB_PERSONAL_ACCESS_TOKEN" ]]; then\n'
@@ -90,7 +94,7 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
         "GITHUB_PERSONAL_ACCESS_TOKEN": TOKEN,
         "GITHUB_TOKEN": TOKEN,
         "HIVE_BUNDLE_URL": str(repo) if bundle else bundle_url,
-        "HIVE_BUNDLE_REF": "dev",
+        "HIVE_BUNDLE_REF": os.environ.get("HIVE_BUNDLE_REF", "dev"),
         "AGENTIHOOKS_HOME": str(home),
         "SWARM_HIVE_ID": "worker-pod",
         "AGENTIHOOKS_HIVE_ID": "worker-member",
@@ -122,13 +126,43 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
     return result, log.read_text() if log.exists() else "", home, tmp_path / "repos/checkout"
 
 
+def test_a_container_restart_clears_the_previous_readiness_marker(tmp_path, monkeypatch):
+    marker = tmp_path / "ready"
+    marker.touch()
+    monkeypatch.setenv("HIVE_READY_FILE", str(marker))
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "hive run" in commands
+    assert not marker.exists()
+
+
 RUN = [
     "bundle unlink",
     "init",
     "deps ensure",
-    "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master max-agents=20",
+    "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= max-agents=20 prefer=",
     "hive run",
 ]
+
+
+def test_the_charted_placement_rank_is_registered_on_every_start(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIVE_PREFER", "eng:1,ci:1,plan:1")
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (
+        "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        "max-agents=20 prefer=eng:1,ci:1,plan:1"
+    ) in commands.splitlines()
+
+
+def test_the_charted_release_name_is_registered_on_every_start(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIVE_NAME", "swarm-hive-002")
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (
+        "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        "max-agents=20 prefer= name=swarm-hive-002"
+    ) in commands.splitlines()
 
 
 def test_mounted_member_clones_repo_and_configures_before_run(tmp_path):
@@ -338,6 +372,65 @@ def test_bundle_is_cloned_beside_the_repos_and_linked_by_init(tmp_path):
     assert commands.endswith("hive run\n")
 
 
+def head(repo):
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout
+
+
+def commit(repo, message):
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            message,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return head(repo)
+
+
+def kept_bundle(tmp_path, ref="dev"):
+    origin = tmp_path / "bundle-origin"
+    subprocess.run(["git", "init", f"--initial-branch={ref}", str(origin)], check=True, capture_output=True)
+    commit(origin, "old doctrine")
+    kept = tmp_path / "repos/agentihooks-bundle"
+    subprocess.run(["git", "clone", "--branch", ref, str(origin), str(kept)], check=True, capture_output=True)
+    return origin, kept
+
+
+def test_a_kept_bundle_clone_is_fast_forwarded_to_its_origin_ref_before_init(tmp_path, monkeypatch):
+    origin, kept = kept_bundle(tmp_path, ref="release")
+    new = commit(origin, "new doctrine")
+    monkeypatch.setenv("HIVE_BUNDLE_REF", "release")
+    result, commands, home, _ = startup(tmp_path, bundle_url=str(origin))
+    assert result.returncode == 0, result.stderr
+    assert (home / "bundle-head-at-init").read_text() == new
+    assert head(kept) == new
+    assert commands.splitlines()[1:3] == [f"init --bundle {kept}", "deps ensure"]
+
+
+def test_a_kept_bundle_clone_that_cannot_fast_forward_is_logged_and_kept(tmp_path):
+    origin, kept = kept_bundle(tmp_path)
+    commit(origin, "new doctrine")
+    local = commit(kept, "local only")
+    result, commands, home, _ = startup(tmp_path, bundle_url=str(origin))
+    assert result.returncode == 0, result.stderr
+    assert "worker-hive: bundle fast forward failed; init runs on the kept clone\n" in result.stderr
+    assert (home / "bundle-head-at-init").read_text() == local
+    assert head(kept) == local
+    assert commands.splitlines()[1:3] == [f"init --bundle {kept}", "deps ensure"]
+
+
 def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path, monkeypatch):
     origin = tmp_path / "linked-origin"
     origin.mkdir()
@@ -506,3 +599,14 @@ def test_hive_run_and_the_agents_it_launches_never_inherit_the_inline_ledger_ca(
     result, _, home, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
     assert (home / "hive-run-ca-pem").read_text() == ""
+
+
+def test_hive_join_trusts_the_system_roots_beside_the_mounted_ledger_ca(tmp_path, monkeypatch, cert):
+    pem = Path(cert[0]).read_text()
+    monkeypatch.setenv("LEDGER_CA_PEM", pem)
+    result, _, home, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (home / "hive-join-ca-pem").read_text() == ""
+    trusted = (home / "hive-join-ca-file").read_text()
+    assert trusted.startswith(Path(ssl.get_default_verify_paths().cafile).read_text())
+    assert trusted.endswith(pem.strip() + "\n")

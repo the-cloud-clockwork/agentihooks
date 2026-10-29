@@ -1,0 +1,52 @@
+{
+  "package": "SV2-UX-03",
+  "package_complete": false,
+  "dependencies": {
+    "SV2-UX-02": "merged into dev (#2603)",
+    "SV2-CKP-05": "merged into dev (#4813)"
+  },
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2626",
+  "tested_commit": "ffad25a52",
+  "status": "fixture-qualified: a context only checkpoint with a newer native checkpoint whose native session object is corrupted shows the context checkpoint, the archive watermark, why native resume is unavailable and the passed over checkpoint; native, context and fresh are separate choices; the controller refuses a native choice the checkpoints cannot give before any replacement and the seat keeps waiting; a path only local snapshot is shown as path only and never as recoverable; a refresh keeps the accepted decision and a replayed click admits no second replacement; no Anton rollout of this commit has been observed",
+  "evidence_class": "mocked: checkpoints committed and verified through a granted local artifact store, one with a corrupted native session object; fakeredis execution registry, fences and recovery records; a fake lease clock; an in process API server whose Pods carry fixture statuses; the ledger page projection read from the same store; no ledger HTTP server, browser, worker Pod or cluster runs",
+  "interfaces": [
+    "scripts.swarm_v2.kubernetes.failures.Recovery.decide and request take native, context, fresh and the earlier resume. An Anton seat's page choice reaches them two ways: synchronously through the controller recovery API, which calls Recovery.decide under the controller lease and answers at once, and as a queued request through Recovery.request, which the controller applies on its next pass. On both paths native and context are refused with the reason from Recovery.unavailable before any replacement is admitted; the time of each accepted decision is kept beside the decision record, which keeps its earlier shape",
+    "Recovery.material(execution_id) names the fenced attempt's reason, archive watermark, transcript tail, latest complete compatible checkpoint, each newer checkpoint passed over with its diagnosis, the availability of each choice, the decision and any refused request; the controller publishes it on every recorded decision and for every pending decision on each pass",
+    "scripts.swarm.recovery_view.view(store, slug, now_ms) projects one card per seat for the current or replacement attempt of a fenced Pod and for each local agent awaiting a restore decision, with the badge recoverable, context only, fresh only or path only, the three choices with their reasons, the live request, the accepted decision and recovery_decision_wait_seconds",
+    "The swarm view carries recovery; the ledger page renders a foldable Recovery section whose choices send action restore-decision with native, context or fresh, and the Handoff outcomes row links to it instead of offering its own buttons",
+    "swarm restore-decision and the ledger server accept native, context, fresh and resume; a local agent refuses context and treats native as reopening its own conversation, recording decided and awaited_at on its restore row"
+  ],
+  "authority": "Only the master or operator reaches restore-decision, as before. The page grants nothing: a Pod choice is only a request that the controller applies under its lease after checking the checkpoints again, and a local choice is checked against the agent still awaiting a decision.",
+  "authoritative_objects": "Fences, recovery decisions, restore directives and the executions registry are authoritative; the published recovery material and the page cards are projections recomputed each pass and each read. Rollback deletes none of them.",
+  "rollback": "Leave affected tasks awaiting decision and hide unsupported recovery actions: a choice the checkpoints cannot give is disabled on the page and refused by the controller with the seat left awaiting decision; removing the Recovery section leaves the earlier resume and fresh buttons in Handoff outcomes, which still reach the same restore decision path. Rehearsed by test_native_is_refused_on_a_context_only_checkpoint_and_the_seat_keeps_waiting and case B.",
+  "states": {
+    "observed": "Cases A, B and C passed in focused Proofs run 40084661327 on ffad25a52 after merging dev and review round two (6167 passed, 10 skipped, 8 warnings, 38 subtests passed, browser page tests included) (first green in run 38154270712 on 1e38c09d3) (evidence/SV2-UX-03/a-result.json, b-result.json, c-result.json); the same tests failed before the change in Proofs run 38154268722 on the tests commit 4d8609836; the page was checked by eye at 1920 by 1080 on a scratch ledger, screenshots recovery-1920.png and recovery-wrapped-1920.png on the ledger task vux3 proof",
+    "accepted": "Standards and Spec reviews closed in round two on pull request https://github.com/the-cloud-clockwork/agentihooks/pull/6657; the quota decision is recorded under limitations",
+    "committed": "Case records, manifest and result committed on the task branch; the change reaches dev only when its pull request merges",
+    "externally_verified": "Not on Anton: no rollout of this commit has been observed and the controller has no production checkpoint listing yet, so no real recovery card has been shown; the evidence is mocked and labelled so"
+  },
+  "measurements": {
+    "recovery_decision_wait_seconds": {
+      "a": {
+        "eng-1@fixture": 90,
+        "eng-2@fixture": 90
+      },
+      "note": "fake clock: each seat was decided 90 seconds after its fence; the wait stops at the decision and survives a refresh (case C)"
+    }
+  },
+  "limitations": [
+    "The deployed controller lists no checkpoints yet, so every Pod card shows fresh only until a verified checkpoint listing is wired into the controller",
+    "The fixture builds the listing entries from the checkpoint validator's verdict; the production listing must report verification the same way",
+    "A local restore has only saved paths and a conversation id, so it is always path only and offers no context continuation",
+    "Published material lags a request by at most one controller pass; the page reads pending requests live",
+    "A local seat's native resume stays enabled when its account is out of quota: quota is retryable, so the attempt returns awaiting decision with the quota reason and the seat keeps waiting; only a lost conversation or worktree disables it"
+  ],
+  "cases": {
+    "a": "evidence/SV2-UX-03/a-result.json",
+    "b": "evidence/SV2-UX-03/b-result.json",
+    "c": "evidence/SV2-UX-03/c-result.json"
+  },
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/6657",
+  "compatibility": "Two refusal texts changed. For an unknown choice, Recovery.decide, the controller recovery API and swarm restore-decision on a Pod attempt now say 'a recovery decision is native, context, fresh or resume' instead of 'a recovery decision is fresh or resume'; the committed SV2-KUB-05 case B record carries the new text in its unknown_choice line and its other lines are unchanged. For a local agent, resume.decide (UNCHOSEN) and the ledger server's restore_decision_argv now say 'Choose native, context, fresh or resume' instead of 'Choose resume or fresh'. resume keeps its earlier meaning, so callers that send resume or fresh behave as before; the page now sends native for a local seat, which reopens its own conversation as resume did and is refused first when the conversation or worktree is lost"
+}

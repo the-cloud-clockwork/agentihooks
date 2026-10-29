@@ -36,6 +36,20 @@ def _post(port, path, body):
     return int(head.split()[1]), json.loads(rest)
 
 
+@pytest.mark.parametrize("scoped", [False, True])
+def test_signed_refresh_delivers_the_bus_address(admin, scoped):
+    from dataclasses import replace
+
+    from tests.hive.test_nats_grant import _offline_signer, _refresh
+
+    member = auth.mint(admin, "worker", PUBLIC)
+    signer = replace(_offline_signer(), member_swarms={member["id"]: ("rig",)} if scoped else None)
+    grant = _refresh(admin, signer, member["ledger_credential"])
+    assert grant["bus_url"] == "nats://hub:4222"
+    assert grant["nats_credentials"]
+    assert grant["bus_scoped"] is scoped
+
+
 def _raises(error):
     def operation(*_, **__):
         raise error
@@ -73,7 +87,7 @@ def test_a_refusal_with_another_cause_stays_a_403(port, monkeypatch):
 def test_any_redis_error_on_the_credential_lookup_is_a_refusal(admin, port, monkeypatch):
     from redis.exceptions import RedisError
 
-    monkeypatch.setattr(admin, "transaction", _raises(RedisError("unknown reply from the server")))
+    monkeypatch.setattr(admin, "hget", _raises(RedisError("unknown reply from the server")))
 
     assert _post(port, server.REFRESH_PATH, {"ledger_credential": "any"}) == (
         403,
@@ -85,7 +99,7 @@ def test_any_redis_error_on_the_credential_lookup_is_a_refusal(admin, port, monk
 def test_a_stalled_credential_lookup_stays_a_503(admin, port, kind, monkeypatch):
     from redis import exceptions
 
-    monkeypatch.setattr(admin, "transaction", _raises(getattr(exceptions, kind)("Timeout reading from socket")))
+    monkeypatch.setattr(admin, "hget", _raises(getattr(exceptions, kind)("Timeout reading from socket")))
 
     assert _post(port, server.REFRESH_PATH, {"ledger_credential": "any"}) == (503, {"error": server.REDIS_STALLED})
 

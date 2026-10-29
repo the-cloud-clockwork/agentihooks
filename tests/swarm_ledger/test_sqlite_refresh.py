@@ -29,8 +29,8 @@ def test_a_foreign_write_refreshes_only_changed_rows_and_serves_the_whole_rebuil
     for ops in writes:
         writer.apply_ops("ledger", ops=ops)
     rebuilds = []
-    original = sqlite.read_rows
-    monkeypatch.setattr(sqlite, "read_rows", lambda *a: rebuilds.append(a) or original(*a))
+    original = sqlite.load
+    monkeypatch.setattr(sqlite, "load", lambda *a: rebuilds.append(a) or original(*a))
     served = reader.current("ledger")
     assert rebuilds == []
     expected = whole(tmp_path)
@@ -61,8 +61,8 @@ def test_a_generation_without_its_change_record_falls_back_to_the_whole_rebuild(
     with sqlite3.connect(writer.path) as connection:
         connection.execute("DELETE FROM row_changes WHERE generation=(SELECT MIN(generation) FROM row_changes)")
     rebuilds = []
-    original = sqlite.read_rows
-    monkeypatch.setattr(sqlite, "read_rows", lambda *a: rebuilds.append(a) or original(*a))
+    original = sqlite.load
+    monkeypatch.setattr(sqlite, "load", lambda *a: rebuilds.append(a) or original(*a))
     served = reader.current("ledger")
     assert len(rebuilds) == 1
     assert served.text == whole(tmp_path).text
@@ -74,8 +74,8 @@ def test_a_replaced_ledger_falls_back_to_the_whole_rebuild(tmp_path, monkeypatch
     reader.current("ledger")
     writer.import_document("ledger", {**json.loads(reader.current("ledger").text), "title": "New"}, replace=True)
     rebuilds = []
-    original = sqlite.read_rows
-    monkeypatch.setattr(sqlite, "read_rows", lambda *a: rebuilds.append(a) or original(*a))
+    original = sqlite.load
+    monkeypatch.setattr(sqlite, "load", lambda *a: rebuilds.append(a) or original(*a))
     assert reader.current("ledger").state["title"] == "New"
     assert len(rebuilds) == 1
 
@@ -99,8 +99,8 @@ def test_a_write_past_the_recorded_path_limit_falls_back_to_the_whole_rebuild(tm
     reader.current("ledger")
     writer.apply_ops("ledger", ops=[chat(1)])
     rebuilds = []
-    original = sqlite.read_rows
-    monkeypatch.setattr(sqlite, "read_rows", lambda *a: rebuilds.append(a) or original(*a))
+    original = sqlite.load
+    monkeypatch.setattr(sqlite, "load", lambda *a: rebuilds.append(a) or original(*a))
     served = reader.current("ledger")
     assert len(rebuilds) == 1
     assert served.text == whole(tmp_path).text
@@ -115,8 +115,8 @@ def test_a_reader_refreshes_only_while_its_gap_fits_the_kept_generations(tmp_pat
     writer.apply_ops("ledger", ops=[chat(1)])
     writer.apply_ops("ledger", ops=[CLAIM])
     rebuilds = []
-    original = sqlite.read_rows
-    monkeypatch.setattr(sqlite, "read_rows", lambda *a: rebuilds.append(a) or original(*a))
+    original = sqlite.load
+    monkeypatch.setattr(sqlite, "load", lambda *a: rebuilds.append(a) or original(*a))
     served = reader.current("ledger")
     assert len(rebuilds) == whole_rebuilds
     assert served.text == whole(tmp_path).text

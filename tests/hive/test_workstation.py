@@ -64,6 +64,7 @@ def test_the_workstation_runs_one_master_spoke_per_swarm_as_this_hive():
     slugs = ["a", "b"]
     store = SimpleNamespace(slugs=lambda: list(slugs), config=lambda slug: SimpleNamespace(slug=slug))
     bus, runtime, held = Mock(), Mock(), {}
+    bus.for_swarm.return_value = bus
 
     first = workstation.spokes(store, bus, runtime, "workstation-1", held)
 

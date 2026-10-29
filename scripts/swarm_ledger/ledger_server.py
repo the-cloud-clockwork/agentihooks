@@ -5,6 +5,7 @@ Usage:
   ledger_server.py --ensure   start it detached if it is not answering, print the base URL
   ledger_server.py --serve    run in the foreground
   ledger_server.py --stop     stop the detached server
+  ledger_server.py --reload   hand the running server's socket to a fresh process on the current code
 
 Env: LEDGER_DIR (default ~/development-ledger), LEDGER_HOST (127.0.0.1), LEDGER_PORT (8765),
 SWARM_PUBLIC_URL and SWARM_ALLOWED_HOSTS (comma list) beside loopback, LEDGER_TLS_CERT and LEDGER_TLS_KEY to serve
@@ -18,6 +19,7 @@ import errno
 import functools
 import html
 import http.server
+import importlib
 import itertools
 import json
 import os
@@ -48,13 +50,16 @@ import ledger_media  # noqa: E402
 from scripts.gates import talk  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
     composition,
+    ledger_blockers,
     ledger_closed,
     ledger_task_duplicates,
     page_policy,
     ports,
+    request_body,
     request_metrics,
     server_code,
     server_compose,
+    server_handoff,
     server_lifetime,
     storage,
 )
@@ -64,7 +69,7 @@ from scripts.swarm_ledger.repository import (
     hierarchy,  # noqa: E402
     legacy,  # noqa: E402
 )
-from scripts.swarm_ledger.server_code import CODE_DIRS, code_stamp  # noqa: E402
+from scripts.swarm_ledger.server_code import CODE_DIRS, code_digest, code_stamp  # noqa: E402
 
 HOST, PORT = ledger_link.address()
 BASE = f"{ledger_link.scheme()}://{HOST}:{PORT}"
@@ -72,8 +77,23 @@ PIDFILE = core.LEDGER_DIR / ".server.pid"
 LOGFILE = core.LEDGER_DIR / ".server.log"
 SERVER_WAIT = 5.0
 COMPOSE_WAIT = 180.0
+POLL_S = 0.05
+DRAIN_S = 5.0
+LEASE_WAIT_S = 20.0
+RELOAD_WAIT_S = 100.0
+WARM_PASSES = 5
+CARRY = ".server.carry.json"
+WATCHED = "LEDGER_WATCHED"
+MODULES = "LEDGER_MODULES"
+RELOAD = threading.Event()
+HANDING = threading.Lock()
+HANDED = threading.Event()
+NEVER = threading.Event()
+WATCH_PASS = threading.Lock()
+HANDOFF = {}
 THREADS_EXHAUSTED = 75
 TLS_HANDSHAKE_S = 10
+BODY_DRAIN_S = 2
 PROBE_FILE = ".healthz"
 FILE_ORIGIN = "null"
 MAX_BODY = 1 << 20
@@ -89,6 +109,7 @@ BIN_SWEEP_EVERY = 15
 FOLLOW_S = 0.25
 SCHEDULER_UNAVAILABLE = threading.Event()
 LOADED_STAMP = code_stamp()
+LOADED_DIGEST = code_digest()
 
 
 @functools.cache
@@ -107,11 +128,13 @@ NO_DOCTOR = ("", False)
 
 def page_view(state, fix_phase, watched):
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
-    marks = ports.swarm().freeze.marks(state, hierarchy.project(state)[0], fix_phase, watched)
+    swarm = ports.swarm()
+    marks = swarm.freeze.marks(state, hierarchy.project(state)[0], fix_phase, watched)
+    status = swarm.phase_state.status({"tasks": [], **state})
     rows, closed = ledger_closed.trimmed(state)
     if closed:
         meta["closed"] = closed
-    return {**state, **rows, "marks": marks, "_meta": {**meta, "limits": PAGE_LIMITS}}
+    return {**state, **rows, "marks": marks, "phase_status": status, "_meta": {**meta, "limits": PAGE_LIMITS}}
 
 
 def doctor_holds(slug):
@@ -122,7 +145,7 @@ def doctor_holds(slug):
         store = swarm_store()
         fix = ports.swarm().freeze.fix_phase(store.config(slug))
         peer = fix and store.peer(slug)
-        records = repository.get_document(peer).get("freezes") or [] if peer and repository.exists(peer) else []
+        records = repository.current(peer).state.get("freezes") or [] if peer and repository.exists(peer) else []
     except (SwarmError, RedisError, ValueError, OSError):
         return NO_DOCTOR
     return fix, any(r.get("verb") == "focus" for r in records)
@@ -168,18 +191,6 @@ def bin_summaries(now=None):
     return sorted(found, key=lambda s: s["deleted_at"], reverse=True)
 
 
-ICON = (
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" '
-    'stroke-linejoin="round" aria-hidden="true">{}</svg>'
-)
-TRASH = ICON.format(
-    '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/>'
-)
-HOME_ICON = ICON.format('<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>')
-HEADS = {
-    "home": ("Ledger", "Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at", ""),
-    "bin": ("Ledger", "Kind", "Overview", ">Deleted", ">Left", ""),
-}
 PAGE_POLICY = page_policy.policy(os.environ, core.LEDGER_DIR, PORT)
 STATIC_RE = re.compile(r"/static/([0-9a-f]{12})/((?:[a-z]+/)?[a-z_]+\.(js|css))")
 STATIC_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8"}
@@ -191,38 +202,9 @@ def home_summaries():
     return [{**s, "swarm": swarm_state(s["slug"])} for s in ledger_summaries()]
 
 
-def head_cell(label):
-    label, _, key = label.partition(":")
-    css = ' class="r"' if label.startswith(">") else ""
-    label = label.removeprefix(">")
-    if not key:
-        return f"<span{css}>{label}</span>"
-    css = ' class="sort r"' if css else ' class="sort"'
-    return f'<button{css} type="button" data-sort="{key}">{label}<i aria-hidden="true">&#8597;</i></button>'
-
-
-def index_page(view="home"):
-    """The HOME or BIN shell; its rows load from the v1 ledger and bin collections."""
-    if view == "bin":
-        heading, total, watermark = "BIN", '<span class="total" id="total"></span>', ""
-        fab = f'<a class="fab" id="home-fab" href="/" aria-label="HOME">{HOME_ICON}</a>'
-    else:
-        heading, total, watermark = "HOME", "", '<div class="watermark" aria-hidden="true"></div>'
-        fab = f'<a class="fab" id="bin-fab" href="/?view=bin" aria-label="Bin">{TRASH}</a>'
-    values = {
-        "HEADING": heading,
-        "PAGE": served_version(),
-        "WATERMARK": watermark,
-        "VIEW": view,
-        "TOTAL": total,
-        "HEAD": "".join(head_cell(label) for label in HEADS[view]),
-        "FAB": fab,
-    }
-    return re.sub(
-        r"__HOME_(HEADING|PAGE|WATERMARK|VIEW|TOTAL|HEAD|FAB)__",
-        lambda m: values[m.group(1)],
-        core.HOME.read_text(encoding="utf-8"),
-    )
+def index_page():
+    """The HOME and BIN shell; its script builds the view and loads its rows from the v1 ledger and bin collections."""
+    return core.HOME.read_bytes().decode().replace("__HOME_PAGE__", served_version())
 
 
 def page_for(slug):
@@ -334,6 +316,7 @@ CAPS = {
     "max_plan": ("max-plan-agents", 0, MAX_CAP),
     "masters_step": ("masters-step", 0, MAX_CAP),
     "compact_limit": ("compact-limit", MIN_COMPACT, MAX_COMPACT),
+    "focus_weight": ("focus-weight", 0, 100),
 }
 PAGE_LIMITS = {
     "capacity": {key: [low, high] for key, (_, low, high) in CAPS.items()},
@@ -488,8 +471,8 @@ def restore_decision_argv(body):
     agent, choice = body.get("agent"), body.get("choice")
     if not isinstance(agent, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9@_.-]{0,127}", agent):
         raise ValueError("A restore decision needs an agent name")
-    if choice not in {"resume", "fresh"}:
-        raise ValueError("Choose resume or fresh")
+    if choice not in {"resume", "native", "context", "fresh"}:
+        raise ValueError("Choose native, context, fresh or resume")
     return ["restore-decision", agent, choice]
 
 
@@ -660,7 +643,8 @@ def deliver_alerts(slug, state):
         master = operator_mail.master_address(inbox.redis, slug, agents)
         addresses = {a.name: a.seat or a.name for a in live}
         alerts = [{**a, "target": addresses.get(a["target"], "master")} for a in fresh]
-        sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since)
+        render = functools.partial(ledger_alerts.message, tier=ledger_blockers.autonomy(slug), doc=state)
+        sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since, render=render)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"alert delivery for {slug}: {exc}\n")
         unrelayed_on(ALERTS, slug, meta["rev"])
@@ -766,9 +750,11 @@ def workspace_tails(slug, task_id):
 
 
 def write_gate(slug):
-    """Every op write: masters fenced to the items they own, page chat to the front door, inside the talk budget."""
+    """Every op write: masters fenced to the items they own, page chat to the front door, asks of the operator behind
+    the blocker protocol, inside the talk budget."""
     swarm = ports.swarm()
-    return swarm.master_fence.Fence(slug, swarm.front_door.Door(slug, talk.Budget(slug)))
+    protocol = ledger_blockers.Gate(slug, talk.Budget(slug))
+    return swarm.master_fence.Fence(slug, swarm.front_door.Door(slug, protocol))
 
 
 def api_services():
@@ -832,20 +818,49 @@ def sample_streams():
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
 
+def request_caller(headers) -> str:
+    if headers is None:
+        return "-"
+    if headers.get("X-Ledger-Agent"):
+        return headers["X-Ledger-Agent"]
+    if headers.get("X-Ledger-Tick"):
+        return "tick"
+    return "controller" if headers.get("X-Controller-Credential") else "-"
+
+
 class Handshake(Exception):
     pass
 
 
 class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    def __init__(self, *args, **kwargs):
+        self.active = 0
+        self.idle = threading.Condition()
+        super().__init__(*args, **kwargs)
+
     def handle_error(self, *args):
         if not isinstance(sys.exc_info()[1], Handshake):
             super().handle_error(*args)
 
     def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+        with self.idle:
+            self.active += 1
         try:
             super().process_request(request, client_address)
         except RuntimeError:
             os._exit(THREADS_EXHAUSTED)
+
+    def process_request_thread(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self.idle:
+                self.active -= 1
+                self.idle.notify_all()
+
+    def drained(self, timeout: float) -> bool:
+        with self.idle:
+            return self.idle.wait_for(lambda: not self.active, timeout)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -860,17 +875,40 @@ class Handler(BaseHTTPRequestHandler):
                 raise Handshake from exc
             self.request.settimeout(None)
         super().setup()
+        self.raw_rfile = self.rfile
 
     def log_message(self, fmt, *args):
         if self.path.startswith("/api/v1/"):
-            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?', 1)[0]}\n")
+            caller = request_caller(getattr(self, "headers", None))
+            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.partition('?')[0]} {caller}\n")
             return
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 
     @request_metrics.measured
     def handle_one_request(self) -> None:
         self.command, self.path, self.raw_requestline = None, "/", b""
+        self.rfile = getattr(self, "raw_rfile", self.rfile)
         return super().handle_one_request()
+
+    def parse_request(self) -> bool:
+        parsed = super().parse_request()
+        request_metrics.arrived()
+        if parsed:
+            self.rfile = request_body.Body(self.rfile, request_body.length(self.headers))
+        return parsed
+
+    def send_response(self, code, message=None):
+        unread = isinstance(getattr(self, "rfile", None), request_body.Body) and not self.rfile.drain(
+            MAX_BODY, self.connection, BODY_DRAIN_S
+        )
+        super().send_response(code, message)
+        if unread:
+            self.send_header("Connection", "close")
+
+    def finish(self):
+        super().finish()
+        if isinstance(getattr(self, "rfile", None), request_body.Body) and self.rfile.left != 0:
+            request_body.linger(self.connection, BODY_DRAIN_S)
 
     def send(self, code, body, ctype):
         if self.path.startswith("/api/v1/") and code >= 400 and ctype != "application/json":
@@ -884,7 +922,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/") and self.headers.get("Origin") == FILE_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", FILE_ORIGIN)
         self.end_headers()
-        self.wfile.write(data)
+        with request_metrics.client():
+            self.wfile.write(data)
 
     def send_header(self, keyword, value):
         super().send_header(keyword, value)
@@ -971,8 +1010,7 @@ class Handler(BaseHTTPRequestHandler):
         if route.startswith("/static/"):
             return self.send_static(route)
         if route == "/":
-            view = "bin" if "view=bin" in self.path.partition("?")[2].split("&") else "home"
-            return self.send(200, index_page(view), "text/html; charset=utf-8")
+            return self.send(200, index_page(), "text/html; charset=utf-8")
         if route == "/api/layout":
             return self.send(200, json.dumps(ledger_layout.read()), "application/json")
         if route.startswith("/api/swarm/"):
@@ -1043,6 +1081,14 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             return self.send(400, str(exc), "text/plain")
         return self.send(200, json.dumps(saved), "application/json")
+
+    def send_export(self, data):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
 
     def send_logo(self):
         try:
@@ -1248,12 +1294,100 @@ def metrics_journal(action, *args):
         sys.stderr.write(f"request metrics journal: {exc}\n")
 
 
-def reload_if_changed(started, code_dirs=CODE_DIRS, execv=os.execv):
-    if code_stamp(code_dirs) == started:
+def container_main(proc=Path("/proc")) -> bool:
+    try:
+        return (proc / str(os.getppid()) / "comm").read_text().startswith("containerd-shim")
+    except OSError:
         return False
-    metrics_journal(request_metrics.stop)
-    execv(sys.executable, [sys.executable, str(CODE_DIR / "ledger_server.py"), "--serve"])
-    return True
+
+
+def reload_if_changed(started, server, code_dirs=CODE_DIRS, hand_off=server_handoff.hand_off, force=False, loaded=None):
+    """None once a successor took the socket and this server stopped accepting, else the code stamp to compare
+    next; with loaded, code whose content still hashes to it reads as unchanged."""
+    stamp = code_stamp(code_dirs)
+    if stamp == started and not force:
+        return started
+    if loaded is not None and not force and code_digest(code_dirs) == loaded:
+        server_code.record(PIDFILE.parent, os.getpid(), stamp, code_dirs)
+        return stamp
+    argv = [sys.executable, str(CODE_DIR / "ledger_server.py"), "--serve"]
+    if container_main():
+        metrics_journal(request_metrics.stop)
+        try:
+            os.execv(sys.executable, argv)
+        except OSError as exc:
+            sys.stderr.write(f"reload: could not restart in place: {exc}; this server keeps serving\n")
+            metrics_journal(request_metrics.restore, core.LEDGER_DIR / request_metrics.JOURNAL_NAME)
+            return stamp
+    try:
+        held = hand_off(server.socket, argv, extra={WATCHED: ",".join(HUB.watched()), MODULES: loaded_modules()})
+    except OSError as exc:
+        sys.stderr.write(f"reload: the successor did not start: {exc}; this server keeps serving\n")
+        return stamp
+    if held is None:
+        sys.stderr.write("reload: the successor never reported ready; this server keeps serving\n")
+        return stamp
+    try:
+        HANDOFF["since"] = json.loads(held)
+    except ValueError:
+        HANDOFF["since"] = {}
+    server.shutdown()
+    return None
+
+
+def write_carry(since: dict) -> None:
+    path = core.LEDGER_DIR / CARRY
+    staged = path.with_name(f"{CARRY}.{os.getpid()}")
+    staged.write_text(json.dumps(stored.carry(since)))
+    staged.replace(path)
+
+
+def take_carry() -> list[str] | None:
+    """The slugs whose committed copies the old server carried over."""
+    path = core.LEDGER_DIR / CARRY
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        return None
+    path.unlink()
+    try:
+        carried = json.loads(text)
+        stored.adopt_carried(carried)
+    except Exception as exc:  # a broken carry leaves its ledgers to load from their rows
+        sys.stderr.write(f"carry: {exc}\n")
+        return None
+    return list(carried)
+
+
+def refresh_streams(slugs: list[str]) -> None:
+    """Bring a warmed stream view up to a ledger the old server wrote after the successor built it."""
+    for slug in slugs:
+        if HUB.has(slug):
+            try:
+                publish_ledger(slug, repository.get_document(slug))
+            except Exception as exc:  # the next write to the ledger publishes its view anyway
+                sys.stderr.write(f"refresh stream {slug}: {exc}\n")
+
+
+def request_reload(signum: int, frame: object) -> None:
+    RELOAD.set()
+
+
+def hand_over(started: int, server: ThreadingHTTPServer, force: bool = False) -> int | None:
+    with HANDING:
+        if HANDED.is_set():
+            return None
+        started = reload_if_changed(started, server, force=force, loaded=LOADED_DIGEST)
+        if started is None:
+            HANDED.set()
+        return started
+
+
+def answer_reloads(server: ThreadingHTTPServer, requested: threading.Event = RELOAD) -> None:
+    while requested.wait():
+        requested.clear()
+        if hand_over(code_stamp(), server, force=True) is None:
+            return
 
 
 def reloading(environ=os.environ) -> bool:
@@ -1275,40 +1409,119 @@ def scheduled_wait(interval: float) -> None:
     time.sleep(interval)
 
 
-def watch_ledgers(interval=2.0):
-    started = code_stamp()
-    reload = reloading()
+def watch_ledgers(server=None, interval=2.0, stopping=NEVER):
+    started = LOADED_STAMP
+    reloads = reloading()
     for passes in itertools.count():
-        if reload:
-            reload_if_changed(started)
-        try:
-            ledger_bin.tidy()
-        except OSError as exc:
-            sys.stderr.write(f"bin purge: {exc}\n")
-        if passes % BIN_SWEEP_EVERY == 0:
-            bin_closed_without_swarm()
-        if passes and passes % BIN_SWEEP_EVERY == 0:
-            expire_alerts()
-        if passes % REPLAY_EVERY == 0:
+        if reloads:
+            started = hand_over(started, server)
+            if started is None:
+                return
+        with WATCH_PASS:
+            if stopping.is_set():
+                return
             try:
-                if unrelayed():
-                    replay_unrelayed()
-            except Exception as exc:  # the watch loop also tidies the bin, expires alerts and samples streams
-                sys.stderr.write(f"unrelayed replay: {exc}\n")
-        sample_streams()
-        metrics_journal(request_metrics.persist)
+                ledger_bin.tidy()
+            except OSError as exc:
+                sys.stderr.write(f"bin purge: {exc}\n")
+            if passes % BIN_SWEEP_EVERY == 0:
+                bin_closed_without_swarm()
+            if passes and passes % BIN_SWEEP_EVERY == 0:
+                expire_alerts()
+            if passes % REPLAY_EVERY == 0:
+                try:
+                    if unrelayed():
+                        replay_unrelayed()
+                except Exception as exc:  # the watch loop also tidies the bin, expires alerts and samples streams
+                    sys.stderr.write(f"unrelayed replay: {exc}\n")
+            sample_streams()
+            metrics_journal(request_metrics.persist)
         scheduled_wait(interval)
+
+
+def listening(listener: socket.socket | None = None) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((HOST, PORT), Handler, bind_and_activate=False)
+    server.request_queue_size = 128
+    if listener is None:
+        server.server_bind()
+        server.server_activate()
+    else:
+        server.socket.close()
+        server.socket = listener
+    return server
+
+
+def warm(passes: int = WARM_PASSES) -> None:
+    """Load every open ledger, again while a pass still finds one written since, at most passes times."""
+    held = {}
+    for _ in range(passes):
+        loaded = {}
+        for summary in ledger_summaries():
+            slug = summary["slug"]
+            try:
+                loaded[slug] = stored.current(slug)
+            except Exception as exc:  # a ledger that fails to load stays cold and the handoff goes on
+                sys.stderr.write(f"warm {slug}: {exc}\n")
+        if all(held.get(slug) is entry for slug, entry in loaded.items()):
+            return
+        held.update(loaded)
+
+
+def loaded_modules(modules=sys.modules) -> str:
+    return ",".join(
+        sorted(
+            name
+            for name, module in modules.items()
+            if module is not None and name != "__main__" and name.rpartition(".")[2] != "ledger_server"
+        )
+    )
+
+
+def warm_modules(environ=os.environ, load=importlib.import_module) -> None:
+    for name in filter(None, environ.pop(MODULES, "").split(",")):
+        try:
+            load(name)
+        except Exception:  # a module the new code no longer has stays unloaded
+            continue
+
+
+def warm_streams(environ=os.environ) -> list[str]:
+    warmed = []
+    for slug in filter(None, environ.pop(WATCHED, "").split(",")):
+        try:
+            HUB.open(slug, lambda slug=slug: stream_resources(slug))
+        except Exception as exc:  # a view that fails to build loads on the page's own reconnect
+            sys.stderr.write(f"warm stream {slug}: {exc}\n")
+            continue
+        HUB.close(slug)
+        warmed.append(slug)
+    return warmed
 
 
 def follow_shared(interval=FOLLOW_S):
     """Publish each watched ledger's newer stored generation, whichever host wrote it to the shared database."""
     while True:
-        for slug in HUB.watched():
+        for slug in () if core.LOCK.locked() else HUB.watched():
             try:
                 repository.current(slug)
             except Exception as exc:  # one unreadable ledger must not stop the others following
                 sys.stderr.write(f"shared follow {slug}: {exc}\n")
         scheduled_wait(interval)
+
+
+def retrying(target, sleep=time.sleep, first=1.0, cap=30.0):
+    @functools.wraps(target)
+    def run(*args, **kwargs):
+        delay = first
+        while True:
+            try:
+                return target(*args, **kwargs)
+            except Exception:  # an unresolved Redis name at pod start must not end the thread for good
+                sys.stderr.write(f"{target.__name__} stopped, retrying in {delay:g}s: {sys.exc_info()[1]}\n")
+                sleep(delay)
+                delay = min(delay * 2, cap)
+
+    return run
 
 
 def adopt_disk_files():
@@ -1320,41 +1533,74 @@ def adopt_disk_files():
             sys.stderr.write(f"disk adoption {slug}: {exc}\n")
 
 
+def take_lease(writer, ledger_writer, listener, predecessor=os.getppid) -> None:
+    """A successor outwaits the predecessor that handed it the socket, since exiting would leave nothing listening."""
+    while True:
+        try:
+            writer.acquire(ledger_writer.owner(), wait=0.0 if listener is None else LEASE_WAIT_S)
+            return
+        except ledger_writer.WriterConflict as conflict:
+            held = conflict.holder.get("pid")
+            if listener is None or held != predecessor():
+                sys.exit(str(conflict))
+            sys.stderr.write(f"reload: predecessor pid {held} still holds the writer lease; waiting\n")
+
+
 def serve():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+    listener = server_handoff.inherited()
+    warmed, carried = [], []
+    if listener is not None:
+        warm_modules()
+        warm()
+        warmed = warm_streams()
+        server_handoff.announce(json.dumps(stored.generations()).encode())
     ledger_writer = ports.swarm().ledger_writer
     writer = ledger_writer.WriterLease(core.LEDGER_DIR)
     if not storage.shared():
-        try:
-            writer.acquire(ledger_writer.owner())
-        except ledger_writer.WriterConflict as conflict:
-            sys.exit(str(conflict))
+        take_lease(writer, ledger_writer, listener)
+    if listener is not None:
+        carried = take_carry()
     legacy.adopt(stored)
     adopt_unrelayed()
     threading.Thread(target=adopt_disk_files, daemon=True).start()
     metrics_journal(request_metrics.restore, core.LEDGER_DIR / request_metrics.JOURNAL_NAME)
-    threading.Thread(target=watch_ledgers, daemon=True).start()
+    server = listening(listener)
+    watching = threading.Event()
+    threading.Thread(target=retrying(watch_ledgers), args=(server,), kwargs={"stopping": watching}, daemon=True).start()
+    threading.Thread(target=answer_reloads, args=(server,), daemon=True).start()
+    threading.Thread(target=refresh_streams, args=(warmed if carried is None else carried,), daemon=True).start()
     if storage.shared():
-        threading.Thread(target=follow_shared, daemon=True).start()
-    server = ThreadingHTTPServer((HOST, PORT), Handler, bind_and_activate=False)
-    server.request_queue_size = 128
-    server.server_bind()
-    server.server_activate()
+        threading.Thread(target=retrying(follow_shared), daemon=True).start()
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
-    server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP)
+    server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP, digest=LOADED_DIGEST)
     PIDFILE.write_text(str(os.getpid()))
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
+    drained = True
     try:
         from scripts.hub import projector
         from scripts.swarm_ledger import outbox_host
 
         with outbox_host.running(stored), projector.running(repository, HUB):
-            server.serve_forever()
+            try:
+                server.serve_forever(POLL_S)
+            finally:
+                stopped.set()
+                HUB.drain()
+                drained = server.drained(DRAIN_S)
     finally:
-        stopped.set()
         server.server_close()
+        with WATCH_PASS:
+            watching.set()
         metrics_journal(request_metrics.stop)
-        writer.release()
+        if drained:
+            try:
+                if "since" in HANDOFF:
+                    write_carry(HANDOFF.pop("since"))
+            finally:
+                writer.release()
+        else:
+            sys.stderr.write("drain: requests still ran at the bound; the lease ends with this process\n")
 
 
 def port_held() -> bool:
@@ -1448,18 +1694,47 @@ def stop():
     print("stopped")
 
 
+def recorded_pid() -> str:
+    try:
+        return PIDFILE.read_text()
+    except OSError:
+        return ""
+
+
+def reload(wait: float = RELOAD_WAIT_S) -> str | None:
+    if server_compose.used(core.LEDGER_DIR) and (error := server_compose.start(core.LEDGER_DIR)):
+        sys.exit(f"could not start the ledger service: {error}")
+    if not server_process_alive():
+        return ensure()
+    pid = recorded_pid()
+    try:
+        os.kill(int(pid), signal.SIGHUP)
+    except (ValueError, ProcessLookupError):
+        return ensure()
+    deadline = time.monotonic() + wait
+    while all((recorded_pid() == pid, server_process_alive())):
+        if time.monotonic() >= deadline:
+            sys.exit(f"the ledger server pid {pid} did not hand off within {wait:.0f} s; see {LOGFILE}")
+        time.sleep(0.1)
+    return ensure()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--ensure", action="store_true")
     group.add_argument("--serve", action="store_true")
     group.add_argument("--stop", action="store_true")
+    group.add_argument("--reload", action="store_true")
     args = parser.parse_args()
     composition.wire()
     if args.serve:
+        signal.signal(signal.SIGHUP, request_reload)
         serve()
     elif args.ensure:
         ensure()
+    elif args.reload:
+        reload()
     else:
         stop()
 

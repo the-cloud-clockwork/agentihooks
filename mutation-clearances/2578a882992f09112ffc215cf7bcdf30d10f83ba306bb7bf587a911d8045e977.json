@@ -1,0 +1,6 @@
+{
+  "scripts/gates/one_push.py:scripts.gates.one_push.x_expand__mutmut_14:6bea1bb61dac596d67cf26bffbb0cfb5c4ea6696c56f142af50f8efb24a96a3f": {
+    "reader": "standards_reader",
+    "reason": "Replacing the empty string default with None changes no output: CPython re.sub inserts an empty string for a callback that returns None, so an unset name still expands to empty."
+  }
+}

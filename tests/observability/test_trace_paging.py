@@ -207,6 +207,242 @@ def test_repeated_streamed_generations_page_without_lost_or_doubled_observations
     assert len(state["records"]) < len(records) / 4
 
 
+def test_repeated_metadata_records_resume_paging_past_the_paged_records(tmp_path, monkeypatch, quiet):
+    metadata = [{"type": "custom-title", "customTitle": "rig"}, {"type": "agent-name", "agentName": "master"}]
+
+    def call(uuid: str, message: str, tool: str, second: int) -> dict:
+        block = {"type": "tool_use", "id": tool, "name": "shell", "input": {"cmd": tool}}
+        content = {"id": message, "model": "model-0", "content": [block]}
+        return {"type": "assistant", "uuid": uuid, "timestamp": _stamp(second), "message": content}
+
+    def user(uuid: str, content, second: int) -> dict:
+        return {"type": "user", "uuid": uuid, "timestamp": _stamp(second), "message": {"content": content}}
+
+    result = [{"type": "tool_result", "tool_use_id": "t2", "content": "two"}]
+    first = [
+        *metadata,
+        user("p0", "ask 0", 1),
+        call("a1", "m1", "t1", 2),
+        *metadata,
+        call("a2", "m2", "t2", 3),
+        user("r2", result, 4),
+    ]
+    later = [*metadata, user("p1", "ask 1", 5)]
+    receiver, _, path = _run(tmp_path, monkeypatch, "paged", CAP, first, len(first))
+    assert agent_trace._cursor("session")["paged"]["boundary"]
+    with path.open("a") as handle:
+        handle.write("".join(_line(record) for record in later))
+    for _ in range(3):
+        agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+    state = agent_trace._cursor("session")
+    assert len(state["accepted"]) + state["paged"]["spans"] == len(receiver.observations)
+    assert state["source"]["records"] == len(first) + len(later)
+    assert set(state["records"]) == {"p1"}
+    assert set(state["source_points"]) <= set(state["records"])
+
+
+def test_paged_point_resumes_past_the_dropped_record_read_last():
+    state = {"source": {"device": 1, "inode": 2}, "source_points": {"a": [30, 40, 4, 1], "b": [10, 20, 2, 0]}}
+    earlier = {"device": 1, "inode": 2, "line": 0, "offset": 5, "records": 1, "unsupported": 0, "boundary": "z"}
+    point = {"device": 1, "inode": 2, "line": 30, "offset": 40, "records": 4, "unsupported": 1, "boundary": "a"}
+    assert agent_trace._paged_point(state, ["a", "b"], [0, 1], earlier) == ("a", point)
+
+
+@pytest.mark.parametrize("offset", [20, 40])
+def test_paged_point_never_moves_behind_the_earlier_paged_point(offset):
+    state = {"source": {"device": 1, "inode": 2}, "source_points": {"a": [0, 10, 1, 0], "b": [10, 20, 2, 0]}}
+    earlier = {"device": 1, "inode": 2, "line": 0, "offset": offset, "records": 4, "unsupported": 0, "boundary": "d"}
+    assert agent_trace._paged_point(state, ["a", "b", "c"], [0, 1], earlier) == ("d", earlier)
+
+
+def test_paged_point_without_every_position_keeps_the_earlier_point():
+    state = {"source": {}, "source_points": {"a": [0, 10, 1, 0]}}
+    assert agent_trace._paged_point(state, ["a", "b"], [0, 1], None) == ("b", None)
+
+
+def _call(uuid: str, message: str, block: dict, second: int) -> dict:
+    content = {"id": message, "model": "model-0", "content": [block]}
+    return {"type": "assistant", "uuid": uuid, "timestamp": _stamp(second), "message": content}
+
+
+def _paged_session(tmp_path, monkeypatch):
+    metadata = [{"type": "custom-title", "customTitle": "rig"}, {"type": "agent-name", "agentName": "master"}]
+
+    def tool(name: str) -> dict:
+        return {"type": "tool_use", "id": name, "name": "shell", "input": {"cmd": name}}
+
+    def user(uuid: str, content, second: int) -> dict:
+        return {"type": "user", "uuid": uuid, "timestamp": _stamp(second), "message": {"content": content}}
+
+    result = [{"type": "tool_result", "tool_use_id": "t2", "content": "two"}]
+    first = [
+        *metadata,
+        user("p0", "ask 0", 1),
+        _call("a1", "m1", tool("t1"), 2),
+        *metadata,
+        _call("a2", "m2", tool("t2"), 3),
+        user("r2", result, 4),
+    ]
+    records = [*first, *metadata, user("p1", "ask 1", 5)]
+    receiver, _, path = _run(tmp_path, monkeypatch, "paged", CAP, first, len(first))
+    with path.open("a") as handle:
+        handle.write("".join(_line(record) for record in records[len(first) :]))
+    for _ in range(3):
+        agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+    assert set(agent_trace._cursor("session")["records"]) == {"p1"}
+    return receiver, path, records
+
+
+def _assert_no_recount(receiver: Receiver, path, dropped: str) -> None:
+    for _ in range(3):
+        agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+    state = agent_trace._cursor("session")
+    assert len(state["accepted"]) + state["paged"]["spans"] == len(receiver.observations)
+    assert set(state["records"]) == {"p1"}
+    exported = json.dumps([dict(span.attributes or {}) for span in receiver.observations.values()], default=str)
+    assert dropped not in exported
+
+
+@pytest.mark.parametrize("rewrite", ["without-boundary", "truncated", "revised"])
+def test_transcript_rewritten_in_place_never_recounts_paged_spans(tmp_path, monkeypatch, quiet, rewrite):
+    receiver, path, records = _paged_session(tmp_path, monkeypatch)
+    boundary = agent_trace._cursor("session")["paged"]["boundary"]
+    revised = _call("a1", "m1", {"type": "text", "text": "revised text"}, 2)
+    if rewrite == "truncated":
+        kept = records[:4]
+    elif rewrite == "revised":
+        kept = [revised if transcript.record_id(record) == "a1" else record for record in records]
+    else:
+        kept = [record for record in records if transcript.record_id(record) != boundary]
+    inode = path.stat().st_ino
+    path.write_text("".join(_line(record) for record in kept))
+    assert path.stat().st_ino == inode
+    _assert_no_recount(receiver, path, "revised text")
+
+
+@pytest.mark.parametrize("masked", [False, True])
+def test_late_record_for_a_paged_message_never_recounts_its_span(tmp_path, monkeypatch, quiet, masked):
+    if masked:
+        original = transcript.mask_value
+        monkeypatch.setattr(transcript, "mask_value", lambda value: "M1" if value == "m1" else original(value))
+    receiver, path, _ = _paged_session(tmp_path, monkeypatch)
+    late = _call("a1-late", "m1", {"type": "text", "text": "late text"}, 6)
+    with path.open("a") as handle:
+        handle.write(_line(late))
+    _assert_no_recount(receiver, path, "late text")
+
+
+def test_message_split_across_the_paging_cut_stays_open_for_a_late_record():
+    values = [
+        _call("a1", "m1", {"type": "text", "text": "one"}, 1),
+        _call("a2", "m1", {"type": "text", "text": "two"}, 2),
+    ]
+    values.append(_call("a3", "m3", {"type": "text", "text": "three"}, 3))
+    paged = agent_trace._paged_ids({}, ["a1", "a2", "a3"], values, [0, 2], [1])
+    assert paged["messages"] == [agent_trace._paged_digest("m3")]
+    assert paged["keys"] == sorted(agent_trace._paged_digest(key) for key in ("a1", "a3"))
+    assert not agent_trace._paged_out(paged, "a4", _call("a4", "m1", {"type": "text", "text": "late"}, 4))
+    later = agent_trace._paged_ids(paged, ["a2", "a5"], [values[1], _call("a5", "m5", {}, 5)], [0, 1], [])
+    assert later["messages"] == sorted(agent_trace._paged_digest(message) for message in ("m1", "m3", "m5"))
+
+
+def test_paged_digest_stays_readable_from_state_written_by_earlier_releases():
+    assert agent_trace._paged_digest("m3") == "32c2aea8c2e77450"
+
+
+def _bytes_read_per_pass(monkeypatch, path) -> list[int]:
+    original, passes = transcript.iter_complete_records, []
+
+    def counting(transcript_path, start):
+        end = start
+        try:
+            for record, end in original(transcript_path, start):
+                yield record, end
+        finally:
+            passes[-1] += end - start
+
+    monkeypatch.setattr(transcript, "iter_complete_records", counting)
+    for _ in range(3):
+        passes.append(0)
+        agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+    return passes
+
+
+def test_lost_paged_boundary_moves_the_paged_point_past_the_paged_records(tmp_path, monkeypatch, quiet):
+    receiver, path, records = _paged_session(tmp_path, monkeypatch)
+    boundary = agent_trace._cursor("session")["paged"]["boundary"]
+    path.write_text("".join(_line(record) for record in records if transcript.record_id(record) != boundary))
+    agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+    unpaged = len(_line(records[-1]).encode())
+    assert path.stat().st_size == 1033
+    assert _bytes_read_per_pass(monkeypatch, path) == [unpaged] * 3
+    _assert_no_recount(receiver, path, "never exported")
+
+
+def test_paged_point_holds_past_the_boundary_between_passes(tmp_path, monkeypatch, quiet):
+    _, path, _ = _paged_session(tmp_path, monkeypatch)
+    offset = agent_trace._cursor("session")["paged"]["source"]["offset"]
+    assert offset > 0
+    assert _bytes_read_per_pass(monkeypatch, path) == [path.stat().st_size - offset] * 3
+
+
+def test_lost_boundary_moves_the_point_only_over_paged_records_before_a_staged_one(tmp_path):
+    def text(uuid: str, message: str, second: int) -> dict:
+        return _call(uuid, message, {"type": "text", "text": uuid}, second)
+
+    lines = ["not json", text("a1", "m1", 1), text("a2", "m2", 2), text("a3", "m3", 3), text("a4", "m4", 4)]
+    path = tmp_path / "transcript.jsonl"
+    path.write_text("".join(_line(record) for record in lines))
+    digest = agent_trace._paged_digest
+    paged = {
+        "boundary": "gone",
+        "keys": [digest("a1"), digest("a4")],
+        "messages": [digest(transcript.mask_value("m2"))],
+    }
+    start = {"device": 1, "inode": 2, "offset": 0, "records": 0, "unsupported": 0}
+    moved = agent_trace._scan_to(str(path), start, paged, {"a3": {}})
+    line, end = (len("".join(_line(record) for record in lines[:count]).encode()) for count in (2, 3))
+    assert moved == {
+        **start,
+        "line": line,
+        "offset": end,
+        "records": 2,
+        "unsupported": 1,
+        "record": "a2",
+        "boundary": "gone",
+    }
+    assert agent_trace._scan_to(str(path), start, {"boundary": "gone"}, {}) == {**start, "boundary": "gone"}
+    found = agent_trace._scan_to(str(path), {**moved, "boundary": "earlier"}, {"boundary": "a3"}, {})
+    assert found["record"] == found["boundary"] == "a3"
+    assert agent_trace._still_at(str(path), found)
+    assert agent_trace._still_at(str(path), {key: value for key, value in found.items() if key != "record"})
+
+
+@pytest.mark.parametrize("edited", ["codex-user-message", "claude-metadata"])
+def test_edited_record_without_native_id_never_changes_span_counts(tmp_path, monkeypatch, quiet, edited):
+    if edited == "codex-user-message":
+        records = _codex(6, 3)
+        first = next(index for index, record in enumerate(records) if record["type"] == "response_item")
+        revised = json.loads(json.dumps(records[first]))
+        revised["payload"]["content"][0]["text"] = "edited ask"
+    else:
+        records = _claude(6, 3)
+        records.insert(1, {"type": "custom-title", "customTitle": "rig"})
+        first, revised = 1, {"type": "custom-title", "customTitle": "edited ask"}
+    receiver, _, path = _run(tmp_path, monkeypatch, "paged", CAP, records, 3)
+    state = agent_trace._cursor("session")
+    assert state["paged"]["boundary"]
+    spans = len(state["accepted"]) + state["paged"]["spans"]
+    assert spans == len(receiver.observations)
+    rewritten = [revised if index == first else record for index, record in enumerate(records)]
+    lost = [record for record in rewritten if transcript.record_id(record) != state["paged"]["boundary"]]
+    path.write_text("".join(_line(record) for record in lost))
+    for _ in range(3):
+        agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+    state = agent_trace._cursor("session")
+    assert len(state["accepted"]) + state["paged"]["spans"] == len(receiver.observations) == spans
+
+
 @pytest.mark.parametrize("chunk", [1, 3])
 def test_streamed_generation_keeps_its_accepted_identity_after_tool_results(tmp_path, monkeypatch, quiet, chunk):
     records = _claude(1, 2)
@@ -371,7 +607,9 @@ def test_resume_point_holds_only_a_whole_boundary_line(cut, tmp_path, monkeypatc
     else:
         path.write_bytes(b"#" * (point["offset"] - 1) + b"\n" + data[point["offset"] :])
     agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
-    assert agent_trace._cursor("session")["paged"]["source"]["offset"] == 0
+    moved = agent_trace._cursor("session")["paged"]["source"]
+    assert moved["offset"] < point["offset"]
+    assert agent_trace._still_at(str(path), moved)
 
 
 def test_kept_records_needs_both_the_cut_entry_and_its_prompt():

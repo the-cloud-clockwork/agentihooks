@@ -9,11 +9,12 @@ that runs without the channel.
 import json
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from scripts.inbox.bus import FeedError, feed_for
 from scripts.inbox.cli import check_answer, identity
-from scripts.inbox.seen import claim
+from scripts.inbox.seen import CLAIM_BATCH, claim
 from scripts.inbox.store import NOTIFY, InboxError, connect
 
 NAME = "inbox"
@@ -24,6 +25,14 @@ RECHECK_S = 5.0
 SETTLE_S = 1.0
 METHOD = "notifications/claude/channel"
 UNSHOWN = "the inbox channel could not show it"
+UNCONFIRMED_MAX = 10
+HELD = ("pending", "delivered")
+
+
+@dataclass
+class Pushed:
+    shown: set[str] = field(default_factory=set)
+    held: set[str] = field(default_factory=set)
 
 
 def launch_args(root: str = ROOT, python: str = sys.executable, *, active: bool = True) -> list[str]:
@@ -128,11 +137,13 @@ async def _recheck(store, me, pubsub):
         raise error
 
 
-async def _deliver(store, me, write):
+async def _deliver(store, me, write, pushed):
     import mcp.types as types
     from mcp.shared.message import SessionMessage
 
-    items = claim(store, me)
+    pushed.held.intersection_update([item_id for item_id in pushed.held if _held(store, item_id)])
+    room = UNCONFIRMED_MAX - len(pushed.held)
+    items = [item for item in claim(store, me, min(room, CLAIM_BATCH)) if item.id not in pushed.shown]
     for index, item in enumerate(items):
         note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
         try:
@@ -141,13 +152,22 @@ async def _deliver(store, me, write):
             for unsent in items[index:]:
                 store.requeue(unsent.id, me, UNSHOWN)
             raise
+        pushed.shown.add(item.id)
+        pushed.held.add(item.id)
+
+
+def _held(store, item_id):
+    try:
+        return store.get(item_id).state in HELD
+    except InboxError:
+        return False
 
 
 async def _push(store, me, write, ready, feed=None):
     import anyio
     from redis.exceptions import RedisError
 
-    pubsub, delay = None, 1.0
+    pubsub, delay, pushed = None, 1.0, Pushed()
     try:
         await ready.wait()
         await anyio.sleep(SETTLE_S)
@@ -156,7 +176,7 @@ async def _push(store, me, write, ready, feed=None):
                 if pubsub is None and feed is None:
                     pubsub = store.redis.pubsub()
                     pubsub.subscribe(NOTIFY)
-                await _deliver(store, me, write)
+                await _deliver(store, me, write, pushed)
                 if feed is None:
                     await _recheck(store, me, pubsub)
                 else:

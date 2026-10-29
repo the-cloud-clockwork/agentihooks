@@ -278,23 +278,27 @@ def _held(raw: str) -> tuple[str, str] | None:
     return execution_key(record.endpoint_ref) or record.execution_id, record.account or CODEX_DEFAULT
 
 
+def _unavailable() -> tuple[type[BaseException], ...]:
+    from scripts.events import state
+
+    # Store families may read Redis whatever the configured backend, known or not.
+    try:
+        configured = state.unavailable()
+    except ValueError:
+        configured = ()
+    return (*state.unavailable({}), *configured)
+
+
 def managed_held() -> set[tuple[str, str]]:
     """Transport records are written before the server starts; an unreadable record or store holds what it last held."""
-    from hooks._redis import get_redis
-
-    redis = get_redis()
-    if redis is None:
-        return set()
-    from redis.exceptions import RedisError
-
     from scripts.codex_session import binding
-    from scripts.swarm.store import RedisStore
 
-    store = RedisStore(redis)
     try:
-        raws = [raw for slug in store.slugs() for raw in redis.hvals(store.key(slug, binding.RECORDS))]
-    except RedisError:
+        raws = binding.transport_records()
+    except _unavailable():
         return set(_LAST_HELD)
+    if raws is None:
+        return set()
     _LAST_HELD.clear()
     _LAST_HELD.update(held for raw in raws if (held := _held(raw)))
     return set(_LAST_HELD)
@@ -338,41 +342,24 @@ def fleet_held(environ: Mapping[str, str] | None = None) -> dict[str, int]:
 
     if RuntimeRouter.from_environ((), os.environ if environ is None else environ).spawn_backend() == LOCAL:
         return {}
-    from hooks._redis import get_redis
-
-    redis = get_redis()
-    if redis is None:
-        return {}
-    from redis.exceptions import RedisError
-
-    from scripts.swarm import lease
-    from scripts.swarm.store import RedisStore
     from scripts.swarm_v2 import accounts
 
-    store = RedisStore(redis)
     try:
-        return accounts.fleet_held(store, lease.now_ms(store))
-    except RedisError:
+        return accounts.fleet_held_now()
+    except _unavailable():
         return {}
 
 
 def hive_held(harness: str) -> dict[str, int]:
     """Other live hives' sessions and unreported launches per account, as the launch reservation counts them."""
-    from hooks._redis import get_redis
-
-    redis = get_redis()
-    if redis is None:
-        return {}
     import time
-
-    from redis.exceptions import RedisError
 
     from scripts.routing import aggregate
     from scripts.swarm.commands import hive_id
 
     try:
-        return aggregate.elsewhere(redis, harness, time.time(), hive_id())
-    except RedisError:
+        return aggregate.held_elsewhere(harness, time.time(), hive_id())
+    except _unavailable():
         return {}
 
 

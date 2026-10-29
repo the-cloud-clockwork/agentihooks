@@ -20,14 +20,18 @@ def checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def validate_artifact(name: str, artifact: dict) -> None:
+def validate_artifact(name: str, artifact: dict, tools: dict) -> None:
     version = artifact.get("version", "")
+    companion = artifact.get("companion")
+    if companion is not None and (companion not in TOOLS or "version_output" in artifact):
+        raise ValueError(f"invalid artifact lock: {name}")
+    source = tools[companion] if companion else artifact
     if (
         not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version)
         or not re.fullmatch(r"[a-f0-9]{64}", artifact.get("sha256") or "")
         or not artifact.get("url", "").startswith("https://")
         or version not in re.findall(r"[0-9]+\.[0-9]+\.[0-9]+", artifact["url"])
-        or re.findall(r"[0-9]+\.[0-9]+\.[0-9]+", artifact.get("version_output", "")) != [version]
+        or re.findall(r"[0-9]+\.[0-9]+\.[0-9]+", str(source.get("version_output"))) != [version]
     ):
         raise ValueError(f"invalid artifact lock: {name}")
 
@@ -45,8 +49,8 @@ def load_lock(path: Path, architecture: str) -> dict:
         raise ValueError("base image requires a sha256 digest")
     if checksum(path.with_name("requirements.lock")) != lock["requirements_sha256"]:
         raise ValueError("Python requirements checksum mismatch")
-    for name in TOOLS:
-        validate_artifact(name, lock["tools"].get(name, {}))
+    for name in (*TOOLS, *sorted(set(lock["tools"]) - set(TOOLS))):
+        validate_artifact(name, lock["tools"].get(name, {}), lock["tools"])
     return lock
 
 
@@ -101,10 +105,16 @@ def install_tools(lock: dict, destination: Path, cache: Path | None = None) -> N
 def tool_versions(lock: dict, destination: Path) -> dict:
     versions = {}
     for name, artifact in lock["tools"].items():
-        result = subprocess.run([str(destination / name), "--version"], check=True, capture_output=True, text=True)
-        if result.stdout.strip() != artifact["version_output"]:
-            raise ValueError(f"binary version mismatch: {name}")
-        versions[name] = result.stdout.strip()
+        if "companion" in artifact:
+            result = subprocess.run([str(destination / name), "--help"], check=True, capture_output=True, text=True)
+            if not result.stdout.startswith(f"Usage: {name} "):
+                raise ValueError(f"binary usage mismatch: {name}")
+            versions[name] = f"{name} {artifact['version']} sha256:{checksum(destination / name)}"
+        else:
+            result = subprocess.run([str(destination / name), "--version"], check=True, capture_output=True, text=True)
+            if result.stdout.strip() != artifact["version_output"]:
+                raise ValueError(f"binary version mismatch: {name}")
+            versions[name] = result.stdout.strip()
     return versions
 
 

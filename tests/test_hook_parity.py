@@ -17,6 +17,8 @@ HARNESSES = ("claude", "codex", "copilot")
 
 UNSUPPORTED = {
     ("codex", "Notification"): "Codex hooks.json has no Notification event",
+    ("codex", "PostToolUseFailure"): "Codex hooks.json has no failed tool call event",
+    ("copilot", "PostToolUseFailure"): "Copilot folds postToolUseFailure into PostToolUse",
 }
 
 UNHELD = {

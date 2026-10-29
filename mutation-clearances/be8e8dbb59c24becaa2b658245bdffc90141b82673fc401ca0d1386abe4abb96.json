@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1launch_room__mutmut_12:dfc915fdb7b533ae45cd4ee1c3fa3b8dc44dfb4dd1956cf8851eb25bf05191a0": {
+    "reader": "standards_reader",
+    "reason": "HerdrRuntime._quota_open uses the lane only in lane == MASTER, and neither the empty string nor \"XXXX\" is \"master\", so both select the same quota accounts and launch_room returns the same seat sum."
+  }
+}

@@ -40,14 +40,29 @@ JUMP = """() => {
   pick.value = "sec-followups";
   pick.dispatchEvent(new Event("change", { bubbles: true }));
 }"""
+FLUSH = """() => {
+  const token = {};
+  window.__probe = token;
+  window.__flushed = false;
+  const probe = new IntersectionObserver(() => {
+    probe.disconnect();
+    if (window.__probe === token) window.__flushed = true;
+  });
+  probe.observe(document.documentElement);
+}"""
+FLUSHED = "() => window.__flushed"
 CAPTURE = """() => {
   const body = document.body.cloneNode(true);
+  const removed = window.__removed || [];
+  const kept = (el) => !removed.some((selector) => el.closest(selector));
   for (const s of body.querySelectorAll("script")) s.remove();
+  for (const selector of removed) for (const el of body.querySelectorAll(selector)) el.remove();
+  for (const el of body.querySelectorAll('[class=""]')) el.removeAttribute("class");
   const storage = {};
   for (let i = 0; i < localStorage.length; i++) storage[localStorage.key(i)] = localStorage.getItem(localStorage.key(i));
-  const fields = [...document.querySelectorAll("input, textarea, select")].map((el) =>
+  const fields = [...document.querySelectorAll("input, textarea, select")].filter(kept).map((el) =>
     [el.id || el.dataset.focus || el.getAttribute("aria-label") || el.tagName, el.value, !!el.checked, !!el.disabled]);
-  const boxes = [...document.querySelectorAll("[id]")].filter((el) => el.tagName !== "SCRIPT").map((el) => {
+  const boxes = [...document.querySelectorAll("[id]")].filter((el) => el.tagName !== "SCRIPT" && kept(el)).map((el) => {
     const r = el.getBoundingClientRect();
     return [el.id, Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)];
   });
@@ -60,15 +75,17 @@ CAPTURE = """() => {
 
 
 class FakeApi:
-    def __init__(self, limits):
+    def __init__(self, limits, phase_status):
         self.requests = []
         self.dialogs = []
         self.rev = INPUTS["doc"]["_meta"]["rev"]
         self.limits = limits
+        self.phase_status = phase_status({"tasks": [], **INPUTS["doc"]})
 
     def state(self):
         doc = json.loads(json.dumps(INPUTS["doc"]))
         doc["_meta"].update(rev=self.rev, limits=self.limits)
+        doc["phase_status"] = self.phase_status
         return doc
 
     def note(self, request):
@@ -129,9 +146,12 @@ class FakeApi:
 
 def quiet(page):
     last, same = None, 0
-    for _ in range(200):
-        time.sleep(0.05)
+    deadline = time.monotonic() + 10
+    page.evaluate(FLUSH)
+    while time.monotonic() < deadline:
+        page.wait_for_function(FLUSHED, polling=10, timeout=max(1, (deadline - time.monotonic()) * 1000))
         now = page.evaluate(f"() => [window.__inflight, JSON.stringify(({CAPTURE})())]")
+        page.evaluate(FLUSH)
         same = same + 1 if now[0] == 0 and now == last else 0
         if same == 3:
             return now
@@ -153,6 +173,67 @@ def settle(page, ms=0):
             return
         before = now
     raise TimeoutError("the page kept changing on each clock tick")
+
+
+def load_contract(path: Path) -> dict[str, int]:
+    contract = json.loads(path.read_text())
+    removed = contract.get("removed") if isinstance(contract, dict) else None
+    reviewers = contract.get("reviewed_by") if isinstance(contract, dict) else None
+    entries_ok = (
+        isinstance(removed, list)
+        and removed
+        and all(
+            isinstance(entry, dict)
+            and set(entry) == {"selector", "order", "matches"}
+            and all(isinstance(entry[key], str) and entry[key].strip() for key in ("selector", "order"))
+            and type(entry["matches"]) is int
+            and entry["matches"] > 0
+            for entry in removed
+        )
+    )
+    reviewers_ok = (
+        isinstance(reviewers, list) and reviewers and all(isinstance(r, str) and r.strip() for r in reviewers)
+    )
+    if (
+        not isinstance(contract, dict)
+        or set(contract) != {"removed", "reviewed_by"}
+        or not entries_ok
+        or not reviewers_ok
+    ):
+        raise SystemExit(
+            f"{path}: an expected page change contract holds reviewed_by, a list of reviewers, and removed, "
+            "a list of entries with a selector, the operator order that removed it and how many elements it matches"
+        )
+    selectors = {entry["selector"]: entry["matches"] for entry in removed}
+    if len(selectors) != len(removed):
+        raise SystemExit(f"{path}: each removed selector is named once")
+    return selectors
+
+
+def removal(selectors) -> str:
+    hidden = json.dumps(",".join(selectors) + "{display:none !important}")
+    return f"""(() => {{
+  window.__removed = {json.dumps(list(selectors))};
+  document.addEventListener("DOMContentLoaded", () => {{
+    const style = document.createElement("style");
+    style.textContent = {hidden};
+    document.head.append(style);
+  }});
+}})();"""
+
+
+def seen(page, selectors) -> dict[str, int]:
+    selectors = list(selectors)
+    counts = page.evaluate("(all) => all.map((s) => document.querySelectorAll(s).length)", selectors)
+    return dict(zip(selectors, counts, strict=True))
+
+
+def mismatched(contract: dict[str, int], shown: dict[str, int]) -> list[str]:
+    return [
+        f"{selector} names {matches} elements but the most the base page shows at once is {shown.get(selector, 0)}"
+        for selector, matches in contract.items()
+        if shown.get(selector, 0) != matches
+    ]
 
 
 def steps():
@@ -268,10 +349,12 @@ def serve(root: Path, folder: Path, stack: ExitStack):
     return f"http://{host}/{SLUG}"
 
 
-def record(root: Path, folder: Path) -> list:
+def record(root: Path, folder: Path, removed: dict[str, int] | None = None) -> list:
     from playwright.sync_api import sync_playwright
 
+    removed = removed or {}
     results = []
+    shown = {}
     with ExitStack() as stack:
         url = serve(root, folder, stack)
         pw = stack.enter_context(sync_playwright())
@@ -280,8 +363,10 @@ def record(root: Path, folder: Path) -> list:
         context = browser.new_context(viewport=VIEWPORT, locale="en-US", timezone_id="UTC")
         import ledger_server
 
-        api = FakeApi(ledger_server.PAGE_LIMITS)
+        api = FakeApi(ledger_server.PAGE_LIMITS, ledger_server.ports.swarm().phase_state.status)
         context.add_init_script(DETERMINISTIC)
+        if removed:
+            context.add_init_script(removal(removed))
         context.route("**/media/**", api.media)
         context.route("**/artifacts/**", api.artifact)
         context.route("**/api/**", api.handle)
@@ -295,6 +380,8 @@ def record(root: Path, folder: Path) -> list:
         for name, act in steps():
             act(page)
             settle(page)
+            for selector, count in seen(page, removed).items():
+                shown[selector] = max(count, shown.get(selector, 0))
             requests, dialogs = api.take()
             results.append(
                 {
@@ -306,6 +393,9 @@ def record(root: Path, folder: Path) -> list:
                 }
             )
             errors.clear()
+    problems = mismatched(removed, shown)
+    if problems:
+        raise SystemExit("the expected page change does not match the base page: " + "; ".join(problems))
     return results
 
 
@@ -314,8 +404,11 @@ def main() -> None:
     parser.add_argument("root", type=Path)
     parser.add_argument("folder", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--remove", type=Path)
     args = parser.parse_args()
-    args.output.write_text(json.dumps(record(args.root.resolve(), args.folder), indent=1, ensure_ascii=False) + "\n")
+    removed = load_contract(args.remove) if args.remove else {}
+    results = record(args.root.resolve(), args.folder, removed)
+    args.output.write_text(json.dumps(results, indent=1, ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":

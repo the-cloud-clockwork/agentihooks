@@ -5,7 +5,7 @@ from dataclasses import replace
 
 from scripts.handoff import transfers
 from scripts.hive import placement, registry
-from scripts.inbox.store import CLOSED, InboxStore
+from scripts.inbox.store import InboxStore
 from scripts.swarm import affinity
 from scripts.swarm.store import MASTER, SwarmError
 
@@ -69,7 +69,8 @@ def quiet_for(store, config, master, now_ms) -> int:
 def target(store, config, master, now_ms, to=""):
     from scripts.hive.launch import _by_origin, loaded_hives
 
-    hives = _by_origin([hive for hive in loaded_hives(store) if to in ("", hive["id"])], config.repo)
+    hives = placement.for_swarm(loaded_hives(store), config.slug)
+    hives = _by_origin([hive for hive in hives if to in ("", hive["id"])], config.repo)
     return placement.place(MASTER, master.harness, master.account, master.route_kind, config.repo, hives, now_ms)
 
 
@@ -131,9 +132,9 @@ def pinned(store, slug, task, transfer):
 
 def placed(store, slug):
     found, inbox = pending(store, slug), InboxStore(store.redis)
-    item = inbox.get(found["item"]) if found and found.get("item") else None
-    if item and item.state not in CLOSED:
-        inbox.close(item.id, item.address, "done", "the master moved to its hive")
+    item = inbox.find(found["item"], "master-move") if found and found.get("item") else None
+    if item:
+        inbox.settle(item.id, item.address, "done", "the master moved to its hive")
     store.redis.delete(_key(store, slug))
 
 

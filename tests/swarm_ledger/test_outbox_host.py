@@ -161,7 +161,7 @@ def test_ledger_server_alone_drives_the_outbox_until_shutdown(tmp_path, monkeypa
     server = Mock()
     monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
 
-    def serving():
+    def serving(poll_interval):
         repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]})
         assert published.wait(3), "only the running server should drive publication"
         close.assert_not_called()
@@ -234,7 +234,8 @@ def test_server_gives_the_relay_and_the_projector_their_stores_and_stops_them_be
         finally:
             lifecycle.append("projector stopped")
 
-    def serving():
+    def serving(poll_interval):
+        assert poll_interval == ledger_server.POLL_S
         lifecycle.append("serving")
         raise ValueError("serving failed")
 
@@ -253,6 +254,7 @@ def test_server_gives_the_relay_and_the_projector_their_stores_and_stops_them_be
     server = Mock()
     server.serve_forever.side_effect = serving
     server.server_close.side_effect = lambda: lifecycle.append("server closed")
+    server.drained.side_effect = lambda timeout: lifecycle.append(("drained", timeout)) or True
     monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
     with pytest.raises(ValueError, match="serving failed"):
         ledger_server.serve()
@@ -260,10 +262,38 @@ def test_server_gives_the_relay_and_the_projector_their_stores_and_stops_them_be
         "relay started",
         "projector started",
         "serving",
+        ("drained", ledger_server.DRAIN_S),
         "projector stopped",
         "relay stopped",
         "server closed",
     ]
+
+
+def test_a_relay_that_fails_to_start_releases_the_lease_without_serving(monkeypatch, tmp_path, capsys):
+    from scripts.swarm_ledger import ledger_server, outbox_host
+
+    def broken(repository):
+        raise RuntimeError("relay refused")
+
+    monkeypatch.setattr(outbox_host, "running", broken)
+    monkeypatch.setattr(ledger_server, "PIDFILE", tmp_path / "server.pid")
+    monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(ledger_server.storage, "shared", lambda: None)
+    monkeypatch.setattr(ledger_server.ports, "swarm", Mock(return_value=Mock()))
+    monkeypatch.setattr(ledger_server.legacy, "adopt", Mock())
+    monkeypatch.setattr(ledger_server.threading, "Thread", Mock())
+    for name in ("adopt_unrelayed", "metrics_journal"):
+        monkeypatch.setattr(ledger_server, name, Mock())
+    monkeypatch.setattr(ledger_server.server_code, "record", Mock())
+    monkeypatch.setattr(ledger_server.server_lifetime, "watch", Mock())
+    server = Mock()
+    monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
+    with pytest.raises(RuntimeError, match="relay refused"):
+        ledger_server.serve()
+    server.serve_forever.assert_not_called()
+    server.server_close.assert_called_once_with()
+    ledger_server.ports.swarm.return_value.ledger_writer.WriterLease.return_value.release.assert_called_once_with()
+    assert "drain:" not in capsys.readouterr().err
 
 
 @pytest.mark.wall_clock

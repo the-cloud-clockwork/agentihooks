@@ -63,6 +63,7 @@ downgrade cannot leave a process serving a port nothing points at. See
 | Flag | Description |
 |------|-------------|
 | `--bundle <path>` | Path to bundle directory. First-time: links the bundle and runs global install. |
+| `--user-bundle <path>` | Path to the personal user bundle. Linked beside the root bundle, which stays linked; kept by `--force`. `AGENTIHOOKS_USER_BUNDLE_PATH` names one when none is linked. |
 | `--target claude\|codex` | Install only the selected supported harness. |
 | `--verbose`, `-v` | Show all installer output, including linked skills and configuration details. |
 | `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,anton` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
@@ -349,6 +350,23 @@ The profile chain is read for `AGENTIHOOKS_TARGET` (default `claude`).
 
 ---
 
+## `agentihooks recall`
+
+Read and build the recall archive of ledgers and swarms. The read commands print the same JSON as the [recall MCP tools](../mcp-tools/index.md#recall) and exit 1 when the answer is `"success": false`.
+
+```bash
+agentihooks recall search "merge queue" --scope all --kind task --since 2d   # ranked hits
+agentihooks recall get <ledger>/tasks/<id>                                    # one item, parents and comments
+agentihooks recall timeline --kind task --kind comment --since 1d             # items oldest first
+agentihooks recall sources                                                    # indexed ledgers and swarms
+agentihooks recall reindex --all                                              # backfill from the stored ledgers
+agentihooks recall eval golden.json                                           # top five hit rate
+```
+
+`--scope` defaults to your own swarm (every source outside a swarm); a ledger or swarm slug narrows it and `all` crosses swarms. `--since` and `--until` take an ISO time, epoch milliseconds or a span back from now such as `1d`. `search` and `timeline` also take `--author`, `--seat` and `--limit`. `--kind` repeats.
+
+---
+
 ## `agentihooks claude` / `agenti`
 
 Launch Claude Code on one of the `AH_CC_TOKEN_<slug>` accounts, with
@@ -415,7 +433,7 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 | `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |
 | `--profile <name>` | Render this role profile once, record its home in the launch report and mount that home in the launched session; see [Profile launch home](profile-launch-home.md) |
 | `--overlay <name>` | Overlay the profile wears; repeat for up to three |
-| `--bundle-revision <commit>` | Render the profile only from this bundle commit |
+| `--bundle-revision <commit>` | Render the profile only from this bundle commit. With a user bundle linked the value is `<root commit>:<user commit>`, which the swarm records at launch; a root-only value is refused then rather than rendering the mutable user tree |
 
 Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
 `failed`, `pending`), `account`, `placement`, and `handoff=done|failed` with
@@ -465,7 +483,7 @@ agentihooks select-profile engineer --home="$HOME/.agentihooks/profiles/.homes/e
 | `--agent claude\|codex\|copilot` | Harness (default `claude`); per-run profiles support `claude` and `codex` |
 | `--model`, `--effort minimal\|low\|medium\|high\|xhigh\|max` | Model and effort; otherwise the profile's `profile.yml` defaults, then the harness defaults |
 | `--overlay <name>` | Wear this overlay; repeat for up to three |
-| `--bundle-revision <commit>` | Render only from this bundle commit |
+| `--bundle-revision <commit>` | Render only from this bundle commit; `<root commit>:<user commit>` when a user bundle is linked |
 | `--home <dir>` | Mount this rendered home instead of rendering; refused unless its binding matches the profile and harness and its persona and sources are unchanged |
 | `--dry-run` | Print the selected environment and `argv=` line without starting the harness |
 
@@ -664,6 +682,7 @@ A path is actionable only when it is **unused** and **removing it loses nothing*
 - `snapshot` builds a commit from the worktree through a temporary index (ignored files and files over 50 MB are left out and listed), with `[skip ci]` in the message, and pushes it to `wip/<repo>/<worktree>-<timestamp>`. A failed push keeps the worktree, except in a scratch repository, where the snapshot stays on a local `wip/` branch and the worktree is removed.
 - Removals are journaled in `~/.agentihooks/gc-journal.json`; the next sweep finishes any removal a crash interrupted.
 - Herdr panes: `init-agent` (every swarm, resume and proof launch) and `run-in-terminal` with a command record each pane they open in `~/.agentihooks/herdr/panes/` (pane id, terminal id, tab, workspace, owner swarm and session, launch time, route status). `gc` lists, and `gc --enforce` and every `swarm tick` close, a recorded pane whose agent is gone: it sits at a bare shell (the agent or command exited, or the launch failed), its swarm agent was retired, or its swarm stopped or was removed. Never inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) of launch, while its input line holds text, or while its screen changed or its agent was prompted inside `AGENTIHOOKS_INBOX_QUIET_S`; a pane whose terminal id changed, or a swarm store that cannot be read, keeps the pane. A pane agentihooks never recorded, such as a plain `run-in-terminal` shell, is never touched. A tab or workspace the sweep empties is closed. Each close prints with its reason, `herdr: closed pane …` in the tick journal (`journalctl --user -t agentihooks-swarm`).
+- Codex execution homes (`$XDG_RUNTIME_DIR/cx` and `~/.agentihooks/cx`): a home no live process owns, by working folder, argument, open file or an answering server socket, and unchanged for ten minutes is listed under `codex_homes` in the JSON report and removed by `--enforce` on first sight, after its rollouts are appended to the canonical Codex home. Removals are logged to `~/.agentihooks/gc-codex-homes.jsonl`. See [Reclaim orphan execution homes](codex-managed-terminal.md#reclaim-orphan-execution-homes).
 - Launch run folder (`$XDG_RUNTIME_DIR/agentihooks-claude-terminal`): launch scripts, route reports, prompts, start markers and profile reports older than a day are removed, and closing markers whose launcher has exited.
 
 Triggers: an `agentihooks-gc` cron on the agentihooks scheduler (`0 * * * *`) starts `gc --enforce` at the top of every hour; install and upgrade remove the older `agentihooks-gc.timer` systemd unit. Every PreToolUse call that names a path inside a managed worktree or scratch task dir records the session as a lease holder; while gc is removing that path the call is blocked with a retry message. When free space (the smaller of `$HOME` and, on WSL, `/mnt/c`) drops below `AGENTIHOOKS_DISK_WARN_GB`, tool calls get a warning (at most every 10 min) and a sweep starts at once. SessionStart and SessionEnd start a sweep at most every `AGENTIHOOKS_GC_INTERVAL_MIN`, as a detached hook task.
@@ -1382,3 +1401,28 @@ echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command"
 | `0` | Success |
 | `1` | Error (installation failed, missing config, etc.) |
 | `2` | Block (used by hook handlers to cancel tool execution) |
+
+## `agentihooks swarm wait` prerequisite merges
+
+A merge wait beyond the first five queue entries asks the claimant to stack the
+next change on the prerequisite branch and publish it, or block with the complete
+prerequisite URL, published stack and next step in the notes. A prerequisite can
+occupy the task's current pull request field; that field alone does not establish
+that the task is finished by its merge.
+
+Confirm a long wait on the task's final deliverable explicitly:
+
+```bash
+agentihooks swarm "<slug>" wait --on merge "<pull-request-url>" --final
+```
+
+`--final` applies only to a merge wait on the task's current pull request. Use it
+only when that pull request is the final deliverable. Short queues and unavailable
+queue metadata preserve the ordinary merge wait.
+
+For a prerequisite, publish the continuation and block with its complete URL in
+the notes. The block preserves the branch and notes and releases the seat. The
+tick reopens the matching blocked task after the prerequisite merges. An open,
+closed unmerged or unreadable prerequisite leaves it blocked. A subsequent
+checked wait invalidates the earlier continuation offer; unrelated block notes
+do not consume it.

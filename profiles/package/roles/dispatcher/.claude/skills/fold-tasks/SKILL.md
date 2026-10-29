@@ -21,7 +21,7 @@ description: Folds open swarm ledger tasks that change the same code into one gr
 
 3. **Check.** Run `fold check FOLDER/plan.json`. Exit 2 prints each problem with its group number; fix the plan and run it again. Done when it prints `"ok": true`.
 
-4. **Ask.** One `AskUserQuestion` call: how many groups fold, with the options fold every group, fold only the true duplicates, fold none. Name each group in the question by its lead's title. When the question tool is refused, say one line, type operator on to decide here, or add a priority with `agentihooks ledger --slug SLUG --as NAME priority add ITEM TEXT` naming the lead task, and end the run. Done when the operator decided or the one line is sent.
+4. **Ask.** One `AskUserQuestion` call: how many groups fold, with the options fold every group, fold only the true duplicates, fold none. Name each group in the question by its lead's title. When the question tool is refused, write nothing to the operator and end the run. Done when the operator decided or the run ended unasked.
 
 5. **Apply.** Cut `plan.json` to the groups the operator chose and run `fold check` once more, then `fold apply FOLDER/plan.json`. It re-checks against the live ledger, then per group groups the tasks, rewrites the lead's description and territory, and comments each member's status, printing one JSON line per group. A refusal exits with the ledger's reason; groups already printed stand. Done when every chosen group printed its line or its refusal is reported.
 

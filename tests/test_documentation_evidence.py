@@ -128,3 +128,59 @@ def test_an_unknown_revision_is_not_an_ancestor_and_prints_nothing(tmp_path, cap
     repository(tmp_path)
     assert documentation_evidence._is_ancestor(tmp_path, "0" * 40, "HEAD") is False
     assert capfd.readouterr().err == ""
+
+
+PULL_REQUEST = "https://example.test/pull/7"
+POLICY_SECTION = (
+    "diff --git a/policy.py b/policy.py\n--- a/policy.py\n+++ b/policy.py\n@@ -1 +1,2 @@\n"
+    "-enabled = False\n+class WidgetPolicy:\n+    retries = 3\n"
+)
+CREDENTIAL_SECTION = "diff --git a/.env b/.env\n--- a/.env\n+++ b/.env\n@@ -0,0 +1 @@\n+CREDENTIAL_SENTINEL\n"
+GUIDE_SECTION = (
+    "diff --git a/user guide.md b/user guide.md\n--- a/user guide.md\n+++ b/user guide.md\n@@ -0,0 +1 @@\n+Retries\n"
+)
+PULL_REQUEST_DIFF = POLICY_SECTION + CREDENTIAL_SECTION + GUIDE_SECTION
+
+
+def unrelated(root):
+    (root / "login.py").write_text("class LoginRecovery:\n    attempts = 2\n")
+    git(root, "add", "login.py")
+    git(root, "commit", "-qm", "Recover the master login")
+
+
+def test_a_source_task_takes_its_changes_from_its_own_pull_request(tmp_path, monkeypatch):
+    base = repository(tmp_path)
+    unrelated(tmp_path)
+    asked = []
+    monkeypatch.setattr(documentation_evidence, "pull_request_diff", lambda url: asked.append(url) or PULL_REQUEST_DIFF)
+    result = documentation_evidence.collect(tmp_path, base, {"id": "t1", "pr_url": PULL_REQUEST})
+    assert asked == [PULL_REQUEST]
+    assert result["files"] == ["policy.py", "user guide.md"]
+    assert result["changes"] == POLICY_SECTION + GUIDE_SECTION
+    assert "LoginRecovery" not in result["changes"]
+    assert "CREDENTIAL_SENTINEL" not in result["changes"]
+    assert result["docs"] == [{"path": "handbook/policy.md", "line": 2, "text": "WidgetPolicy controls retries."}]
+
+
+def test_a_source_task_without_a_pull_request_gets_no_diff(tmp_path, monkeypatch):
+    base = repository(tmp_path)
+    unrelated(tmp_path)
+
+    def forbidden(url):
+        raise AssertionError("no pull request to read")
+
+    monkeypatch.setattr(documentation_evidence, "pull_request_diff", forbidden)
+    result = documentation_evidence.collect(tmp_path, base, {"id": "t1"})
+    assert (result["files"], result["changes"]) == ([], "")
+
+
+def test_the_pull_request_diff_is_read_from_the_named_pull_request(monkeypatch):
+    calls = []
+    monkeypatch.setattr(subprocess, "check_output", lambda args, **kwargs: calls.append((args, kwargs)) or "")
+    assert documentation_evidence.pull_request_diff(PULL_REQUEST) == ""
+    assert calls == [
+        (
+            ["gh", "pr", "diff", PULL_REQUEST, "--color", "never"],
+            {"text": True, "stderr": subprocess.DEVNULL, "timeout": 60},
+        )
+    ]

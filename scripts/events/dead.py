@@ -5,7 +5,7 @@ from dataclasses import replace
 
 from .envelope import Envelope
 
-DEAD_STREAM = "AGENTIHOOKS_DEAD"
+DEAD_STREAM = "AGENTIHOOKS-DEAD"
 DEAD_SUBJECT = "dead.>"
 
 

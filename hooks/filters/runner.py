@@ -7,7 +7,8 @@ from dataclasses import dataclass, replace
 from pathlib import PurePath
 
 from hooks import classifier
-from hooks.classifier import definitions, runner
+from hooks.classifier import answer_cache, definitions, runner
+from hooks.classifier import settings as classifier_settings
 from hooks.filters import extract, rounds, schema
 from hooks.filters.finders import scripts
 
@@ -39,7 +40,8 @@ def _applies(spec: schema.FilterSpec, tool_input: dict) -> bool:
 def find(spec: schema.FilterSpec, pieces: list[extract.Piece], payload: dict | None = None) -> list[Finding]:
     payload = payload or {}
     if spec.mode == "classifier":
-        return [Finding(p.where, 0, len(p.text), p.text, "whole text", p.text) for p in pieces if p.text]
+        units = extract.units(payload.get("tool_name"), pieces)
+        return [Finding(p.where, 0, len(p.text), p.text, "whole text", p.text) for p in units if p.text]
     named = scripts.resolve(payload.get("cwd")) if any(f.script for f in spec.finders) else {}
     path = extract.target_path(payload.get("tool_input") or {})
     tool = payload.get("tool_name", "")
@@ -70,7 +72,11 @@ def _enclosing_lines(text: str, start: int, end: int) -> str:
 
 
 def _intent(spec: schema.FilterSpec, tool_input: dict) -> str:
-    value = tool_input.get(spec.intent_from) if spec.intent_from else None
+    if not spec.intent_from:
+        return spec.intent
+    value = tool_input
+    for key in spec.intent_from.split("."):
+        value = value.get(key) if isinstance(value, dict) else None
     return value if isinstance(value, str) and value else spec.intent
 
 
@@ -87,14 +93,27 @@ def confirm(entry: dict, spec: schema.FilterSpec, payload: dict, findings: list[
         return findings
     tool_input = payload.get("tool_input") or {}
     intent = _intent(spec, tool_input)
-    state = {
-        "filter": entry["file"],
-        "tool": payload.get("tool_name"),
-        "path": extract.target_path(tool_input),
-        "intent": intent,
-    }
+    models = classifier_settings.load().models
+    keys = [answer_cache.key(intent, spec.question, f.text, f.reason, f.context, models) for f in findings]
+    answers = answer_cache.lookup(keys)
+    asked = [(f, k) for f, k in zip(findings, keys) if k not in answers]
+    if asked:
+        state = {
+            "filter": entry["file"],
+            "tool": payload.get("tool_name"),
+            "path": extract.target_path(tool_input),
+            "intent": intent,
+        }
+        fresh = _ask(entry, spec, state, asked)
+        answer_cache.store(fresh)
+        answers.update(fresh)
+    return [f for f, k in zip(findings, keys) if answers.get(k)]
+
+
+def _ask(entry: dict, spec: schema.FilterSpec, state: dict, asked: list[tuple[Finding, str]]) -> dict[str, bool]:
+    findings = [f for f, _ in asked]
     try:
-        output = runner.run(PURPOSE, state, _params(spec, intent, findings), decider=classifier.decide)
+        output = runner.run(PURPOSE, state, _params(spec, state["intent"], findings), decider=classifier.decide)
     except classifier.ClassifierInputError:
         raise
     except classifier.ClassifierError as error:
@@ -104,8 +123,8 @@ def confirm(entry: dict, spec: schema.FilterSpec, payload: dict, findings: list[
             "filter passed: classifier unavailable",
             {"filter": entry["path"], "findings": len(findings), "error": str(error)},
         )
-        return []
-    return [f for i, f in enumerate(findings) if output.verdicts[f"finding_{i}"]]
+        return {}
+    return {k: bool(output.verdicts[f"finding_{i}"]) for i, (_, k) in enumerate(asked)}
 
 
 def _listing(findings: list[Finding]) -> str:
@@ -137,11 +156,15 @@ def strip(step: str, payload: dict, findings: list[Finding]) -> dict:
     tool_input = payload.get("tool_input") or {}
     texts = {piece.where: piece.text for piece in extract.pieces(payload.get("tool_name"), tool_input)}
     spans: dict[tuple, list[tuple[int, int]]] = {}
+    dropped = []
     for finding in findings:
-        spans.setdefault(finding.where, []).append((finding.start, finding.end))
+        if finding.where in texts:
+            spans.setdefault(finding.where, []).append((finding.start, finding.end))
+        else:
+            dropped.append(finding.where)
     replaced = {where: _cut(texts[where], cut) for where, cut in spans.items()}
     out = {
-        "tool_input": extract.rewrite(tool_input, replaced),
+        "tool_input": extract.rewrite(tool_input, replaced, dropped),
         "context": f"filter stripped:\n{_listing(findings)}",
     }
     if payload.get("permission_mode") != "bypassPermissions":
@@ -225,6 +248,8 @@ def run(entry: dict, step: str, payload: dict) -> dict:
     if not isinstance(tool_input, dict) or not _applies(spec, tool_input):
         return _passed()
     pieces = extract.pieces(payload.get("tool_name"), tool_input)
+    if spec.fields:
+        pieces = [piece for piece in pieces if piece.where[0] in spec.fields]
     findings = find(spec, pieces, payload)
     try:
         confirmed = confirm(entry, spec, payload, findings) if findings else []

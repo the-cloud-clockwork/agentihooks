@@ -141,6 +141,30 @@ def read_rows(connection, slug: str) -> dict:
     return rows
 
 
+def load(connection, slug: str) -> object:
+    """assemble(read_rows(connection, slug)) without first collecting every stored row and its raw value text."""
+    read = getattr(connection, "stream", connection.execute)
+    containers = {}
+    for table in TABLES:
+        for path, kind in read(f"SELECT path, kind FROM {table} WHERE slug=? AND kind<>'value'", (slug,)):
+            containers[path] = [] if kind == "array" else {}
+    placed = {}
+    for table in TABLES:
+        for path, parent, key, position, kind, value in read(
+            f"SELECT path, parent, key, position, kind, value FROM {table} WHERE slug=?", (slug,)
+        ):
+            child = json.loads(value) if kind == "value" else containers[path]
+            placed.setdefault(parent, []).append((position, key, child))
+    for parent, items in placed.items():
+        container = containers.get(parent)
+        items.sort(key=lambda item: item[0])
+        if type(container) is list:
+            container.extend(child for _, _, child in items)
+        elif container is not None:
+            container.update((json.loads(key), child) for _, key, child in items)
+    return containers["[]"]
+
+
 def changes(before: dict, after: dict) -> dict:
     missing = object()
     return {

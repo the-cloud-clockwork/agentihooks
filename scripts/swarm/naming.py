@@ -11,9 +11,12 @@ import re
 import secrets
 import subprocess
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
+from scripts.events import state
 from scripts.swarm.keyspace import ROOT
+from scripts.swarm.name_state import KEEP, NameState, NamingError, state_key
 
 PREFIX = f"{ROOT}:names"
 TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner", "dispatch": "dispatcher"}
@@ -53,10 +56,6 @@ SUGGESTION_SKIP = frozenset(
 )
 SUGGESTION_FALLBACK = ("new", "next", "work", "build")
 SWARM_INIT = "agentihooks swarm init <name> --plan <file> --repo <dir>"
-
-
-class NamingError(RuntimeError):
-    pass
 
 
 @dataclass(frozen=True)
@@ -120,7 +119,17 @@ def plain(name):
 
 
 def _clean(text):
-    return re.sub(r"[^a-z0-9._-]+", "-", text.lower()).strip("-.")
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def pane_label(title: str) -> str:
+    return _clean(title) or "pane"
+
+
+def seat_label(lane: str, index: int) -> str:
+    if lane not in TYPES or type(index) is not int or index < 1:
+        raise NamingError("a seat needs a known lane and a positive integer")
+    return lane if lane in {"master", "dispatch"} and index == 1 else f"{lane}-{index}"
 
 
 def repo_name(path):
@@ -177,12 +186,12 @@ def scratch(environ, cwd):
 
 
 def scratch_folder(swarm, task):
-    return f"{swarm}-{_clean(task)}"
+    return f"{_clean(swarm)}-{_clean(task)}"
 
 
 def plan_slug(plan, date):
-    stem = re.sub(r"[^a-z0-9]+", "-", Path(plan).stem.lower()).strip("-") or "plan"
-    return f"{stem}-{date}"
+    stem = _clean(Path(plan).stem) or "plan"
+    return f"{stem}-{_clean(date)}"
 
 
 def small_slug(environ):
@@ -233,7 +242,11 @@ def _mint():
 
 
 def _record(slug, code, ledger, repo):
-    return json.dumps({"swarm": slug, "name": swarm_name(code), "ledger": ledger, "repo": repo})
+    return {"swarm": slug, "name": swarm_name(code), "ledger": ledger, "repo": repo}
+
+
+def _unless_held(value):
+    return lambda found: KEEP if found is not None else value
 
 
 def resolve_name(name):
@@ -267,6 +280,10 @@ class NameRegistry:
     def __init__(self, redis, mint=None):
         self.redis, self.mint = redis, mint or (lambda: _mint())
 
+    @cached_property
+    def names_state(self) -> NameState:
+        return NameState(self.redis)
+
     @staticmethod
     def key(*parts):
         return ":".join((PREFIX, *parts))
@@ -296,8 +313,14 @@ class NameRegistry:
         resolved = self.resolve_many(names)
         parsed = {name: parse(current) for name, current in resolved.items()}
         codes = sorted({found.code for found in parsed.values() if found})
-        rows = self.redis.hmget(self.key("codes"), codes) if codes else []
-        swarms = {code: json.loads(row or "{}").get("swarm", "") for code, row in zip(codes, rows)}
+        rows = self.names_state.get_many(
+            "codes",
+            codes,
+            lambda client, missing: [
+                json.loads(row) if row else None for row in client.hmget(self.key("codes"), missing)
+            ],
+        )
+        swarms = {code: (row or {}).get("swarm", "") for code, row in zip(codes, rows)}
         return {name: swarms[found.code] if found else legacy_slug(resolved[name]) for name, found in parsed.items()}
 
     def alias(self, old, new):
@@ -331,11 +354,23 @@ class NameRegistry:
         reader = reader if reader is not None else self.redis
         return sorted(reader.smembers(self.key("aliases-of", self.resolve(name, reader))))
 
+    def _legacy_code_of(self, slug):
+        return lambda client: client.hget(self.key("code-of"), slug)
+
+    def _legacy_codes(self, code):
+        return lambda client: json.loads(client.hget(self.key("codes"), code) or "null")
+
     def code_of(self, slug):
-        return self.redis.hget(self.key("code-of"), slug) or ""
+        return self.names_state.get("code-of", slug, self._legacy_code_of(slug)) or ""
 
     def swarm(self, code):
-        return json.loads(self.redis.hget(self.key("codes"), code) or "{}")
+        return self.names_state.get("codes", code, self._legacy_codes(code)) or {}
+
+    def _hold_code(self, code, record):
+        return self.names_state.amend("codes", code, _unless_held(record), self._legacy_codes(code))
+
+    def _hold_code_of(self, slug, code):
+        return self.names_state.amend("code-of", slug, _unless_held(code), self._legacy_code_of(slug))
 
     def mint_code(self, slug, ledger, repo):
         """The swarm's code, minted and registered the first time; a code another swarm holds is minted again."""
@@ -344,34 +379,34 @@ class NameRegistry:
             return held
         for _ in range(MINT_ATTEMPTS):
             code = self.mint()
-            if not self.redis.hsetnx(self.key("codes"), code, _record(slug, code, ledger, repo)):
+            record = _record(slug, code, ledger, repo)
+            if self._hold_code(code, record) is not record:
                 continue
-            if self.redis.hsetnx(self.key("code-of"), slug, code):
+            owner = self._hold_code_of(slug, code)
+            if owner == code:
                 return code
-            self.redis.hdel(self.key("codes"), code)
-            return self.code_of(slug)
+            self.names_state.restore({state_key("codes", code): None})
+            return owner
         raise NamingError(f"no free swarm code after {MINT_ATTEMPTS} tries")
 
     def adopt(self, slug, code, ledger, repo):
         """Register a code the swarm record already carries, as after a restore into an emptied Redis."""
-        self.redis.hsetnx(self.key("codes"), code, _record(slug, code, ledger, repo))
-        self.redis.hsetnx(self.key("code-of"), slug, code)
+        self._hold_code(code, _record(slug, code, ledger, repo))
+        self._hold_code_of(slug, code)
 
     def swarm_slug(self, ref):
         """The ledger slug a swarm name `swarm@<code>` stands for while that swarm holds the code; ref otherwise."""
-        from redis.exceptions import RedisError
-
         try:
             code = swarm_code(ref)
             slug = self.swarm(code).get("swarm")
             return slug if slug and self.code_of(slug) == code else ref
-        except RedisError as exc:
+        except state.unavailable() as exc:
             logging.getLogger(__name__).warning("swarm alias lookup failed for %s: %s", ref, exc)
             return ref
 
     def release(self, slug):
         """Forget which code a removed swarm held; the code itself stays taken, so its names stay unique."""
-        self.redis.hdel(self.key("code-of"), slug)
+        self.names_state.amend("code-of", slug, lambda _: None, self._legacy_code_of(slug))
 
     def swarm_keys(self, slug):
         """The swarm's counters, its name list and each name's record, for a snapshot."""
@@ -455,3 +490,20 @@ class NameRegistry:
             if row.get("type") == parsed.kind and not row.get("retired_at"):
                 return other
         return ""
+
+
+def registry():
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    return NameRegistry(redis) if redis is not None else None
+
+
+def registered_slug(name):
+    """The swarm of a name from the registry, None without one; raises when its alias cannot be read, where slug_of
+    would swallow the failure."""
+    names = registry()
+    if names is None:
+        return None
+    names.redis.get(names.key("alias", name))
+    return names.slug_of(name)

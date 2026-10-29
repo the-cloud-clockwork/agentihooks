@@ -9,9 +9,16 @@ from pathlib import Path
 
 from scripts import ci_prepush
 from scripts.gates import entry as gate_entry
-from scripts.swarm import continuation, naming, stack
+from scripts.swarm import continuation, naming, publish_queue, stack
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
+
+
+class PublicationRefusal(SwarmError):
+    def __init__(self, repository: Path, branch: str, reason: str) -> None:
+        super().__init__(reason)
+        self.repository = str(repository)
+        self.branch = branch
 
 
 def execute(argv: list[str], root: Path) -> str:
@@ -100,45 +107,73 @@ def local_repository(value: str, repo: str) -> Path:
     return found.pop()
 
 
-def repository_task(repo: Path, task: dict) -> dict:
+def mapped_branch(repo: Path, task: dict) -> str | None:
     branches = task.get("repository_branches", {})
     branch = branches.get(str(repo))
     if branch is None:
         branch = next(
             (value for key, value in branches.items() if repository_name(key) == repository_name(str(repo))), None
         )
+    return branch
+
+
+def refusal_branch(repo: Path, task: dict) -> str:
+    branch = mapped_branch(repo, task)
+    return task.get("branch", "") if branch is None else branch
+
+
+def recorded_branch(repo: Path, task: dict) -> str:
+    remote = task.get("branch_repo")
+    if remote and stack.repo_key(remote) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
+        return ""
+    if not remote and len(task.get("repositories", [])) > 1:
+        return ""
+    return task.get("branch") or ""
+
+
+def repository_task(repo: Path, task: dict) -> dict:
+    branch = mapped_branch(repo, task)
     if branch is None:
-        branch = task.get("branch", "")
-        remote = task.get("branch_repo")
-        if remote and stack.repo_key(remote) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
-            branch = ""
-        elif not remote and len(task.get("repositories", [])) > 1:
-            branch = ""
+        branch = recorded_branch(repo, task)
     return {**task, "branch": require_branch(branch) if branch else ""}
+
+
+def continuation_task(repo: Path, task: dict, scoped: dict, branch: str) -> dict:
+    mapped, recorded = scoped["branch"], recorded_branch(repo, task)
+    if branch == mapped or recorded in ("", mapped):
+        return scoped
+    heads = {name for name in (mapped, recorded) if git(repo, "ls-remote", "origin", f"refs/heads/{name}")}
+    if mapped in heads or recorded not in heads:
+        return scoped
+    return {**scoped, "branch": recorded}
 
 
 def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | None, Path, dict]:
     current = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    root = None
     if current.returncode == 0 and (Path(current.stdout.strip()) / ".git").is_file():
         root = Path(current.stdout.strip())
         primary = repository_root(root)
+    else:
+        repositories = task.get("repositories") or [repo]
+        if len(repositories) != 1:
+            raise SwarmError("publish from the task worktree to select one of its repositories")
+        primary = local_repository(repositories[0], repo)
+    try:
         declared = task.get("repositories")
-        if declared and repository_name(str(primary)) not in {repository_name(value) for value in declared}:
+        if root and declared and repository_name(str(primary)) not in {repository_name(value) for value in declared}:
             raise SwarmError(f"current worktree repository {primary} is not in the task repositories")
         scoped = repository_task(primary, task)
+        if root is None:
+            return existing(primary, scoped, agent), primary, scoped
         branch = require_branch(git(root, "branch", "--show-current"))
+        scoped = continuation_task(primary, task, scoped, branch)
         own = re.fullmatch(rf"{re.escape(naming.plain(agent.name))}(?:-\d+)?", branch)
         if not (own or branch == scoped.get("branch")):
             raise SwarmError(f"current worktree {root} does not belong to this task")
-        if scoped.get("pr_url"):
-            return root, primary, scoped
-        return root, primary, {**scoped, "branch": branch}
-    repositories = task.get("repositories") or [repo]
-    if len(repositories) != 1:
-        raise SwarmError("publish from the task worktree to select one of its repositories")
-    primary = local_repository(repositories[0], repo)
-    scoped = repository_task(primary, task)
-    return existing(primary, scoped, agent), primary, scoped
+        return root, primary, scoped
+    except SwarmError as exc:
+        raise PublicationRefusal(primary, refusal_branch(primary, task), str(exc)) from exc
 
 
 def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
@@ -157,27 +192,70 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     return record
 
 
+def merged_record(repo: Path, task: dict) -> bool:
+    if not task.get("branch") or not task.get("pr_url"):
+        return False
+    if stack.repo_key(task["pr_url"].split("/pull/")[0]) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
+        return False
+    pull = json.loads(execute(["gh", "pr", "view", task["pr_url"], "--json", "state,headRefName"], Path(repo)))
+    return pull["state"] == "MERGED" and pull["headRefName"] == task["branch"]
+
+
+def open_pull_head(root: Path, task: dict, branch: str, remote: str) -> str:
+    url = task.get("pr_url", "")
+    head = publish_queue.open_head(remote, url)
+    if head and head != branch:
+        git(root, "fetch", "origin", head)
+        if not descends(root, head):
+            raise SwarmError(
+                f"open pull request {url} delivers branch {head}, but worktree {root} on branch {branch} "
+                f"does not descend from it; continue from origin/{head} or close that pull request"
+            )
+    return head
+
+
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
-    fields = []
+    fields, cleared = [], {}
     repositories = dict.fromkeys(local_repository(value, repo) for value in task.get("repositories") or [repo])
     for repository in repositories:
-        scoped = repository_task(repository, task)
-        root = existing(repository, scoped, agent)
-        if root is None:
-            command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
-            if scoped.get("branch"):
-                command.extend(["--from", f"origin/{scoped['branch']}"])
-            output = execute(command, repository)
-            root = Path(output.splitlines()[-1])
-        checkout = checkout_fields(root)
-        delivery = target_branch(root, scoped, checkout["branch"], task)
-        if delivery != checkout["branch"]:
-            git(root, "branch", f"--set-upstream-to=origin/{delivery}")
-        fields.append({**checkout, "branch": delivery, "repository": str(repository)})
-    update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
+        scoped = task
+        try:
+            scoped = repository_task(repository, task)
+            retired = merged_record(repository, scoped)
+            if retired:
+                cleared = {"pr_url": ""}
+                hints = {
+                    key: {
+                        name: value
+                        for name, value in (task.get(key) or {}).items()
+                        if name != "continue_from" or value != f"origin/{scoped['branch']}"
+                    }
+                    for key in ("handoff_envelope", "reclaim")
+                }
+                scoped = {**scoped, **cleared, **hints, "branch": ""}
+            root = None if retired else existing(repository, scoped, agent)
+            if root is None:
+                command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
+                if scoped.get("branch"):
+                    command.extend(["--from", f"origin/{scoped['branch']}"])
+                output = execute(command, repository)
+                root = Path(output.splitlines()[-1])
+            checkout = checkout_fields(root)
+            head = open_pull_head(root, scoped, checkout["branch"], checkout["branch_repo"])
+            delivery = head or target_branch(root, scoped, checkout["branch"], scoped if retired else task)
+            if delivery != checkout["branch"]:
+                git(root, "branch", f"--set-upstream-to=origin/{delivery}")
+            checkout["branch"] = head or checkout["branch"]
+            fields.append({**checkout, "repository": str(repository)})
+        except SwarmError as exc:
+            raise PublicationRefusal(repository, refusal_branch(repository, scoped), str(exc)) from exc
+    registered = task
+    for entry in fields:
+        registered = drop_repository(registered, Path(entry["repository"]))
+    update = branch_record(fields[-1], Path(fields[-1]["repository"]), registered)
     update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
-    ledger.update_task(slug, agent.task, update, by=agent.name)
+    ledger.update_task(slug, agent.task, {**cleared, **update}, by=agent.name)
     result = fields[0] if len(fields) == 1 else {"worktrees": fields}
     return {**result, "repository_source": "task" if task.get("repositories") else "swarm default"}
 
@@ -252,11 +330,52 @@ def tracked(root: Path, record: dict) -> str:
 def target_branch(root: Path, task: dict, branch: str, record: dict) -> str:
     for candidate in (continuation.retained(task), tracked(root, record), task.get("branch")):
         if candidate:
-            ref = f"refs/remotes/origin/{candidate}"
-            done = subprocess.run(["git", "merge-base", "--is-ancestor", ref, "HEAD"], cwd=root, capture_output=True)
-            if done.returncode == 0:
+            if descends(root, candidate):
                 return candidate
     return branch
+
+
+def descends(root: Path, branch: str) -> bool:
+    ref = f"refs/remotes/origin/{branch}"
+    return not subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ref, "HEAD"], cwd=root, capture_output=True
+    ).returncode
+
+
+def delivery_branch(root: Path, task: dict, branch: str) -> str:
+    recorded = task.get("branch")
+    if recorded and branch != recorded:
+        remote = git(root, "remote", "get-url", "origin")
+        delivered = publish_queue.open_head(remote, task.get("pr_url", ""))
+        if delivered == recorded and descends(root, recorded):
+            return recorded
+        if not delivered and cut_from(root, recorded) and settled(root, task):
+            return branch
+        raise SwarmError(f"current worktree {root} branch {branch} differs from registered branch {recorded}")
+    return branch
+
+
+def cut_from(root: Path, recorded: str) -> bool:
+    head = remote_head(root, recorded)
+    if not head:
+        return False
+    return git(root, "merge-base", head, "HEAD") == head
+
+
+def drop_repository(task: dict, repository: Path) -> dict:
+    name = repository_name(str(repository))
+    branches = task.get("repository_branches", {})
+    return {
+        **task,
+        "repository_branches": {key: value for key, value in branches.items() if repository_name(key) != name},
+    }
+
+
+def settled(root: Path, task: dict) -> bool:
+    url = task.get("pr_url")
+    if not url:
+        return True
+    return json.loads(execute(["gh", "pr", "view", url, "--json", "state"], root))["state"] in ("CLOSED", "MERGED")
 
 
 def gate_python(repo: Path) -> str:
@@ -283,7 +402,7 @@ def remote_head(root: Path, branch: str) -> str:
     return listed.split()[0] if listed else ""
 
 
-def grade_and_push(root: Path, primary: Path, fields: dict, own: str, head: str) -> None:
+def grade_and_push(root: Path, primary: Path, fields: dict, head: str) -> None:
     python = gate_python(primary)
     source = root / "scripts" / "ci_prepush"
     if (source / "__main__.py").is_file() or source.with_suffix(".py").is_file():
@@ -295,21 +414,25 @@ def grade_and_push(root: Path, primary: Path, fields: dict, own: str, head: str)
     if not ci_prepush.passed(root) or git(root, "rev-parse", "HEAD") != head:
         raise SwarmError("the committed HEAD has no passing prepush evidence")
     ref = f"refs/heads/{fields['branch']}"
-    lease = [] if fields["branch"] == own else [f"--force-with-lease={ref}"]
-    git(root, "push", *lease, "-u", "origin", f"HEAD:{ref}")
+    publish_queue.require_unqueued(git(root, "remote", "get-url", "--push", "origin"), fields["branch"])
+    git(root, "push", "-u", "origin", f"HEAD:{ref}")
 
 
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
-    root, primary, scoped = publishing_root(repo, task, agent)
-    if root is None:
-        raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
-    fields = checkout_fields(root)
-    own = fields["branch"]
-    fields["branch"] = target_branch(root, scoped, own, task)
-    selected = selected_files(root, files)
-    retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
+    primary, scoped, fields = Path(repo), task, {}
+    retry = ""
     try:
+        root, primary, scoped = publishing_root(repo, task, agent)
+        if root is None:
+            raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
+        fields = checkout_fields(root)
+        selected = selected_files(root, files)
+        retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
+        fields["branch"] = delivery_branch(root, scoped, fields["branch"])
+        ledger.update_task(
+            slug, agent.task, branch_record(fields, primary, drop_repository(task, primary)), by=agent.name
+        )
         stage_files(root, selected)
         changed = bool(git(root, "diff", "--cached", "--name-only", "-z"))
         if changed:
@@ -317,7 +440,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             git(root, "commit", "-m", message)
         head = git(root, "rev-parse", "HEAD")
         if changed or remote_head(root, fields["branch"]) != head:
-            grade_and_push(root, primary, fields, own, head)
+            grade_and_push(root, primary, fields, head)
         else:
             fields["unchanged"] = (
                 "no changes in the listed files and the remote branch already points at this head; nothing pushed"
@@ -326,7 +449,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
         detail = str(exc)
         if fields.get("gate") == "AgentiHooks touched Python fallback":
             detail = f"AgentiHooks touched Python fallback for {root}: {detail}"
-        raise SwarmError(f"{detail}; Next: {retry}") from exc
-    update = branch_record(fields, primary, task)
-    ledger.update_task(slug, agent.task, update, by=agent.name)
+        branch = exc.branch if isinstance(exc, PublicationRefusal) else scoped.get("branch", "")
+        repository = Path(exc.repository) if isinstance(exc, PublicationRefusal) else primary
+        raise PublicationRefusal(repository, branch, f"{detail}; Next: {retry}" if retry else detail) from exc
     return {**fields, "head": head}

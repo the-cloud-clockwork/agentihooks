@@ -1,10 +1,12 @@
 from scripts.gates.catalog import defaults
+from scripts.swarm_ledger import page_tips
 from tests.swarm_ledger.test_swarm_layout import ROOT, browser, open_page, status  # noqa: F401
 
 
 def test_every_gate_shows_failure_outcomes_and_check_tooltips(open_page):  # noqa: F811
     page = open_page(status(gate_modes=defaults()), width=1920)
     page.tab.add_script_tag(path=str(ROOT / "scripts/swarm_ledger/tooltips.js"))
+    page.tab.evaluate("values => window.ledgerTipValues(values)", page_tips.values())
     page.tab.set_viewport_size({"width": 1920, "height": 1080})
     for name in defaults():
         group = page.tab.get_by_role("group", name=f"{name} gate mode", exact=True)

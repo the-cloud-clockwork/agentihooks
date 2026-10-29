@@ -34,6 +34,12 @@ def _hosted_secret(server_secret) -> str | None:
         return None
 
 
+def hosted() -> str | None:
+    from scripts.swarm_ledger.storage_migration.hosted import server_secret
+
+    return _hosted_secret(server_secret)
+
+
 @contextmanager
 def bound(value: str | None) -> Iterator[None]:
     global _current

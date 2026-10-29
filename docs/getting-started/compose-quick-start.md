@@ -119,7 +119,7 @@ The recording persists: later `agentihooks swarm init` runs without `--adopt` ke
 
 While `SWARM_ADOPT_LEDGER_DIR` is set:
 
-- Every Compose call on the stack adds `deploy/compose/adopt.yaml`. The `swarm` service runs as the recorded user and group, mounts the ledger folder at its own absolute path and the host `~/.agentihooks` at the same path, and shares the host PID and network namespaces, so server pidfiles stay valid on the host. It runs the ledger server from the recorded checkout with reload on, bound to 127.0.0.1:8765, against the recorded Redis, so every swarm keeps its ledger, inbox items and seats. Stop the legacy ledger container by its id before the bundle `swarm` service starts on that port.
+- Every Compose call on the stack adds `deploy/compose/adopt.yaml`. The `swarm` service runs as the recorded user and group, mounts the ledger folder at its own absolute path and the host `~/.agentihooks` at the same path, and shares the host PID and network namespaces, so server pidfiles stay valid on the host. It runs the ledger server under its reload supervisor from the recorded checkout with reload on, so a code reload hands the listening socket to a successor while the container keeps running, bound to 127.0.0.1:8765, against the recorded Redis, so every swarm keeps its ledger, inbox items and seats. Stop the legacy ledger container by its id before the bundle `swarm` service starts on that port.
 - `agentihooks ledger serve --ensure` and `--stop` for the adopted folder, and the Doctor and watchdog restarts built on them, start and stop the bundle `swarm` service. The legacy `ledger` service of the `agentihooks-ledger` Compose project and the host process server are not started again.
 - A shared ledger folder other than the adopted one is refused with `the swarm stack adopts <adopted>, not <folder>; the legacy ledger service stays down`.
 - The stack Redis gives the `swarm` user every command except `FLUSHALL` and `FLUSHDB` (`+@all -flushall -flushdb`). Redis answers a flush with a `NOPERM` error, so the bundle cannot empty the shared Redis data it takes over. Hive member users keep `-@dangerous` and the `default` user stays off.
@@ -136,6 +136,18 @@ docker compose --project-name "${project:-agentihooks-swarm}" exec redis grep -c
 ```
 
 The count is `1` when adoption is recorded. Redis rebuilds the ACL from its template on every start, so a stack started before `--adopt --no-start` picks up the flush deny once `agentihooks swarm init` brings Redis up again with the adoption overlay.
+
+## Workstation tailnet fronts
+
+The adopted workstation stack can expose its ledger, hive join and Redis fronts through Tailscale. The overlay, nginx template and startup script ship with the stack under `deploy/compose`. They require the existing hive certificate and key under the adopted user's `.agentihooks/hive-tls` folder. The ledger forwards to loopback port 8765 and Redis to loopback port 6379, preserving the workstation's adopted Redis service.
+
+Start or restart the three fronts with:
+
+```bash
+bash "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/swarm-stack/deploy/compose/start-tailnet.sh"
+```
+
+Every invocation reads `tailscale ip -4`, refuses a missing or invalid tailnet address and recreates only the three fronts. It overrides any old `SWARM_TAILNET_IP` value without rewriting the private settings. The nginx listener, hive listener and advertised Redis address all use that address. Run this command after reconnecting the workstation to the tailnet; `docker restart` alone retains the container's previous address. `SWARM_STACK_HOME` selects another stack folder and `SWARM_COMPOSE_PROJECT` selects another project. Arguments such as `config --format json` replace the default startup action.
 
 ## Diagnose or stop the stack
 

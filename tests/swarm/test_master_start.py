@@ -49,6 +49,38 @@ def test_unreported_master_retries_original_handoff_then_alerts_once(store):  # 
     assert store.handoff("sw", MASTER) == "Original complete handoff"
 
 
+class DeferredRuntime(StartupRuntime):
+    def spawn(self, config, lane, name, task):
+        placed = super().spawn(config, lane, name, task)
+        budget = {"state": "pending", "report": "/r.json", "deadline_ms": 660_000}
+        return replace(placed, profile_decision={"validation": budget}) if lane == MASTER else placed
+
+
+def test_a_deferred_master_launch_has_its_launch_budget_to_report_a_hook(store):  # noqa: F811
+    runtime, ledger = DeferredRuntime(), tasks()
+    tick("sw", store, ledger, runtime, 1)
+    first = runtime.masters[0][0]
+    tick("sw", store, ledger, runtime, DEADLINE + 1)
+    tick("sw", store, ledger, runtime, 660_000)
+    assert len(runtime.masters) == 1
+    assert first not in runtime.killed
+    tick("sw", store, ledger, runtime, 660_001)
+    assert len(runtime.masters) == 2
+    assert first in runtime.killed
+
+
+def test_the_hook_deadline_is_never_shorter_than_two_minutes():
+    from scripts.swarm import master_start
+    from scripts.swarm.store import AgentRecord
+
+    agent = AgentRecord("master@a1b2c3-0001", MASTER, MASTER)
+    assert master_start.deadline_ms(agent) == DEADLINE
+    short = replace(agent, profile_decision={"validation": {"deadline_ms": 1_000}})
+    assert master_start.deadline_ms(short) == DEADLINE
+    long = replace(agent, profile_decision={"validation": {"deadline_ms": 660_000}})
+    assert master_start.deadline_ms(long) == 660_000
+
+
 def test_first_hook_confirms_startup_and_prevents_retry(store):  # noqa: F811
     runtime, ledger = StartupRuntime(), tasks()
     store.put_handoff("sw", MASTER, "Original handoff")
@@ -293,3 +325,27 @@ def test_the_alert_state_is_saved_before_the_notice(store):  # noqa: F811
     with pytest.raises(SwarmError):
         master_start.observe("sw", store.config("sw"), store, Raising(), StartupRuntime(), DEADLINE)
     assert master_start.read(store, "sw")["alerted"] is True
+
+
+def test_a_refused_master_launch_restores_the_alerted_start_it_began_from(store):  # noqa: F811
+    from scripts.swarm import master_start
+    from scripts.swarm.tick import SpawnError
+
+    refused = "no hive for eng has room: remote cpu: five minute load 1.17 on 8 CPUs, fits 0 more"
+    pending = {"name": "", "task": {"id": MASTER}, "attempt": 2, "retry": True, "alerted": True, "at": 0}
+    master_start.save(store, "sw", pending)
+    runtime = FakeRuntime(crash=SpawnError(refused, "unavailable"))
+    actions = tick("sw", store, tasks(), runtime, master_start.RETRY_MS + 1)
+    assert f"the master waits: {refused}" in actions
+    assert master_start.read(store, "sw") == pending
+
+
+@pytest.mark.parametrize("pending", [{}, {"name": "", "task": {"id": MASTER}, "attempt": 1, "at": 7}])
+def test_withdraw_puts_back_the_start_a_refused_launch_began_from(store, pending):  # noqa: F811
+    from scripts.swarm import master_start
+
+    master_start.save(store, "sw", {"name": "engineer@sw-1", "task": {"id": MASTER}, "attempt": 2, "at": 9})
+    master_start.save(store, "other", {"name": "engineer@other-1", "at": 9})
+    master_start.withdraw(store, "sw", pending)
+    assert master_start.read(store, "sw") == pending
+    assert master_start.read(store, "other") == {"name": "engineer@other-1", "at": 9}

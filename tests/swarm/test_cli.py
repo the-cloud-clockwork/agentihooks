@@ -13,15 +13,16 @@ from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
+from tests.swarm.memory_fixture import tmp_path
+from tests.swarm.profile_fixture import validated
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm.test_tick_lock import hold_tick
 
 real_reconcile = timer.reconcile
-
-
-from tests.swarm.profile_fixture import validated
+_fixture = tmp_path
 
 
 @pytest.fixture
@@ -38,9 +39,9 @@ def env(monkeypatch, tmp_path):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
     ledger.said = []
-    ledger.comments = []
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda _, *args: ledger.join(*args))
     ledger.say = lambda slug, text, by=None: ledger.said.append((text, by))
-    ledger.relay = lambda slug, text, by, op_id="": ledger.said.append((text, by))
+    ledger.relay = lambda slug, text, by, op_id="", reply_to="": ledger.said.append((text, by))
     ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
     rt = FakeRuntime()
     monkeypatch.setattr(cli, "connect", lambda: store)
@@ -337,9 +338,11 @@ def test_block_on_dev_red_records_the_failing_dev_run(env, capsys, monkeypatch):
     monkeypatch.setattr(
         dev_red, "latest", lambda repo, run=None: read.append(repo) or {"id": 41, "conclusion": "failure"}
     )
+    store.redis.hset(store.key("sw", "started-lives"), "t2", 2)
     capsys.readouterr()
     assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev Tests is red on a test I never touched") == 0
     assert read == ["/repo"]
+    assert store.claims("sw", "t2") == 1
     assert ledger.rows["t2"]["state"] == "blocked"
     assert ledger.comments == [("t2", "dev Tests is red on a test I never touched", "ci@a1b2c3-0001")]
     assert store.redis.hgetall(dev_red.key("sw")) == {"t2": "41"}
@@ -349,6 +352,19 @@ def test_block_on_dev_red_records_the_failing_dev_run(env, capsys, monkeypatch):
         "dev_red_run": 41,
         "next": "stop now; the swarm closes this session",
     }
+
+
+def test_block_on_dev_red_refunds_nothing_once_the_agent_no_longer_holds_its_claim(env, monkeypatch):
+    from scripts.swarm import dev_red
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setattr(dev_red, "latest", lambda repo, run=None: {"id": 41, "conclusion": "failure"})
+    store.redis.hset(store.key("sw", "started-lives"), "t2", 2)
+    assert store.release("sw", "t2", "ci@a1b2c3-0001")
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev Tests is red on a test I never touched") == 0
+    assert store.claims("sw", "t2") == 2
 
 
 def test_block_on_dev_red_is_refused_while_dev_is_green(env, capsys, monkeypatch):
@@ -469,8 +485,8 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
     assert ledger.said == []
     [item] = InboxStore(store.redis).inbox("ci@a1b2c3-0001")
     assert (item.sender, item.text, item.state) == ("engineer@a1b2c3-0001", "the docs task is merged", "pending")
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "status for the page only") == 0
-    assert ledger.said[-1] == ("status for the page only", "engineer@a1b2c3-0001")
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "status for the page only") == 1
+    assert ledger.said == [] and "msg send master@sw" in capsys.readouterr().err
     assert [i.text for i in InboxStore(store.redis).inbox("ci@a1b2c3-0001")] == ["the docs task is merged"]
 
     assert run("sw", "--as", "stranger", "say", "hello") == 1
@@ -492,17 +508,17 @@ def test_say_to_an_agent_a_lane_or_everyone_never_posts_to_chat(env, to, capsys)
     assert "engineer@a1b2c3-0001" in json.loads(capsys.readouterr().out)["sent"]
 
 
-def test_say_to_the_operator_posts_to_chat_and_reaches_no_inbox(env, capsys):
+def test_say_to_the_operator_is_refused_naming_the_front_door_inbox(env, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     ledger.said.clear()
-    ledger.say = lambda slug, text, by=None: ledger.said.append((slug, text, by))
     capsys.readouterr()
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "phase one is done", "--to", "operator") == 0
-    assert ledger.said == [("sw", "phase one is done", "engineer@a1b2c3-0001")]
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "phase one is done", "--to", "operator") == 1
+    err = capsys.readouterr().err
+    assert front_door.say_refusal("sw", "engineer@a1b2c3-0001") in err and 'msg send master@sw "<text>"' in err
+    assert ledger.said == []
     assert InboxStore(store.redis).inbox("ci@a1b2c3-0001") == []
-    assert json.loads(capsys.readouterr().out) == {"posted": True}
 
 
 @pytest.mark.parametrize("flag, env_name", [("engineer@a1b2c3-0001", ""), ("", "engineer@a1b2c3-0001")])
@@ -1104,24 +1120,20 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     assert timer.ensure("/bin/agentihooks", tmp_path, run=run)
     calls.clear()
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    names = [
-        "agentihooks-inbox-waker.service",
-        "agentihooks-quota-prober.service",
-        "agentihooks-tick-watch.service",
-        "agentihooks-swarm-waits.timer",
-    ]
+    names = [f"agentihooks-{name}" for name in ("scheduler.service", "inbox-waker.service", "quota-prober.service")]
+    names += ["agentihooks-tick-watch.service", "agentihooks-swarm-waits.timer"]
     assert calls == [(["systemctl", "--user", "is-enabled", "--quiet", name], kw) for name in names]
 
     calls.clear()
     failing.add("is-enabled")
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable", "enable"]
+    assert [call[0][2] for call in calls] == ["is-enabled", *["enable"] * 5]
 
     calls.clear()
     failing.clear()
-    failing.add(names[1])
+    failing.add(names[2])
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run) is False
-    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", *["enable"] * 4]
+    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", "is-enabled", *["enable"] * 5]
     failing.clear()
 
     calls.clear()
@@ -1149,6 +1161,7 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     assert (tmp_path / "agentihooks-new-intake.service").read_text() == added
     assert calls == [
         (["systemctl", "--user", "daemon-reload"], {**kw, "check": False}),
+        enable("agentihooks-scheduler.service"),
         enable("agentihooks-inbox-waker.service"),
         enable("agentihooks-quota-prober.service"),
         enable("agentihooks-tick-watch.service"),
@@ -1222,7 +1235,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         "anchors": [],
         "overlays": [],
         "bundle_revision": "",
-    }
+    } | {"automated": {"swarm": "sw", "seat": ""}}
     assert placed == runtime.Placed(
         "w3:p1",
         "codex",
@@ -1577,7 +1590,7 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
 
-    def refuse(slug, text, by=None, op_id=""):
+    def refuse(slug, text, by=None, op_id="", reply_to=""):
         raise SwarmError("ledger sw refused: chat refused: clock time '18:45'")
 
     ledger.relay = refuse
@@ -1597,7 +1610,7 @@ def test_agent_prompt_starts_by_reading_the_ledger_json(monkeypatch):
     monkeypatch.delenv("LEDGER_DIR")
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
-    assert text.index("agentihooks ledger --slug sw show") < text.index("Work it end to end")
+    assert text.index("agentihooks ledger --slug sw get tasks/t1") < text.index("Work it end to end")
 
 
 def test_status_json_gives_every_agent_a_status_and_its_model(env, capsys):
@@ -1681,9 +1694,9 @@ def test_status_text_logs_a_base_miss_as_enforced_with_a_finding(env, capsys):
     out = capsys.readouterr().out.splitlines()
     assert "launch  engineer@a1b2c3-0001  failed  60000ms" in out
     assert "  base  enforced  expected package:engineer; observed engineer" in out
-    assert (
-        "finding  launch check  engineer@a1b2c3-0001/base: engineer@a1b2c3-0001 failed its launch check on base" in out
-    )
+    (finding,) = launch_check.findings(store, "sw")
+    assert finding.subject.startswith("base/19700101T00-")
+    assert f"finding  launch check  {finding.subject}: engineer@a1b2c3-0001 failed the launch check on base" in out
 
 
 def test_status_text_logs_enforced_and_passed_launch_checks(env, capsys):
@@ -1699,9 +1712,9 @@ def test_status_text_logs_enforced_and_passed_launch_checks(env, capsys):
     assert "launch  engineer@a1b2c3-0001  failed  60000ms" in out
     assert "  name  enforced  expected a; observed b" in out
     assert "launch  engineer@a1b2c3-0002  passed  2000ms" in out
-    assert (
-        "finding  launch check  engineer@a1b2c3-0001/name: engineer@a1b2c3-0001 failed its launch check on name" in out
-    )
+    (finding,) = launch_check.findings(store, "sw")
+    assert finding.subject.startswith("name/19700101T00-")
+    assert f"finding  launch check  {finding.subject}: engineer@a1b2c3-0001 failed the launch check on name" in out
 
 
 def test_status_text_lists_a_closed_failed_launch_pane_with_its_lines(env, capsys):
@@ -2114,7 +2127,6 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         f"{led} task add",
         f"{led} time-left",
         f"{led} followup add",
-        "agentihooks swarm sw --as master@a1b2c3-0002 say --to operator",
         "agentihooks msg reply",
         "--fyi",
         "agentihooks swarm sw --as master@a1b2c3-0002 send-message",
@@ -2131,7 +2143,7 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         "and the operator's environment with him through the agentihooks commands and tools. You never edit code "
         "or config files in a repository, commit, merge or claim a task: engineers do that.\n"
     ) in text
-    assert "wt.sh new" not in text and "done --pr" not in text
+    assert "wt.sh new" not in text and "done --pr" not in text and "say --to operator" not in text
 
 
 def test_the_tick_wakes_an_idle_pane_holding_a_pending_inbox_item(env):
@@ -2479,7 +2491,7 @@ def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):
     env[2].live.update({"engineer@a1b2c3-0001", "engineer@a1b2c3-0002"})
     run("sw", "status")
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
-    assert lines["engineer@a1b2c3-0001"][-5] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-5] == "-"
+    assert lines["engineer@a1b2c3-0001"][-6] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-6] == "-"
     run("sw", "status", "--json")
     agents = {a["name"]: a for a in json.loads(capsys.readouterr().out.splitlines()[-1])["agents"]}
     assert (agents["engineer@a1b2c3-0001"]["conversation_id"], agents["engineer@a1b2c3-0002"]["conversation_id"]) == (

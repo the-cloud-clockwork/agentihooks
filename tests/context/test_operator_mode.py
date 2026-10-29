@@ -6,6 +6,7 @@ import pytest
 from hooks import hook_manager
 from hooks.context import operator_mode
 from hooks.context.swarm_heartbeat import is_operator_prompt
+from scripts.events.redis_state import RedisStateStore
 from scripts.inbox.wake import WAKE_TEXT
 from scripts.swarm import delivery
 from scripts.swarm.runtime import HerdrRuntime
@@ -13,7 +14,7 @@ from scripts.swarm.store import AgentRecord
 from scripts.swarm.tick import NUDGE
 
 SWARM = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": "master@a1-1"}
-WINDOW = operator_mode.WINDOW_SEC
+WINDOW = 1800
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +30,11 @@ def ledgers(tmp_path, monkeypatch):
     for name in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM_TASK"):
         monkeypatch.delenv(name, raising=False)
     return path
+
+
+@pytest.fixture
+def bound(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
 
 
 def test_an_unbound_session_always_has_the_operator_present(ledgers):
@@ -68,6 +74,7 @@ def test_presence_commands_match_sentences_with_command_boundaries():
         assert operator_mode.switch(text) == ""
 
 
+@pytest.mark.usefixtures("bound")
 @pytest.mark.parametrize("word", ["on", "off"])
 def test_typed_sentence_switches_only_its_session(word):
     operator_mode.observe("other", "operator on", True, now=100)
@@ -77,6 +84,7 @@ def test_typed_sentence_switches_only_its_session(word):
     assert operator_mode._heard("other")
 
 
+@pytest.mark.usefixtures("bound")
 @pytest.mark.parametrize("word", ["on", "off"])
 def test_relayed_sentence_does_not_switch_presence(word):
     operator_mode.observe("pane", "operator on", True, now=100)
@@ -84,6 +92,7 @@ def test_relayed_sentence_does_not_switch_presence(word):
     assert operator_mode._heard("pane")
 
 
+@pytest.mark.usefixtures("bound")
 def test_idle_scheduler_does_not_end_explicit_presence():
     from scripts.inbox.store import InboxStore
     from scripts.scheduler import Scheduler
@@ -91,7 +100,7 @@ def test_idle_scheduler_does_not_end_explicit_presence():
 
     redis = redis_client()
     operator_mode.observe("pane", "operator on", True, now=100)
-    Scheduler(redis).run_due(now=100000)
+    Scheduler(RedisStateStore(redis, "scheduler")).run_due(now=100000)
     assert operator_mode._heard("pane")
     assert operator_mode.question_block("AskUserQuestion", "pane") == ""
     assert InboxStore(redis).inbox("pane") == []
@@ -99,6 +108,7 @@ def test_idle_scheduler_does_not_end_explicit_presence():
     assert not operator_mode._heard("pane")
 
 
+@pytest.mark.usefixtures("bound")
 @pytest.mark.parametrize("source", ["startup", "resume", "compact"])
 def test_session_restart_clears_presence_but_compaction_preserves_it(monkeypatch, source):
     from unittest.mock import Mock
@@ -115,6 +125,7 @@ def test_session_restart_clears_presence_but_compaction_preserves_it(monkeypatch
     assert operator_mode._heard("other")
 
 
+@pytest.mark.usefixtures("bound")
 def test_restart_without_a_session_does_not_change_presence():
     operator_mode.observe("pane", "operator on", True, now=100)
     operator_mode.reset({})
@@ -142,7 +153,8 @@ def test_operator_off_ends_it_at_once():
     assert operator_mode.observe("s1", "operator off", True, now=110) == "off"
     assert not operator_mode.present("s1", SWARM, now=111)
     operator_mode.observe("s1", "keep going", True, now=112)
-    assert not operator_mode.present("s1", SWARM, now=113)
+    assert not operator_mode._heard("s1", SWARM)
+    assert operator_mode.present("s1", SWARM, now=113)
 
 
 def test_operator_on_keeps_questions_open_through_inbox_and_silence_until_off():
@@ -244,7 +256,7 @@ def test_a_cross_session_message_never_switches_presence_or_uncaps_the_turn(monk
     out = run_prompt(monkeypatch, capsys, "s1", peer.format(words="operator on"))
     assert not operator_mode.present("s1", SWARM)
     assert operator_mode.ON_NOTICE not in out
-    assert operator_mode.TURN_NOTICE not in out
+    assert "Operator present for this turn" not in out
     assert operator_mode.ON_NOTICE in run_prompt(monkeypatch, capsys, "s1", "operator on")
     assert operator_mode.present("s1", SWARM)
 
@@ -278,18 +290,12 @@ def test_a_failing_mode_store_is_logged_and_never_raises_into_the_hook(monkeypat
 
 
 ASK = (
-    "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
-    'agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
-    "and keep working; the master answers it or raises it to the operator."
+    "The operator is not present in this pane, so the question tool is off. Send the question to the front door "
+    'master by inbox with agentihooks msg send master@{slug} "<the question in plain words>" and keep working.'
 )
 MASTER_ASK = (
-    "The operator is not present in this pane, so the question tool is off. Never write the questions as chat text. "
-    "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
-    'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
-)
-STANDALONE_ASK = (
-    "The operator is not present in this pane, so the question tool is off until he types operator on. "
-    "State the open question in one short line, take the most reasonable choice and keep working."
+    "The operator is not present in this pane, so the question tool is off. Never write to him first, as chat text "
+    "or anywhere else: hold the question until he writes, then answer what he asks."
 )
 PROMPT_REFUSAL = (
     "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
@@ -329,13 +335,14 @@ def test_the_binding_is_read_from_the_home_ledger_folder_by_default():
     assert operator_mode.question_block("AskUserQuestion", "s5", {}) == ASK.format(slug="<slug>", name="eng-2@work")
 
 
-def test_the_question_tool_passes_only_after_typed_operator_on_and_other_tools_always_pass(ledgers):
+def test_the_question_tool_passes_a_bound_session_only_after_typed_operator_on_and_a_standalone_one_always(ledgers):
     standalone = {"LEDGER_DIR": str(ledgers)}
-    assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == STANDALONE_ASK
-    assert operator_mode.question_block("AskUserQuestion", "", standalone) == STANDALONE_ASK
+    assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == ""
+    assert operator_mode.question_block("AskUserQuestion", "", standalone) == ""
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) != ""
     operator_mode.observe("s1", "operator on", True, now=100)
-    operator_mode.observe("s3", "operator on", True, now=100)
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ""
+    operator_mode.observe("s3", "operator off", True, now=100)
     assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == ""
     assert operator_mode.question_block("Bash", "s4", SWARM) == ""
     assert operator_mode.question_block("Bash", "s4", standalone) == ""
@@ -364,7 +371,7 @@ def test_the_pre_tool_hook_blocks_the_codex_question_tool_in_plan_and_default_mo
     assert str(blocked.value) == MASTER_ASK.format(slug="demo", name="master@a1-1")
 
 
-def test_a_standalone_codex_question_is_refused_until_its_operator_types_operator_on(monkeypatch):
+def test_a_standalone_codex_question_passes_without_operator_on(monkeypatch):
     from hooks.targets.normalizer import normalize_payload
 
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
@@ -372,26 +379,18 @@ def test_a_standalone_codex_question_is_refused_until_its_operator_types_operato
     payload = normalize_payload(
         {"session_id": "s8", "tool_name": "request_user_input", "tool_input": {"questions": [question]}}
     )
+    hook_manager.on_pre_tool_use(payload)
     for prompt in ("Explain the plan", "operator off"):
         operator_mode.observe("s8", prompt, True, now=100)
-        with pytest.raises(hook_manager.BlockAction) as blocked:
-            hook_manager.on_pre_tool_use(payload)
-        assert str(blocked.value) == STANDALONE_ASK
-    operator_mode.observe("s8", "operator on", True, now=101)
-    hook_manager.on_pre_tool_use(payload)
+        hook_manager.on_pre_tool_use(payload)
 
 
-def test_a_standalone_claude_question_is_refused_until_its_operator_types_operator_on():
+def test_a_standalone_claude_question_passes_without_operator_on():
     payload = {"session_id": "s7", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}
-    with pytest.raises(hook_manager.BlockAction) as blocked:
-        hook_manager.on_pre_tool_use(payload)
-    assert str(blocked.value) == STANDALONE_ASK
-    operator_mode.observe("s7", "Explain the plan", True, now=100)
-    with pytest.raises(hook_manager.BlockAction) as blocked:
-        hook_manager.on_pre_tool_use(payload)
-    assert str(blocked.value) == STANDALONE_ASK
-    operator_mode.observe("s7", "operator on", True, now=101)
     hook_manager.on_pre_tool_use(payload)
+    for prompt in ("Explain the plan", "operator off"):
+        operator_mode.observe("s7", prompt, True, now=100)
+        hook_manager.on_pre_tool_use(payload)
 
 
 def test_a_failing_question_check_is_logged_and_refuses_only_the_question_tool(monkeypatch):
@@ -416,7 +415,12 @@ def test_a_mode_file_that_is_not_an_object_holds_the_question_tool_off(tmp_path,
     )
 
 
-REMINDER = "Operator not present: replies stay within 20 words."
+AWAY = (
+    "Operator not present: he never reads this pane. End the turn with no report, summary or ask addressed to him "
+    "and skip the response template; any pane text stays within {words} words. "
+    "Never write to him first; answer only what he writes."
+)
+REMINDER = AWAY.format(words=20)
 
 
 def test_while_off_a_one_line_reminder_comes_every_second_tool_call():
@@ -428,21 +432,18 @@ def test_while_off_a_one_line_reminder_comes_every_second_tool_call():
 def test_the_away_word_limit_defaults_to_twenty_and_reads_the_environment(monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS", raising=False)
     assert operator_mode.reminder("default", SWARM, now=100) == ""
-    assert operator_mode.reminder("default", SWARM, now=100) == "Operator not present: replies stay within 20 words."
+    assert operator_mode.reminder("default", SWARM, now=100) == REMINDER
     monkeypatch.setenv("AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS", "35")
     assert operator_mode.reminder("default", now=100, environ=SWARM) == ""
-    assert (
-        operator_mode.reminder("default", now=100, environ=SWARM)
-        == "Operator not present: replies stay within 20 words."
-    )
+    assert operator_mode.reminder("default", now=100, environ=SWARM) == REMINDER
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
     assert operator_mode.reminder("custom", now=100) == ""
-    assert operator_mode.reminder("custom", now=100) == "Operator not present: replies stay within 35 words."
+    assert operator_mode.reminder("custom", now=100) == AWAY.format(words=35)
 
 
 def test_every_away_prompt_injects_the_reminder_without_consuming_tool_calls(monkeypatch, capsys):
-    expected = "Operator not present: replies stay within 20 words."
+    expected = REMINDER
     first = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
     second = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
     assert first.count(expected) == 1
@@ -459,33 +460,54 @@ def test_prompt_reminders_use_the_configured_limit_uncompressed_and_unlogged(mon
     hook_manager._operator_mode({"session_id": "s1", "prompt": delivery.marked("continue")}, False)
     assert injected == [
         (
-            ("Operator not present: replies stay within 35 words.",),
+            (AWAY.format(words=35),),
             {"also_log": False, "skip_compression": True, "kind": "alert"},
         )
     ]
 
 
-def test_a_typed_prompt_uncaps_only_its_reply_turn(monkeypatch, capsys):
-    expected = "Operator not present: replies stay within 20 words."
-    typed_notice = "Operator present for this turn: reply without a word limit."
+def test_a_typed_master_prompt_lifts_reply_limit_but_keeps_questions_locked(monkeypatch, capsys):
     run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
-    run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
     out = run_prompt(monkeypatch, capsys, "s1", "Explain the result")
-    assert typed_notice in out
-    assert expected not in out
-    assert [operator_mode.reminder("s1", SWARM) for _ in range(4)] == [""] * 4
-    assert not operator_mode.present("s1", SWARM)
+    assert "Operator present in this pane during the quiet window. Answer his message." in out
+    assert REMINDER not in out
+    assert [operator_mode.reminder("s1", SWARM) for _ in range(2)] == ["", ""]
+    assert operator_mode.present("s1", SWARM)
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
-    assert [operator_mode.reminder("s2", SWARM) for _ in range(2)] == ["", expected]
-    next_turn = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
-    assert expected in next_turn
-    assert typed_notice not in next_turn
-    assert [operator_mode.reminder("s1", SWARM) for _ in range(2)] == ["", expected]
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
-        slug="demo", name="master@a1-1"
-    )
+
+
+def test_away_turns_end_without_a_report_and_a_typed_master_prompt_restores_replies(monkeypatch, capsys):
+    run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
+    away = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
+    assert "End the turn with no report, summary or ask addressed to him" in away
+    assert "Never write to him first; answer only what he writes." in away
+    typed = run_prompt(monkeypatch, capsys, "s1", "Explain the result")
+    assert "Operator present in this pane during the quiet window. Answer his message." in typed
+    present = run_prompt(monkeypatch, capsys, "s1", "operator on")
+    assert "addressed to him" not in present
+    assert "only in Priorities" not in present
+
+
+def test_an_away_worker_routes_his_decisions_to_the_front_door_inbox_never_the_ledger(ledgers):
+    env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": "engineer@a1-2", "LEDGER_DIR": str(ledgers)}
+    text = [operator_mode.reminder("w1", env, now=100) for _ in range(2)][1]
+    assert "End the turn with no report, summary or ask addressed to him" in text
+    assert "front door master by inbox with agentihooks msg send" in text
+    assert "question add" not in text
+    assert "Priorities" not in text
+
+
+def test_the_session_binding_picks_the_route_over_the_environment_name(ledgers, monkeypatch, capsys):
+    (ledgers / ".sessions" / "w1.json").write_text(json.dumps({"slug": "demo", "name": "engineer@a1-2"}))
+    (ledgers / ".sessions" / "m1.json").write_text(json.dumps({"slug": "demo", "name": "master@a1-1"}))
+    out = run_prompt(monkeypatch, capsys, "w1", delivery.marked("continue"))
+    assert operator_mode.WORKER_ROUTE in out
+    assert operator_mode.MASTER_ROUTE not in out
+    env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": "engineer@a1-2", "LEDGER_DIR": str(ledgers)}
+    text = [operator_mode.reminder("m1", env, now=100) for _ in range(2)][1]
+    assert text.endswith(operator_mode.MASTER_ROUTE)
 
 
 def test_only_typed_operator_on_opens_the_question_tool_and_no_other_prompt_does(monkeypatch, capsys):
@@ -504,7 +526,7 @@ def test_the_typed_turn_window_never_opens_the_question_tool(monkeypatch):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
     operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100)
-    assert operator_mode._turn(operator_mode._load("s1"), 101)
+    assert operator_mode._load("s1")["turn_at"] == 100
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
@@ -513,11 +535,12 @@ def test_the_typed_turn_window_never_opens_the_question_tool(monkeypatch):
     )
 
 
-def test_the_typed_turn_notice_is_exact_and_operator_off_gives_only_the_away_notice(monkeypatch):
+def test_a_typed_master_prompt_gets_presence_notice_and_operator_off_the_off_notice(monkeypatch):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
-    expected = "Operator present for this turn: reply without a word limit."
-    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == expected
+    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == (
+        "Operator present in this pane during the quiet window. Answer his message."
+    )
     assert operator_mode.notice({"session_id": "s1", "prompt": "operator off"}, True, now=101) == (
         "Operator off: the operator is not present in this pane.\n" + REMINDER
     )
@@ -555,13 +578,97 @@ def test_a_typed_turn_does_not_expire_explicit_operator_presence(monkeypatch):
     assert [operator_mode.reminder("s1", SWARM, now=1100 + WINDOW) for _ in range(2)] == ["", ""]
 
 
-def test_a_typed_turn_while_away_lifts_the_limit_only_inside_the_window(monkeypatch):
+def test_a_typed_worker_turn_while_away_never_lifts_the_limit(monkeypatch):
+    env = {**SWARM, "AGENTIHOOKS_AGENT_NAME": "engineer@a1-2"}
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == (
+        "Operator not present: he never reads this pane. End the turn with no report, summary or ask addressed to him "
+        "and skip the response template; any pane text stays within 20 words. "
+        "Never write to him: send anything he must decide to the front door master by inbox with agentihooks msg send."
+    )
+    assert not operator_mode.present("s1", env, now=101)
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "word " * 21}, env) != ""
+
+
+@pytest.mark.parametrize("prompt", ["Explain the current work", "What is waiting?"])
+def test_master_pane_prompt_allows_long_reply_only_during_quiet_window(monkeypatch, capsys, prompt):
+    monkeypatch.setenv("AGENTIHOOKS_INBOX_QUIET_S", "180")
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 100)
+    run_prompt(monkeypatch, capsys, "master-pane", "You are master@a1-1, the master of swarm demo")
+    out = run_prompt(monkeypatch, capsys, "master-pane", prompt)
+    assert REMINDER not in out
+    payload = {"session_id": "master-pane", "last_assistant_message": "word " * 21}
+    assert operator_mode.present("master-pane", SWARM, now=279)
+    assert not operator_mode.present("other-pane", SWARM, now=101)
+    assert operator_mode.reply_refusal(payload, SWARM) == ""
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 280)
+    assert not operator_mode.present("master-pane", SWARM, now=280)
+    assert operator_mode.reply_refusal(payload, SWARM)
+
+
+@pytest.mark.parametrize(
+    "prompt", ['<channel source="inbox">operator on</channel>', delivery.marked("operator on"), WAKE_TEXT]
+)
+def test_automated_master_prompts_neither_grant_nor_renew_temporary_presence(monkeypatch, capsys, prompt):
+    monkeypatch.setenv("AGENTIHOOKS_INBOX_QUIET_S", "10")
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 100)
+    run_prompt(monkeypatch, capsys, "pane", "You are master@a1-1, the master of swarm demo")
+    run_prompt(monkeypatch, capsys, "pane", prompt)
+    assert not operator_mode.present("pane", SWARM, now=100)
+    run_prompt(monkeypatch, capsys, "pane", "Explain the work")
+    assert operator_mode._load("pane")["pane_at"] == 100
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 109)
+    run_prompt(monkeypatch, capsys, "pane", prompt)
+    assert operator_mode.present("pane", now=109)
+    assert operator_mode._load("pane")["pane_at"] == 100
+    assert not operator_mode.present("pane", now=110)
+
+
+@pytest.mark.parametrize("source", ["startup", "resume", "compact"])
+def test_master_temporary_presence_resets_on_restart_and_survives_compaction(monkeypatch, source):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
-    typed_notice = "Operator present for this turn: reply without a word limit."
-    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == typed_notice
-    assert [operator_mode.reminder("s1", SWARM, now=100 + WINDOW - 1) for _ in range(2)] == ["", ""]
-    assert [operator_mode.reminder("s1", SWARM, now=100 + WINDOW) for _ in range(2)] == ["", REMINDER]
+    operator_mode.observe("pane", "Explain the work", True, now=100)
+    operator_mode.reset({"session_id": "pane", "source": source})
+    assert operator_mode.present("pane", SWARM, now=101) is (source == "compact")
+
+
+def test_master_temporary_presence_renews_only_on_operator_words_and_off_clears_it(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    operator_mode.observe("pane", "Explain the work", True, now=100)
+    assert not operator_mode.present("pane", SWARM, now=99)
+    assert operator_mode.present("pane", SWARM, now=279)
+    assert not operator_mode.present("pane", SWARM, now=280)
+    operator_mode.observe("pane", "What is next?", True, now=200)
+    assert operator_mode._load("pane")["pane_at"] == 200
+    assert operator_mode.present("pane", SWARM, now=379)
+    assert not operator_mode.present("pane", SWARM, now=380)
+    operator_mode.observe("pane", "operator off", True, now=201)
+    assert "pane_at" not in operator_mode._load("pane")
+    assert not operator_mode.present("pane", SWARM, now=201)
+
+
+def test_master_temporary_presence_uses_the_session_binding_and_supplied_environment(ledgers):
+    (ledgers / ".sessions" / "pane.json").write_text(json.dumps({"slug": "demo", "name": "master@a1-1"}))
+    operator_mode.observe("pane", "Explain the work", True, now=100)
+    env = {"LEDGER_DIR": str(ledgers), "AGENTIHOOKS_AGENT_NAME": "engineer@a1-2", "AGENTIHOOKS_INBOX_QUIET_S": "2"}
+    assert operator_mode.present("pane", env, now=101)
+    assert not operator_mode.present("pane", env, now=102)
+    (ledgers / ".sessions" / "pane.json").write_text(json.dumps({"slug": "demo", "name": "engineer@a1-2"}))
+    assert not operator_mode.present("pane", {**env, **SWARM}, now=101)
+
+
+def test_master_presence_notice_uses_supplied_clock_after_automated_prompt(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 100)
+    operator_mode.observe("pane", "Explain the work", True, now=100)
+    assert operator_mode.present("pane", SWARM, now=279.99)
+    assert (
+        operator_mode.notice({"session_id": "pane", "prompt": delivery.marked("continue")}, False, now=280) == REMINDER
+    )
 
 
 CHANNEL = '<channel source="inbox" item_id="ITEM" sender="SENDER" sent_at_ms="MILLIS">Automated notice</channel>'
@@ -623,7 +730,8 @@ def test_the_reminder_count_survives_a_typed_turn():
     operator_mode.observe("s1", "Explain the result", True, now=101)
     assert operator_mode.reminder("s1", SWARM, now=102) == ""
     operator_mode.observe("s1", delivery.marked("continue"), False, now=103)
-    assert operator_mode.reminder("s1", SWARM, now=104) == REMINDER
+    assert operator_mode.reminder("s1", SWARM, now=281) == REMINDER
+    assert operator_mode.reminder("s1", SWARM, now=282) == ""
 
 
 def test_the_pre_tool_hook_injects_the_reminder_uncompressed_and_unlogged(monkeypatch):
@@ -647,10 +755,114 @@ def test_every_pre_tool_call_counts_toward_the_reminder(monkeypatch):
 
 
 @pytest.mark.parametrize("words", [20, 21, 100])
-def test_the_stop_hook_never_refuses_a_long_final_message(monkeypatch, words):
+def test_the_stop_hook_refuses_an_over_limit_reply_while_off(monkeypatch, words):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
-    hook_manager.on_stop({"session_id": "s1", "last_assistant_message": "word " * words, "hook_event_name": "Stop"})
+    monkeypatch.setattr(hook_manager, "_swarm_heartbeat", lambda *a, **k: None)
+    payload = {"session_id": "s1", "last_assistant_message": "word " * words, "hook_event_name": "Stop"}
+    if words <= 20:
+        hook_manager.on_stop(payload)
+        return
+    with pytest.raises(hook_manager.BlockAction) as blocked:
+        hook_manager.on_stop(payload)
+    assert str(blocked.value) == (
+        f"Operator not present: this reply has {words} words, over the 20 word limit. "
+        "Reply again in at most 20 words, machine style: result only, no explanation."
+    )
+
+
+HIVE = {**SWARM, "AGENTIHOOKS_AGENT_NAME": "eng-1@demo", "AGENTIHOOKS_HIVE_ID": "hive-001"}
+WORKSTATION = {**SWARM, "AGENTIHOOKS_AGENT_NAME": "eng-1@demo"}
+LONG = "word " * 21
+
+
+@pytest.mark.parametrize("env", [HIVE, WORKSTATION, SWARM], ids=["hive", "workstation", "master"])
+def test_every_swarm_agent_starts_off_and_its_long_reply_is_refused(env):
+    assert not operator_mode.present("s1", env, now=100)
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": LONG}, env) == (
+        "Operator not present: this reply has 21 words, over the 20 word limit. "
+        "Reply again in at most 20 words, machine style: result only, no explanation."
+    )
+
+
+def test_a_standalone_session_is_never_gated(ledgers):
+    env = {"LEDGER_DIR": str(ledgers)}
+    assert operator_mode.present("s1", env, now=100)
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": LONG}, env) == ""
+
+
+def test_a_hand_seated_master_without_swarm_env_starts_off_until_operator_on(ledgers, tmp_path, monkeypatch):
+    from hooks.context import master_coding
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    env = {"LEDGER_DIR": str(ledgers)}
+    master_coding.record_seat("m1", "demo", "master@a1-1")
+    assert not operator_mode.present("m1", env, now=100)
+    operator_mode.observe("m1", "triage the priorities", True, now=100)
+    assert operator_mode.question_block("AskUserQuestion", "m1", env) == MASTER_ASK.format(
+        slug="demo", name="master@a1-1"
+    )
+    assert operator_mode.reply_refusal({"session_id": "m1", "last_assistant_message": LONG}, env) != ""
+    operator_mode.observe("m1", "operator on", True, now=101)
+    assert operator_mode.question_block("AskUserQuestion", "m1", env) == ""
+    assert operator_mode.present("m2", env, now=101)
+
+
+def test_operator_on_lifts_the_limit_and_operator_off_restores_it():
+    operator_mode.observe("s1", "operator on", True, now=100)
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": LONG}, WORKSTATION) == ""
+    operator_mode.observe("s1", "operator off", True, now=101)
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": LONG}, WORKSTATION) != ""
+
+
+def test_the_reply_limit_reads_the_environment_skips_markers_and_checks_retries():
+    env = {**WORKSTATION, "AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS": "3"}
+    marker = "<!-- @lesson -->\none two three four\n<!-- @/lesson -->"
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "one two three"}, env) == ""
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "ok " + marker}, env) == ""
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "a b <!-- c d e -->"}, env) == ""
+    refused = operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "a b c d"}, env)
+    assert refused.startswith("Operator not present: this reply has 4 words, over the 3 word limit.")
+    repeat = {"session_id": "s1", "last_assistant_message": "a b c d", "stop_hook_active": True}
+    assert operator_mode.reply_refusal(repeat, env) == refused
+    assert operator_mode.reply_refusal({**repeat, "last_assistant_message": "a b c"}, env) == ""
+    assert operator_mode.REPLY_RETRIES == 3
+    assert operator_mode.reply_refusal(repeat, env) == refused
+    assert operator_mode._load("s1")["refusals"] == 3
+    assert operator_mode.reply_refusal(repeat, env) == ""
+    assert operator_mode._load("s1")["refusals"] == 4
+    assert operator_mode.reply_refusal({**repeat, "stop_hook_active": False}, env) == refused
+    assert operator_mode._load("s1")["refusals"] == 1
+    assert operator_mode.reply_refusal({**repeat, "session_id": "fresh"}, env) == refused
+    assert operator_mode._load("fresh")["refusals"] == 1
+    assert operator_mode.reply_refusal({"session_id": "", "last_assistant_message": "a b c d"}, env) == ""
+    assert operator_mode.reply_refusal({"session_id": "s1"}, env) == ""
+
+
+def test_spoken_text_drops_markers_and_comments_in_linear_scan():
+    spoken = operator_mode._spoken
+    assert spoken("a <!-- @lesson -->x y<!-- @/lesson --> b") == "a    b"
+    assert spoken("a <!-- @decision date=1 -->x<!-- note -->y<!-- @/lesson -->z<!-- @/decision -->b") == "a     b"
+    assert spoken("a <!-- note -->b") == "a  b"
+    assert spoken("a <!-- note -->b @/XXXX") == "a  b @/XXXX"
+    assert spoken("a <!-- @lesson -->x y") == "a  x y"
+    assert spoken("a <!-- open") == "a  <!-- open"
+    assert spoken("x<!-- @a -->y<!-- open") == "x y <!-- open"
+    assert spoken("<!-- @/lesson -->a") == " a"
+    assert spoken("<!-- x @y -->z<!-- @/y -->w") == " z w"
+    assert spoken("<!--@a-->x<!--@/a-->y") == "  y"
+    assert spoken("<!-- @a -->x<!-- @/ab -->y<!-- @/a -->z") == "   z"
+    assert spoken("<!-- @a -->x<!-- @a -->y<!-- @/a -->z") == "   z"
+    assert spoken("a <!-- n -->b-->c") == "a  b-->c"
+
+
+def test_a_failing_reply_check_is_logged_and_never_raises_into_the_stop_hook(monkeypatch):
+    logged = []
+    monkeypatch.setattr(operator_mode, "reply_refusal", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
+    monkeypatch.setattr(hook_manager, "log", lambda *a, **k: logged.append(a))
+    monkeypatch.setattr(hook_manager, "_swarm_heartbeat", lambda *a, **k: None)
+    hook_manager.on_stop({"session_id": "s1", "last_assistant_message": LONG, "hook_event_name": "Stop"})
+    assert ("conditions stop failed", {"error": "disk full"}) in logged
 
 
 def test_a_failing_reminder_is_logged_and_never_raises_into_the_hook(monkeypatch):

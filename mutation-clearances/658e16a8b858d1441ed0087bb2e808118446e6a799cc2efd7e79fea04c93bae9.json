@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__where__mutmut_9:f74da33c155aa6bd4b6046329b6b2cecc9092b364f45c7e2bf0e3fa70064e5bc": {
+    "reader": "standards_reader",
+    "reason": "Only the case of the records.ledger_slug and records.swarm_slug identifiers and the OR keyword changes, which SQLite treats as case-insensitive."
+  }
+}

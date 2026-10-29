@@ -73,7 +73,7 @@ jobs:
           exit 1
       - name: Install dependencies shared by both revisions
         working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Prepare identical hierarchy probes for base and head
         run: |
           mkdir hierarchy-evidence
@@ -107,13 +107,17 @@ jobs:
         run: redis-cli -p 6379 shutdown nosave || true
       - name: Preserve the pair's hierarchy profiles and exact response bodies
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./head/.github/actions/retry-upload
         with:
+          after-cancel: true
           name: hierarchy-pair-${{ matrix.pair }}
           path: hierarchy-evidence/*.json
           if-no-files-found: error
+          retention-days: 7
 
   load:
+    env:
+      CONDITIONS_TRUSTED_OWNERS: ${{ github.repository_owner }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 10
     strategy:
@@ -152,7 +156,7 @@ jobs:
           exit 1
       - name: Install dependencies shared by both revisions
         working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Prepare the same load harness for base and head
         run: |
           mkdir load-evidence
@@ -192,13 +196,15 @@ jobs:
         run: redis-cli -p 6379 shutdown nosave || true
       - name: Preserve the pair's load measurements and server logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./head/.github/actions/retry-upload
         with:
+          after-cancel: true
           name: load-pair-${{ matrix.pair }}
           path: |
             load-evidence/*.log
             load-evidence/*/server.log
           if-no-files-found: error
+          retention-days: 7
 
   grade:
     needs: [load, hierarchy]

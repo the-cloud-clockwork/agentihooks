@@ -25,9 +25,12 @@ sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
 python3 tests/chart_examples.py "$chart"
 python3 tests/chart_github_auth.py "$chart"
 python3 tests/chart_hive_home.py "$chart"
+python3 tests/chart_hive_rollout.py
 python3 tests/chart_hive_only.py "$chart"
 python3 tests/chart_hub.py "$chart"
+python3 tests/chart_ledger_rollout.py "$chart"
 python3 tests/chart_nats.py "$chart"
+python3 tests/chart_scratch_swarms.py "$chart"
 
 finish() {
   status=$?
@@ -57,6 +60,8 @@ finish() {
     kubectl exec "$release-redis-0" -- redis-cli ping || true
     kubectl exec "$ledger_pod" -- env SLUG="$slug" python -c 'import json, os; from scripts.swarm.store import connect; store = connect(); key = store.key(os.environ["SLUG"], "tick-lock"); raw = store.redis.get(key); held = json.loads(raw) if raw else {}; print(json.dumps({"tick_lock": {field: held.get(field) for field in ("epoch", "host", "pid", "start")}, "ttl_ms": store.redis.pttl(key)}))' || true
     kubectl get pods "${controller[@]}" -o jsonpath='{range .items[*].status.initContainerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}{range .items[*].status.containerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}' || true
+    kubectl exec "deployment/$release-controller" -c controller -- sh -c 'cat /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory.peak' || true
+    kubectl get events --sort-by=.lastTimestamp | grep -F "$release-controller" | tail -30 || true
     kubectl logs "$ledger_pod" --tail 100 || true
   fi
   kind delete cluster --name "$cluster" || true
@@ -102,7 +107,7 @@ keep_layers() {
   keep_layers swarm terminal
 ) &
 build=$!
-kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
+{ node="$(bash "$chart/ci/pull-kind-node.sh")" && kind create cluster --name "$cluster" --image "$node"; } &
 cluster_setup=$!
 load_lock="$(mktemp)"
 trap finish EXIT
@@ -151,6 +156,16 @@ if [[ -n "$(ledger_reload)" ]]; then
   printf 'the plain http ledger StatefulSet asked Reloader to watch a TLS secret\n' >&2
   exit 1
 fi
+arenas="$(helm template "$release" "$chart" --show-only templates/ledger.yaml | python3 -c '
+import sys, yaml
+found = [doc for doc in yaml.safe_load_all(sys.stdin) if doc and doc["kind"] == "StatefulSet"]
+ledger = next(c for c in found[0]["spec"]["template"]["spec"]["containers"] if c["name"] == "ledger")
+print(next((e.get("value", "") for e in ledger["env"] if e["name"] == "MALLOC_ARENA_MAX"), ""))')"
+if [[ $arenas != 2 ]]; then
+  printf 'the ledger container sets MALLOC_ARENA_MAX to %s, not 2 as the Compose ledger does\n' "${arenas:-nothing}" >&2
+  exit 1
+fi
+printf 'the ledger container limits malloc arenas to two\n'
 ledger_values="$(mktemp)"
 printf 'ledger:\n  secretEnv:\n    - {name: AGENTIHOOKS_SWARM_DATABASE_URL, secretName: swarm-ledger-database, key: url}\n' >"$ledger_values"
 helm template "$release" "$chart" "${secrets[@]}" -f "$ledger_values" \
@@ -177,11 +192,6 @@ for tag in "$digest" "@$digest" "$(printf 'b%.0s' $(seq 40))"; do
     exit 1
   fi
 done
-refusal="$(helm template "$release" "$chart" --set ledger.replicas=2 2>&1 >/dev/null || true)"
-if [[ $refusal != *"ledger.replicas must be 1"* ]]; then
-  printf 'the chart did not refuse two ledger writers: %s\n' "$refusal" >&2
-  exit 1
-fi
 refusal="$(helm template "$release" "$chart" --set controller.api.enabled=true 2>&1 >/dev/null || true)"
 if [[ $refusal != *"controller.api.swarm must name the swarm"* ]]; then
   printf 'the chart did not refuse a control API without a swarm: %s\n' "$refusal" >&2
@@ -238,6 +248,8 @@ plant_hive_join 'the hive join command is' --set hive.join.memberRedisUrl=rediss
 plant_hive_join 'the hive join Service ports are' --set hive.join.port=8771
 plant_hive_join 'the hive join volumes are' --set hive.join.tlsSecretName=other-tls
 plant_hive_join 'the hive join env is' --set hive.join.redisSecret.name=swarm-redis
+plant_hive_join 'the hive join env is' --set hive.join.natsSigner.trustedOperator=OAOTHER
+plant_hive_join 'the hive join volumes are' --set hive.join.natsSigner.secretName=other-signer
 plant_hive_join 'the hive join tolerations are' --set-json 'hive.join.tolerations=[{"operator":"Exists"}]'
 foreign="$chart/ci/kind-hive-join-foreign-ledger.yaml"
 helm template "$release" "$chart" "${hive_join[@]}" -f "$foreign" \

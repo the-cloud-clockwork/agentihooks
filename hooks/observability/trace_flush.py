@@ -24,9 +24,11 @@ from hooks.context.account_sessions import (
 )
 from hooks.observability.agent_trace import TRIGGER_ENV
 from hooks.observability.correlation import KEYS
-from scripts.scheduler.process_timer import wait as scheduled_wait
+from scripts.scheduler.process_timer import wait as timer_wait
 
 POLL_SEC = 1.0
+POLL_LIMIT_SEC = 5.0
+STOP_REASONS = ("stop", "end")
 IDENTITY_KEYS = (*KEYS, "AGENTIHOOKS_SWARM_LANE")
 ACCOUNT_NAMES = (TOKEN_PREFIX, INTERACTIVE_PREFIX, API_MARKER)
 
@@ -132,6 +134,7 @@ def request(
         "transcript": transcript_path or previous.get("transcript", ""),
         "target": os.environ.get("AGENTIHOOKS_TARGET", "claude"),
         "reason": reason,
+        "stopped": reason in STOP_REASONS or bool(previous.get("stopped")),
         "at": time.time_ns(),
         "identity": _identity(),
     }
@@ -281,6 +284,15 @@ def _lock(session_id: str, wait: float, clock: Callable[[], float], sleep: Calla
                 handle.close()
                 return None
             sleep(POLL_SEC)
+
+
+def scheduled_wait(delay: float) -> None:
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    try:
+        timer_wait(delay, timeout=POLL_LIMIT_SEC)
+    except (ConnectionError, TimeoutError):
+        time.sleep(delay)
 
 
 def supervise(

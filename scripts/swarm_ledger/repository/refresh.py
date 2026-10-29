@@ -74,3 +74,34 @@ def refreshed(connection: Connection, slug: str, state: dict, paths: set) -> dic
         return dict(build(connection, slug, ROOT, state, touched(paths)))
     except KeyError:
         return None
+
+
+def stored_row(connection: Connection, slug: str, path: str) -> tuple | None:
+    for table in TABLES:
+        row = connection.execute(f"SELECT position, kind, value FROM {table} WHERE slug=? AND path=?", (slug, path))
+        found = row.fetchone()
+        if found is not None:
+            return found
+    return None
+
+
+def rebuilt(connection: Connection, slug: str, path: str, old: list, paths: set) -> list | None:
+    """The array at path as stored now, rebuilding only the children paths reached; None when the array itself
+    changed or a child was added, removed or moved."""
+    if path in paths:
+        return None
+    parts, dirty, items = json.loads(path), touched(paths), list(old)
+    for child in {encode(json.loads(changed)[: len(parts) + 1]) for changed in paths}:
+        row = stored_row(connection, slug, child)
+        if row is None or row[1] != "object" or not same_child(old, row[0], json.loads(child)[-1]):
+            return None
+        items[row[0]] = dict(build(connection, slug, child, old[row[0]], dirty))
+    return items
+
+
+def same_child(old: list, position: int, identity: list) -> bool:
+    """Whether the child stored at position is the first old child with the id identity names."""
+    if identity[0] != "id" or identity[2] != 0 or position >= len(old):
+        return False
+    item = old[position]
+    return isinstance(item, dict) and item.get("id") == identity[1]

@@ -26,8 +26,10 @@ def arguments(config: SwarmConfig, harness: str, task: dict) -> list[str]:
     result = ["--codex-transport", transport]
     if transport == APP_SERVER_TRANSPORT:
         result += ["--seat", task["seat"]]
-        previous = task.get("previous_execution_id")
-        if previous:
+        admitted, previous = task.get("admitted_execution_id"), task.get("previous_execution_id")
+        if admitted:
+            result += ["--execution", admitted]
+        elif previous:
             result += ["--previous-execution", previous]
     return result
 

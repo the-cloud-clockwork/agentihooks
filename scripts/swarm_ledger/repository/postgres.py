@@ -1,3 +1,4 @@
+import itertools
 import re
 import sqlite3
 import threading
@@ -5,12 +6,16 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
 
+from scripts.swarm_ledger import request_metrics
+
 from . import hierarchy, refresh
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, Snapshot, SQLiteLedgerRepository
 
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
 WRITER_LOCK = 0x4C454447
 KEPT = 8
+STREAM_ROWS = 2000
+STREAMS = itertools.count()
 LOCK_WAIT = 10
 LOCK_TRIES = 3
 LOCK_REFUSED = f"the ledger writer lock was not granted in {LOCK_TRIES} waits of {LOCK_WAIT} seconds"
@@ -22,6 +27,9 @@ REFUSED_CODE = "LW001"
 SESSION = {
     "options": f"-c lock_timeout={LOCK_WAIT}s -c idle_in_transaction_session_timeout=15s -c statement_timeout=60s"
     f" -c {VERSION_SETTING}={VERSION}",
+    "connect_timeout": 10,
+    # keepalives probe only an idle socket; this ends a request whose bytes a dead link never acknowledges
+    "tcp_user_timeout": 30000,
     "keepalives": 1,
     "keepalives_idle": 30,
     "keepalives_interval": 10,
@@ -143,7 +151,8 @@ def mapped() -> Iterator[None]:
     """Raise Postgres failures as the sqlite3 errors every ledger caller already handles."""
     psycopg2 = errors()
     try:
-        yield
+        with request_metrics.postgres():
+            yield
     except psycopg2.IntegrityError as exc:
         raise sqlite3.IntegrityError(str(exc)) from exc
     except psycopg2.errors.UndefinedTable as exc:
@@ -212,6 +221,18 @@ class Connection:
             cursor = self.raw.cursor()
             cursor.execute(translate(sql, isinstance(parameters, Mapping)), parameters)
         return cursor
+
+    def stream(self, sql: str, parameters: tuple = ()) -> Iterator[tuple]:
+        """Rows of a read the server sends STREAM_ROWS at a time, so no whole result is held here at once."""
+        with mapped():
+            cursor = self.raw.cursor(name=f"stream_{next(STREAMS)}")
+            cursor.execute(translate(sql), parameters)
+        while True:
+            with mapped():
+                batch = cursor.fetchmany(STREAM_ROWS)
+            if not batch:
+                return
+            yield from batch
 
     def lock(self) -> object:
         """The writer lock, asked for again after each wait the server ends at its lock timeout."""
@@ -298,6 +319,9 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
             yield connection
         finally:
             connection.close()
+
+    def _reader(self):
+        return self.connect()
 
     def _set_up(self, connection, address) -> None:
         with self._guard:

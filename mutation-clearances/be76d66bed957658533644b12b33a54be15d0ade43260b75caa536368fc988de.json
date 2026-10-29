@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/proof_swarm.py:scripts.swarm_v2.proof_swarm.x__scratch__mutmut_34:0de0ebe1f60525113a40e360cfcce7554279e9a8ee9866bb35a9ee8e867357e1": {
+    "reader": "standards_reader",
+    "reason": "In scripts.swarm_v2.proof_swarm._scratch, the default of environ.get(HOST_SWARMS_ENV, \"\") only applies when the host-swarm setting is unset. Its value then becomes the single element \"XXXX\" (or \"\" in the original), which is intersected with the keys of listed. Every key of listed has already passed naming.PROOF_RE.fullmatch in the earlier loop of the same function, and that pattern (proof-[0-9a-f]{6}-[a-z0-9]+-\\d+) cannot match \"XXXX\" (uppercase, no proof- prefix) or \"\". The intersection is therefore empty under both the original and the mutant default, so hosted is empty, no SwarmError is raised, and the returned listed is identical. The equivalence depends on the PROOF_RE check staying ahead of the intersection; removing that check would make the mutant's behaviour depend on the default string."
+  }
+}

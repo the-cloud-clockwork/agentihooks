@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from hooks.context import profile_chain
 from hooks.observability.trace_flush import start_time
 from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, RECORDS, BindingStore, TransportRecord, decode
@@ -36,7 +37,16 @@ EXECUTION_PREFIX = "exe-"
 ENDPOINT_ID_CHARS = 16
 PRIVATE_MODE = 0o700
 SHARED_ROLLOUTS = ("sessions", "archived_sessions")
-OMITTED_STATE = (*SHARED_ROLLOUTS, "bin", "history.jsonl", "session_index.jsonl", "log", "tmp", "shell_snapshots")
+STARTUP_FILES = (
+    "config.toml",
+    "hooks.json",
+    "AGENTS.md",
+    "AGENTS.override.md",
+    "rules",
+    "skills",
+    binding.FILE,
+    profile_chain.RENDER_STAMP,
+)
 RUNTIME_SUBDIR = "cx"
 HOME_SUBDIR = ".agentihooks"
 CODEX_HOME_KEY = "codexHome"
@@ -51,6 +61,7 @@ LONG_SOCKET = f"socket path is longer than {SOCKET_PATH_MAX} bytes"
 DAEMON_REFUSED = "app-server takes no --no-daemon flag"
 FOREIGN_CREDENTIALS = "child environment carries other account credentials: {}"
 OTHER_TRANSPORT = "swarm {} runs the {} Codex inbox transport"
+NOT_ADMITTED = "execution {} is not this seat's launching Codex app-server execution on this hive"
 EXITED_EARLY = "app-server exited with status {} before it answered"
 PID_TAKEN = "the server pid no longer belongs to the started process"
 NEVER_ANSWERED = "app-server started but never answered initialize in time"
@@ -78,6 +89,7 @@ class Launch:
     environ: Mapping[str, str]
     server_args: tuple = ()
     previous_execution_id: str = ""
+    execution_id: str = ""
     resume_thread: str = ""
     opening: str = ""
     account_type: str = ""
@@ -107,6 +119,7 @@ class Started:
     record: TransportRecord
     agent: AgentRecord
     process: subprocess.Popen
+    slot_hive: str = ""
 
 
 def runtime_root(environ: Mapping[str, str]) -> Path:
@@ -164,8 +177,22 @@ def admit(store: RedisStore, launch: Launch, deps: Deps) -> AgentRecord:
     target = {"pid": os.getpid(), "pid_start": pid_start} if pid_start else {}
     from scripts.swarm.commands import hive_id
 
+    if launch.execution_id:
+        return adopt(store, launch, chosen, hive_id())
     agent = replace(launch.agent, harness="codex", transport=chosen, hive=hive_id(), runtime_target=target)
     return store.start_execution(launch.slug, agent, launch.previous_execution_id)
+
+
+def adopt(store: RedisStore, launch: Launch, chosen: str, hive: str) -> AgentRecord:
+    agent = store.execution_registry.get(launch.slug, launch.execution_id)
+    current = store.execution_occupants(launch.slug).get(launch.agent.seat)
+    if (
+        current is None
+        or current.execution_id != agent.execution_id
+        or (agent.state, agent.harness, agent.transport, agent.hive) != ("launching", "codex", chosen, hive)
+    ):
+        raise LaunchFailure("execution", NOT_ADMITTED.format(launch.execution_id))
+    return replace(agent, model=launch.agent.model, effort=launch.agent.effort)
 
 
 def wait_ready(
@@ -328,15 +355,22 @@ def _connect_bound(store, bindings, launch, agent, record, process, deps) -> tup
 
 
 def spawn(spec: Launch, deps: Deps, path: Path) -> subprocess.Popen:
+    from scripts.hive import account_slots
+
     try:
-        return deps.popen(
-            server_command(deps.codex_bin, path, spec.server_args),
-            env=dict(spec.environ),
-            cwd=spec.cwd,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
+        return account_slots.execute(
+            "codex",
+            spec.agent.account,
+            {**spec.environ, account_slots.EXECUTION_ENV: spec.agent.execution_id},
+            lambda env: deps.popen(
+                server_command(deps.codex_bin, path, spec.server_args),
+                env=env,
+                cwd=spec.cwd,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            ),
         )
-    except OSError as exc:
+    except (OSError, account_slots.Unavailable) as exc:
         raise LaunchFailure("spawn", SPAWN_FAILED.format(exc)) from exc
 
 
@@ -347,9 +381,7 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
         source,
         home,
         ignore=lambda directory, names: (
-            tuple(name for name in names if name in OMITTED_STATE or ".sqlite" in name)
-            if Path(directory) == source
-            else ()
+            tuple(name for name in names if name not in STARTUP_FILES) if Path(directory) == source else ()
         ),
         ignore_dangling_symlinks=True,
     )
@@ -357,6 +389,9 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
         canonical = (source / name).resolve()
         canonical.mkdir(parents=True, exist_ok=True)
         (home / name).symlink_to(canonical)
+    auth = source / "auth.json"
+    if auth.is_file():
+        (home / "auth.json").symlink_to(auth.resolve())
     binaries = source / "bin"
     if binaries.exists():
         (home / "bin").symlink_to(binaries.resolve())
@@ -440,33 +475,45 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
     try:
         path = socket_path(deps.runtime_root or runtime_root(spec.environ), agent.execution_id)
         record = bindings.reserve(spec.slug, _record(spec, agent, path))
-        spec = execution_home(spec, path.parent)
+        spec = execution_home(replace(spec, agent=agent), path.parent)
         process = spawn(spec, deps, path)
         record = replace(record, server_pid=process.pid, server_start_identity=deps.start_identity(process.pid) or 0)
         bindings.put(spec.slug, record)
         record, agent = _connect_bound(store, bindings, spec, agent, record, process, deps)
     except BaseException as failure:
         try:
-            if process is not None:
-                stop(process)
-        finally:
             try:
-                if record is not None:
-                    error_class = getattr(failure, "error_class", type(failure).__name__)
-                    bindings.put(spec.slug, replace(record, state=FAILED, last_error_class=error_class))
-                    bindings.release(spec.slug, record)
+                if process is not None:
+                    stop(process)
+                    _release_slot(spec.environ.get("AGENTIHOOKS_SLOT_HIVE") or "", agent)
             finally:
                 try:
-                    store.put_agent(spec.slug, replace(agent, state="finished"))
-                    store.drop_agent(spec.slug, agent.name, deps.now_ms())
+                    if record is not None:
+                        error_class = getattr(failure, "error_class", type(failure).__name__)
+                        bindings.put(spec.slug, replace(record, state=FAILED, last_error_class=error_class))
+                        bindings.release(spec.slug, record)
                 finally:
-                    if path is not None:
-                        shutil.rmtree(path.parent)
+                    try:
+                        store.put_agent(spec.slug, replace(agent, state="finished"))
+                        store.drop_agent(spec.slug, agent.name, deps.now_ms())
+                    finally:
+                        if path is not None:
+                            shutil.rmtree(path.parent)
+        except Exception as cleanup:
+            failure.add_note(f"cleanup after the failed launch also failed: {cleanup!r}")
         raise
-    return Started(record, agent, process)
+    return Started(record, agent, process, spec.environ.get("AGENTIHOOKS_SLOT_HIVE", ""))
+
+
+def _release_slot(hive: str, agent: AgentRecord) -> None:
+    if hive:
+        from scripts.hive.account_slots import release
+
+        release(hive, agent.execution_id, "codex", agent.account)
 
 
 def finish(store: RedisStore, slug: str, started: Started, now_ms: int) -> TransportRecord:
+    _release_slot(started.slot_hive, started.agent)
     bindings = BindingStore(store)
     current = bindings.get(slug, started.record.execution_id) or started.record
     record = replace(current, state=EXITED, active_turn_id="", last_transport_activity=now_ms)

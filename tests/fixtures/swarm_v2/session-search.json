@@ -1,0 +1,97 @@
+{
+  "grant": {
+    "principal": "search-fixture",
+    "corpus": "swarm-fixture",
+    "projects": ["github.com/the-cloud-clockwork/agentihooks", "github.com/the-cloud-clockwork/agentibrain-kernel"]
+  },
+  "project": "github.com/the-cloud-clockwork/agentihooks",
+  "other_project": "github.com/the-cloud-clockwork/agentibrain-kernel",
+  "unauthorized_project": "github.com/the-cloud-clockwork/antoncore-private",
+  "foreign_corpus": "personal-corpus",
+  "provider": "claude",
+  "retention": "retain-until-deleted",
+  "policies": {"current": {"version": "turn-v1", "max_chars": 2000}},
+  "index_generation": "fixture-search-v1",
+  "next_index_generation": "fixture-search-v2",
+  "model": {"model": "fixture-concept-embedder-4", "dimension": 4},
+  "next_model": {"model": "fixture-concept-embedder-next-4", "dimension": 4},
+  "limits": {"batch_size": 4, "batch_chars": 8000, "max_batches": 8},
+  "clock": {"queued": 2000.0, "drained": 2010.0},
+  "concepts": [
+    ["database", "locked", "lock", "sqlite3.operationalerror", "busy_timeout", "writer", "writers", "concurrent", "raced"],
+    ["fix", "set", "raise", "waits", "wait", "instead", "updated"],
+    ["chunkindex.build", "build", "grant", "archive", "defined"],
+    ["readme", "format", "formatted", "headings"]
+  ],
+  "sessions": [
+    {
+      "name": "lock",
+      "session_uid": "swarm-fixture:claude:worker-a:search-lock",
+      "source_generation": "device-3:inode-41:anchor-0",
+      "origin": "worker-a:projects/agentihooks/search-lock.jsonl",
+      "project": "github.com/the-cloud-clockwork/agentihooks",
+      "turns": [
+        [
+          {"kind": "user_text", "text": "the ingest batch failed with sqlite3.OperationalError: database is locked"},
+          {"kind": "tool_call", "tool_name": "Bash", "tool_input": {"command": "pytest tests/test_memory_catalog.py"}, "tool_use_id": "toolu_lock_run"},
+          {"kind": "tool_result", "tool_result": "sqlite3.OperationalError: database is locked", "tool_use_id": "toolu_lock_run", "is_error": true},
+          {"kind": "assistant_text", "text": "Two writers raced on the catalog file."}
+        ],
+        [
+          {"kind": "user_text", "text": "fix the concurrent writers"},
+          {"kind": "assistant_text", "text": "Set PRAGMA busy_timeout=5000 in Catalog.__init__ so a second writer waits for the first instead of failing."},
+          {"kind": "tool_call", "tool_name": "Edit", "tool_input": {"file_path": "hooks/memory/catalog.py"}, "tool_use_id": "toolu_lock_edit"},
+          {"kind": "tool_result", "tool_result": "updated", "tool_use_id": "toolu_lock_edit", "is_error": false}
+        ],
+        [
+          {"kind": "user_text", "text": "unrelated: format the readme"},
+          {"kind": "assistant_text", "text": "Formatted the readme headings."}
+        ]
+      ]
+    },
+    {
+      "name": "symbol",
+      "session_uid": "swarm-fixture:claude:worker-a:search-symbol",
+      "source_generation": "device-3:inode-42:anchor-0",
+      "origin": "worker-a:projects/agentihooks/search-symbol.jsonl",
+      "project": "github.com/the-cloud-clockwork/agentihooks",
+      "turns": [
+        [
+          {"kind": "user_text", "text": "where is ChunkIndex.build defined"},
+          {"kind": "tool_call", "tool_name": "Read", "tool_input": {"file_path": "hooks/memory/chunking.py"}, "tool_use_id": "toolu_symbol_read"},
+          {"kind": "tool_result", "tool_result": "def build(self, grant, scope, policy)", "tool_use_id": "toolu_symbol_read", "is_error": false},
+          {"kind": "assistant_text", "text": "ChunkIndex.build reads the archive through the grant check."}
+        ]
+      ]
+    },
+    {
+      "name": "kernel",
+      "session_uid": "swarm-fixture:claude:worker-b:search-kernel",
+      "source_generation": "device-4:inode-51:anchor-0",
+      "origin": "worker-b:projects/agentibrain-kernel/search-kernel.jsonl",
+      "project": "github.com/the-cloud-clockwork/agentibrain-kernel",
+      "turns": [
+        [
+          {"kind": "user_text", "text": "the vault sync failed with sqlite3.OperationalError: database is locked"},
+          {"kind": "assistant_text", "text": "The kernel vault writer held a lock; raise its busy_timeout so writers wait."}
+        ]
+      ]
+    }
+  ],
+  "appended": [
+    [
+      {"kind": "user_text", "text": "capture keeps running during the index rollback"},
+      {"kind": "assistant_text", "text": "Captured while search reads the earlier generation."}
+    ]
+  ],
+  "queries": {
+    "recall": "\"database is locked\" why did the ingest fail",
+    "symbol": "ChunkIndex.build",
+    "stopwords": "why is the"
+  },
+  "expected": {
+    "recall_lexical": ["lock:0:turn", "lock:0:tool"],
+    "recall_semantic": ["lock:1:turn"],
+    "symbol": ["symbol:0:turn"]
+  }
+}

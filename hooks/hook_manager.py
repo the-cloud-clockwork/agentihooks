@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Only import lightweight common module at startup
 from hooks.common import log
+from hooks.context import tool_end
 from hooks.prompt_budget import PromptBudget
 
 
@@ -519,12 +520,9 @@ def on_session_start(payload: dict) -> None:
     # --- Broadcast: register session + deliver pending ---
     # Brain adapter FIRST — publishes brain content to broadcast.json
     try:
-        from hooks.config import BRAIN_ENABLED
+        from hooks.context.brain_adapter import inject_on_session_start
 
-        if BRAIN_ENABLED:
-            from hooks.context.brain_adapter import inject_on_session_start
-
-            inject_on_session_start(session_id, payload.get("cwd", ""))
+        inject_on_session_start(session_id, payload.get("cwd", ""))
     except Exception as e:
         log("brain_adapter session_start failed", {"error": str(e)})
 
@@ -1165,7 +1163,9 @@ def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None
 def _swarm_outcome(payload: dict) -> None:
     try:
         from hooks.context.swarm_heartbeat import outcome
+        from hooks.observability.consultation import search
 
+        search(payload)
         outcome(payload)
     except Exception as e:
         log("swarm outcome record failed", {"error": str(e)})
@@ -1207,7 +1207,16 @@ def _swarm_ledger(payload: dict) -> None:
 
 def _swarm_after_tool(payload: dict) -> None:
     _swarm_outcome(payload)
+    _swarm_tool_end(payload)
+    _hive_join(payload, "tool")
     _swarm_ledger(payload)
+
+
+def _swarm_tool_end(payload: dict) -> None:
+    """Handle PostToolUseFailure too: a failed call still ends, so the stall clock sees it closed."""
+    from scripts.swarm.health.activity import finish
+
+    finish(call_id=payload.get("tool_use_id") or "")
 
 
 def _operator_words(payload: dict) -> bool:
@@ -1246,9 +1255,13 @@ def _master_coding(payload: dict, typed: bool) -> None:
 
 def _operator_question(payload: dict) -> str:
     try:
-        from hooks.context import operator_mode
+        from hooks.context import master_question, operator_mode
 
-        return operator_mode.question_block(payload.get("tool_name"), payload.get("session_id"))
+        return (
+            master_question.move(payload)
+            or master_question.refusal(payload)
+            or operator_mode.question_block(payload.get("tool_name"), payload.get("session_id"))
+        )
     except Exception as e:
         log("operator question check failed", {"error": str(e)})
         return _QUESTION_CHECK_FAILED if payload.get("tool_name") == "AskUserQuestion" else ""
@@ -1451,20 +1464,16 @@ def on_pre_tool_use(payload: dict) -> None:
     try:
         from scripts.swarm.health.activity import record as _record_swarm_activity
 
-        _record_swarm_activity(tool_name, tool_input)
+        _record_swarm_activity(tool_name, tool_input, call_id=payload.get("tool_use_id") or "")
     except Exception as e:
         log("swarm activity record failed", {"error": str(e)})
     _swarm_heartbeat("working", payload=payload)
 
-    _recycle_block = None
-    try:
-        from hooks.context.context_recycle import gate as _recycle_gate
+    from hooks.context.swarm_gates import pretool as _swarm_gates
 
-        _recycle_block = _recycle_gate(tool_name, tool_input, payload.get("session_id", ""))
-    except Exception as e:
-        log("context recycle gate failed", {"error": str(e)})
-    if _recycle_block:
-        raise BlockAction(_recycle_block)
+    _swarm_block = _swarm_gates(tool_name, tool_input, payload.get("session_id", ""))
+    if _swarm_block:
+        raise BlockAction(_swarm_block)
 
     from hooks.lifecycle.guard import pretool as _lifecycle_pretool
 
@@ -2005,9 +2014,9 @@ def on_post_tool_use(payload: dict) -> None:
             recycle_context = _recycle_directive(_trace_session_id)
             if recycle_context:
                 inject_context(recycle_context, also_log=False, skip_compression=True)
-            from hooks.context.project_cache import take_project_context
+            from hooks.context.task_context import deliver_pending
 
-            project_context = take_project_context(_trace_session_id)
+            project_context = deliver_pending(_trace_session_id, "PostToolUse")
             if project_context:
                 inject_context(project_context, also_log=False, skip_compression=True)
             if BROADCAST_ENABLED:
@@ -2294,9 +2303,9 @@ def on_stop(payload: dict) -> None:
     """Handle Stop event."""
     _stop_block = None
     try:
-        from hooks.context import conditions
+        from hooks.context import conditions, operator_mode
 
-        _stop_block = conditions.stop_block(payload)
+        _stop_block = conditions.stop_block(payload) or operator_mode.reply_refusal(payload) or None
     except Exception as e:
         log("conditions stop failed", {"error": str(e)})
     if _stop_block is not None:
@@ -2807,7 +2816,7 @@ EVENT_HANDLERS = {
     "SessionStart": on_session_start,
     "SessionEnd": on_session_end,
     "UserPromptSubmit": on_user_prompt_submit,
-    "PreToolUse": on_pre_tool_use,
+    "PreToolUse": lambda payload: tool_end.closing_denied(on_pre_tool_use, payload, BlockAction, _swarm_tool_end),
     "PostToolUse": on_post_tool_use,
     "Stop": on_stop,
     "SubagentStart": on_subagent_start,
@@ -2815,6 +2824,7 @@ EVENT_HANDLERS = {
     "Notification": on_notification,
     "PreCompact": on_pre_compact,
     "PermissionRequest": on_permission_request,
+    "PostToolUseFailure": _swarm_tool_end,
 }
 
 

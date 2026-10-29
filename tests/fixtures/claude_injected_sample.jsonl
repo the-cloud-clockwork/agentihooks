@@ -1,0 +1,6 @@
+{"type": "user", "message": {"content": [{"type": "text", "text": "fix the bug"}]}}
+{"type": "user", "isMeta": true, "message": {"content": [{"type": "text", "text": "<system-reminder>injected banner</system-reminder>"}]}}
+{"type": "attachment", "attachment": {"type": "hook_additional_context", "content": ["=== CONTEXT INJECTION ==="]}}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "On it."}, {"type": "tool_use", "id": "tu2", "name": "Read", "input": {"file_path": "a.py"}}]}}
+{"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tu2", "content": "print(1)"}]}}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "Fixed."}]}}

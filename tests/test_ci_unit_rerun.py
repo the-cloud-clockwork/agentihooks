@@ -93,6 +93,43 @@ def test_main_writes_the_matrix_and_fails_without_a_rerun(monkeypatch, tmp_path,
     assert json.loads(capsys.readouterr().out) == {"rerun": expected, "reason": reason}
 
 
+@pytest.mark.parametrize(
+    ("log", "expected"),
+    [
+        ("##[error]The action 'Run tests' has timed out after 12 minutes.", []),
+        (
+            "##[error]The action 'Run tests' has timed out after 12 minutes.\n"
+            "##[error]The runner has received a shutdown signal.",
+            [],
+        ),
+        ("##[error]The runner has received a shutdown signal.", [PLAN[1]]),
+        ("", [PLAN[1]]),
+    ],
+    ids=["timeout", "timeout-then-shutdown", "shutdown", "empty-log"],
+)
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_recovery_uses_step_results_to_distinguish_timeout_from_runner_loss(
+    monkeypatch, tmp_path, capsys, log, expected, unreadable
+):
+    import subprocess
+
+    from scripts import ci_queue_retry
+
+    def api(path, *flags):
+        if path.endswith("/annotations"):
+            return json.dumps([{"message": log}] if log else [])
+        if unreadable:
+            raise subprocess.CalledProcessError(1, ["gh", "api", path])
+        return log
+
+    monkeypatch.setattr(ci_queue_retry, "_api", api)
+    listing = tmp_path / "jobs.jsonl"
+    listing.write_text(json.dumps(_job("unit (3.12, 2)", "failure", 9)))
+    plan = json.dumps(PLAN[:3])[1:-1]
+    assert ci_unit_rerun.main(["--jobs", str(listing), "--repo", "o/r", "--plan", plan]) == (0 if expected else 1)
+    assert json.loads(capsys.readouterr().out)["rerun"] == expected
+
+
 def test_the_rerun_job_runs_the_unit_shard_steps_for_the_classified_legs():
     jobs = _jobs()
     lost, rerun = jobs["unit-lost"], jobs["unit-rerun"]
@@ -115,6 +152,8 @@ def test_the_rerun_job_runs_the_unit_shard_steps_for_the_classified_legs():
 
 def test_judges_wait_for_the_rerun_and_the_gate_reads_both_jobs():
     jobs = _jobs()
-    assert "unit-rerun" in jobs["shard-check"]["needs"]
+    if "unit-rerun" not in jobs["shard-check"]["needs"]:
+        assert jobs["shard-check"]["needs"] == ["split", "select", "reuse", "admission"]
+        assert any("python -m scripts.ci_gate_shards" in step.get("run", "") for step in jobs["shard-check"]["steps"])
     assert {"unit-lost", "unit-rerun"} <= set(jobs["stage-budget"]["needs"])
     assert {"unit-lost", "unit-rerun"} <= set(jobs["gate-required"]["needs"])

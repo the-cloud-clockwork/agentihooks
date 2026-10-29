@@ -13,9 +13,15 @@ FAILED_RUNS = '.workflow_runs[] | select(.conclusion != "success") | .id'
 
 def classify(jobs: list[dict], notes: Callable[[int], list[str]]) -> str | None:
     red = {job["name"]: job for job in jobs if job.get("conclusion") not in ("success", "skipped")}
-    if set(red) != {WATCHER, GATE}:
-        return None
-    return "rebuild" if any(REBUILT in note for note in notes(red[WATCHER]["id"])) else "drop"
+    if any(job["name"] == "Queue gate summary" for job in jobs):
+        watcher = GATE
+        if watcher not in red or set(red) - {GATE, "Queue gate summary"}:
+            return None
+    else:
+        watcher = WATCHER
+        if set(red) != {WATCHER, GATE}:
+            return None
+    return "rebuild" if any(REBUILT in note for note in notes(red[watcher]["id"])) else "drop"
 
 
 def count(repo: str, day: str, api: Callable[..., str]) -> dict:

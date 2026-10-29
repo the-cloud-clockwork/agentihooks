@@ -1,0 +1,19 @@
+{
+  "source": "session.jsonl",
+  "warn_bytes": 1200,
+  "max_bytes": 1800,
+  "start_clock": 1000.0,
+  "tick_seconds": 5.0,
+  "prompts": [
+    "café outage prompt one",
+    "日本 outage prompt two",
+    "outage prompt three ✓",
+    "outage prompt four",
+    "outage prompt five",
+    "outage prompt six",
+    "outage prompt seven",
+    "outage prompt eight",
+    "outage prompt nine",
+    "outage prompt ten"
+  ]
+}

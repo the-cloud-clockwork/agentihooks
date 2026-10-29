@@ -1,5 +1,7 @@
 import json
+import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,6 +34,32 @@ def proc(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def agents(monkeypatch):
+    found = {"claude": {}, "codex": {}}
+    monkeypatch.setattr(headroom.account_sessions, "local_processes", lambda: found)
+    return found
+
+
+@pytest.fixture(autouse=True)
+def disk(tmp_path, monkeypatch):
+    probed = []
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.delenv("WORKTREE_ROOT", raising=False)
+    monkeypatch.delenv("WT_MIN_FREE_GB", raising=False)
+    monkeypatch.setattr(headroom, "WINDOWS", tmp_path / "no-windows")
+
+    def usage(path):
+        probed.append(Path(path))
+        free = 3 * 2**30 if Path(path) == headroom.WINDOWS else int(9.9 * 2**30)
+        return SimpleNamespace(total=100 * 2**30, used=90 * 2**30, free=free)
+
+    monkeypatch.setattr(shutil, "disk_usage", usage)
+    return probed
+
+
+@pytest.fixture(autouse=True)
 def cgroup(tmp_path, monkeypatch):
     folder = tmp_path / "cgroup"
     folder.mkdir()
@@ -46,9 +74,47 @@ def test_measure_reads_the_five_minute_load_and_available_memory(proc, monkeypat
         "load5": 3.456,
         "available_mb": 8000,
         "total_mb": 15625,
+        "disk_free_gb": 9,
+        "disk_floor_gb": 50,
         "pending": 3,
+        "agents": {"claude": 0, "codex": 0},
         "measured_at": 77_000,
     }
+
+
+def test_measure_reads_free_disk_at_the_nearest_existing_folder_of_the_worktree_root(proc, disk, tmp_path):
+    assert headroom.measure(0, 1, proc)["disk_free_gb"] == 9
+    assert disk == [tmp_path / "home"]
+    (tmp_path / "home" / "dev" / "worktrees").mkdir(parents=True)
+    headroom.measure(0, 1, proc)
+    assert disk[-1] == tmp_path / "home" / "dev" / "worktrees"
+
+
+def test_measure_follows_the_worktree_root_and_floor_the_hive_sets(proc, disk, tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path))
+    monkeypatch.setenv("WT_MIN_FREE_GB", "80")
+    measured = headroom.measure(0, 1, proc)
+    assert (measured["disk_free_gb"], measured["disk_floor_gb"], disk) == (9, 80, [tmp_path])
+
+
+def test_measure_takes_the_smaller_of_the_worktree_root_and_the_windows_drive_like_wt_sh(
+    proc, disk, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(headroom, "WINDOWS", tmp_path)
+    assert headroom.measure(0, 1, proc)["disk_free_gb"] == 3
+    assert disk == [tmp_path / "home", tmp_path]
+
+
+def test_measure_reads_an_empty_worktree_root_or_floor_as_unset_like_wt_sh(proc, disk, tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKTREE_ROOT", "")
+    monkeypatch.setenv("WT_MIN_FREE_GB", "")
+    measured = headroom.measure(0, 1, proc)
+    assert (measured["disk_floor_gb"], disk) == (50, [tmp_path / "home"])
+
+
+def test_measure_counts_the_agent_processes_in_the_process_table_it_reads(proc, agents):
+    agents.update({"claude": {11: "a", 12: "b"}, "codex": {13: "c"}})
+    assert headroom.measure(0, 1, proc)["agents"] == {"claude": 2, "codex": 1}
 
 
 def test_measure_rounds_the_memory_total_down_to_whole_megabytes(proc):
@@ -92,7 +158,10 @@ def test_publish_counts_waiting_launch_orders_and_expires_with_the_heartbeat(red
         "load5": 3.456,
         "available_mb": 8000,
         "total_mb": 15625,
+        "disk_free_gb": 9,
+        "disk_floor_gb": 50,
         "pending": 2,
+        "agents": {"claude": 0, "codex": 0},
         "measured_at": 5_000,
     }
     assert 29_000 < redis.pttl(headroom.key("box")) <= 30_000
@@ -125,6 +194,29 @@ def test_summary_names_each_number_or_missing_telemetry():
     assert headroom.summary(None) == "headroom=missing"
 
 
+@pytest.mark.parametrize(
+    ("node", "pod", "shown"),
+    [(10356, 2576, 2576), (1900, 2576, 1900)],
+)
+def test_summary_shows_the_tighter_of_node_and_pod_memory_with_the_pod_limit(node, pod, shown):
+    record = {
+        "cpus": 16,
+        "load5": 4.73,
+        "available_mb": node,
+        "total_mb": 29857,
+        "pod_total_mb": 4200,
+        "pod_available_mb": pod,
+        "pending": 0,
+        "measured_at": 1,
+    }
+    assert headroom.summary(record) == f"cpus=16\tload5=4.73\tavailable-mb={shown}\tpod-limit-mb=4200\tpending=0"
+
+
+def test_summary_shows_node_memory_when_the_pod_reading_is_incomplete():
+    record = {"cpus": 8, "load5": 1.0, "available_mb": 8000, "pod_total_mb": 4200, "pending": 0, "measured_at": 1}
+    assert headroom.summary(record) == "cpus=8\tload5=1.00\tavailable-mb=8000\tpending=0"
+
+
 def test_beat_publishes_headroom_at_the_beat_time_in_whole_milliseconds(redis, monkeypatch):
     calls = []
     monkeypatch.setattr(
@@ -149,7 +241,7 @@ def test_beat_leaves_headroom_with_its_heartbeat_when_a_later_step_fails(redis, 
     monkeypatch.setattr(daemon, "execution_report", fails)
     with pytest.raises(RuntimeError, match="^herdr timed out$"):
         daemon.beat(redis, "machine")
-    assert redis.hget(registry.key("machine"), "heartbeat_at") == "12345"
+    assert registry.show(redis, "machine")["heartbeat_at"] == 12345
     assert json.loads(redis.get(headroom.key("machine")))["measured_at"] == 12_345
 
 
@@ -182,6 +274,24 @@ def limit(cgroup, files):
         (cgroup / name).write_text(text)
 
 
+def test_hive_list_shows_a_pod_hive_within_its_pod_memory_limit(redis, proc, cgroup, monkeypatch, capsys):
+    limit(
+        cgroup,
+        {
+            "memory.max": "4404019200\n",
+            "memory.current": "2300563456\n",
+            "memory.stat": "inactive_file 629370880\n",
+        },
+    )
+    monkeypatch.setattr(headroom.os, "cpu_count", lambda: 16)
+    monkeypatch.setattr(cli, "redis_client", lambda: redis)
+    monkeypatch.setattr(cli, "now_ms", lambda: 5_000)
+    registry.update(redis, "anton-2", ["ui=no"])
+    headroom.publish(redis, "anton-2", 5_000, proc)
+    assert cli.main(["list"]) == 0
+    assert "\tcpus=16\tload5=3.46\tavailable-mb=2606\tpod-limit-mb=4200\tpending=0\n" in capsys.readouterr().out
+
+
 def test_measure_adds_the_pod_memory_and_cpu_limits_beside_the_node_reading(proc, cgroup, monkeypatch):
     monkeypatch.setattr(headroom.os, "cpu_count", lambda: 8)
     limit(cgroup, POD_LIMITS)
@@ -194,7 +304,10 @@ def test_measure_adds_the_pod_memory_and_cpu_limits_beside_the_node_reading(proc
         "pod_available_mb": 5400,
         "pod_cpus": 2.5,
         "pod_cpu_usec": 9_000_000,
+        "disk_free_gb": 9,
+        "disk_floor_gb": 50,
         "pending": 0,
+        "agents": {"claude": 0, "codex": 0},
         "measured_at": 5,
     }
 

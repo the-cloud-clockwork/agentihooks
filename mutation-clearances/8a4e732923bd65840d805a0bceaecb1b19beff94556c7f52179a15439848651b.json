@@ -1,0 +1,6 @@
+{
+  "scripts/recall/store.py:scripts.recall.store.xǁSQLiteRecallStoreǁsources__mutmut_4:db1b4d27f35104c7f9946e659b76585367627875a8e1083fd7adc57bda89b5de": {
+    "reader": "standards_reader",
+    "reason": "Lowercasing select name from sqlite_master where type = 'table' leaves the 'table' literal intact, so the set of table names is unchanged."
+  }
+}

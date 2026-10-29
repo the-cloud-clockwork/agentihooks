@@ -17,7 +17,7 @@ TEST = "tests/swarm_ledger/test_alerts_page.py::test_the_panel_fold_is_remembere
 OTHER = "tests/Inbox_Cases/test_Notify.py::TestNotify::test_Notify_Within_Budget"
 TEXT = (
     "The test the panel fold is remembered after a reload in the swarm ledger alerts page tests passed only"
-    " on a retry in 2 dev runs within seven days."
+    " on a retry in 2 dev runs within seven days. Proposed fix: make it pass on the first run."
 )
 LISTING = "repos/{owner}/{repo}/actions/artifacts?name=flake-budget&per_page=100"
 JQ = '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "dev")][0].id // empty'
@@ -37,6 +37,8 @@ def _budget(*tests):
 def _gh(calls, budget=None, artifact="77", archive=None):
     def run(command, **kwargs):
         calls.append((command, kwargs))
+        if "/commits?" in command[2]:
+            return subprocess.CompletedProcess(command, 0, "", "")
         if command[2] == LISTING:
             return subprocess.CompletedProcess(command, 0, f"{artifact}\n", "")
         return subprocess.CompletedProcess(command, 0, archive if archive is not None else _zip(budget), b"")
@@ -86,11 +88,11 @@ def test_a_test_flaky_in_two_runs_is_filed_once_in_plain_words(swarm):
         (
             "sw",
             "The test notify within budget in the inbox cases notify tests passed only on a retry in 2 dev runs"
-            " within seven days.",
+            " within seven days. Proposed fix: make it pass on the first run.",
         ),
     ]
     assert all(ledger_comments.problems(text, "item") == [] and plain(text, "item") == text for _, text in ledger.added)
-    assert actions == ["filed a ledger follow up for a test flaky in two dev runs within seven days"] * 2
+    assert actions == ["filed a ledger follow up for a test flaky in 2 dev runs within seven days"] * 2
     assert calls[0][0][4] == JQ and calls[0][1]["cwd"] == "/repo"
     raised = f"{PREFIX}:sw:ci-budget:flaky:{TEST}"
     assert flakes.RAISED_TTL_S == 604800
@@ -102,7 +104,8 @@ def test_a_test_flaky_in_two_runs_is_filed_once_in_plain_words(swarm):
     newer = "tests/test_page.py::test_reload"
     flakes.refresh("sw", config, store, ledger, later + defects.REFRESH_MS, run=_gh(calls, _budget(TEST, newer)))
     assert [text for _, text in ledger.added[2:]] == [
-        "The test reload in the page tests passed only on a retry in 2 dev runs within seven days."
+        "The test reload in the page tests passed only on a retry in 2 dev runs within seven days. Proposed fix: make"
+        " it pass on the first run."
     ]
 
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from scripts.doctor.words import gist, plural
 from scripts.inbox.seats import is_seat
-from scripts.inbox.store import CLOSED
+from scripts.inbox.store import CLOSED, OPERATOR
 from scripts.inbox.wake import TO_MASTER, TO_OPERATOR, WOKEN
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 
@@ -22,6 +22,8 @@ class Receiver:
     occupant: str = ""
     harness: str = ""
     seat_wait: bool = False
+    task: str = ""
+    bound_at: int = 0
 
 
 def findings(items, now_ms, window_ms, receivers=None):
@@ -43,6 +45,8 @@ def _route(item):
 
 
 def _recipient(item, receivers):
+    if item["address"] == OPERATOR:
+        return "addressed to the operator, reached only through the ledger page relay"
     receiver = (receivers or {}).get(item["address"])
     if receiver is None:
         return "recipient state unavailable"
@@ -60,11 +64,27 @@ def reader(item):
     return next((e.get("by", "") for e in reversed(item["history"]) if e.get("state") in ("delivered", "read")), "")
 
 
+def _task_mismatch(item, receivers):
+    receiver = receivers.get(item["address"], Receiver())
+    task = item.get("task", "")
+    if (
+        item["state"] == "pending"
+        and is_seat(item["address"])
+        and receiver.live
+        and task
+        and receiver.task
+        and task != receiver.task
+    ):
+        return (f"notice task {task}; occupant holds {receiver.task}",)
+    return ()
+
+
 def past_window(items, now_ms, window_ms, receivers=None):
     found, receivers = [], receivers or {}
     for item in items:
         waited = now_ms - item["created_at"]
-        if item.get("fyi") or item["state"] in CLOSED or waited < window_ms:
+        bound_at = receivers.get(item["address"], Receiver()).bound_at
+        if item.get("fyi") or item["state"] in CLOSED or now_ms - max(item["created_at"], bound_at) < window_ms:
             continue
         receiver = receivers.get(reader(item)) or receivers.get(item["address"], Receiver())
         if not _waiting(item, receiver, window_ms):
@@ -72,7 +92,13 @@ def past_window(items, now_ms, window_ms, receivers=None):
         if not receiver.live and receivers.get(item["address"], Receiver()).seat_wait:
             continue
         minutes = waited // MINUTE_MS
-        category = "unread delivery" if item["state"] == "pending" else "delivered backlog"
+        mismatch = _task_mismatch(item, receivers)
+        if mismatch:
+            category = "task ownership mismatch"
+        elif item["state"] != "pending":
+            category = "delivered backlog"
+        else:
+            category = "page relay missed" if item["address"] == OPERATOR else "unread delivery"
         found.append(
             Finding(
                 "inbox past window",
@@ -84,10 +110,16 @@ def past_window(items, now_ms, window_ms, receivers=None):
                     _recipient(item, receivers),
                     plural(len(_steps(item, WOKEN)), "wake"),
                     plural(sum(len(_steps(item, e)) for e in RAISED), "escalation"),
+                    *mismatch,
                 ),
                 f"open past the {plural(window_ms // 1000, 'second')} retry window",
                 minutes,
-                evidence_identity=(item["state"], len(_steps(item, WOKEN)), sum(len(_steps(item, e)) for e in RAISED)),
+                evidence_identity=(
+                    item["state"],
+                    len(_steps(item, WOKEN)),
+                    sum(len(_steps(item, e)) for e in RAISED),
+                    *mismatch,
+                ),
             )
         )
     return found

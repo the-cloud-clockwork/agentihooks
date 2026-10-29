@@ -62,6 +62,7 @@ def keep(source: Path, out: Path, tests: set[str], moved: dict[str, dict[int, in
                 if start is not None and end is not None
             ]
             db.executemany("insert or ignore into arc (file_id, context_id, fromno, tono) values (?, ?, ?, ?)", shifted)
+        db.execute("delete from file where id not in (select file_id from arc union select file_id from line_bits)")
     return len({node(context.rsplit("|", 1)[0]) for _, context in contexts if context} & tests)
 
 
@@ -113,7 +114,8 @@ def main(argv: list[str] | None = None) -> int:
         artifact = os.environ.get("ARTIFACT", str(args.coverage))
         print(f"::error::The dev coverage {artifact} from {args.commit} is unusable ({unusable})")
         return 1
-    tests = set(json.loads(args.reused.read_text())["tests"])
+    deselected = json.loads(args.reused.read_text())
+    tests = set(deselected["tests"]) - set(deselected.get("branch", []))
     moved = moved_lines(args.repo, args.commit, args.head)
     count = keep(args.coverage, args.out, tests, moved)
     captures = keep_captures(args.captures, args.captures_out, tests)

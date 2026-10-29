@@ -22,7 +22,7 @@ from scripts.swarm.resume import blocker
 from scripts.swarm.snapshot import ledger_source
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 from scripts.swarm.templates import DEFAULT_PROFILES
-from scripts.swarm.tick import placed_record, primed
+from scripts.swarm.tick import SUSPECT, placed_record, primed
 from scripts.swarm_v2 import master_fill
 from scripts.swarm_v2 import masters as master_seats
 
@@ -38,10 +38,17 @@ OFFER = "Start a new master instead? [y/N] "
 NONE_RECORDED = "no earlier master is recorded"
 RESUMED = (
     "The operator brought you back with agentihooks swarm {slug} master up as {name}, the master of this swarm. "
-    "Time passed and other agents may have moved the work. Before acting, re-read the ledger with {ledger} and your "
-    "inbox, then continue as master."
+    "Time passed and other agents may have moved the work. Before acting, read your inbox and the items you need one "
+    "at a time with agentihooks ledger --slug {slug} get tasks/<id> and agentihooks ledger --slug {slug} tasks, "
+    "never {ledger}, then continue as master."
 )
 RECORD_FIELDS = {f.name for f in fields(AgentRecord)}
+LEAD_STARTING = ("starting", SUSPECT)
+STARTING = (
+    "the front door master {name} is {state} and every master seat is held (master seat count {count}), so no "
+    "other master starts; "
+    "raise the count with set masters=N, or run master up --replace to retire it first"
+)
 
 
 @dataclass(frozen=True)
@@ -201,6 +208,10 @@ def _front_doors(store, slug, live):
     return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.name in live]
 
 
+def _starting_leads(store, slug):
+    return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.state in LEAD_STARTING]
+
+
 def _free_seat(store, slug, live):
     taken = master_fill.taken_seats(store, slug, live)
     return next(
@@ -228,15 +239,20 @@ def _beside(store, slug, runtime, at, live):
 
 def _fresh(store, slug, runtime, at, live, replace_live=False):
     front = _front_doors(store, slug, live)
-    if front and not replace_live:
+    leads = front or _starting_leads(store, slug)
+    if leads and not replace_live:
+        count = master_seats.MasterSeats(store.redis).count(slug)
+        if _free_seat(store, slug, live) > count:
+            raise SwarmError(STARTING.format(name=leads[0].name, state=leads[0].state, count=count))
         return _beside(store, slug, runtime, at, live)
     take_master.retired(store, slug, runtime, front)
     return _new(store, slug, runtime, at)
 
 
 def up(store, slug, runtime, at, choice, ask, say):
-    """Launch the chosen master; ask last or new when no choice is given. Never refuses because a master is live:
-    a new master takes its own seat beside a live front door, and a replacing one retires the front door first."""
+    """Launch the chosen master; ask last or new when no choice is given. Refuses beside a live master only when
+    every counted master seat is held: a new master takes a free counted seat beside a live front door, and a
+    replacing one retires the front door first."""
     replace_live = choice == REPLACE
     choice = NEW if replace_live else choice
     live = runtime.live_names()

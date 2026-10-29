@@ -188,7 +188,7 @@ def test_refusal_names_the_autonomy():
     assert ledger_answer.refusal(DELEGATE) == ""
     assert ledger_answer.refusal(FULL) == ""
     assert ledger_answer.refusal(MANUAL) == (
-        "answer refused: at manual autonomy the operator answers questions; raise it with priority add"
+        "answer refused: at manual autonomy the operator answers questions; wait for him to write"
     )
     assert ledger_answer.refusal("") == "answer refused: this ledger has no swarm, so the operator answers questions"
 

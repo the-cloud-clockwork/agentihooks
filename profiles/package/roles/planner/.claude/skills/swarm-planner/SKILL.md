@@ -38,6 +38,15 @@ first: the project intent, the phase intent and any send back note.
   when it expires. Act on every OPERATOR line about your phase, then
   `agentihooks ledger --slug <slug> --as <name> ack`.
 
+## Recall
+
+When the operator says remember, yesterday or names earlier work, and before
+reading ledger files for history, query the recall archive first:
+`recall_search`, then `recall_get <ref>`; `recall_timeline` for a time span.
+Recall holds swarm and ledger history; the brain holds fleet lessons. Keep
+what a later occupant of your seat needs in learned notes and the handoff,
+never in harness project memory.
+
 ## Inbox
 
 `agentihooks msg inbox` lists your items, `agentihooks msg read <id>` shows one.
@@ -74,6 +83,12 @@ first: the project intent, the phase intent and any send back note.
    both its computed plan range and proof contract.
 5. Work outside the phase is a follow up:
    `agentihooks ledger --slug <slug> --as <name> followup add "<text>"`.
+6. A task or follow up add may be refused as a duplicate. The refusal names the
+   item it repeats with its state, rank and phase, or only its title when that
+   item landed while the check ran. It will be built or is already built, so
+   drop the add. Only when the new item is a different change, repeat the add
+   with `--not-duplicate "<why it differs>"`. Done when every add landed or was
+   dropped as a repeat.
 
 ## Waits
 

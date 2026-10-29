@@ -36,6 +36,25 @@ def test_a_check_and_set_conflict_rereads_and_retries_up_to_three_times():
     assert len(fake.writes) == 4
 
 
+def test_create_writes_only_a_missing_record():
+    fake = FakeBao()
+    assert openbao_kv.create(_bao(fake), openbao_kv.CODEX_CREDS, {"A": "1"}) is True
+    assert (fake.data, fake.version) == ({"A": "1"}, 1)
+    assert json.loads(fake.writes[0].data) == {"options": {"cas": 0}, "data": {"A": "1"}}
+
+
+def test_create_reports_a_record_another_writer_created_first():
+    fake = FakeBao(conflicts=1)
+    assert openbao_kv.create(_bao(fake), openbao_kv.CODEX_CREDS, {"A": "1"}) is False
+    assert fake.data == {} and len(fake.writes) == 1
+
+
+def test_create_raises_a_failure_that_is_not_a_conflict():
+    with pytest.raises(openbao_kv.OpenBaoError) as raised:
+        openbao_kv.create(_bao(FakeBao(fail_writes=True)), openbao_kv.CODEX_CREDS, {"A": "1"})
+    assert raised.value.status == 503
+
+
 def test_a_response_that_is_not_json_raises_an_openbao_error():
     fake = FakeBao({"KEEP": "k"})
     fake.garbage_writes = True

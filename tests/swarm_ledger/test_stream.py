@@ -32,10 +32,13 @@ def live(monkeypatch):
     monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: {"config": {"state": "running"}})
     monkeypatch.setattr(stream, "HEARTBEAT_S", 0.2)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd.daemon_threads = False
     threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
     yield httpd.server_address[1], legacy_page.stored_token(html_path)
     httpd.shutdown()
+    server.HUB.drain()
     httpd.server_close()
+    assert server.HUB.watched() == []
 
 
 def connect(port, token, cursor=None, timeout=5):
@@ -54,11 +57,25 @@ def frames(response):
     return stream.parse(lines)
 
 
-def next_of(reader, names):
+def next_of(reader, names, timeout=5):
+    deadline = time.monotonic() + timeout
     for name, data, cursor in reader:
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"stream timed out waiting for {names}")
         if name in names:
             return name, data, cursor
     raise AssertionError(f"stream ended before {names}")
+
+
+def test_heartbeats_do_not_extend_the_next_event_deadline(monkeypatch):
+    from types import SimpleNamespace
+
+    ticks = iter([0, 0.25, 1])
+    monkeypatch.setattr(sys.modules[__name__], "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    reader = iter([("heartbeat", {}, None), ("heartbeat", {}, None), ("ledger", {}, "late")])
+    with pytest.raises(AssertionError, match="timed out.*ledger"):
+        next_of(reader, {"ledger"}, timeout=1)
+    assert next(reader) == ("ledger", {}, "late")
 
 
 def comment(n):
@@ -103,7 +120,9 @@ def test_a_reconnect_replays_the_changes_it_missed_and_nothing_else(live):
     _, snapshot, cursor = next_of(frames(response), {"snapshot"})
     conn.close()
     server.repository.apply_ops(SLUG, ops=[comment(2)])
+    server.repository.drain(5)
     server.repository.apply_ops(SLUG, ops=[comment(3)])
+    server.repository.drain(5)
     conn, response = connect(port, token, cursor)
     assert response.status == 200
     reader = frames(response)

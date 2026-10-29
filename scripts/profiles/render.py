@@ -16,6 +16,7 @@ from pathlib import Path
 from hooks.context import profile_chain, quarantine
 from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import binding, browser, bundle_copy, connectors, homes, plugins, sources
+from scripts.swarm import brain_binding
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_hook_trust import trusted_state
@@ -75,9 +76,9 @@ def _resolve(name: str) -> Path | None:
     local = _i.PROFILES_DIR / name
     if local.is_dir():
         return local
-    candidate = copy / "profiles" / name
-    if candidate.is_dir():
-        return candidate
+    for pinned in (copy, bundle_copy.current_user()):
+        if pinned is not None and (pinned / "profiles" / name).is_dir():
+            return pinned / "profiles" / name
     return _i._resolve_linked_profile_dir(name) or _i._package_role_dir(name)
 
 
@@ -95,9 +96,12 @@ def declared(name: str) -> list[str]:
 def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
     if _resolve(name) is None:
         raise ValueError(f"Profile '{name}' not found")
-    always = [name, *declared(name)]
+    managed = brain_binding.current(os.environ) is not None
+    always = [name, *(o for o in declared(name) if managed or o != brain_binding.OVERLAY)]
     worn = profile_chain.worn(_resolve_chain(always), list(overlays), _resolve)
-    return _resolve_chain([*always, *worn])
+    dirs = _resolve_chain([*always, *worn])
+    profile_chain.require_capabilities(dirs, profile_chain.hive_capabilities(os.environ))
+    return dirs
 
 
 def _bundle() -> Path | None:
@@ -109,6 +113,19 @@ def _bundle() -> Path | None:
             f"linked bundle {linked} is missing; relink it with agentihooks bundle link <path> before rendering"
         )
     return bundle
+
+
+def _user() -> Path | None:
+    if bundle_copy.is_pinned():
+        return bundle_copy.current_user()
+    _i = _install_module()
+    user = _i._get_user_bundle_path()
+    linked = (_i._load_state().get("user_bundle") or {}).get("path")
+    if user is None and linked:
+        raise ValueError(
+            f"linked user bundle {linked} is missing; relink it with agentihooks bundle link --user <path> before rendering"
+        )
+    return user
 
 
 def _base_digest() -> str:
@@ -133,20 +150,28 @@ def _profiles_digest(dirs: list[tuple[str, Path]]) -> str:
     return digest.hexdigest()
 
 
+def _commit(root: Path | None) -> str:
+    if root is None:
+        return ""
+    head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True)
+    return head.stdout.strip()
+
+
 def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
-    commit = ""
-    if bundle is not None:
-        head = subprocess.run(["git", "-C", str(bundle), "rev-parse", "HEAD"], capture_output=True, text=True)
-        commit = head.stdout.strip()
+    commit = _commit(bundle)
+    user = _user()
     chain = [n for n, _ in dirs]
     return {
         "bundle_commit": commit,
+        **({"user_bundle_commit": _commit(user)} if user is not None else {}),
         "base": _base_digest(),
         "profiles": _profiles_digest(dirs),
         "chain": chain,
         "overlays": _overlays(dirs),
         "mcp_urls": json.loads(os.environ.get("AGENTIHOOKS_MCP_URLS", "{}")),
         "mcp_bearer_env": json.loads(os.environ.get("AGENTIHOOKS_MCP_BEARER_ENV", "{}")),
+        "hosted_ledger": os.environ.get("AGENTIHOOKS_HOSTED_LEDGER_URL", ""),
+        "swarm_brain": brain_binding.current(os.environ),
         "enabled_plugins": _plugins(chain, _settings("claude", bundle, dirs).get("enabledPlugins") or {}),
         **({"browser": browser.spec()} if browser.proxy_enabled(chain) else {}),
         "corrections": quarantine.digest(),
@@ -158,7 +183,8 @@ def stamp(name: str) -> dict:
 
 
 def _roots(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
-    return ([bundle] if bundle is not None else []) + [d for _, d in dirs]
+    user = _user()
+    return ([bundle] if bundle is not None else []) + ([user] if user is not None else []) + [d for _, d in dirs]
 
 
 def _features(subdir: str, keep, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Path]:
@@ -189,6 +215,8 @@ def claude_environment(doc: dict, dirs: list[tuple[str, Path]]) -> dict:
     from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
 
     env = doc["env"]
+    if hosted := os.environ.get("AGENTIHOOKS_HOSTED_LEDGER_URL"):
+        env["AGENTIHOOKS_HOSTED_LEDGER_URL"] = hosted
     subscribed = _channels(env.get(CHANNELS, ""), dirs)
     if subscribed:
         env[CHANNELS] = subscribed
@@ -269,7 +297,7 @@ def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]])
         else server
         for name, server in servers.items()
     }
-    return browser.configure(servers, [name for name, _ in dirs])
+    return brain_binding.apply(browser.configure(servers, [name for name, _ in dirs]), os.environ)
 
 
 def _seed(src: Path) -> dict:
@@ -321,9 +349,10 @@ def _link_commands(skills: Path, commands: Path) -> None:
 
 def _persona(root: Path, target: str, bundle: Path | None, dirs: list[tuple[str, Path]], chain: list[str]) -> str:
     items = _features("rules", _is_doc, bundle, dirs)
-    sources.write(sources.path(root.name, target, root.parent), sources.rows(bundle, dirs, items))
+    user = _user()
+    sources.write(sources.path(root.name, target, root.parent), sources.rows(bundle, dirs, items, user))
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
-    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER))
+    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER, user))
     ending = f"\n\n{FOOTER}\n"
     text = binding.persona(text.removesuffix(ending)) + ending
     if len(text) > 150_000:
@@ -363,6 +392,10 @@ def profile_dir(name: str, overlays: Sequence[str] = ()) -> Path | None:
 
 def owner(home: Path) -> str | None:
     return homes.owner(rendered_root(), home)
+
+
+def has_codex_rollout(name: str, overlays: Sequence[str], conversation_id: str) -> bool:
+    return homes.has_codex_rollout(rendered_root(), home_key(name, overlays), conversation_id)
 
 
 def _claude_fresh(root: Path, stamp: dict, required: set[str]) -> bool:
@@ -471,7 +504,20 @@ def _codex_skills(bundle: Path | None, dirs: list[tuple[str, Path]], stamp: dict
     return below, plugins.layer_skills(_roots(bundle, dirs))
 
 
-def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), isolate: bool = False) -> Path | None:
+def _link_codex_state(out: Path, operator: Path, login: bool, rollouts: Path | None) -> None:
+    for item in CODEX_STATE:
+        if rollouts is not None and item not in ("auth.json", "hooks.json"):
+            continue
+        if item != "auth.json" or login:
+            _link(out / item, operator / item)
+    for item in homes.CODEX_ROLLOUTS if rollouts is not None else ():
+        (rollouts / item).mkdir(parents=True, exist_ok=True)
+        _link(out / item, rollouts / item)
+
+
+def render_codex(
+    name: str, force: bool = False, overlays: Sequence[str] = (), isolate: bool = False, push: bool = False
+) -> Path | None:
     import tomlkit
 
     from scripts.profiles import codex_master
@@ -493,6 +539,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), i
         "hooks": _file_digest(operator / "hooks.json"),
         "login": (operator / "auth.json").is_file(),
         "isolate": isolate,
+        **({"push": True} if push else {}),
         "skills": {skill: str(path) for skill, path in {**below, **above}.items()},
     }
     root = profile_dir(name, overlays)
@@ -504,6 +551,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), i
         and (out / binding.FILE).is_file()
         and connectors.path(root.name, "codex", root.parent).is_file()
         and _read_json(out / STAMP) == current
+        and all((out / item).is_symlink() for item in (homes.CODEX_ROLLOUTS if isolate else ()))
         and (not master or ((out / "AGENTS.md").is_file() and not (out / "AGENTS.md").is_symlink()))
     ):
         return None
@@ -520,16 +568,14 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), i
         agents = out / "AGENTS.md"
         if agents.is_symlink():
             agents.unlink()
-        _atomic_write(agents, codex_master.persona((claude / "CLAUDE.md").read_text()))
+        _atomic_write(agents, codex_master.persona((claude / "CLAUDE.md").read_text(), push))
     else:
         _link(out / "AGENTS.md", claude / "CLAUDE.md")
     _relink(out / "skills", {**below, **{p.name: p for p in sorted((claude / "skills").iterdir())}, **above})
     _link_commands(out / "skills", claude / "commands")
-    for item in CODEX_STATE:
-        if isolate and item not in ("auth.json", "hooks.json"):
-            continue
-        if item != "auth.json" or current["login"]:
-            _link(out / item, operator / item)
+    _link_codex_state(
+        out, operator, current["login"], homes.rollouts(rendered_root(), home_key(name, overlays)) if isolate else None
+    )
     _link(manifest, sources.path(root.name, "claude", root.parent))
     doc = _codex_config(installed, operator, out, _settings("codex", bundle, dirs))
     if isolate:
@@ -592,13 +638,21 @@ def render(
     overlays: Sequence[str] = (),
     bundle_revision: str = "",
     isolate: bool = False,
+    push: bool = False,
 ) -> Path | None:
     renderers = {"claude": render_claude, "codex": render_codex, "copilot": render_copilot}
     if target not in renderers:
         raise ValueError(f"{target} per-run profiles are not supported")
-    options = {"isolate": isolate} if target == "codex" else {}
+    options = {"isolate": isolate, "push": push} if target == "codex" else {}
     if bundle_revision:
-        with bundle_copy.recorded(_bundle(), bundle_revision, rendered_root()):
+        root_revision, _, user_revision = bundle_revision.partition(":")
+        user = _user()
+        if user is not None and not user_revision:
+            raise ValueError(
+                f"the launch recorded bundle commit {root_revision} and no user bundle commit, but the user bundle "
+                f"at {user} is linked; launch again to record both"
+            )
+        with bundle_copy.recorded(_bundle(), root_revision, rendered_root(), user, user_revision):
             return renderers[target](name, force=force, overlays=overlays, **options)
     return renderers[target](name, force=force, overlays=overlays, **options)
 
@@ -641,9 +695,12 @@ def _seed_linked_profiles(out: Path) -> None:
 def _render_scratch(args: argparse.Namespace) -> int:
     bundle = args.bundle or _bundle()
     _seed_linked_profiles(args.out)
+    user = args.user_bundle or _user()
     env = {**os.environ, "AGENTIHOOKS_HOME": str(args.out.resolve())}
     if bundle is not None:
         env["AGENTIHOOKS_BUNDLE_PATH"] = str(bundle.resolve())
+    if user is not None:
+        env["AGENTIHOOKS_USER_BUNDLE_PATH"] = str(user.resolve())
     argv = [sys.executable, "-m", "scripts.profiles.render", "render", args.name, "--target", args.target]
     # The child resolves the agentihooks home, bundle and corrections store at import, so only a fresh process sees them.
     cwd = Path(__file__).resolve().parents[2]
@@ -661,6 +718,7 @@ def main(argv: list[str] | None = None) -> int:
     render_cmd.add_argument("--overlay", action="append", default=[], help="Wear this overlay; repeat for up to three")
     render_cmd.add_argument("--out", type=Path, help="Render into this scratch agentihooks home, not the live one")
     render_cmd.add_argument("--bundle", type=Path, help="Bundle for --out (default: the linked bundle)")
+    render_cmd.add_argument("--user-bundle", type=Path, help="User bundle for --out (default: the linked user bundle)")
     from scripts.profiles import measure
 
     measure.add_arguments(commands.add_parser("measure", help="Print a profile's first turn input tokens"))
@@ -680,8 +738,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "measure":
         return measure.main(args)
-    if args.bundle is not None and args.out is None:
-        render_cmd.error("--bundle needs --out")
+    if args.out is None:
+        for flag, value in (("--bundle", args.bundle), ("--user-bundle", args.user_bundle)):
+            if value is not None:
+                render_cmd.error(f"{flag} needs --out")
     try:
         if args.out is not None:
             return _render_scratch(args)

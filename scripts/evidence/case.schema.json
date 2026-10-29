@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "case",
+  "type": "object",
+  "required": ["intent", "points"],
+  "additionalProperties": false,
+  "properties": {
+    "intent": {"type": "string", "minLength": 1},
+    "points": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "case": "T-SV2-GAT-04-C",
+  "evidence_class": "mocked",
+  "input_sha256": {
+    "consultation-gates.json": "c6d1d560a5bc254786323168b8bddc662b7bae991051412fc4666cef3c0c2c05"
+  },
+  "observed": {
+    "tests": [
+      "test_c_a_spec_change_invalidates_the_receipt_until_a_new_pack_lands",
+      "test_c_a_new_claim_invalidates_the_receipt_until_a_new_pack_lands",
+      "test_c_a_state_move_keeps_the_receipt",
+      "test_c_an_expired_receipt_is_refused_and_redelivered",
+      "test_outside_a_swarm_task_no_consultation_is_written"
+    ],
+    "spec_change": "refused: the task spec changed after the receipt; the unchanged pack is redelivered at the next refresh with the new revision and the write passes",
+    "new_claim_generation": "refused: the receipt predates the current claim of this task; passes after redelivery",
+    "state_move_without_spec_change": "receipt kept; the pack is deduplicated",
+    "expiry": "refused: the receipt expired; redelivered with the configured expiry",
+    "outside_a_task": "no consultation receipt is written and deduplication is unchanged"
+  },
+  "state": "passed"
+}

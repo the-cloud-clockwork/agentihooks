@@ -47,7 +47,7 @@ def test_a_departed_occupant_is_empty_even_when_its_agent_record_still_says_work
     store.seats.record_exit("demo-ci-1", "ci-1@demo", "left")
     item = {"address": "ci-1@demo", "history": []}
     receiver = read.inbox_receivers(store, box, "demo", [item])[item["address"]]
-    assert receiver == inbox.Receiver(seat_wait=True)
+    assert receiver == inbox.Receiver(seat_wait=True, bound_at=1)
 
 
 @pytest.mark.parametrize(

@@ -21,6 +21,7 @@ LANE = (
 DIRECT = {
     "ci-templates.yml": ("CI templates", "ci-templates"),
     "helm-kind.yml": ("Helm chart in kind", "helm-kind"),
+    "helm-kind-published.yml": ("Published Helm chart in kind", "helm-kind-published"),
     "ledger-load.yml": ("Ledger server load", "ledger-load"),
     "hierarchy-cpu.yml": ("Hierarchy CPU proof", "hierarchy-cpu"),
     "swarm-smoke.yml": ("Swarm container smoke", "swarm-smoke"),
@@ -41,12 +42,18 @@ LANE_USERS = {
     "hive-worker.yml",
     "lost-runner.yml",
     "chart-release.yml",
+    "changelog.yml",
+    "changelog-seed.yml",
     *DIRECT,
 }
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
+CALLED = {
+    "semgrep.yml:feature-tests": "feature fixtures run in a called workflow and must not hold the caller lane",
+    "semgrep.yml:charts": "a job added to a called workflow needs the called lane form for the branch lane grader",
+}
 EXCLUDED = {
     "branch-lanes.yml": "every branch push runs one short grader that must refuse and cancel lane skipping workflows at once",
-    "codex-cache.yml": "main push, six hourly and manual, one short job that seeds the Codex cache, no pull request trigger",
+    "codex-cache.yml": "main push, six hourly and manual, one short job that seeds the Codex and nats server caches, no pull request trigger",
     "coverage-stability.yml": "a manual dispatch runs one short job that only reads dev run data",
     "pages.yml": "a rare manual docs build and deploy; the github-pages environment decides which branches deploy",
     "publish-pypi.yml": "operator release path from main",
@@ -65,6 +72,8 @@ if (_WORKFLOWS / "count-record.yml").is_file():
     LANE_USERS = LANE_USERS | {"count-record.yml"}
 if (_WORKFLOWS / "actions-storage.yml").is_file():
     LANE_USERS = LANE_USERS | {"actions-storage.yml"}
+if (_WORKFLOWS / "ci-minutes.yml").is_file():
+    LANE_USERS = LANE_USERS | {"ci-minutes.yml"}
 
 
 class _Context(dict):
@@ -159,8 +168,19 @@ def test_every_non_required_trigger_is_on_a_lane_or_excluded_with_a_reason():
     assert not users & set(EXCLUDED)
     assert set(EXCLUDED) <= open_triggers
     assert open_triggers <= users | set(EXCLUDED)
-    assert {where for where, block in _blocks() if "hosted-lane" in str(block["group"])} == LANE_USERS
+    assert {where for where, block in _blocks() if "hosted-lane" in str(block["group"])} == LANE_USERS | set(CALLED)
     assert not [where for where, block in _blocks() if "mutation-lane" in str(block["group"])]
+
+
+@pytest.mark.parametrize("where", sorted(CALLED))
+def test_a_called_only_lane_block_never_resolves_to_a_lane(where):
+    assert set(_workflow(where.split(":")[0])[True]) == {"workflow_call"}
+    contexts = list(_contexts(where))
+    assert contexts
+    for github in contexts:
+        resolved = _resolve(_block(where), **github)
+        assert not _is_lane(resolved["group"]), (where, github)
+        assert resolved["queue"] == "single", (where, github)
 
 
 def test_every_lane_user_names_the_same_three_lanes():

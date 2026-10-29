@@ -5,7 +5,9 @@ import re
 import sys
 from pathlib import Path
 
+from hooks.context import brain_routes
 from scripts import gh_config
+from scripts.swarm import brain_binding
 
 # A name outside this shape cannot be a shell variable, and a mistyped line can
 # put a secret in the name, so such a line is reported by position only.
@@ -189,7 +191,7 @@ def _load_brain_env(*, override_file_owned: bool = False) -> None:
     .env already set is left alone, so this is a default, not an override.
     """
     env_file = _brain_env_file()
-    if not env_file.is_file():
+    if os.environ.get(brain_binding.VARIABLE) or not env_file.is_file():
         return
     try:
         lines = env_file.read_text(encoding="utf-8").splitlines()
@@ -293,8 +295,24 @@ def _env_files_fingerprint() -> tuple:
     return tuple(sorted(stamps))
 
 
+def _guard_swarm_brain() -> None:
+    if not os.environ.get(brain_binding.VARIABLE):
+        return
+    os.environ["BRAIN_SOURCE_TYPE"] = "none"
+    if not brain_binding.audience(os.environ):
+        for key in ("BRAIN_URL", "BRAIN_HTTP_TOKEN", "KB_ROUTER_TOKEN"):
+            os.environ.pop(key, None)
+        os.environ["BRAIN_ENABLED"] = os.environ["BRAIN_WRITER_ENABLED"] = "false"
+
+
+def _route_brain() -> None:
+    _guard_swarm_brain()
+    brain_routes.apply(os.environ)
+
+
 _load_user_env()
 _load_brain_env()
+_route_brain()
 _ENV_FINGERPRINT = _env_files_fingerprint()
 # The scripts package pin ran before the env files above could set XDG_CONFIG_HOME.
 gh_config.pin(os.environ)
@@ -340,6 +358,7 @@ def reload_brain_env(force: bool = False) -> dict:
 
     _load_user_env(override_file_owned=True)
     _load_brain_env(override_file_owned=True)
+    _route_brain()
 
     _feed_dir = Path(AGENTIHOOKS_HOME) / "brain-feed"
     _default = "true" if (_brain_http_configured() or (_feed_dir.is_dir() and any(_feed_dir.glob("*.md")))) else "false"
@@ -775,8 +794,15 @@ def _receives(path: Path, role: str | None, choice: dict[str, bool]) -> bool:
     return roles is None or role.casefold() in roles
 
 
+def _manifesto_files(directory: Path) -> list[Path]:
+    return [path for path in directory.glob("*.md") if path.name.casefold() != "readme.md"]
+
+
 def _resolve_manifesto_paths(
-    bundle_root: str | Path | None = None, role: str | None = None, choice: dict[str, bool] | None = None
+    bundle_root: str | Path | None = None,
+    role: str | None = None,
+    choice: dict[str, bool] | None = None,
+    user_root: str | Path | None = None,
 ) -> list[str]:
     explicit = os.getenv("CI_MANIFESTO_PATH")
     if explicit:
@@ -791,14 +817,17 @@ def _resolve_manifesto_paths(
         if root
         else Path.home() / "dev" / "tcc-ecosystem" / "agentihooks-bundle" / "manifestos"
     )
+    user_directory = Path(user_root).expanduser() / "manifestos" if user_root and not manifests_dir else None
     skip = _manifesto_skip_names()
-    if directory.is_dir():
+    if directory.is_dir() or (user_directory and user_directory.is_dir()):
+        mine = _manifesto_files(user_directory) if user_directory and user_directory.is_dir() else []
+        overridden = {path.stem.casefold() for path in mine}
+        shared = _manifesto_files(directory) if directory.is_dir() else []
+        merged = [path for path in shared if path.stem.casefold() not in overridden] + mine
         return [
             str(path)
-            for path in sorted(directory.glob("*.md"), key=lambda item: item.name.casefold())
-            if path.name.casefold() != "readme.md"
-            and path.stem.casefold() not in skip
-            and _receives(path, role, choice or {})
+            for path in sorted(merged, key=lambda item: item.name.casefold())
+            if path.stem.casefold() not in skip and _receives(path, role, choice or {})
         ]
     legacy = Path.home() / "dev" / "tcc-ecosystem" / "documents" / "anton" / "ANTON-CORE-CI-MANIFESTO.md"
     return [str(legacy)] if legacy.is_file() and legacy.stem.casefold() not in skip else []

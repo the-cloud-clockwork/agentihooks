@@ -26,6 +26,15 @@ step and to `proof.md` per piece of evidence.
   when it expires. Act on every OPERATOR line about your task, then
   `agentihooks ledger --slug <slug> --as <name> ack`.
 
+## Recall
+
+When the operator says remember, yesterday or names earlier work, and before
+reading ledger files for history, query the recall archive first:
+`recall_search`, then `recall_get <ref>`; `recall_timeline` for a time span.
+Recall holds swarm and ledger history; the brain holds fleet lessons. Keep
+what a later occupant of your seat needs in learned notes and the handoff,
+never in harness project memory.
+
 ## Inbox
 
 Items addressed to you or your seat arrive in the session at your next tool
@@ -140,7 +149,7 @@ make, another task first): push the branch, open a draft pull request, then
 When red dev Tests is the blocker, add `--dev-red`: the swarm reopens the task
 once a later dev Tests run passes.
 A question for the master without stopping:
-`agentihooks ledger --slug <slug> --as <name> question add "<text>"`.
+`agentihooks msg send master@<slug> "<text>"`.
 
 ## Handoff
 

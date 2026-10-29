@@ -11,10 +11,12 @@ import yaml
 from scripts import init_agent
 from scripts.profiles import binding, plugins
 from scripts.profiles import render as profiles
+from scripts.swarm import launches
 
 OVERLAYS = "AGENTIHOOKS_OVERLAYS"
 BUNDLE_REVISION = "AGENTIHOOKS_BUNDLE_REVISION"
 RECORDED_HOME = "AGENTIHOOKS_RECORDED_PROFILE_HOME"
+PUSH = "AGENTIHOOKS_CODEX_PUSH"
 
 
 def prepare(
@@ -48,6 +50,8 @@ def prepare(
         binding.inspect(Path(recorded), name, agent)
     else:
         options = {"isolate": True} if isolate else {}
+        if agent == "codex" and environ.get(PUSH):
+            options["push"] = True
         profiles.render(agent, name, overlays=overlays, bundle_revision=revision, **options)
     env = {"AGENTIHOOKS_PROFILE": name, profiles.CHANNELS: profiles.channels(name), OVERLAYS: ",".join(overlays)}
     env[BUNDLE_REVISION] = revision
@@ -139,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("\n".join([*(f"{key}={value}" for key, value in env.items()), f"argv={shlex.join(command)}"]))
         return 0
+    launches.record(dict(os.environ))
     return subprocess.run(command, env={**os.environ, **env}).returncode
 
 

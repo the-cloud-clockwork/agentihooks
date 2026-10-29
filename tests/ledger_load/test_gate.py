@@ -123,7 +123,7 @@ def test_the_base_budgets_are_read_from_the_commit_not_the_working_file(monkeypa
 def test_budgets_are_read_from_the_source_given_not_the_running_module():
     planted = {name: n + 0.5 for n, name in enumerate(ledger_load.BUDGETS)}
     source = "".join(f"{name} = {value}\n" for name, value in planted.items()) + "TIMEOUT_S = 99.0\n"
-    assert ledger_load.budgets(source) == planted
+    assert ledger_load.budgets(source + picks_source(ledger_load.BUDGETS)) == planted
 
 
 def test_a_base_without_the_gate_is_red():
@@ -133,7 +133,43 @@ def test_a_base_without_the_gate_is_red():
 
 def test_a_base_without_a_budget_is_red():
     with pytest.raises(SystemExit, match="LEDGER_BYTES"):
-        ledger_load.budgets("WRITE_P95_S = 2.0\nCPU_CORES = 1.0\n")
+        ledger_load.budgets("WRITE_P95_S = 2.0\nCPU_CORES = 1.0\n" + picks_source(ledger_load.BUDGETS))
+
+
+def picks_source(table: dict) -> str:
+    picks = ", ".join(f"{name!r}: {pick.__name__}" for name, pick in table.items())
+    return f"BUDGETS = {{{picks}}}\n"
+
+
+def table_source(table: dict) -> str:
+    return "".join(f"{name} = {getattr(ledger_load, name)!r}\n" for name in ledger_load.BUDGETS) + picks_source(table)
+
+
+@pytest.mark.parametrize(
+    "table", ["", "BUDGETS = None\n", "BUDGETS = {'WRITE_P95_S': lambda a, b: a}\n", "BUDGETS = {**{}}\n"]
+)
+def test_a_base_without_a_table_of_min_or_max_picks_is_red(table):
+    values = "".join(f"{name} = {getattr(ledger_load, name)!r}\n" for name in ledger_load.BUDGETS)
+    with pytest.raises(SystemExit, match="names no BUDGETS table"):
+        ledger_load.budgets(values + table)
+
+
+def test_a_head_that_drops_a_budget_the_base_grades_is_red(monkeypatch):
+    table = dict(ledger_load.BUDGETS)
+    monkeypatch.setattr(ledger_load, "BUDGETS", {name: pick for name, pick in table.items() if name != "WRITE_P95_S"})
+    with pytest.raises(SystemExit, match="WRITE_P95_S"):
+        ledger_load.budgets(table_source(table))
+
+
+def test_a_head_that_flips_a_budget_pick_the_base_grades_is_red(monkeypatch):
+    table = dict(ledger_load.BUDGETS)
+    monkeypatch.setattr(ledger_load, "BUDGETS", {**table, "CPU_CORES": max})
+    with pytest.raises(SystemExit, match="CPU_CORES"):
+        ledger_load.budgets(table_source(table))
+
+
+def test_a_head_keeping_the_base_table_is_graded_by_its_values():
+    assert ledger_load.budgets(table_source(ledger_load.BUDGETS)) == head_budgets()
 
 
 def test_the_base_budgets_come_from_the_committed_gate_at_that_revision():
@@ -241,6 +277,81 @@ def test_a_run_returns_its_problems_and_its_measured_write_p95(monkeypatch, tmp_
     monkeypatch.setattr(ledger_load, "load", lambda port, token, pid, seconds: results)
     monkeypatch.setattr(ledger_load, "unexpired", lambda folder, at: [])
     assert ledger_load.run(tmp_path) == ([], 0.7)
+
+
+def test_the_load_server_trusts_its_writer_but_refuses_an_unrelated_project(monkeypatch, tmp_path):
+    import os
+    import subprocess
+
+    stranger = tmp_path / "stranger"
+    stranger.mkdir()
+    subprocess.run(["git", "init", "-q", str(stranger)], check=True)
+    subprocess.run(
+        ["git", "-C", str(stranger), "remote", "add", "origin", "https://github.com/stranger/project.git"],
+        check=True,
+    )
+    (stranger / ".agentihooks" / "conditions").mkdir(parents=True)
+    checkout = Path(ledger_load.__file__).resolve().parents[2]
+    script = tmp_path / "trust_server.py"
+    script.write_text(
+        "import os, socket\n"
+        "from hooks import config\n"
+        "from hooks.context import profile_chain\n"
+        "from hooks.filters.check import trusted_folder\n"
+        "profile_chain.read_state = lambda: {}\n"
+        "assert config.CONDITIONS_ENABLED\n"
+        f"trusted_folder({str(checkout)!r})\n"
+        "try:\n"
+        f"    trusted_folder({str(stranger)!r})\n"
+        "except ValueError as exc:\n"
+        "    assert 'outside the operator' in str(exc)\n"
+        "else:\n"
+        "    raise AssertionError('unrelated writer was trusted')\n"
+        "listener = socket.socket()\n"
+        "listener.bind(('127.0.0.1', int(os.environ['LEDGER_PORT'])))\n"
+        "listener.listen()\n"
+        "while True:\n"
+        "    connection, _ = listener.accept()\n"
+        "    connection.close()\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(checkout))
+    monkeypatch.setenv("CONDITIONS_ENABLED", "true")
+    monkeypatch.setenv("CONDITIONS_TRUSTED_OWNERS", "")
+    monkeypatch.setattr(ledger_load, "ledger_server", SimpleNamespace(__file__=str(script)))
+    monkeypatch.setattr(ledger_load, "RELAYS", {})
+    with (tmp_path / "server.log").open("w") as log:
+        server = ledger_load.start_server(tmp_path, ledger_load.free_port(), log)
+        ledger_load.stop_server(server)
+    assert os.environ["CONDITIONS_TRUSTED_OWNERS"] == ""
+
+
+@pytest.mark.parametrize("unwritable_log", [False, True])
+def test_a_server_that_fails_at_startup_names_its_exit_status_and_stderr(monkeypatch, tmp_path, unwritable_log):
+    script = tmp_path / "failing_server.py"
+    script.write_text("import sys\nsys.stderr.write('ledger database is locked\\n')\nsys.exit(120)\n")
+    monkeypatch.setattr(ledger_load, "ledger_server", SimpleNamespace(__file__=str(script)))
+    log_path = Path("/dev/full") if unwritable_log else tmp_path / "server.log"
+    with log_path.open("w") as log, pytest.raises(SystemExit) as exited:
+        ledger_load.start_server(tmp_path, ledger_load.free_port(), log)
+    assert "ledger server exited with 120 before listening" in str(exited.value)
+    assert "ledger database is locked" in str(exited.value)
+    if not unwritable_log:
+        assert log_path.read_text() == "ledger database is locked\n"
+
+
+def test_a_server_that_never_listens_names_its_stderr(monkeypatch, tmp_path):
+    script = tmp_path / "silent_server.py"
+    script.write_text(
+        "import sys, time\nsys.stderr.write('waiting on the ledger lock\\n')\nsys.stderr.flush()\ntime.sleep(60)\n"
+    )
+    monkeypatch.setattr(ledger_load, "ledger_server", SimpleNamespace(__file__=str(script)))
+    monkeypatch.setattr(ledger_load, "SERVER_WAIT_S", 2.0)
+    monkeypatch.setattr(ledger_load, "RELAYS", {})
+    with (tmp_path / "server.log").open("w") as log, pytest.raises(SystemExit) as exited:
+        ledger_load.start_server(tmp_path, ledger_load.free_port(), log)
+    assert "did not listen on port" in str(exited.value)
+    assert "waiting on the ledger lock" in str(exited.value)
+    assert not ledger_load.RELAYS
 
 
 def resource_samples(threads=0, memory=0):

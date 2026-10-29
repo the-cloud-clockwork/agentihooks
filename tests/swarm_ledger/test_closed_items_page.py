@@ -79,7 +79,6 @@ def ledger(browser):
     page.goto(URL)
     loaded(page)
     page.click("#tasks-box > summary")
-    page.click("#tasks-done > summary")
     page.locator("#tasks-done ol > li[id^=item-tasks-]").first.wait_for()
     yield page, reads, served
     context.close()
@@ -93,10 +92,10 @@ def more(page, scope, name):
     return page.locator(f"{scope} button[data-closed={name}]")
 
 
-def test_the_done_fold_shows_the_last_ten_newest_first_and_counts_the_hidden(ledger):
+def test_the_done_group_shows_the_last_ten_newest_first_and_counts_the_hidden(ledger):
     page, reads, _ = ledger
     assert done_ids(page) == [f"t{n}" for n in range(24, 14, -1)]
-    assert page.locator("#tasks-done > summary").text_content() == "25 done"
+    assert page.locator("#tasks-done > .done-head").text_content() == "25 done"
     assert "25 done" in page.locator("#tasks-count").text_content()
     assert more(page, "#tasks-done", "tasks").text_content() == "Show 10 more done tasks · 15 left"
     assert reads == []
@@ -109,12 +108,12 @@ def test_show_more_loads_the_next_ten_from_the_server_then_the_rest(ledger):
     assert done_ids(page) == [f"t{n}" for n in range(24, 4, -1)]
     assert reads == [("tasks", {"state": "done", "offset": "10", "limit": "10"})]
     assert more(page, "#tasks-done", "tasks").text_content() == "Show 5 more done tasks · 5 left"
-    assert page.locator("#tasks-done > summary").text_content() == "25 done"
+    assert page.locator("#tasks-done > .done-head").text_content() == "25 done"
     more(page, "#tasks-done", "tasks").click()
     page.wait_for_function("() => document.querySelectorAll('#tasks-done ol > li[id^=item-tasks-]').length === 25")
     assert reads[1] == ("tasks", {"state": "done", "offset": "20", "limit": "10"})
     assert more(page, "#tasks-done", "tasks").count() == 0
-    assert page.locator("#tasks-done > summary").text_content() == "25 done"
+    assert page.locator("#tasks-done > .done-head").text_content() == "25 done"
 
 
 def test_the_phases_section_and_the_stats_count_hidden_phases_and_offer_show_more(ledger):
@@ -175,7 +174,7 @@ def test_a_row_leaving_the_server_window_after_a_load_stays_and_the_next_page_fo
     )
     page.wait_for_function("() => document.querySelector('#tasks-done #item-tasks-t25')")
     assert done_ids(page) == ["t25", *[f"t{n}" for n in range(24, 4, -1)]]
-    assert page.locator("#tasks-done > summary").text_content() == "26 done"
+    assert page.locator("#tasks-done > .done-head").text_content() == "26 done"
     assert more(page, "#tasks-done", "tasks").text_content() == "Show 5 more done tasks · 5 left"
     more(page, "#tasks-done", "tasks").click()
     page.wait_for_function("() => document.querySelectorAll('#tasks-done ol > li[id^=item-tasks-]').length === 26")
@@ -193,7 +192,7 @@ def test_reopening_a_loaded_row_keeps_the_next_page_aligned(ledger):
     closed = {"tasks": {"hidden": 14, "kept": 10, "ids": [t["id"] for t in hidden], "plan_phases": []}}
     serve(served, 2, tasks=KEPT_TASKS + [reopened] + OPEN_TASKS, _meta={"closed": {**DOC["_meta"]["closed"], **closed}})
     page.wait_for_function("() => document.querySelectorAll('#tasks-done ol > li[id^=item-tasks-]').length === 19")
-    assert page.locator("#tasks-done > summary").text_content() == "24 done"
+    assert page.locator("#tasks-done > .done-head").text_content() == "24 done"
     assert more(page, "#tasks-done", "tasks").text_content() == "Show 5 more done tasks · 5 left"
     more(page, "#tasks-done", "tasks").click()
     page.wait_for_function("() => document.querySelectorAll('#tasks-done ol > li[id^=item-tasks-]').length === 24")

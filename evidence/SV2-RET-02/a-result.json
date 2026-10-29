@@ -1,0 +1,147 @@
+{
+  "case": "A",
+  "first": {
+    "after": {
+      "exposures": {},
+      "lessons": {
+        "lesson-lock-only": {
+          "lesson_id": "lesson-lock-only",
+          "state": "redacted",
+          "support": [],
+          "text": null
+        },
+        "lesson-shared": {
+          "lesson_id": "lesson-shared",
+          "state": "revalidated",
+          "support": [
+            "symbol",
+            "kernel"
+          ],
+          "text": "Retry a locked catalog write instead of failing the ingest."
+        }
+      },
+      "packs": {
+        "cited": "the cached context is not available to this grant",
+        "kept": "readable"
+      },
+      "range_reads": {
+        "get_session_segment": "evidence_unavailable",
+        "session_records": "evidence_unavailable"
+      },
+      "searched_sessions": {
+        "search_sessions": [
+          "kernel"
+        ],
+        "session_search": [
+          "kernel"
+        ]
+      }
+    },
+    "authoritative_events_kept": 10,
+    "before": {
+      "exposures": {
+        "chunk_cutover": 1,
+        "chunk_generation": 1,
+        "chunk_vector": 5,
+        "context_pack": 1,
+        "derived_lesson": 2,
+        "search_chunk": 5
+      },
+      "lessons": {
+        "lesson-lock-only": {
+          "lesson_id": "lesson-lock-only",
+          "state": "inferred",
+          "support": [
+            "lock"
+          ],
+          "text": "Set a busy timeout before concurrent catalog writers start."
+        },
+        "lesson-shared": {
+          "lesson_id": "lesson-shared",
+          "state": "inferred",
+          "support": [
+            "lock",
+            "symbol",
+            "kernel"
+          ],
+          "text": "Retry a locked catalog write instead of failing the ingest."
+        }
+      },
+      "packs": {
+        "cited": "readable",
+        "kept": "readable"
+      },
+      "range_reads": {
+        "get_session_segment": "answered",
+        "session_records": "answered"
+      },
+      "searched_sessions": {
+        "search_sessions": [
+          "kernel",
+          "lock"
+        ],
+        "session_search": [
+          "kernel",
+          "lock"
+        ]
+      }
+    },
+    "lag": [
+      {
+        "consumer": "lessons",
+        "revocation_propagation_lag_seconds": 2.5,
+        "sequence": 1,
+        "session_uid": "lock"
+      },
+      {
+        "consumer": "packs",
+        "revocation_propagation_lag_seconds": 2.5,
+        "sequence": 1,
+        "session_uid": "lock"
+      },
+      {
+        "consumer": "search",
+        "revocation_propagation_lag_seconds": 2.5,
+        "sequence": 1,
+        "session_uid": "lock"
+      }
+    ],
+    "notices": [
+      {
+        "consumer": "search",
+        "references": 5,
+        "sequence": 1,
+        "session_uid": "lock"
+      },
+      {
+        "consumer": "packs",
+        "references": [
+          "pack-ingest-lock"
+        ],
+        "sequence": 1,
+        "session_uid": "lock"
+      },
+      {
+        "consumer": "lessons",
+        "references": [
+          "lesson-lock-only",
+          "lesson-shared"
+        ],
+        "sequence": 1,
+        "session_uid": "lock"
+      }
+    ],
+    "replayed": [],
+    "revision": 2,
+    "tombstones": [
+      {
+        "recorded_at": 3000.0,
+        "revision": 2,
+        "sequence": 1,
+        "session_uid": "lock",
+        "state": "deleted"
+      }
+    ]
+  },
+  "independent_fixture_matches": true
+}

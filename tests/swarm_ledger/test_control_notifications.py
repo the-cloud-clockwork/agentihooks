@@ -93,7 +93,7 @@ def page(controls, monkeypatch):
         ({"action": "set", "max_eng": 2, "max_ci": 1}, "changed the swarm settings", "running"),
         (
             {"action": "verdict", "id": "idle/worker", "verdict": "resolved", "note": "Finished"},
-            "gave a health finding a verdict",
+            "gave the health finding idle/worker a verdict",
             "running",
         ),
     ],

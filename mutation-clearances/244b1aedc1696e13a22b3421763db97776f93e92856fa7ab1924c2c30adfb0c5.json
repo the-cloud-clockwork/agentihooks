@@ -1,0 +1,6 @@
+{
+  "scripts/hive/daemon.py:scripts.hive.daemon.x__native_accounts__mutmut_44:d987c59f5e9749d5807a7cfd14fc8a54e89db4882b27dd3e52f35e0ddf390f48": {
+    "reader": "standards-reader",
+    "reason": "The sole consumer _subscriptions emits account from its dictionary key, capacity from account_cap and quota windows and timestamp. ProbeResult state is never read on this path and the dataclass has no validation or side effects."
+  }
+}

@@ -8,7 +8,7 @@ from redis.exceptions import RedisError
 from scripts.hive import auth
 from scripts.swarm.store import MASTER, RedisStore, SwarmError
 from scripts.swarm_v2.auth_context import GrantRefused
-from scripts.swarm_v2.kubernetes.failures import Recovery
+from scripts.swarm_v2.kubernetes.failures import CHOICES, RESUME, Recovery
 from scripts.swarm_v2.runtime.commands import Role
 
 PATH = re.compile(r"/v1/executions/([^/]+)/(restore-decision|checkpoints|restore-outcome)")
@@ -42,8 +42,8 @@ class RecoveryAPI:
             self._authorize(token, body.get("agent", ""))
             if subject[2] == "checkpoints":
                 return self._checkpoints(subject[1], body)
-            if body.get("choice") not in ("resume", "fresh"):
-                raise GrantRefused("invalid_request", "a recovery decision is fresh or resume")
+            if body.get("choice") not in (*CHOICES, RESUME):
+                raise GrantRefused("invalid_request", "a recovery decision is native, context, fresh or resume")
             recovery = self.recovery()
             if recovery is None:
                 raise GrantRefused("dependency_unavailable", "controller recovery is unavailable")

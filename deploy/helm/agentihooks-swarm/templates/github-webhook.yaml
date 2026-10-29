@@ -39,10 +39,6 @@ spec:
           env:
             - name: AGENTIHOOKS_BUS
               value: {{ .Values.hub.bus.backend | quote }}
-            {{- with .Values.hub.bus.url }}
-            - name: AGENTIHOOKS_BUS_URL
-              value: {{ . | quote }}
-            {{- end }}
             {{- include "swarm.extraEnv" $receiver.env | nindent 12 }}
           envFrom:
             - secretRef:

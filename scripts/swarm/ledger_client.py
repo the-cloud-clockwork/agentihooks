@@ -21,6 +21,24 @@ class LedgerRefused(SwarmError):
     pass
 
 
+class LedgerUnreachable(SwarmError):
+    pass
+
+
+UNREACHABLE = (
+    "ledger server not answering",
+    "server refused: 5",
+    "unauthenticated:",
+    "ledger talk queued while the server was down",
+    "the local inbox outbox is full",
+)
+
+
+def _accepted(slug, state):
+    if "queued" in state:
+        raise LedgerUnreachable(f"ledger {slug}: the server is not answering, the post waits in the local outbox")
+
+
 def _ledger():
     if str(LEDGER_DIR) not in sys.path:
         sys.path.insert(0, str(LEDGER_DIR))
@@ -46,7 +64,9 @@ class LedgerClient:
             raise LedgerGone(str(exc)) from exc
         except SystemExit as exc:
             refused = str(exc).startswith("server refused: 4")
-            raise (LedgerRefused if refused else SwarmError)(f"ledger {slug}: {exc}") from exc
+            unreachable = str(exc).startswith(UNREACHABLE)
+            error = LedgerRefused if refused else LedgerUnreachable if unreachable else SwarmError
+            raise error(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):
             detail = "; ".join(state.get("_meta", {}).get("warnings", [])) or str(state["rejected"])
             raise LedgerRefused(f"ledger {slug} refused: {detail}")
@@ -66,8 +86,13 @@ class LedgerClient:
 
     def task(self, slug, task_id):
         """One task without its threads, or None when the ledger holds no such task."""
+        return self.item(slug, f"tasks/{task_id}")
+
+    def item(self, slug, path):
+        """One item by its list path, or None when the ledger holds no such item."""
+        name, _, item_id = path.partition("/")
         try:
-            return self._resource(slug, f"tasks/{quote(task_id, safe='')}")
+            return self._resource(slug, f"{name}/{quote(item_id, safe='')}")
         except urllib.error.HTTPError as exc:
             from scripts.swarm_ledger.api.client import failure
 
@@ -75,6 +100,9 @@ class LedgerClient:
             if exc.code != 404 or error.get("code") != "resource_missing":
                 raise replay from None
             return None
+
+    def blocker(self, slug, kind, by, item, fields):
+        self._call(slug, [_op(kind, by, item=item, **fields)])
 
     def events(self, slug):
         return self._resource(slug, "events", collection=True)
@@ -150,15 +178,17 @@ class LedgerClient:
             op.pop("to")
         self._call(slug, [op])
 
-    def relay(self, slug: str, text: str, by: str, op_id: str = "") -> None:
+    def relay(self, slug: str, text: str, by: str, op_id: str = "", reply_to: str = "") -> None:
         op = _op("add", by, thread="chat", text=text, to="operator")
         if op_id:
             op["id"] = op_id
-        LedgerClient(service=True)._call(slug, [op])
+        if reply_to:
+            op["reply_to"] = reply_to
+        _accepted(slug, LedgerClient(service=True)._call(slug, [op]))
 
     def relay_comment(self, slug, entry, text, by, op_id):
         op = {**_op("add", by, thread=f"{entry}/comments", text=text, to="operator"), "id": op_id}
-        LedgerClient(service=True)._call(slug, [op])
+        _accepted(slug, LedgerClient(service=True)._call(slug, [op]))
 
     def notify(self, slug, text):
         from scripts.gates import Who
@@ -169,11 +199,15 @@ class LedgerClient:
         author = who.name if ledger_link.remote(slug=slug) and who.pinned and lane_of(who.name) == "master" else "swarm"
         self._call(slug, [_op("notice", author, text=text)])
 
-    def raise_alert(self, slug, source, text):
-        self._call(slug, [_op("alert_raise", "swarm", source=source, text=text)])
+    def raise_alert(self, slug, source, text, item=None):
+        fields = {"item": item} if item else {}
+        self._call(slug, [_op("alert_raise", "swarm", source=source, text=text, **fields)])
 
     def close_alert(self, slug, alert_id, outcome):
         self._call(slug, [_op("alert_close", "swarm", target=alert_id, outcome=outcome)])
+
+    def close_item_alerts(self, slug, item, outcome):
+        self._call(slug, [_op("alert_close", "swarm", item=item, outcome=outcome)])
 
     def followup(self, slug, text, needs_operator=False, by="swarm"):
         flag = {"needs_operator": True} if needs_operator else {}
@@ -181,6 +215,9 @@ class LedgerClient:
 
     def followup_once(self, slug, text, by, op_id):
         return "queued" not in self._call(slug, [{**_op("add_item", by, list="followups", text=text), "id": op_id}])
+
+    def question(self, slug, text, by, op_id):
+        self._call(slug, [{**_op("add_item", by, list="questions", text=text), "id": op_id}])
 
     def priority(self, slug, item, text):
         return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")

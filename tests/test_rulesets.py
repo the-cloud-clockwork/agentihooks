@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts import ci_gate_queue
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -59,14 +61,15 @@ def test_dev_merges_through_a_queue_that_runs_the_workflow_gate():
     assert params["do_not_enforce_on_create"] is False
     checks = params["required_status_checks"]
     assert len(checks) == 1
-    assert checks[0]["context"] == workflow["jobs"]["gate-required"]["name"] == "Gate — Required"
+    jobs = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
+    assert checks[0]["context"] == jobs["gate-required"]["name"] == "Gate — Required"
+    assert workflow["jobs"]["queue-fail-fast"]["name"] == ci_gate_queue.GATE_NAME
     assert checks[0]["integration_id"] == 15368
     queue = rules["merge_queue"]["parameters"]
-    assert queue["max_entries_to_build"] in (1, 3, 5)
     assert queue == {
         "check_response_timeout_minutes": 45,
         "grouping_strategy": "ALLGREEN",
-        "max_entries_to_build": queue["max_entries_to_build"],
+        "max_entries_to_build": 5,
         "max_entries_to_merge": 5,
         "merge_method": "SQUASH",
         "min_entries_to_merge": 1,
@@ -81,7 +84,18 @@ def test_main_keeps_its_existing_branch_match_and_rules():
 
     assert ruleset["conditions"] == {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}
     rules = {rule["type"]: rule for rule in ruleset["rules"]}
-    assert set(rules) == {"deletion", "non_fast_forward", "required_linear_history", "pull_request"}
+    assert set(rules) == {
+        "deletion",
+        "non_fast_forward",
+        "required_linear_history",
+        "pull_request",
+        "required_status_checks",
+    }
+    assert rules["required_status_checks"]["parameters"] == {
+        "strict_required_status_checks_policy": False,
+        "do_not_enforce_on_create": False,
+        "required_status_checks": [{"context": "Gate — Required", "integration_id": 5243008}],
+    }
     assert rules["pull_request"]["parameters"] == {
         "required_approving_review_count": 0,
         "dismiss_stale_reviews_on_push": False,

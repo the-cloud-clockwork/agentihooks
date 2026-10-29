@@ -10,6 +10,9 @@ hive:
     redisSecret:
       name: swarm-redis-admin
       key: url
+    natsSigner:
+      secretName: swarm-nats-signer
+      trustedOperator: OAEXAMPLETRUSTEDOPERATOR
     ingressFrom:
       - ipBlock:
           cidr: 10.10.30.0/24

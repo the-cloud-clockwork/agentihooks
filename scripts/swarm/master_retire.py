@@ -45,7 +45,7 @@ def hold(store: RedisStore, slug: str, agent: AgentRecord, reason: str, live: bo
     return ""
 
 
-def forget(store: RedisStore, slug: str, name: str) -> bool:
+def forget(store: RedisStore, slug: str, name: str, why: str = "the master handed off or was retired") -> bool:
     raw = store.redis.hget(_key(store, slug), name)
     if raw is None:
         return False
@@ -56,7 +56,7 @@ def forget(store: RedisStore, slug: str, name: str) -> bool:
         try:
             item = inbox.get(request["item"])
             if item.state not in CLOSED:
-                inbox.close(item.id, exits.BY, "done", "the master handed off or was retired")
+                inbox.close(item.id, exits.BY, "done", why)
         except Contended:
             continue
         except InboxError:

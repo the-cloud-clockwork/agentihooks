@@ -5,6 +5,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from scripts.swarm.host_budget import UNKNOWN, Room
+from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import image_tag, masters, proof_swarm
 from scripts.swarm_v2.accounts import AccountCapacity, fleet_held
@@ -229,7 +230,10 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     prompts = None if controller.terminals is None else TerminalPrompts(controller.terminals.terminal.router())
     kubernetes = KubernetesRuntime(controller.execute, workers.launch, prompts)
     runtime = routed(
-        environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)
+        environ,
+        herdr=HerdrRuntime(defer_master_canary=True),
+        kubernetes=kubernetes,
+        launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target),
     )
 
     def seats() -> frozenset[str]:

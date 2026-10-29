@@ -15,12 +15,16 @@ from scripts.doctor import (
     ci,
     ci_read,
     context_overruns,
+    features,
     handoffs,
     health,
+    hive_pools,
     inbox,
     master_launches,
+    master_prompts,
     read,
     runtime,
+    slot_census,
     spawn_read,
     spawns,
     tick_delivery,
@@ -29,10 +33,11 @@ from scripts.doctor import (
 )
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
-from scripts.swarm import idle, status, timing
+from scripts.swarm import commands, idle, input_wait, status, timing
 from scripts.swarm.health import activity
 from scripts.swarm.runtime import SWARM_HOME
 
+HOUR_MS = 3_600_000
 PR_RE = re.compile(r"github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)")
 
 
@@ -53,6 +58,13 @@ def _inbox(store, mail, slug, now_ms, env, items):
 
 def _traces(store, tasks, slug, now_ms, env, trace_client=None):
     started = time.monotonic()
+    key = store.key(slug, "doctor-task-cost")
+    previous = store.redis.get(key)
+    merged = traces_read.merged(tasks)
+    if previous is None:
+        previous = json.dumps(merged)
+        store.redis.set(key, previous)
+    judged = set(json.loads(previous))
     limits = traces.Limits.from_env(env)
     get = (trace_client or traces_read.client)(env)
     record = traces_read.record(slug, tasks, [asdict(a) for a in store.agents(slug)], now_ms, get)
@@ -62,7 +74,12 @@ def _traces(store, tasks, slug, now_ms, env, trace_client=None):
         started,
         traces_read.Budget(),
     )
-    return traces.findings(record, limits)
+    candidates = traces.task_cost_candidates(record) - judged
+    record["task_cost_candidates"] = candidates
+    found = traces.findings(record, limits)
+    if candidates:
+        store.redis.set(key, json.dumps(sorted(judged | candidates)))
+    return found
 
 
 def _overruns(store, slug):
@@ -71,6 +88,12 @@ def _overruns(store, slug):
         [asdict(a) for a in store.agents(slug)],
         lambda session: context_recycle.unmarked_overrun(session, limit),
     )
+
+
+def _master_prompts(store, slug, now_ms):
+    masters = [asdict(a) for a in store.agents(slug) if a.lane == "master"]
+    since = {a["name"]: input_wait.since(store, slug, a["name"]) for a in masters}
+    return master_prompts.findings(masters, since, now_ms)
 
 
 def _starts(store, slug, now_ms):
@@ -83,6 +106,14 @@ def _starts(store, slug, now_ms):
         a["name"]: beat["at"] for a in agents if a["hive"] and (beat := idle.heartbeat(store.redis, slug, a["name"]))
     }
     return spawns.silent_starts(agents, activity.first_events(slug), now_ms, beats, pending)
+
+
+def _headroom(store, now_ms):
+    from scripts.hive import headroom, registry
+
+    hives = registry.hives(store.redis)
+    readings = {hive["id"]: headroom.read(store.redis, hive["id"], now_ms) for hive in hives}
+    return spawns.missing_headroom(hives, readings, now_ms)
 
 
 def _once(load):
@@ -98,8 +129,7 @@ def _once(load):
 
 def _ci(store, tasks, now_ms):
     pulls = open_pulls(tasks)
-    with ThreadPoolExecutor() as pool:
-        records = list(pool.map(lambda pull: ci_read.pull_request(*pull, cache=store.redis), pulls))
+    records = ci_read.pull_requests(pulls, cache=store.redis)
     return [f for record in records for f in ci.findings(record, now_ms)]
 
 
@@ -109,6 +139,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
     mail = InboxStore(store.redis)
     items = _once(lambda: read.inbox_items(mail, slug))
     tasks = _once(lambda: ledger.tasks(slug))
+    claims = _once(lambda: spawn_read.slot_claims(store, slug))
 
     found = {
         "runtime storage": lambda: runtime.findings(now_ms, env),
@@ -120,10 +151,16 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         "handoff": lambda: handoffs.findings(read.handoffs(store, mail, home, slug, items())),
         "spawn": lambda: spawns.findings(spawn_read.records(store, slug, now_ms)),
         "master launch": lambda: master_launches.findings(spawn_read.master_records(store, slug)),
+        "slot census": lambda: slot_census.findings(claims()),
+        "unclaimed launch": lambda: slot_census.unclaimed(claims(), commands.hive_id(), now_ms - HOUR_MS),
         "startup": lambda: _starts(store, slug, now_ms),
+        "headroom": lambda: _headroom(store, now_ms),
+        "hive pool": lambda: hive_pools.read(store, slug, now_ms),
         "context overrun": lambda: _overruns(store, slug),
+        "master prompt": lambda: _master_prompts(store, slug, now_ms),
         "ci": lambda: _ci(store, tasks(), now_ms),
         "dev workflow": lambda: ci.red_dev_workflows(ci_read.dev_pushes(store.config(slug).repo)),
+        "feature": lambda: features.findings(),
         "trace": lambda: _traces(store, tasks(), slug, now_ms, env, None if telemetry is True else telemetry),
     }
     return found if telemetry else {name: read for name, read in found.items() if name != "trace"}

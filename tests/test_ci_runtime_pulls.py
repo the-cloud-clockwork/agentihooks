@@ -127,7 +127,7 @@ def tools_with(tmp_path, docker):
     return tools
 
 
-def pull_runtime(tmp_path, failures, manifest_failures=0, stalls=0, manifest_stalls=0):
+def pull_runtime(tmp_path, failures, manifest_failures=0, stalls=0, manifest_stalls=0, extra_env=None):
     tools = tools_with(tmp_path, LAYER_DOCKER)
     log, waits = tmp_path / "docker.log", tmp_path / "waits.log"
     result = subprocess.run(
@@ -142,6 +142,7 @@ def pull_runtime(tmp_path, failures, manifest_failures=0, stalls=0, manifest_sta
             "STALLS": str(stalls),
             "MANIFEST_STALLS": str(manifest_stalls),
             "PULL_ATTEMPT_SECONDS": "1",
+            **(extra_env or {}),
         },
         text=True,
         capture_output=True,
@@ -169,6 +170,26 @@ def test_runtime_pull_stops_at_three_attempts_and_keeps_the_final_failure(tmp_pa
     assert len(waits) == 2
     assert not tags
     assert result.stderr.rstrip().endswith("not found on attempt 3")
+
+
+@pytest.mark.parametrize("extra_env,delay", [(None, "10"), ({"PULL_RETRY_SECONDS": "1"}, "1")])
+def test_runtime_pull_waits_the_configured_retry_delay_between_all_three_attempts(tmp_path, extra_env, delay):
+    result, pulls, tags, waits = pull_runtime(tmp_path, 99, extra_env=extra_env)
+    assert result.returncode == 17
+    assert len(pulls) == 3
+    assert waits == [delay, delay]
+    assert result.stderr.count(f"retrying in {delay} seconds") == 2
+
+
+def test_attestation_proof_runs_its_negative_pull_beside_the_positive_one():
+    proof = (ROOT / "scripts/packaging/hive-launch-attestation-proof.sh").read_text()
+    negative = proof.index("PULL_RETRY_SECONDS=1 bash scripts/packaging/pull-runtime-image.sh")
+    positive = proof.index("bash scripts/packaging/pull-runtime-image.sh 127.0.0.1:5000/proof:present")
+    assert negative < positive
+    assert '--insecure > "$proof_dir/pull.log" 2>&1 &\nnegative=$!' in proof
+    assert proof.index('if wait "$negative"; then') > positive
+    assert "grep -c 'failed on attempt' \"$proof_dir/pull.log\" | grep -x 2" in proof
+    assert proof.index('wait "$daemon_start"') < proof.index("for attempt in {1..30}")
 
 
 def test_runtime_pull_retries_a_failed_digest_lookup_within_the_same_bound(tmp_path):
@@ -246,6 +267,50 @@ fi
         " pull mirror.gcr.io/library/redis:7@sha256:runtime"
     )
     assert calls[-1].endswith(f" tag mirror.gcr.io/library/redis:7@sha256:runtime {image}")
+
+
+def test_runtime_pull_falls_back_to_public_ecr_when_the_mirror_lacks_a_layer(tmp_path):
+    image = "mirror.gcr.io/library/python:3.12-slim-bookworm"
+    log = tmp_path / "docker.log"
+    tools = tools_with(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$PULL_LOG"
+if [[ "$1" == manifest ]]; then
+  printf '%s\\n' '{"manifests":[{"digest":"sha256:runtime","platform":{"os":"linux","architecture":"amd64"}}]}'
+  exit 0
+fi
+if [[ "$1" == --host ]]; then shift 2; fi
+if [[ "$1" == pull && "$2" == mirror.gcr.io/* ]]; then
+  echo 'could not fetch content descriptor sha256:layer from remote: not found' >&2
+  exit 1
+fi
+""",
+    )
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts/packaging/pull-runtime-image.sh"), image],
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "PULL_LOG": str(log),
+            "WAITS": str(tmp_path / "waits.log"),
+            "PULL_ATTEMPT_SECONDS": "1",
+        },
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    calls = log.read_text().splitlines()
+    assert [call.split()[-1] for call in calls if call.startswith("manifest inspect ")] == [
+        image,
+        "public.ecr.aws/docker/library/python:3.12-slim-bookworm",
+    ]
+    assert [call for call in calls if " pull " in f" {call} "][-1].endswith(
+        " pull public.ecr.aws/docker/library/python:3.12-slim-bookworm@sha256:runtime"
+    )
+    assert calls[-1].endswith(f" tag public.ecr.aws/docker/library/python:3.12-slim-bookworm@sha256:runtime {image}")
 
 
 @pytest.mark.parametrize(
@@ -375,6 +440,76 @@ def test_kind_proof_pulls_every_dockerfile_base_through_the_bounded_pull_before_
         pull = f"bash scripts/packaging/pull-runtime-image.sh {base}"
         assert pull in script
         assert script.index(pull) < build
+
+
+@pytest.mark.parametrize(
+    "failures,source",
+    [
+        (0, "mirror.gcr.io/kindest/node:v1.37.0@sha256:node"),
+        (1, "docker.io/kindest/node:v1.37.0@sha256:node"),
+        (2, "mirror.gcr.io/kindest/node:v1.37.0@sha256:node"),
+        (3, ""),
+    ],
+)
+def test_kind_node_pull_retries_and_prints_the_pulled_source(tmp_path, failures, source):
+    tools = tools_with(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$PULL_LOG"
+(( $(wc -l < "$PULL_LOG") > FAILURES ))
+""",
+    )
+    log, waits = tmp_path / "docker.log", tmp_path / "waits.log"
+    result = subprocess.run(
+        ["bash", str(ROOT / "deploy/helm/agentihooks-swarm/ci/pull-kind-node.sh")],
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "PULL_LOG": str(log),
+            "WAITS": str(waits),
+            "FAILURES": str(failures),
+            "KIND_NODE_IMAGE": "mirror.gcr.io/kindest/node:v1.37.0@sha256:node",
+        },
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    returncode = result.returncode
+    assert returncode == (1 if failures == 3 else 0), result.stderr
+    assert result.stdout.strip() == source
+    pulls = log.read_text().splitlines()
+    assert len(pulls) == min(failures + 1, 3)
+    assert all(pull.startswith("pull -q ") for pull in pulls)
+    assert result.stderr.count("failed on attempt") == failures
+    assert (waits.read_text().splitlines() if waits.exists() else []) == ["10"] * min(failures, 2)
+
+
+def test_kind_smoke_creates_the_cluster_from_the_retried_node_pull():
+    text = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh").read_text()
+    creates = [line for line in text.splitlines() if "kind create cluster" in line]
+    pull = 'node="$(bash "$chart/ci/pull-kind-node.sh")"'
+    assert creates == [f'{{ {pull} && kind create cluster --name "$cluster" --image "$node"; }} &']
+
+
+def test_kind_published_pulls_the_node_before_waiting_for_the_release_image():
+    lines = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-published.sh").read_text().splitlines()
+    pull = lines.index('node="$(bash "$(dirname "$0")/pull-kind-node.sh")"')
+    create = lines.index('kind create cluster --name "$cluster" --image "$node" &')
+    wait = lines.index('until docker pull -q "$image"; do')
+    assert pull < create < wait
+    assert [line for line in lines if "kind create cluster" in line] == [lines[create]]
+
+
+def test_startup_stages_creates_the_cluster_from_the_retried_node_pull():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/startup-stages.yml").read_text())
+    runs = [step.get("run", "") for step in workflow["jobs"]["measure"]["steps"]]
+    create = next(run for run in runs if "kind create cluster" in run)
+    pull = 'node_image="$(bash deploy/helm/agentihooks-swarm/ci/pull-kind-node.sh)"'
+    assert f"\n{pull}\n" in f"\n{create}"
+    assert create.index(pull) < create.index("kind create cluster")
+    assert '--image "$node_image"' in create
+    assert '--image "$KIND_NODE_IMAGE"' not in create
 
 
 def test_hive_join_pulls_its_images_through_the_bounded_pull_before_starting_them():

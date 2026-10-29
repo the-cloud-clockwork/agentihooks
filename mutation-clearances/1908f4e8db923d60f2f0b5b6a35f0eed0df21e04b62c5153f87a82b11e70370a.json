@@ -1,0 +1,6 @@
+{
+  "scripts/recall/store.py:scripts.recall.store.xǁSQLiteRecallStoreǁsources__mutmut_19:4b0090420efa6db7a756a66f9d5309e27eae3b89b8826c71957db39a1dc65d75": {
+    "reader": "standards_reader",
+    "reason": "Uppercasing SELECT, MAX, COUNT, SUM and the identifiers is a no-op under SQLite's case-insensitive function and identifier resolution."
+  }
+}

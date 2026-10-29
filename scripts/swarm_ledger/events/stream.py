@@ -2,7 +2,7 @@
 
 import json
 
-from .hub import Expired
+from .hub import Closed, Expired
 
 HEARTBEAT_S = 5.0
 WRITE_TIMEOUT_S = 30.0
@@ -36,7 +36,8 @@ def parse(lines):
 
 
 def serve(handler, hub, slug, load):
-    """Answer one events request until the client goes away; raises Expired before any byte is sent."""
+    """Answer one events request until the client goes away or the hub drains; raises Expired before any byte is
+    sent."""
     seq, first = hub.open(slug, load, handler.headers.get("Last-Event-ID"))
     try:
         handler.send_response(200)
@@ -58,7 +59,7 @@ def serve(handler, hub, slug, load):
                 pending = hub.wait(slug, seq, HEARTBEAT_S)
             except Expired:
                 seq, pending = hub.snapshot(slug)
-    except OSError:
+    except (OSError, Closed):
         return None
     finally:
         hub.close(slug)

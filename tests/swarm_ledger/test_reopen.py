@@ -43,8 +43,18 @@ def test_reopen_buttons_call_the_existing_authenticated_swarm_endpoint():
     assert '$("closed-label").textContent = closedText(doc.closed_at)' in page
     assert '$("closed-banner").addEventListener("click", (event) => {' in page
     assert '$("closed-banner").querySelectorAll("button[data-swarm]")' in page
-    home_js = (server.core.HOME.parent / "static" / "home" / "home.js").read_text(encoding="utf-8")
+    static = server.core.HOME.parent / "static"
+    home_js = (static / "home" / "home.js").read_text(encoding="utf-8")
     script = re.search(r"(async function reopenLedger.*?\n\})", home_js, re.S).group(1)
+    api = (static / "js" / "api.js").read_text(encoding="utf-8")
+    script = (
+        "\n".join(
+            re.search(rf"(export function {name}\(.*?\n\}})", api, re.S).group(1).removeprefix("export ")
+            for name in ("readLedgerPage", "writeLedgerSwarm")
+        )
+        + "\nconst ROOT_API = '/api/v1';\n"
+        + script
+    )
     probe = (
         """
 const calls=[];
@@ -58,7 +68,7 @@ global.fetch=async (url,options)=>{calls.push([url,options]);return {ok:true,tex
     result = subprocess.run(["node", "-e", probe], capture_output=True, text=True, check=True)
     calls = json.loads(result.stdout)
     assert calls[0][0] == "/sw"
-    assert calls[1][0] == "/api/swarm/sw"
+    assert calls[1][0] == "/api/v1/ledgers/sw/swarm/controls"
     assert calls[1][1]["method"] == "PUT"
     assert calls[1][1]["headers"]["X-Ledger-Token"] == "ledger-token"
     assert json.loads(calls[1][1]["body"]) == {"action": "reopen"}

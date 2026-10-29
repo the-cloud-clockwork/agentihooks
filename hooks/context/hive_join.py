@@ -30,7 +30,12 @@ def run(payload: dict, event: str) -> None:
                 )
         return
     agent = next((a for a in store.agents(slug) if a.name == name and join_report.host(a) == hive), None)
-    if agent is None or join_report.read(store.redis, agent).get("session_id") == session:
+    if agent is None:
+        return
+    if event == "tool":
+        join_report.retry_ledger(store.redis, agent, session, at)
+        return
+    if join_report.read(store.redis, agent).get("session_id") == session:
         return
     transcript = payload.get("transcript_path")
     context = {

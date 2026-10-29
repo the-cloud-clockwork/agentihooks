@@ -47,7 +47,7 @@ def test_publication_refuses_incomplete_maps_before_writing_any_file(tmp_path, m
     monkeypatch.setattr(
         refresh_durations,
         "ci_medians",
-        lambda folder, version, source, collected, slowest=False: (
+        lambda folder, version, source, collected: (
             dict(list(complete.items())[:89]) if version == incomplete else complete
         ),
     )
@@ -79,7 +79,7 @@ def test_recorded_incomplete_durations_are_refused(tmp_path, monkeypatch, capsys
         monkeypatch.setattr(
             refresh_durations,
             "ci_medians",
-            lambda folder, version, source, collected, slowest=False: incomplete if version == "3.12" else complete,
+            lambda folder, version, source, collected: incomplete if version == "3.12" else complete,
         )
         with pytest.raises(ValueError, match="1440 of 12891 tests have no stored duration"):
             refresh_durations.main(["--ci-run", str(record["producer_run"])])

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts import ci_reuse, gate_protected
+from scripts import ci_gate_queue, ci_reuse, gate_protected
 
 pytestmark = pytest.mark.unit
 
@@ -20,7 +20,16 @@ DURATION_JOB = (
 )
 UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count"}
 QUEUE = UNIT | {"queue-fail-fast"}
-PULL_REQUEST = UNIT | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
+PULL_REQUEST = UNIT | {
+    "select",
+    "lint",
+    "semgrep",
+    "sonar",
+    "mutation-plan",
+    "mutation-stats",
+    "mutation",
+    "writer-lock",
+}
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
 UNSELECTED = PULL_REQUEST - {"split", "unit", "shard-check"}
 TIERS = [
@@ -33,7 +42,7 @@ TIERS = [
 
 def _gate_steps(*, docs=False):
     options = {"consolidated": True} if DURATION_JOB == "select" else {}
-    return ci_reuse.gate_steps(queue_tier=True, docs=docs, **options)
+    return ci_reuse.postgres_required(ci_reuse.gate_steps(queue_tier=True, docs=docs, **options))
 
 
 def gate(event, needs, mutation="true", scope="full"):
@@ -91,6 +100,31 @@ def test_main_pull_requests_skip_mutation_but_still_require_the_other_checks():
     needs = {name: {"result": "skipped" if name.startswith("mutation") else "success"} for name in PULL_REQUEST}
     result = gate("pull_request", needs, mutation="false")
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "selection,sonar,passes",
+    [
+        ("skip", "skipped", True),
+        ("skip", "success", False),
+        ("", "skipped", False),
+        ("", "success", True),
+    ],
+)
+def test_a_pull_request_skips_sonar_only_when_selection_marks_it_test_only(selection, sonar, passes):
+    needs = {job: {"result": "success"} for job in SELECTED}
+    needs["sonar"]["result"] = sonar
+    needs["select"]["outputs"] = {"scope": "selected", "sonar": selection}
+    [step] = ci_reuse.test_only_sonar(_gate_steps())
+    outcome = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(
+            os.environ, EVENT="pull_request", NEEDS=json.dumps(needs), MUTATION="true", KIND="false", REUSED="false"
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert (outcome.returncode == 0) == passes, outcome.stdout + outcome.stderr
 
 
 def test_duration_provenance_reads_the_base_and_records_the_queue_head():
@@ -173,6 +207,10 @@ def test_the_protected_grader_accepts_only_the_exact_tiered_aggregation_and_reus
     head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps(
         docs="docs" in head["test.yml"]["jobs"]["gate-required"]["needs"]
     )
+    head["test.yml"]["jobs"]["reuse"]["if"] = "false"
+    assert grade() == ["The early queue gate requires the existing whole queue reuse exclusion"]
+    head["test.yml"]["jobs"]["reuse"]["if"] = base["test.yml"]["jobs"]["reuse"]["if"]
+    base, head = ci_gate_queue.normalize(base), ci_gate_queue.normalize(head)
     head["test.yml"]["jobs"]["reuse"]["if"] = "false"
     assert any("changes the protected reuse job" in problem for problem in grade())
 

@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x_get__mutmut_20:bde2a0b05025aa25a42b67df949675cb64379dc07459a16727920d41cc0a909a": {
+    "reader": "standards_reader",
+    "reason": "Only ORDER BY changes case in the ref fallback query, which SQLite accepts identically and which only affects row order of a lookup that already raises on more than one match."
+  }
+}

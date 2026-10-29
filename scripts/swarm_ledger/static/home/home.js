@@ -1,4 +1,7 @@
-const view = document.querySelector("main").className;
+import { monitor } from "./monitor.js";
+import { loadTips, readCollection, readLayout, readLedgerPage, writeBin, writeLayout, writeLedgerSwarm } from "../js/api.js";
+
+const view = new URLSearchParams(location.search).get("view") === "bin" ? "bin" : "home";
 const list = document.getElementById("rows");
 const SORT_KEY = "home-sort";
 const FIRST = { kind: 1, open: -1, done: -1, swarm: 1, at: -1 };
@@ -6,7 +9,13 @@ const SWARM_RANK = { running: 0, paused: 1, stopping: 1, drained: 2, stopped: 3,
 const ICONS = {
   trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/>',
   restore: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
 };
+const HEADS = {
+  home: ["Ledger", "Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at", ""],
+  bin: ["Ledger", "Kind", "Overview", ">Deleted", ">Left", ""],
+};
+const FABS = { home: ["bin-fab", "/?view=bin", "Bin", "trash"], bin: ["home-fab", "/", "HOME", "home"] };
 
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -24,12 +33,35 @@ function icon(name) {
   return box.content.firstChild;
 }
 
+function headCell(label) {
+  const [text, key] = label.split(":"), name = text.replace(/^>/, "") || "Actions", right = text !== name;
+  const cell = h("span", { role: "columnheader", class: right ? "r" : null });
+  if (!key) cell.textContent = name;
+  else cell.append(h("button", { class: right ? "sort r" : "sort", type: "button", "data-sort": key, "aria-label": name },
+    name, h("i", { "aria-hidden": "true", text: "↕" })));
+  return cell;
+}
+
+function shell() {
+  const main = document.querySelector("main"), heading = view === "bin" ? "BIN" : "HOME";
+  const [id, href, label, name] = FABS[view];
+  main.className = view;
+  document.title = heading;
+  main.prepend(h("header", {}, h("a", { class: "logo-link", href: "/", "aria-label": "HOME" }, h("span", { class: "logo", "aria-hidden": "true" })),
+    h("span", { class: "brand", text: "agentihooks" }), h("h1", { text: heading }), view === "bin" ? h("span", { class: "total", id: "total" }) : null));
+  if (view === "home") main.before(h("div", { class: "watermark", "aria-hidden": "true" }));
+  if (view === "home") main.querySelector("header").after(h("div", { class: "home-grid" }, monitor(), main.querySelector(".panel")));
+  main.querySelector(".row.head").replaceChildren(...HEADS[view].map(headCell));
+  main.after(h("nav", { "aria-label": "Ledger navigation" }, h("a", { class: "fab", id, href, "aria-label": label }, icon(name))));
+  main.querySelector("header").after(h("div", { id: "notice", role: "status", "aria-live": "polite", "aria-atomic": "true" }));
+}
+
 async function collection(path) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const rows = [];
     let cursor = null, restart = false;
     do {
-      const resp = await fetch(`/api/v1/${path}?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { cache: "no-store" });
+      const resp = await readCollection(path, cursor);
       if (resp.status === 409) { restart = true; break; }
       if (!resp.ok) throw new Error(`the server answered ${resp.status}`);
       const page = await resp.json();
@@ -64,10 +96,12 @@ function act(cls, act, slug, label, ...kids) {
 }
 
 function ledgerRow(s, cells, controls, attrs) {
-  return h("li", { class: "row", ...attrs },
-    h("a", { class: "title", href: `/${s.slug}`, "data-tip": s.title, text: s.title }),
+  const row = h("li", { class: "row", role: "row", ...attrs },
+    h("span", { class: "title", role: "cell" }, h("a", { href: `/${s.slug}`, "data-tip": s.title, text: s.title })),
     h("span", { class: "kind", text: s.size }), h("span", { class: "ov", "data-tip": s.overview, text: s.overview }),
     ...cells, h("span", { class: "acts" }, ...controls));
+  for (const cell of row.children) cell.setAttribute("role", "cell");
+  return row;
 }
 
 function homeRow(s, now) {
@@ -88,24 +122,52 @@ function binRow(s) {
 }
 
 async function reopenLedger(b) {
-  const slug = encodeURIComponent(b.dataset.slug), page = await fetch("/" + slug);
+  const page = await readLedgerPage(b.dataset.slug);
   if (!page.ok) return page;
   const doc = new DOMParser().parseFromString(await page.text(), "text/html");
-  const token = doc.querySelector("meta[name=ledger-token]").content;
-  return fetch("/api/swarm/" + slug, { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": token },
-    body: JSON.stringify({ action: "reopen" }) });
+  return writeLedgerSwarm(b.dataset.slug, doc.querySelector("meta[name=ledger-token]").content, { action: "reopen" });
 }
 
-document.addEventListener("click", async (e) => {
-  const b = e.target.closest("button[data-act]");
-  if (!b) return;
+function notice(text, actions = []) {
+  const box = document.getElementById("notice");
+  box.replaceChildren(...(text ? [h("span", { text })] : []));
+  for (const [label, run] of actions) {
+    const button = h("button", { type: "button", class: "act", text: label });
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try { await run(); } finally { button.disabled = false; }
+    });
+    box.append(button);
+  }
+}
+
+async function perform(b) {
+  const action = b.dataset.act, slug = b.dataset.slug;
   b.disabled = true;
-  const r = b.dataset.act === "reopen" ? await reopenLedger(b)
-    : await fetch("/api/bin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: b.dataset.act, slug: b.dataset.slug }) });
-  if (r.ok) return location.reload();
-  b.disabled = false;
-  alert(await r.text());
+  try {
+    const response = action === "reopen" ? await reopenLedger(b) : await writeBin(action, slug);
+    if (!response.ok) throw new Error("action failed");
+  } catch (error) {
+    const verb = { delete: "moved to the bin", restore: "restored to HOME", reopen: "reopened" }[action];
+    notice(`The ledger could not be ${verb}. Check your connection and try again.`, [["Retry", () => perform(b)]]);
+    return;
+  } finally {
+    b.disabled = false;
+  }
+  const loaded = await refresh(false);
+  const actions = action === "delete" ? [["Undo", () => perform(act("restore", "restore", slug, "Undo"))]] : [];
+  if (!loaded) actions.push(["Retry", () => refresh()]);
+  const text = { delete: "Ledger moved to the bin. It can be restored for 30 days.",
+    restore: "Ledger restored to HOME. Its swarm remains stopped.", reopen: "Ledger reopened." }[action];
+  notice(text + (loaded ? "" : " The list could not be refreshed."), actions);
+}
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-act]");
+  if (b && !b.disabled) perform(b);
 });
+
+let reorder = () => {};
 
 function sorting() {
   if (view !== "home") return;
@@ -119,10 +181,11 @@ function sorting() {
     const x = value(a, sort.key), y = value(b, sort.key);
     return (x < y ? -1 : x > y ? 1 : 0) * sort.dir || Number(b.dataset.at) - Number(a.dataset.at);
   };
-  const order = () => {
+  const order = reorder = () => {
     list.append(...rows().sort(compare));
     for (const head of document.querySelectorAll(".sort")) {
       const on = head.dataset.sort === sort.key;
+      head.parentElement.setAttribute("aria-sort", on ? (sort.dir > 0 ? "ascending" : "descending") : "none");
       if (on) head.dataset.dir = sort.dir > 0 ? "asc" : "desc";
       else delete head.dataset.dir;
       head.querySelector("i").textContent = on ? (sort.dir > 0 ? "▲" : "▼") : "↕";
@@ -158,9 +221,7 @@ function setColumns(widths) {
   layout = { ...layout, columns: { ...(layout.columns || {}), [view]: widths.map((w) => Math.round(w)) } };
   applyColumns();
   clearTimeout(layoutSave);
-  layoutSave = setTimeout(() => {
-    fetch("/api/layout", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(layout) }).catch(() => {});
-  }, 300);
+  layoutSave = setTimeout(() => { writeLayout(layout).catch(() => {}); }, 300);
 }
 
 function columns() {
@@ -190,28 +251,48 @@ function columns() {
     const index = heads().indexOf(grip.parentElement);
     setColumns(measured().map((w, i) => (i === index ? Math.max(COLUMN_MIN, w + step * (ev.shiftKey ? 4 : 1)) : w)));
   });
-  fetch("/api/layout", { cache: "no-store" }).then((r) => (r.ok ? r.json() : {})).then((saved) => { layout = saved || {}; applyColumns(); }).catch(() => {});
+  readLayout()
+    .then((r) => (r.ok ? r.json() : {}))
+    .then((saved) => { if (!layoutSave) { layout = saved.data || {}; applyColumns(); } })
+    .catch(() => {})
+    .finally(() => { document.documentElement.dataset.layout = "ready"; });
+}
+
+function emptyState() {
+  const cell = h("span", { role: "cell", "aria-colspan": String(HEADS[view].length) });
+  if (view === "bin") cell.append("The bin is empty. Deleted ledgers stay here for 30 days. Restore returns a ledger to HOME and leaves its swarm stopped. ",
+    h("a", { href: "/", text: "Go to HOME" }));
+  else cell.append("No ledgers yet. Create one from a content file: ", h("code", { text: "agentihooks ledger new --content content.json" }));
+  return h("li", { class: "empty", role: "row" }, cell);
+}
+
+async function refresh(announce = true) {
+  try {
+    const [rows, binned] = view === "bin" ? [await collection("bin"), []] :
+      await Promise.all([collection("ledgers"), collection("bin")]);
+    list.replaceChildren(...rows.map((s) => view === "bin" ? binRow(s) : homeRow(s, Date.now())));
+    if (!rows.length) list.append(emptyState());
+    if (view === "bin") document.getElementById("total").textContent = `${rows.length} ledger${rows.length === 1 ? "" : "s"}`;
+    else {
+      const fab = document.getElementById("bin-fab");
+      fab.querySelector(".count")?.remove();
+      if (binned.length) fab.append(h("span", { class: "count", text: String(binned.length) }));
+    }
+    reorder();
+    if (announce) notice("");
+    return true;
+  } catch (error) {
+    if (announce) notice("The ledger list could not be loaded. Check your connection and try again.", [["Retry", () => refresh()]]);
+    return false;
+  }
 }
 
 async function start() {
-  const now = Date.now();
-  try {
-    if (view === "bin") {
-      const rows = await collection("bin");
-      list.replaceChildren(...rows.map(binRow));
-      document.getElementById("total").textContent = `${rows.length} ledger${rows.length === 1 ? "" : "s"}`;
-      if (!rows.length) list.append(h("li", { class: "empty", text: "The bin is empty." }));
-    } else {
-      const [rows, binned] = await Promise.all([collection("ledgers"), collection("bin")]);
-      list.replaceChildren(...rows.map((s) => homeRow(s, now)));
-      if (!rows.length) list.append(h("li", { class: "empty", text: "No ledgers yet." }));
-      if (binned.length) document.getElementById("bin-fab").append(h("span", { class: "count", text: String(binned.length) }));
-    }
-  } catch (error) {
-    list.replaceChildren(h("li", { class: "empty", text: `The ledger list could not be read: ${error.message}` }));
-  }
+  shell();
+  loadTips();
   sorting();
   columns();
+  await refresh();
 }
 
 start();

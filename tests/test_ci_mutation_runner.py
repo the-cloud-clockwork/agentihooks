@@ -5,7 +5,8 @@ import time
 
 import pytest
 
-from scripts.ci_mutation.runner import run_gate, run_process
+from scripts.ci_mutation import runner
+from scripts.ci_mutation.runner import link_or_copy, run_gate, run_process
 
 
 def test_over_budget_reports_every_unfinished_file_by_name(tmp_path, capsys, monkeypatch):
@@ -279,6 +280,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
 
 
 def test_workspace_carries_the_repository_root_files_into_the_mutants_copy(tmp_path):
+    import subprocess
     import tomllib
 
     from scripts.ci_mutation.runner import prepare_workspace
@@ -287,8 +289,9 @@ def test_workspace_carries_the_repository_root_files_into_the_mutants_copy(tmp_p
     (root / "tests").mkdir(parents=True)
     (root / "pyproject.toml").write_text('[project]\nreadme = "README.md"\n\n[tool.pytest.ini_options]\n')
     copied = ("README.md", "LICENSE", "index.md", "compose.yaml", "sonar-project.properties", ".test_durations")
-    for name in (*copied, ".env", ".env.example", ".git"):
+    for name in (*copied, ".env", ".env.example"):
         (root / name).write_text(name)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
     (tmp_path / "outside.txt").write_text("outside")
     (root / "linked.md").symlink_to(tmp_path / "outside.txt")
     work = tmp_path / "work"
@@ -298,8 +301,10 @@ def test_workspace_carries_the_repository_root_files_into_the_mutants_copy(tmp_p
     assert [name for name in also_copy if not name.endswith("/")] == sorted(copied)
     for name in copied:
         assert (work / name).read_text() == name
-    for name in (".env", ".env.example", ".git", "linked.md"):
+    for name in (".env", ".env.example", "linked.md"):
         assert not (work / name).exists()
+    assert (work / ".git").is_dir()
+    assert also_copy.count(".git/") == 1
 
 
 @pytest.mark.parametrize(
@@ -560,6 +565,32 @@ def test_workspace_discovers_inputs_read_by_a_parent_conftest(tmp_path):
     assert (work / "records/input.json").read_text() == "fixture"
 
 
+@pytest.mark.parametrize(
+    "importer",
+    [
+        "from tests.nested.helper import startup\n\ndef test_selected():\n    startup()\n",
+        "from tests.nested import helper\n\ndef test_selected():\n    helper.startup()\n",
+    ],
+)
+def test_workspace_discovers_inputs_read_by_an_imported_test_helper(tmp_path, importer):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests/nested").mkdir(parents=True)
+    (root / "deploy/worker").mkdir(parents=True)
+    (root / "deploy/worker/start.sh").write_text("fixture")
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "tests/nested/helper.py").write_text(
+        'from pathlib import Path\nSTART = Path(__file__).resolve().parents[2] / "deploy/worker/start.sh"\n'
+        "def startup():\n    return START.read_text()\n"
+    )
+    (root / "tests/nested/test_selected.py").write_text(importer)
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/nested/test_selected.py::test_selected"])
+    assert (work / "deploy/worker/start.sh").read_text() == "fixture"
+
+
 def test_workspace_does_not_copy_inputs_referenced_through_repository_parent_traversal(tmp_path):
     from scripts.ci_mutation.runner import prepare_workspace
 
@@ -596,6 +627,163 @@ def test_workspace_preserves_valid_fixture_names_containing_line_breaks(tmp_path
     work.mkdir()
     prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
     assert (work / name).read_text() == "fixture"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import json\nfor name in json.loads((ROOT / "inputs.json").read_text()):\n    (ROOT / name).read_bytes()',
+        'for name in ("extra",):\n    assert (ROOT / name).is_dir()',
+        'folder = ROOT / "extra"\nassert folder.exists()',
+    ],
+)
+def test_workspace_preserves_data_dependent_repository_inputs_in_both_stages(tmp_path, source):
+    import shutil
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "extra/nested").mkdir(parents=True)
+    (root / "extra/nested/input.bin").write_bytes(b"repository input")
+    (root / "inputs.json").write_text('["extra/nested/input.bin"]')
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "tests/test_inputs.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n" + source + "\n"
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_inputs.py"])
+    assert (work / "extra/nested/input.bin").read_bytes() == b"repository input"
+    config = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]
+    mutants = work / "mutants"
+    mutants.mkdir()
+    for name in config["also_copy"]:
+        path = work / name
+        if path.is_dir():
+            shutil.copytree(path, mutants / name, dirs_exist_ok=True)
+        elif path.is_file():
+            (mutants / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, mutants / name)
+    assert (mutants / "extra/nested/input.bin").read_bytes() == b"repository input"
+    assert "pyproject.toml/" not in config["also_copy"]
+
+
+def test_workspace_discovers_tracked_inputs_without_copying_generated_statistics(tmp_path):
+    import subprocess
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "inputs").mkdir()
+    (root / "inputs/fixture.txt").write_text("tracked fixture")
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "tests/test_input.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        "def test_input(name):\n    return (ROOT / name).read_text()\n"
+    )
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "add", "tests", "inputs", "pyproject.toml"], cwd=root, check=True)
+    (root / ".mutation-stats/killers").mkdir(parents=True)
+    (root / ".mutation-stats/killers/generated.json").write_text("{}")
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_input.py"])
+    assert (work / "inputs/fixture.txt").read_text() == "tracked fixture"
+    assert not (work / ".mutation-stats").exists()
+    config = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]
+    assert ".mutation-stats/" not in config["also_copy"]
+
+
+@pytest.mark.parametrize("origin", ["", "https://github.com/fixture-owner/repository.git", "unresolved"])
+def test_workspace_preserves_git_reads_without_copying_repository_configuration(tmp_path, origin):
+    import shutil
+    import subprocess
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "input.txt").write_text("trusted revision")
+    subprocess.run(["git", "init", "-q", "-b", "fixture", str(root)], check=True)
+    subprocess.run(["git", "add", "input.txt"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"],
+        cwd=root,
+        check=True,
+    )
+    subprocess.run(["git", "pack-refs", "--all"], cwd=root, check=True)
+    subprocess.run(["git", "update-ref", "refs/heads/unpacked", "HEAD"], cwd=root, check=True)
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    subprocess.run(["git", "config", "fixture.source", "original"], cwd=root, check=True)
+    if origin:
+        subprocess.run(["git", "remote", "add", "origin", origin], cwd=root, check=True)
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], [])
+    config = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]
+    mutants = work / "mutants"
+    mutants.mkdir()
+    for name in config["also_copy"]:
+        path = work / name
+        if path.is_dir():
+            shutil.copytree(path, mutants / name, dirs_exist_ok=True)
+        elif path.is_file():
+            shutil.copy2(path, mutants / name)
+    for stage in (work, mutants):
+        assert subprocess.check_output(["git", "show", "HEAD:input.txt"], cwd=stage, text=True) == "trusted revision"
+        assert subprocess.check_output(["git", "ls-files"], cwd=stage, text=True).splitlines() == ["input.txt"]
+        assert subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=stage, text=True).strip() == str(
+            stage
+        )
+        assert subprocess.check_output(["git", "rev-parse", "unpacked"], cwd=stage, text=True).strip() == revision
+        original = subprocess.run(["git", "config", "--get", "fixture.source"], cwd=stage, capture_output=True)
+        assert original.returncode == 1
+        from hooks.context.conditions import _remote_owner, directory_trust
+
+        assert _remote_owner(stage) == _remote_owner(root)
+        assert directory_trust(stage, {}) == directory_trust(root, {})
+
+
+@pytest.mark.parametrize("operation", ["init", "config"])
+def test_workspace_reports_a_failed_git_metadata_command(tmp_path, monkeypatch, operation):
+    import os
+    import shlex
+    import shutil
+    import subprocess
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/fixture-owner/repository.git"], cwd=root, check=True
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    git = binary / "git"
+    git.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'if [[ "$1" == init && "$FAIL_OPERATION" == init ]] || '
+        '[[ "$1" == -C && "$2" == "$FAIL_WORK" && "$3" == config && "$FAIL_OPERATION" == config ]]; then exit 37; fi\n'
+        f'exec {shlex.quote(shutil.which("git"))} "$@"\n'
+    )
+    git.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{binary}:{os.environ['PATH']}")
+    monkeypatch.setenv("FAIL_OPERATION", operation)
+    monkeypatch.setenv("FAIL_WORK", str(work))
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        prepare_workspace(root, work, ["hooks/sample.py"], [])
+    assert error.value.returncode == 37
 
 
 def test_workspace_handles_a_selected_test_probing_an_invalid_null_path(tmp_path):
@@ -889,6 +1077,18 @@ def test_a_stats_part_collects_once_and_skips_the_report(tmp_path, monkeypatch):
     ]
 
 
+def test_a_stats_part_echoes_only_the_cache_report_from_its_log(tmp_path, capfd):
+    from scripts.ci_mutation.runner import echo_cache_report
+
+    log = tmp_path / "run.log"
+    echo_cache_report(log)
+    log.write_bytes(
+        b"collecting \xff\nMutation stats cache: reused 3 test files; collect 1\n  Mutation stats cache: indented\n"
+    )
+    echo_cache_report(log)
+    assert capfd.readouterr().out == "Mutation stats cache: reused 3 test files; collect 1\n"
+
+
 def test_a_shard_mutates_with_every_matching_stats_part(tmp_path, monkeypatch):
     import json
 
@@ -915,6 +1115,7 @@ def test_a_shard_mutates_with_every_matching_stats_part(tmp_path, monkeypatch):
 def test_shards_reuse_exact_measured_plan_and_refuse_independently_stale_inputs(tmp_path, monkeypatch, stale):
     import json
 
+    from scripts.ci_mutation.killers import KillMemory
     from scripts.ci_mutation.runner import mutate_files
     from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
 
@@ -928,18 +1129,22 @@ def test_shards_reuse_exact_measured_plan_and_refuse_independently_stale_inputs(
         "keys": ["other" if stale == "selection" else key],
         "shards": 4,
         "assignments": {"mutant": 2},
+        "splits": {"hooks.sample.x_f": {"head": ["a"], "slices": [["b"], ["c"]], "costs": [1.0, 1.0]}},
     }
     (stats.folder / "plan.json").write_text(json.dumps(plan))
     rows, reason = mutate_files(tmp_path, tmp_path / "work", selected, 20, (2, 4), stats.group(0))
+    kept = KillMemory(tmp_path / "work/killers").split("hooks.sample.x_f", ["c", "b", "a"])
     if stale:
         assert rows == {}
         assert reason == "measured mutation plan stale for this commit or selection"
         assert commands == []
+        assert kept is None
     else:
         assert reason == ""
         assert rows == {"hooks/sample.py": [{"status": "killed"}]}
         assert json.loads((tmp_path / "work/shard-plan.json").read_text()) == plan
         assert commands[0][-4:] == ["2", "4", "reuse", str(tmp_path / "work/shared-stats.json")]
+        assert kept == {"head": ["a"], "slices": [["b"], ["c"]]}
 
 
 @pytest.mark.parametrize("kept", [True, False])
@@ -985,3 +1190,29 @@ def test_a_shard_with_missing_or_stale_stats_fails_before_mutating(tmp_path, mon
     assert report["not_mutated"][0]["reason"].startswith(reason)
     assert commands == []
     assert f"hooks/sample.py: not mutated, {reason}" in capsys.readouterr().out
+
+
+def test_workspace_links_tree_files_and_copies_when_links_fail(tmp_path, monkeypatch):
+    source = tmp_path / "source.txt"
+    source.write_text("kept\n")
+    link_or_copy(str(source), str(tmp_path / "linked.txt"))
+    assert (tmp_path / "linked.txt").stat().st_ino == source.stat().st_ino
+
+    def refuse(*args):
+        raise OSError("cross device")
+
+    monkeypatch.setattr(runner.os, "link", refuse)
+    link_or_copy(str(source), str(tmp_path / "copied.txt"))
+    assert (tmp_path / "copied.txt").read_text() == "kept\n"
+    assert (tmp_path / "copied.txt").stat().st_ino != source.stat().st_ino
+    assert (tmp_path / "copied.txt").stat().st_mtime == source.stat().st_mtime
+
+
+def test_prepared_workspace_links_the_source_tree(tmp_path):
+    root, work = tmp_path / "root", tmp_path / "work"
+    (root / "hooks").mkdir(parents=True)
+    (root / "hooks" / "sample.py").write_text("value = 1\n")
+    (root / "pyproject.toml").write_text("[tool]\n")
+    work.mkdir()
+    runner.prepare_workspace(root, work, [], [])
+    assert (work / "hooks" / "sample.py").stat().st_ino == (root / "hooks" / "sample.py").stat().st_ino

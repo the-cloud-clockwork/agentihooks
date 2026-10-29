@@ -9,7 +9,12 @@ from scripts.events.config import BusConfig
 
 @pytest.mark.parametrize("provision", [False, True])
 def test_bus_provisions_only_when_requested(monkeypatch, provision):
-    js = SimpleNamespace(add_stream=AsyncMock(), create_key_value=AsyncMock(), key_value=AsyncMock())
+    js = SimpleNamespace(
+        stream_info=AsyncMock(side_effect=nats.NotFoundError()),
+        add_stream=AsyncMock(),
+        create_key_value=AsyncMock(),
+        key_value=AsyncMock(),
+    )
     client = SimpleNamespace(jetstream=Mock(return_value=js), close=AsyncMock())
     connect = AsyncMock(return_value=client)
     monkeypatch.setattr(nats.nats_client, "connect", connect)

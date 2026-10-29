@@ -384,6 +384,7 @@ def test_every_unfinished_status_of_an_earlier_run_is_awaited(repo, monkeypatch,
     _github(monkeypatch, head, [], [], {}, live=[_run(7, head, None, branch="other", status=status)])
     slept = _clock(monkeypatch)
     assert _main(monkeypatch, root) == "reused=false\n"
+    assert sum(slept) <= 60
     assert slept == [reuse.POLL] * (reuse.WAIT // reuse.POLL)
     assert f"Stopped waiting after {reuse.WAIT} seconds\n" in capsys.readouterr().out
 

@@ -92,12 +92,15 @@ def test_claim_and_close_from_the_panel_send_their_ops(tab):
     tab.locator("#alert-fab").click()
     row = tab.locator("#alert-al-3-0")
     row.get_by_role("button", name="Claim").click()
-    assert "Claimed by operator" in row.inner_text()
+    assert row.locator(".alert-state").inner_text().lower() == "sending"
     row.get_by_role("button", name="Mark done").click()
     row.get_by_label("Outcome").fill("Trimmed the phase")
     row.get_by_role("button", name="Save").click()
-    tab.wait_for_function("document.querySelectorAll('#alerts > li').length === 1")
-    tab.wait_for_timeout(300)
+    for _ in range(40):
+        if any(op["op"] == "alert_close" for op in tab.sent):
+            break
+        tab.wait_for_timeout(50)
+    assert tab.locator("#alerts > li").count() == 2
     kinds = [(op["op"], op["target"], op.get("outcome")) for op in tab.sent if op["op"].startswith("alert_")]
     assert kinds == [("alert_claim", "al-3-0", None), ("alert_close", "al-3-0", "Trimmed the phase")]
 

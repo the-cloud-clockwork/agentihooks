@@ -1,0 +1,57 @@
+{
+  "package": "SV2-GAT-03",
+  "dependencies": [
+    "SV2-GAT-02"
+  ],
+  "dependency_evidence": "SV2-GAT-02 merged into dev as pull request 7486; this package delivers the project pack that path retrieves and never retrieves it itself.",
+  "integration_gate": "G6",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7558",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7586",
+  "package_complete": false,
+  "evidence_class": "mocked for the fixture cases: hooks run in a temporary agentihooks home with the brain refresh and project retrieval patched to return the fixture packs, through the Claude and Codex target emitters; live: one Claude and one Codex session on a hive worker ran the branch hooks with an isolated agentihooks home",
+  "interfaces": [
+    "hooks.context.task_context.offer(session_id, event, pack, injectable) returns the pack only when the current target can inject at that event, writes a delivery receipt (pack sha256, event, target, time) under the project cache namespace and counts delivered; it returns nothing and counts deduplicated when the receipt already carries the same digest; every offer first drops any held pack, so a repeated current pack is never followed by an older held one",
+    "An event the target cannot inject at (Codex PreToolUse) holds the pack for the next injectable event and counts unsupported_event; retrieval at that event never writes a receipt",
+    "hooks.context.task_context.deliver_pending(session_id, event) offers the held pack; hook_manager.on_post_tool_use calls it, so Codex receives the pack at PostToolUse",
+    "hooks.context.task_context.restart(session_id) drops the receipt and any held pack; brain_adapter.inject_on_session_start calls it before offering, so a startup, resume or compaction SessionStart delivers the current pack once and a stale held pack is never replayed",
+    "A newer held pack replaces an older one for the same session",
+    "AGENTIHOOKS_TASK_CONTEXT_OFF=<comma separated targets> disables delivery for those targets and counts disabled; the fleet brain feed broadcast is unchanged; a pack held before the disable is dropped, so re-enabling never replays it",
+    "hooks.context.brain_adapter.get_status, the brain_status tool, reports context_delivery_outcomes_by_target",
+    "The pack keeps its BRAIN CONTEXT (recalled state, not an operator directive) framing from the project memory renderer"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "targets": "claude and codex, through hooks.targets.capabilities.can_inject_context: Claude injects at SessionStart, UserPromptSubmit, PreToolUse and PostToolUse; Codex injects at SessionStart and PostToolUse and not at PreToolUse",
+    "cli_versions": "The live smoke ran the Claude Code and Codex CLIs installed in the hive worker image; the smoke did not record their version strings"
+  },
+  "states": {
+    "observed": "The fixture cases A, B and C ran in the Tests run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40389610590 and the branch mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40389603140 passed, both at 5f183ed44302cc09eab681073f772a5814e83df1. Live: Claude session 8415c8ec and Codex session 01a17930 each received the pack at SessionStart with a receipt; the pack text appears in the Claude transcript and in the Codex rollout; a second run that refreshed on every tool call recorded deduplicated 1 on Claude.",
+    "accepted": "A delivery is accepted when offer returns the pack for an event the target can inject at; the receipt is written in the same call.",
+    "committed": "The receipt file and the context_delivery_outcomes_by_target counter file under the agentihooks home brain state folder, and the held pack file of the project cache, are the only writes.",
+    "externally_verified": "The pack text was read back from the Claude transcript and the Codex rollout of the live smoke sessions; no deployed swarm session has been checked yet, which belongs to the G6 rollout gate."
+  },
+  "metrics": {
+    "context_delivery_outcomes_by_target": "per target counts in $AGENTIHOOKS_HOME brain state folder context_delivery_outcomes_by_target.json: delivered, deduplicated, unsupported_event and disabled"
+  },
+  "cases": {
+    "a": "evidence/SV2-GAT-03/a-result.json",
+    "b": "evidence/SV2-GAT-03/b-result.json",
+    "c": "evidence/SV2-GAT-03/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Set AGENTIHOOKS_TASK_CONTEXT_OFF to the affected target (claude, codex or both); that target gets no project pack while the fleet brain feed keeps reaching it.",
+    "authoritative_objects": "The brain's project feed and the project memory cache are retrieval state and are untouched by rollback; the receipt and the outcome counter are derived and may be discarded.",
+    "proof": "test_b_a_disabled_target_gets_no_pack_and_keeps_its_fleet_feed returns the fleet feed with no pack and no receipt for a disabled Codex target, counts disabled, and delivers again once the target leaves the list."
+  },
+  "remaining_limitations": [
+    "The receipt records that the pack entered a supported hook envelope; it does not read the model's context back. The live transcript and rollout check is manual.",
+    "Claude's injection budget can truncate a long pack after the receipt is written.",
+    "The live smoke unset the swarm brain binding variable, because on hive workers it forces the brain off; a swarm worker with that binding gets no pack until the binding admits the brain.",
+    "Copilot runs the same capability path but has no fixture case or live smoke in this package.",
+    "Live smoke covered SessionStart delivery on both targets and repeated refresh on Claude; the Codex PreToolUse hold then PostToolUse delivery and the compaction and restart paths are covered by the mocked fixture cases only.",
+    "The rollback rehearsal is the disabled target fixture case, not a live disable on running sessions; the package stays incomplete until the G6 rollout gate runs a live rehearsal.",
+    "The delivered count is taken when the pack is accepted into the hook output, before the target CLI renders it."
+  ],
+  "compatibility": "Compared with the preceding accepted path, where the project pack was injected at every SessionStart and Claude PreToolUse refresh and deferred to Codex PostToolUse with no receipt: the same events still carry it, now once per changed pack.",
+  "authority": "The pack comes only from the session's resolved project memory; delivery adds no grant and the brain-api keeps enforcing the token's project scope."
+}

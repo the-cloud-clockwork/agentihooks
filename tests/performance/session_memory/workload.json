@@ -1,0 +1,84 @@
+{
+  "corpus": "swarm-load-fixture",
+  "provider": "claude",
+  "retention": "retain-until-deleted",
+  "projects": {
+    "granted": "github.com/the-cloud-clockwork/agentihooks",
+    "other": "github.com/the-cloud-clockwork/agentibrain-kernel",
+    "restricted": "github.com/the-cloud-clockwork/antoncore-private"
+  },
+  "principals": {
+    "indexer": "load-fixture-indexer",
+    "searcher": "load-fixture-searcher"
+  },
+  "seeds": [
+    7,
+    11
+  ],
+  "writers": 9,
+  "background_sessions": 27,
+  "warmup_turns": 2,
+  "ticks": 16,
+  "tick_seconds": 1.0,
+  "split_every": 3,
+  "flush_every": 2,
+  "search_every": 2,
+  "drain_ticks": 30,
+  "limits": {
+    "batch_size": 6,
+    "batch_chars": 64000,
+    "max_batches": 2
+  },
+  "policy": {
+    "version": "turn-v1",
+    "max_chars": 2000
+  },
+  "model": {
+    "model": "fixture-hash-embedder-16",
+    "dimension": 16
+  },
+  "index_generation": "load-v1",
+  "spool": {
+    "max_bytes": 1048576,
+    "warn_bytes": 8192
+  },
+  "duplicates": {
+    "lost_cursor_commit": [
+      [
+        0,
+        3
+      ],
+      [
+        4,
+        5
+      ],
+      [
+        7,
+        9
+      ]
+    ],
+    "lost_acknowledgement": [
+      [
+        1,
+        4
+      ],
+      [
+        5,
+        14
+      ],
+      [
+        8,
+        16
+      ]
+    ]
+  },
+  "overload": {
+    "from": 6,
+    "until": 12,
+    "restart_at": 9
+  },
+  "rejection": {
+    "spool_max_bytes": 3000,
+    "drop_older_than_seconds": 3.0
+  }
+}

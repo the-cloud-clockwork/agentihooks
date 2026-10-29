@@ -73,11 +73,16 @@ def require_target(store: object, slug: str, task_id: str, url: str, tasks: list
     from scripts.swarm.store import SwarmError
 
     own = next((task for task in tasks if task["id"] == task_id), {})
-    if url not in _pulls(own):
+    if url not in _targets(own):
         raise SwarmError("final integration must target this task's recorded pull request")
     for task in tasks:
-        if url in _pulls(task):
+        if url in _targets(task):
             require_local(store, slug, task["id"])
+
+
+def _targets(task):
+    scopes = task.get("pull_scopes") or {}
+    return [*_pulls(task), *(url for url, scope in scopes.items() if scope.get("kind") == "prerequisite")]
 
 
 def recheck_pass(store, slug, doc, ledger, now_ms, github):

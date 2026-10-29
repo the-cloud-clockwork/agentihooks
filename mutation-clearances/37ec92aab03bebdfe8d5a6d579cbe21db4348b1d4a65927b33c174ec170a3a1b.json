@@ -1,0 +1,6 @@
+{
+  "scripts/hive/daemon.py:scripts.hive.daemon.x__native_accounts__mutmut_31:400afb3b56ed3b9530a3a22679a0c02141afffb0b8fb0b8ec745778de4b82371": {
+    "reader": "standards-reader",
+    "reason": "The sole consumer _subscriptions takes account identity from the unchanged observed dictionary key. The ProbeResult account field is never read on this path and changes no emitted account, capacity, quota window or timestamp."
+  }
+}

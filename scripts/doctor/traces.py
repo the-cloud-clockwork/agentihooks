@@ -24,6 +24,7 @@ class Limits:
     active_stale_seconds: int = 60
     active_grace_seconds: int = 60
     interval_minutes: int = 10
+    first_turn_minutes: int = 60
 
     @classmethod
     def from_env(cls, environ):
@@ -110,11 +111,26 @@ def _finished(record, task):
     return max(o.get("end", 0) for t in traced for o in _turns(t))
 
 
+def task_cost_candidates(record: dict) -> set[str]:
+    reader = record.get("reader", {})
+    historical = reader.get("historical", {})
+    if (
+        not historical.get("listed", False)
+        or not historical.get("complete", False)
+        or historical.get("capped")
+        or reader.get("failures")
+    ):
+        return set()
+    return {cost["task"] for cost in _task_costs(record) if cost["sessions"]}
+
+
 def task_cost(record: dict, limits: Limits) -> list[Finding]:
     costs = [c for c in _task_costs(record) if c["tokens"]]
     finished = {c["task"]: _finished(record, c["task"]) for c in costs}
     found = []
     for cost in costs:
+        if cost["task"] not in record.get("task_cost_candidates", record["merged"]):
+            continue
         others = [c["tokens"] for c in costs if c is not cost and finished[c["task"]] <= finished[cost["task"]]]
         if not others or cost["tokens"] <= limits.task_cost_ratio * median(others):
             continue
@@ -209,23 +225,25 @@ def gap_agents(record: dict, limits: Limits) -> list[str]:
 
 
 def wait_coverage(record: dict, limits: Limits) -> list[Finding]:
-    unread = record.get("waits_unread")
-    if not unread:
+    unread = record.get("waits_unread", [])
+    working = _live(record)
+    live = [name for name in unread if name in working]
+    if not live:
         return []
     return [
         Finding(
             "wait history partial",
             record["slug"],
-            f"wait history of {plural(len(unread), 'agent')} with turn gaps over {limits.turn_gap_minutes} minutes "
+            f"wait history of {plural(len(live), 'live agent')} with turn gaps over {limits.turn_gap_minutes} minutes "
             "not read in budget",
             (
-                "unread: " + ", ".join(unread[:5]),
-                f"live agents unread: {len(_live(record) & set(unread))}",
+                "unread: " + ", ".join(live[:5]),
+                f"retired agents unread: {len(unread) - len(live)}",
                 "turn gap findings skip agents whose wait history was not read",
                 "each Doctor scan reads the wait history again within its budget",
             ),
-            "every agent with a turn gap over the limit has its wait history read",
-            len(unread),
+            "every live agent with a turn gap over the limit has its wait history read",
+            len(live),
         )
     ]
 
@@ -317,7 +335,10 @@ def _stale(binding, record, limits, lag):
 
 def _unconfirmed(binding, record, limits):
     local, remote, now = binding["local"], binding["remote"], record["now_ms"]
-    if not (binding["read"] and local and remote) or local["accepted"] <= remote["observations"]:
+    if not (binding["read"] and local and remote):
+        return None
+    reconciliation = remote.get("reconciliation")
+    if reconciliation is None or not reconciliation["missing"]:
         return None
     waited = _ago(now, local["accepted_at"])
     if waited <= limits.active_stale_seconds:
@@ -329,6 +350,7 @@ def _unconfirmed(binding, record, limits):
         (
             *_who(binding),
             f"exporter recorded {local['accepted']} accepted observations, Langfuse holds {remote['observations']}",
+            f"{len(reconciliation['missing'])} accepted observation identities missing from Langfuse",
             f"last acceptance {waited} seconds ago",
             _remote_fresh(binding, now),
         ),
@@ -337,16 +359,50 @@ def _unconfirmed(binding, record, limits):
     )
 
 
+def _count_drift(binding):
+    remote = binding["remote"]
+    reconciled = (remote or {}).get("reconciliation")
+    if not binding["read"] or not reconciled or not reconciled["drift"]:
+        return None
+    return Finding(
+        "telemetry count drift",
+        binding["life"],
+        "exporter aggregate differs from accepted observation identities",
+        (
+            *_who(binding),
+            f"exporter recorded {binding['local']['accepted']} accepted observations",
+            f"reconstructed {reconciled['accepted']} accepted observation identities",
+            f"{len(reconciled['missing'])} accepted observation identities missing from Langfuse",
+        ),
+        "exporter accepted aggregate agrees with its observation identities",
+        abs(reconciled["drift"]),
+    )
+
+
+def _turn_completed(binding):
+    return bool((binding["local"] or {}).get("stopped"))
+
+
 def _never_exported(binding, record, limits):
     age = _ago(record["now_ms"], binding["started_at"])
+    turn = (
+        "a turn completed"
+        if _turn_completed(binding)
+        else f"no completed turn recorded, working past the {limits.first_turn_minutes} minute first turn bound"
+    )
     return Finding(
         "telemetry never exported",
         f"{binding['agent']}.{binding['started_at']}",
         f"working agent with no Langfuse trace after {age} seconds",
-        (*_who(binding), f"no trace tagged swarm:{record['slug']} and agent:{binding['agent']}"),
-        f"no trace after a {limits.active_grace_seconds} second grace, {_cadence(limits)}",
+        (*_who(binding), f"no trace tagged swarm:{record['slug']} and agent:{binding['agent']}", turn),
+        f"no trace after a completed turn or past a {limits.first_turn_minutes} minute first turn, {_cadence(limits)}",
         age,
     )
+
+
+def _fault_due(binding, record, limits):
+    first_turn = record["now_ms"] - binding["started_at"] <= limits.first_turn_minutes * MINUTE_MS
+    return _turn_completed(binding) or not first_turn
 
 
 def _misattributed(binding):
@@ -394,12 +450,13 @@ def _active_binding(binding, record, limits):
     if record["now_ms"] - binding["started_at"] <= limits.active_grace_seconds * SECOND_MS:
         return []
     wrong = _misattributed(binding)
-    found = [wrong] if wrong else []
+    found = [f for f in (wrong, _count_drift(binding)) if f]
     lag = unaccepted_seconds(binding, record["now_ms"])
     if lag > limits.active_stale_seconds:
         found.append(_stale(binding, record, limits, lag))
     elif binding["read"] and not binding["remote"] and not wrong:
-        found.append(_never_exported(binding, record, limits))
+        if _fault_due(binding, record, limits):
+            found.append(_never_exported(binding, record, limits))
     else:
         found += [f for f in (_unconfirmed(binding, record, limits),) if f]
     return found

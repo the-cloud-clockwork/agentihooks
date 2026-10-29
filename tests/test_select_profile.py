@@ -91,6 +91,15 @@ def test_prepare_isolates_only_swarm_codex(profile, agent, swarm):
     assert env[key] == str(root / "rendered" / "qa" / agent)
 
 
+@pytest.mark.parametrize(("agent", "options"), [("codex", {"isolate": True, "push": True}), ("claude", {})])
+def test_prepare_renders_a_push_profile_only_for_codex(profile, agent, options):
+    _, renderer = profile
+
+    select_profile.prepare("qa", agent, "", "", [], {"AGENTIHOOKS_SWARM": "crew", "AGENTIHOOKS_CODEX_PUSH": "1"})
+
+    renderer.assert_called_once_with(agent, "qa", overlays=(), bundle_revision="", **options)
+
+
 @pytest.mark.parametrize("alias", [False, True])
 def test_swarm_codex_prepare_refuses_the_real_home(profile, monkeypatch, alias):
     root, _ = profile
@@ -624,6 +633,31 @@ def test_init_agent_pins_the_render_to_the_recorded_bundle_commit(profile, monke
     launcher = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh"))
     worn = f"--overlay=tuner --bundle-revision=abc123 --home={tmp_path / 'rendered' / 'engineer+tuner' / 'claude'}"
     assert f"select-profile engineer {worn} --agent claude --" in launcher.read_text()
+
+
+def test_an_app_server_launch_renders_the_pushed_home_once_and_hands_it_to_serve(profile, tmp_path):
+    root, renderer = profile
+    args = init_agent._parser().parse_args(
+        ["--agent", "codex", "--profile", "engineer", "--codex-transport", "app_server", "--seat", "eng-1@sw"]
+    )
+    environ = {"AGENTIHOOKS_SWARM": "sw", "HOME": str(tmp_path)}
+    init_agent._prepare_profile(args, "codex", [], environ)
+    renderer.assert_called_once_with("codex", "engineer", overlays=[], bundle_revision="", isolate=True, push=True)
+    assert select_profile.PUSH not in environ
+    home = root / "rendered" / "engineer" / "codex"
+    assert environ["CODEX_HOME"] == str(home)
+    spec = init_agent.AgentSpec(
+        agent="codex", profile="engineer", seat="eng-1@sw", transport=init_agent.APP_SERVER, home=str(home)
+    )
+    command, _ = init_agent._agent_command(spec, tmp_path / "route", "run", [], {}, tmp_path)
+    assert command.index(f"--home={home}") < command.index("--")
+
+
+def test_a_terminal_codex_launch_renders_without_push(profile, tmp_path):
+    _, renderer = profile
+    args = init_agent._parser().parse_args(["--agent", "codex", "--profile", "engineer"])
+    init_agent._prepare_profile(args, "codex", [], {"AGENTIHOOKS_SWARM": "sw", "HOME": str(tmp_path)})
+    renderer.assert_called_once_with("codex", "engineer", overlays=[], bundle_revision="", isolate=True)
 
 
 def test_a_continued_session_pins_the_bundle_commit_of_its_environment(profile, monkeypatch, tmp_path):

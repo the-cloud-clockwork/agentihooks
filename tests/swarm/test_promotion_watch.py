@@ -69,7 +69,10 @@ class Ledger:
         next(a for a in self.alerts if a["id"] == alert_id)["state"] = "done"
 
 
-def gh(runs, jobs=(), calls=None):
+PROMOTED = [{"name": "promote / promote", "conclusion": "success"}]
+
+
+def gh(runs, jobs=PROMOTED, calls=None):
     def run(argv, **kwargs):
         if calls is not None:
             calls.append((argv, kwargs))
@@ -121,6 +124,7 @@ def sonar_run(message, extra_jobs=(), extra_steps=()):
                 "--paginate",
                 "--jq",
                 ".[] | {annotation_level, message} | @json",
+                "--include",
             ]
             body = [
                 {"annotation_level": "warning", "message": "Node.js 20 actions are deprecated."},
@@ -135,6 +139,7 @@ def sonar_run(message, extra_jobs=(), extra_steps=()):
                 "--paginate",
                 "--jq",
                 JOBS_JQ,
+                "--include",
             ]
             body = found
         else:
@@ -216,7 +221,15 @@ def test_jobs_reads_every_job_of_the_run():
     assert promotion_watch.jobs("/repo", 900, gh([], JOBS, calls)) == JOBS
     assert calls == [
         (
-            ["gh", "api", "repos/{owner}/{repo}/actions/runs/900/jobs?per_page=100", "--paginate", "--jq", JOBS_JQ],
+            [
+                "gh",
+                "api",
+                "repos/{owner}/{repo}/actions/runs/900/jobs?per_page=100",
+                "--paginate",
+                "--jq",
+                JOBS_JQ,
+                "--include",
+            ],
             {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60},
         )
     ]
@@ -246,7 +259,15 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
     assert calls == [
         (["gh", "api", RUNS, "--jq", ".workflow_runs[] | {id, conclusion, head_sha, html_url} | @json"], kwargs),
         (
-            ["gh", "api", "repos/{owner}/{repo}/actions/runs/900/jobs?per_page=100", "--paginate", "--jq", JOBS_JQ],
+            [
+                "gh",
+                "api",
+                "repos/{owner}/{repo}/actions/runs/900/jobs?per_page=100",
+                "--paginate",
+                "--jq",
+                JOBS_JQ,
+                "--include",
+            ],
             kwargs,
         ),
     ]
@@ -386,9 +407,9 @@ def test_the_watch_reads_at_most_once_per_refresh_window(store):
     calls = []
     refresh(store, Ledger(), gh([GREEN], calls=calls))
     refresh(store, Ledger(), gh([GREEN], calls=calls), NOW + promotion_watch.REFRESH_MS - 1)
-    assert len(calls) == 1
+    assert len([argv for argv, _ in calls if "/jobs" not in argv[2]]) == 1
     refresh(store, Ledger(), gh([GREEN], calls=calls), NOW + promotion_watch.REFRESH_MS)
-    assert len(calls) == 2
+    assert len([argv for argv, _ in calls if "/jobs" not in argv[2]]) == 2
 
 
 def test_a_green_run_closes_open_and_blocked_promotion_tasks_and_the_alert(store):
@@ -421,6 +442,36 @@ def test_a_green_run_closes_open_and_blocked_promotion_tasks_and_the_alert(store
         "cleared the promotion alert, dev push run 901 passed",
     ]
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "901"
+
+
+@pytest.mark.parametrize(
+    "promote",
+    [
+        [{"name": "promote", "conclusion": "skipped"}],
+        [{"name": "promote / promote", "conclusion": "cancelled"}],
+        [],
+    ],
+)
+def test_a_green_run_whose_promote_did_not_succeed_keeps_the_promotion_red_open(store, promote):
+    tasks = [{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open"}]
+    alerts = [{"id": "al-1", "source": "promotion", "text": "red", "state": "open"}]
+    store.redis.set(promotion_watch.key(SLUG, "seen"), 900)
+    store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-900-0", "helm-kind")
+    ledger = Ledger(tasks, alerts)
+    actions = refresh(store, ledger, gh([GREEN], [{"name": "lint", "conclusion": "success"}, *promote]))
+    assert ledger.updates == [] and ledger.comments == [] and ledger.closed == []
+    assert actions == ["dev push run 901 passed but its promote job did not succeed, so the promotion red stays open"]
+    assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "901"
+    assert filed(store) == {"promo-900-0": "helm-kind"}
+    refresh(store, ledger, gh([{**GREEN, "id": 902}]), NOW * 2)
+    assert ledger.tasks[0]["state"] == "done" and ledger.alerts[0]["state"] == "done"
+    assert filed(store) == {}
+
+
+def test_only_the_promote_job_and_its_called_jobs_decide_whether_a_green_run_clears(store):
+    ledger = Ledger([{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open"}])
+    refresh(store, ledger, gh([GREEN], [*PROMOTED, {"name": "promote smoke", "conclusion": "skipped"}]))
+    assert ledger.tasks[0]["state"] == "done"
 
 
 def test_a_task_claimed_before_the_close_lands_is_not_reported_closed(store):
@@ -506,7 +557,7 @@ def test_a_ledger_without_task_or_alert_lists_still_files_and_closes(store):
 def test_the_first_window_reads_once_the_refresh_interval_has_passed_since_zero(store):
     calls = []
     refresh(store, Ledger(), gh([GREEN], calls=calls), promotion_watch.REFRESH_MS)
-    assert len(calls) == 1
+    assert len([argv for argv, _ in calls if "/jobs" not in argv[2]]) == 1
 
 
 def test_a_run_numbered_one_is_handled_on_a_fresh_watch(store):
@@ -727,19 +778,23 @@ def outage_run(found, run_id=900):
     return run
 
 
-def test_a_run_whose_failed_jobs_all_lost_their_runner_files_one_outage_task(store):
+def outage_alert(ledger):
+    assert len(ledger.raised) == 1
+    return ledger.raised[0][2]
+
+
+def test_a_run_whose_failed_jobs_all_lost_their_runner_raises_the_alert_and_files_no_task(store):
     ledger = Ledger()
     found = [(f"unit (3.11, {n})", RAN, DOWNLOAD) for n in range(1, 18)]
     actions = refresh(store, ledger, outage_run(found))
-    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
-    _, fields, _ = ledger.added[0]
-    assert (fields["task"], fields["kind"], fields["rank"]) == ("promo-900-0", "ci", "urgent")
-    assert "https://github.com/o/r/actions/runs/900" in fields["description"]
-    assert all(f"unit (3.11, {n})" in fields["description"] for n in range(1, 18))
-    assert "Failed to resolve action download info" in fields["description"]
-    assert len(ledger.raised) == 1
-    assert "runner outage" in ledger.raised[0][2]
-    assert actions[0] == "filed promo-900-0 for the failed dev job runner outage"
+    assert ledger.added == []
+    assert filed(store) == {}
+    text = outage_alert(ledger)
+    assert "infrastructure outage" in text
+    assert "https://github.com/o/r/actions/runs/900" in text
+    assert all(f"unit (3.11, {n})" in text for n in range(1, 18))
+    assert "Failed to resolve action download info" in text
+    assert actions == ["raised the promotion alert for dev push run 900"]
 
 
 @pytest.mark.parametrize(
@@ -750,12 +805,16 @@ def test_a_run_whose_failed_jobs_all_lost_their_runner_files_one_outage_task(sto
         ([*RAN[:1], {"name": "Run tests", "conclusion": None}], []),
         (RAN, ["The self-hosted runner: anton-x lost communication with the server."]),
         (RAN, ["The operation was canceled."]),
+        (RAN, ["RPC failed; HTTP 408 curl 22 The requested URL returned error: 408"]),
+        (RAN, ["RPC failed; HTTP 503 curl 22 The requested URL returned error: 503"]),
+        (RAN, ["Twine upload failed 3 times over 90s: HTTP 502. this is not a code verdict."]),
     ],
 )
-def test_each_runner_infrastructure_signature_is_an_outage(store, steps, messages):
+def test_each_infrastructure_signature_is_an_outage_that_files_no_task(store, steps, messages):
     ledger = Ledger()
     refresh(store, ledger, outage_run([("unit (3.12, 1)", steps, messages), ("unit (3.12, 2)", RAN, DOWNLOAD)]))
-    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
+    assert ledger.added == []
+    assert "the jobs unit (3.12, 1), unit (3.12, 2) failed on CI infrastructure" in outage_alert(ledger)
 
 
 def test_a_failed_step_that_skipped_the_tests_files_its_own_fixer_and_no_outage(store):
@@ -775,19 +834,18 @@ def test_a_job_whose_tests_passed_without_an_outage_sign_files_its_own_fixer(sto
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: unit (3.12, 1)"]
 
 
-def test_the_outage_task_names_the_run_the_jobs_and_every_cause(store):
+def test_the_outage_alert_names_the_run_the_jobs_and_every_cause(store):
     ledger = Ledger()
     found = [("unit (3.11, 1)", RAN, DOWNLOAD), ("unit (3.11, 2)", RAN, ["The operation was canceled."])]
     refresh(store, ledger, outage_run(found))
-    assert ledger.added[0][1]["description"] == (
-        f"The dev push run 900 of Tests lost its runner infrastructure at commit {SHA}: "
-        "https://github.com/o/r/actions/runs/900. Its cause: the jobs unit (3.11, 1), unit (3.11, 2) lost their "
-        "runner infrastructure (Failed to resolve action download info; The operation was canceled). "
-        "No code change is due; the swarm closes this task when a later dev push run passes."
+    assert outage_alert(ledger) == (
+        f"Dev promotion is red: push run 900 at commit {SHA} failed in infrastructure outage: the jobs "
+        "unit (3.11, 1), unit (3.11, 2) failed on CI infrastructure, so no code change is due (Failed to resolve "
+        "action download info; The operation was canceled). https://github.com/o/r/actions/runs/900"
     )
 
 
-def test_a_real_failure_beside_an_outage_files_the_outage_task_and_its_own_fixer(store):
+def test_a_real_failure_beside_an_outage_files_only_its_own_fixer_and_the_alert_names_both(store):
     ledger = Ledger()
     found = [
         ("unit (3.11, 1)", RAN, DOWNLOAD),
@@ -795,21 +853,29 @@ def test_a_real_failure_beside_an_outage_files_the_outage_task_and_its_own_fixer
         ("unit (3.12, 3)", [*RAN[:1], {"name": "Run tests", "conclusion": "failure"}], ["1 failed, 900 passed"]),
     ]
     refresh(store, ledger, outage_run(found))
-    assert [fields["title"] for _, fields, _ in ledger.added] == [
-        "Promotion red: runner outage",
-        "Promotion red: unit (3.12, 3)",
-    ]
-    assert len(ledger.raised) == 1
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: unit (3.12, 3)"]
+    text = outage_alert(ledger)
+    assert "infrastructure outage: the jobs unit (3.11, 1), unit (3.11, 2)" in text
+    assert "unit (3.12, 3): Run tests; 1 failed, 900 passed" in text
 
 
-def test_an_open_outage_task_holds_a_later_outage_and_a_green_run_closes_it(store):
+def test_a_live_outage_alert_stays_quiet_through_a_later_outage_and_a_green_run_clears_it(store):
     ledger = Ledger()
     refresh(store, ledger, outage_run([("unit (3.11, 1)", RAN, DOWNLOAD)]))
     refresh(store, ledger, outage_run([("unit (3.12, 4)", RAN, ["The operation was canceled."])], 902), NOW * 2)
-    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0"]
+    assert ledger.added == []
     assert len(ledger.raised) == 1
     refresh(store, ledger, gh([{**GREEN, "id": 903}]), NOW * 3)
-    assert ledger.tasks[0]["state"] == "done"
+    assert ledger.alerts[0]["state"] == "done"
+
+
+def test_an_outage_stays_quiet_while_a_former_owner_holds_a_live_promotion_alert(store, monkeypatch):
+    former = Ledger(alerts=[{"id": "al-0", "source": "promotion", "text": "red", "state": "open"}])
+    ledger = Ledger()
+    ledger.state = lambda slug: former.doc()
+    monkeypatch.setattr(promotion_watch.promotion_owner, "history", lambda repo, redis: {SLUG, "former"})
+    refresh(store, ledger, outage_run([("unit (3.11, 1)", RAN, DOWNLOAD)]))
+    assert (ledger.added, ledger.raised) == ([], [])
 
 
 UPLOADED = [*RAN, {"name": "Upload durations", "conclusion": "failure"}]
@@ -863,21 +929,16 @@ def recorded_outage(extra=()):
     return [*shards, ("unit (3.12, 10)", FAILED_TESTS, []), *CONSUMERS, *extra]
 
 
-def test_jobs_that_failed_for_want_of_lost_unit_shard_output_join_the_outage_task(store):
+def test_jobs_that_failed_for_want_of_lost_unit_shard_output_join_the_outage(store):
     ledger = Ledger()
     refresh(store, ledger, outage_run(recorded_outage()))
-    assert [fields["title"] for _, fields, _ in ledger.added] == [
-        "Promotion red: runner outage",
-        "Promotion red: unit (3.12, 10)",
-    ]
-    description = ledger.added[0][1]["description"]
-    assert f"the jobs {', '.join(LOST_SHARDS)} lost their runner infrastructure" in description
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: unit (3.12, 10)"]
+    text = outage_alert(ledger)
+    assert f"the jobs {', '.join(LOST_SHARDS)} failed on CI infrastructure" in text
     assert (
         "the jobs refresh-durations, shard-check (3.11), shard-check (3.12), sonar failed for want of their unit shard "
-        "output" in description
+        "output" in text
     )
-    assert "unit (3.12, 10)" not in description
-    assert len(ledger.raised) == 1
 
 
 def test_a_job_outside_the_shard_output_consumers_beside_an_outage_files_its_own_fixer(store):
@@ -885,11 +946,10 @@ def test_a_job_outside_the_shard_output_consumers_beside_an_outage_files_its_own
     lint = ("lint", [{"name": "Run ruff", "conclusion": "failure"}], ["F401 unused import"])
     refresh(store, ledger, outage_run(recorded_outage([lint])))
     assert [fields["title"] for _, fields, _ in ledger.added] == [
-        "Promotion red: runner outage",
         "Promotion red: lint",
         "Promotion red: unit (3.12, 10)",
     ]
-    assert "lint" not in ledger.added[0][1]["description"]
+    assert "F401 unused import" in ledger.added[0][1]["description"]
 
 
 def test_a_shard_output_consumer_files_its_own_fixer_when_no_unit_shard_lost_its_runner(store):
@@ -897,7 +957,6 @@ def test_a_shard_output_consumer_files_its_own_fixer_when_no_unit_shard_lost_its
     found = [("docs", RAN, DOWNLOAD), ("unit (3.12, 10)", FAILED_TESTS, []), *CONSUMERS[:1]]
     refresh(store, ledger, outage_run(found))
     assert [fields["title"] for _, fields, _ in ledger.added] == [
-        "Promotion red: runner outage",
         "Promotion red: sonar",
         "Promotion red: unit (3.12, 10)",
     ]
@@ -928,12 +987,11 @@ def test_each_shard_output_consumer_joins_the_outage_of_a_lost_unit_shard(store,
     ledger = Ledger()
     found = [("unit (3.12, 1)", RAN, DOWNLOAD), (consumer, [{"name": "Grade", "conclusion": "failure"}], messages)]
     refresh(store, ledger, outage_run(found))
-    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
-    assert ledger.added[0][1]["description"].endswith(
-        f"lost their runner infrastructure (Failed to resolve action download info); the jobs {consumer} failed for "
-        "want of their unit shard output. No code change is due; the swarm closes this task when a later dev push run "
-        "passes."
-    )
+    assert ledger.added == []
+    assert (
+        "so no code change is due (Failed to resolve action download info); the jobs "
+        f"{consumer} failed for want of their unit shard output. https://github.com/o/r/actions/runs/900"
+    ) in outage_alert(ledger)
 
 
 @pytest.mark.parametrize(
@@ -962,30 +1020,24 @@ def test_a_consumer_failing_on_its_own_error_beside_a_lost_unit_shard_files_its_
 ):
     ledger = Ledger()
     refresh(store, ledger, outage_run([("unit (3.12, 1)", RAN, DOWNLOAD), (consumer, steps, messages)]))
-    assert [fields["title"] for _, fields, _ in ledger.added] == [
-        "Promotion red: runner outage",
-        f"Promotion red: {consumer}",
-    ]
-    assert "unit shard output" not in ledger.added[0][1]["description"]
+    assert [fields["title"] for _, fields, _ in ledger.added] == [f"Promotion red: {consumer}"]
+    assert "unit shard output" not in outage_alert(ledger)
 
 
 def test_a_job_that_only_starts_like_a_unit_shard_does_not_starve_its_consumers(store):
     ledger = Ledger()
     found = [("unit-selected (3.12)", RAN, DOWNLOAD), *CONSUMERS[:1]]
     refresh(store, ledger, outage_run(found))
-    assert [fields["title"] for _, fields, _ in ledger.added] == [
-        "Promotion red: runner outage",
-        "Promotion red: sonar",
-    ]
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: sonar"]
 
 
 def test_a_consumer_that_lost_its_own_runner_is_named_once_among_the_lost_jobs(store):
     ledger = Ledger()
     refresh(store, ledger, outage_run([("sonar", RAN, DOWNLOAD), ("unit (3.12, 1)", RAN, DOWNLOAD)]))
-    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
-    description = ledger.added[0][1]["description"]
-    assert "the jobs sonar, unit (3.12, 1) lost their runner infrastructure" in description
-    assert "unit shard output" not in description
+    assert ledger.added == []
+    text = outage_alert(ledger)
+    assert "the jobs sonar, unit (3.12, 1) failed on CI infrastructure" in text
+    assert "unit shard output" not in text
 
 
 @pytest.mark.parametrize(("lost", "failed"), [("unit smoke (3.12)", "sonar"), ("unit (3.12, 1)", "sonar report")])
@@ -994,34 +1046,95 @@ def test_only_the_job_name_before_its_matrix_marks_a_unit_shard_or_a_consumer(st
     refresh(
         store, ledger, outage_run([(lost, RAN, DOWNLOAD), (failed, [{"name": "Grade", "conclusion": "failure"}], [])])
     )
-    assert [fields["title"] for _, fields, _ in ledger.added] == [
-        "Promotion red: runner outage",
-        f"Promotion red: {failed}",
-    ]
+    assert [fields["title"] for _, fields, _ in ledger.added] == [f"Promotion red: {failed}"]
 
 
 def test_a_refresh_naming_lost_shards_joins_an_outage_no_unit_shard_reported(store):
     ledger = Ledger()
     refresh(store, ledger, outage_run([("worker-image / worker-image (startup)", RAN, DOWNLOAD), CONSUMERS[-1]]))
-    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
-    assert "the jobs refresh-durations failed for want of their unit shard output" in ledger.added[0][1]["description"]
+    assert ledger.added == []
+    assert "the jobs refresh-durations failed for want of their unit shard output" in outage_alert(ledger)
 
 
 def test_a_refresh_that_failed_on_its_own_cause_beside_a_lost_unit_shard_files_its_own_fixer(store):
     ledger = Ledger()
     own = ("refresh-durations", REFRESHED, ["refresh durations: malformed sample file durations.json: Expecting value"])
     refresh(store, ledger, outage_run([("unit (3.12, 1)", RAN, DOWNLOAD), own]))
-    assert [fields["title"] for _, fields, _ in ledger.added] == [
-        "Promotion red: runner outage",
-        "Promotion red: refresh-durations",
-    ]
-    assert "refresh-durations" not in ledger.added[0][1]["description"]
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: refresh-durations"]
+    assert "for want of their unit shard output" not in outage_alert(ledger)
 
 
 def test_a_refresh_naming_lost_shards_files_its_own_fixer_when_nothing_lost_its_runner(store):
     ledger = Ledger()
     refresh(store, ledger, outage_run([CONSUMERS[-1]]))
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: refresh-durations"]
+
+
+SONAR_504 = (
+    "SonarQube Scan failed 1 times over 224s: java.lang.IllegalStateException: Failed to upload report: Error 504 on "
+    "http://127.0.0.1:9000/api/ce/submit?projectKey=agentihooks : <!DOCTYPE HTML>. The Sonar server or its Access "
+    "proxy did not answer; this is not a code verdict. Sonar report upload failed during a Sonar server outage "
+    "(infrastructure)."
+)
+CHECKOUT_408 = [
+    "Can't find 'action.yml', 'action.yaml' or 'Dockerfile' under "
+    "'/home/runner/_work/agentihooks/agentihooks/.github/actions/retry-upload'. Did you forget to run actions/checkout "
+    "before running your local action?",
+    "The process '/usr/bin/git' failed with exit code 128",
+    "could not fetch f233deaae556026ac9696772d998fc64e43cbfd8 from promisor remote",
+    "expected 'packfile'",
+    "RPC failed; HTTP 408 curl 22 The requested URL returned error: 408",
+    "ambiguous argument 'HEAD': unknown revision or path not in the working tree.",
+]
+
+
+def failed_steps(*names):
+    return [{"name": name, "conclusion": "failure"} for name in names]
+
+
+def test_the_recorded_sonar_upload_504_raises_the_alert_and_files_no_task(store):
+    ledger = Ledger()
+    sonar = (
+        "sonar",
+        failed_steps("SonarQube Scan", "Hold the Delivery L2 conditions"),
+        ["Process completed with exit code 2.", "Process completed with exit code 3.", SONAR_504],
+    )
+    refresh(store, ledger, outage_run([sonar], 40728940569))
+    assert ledger.added == []
+    assert "the jobs sonar failed on CI infrastructure" in outage_alert(ledger)
+
+
+def test_the_recorded_http_408_checkout_and_the_jobs_it_starved_file_no_task(store):
+    ledger = Ledger()
+    found = [
+        (
+            "shard-check (3.12)",
+            failed_steps("Wait for every planned shard", "Summarize reused, ran and flaky tests"),
+            [],
+        ),
+        (
+            "unit (3.12, 2)",
+            failed_steps("Check out the graded commit, attempt 2", "Upload the flake report"),
+            CHECKOUT_408,
+        ),
+        (
+            "sonar",
+            failed_steps("Wait for the coverage merge", "Hold the Delivery L2 conditions"),
+            ["Process completed with exit code 2.", "Missing coverage for shard 2"],
+        ),
+    ]
+    refresh(store, ledger, outage_run(found, 40713867099))
+    assert ledger.added == []
+    text = outage_alert(ledger)
+    assert "the jobs unit (3.12, 2) failed on CI infrastructure" in text
+    assert "the jobs shard-check (3.12), sonar failed for want of their unit shard output" in text
+
+
+def test_a_shard_wait_failure_files_its_own_fixer_when_no_unit_shard_lost_its_runner(store):
+    ledger = Ledger()
+    wait = ("shard-check (3.12)", failed_steps("Wait for every planned shard"), [])
+    refresh(store, ledger, outage_run([wait]))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: shard-check (3.12)"]
 
 
 def recorded_test_failure(
@@ -1057,7 +1170,12 @@ def recorded_test_failure(
     def run(argv, **kwargs):
         if argv[2].endswith("/logs"):
             job_id = argv[2].split("/jobs/")[1].split("/")[0]
-            assert argv == ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs"]
+            assert argv == [
+                "gh",
+                "api",
+                f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs",
+                "--allow-escape-sequences",
+            ]
             assert kwargs == {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
             output = "\n".join(f"2026-10-20T12:47:13Z FAILED {test} - AssertionError: failure" for test in tests)
             return subprocess.CompletedProcess(argv, 0, output, "")

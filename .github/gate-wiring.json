@@ -8,7 +8,7 @@
   },
   "outside_gate": {
     "equivalence.yml/ledger-equivalence": {
-      "reason": "Opt in replay of ledger storage and pages; the equivalence gate task wires it into the gate.",
+      "reason": "Replays ledger storage and pages on every pull request that touches the ledger package, its tests or this workflow; the equivalence gate task wires it into the gate.",
       "owner": "ci-1@rig-grade-swarm",
       "expires": "2026-11-08"
     },
