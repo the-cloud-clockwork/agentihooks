@@ -1636,6 +1636,13 @@ jobs:
           [[ "$(uname -m)" == x86_64 && -n "$release" && -n "$sha" ]]
           export NATS_SERVER_RELEASE="$release" NATS_SERVER_SHA256="$sha" NATS_SERVER_NAME="nats-server-${release}-linux-amd64"
           mkdir -p "$RUNNER_TEMP/nats-bg"
+          if [[ "$(nats-server --version 2>/dev/null)" == "nats-server: $release" ]]; then
+            ln -s "$(command -v nats-server)" "$RUNNER_TEMP/nats-bg/nats-server"
+            echo 0 > "$RUNNER_TEMP/nats-bg.status"
+            echo "the runner image carries nats-server $release" > "$RUNNER_TEMP/nats-bg.log"
+            echo "$$" > "$RUNNER_TEMP/nats-bg.pid"
+            exit 0
+          fi
           nohup bash -c '
             archive="$RUNNER_TEMP/nats-bg/$NATS_SERVER_NAME.tar.gz"
             status=0

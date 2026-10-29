@@ -255,8 +255,51 @@ def test_nats_server_archive_is_cached_on_its_pinned_release_and_checksum():
     }
     assert install["env"]["CACHE_HIT"] == "${{ steps.cache.outputs.cache-hit }}"
     assert save["uses"] == "actions/cache/save@v4"
-    assert save["if"] == "steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'"
+    assert save["if"] == (
+        "steps.pin.outputs.image != 'true' && steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'"
+    )
     assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.cache.outputs.cache-primary-key }}"}
+    assert restore["if"] == install["if"] == "steps.pin.outputs.image != 'true'"
+
+
+def _run_nats_pin(tmp_path: Path, image_version: str | None) -> tuple[str, str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    if image_version is not None:
+        server = bin_dir / "nats-server"
+        server.write_text(f"#!/bin/sh\necho nats-server: {image_version}\n")
+        server.chmod(0o755)
+    output, env_file = tmp_path / "output", tmp_path / "env"
+    step = _nats_server_steps()["Resolve the pinned nats server"]
+    env = {
+        **os.environ,
+        **step["env"],
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_OUTPUT": str(output),
+        "GITHUB_ENV": str(env_file),
+    }
+    subprocess.run(["bash", "-c", step["run"]], env=env, check=True, capture_output=True, text=True)
+    return output.read_text(), env_file.read_text() if env_file.exists() else ""
+
+
+def test_nats_server_pin_takes_the_runner_image_server_of_the_pinned_release(tmp_path):
+    release = _nats_server_steps()["Resolve the pinned nats server"]["env"]["NATS_SERVER_RELEASE"]
+    output, env = _run_nats_pin(tmp_path, release)
+    assert "image=true\n" in output
+    assert env == "NATS_SERVER_REQUIRED=1\n"
+
+
+def test_nats_server_pin_installs_when_the_image_server_is_another_release(tmp_path):
+    output, env = _run_nats_pin(tmp_path, "v0.0.1")
+    assert "image=" not in output
+    assert env == ""
+
+
+def test_nats_server_pin_installs_when_the_image_carries_no_server(tmp_path):
+    output, env = _run_nats_pin(tmp_path, None)
+    assert "image=" not in output
+    assert env == ""
 
 
 def _run_nats_install(tmp_path: Path, cache_hit: str, cached: str) -> list[str]:
@@ -1567,7 +1610,7 @@ def test_selected_legs_download_the_nats_server_while_setup_runs_and_fall_back_t
     assert use["timeout-minutes"] == 3
 
 
-def _run_background_nats(tmp_path: Path, curl_works: bool) -> subprocess.CompletedProcess:
+def _run_background_nats(tmp_path: Path, curl_works: bool, image: bool = False) -> subprocess.CompletedProcess:
     name = "nats-server-v0-linux-amd64"
     binary = tmp_path / "src" / name / "nats-server"
     binary.parent.mkdir(parents=True)
@@ -1591,6 +1634,8 @@ def _run_background_nats(tmp_path: Path, curl_works: bool) -> subprocess.Complet
     copy = 'while [[ $# -gt 0 ]]; do [[ "$1" == -o ]] && cp "$GOOD" "$2"; shift; done\n' if curl_works else "exit 22\n"
     stub.write_text(f'#!/usr/bin/env bash\necho "$@" >> "$CURL_LOG"\n{copy}')
     stub.chmod(0o755)
+    if image:
+        (stub.parent / "nats-server").symlink_to(binary)
     runner = tmp_path / "runner"
     runner.mkdir()
     env = {
@@ -1622,6 +1667,19 @@ def test_the_background_nats_download_puts_the_verified_pinned_server_on_the_pat
     assert (tmp_path / "path").read_text() == f"{server.parent}\n"
     assert (tmp_path / "env").read_text() == "NATS_SERVER_REQUIRED=1\n"
     assert "releases/download/v0/nats-server-v0-linux-amd64.tar.gz" in (tmp_path / "curl.log").read_text()
+
+
+def test_the_background_nats_step_takes_the_runner_image_server_without_a_download(tmp_path):
+    result = _run_background_nats(tmp_path, curl_works=False, image=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    server = tmp_path / "runner/nats-bg/nats-server"
+    assert (
+        subprocess.run([str(server), "--version"], check=True, capture_output=True, text=True).stdout
+        == "nats-server: v0\n"
+    )
+    assert (tmp_path / "path").read_text() == f"{server.parent}\n"
+    assert (tmp_path / "env").read_text() == "NATS_SERVER_REQUIRED=1\n"
+    assert not (tmp_path / "curl.log").exists()
 
 
 def test_a_failed_background_nats_download_leaves_the_install_to_the_action(tmp_path):
