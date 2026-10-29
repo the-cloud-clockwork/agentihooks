@@ -9,7 +9,7 @@ from pathlib import Path
 
 from scripts.swarm_ledger import request_metrics
 
-from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
+from . import artifact_files, heap, hierarchy, media_files, outbox, refresh, writer_copy
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
@@ -502,22 +502,24 @@ class SQLiteLedgerRepository:
             cached = self._cache.get(self._key(slug))
             if cached is not None and cached.generation >= row[0]:
                 return cached
-            state = None if cached is None else self._refreshed(connection, slug, cached, row[0])
+            state, writer = self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
                 state = load(connection, slug)
             if "events" in state["_meta"]:
                 state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
             fragments = document(state, None if whole else cached.fragments)
-            entry = Entry(row[0], None, fragments.value, fragments)
+            entry = Entry(row[0], None, fragments.value, fragments, writer)
             self._remember(slug, entry)
         if whole:
             heap.release()
         return entry
 
-    def _refreshed(self, connection, slug: str, cached: Entry, generation: int) -> dict | None:
+    def _refreshed(self, connection, slug: str, cached: Entry | None, generation: int) -> tuple:
+        if cached is None:
+            return None, None
         paths = refresh.changed_paths(connection, slug, cached.generation, generation, CHANGES_KEPT)
-        return None if paths is None else refresh.refreshed(connection, slug, cached.state, paths)
+        return (None, None) if paths is None else writer_copy.refreshed(connection, slug, cached, paths)
 
     def _remember(self, slug: str, entry: Entry) -> None:
         with self._guard:

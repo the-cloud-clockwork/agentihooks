@@ -59,9 +59,8 @@ def _names(folder: Path) -> list[str]:
 def _deps() -> list[str]:
     from scripts import deps_preflight
 
-    path = deps_preflight.manifest_path()
     try:
-        declared = deps_preflight.parse(json.loads(path.read_text())) if path else []
+        declared = deps_preflight.declared()
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return []
     return sorted(dep.id for dep in declared if deps_preflight.satisfied(dep))

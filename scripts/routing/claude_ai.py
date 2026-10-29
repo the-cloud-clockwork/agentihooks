@@ -1,6 +1,7 @@
 """Standalone Claude sessions on the stored claude ai logins: a slot's credentials, never its claim."""
 
 import os
+import sys
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -75,6 +76,8 @@ def _front(environ: Mapping[str, str], cwd: Path) -> tuple[dict[str, str], str, 
     child = login.child(environ, target, found)
     try:
         native_login.check(child, found)
+        if native_login.rejected(child, found):
+            raise native_login.LoginError(native_login.EXPIRED)
     except native_login.LoginError as exc:
         login.release(target, environ)
         raise login.LoginRefused(str(exc)) from exc
@@ -92,6 +95,9 @@ def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], repo
         front = front_door_route.check(environ.get("AGENTIHOOKS_PROFILE", ""), title, [])
         child, found, number = (_front if front else prepare)(environ, Path.cwd())
     except login.LoginRefused as exc:
+        if front and str(exc) == native_login.EXPIRED:
+            print(f"[agenti] claude ai login refused: {exc}", file=sys.stderr)
+            return login.launch_token(binary, args, environ, report)
         raise RoutingError(str(exc)) from exc
     _write_route_report(report, status="routed", account=found, placement="forced")
     print(f"[agenti] account={found} route={ROUTE} slot={number}", flush=True)

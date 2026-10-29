@@ -85,6 +85,7 @@ from scripts.swarm import (
     agent_up,
     bottleneck,
     bottleneck_status,
+    claim_lost,
     clearance,
     control_notifications,
     default_models,
@@ -775,7 +776,7 @@ def _state(store, args, state):
             "run agentihooks swarm tick yourself",
             file=sys.stderr,
         )
-    for action in run_tick(store, args.slug):
+    for action in getattr(args, "tick", run_tick)(store, args.slug):
         print(action)
     print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state}))
 
@@ -953,12 +954,20 @@ def cmd_agent_up(store, args):
 def cmd_exit(store, args):
     name = store.names.resolve(args.name or Who.from_env().name)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
-    if agent and agent.lane != MASTER and store.claimant(args.slug, agent.task) != name:
+    if agent and agent.lane != MASTER and _claimless(store, args.slug, agent):
         _retire(store, args.slug, agent, "finished its session without a claim")
     else:
         agent_up.retire(store, args.slug, name, now_ms())
     print(json.dumps({"exited": name}), flush=True)
     HerdrRuntime().reap_name(name)
+
+
+def _claimless(store, slug, agent):
+    from scripts.hive import scope
+
+    if store.claimant(slug, agent.task) != agent.name:
+        return True
+    return claim_lost.lost(agent.name, LedgerClient().task(slug, agent.task), bool(scope.member()))
 
 
 def gate_mode(key, value):
@@ -1302,7 +1311,7 @@ def cmd_status(store, args):
     from scripts.swarm import capacity, incidents, quota_view
     from scripts.swarm_ledger import ledger_freezes
 
-    quota = quota_view.lines(capacity.read(store, args.slug), now_ms())
+    quota = quota_view.lines(capacity.read(store, args.slug), now_ms(), quota_view.live(agents), config.scaling)
     held = spawn_holds(store, args.slug) + failed_panes.status_lines(store, args.slug)
     held += incidents.status_lines(store, args.slug)
     from scripts.hive import admission, placement_waits
@@ -1708,9 +1717,10 @@ def cmd_pr(store, args):
     row.update(scoped)
     fields.update(scoped)
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
-    if not keeps_main and row.get("pr_url") != args.url:
-        lift.drop_task(args.slug, agent.task, store=store)
+    drop_lifts = not keeps_main and row.get("pr_url") != args.url
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    if drop_lifts:
+        lift.drop_task(args.slug, agent.task, store=store)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
 
 
