@@ -53,6 +53,24 @@ def test_archive_moves_only_rows_no_live_reader_returns(store):
     assert registry.archive("fixture") == 0
 
 
+def test_managed_reads_the_archive_inside_redis(store, monkeypatch):
+    first, second, third, other = history(store)
+    registry = store.execution_registry
+    registry.archive("fixture")
+    archive = store.key("fixture", ARCHIVE)
+    hvals = store.redis.hvals
+
+    def refusing(key):
+        assert key != archive, "the archive was read into the client"
+        return hvals(key)
+
+    monkeypatch.setattr(store.redis, "hvals", refusing)
+    assert registry.managed("fixture", first.name) is True
+    assert registry.managed("fixture", third.name) is True
+    assert registry.managed("fixture", first.name[:-1]) is False
+    assert registry.managed("fixture", "nobody@fixture") is False
+
+
 def test_set_pane_still_finds_an_archived_attempt(store):
     first, *_ = history(store)
     store.execution_registry.archive("fixture")
