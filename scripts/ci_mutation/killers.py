@@ -22,17 +22,24 @@ class KillMemory:
         key = json.dumps([mutant, sorted(set(tests))])
         return self.folder / (hashlib.sha256(key.encode()).hexdigest() + ".cost")
 
+    @staticmethod
+    def _record(path: Path) -> dict | None:
+        if not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text())
+        except json.JSONDecodeError:
+            # The cache merges every shard's copy of one record in parallel, which can leave a torn file.
+            return None
+
     def killer(self, mutant: str) -> str | None:
         path = self._path(mutant)
         return path.read_text() if path.is_file() else None
 
     def cost(self, mutant: str, tests: Iterable[str]) -> float | None:
         tests = sorted(set(tests))
-        path = self._cost_path(mutant, tests)
-        if not path.is_file():
-            return None
-        record = json.loads(path.read_text())
-        return record["seconds"] if record["tests"] == sorted(tests) else None
+        record = self._record(self._cost_path(mutant, tests))
+        return record["seconds"] if record and record["tests"] == sorted(tests) else None
 
     def _split_path(self, function: str) -> Path:
         return self.folder / (hashlib.sha256(function.encode()).hexdigest() + ".split")
@@ -47,10 +54,9 @@ class KillMemory:
             partial.replace(path)
 
     def split(self, function: str, tests: Iterable[str]) -> dict | None:
-        path = self._split_path(function)
-        if not path.is_file():
+        record = self._record(self._split_path(function))
+        if record is None:
             return None
-        record = json.loads(path.read_text())
         kept = sorted([*record["head"], *(test for chosen in record["slices"] for test in chosen)])
         return record if kept == sorted(set(tests)) else None
 

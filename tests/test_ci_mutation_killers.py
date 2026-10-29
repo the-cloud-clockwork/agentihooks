@@ -206,3 +206,19 @@ def test_kept_splits_survive_a_cache_reload_and_answer_only_for_the_same_tests(t
     assert restored.split("scripts.a.x_g", ["a", "b", "c", "fast"]) is None
     assert restored.killer("scripts.a.x_f__mutmut_1") is None
     assert not list(memory.folder.glob(f"*.{os.getpid()}"))
+
+
+def test_a_torn_cached_record_reads_as_missing(tmp_path, monkeypatch):
+    memory = killers.KillMemory(tmp_path / "killers")
+    mutant = "scripts.a.x_f__mutmut_1"
+    ticks = iter([10.0, 12.0])
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    memory.prepare(mutant, TESTS)
+    assert memory.wrap(lambda *args, **kwargs: 0)(object(), TESTS) == 0
+    memory.keep_splits({"scripts.a.x_f": {"head": TESTS[:1], "slices": [TESTS[1:]], "costs": [1.0]}})
+    assert memory.cost(mutant, TESTS) == 2.0
+    assert memory.split("scripts.a.x_f", TESTS) is not None
+    for path in [*memory.folder.glob("*.cost"), *memory.folder.glob("*.split")]:
+        path.write_text(path.read_text() + "1}")
+    assert memory.cost(mutant, TESTS) is None
+    assert memory.split("scripts.a.x_f", TESTS) is None
