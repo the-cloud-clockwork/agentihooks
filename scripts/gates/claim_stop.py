@@ -154,14 +154,19 @@ class ClaimStop:
     def decide(self, call, who, state):
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:
             return Decision()
+        from scripts.swarm import outage
+
+        store, now = self.connect(), self.now()
+        streak = Streak(store, who.swarm, who.name)
+        if any(record["kind"] == "ledger" for record in outage.open_records(who.swarm)):
+            streak.clear()
+            return Decision()
         ledger = self.ledger()
         task = ledger.task(who.swarm, who.task)
         if task is None or task.get("state") not in ACTIVE or task.get("claimed_by") != who.name:
             return Decision()
         from scripts.swarm import idle, ready, waits
 
-        store, now = self.connect(), self.now()
-        streak = Streak(store, who.swarm, who.name)
         if (
             lift.lifted(who.swarm, call.session, self.name, state.home)
             or lift.task_lifted(who.swarm, who.task, self.name, state.home)
@@ -185,7 +190,7 @@ class ClaimStop:
         if checks and held_on.get("kind") not in KEPT and not run_wait:
             on = {"kind": "checks", "target": checks}
             idle.declare_wait(store.redis, who.swarm, who.name, now + CHECKS_WAIT_MS, f"checks on {checks}", now, on=on)
-        if not owed:
+        if live or not owed:
             streak.clear()
             return Decision()
         reason, count = refusal(owed, who.swarm, task, pull), streak.bump(now)
