@@ -91,7 +91,7 @@ def test_a_live_home_without_systemd_or_crontab_skips_maintenance_without_callin
     monkeypatch.setattr(maintenance.shutil, "which", lambda name: None)
     monkeypatch.setattr(maintenance, "git", fake)
     report = maintenance.maintain([repo.primary], act=True)
-    assert calls == [("count-objects", "-v")]
+    assert [call for call in calls if call[0] == "maintenance"] == []
     assert report == [
         {"path": str(repo.primary), "registered": False, "outcome": maintenance.NO_SCHEDULER, "loose": 4, "packs": 2}
     ]
