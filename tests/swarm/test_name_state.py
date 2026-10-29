@@ -136,7 +136,10 @@ def test_legacy_values_read_until_the_first_write_moves_them(client, on_redis):
     client.set("old:alias", "engineer@abcdef-0001")
     names = NameState(client)
     assert names.legacy is client
-    legacy = lambda redis: redis.get("old:alias")  # noqa: E731
+
+    def legacy(redis):
+        return redis.get("old:alias")
+
     assert names.get("alias", "x", legacy) == "engineer@abcdef-0001"
     assert names.amend("alias", "x", lambda held: KEEP if held else "other", legacy) == "engineer@abcdef-0001"
     assert names.shared.get(state_key("alias", "x")) is None
@@ -147,7 +150,7 @@ def test_legacy_values_read_until_the_first_write_moves_them(client, on_redis):
 
 def test_many_reads_ask_legacy_once_for_the_parts_the_store_lacks(client, on_redis):
     names = NameState(client)
-    names.amend("alias", "held", lambda _: "a", _never)
+    names.amend("alias", "held", lambda _: "a", lambda _: None)
     asked = []
 
     def legacy(redis, missing):
@@ -162,7 +165,7 @@ def test_many_reads_ask_legacy_once_for_the_parts_the_store_lacks(client, on_red
 
 def test_a_reader_reads_the_store_and_legacy_keys_through_itself(client, on_redis):
     names = NameState(client)
-    names.amend("alias", "x", lambda _: "a", _never)
+    names.amend("alias", "x", lambda _: "a", lambda _: None)
     with client.pipeline() as pipe:
         pipe.watch("watched")
         shared, legacy = names.views(pipe)
