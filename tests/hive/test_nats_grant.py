@@ -684,6 +684,10 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
         *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets),
         *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets),
         "slots.*.m1",
+        "$KV.scheduler-m1.>",
+        "$JS.API.STREAM.INFO.KV_scheduler-m1",
+        "$JS.API.STREAM.MSG.GET.KV_scheduler-m1",
+        "$JS.API.STREAM.CREATE.KV_scheduler-m1",
     ]
     assert claims["nats"] == {
         "type": "user",
@@ -694,7 +698,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
         "data": -1,
         "payload": -1,
     }
-    assert not [subject for subject in publish if ".CREATE" in subject]
+    assert [subject for subject in publish if ".CREATE" in subject] == ["$JS.API.STREAM.CREATE.KV_scheduler-m1"]
 
 
 def test_a_role_credential_keeps_the_unrestricted_user_claims():
