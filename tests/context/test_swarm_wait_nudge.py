@@ -297,6 +297,9 @@ def test_empty_monitor_commands_are_allowed(worker, tool_input):
         "gh -R owner/repo run view 123 --verbose",
         "gh --repo=owner/repo run view 123",
         "cd repo && /usr/bin/gh run view 123 | tail -n 5",
+        "bash -lc 'gh run view 123'",
+        "env X=1 gh run view 123",
+        "time gh run view 123",
     ],
 )
 @pytest.mark.parametrize("name", [NAME, "ci@abc123-0001", "master@abc123-0001"])
@@ -319,6 +322,8 @@ def test_a_full_run_view_is_refused_to_every_swarm_agent(worker, monkeypatch, ca
         "gh run view 123 -j 456",
         "gh run view 123 -j456",
         "gh run view 123 --web",
+        "gh run view 123 -w",
+        "gh -R owner/repo run view 123 --json status",
         "gh run list -L 5",
         "echo gh run view 123",
     ],
@@ -327,8 +332,9 @@ def test_a_narrow_run_view_is_allowed(worker, capsys, command):
     _pre(capsys, _bash(command))
 
 
-def test_a_full_run_view_outside_the_swarm_is_allowed(worker, monkeypatch, capsys):
-    monkeypatch.delenv("AGENTIHOOKS_SWARM")
+@pytest.mark.parametrize("missing", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"])
+def test_a_full_run_view_outside_the_swarm_is_allowed(worker, monkeypatch, capsys, missing):
+    monkeypatch.delenv(missing)
     _pre(capsys, _bash("gh run view 123"))
 
 
