@@ -142,3 +142,45 @@ def test_a_reap_pass_goes_on_to_the_next_agent_after_a_skipped_one(store, capsys
     alone = watched(live)
     assert alone != []
     assert watched([skipped, *live]) == alone
+
+
+def test_an_idle_watch_times_each_read_inside_the_watch_step(store, capsys):
+    from scripts.gates import log as gate_log
+    from scripts.hive import scope
+    from scripts.swarm import automated_gc, ledger_probe, outage, resume
+    from scripts.swarm import idle as idle_state
+    from scripts.swarm.naming import NameRegistry
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    agent = "engineer@a1b2c3-0001"
+    runtime.statuses[agent] = "idle"
+    capsys.readouterr()
+    with timing.tick("sw"):
+        tick("sw", store, ledger, runtime, now_ms=2_000)
+    rows = [row for row in finished(capsys) if row.get("agent") == agent]
+    watch = next(row for row in rows if row["step"] == timing.named(tick_module._watch_agent))
+    inside = [row for row in rows if watch["started"] < row["started"]]
+    inside = {row["step"] for row in inside if row["started"] + row["wall_s"] <= watch["started"] + watch["wall_s"]}
+    parts = [
+        timing.named(tick_module._observe),
+        timing.named(tick_module._refusal_due),
+        timing.named(store.redis.set),
+        timing.named(outage.mark_pane),
+        timing.named(outage.held),
+        timing.named(resume.recovery_exhausted),
+        timing.named(resume.recovery_pending),
+        timing.named(tick_module._stuck_on_provider),
+        timing.named(tick_module._stale_nudge),
+        timing.named(idle_state.heartbeat),
+        timing.named(idle_state.wait),
+        timing.named(NameRegistry.resolve),
+        timing.named(scope.readings),
+        timing.named(tick_module._operator_at_pane),
+        timing.named(ledger_probe.holding),
+        timing.named(automated_gc.owned),
+        timing.named(RedisStore.put_agent),
+        timing.named(gate_log.append),
+        timing.named(resume.recovery_holds),
+    ]
+    assert [part for part in parts if part not in inside] == []
