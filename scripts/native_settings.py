@@ -21,7 +21,7 @@ def native_settings(
     # Settings gain the bundle rung that MCP already had; without it a bundle
     # can only express fleet-wide settings by repeating them in every profile.
     for kind, bundle_root in _i._bundle_roots():
-        label = "Applied bundle overrides: {path}" if kind == "root" else "Applied user bundle overrides: {path}"
+        label = f"Applied {_i._BUNDLE_LABELS[kind]} overrides: {{path}}"
         rendered = _apply_layer(rendered, install_target, bundle_root, label, say)
 
     # --- 1b. Apply per-profile overrides (chained: each profile merges on top) ---
