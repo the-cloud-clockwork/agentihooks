@@ -193,3 +193,16 @@ def test_only_completed_mutant_tests_record_cost(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="runner failed"):
         memory.wrap(failed)(object(), TESTS)
     assert memory.cost(mutant, TESTS) is None
+
+
+def test_kept_splits_survive_a_cache_reload_and_answer_only_for_the_same_tests(tmp_path):
+    memory = killers.KillMemory(tmp_path / "missing" / "killers")
+    split = {"head": ["fast"], "slices": [["b", "a"], ["c"]], "costs": [9.0, 9.0]}
+    memory.keep_splits({"scripts.a.x_f": split})
+    restored = killers.KillMemory(memory.folder)
+    assert restored.split("scripts.a.x_f", ["c", "a", "fast", "b"]) == {"head": ["fast"], "slices": [["a", "b"], ["c"]]}
+    assert restored.split("scripts.a.x_f", ["a", "b", "c"]) is None
+    assert restored.split("scripts.a.x_f", ["a", "b", "c", "fast", "d"]) is None
+    assert restored.split("scripts.a.x_g", ["a", "b", "c", "fast"]) is None
+    assert restored.killer("scripts.a.x_f__mutmut_1") is None
+    assert not list(memory.folder.glob(f"*.{os.getpid()}"))

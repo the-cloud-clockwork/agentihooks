@@ -176,6 +176,52 @@ def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_p
     assert "scripts.sample.x_plain__mutmut_1" in mixed["assignments"]
 
 
+def test_a_kept_split_is_reused_so_its_unit_costs_stay_observed_when_durations_drift(tmp_path, monkeypatch):
+    from scripts.ci_mutation import killers, measured
+
+    function = "scripts.sample.x_f"
+    names = [f"{function}__mutmut_{index}" for index in range(2)]
+    nodes = ["fast", *(f"t{index}" for index in range(6))]
+    memory = killers.KillMemory(tmp_path)
+
+    def results(durations):
+        return [{"tests": {function: nodes}, "durations": {"fast": 1.0, **durations}}]
+
+    even = results({f"t{index}": 100.0 for index in range(6)})
+    drifted_durations = results({"t0": 250.0, **{f"t{index}": 50.0 for index in range(1, 6)}})
+    first = measured.measured_plan([(names, even)], memory, limit=3)
+    memory.keep_splits(first["splits"])
+    ticks = iter(float(value) for value in range(100))
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    for name in names:
+        for chosen in first["splits"][function]["slices"]:
+            tests = [*first["splits"][function]["head"], *chosen]
+            memory.prepare(name, tests)
+            assert memory.wrap(lambda *args, **kwargs: 0)(object(), tests) == 0
+    drifted = measured.measured_plan([(names, drifted_durations)], memory, limit=3)
+    assert drifted["splits"][function]["head"] == first["splits"][function]["head"]
+    assert drifted["splits"][function]["slices"] == first["splits"][function]["slices"]
+    assert drifted["unit_costs"] == {name: [1.0] * 3 for name in names}
+    fresh = measured.measured_plan([(names, drifted_durations)], killers.KillMemory(tmp_path / "empty"), limit=3)
+    assert fresh["splits"][function]["slices"] != first["splits"][function]["slices"]
+    changed = [{"tests": {function: [*nodes, "t6"]}, "durations": {**drifted_durations[0]["durations"], "t6": 50.0}}]
+    assert 1.0 not in measured.measured_plan([(names, changed)], memory, limit=3)["unit_costs"][names[0]]
+
+
+def test_a_kept_split_wider_than_the_shard_limit_is_cut_again(tmp_path):
+    from scripts.ci_mutation import killers, measured
+
+    function = "scripts.sample.x_f"
+    nodes = ["fast", "a", "b", "c"]
+    memory = killers.KillMemory(tmp_path)
+    memory.keep_splits({function: {"head": ["fast"], "slices": [["a"], ["b"], ["c"]], "costs": [1.0] * 3}})
+    durations = {"fast": 1.0, "a": 150.0, "b": 150.0, "c": 150.0}
+    split = measured.measured_splits(
+        [f"{function}__mutmut_1"], [{"tests": {function: nodes}, "durations": durations}], 2, memory
+    )
+    assert len(split[function]["slices"]) == 2
+
+
 def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_its_traced_sum(tmp_path):
     from types import SimpleNamespace
 
