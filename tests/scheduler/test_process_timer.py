@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 from unittest.mock import Mock
 
@@ -9,6 +10,7 @@ from scripts.scheduler import process_timer
 from scripts.scheduler.core import Scheduler
 
 pytestmark = pytest.mark.unit
+MAX_POLLS = 200
 
 
 @pytest.fixture
@@ -26,6 +28,17 @@ def state(redis):
 @pytest.fixture(autouse=True)
 def quick_polls(monkeypatch):
     monkeypatch.setattr(process_timer, "POLL_S", 0.01)
+
+    class BoundedEvent(threading.Event):
+        polls = 0
+
+        def wait(self, timeout=None):
+            self.polls += 1
+            if self.polls > MAX_POLLS:
+                pytest.fail(f"still polling after {MAX_POLLS} polls")
+            return super().wait(timeout)
+
+    monkeypatch.setattr(process_timer, "Event", BoundedEvent)
 
 
 def test_wait_is_released_by_the_scheduler_signal(state, monkeypatch):
