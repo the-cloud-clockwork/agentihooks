@@ -136,7 +136,10 @@ def _launches(source: str, comment: str) -> bool:
 
 @functools.cache
 def _launched_literal(runners: re.Pattern) -> Callable[[str, re.Match], bool]:
-    launched = re.compile(rf"(?m)(?:^|[;&|`'\"]|\$\()\s*(?:{_WRAPPER}\s+)*(?:[\w.$~{{}}-]*/)*(?:{runners.pattern})")
+    runner, attached = runners.pattern, runners.pattern.removeprefix(r"\b")
+    launched = re.compile(
+        rf"(?m)(?:^|[;&|`'\"]|\$\()\s*(?:{_WRAPPER}\s+)*(?:[\w.$~{{}}-]*/)*(?:{runner})|-m\s*(?:{attached})"
+    )
 
     def keep(source: str, match: re.Match) -> bool:
         return bool(launched.search(source[match.end("q") : match.end() - len(match["q"])]))

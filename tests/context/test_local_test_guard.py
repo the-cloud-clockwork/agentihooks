@@ -691,6 +691,9 @@ def test_a_script_that_launches_gh_and_names_a_runner_in_data_passes(tmp_path, m
         "subprocess.run('cd tests && pytest -q', shell=True)",
         "subprocess.run('uv run pytest tests', shell=True)",
         "os.system('timeout 60 .venv/bin/pytest -x')",
+        "subprocess.run(f'{sys.executable} -m pytest', shell=True)",
+        "subprocess.run('{} -m pytest'.format(sys.executable), shell=True)",
+        "subprocess.run(['python', '-mpytest', 'tests'])",
     ],
 )
 def test_a_gh_reader_that_also_launches_a_runner_is_blocked(launch, tmp_path, monkeypatch):
