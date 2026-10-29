@@ -273,6 +273,7 @@ def split_files(root: Path, files: list[str], total: int) -> list[list[str]]:
 
 
 def partition(files: list[str], seconds: dict[str, float], total: int) -> list[list[str]]:
+    # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
     parts = [[] for _ in range(total)]
     loads = Counter()
     for path in sorted(files, key=lambda path: (-seconds[path], path)):
