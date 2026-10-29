@@ -88,6 +88,20 @@ def test_write_entry_returns_the_first_valid_answer_without_retry():
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize(
+    ("marked", "plain"),
+    [
+        ("# Heading", "Heading"),
+        ("a <port> placeholder", "a port placeholder"),
+        ("a [link](https://example.com)", "a link"),
+        ("a ```fence```", "a fence"),
+    ],
+)
+def test_write_entry_normalizes_markup_before_validating(marked, plain):
+    text = f"{marked} {_words(25)}"
+    assert rc.write_entry(_change(), lambda change: text) == f"{plain} {_words(25)}"
+
+
 @pytest.mark.parametrize("first", [rc.WordCountError, rc.MarkupError, rc.ModelError])
 def test_write_entry_retries_once_after_a_failure(first, capsys):
     answers = iter([first, _words(25)])
