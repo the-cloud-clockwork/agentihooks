@@ -50,3 +50,16 @@ def test_a_managed_swarm_launch_wears_the_swarm_brain(world, kernel_brain, monke
     assert json.loads((out / ".claude.json").read_text())["mcpServers"]["agentibrain"]["url"] == SWARM_MCP
     assert json.loads((out / render.STAMP).read_text())["overlays"] == ["brain", "swarm-brain"]
     assert "SWARM BRAIN MARKER" in (out / "CLAUDE.md").read_text()
+
+
+def test_a_managed_launch_with_a_refused_binding_still_wears_the_swarm_brain(world, kernel_brain, monkeypatch):  # noqa: F811
+    from scripts.profiles import render
+    from scripts.swarm import brain_binding
+
+    monkeypatch.setenv(brain_binding.VARIABLE, json.dumps({"status": "refused", "reason": "unset"}))
+    monkeypatch.setattr(world["install"], "_resolve_hooks_python", lambda: Path(sys.executable))
+
+    out = render.render_claude("rb-role")
+
+    assert "agentibrain" not in json.loads((out / ".claude.json").read_text())["mcpServers"]
+    assert json.loads((out / render.STAMP).read_text())["overlays"] == ["brain", "swarm-brain"]
