@@ -697,6 +697,15 @@ def tick(store, rt):
     return swarm_cli.run_tick(store, DOCTOR, ledger=FileLedger(), runtime=rt, messenger=FakeHerdr({}))
 
 
+def test_controller_tick_does_not_run_doctor_detectors(env, monkeypatch):
+    store, rt, _ = env
+    doctor.main([WATCHED, "start"])
+    calls = []
+    monkeypatch.setattr(doctor, "timer", lambda *args: calls.append(args) or [])
+    tick(store, rt)
+    assert calls == []
+
+
 def test_the_swarm_tick_reports_a_finding_and_task_turns_its_verdict_into_ledger_tasks(env, monkeypatch, capsys):
     store, rt, _ = env
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
