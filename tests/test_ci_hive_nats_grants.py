@@ -398,8 +398,10 @@ def test_the_controller_grant_covers_every_bucket_and_queue_the_hub_opens():
     from scripts.hive import buckets, execution_events, presence
     from scripts.hub import hive_loss, lease, pulls, reconciler, runner, slots, timers
     from scripts.inbox import migration
+    from scripts.scheduler.core import BUCKET as SCHEDULER
 
     opened = {
+        SCHEDULER,
         *buckets.NAMES,
         *slots.BUCKETS,
         presence.BUCKET,
@@ -422,6 +424,11 @@ def test_the_controller_grant_covers_every_bucket_and_queue_the_hub_opens():
     assert {"$KV.account-slots.>", "$KV.hive-slot-accounts.>"} <= publish
     assert {"swarm.>", "dead.>", f"{nats.QUEUE_SUBJECT}.>", "$JS.ACK.>"} <= publish
     assert not {">", "$JS.API.>", "$KV.>"} & publish
+
+
+def test_the_controller_grant_publishes_the_scheduler_bucket_antoncore_grants():
+    publish = nats_grant.controller_claims()["pub"]["allow"]
+    assert "$KV.scheduler.>" in publish
 
 
 def test_the_controller_grant_keeps_legacy_event_routing_and_swarm_discovery():
