@@ -1910,7 +1910,7 @@ def _under_tick_lock(slug, store, act):
 def _settle(slug, config, store, ledger, rows, doc):
     agents = store.agents(slug)
     if config.state == "stopping":
-        if _end_undecided(slug, store, agents):
+        if _end_undecided(slug, store, ledger, rows, agents):
             return []
         store.update(slug, state="stopped")
         return ["stopped"]
@@ -1925,11 +1925,15 @@ def _settle(slug, config, store, ledger, rows, doc):
     return ["drained"]
 
 
-def _end_undecided(slug, store, agents):
+def _end_undecided(slug, store, ledger, rows, agents):
     if any(a.lane == MASTER for a in agents):
         return agents
     for agent in agents:
         if agent.state == resume.AWAITING:
             store.release(slug, agent.task, agent.name)
             store.drop_agent(slug, agent.name)
+            row = rows.get(agent.task, {})
+            if row.get("state") in ACTIVE and row.get("claimed_by") == agent.name:
+                _reopen(slug, ledger, rows, agent.task)
+            exits.settle(InboxStore(store.redis), agent.name, "", "stopped")
     return [a for a in agents if a.state != resume.AWAITING]

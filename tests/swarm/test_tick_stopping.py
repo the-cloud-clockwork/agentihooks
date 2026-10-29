@@ -1,3 +1,6 @@
+import pytest
+
+from scripts.inbox.store import InboxStore
 from scripts.swarm.store import MASTER, AgentRecord
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
@@ -9,14 +12,27 @@ def _awaiting(name, lane, task):
     return AgentRecord(name, lane, task, state="awaiting-decision", started_at=1)
 
 
-def test_stopping_with_an_empty_master_seat_ends_an_awaiting_decision_seat_and_stops(store):  # noqa: F811
+@pytest.mark.parametrize(
+    ("row", "after"),
+    [
+        ({"state": "claimed", "claimed_by": ENGINEER}, {"state": "open", "claimed_by": ""}),
+        ({"state": "pr", "claimed_by": ENGINEER}, {"state": "open", "claimed_by": ""}),
+        ({"state": "done", "claimed_by": ENGINEER}, {"state": "done", "claimed_by": ENGINEER}),
+        ({"state": "claimed", "claimed_by": "other"}, {"state": "claimed", "claimed_by": "other"}),
+    ],
+)
+def test_stopping_with_an_empty_master_seat_ends_an_awaiting_decision_seat_and_stops(store, row, after):  # noqa: F811
     ledger = tasks(("t1", "eng"))
+    ledger.rows["t1"].update(row)
     store.claim("sw", "t1", ENGINEER, 60_000)
     store.put_agent("sw", _awaiting(ENGINEER, "eng", "t1"))
+    item = InboxStore(store.redis).send("operator", ENGINEER, "are you there")
     store.update("sw", state="stopping")
     tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
     assert store.config("sw").state == "stopped"
     assert store.agents("sw") == [] and store.claimant("sw", "t1") is None
+    assert {key: ledger.rows["t1"][key] for key in after} == after
+    assert InboxStore(store.redis).get(item.id).state != "pending"
 
 
 def test_stopping_keeps_an_awaiting_decision_seat_while_a_master_can_decide(store):  # noqa: F811
