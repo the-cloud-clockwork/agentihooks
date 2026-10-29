@@ -16,6 +16,7 @@
 /scripts/swallowed_exceptions.py @nestorcolt
 /scripts/locked_tests.py @nestorcolt
 /scripts/design_rules.py @nestorcolt
+/scripts/threshold_pins.py @nestorcolt
 /scripts/check_* @nestorcolt
 /scripts/github_access.sh @nestorcolt
 /scripts/swarm_ledger/artifact_sanity.py @nestorcolt

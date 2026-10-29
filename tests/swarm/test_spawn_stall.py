@@ -585,9 +585,9 @@ def test_a_doctor_held_by_the_watched_focus_is_not_a_spawn_stall(stalled, monkey
 HIVE_FULL = "no hive for eng has room"
 CPU_GATE = {"id": "anton-1", "refusal": admission.refusal(admission.Room(0, admission.CPU, "five minute load 9.00"))}
 MAX_GATE = {"id": "anton-2", "refusal": admission.refusal(admission.capped(admission.Room(1, "", ""), 3, 3))}
-CPU_WAIT = placement._refused(HIVE_FULL, [CPU_GATE])
+CPU_WAIT = placement._refused(HIVE_FULL, [CPU_GATE], "eng")
 FULL_WAIT = placement.overflow(
-    "engineer", placement.Wait(placement._refused(HIVE_FULL, [CPU_GATE, MAX_GATE])), 8, 8
+    "engineer", placement.Wait(placement._refused(HIVE_FULL, [CPU_GATE, MAX_GATE], "eng")), 8, 8
 ).reason
 REFUSALS = (
     "Admission refusals, latest first: local cap on ws (8 of 8 agents), cpu on anton-1 (2 tasks), "
@@ -812,7 +812,7 @@ def test_a_legacy_wait_without_a_seen_time_counts_from_its_start():
 def test_a_refusal_orders_by_its_latest_sighting_across_tasks():
     waits = {
         "t1": {"reason": CPU_WAIT, "started_at": 1, "seen_at": 9},
-        "t2": {"reason": placement._refused(HIVE_FULL, [MAX_GATE]), "started_at": 1, "seen_at": 5},
+        "t2": {"reason": placement._refused(HIVE_FULL, [MAX_GATE], "eng"), "started_at": 1, "seen_at": 5},
         "t3": {"reason": CPU_WAIT, "started_at": 1, "seen_at": 1},
     }
     assert spawn_stall.refusals(waits, {}, 0) == (
@@ -821,7 +821,7 @@ def test_a_refusal_orders_by_its_latest_sighting_across_tasks():
 
 
 def test_a_refusal_first_seen_at_zero_keeps_its_place():
-    waits = {"t1": {"reason": placement._refused(HIVE_FULL, [MAX_GATE]), "started_at": 0, "seen_at": 0}}
+    waits = {"t1": {"reason": placement._refused(HIVE_FULL, [MAX_GATE], "eng"), "started_at": 0, "seen_at": 0}}
     local = {"machine": "ws", "taken": 8, "maximum": 8, "at": 0}
     assert spawn_stall.refusals(waits, local, 0) == (
         "Admission refusals, latest first: local cap on ws (8 of 8 agents), max agents on anton-2 (1 task)"

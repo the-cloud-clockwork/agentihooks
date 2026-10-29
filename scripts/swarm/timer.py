@@ -274,24 +274,26 @@ def recycle():
 
 
 def _proven():
+    from scripts.events import state
     from scripts.scheduler import service
+    from scripts.scheduler.core import Scheduler
     from scripts.swarm import scheduled_tick
-    from scripts.swarm.store import store_errors
 
     started = (service.holder(_scheduler_env()) or {}).get("started")
     try:
-        return started is not None and scheduled_tick.delivered_at(scheduled_tick.open_scheduler()) >= started
-    except store_errors():
+        return started is not None and scheduled_tick.delivered_at(Scheduler()) >= started
+    except state.unavailable():
         return False
 
 
 def schedule():
+    from scripts.events import state
+    from scripts.scheduler.core import Scheduler
     from scripts.swarm import scheduled_tick
-    from scripts.swarm.store import store_errors
 
     try:
-        scheduled_tick.ensure(scheduled_tick.open_scheduler())
-    except store_errors() as exc:
+        scheduled_tick.ensure(Scheduler())
+    except state.unavailable() as exc:
         print(f"the scheduled swarm tick could not be registered: {type(exc).__name__}: {exc}", file=sys.stderr)
         return False
     supervise()
@@ -299,27 +301,29 @@ def schedule():
 
 
 def unschedule():
+    from scripts.events import state
+    from scripts.scheduler.core import Scheduler
     from scripts.swarm import scheduled_tick
-    from scripts.swarm.store import store_errors
 
     try:
-        scheduled_tick.cancel(scheduled_tick.open_scheduler())
-    except store_errors() as exc:
+        scheduled_tick.cancel(Scheduler())
+    except state.unavailable() as exc:
         print(f"the scheduled swarm tick could not be cancelled: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def undelivered():
+    from scripts.scheduler.core import Scheduler
     from scripts.swarm import scheduled_tick
 
-    return scheduled_tick.undelivered(scheduled_tick.open_scheduler(), _roots()[1], time.time())
+    return scheduled_tick.undelivered(Scheduler(), _roots()[1], time.time())
 
 
 def _kept():
-    from scripts.swarm.store import store_errors
+    from scripts.events import state
 
     try:
         return undelivered()
-    except store_errors() as exc:
+    except state.unavailable() as exc:
         return f"the swarm tick delivery could not be read: {type(exc).__name__}: {exc}"
 
 

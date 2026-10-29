@@ -83,7 +83,7 @@ async def test_runner_survives_a_redis_that_does_not_answer_yet(monkeypatch, tmp
 
     await service.run(SimpleNamespace(run_due=drain), stop)
     assert passes == [1, 1]
-    assert capsys.readouterr().err == "scheduler pass skipped: Redis did not answer\n"
+    assert capsys.readouterr().err == "scheduler pass skipped: the state store did not answer\n"
 
 
 async def test_runner_still_stops_on_any_other_error(monkeypatch, tmp_path):
@@ -186,7 +186,7 @@ def test_service_entrypoint_runs_the_configured_redis_scheduler(monkeypatch):
     monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
 
     async def run(scheduler):
-        received.append(scheduler.redis)
+        received.append(scheduler.state.redis)
 
     monkeypatch.setattr(service, "run", run)
     monkeypatch.setattr(service, "supervise", Mock(side_effect=AssertionError("unexpected supervisor")))
@@ -695,3 +695,29 @@ def test_a_supervisor_started_outside_its_unit_leaves_no_mark(monkeypatch, tmp_p
     stopped.set()
     service.supervise(stopped)
     assert not (tmp_path / "agentihooks-scheduler.service").exists()
+
+
+@pytest.mark.parametrize(
+    ("environ", "identity"),
+    [
+        ({}, ["memory", "", "", "", None]),
+        (
+            {
+                "AGENTIHOOKS_BUS": "nats",
+                "AGENTIHOOKS_BUS_URL": "nats://bus:4222",
+                "AGENTIHOOKS_DEPLOYMENT": "distributed",
+                "AGENTIHOOKS_HIVE_ID": "h1",
+            },
+            ["nats", "nats://bus:4222", "distributed", "h1", None],
+        ),
+    ],
+    ids=["defaults", "named"],
+)
+def test_a_bus_runtime_folder_is_named_by_its_bus_identity(environ, identity):
+    import hashlib
+
+    from scripts.scheduler import service
+
+    folder = service.runtime_dir({"AGENTIHOOKS_STATE_BACKEND": "bus", **environ})
+    digest = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+    assert folder == Path.home() / ".cache" / "agentihooks" / "scheduler" / digest

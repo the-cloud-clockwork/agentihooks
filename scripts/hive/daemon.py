@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, github_app_cli, master_claude_login, session_bands
-from scripts.hive import bundle_refresh, quota_refresh, registry
+from scripts.hive import bundle_refresh, dispatch, quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm.commands import hive_id
@@ -21,6 +21,7 @@ from scripts.swarm.commands import hive_id
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.events.bus import StateStore
     from scripts.hive.orders import Consumer
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
@@ -77,7 +78,7 @@ def beat(redis: "Redis", local_id: str) -> None:
         _refresh_launch_slots(redis, executions)
     adopt_capabilities(redis, local_id)
     if not fenced:
-        poll_orders(consumer)
+        dispatch.poll(consumer)
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
@@ -96,19 +97,20 @@ def beat(redis: "Redis", local_id: str) -> None:
     close_dead_tabs(set(hosted["names"]))
 
 
-def poll_orders(consumer: "Consumer") -> None:
+def poll_orders(consumer: "Consumer", apply: Callable[[], None] | None = None) -> None:
     from scripts.swarm_ledger import authority_context
 
+    apply = consumer.poll if apply is None else apply
     member = consumer.hive == os.environ.get("AGENTIHOOKS_HIVE_ID")
     pending = not member and consumer.store.redis.xlen(consumer.orders.stream(consumer.hive))
     secret = authority_context.hosted() if pending else None
     if not secret:
-        consumer.poll()
+        apply()
         return
     kept = os.environ.get("SWARM_SECRET")
     try:
         with authority_context.bound(secret):
-            consumer.poll()
+            apply()
     finally:
         if kept is not None:
             os.environ["SWARM_SECRET"] = kept
@@ -207,6 +209,15 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
     return redis.hlen(key) > 0
 
 
+def timer_state(waiter: "Redis") -> "StateStore":
+    from scripts.events import state
+    from scripts.events.redis_state import RedisStateStore
+    from scripts.events.scheduler_state import open_scheduler_state
+    from scripts.scheduler.core import bucket
+
+    return RedisStateStore(waiter, bucket()) if state.backend() == "redis" else open_scheduler_state(bucket())
+
+
 def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
     from redis.exceptions import ConnectionError, RedisError, TimeoutError
 
@@ -214,7 +225,7 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
 
     while not stop.is_set():
         try:
-            scheduled_wait(HEADROOM_SECONDS, redis=waiter, timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
+            scheduled_wait(HEADROOM_SECONDS, state=timer_state(waiter), timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
         except (ConnectionError, TimeoutError) as exc:
             print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
             return
@@ -237,7 +248,7 @@ def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: th
 
     while not stop.is_set():
         try:
-            scheduled_wait(herdr_stats.EVERY_S, redis=waiter, timeout=herdr_stats.EVERY_S + WAKE_SLACK_S)
+            scheduled_wait(herdr_stats.EVERY_S, state=timer_state(waiter), timeout=herdr_stats.EVERY_S + WAKE_SLACK_S)
         except (ConnectionError, TimeoutError) as exc:
             print(f"hive herdr stats wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
             return
@@ -276,7 +287,9 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                     Path(marker).touch()
                 elapsed = time.monotonic() - started
                 delay = max(0, BEAT_SECONDS - max(WAKE_SLACK_S, elapsed))
-                scheduled_wait(delay, redis=waiter, timeout=max(delay, BEAT_SECONDS - elapsed - WAKE_SLACK_S / 2))
+                scheduled_wait(
+                    delay, state=timer_state(waiter), timeout=max(delay, BEAT_SECONDS - elapsed - WAKE_SLACK_S / 2)
+                )
                 failures = 0
         except lost as exc:
             stop.set()

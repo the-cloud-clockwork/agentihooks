@@ -19,6 +19,7 @@ LINT_CONTROLS = [
     "Hold swallowed exceptions in hooks and gates",
     "Hold dead code in hooks and scripts",
     "Hold the locked guard tests",
+    "Pin thresholds, floors and allowlists against the base",
     "Fail on known vulnerabilities new against the base",
     "Run every Swarm Ledger dashboard query against this head's metrics tables",
 ]
