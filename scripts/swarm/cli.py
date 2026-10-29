@@ -1786,7 +1786,16 @@ def cmd_merge(store, args):
             result = merge_queue.operate(
                 args.action,
                 args.url,
-                admit=lambda head: _queue_intent(store, args, agent, head) or queue_exit.require_fresh(args.url, head),
+                admit=lambda head: (
+                    _queue_intent(store, args, agent, head)
+                    or queue_exit.require_fresh(
+                        args.url,
+                        head,
+                        record=lambda evidence: store.record_queue_refusal(
+                            args.slug, {"agent": agent.name, "task": agent.task, **evidence}
+                        ),
+                    )
+                ),
                 journal=queue_record.Journal(args.url),
                 attempts=merge_queue.ATTEMPTS,
             )
