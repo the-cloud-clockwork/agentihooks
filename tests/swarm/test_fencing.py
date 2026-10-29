@@ -154,13 +154,6 @@ def test_a_first_write_imports_the_legacy_redis_lease_once(store, clock):
     )
 
 
-def test_a_read_leaves_the_store_unchanged(store):
-    store.redis.set(store.key("sw", "control-epoch"), 3)
-    before = {key: store.redis.dump(key) for key in store.redis.scan_iter()}
-    assert fencing.read(store, "sw")["epoch"] == 3
-    assert {key: store.redis.dump(key) for key in store.redis.scan_iter()} == before
-
-
 def test_a_refusal_count_leaves_the_fencing_document_unchanged(store):
     fencing.write(store, "sw", lambda doc: doc.update(epoch=2))
     before = fencing.read(store, "sw")

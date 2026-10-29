@@ -111,8 +111,7 @@ def _decode(value: bytes) -> dict:
 
 
 def read(store: Any, slug: str) -> dict:
-    entry = _states(store).get(slug)
-    return _legacy(store, slug) if entry is None else _decode(entry.value)
+    return _decode(_entry(_states(store), store, slug).value)
 
 
 def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
