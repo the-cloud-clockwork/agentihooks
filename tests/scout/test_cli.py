@@ -1,12 +1,12 @@
 import json
 
 import pytest
+from scripts.scout import cli, loop
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
 from scripts import cli_delegates
 from scripts.evidence import schema
 from scripts.headless.request import READ_ONLY, HeadlessError
-from scripts.scout import cli, loop
 
 pytestmark = pytest.mark.unit
 
