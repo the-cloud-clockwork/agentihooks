@@ -2,8 +2,11 @@ import importlib
 import importlib.abc
 import importlib.machinery
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
+
+import pytest
 
 
 class ShortNameAlias(importlib.abc.MetaPathFinder, importlib.abc.Loader):
@@ -41,3 +44,10 @@ def pytest_load_initial_conftests(early_config, parser, args) -> None:
         finder = ShortNameAlias(early_config.rootpath, path)
         sys.meta_path.insert(0, finder)
         early_config.add_cleanup(lambda finder=finder: sys.meta_path.remove(finder))
+
+
+@pytest.fixture(autouse=True, scope="session")
+def drop_basetemp(tmp_path_factory):
+    yield
+    # Killed mutants fail their session, and pytest keeps a failed session's basetemp in the shared memory folder.
+    shutil.rmtree(tmp_path_factory.getbasetemp(), ignore_errors=True)
