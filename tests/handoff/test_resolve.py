@@ -101,3 +101,12 @@ def test_a_ledger_item_is_read_by_its_own_path(redis):
 
     assert Resolver("sw", redis, ledger_item=read)("ledger:other/phases/p7")
     assert reads == [("other", "phases/p7")]
+
+
+def test_the_default_reads_the_ledger_item_through_the_ledger_client(monkeypatch):
+    from scripts.swarm.ledger_client import LedgerClient
+
+    reads = []
+    monkeypatch.setattr(LedgerClient, "item", lambda self, slug, path: reads.append((slug, path)) or {"id": "t1"})
+    assert Resolver("sw", None)("ledger:sw/tasks/t1")
+    assert reads == [("sw", "tasks/t1")]

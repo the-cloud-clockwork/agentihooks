@@ -38,3 +38,18 @@ def test_handoff_names_claims_unknown_when_the_ledger_refuses_the_task_read(star
     capsys.readouterr()
     assert cli.main(["sw", "--as", "engineer@a1b2c3-0001", "handoff", str(_handoff_doc(tmp_path))]) == 0
     assert json.loads(capsys.readouterr().out)["envelope"]["claims"] == handoff_envelope.UNKNOWN
+
+
+def test_handoff_resolves_seat_and_work_folder_addresses_in_this_swarm(started, tmp_path, capsys):
+    from scripts.inbox.seats import SeatMemory
+    from scripts.swarm_ledger import ledger_workspace
+
+    SeatMemory(cli.connect().redis).add_recap("eng-1@sw", "engineer@a1b2c3-0000", "t1", "did seam one", 1)
+    folder = ledger_workspace.folder("sw", "t1")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "progress.md").write_text("step one landed")
+    doc = _handoff_doc(tmp_path)
+    doc.write_text(
+        doc.read_text().replace("- ledger:sw/tasks/t1", "- recap:eng-1@sw the seat\n- workspace:t1/progress")
+    )
+    assert cli.main(["sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)]) == 0
