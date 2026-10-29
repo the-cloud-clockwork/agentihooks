@@ -336,14 +336,12 @@ def test_pending_batch_keeps_duplicate_pointers_and_legacy_rebuild_behavior(stor
     assert store.pending() == [first, second]
 
 
-def test_pending_batch_names_a_missing_item(store):
-    from scripts.inbox.store import InboxError
-
+def test_pending_batch_skips_and_drops_a_missing_item(store):
     item = store.send("alice", "bob", "work")
     store.pending()
     store.redis.delete(store.key("item", item.id))
-    with pytest.raises(InboxError, match=f"^no message {item.id}$"):
-        store.pending()
+    assert store.pending() == []
+    assert pending_ids(store, "bob") == []
 
 
 def test_back_fill_rebuilds_the_waiting_set_once(store):
