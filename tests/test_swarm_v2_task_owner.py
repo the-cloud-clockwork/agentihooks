@@ -613,3 +613,16 @@ def test_a_rebalance_tells_both_masters_each_phase_that_changes_owner(world):
     text = f"Master phase owners of swarm {SLUG} changed: p2 moved from {LEAD} to {SECOND}."
     assert [item.text for item in inbox(world).inbox(LEAD)] == [text]
     assert [item.text for item in inbox(world).inbox(SECOND)] == [text]
+
+
+def test_one_owner_change_item_names_every_moved_phase_and_skips_uncounted_seats(world):
+    gone = f"master-3@{SLUG}"
+    moved = {"p1": (gone, LEAD), "p2": (gone, LEAD)}
+
+    masters.tell(world.redis, SLUG, moved, [LEAD, SECOND])
+
+    text = (
+        f"Master phase owners of swarm {SLUG} changed: p1 moved from {gone} to {LEAD}; p2 moved from {gone} to {LEAD}."
+    )
+    assert [item.text for item in inbox(world).inbox(LEAD)] == [text]
+    assert inbox(world).inbox(gone) == inbox(world).inbox(SECOND) == []
