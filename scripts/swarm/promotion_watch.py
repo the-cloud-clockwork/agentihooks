@@ -96,10 +96,10 @@ def key(slug: str, part: str) -> str:
     return ":".join((PREFIX, slug, SOURCE, part))
 
 
-def _read(repo_dir: str, endpoint: str, jq: str, run: Callable, paginate: bool = True) -> list[dict]:
+def _read(repo_dir: str, endpoint: str, jq: str, run: Callable, pages: tuple = ("--paginate",)) -> list[dict]:
     output = github_reads.rest(
         "swarm.promotion_watch",
-        ["api", endpoint, *(["--paginate"] if paginate else []), "--jq", jq],
+        ["api", endpoint, *pages, "--jq", jq],
         run,
         cwd=repo_dir,
         capture_output=True,
@@ -126,12 +126,12 @@ def superseded(repo_dir: str, job: dict, run: Callable = subprocess.run) -> bool
 def repaired(repo_dir: str, last: dict, failed: list[str], run: Callable = subprocess.run) -> set[str]:
     passed: set[str] = set()
     with contextlib.suppress(*dev_red.READ_ERRORS):
-        for newer in _read(repo_dir, NEWER_RUNS, NEWER_JQ, run, paginate=False):
+        for newer in _read(repo_dir, NEWER_RUNS, NEWER_JQ, run, pages=()):
             if newer["id"] <= last["id"] or set(failed) <= passed:
                 continue
             if newer["head_sha"] != last["head_sha"]:
                 compare = f"repos/{{owner}}/{{repo}}/compare/{last['head_sha']}...{newer['head_sha']}"
-                if _read(repo_dir, compare, "{status} | @json", run, paginate=False)[0]["status"] not in CONTAINS:
+                if _read(repo_dir, compare, "{status} | @json", run, pages=())[0]["status"] not in CONTAINS:
                     continue
             passed |= {j["name"] for j in jobs(repo_dir, newer["id"], run) if j["conclusion"] == "success"}
     return passed & set(failed)
