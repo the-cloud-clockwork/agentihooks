@@ -3,6 +3,8 @@
 import ast
 from pathlib import Path
 
+import pytest
+
 from hooks.context import account_sessions as acc
 from scripts.events.bus import StateConflict
 
@@ -21,8 +23,27 @@ def _imported_names(tree: ast.AST) -> set[str]:
     return names
 
 
-def _conflict(*args, **kwargs):
+def _conflict():
     raise StateConflict("store moved")
+
+
+def _redis_down():
+    from redis.exceptions import ConnectionError
+
+    raise ConnectionError("down")
+
+
+def _bus_down():
+    from nats.errors import Error
+
+    raise Error("down")
+
+
+def _hive_failure(raised):
+    def held(harness, now, own):
+        raised()
+
+    return held
 
 
 def test_the_readers_import_no_redis_client():
@@ -69,18 +90,33 @@ def test_hive_held_reads_the_launch_reservation_family(monkeypatch):
     seen = []
 
     def held(harness, now, own):
-        seen.append((harness, own))
+        seen.append((harness, now, own))
         return {"alpha": 3}
 
+    monkeypatch.setattr("time.time", lambda: 42.5)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-1")
     monkeypatch.setattr("scripts.routing.aggregate.held_elsewhere", held)
 
     assert acc.hive_held("codex") == {"alpha": 3}
-    assert seen == [("codex", "hive-1")]
+    assert seen == [("codex", 42.5, "hive-1")]
 
 
 def test_hive_held_holds_nothing_on_a_protocol_failure(monkeypatch):
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-1")
-    monkeypatch.setattr("scripts.routing.aggregate.held_elsewhere", _conflict)
+    monkeypatch.setattr("scripts.routing.aggregate.held_elsewhere", _hive_failure(_conflict))
 
+    assert acc.hive_held("claude") == {}
+
+
+@pytest.mark.parametrize("raised", [_redis_down, _bus_down])
+def test_the_readers_survive_redis_and_bus_failures_on_the_bus_backend(monkeypatch, raised):
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "bus")
+    monkeypatch.setattr(acc, "_LAST_HELD", {("exe-old", "alpha")})
+    monkeypatch.setattr("scripts.codex_session.binding.transport_records", raised)
+    monkeypatch.setattr("scripts.swarm_v2.accounts.fleet_held_now", raised)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-1")
+    monkeypatch.setattr("scripts.routing.aggregate.held_elsewhere", _hive_failure(raised))
+
+    assert acc.managed_held() == {("exe-old", "alpha")}
+    assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {}
     assert acc.hive_held("claude") == {}
