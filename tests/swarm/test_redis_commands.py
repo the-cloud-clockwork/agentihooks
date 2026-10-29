@@ -635,9 +635,59 @@ def test_the_map_lists_each_consumer_role_commands_senders_and_keys(monkeypatch,
                     "ZADD": ["scripts.store:Store.drain"],
                 },
                 "keys": redis_commands.scheduler_keys("distributed"),
+                "stores": {},
             }
         },
     }
+
+
+STORE_COMMANDS = ["HGET", "HSET", "INCRBY", "LRANGE", "LTRIM", "RPUSH", "WATCH"]
+
+
+def test_a_pipeline_watch_is_published_as_watch(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/__init__.py").write_text("")
+    (tmp_path / "scripts/guard.py").write_text(
+        "def hold(redis: 'Redis'):\n    with redis.pipeline() as pipe:\n        pipe.watch('k')\n"
+    )
+    program = code_reach.Program(code_reach.parse(tmp_path))
+    assert program.commands(program.reach(("scripts.guard:hold",))) == {"WATCH": {"scripts.guard:hold"}}
+
+
+@pytest.mark.parametrize("consumer", ["controller", "tick", "hub", "ledger server"])
+def test_the_hive_credentials_store_keys_and_commands_are_published_for_each_service(published, consumer):
+    from scripts.hive import auth
+
+    store = published[consumer]["stores"]["hive credentials"]
+    base = f"{auth.PREFIX}:state:credentials"
+    assert store["keys"] == [f"{base}:current", f"{base}:revision", f"{base}:history:probe"]
+    assert sorted(store["commands"]) == STORE_COMMANDS
+    assert "scripts.events.redis_state:RedisStateStore._write" in store["commands"]["HSET"]
+
+
+def test_the_hive_registry_store_keys_are_published_where_hive_records_are_opened(published):
+    base = f"{ROOT}:swarm:state:hive-probe"
+    for consumer in ("controller", "tick", "hub", "ledger server", "hooks"):
+        store = published[consumer]["stores"]["hive registry"]
+        assert store["keys"] == [f"{base}:current", f"{base}:revision", f"{base}:history:probe"]
+        assert sorted(store["commands"]) == STORE_COMMANDS
+
+
+def test_worker_role_consumers_publish_no_hive_credentials_store(published):
+    assert "hive credentials" not in published["hooks"]["stores"]
+    assert published["worker"]["stores"] == {}
+
+
+def test_a_moved_credentials_store_moves_its_published_keys(monkeypatch):
+    from scripts.hive import auth
+
+    monkeypatch.setattr(auth, "PREFIX", "moved-hive")
+    keys = redis_commands.store_keys(redis_commands.STORES["hive credentials"])
+    assert keys == [
+        "moved-hive:state:credentials:current",
+        "moved-hive:state:credentials:revision",
+        "moved-hive:state:credentials:history:probe",
+    ]
 
 
 def test_every_consumer_but_the_worker_reaches_redis(published):

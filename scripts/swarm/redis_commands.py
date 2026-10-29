@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from unittest import mock
@@ -29,6 +30,34 @@ CONSUMERS = {
     "worker": Consumer("worker", ("scripts.swarm_v2.worker.start:main",)),
     "hooks": Consumer("worker", ("hooks.hook_manager:main",)),
 }
+STATE_STORE = "scripts.events.redis_state:RedisStateStore."
+KEYLESS = frozenset({"MULTI", "EXEC"})
+
+
+@dataclass(frozen=True)
+class Store:
+    opener: str
+    open: Callable
+    # Reached only through scope.members, which a hive member's hooks skip: they read their own scope alone.
+    skipped: tuple[str, ...] = ()
+
+
+def _credentials():
+    from scripts.hive import auth
+
+    return auth._store(None)
+
+
+def _registry():
+    from scripts.hive import hive_state
+
+    return hive_state.records(None, "probe")
+
+
+STORES = {
+    "hive credentials": Store("scripts.hive.auth:_store", _credentials, ("hooks",)),
+    "hive registry": Store("scripts.hive.hive_state:records", _registry),
+}
 
 
 def scheduler_keys(deployment: str) -> dict[str, str]:
@@ -40,15 +69,32 @@ def scheduler_keys(deployment: str) -> dict[str, str]:
         return {label: scheduler.key(suffix) for label, suffix in SCHEDULER_KEYS.items()}
 
 
+def store_keys(store: Store) -> list[str]:
+    from scripts.hive import hive_state
+
+    with mock.patch.object(hive_state, "on_redis", return_value=True):
+        opened = store.open()
+    return [opened._current, opened._revision, f"{opened._history}probe"]
+
+
 def consumer_map(deployment: str, root: Path = ROOT) -> dict:
-    """Each consumer's Redis role, the commands it reaches with the code that sends each, and its scheduler keys."""
+    """Each consumer's Redis role, the commands it reaches with the code that sends each, its scheduler keys, and the
+    keys of each hive state store it opens with the commands the store sends on them."""
     program = Program(parse(root))
     keys = scheduler_keys(deployment)
+    found = program.commands(unit for unit in program.units if unit.startswith(STATE_STORE))
+    store_commands = {command: sorted(units) for command, units in sorted(found.items()) if command not in KEYLESS}
     consumers = {}
     for name, consumer in CONSUMERS.items():
-        found = program.commands(program.reach(consumer.entries))
+        reached = program.reach(consumer.entries)
+        found = program.commands(reached)
         commands = {command: sorted(units) for command, units in sorted(found.items())}
-        consumers[name] = {"role": consumer.role, "commands": commands, "keys": keys}
+        stores = {
+            label: {"keys": store_keys(store), "commands": store_commands}
+            for label, store in STORES.items()
+            if store.opener in reached and name not in store.skipped
+        }
+        consumers[name] = {"role": consumer.role, "commands": commands, "keys": keys, "stores": stores}
     return {"deployment": deployment, "consumers": consumers}
 
 
