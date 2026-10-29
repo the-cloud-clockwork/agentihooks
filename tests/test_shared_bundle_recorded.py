@@ -135,6 +135,19 @@ def test_a_host_without_the_shared_bundle_warns_and_renders_without_it_instead_o
     assert not seen["kwargs"].get("shared_revision")
 
 
+def test_a_three_part_revision_with_an_empty_shared_field_is_refused_while_a_shared_bundle_is_linked(
+    three, monkeypatch, tmp_path
+):
+    bundles.link(three["root"])
+    bundles.link(three["user"], user=True)
+    bundles.link(three["shared"], shared=True)
+    _record_calls(monkeypatch, tmp_path)
+    commits = three["commits"]
+
+    with pytest.raises(ValueError, match="shared bundle"):
+        render.render("claude", "tiny", bundle_revision=f"{commits['root']}::{commits['user']}")
+
+
 def test_rendering_a_two_part_revision_is_refused_while_a_shared_bundle_is_linked(three, monkeypatch, tmp_path):
     bundles.link(three["root"])
     bundles.link(three["shared"], shared=True)
