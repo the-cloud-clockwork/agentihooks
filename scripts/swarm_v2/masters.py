@@ -104,7 +104,11 @@ def held(redis, slug: str, agents: list) -> dict[str, str]:
 
 
 def assign(
-    phases: list[str], seat_list: list[str], previous: dict[str, str], known: list[str], handed=frozenset()
+    phases: list[str],
+    seat_list: list[str],
+    previous: dict[str, str],
+    known: list[str],
+    handed: frozenset[str] = frozenset(),
 ) -> dict[str, str]:
     """A phase keeps a seat that still exists; an unowned phase, in ledger order, goes to the seat owning fewest.
     A seat not in known (added since the last save) then takes the busiest seats' last phases up to an even share,

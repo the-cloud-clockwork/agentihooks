@@ -567,6 +567,13 @@ def test_an_added_seat_takes_from_a_less_busy_seat_when_the_busiest_holds_only_h
     assert owners == {"p1": LEAD, "p2": LEAD, "p3": LEAD, "p4": third}
 
 
+def test_an_added_seat_takes_nothing_while_every_phase_was_handed_to_the_front_door():
+    third = f"master-3@{SLUG}"
+    previous = dict.fromkeys(PHASES, LEAD)
+    owners = masters.assign(PHASES, [LEAD, SECOND, third], previous, [LEAD, SECOND], frozenset(PHASES))
+    assert owners == previous
+
+
 def test_a_master_seat_owns_a_hive_while_operator_writes_on_it_reach_the_front_door(swarm):
     store, inbox = swarm
     seated(store, FIRST, OTHER)
