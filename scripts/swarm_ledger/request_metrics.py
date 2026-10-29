@@ -25,7 +25,8 @@ DEFAULT_RECORDS = 1000
 MAX_RECORDS = 10000
 JOURNAL_NAME = ".request-metrics.jsonl"
 WRITES = frozenset(("POST", "PUT", "PATCH", "DELETE"))
-JOURNAL_WIDTHS = {"held": 2, "lost": 3, "evicted": 2, "start": 2, "flush": 2, "stop": 2, "s": 7}
+JOURNAL_WIDTHS = {"held": 2, "lost": 3, "evicted": 2, "start": 2, "flush": 2, "stop": 2, "s": 9}
+LEGACY_SAMPLE_WIDTH = 7
 CURRENT = ContextVar("ledger_request_timing", default=None)
 SAMPLES = deque(maxlen=MAX_SAMPLES)
 PENDING = []
@@ -43,6 +44,10 @@ STALE = False
 @dataclass
 class Timing:
     lock_wait: float = 0.0
+    client_wait: float = 0.0
+    postgres_wait: float = 0.0
+    started: float = 0.0
+    locking: int = 0
 
 
 RESOURCES = frozenset(
@@ -141,12 +146,20 @@ def hold(row: tuple) -> None:
     SAMPLES.append(row)
 
 
-def record(method: str, route: str, wall: float, cpu: float, lock_wait: float) -> None:
+def record(
+    method: str,
+    route: str,
+    wall: float,
+    cpu: float,
+    lock_wait: float,
+    client_wait: float = 0.0,
+    postgres_wait: float = 0.0,
+) -> None:
     global EVICTED_THROUGH
 
     with GUARD:
         ended = time.time()
-        row = (ended, method, route, wall, cpu, lock_wait)
+        row = (ended, method, route, wall, cpu, lock_wait, client_wait, postgres_wait)
         hold(row)
         if JOURNAL is not None:
             PENDING.append(row)
@@ -172,7 +185,7 @@ def journal_rows(path: Path) -> Iterator[list]:
 def journal_row(row: object) -> bool:
     if not isinstance(row, list) or not row or not isinstance(row[0], str):
         return False
-    if len(row) != JOURNAL_WIDTHS.get(row[0]):
+    if len(row) != JOURNAL_WIDTHS.get(row[0]) and not (row[0] == "s" and len(row) == LEGACY_SAMPLE_WIDTH):
         return False
     texts = (2, 3) if row[0] == "s" else ()
     return all(
@@ -200,7 +213,7 @@ def replay(rows: Iterator[list], started_at: float) -> tuple[list, float | None,
         elif open_since is not None:
             open_since = max(open_since, stamp)
         if kind == "s":
-            samples.append((stamp, *rest))
+            samples.append((stamp, *rest, *[0.0] * (JOURNAL_WIDTHS["s"] - 2 - len(rest))))
     if open_since is not None:
         lost.append((open_since, started_at))
     return samples, held, lost, evicted
@@ -292,9 +305,9 @@ def measured(method: Callable) -> Callable:
     def request(handler):
         if CURRENT.get() is not None:
             return method(handler)
-        timing = Timing()
-        token = CURRENT.set(timing)
         wall, cpu = time.perf_counter(), time.thread_time()
+        timing = Timing(started=wall)
+        token = CURRENT.set(timing)
         try:
             return method(handler)
         finally:
@@ -311,7 +324,15 @@ def measured(method: Callable) -> Callable:
                     if name in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT"}
                     else "OTHER"
                 )
-                record(name, route_name(handler.path), elapsed, used, timing.lock_wait)
+                record(
+                    name,
+                    route_name(handler.path),
+                    elapsed,
+                    used,
+                    timing.lock_wait,
+                    timing.client_wait,
+                    timing.postgres_wait,
+                )
 
     return request
 
@@ -320,11 +341,42 @@ def measured(method: Callable) -> Callable:
 def waiting() -> Iterator[None]:
     timing = CURRENT.get()
     wall = time.perf_counter()
+    if timing is not None:
+        timing.locking += 1
     try:
         yield
     finally:
         if timing is not None:
+            timing.locking -= 1
             timing.lock_wait += time.perf_counter() - wall
+
+
+def arrived() -> None:
+    timing = CURRENT.get()
+    if timing is not None:
+        timing.client_wait += time.perf_counter() - timing.started
+
+
+@contextmanager
+def client() -> Iterator[None]:
+    timing = CURRENT.get()
+    wall = time.perf_counter()
+    try:
+        yield
+    finally:
+        if timing is not None:
+            timing.client_wait += time.perf_counter() - wall
+
+
+@contextmanager
+def postgres() -> Iterator[None]:
+    timing = CURRENT.get()
+    wall = time.perf_counter()
+    try:
+        yield
+    finally:
+        if timing is not None and not timing.locking:
+            timing.postgres_wait += time.perf_counter() - wall
 
 
 @contextmanager
@@ -365,11 +417,18 @@ def records(hours: float, end: float | None, limit: int) -> dict:
     writes = [row for row in rows if row[1] in WRITES]
     kept = writes[-limit:]
     routes = {}
-    for ended, method, route, wall, cpu, lock_wait in kept:
+    for ended, method, route, wall, cpu, lock_wait, client_wait, postgres_wait in kept:
         entry = routes.setdefault((method, route), {"method": method, "route": route, "count": 0, "records": []})
         entry["count"] += 1
         entry["records"].append(
-            {"ended": ended, "wall_seconds": wall, "cpu_seconds": cpu, "lock_wait_seconds": lock_wait}
+            {
+                "ended": ended,
+                "wall_seconds": wall,
+                "cpu_seconds": cpu,
+                "lock_wait_seconds": lock_wait,
+                "client_wait_seconds": client_wait,
+                "postgres_wait_seconds": postgres_wait,
+            }
         )
     return {
         "window_start": start,
@@ -388,7 +447,7 @@ def report(hours: float, end: float | None = None) -> dict:
     writes = [row for row in rows if row[1] in WRITES]
     walls = sorted(row[3] for row in writes)
     days, routes = {}, {}
-    for ended, method, route, wall, cpu, lock_wait in rows:
+    for ended, method, route, wall, cpu, *_waits in rows:
         entry = routes.setdefault((method, route), {"method": method, "route": route, "count": 0, "cpu_seconds": 0.0})
         entry["count"] += 1
         entry["cpu_seconds"] += cpu
@@ -404,7 +463,9 @@ def report(hours: float, end: float | None = None) -> dict:
             "p95_wall_seconds": walls[math.ceil(len(walls) * 0.95) - 1] if walls else None,
             "cpu_seconds": sum(row[4] for row in writes),
             "lock_wait_seconds": sum(row[5] for row in writes),
-            "other_wall_seconds": sum(max(0.0, row[3] - row[4] - row[5]) for row in writes),
+            "client_wait_seconds": sum(row[6] for row in writes),
+            "postgres_wait_seconds": sum(row[7] for row in writes),
+            "other_wall_seconds": sum(max(0.0, row[3] - sum(row[4:])) for row in writes),
         },
         "slow_days": [{"day": day, "count": count} for day, count in sorted(days.items())],
         "routes": sorted(routes.values(), key=lambda entry: (-entry["cpu_seconds"], entry["method"], entry["route"])),

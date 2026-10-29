@@ -6,6 +6,8 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
 
+from scripts.swarm_ledger import request_metrics
+
 from . import hierarchy, refresh
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, Snapshot, SQLiteLedgerRepository
 
@@ -149,7 +151,8 @@ def mapped() -> Iterator[None]:
     """Raise Postgres failures as the sqlite3 errors every ledger caller already handles."""
     psycopg2 = errors()
     try:
-        yield
+        with request_metrics.postgres():
+            yield
     except psycopg2.IntegrityError as exc:
         raise sqlite3.IntegrityError(str(exc)) from exc
     except psycopg2.errors.UndefinedTable as exc:
@@ -224,8 +227,12 @@ class Connection:
         with mapped():
             cursor = self.raw.cursor(name=f"stream_{next(STREAMS)}")
             cursor.execute(translate(sql), parameters)
-            while batch := cursor.fetchmany(STREAM_ROWS):
-                yield from batch
+        while True:
+            with mapped():
+                batch = cursor.fetchmany(STREAM_ROWS)
+            if not batch:
+                return
+            yield from batch
 
     def lock(self) -> object:
         """The writer lock, asked for again after each wait the server ends at its lock timeout."""
