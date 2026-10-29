@@ -108,6 +108,7 @@ def test_a_swarm_that_gained_a_code_meanwhile_keeps_it_and_frees_the_new_one(cli
     names.names_state.amend = amend
     assert names.mint_code("sw", "sw", "/repo") == "abcdef"
     assert names.swarm("123456") == {}
+    assert RedisStateStore(client, name_state.BUCKET).get(name_state.state_key("codes", "123456")).value == b""
     assert names.code_of("sw") == "abcdef"
 
 
@@ -125,6 +126,16 @@ def test_adopt_keeps_a_code_already_registered(client, on_redis):
     names.adopt("sw", "123456", "sw", "/repo")
     assert names.swarm("abcdef") == _record("sw", "abcdef")
     assert names.code_of("sw") == "abcdef"
+
+
+def test_adopt_keeps_a_code_registered_before_the_move(client, on_redis):
+    client.hset(_legacy("codes"), "abcdef", json.dumps(_record("other", "abcdef")))
+    client.hset(_legacy("code-of"), "sw", "123456")
+    names = naming.NameRegistry(client)
+    names.adopt("sw", "abcdef", "sw", "/repo")
+    assert names.swarm("abcdef") == _record("other", "abcdef")
+    assert names.code_of("sw") == "123456"
+    assert RedisStateStore(client, name_state.BUCKET).get(name_state.state_key("codes", "abcdef")) is None
 
 
 @pytest.mark.parametrize("error", ["redis", OSError, StateConflict])

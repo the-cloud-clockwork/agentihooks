@@ -16,7 +16,7 @@ from pathlib import Path
 
 from scripts.events import state
 from scripts.swarm.keyspace import ROOT
-from scripts.swarm.name_state import KEEP, NameState, NamingError
+from scripts.swarm.name_state import KEEP, NameState, NamingError, state_key
 
 PREFIX = f"{ROOT}:names"
 TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner", "dispatch": "dispatcher"}
@@ -366,6 +366,12 @@ class NameRegistry:
     def swarm(self, code):
         return self.names_state.get("codes", code, self._legacy_codes(code)) or {}
 
+    def _hold_code(self, code, record):
+        return self.names_state.amend("codes", code, _unless_held(record), self._legacy_codes(code))
+
+    def _hold_code_of(self, slug, code):
+        return self.names_state.amend("code-of", slug, _unless_held(code), self._legacy_code_of(slug))
+
     def mint_code(self, slug, ledger, repo):
         """The swarm's code, minted and registered the first time; a code another swarm holds is minted again."""
         held = self.code_of(slug)
@@ -374,20 +380,19 @@ class NameRegistry:
         for _ in range(MINT_ATTEMPTS):
             code = self.mint()
             record = _record(slug, code, ledger, repo)
-            if self.names_state.amend("codes", code, _unless_held(record), self._legacy_codes(code)) is not record:
+            if self._hold_code(code, record) is not record:
                 continue
-            owner = self.names_state.amend("code-of", slug, _unless_held(code), self._legacy_code_of(slug))
+            owner = self._hold_code_of(slug, code)
             if owner == code:
                 return code
-            self.names_state.amend("codes", code, lambda _: None, self._legacy_codes(code))
+            self.names_state.restore({state_key("codes", code): None})
             return owner
         raise NamingError(f"no free swarm code after {MINT_ATTEMPTS} tries")
 
     def adopt(self, slug, code, ledger, repo):
         """Register a code the swarm record already carries, as after a restore into an emptied Redis."""
-        record = _record(slug, code, ledger, repo)
-        self.names_state.amend("codes", code, _unless_held(record), self._legacy_codes(code))
-        self.names_state.amend("code-of", slug, _unless_held(code), self._legacy_code_of(slug))
+        self._hold_code(code, _record(slug, code, ledger, repo))
+        self._hold_code_of(slug, code)
 
     def swarm_slug(self, ref):
         """The ledger slug a swarm name `swarm@<code>` stands for while that swarm holds the code; ref otherwise."""
