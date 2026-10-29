@@ -196,7 +196,7 @@ Prevents destructive git operations that bypass the normal PR and release workfl
 
 The prod lockdown guard also refuses `gh pr merge` into a base branch with a merge queue: the installed gh predates merge queues and lands the pull request directly through the admin bypass, cancelling the running group build. Queue it with `agentihooks swarm <slug> merge queue <url>` (the GraphQL `enqueuePullRequest` mutation). Only bypass mode lifts this refusal. The guard reads `gh pr merge` only; a merge through `gh api` is not checked.
 
-All blocked operations return exit code 2 with a human-readable explanation. CI alone promotes green `dev` into `main` and issues release tags. Agent pull requests target `dev`; no signal or bypass opens their creation or merge into `main`, `master` or `v1`.
+All blocked operations return exit code 2 with a human-readable explanation. CI alone promotes green `dev` into `main` and issues release tags. Agent pull requests target `dev`. An agent creates a pull request into `main`, `master` or `v1` only with the operator's PR phrase in its session; bypass mode does not replace the phrase, and merging into those branches stays with the operator or CI.
 
 ### What is allowed
 
@@ -373,7 +373,8 @@ These remain blocked even with controls disabled — no toggle reaches them:
 - Direct `git push` to main/master (also blocked at OS layer + GitHub ruleset)
 - Force push to main/master (caught by the main-push pattern that runs first)
 - `git commit` while HEAD is on main/master
-- Agent creation or merge of pull requests into `main`, `master` or `v1`; CI alone owns promotion
+- Pull request creation into `main`, `master` or `v1` without the operator's PR phrase, or past the per-session PR limit
+- Agent merges of pull requests into `main`, `master` or `v1`; merging stays with the operator or CI
 - Manual release workflow dispatch by agents; CI alone creates releases
 - PyPI publication without the operator's `release dance` request
 - Explicit `--base` requirement on `gh pr create`
@@ -411,7 +412,7 @@ Agents must NOT volunteer the toggle ("want me to disable controls?"). The opera
 
 ### Release publication
 
-`release dance` authorizes `gh workflow run publish-pypi.yml --ref main` only. The workflow publishes the latest stable release after verifying its tag tree matches `main`. Verify the successful workflow, the package index version and a clean install. CI promotion owns the preceding release, tag and images; release, hotfix and PR signals never authorize agents to open or merge a protected promotion pull request.
+`release dance` authorizes `gh workflow run publish-pypi.yml --ref main` only. The workflow publishes the latest stable release after verifying its tag tree matches `main`. Verify the successful workflow, the package index version and a clean install. CI promotion owns the preceding release, tag and images; release and hotfix signals never authorize agents to open a pull request into `main`; only the operator's PR phrase does, and no signal authorizes an agent merge into it.
 
 ---
 
