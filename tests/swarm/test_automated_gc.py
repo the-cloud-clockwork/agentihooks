@@ -564,3 +564,18 @@ def test_a_gone_request_or_answer_leaves_an_empty_request(world, gone):
     record = {"request": asked.id, "answers": [], "idle_answers": 0}
     assert automated_gc._answer(inbox, agent, record, START) is False
     assert record == {"request": "", "answers": [], "idle_answers": 0}
+
+
+def test_an_answer_already_cancelled_is_recorded_without_failing_the_sweep(world):
+    from scripts.swarm import automated_gc
+
+    store, inbox, agent, _, _ = world
+    sweep(world, START + LIMIT)
+    reply = answer(world, "nothing to do")
+    reason = "cancelled: recipient no longer resolves: swarm"
+    assert inbox.withdraw(reply.id, "swarm", reason, reply.address)
+    assert sweep(world, START + LIMIT + 1) == [f"recorded activity answer from {agent.name}"]
+    record = automated_gc.state(store, SLUG, agent)
+    assert record["idle_answers"] == 1
+    assert record["request"] == ""
+    assert inbox.get(reply.id).reason == reason

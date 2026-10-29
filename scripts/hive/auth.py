@@ -168,7 +168,15 @@ def _set_user(client, member_id: str, password: str) -> None:
 def _acl_keys(member_id: str) -> tuple[str, ...]:
     own = f"{ROOT}:hive:{member_id}"
     record = f"{ROOT}:swarm:state:hive-{member_id}:*"
-    return (f"%R~{ROOT}:*", f"~{own}", f"~{own}:*", f"~{record}", *(f"~{ROOT}:{key}" for key in WORKER_KEYS))
+    scheduler = f"~{ROOT}:swarm:state:scheduler-{member_id}:*"
+    return (
+        f"%R~{ROOT}:*",
+        f"~{own}",
+        f"~{own}:*",
+        f"~{record}",
+        scheduler,
+        *(f"~{ROOT}:{key}" for key in WORKER_KEYS),
+    )
 
 
 def regrant(redis) -> None:

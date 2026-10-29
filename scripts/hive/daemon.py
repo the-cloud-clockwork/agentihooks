@@ -21,6 +21,7 @@ from scripts.swarm.commands import hive_id
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.events.bus import StateStore
     from scripts.hive.orders import Consumer
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
@@ -207,6 +208,15 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
     return redis.hlen(key) > 0
 
 
+def timer_state(waiter: "Redis") -> "StateStore":
+    from scripts.events import state
+    from scripts.events.redis_state import RedisStateStore
+    from scripts.events.scheduler_state import open_scheduler_state
+    from scripts.scheduler.core import bucket
+
+    return RedisStateStore(waiter, bucket()) if state.backend() == "redis" else open_scheduler_state(bucket())
+
+
 def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
     from redis.exceptions import ConnectionError, RedisError, TimeoutError
 
@@ -214,7 +224,7 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
 
     while not stop.is_set():
         try:
-            scheduled_wait(HEADROOM_SECONDS, redis=waiter, timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
+            scheduled_wait(HEADROOM_SECONDS, state=timer_state(waiter), timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
         except (ConnectionError, TimeoutError) as exc:
             print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
             return
@@ -237,7 +247,7 @@ def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: th
 
     while not stop.is_set():
         try:
-            scheduled_wait(herdr_stats.EVERY_S, redis=waiter, timeout=herdr_stats.EVERY_S + WAKE_SLACK_S)
+            scheduled_wait(herdr_stats.EVERY_S, state=timer_state(waiter), timeout=herdr_stats.EVERY_S + WAKE_SLACK_S)
         except (ConnectionError, TimeoutError) as exc:
             print(f"hive herdr stats wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
             return
@@ -276,7 +286,9 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                     Path(marker).touch()
                 elapsed = time.monotonic() - started
                 delay = max(0, BEAT_SECONDS - max(WAKE_SLACK_S, elapsed))
-                scheduled_wait(delay, redis=waiter, timeout=max(delay, BEAT_SECONDS - elapsed - WAKE_SLACK_S / 2))
+                scheduled_wait(
+                    delay, state=timer_state(waiter), timeout=max(delay, BEAT_SECONDS - elapsed - WAKE_SLACK_S / 2)
+                )
                 failures = 0
         except lost as exc:
             stop.set()

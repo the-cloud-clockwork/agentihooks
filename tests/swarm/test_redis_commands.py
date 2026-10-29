@@ -680,8 +680,8 @@ def test_the_map_names_each_consumer_with_its_redis_role(published):
 
 def test_the_controller_issues_the_lease_counter_and_the_scheduler_wait(published):
     commands = published["controller"]["commands"]
-    assert {"INCRBY", "BLPOP"} <= commands.keys()
-    assert "scripts.scheduler.process_timer:Timer.wait" in commands["BLPOP"]
+    assert "INCRBY" in commands
+    assert "scripts.scheduler.process_timer:Timer.wait" not in commands.get("BLPOP", [])
 
 
 def test_the_hub_reads_the_wake_outbox_with_a_command_the_controller_user_grants(published):
