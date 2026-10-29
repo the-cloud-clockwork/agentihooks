@@ -207,10 +207,14 @@ print(json.dumps(result))
 PY
 )"
 drill() {
+  local t=$SECONDS
   docker compose exec -T -e SLUG -e LEDGER_HOST swarm python - "$@" <<<"$DRILL"
+  printf 'Recovery drill call %s: %ss\n' "$1" "$((SECONDS - t))" >&2
 }
 hub() {
+  local t=$SECONDS
   docker compose exec -T -e LEDGER_HOST swarm agentihooks hub run --once >/dev/null
+  printf 'Recovery drill call hub: %ss\n' "$((SECONDS - t))" >&2
 }
 volume() {
   docker run --rm --entrypoint sh -v "${run}_nats-data:/data" -v "$backup:/backup" "$nats_image" -c "$1"
