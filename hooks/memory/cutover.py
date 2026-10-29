@@ -114,7 +114,7 @@ class ConsumerRoutes:
 
     def qualify(self, tools: records.SessionTools, grant: Grant, consumer: str, questions: list, now: float) -> dict:
         answer = shadow(tools, grant, questions, now)
-        operation = f"shadow-{digest([consumer, _holder(grant), questions, now])[:16]}"
+        operation = f"shadow-{digest([consumer, _holder(grant), questions, now, answer])[:16]}"
         proof = {"operation_id": operation, "consumer": consumer, "observed_at": now, **answer}
         self.db.execute(RECORD, (grant.corpus, operation, _holder(grant), json.dumps(proof, sort_keys=True)))
         return self.evidence(grant, operation)
