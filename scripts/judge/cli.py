@@ -52,14 +52,14 @@ def main(argv: list[str]) -> int:
     try:
         harness, verdict = runner.on_claude_if_refused(
             runner.harness_for(args.harness, os.environ),
-            lambda harness: runner.run(
+            lambda chosen: runner.run(
                 ROLE.read_text(),
                 judge_input(screened["case"], screened["evidence"]),
                 reply_schema(),
                 SEALED,
                 args.tier,
                 EFFORT,
-                harness,
+                chosen,
             ),
         )
         schema.validate("verdict", verdict)

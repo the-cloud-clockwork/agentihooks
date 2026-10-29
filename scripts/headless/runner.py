@@ -7,7 +7,7 @@ from typing import TypeVar
 
 import jsonschema
 
-from scripts import codex_router
+from scripts import claude_quota_balancer, codex_router
 from scripts.headless import claude, codex, tiers
 from scripts.headless.request import READ_ONLY, SEALED, HeadlessError, Request
 
@@ -19,13 +19,17 @@ T = TypeVar("T")
 
 
 class RouteRefused(HeadlessError):
-    pass
+    def __init__(self, harness: str, reason: object):
+        super().__init__(f"{harness} refused to route: {reason}")
+        self.harness = harness
 
 
 def on_claude_if_refused(harness: str, ask: Callable[[str], T]) -> tuple[str, T]:
     try:
         return harness, ask(harness)
-    except RouteRefused:
+    except RouteRefused as refused:
+        if refused.harness == CLAUDE:
+            raise
         return CLAUDE, ask(CLAUDE)
 
 
@@ -52,8 +56,8 @@ def run(
     adapter = ADAPTERS[name]
     try:
         routed = adapter.route(os.environ)
-    except codex_router.RoutingError as exc:
-        raise RouteRefused(f"{name} refused to route: {exc}") from exc
+    except (codex_router.RoutingError, claude_quota_balancer.RoutingError) as exc:
+        raise RouteRefused(name, exc) from exc
     for _ in range(ATTEMPTS):
         with tempfile.TemporaryDirectory() as work:
             reply = adapter.invoke(request, routed, Path(work))

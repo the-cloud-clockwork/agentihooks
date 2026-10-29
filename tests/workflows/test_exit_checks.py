@@ -118,7 +118,7 @@ def test_a_classifier_refused_a_codex_route_answers_on_claude(monkeypatch):
     def run(*a):
         asked.append(a[6])
         if a[6] != "claude":
-            raise runner.RouteRefused("codex refused to route: every session is taken")
+            raise runner.RouteRefused("codex", "every session is taken")
         return {"satisfied": True}
 
     monkeypatch.setattr(runner, "run", run)

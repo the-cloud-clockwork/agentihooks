@@ -4,7 +4,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from scripts import codex_router
+from scripts import claude_quota_balancer, codex_router
 from scripts.headless import claude, codex, runner
 from scripts.headless.request import HeadlessError
 
@@ -257,7 +257,7 @@ def test_a_route_refusal_is_asked_again_on_claude():
     def ask(harness):
         asked.append(harness)
         if harness != "claude":
-            raise runner.RouteRefused("codex refused to route: full")
+            raise runner.RouteRefused("codex", "full")
         return "v"
 
     assert runner.on_claude_if_refused("auto", ask) == ("claude", "v")
@@ -274,3 +274,31 @@ def test_other_headless_errors_are_not_asked_again():
     with pytest.raises(HeadlessError, match="^codex exited 1$"):
         runner.on_claude_if_refused("codex", ask)
     assert asked == ["codex"]
+
+
+def test_a_claude_routing_refusal_is_a_route_refusal_named_for_claude(fake_cli, monkeypatch):
+    calls = fake_cli("claude", [result_event("pass")])
+
+    def refuse(environ):
+        raise claude_quota_balancer.RoutingError("no Claude account has room")
+
+    monkeypatch.setattr(claude, "route", refuse)
+    with pytest.raises(runner.RouteRefused) as caught:
+        runner.run("P", "I", SCHEMA, "sealed", "low", "low", harness="claude")
+    assert (caught.value.harness, str(caught.value)) == (
+        "claude",
+        "claude refused to route: no Claude account has room",
+    )
+    assert calls() == []
+
+
+def test_a_claude_route_refusal_is_not_asked_again():
+    asked = []
+
+    def ask(harness):
+        asked.append(harness)
+        raise runner.RouteRefused("claude", "no room")
+
+    with pytest.raises(runner.RouteRefused, match="^claude refused to route: no room$"):
+        runner.on_claude_if_refused("auto", ask)
+    assert asked == ["auto"]
