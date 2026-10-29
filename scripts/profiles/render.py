@@ -373,7 +373,8 @@ def _persona(root: Path, target: str, bundle: Path | None, dirs: list[tuple[str,
     user, shared = _user(), _shared()
     sources.write(sources.path(root.name, target, root.parent), sources.rows(bundle, dirs, items, user, shared))
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
-    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER, user, shared))
+    later = {"shared bundle": shared, "user bundle": user}
+    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER, later))
     ending = f"\n\n{FOOTER}\n"
     text = binding.persona(text.removesuffix(ending)) + ending
     if len(text) > 150_000:

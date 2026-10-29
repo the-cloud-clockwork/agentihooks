@@ -104,6 +104,8 @@ STATE_JSON = AGENTIHOOKS_STATE_DIR / "state.json"
 _CLAUDE_SUBDIR = ".claude"
 _USER_BUNDLE_ENV = "AGENTIHOOKS_USER_BUNDLE_PATH"
 _SHARED_BUNDLE_ENV = "AGENTIHOOKS_SHARED_BUNDLE_PATH"
+_BUNDLE_LABELS = {"root": "bundle", "shared": "shared bundle", "user": "user bundle"}
+_IDENTITY_STATE_KEYS = ("bundle", "shared_bundle", "user_bundle", "linked_profiles", "herdr")
 _CLAUDE_MD_NAME = "CLAUDE.md"
 _MCP_JSON_NAME = ".mcp.json"
 
@@ -552,18 +554,12 @@ def _managed_roots() -> list[Path]:
     env_bundle = os.environ.get("AGENTIHOOKS_BUNDLE_PATH", "")
     if env_bundle:
         roots.append(Path(env_bundle).expanduser())
-    shared_bundle = state.get("shared_bundle")
-    if isinstance(shared_bundle, dict) and shared_bundle.get("path"):
-        roots.append(Path(shared_bundle["path"]))
-    env_shared_bundle = os.environ.get(_SHARED_BUNDLE_ENV, "")
-    if env_shared_bundle:
-        roots.append(Path(env_shared_bundle).expanduser())
-    user_bundle = state.get("user_bundle")
-    if isinstance(user_bundle, dict) and user_bundle.get("path"):
-        roots.append(Path(user_bundle["path"]))
-    env_user_bundle = os.environ.get(_USER_BUNDLE_ENV, "")
-    if env_user_bundle:
-        roots.append(Path(env_user_bundle).expanduser())
+    for key, env_name in (("shared_bundle", _SHARED_BUNDLE_ENV), ("user_bundle", _USER_BUNDLE_ENV)):
+        linked = state.get(key)
+        if isinstance(linked, dict) and linked.get("path"):
+            roots.append(Path(linked["path"]))
+        if env_value := os.environ.get(env_name, ""):
+            roots.append(Path(env_value).expanduser())
     for entry in _get_linked_profiles():
         p = entry.get("path")
         if p:
@@ -794,63 +790,31 @@ def _print_bundle_discover_hint(*, profile_hint: str = "default") -> None:
 
 def _get_bundle_path() -> Path | None:
     """Return the linked bundle path from state.json, or AGENTIHOOKS_BUNDLE_PATH env var."""
-    state = _load_state()
-    bundle = state.get("bundle")
-    if bundle:
-        p = Path(bundle["path"])
-        if p.is_dir():
-            return p
-    # Fallback: auto-discover from env var (headless/container mode)
-    env_path = os.environ.get("AGENTIHOOKS_BUNDLE_PATH", "")
-    if env_path:
-        p = Path(env_path).expanduser().resolve()
-        if p.is_dir():
-            return p
-    return None
+    from hooks.context.profile_chain import bundle_path
+
+    return bundle_path(_load_state(), os.environ)
 
 
 def _get_user_bundle_path() -> Path | None:
     """Return the linked user bundle path from state.json, or AGENTIHOOKS_USER_BUNDLE_PATH."""
     from hooks.context.profile_chain import user_bundle_path
 
-    linked = user_bundle_path(_load_state())
-    if linked:
-        return linked
-    env_path = os.environ.get(_USER_BUNDLE_ENV, "")
-    if env_path:
-        p = Path(env_path).expanduser().resolve()
-        if p.is_dir():
-            return p
-    return None
+    return user_bundle_path(_load_state(), os.environ)
 
 
 def _get_shared_bundle_path() -> Path | None:
     """Return the linked shared bundle path from state.json, or AGENTIHOOKS_SHARED_BUNDLE_PATH."""
     from hooks.context.profile_chain import shared_bundle_path
 
-    linked = shared_bundle_path(_load_state())
-    if linked:
-        return linked
-    env_path = os.environ.get(_SHARED_BUNDLE_ENV, "")
-    if env_path:
-        p = Path(env_path).expanduser().resolve()
-        if p.is_dir():
-            return p
-    return None
+    return shared_bundle_path(_load_state(), os.environ)
 
 
 def _bundle_roots() -> list[tuple[str, Path]]:
     from hooks.context.profile_chain import bundle_roots
 
-    found = (
-        ("bundle", _get_bundle_path()),
-        ("shared_bundle", _get_shared_bundle_path()),
-        ("user_bundle", _get_user_bundle_path()),
-    )
+    found = (("bundle", _get_bundle_path()), ("shared_bundle", _get_shared_bundle_path()))
+    found += (("user_bundle", _get_user_bundle_path()),)
     return bundle_roots({key: {"path": str(path)} for key, path in found if path})
-
-
-_BUNDLE_LABELS = {"root": "bundle", "shared": "shared bundle", "user": "user bundle"}
 
 
 def _bundle_feature_layers(subdir: str, label: str) -> list[tuple[str, Path]]:
@@ -1969,11 +1933,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     if getattr(args, "force", False):
         _kept_state = _load_state()
         _clean_state_dir()
-        _identity = {
-            k: _kept_state[k]
-            for k in ("bundle", "shared_bundle", "user_bundle", "linked_profiles", "herdr")
-            if _kept_state.get(k)
-        }
+        _identity = {k: _kept_state[k] for k in _IDENTITY_STATE_KEYS if _kept_state.get(k)}
         if _identity:
             _save_state(_identity)
     bundle_path = getattr(args, "bundle", None)

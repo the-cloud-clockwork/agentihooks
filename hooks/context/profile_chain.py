@@ -37,31 +37,26 @@ def read_state() -> dict:
     return {}
 
 
-def bundle_path(state: dict) -> Path | None:
-    bp = (state.get("bundle") or {}).get("path")
-    if bp:
-        path = Path(bp).expanduser()
-        if path.is_dir():
-            return path
+def bundle_path(state: dict, environ: Mapping[str, str] | None = None) -> Path | None:
+    return _slot_path(state, "bundle", "AGENTIHOOKS_BUNDLE_PATH", environ)
+
+
+def _slot_path(state: dict, key: str, env_name: str, environ: Mapping[str, str] | None) -> Path | None:
+    bp = (state.get(key) or {}).get("path")
+    if bp and (path := Path(bp).expanduser()).is_dir():
+        return path
+    raw = (environ or {}).get(env_name, "")
+    if raw and (path := Path(raw).expanduser().resolve()).is_dir():
+        return path
     return None
 
 
-def user_bundle_path(state: dict) -> Path | None:
-    bp = (state.get("user_bundle") or {}).get("path")
-    if bp:
-        path = Path(bp).expanduser()
-        if path.is_dir():
-            return path
-    return None
+def user_bundle_path(state: dict, environ: Mapping[str, str] | None = None) -> Path | None:
+    return _slot_path(state, "user_bundle", USER_BUNDLE_ENV, environ)
 
 
-def shared_bundle_path(state: dict) -> Path | None:
-    bp = (state.get("shared_bundle") or {}).get("path")
-    if bp:
-        path = Path(bp).expanduser()
-        if path.is_dir():
-            return path
-    return None
+def shared_bundle_path(state: dict, environ: Mapping[str, str] | None = None) -> Path | None:
+    return _slot_path(state, "shared_bundle", SHARED_BUNDLE_ENV, environ)
 
 
 def registered_user_bundle(state: dict, environ: Mapping[str, str]) -> Path | None:

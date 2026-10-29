@@ -706,8 +706,7 @@ class CopilotAdapter:
             self._pending_rules,
             _MANAGED_HEADER,
             _MANAGED_FOOTER,
-            user_dir,
-            shared_dir,
+            {"shared bundle": shared_dir, "user bundle": user_dir},
         )
         dst = self.home() / "copilot-instructions.md"
         text = write_persona(dst, managed_text, _MANAGED_HEADER, _MANAGED_FOOTER)
