@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from scripts.inbox.seats import is_seat, of_swarm
-from scripts.inbox.store import _item, _order
+from scripts.inbox.store import _order, _present
 from scripts.swarm.naming import NameRegistry
 from scripts.swarm.store import MASTER, PREFIX
 
@@ -44,13 +44,11 @@ def inbox_items(inbox, slug):
     ids = [item_id for group in listed for item_id in group]
     raws = dict(zip(ids, _batched(redis, ids, lambda pipe, item_id: pipe.hgetall(inbox.key("item", item_id)))))
     prefix = inbox.key("address", "")
+    grouped = []
     for key, group in zip(keys, listed):
-        gone = [item_id for item_id in group if not raws[item_id]]
-        if gone:
-            inbox.drop_gone(key[len(prefix) :], gone)
-    grouped = [
-        sorted((_item(raws[item_id], item_id) for item_id in group if raws[item_id]), key=_order) for group in listed
-    ]
+        items, gone = _present(group, [raws[item_id] for item_id in group])
+        inbox.drop_gone(key.removeprefix(prefix), gone)
+        grouped.append(sorted(items, key=_order))
     named = sorted({name for group in grouped for item in group for name in (item.address, item.sender)})
     slugs = NameRegistry(redis).slugs_of(named)
     names = SimpleNamespace(slug_of=lambda name: slugs[name])

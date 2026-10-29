@@ -329,7 +329,7 @@ class InboxStore:
 
     def drop_gone(self, address, gone):
         """Drop ids whose record is gone from every index of address."""
-        with self.redis.pipeline(transaction=False) as pipe:
+        with self.redis.pipeline() as pipe:
             self._stage_drop(pipe, address, gone)
             pipe.execute()
         self._report_gone(address, gone)
@@ -1095,13 +1095,17 @@ def _report_dropped(index, gone):
 
 
 def _present(item_ids, rows):
-    items = [_item(raw, item_id) for item_id, raw in zip(item_ids, rows) if raw]
+    items = [_parsed(raw) for raw in rows if raw]
     return items, [item_id for item_id, raw in zip(item_ids, rows) if not raw]
 
 
 def _item(raw, item_id):
     if not raw:
         raise InboxError(f"no message {item_id}")
+    return _parsed(raw)
+
+
+def _parsed(raw):
     known = {field.name for field in fields(Item)}
     return Item(
         **{

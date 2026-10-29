@@ -20,7 +20,9 @@ def store(redis):
 
 
 def dangle(store, address):
-    """A sent item whose record is gone while every index of its address still lists it."""
+    """A sent item whose record is gone while every current index of its address still lists it."""
+    store.open_items(address)
+    store.pending_items(address)
     item = store.send("alice", address, "lost")
     store.redis.delete(store.key("item", item.id))
     return item.id
@@ -70,6 +72,7 @@ def test_the_unsettled_listing_skips_logs_and_drops_an_id_whose_record_is_gone(s
 def test_a_drop_keeps_the_open_index_current(store):
     kept = store.send("carol", "bob", "here")
     assert [item.id for item in store.open_items("bob")] == [kept.id]
+    dangle(store, "bob")
     dangle(store, "bob")
     assert [item.id for item in store.inbox("bob")] == [kept.id]
     assert store.redis.get(store.key("open-size", "bob")) == "1"
@@ -148,7 +151,8 @@ def test_a_shown_confirm_drops_and_logs_a_delivered_id_whose_record_is_gone(redi
     store = InboxStore(redis, session_id="s1")
     store.redis.zadd(store.key("delivered"), {"gone1": 1})
     store.redis.rpush(store.key("history", "gone1"), json.dumps({"state": "delivered", "by": "bob", "at": 1}))
-    assert store.confirm_shown("bob", 10) == []
+    kept = store.deliver(store.send("alice", "bob", "here").id, "bob")
+    assert [item.id for item in store.confirm_shown("bob", kept.updated_at + 1)] == [kept.id]
     assert store.redis.zrange(store.key("delivered"), 0, -1) == []
     assert capsys.readouterr().err.splitlines() == [
         f"agentihooks inbox: {store.key('delivered')} lists message gone1 whose record is gone; dropped it"
