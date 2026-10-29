@@ -128,6 +128,16 @@ def test_process_fails_closed_when_shared_memory_cannot_be_measured(tmp_path, mo
     assert "fell below" in log.read_text()
 
 
+def test_process_fails_closed_when_a_child_ran_out_of_space_between_samples(tmp_path, monkeypatch):
+    memory = tmp_path / "shm"
+    memory.mkdir()
+    monkeypatch.setattr(runner, "SHARED_MEMORY", memory)
+    log = tmp_path / "process.log"
+    code = "print('OSError: [Errno 28] No space left on device')"
+    assert run_process([sys.executable, "-c", code], tmp_path, 10, log) == 1
+    assert "fell below" in log.read_text()
+
+
 def _two_groups(tmp_path):
     for path in ("hooks/sample.py", "scripts/ci_mutation/identity.py"):
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)

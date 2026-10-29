@@ -92,6 +92,9 @@ def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int
             return None
         if temp:
             temp[2]()
+            stream.flush()
+            if not temp[1] and "No space left on device" in log.read_text(errors="replace"):
+                temp[1].append(memory_usage(SHARED_MEMORY))
             if temp[1]:
                 stream.write(f"temporary folder {temp[0]} fell below {MEMORY_FLOOR} free bytes\n{temp[1][0]}\n")
                 return status or 1
