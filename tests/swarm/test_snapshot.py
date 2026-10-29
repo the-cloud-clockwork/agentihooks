@@ -57,7 +57,10 @@ def everything(redis):
 
 
 def test_export_then_restore_after_losing_redis_gives_back_the_same_swarm_state(store):
+    from scripts.swarm import fencing
+
     seed(store, "sw")
+    fencing.read(store, "sw")
     alone = everything(store.redis)
     seed(store, "other")
     state = store.export("sw")

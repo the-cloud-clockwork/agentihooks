@@ -188,6 +188,11 @@ def test_receiver_reads_have_constant_round_trips_and_preserve_results(redis, mo
         expected[taker] = Receiver(seat_wait=bool(n % 2))
     items.extend([{"address": "operator", "history": []}, {"address": "stranger", "history": []}])
     expected.update(operator=Receiver(), stranger=Receiver(scoped=False))
+    from scripts.doctor.priming import doctor_slug
+    from scripts.swarm import fencing
+
+    fencing.read(store, SLUG)
+    fencing.read(store, doctor_slug(SLUG))
     trips = []
     direct, batched = redis.execute_command, Pipeline.execute
     monkeypatch.setattr(redis, "execute_command", lambda *a, **k: trips.append(a[0]) or direct(*a, **k))

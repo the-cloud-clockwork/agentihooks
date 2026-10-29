@@ -646,8 +646,8 @@ def test_every_consumer_but_the_worker_reaches_redis(published):
 
 def test_known_real_senders_stay_in_the_published_map(published):
     commands = published["controller"]["commands"]
-    assert "scripts.swarm.lease:acquire" in commands["GET"]
-    assert "scripts.swarm.execution:ExecutionRegistry.records" in commands["HVALS"]
+    assert "scripts.swarm.fencing:_legacy" in commands["GET"]
+    assert "scripts.swarm.fencing:_scan" in commands["SCAN"]
 
 
 def test_the_published_map_drops_calls_on_receivers_that_hold_no_redis_client(published):
