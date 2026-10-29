@@ -7,7 +7,7 @@ from scripts.swarm import commands, lease
 from scripts.swarm.tick import SpawnError
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
-from tests.hive.test_local_overflow import fill_anton, hybrid, local_agents
+from tests.hive.test_local_overflow import fill_anton, hybrid, local_agents, workstation
 
 
 def test_successful_root_selection_still_obeys_the_swarm_limit(setup, monkeypatch):
@@ -185,6 +185,7 @@ def test_local_mode_excludes_its_own_task_and_honors_pending_claims(setup, monke
     from scripts.swarm.store import AgentRecord
 
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    workstation(monkeypatch, cpus=16)
     setup.store.update(setup.config.slug, local_max_agents=1)
     setup.store.put_agent(setup.config.slug, AgentRecord("self", "eng", "task"))
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
