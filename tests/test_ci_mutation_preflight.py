@@ -212,7 +212,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
         "fail-fast": False,
         "matrix": {"part": "${{ fromJSON(needs.plan.outputs.stats_parts) }}"},
     }
-    assert jobs["mutation-shard"]["needs"] == ["plan", "stats", "refine"]
+    assert jobs["mutation-shard"]["needs"] == ["plan", "stats", "refine", "probe"]
     assert jobs["mutation-shard"]["strategy"] == {
         "fail-fast": False,
         "matrix": {"shard": "${{ fromJSON(needs.refine.outputs.shards || needs.stats.outputs.shards) }}"},

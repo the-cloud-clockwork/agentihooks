@@ -72,7 +72,7 @@ def test_replay_preserves_sources_tests_and_selected_mutants(tmp_path, monkeypat
         assert (folder / "source/scripts/sample.py").read_text() == "def f():\n    return 1\n"
         assert not (folder / "source/mutants").exists()
         assert not (folder / "source/killers").exists()
-        assert output.read_text() == "shards=[0]\nprobe=false\n"
+        assert output.read_text() == "shards=[0]\n"
         assert json.loads(capsys.readouterr().out) == {**manifest, "shards": 1}
         monkeypatch.delenv("GITHUB_OUTPUT")
         monkeypatch.setattr("sys.argv", ["replay", "prepare", "--folder", str(folder)])
