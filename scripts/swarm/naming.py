@@ -281,7 +281,7 @@ class NameRegistry:
         self.redis, self.mint = redis, mint or (lambda: _mint())
 
     @cached_property
-    def names_state(self):
+    def names_state(self) -> NameState:
         return NameState(self.redis)
 
     @staticmethod
