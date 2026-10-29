@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import time
 
 from scripts.ci_budget import rate_limit
@@ -18,7 +19,9 @@ def api(endpoint: str, *, binary: bool = False) -> list | bytes:
         try:
             result = gh_api(command, timeout=60)
             break
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            stderr = (error.stderr or b"").decode(errors="replace").strip()
+            print(f"gh api {endpoint} failed: {stderr or error}", file=sys.stderr)
             if delay is None:
                 raise
             time.sleep(delay)
