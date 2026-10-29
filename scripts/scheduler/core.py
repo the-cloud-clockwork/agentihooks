@@ -316,9 +316,3 @@ class Scheduler:
                     self._deliver(entry_id, now, lease)
             self._reap(lease)
             return fired
-
-
-def open_scheduler() -> Scheduler:
-    from scripts.swarm.store import redis_client
-
-    return Scheduler(redis_client())

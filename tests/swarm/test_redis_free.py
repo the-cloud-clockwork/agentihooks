@@ -35,5 +35,5 @@ def _client_names(module):
 
 
 @pytest.mark.parametrize("module", ("scripts.swarm.timer", "hooks.context.operator_words"))
-def test_the_timer_and_operator_words_reach_no_redis_client(module):
+def test_the_timer_and_operator_words_import_no_redis_client(module):
     assert list(_client_names(module)) == []
