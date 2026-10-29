@@ -152,7 +152,7 @@ completed before and after timing comparison or a ten minute runtime guarantee.
 | `Gate — Required` is green but `promote` is skipped | Read `hierarchy-cpu / grade` and all other promotion dependencies. The hierarchy proof must succeed independently of the gate |
 | A hierarchy pair or load pair fails before grading | Read the failing job's Redis readiness, dependency installation and probe logs; setup failure is not a measured CPU regression |
 | `grade` reports a CPU or response regression | Follow [hierarchy troubleshooting](ledger-load-gate.md#troubleshooting-a-hierarchy-red), retain pair artifacts and fix through a pull request into `dev` |
-| A dev push has no proof jobs | Check whether it was replaced while pending in its `promotion-dev-<lane>` group; inspect the newest admitted run of that lane. A pull request, merge group or Tests dispatch skips the proof by design |
+| A dev push has no proof jobs | Check whether it was replaced while pending in its `promotion-dev-<lane>` group; inspect the newest run in that lane. A pull request, merge group or Tests dispatch skips the proof by design |
 | Proof jobs queue while merge queue jobs run | Compare the returned labels and runner times. Batch jobs do not request queue runners; investigate the named pool's capacity before attributing the wait |
 
 A red promotion receives a fixer task under the [delivery tiers rule](#rules).

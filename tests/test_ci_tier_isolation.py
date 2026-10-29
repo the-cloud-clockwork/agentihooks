@@ -12,7 +12,7 @@ pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_an_older_red_run_holds_only_its_own_promotion_lane():
+def test_dev_push_run_ids_map_to_promotion_lanes_by_last_digit():
     for run_id, lane in ((1000, "a"), (1061, "a"), (1004, "b"), (1009, "c")):
         assert _concurrency("push", run_id) == {
             "group": f"promotion-dev-{lane}",
