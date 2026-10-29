@@ -616,11 +616,13 @@ jobs:
           ls -A ~/dev-durations
           echo "queued=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      # The head reuses the protected checkout's full history instead of cloning it again.
+      - name: Check out the head from the protected checkout
         if: github.event_name == 'pull_request'
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
+        run: |
+          mv "$GITHUB_WORKSPACE/provenance-grader" "$RUNNER_TEMP/repository"
+          git -C "$RUNNER_TEMP/repository" fetch --no-tags origin "$GITHUB_SHA"
+          git -C "$RUNNER_TEMP/repository" worktree add --detach "$GITHUB_WORKSPACE" "$GITHUB_SHA"
 
       # The protected copy selects, so a pull request cannot widen what it may skip.
       - name: Check out the protected grader
