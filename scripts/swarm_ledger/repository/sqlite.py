@@ -3,7 +3,8 @@ import re
 import secrets
 import sqlite3
 import threading
-from contextlib import contextmanager, suppress
+import weakref
+from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
 
 from scripts.swarm_ledger import request_metrics
@@ -387,6 +388,17 @@ class Snapshot:
         return None if row is None else row[0]
 
 
+def release_reader(held: dict, connection: sqlite3.Connection) -> None:
+    held.pop(connection, None)
+    connection.close()
+
+
+def close_all(held: dict) -> None:
+    """Close a released store's held reader connections."""
+    for closing in list(held.values()):
+        closing()
+
+
 class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
@@ -401,6 +413,8 @@ class SQLiteLedgerRepository:
         self._loads = {}
         self._guard = threading.Lock()
         self._readers = threading.local()
+        self._held = {}
+        weakref.finalize(self, close_all, self._held)
 
     @property
     def domain(self):
@@ -435,10 +449,10 @@ class SQLiteLedgerRepository:
         finally:
             connection.close()
 
-    def _open(self) -> tuple:
+    def _open(self, **options) -> tuple:
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(path, timeout=30)
+        connection = sqlite3.connect(path, timeout=30, **options)
         try:
             connection.execute("PRAGMA foreign_keys=ON")
             if path not in self._ready:
@@ -449,13 +463,15 @@ class SQLiteLedgerRepository:
             raise
         return path, connection
 
-    @contextmanager
     def _reader(self):
         held = getattr(self._readers, "held", None)
         if held is None or held[0] != self.path:
-            held = self._readers.held = self._open()
+            if held is not None:
+                self._held[held[1]]()
+            held = self._readers.held = self._open(check_same_thread=False)
+            self._held[held[1]] = weakref.finalize(threading.current_thread(), release_reader, self._held, held[1])
         held[1].set_trace_callback(self.trace)
-        yield held[1]
+        return nullcontext(held[1])
 
     def _set_up(self, connection, path: Path) -> None:
         with self._guard:
