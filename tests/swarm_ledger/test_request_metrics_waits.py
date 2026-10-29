@@ -159,11 +159,13 @@ def test_a_client_slow_to_send_its_request_line_shows_as_client_wait(monkeypatch
     monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{ledger_port}"})
     timed = threading.Event()
 
-    class Timing(metrics.Timing):
-        def __post_init__(self):
-            timed.set()
+    timing = metrics.Timing
 
-    monkeypatch.setattr(metrics, "Timing", Timing)
+    def started(**fields):
+        timed.set()
+        return timing(**fields)
+
+    monkeypatch.setattr(metrics, "Timing", started)
     with ThreadingHTTPServer(("127.0.0.1", ledger_port), server.Handler) as http:
         thread = threading.Thread(target=http.serve_forever)
         thread.start()
