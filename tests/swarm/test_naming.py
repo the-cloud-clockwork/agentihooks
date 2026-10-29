@@ -339,7 +339,7 @@ def test_names_lists_legacy_names_first_then_new_ones_in_spawn_order(store, redi
     redis.rpush(store.names.key("names", code), "old-agent")
     late = store.next_name("sw", "eng", at=9)
     early = store.next_name("sw", "ci", at=4)
-    assert [row["name"] for row in store.names.names("sw")] == ["old-agent", early, late]
+    assert store.names.names("sw") == [store.names.entry(name) for name in ("old-agent", early, late)]
 
 
 def test_names_without_a_code_reads_no_records(store, redis, monkeypatch):
