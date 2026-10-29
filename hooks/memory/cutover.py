@@ -16,6 +16,7 @@ LOCAL, SESSION = "local.v1", "session.v1"
 PROTOCOLS = {SESSION: "1"}
 ENDPOINTS = frozenset({LOCAL, *PROTOCOLS})
 SEARCH_LIMIT = 50
+RECORD_PAGE = records.MAX_RECORDS
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS consumer_route (
     access_domain TEXT NOT NULL, consumer TEXT NOT NULL, revision INTEGER NOT NULL, endpoint TEXT NOT NULL,
@@ -49,6 +50,17 @@ def _ranges(question: dict) -> list[tuple]:
     return ranges
 
 
+def _expand(tools: records.SessionTools, grant: Grant, cited: dict, now: float) -> list[dict] | None:
+    asked = {"schema_version": SCHEMA_VERSION, "access_domain": grant.corpus, "citation": cited, "limit": RECORD_PAGE}
+    expanded, found = records.call(tools, "session_records", grant, asked, now), []
+    while expanded["state"] == "answered":
+        found += expanded["records"]
+        if expanded["next_cursor"] is None:
+            return found
+        expanded = records.call(tools, "session_records", grant, {**asked, "cursor": expanded["next_cursor"]}, now)
+    return None
+
+
 def _held(tools: records.SessionTools, grant: Grant, text: str, now: float) -> tuple[set, int, int]:
     request = {"schema_version": SCHEMA_VERSION, "access_domain": grant.corpus, "query": text, "limit": SEARCH_LIMIT}
     found = records.call(tools, "session_search", grant, request, now)
@@ -57,12 +69,11 @@ def _held(tools: records.SessionTools, grant: Grant, text: str, now: float) -> t
     held, refused, foreign = set(), 0, 0
     for result in found["results"]:
         cited = result["citation"]
-        asked = {"schema_version": SCHEMA_VERSION, "access_domain": grant.corpus, "citation": cited}
-        expanded = records.call(tools, "session_records", grant, asked, now)
-        if expanded["state"] != "answered" or not expanded["complete"]:
+        expanded = _expand(tools, grant, cited, now)
+        if expanded is None:
             refused += 1
             continue
-        for record in expanded["records"]:
+        for record in expanded:
             if record["project_id"] and record["project_id"] not in grant.projects:
                 foreign += 1
                 continue

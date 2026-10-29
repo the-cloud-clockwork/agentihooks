@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from hooks.memory import cutover
 from hooks.memory.api import records
 from hooks.memory.cutover import ConsumerRoutes, shadow
 from tests import sv2_mig04_cases as cases
@@ -52,6 +53,20 @@ def test_shadow_resolves_source_ranges_in_two_independent_catalogs(bank, tmp_pat
         assert answer["shadow_search_source_recall"] == 1.0
         assert answer["expected_ranges"] == answer["recalled_ranges"] == 1
         assert answer["unresolved_ranges"] == 0
+
+
+def test_shadow_pages_through_every_cited_record(bank, tmp_path, monkeypatch):
+    monkeypatch.setattr(cutover, "RECORD_PAGE", 1)
+    routes = ConsumerRoutes(tmp_path / "routes.sqlite3")
+    proof = routes.qualify(bank.tools, grant(bank.inputs), "keeper", questions(bank), 5000.0)
+    assert (proof["state"], proof["recalled_ranges"]) == ("accepted", 1)
+    routes.close()
+
+
+def test_single_record_range_is_recalled(bank):
+    asked = questions(bank)
+    asked[0]["expected"][0]["last_sequence"] = 1
+    assert shadow(bank.tools, grant(bank.inputs), asked, 5000.0)["state"] == "accepted"
 
 
 def test_missing_expected_evidence_is_not_qualified(bank):
