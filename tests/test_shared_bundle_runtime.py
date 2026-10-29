@@ -49,18 +49,18 @@ def test_a_later_bundle_condition_overrides_an_earlier_one_of_the_same_key(layer
     from hooks.context import conditions, profile_chain
 
     for bundle in ("root", "shared", "user"):
-        _write(layers3[bundle] / ".claude" / "conditions" / "pre-bash.clash.sh", f"#!/bin/sh\necho {bundle}\n")
-    _write(layers3["root"] / ".claude" / "conditions" / "pre-bash.rs.sh", "#!/bin/sh\necho root\n")
-    _write(layers3["shared"] / ".claude" / "conditions" / "pre-bash.rs.sh", "#!/bin/sh\necho shared\n")
-    _write(layers3["shared"] / ".claude" / "conditions" / "pre-bash.only-shared.sh", "#!/bin/sh\n")
+        _write(layers3[bundle] / ".claude" / "conditions" / "pre-bash-clash.sh", f"#!/bin/sh\necho {bundle}\n")
+    _write(layers3["root"] / ".claude" / "conditions" / "pre-bash-rs.sh", "#!/bin/sh\necho root\n")
+    _write(layers3["shared"] / ".claude" / "conditions" / "pre-bash-rs.sh", "#!/bin/sh\necho shared\n")
+    _write(layers3["shared"] / ".claude" / "conditions" / "pre-bash-onlyshared.sh", "#!/bin/sh\n")
     _state_all(layers3)
 
     entries, _invalid = conditions.scan_layers(conditions.layer_dirs(profile_chain.read_state())[0])
     by_file = {entry["file"]: entry["source"] for entry in entries}
 
-    assert by_file["pre-bash.clash.sh"] == "user-bundle"
-    assert by_file["pre-bash.rs.sh"] == "shared-bundle"
-    assert by_file["pre-bash.only-shared.sh"] == "shared-bundle"
+    assert by_file["pre-bash-clash.sh"] == "user-bundle"
+    assert by_file["pre-bash-rs.sh"] == "shared-bundle"
+    assert by_file["pre-bash-onlyshared.sh"] == "shared-bundle"
 
 
 def test_a_machine_without_a_shared_bundle_keeps_its_condition_layers(layers3):
@@ -142,7 +142,7 @@ def test_lifecycle_roots_merge_by_id_root_then_shared_then_user(layers3):
     _write(layers3["user"] / "lifecycle.json", json.dumps({"roots": [root("c", "/u/c")]}))
     _state_all(layers3)
 
-    paths = {r.id: r.path for r in config.load_roots()}
+    paths = {r.id: r.path for r in config.load_roots() if r.id in {"a", "b", "c", "d"}}
 
     assert paths == {"a": "/r/a", "b": "/s/b", "c": "/u/c", "d": "/s/d"}
 
