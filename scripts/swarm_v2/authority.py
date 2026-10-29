@@ -8,6 +8,12 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2.auth_context import GrantRefused, Registration
 from scripts.swarm_v2.controller import Controller
 
+ADMITTED, REPLAYED, FENCED, ACTIVE = "admitted", "replayed", "fenced", "active"
+UNFENCED = (ADMITTED, REPLAYED)
+FENCE_FIELDS = ("sequence", "digest")
+CREDENTIAL_EXPIRED = "worker credential has expired"
+OUT_OF_ORDER = "out_of_order"
+
 
 @dataclass(frozen=True)
 class TaskClaim:
@@ -231,25 +237,24 @@ class TaskAuthority:
     ) -> None:
         now = lease.now_ms(self.store)
         if worker_deadline_ms is not None and worker_deadline_ms <= now:
-            raise SwarmError("worker credential has expired")
-        if event == "admitted" and current.lease_deadline_ms <= now:
+            raise SwarmError(CREDENTIAL_EXPIRED)
+        if event == ADMITTED and current.lease_deadline_ms <= now:
             self._stale()
-        if event not in ("admitted", "replayed") and (previous.state != "active" or previous.lease_deadline_ms <= now):
+        if event not in UNFENCED and (previous.state != ACTIVE or previous.lease_deadline_ms <= now):
             self._stale()
         if fence is not None:
-            seen = doc["fences"].get(fence.key)
+            seen = RenewalFence(fence.key, **doc["fences"][fence.key]) if fence.key in doc["fences"] else None
             if seen and (
-                seen["sequence"] > fence.sequence
-                or (seen["sequence"] == fence.sequence and seen["digest"] != fence.digest)
+                seen.sequence > fence.sequence or (seen.sequence == fence.sequence and seen.digest != fence.digest)
             ):
-                raise SwarmError("out_of_order")
-            doc["fences"][fence.key] = {"sequence": fence.sequence, "digest": fence.digest}
+                raise SwarmError(OUT_OF_ORDER)
+            doc["fences"][fence.key] = {name: getattr(fence, name) for name in FENCE_FIELDS}
         task = current.task_id
         doc["claims"][task] = asdict(current)
         journal = doc["journals"].setdefault(task, [])
-        if event == "admitted" and previous and previous.state == "active":
-            journal.append({"event": "fenced", "claim": asdict(replace(previous, state="fenced"))})
-        if event != "replayed":
+        if event == ADMITTED and previous and previous.state == ACTIVE:
+            journal.append({"event": FENCED, "claim": asdict(replace(previous, state=FENCED))})
+        if event != REPLAYED:
             journal.append({"event": event, "claim": asdict(current)})
 
     def _project(self, current: TaskClaim) -> None:

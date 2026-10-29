@@ -11,6 +11,7 @@ from scripts.swarm import fencing
 
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend", "transport")
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
+LAUNCH_DETAILS = ("hive", "transport", "remote_control")
 PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control", "desired_route_kind")
 LAUNCH_BINDING = (
     "runtime_target",
@@ -129,10 +130,14 @@ class ExecutionRegistry:
         result = []
         for name, row in sorted(projections.items()):
             if name in heads:
-                row.update({field: heads[name][field] for field in EXECUTION_FIELDS})
-                row["hive"] = heads[name].get("hive", "")
-                row["transport"] = heads[name].get("transport", "")
-                row["remote_control"] = heads[name].get("remote_control", {})
+                row = {key: value for key, value in row.items() if key not in LAUNCH_DETAILS}
+                row.update(
+                    {
+                        field: heads[name][field]
+                        for field in (*EXECUTION_FIELDS, *LAUNCH_DETAILS)
+                        if field in heads[name]
+                    }
+                )
             row["desired_route_kind"] = desired.get(name) or heads.get(name, {}).get("desired_route_kind", "")
             result.append(_record(row))
         return result

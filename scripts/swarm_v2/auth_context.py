@@ -260,22 +260,23 @@ class LaunchAuthority:
 
     def admit(self, doc: dict, slug: str, claims: dict) -> Registration:
         audit = self.issued(doc, slug, claims)
+        execution_id, grant_id = claims["execution_id"], claims["grant_id"]
         occupants = occupants_of(doc).values()
-        if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
+        if (execution_id, claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
             self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
-        if doc["executions"][claims["execution_id"]]["state"] == "ended":
+        if doc["executions"][execution_id]["state"] == "ended":
             self.refuse(slug, "stale_generation", "launch grant is for an ended execution")
-        existing = doc["registrations"].get(claims["execution_id"])
+        existing = doc["registrations"].get(execution_id)
         if existing:
             registration = Registration(**existing)
-            if registration.grant_id != claims["grant_id"]:
+            if registration.grant_id != grant_id:
                 self.refuse(slug, "forbidden_scope", "execution is already registered under another launch grant")
             return registration
         if doc["grants_disabled"]:
             self.refuse(slug, "forbidden_scope", "launch grants are disabled for this swarm")
         registration = _registration(claims, _timestamp(int(self.clock())))
-        doc["registrations"][claims["execution_id"]] = asdict(registration)
-        doc["grants"][claims["grant_id"]] = {**audit, "state": "registered"}
+        doc["registrations"][execution_id] = asdict(registration)
+        doc["grants"][grant_id] = {**audit, "state": "registered"}
         return registration
 
     def registration(self, slug: str, execution_id: str) -> Registration | None:

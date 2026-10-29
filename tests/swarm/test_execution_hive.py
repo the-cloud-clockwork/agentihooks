@@ -40,3 +40,24 @@ def test_hive_is_empty_for_a_listed_agent_without_a_named_placement(store, rows)
         )
 
     assert ExecutionRegistry(store).hive("fixture", "eng-a") == ""
+
+
+def test_an_imported_execution_without_launch_details_reads_as_empty(store):
+    store.redis.hset(store.key("fixture", "agents"), "eng-a", json.dumps({"name": "eng-a", "lane": "eng", "task": "t"}))
+    store.redis.hset(
+        store.key("fixture", "executions"),
+        "exe-1",
+        json.dumps(
+            {
+                "name": "eng-a",
+                "generation": 1,
+                "execution_id": "exe-1",
+                "runtime_backend": "local",
+                "runtime_target": {},
+            }
+        ),
+    )
+
+    [agent] = ExecutionRegistry(store).agents("fixture")
+
+    assert (agent.hive, agent.transport, agent.remote_control) == ("", "", {})
