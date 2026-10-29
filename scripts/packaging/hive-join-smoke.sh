@@ -142,6 +142,7 @@ class NoOrders:
 
 orders.Consumer.local = classmethod(lambda cls, redis, hive: NoOrders(hive))
 daemon.execution_report = lambda redis, local_id, herdr: {"names": [], "panes": {}, "executions": {}}
+daemon.dispatch.poll = lambda consumer: None
 daemon.beat(client, member)
 assert registry.live(registry.show(client, member), int(time.time() * 1000))
 assert member in client.smembers(registry.INDEX)
