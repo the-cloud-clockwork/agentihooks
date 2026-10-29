@@ -200,7 +200,6 @@ def _has_pr_signal(session_id: str) -> bool:
 # Other gh pr subcommands (list/view/status/comment/review/edit/merge) pass.
 _PR_CREATE_PATTERN = re.compile(r"\bgh\b[^|&;\n]*?\bpr\s+create\b")
 
-# CI alone promotes dev into protected branches.
 _PR_BASE_RE = re.compile(r"(?:^|\s)(?:--base[\s=]+|-B\s*)(\S+)")
 PROTECTED_PR_BASES = frozenset({"main", "master", "v1"})
 
@@ -320,14 +319,11 @@ def _check_pr_creation(check_text: str, command: str, session_id: str) -> None:
         if base == "dev":
             log("branch_guard: PR into dev allowed", {"session_id": session_id})
             return
-        if base in PROTECTED_PR_BASES:
-            raise BlockAction(
-                f"BLOCKED: agent PR creation into '{base}' is forbidden. CI alone promotes dev into protected branches."
-            )
+        protected = base in PROTECTED_PR_BASES
         try:
             from hooks.context.controls_toggle import is_controls_disabled as _ctl_off
 
-            _bypass_active = _ctl_off(session_id)
+            _bypass_active = not protected and _ctl_off(session_id)
         except Exception:
             _bypass_active = False
         if not _bypass_active and not _has_pr_signal(session_id):
@@ -335,6 +331,13 @@ def _check_pr_creation(check_text: str, command: str, session_id: str) -> None:
                 "branch_guard: PR creation blocked (no signal)",
                 {"command": command[:200], "base": base, "session_id": session_id},
             )
+            if protected:
+                raise BlockAction(
+                    f"BLOCKED: a PR into '{base}' needs the operator's PR phrase in this session.\n"
+                    "The operator includes 'open a pr', 'create a pr', 'make a pr' or 'pr please' in a message; "
+                    "bypass mode does not replace it.\n"
+                    f"Merging into '{base}' stays with the operator or CI."
+                )
             raise BlockAction(
                 f"BLOCKED: agent PR creation into '{base}' is disabled (CI Manifesto §15).\n"
                 "PRs into dev need no signal; CI alone promotes into main, master and v1.\n"

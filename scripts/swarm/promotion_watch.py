@@ -253,6 +253,12 @@ def _live_alerts(doc: dict) -> list[dict]:
     return [a for a in doc.get("alerts", []) if a.get("source") == SOURCE and a.get("state") != "done"]
 
 
+def _alerted(doc: dict, run_id: int) -> bool:
+    return bool(_live_alerts(doc)) or any(
+        a.get("source") == SOURCE and f"push run {run_id} " in a["text"] for a in doc.get("alerts", [])
+    )
+
+
 def _held_causes(redis, slug: str, doc: dict) -> set[str]:
     filed = redis.hgetall(key(slug, "jobs"))
     live = {t["id"] for t in _promotion_tasks(doc) if t.get("state") != "done"}
@@ -264,11 +270,11 @@ def _held_causes(redis, slug: str, doc: dict) -> set[str]:
 def _red(slug, store, ledger, doc, last, causes, repo):
     redis, run_id, sha, url = store.redis, last["id"], last["head_sha"], last["html_url"]
     held, present = _held_causes(redis, slug, doc), {t["id"] for t in doc.get("tasks", [])}
-    alerted = bool(_live_alerts(doc))
+    alerted = _alerted(doc, run_id)
     for previous in promotion_owner.history(repo, redis) - {slug}:
         state = ledger.state(previous)
         held.update(_held_causes(redis, previous, state))
-        alerted = alerted or bool(_live_alerts(state))
+        alerted = alerted or _alerted(state, run_id)
     lane, actions, new = "", [], []
     outage = [(OUTAGE, why) for job, why in causes if job == OUTAGE]
     for n, (job, why) in enumerate(causes):
