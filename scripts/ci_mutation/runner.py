@@ -25,7 +25,7 @@ SHARED_MEMORY = Path("/dev/shm")
 MEMORY_FLOOR = 8 << 20
 
 
-def memory_usage(root: Path, depth: int = 3, top: int = 12) -> str:
+def memory_usage(root: Path, depth: int = 6, top: int = 30) -> str:
     sizes: dict[Path, int] = {}
     for folder, _, files in os.walk(root):
         for name in files:
