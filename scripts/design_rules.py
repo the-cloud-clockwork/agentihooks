@@ -251,11 +251,11 @@ def _concrete(node: ast.ClassDef) -> bool:
     return not any(_terminal(base) in ROOTS or _builtin_exception(_terminal(base)) for base in node.bases)
 
 
-def _ancestors(index: Index, module: str, node: ast.ClassDef, seen: frozenset = frozenset()) -> set[str]:
+def _ancestors(index: Index, module: str, node: ast.ClassDef, seen: frozenset = frozenset()) -> set:
     found = set()
     for base in node.bases:
         project = resolve(index, module, base)
-        name = ast.unparse(base) if project is None else ".".join(project)
+        name = ast.unparse(base) if project is None else project
         found.add(name)
         if project is not None and name not in seen:
             parent = index.get(project[0]).classes[project[1]]
