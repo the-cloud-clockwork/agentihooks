@@ -1142,16 +1142,16 @@ def test_scheduler_wait_preserves_interruption(monkeypatch):
 
 
 def test_scheduler_wait_returns_within_its_bound_when_the_timer_never_rings(monkeypatch):
-    clock = Clock()
+    waited = []
 
     def never_rings(delay, timeout=None):
         if timeout is None:
             raise AssertionError("an unbounded timer wait hangs the exporter")
-        clock.sleep(timeout)
+        waited.append(timeout)
 
     monkeypatch.setattr(trace_flush, "timer_wait", never_rings)
     trace_flush.scheduled_wait(trace_flush.POLL_SEC)
-    assert clock.now == trace_flush.POLL_LIMIT_SEC == 5.0
+    assert waited == [trace_flush.POLL_LIMIT_SEC] == [5.0]
 
 
 IDENTITY = {
