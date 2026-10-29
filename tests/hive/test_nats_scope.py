@@ -97,6 +97,12 @@ def test_member_credentials_hold_no_grant_on_the_hub_owned_account_buckets():
     assert not [value for value in claims["pub"]["allow"] if value.startswith("$KV.") or ".KV_" in value]
 
 
+def test_controller_claims_purge_only_the_kv_stream_of_each_bucket_it_writes():
+    purges = [value for value in nats_grant.controller_claims()["pub"]["allow"] if "PURGE" in value]
+    assert purges == [f"$JS.API.STREAM.PURGE.KV_{bucket}" for bucket in nats_grant.CONTROLLER_BUCKETS]
+    assert "$JS.API.STREAM.PURGE.KV_hub-timers" in purges
+
+
 @pytest.mark.parametrize(
     ("swarms", "slots"), [(None, ["slots.*.m1"]), (("rig", "other"), ["slots.rig.m1", "slots.other.m1"])]
 )
