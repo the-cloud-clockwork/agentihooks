@@ -121,7 +121,7 @@ def plan_shards(
         "assignments": assignments,
         "costs": costs,
         "units": "worker seconds",
-        "unit_costs": units,
+        **({"unit_costs": units} if units else {}),
         "estimated_worker_seconds": seconds,
         "shard_worker_seconds": loads,
         "workers": shard_workers(),
