@@ -722,7 +722,7 @@ def test_selected_test_ids_take_their_own_durations_share_their_file_shard_and_b
 
 @pytest.mark.parametrize("total", [1, 2, 3, 6])
 def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist_group(tmp_path, total):
-    from scripts.ci_mutation.selection import part_files
+    from scripts.ci_mutation.selection import split_files
 
     (tmp_path / "tests").mkdir()
     files = [f"tests/test_{name}.py" for name in "abcdef"]
@@ -732,17 +732,17 @@ def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist
     (tmp_path / ".test_durations").write_text(
         json.dumps({f"tests/test_{name}.py::t": value for name, value in seconds.items()} | {"tests/x.py::t": 50})
     )
-    parts = [part_files(tmp_path, list(reversed(files)), (index, total)) for index in range(total)]
+    parts = split_files(tmp_path, list(reversed(files)), total)
     assert sorted(path for part in parts for path in part) == files
     assert all(part == sorted(part) for part in parts)
     loads = [sum(seconds[path[11]] for path in part) for part in parts]
     expected = {1: [27], 2: [14, 13], 3: [9, 9, 9], 6: [9, 7, 5, 3, 2, 1]}[total]
     assert loads == expected
-    assert part_files(tmp_path, files[:1], (2, 3)) == []
+    assert split_files(tmp_path, files[:1], 3)[2] == []
 
 
 def test_statistics_split_reads_each_duration_a_bounded_number_of_times():
-    from scripts.ci_mutation.selection import split_parts
+    from scripts.ci_mutation.selection import partition
 
     class Counted(dict):
         reads = 0
@@ -752,7 +752,7 @@ def test_statistics_split_reads_each_duration_a_bounded_number_of_times():
             return super().__getitem__(key)
 
     seconds = Counted({f"tests/test_x.py::test_{index}": float(index % 7) for index in range(400)})
-    split_parts(list(seconds), seconds, (0, 4))
+    partition(list(seconds), seconds, 4)
     assert seconds.reads <= 2 * len(seconds)
 
 
@@ -901,7 +901,7 @@ def test_sizing_against_a_stats_cache_of_the_observed_shape_finishes_in_seconds(
 
 
 def test_statistics_parts_partition_every_test_when_each_part_restores_a_different_cache(tmp_path, monkeypatch):
-    from scripts.ci_mutation.selection import part_files
+    from scripts.ci_mutation.selection import split_files
 
     tests = [f"tests/test_sample.py::test_{name}" for name in "abc"]
     (tmp_path / ".test_durations").write_text(json.dumps(dict(zip(tests, [3, 2, 1]))))
@@ -912,7 +912,7 @@ def test_statistics_parts_partition_every_test_when_each_part_restores_a_differe
     parts = []
     for index, cache in enumerate(caches):
         monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
-        parts.append(part_files(tmp_path, tests, (index, 2)))
+        parts.append(split_files(tmp_path, tests, 2)[index])
     assert parts == [[tests[0]], tests[1:]]
 
 

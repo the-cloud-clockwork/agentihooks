@@ -267,20 +267,9 @@ def collect_test_ids(test_runner, files: list[str]) -> list[str]:
         output.unlink()
 
 
-def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
-    index, total = part
-    return split_files(root, files, total)[index]
-
-
 def split_files(root: Path, files: list[str], total: int) -> list[list[str]]:
     # Every part must split identically, and each restores its own traced cache.
     return partition(files, entry_seconds(recorded_seconds(unit_records(root)), files), total)
-
-
-def split_parts(files: list[str], seconds: dict[str, float], part: tuple[int, int]) -> list[str]:
-    # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
-    index, total = part
-    return partition(files, seconds, total)[index]
 
 
 def partition(files: list[str], seconds: dict[str, float], total: int) -> list[list[str]]:

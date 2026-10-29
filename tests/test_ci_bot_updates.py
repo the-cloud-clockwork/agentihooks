@@ -166,7 +166,9 @@ def test_every_mutation_stats_part_restores_the_dev_durations_the_plan_matched()
         "github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'"
         " && needs.mutation-plan.outputs.durations != ''"
     )
+    assert adopt["env"] == ADOPT_ENV
     assert "from tests.dev_durations import adopt" in adopt["run"]
+    assert 'Path(".test_durations").write_text' in adopt["run"]
 
 
 @pytest.mark.parametrize("bump,expected", [("patch", "2.17.1"), ("minor", "2.18.0"), ("major", "3.0.0")])
