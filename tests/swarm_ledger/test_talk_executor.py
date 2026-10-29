@@ -51,6 +51,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         "HOME": str(tmp_path / "home"),
         "PYTHONPATH": str(ROOT),
         "LEDGER_DIR": str(ledgers),
+        "CONDITIONS_TRUSTED_OWNERS": "*",
         "LEDGER_PORT": str(ledger_port),
         "LEDGER_AUTOSTART": "1",
         "AGENTIHOOKS_SWARM_REDIS_URL": url,

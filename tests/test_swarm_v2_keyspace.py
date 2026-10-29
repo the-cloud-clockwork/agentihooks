@@ -351,7 +351,9 @@ def test_an_outbox_replay_keeps_the_key_of_its_first_post(world, monkeypatch, tm
         patch("hooks._brain_http.brain_http_enabled", return_value=True),
         patch("hooks._brain_http.post", return_value={"ok": True}) as post,
     ):
-        assert _drain_outbox(str(outbox)) == 2
+        assert _drain_outbox(str(outbox)) == 1
+        use_brain(monkeypatch, "personal")
+        assert _drain_outbox(str(outbox)) == 1
     keys = [call.kwargs["idempotency_key"] for call in post.call_args_list]
     assert keys == [keyspace.legacy_marker_key(SESSION, "lesson", "old"), original]
 

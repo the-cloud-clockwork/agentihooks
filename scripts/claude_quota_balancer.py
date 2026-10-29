@@ -702,11 +702,15 @@ def _metric(value: float | None) -> float:
     return -1.0 if value is None else value
 
 
+def refused(result: ProbeResult) -> bool:
+    return result.provider_status in ("rejected", REVOKED)
+
+
 def account_cap(
     result: ProbeResult, now: float | None = None, include_fable: bool = False, ceiling: int | None = None
 ) -> int | None:
     """Live sessions the account may hold under the session bands; None without a full reading."""
-    if result.provider_status in ("rejected", REVOKED):
+    if refused(result):
         return 0
     timestamp = time.time() if now is None else now
     weeks = [result.seven_day, *([result.fable] if include_fable else [])]
@@ -793,7 +797,9 @@ def select_credential(
     timestamp = time.time() if now is None else now
     api, weight = _api_side(active_env, live, excluded, timestamp)
     if not credentials and not api:
-        raise RoutingError(f"no non-empty {TOKEN_PREFIX}* variables found")
+        raise RoutingError(
+            "; ".join([f"no non-empty {TOKEN_PREFIX}* variables found", *_closed(active_env, live, timestamp)])
+        )
     options = {
         "include_fable": include_fable,
         "refresh": refresh,
@@ -815,7 +821,8 @@ def select_credential(
         seat = session_bands.pick(other for other in seats if other.account not in reserve) or seat
     if seat is None:
         outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
-        raise RoutingError(f"no Claude account has a free session under its quota band{outside}", results)
+        no_seat = f"no Claude account has a free session under its quota band{outside}"
+        raise RoutingError("; ".join([no_seat, *_closed(active_env, live, timestamp)]), results)
     if seat.kind == API:
         return RouteDecision(None, None, source, seat.sessions, seat.cap, kind=API)
     by_account = {credential.account: credential for credential in credentials}
@@ -851,6 +858,10 @@ def _api_side(
     if API_ACCOUNT in excluded:
         return [], 0
     return place.api_side(claude_api.ClaudeApiSource(sessions), HARNESS, environ, now)
+
+
+def _closed(environ: Mapping[str, str], sessions: Mapping[str, int], now: float) -> list[str]:
+    return place.closure(claude_api.ClaudeApiSource(sessions), HARNESS, environ, now)
 
 
 def forced(environ: Mapping[str, str], route: str) -> RouteDecision:
