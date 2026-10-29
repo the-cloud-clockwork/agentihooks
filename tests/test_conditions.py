@@ -829,3 +829,20 @@ def test_a_failing_git_other_than_a_missing_binary_stays_unknown(tmp_path, monke
 
     monkeypatch.setattr(conditions.subprocess, "run", refused)
     assert conditions._remote_owner(repo) is None
+
+
+@pytest.mark.parametrize(("code", "owner"), [(0, "stranger"), (1, ""), (128, None), (2, None)])
+def test_git_exit_codes_map_to_an_owner_no_remote_or_unknown(tmp_path, monkeypatch, code, owner):
+    out = subprocess.CompletedProcess(
+        [], code, stdout="git@github.com:Stranger/x.git\n" if code == 0 else "", stderr=""
+    )
+    monkeypatch.setattr(conditions.subprocess, "run", lambda *args, **kwargs: out)
+    assert conditions._remote_owner(tmp_path) == owner
+
+
+def test_a_host_without_git_and_an_undecodable_config_is_unknown(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "config").write_bytes(b'[remote "origin"]\n\turl = \xff\xfe\n')
+    _without_git(monkeypatch)
+    assert conditions._remote_owner(repo) is None

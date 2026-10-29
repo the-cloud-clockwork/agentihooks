@@ -142,6 +142,8 @@ def _remote_owner(repo: Path) -> str | None:
             text=True,
             timeout=3,
         )
+        if out.returncode not in (0, 1):
+            return None
         url = out.stdout.strip()
     except FileNotFoundError:
         url = _config_origin(repo)
@@ -163,7 +165,7 @@ def _config_origin(repo: Path) -> str | None:
         if (gitdir / "commondir").is_file():
             gitdir = gitdir / (gitdir / "commondir").read_text().strip()
         lines = (gitdir / "config").read_text().splitlines()
-    except OSError:
+    except (OSError, ValueError):
         return None
     section = url = ""
     for line in map(str.strip, lines):
