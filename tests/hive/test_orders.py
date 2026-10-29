@@ -517,8 +517,22 @@ def test_queued_orders_with_full_length_launches_all_acknowledge_live_inside_the
     for (item, order), started in zip(queued, (0, 15000, 40000, 90000)):
         now[0] = sent + started
         setup.consumer.consume(item, {"order": json.dumps(asdict(order))})
-    assert [setup.orders.ack(order).status for _, order in queued] == ["live"] * 4
+    acks = [setup.orders.ack(order) for _, order in queued]
+    assert [(ack.status, ack.failure) for ack in acks] == [("live", "")] * 4
     setup.runtime.terminate.assert_not_called()
+
+
+def test_the_launch_ends_on_the_hive_clock_an_acknowledgement_margin_before_the_order_expires(setup, monkeypatch):
+    from scripts.hive import orders
+    from scripts.swarm import lease
+
+    monkeypatch.setattr(lease, "now_ms", lambda store: 1_000_000)
+    monkeypatch.setattr(orders, "time", SimpleNamespace(time=lambda: 5_000.0))
+    order = replace(setup.order, expires_at=1_300_000)
+    setup.orders.send("host", order)
+    setup.consumer.poll()
+    assert setup.runtime.spawn.call_args.args[0].task["launch_until_ms"] == 5_285_000
+    assert orders.ACK_MARGIN_MS == 15000
 
 
 def test_epoch_takeover_during_launch_refuses_live_admission(setup, monkeypatch):
