@@ -93,7 +93,7 @@ def _legacy(store: Any, slug: str) -> dict:
 
 
 def _encode(doc: dict) -> bytes:
-    return json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()
+    return json.dumps(doc, separators=(",", ":")).encode()
 
 
 def _entry(states: Any, store: Any, slug: str):
