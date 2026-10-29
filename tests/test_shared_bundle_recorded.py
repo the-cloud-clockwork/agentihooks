@@ -119,6 +119,22 @@ def test_rendering_a_three_part_revision_pins_all_three_and_an_empty_user_field_
     assert seen["kwargs"]["shared"] == three["shared"]
 
 
+def test_a_host_without_the_shared_bundle_warns_and_renders_without_it_instead_of_refusing(
+    three, monkeypatch, tmp_path, capsys
+):
+    bundles.link(three["root"])
+    seen = _record_calls(monkeypatch, tmp_path)
+    commits = three["commits"]
+
+    render.render("claude", "tiny", bundle_revision=f"{commits['root']}:{commits['shared']}:")
+
+    err = capsys.readouterr().err
+    assert f"recorded shared bundle commit {commits['shared']}" in err
+    assert "no shared bundle is linked on this host; rendering without it" in err
+    assert seen["args"][1] == commits["root"]
+    assert not seen["kwargs"].get("shared_revision")
+
+
 def test_rendering_a_two_part_revision_is_refused_while_a_shared_bundle_is_linked(three, monkeypatch, tmp_path):
     bundles.link(three["root"])
     bundles.link(three["shared"], shared=True)
