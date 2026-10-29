@@ -157,11 +157,21 @@ def test_a_journal_sample_of_unknown_width_is_dropped():
 def test_a_client_slow_to_send_its_request_line_shows_as_client_wait(monkeypatch, ledger_port):
     monkeypatch.setattr(metrics, "SAMPLES", deque(maxlen=64))
     monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{ledger_port}"})
+    timed = threading.Event()
+
+    timing = metrics.Timing
+
+    def started(**fields):
+        timed.set()
+        return timing(**fields)
+
+    monkeypatch.setattr(metrics, "Timing", started)
     with ThreadingHTTPServer(("127.0.0.1", ledger_port), server.Handler) as http:
         thread = threading.Thread(target=http.serve_forever)
         thread.start()
         try:
             with socket.create_connection(("127.0.0.1", ledger_port), timeout=10) as sock:
+                assert timed.wait(10)
                 time.sleep(0.5)
                 sock.sendall(
                     b"POST /api/v1/ledgers/timing/operations HTTP/1.0\r\n"
