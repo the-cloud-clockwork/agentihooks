@@ -56,7 +56,7 @@ def test_one_download_then_a_rest_fallback_only_when_it_fails_or_arrives_torn():
     assert "continue-on-error" not in fallback
     assert "actions/artifacts/$id/zip" in fallback["run"]
     assert "${{" not in fallback["run"]
-    assert refetched["if"] == "steps.verify.outcome == 'failure'"
+    assert refetched["if"] == f"({_REFETCH}) && inputs.verify != ''"
     assert "continue-on-error" not in refetched
     assert refetched["env"] == verify["env"]
 
@@ -140,8 +140,8 @@ def test_the_durations_downloads_retry_in_place(job, name, given):
     assert step["with"] == given
 
 
-def _verify(tmp_path, command, step="Verify the download"):
-    step = next(s for s in _action()["runs"]["steps"] if s.get("name") == step)
+def _verify(tmp_path, command, name="Verify the download"):
+    step = next(s for s in _action()["runs"]["steps"] if s.get("name") == name)
     env = {**os.environ, **step["env"], "VERIFY": command, "ARTIFACT": "split-3.12", "HOME": str(tmp_path)}
     return subprocess.run(
         ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
@@ -173,7 +173,7 @@ def test_the_split_verify_refetches_only_a_torn_or_missing_dev_durations_file(tm
 def test_a_refetch_still_torn_is_red(tmp_path, torn):
     (tmp_path / "durations.sha256").write_text(hashlib.sha256(b"{}").hexdigest() + "\n")
     (tmp_path / ".test_durations").write_text(_TORN if torn else "{}")
-    done = _verify(tmp_path, _SHARD_VERIFY, step="Verify the refetch")
+    done = _verify(tmp_path, _SHARD_VERIFY, name="Verify the refetch")
     assert done.returncode == (1 if torn else 0), done.stdout + done.stderr
     assert ("still torn after the REST refetch" in done.stdout) is torn
 
