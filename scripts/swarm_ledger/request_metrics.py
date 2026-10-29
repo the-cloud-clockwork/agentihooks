@@ -394,7 +394,7 @@ def begin(connection: sqlite3.Connection, statement: str) -> None:
         connection.execute(statement)
 
 
-def begin_ledger(connection, slug: str, statement: str) -> None:
+def begin_ledger(connection: sqlite3.Connection, slug: str, statement: str) -> None:
     with waiting():
         lock = getattr(connection, "lock_ledger", None)
         lock(slug) if lock is not None else connection.execute(statement)
