@@ -168,6 +168,22 @@ def test_a_waiting_watch_times_its_input_wait_mark_inside_the_watch_step(store, 
     assert timing.named(input_wait.clear) in watched_steps(capsys, agent)
 
 
+def test_a_master_holding_a_task_gets_no_stale_nudge(store, monkeypatch):
+    from dataclasses import replace
+
+    from scripts.swarm import stale_nudge
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.store import MASTER
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    master = replace(store.agents("sw")[0], lane=MASTER, idle_ticks=0)
+    sent = []
+    monkeypatch.setattr(stale_nudge, "nudge", lambda *args: sent.append(args) or ["nudged"])
+    assert tick_module._stale_nudge("sw", store, master, PaneObservation("idle"), False, 2_000) == []
+    assert sent == []
+
+
 def test_an_idle_watch_times_each_read_inside_the_watch_step(store, capsys):
     from scripts.gates import log as gate_log
     from scripts.hive import scope
