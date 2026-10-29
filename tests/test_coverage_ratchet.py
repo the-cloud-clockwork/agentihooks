@@ -32,6 +32,21 @@ def test_unchanged_lines_map_across_an_insert_above_them():
     assert ratchet.line_map(old, new) == {1: 1, 2: 3, 3: 4}
 
 
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("a\na\n", "a\na\na\n", {1: 1, 2: 2}),
+        ("a\na\na\n", "a\na\n", {1: 1, 2: 2}),
+        ("a\nb\nc\nd\n", "a\nx\nc\nd\n", {1: 1, 3: 3, 4: 4}),
+        ("a\nb\nc\nd\n", "z\nb\nc\ny\n", {2: 2, 3: 3}),
+        ("x\na\nb\n", "a\nb\nx\n", {2: 1, 3: 2}),
+        ("p\nb\nc\nq\n", "p\nc\nb\nq\n", {1: 1, 2: 3, 4: 4}),
+    ],
+)
+def test_common_ends_map_beside_the_matched_middle(old, new, expected):
+    assert ratchet.line_map(old, new) == expected
+
+
 def test_shards_union_their_executed_lines_under_the_graded_trees(tmp_path):
     one = _shard(tmp_path / "one", {"hooks/a.py": [1, 2], "tests/t.py": [1]})
     two = _shard(tmp_path / "two", {"hooks/a.py": [3], "scripts/b.py": [5]})

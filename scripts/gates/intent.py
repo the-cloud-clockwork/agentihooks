@@ -701,14 +701,20 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
         return None
     verdicts = Verdicts(slug, NAME, home)
     previous = verdicts.read(task_id)
-    if previous and previous.get("planned") == traced["plan_hash"] and _same_phase(previous, task):
+    inputs = _fingerprint(doc, task)
+    if (
+        previous
+        and previous.get("planned") == traced["plan_hash"]
+        and previous.get("inputs") == inputs
+        and _same_phase(previous, task)
+    ):
         return {"verdict": previous["verdict"], "reason": previous["reason"]}
     kept = [row for row in traced["pieces"] if row["kept"]]
     state = intent_history.prepare(plan_state(doc, task, kept))
     answer = judged(state)
     verdict, reason = answer["verdict"], answer["reason"]
     _remember(slug, task, now_ms, state, answer, home)
-    fields = {"phase": task.get("phase"), "planned": traced["plan_hash"], **_detail(answer)}
+    fields = {"phase": task.get("phase"), "planned": traced["plan_hash"], "inputs": inputs, **_detail(answer)}
     verdicts.write(task_id, verdict, reason, now_ms, **fields)
     who = Who(name=task.get("claimed_by", ""), task=task_id)
     if verdict == UNCHECKED:

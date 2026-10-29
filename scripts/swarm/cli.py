@@ -1710,8 +1710,7 @@ def cmd_pr(store, args):
     config = store.config(args.slug)
     awaiting = "approval" if config.autonomy == ASSIST else ""
     ledger = LedgerClient()
-    doc = ledger.state(args.slug)
-    row = next(t for t in doc["tasks"] if t.get("id") == agent.task)
+    doc, row = _stamp_scope(ledger, args.slug, agent.task)
     keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
     head, repo = pull_branch(args.url)
     branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
@@ -1726,6 +1725,16 @@ def cmd_pr(store, args):
     if drop_lifts:
         lift.drop_task(args.slug, agent.task, store=store)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
+
+
+def _stamp_scope(ledger, slug, task_id):
+    row = ledger.task(slug, task_id)
+    if row.get("split"):
+        doc = ledger.state(slug)
+        return doc, next(t for t in doc["tasks"] if t.get("id") == task_id)
+    phase = ledger.item(slug, f"phases/{row.get('phase')}") if row.get("phase") else None
+    doc = {"overview": ledger.metadata(slug)["overview"], "phases": [phase] if phase else [], "tasks": [row]}
+    return doc, row
 
 
 def _split_binding(row, url, half):

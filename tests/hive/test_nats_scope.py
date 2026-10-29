@@ -236,6 +236,8 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
                 f"$JS.ACK.{stream}.>",
             )
         )
+    for stream in ("AGENTIHOOKS_726967_STATE_scheduler-m1", stream_name("rig", "STATE_scheduler-m1")):
+        expected.update(f"$JS.API.STREAM.{verb}.{stream}" for verb in ("INFO", "MSG.GET", "CREATE"))
     claims = nkey.claims(jwt)["nats"]
     assert set(claims) == {"type", "version", "pub", "sub", "subs", "data", "payload"}
     assert set(claims["pub"]) == {"allow"}
