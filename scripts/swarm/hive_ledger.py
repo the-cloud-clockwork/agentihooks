@@ -1,10 +1,10 @@
-"""Hive agents' ledger write results, kept in each agent's session readings. The workstation's own ledger probe
-cannot see a hosted route that fails only for hives, so repeated gateway errors there open a swarm outage that only a
-hive agent's successful write ends."""
+"""Hive agents' ledger write results, which open a swarm outage on repeated gateway errors."""
 
 import json
 import os
 import time
+
+from scripts.swarm import idle
 
 KIND = "hive-ledger"
 GATEWAY = (502, 503, 504)
@@ -14,8 +14,6 @@ KEPT = 20
 
 
 def _key(redis, slug, name):
-    from scripts.swarm import idle
-
     name, prefix = idle._resolved(redis, slug, name)
     return idle.key(slug, "ledger-writes", name, prefix)
 
@@ -26,14 +24,12 @@ def read(redis, slug, name):
 
 
 def record(redis, slug, name, code, now_ms):
-    from scripts.swarm import idle
-
     if code is None:
-        held = {"ok_at": now_ms}
+        result = {"ok_at": now_ms}
     else:
-        held = read(redis, slug, name)
-        held = {"failed": [*held.get("failed", []), [now_ms, code]][-KEPT:]}
-    redis.set(_key(redis, slug, name), json.dumps(held), ex=idle.BEAT_TTL_S)
+        earlier = read(redis, slug, name).get("failed", [])
+        result = {"failed": [*earlier, [now_ms, code]][-KEPT:]}
+    redis.set(_key(redis, slug, name), json.dumps(result), ex=idle.BEAT_TTL_S)
 
 
 def report(code, environ=None, redis=None, now_ms=None):
