@@ -39,3 +39,17 @@ def test_size_admission_uses_the_protected_grader_and_actual_base(jobs):
     base = next(step for step in steps if '"$RUNNER_TEMP/base"' in step.get("run", "") and step is not size)
     assert base["env"]["BASE"] == "${{ github.event.pull_request.base.sha }}"
     assert steps.index(base) < steps.index(size)
+
+
+def test_pull_request_selection_clones_the_repository_once(jobs):
+    steps = jobs["select"]["steps"]
+    clones = [
+        step
+        for step in steps
+        if step.get("uses") == "actions/checkout@v4" and "pull_request" in step.get("if", "pull_request")
+    ]
+    assert [step["with"]["path"] for step in clones] == ["provenance-grader"]
+    head = next(step for step in steps if step.get("name") == "Check out the head from the protected checkout")
+    assert head["if"] == "github.event_name == 'pull_request'"
+    assert steps.index(clones[0]) < steps.index(head)
+    assert 'worktree add --detach "$GITHUB_WORKSPACE" "$GITHUB_SHA"' in head["run"]

@@ -220,6 +220,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/chart_nats.py",
         "tests/chart_network.py",
         "tests/chart_redis.py",
+        "tests/chart_scheduler_state.py",
         "tests/chart_scratch_swarms.py",
         "tests/chart_secrets.py",
         "tests/chart_workers.py",
@@ -536,7 +537,10 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     merge = next(step for step in steps if step.get("name") == "Merge shard coverage")
     assert download["if"] == merge["if"] == "needs.select.outputs.scope != 'none'"
     assert download["uses"].startswith("actions/download-artifact@")
-    assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
+    assert download["with"] == {
+        "pattern": "${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}",
+        "path": ".coverage-shards",
+    }
     assert steps.index(download) < steps.index(merge)
     assert merge["env"] == {
         "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}",

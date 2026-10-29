@@ -59,6 +59,7 @@ def estimate(
     selection: dict[str, list[str]] | None = None,
     manifest: dict | None = None,
     everything: bool = False,
+    direct: dict[str, list[str]] | None = None,
 ) -> tuple[float, int, list[str]]:
     mutants, tests = 0, set()
     drift = record_drift(root, manifest) if manifest is not None else None
@@ -66,7 +67,7 @@ def estimate(
         stale, drifted, paths = drift
         units, unrecorded = changed_recorded_units(root, manifest, changes)
         if "lines" in manifest:
-            covering = line_covering_tests(root, manifest, changes, paths)
+            covering = line_covering_tests(root, manifest, changes, paths, direct)
         else:
             covering = covering_tests(manifest, units | drifted, paths)
         recorded = {}
@@ -523,8 +524,16 @@ def table_reads(tree: ast.Module, tables: dict[str, bool]) -> set[int]:
     }
 
 
-def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]], paths: set[str]) -> set[str]:
+def line_covering_tests(
+    root: Path,
+    manifest: dict,
+    changes: dict[str, set[int]],
+    paths: set[str],
+    direct: dict[str, list[str]] | None = None,
+) -> set[str]:
     lines, fallback, tables = recorded_lines(root, manifest, changes)
+    if direct is not None:
+        direct.update(direct_tests(manifest, lines, changes))
     return {
         node(test).partition("[")[0]
         for test, found in manifest["tests"].items()
@@ -536,6 +545,19 @@ def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]]
             path in manifest["lines"][test] and re.search(rf"\b{name}\b", file_text(root / test_file(test)))
             for path, name in tables
         )
+    }
+
+
+def direct_tests(manifest: dict, lines: dict[str, set[int]], changes: dict[str, set[int]]) -> dict[str, list[str]]:
+    return {
+        path: sorted(
+            {
+                node(test).partition("[")[0]
+                for test, covered in manifest["lines"].items()
+                if lines[path].intersection(covered.get(path, ()))
+            }
+        )
+        for path in changes
     }
 
 
@@ -638,11 +660,12 @@ def main() -> int:
             else:
                 run, manifest = found
                 print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
-    selection = {}
-    seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure))
+    selection, direct = {}, {}
+    seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure), direct)
     validate_tests(root, tests)
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
+    (root / ".mutation-direct.json").write_text(json.dumps(direct) + "\n")
     count = shard_count(seconds, mutants, args.target, args.limit)
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
     print(

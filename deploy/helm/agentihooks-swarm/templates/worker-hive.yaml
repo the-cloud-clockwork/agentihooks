@@ -4,8 +4,8 @@
 {{- $drain := int $workers.drainSeconds }}
 {{- if $root.Values.workers.rollout.enabled }}
 {{- $drain = int $root.Values.workers.rollout.drainSeconds }}
-{{- if or (lt $drain 0) (gt $drain 300) }}
-{{- fail "workers.rollout.drainSeconds must be between 0 and 300" }}
+{{- if or (lt $drain 0) (gt $drain 1500) }}
+{{- fail "workers.rollout.drainSeconds must be between 0 and 1500" }}
 {{- end }}
 {{- end }}
 {{- range $swarm := ($workers.masterSwarms | default list) }}

@@ -59,6 +59,82 @@ def test_archive_moves_only_rows_no_live_reader_returns(store):
     assert registry.archive("fixture") == 0
 
 
+def test_managed_reads_the_archive_inside_redis(store, monkeypatch):
+    first, second, third, other = history(store)
+    registry = store.execution_registry
+    registry.archive("fixture")
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    archive = store.key("fixture", ARCHIVE)
+    hvals = store.redis.hvals
+
+    def refusing(key):
+        assert key != archive, "the archive was read into the client"
+        return hvals(key)
+
+    monkeypatch.setattr(store.redis, "hvals", refusing)
+    assert registry.managed("fixture", first.name) is True
+    assert registry.managed("fixture", third.name) is True
+    assert registry.managed("fixture", first.name[:-1]) is False
+    assert registry.managed("fixture", "nobody@fixture") is False
+
+
+def test_a_hive_member_reads_the_archive_it_may_only_read(store, monkeypatch):
+    first, second, third, other = history(store)
+    registry = store.execution_registry
+    registry.archive("fixture")
+    for variable in ("AGENTIHOOKS_HIVE_REDIS_URL", "AGENTIHOOKS_SWARM_REDIS_URL"):
+        monkeypatch.setenv(variable, "redis://hive.example:6380/0")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
+    archive = store.key("fixture", ARCHIVE)
+    script = store.redis.eval
+
+    def refusing(source, keys, *args):
+        assert args[0] != archive, "the archive key was declared to a script"
+        return script(source, keys, *args)
+
+    monkeypatch.setattr(store.redis, "eval", refusing)
+    assert registry.managed("fixture", first.name) is True
+    assert registry.managed("fixture", third.name) is True
+    assert registry.managed("fixture", "nobody@fixture") is False
+
+
+def timed_steps(capsys, write):
+    from scripts.swarm import timing
+
+    capsys.readouterr()
+    with timing.tick("fixture"):
+        write()
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if line.startswith("{")]
+    return {row["step"] for row in rows if row.get("event") == "swarm_tick_step" and row["phase"] == "finished"}
+
+
+def test_a_legacy_agent_write_times_its_managed_check_and_commit(store, capsys):
+    from scripts.swarm import timing
+
+    legacy = AgentRecord("engineer@fixture-0009", "eng", "task", seat="eng-9@fixture")
+    steps = timed_steps(capsys, lambda: store.put_agent("fixture", legacy))
+    with store.redis.pipeline() as pipe:
+        execute = timing.named(pipe.execute)
+    parts = [timing.named(ExecutionRegistry._put), execute]
+    assert [part for part in parts if part not in steps] == []
+
+
+def test_an_identified_agent_write_times_its_update_reads_and_commit(store, capsys):
+    from scripts.swarm import timing
+
+    live = started(store, "eng-1@fixture")
+    steps = timed_steps(capsys, lambda: store.put_agent("fixture", replace(live, pane_id="pane-7")))
+    with store.redis.pipeline() as pipe:
+        execute = timing.named(pipe.execute)
+    parts = [
+        timing.named(ExecutionRegistry._put),
+        timing.named(ExecutionRegistry._update),
+        execute,
+    ]
+    assert [part for part in parts if part not in steps] == []
+    assert next(a for a in store.agents("fixture") if a.name == live.name).pane_id == "pane-7"
+
+
 def test_set_pane_still_finds_an_archived_attempt(store):
     first, *_ = history(store)
     store.execution_registry.archive("fixture")

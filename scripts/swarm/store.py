@@ -795,6 +795,7 @@ class RedisStore:
             "keys": _dump(self.redis, keys),
             "members": {f"{PREFIX}:index": [slug], **members},
             "fencing": fencing.read(self, slug),
+            "names": self.names.export(slug),
         }
 
     def restore(self, slug, state):
@@ -811,6 +812,7 @@ class RedisStore:
                 pipe.sadd(key, *found)
             pipe.execute()
         fencing.replace(self, slug, state.get("fencing"))
+        self.names.names_state.restore(state.get("names", {}))
         self.ensure_code(slug)
 
 

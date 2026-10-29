@@ -658,8 +658,11 @@ def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts
     updates = []
 
     class Ledger:
-        def state(self, slug):
-            return {"tasks": [{"id": "t1", "lane": "eng", "state": "claimed"}], "phases": []}
+        def task(self, slug, task):
+            return {"id": "t1", "lane": "eng", "state": "claimed"}
+
+        def metadata(self, slug):
+            return {"overview": ""}
 
         def update_task(self, slug, task, fields, by=None):
             updates.append((task, fields, by))
@@ -724,8 +727,11 @@ def test_a_member_credential_records_its_pull_request_before_a_lift_cleanup_refu
     updates = []
 
     class Ledger:
-        def state(self, slug):
-            return {"tasks": [{"id": "t1", "lane": "eng", "state": "claimed"}], "phases": []}
+        def task(self, slug, task):
+            return {"id": "t1", "lane": "eng", "state": "claimed"}
+
+        def metadata(self, slug):
+            return {"overview": ""}
 
         def update_task(self, slug, task, fields, by=None):
             updates.append((task, fields, by))

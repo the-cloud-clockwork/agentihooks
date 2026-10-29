@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from scripts.inbox.seats import is_seat
-from scripts.swarm import fencing
+from scripts.swarm import fencing, timing
 
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend", "transport")
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
@@ -144,10 +144,11 @@ class ExecutionRegistry:
 
     def put(self, slug: str, agent: AgentRecord) -> None:
         with _writes(slug):
-            if _has_identity(agent) or not self.store.project_legacy(
-                slug, agent, lambda: self.managed(slug, agent.name)
-            ):
-                self._update(slug, agent)
+            timing.timed(self._put, slug, agent)
+
+    def _put(self, slug: str, agent: AgentRecord) -> None:
+        if _has_identity(agent) or not self.store.project_legacy(slug, agent, lambda: self.managed(slug, agent.name)):
+            self._update(slug, agent)
 
     def get(self, slug: str, execution_id: str) -> AgentRecord:
         doc = fencing.read(self.store, slug)
@@ -218,7 +219,7 @@ class ExecutionRegistry:
 
     def update(self, slug: str, agent: AgentRecord) -> None:
         with _writes(slug):
-            self._update(slug, agent)
+            timing.timed(self._update, slug, agent)
 
     def _update(self, slug: str, agent: AgentRecord) -> None:
         self.validate(slug, agent)

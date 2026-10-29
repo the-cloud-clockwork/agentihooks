@@ -285,6 +285,34 @@ def test_a_handoff_still_waiting_for_its_successor_is_read(redis, tmp_path):
     )
 
 
+def test_handoff_consumed_after_key_scan_is_not_reported_as_unattributed(redis, tmp_path, monkeypatch):
+    store, box = RedisStore(redis), InboxStore(redis)
+    seat = f"eng-2@{SLUG}"
+    author = f"{SLUG}-eng-2"
+    store.put_handoff(SLUG, "gone", "# gone", seat, {"agent": author})
+    store.put_handoff(SLUG, "kept", "# kept", seat, {"agent": author})
+    keys = [store.key(SLUG, "handoff", task) for task in ("gone", "kept")]
+
+    def consumed_scan(**kwargs):
+        store.clear_handoff(SLUG, "gone")
+        yield from keys
+
+    monkeypatch.setattr(redis, "scan_iter", consumed_scan)
+    rows = read.handoffs(store, box, tmp_path, SLUG, items=[])
+    assert [finding.id for finding in handoffs.findings(rows)] == [f"missing-recap/{author}"]
+    assert [(row["task"], row["seat"], row["from"], row["document"]) for row in rows] == [
+        ("kept", seat, author, "# kept")
+    ]
+
+
+def test_present_handoff_without_seat_or_sender_remains_unattributed(redis, tmp_path):
+    store, box = RedisStore(redis), InboxStore(redis)
+    store.put_handoff(SLUG, "unattributed", "# unattributed")
+    [record] = read.handoffs(store, box, tmp_path, SLUG, items=[])
+    assert (record["seat"], record["from"], record["document"]) == ("", "", "# unattributed")
+    assert [finding.id for finding in handoffs.findings([record])] == ["unattributed-handoff/unattributed"]
+
+
 def test_a_waiting_handoff_is_authored_by_its_envelope_agent_not_the_next_seat_holder(redis, tmp_path):
     store, box = RedisStore(redis), InboxStore(redis)
     seat = f"eng-2@{SLUG}"

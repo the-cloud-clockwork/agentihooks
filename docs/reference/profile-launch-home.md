@@ -51,22 +51,15 @@ a different home, so the binding canary validates the home the launch recorded.
 
 Once the new session's route report arrives, `init-agent` waits for the
 launched agent itself to run the canary command. That wait ends only when the
-report reads `validated` or `failed`, or when its deadline passes. The deadline
-belongs to the harness, never to `--route-timeout`:
+report reads `validated` or `failed`, or when the launch deadline runs out. By
+default the canary wait gets the rest of the launch deadline, never
+`--route-timeout`.
 
-| Harness | Default canary wait | Largest route report to canary time measured |
-|---|---|---|
-| Claude | 120 seconds | 69.9 seconds over 2425 swarm launches |
-| Codex | 90 seconds | 56.6 seconds over 1309 swarm launches |
+The wait counts from the route report, so it also covers the harness's own
+start before it reads the opening prompt; a slow session start uses launch
+time, never a separate fixed canary allowance.
 
-Each default is about one and a half times the largest time measured over the
-histories of both swarms. Before this deadline existed the canary wait reused
-the route timeout, which the swarm runtime sets to 30 seconds for Codex and 90
-for Claude, so a Codex agent that took longer than 30 seconds to reach its
-first command failed its spawn. On 13 October, 11 Codex launches that
-succeeded took more than 30 seconds from route report to canary.
-
-Pass `--canary-timeout <seconds>` to override the default for one launch:
+Pass `--canary-timeout <seconds>` to cap the wait for one launch:
 
 ```bash
 agentihooks init-agent --agent codex --profile engineer --dir "$PWD" \
@@ -77,21 +70,31 @@ agentihooks init-agent --agent codex --profile engineer --dir "$PWD" \
 
 All waits of one launch share a 270 second deadline counted from the start of
 `init-agent`, so a swarm spawn returns inside the runtime's 300 second spawn
-timeout. The canary wait is granted its harness deadline or what remains of the
-270 seconds, whichever is less. A swarm Codex launch whose two ready waits each
-run their full 120 seconds leaves the canary 30 seconds.
+timeout. The canary wait is granted what remains of the 270 seconds, or
+`--canary-timeout` when that is less. A swarm Codex launch whose two ready
+waits each run their full 120 seconds leaves the canary 30 seconds.
+
+`--launch-until <epoch milliseconds>` shortens the deadline so the launch
+returns by that wall clock time. A hive passes its launch order's expiry less
+30 seconds (`ACK_MARGIN_MS`), counted on its own clock, so a launch that started
+late in the order's 300 second lifetime still acknowledges before the order
+expires instead of being stopped as `expired`. The margin holds the herdr
+commands that run outside the deadline and the hive's own acknowledgement. An
+order with no more than the margin left fails `expired` before any pane opens.
+The route report wait also ends with the launch deadline.
 
 ### Timeout output
 
 A canary wait that runs out prints `profile_validation=failed` with the rest of
-the launch report on stdout, the reason on stderr, and exits 3:
+the launch report on stdout, the reason on stderr, and exits 3. A canary that
+fails or times out before the launch deadline runs out keeps the plain reason:
 
 ```text
 agentihooks init-agent: mounted profile canary did not validate before timeout: the codex agent reported no canary within 90s
 ```
 
-When the launch deadline cut the wait short, the reason first names the
-deadline, the wait it ran out in and the seconds each wait spent:
+A wait that ran to the launch deadline first names the deadline, the wait it
+ran out in and the seconds each wait spent:
 
 ```text
 agentihooks init-agent: the 270s launch deadline ran out in the profile canary wait after Codex ready 120s, Codex ready for the opening prompt 120s, profile canary 30s: the codex agent reported no canary within 30s
@@ -114,10 +117,12 @@ days, so read older days from the swarm store history instead.
 
 ### Tests
 
-`tests/test_canary_wait.py` pins each harness default against a 30 second route
-timeout, the `--canary-timeout` override, the flag's help text and the timeout
-message. `tests/test_launch_deadline.py` pins the shared launch deadline and its
-message.
+`tests/test_canary_wait.py` pins the default wait to the rest of the launch
+deadline, a canary reported at 150 seconds passing, `--launch-until`, the
+`--canary-timeout` override, the flags' help text and the timeout message.
+`tests/test_launch_deadline.py` pins the shared launch deadline and its message.
+`tests/hive/test_orders.py` pins queued orders whose launches run to their
+deadline all acknowledging live inside the order lifetime.
 
 ## What the home check requires
 

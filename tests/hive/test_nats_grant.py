@@ -584,9 +584,41 @@ def test_refresh_writes_the_bus_credential_beside_the_member_env(tmp_path):
     assert oct(creds.stat().st_mode & 0o777) == "0o600"
     assert env.endswith(f"AGENTIHOOKS_BUS_CREDENTIALS={creds}\nAGENTIHOOKS_BUS_BIND=1\n")
     env = auth.write_env(tmp_path, "https://hive", {**grant, "nats_credentials": None}).read_text()
+    assert creds.read_text() == "creds text"
+    assert env.endswith(f"AGENTIHOOKS_BUS_CREDENTIALS={creds}\nAGENTIHOOKS_BUS_BIND=1\n")
+
+
+def test_a_grant_for_another_member_drops_the_bus_credential_saved_for_the_previous_one(tmp_path):
+    grant = {"id": "m1", "ledger_credential": "l", "redis_url": "r", "nats_credentials": "creds text"}
+    auth.write_env(tmp_path, "https://hive", grant)
+    env = auth.write_env(tmp_path, "https://hive", {**grant, "id": "m2", "nats_credentials": None}).read_text()
+    assert "AGENTIHOOKS_BUS_CREDENTIALS" not in env
+    assert not (tmp_path / auth.NATS_CREDS_FILE).exists()
+
+
+def test_a_bus_credential_with_no_saved_membership_is_dropped(tmp_path):
+    (tmp_path / auth.NATS_CREDS_FILE).write_text("creds text")
+    assert auth.kept_bus(tmp_path, "m1") is None
+
+
+def test_a_kept_bus_credential_carries_the_saved_scope_as_written(tmp_path):
+    (tmp_path / auth.NATS_CREDS_FILE).write_text("creds text")
+    (tmp_path / auth.ENV_FILE).write_text(
+        "AGENTIHOOKS_HIVE_ID=m1\nAGENTIHOOKS_BUS_SCOPED=1\nAGENTIHOOKS_BUS_SWARMS=demo,${UNSET_SWARM}x\n"
+    )
+    assert auth.kept_bus(tmp_path, "m1") == {
+        "bus_credentials": str(tmp_path / auth.NATS_CREDS_FILE),
+        "bus_scoped": True,
+        "bus_swarms": ["demo", "${UNSET_SWARM}x"],
+    }
+
+
+def test_a_grant_without_a_bus_credential_and_no_saved_one_names_none(tmp_path):
+    grant = {"id": "m1", "ledger_credential": "l", "redis_url": "r", "nats_credentials": None}
+    env = auth.write_env(tmp_path, "https://hive", grant).read_text()
     assert "AGENTIHOOKS_BUS_CREDENTIALS" not in env
     assert "AGENTIHOOKS_BUS_BIND" not in env
-    assert not creds.exists()
+    assert not (tmp_path / auth.NATS_CREDS_FILE).exists()
 
 
 @pytest.fixture
@@ -684,6 +716,10 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
         *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets),
         *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets),
         "slots.*.m1",
+        "$KV.scheduler-m1.>",
+        "$JS.API.STREAM.INFO.KV_scheduler-m1",
+        "$JS.API.STREAM.MSG.GET.KV_scheduler-m1",
+        "$JS.API.STREAM.CREATE.KV_scheduler-m1",
     ]
     assert claims["nats"] == {
         "type": "user",
@@ -694,7 +730,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
         "data": -1,
         "payload": -1,
     }
-    assert not [subject for subject in publish if ".CREATE" in subject]
+    assert [subject for subject in publish if ".CREATE" in subject] == ["$JS.API.STREAM.CREATE.KV_scheduler-m1"]
 
 
 def test_a_role_credential_keeps_the_unrestricted_user_claims():

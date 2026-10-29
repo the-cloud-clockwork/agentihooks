@@ -210,19 +210,35 @@ def ledger_member(redis, credential: str) -> str | None:
 
 
 def issue_agent(redis, member_id: str, slug: str, name: str) -> str:
+    found = member(redis, member_id)
+    if found is None:
+        raise HiveError("Hive membership was revoked")
+    digest = found["ledger"]
+    store = _store(redis)
+    current = hive_state.read(store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}")))
+    if current != member_id:
+        raise HiveError("Hive membership was revoked")
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"
-
-    def record(current: dict | None) -> dict:
-        if current is None:
-            raise HiveError("Hive membership was revoked")
-        return {**current, "agents": {**current.get("agents", {}), _digest(token): [slug, name]}}
-
-    hive_state.amend(_store(redis), f"member.{member_id}", record, _legacy(redis, _legacy_member(member_id)))
+    key = f"agent.{member_id}.{_digest(token)}"
+    hive_state.amend(store, key, lambda _: {"ledger": digest, "scope": [slug, name]})
+    if agent_member(redis, token, slug, name) != member_id:
+        hive_state.amend(store, key, lambda _: None)
+        raise HiveError("Hive membership was revoked")
     return token
 
 
 def agent_member(redis, token: str, slug: str, name: str) -> str | None:
     member_id = token.removeprefix("hive.").partition(".")[0]
+    store = _store(redis)
+    scoped = hive_state.read(store, f"agent.{member_id}.{_digest(token)}")
+    if scoped is not None:
+        if scoped["scope"] != [slug, name]:
+            return None
+        digest = scoped["ledger"]
+        current = hive_state.read(
+            store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
+        )
+        return member_id if current == member_id else None
     scope = (member(redis, member_id) or {}).get("agents", {}).get(_digest(token))
     return member_id if scope == [slug, name] else None
 
@@ -269,12 +285,15 @@ def revoke(redis, member_id: str) -> None:
     if not found:
         raise HiveError(f"no hive member {member_id}")
     store = _store(redis)
+    digest = found["ledger"]
     try:
-        hive_state.amend(store, f"ledger.{found['ledger']}", lambda _: None)
+        hive_state.amend(
+            store, f"ledger.{digest}", lambda _: None, _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
+        )
         hive_state.indexed(redis, member_id, False)
         redis_acl.drop(redis, f"hive-{member_id}")
         redis_acl.save(redis)
-        hive_state.amend(store, f"member.{member_id}", lambda _: None)
+        hive_state.amend(store, f"member.{member_id}", lambda _: None, _legacy(redis, _legacy_member(member_id)))
     except _refusals() as exc:
         raise HiveError(
             f"revoking {member_id} is incomplete and a Redis restart before it completes revives its Redis user; "
@@ -286,9 +305,28 @@ def write_env(home: Path | str, url: str, grant: dict) -> Path:
     creds = Path(home) / NATS_CREDS_FILE
     if grant.get("nats_credentials"):
         grant = {**grant, "bus_credentials": str(_write_private(creds, grant["nats_credentials"]))}
+    elif (kept := kept_bus(home, grant["id"])) is not None:
+        grant = {**grant, **kept}
     else:
         creds.unlink(missing_ok=True)
     return _write_private(Path(home) / ENV_FILE, env_text(url, grant))
+
+
+def kept_bus(home: Path | str, member_id: str) -> dict | None:
+    from dotenv import dotenv_values
+
+    creds, saved = Path(home) / NATS_CREDS_FILE, Path(home) / ENV_FILE
+    if not creds.is_file():
+        return None
+    values = dotenv_values(saved, interpolate=False)
+    if values.get("AGENTIHOOKS_HIVE_ID") != member_id:
+        return None
+    swarms = values.get("AGENTIHOOKS_BUS_SWARMS")
+    return {
+        "bus_credentials": str(creds),
+        "bus_scoped": values.get("AGENTIHOOKS_BUS_SCOPED") == "1",
+        "bus_swarms": swarms.split(",") if swarms else [],
+    }
 
 
 def env_text(url: str, grant: dict) -> str:

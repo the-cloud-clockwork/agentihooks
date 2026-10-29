@@ -7,6 +7,7 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
+from scripts import locked_tests
 from scripts.ci_mutation.scope import select_tests
 from scripts.ci_test_plan import find_record
 from tests.shards import FIRST_SHARD_FILES, assign_files, source_sizes
@@ -40,6 +41,8 @@ CONFTEST = "conftest.py"
 # Only the full suite ran these checks, so a new or edited test module could pass its own tier and fail the queue.
 SUITE_SPEED = "tests/test_suite_speed.py"
 FAKEREDIS = "fakeredis"
+# The manifest names its locked tests through a constant, so neither file name selects its agreement check.
+LOCKED_CHECK = f"{TESTS}/test_locked_tests.py"
 # Only the queue ran these whole tree checks, so a pull request adding, removing or moving a file passed its own tier.
 TREE_CHECKS = (f"{TESTS}/test_codeowners.py", f"{TESTS}/test_ci_pull_request_api.py")
 # Stored test seconds per leg up to the leg limit; a larger selection shares the legs and each runs longer.
@@ -109,6 +112,8 @@ def selected_tests(root: Path, changed: list[str], tree_reshaped: bool, manifest
                 "tests/test_ci_runner_trust.py",
             }
         )
+    if any(path in locked_tests.LOCKED or path == locked_tests.MANIFEST.as_posix() for path in changed):
+        tests.add(LOCKED_CHECK)
     tests |= naming_tests(root, needles)
     tests = {path for path in tests if SAFE.fullmatch(path) and (root / path).is_file()}
     if (

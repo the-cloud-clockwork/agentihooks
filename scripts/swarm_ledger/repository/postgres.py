@@ -13,6 +13,9 @@ from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, Sna
 
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
 WRITER_LOCK = 0x4C454447
+LEDGER_LOCK = 0x4C454453
+LEDGER_WRITE = f"SELECT pg_advisory_xact_lock_shared({WRITER_LOCK})"
+LEDGER_ONLY = f"SELECT pg_advisory_xact_lock({LEDGER_LOCK}, hashtext(?))"
 KEPT = 8
 STREAM_ROWS = 2000
 STREAMS = itertools.count()
@@ -234,7 +237,7 @@ class Connection:
                 return
             yield from batch
 
-    def lock(self) -> object:
+    def lock(self, statements: tuple = ((BEGIN_IMMEDIATE, ()),)) -> object:
         """The writer lock, asked for again after each wait the server ends at its lock timeout."""
         psycopg2 = errors()
         lost = psycopg2.errors.LockNotAvailable
@@ -244,11 +247,16 @@ class Connection:
             for _ in range(LOCK_TRIES):
                 cursor = self.raw.cursor()
                 try:
-                    cursor.execute(translate(BEGIN_IMMEDIATE), ())
+                    for sql, parameters in statements:
+                        cursor.execute(translate(sql), parameters)
                     return cursor
                 except lost:
                     self.raw.rollback()
         raise sqlite3.OperationalError(LOCK_REFUSED)
+
+    def lock_ledger(self, slug: str) -> object:
+        """One ledger's writer lock, shared with other ledgers' writers and excluded by every whole store writer."""
+        return self.lock(((LEDGER_WRITE, ()), (LEDGER_ONLY, (slug,))))
 
     def executemany(self, sql: str, rows: Iterable) -> None:
         with mapped(), self.raw.cursor() as cursor:

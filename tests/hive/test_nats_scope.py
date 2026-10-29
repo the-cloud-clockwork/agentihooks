@@ -97,6 +97,11 @@ def test_member_credentials_hold_no_grant_on_the_hub_owned_account_buckets():
     assert not [value for value in claims["pub"]["allow"] if value.startswith("$KV.") or ".KV_" in value]
 
 
+def test_controller_claims_purge_only_the_kv_stream_of_each_bucket_it_writes():
+    purges = [value for value in nats_grant.controller_claims()["pub"]["allow"] if "PURGE" in value]
+    assert purges == [f"$JS.API.STREAM.PURGE.KV_{bucket}" for bucket in nats_grant.CONTROLLER_BUCKETS]
+
+
 @pytest.mark.parametrize(
     ("swarms", "slots"), [(None, ["slots.*.m1"]), (("rig", "other"), ["slots.rig.m1", "slots.other.m1"])]
 )
@@ -231,6 +236,8 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
                 f"$JS.ACK.{stream}.>",
             )
         )
+    for stream in ("AGENTIHOOKS_726967_STATE_scheduler-m1", stream_name("rig", "STATE_scheduler-m1")):
+        expected.update(f"$JS.API.STREAM.{verb}.{stream}" for verb in ("INFO", "MSG.GET", "CREATE"))
     claims = nkey.claims(jwt)["nats"]
     assert set(claims) == {"type", "version", "pub", "sub", "subs", "data", "payload"}
     assert set(claims["pub"]) == {"allow"}

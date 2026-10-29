@@ -24,6 +24,8 @@ def ledger_page(monkeypatch, tmp_path):
     redis = Mock()
     redis.get.side_effect = TimeoutError("Timeout reading from socket")
     redis.mget.side_effect = TimeoutError("Timeout reading from socket")
+    redis.hget.side_effect = TimeoutError("Timeout reading from socket")
+    redis.hmget.side_effect = TimeoutError("Timeout reading from socket")
     monkeypatch.setattr("hooks._redis.get_redis", lambda: redis)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01})
