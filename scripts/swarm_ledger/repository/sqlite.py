@@ -645,9 +645,9 @@ class SQLiteLedgerRepository:
         from . import mutation
 
         self._adopt(slug)
-        with request_metrics.locked(self.domain.LOCK), self.connect() as connection:
+        with request_metrics.locked(self.domain.LOCK.ledger(slug)), self.connect() as connection:
             with connection:
-                request_metrics.begin(connection, BEGIN_IMMEDIATE)
+                request_metrics.begin_ledger(connection, slug, BEGIN_IMMEDIATE)
                 entry = self._entry(connection, slug)
                 state = entry.for_write()
                 rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
