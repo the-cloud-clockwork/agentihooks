@@ -198,3 +198,18 @@ def test_local_page_derived_agent_tokens_still_work(live, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
     token = authority.agent_token(live["admin"], SLUG, WORKER)
     assert authority.principal(live["admin"], SLUG, token, WORKER) == WORKER
+
+
+def test_a_token_request_while_every_hive_permit_is_held_answers_busy(live, hive, monkeypatch):
+    from scripts.swarm_ledger import hive_work
+    from tests.swarm_ledger.test_hive_work import every_permit_held
+
+    store, grant = hive
+    store.start_execution(SLUG, AgentRecord(WORKER, "eng", "proof", seat=f"eng-1@{SLUG}", hive=grant["id"]))
+    monkeypatch.setattr(hive_work, "WAIT_S", 0.05)
+    with every_permit_held():
+        status, reply = mint(live, grant, WORKER)
+    assert status == 503
+    assert reply == {
+        "error": {"code": "busy", "message": "The ledger is busy with other hive credential requests; retry shortly"}
+    }
