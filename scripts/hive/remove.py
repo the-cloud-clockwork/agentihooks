@@ -78,6 +78,7 @@ class Host:
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
+    wall: Callable[[], float] = time.time
     known_hosts: Path = field(default_factory=lambda: Path.home() / ".ssh" / "known_hosts")
     home: Path = field(default_factory=registry.home)
 
@@ -152,30 +153,28 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
     while remaining := _unhanded(store, hive):
         _order(inbox, ordered, remaining, ROLL, hive)
         if host.clock() >= deadline:
-            return _recover(store, hive, wait_s, remaining)
+            return _recover(store, hive, wait_s, remaining, host)
         host.sleep(POLL_S)
     return f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
 
 
 def _unhanded(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
-    return [(slug, agent) for slug, agent in hosted(store, hive) if not store.handoff(slug, agent.task)]
+    return [(slug, agent) for slug, agent in hosted(store, hive) if agent.task and not store.handoff(slug, agent.task)]
 
 
-def _recover(store: "RedisStore", hive: str, wait_s: int, remaining: list[tuple[str, "AgentRecord"]]) -> str:
-    from scripts.handoff import transfers
+def _recover(store: "RedisStore", hive: str, wait_s: int, remaining: list, host: Host) -> str:
+    from scripts.handoff import envelope, transfers
     from scripts.swarm_ledger.ledger_workspace import folder
 
-    recovered = [(slug, agent) for slug, agent in remaining if agent.task]
-    for slug, agent in recovered:
+    at = int(host.wall() * 1000)
+    for slug, agent in remaining:
         text = RECOVERY.format(
             name=agent.name, task=agent.task, hive=hive, wait=wait_s, folder=folder(slug, agent.task)
         )
-        store.put_handoff(slug, agent.task, text, seat=agent.seat)
-        transfers.record(store, slug, agent, "exit", text, int(time.time() * 1000))
-    if not recovered:
-        names = ", ".join(agent.name for _, agent in remaining)
-        return f"hive {hive} stops after {wait_s} seconds with {names} still running and no task to hand off"
-    names = ", ".join(agent.name for _, agent in recovered)
+        built = envelope.build(store, slug, agent, "exit", None, at, run=host.run)
+        store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=built)
+        transfers.record(store, slug, agent, "exit", text, at)
+    names = ", ".join(agent.name for _, agent in remaining)
     return (
         f"hive {hive} stops after {wait_s} seconds; {names} did not hand off, "
         "so each got a recovery handoff and its task reopens"

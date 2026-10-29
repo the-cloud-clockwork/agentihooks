@@ -39,6 +39,7 @@ class Swarm:
         self.redis = redis
         self.rows = []
         self.handoffs = {}
+        self.envelopes = {}
 
     def key(self, slug, *parts):
         return ":".join(["swarm", slug, *parts])
@@ -46,8 +47,9 @@ class Swarm:
     def handoff(self, slug, task):
         return self.handoffs.get((slug, task), ("", ""))[0]
 
-    def put_handoff(self, slug, task, text, seat=""):
+    def put_handoff(self, slug, task, text, seat="", envelope=None):
         self.handoffs[(slug, task)] = (text, seat)
+        self.envelopes[(slug, task)] = envelope
 
     def slugs(self):
         return [SLUG] if self.rows else []
@@ -135,7 +137,7 @@ def _agent(store, member):
 def _host(clock, run, tmp_path):
     known = tmp_path / "known_hosts"
     known.write_text("[10.10.30.207]:2222 ssh-ed25519 AAAA\n")
-    return remove.Host(run=run, sleep=clock.sleep, clock=clock, known_hosts=known, home=tmp_path)
+    return remove.Host(run=run, sleep=clock.sleep, clock=clock, wall=lambda: 1793.5, known_hosts=known, home=tmp_path)
 
 
 def _created(store, tmp_path, name="anton-9"):
@@ -448,13 +450,23 @@ def test_a_release_roll_ends_its_drain_one_poll_after_its_agents_obey_the_order_
     assert remove.hosted(store, member) == []
 
 
-def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_at_the_deadline(store, tmp_path):
+def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_at_the_deadline(
+    store, tmp_path, monkeypatch
+):
+    from scripts.handoff import envelope
+
     member = _member(store)
     _agent(store, member)
     store.put_agent(SLUG, AgentRecord("engineer@2", "eng", "t2", seat=f"eng-2@{SLUG}", hive=member))
-    clock = Clock(store, member, 99)
+    clock, run, built = Clock(store, member, 99), Run(), []
 
-    settled = remove.settle(store, member, 30, _host(clock, Run(), tmp_path))
+    def build(swarm, slug, agent, reason, rows, at, run):
+        built.append((swarm, slug, agent.name, reason, rows, at, run))
+        return {"agent": agent.name, "reason": reason}
+
+    monkeypatch.setattr(envelope, "build", build)
+
+    settled = remove.settle(store, member, 30, _host(clock, run, tmp_path))
 
     assert settled == (
         f"hive {member} stops after 30 seconds; engineer@1, engineer@2 did not hand off, "
@@ -465,10 +477,16 @@ def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_
     for name, task, seat in (("engineer@1", "t1", SEAT), ("engineer@2", "t2", f"eng-2@{SLUG}")):
         text = remove.RECOVERY.format(name=name, task=task, hive=member, wait=30, folder=folder(SLUG, task))
         assert store.handoffs[(SLUG, task)] == (text, seat)
+        assert store.envelopes[(SLUG, task)] == {"agent": name, "reason": "exit"}
         transfer = next(row for row in transfers.list_transfers(store, SLUG) if row["task"] == task)
         assert (transfer["predecessor"], transfer["seat"], transfer["reason"]) == (name, seat, "exit")
         assert transfer["handoff"] == text
         assert transfer["next"] == first_next(text)
+        assert transfer["at"] == 1793500
+    assert built == [
+        (store, SLUG, "engineer@1", "exit", None, 1793500, run),
+        (store, SLUG, "engineer@2", "exit", None, 1793500, run),
+    ]
 
 
 def test_an_agent_with_a_recorded_handoff_no_longer_holds_the_drain_and_keeps_its_document(store, tmp_path):
@@ -485,13 +503,16 @@ def test_an_agent_with_a_recorded_handoff_no_longer_holds_the_drain_and_keeps_it
     assert transfers.list_transfers(store, SLUG) == []
 
 
-def test_an_agent_with_no_task_gets_no_recovery_handoff(store, tmp_path):
+def test_an_agent_with_no_task_holds_no_drain_and_gets_no_recovery_handoff(store, tmp_path):
     member = _member(store)
     store.put_agent(SLUG, AgentRecord("engineer@3", "eng", "", seat=f"eng-3@{SLUG}", hive=member, state="working"))
 
-    settled = remove.settle(store, member, 0, _host(Clock(store, member, 99), Run(), tmp_path))
+    clock = Clock(store, member, 99)
 
-    assert settled == f"hive {member} stops after 0 seconds with engineer@3 still running and no task to hand off"
+    settled = remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
+
+    assert settled == f"hive {member} drained: every agent handed off, 0 ordered to hand off"
+    assert clock.slept == 0
     assert store.handoffs == {}
     assert transfers.list_transfers(store, SLUG) == []
 
