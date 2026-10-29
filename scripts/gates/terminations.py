@@ -14,8 +14,8 @@ KILLERS = frozenset({"pkill", "killall"})
 AGENTS = ("claude", "codex")
 INSPECTS = frozenset({"--list", "--dry-run"})
 REFUSAL = (
-    "termination: a master terminates, kills or retires an agent only on the operator's order. Ask him in your pane "
-    "or raise it in Priorities, and leave the agent running until he says so."
+    "termination: a master terminates, kills or retires an agent only on the operator's order. Answer him in your pane "
+    "only when he writes, and leave the agent running until he says so."
 )
 
 
@@ -38,9 +38,9 @@ class Terminations:
     default_mode = "observe"
 
     def matches(self, call):
-        return call.tool == "Bash"
+        return call.tool in ("Bash", "terminate-agent")
 
     def decide(self, call, who, state):
-        if naming.lane_of(who.name) != MASTER or not terminates(call.command):
+        if naming.lane_of(who.name) != MASTER or (call.tool == "Bash" and not terminates(call.command)):
             return Decision()
         return Decision.deny(REFUSAL)

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import random
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,7 @@ def test_a_dropping_uploader_is_graded_by_the_missing_events_and_archive_gap():
 @pytest.mark.parametrize("case", ["a", "b", "c"])
 def test_package_cases_match_their_committed_evidence(case, monkeypatch):
     monkeypatch.setattr(os, "fsync", lambda descriptor: None)
+    monkeypatch.setattr(tempfile, "tempdir", "/dev/shm")
     first = cases.run_case(case)
     assert first["state"] == "passed", json.dumps(first, indent=2, sort_keys=True)
     path = EVIDENCE / f"{case}-result.json"
@@ -74,7 +76,9 @@ def test_the_manifest_hashes_the_workload_and_the_harness():
 
 
 @pytest.mark.wall_clock
-def test_search_stays_within_its_wall_clock_budget_under_the_load():
+def test_search_stays_within_its_wall_clock_budget_under_the_load(monkeypatch):
+    monkeypatch.setattr(os, "fsync", lambda descriptor: None)
+    monkeypatch.setattr(tempfile, "tempdir", "/dev/shm")
     measured = load.measure(load.load_spec()["seeds"][0], load.load_spec())
     assert measured["verdict"]["complete"], measured["verdict"]["failures"]
     latency = measured["search_latency_seconds"]

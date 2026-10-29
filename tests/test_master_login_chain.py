@@ -366,13 +366,19 @@ def test_token_fallback_emails_the_operator_once_per_login_attempt(tmp_path, mon
         "the current claude.ai session failed and the browser authorization ended in captcha."
     )
     assert chain.alert(first, target, "captcha", "/repo") == "email failed: down"
-    assert not (tmp_path / "slot" / "login-notifications.jsonl").exists()
     assert chain.alert(first, target, "captcha", "/repo") == ""
     assert chain.alert(first, target, "failure", "/repo") == ""
     expected = ("Master login fell back to token routing", text, first, "/repo")
     assert sent == [expected, expected]
     path = tmp_path / "slot" / "login-notifications.jsonl"
     assert [json.loads(line) for line in path.read_text().splitlines()] == [
+        {
+            "step": "token",
+            "outcome": "captcha",
+            "transport": "refused",
+            "agent": "master@proof-1",
+            "reason": "email failed: down",
+        },
         {"step": "token", "outcome": "captcha", "transport": "email", "agent": "master@proof-1"},
     ]
     second = {"AGENTIHOOKS_AGENT_NAME": "master@proof-2"}

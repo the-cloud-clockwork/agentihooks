@@ -74,6 +74,25 @@ def test_merge_target_requires_the_recorded_task_and_checks_shared_links():
         done_gate.require_target(state, "sw", "t1", URL, rows)
 
 
+def test_merge_target_accepts_a_recorded_prerequisite_and_refuses_other_pulls():
+    from scripts.swarm.store import SwarmError
+    from tests.swarm.test_merge_queue import swarm_of
+
+    state = swarm_of("eng")
+    first, staged, other = (f"https://github.com/o/r/pull/{n}" for n in (7, 8, 6))
+    scopes = {first: {"kind": "prerequisite", "scope": "tests first"}, staged: {"kind": "stage", "scope": "one"}}
+    rows = [{"id": "t1", "pr_url": URL, "pull_scopes": scopes}]
+    assert done_gate.require_target(state, "sw", "t1", first, rows) is None
+    assert done_gate.require_target(state, "sw", "t1", URL, rows) is None
+    for url in (staged, other):
+        with pytest.raises(SwarmError, match="^final integration must target this task's recorded pull request$"):
+            done_gate.require_target(state, "sw", "t1", url, rows)
+    rows.append({"id": "t2", "pr_url": other, "pull_scopes": {first: {"kind": "prerequisite", "scope": "shared"}}})
+    state.redis.set(state.key("sw", "task-authority", "t2"), "{}")
+    with pytest.raises(SwarmError, match="controller outcome"):
+        done_gate.require_target(state, "sw", "t1", first, rows)
+
+
 def test_a_task_without_a_kind_is_gated_as_code():
     assert done_gate.refusal({"id": "t1"}, "", github("MERGED")) == (
         "a code task is done only with its merged pull request: give --pr <url>"

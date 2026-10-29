@@ -28,6 +28,10 @@ pytestmark = pytest.mark.unit
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
 BAO_URL = "https://bao.test"
 POLICY = {**json.loads((FIXTURES / "pod-policy.json").read_text()), "provider_accounts": []}
+MISSING_BAO = (
+    "it needs OPENBAO_URL and OPENBAO_TOKEN, set in the agentihooks env files: ~/.agentihooks/.env or a *.env "
+    "companion beside it, such as ~/.agentihooks/openbao.env"
+)
 
 
 def ssh_private(key) -> str:
@@ -278,7 +282,7 @@ def test_setup_command_defaults_antoncore_to_the_workbench_checkout(tmp_path, mo
 @pytest.mark.parametrize(
     "environ, who, message",
     [
-        ({}, Who(), "operator terminal setup refused: it needs OPENBAO_URL and OPENBAO_TOKEN\n"),
+        ({}, Who(), f"operator terminal setup refused: {MISSING_BAO}\n"),
         (
             {"OPENBAO_URL": BAO_URL, "OPENBAO_TOKEN": "t"},
             Who(name="engineer@abc-1"),
@@ -1002,11 +1006,14 @@ def test_setup_command_reads_the_hive_redis_address_from_its_environment(tmp_pat
 
 class Ledger:
     def __init__(self) -> None:
-        self.followups = []
+        self.alerts, self.cleared = [], []
 
-    def followup(self, slug, text, needs_operator=False):
-        self.followups.append((slug, text, needs_operator))
-        return True
+    def raise_alert(self, slug, source, text, item=None):
+        assert item == operator_setup.SETUP_ITEM
+        self.alerts.append((slug, text, source))
+
+    def close_item_alerts(self, slug, item, outcome):
+        self.cleared.append((slug, item, outcome))
 
 
 class Flaky(Ledger):
@@ -1014,14 +1021,12 @@ class Flaky(Ledger):
         super().__init__()
         self.failed = set()
 
-    def followup(self, slug, text, needs_operator=False):
-        super().followup(slug, text, needs_operator)
-        if slug in self.failed:
-            return True
+    def raise_alert(self, slug, source, text, item=None):
+        super().raise_alert(slug, source, text, item)
+        if slug in self.failed or slug == "hive-c":
+            return
         self.failed.add(slug)
-        if slug == "hive-b":
-            raise SwarmError("the ledger server is gone")
-        return slug != "hive-a"
+        raise SwarmError("the ledger server is gone")
 
 
 def alarm_store(slugs):
@@ -1043,12 +1048,12 @@ def test_a_refused_setup_raises_one_priority_on_each_synced_swarm(tmp_path, monk
     monkeypatch.setattr(publications, "connect", lambda environ: dialled.append(dict(environ)) or made)
     monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
     environ = {"AGENTIHOOKS_HIVE_REDIS_URL": "rediss://own.example:6379/0"}
-    message = f"operator terminal setup refused: it needs {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV}"
+    message = f"operator terminal setup refused: {MISSING_BAO}"
 
     assert run_main(["setup"], environ, Who(), tmp_path / "home") == (1, "", message + "\n")
     assert run_main(["setup"], environ, Who(), tmp_path / "home")[0] == 1
 
-    assert ledger.followups == [("hive-a", message, True), ("hive-b", message, True)]
+    assert ledger.alerts == [("hive-a", message, "setup"), ("hive-b", message, "setup")]
     assert dialled == [environ, environ]
 
 
@@ -1064,8 +1069,8 @@ def test_a_new_refusal_raises_again(tmp_path, monkeypatch):
     monkeypatch.setattr(openbao_kv.urllib.request, "urlopen", Bao(status=500))
     run_main(["setup"], {**environ, "OPENBAO_URL": BAO_URL, "OPENBAO_TOKEN": "fixture-token"}, Who(), tmp_path / "home")
 
-    assert len(ledger.followups) == 2
-    assert ledger.followups[1][1].startswith("operator terminal setup refused: the terminal user CA could not be read")
+    assert len(ledger.alerts) == 2
+    assert ledger.alerts[1][1].startswith("operator terminal setup refused: the terminal user CA could not be read")
 
 
 def test_a_dropped_or_failed_notice_is_raised_again_and_a_delivered_one_is_not(tmp_path, monkeypatch):
@@ -1080,7 +1085,7 @@ def test_a_dropped_or_failed_notice_is_raised_again_and_a_delivered_one_is_not(t
     for _ in range(3):
         assert run_main(["setup"], environ, Who(), tmp_path / "home")[0] == 1
 
-    assert [slug for slug, _, _ in ledger.followups] == ["hive-a", "hive-b", "hive-c", "hive-a", "hive-b"]
+    assert [slug for slug, _, _ in ledger.alerts] == ["hive-a", "hive-b", "hive-c", "hive-a", "hive-b"]
 
 
 def test_a_successful_setup_clears_the_alarm_so_a_recurring_refusal_raises_again(tmp_path, monkeypatch):
@@ -1103,7 +1108,40 @@ def test_a_successful_setup_clears_the_alarm_so_a_recurring_refusal_raises_again
     assert not (tmp_path / "home" / "swarm-terminal" / "alarm").exists()
     assert run_main(["setup"], refused, Who(), tmp_path / "home")[0] == 1
 
-    assert [slug for slug, _, _ in ledger.followups] == ["hive-a", "hive-a"]
+    assert [slug for slug, _, _ in ledger.alerts] == ["hive-a", "hive-a"]
+    assert ledger.cleared == [("hive-a", operator_setup.SETUP_ITEM, "The operator terminal setup succeeded.")]
+
+
+def test_clearing_the_alarm_skips_a_refused_close_and_still_removes_the_alarm(tmp_path, monkeypatch):
+    class Refusing(Ledger):
+        def close_item_alerts(self, slug, item, outcome):
+            if slug == "hive-a":
+                raise SwarmError("the ledger server is gone")
+            super().close_item_alerts(slug, item, outcome)
+
+    ledger = Refusing()
+    monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
+    placement = operator_setup.Placement(tmp_path / operator_setup.FOLDER)
+    placement.alarm.parent.mkdir(parents=True)
+    placement.alarm.write_text(json.dumps({"message": "refused", "raised": ["hive-a", "hive-b"]}))
+
+    operator_setup.clear_alarm(placement)
+
+    assert ledger.cleared == [("hive-b", operator_setup.SETUP_ITEM, "The operator terminal setup succeeded.")]
+    assert not placement.alarm.exists()
+
+
+def test_clearing_an_absent_alarm_opens_no_ledger(tmp_path, monkeypatch):
+    def refuse():
+        raise AssertionError("no ledger without a raised alarm")
+
+    monkeypatch.setattr(operator_setup, "LedgerClient", refuse)
+    operator_setup.clear_alarm(operator_setup.Placement(tmp_path / operator_setup.FOLDER))
+    placement = operator_setup.Placement(tmp_path / "other")
+    placement.alarm.parent.mkdir(parents=True)
+    placement.alarm.write_text(json.dumps({"message": "refused"}))
+    operator_setup.clear_alarm(placement)
+    assert not placement.alarm.exists()
 
 
 def test_a_refused_setup_without_a_transport_only_reaches_the_journal(tmp_path, monkeypatch):
@@ -1261,3 +1299,114 @@ def test_install_command_passes_its_hive_redis_address(tmp_path, monkeypatch):
     assert run_main(["install", "--redis-address", "swarm.example:6379"], {}, Who(), tmp_path / "home")[0] == 0
     assert run_main(["install"], {}, Who(), tmp_path / "home")[0] == 0
     assert seen == [(tmp_path / "home", "swarm.example:6379"), (tmp_path / "home", "")]
+
+
+def test_the_scheduled_setup_never_takes_openbao_settings_from_the_runner_shell(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setenv("OPENBAO_URL", BAO_URL)
+    monkeypatch.setenv("OPENBAO_TOKEN", "shell-token")
+    monkeypatch.setenv("KEPT", "runner")
+    shell_files(monkeypatch, {})
+    monkeypatch.setattr(operator_setup, "setup", lambda root, environ: seen.append(environ) or 1)
+
+    operator_setup.refresh(event(tmp_path / "home"), "delivery", None)
+
+    assert [("OPENBAO_URL" in environ, "OPENBAO_TOKEN" in environ, environ["KEPT"]) for environ in seen] == [
+        (False, False, "runner")
+    ]
+
+
+def test_a_refused_setup_before_the_hive_transport_alerts_the_swarms_of_the_machine_redis(tmp_path, monkeypatch):
+    ledger, made = Ledger(), alarm_store(["hive-a", "hive-b"])
+    monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.redis)
+    message = f"operator terminal setup refused: {MISSING_BAO}"
+
+    assert run_main(["setup"], {}, Who(), tmp_path / "home") == (1, "", message + "\n")
+
+    assert ledger.alerts == [("hive-a", message, "setup"), ("hive-b", message, "setup")]
+    alarm = json.loads((tmp_path / "home" / "swarm-terminal" / "alarm").read_text())
+    assert alarm == {"message": message, "raised": ["hive-a", "hive-b"]}
+
+
+@pytest.mark.parametrize("kind", ["redis", "socket", "swarm"])
+def test_an_unreachable_machine_redis_leaves_a_refusal_in_the_journal_only(tmp_path, monkeypatch, kind):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    errors = {"redis": RedisConnectionError("gone"), "socket": OSError("no socket"), "swarm": SwarmError("refused")}
+
+    def unreachable():
+        raise errors[kind]
+
+    def refuse():
+        raise AssertionError("no ledger without a swarm to alert")
+
+    monkeypatch.setattr(operator_setup, "redis_client", unreachable)
+    monkeypatch.setattr(operator_setup, "LedgerClient", refuse)
+
+    assert run_main(["setup"], {}, Who(), tmp_path / "home")[0] == 1
+    assert not (tmp_path / "home" / "swarm-terminal" / "alarm").exists()
+
+
+@pytest.mark.parametrize("kind", ["socket", "redis"])
+def test_a_hive_transport_failing_at_the_socket_falls_back_to_the_machine_redis(tmp_path, monkeypatch, kind):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    from scripts.swarm_v2.herdr import publications
+
+    class Dropped:
+        def slugs(self):
+            raise RedisConnectionError("dropped")
+
+    def broken(environ):
+        if kind == "socket":
+            raise OSError("socket closed")
+        return Dropped()
+
+    ledger, made = Ledger(), alarm_store(["hive-a"])
+    monkeypatch.setattr(publications, "connect", broken)
+    monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.redis)
+
+    assert run_main(["setup"], {}, Who(), tmp_path / "home")[0] == 1
+    assert [slug for slug, _, _ in ledger.alerts] == ["hive-a"]
+
+
+def test_a_clean_home_install_schedules_both_jobs_and_the_setup_job_places_the_files(tmp_path, monkeypatch):
+    import time
+
+    home = tmp_path / "user"
+    state = home / ".agentihooks"
+    state.mkdir(parents=True)
+    (state / ".env").write_text(f"AGENTIHOOKS_ANTONCORE_DIR={antoncore(tmp_path)}\n")
+    (state / "openbao.env").write_text(f"OPENBAO_URL={BAO_URL}\nOPENBAO_TOKEN=configured-token\n")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(state))
+    monkeypatch.setenv("OPENBAO_URL", "https://shell.test")
+    monkeypatch.setenv("OPENBAO_TOKEN", "shell-token")
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_REDIS_ADDRESS", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_ANTONCORE_DIR", raising=False)
+    key = Ed25519PrivateKey.generate()
+    secret = ssh_private(key)
+    bao = Bao({"user_ca": secret})
+    monkeypatch.setattr(openbao_kv.urllib.request, "urlopen", bao)
+    synced = []
+    monkeypatch.setattr(operator_setup, "sync_once", lambda environ, root: synced.append(root) or 0)
+    machine, units = scheduler(), tmp_path / "units"
+
+    operator_setup.install(state, "", units, Systemctl(), machine, lambda: None)
+    assert operator_setup.installed(state, "", units, machine)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        assert machine.run_due(now=time.time() + operator_setup.REFRESH_SECONDS + 1) == 2
+
+    placement = operator_setup.Placement(state / operator_setup.FOLDER)
+    assert placement.ca_key.read_text() == secret
+    assert operator_setup.settings(state) == {
+        operator_setup.CA_KEY_ENV: str(placement.ca_key),
+        operator_setup.POLICY_ENV: str(placement.policy),
+    }
+    assert {(url.split("/v1/")[0], token) for url, token in bao.requests} == {(BAO_URL, "configured-token")}
+    assert json.loads(out.getvalue())["ca_fingerprint"] == fingerprint(key)
+    assert synced == [state]
+    assert operator_setup.installed(state, "", units, machine)

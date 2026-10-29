@@ -16,12 +16,14 @@ ORDER = [
     "push-stop",
     "quiet",
     "one-push",
+    "brain",
     "claims",
     "trace-plan",
     "window",
     "stall",
     "lane-split",
     "nightwatch",
+    "reset",
     "talk",
 ]
 

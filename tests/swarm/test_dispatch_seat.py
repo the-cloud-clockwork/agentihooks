@@ -175,6 +175,20 @@ def test_a_failed_spawn_leaves_no_seat_record():
     assert seats(store) == []
 
 
+@pytest.mark.parametrize(
+    "refused",
+    [
+        "no hive for dispatch has room: remote cpu: five minute load 1.17 on 8 CPUs, fits 0 more",
+        "no hive has room, and the local machine runs 4 of its 4 agents",
+        ", and the local machine runs 4 of its 4 agents: cpu: five minute load 1.17 on 8 CPUs",
+    ],
+)
+def test_a_refused_hive_reservation_waits_instead_of_failing_the_spawn(refused):
+    store, runtime = swarm(), FakeRuntime(crash=tick_module.SpawnError(refused, "unavailable"))
+    assert run(store, runtime, doc(priority())) == [f"the dispatcher waits: {refused}"]
+    assert seats(store) == []
+
+
 class PriorityLedger(FakeLedger):
     def state(self, slug):
         return {**super().state(slug), "priorities": [priority()]}
@@ -299,9 +313,10 @@ agentihooks ledger --slug {SLUG} get <item> (priorities/<id>, tasks/<id> or foll
 Settle each trigger within the swarm's autonomy with the agentihooks commands, the classifiers and read only sub \
 agents: comment on its item with {LED} comment <item> "<text>", close a decided follow up, rank a task, and clear the \
 priority once it is resolved with {LED} priority clear <priority id>.
-For a decision only the operator can make, tell the master and hand its priority to the operator with {LED} priority \
-add <item> "<the ask in plain words>": it stays in his Priorities and no longer counts as your trigger. Never ask the \
-operator yourself. You never edit code or config files, commit, merge or claim a task.
+For a decision only the operator can make, tell the master by inbox and leave the trigger open. Never ask the \
+operator yourself: the ledger refuses every agent question, priority and needs operator follow up. Send anything he \
+must decide to the front door master by inbox: agentihooks msg send master@{SLUG} "<text>". You never edit code or \
+config files, commit, merge or claim a task.
 After each trigger, tell the master what you did: agentihooks msg send master@{SLUG} "<plain words>".
 New triggers arrive as inbox messages: answer one with agentihooks msg reply <id> "<text>", or close it with \
 agentihooks msg close <id> done "<where the work went>".

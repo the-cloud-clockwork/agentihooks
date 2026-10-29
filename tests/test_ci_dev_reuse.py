@@ -351,3 +351,19 @@ def test_a_queue_run_that_reused_tests_never_feeds_a_dev_push(tmp_path):
     with (folder / "artifacts.jsonl").open("a") as items:
         items.write(json.dumps({"name": "reused-tests-3.12", "expired": False}) + "\n")
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+
+
+@pytest.mark.parametrize("expired", [False, True])
+def test_a_run_that_reused_its_pull_requests_earlier_runs_never_feeds_a_dev_push(tmp_path, expired):
+    _, _, folder = evidence(tmp_path)
+    with (folder / "artifacts.jsonl").open("a") as items:
+        items.write(json.dumps({"name": "reused-branch-3.12", "expired": expired}) + "\n")
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+
+
+def test_a_queue_reused_pull_request_that_reused_its_earlier_runs_never_feeds_a_dev_push(tmp_path):
+    queue, record, folder = evidence(tmp_path, reused=True)
+    _, _, source_folder = source_evidence(tmp_path, queue, record, folder)
+    with (source_folder / "artifacts.jsonl").open("a") as items:
+        items.write(json.dumps({"name": "reused-branch-3.12", "expired": False}) + "\n")
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None

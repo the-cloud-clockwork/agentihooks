@@ -14,6 +14,8 @@ SUMMARY_NAME = "${{ github.event_name == 'merge_group' && 'Queue gate summary' |
 REQUIRED = {"select", "split", "test-count", "shard-check"}
 # Polls spend the App installation's shared hourly quota: one jobs call while an attempt has at most 100 jobs.
 JOB_PAGE = 100
+# Ends before the dev merge queue check timeout (45 minutes) so the run reports its own failure first.
+DEADLINE_SECONDS = 40 * 60
 SKIPPED = {
     "unit-selected",
     "coverage-ratchet",
@@ -27,6 +29,7 @@ SKIPPED = {
     "worker-image",
     "brain-smoke",
     "writer-lock",
+    "install-smoke",
     "kind-due",
     "helm-kind",
     "semgrep",
@@ -34,6 +37,9 @@ SKIPPED = {
     "stage-budget",
     "reuse",
 }
+
+# A promotion gate the protected grader accepts before the pull request that adds it lands.
+ANNOUNCED = {"install-smoke"}
 
 
 def inventory(jobs: list[dict], expected: set[str]) -> dict[str, dict]:
@@ -99,18 +105,18 @@ def verify(jobs: list[dict], shards: list[int], lost: Callable[[dict], bool] = l
         raise ValueError("The queue needs a nonempty unique positive shard plan")
     expected = {f"unit (3.12, {shard})" for shard in shards}
     groups = inventory(jobs, expected)
-    finished = [checked(groups.get(name), "success" if name in REQUIRED else "skipped") for name in REQUIRED | SKIPPED]
+    finished = [checked(groups.get(name), "success") for name in REQUIRED]
     recovered, originals_finished = originals(groups, expected, lost)
     recovery_finished = recovery(groups, recovered) if originals_finished else False
     return all(finished) and originals_finished and recovery_finished
 
 
-def watcher(runner: str) -> dict:
+def watcher(runner: str, *, deferred: bool = False) -> dict:
     return {
         "name": GATE_NAME,
         "outputs": {"failed": "${{ steps.watch.outputs.failed }}"},
         "if": "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && github.event_name != 'pull_request' }}",
-        "needs": ["split", "select", "reuse", "admission"],
+        "needs": ["split", "select", "reuse", "admission"] + (["shard-check"] if deferred else []),
         "runs-on": runner,
         "timeout-minutes": 60,
         "steps": [
@@ -168,7 +174,11 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
         if not dynamic:
             continue
         summary, early = jobs.get("gate-required", {}), jobs.get("queue-fail-fast", {})
-        if len(dynamic) != 2 or summary.get("name") != SUMMARY_NAME or early != watcher(summary.get("runs-on")):
+        if (
+            len(dynamic) != 2
+            or summary.get("name") != SUMMARY_NAME
+            or early not in (watcher(summary.get("runs-on")), watcher(summary.get("runs-on"), deferred=True))
+        ):
             raise ValueError("The early queue gate must use the exact reviewed context pair and verifier")
         if (
             jobs.get("reuse", {}).get("if")
@@ -176,7 +186,7 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
         ):
             raise ValueError("The early queue gate requires the existing whole queue reuse exclusion")
         expected = REQUIRED | SKIPPED | {"unit", "unit-lost", "unit-rerun", "queue-fail-fast"}
-        if set(summary.get("needs", [])) != expected:
+        if set(summary.get("needs", [])) not in (expected, expected | ANNOUNCED):
             raise ValueError("The early queue gate must preserve the reviewed graded inventory")
         summary["name"] = "Gate — Required"
         early["name"] = "queue-fail-fast"
@@ -194,7 +204,7 @@ def current(repository: str, ref: str, head: str) -> None:
 def watch(repository: str, run: str, attempt: str, shards: list[int], ref: str, head: str) -> None:
     verify([], shards)
     seen = {}
-    deadline = rate_limit.deadline = time.monotonic() + 1200
+    deadline = rate_limit.deadline = time.monotonic() + DEADLINE_SECONDS
     while time.monotonic() < deadline:
         current(repository, ref, head)
         jobs = read_jobs(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs", JOB_PAGE)
@@ -208,6 +218,7 @@ def watch(repository: str, run: str, attempt: str, shards: list[int], ref: str, 
 def main() -> None:
     if os.environ["GITHUB_EVENT_NAME"] != "merge_group":
         raise ValueError("The early queue gate runs only on merge_group")
+    rate_limit.budget("Queue verification", "start")
     try:
         watch(
             os.environ["GITHUB_REPOSITORY"],
@@ -218,6 +229,7 @@ def main() -> None:
             os.environ["GITHUB_SHA"],
         )
     finally:
+        rate_limit.budget("Queue verification", "end")
         rate_limit.report("Queue verification")
 
 

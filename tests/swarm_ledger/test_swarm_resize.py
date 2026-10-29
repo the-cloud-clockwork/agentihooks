@@ -20,7 +20,16 @@ from tests.swarm_ledger import legacy_page  # noqa: E402
 
 browser = chromium_browser
 SLUGS = ("resize-one-2026-10-06", "resize-two-2026-10-06")
-HEIGHT_ROWS = ("capacity-box", "quota-box", "hives-box", "overlays-box", "agents-box", "handoff-box", "recovery-box")
+HEIGHT_ROWS = (
+    "capacity-box",
+    "quota-box",
+    "hives-box",
+    "overlays-box",
+    "agents-box",
+    "handoff-box",
+    "recovery-box",
+    "context-box",
+)
 HANDOFFS = [
     {
         "seat": f"eng-{n}@rig",
@@ -354,10 +363,19 @@ def test_arrow_keys_move_a_focused_column_grip_and_reset_clears_the_widths(visit
     assert "columns" not in layout.read()
 
 
-def test_home_columns_drag_and_step_and_keep_their_widths(browser, base):
+def test_home_columns_drag_and_step_and_keep_their_widths(browser, base, monkeypatch):
     layout.path().unlink(missing_ok=True)
     context = browser.new_context(viewport={"width": 1920, "height": 1000})
     tab = context.new_page()
+    stored, entered, release = layout.read, threading.Event(), threading.Event()
+
+    def held_read():
+        if not entered.is_set():
+            entered.set()
+            release.wait(10)
+        return stored()
+
+    monkeypatch.setattr(layout, "read", held_read)
     try:
         tab.goto(f"{base}/")
         grip = tab.locator(".row.head > *:nth-child(3) .col-grip")
@@ -376,7 +394,10 @@ def test_home_columns_drag_and_step_and_keep_their_widths(browser, base):
         tab.mouse.up()
         grip.focus()
         tab.keyboard.press("ArrowLeft")
+        assert entered.wait(5)
+        release.set()
         widths = saved_columns("home", settled=lambda found: abs(found[2] - (before[2] - 116)) <= 2)
+        tab.wait_for_function("() => document.documentElement.dataset.layout === 'ready'", timeout=5000)
         assert abs(widths[2] - (before[2] - 116)) <= 2
         assert widths[:2] == [round(w) for w in before[:2]]
         tab.locator(".sort[data-sort=kind]").click()
@@ -386,5 +407,6 @@ def test_home_columns_drag_and_step_and_keep_their_widths(browser, base):
         tab.wait_for_function("() => document.querySelector('.panel').classList.contains('sized-cols')")
         assert abs(tracks()[2] - widths[2]) <= 1
     finally:
+        release.set()
         context.close()
         layout.path().unlink(missing_ok=True)

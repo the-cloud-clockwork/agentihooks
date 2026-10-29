@@ -19,7 +19,7 @@ ORDER = "nestor.colt@gmail.com,thecloudclockwork@gmail.com"
 @pytest.fixture(autouse=True)
 def ah(tmp_path, monkeypatch):
     monkeypatch.setattr(login, "MANAGED", tmp_path / "no-managed-settings.json")
-    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", tmp_path / "ah")
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     monkeypatch.setenv(login.ORDER_ENV, ORDER)
     monkeypatch.chdir(tmp_path)
@@ -336,3 +336,168 @@ def test_the_interactive_route_still_launches_under_the_route_lock(tmp_path, mon
     monkeypatch.setattr(interactive, "launch_claude", launch)
     install.cmd_claude(["--route", "interactive", "--version"])
     assert seen == [("/opt/claude", ["--version"], install.os.environ, "")]
+
+
+def _plain_shell(tmp_path, monkeypatch):
+    operator, decoy = tmp_path / "operator", tmp_path / "process-claude"
+    (operator / ".claude").mkdir(parents=True)
+    (operator / ".claude" / "settings.json").write_text("{}")
+    (operator / ".claude" / "CLAUDE.md").write_text("operator persona")
+    (operator / ".claude.json").write_text(json.dumps({"hasCompletedOnboarding": True}))
+    decoy.mkdir()
+    (decoy / "settings.json").write_text('{"apiKeyHelper": "/bin/decoy"}')
+    (decoy / "CLAUDE.md").write_text("process persona")
+    (decoy / ".claude.json").write_text(json.dumps({"decoy": True}))
+    monkeypatch.setenv("HOME", str(operator))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: operator))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(decoy))
+    for name in ("CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    return operator
+
+
+def test_prepare_with_no_claude_config_dir_picks_a_stored_login_from_the_default_home(tmp_path, monkeypatch, checked):
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    child, found, number = claude_ai.prepare({"HOME": str(operator), "AGENTIHOOKS_AGENT_NAME": "s-251026"}, tmp_path)
+    target = login.root(1).parent / "claude-ai" / "s_251026" / "claude"
+    assert (found, number) == ("nestor_coltatgmail_com", 1)
+    assert child["CLAUDE_CONFIG_DIR"] == str(target)
+    assert child[claude_ai.STORE] == str(login.home(1))
+    assert (target / "CLAUDE.md").read_text() == "operator persona"
+    assert json.loads((target / login.CONFIG).read_text()) == {
+        "hasCompletedOnboarding": True,
+        login.ACCOUNT: PREFERRED,
+    }
+
+
+def test_default_home_settings_that_bring_back_a_credential_refuse(tmp_path, monkeypatch, executed):
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    (operator / ".claude" / "settings.json").write_text('{"apiKeyHelper": "/bin/key"}')
+    with pytest.raises(login.LoginRefused) as refused:
+        claude_ai.prepare({"HOME": str(operator)}, tmp_path)
+    assert str(refused.value) == login.API_HELPER.format(path=operator / ".claude" / "settings.json")
+
+
+def test_the_resume_flag_passes_through_from_a_plain_shell(tmp_path, monkeypatch, checked, executed):
+    from scripts import install
+
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", ["-r"], {"HOME": str(operator)}, "")
+    assert executed[0][1] == install._claude_command("/opt/claude", [*login.SETTINGS, "-r"])
+
+
+def test_a_conversation_written_under_the_route_home_survives_the_next_launch(tmp_path, monkeypatch, checked, executed):
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    environ = {"HOME": str(operator), "AGENTIHOOKS_AGENT_NAME": "s-251026"}
+    claude_ai.launch_claude("/opt/claude", [], environ, "")
+    target = Path(executed[0][2]["CLAUDE_CONFIG_DIR"])
+    for name in ("projects", "sessions"):
+        assert (target / name).readlink() == operator / ".claude" / name
+    (target / "projects" / "repo").mkdir()
+    (target / "projects" / "repo" / "conversation.jsonl").write_text("resumed\n")
+    (target / "sessions" / "1.json").write_text("{}")
+    claude_ai.launch_claude("/opt/claude", ["-r"], environ, "")
+    assert Path(executed[1][2]["CLAUDE_CONFIG_DIR"]) == target
+    assert (target / "projects" / "repo" / "conversation.jsonl").read_text() == "resumed\n"
+    assert (operator / ".claude" / "projects" / "repo" / "conversation.jsonl").read_text() == "resumed\n"
+    assert (operator / ".claude" / "sessions" / "1.json").read_text() == "{}"
+
+
+def test_the_route_home_links_a_rendered_home_folder_to_where_it_points(
+    rendered, tmp_path, monkeypatch, checked, executed
+):
+    shared = tmp_path / "operator-claude" / "projects"
+    (rendered / "projects").symlink_to(shared)
+    (rendered / "plugins" / "kit" / "sessions").mkdir(parents=True)
+    (rendered / "plugins" / "kit" / "sessions" / "notes.json").write_text("{}")
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    target = Path(executed[0][2]["CLAUDE_CONFIG_DIR"])
+    assert (target / "projects").readlink() == shared
+    assert shared.is_dir()
+    assert (target / "sessions").readlink() == rendered / "sessions"
+    assert (rendered / "sessions").is_dir()
+    assert (target / "plugins" / "kit" / "sessions").is_dir()
+    assert not (target / "plugins" / "kit" / "sessions").is_symlink()
+    assert (target / "plugins" / "kit" / "sessions" / "notes.json").read_text() == "{}"
+
+
+def test_conversations_copied_into_an_older_route_home_move_to_the_default_folder(
+    tmp_path, monkeypatch, checked, executed
+):
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    shared = operator / ".claude" / "projects" / "repo"
+    shared.mkdir(parents=True)
+    (shared / "kept.jsonl").write_text("operator\n")
+    folder = login.root(1).parent / "claude-ai" / "s_251026"
+    older = login._rebuild(folder, operator / ".claude")
+    assert not (older / "projects").is_symlink()
+    (shared / "appended.jsonl").write_text("operator\n")
+    os.utime(shared / "appended.jsonl", (1000, 1000))
+    (older / "projects" / "repo" / "kept.jsonl").write_text("same age\n")
+    os.utime(older / "projects" / "repo" / "kept.jsonl", (2000, 2000))
+    os.utime(shared / "kept.jsonl", (2000, 2000))
+    (older / "projects" / "repo" / "appended.jsonl").write_text("operator\nresumed\n")
+    os.utime(older / "projects" / "repo" / "appended.jsonl", (3000, 3000))
+    (older / "projects" / "repo" / "resumed.jsonl").write_text("resumed\n")
+    (older / "projects" / "repo" / "link.jsonl").symlink_to(tmp_path / "gone.jsonl")
+    (tmp_path / "outside.jsonl").write_text("outside\n")
+    (older / "projects" / "repo" / "outside.jsonl").symlink_to(tmp_path / "outside.jsonl")
+    (older / "projects" / "repo" / "kept-link.jsonl").symlink_to(tmp_path / "outside.jsonl")
+    (shared / "kept-link.jsonl").write_text("operator\n")
+    (older / "sessions").mkdir()
+    (older / "sessions" / "1.json").write_text("{}")
+    claude_ai.launch_claude("/opt/claude", [], {"HOME": str(operator), "AGENTIHOOKS_AGENT_NAME": "s-251026"}, "")
+    target = Path(executed[0][2]["CLAUDE_CONFIG_DIR"])
+    assert target == older
+    assert (target / "projects").readlink() == operator / ".claude" / "projects"
+    assert (shared / "kept.jsonl").read_text() == "operator\n"
+    assert (shared / "kept.jsonl").stat().st_mtime == 2000
+    assert (shared / "resumed.jsonl").read_text() == "resumed\n"
+    assert (shared / "appended.jsonl").read_text() == "operator\nresumed\n"
+    assert not (shared / "link.jsonl").is_symlink()
+    assert not (shared / "outside.jsonl").exists()
+    assert (shared / "kept-link.jsonl").read_text() == "operator\n"
+    assert (operator / ".claude" / "sessions" / "1.json").read_text() == "{}"
+
+
+def _front_door(rendered):
+    return _environ(rendered, AGENTIHOOKS_PROFILE="master")
+
+
+def test_an_expired_front_door_login_falls_back_to_a_quota_token_route(rendered, monkeypatch, executed, capsys):
+    def expired(environ, cwd):
+        raise login.LoginRefused(native_login.EXPIRED)
+
+    tokens = []
+    monkeypatch.setattr(claude_ai, "_front", expired)
+    monkeypatch.setattr(login, "launch_token", lambda *args: tokens.append(args))
+    environ = _front_door(rendered)
+    args = ["--name", "master 1 · rig", "--remote-control", "master 1 · rig"]
+    claude_ai.launch_claude("/opt/claude", args, environ, "/run/route")
+    assert tokens == [("/opt/claude", args, environ, "/run/route")]
+    assert executed == []
+    assert capsys.readouterr() == ("", f"[agenti] claude ai login refused: {native_login.EXPIRED}\n")
+
+
+def test_a_refused_login_outside_the_front_door_still_fails_the_route(rendered, monkeypatch):
+    from scripts.claude_quota_balancer import RoutingError
+
+    def expired(environ, cwd):
+        raise login.LoginRefused(native_login.EXPIRED)
+
+    monkeypatch.setattr(claude_ai, "prepare", expired)
+    monkeypatch.setattr(login, "launch_token", lambda *args: pytest.fail("token fallback outside the front door"))
+    with pytest.raises(RoutingError) as raised:
+        claude_ai.launch_claude("/opt/claude", ["--name", "master 2 · rig"], _front_door(rendered), "")
+    assert str(raised.value) == native_login.EXPIRED

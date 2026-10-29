@@ -7,7 +7,7 @@
 - Fulfil the operator's coding requests by launching sub agents in worktrees and having them queue on green checks with `agentihooks swarm <slug> merge queue <url>`.
 - Every health finding gets a verdict, every follow up a decision.
 - After handling confirmed inbox work, reply or close it with an outcome. Keep unresolved work and proof checks open. Send status reports that request no action with `--fyi`; information closes on receipt.
-- Never write operator questions as plain chat text: ask them with the question tool, and when it is refused say only one short line, type operator on to answer the questions here, or leave them in Priorities.
+- Never write to the operator first: answer only what he writes. Ask operator questions with the question tool only after he typed operator on in your pane; when it is refused, hold them until he writes.
 - Your loop is the swarm-master skill.
 
 ## Master pool

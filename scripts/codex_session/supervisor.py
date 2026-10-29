@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from hooks.context import profile_chain
 from hooks.observability.trace_flush import start_time
 from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, RECORDS, BindingStore, TransportRecord, decode
@@ -36,7 +37,16 @@ EXECUTION_PREFIX = "exe-"
 ENDPOINT_ID_CHARS = 16
 PRIVATE_MODE = 0o700
 SHARED_ROLLOUTS = ("sessions", "archived_sessions")
-STARTUP_FILES = ("config.toml", "hooks.json", "AGENTS.md", "AGENTS.override.md", "rules", "skills", binding.FILE)
+STARTUP_FILES = (
+    "config.toml",
+    "hooks.json",
+    "AGENTS.md",
+    "AGENTS.override.md",
+    "rules",
+    "skills",
+    binding.FILE,
+    profile_chain.RENDER_STAMP,
+)
 RUNTIME_SUBDIR = "cx"
 HOME_SUBDIR = ".agentihooks"
 CODEX_HOME_KEY = "codexHome"
@@ -472,22 +482,25 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
         record, agent = _connect_bound(store, bindings, spec, agent, record, process, deps)
     except BaseException as failure:
         try:
-            if process is not None:
-                stop(process)
-                _release_slot(spec.environ.get("AGENTIHOOKS_SLOT_HIVE", ""), agent)
-        finally:
             try:
-                if record is not None:
-                    error_class = getattr(failure, "error_class", type(failure).__name__)
-                    bindings.put(spec.slug, replace(record, state=FAILED, last_error_class=error_class))
-                    bindings.release(spec.slug, record)
+                if process is not None:
+                    stop(process)
+                    _release_slot(spec.environ.get("AGENTIHOOKS_SLOT_HIVE") or "", agent)
             finally:
                 try:
-                    store.put_agent(spec.slug, replace(agent, state="finished"))
-                    store.drop_agent(spec.slug, agent.name, deps.now_ms())
+                    if record is not None:
+                        error_class = getattr(failure, "error_class", type(failure).__name__)
+                        bindings.put(spec.slug, replace(record, state=FAILED, last_error_class=error_class))
+                        bindings.release(spec.slug, record)
                 finally:
-                    if path is not None:
-                        shutil.rmtree(path.parent)
+                    try:
+                        store.put_agent(spec.slug, replace(agent, state="finished"))
+                        store.drop_agent(spec.slug, agent.name, deps.now_ms())
+                    finally:
+                        if path is not None:
+                            shutil.rmtree(path.parent)
+        except Exception as cleanup:
+            failure.add_note(f"cleanup after the failed launch also failed: {cleanup!r}")
         raise
     return Started(record, agent, process, spec.environ.get("AGENTIHOOKS_SLOT_HIVE", ""))
 

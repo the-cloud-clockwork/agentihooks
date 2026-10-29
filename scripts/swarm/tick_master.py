@@ -26,8 +26,8 @@ PROMPT = (
     "2. Fix the causes of the outage right away in code: find where that error is raised and fix it through your own "
     "pull request into dev, never as follow ups. Once it merges and wt.sh done syncs local dev, the next forced "
     "launch runs the fixed code, or start one at once with agentihooks swarm {slug} master up --new. "
-    "3. Throughout, tell the swarm and the operator what failed and what you are doing, with agentihooks swarm "
-    '{slug} say "<text>" and agentihooks swarm {slug} say --to eng "<text>". '
+    "3. Throughout, tell the swarm what failed and what you are doing, with agentihooks swarm "
+    '{slug} say --to eng "<text>"; never write to the operator first. '
     "You do not act as master: never answer chat as master, write tasks or steer the swarm. "
     "The tick ends this promotion when a real master binds and tells you; then return to task {task}."
 )

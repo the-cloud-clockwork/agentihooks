@@ -41,6 +41,7 @@ for compliance.
 | A rule must survive context drift | `enforcement_set` with a tool-call cadence; `matcher` (e.g. `bash.kubectl`) limits it to matching tool calls |
 | The rule belongs to one repository | `enforcement_set(local=true)` — global entries reach every repo on the machine |
 | The operator's message asks to set, change or remove a condition | `condition_set` / `condition_clear` (script body; `scope` global, profile or directory). Never on your own initiative — the hook refuses it |
+| A filter on unwanted text | `condition_set` with `language="filter"`, only when the operator asks |
 | Which conditions run, or why a call was shaped | `condition_list`, `condition_show` |
 | Runtime doctrine is complete or obsolete | `enforcement_clear` by ID or tag |
 | Which layer (bundle, profile, enforcement, condition, broadcast, brain) put a directive into a session | `agentihooks trace [<session_id>]`: time, layer, source, locator (the store or file to clear it in), text, recorded as each hook injected it |
@@ -49,6 +50,7 @@ for compliance.
 | Serena refuses, or which worktrees hold a backend | `agentihooks serena status` (page http://127.0.0.1:8643/); router down → `agentihooks serena restart` |
 | A dev-environment tool is missing or out of state | `agentihooks deps check`, then `agentihooks deps ensure`; a tool `deps.json` lacks → add it to the bundle by PR |
 | A change only reaches sessions after a restart (MCP registration, plugin) | `agentihooks deps mark-changed --reason <x>`; `init-agent` sessions restart at their next stop |
+| The operator says remember, yesterday, or names earlier work | `recall_search` (scope a ledger or swarm slug, default this swarm; `all` crosses swarms), then `recall_get <ref>`; `recall_timeline` for a time span, `recall_sources` for what is indexed (`agentihooks recall` in a shell). Recall before reading ledger files. Recall holds swarm and ledger history; fleet lessons stay in the brain |
 
 Use channels for live coordination. Put durable knowledge in brain markers or
 `brain_ingest`.
@@ -104,7 +106,7 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
 | Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full effort-min=E effort-max=E`; the ledger page swarm panel writes the same ops. Codex is one more account in the session rotation, judged on its week alone with the top band. Every lane agent starts inside the effort range (default medium to xhigh) |
 | Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, act on every OPERATOR line, then `ack`. In a swarm each operator write arrives as an inbox message at the next tool call and the tick wakes an idle pane, so no Monitor is needed; a ledger without a swarm wakes an idle session only through a `Monitor` on `agentihooks ledger watch <slug> --as <name>` |
 | Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
-| A question while the operator is away (in a swarm bound session the question tool and the plan prompt stay refused until he types `operator on` in that pane; a standalone session always has them) | `ledger question add "<text>"`; the tick sends it to the master, who answers it or raises it to the operator |
+| A question while the operator is away (in a swarm bound session the question tool and the plan prompt stay refused until he types `operator on` in that pane; a standalone session always has them) | `agentihooks msg send master@<slug> "<text>"`; the ledger refuses agent questions, and no agent writes to the operator first |
 | Publish an artifact only when the operator asked for that file: a plan, an image, a logo, an SVG, markdown or JSON he wants to review | `agentihooks ledger --slug <slug> --as <name> artifact <file> "<title in plain words>"` from a task marked artifact requested (`task add --artifact`, `task set <id> artifact=yes`) or with `--request <id of his message>`; anything else is refused. Never publish test runs, logs, review notes or proofs: proofs go on the task proof and the pull request |
 | A planner or the master has an accepted plan | `agentihooks ledger --slug <slug> --as <name> publish-plan <plan file> --phase <phase ids>` before adding its tasks: a GitHub issue where the repo has issues, else a ledger artifact (a plan counts as artifact requested); it links and comments each phase, every task added there carries the link, and a planner's slice is refused while a task lacks it |
 | A swarm agent's task moves | `agentihooks swarm <slug> issue <url>`, `pr <url>`, `block "<why>"`; `ledger leave`, then `swarm <slug> ready <doc>` (the tick merges and closes the task) or `swarm <slug> done --pr <url>` |
@@ -112,6 +114,7 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
 | A task reads or changes the workstation's primary checkout or its local task folders, such as a checkout landing or a final reconciliation | `ledger task add --workstation` (or `task set <id> workstation=yes`): no remote hive runs it, so it lands on the workstation |
 | A task needs a specialist, such as interface work | `ledger task add --profile frontend` (or `task set <id> profile=frontend`): the tick spawns its claimant with that profile instead of the lane's |
 | A task is not code | `ledger task add --kind ops\|tune\|troubleshoot\|research`; `done` then carries its proof (`--command --output`, `--root-cause --evidence --fix\|--filed`, `--finding`) or the ledger refuses it |
+| A task, follow up or phase add is refused as a duplicate | The refusal names the item it repeats with its state, rank and phase (only its title when that item landed while the check ran); that item will be built or is already built: drop the add. Only when the new item is a different change, add it again with `--not-duplicate "<why it differs>"` (`not_duplicate` on a phase in `plan phases`) |
 | HANDOFF PREPARATION at `AGENTIHOOKS_COMPACT_LIMIT` (thousands of tokens, default 600) | Use the handoff skill to write the Handoff v2 body before its twenty five minute deadline or the hard gate `AGENTIHOOKS_HANDOFF_MARGIN` above the limit (default 50), whichever comes first. Submit only the document: `agentihooks swarm <slug> handoff <doc>`, then stop. The runtime supplies the envelope; the seat recap is derived from Done, Stopped at and Next. A successor reads the envelope and ranked Read first list before older recaps, with the swarm culture, latest derived recap and learned notes. A lesson for every later occupant: `agentihooks swarm <slug> learned "<lesson because reason>"` (`--maturity data|note|insight|canon`, default note; canon only by the master or operator, who raise a note with `swarm <slug> promote`). The swarm culture: `swarm <slug> culture set <file>` / `show`. From the hard gate on, PreToolUse denies every other tool call: only reads (read-only shell commands included), writes under `~/scratchpad`, the handoff and learned commands and `ledger` comment, say, leave and ack pass |
 
 - Each swarm keeps one master, `master@<code>-<n>`: the tick starts it, respawns
@@ -180,8 +183,9 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
 - Only four things on the ledger page fold, each remembering its choice per
   viewer across reloads: the Ledger tab's own sections below Overview; the
   Swarm tab panels below Capacity (Quota, Hives, Overlays, Agents, Handoff
-  outcomes, Recovery, Freezes, Architecture); the outline categories, with
-  one toggle on top flipping between Expand all and Collapse all; and comment
+  outcomes, Recovery, Brain context, Freezes, Architecture); the outline
+  categories, with one toggle on top flipping between Expand all and
+  Collapse all; and comment
   dropdowns,
   each section with one toggle for its own items flipping between Show all
   comments and Hide all comments. Nothing else folds: the chat, artifacts,

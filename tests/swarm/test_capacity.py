@@ -149,6 +149,16 @@ def test_a_stale_claude_reading_gets_no_seat(monkeypatch):
     assert seen == [capacity.Account("claude", "a", "UNKNOWN", 0, 90, 100, None)]
 
 
+def test_a_revoked_claude_account_is_closed_with_no_seat(monkeypatch):
+    result = balancer.revoked_result("a", 100)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, result)])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {"a": 4})
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
+    (row,) = capacity.accounts({"AH_CC_TOKEN_a": "fake"}, 100)
+    assert (row.state, row.cap, row.sessions) == ("CLOSED", 0, 4)
+    assert capacity.free_seats(row) == 0
+
+
 def test_a_fresh_codex_reading_with_only_the_week_gets_the_top_band(monkeypatch):
     from scripts.codex_quota import CodexQuota
 
@@ -781,10 +791,11 @@ def test_status_command_prints_the_capacity_reason(monkeypatch, capsys):
     )
     monkeypatch.setattr(cli, "now_ms", lambda: 3 * 60_000)
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    out = capsys.readouterr().out.splitlines()
     assert (
-        "quota capacity eng 0 of 2, ci 0 of 1, plan 0 of 1, changed 3 minutes ago, because accounts are closed"
-        in capsys.readouterr().out.splitlines()
+        "quota capacity eng 0 of 2, ci 0 of 1, plan 0 of 1, changed 3 minutes ago, because accounts are closed" in out
     )
+    assert "scaling auto, live of ceiling eng 0 of 2, ci 0 of 1, plan 0 of 1" in out
 
 
 def test_unplaceable_first_task_does_not_block_other_ready_work(monkeypatch, tmp_path):
@@ -1442,6 +1453,51 @@ def test_capacity_places_ready_tasks_in_the_claim_order():
     )
     capacity.apply("sw", config, store, ledger, runtime, 1000)
     assert capacity.read(store, "sw")["tasks"] == {"deep": "claude"}
+
+
+@pytest.mark.parametrize("age", [0, 299_999, 300_000, 300_001])
+def test_capacity_skips_fresh_placement_refusals_before_reserving_slots(age):
+    from scripts.hive import placement_waits
+    from scripts.swarm.tick import _spawn_order
+
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    store.create(config)
+    ledger = FakeLedger([{"id": "refused", "rank": "urgent"}, {"id": "next", "rank": "urgent"}])
+    runtime = FakeRuntime()
+    now = 1_000_000
+    placement_waits.observe(store, "sw", "eng", "refused", "no hive has room", now - age)
+    expected = ["next"] if age < placement_waits.FRESH_MS else ["refused", "next"]
+    demands = []
+    prepared = []
+
+    def requirements(cfg, ready):
+        assert cfg == config
+        prepared.extend(task["id"] for task in ready["eng"])
+        return {lane: [("claude",)] * len(tasks) for lane, tasks in ready.items()}
+
+    def calculate(cfg, agents, observed, demand, choices):
+        assert observed == now / 1000
+        demands.append(demand)
+        return capacity.calculate(cfg, [account()], agents, demand, choices)
+
+    runtime.quota_requirements = requirements
+    runtime.quota_capacity = calculate
+    actions = capacity.apply("sw", config, store, ledger, runtime, now)
+    assert prepared == expected
+    assert demands == [{"eng": len(expected), "ci": 0, "plan": 0}]
+    assert capacity.read(store, "sw")["tasks"] == {expected[0]: "claude"}
+    queue, _ = _spawn_order("sw", config, store, [], ledger.rows, ledger.state("sw"), runtime)
+    assert [(lane, task["id"]) for lane, task in queue] == [("eng", expected[0])]
+    skipped = [line for line in actions if "fresh placement refusal" in line]
+    assert skipped == (
+        ["capacity skipped eng task refused: fresh placement refusal: no hive has room"]
+        if age < placement_waits.FRESH_MS
+        else []
+    )
+    placement_waits.observe(store, "sw", "eng", "refused", "", now)
+    capacity.apply("sw", config, store, ledger, runtime, now)
+    assert capacity.read(store, "sw")["tasks"] == {"refused": "claude"}
 
 
 def test_ready_work_orders_a_lane_by_the_dispatcher_queue_at_delegate():

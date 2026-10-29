@@ -11,7 +11,7 @@ def install(tmp_path, monkeypatch, slug, server):
 
     home = tmp_path / "home"
     home.mkdir(parents=True)
-    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", str(home))
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", home)
     redis = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: 1791939600000)
     store = RedisStore(redis)

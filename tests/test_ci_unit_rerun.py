@@ -105,6 +105,7 @@ def test_main_writes_the_matrix_and_fails_without_a_rerun(monkeypatch, tmp_path,
         ("##[error]The runner has received a shutdown signal.", [PLAN[1]]),
         ("", [PLAN[1]]),
     ],
+    ids=["timeout", "timeout-then-shutdown", "shutdown", "empty-log"],
 )
 @pytest.mark.parametrize("unreadable", [False, True])
 def test_recovery_uses_step_results_to_distinguish_timeout_from_runner_loss(

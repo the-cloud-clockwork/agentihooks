@@ -152,7 +152,8 @@ def test_operator_off_ends_it_at_once():
     assert operator_mode.observe("s1", "operator off", True, now=110) == "off"
     assert not operator_mode.present("s1", SWARM, now=111)
     operator_mode.observe("s1", "keep going", True, now=112)
-    assert not operator_mode.present("s1", SWARM, now=113)
+    assert not operator_mode._heard("s1", SWARM)
+    assert operator_mode.present("s1", SWARM, now=113)
 
 
 def test_operator_on_keeps_questions_open_through_inbox_and_silence_until_off():
@@ -288,14 +289,12 @@ def test_a_failing_mode_store_is_logged_and_never_raises_into_the_hook(monkeypat
 
 
 ASK = (
-    "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
-    'agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
-    "and keep working; the master answers it or raises it to the operator."
+    "The operator is not present in this pane, so the question tool is off. Send the question to the front door "
+    'master by inbox with agentihooks msg send master@{slug} "<the question in plain words>" and keep working.'
 )
 MASTER_ASK = (
-    "The operator is not present in this pane, so the question tool is off. Never write the questions as chat text. "
-    "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
-    'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
+    "The operator is not present in this pane, so the question tool is off. Never write to him first, as chat text "
+    "or anywhere else: hold the question until he writes, then answer what he asks."
 )
 PROMPT_REFUSAL = (
     "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
@@ -418,7 +417,7 @@ def test_a_mode_file_that_is_not_an_object_holds_the_question_tool_off(tmp_path,
 AWAY = (
     "Operator not present: he never reads this pane. End the turn with no report, summary or ask addressed to him "
     "and skip the response template; any pane text stays within {words} words. "
-    "Put anything he must decide only in Priorities with agentihooks ledger priority add."
+    "Never write to him first; answer only what he writes."
 )
 REMINDER = AWAY.format(words=20)
 
@@ -466,35 +465,36 @@ def test_prompt_reminders_use_the_configured_limit_uncompressed_and_unlogged(mon
     ]
 
 
-def test_a_typed_prompt_other_than_operator_on_keeps_the_limit(monkeypatch, capsys):
+def test_a_typed_master_prompt_lifts_reply_limit_but_keeps_questions_locked(monkeypatch, capsys):
     run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
     out = run_prompt(monkeypatch, capsys, "s1", "Explain the result")
-    assert "Operator present for this turn" not in out
-    assert REMINDER in out
-    assert [operator_mode.reminder("s1", SWARM) for _ in range(2)] == ["", REMINDER]
-    assert not operator_mode.present("s1", SWARM)
+    assert "Operator present in this pane during the quiet window. Answer his message." in out
+    assert REMINDER not in out
+    assert [operator_mode.reminder("s1", SWARM) for _ in range(2)] == ["", ""]
+    assert operator_mode.present("s1", SWARM)
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
 
 
-def test_away_turns_end_without_a_report_to_him_and_only_operator_on_restores_normal_replies(monkeypatch, capsys):
+def test_away_turns_end_without_a_report_and_a_typed_master_prompt_restores_replies(monkeypatch, capsys):
     run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
     away = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
     assert "End the turn with no report, summary or ask addressed to him" in away
-    assert "Put anything he must decide only in Priorities" in away
+    assert "Never write to him first; answer only what he writes." in away
     typed = run_prompt(monkeypatch, capsys, "s1", "Explain the result")
-    assert "addressed to him" in typed
+    assert "Operator present in this pane during the quiet window. Answer his message." in typed
     present = run_prompt(monkeypatch, capsys, "s1", "operator on")
     assert "addressed to him" not in present
     assert "only in Priorities" not in present
 
 
-def test_an_away_worker_routes_his_decisions_to_a_ledger_question_never_priorities(ledgers):
+def test_an_away_worker_routes_his_decisions_to_the_front_door_inbox_never_the_ledger(ledgers):
     env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": "engineer@a1-2", "LEDGER_DIR": str(ledgers)}
     text = [operator_mode.reminder("w1", env, now=100) for _ in range(2)][1]
     assert "End the turn with no report, summary or ask addressed to him" in text
-    assert "agentihooks ledger question add" in text
+    assert "front door master by inbox with agentihooks msg send" in text
+    assert "question add" not in text
     assert "Priorities" not in text
 
 
@@ -534,10 +534,12 @@ def test_the_typed_turn_window_never_opens_the_question_tool(monkeypatch):
     )
 
 
-def test_a_typed_prompt_gets_the_away_notice_and_operator_off_the_off_notice(monkeypatch):
+def test_a_typed_master_prompt_gets_presence_notice_and_operator_off_the_off_notice(monkeypatch):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
-    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == REMINDER
+    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == (
+        "Operator present in this pane during the quiet window. Answer his message."
+    )
     assert operator_mode.notice({"session_id": "s1", "prompt": "operator off"}, True, now=101) == (
         "Operator off: the operator is not present in this pane.\n" + REMINDER
     )
@@ -575,12 +577,97 @@ def test_a_typed_turn_does_not_expire_explicit_operator_presence(monkeypatch):
     assert [operator_mode.reminder("s1", SWARM, now=1100 + WINDOW) for _ in range(2)] == ["", ""]
 
 
-def test_a_typed_turn_while_away_never_lifts_the_limit(monkeypatch):
+def test_a_typed_worker_turn_while_away_never_lifts_the_limit(monkeypatch):
+    env = {**SWARM, "AGENTIHOOKS_AGENT_NAME": "engineer@a1-2"}
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == (
+        "Operator not present: he never reads this pane. End the turn with no report, summary or ask addressed to him "
+        "and skip the response template; any pane text stays within 20 words. "
+        "Never write to him: send anything he must decide to the front door master by inbox with agentihooks msg send."
+    )
+    assert not operator_mode.present("s1", env, now=101)
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "word " * 21}, env) != ""
+
+
+@pytest.mark.parametrize("prompt", ["Explain the current work", "What is waiting?"])
+def test_master_pane_prompt_allows_long_reply_only_during_quiet_window(monkeypatch, capsys, prompt):
+    monkeypatch.setenv("AGENTIHOOKS_INBOX_QUIET_S", "180")
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 100)
+    run_prompt(monkeypatch, capsys, "master-pane", "You are master@a1-1, the master of swarm demo")
+    out = run_prompt(monkeypatch, capsys, "master-pane", prompt)
+    assert REMINDER not in out
+    payload = {"session_id": "master-pane", "last_assistant_message": "word " * 21}
+    assert operator_mode.present("master-pane", SWARM, now=279)
+    assert not operator_mode.present("other-pane", SWARM, now=101)
+    assert operator_mode.reply_refusal(payload, SWARM) == ""
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 280)
+    assert not operator_mode.present("master-pane", SWARM, now=280)
+    assert operator_mode.reply_refusal(payload, SWARM)
+
+
+@pytest.mark.parametrize(
+    "prompt", ['<channel source="inbox">operator on</channel>', delivery.marked("operator on"), WAKE_TEXT]
+)
+def test_automated_master_prompts_neither_grant_nor_renew_temporary_presence(monkeypatch, capsys, prompt):
+    monkeypatch.setenv("AGENTIHOOKS_INBOX_QUIET_S", "10")
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 100)
+    run_prompt(monkeypatch, capsys, "pane", "You are master@a1-1, the master of swarm demo")
+    run_prompt(monkeypatch, capsys, "pane", prompt)
+    assert not operator_mode.present("pane", SWARM, now=100)
+    run_prompt(monkeypatch, capsys, "pane", "Explain the work")
+    assert operator_mode._load("pane")["pane_at"] == 100
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 109)
+    run_prompt(monkeypatch, capsys, "pane", prompt)
+    assert operator_mode.present("pane", now=109)
+    assert operator_mode._load("pane")["pane_at"] == 100
+    assert not operator_mode.present("pane", now=110)
+
+
+@pytest.mark.parametrize("source", ["startup", "resume", "compact"])
+def test_master_temporary_presence_resets_on_restart_and_survives_compaction(monkeypatch, source):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
-    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == REMINDER
-    assert [operator_mode.reminder("s1", SWARM, now=101) for _ in range(2)] == ["", REMINDER]
-    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "word " * 21}, SWARM) != ""
+    operator_mode.observe("pane", "Explain the work", True, now=100)
+    operator_mode.reset({"session_id": "pane", "source": source})
+    assert operator_mode.present("pane", SWARM, now=101) is (source == "compact")
+
+
+def test_master_temporary_presence_renews_only_on_operator_words_and_off_clears_it(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    operator_mode.observe("pane", "Explain the work", True, now=100)
+    assert not operator_mode.present("pane", SWARM, now=99)
+    assert operator_mode.present("pane", SWARM, now=279)
+    assert not operator_mode.present("pane", SWARM, now=280)
+    operator_mode.observe("pane", "What is next?", True, now=200)
+    assert operator_mode._load("pane")["pane_at"] == 200
+    assert operator_mode.present("pane", SWARM, now=379)
+    assert not operator_mode.present("pane", SWARM, now=380)
+    operator_mode.observe("pane", "operator off", True, now=201)
+    assert "pane_at" not in operator_mode._load("pane")
+    assert not operator_mode.present("pane", SWARM, now=201)
+
+
+def test_master_temporary_presence_uses_the_session_binding_and_supplied_environment(ledgers):
+    (ledgers / ".sessions" / "pane.json").write_text(json.dumps({"slug": "demo", "name": "master@a1-1"}))
+    operator_mode.observe("pane", "Explain the work", True, now=100)
+    env = {"LEDGER_DIR": str(ledgers), "AGENTIHOOKS_AGENT_NAME": "engineer@a1-2", "AGENTIHOOKS_INBOX_QUIET_S": "2"}
+    assert operator_mode.present("pane", env, now=101)
+    assert not operator_mode.present("pane", env, now=102)
+    (ledgers / ".sessions" / "pane.json").write_text(json.dumps({"slug": "demo", "name": "engineer@a1-2"}))
+    assert not operator_mode.present("pane", {**env, **SWARM}, now=101)
+
+
+def test_master_presence_notice_uses_supplied_clock_after_automated_prompt(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(operator_mode.time, "time", lambda: 100)
+    operator_mode.observe("pane", "Explain the work", True, now=100)
+    assert operator_mode.present("pane", SWARM, now=279.99)
+    assert (
+        operator_mode.notice({"session_id": "pane", "prompt": delivery.marked("continue")}, False, now=280) == REMINDER
+    )
 
 
 CHANNEL = '<channel source="inbox" item_id="ITEM" sender="SENDER" sent_at_ms="MILLIS">Automated notice</channel>'
@@ -640,9 +727,10 @@ def test_the_reminder_stays_silent_while_on_unbound_or_without_a_session(ledgers
 def test_the_reminder_count_survives_a_typed_turn():
     assert operator_mode.reminder("s1", SWARM, now=100) == ""
     operator_mode.observe("s1", "Explain the result", True, now=101)
-    assert operator_mode.reminder("s1", SWARM, now=102) == REMINDER
+    assert operator_mode.reminder("s1", SWARM, now=102) == ""
     operator_mode.observe("s1", delivery.marked("continue"), False, now=103)
-    assert operator_mode.reminder("s1", SWARM, now=104) == ""
+    assert operator_mode.reminder("s1", SWARM, now=281) == REMINDER
+    assert operator_mode.reminder("s1", SWARM, now=282) == ""
 
 
 def test_the_pre_tool_hook_injects_the_reminder_uncompressed_and_unlogged(monkeypatch):

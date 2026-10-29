@@ -1,0 +1,274 @@
+{
+ "sources": [
+  {
+   "source": "alpha",
+   "raw": "alpha.jsonl",
+   "preview": [
+    {
+     "entry_type": "user",
+     "timestamp": "",
+     "content": "Open the ledger task and list its dependencies.",
+     "tool_names": [],
+     "uuid": "a-u1"
+    },
+    {
+     "entry_type": "assistant",
+     "timestamp": "",
+     "content": "The task depends on the consumer inventory.",
+     "tool_names": [
+      "Read"
+     ],
+     "uuid": "a-a1"
+    },
+    {
+     "entry_type": "user",
+     "timestamp": "",
+     "content": "Read the swarm handoff and compare the seat recap with the ledger task before resuming the claim. Read the swarm handoff and compare the seat recap with the ledger task before resuming the claim. Read the swarm handoff and compare the seat recap with the ledger task before resuming the claim. Read the swarm handoff and compare the seat recap with the ledger task before resuming the claim. Read the swarm handoff and compare the seat recap with the ledger task before resuming the claim. Read the s",
+     "tool_names": [],
+     "uuid": "a-u2"
+    },
+    {
+     "entry_type": "user",
+     "timestamp": "",
+     "content": "Push the branch and open the draft.",
+     "tool_names": [],
+     "uuid": "a-u3"
+    }
+   ],
+   "vectors": [
+    {
+     "chunk_idx": 0,
+     "timestamp": "",
+     "text_preview": "User: Open the ledger task and list its dependencies.\nAssistant: The task depends on the consumer inventory.\nTools used: Read\n"
+    },
+    {
+     "chunk_idx": 1,
+     "timestamp": "",
+     "text_preview": "User: Push the branch and open the draft.\nAssistant: Pushed and opened the draft pull request.\n"
+    },
+    {
+     "chunk_idx": 2,
+     "timestamp": "",
+     "text_preview": "User: Read the swarm handoff and compare the seat recap with the ledger task before resuming the claim. Read the swarm handoff and compare the seat recap with the ledger task before resuming the claim. Read the swarm handoff and compare the seat recap with the ledger task before resuming the claim. Read the swarm handoff and compare the seat recap with the ledger task before resuming the claim. Read the swarm handoff and compare the seat recap with the ledger task before resuming the claim. Read the s\n"
+    }
+   ]
+  },
+  {
+   "source": "beta",
+   "raw": null,
+   "preview": [
+    {
+     "entry_type": "user",
+     "timestamp": "",
+     "content": "Restack the parked task onto dev.",
+     "tool_names": [],
+     "uuid": "b-u1"
+    },
+    {
+     "entry_type": "assistant",
+     "timestamp": "",
+     "content": "Restacking now.",
+     "tool_names": [],
+     "uuid": "b-a1"
+    },
+    {
+     "entry_type": "user",
+     "timestamp": "",
+     "content": "Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. ",
+     "tool_names": [],
+     "uuid": "b-u2"
+    },
+    {
+     "entry_type": "assistant",
+     "timestamp": "",
+     "content": "Restacked; two conflicts resolved.",
+     "tool_names": [],
+     "uuid": "b-a2"
+    }
+   ],
+   "vectors": null
+  },
+  {
+   "source": "gamma",
+   "raw": null,
+   "preview": null,
+   "vectors": [
+    {
+     "chunk_idx": 0,
+     "timestamp": "",
+     "text_preview": "User: Check the hive heartbeat.\nAssistant: Both hives read live.\n"
+    },
+    {
+     "chunk_idx": 1,
+     "timestamp": "",
+     "text_preview": "User: Close the probe pane.\nAssistant: Closed.\n"
+    }
+   ]
+  },
+  {
+   "source": "delta",
+   "raw": null,
+   "preview": null,
+   "vectors": null
+  }
+ ],
+ "late": {
+  "source": "beta",
+  "raw": "late/beta.jsonl",
+  "preview": [
+   {
+    "entry_type": "user",
+    "timestamp": "",
+    "content": "Restack the parked task onto dev.",
+    "tool_names": [],
+    "uuid": "b-u1"
+   },
+   {
+    "entry_type": "assistant",
+    "timestamp": "",
+    "content": "Restacking now.",
+    "tool_names": [],
+    "uuid": "b-a1"
+   },
+   {
+    "entry_type": "user",
+    "timestamp": "",
+    "content": "Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. ",
+    "tool_names": [],
+    "uuid": "b-u2"
+   },
+   {
+    "entry_type": "assistant",
+    "timestamp": "",
+    "content": "Restacked; two conflicts resolved.",
+    "tool_names": [],
+    "uuid": "b-a2"
+   }
+  ],
+  "vectors": null
+ },
+ "private_label": "private preview text",
+ "bad": [
+  {
+   "source": "beta",
+   "class": "full_raw",
+   "preview": [
+    {
+     "entry_type": "user",
+     "timestamp": "",
+     "content": "Restack the parked task onto dev.",
+     "tool_names": [],
+     "uuid": "b-u1"
+    },
+    {
+     "entry_type": "assistant",
+     "timestamp": "",
+     "content": "Restacking now.",
+     "tool_names": [],
+     "uuid": "b-a1"
+    },
+    {
+     "entry_type": "user",
+     "timestamp": "",
+     "content": "Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. ",
+     "tool_names": [],
+     "uuid": "b-u2"
+    },
+    {
+     "entry_type": "assistant",
+     "timestamp": "",
+     "content": "Restacked; two conflicts resolved.",
+     "tool_names": [],
+     "uuid": "b-a2"
+    }
+   ]
+  },
+  {
+   "source": "epsilon",
+   "preview": [
+    {
+     "entry_type": "user",
+     "content": "private preview text"
+    }
+   ]
+  },
+  {
+   "source": "epsilon",
+   "vectors": [
+    {
+     "chunk_idx": "0",
+     "timestamp": "",
+     "text_preview": "private preview text"
+    }
+   ]
+  },
+  {
+   "source": "",
+   "preview": [
+    {
+     "entry_type": "user",
+     "timestamp": "",
+     "content": "Restack the parked task onto dev.",
+     "tool_names": [],
+     "uuid": "b-u1"
+    },
+    {
+     "entry_type": "assistant",
+     "timestamp": "",
+     "content": "Restacking now.",
+     "tool_names": [],
+     "uuid": "b-a1"
+    },
+    {
+     "entry_type": "user",
+     "timestamp": "",
+     "content": "Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. ",
+     "tool_names": [],
+     "uuid": "b-u2"
+    },
+    {
+     "entry_type": "assistant",
+     "timestamp": "",
+     "content": "Restacked; two conflicts resolved.",
+     "tool_names": [],
+     "uuid": "b-a2"
+    }
+   ]
+  }
+ ],
+ "forged_hash": {
+  "source": "beta",
+  "raw": "late/beta.jsonl",
+  "raw_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "preview": [
+   {
+    "entry_type": "user",
+    "timestamp": "",
+    "content": "Restack the parked task onto dev.",
+    "tool_names": [],
+    "uuid": "b-u1"
+   },
+   {
+    "entry_type": "assistant",
+    "timestamp": "",
+    "content": "Restacking now.",
+    "tool_names": [],
+    "uuid": "b-a1"
+   },
+   {
+    "entry_type": "user",
+    "timestamp": "",
+    "content": "Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. Rebase the parked branch onto dev and resolve each conflict to the dev version plus the task lines. ",
+    "tool_names": [],
+    "uuid": "b-u2"
+   },
+   {
+    "entry_type": "assistant",
+    "timestamp": "",
+    "content": "Restacked; two conflicts resolved.",
+    "tool_names": [],
+    "uuid": "b-a2"
+   }
+  ]
+ }
+}

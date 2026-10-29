@@ -1,5 +1,6 @@
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -645,6 +646,32 @@ def test_stats_parts_read_the_stored_durations_once(tmp_path, monkeypatch):
     assert len(reads) == 1
 
 
+@pytest.mark.parametrize(("target", "limit", "expected"), [(81, 10, (2, 80)), (41, 10, (4, 40)), (5, 3, (2, 80))])
+def test_statistics_parts_balance_recorded_cases_within_one_file(tmp_path, target, limit, expected):
+    (tmp_path / "tests").mkdir()
+    test = "tests/test_sample.py"
+    (tmp_path / test).write_text("def test_value(): pass\n")
+    (tmp_path / ".test_durations").write_text(
+        json.dumps({f"{test}::test_value[{value}]@shared": 40 for value in range(4)})
+    )
+    parts, wall = plan.stats_part_count(tmp_path, [test], target, limit)
+    assert (parts, wall) == (expected[0], pytest.approx(expected[1], abs=0.1))
+
+
+def test_statistics_parts_use_traced_timings_when_units_underestimate_collection(tmp_path, monkeypatch):
+    (tmp_path / "tests").mkdir()
+    test = "tests/test_sample.py"
+    (tmp_path / test).write_text("def test_value(): pass\n")
+    nodes = [f"{test}::test_value[{value}]" for value in range(4)]
+    (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(nodes, 1)))
+    cache = tmp_path / ".mutation-stats-cache"
+    cache.mkdir()
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
+    (cache / "successful.json").write_text(json.dumps({"status": 0, "durations": dict.fromkeys(nodes, 40)}))
+    (cache / "failed.json").write_text(json.dumps({"status": 1, "durations": dict.fromkeys(nodes, 1000)}))
+    assert plan.stats_part_count(tmp_path, [test], 41, 10) == (4, pytest.approx(40, abs=0.1))
+
+
 def _project(tmp_path, durations):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
@@ -699,6 +726,64 @@ def test_estimate_names_the_file_whose_pragma_is_broken(tmp_path, monkeypatch):
     (tmp_path / "tests/test_broken.py").write_text("from scripts.broken import f\n")
     with pytest.raises(PragmaParseError, match="at scripts/broken.py:1"):
         plan.estimate(tmp_path, {"scripts/broken.py": {3}})
+
+
+@pytest.mark.parametrize("decorator, refused", [("@opaque\n", True), ("@dataclasses.dataclass\n", False)])
+def test_estimate_refuses_changed_function_lines_that_produce_no_mutant(tmp_path, monkeypatch, decorator, refused):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    source = f"import dataclasses\n\n{decorator}class Box:\n    def doubled(self, value):\n        return value * 2\n"
+    (tmp_path / "scripts/cached.py").write_text(source)
+    (tmp_path / "tests/test_cached.py").write_text("from scripts.cached import Box\n")
+    line = source.splitlines().index("        return value * 2") + 1
+    if refused:
+        with pytest.raises(SystemExit) as refusal:
+            plan.estimate(tmp_path, {"scripts/cached.py": {line}})
+        assert str(refusal.value) == "scripts/cached.py: not mutated, changed functions produce no mutants: doubled"
+    else:
+        assert plan.estimate(tmp_path, {"scripts/cached.py": {line}})[1] == 2
+    assert plan.estimate(tmp_path, {"scripts/cached.py": {1}})[1] == 0
+
+
+@pytest.mark.parametrize("decorator", ["@functools.lru_cache(maxsize=1)", "@functools.cache"])
+def test_estimate_plans_cached_function_body_mutants(tmp_path, monkeypatch, decorator):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    source = f"import functools\n\n{decorator}\ndef doubled(value):\n    return value * 2\n"
+    (tmp_path / "scripts/cached.py").write_text(source)
+    (tmp_path / "tests/test_cached.py").write_text("from scripts.cached import doubled\n")
+    assert plan.estimate(tmp_path, {"scripts/cached.py": {5}})[1:] == (2, ["tests/test_cached.py"])
+
+
+@pytest.mark.parametrize("decorator, refused", [("@opaque\nclass Box:\n    ", True), ("", False)])
+def test_estimate_refuses_an_ungraded_changed_function_beside_a_graded_one(tmp_path, monkeypatch, decorator, refused):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    source = f"import functools\n\n\ndef tripled(value):\n    return value * 3\n\n\n{decorator}def doubled(value):\n{'    ' if refused else ''}    return value * 2\n"
+    (tmp_path / "scripts/mixed.py").write_text(source)
+    (tmp_path / "tests/test_mixed.py").write_text("from scripts.mixed import doubled, tripled\n")
+    lines = {5, next(index for index, line in enumerate(source.splitlines(), 1) if line.strip() == "return value * 2")}
+    if refused:
+        with pytest.raises(SystemExit) as refusal:
+            plan.estimate(tmp_path, {"scripts/mixed.py": lines})
+        assert str(refusal.value) == "scripts/mixed.py: not mutated, changed functions produce no mutants: doubled"
+    else:
+        assert plan.estimate(tmp_path, {"scripts/mixed.py": lines})[1] == 4
+
+
+def test_estimate_names_each_ungraded_function_in_source_order(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    source = "\n\n@opaque\nclass Box:\n    def tripled(value):\n        return value * 3\n\n\n    def doubled(value):\n        return value * 2\n"
+    (tmp_path / "scripts/mixed.py").write_text(source)
+    (tmp_path / "tests/test_mixed.py").write_text("from scripts.mixed import doubled, tripled\n")
+    with pytest.raises(SystemExit) as refusal:
+        plan.estimate(tmp_path, {"scripts/mixed.py": {6, 10}})
+    assert str(refusal.value) == "scripts/mixed.py: not mutated, changed functions produce no mutants: tripled, doubled"
 
 
 def _budget_project(tmp_path, monkeypatch, seconds, timed):
@@ -759,18 +844,48 @@ def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, m
         calls.append(("discover", root, bases, head))
         return changed
 
+    started = threading.Event()
+
     def record(repository):
-        calls.append(("record", repository))
+        started.set()
         return None, ""
 
+    def bases(*args):
+        # The record read is already running while the bases are worked out.
+        assert not changed or started.wait(10)
+        return ["base"]
+
     monkeypatch.setattr(plan, "read_record", record)
-    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "touches_code", lambda *args: calls.append(("touches", *args)) or bool(changed))
+    monkeypatch.setattr(plan, "own_bases", bases)
     monkeypatch.setattr(plan, "discover_changes", discover)
     assert plan.main() == 0
-    assert calls == [("discover", tmp_path, ["base"], "HEAD"), *[("record", "owner/repo")] * bool(changed)]
+    assert calls == [("touches", tmp_path, "base", "HEAD"), ("discover", tmp_path, ["base"], "HEAD")]
+    assert started.is_set() is bool(changed)
     assert f"changed={len(changed)}\n" in (tmp_path / "github-output").read_text()
     if not changed:
         assert "No change remains to mutate, so the recorded dev coverage is not read.\n" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "changed, touched",
+    [
+        ("scripts/sample.py", True),
+        ("hooks/sample.py", True),
+        ("scripts/caf\u00e9.py", True),
+        ("scripts/notes.txt", False),
+        ("tests/test_x.py", False),
+    ],
+)
+def test_touches_code_names_only_hooks_or_scripts_python_changes(tmp_path, changed, touched):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "base")
+    _git(tmp_path, "branch", "base")
+    (tmp_path / changed).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / changed).write_text("VALUE = 1\n")
+    _git(tmp_path, "add", changed)
+    _git(tmp_path, "commit", "-qm", "change")
+    assert plan.touches_code(tmp_path, "base", "HEAD") is touched
 
 
 @pytest.mark.parametrize("source, matched", [("sample", False), ("sample", True), ("plain", False)])
@@ -830,6 +945,46 @@ def test_planning_checks_selected_test_collection_and_worker_contracts(
     else:
         assert plan.main() == 0
         assert "stats_parts=" in output.read_text()
+
+
+def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_path, monkeypatch):
+    from tests import test_collection_imports as contracts
+
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/lazy.py").write_text("def load():\n    import mcp\n")
+    group = 'pytestmark = pytest.mark.xdist_group("mcp-sdk")\n'
+    (tmp_path / "tests/test_a.py").write_text("from scripts.lazy import load\n" + group)
+    (tmp_path / "tests/test_b.py").write_text("from scripts.lazy import load\n")
+    plan.validate_tests(tmp_path, ["tests/test_a.py::test_one"])
+    with pytest.raises(SystemExit, match="tests/test_b.py: loads the MCP SDK without the mcp-sdk worker group"):
+        plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
+
+
+def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(tmp_path, monkeypatch):
+    from tests import test_collection_imports as contracts
+
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/leaf.py").write_text("")
+    (tmp_path / "scripts/clean.py").write_text("def run():\n    import scripts.leaf\n")
+    (tmp_path / "tests/test_a.py").write_text("from scripts.clean import run\n")
+    (tmp_path / "tests/test_b.py").write_text("from scripts.clean import run\n")
+    walks = []
+    loads_heavy = contracts.loads_heavy
+
+    def counted(name, seen):
+        if name not in seen:
+            walks.append(name)
+        return loads_heavy(name, seen)
+
+    monkeypatch.setattr(contracts, "loads_heavy", counted)
+    plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
+    assert walks.count("scripts.leaf") == 1
 
 
 def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
@@ -943,3 +1098,78 @@ def test_mutation_lane_cli_requires_capacity_width_and_run(missing, monkeypatch)
     with pytest.raises(SystemExit) as error:
         main()
     assert error.value.code == 2
+
+
+def test_the_import_scan_finds_imports_nested_in_every_statement_body():
+    source = """
+import a
+from . import sibling
+def f():
+    import b
+class C:
+    from c import d
+if x:
+    import e
+else:
+    import f2
+for i in y:
+    pass
+else:
+    import g
+while z:
+    import h
+try:
+    import i
+except E:
+    import j
+else:
+    import k
+finally:
+    import l
+with m:
+    import n
+match v:
+    case 1:
+        import o
+async def q():
+    async with r:
+        import s
+value = lambda: __import__("t")
+"""
+    names = plan._imported("scripts/pkg/mod.py", source)
+    imported = {"a", "b", "e", "f2", "g", "h", "i", "j", "k", "l", "n", "o", "s"}
+    assert set(names) == imported | {"scripts.pkg", "scripts.pkg.sibling", "c", "c.d"}
+    assert len(names) == len(imported) + 4
+    assert plan._imported("scripts/x.py", "def broken(:\n") == []
+
+
+def test_narrowing_keeps_the_covering_tests_of_a_fully_recorded_file_and_whole_other_files(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_recorded.py").write_text(
+        "def test_a():\n    pass\nclass TestB:\n    def test_c(self):\n        pass\n"
+    )
+    (tests / "test_partial.py").write_text("def test_d():\n    pass\ndef test_e():\n    pass\n")
+    (tests / "test_stale.py").write_text("def test_f():\n    pass\n")
+    chosen = ["tests/test_partial.py", "tests/test_recorded.py", "tests/test_stale.py"]
+    covering = {"tests/test_recorded.py::TestB::test_c", "tests/test_partial.py::test_d", "tests/test_other.py::test_x"}
+    recorded = {
+        "tests/test_recorded.py": {"test_a", "TestB::test_c"},
+        "tests/test_partial.py": {"test_d"},
+        "tests/test_stale.py": {"test_f"},
+    }
+    assert plan.narrow(tmp_path, chosen, covering, recorded, {"tests/test_stale.py"}) == [
+        "tests/test_partial.py",
+        "tests/test_recorded.py::TestB::test_c",
+        "tests/test_stale.py",
+    ]
+    assert plan.narrow(tmp_path, ["tests/test_recorded.py"], set(), recorded, set()) == ["tests/test_recorded.py"]
+
+
+def test_defined_tests_name_test_functions_and_methods_but_not_their_nested_helpers(tmp_path):
+    path = tmp_path / "test_sample.py"
+    path.write_text(
+        "def test_one():\n    def helper():\n        pass\n"
+        "class TestGroup:\n    def test_two(self):\n        pass\n    def setup(self):\n        pass\n"
+    )
+    assert plan.defined_tests(path) == {"test_one", "TestGroup.test_two"}

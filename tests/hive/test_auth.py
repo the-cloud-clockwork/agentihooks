@@ -73,6 +73,7 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"%R~{ROOT}:*",
                     f"~{ROOT}:hive:m1",
                     f"~{ROOT}:hive:m1:*",
+                    f"~{ROOT}:swarm:state:hive-m1:*",
                     f"~{ROOT}:swarm:*:agents",
                     f"~{ROOT}:swarm:*:executions",
                     f"~{ROOT}:swarm:*:execution-publishing",
@@ -98,6 +99,8 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:dev-red",
                     f"~{ROOT}:swarm:*:prerequisite-waits",
                     f"~{ROOT}:swarm:*:stage-covers",
+                    f"~{ROOT}:swarm:*:gate-lift-drops",
+                    f"~{ROOT}:swarm:*:ledger-ready",
                     f"~{ROOT}:seat:*:recaps",
                     f"~{ROOT}:seat:*:learned",
                     f"~{ROOT}:seat-of:*:exit",
@@ -158,6 +161,10 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("swarm:proof:dev-red", True),
         ("swarm:proof:prerequisite-waits", True),
         ("swarm:proof:stage-covers", True),
+        ("swarm:proof:ledger-ready", True),
+        ("swarm:proof:gate-lift-drops", True),
+        ("swarm:proof:gate-lifts:tasks:t1", False),
+        ("swarm:proof:gate-lifts:agents:engineer@0001-0001", False),
         ("swarm:proof:execution-publishing", True),
         ("swarm:proof:codex-transport", True),
         ("swarm:proof:codex-endpoints", True),
@@ -206,9 +213,10 @@ def test_the_grant_sizes_and_member_record(admin, redis_lib):
     int(grant["id"], 16)
     assert len(password) == 43
     assert len(grant["ledger_credential"]) == 43
-    assert admin.hgetall(f"{auth.PREFIX}:member:{grant['id']}") == {
+    assert auth.member(admin, grant["id"]) == {
         "name": "laptop",
         "ledger": hashlib.sha256(grant["ledger_credential"].encode()).hexdigest(),
+        "agents": {},
     }
     assert admin.acl_getuser(f"hive-{grant['id']}")["flags"] == ["on"]
 
@@ -222,19 +230,17 @@ def test_the_member_url_replaces_credentials_already_in_the_hive_url(admin):
 
 
 def test_a_refused_acl_user_leaves_no_member_records(admin, redis_lib, monkeypatch):
-    real = redis_lib.client.Pipeline.execute
-
-    def refuse(pipe, raise_on_error=True):
-        real(pipe, raise_on_error)
+    def refuse(*args, **kwargs):
         raise redis_lib.exceptions.ResponseError("ERR Error in ACL SETUSER modifier")
 
-    monkeypatch.setattr(redis_lib.client.Pipeline, "execute", refuse)
+    monkeypatch.setattr(admin, "acl_setuser", refuse)
 
     with pytest.raises(auth.HiveError) as refused:
         auth.mint(admin, "laptop", PUBLIC)
 
     assert str(refused.value) == "Redis refused the new member (ERR Error in ACL SETUSER modifier)"
-    assert admin.keys("*") == []
+    assert auth.members(admin) == {}
+    assert admin.smembers(auth.INDEX) == set()
     assert admin.acl_users() == ["default"]
 
 
@@ -285,7 +291,7 @@ def test_revoke_cuts_both_credentials(admin):
     auth.revoke(admin, grant["id"])
 
     assert auth.ledger_member(admin, grant["ledger_credential"]) is None
-    assert admin.keys(f"{auth.PREFIX}:member:*") == [f"{auth.PREFIX}:member:{other['id']}"]
+    assert sorted(auth.members(admin)) == [other["id"]]
     assert sorted(admin.acl_users()) == ["default", f"hive-{other['id']}"]
     assert auth.ledger_member(admin, other["ledger_credential"]) == other["id"]
     assert admin.smembers(auth.INDEX) == {other["id"]}
@@ -589,3 +595,72 @@ def test_a_member_credential_runs_a_checked_wait_and_a_cover_and_no_other_writes
     for forbidden in (f"{ROOT}:hive:m2:swarm:proof:wait:{agent.name}", swarm.key("proof", "config")):
         with pytest.raises(NoPermissionError):
             member.set(forbidden, "write")
+
+
+def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts(monkeypatch):
+    import fakeredis
+    from redis.exceptions import NoPermissionError
+
+    from scripts.swarm import cli as swarm_cli
+
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    admin.acl_setuser(
+        "hive-m1",
+        enabled=True,
+        nopass=True,
+        categories=auth.ACL_CATEGORIES,
+        keys=auth._acl_keys("m1"),
+        channels=auth.ACL_PATTERNS,
+    )
+    reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "HVALS", "HMGET"}
+
+    # fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client.
+    class Member(fakeredis.FakeRedis):
+        def execute_command(self, *args, **options):
+            if str(args[0]).upper() in reads:
+                return admin.execute_command(*args, **options)
+            return super().execute_command(*args, **options)
+
+    member = Member(server=server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    host = store.RedisStore(admin)
+    host.create(store.SwarmConfig("proof", "/repo", 1, 0, "running"))
+    host.put_agent("proof", store.AgentRecord(name="engineer@0001-0001", lane="eng", task="t1"))
+    host.put_gate_lift("proof", "tasks", "t1", "subagents", {"at": 1.0})
+    url = "https://github.com/o/r/pull/3"
+    updates = []
+
+    class Ledger:
+        def state(self, slug):
+            return {"tasks": [{"id": "t1", "lane": "eng", "state": "claimed"}], "phases": []}
+
+        def update_task(self, slug, task, fields, by=None):
+            updates.append((task, fields, by))
+
+    swarm = store.RedisStore(member)
+    # The agent listing reads through a read only Lua pipeline that fakeredis checks without the %R~ grant.
+    swarm.agents = host.agents
+    member.time = lambda: (100, 5)
+    monkeypatch.setattr(swarm_cli, "connect", lambda: swarm)
+    monkeypatch.setattr(swarm_cli, "LedgerClient", Ledger)
+    monkeypatch.setattr(swarm_cli, "pull_branch", lambda pull: ("", ""))
+    monkeypatch.setattr("scripts.gates.intent.stamp_body", lambda *args, **kwargs: False)
+
+    assert swarm_cli.main(["proof", "--as", "engineer@0001-0001", "pr", url]) == 0
+
+    assert updates == [("t1", {"state": "pr", "awaiting": "", "pr_url": url}, "engineer@0001-0001")]
+    assert host.gate_lift("proof", "tasks", "t1", "subagents") == {}
+    assert admin.hget(host.key("proof", "gate-lift-drops"), "t1") == "100.000005"
+    for record in ({"at": 100.000005}, {"url": url}):
+        host.put_gate_lift("proof", "tasks", "t1", "subagents", record)
+        assert host.gate_lift("proof", "tasks", "t1", "subagents") == {}
+    host.put_gate_lift("proof", "tasks", "t1", "subagents", {"at": 100.00001})
+    assert host.gate_lift("proof", "tasks", "t1", "subagents") == {"at": 100.00001}
+    admin.hset(host.key("proof", "gate-lift-drops"), "t2", "0.5")
+    host.put_gate_lift("proof", "tasks", "t2", "subagents", {"url": url})
+    assert host.gate_lift("proof", "tasks", "t2", "subagents") == {}
+    host.put_gate_lift("proof", "agents", "t1", "subagents", {"at": 1.0})
+    assert host.gate_lift("proof", "agents", "t1", "subagents") == {"at": 1.0}
+    with pytest.raises(NoPermissionError):
+        member.hset(host.key("proof", "gate-lifts", "tasks", "t1"), "subagents", "{}")

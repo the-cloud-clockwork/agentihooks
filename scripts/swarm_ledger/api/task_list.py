@@ -5,7 +5,7 @@ from . import resources
 
 PAGES_KEPT = 32
 ENCODER = json.JSONEncoder(ensure_ascii=False)
-LEDGERS_KEPT = 8
+LEDGERS_KEPT = 4
 
 
 class Page(dict):
@@ -21,23 +21,32 @@ class Page(dict):
             return self._text
 
 
-class Tasks:
-    def __init__(self, repository: object, version: tuple) -> None:
-        self.repository, self.version, self.lock = repository, version, threading.Lock()
-        self.revision, self.rows, self.revisions, self.pages = None, None, None, {}
+def row_revision(row: object) -> str | None:
+    return resources.revision(row) if isinstance(row, dict) else None
 
-    def load(self, slug: str) -> None:
-        state = self.repository.read(slug, "tasks", "_meta.task_revision", "_meta.rev")
-        self.revision = resources.resource_revision(state, "tasks")
-        self.rows = state.get("tasks") or []
-        self.revisions = resources.collection_revisions(self.rows)[1]
+
+class Tasks:
+    def __init__(self, repository: object) -> None:
+        self.repository, self.lock = repository, threading.Lock()
+        self.stored, self.revision, self.revisions, self.pages = None, None, [], {}
+
+    def refresh(self, slug: str) -> None:
+        stored = self.repository.task_rows(slug, self.stored)
+        if stored is self.stored:
+            return
+        rows, revision = stored[2], resources.resource_revision({"_meta": stored[1]}, "tasks")
+        if self.stored is None or rows is not self.stored[2]:
+            known = {} if self.stored is None else dict(zip(map(id, self.stored[2]), self.revisions))
+            self.revisions = [known.get(id(row)) or row_revision(row) for row in rows]
+            self.pages = {}
+        self.stored, self.revision = stored, revision
 
     def page(self, query: dict) -> Page:
         key = (query.get("cursor"), query.get("limit"))
         if key not in self.pages:
             if len(self.pages) >= PAGES_KEPT:
                 self.pages.clear()
-            self.pages[key] = Page(resources.page(self.rows, self.revision, query, self.revisions, True))
+            self.pages[key] = Page(resources.page(self.stored[2], self.revision, query, self.revisions, True))
         return self.pages[key]
 
 
@@ -46,16 +55,13 @@ GUARD = threading.Lock()
 
 
 def read(repository: object, slug: str, query: dict) -> Page:
-    version = repository.task_version(slug)
     with GUARD:
-        held = HELD.get(slug)
-        if held is None or held.repository is not repository or held.version != version:
-            held = Tasks(repository, version)
-        HELD.pop(slug, None)
+        held = HELD.pop(slug, None)
+        if held is None or held.repository is not repository:
+            held = Tasks(repository)
         HELD[slug] = held
         while len(HELD) > LEDGERS_KEPT:
             HELD.pop(next(iter(HELD)))
     with held.lock:
-        if held.rows is None:
-            held.load(slug)
+        held.refresh(slug)
         return held.page(query)

@@ -13,10 +13,10 @@ pytestmark = pytest.mark.unit
 
 
 def root(metadata=None, provision=False):
-    info = SimpleNamespace(config=SimpleNamespace(metadata=metadata), state=SimpleNamespace(messages=0))
+    info = SimpleNamespace(config=SimpleNamespace(metadata=metadata), state=SimpleNamespace(messages=0, subjects=None))
     client = SimpleNamespace(max_payload=1048576)
 
-    async def stream_info(name):
+    async def stream_info(name, subjects_filter=None):
         if name.startswith("AGENTIHOOKS_"):
             raise NotFoundError()
         return info

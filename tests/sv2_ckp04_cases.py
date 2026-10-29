@@ -1,6 +1,5 @@
 import hashlib
 import json
-import tempfile
 from pathlib import Path
 
 from scripts.swarm_v2 import contracts
@@ -129,8 +128,8 @@ def _positive_fixture(root: Path) -> dict:
 
 
 def _positive() -> tuple[dict, bool]:
-    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
-        observed = {"fixture": _positive_fixture(Path(one)), "second_fixture": _positive_fixture(Path(two))}
+    with ckp02.scratch() as (one, two):
+        observed = {"fixture": _positive_fixture(one), "second_fixture": _positive_fixture(two)}
     first = observed["fixture"]
     checks = [
         observed["fixture"] == observed["second_fixture"],
@@ -187,8 +186,8 @@ def _rejection_fixture(root: Path) -> dict:
 
 
 def _rejection() -> tuple[dict, bool]:
-    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
-        observed = {"fixture": _rejection_fixture(Path(one)), "second_fixture": _rejection_fixture(Path(two))}
+    with ckp02.scratch() as (one, two):
+        observed = {"fixture": _rejection_fixture(one), "second_fixture": _rejection_fixture(two)}
     first = observed["fixture"]
     checks = [
         observed["fixture"] == observed["second_fixture"],
@@ -294,8 +293,8 @@ def _rollback(pub: publisher.Publisher) -> dict:
 
 
 def _recovery() -> tuple[dict, bool]:
-    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
-        observed = {"fixture": _recovery_fixture(Path(one)), "second_fixture": _recovery_fixture(Path(two))}
+    with ckp02.scratch() as (one, two):
+        observed = {"fixture": _recovery_fixture(one), "second_fixture": _recovery_fixture(two)}
     first = observed["fixture"]
     last = first["boundaries"][-1]
     checks = [

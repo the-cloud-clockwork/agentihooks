@@ -36,6 +36,8 @@ EVENTS_ENGINE = "events"
 MAX_LOAD = 10.0
 CODEX_TRANSPORTS = ("legacy", "app_server")
 LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
+PLACEMENT_MODES = ("anton-first", "round-robin")
+ANTON_FIRST, ROUND_ROBIN = PLACEMENT_MODES
 
 
 class SwarmError(RuntimeError):
@@ -86,8 +88,19 @@ class SwarmConfig:
     local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
     engine: str = "legacy"
     window: dict = field(default_factory=dict)
+    focus_weight: int = 50
+    watchdog_address: str = ""
+    placement_mode: str = ANTON_FIRST
+    placement_nodes: int = 0
+    repo_origin: str = ""
 
     def __post_init__(self) -> None:
+        if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
+            raise SwarmError("focus weight must be a whole number from 0 to 100")
+        if self.placement_mode not in PLACEMENT_MODES:
+            raise SwarmError(f"placement mode must be one of {', '.join(PLACEMENT_MODES)}")
+        if type(self.placement_nodes) is not int or self.placement_nodes < 0:
+            raise SwarmError("placement-nodes takes a whole number of hives, 0 for no limit")
         if self.engine not in ("legacy", "events"):
             raise SwarmError("engine must be one of legacy, events")
 
@@ -160,6 +173,19 @@ class RedisStore:
 
     def key(self, slug, *parts):
         return ":".join((PREFIX, slug, *parts))
+
+    def put_gate_lift(self, slug: str, scope: str, subject: str, gate: str, record: dict) -> None:
+        self.redis.hset(self.key(slug, "gate-lifts", scope, subject), gate, json.dumps(record))
+
+    def gate_lift(self, slug: str, scope: str, subject: str, gate: str) -> dict:
+        raw = self.redis.hget(self.key(slug, "gate-lifts", scope, subject), gate)
+        record = json.loads(raw) if raw else {}
+        dropped = self.redis.hget(self.key(slug, "gate-lift-drops"), subject) if scope == "tasks" else None
+        return {} if dropped and record.get("at", 0) <= float(dropped) else record
+
+    def drop_task_lifts(self, slug: str, task: str) -> None:
+        seconds, micros = self.redis.time()
+        self.redis.hset(self.key(slug, "gate-lift-drops"), task, f"{seconds}.{micros:06d}")
 
     @property
     def operation_journal(self) -> "OperationJournal":
@@ -234,6 +260,11 @@ class RedisStore:
             int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
             raw.get("engine", "legacy"),
             json.loads(raw.get("window") or "{}"),
+            int(raw.get("focus_weight", 50)),
+            raw.get("watchdog_address", ""),
+            raw.get("placement_mode") or ANTON_FIRST,
+            int(raw.get("placement_nodes") or 0),
+            raw.get("repo_origin", ""),
         )
 
     def update(self, slug, **changes):
@@ -449,6 +480,7 @@ class RedisStore:
                     executions = [a for a in self.execution_registry.occupants(slug, pipe).values() if a.name == name]
                     if expected is not None and expected.execution_id not in {a.execution_id for a in executions}:
                         return False
+                    lives = self.execution_registry.records(slug) if previous else []
                     pipe.multi()
                     if before is not None:
                         before(pipe)
@@ -457,7 +489,16 @@ class RedisStore:
                         reason = "finished" if row["state"] == "finished" else "retired"
                         if self.handoff(slug, row["task"]):
                             reason = "handed off"
-                        pipe.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
+                        placement = {
+                            field: getattr(agent, field)
+                            for agent in lives
+                            if (agent.name, agent.started_at) == (name, row.get("started_at"))
+                            for field in ("execution_id", "hive", "runtime_backend")
+                        }
+                        pipe.rpush(
+                            self.key(slug, "history"),
+                            json.dumps({**row, **placement, "ended_at": ended, "reason": reason}),
+                        )
                     for agent in executions:
                         if agent.state != "finished":
                             pipe.hset(
@@ -488,6 +529,7 @@ class RedisStore:
         return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
 
     def count_claim(self, slug, task):
+        self.redis.hdel(self.key(slug, "pending-lives"), task)
         self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
         return self.redis.hincrby(self.key(slug, "started-lives"), task)
 
@@ -495,11 +537,12 @@ class RedisStore:
         from redis.exceptions import WatchError
 
         key, lives = self.key(slug, "claim", task), self.key(slug, "started-lives")
+        pending = self.key(slug, "pending-lives")
         guards = self._claim_guards(slug, task)
         for _ in range(3):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(key, f"{key}:generation", f"{key}:refunded", lives, *guards)
+                    pipe.watch(key, f"{key}:generation", f"{key}:refunded", lives, pending, *guards)
                     if (
                         pipe.get(key) != agent
                         or int(pipe.get(f"{key}:generation") or 0) != generation
@@ -507,13 +550,17 @@ class RedisStore:
                         or any(pipe.exists(guard) for guard in guards)
                     ):
                         return False
+                    waiting = pipe.hget(pending, task)
                     started = self._started_lives(slug, task)
-                    if int(pipe.hget(lives, task) or started) <= 0:
+                    if not waiting and int(pipe.hget(lives, task) or started) <= 0:
                         return False
                     pipe.multi()
                     pipe.set(f"{key}:refunded", generation)
-                    pipe.hsetnx(lives, task, started)
-                    pipe.hincrby(lives, task, -1)
+                    if waiting:
+                        self._cancel_pending(pipe, slug, task, waiting)
+                    else:
+                        pipe.hsetnx(lives, task, started)
+                        pipe.hincrby(lives, task, -1)
                     pipe.execute()
                     return True
                 except WatchError:
@@ -527,9 +574,21 @@ class RedisStore:
         return self._started_lives(slug, task)
 
     def reset_claims(self, slug, task):
+        self.cancel_pending_life(slug, task)
         self.redis.hset(self.key(slug, "started-lives"), task, 0)
         self.redis.hdel(self.key(slug, "launch-failures"), task)
         self.clear_failed_harness(slug, task)
+
+    def pend_life(self, slug: str, task: str, execution: str) -> None:
+        self.redis.hset(self.key(slug, "pending-lives"), task, execution)
+
+    def cancel_pending_life(self, slug: str, task: str) -> None:
+        if waiting := self.redis.hget(self.key(slug, "pending-lives"), task):
+            self._cancel_pending(self.redis, slug, task, waiting)
+
+    def _cancel_pending(self, client, slug: str, task: str, execution: str) -> None:
+        client.hsetnx(self.key(slug, "counted-executions"), execution, task)
+        client.hdel(self.key(slug, "pending-lives"), task)
 
     def note_launch_failure(self, slug, task, reason, harness=""):
         self.redis.hset(self.key(slug, "launch-failures"), task, reason)
@@ -763,3 +822,9 @@ def connect(environ=None):
         return RedisStore(redis_client(environ))
     except redis.RedisError as exc:
         raise Unreachable(f"Redis is unreachable ({exc}); the swarm refuses to run without it") from exc
+
+
+def store_errors() -> tuple[type[BaseException], ...]:
+    import redis
+
+    return (redis.RedisError,)

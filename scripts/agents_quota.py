@@ -32,6 +32,8 @@ PAGE_TTL_S = 60
 RETIRED_AFTER_S = session_bands.FRESH_SECONDS
 STALE = "STALE"
 CLOSED = "CLOSED"
+DUPLICATE = "DUPLICATE"
+DUPLICATE_SOURCE = "same ChatGPT account as {kept}"
 EXPIRED_SOURCE = "token expired: run {login}"
 NEXT_MARK = "(next)"
 RESERVED_MARK = "(reserved)"
@@ -202,6 +204,28 @@ def without_routing(rows: list[QuotaRow], accounts: list) -> list[QuotaRow]:
     """Accounts this environment holds no token for show their quota but take no routing share."""
     names = {account.name for account in accounts}
     return [replace(row, cap=None, routing_left=None) if row.account in names else row for row in rows]
+
+
+def duplicate_rows(environ: Mapping[str, str], sessions: dict[str, int]) -> list[QuotaRow]:
+    """Token accounts the router refuses because another token account holds the same ChatGPT account."""
+    tokens = codex_router.token_accounts(environ)
+    repeated = codex_router.duplicates(tokens, environ)
+    identities = fingerprints([account for account in tokens if account.name in repeated], environ)
+    return [
+        QuotaRow(
+            agent="codex",
+            account=account.name,
+            state=DUPLICATE,
+            sessions=sessions.get(account.name, 0),
+            five_hour_left=None,
+            seven_day_left=None,
+            seven_day_resets_at=None,
+            source=DUPLICATE_SOURCE.format(kept=repeated[account.name]),
+            identity=identities[account.name],
+        )
+        for account in tokens
+        if account.name in repeated
+    ]
 
 
 def next_account(pool: list, quotas: dict, sessions: dict[str, int], now: float, environ: dict[str, str]) -> str:
@@ -497,7 +521,7 @@ def _page_quota(now: float) -> dict:
     claude = claude_rows([result for _, result in cached], live, "cached", observed, now)
     claude += api_rows(ClaudeApiSource(live), "claude", now)
     codex = codex_rows(pool + elsewhere, quotas, codex_live, now, identities=fingerprints(pool + elsewhere, os.environ))
-    rows = claude + without_routing(codex, elsewhere)
+    rows = claude + without_routing(codex, elsewhere) + duplicate_rows(os.environ, codex_live)
     rows += api_rows(CodexApiSource(codex_live), "codex", now)
     rows = with_masters(rows, _masters(), live)
     return {"probed_at": max(observed.values(), default=None), "rows": [asdict(row) for row in rows]}

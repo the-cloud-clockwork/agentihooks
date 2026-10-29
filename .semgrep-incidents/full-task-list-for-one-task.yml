@@ -1,0 +1,48 @@
+rules:
+  - id: full-task-list-for-one-task
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Agent side code reads the whole hosted task list to find one task, or reads it again on every pass of a loop.
+      On 27 October hive agents made about fifty seven full task list reads a minute against the hosted ledger. Read
+      the one task with LedgerClient.task, or read the list once before the loop.
+    paths:
+      exclude:
+        - /scripts/swarm_ledger/
+    pattern-either:
+      - pattern: next(($ROW for $ROW in $LEDGER.tasks(...) if <... $ROW.get("id") ...>), ...)
+      - pattern: next(($ROW for $ROW in $LEDGER.tasks(...) if <... $ROW["id"] ...>), ...)
+      - pattern: '{$ROW["id"]: $ROW for $ROW in $LEDGER.tasks(...)}.get(...)'
+      - pattern: '{$ROW["id"]: $ROW for $ROW in $LEDGER.tasks(...)}[$ID]'
+      - patterns:
+          - pattern: $LEDGER.tasks(...)
+          - pattern-either:
+              - pattern-inside: |
+                  while $COND:
+                      ...
+              - pattern-inside: |
+                  for $ITEM in $ITEMS:
+                      ...
+          - pattern-not-inside: |
+              for $ITEM in $LEDGER.tasks(...):
+                  ...
+          - pattern-not-inside: |
+              for $SLUG in $SLUGS:
+                  ...
+                  <... $LEDGER.tasks($SLUG) ...>
+                  ...
+      - patterns:
+          - pattern: $LEDGER.tasks(...)
+          - pattern-inside: |
+              while $COND:
+                  ...
+      - pattern: |
+          while $COND:
+              ...
+              for $ROW in $LEDGER.tasks(...):
+                  ...
+      - pattern: |
+          for $ITEM in $ITEMS:
+              ...
+              for $ROW in $LEDGER.tasks(...):
+                  ...

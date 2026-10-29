@@ -5,14 +5,14 @@ A fact the runtime looked for and could not find is "unknown"; one it found abse
 
 import json
 import subprocess
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from datetime import datetime, timezone
 
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import effort_range, snapshot
+from scripts.swarm import effort_range, publish, snapshot
 from scripts.swarm.ledger_events import RED
 from scripts.swarm.naming import plain
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, SwarmError
 
 REASONS = ("recycle", "quota", "succession", "takeover", "reopen", "restore", "inbox", "exit", "operator")
 UNKNOWN, NONE = "unknown", "none"
@@ -36,7 +36,7 @@ def build(store, slug, agent, reason, rows, at, run=subprocess.run):
     if reason not in REASONS:
         raise ValueError(f"handoff reason {reason!r} is not one of {', '.join(REASONS)}")
     row = next((r for r in rows or [] if r.get("id") == agent.task), None)
-    worktree = _worktree(store, slug, agent, run)
+    worktree = _worktree(store, slug, agent, row, run)
     branch = _branch(worktree, run) if worktree else UNKNOWN
     return {
         "seat": agent.seat or UNKNOWN,
@@ -66,13 +66,25 @@ def _launch(store, slug, agent):
     return launch
 
 
-def _worktree(store, slug, agent, run):
+def _worktree(store, slug, agent, row, run):
     repo = store.config(slug).repo
     if agent.lane == MASTER:
         return repo
+    return _listed_worktree(repo, agent, run) or _task_worktree(repo, row or {}, agent)
+
+
+def _listed_worktree(repo, agent, run):
     try:
-        return snapshot.worktrees(repo, [agent.name], run).get(agent.name, "")
+        return snapshot.worktrees(repo, [agent.name], run)[agent.name]
     except FAILED:
+        return ""
+
+
+def _task_worktree(repo, row, agent):
+    try:
+        local = publish.local_repository(repo, repo)
+        return str(publish.existing(local, publish.repository_task(local, row), agent) or "")
+    except (*FAILED, SwarmError):
         return ""
 
 
@@ -99,12 +111,19 @@ def continuation(worktree, branch, run):
     return {"remote_branch": remote, "remote_head": head, "continue_from": "fresh", "fresh_reason": why}
 
 
-def reclaim(repo: str, lives: list[str], recorded: str, run=subprocess.run, forbidden: Collection[str] = ()) -> dict:
+def reclaim(
+    repo: str,
+    lives: list[str],
+    recorded: str,
+    run=subprocess.run,
+    forbidden: Collection[str] = (),
+    heads: Mapping[str, str] | None = None,
+) -> dict:
     checked = [recorded] if recorded else list(dict.fromkeys(plain(name) for name in lives))
     checked = [branch for branch in checked if branch not in forbidden]
     unread = []
     for branch in checked:
-        head = _remote_head(repo, branch, run)
+        head = _remote_head(repo, branch, run) if heads is None else heads.get(branch, NONE)
         if head == UNKNOWN:
             unread.append(branch)
         elif head != NONE:
@@ -142,6 +161,22 @@ def _remote_head(worktree, remote, run):
     if done.returncode == 2:
         return NONE
     return done.stdout.split()[0] if done.returncode == 0 else UNKNOWN
+
+
+def remote_heads(repo: str, run=subprocess.run) -> dict[str, str] | None:
+    argv = ["git", "-C", repo, "ls-remote", "--heads", "origin"]
+    try:
+        done = run(argv, capture_output=True, text=True, timeout=20)
+    except FAILED:
+        return None
+    if done.returncode != 0:
+        return None
+    heads = {}
+    for line in done.stdout.splitlines():
+        head, _, ref = line.partition("\t")
+        if ref.startswith("refs/heads/"):
+            heads[ref.removeprefix("refs/heads/")] = head
+    return heads
 
 
 def _pull_request(row, run):

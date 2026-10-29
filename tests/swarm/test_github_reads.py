@@ -163,3 +163,359 @@ def test_counts_skip_unreadable_lines(actions, clock):  # noqa: F811
 
 def test_counts_are_empty_before_any_charged_request():
     assert github_reads.counts(0, 2_000) == {}
+
+
+def test_nested_cache_home_retains_runs_snapshots_and_caller_counts(monkeypatch, tmp_path):
+    for reader in ("run", "snapshot", "charge"):
+        monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / reader / "nested" / "state"))
+        if reader == "charge":
+            github_reads.charge("doctor.ci", "jobs", 1_000)
+            assert github_reads.counts(0, 1_001) == {"doctor.ci": 1}
+        else:
+            calls = []
+            payload = {"status": "in_progress", "head": "first"}
+
+            def fetch():
+                calls.append(1)
+                return payload
+
+            read = getattr(github_reads, reader)
+            assert read("first", 1_000, fetch) == payload
+            assert read("first", 1_001, fetch) == payload
+            assert len(calls) == 1
+
+
+def test_snapshots_keep_distinct_resources_and_retry_partial_results(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    responses = iter([{"pull": "first"}, {"pull": "second"}, {"pull": None}, {"pull": "recovered"}])
+
+    def fetch():
+        return next(responses)
+
+    assert github_reads.snapshot("first", 1_000, fetch) == {"pull": "first"}
+    assert github_reads.snapshot("second", 1_000, fetch) == {"pull": "second"}
+    assert github_reads.snapshot("first", 1_001, fetch) == {"pull": "first"}
+    assert github_reads.snapshot("partial", 1_000, fetch) == {"pull": None}
+    assert github_reads.snapshot("partial", 1_001, fetch) == {"pull": "recovered"}
+
+
+@pytest.mark.parametrize("kind", ["job_log", "snapshot"])
+def test_retained_readers_share_the_lock_with_an_existing_process(kind, monkeypatch, tmp_path):
+    import fcntl
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("GH_TOKEN", "lock-compatibility-test")
+    reader = getattr(github_reads, kind)
+    payload = "saved" if kind == "job_log" else {"pull": "saved"}
+
+    def read(fetch):
+        return reader("resource", fetch) if kind == "job_log" else reader("resource", 1_000, fetch)
+
+    assert read(lambda: payload) == payload
+    suffix = "*.log" if kind == "job_log" else "*.json"
+    entry = next(github_reads.home().glob(suffix))
+    entry.unlink()
+    original = fcntl.flock
+    contended = []
+    attempted = threading.Event()
+
+    def acquire(fd, operation):
+        try:
+            original(fd, operation | fcntl.LOCK_NB)
+        except BlockingIOError:
+            contended.append(True)
+            attempted.set()
+            original(fd, operation)
+        else:
+            attempted.set()
+
+    fetches = []
+    with entry.with_suffix(".lock").open("a") as holder, ThreadPoolExecutor() as pool:
+        original(holder, fcntl.LOCK_EX)
+        monkeypatch.setattr(fcntl, "flock", acquire)
+        future = pool.submit(read, lambda: fetches.append(1) or payload)
+        try:
+            assert attempted.wait(5)
+            if kind == "job_log":
+                entry.write_text(payload)
+            else:
+                entry.write_text(json.dumps({"at": 1_000, "snapshot": payload}))
+        finally:
+            original(holder, fcntl.LOCK_UN)
+        assert future.result(timeout=5) == payload
+    assert contended == [True]
+    assert fetches == []
+
+
+def response(status, body="", **headers):
+    fields = "\r\n".join(f"{key}: {value}" for key, value in headers.items())
+    return f"HTTP/2.0 {status}\r\n{fields}\r\n\r\n{body}"
+
+
+def test_conditional_pages_share_reads_then_revalidate_without_charging_unchanged_data(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("GH_TOKEN", "conditional-test-token")
+    now = [1_000.0]
+    monkeypatch.setattr(github_reads.time, "time", lambda: now[0])
+    calls = []
+    outputs = iter(
+        [
+            response(200, '{"jobs": [{"id": 1}]}', ETag='"one"'),
+            response(304),
+            response(200, '{"jobs": [{"id": 2}]}', ETag='"two"'),
+        ]
+    )
+
+    import subprocess
+
+    from scripts.ci_queue_retry import _api
+
+    def run(command, **options):
+        calls.append(tuple(command[2:]))
+        return subprocess.CompletedProcess(command, 0, stdout=next(outputs))
+
+    monkeypatch.setattr(subprocess, "run", run)
+    fetch = _api
+    endpoint = "repos/o/r/actions/runs/7/jobs?per_page=100"
+    assert github_reads.conditional_pages("lost_runner.jobs", endpoint, fetch) == [{"jobs": [{"id": 1}]}]
+    now[0] += 59
+    assert github_reads.conditional_pages("another", endpoint, fetch) == [{"jobs": [{"id": 1}]}]
+    assert len(calls) == 1
+    now[0] += 1
+    assert github_reads.conditional_pages("lost_runner.jobs", endpoint, fetch) == [{"jobs": [{"id": 1}]}]
+    assert calls[-1] == (endpoint, "--include", "-H", 'If-None-Match: "one"')
+    assert github_reads.counts(1_000, 1_061) == {"lost_runner.jobs": 1}
+    now[0] += 60
+    assert github_reads.conditional_pages("lost_runner.jobs", endpoint, fetch) == [{"jobs": [{"id": 2}]}]
+    assert github_reads.counts(1_000, 1_121) == {"lost_runner.jobs": 2}
+
+
+def test_conditional_pages_keep_cached_links_on_304_and_drop_removed_pages(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    now = [1_000.0]
+    monkeypatch.setattr(github_reads.time, "time", lambda: now[0])
+    first = "repos/o/r/jobs?per_page=1"
+    second = "https://api.github.com/repos/o/r/jobs?per_page=1&page=2"
+    outputs = iter(
+        [
+            response(200, '{"jobs": [1]}', ETag='"one"', Link=f'<{second}>; rel="next"'),
+            response(200, '{"jobs": [2]}', ETag='"two"'),
+            response(304),
+            response(304),
+            response(200, '{"jobs": [3]}', ETag='"three"'),
+        ]
+    )
+    calls = []
+
+    def fetch(*args):
+        calls.append(args)
+        return next(outputs)
+
+    assert github_reads.conditional_pages("jobs", first, fetch) == [{"jobs": [1]}, {"jobs": [2]}]
+    now[0] += 60
+    assert github_reads.conditional_pages("jobs", first, fetch) == [{"jobs": [1]}, {"jobs": [2]}]
+    assert calls[3] == (second, "--include", "-H", 'If-None-Match: "two"')
+    now[0] += 60
+    assert github_reads.conditional_pages("jobs", first, fetch) == [{"jobs": [3]}]
+    assert len(calls) == 5
+
+
+def test_conditional_pages_without_etags_or_with_a_new_credential_read_fresh(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    now = [1_000.0]
+    monkeypatch.setattr(github_reads.time, "time", lambda: now[0])
+    calls = []
+
+    def fetch(*args):
+        calls.append(args)
+        return response(200, '{"jobs": []}')
+
+    for token in ("first-test-token", "second-test-token", "first-test-token"):
+        monkeypatch.setenv("GH_TOKEN", token)
+        assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": []}]
+        now[0] += 60
+    assert calls == [("resource", "--include")] * 3
+
+
+def test_conditional_pages_accept_a_304_gh_error_but_propagate_other_errors(monkeypatch, tmp_path):
+    import subprocess
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    now = [1_000.0]
+    monkeypatch.setattr(github_reads.time, "time", lambda: now[0])
+    outputs = iter(
+        [
+            response(200, '{"jobs": []}', ETag='"one"'),
+            subprocess.CalledProcessError(1, ["gh"], output=response(304)),
+            subprocess.CalledProcessError(1, ["gh"], output=response(403, '{"message": "refused"}')),
+        ]
+    )
+
+    def fetch(*args):
+        found = next(outputs)
+        if isinstance(found, Exception):
+            raise found
+        return found
+
+    assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": []}]
+    now[0] += 60
+    assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": []}]
+    now[0] += 60
+    with pytest.raises(subprocess.CalledProcessError):
+        github_reads.conditional_pages("jobs", "resource", fetch)
+
+
+def test_conditional_pages_reject_a_non_success_response_with_its_diagnostics(monkeypatch, tmp_path):
+    import subprocess
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    output = response(403, '{"message": "refused"}')
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        github_reads.conditional_pages("jobs", "resource", lambda *args: output)
+    assert error.value.returncode == 1
+    assert error.value.cmd == ["gh", "api", "resource", "--include"]
+    assert error.value.stdout == output
+
+
+def test_conditional_pages_split_headers_from_pretty_json_at_the_first_blank_line(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    body = '{\n\n"jobs": [1]\n}'
+    assert github_reads.conditional_pages("jobs", "resource", lambda *args: response(200, body)) == [{"jobs": [1]}]
+
+
+def test_conditional_pages_without_a_validator_still_share_one_interval(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    calls = []
+
+    def fetch(*args):
+        calls.append(args)
+        return response(200, '{"jobs": []}')
+
+    assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": []}]
+    assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": []}]
+    assert calls == [("resource", "--include")]
+
+
+def test_conditional_pages_use_distinct_cache_entries_for_every_page(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    keys = []
+    outputs = iter(
+        [
+            response(200, '{"jobs": [1]}', Link='<second>; rel="next"'),
+            response(200, '{"jobs": [2]}'),
+        ]
+    )
+
+    def snapshot(key, now, fetch):
+        assert key is not None
+        assert key not in keys
+        keys.append(key)
+        return fetch()
+
+    monkeypatch.setattr(github_reads, "snapshot", snapshot)
+    assert github_reads.conditional_pages("jobs", "first", lambda *args: next(outputs)) == [
+        {"jobs": [1]},
+        {"jobs": [2]},
+    ]
+    assert len(keys) == 2
+
+
+def test_conditional_pages_revalidate_an_etag_that_contains_a_colon(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    now = [1_000.0]
+    monkeypatch.setattr(github_reads.time, "time", lambda: now[0])
+    calls = []
+    outputs = iter([response(200, '{"jobs": [1]}', ETag='"v:1"'), response(304)])
+
+    def fetch(*args):
+        calls.append(args)
+        return next(outputs)
+
+    assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": [1]}]
+    now[0] += github_reads.RUN_TTL_S
+    assert github_reads.conditional_pages("jobs", "resource", fetch) == [{"jobs": [1]}]
+    assert calls[1] == ("resource", "--include", "-H", 'If-None-Match: "v:1"')
+
+
+def test_conditional_pages_stop_at_a_next_link_already_read(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    outputs = iter(
+        [
+            response(200, '{"jobs": [1]}', Link='<second>; rel="next"'),
+            response(200, '{"jobs": [2]}', Link='<first>; rel="next"'),
+        ]
+    )
+    assert github_reads.conditional_pages("jobs", "first", lambda *args: next(outputs)) == [
+        {"jobs": [1]},
+        {"jobs": [2]},
+    ]
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        b"HTTP/2.0 304 Not Modified\r\nETag: one\r\n\r\n",
+        "HTTP/2.0 304 Not Modified\nETag: one\n\n",
+    ],
+)
+def test_not_modified_subprocess_errors_preserve_output_and_spend_no_primary_quota(monkeypatch, tmp_path, output):
+    import subprocess
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    failure = subprocess.CalledProcessError(1, ["gh"], output=output)
+
+    def run(*args, **kwargs):
+        raise failure
+
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        github_reads.rest("jobs", ["api", "resource", "--include"], run)
+    assert error.value is failure
+    assert github_reads.counts(0, float("inf")) == {}
+
+
+@pytest.mark.parametrize(
+    "output, expected",
+    [
+        (None, False),
+        ("", False),
+        (b"", False),
+        (b"HTTP/1.1 304 Not Modified\r\n\xff", True),
+        (b"HTTP/2.0 3040 Wrong\r\n\xff", False),
+        ("HTTP/2.0 200 OK\n", False),
+        ("prefix HTTP/2.0 304 Not Modified\n", False),
+    ],
+)
+def test_not_modified_recognizes_only_an_initial_304_status(output, expected):
+    assert github_reads._not_modified(output) is expected
+
+
+def test_rest_accounts_for_leading_slash_endpoints_and_retains_the_query(monkeypatch, tmp_path):
+    import subprocess
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    endpoint = "/repos/o/r/jobs?per_page=100"
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="{}")
+
+    github_reads.rest("jobs", ["api", "-X", "GET", endpoint], run)
+    assert calls == [["gh", "api", "-X", "GET", endpoint]]
+    rows = [json.loads(line) for line in (github_reads.home() / "charged.jsonl").read_text().splitlines()]
+    assert [(row["caller"], row["endpoint"]) for row in rows] == [("jobs", endpoint)]
+
+
+def test_rest_strips_slurped_page_headers_into_one_json_array(monkeypatch, tmp_path):
+    import subprocess
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    out = '[HTTP/2.0 200 OK\nEtag: "a"\r\n\r\n{"jobs": [1]}\n,HTTP/2.0 200 OK\nEtag: "b"\r\n\r\n{"jobs": [2]}]'
+
+    def run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, stdout=out)
+
+    result = github_reads.rest("jobs", ["api", "repos/o/r/actions/runs/1/jobs", "--paginate", "--slurp"], run)
+    assert json.loads(result.stdout) == [{"jobs": [1]}, {"jobs": [2]}]

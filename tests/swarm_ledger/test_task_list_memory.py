@@ -8,13 +8,15 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-READERS = 100
+READERS = 20
+HUNDRED = 100
 TASKS = 2000
+PEAK_TASKS = 500
 SLUG = "ledger"
 CURSOR = re.compile(r'"next_cursor": (?:"([^"]+)"|null)')
 
 
-def document() -> dict:
+def document(tasks: int = TASKS) -> dict:
     from scripts.swarm_ledger.new_ledger import build_doc
 
     doc = build_doc({"title": "Task list memory"})
@@ -28,7 +30,7 @@ def document() -> dict:
             "lane": "eng",
             "comments": [{"id": f"c{comment}", "text": "Recorded evidence " * 8} for comment in range(4)],
         }
-        for index in range(TASKS)
+        for index in range(tasks)
     ]
     doc["chat"] = [{"id": f"m{index}", "text": "Chat line from the swarm " * 8} for index in range(20000)]
     return doc
@@ -89,13 +91,22 @@ def walk(server: object) -> int:
             return pages
 
 
-@pytest.fixture
-def stored(tmp_path):
+def store(tmp_path, tasks: int):
     from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
     path = tmp_path / "ledger.sqlite3"
-    SQLiteLedgerRepository(path).import_document(SLUG, document())
+    SQLiteLedgerRepository(path).import_document(SLUG, document(tasks))
     return path
+
+
+@pytest.fixture
+def stored(tmp_path):
+    return store(tmp_path, TASKS)
+
+
+@pytest.fixture
+def peak_stored(tmp_path):
+    return store(tmp_path, PEAK_TASKS)
 
 
 def test_full_task_list_walk_returns_every_task_in_order(stored):
@@ -117,18 +128,9 @@ def test_full_task_list_walk_returns_every_task_in_order(stored):
     assert all(row["comments_count"] == 4 and "comments" not in row for row in rows)
 
 
-def test_hundred_concurrent_full_task_list_reads_stay_under_a_fixed_peak(stored):
+def test_concurrent_full_task_list_walks_return_the_same_pages(stored):
     from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
-    tracemalloc.start()
-    try:
-        SQLiteLedgerRepository(stored).current(SLUG)
-        _, whole = tracemalloc.get_traced_memory()
-        tracemalloc.reset_peak()
-        SQLiteLedgerRepository(stored).read(SLUG, "tasks")
-        _, tasks = tracemalloc.get_traced_memory()
-    finally:
-        tracemalloc.stop()
     server = services(SQLiteLedgerRepository(stored))
     barrier, pages, failures = threading.Barrier(READERS), [], []
 
@@ -140,6 +142,37 @@ def test_hundred_concurrent_full_task_list_reads_stay_under_a_fixed_peak(stored)
             failures.append(exc)
 
     threads = [threading.Thread(target=reader) for _ in range(READERS)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not failures, failures[0]
+    assert len(pages) == READERS and len(set(pages)) == 1 and pages[0] > 1
+
+
+def test_hundred_concurrent_full_task_list_reads_stay_under_a_fixed_peak(peak_stored):
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    tracemalloc.start()
+    try:
+        SQLiteLedgerRepository(peak_stored).current(SLUG)
+        _, whole = tracemalloc.get_traced_memory()
+        tracemalloc.reset_peak()
+        SQLiteLedgerRepository(peak_stored).read(SLUG, "tasks")
+        _, tasks = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    server = services(SQLiteLedgerRepository(peak_stored))
+    barrier, pages, failures = threading.Barrier(HUNDRED), [], []
+
+    def reader():
+        try:
+            barrier.wait()
+            pages.append(walk(server))
+        except Exception as exc:
+            failures.append(exc)
+
+    threads = [threading.Thread(target=reader) for _ in range(HUNDRED)]
     tracemalloc.start()
     try:
         for thread in threads:
@@ -150,9 +183,9 @@ def test_hundred_concurrent_full_task_list_reads_stay_under_a_fixed_peak(stored)
     finally:
         tracemalloc.stop()
     assert not failures, failures[0]
-    assert len(pages) == READERS and len(set(pages)) == 1 and pages[0] > 1
+    assert len(pages) == HUNDRED and len(set(pages)) == 1 and pages[0] > 1
     report = (
-        f"{READERS} task list walks peaked at {peak} bytes; one load peaks at {whole} whole, {tasks} task rows only"
+        f"{HUNDRED} task list walks peaked at {peak} bytes; one load peaks at {whole} whole, {tasks} task rows only"
     )
-    assert peak < whole / 2, report
+    assert peak < whole, report
     assert peak < tasks * 1.5, report

@@ -238,7 +238,7 @@ class Spoke:
         outcome = self.runtime.spawn(request)
         if not outcome.ok:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
-            raise RuntimeError
+            raise RuntimeError(f"spawn {outcome.status}: {outcome.detail}")
         placed = outcome.value
         started = Envelope(
             id=f"started:{key}",

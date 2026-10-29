@@ -1,9 +1,12 @@
 import errno
+import json
 from pathlib import Path
 
 import pytest
 
+from hooks.context import profile_chain
 from scripts.codex_session import supervisor
+from scripts.swarm import launch_check
 from tests.codex_session.fakes import Clock, Server
 from tests.codex_session.test_supervisor import SLUG, deps, launch_spec
 from tests.codex_session.test_supervisor import root as root
@@ -83,6 +86,20 @@ def test_launch_stages_only_startup_files_and_auth_references(store, server, roo
     assert not home.parent.exists()
     assert (profile / "auth.json").exists()
     assert (unrelated / "large").stat().st_size == 1024 * 1024
+
+
+def test_launch_stages_the_render_stamp_the_launch_check_reads(store, server, root, tmp_path):
+    profile = Path(server.codex_home)
+    stamp = {"render": {"chain": ["anton-base", "package:engineer"], "overlays": ["frontend"]}}
+    (profile / launch_check.STAMP).write_text(json.dumps(stamp))
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, Clock(), root))
+    home = Path(server.spawns[0]["env"]["CODEX_HOME"])
+
+    assert json.loads((home / launch_check.STAMP).read_text()) == stamp
+    assert launch_check.chain(home) == ["anton-base", "package:engineer"]
+    assert profile_chain.rendered_overlays(home) == ["frontend"]
+    supervisor.stop(started.process)
+    supervisor.finish(store, SLUG, started, 5000)
 
 
 def test_launch_ignores_a_full_user_runtime_disk(store, server, root, tmp_path, monkeypatch):

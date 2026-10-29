@@ -50,7 +50,7 @@ def test_github_reads_paginate_metadata_and_preserve_zip_bytes(binary):
     assert value == (payload if binary else [{"jobs": []}, {"jobs": [{"name": "last"}]}])
     command = ["gh", "api", "repos/org/repo/actions"]
     if not binary:
-        command += ["--paginate", "--slurp"]
+        command += ["--paginate", "--slurp", "--include"]
     run.assert_called_once_with(command, check=True, capture_output=True, timeout=60, text=False)
 
 
@@ -58,7 +58,7 @@ def test_metadata_is_decoded_and_paginated_when_binary_is_omitted():
     result = subprocess.CompletedProcess([], 0, stdout=b'[{"artifacts": []}]')
     with patch.object(ci_gate_shards.subprocess, "run", return_value=result) as run:
         assert ci_gate_shards.api("repos/org/repo/actions") == [{"artifacts": []}]
-    assert run.call_args.args[0] == ["gh", "api", "repos/org/repo/actions", "--paginate", "--slurp"]
+    assert run.call_args.args[0] == ["gh", "api", "repos/org/repo/actions", "--paginate", "--slurp", "--include"]
 
 
 @pytest.mark.parametrize(
@@ -181,3 +181,30 @@ def test_wait_polls_only_the_jobs_page_until_every_shard_passes():
         ("repos/org/repo/actions/runs/123/attempts/2/jobs?per_page=100",)
     ] * 2
     sleep.assert_called_once_with(15)
+
+
+@pytest.mark.parametrize("name", ["unit (3.12, 1)", "unit rerun (3.12, 1)"])
+def test_runner_queue_wait_never_counts_against_the_watch_deadline(name):
+    queued = {"name": name, "status": "queued", "conclusion": None}
+    passed = {**queued, "status": "completed", "conclusion": "success"}
+    with (
+        patch.object(ci_gate_shards, "api", side_effect=[[{"jobs": [queued]}], [{"jobs": [passed]}]]),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1300, 1300]),
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
+    ):
+        ci_gate_shards.watch("org/repo", "123", "2", [1])
+    sleep.assert_called_once_with(15)
+    assert ci_gate_shards.rate_limit.deadline == 2500
+
+
+@pytest.mark.parametrize("name", ["lint", "unit (3.12, 2)", "unit rerun (3.12, 2)", "unit (3.11, 1)"])
+def test_a_queued_job_outside_the_plan_never_extends_the_watch_deadline(name):
+    queued = {"name": name, "status": "queued", "conclusion": None}
+    with (
+        patch.object(ci_gate_shards, "api", return_value=[{"jobs": [queued]}]),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1200]),
+        patch.object(ci_gate_shards.time, "sleep"),
+        pytest.raises(RuntimeError, match="timed out"),
+    ):
+        ci_gate_shards.watch("org/repo", "123", "2", [1])
+    assert ci_gate_shards.rate_limit.deadline == 1200

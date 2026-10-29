@@ -34,6 +34,8 @@ def complete():
         "stage-budget",
         "reuse",
     ]
+    if "install-smoke" in ci_gate_queue.SKIPPED:
+        skipped.append("install-smoke")
     return [
         {"id": index, "name": name, "status": "completed", "conclusion": result}
         for index, (name, result) in enumerate(
@@ -45,11 +47,12 @@ def complete():
 def test_complete_queue_waits_for_the_shard_judge_and_every_inventory_row():
     jobs = complete()
     assert ci_gate_queue.verify(jobs, [2, 7])
-    for index in range(len(jobs)):
-        assert ci_gate_queue.verify(jobs[:index] + jobs[index + 1 :], [2, 7]) is False
+    for index, job in enumerate(jobs):
+        expected = job["name"] in ci_gate_queue.SKIPPED
+        assert ci_gate_queue.verify(jobs[:index] + jobs[index + 1 :], [2, 7]) is expected
         pending = copy.deepcopy(jobs)
         pending[index].update(status="in_progress", conclusion=None)
-        assert ci_gate_queue.verify(pending, [2, 7]) is False
+        assert ci_gate_queue.verify(pending, [2, 7]) is expected
 
 
 @pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out", "neutral", "skipped", None])
@@ -63,12 +66,11 @@ def test_a_failed_or_skipped_required_job_never_passes(name, conclusion):
 
 
 @pytest.mark.parametrize("name", ["lint", "reuse", "sonar", "unit-selected", "mutation", "helm-kind"])
-def test_an_unexpected_running_promotion_or_pull_request_gate_never_passes(name):
+@pytest.mark.parametrize("conclusion", ["success", "failure", "cancelled", "timed_out"])
+def test_a_promotion_or_pull_request_gate_result_never_decides_the_queue(name, conclusion):
     jobs = complete()
-    next(job for job in jobs if job["name"] == name)["conclusion"] = "success"
-    with pytest.raises(ValueError) as failure:
-        ci_gate_queue.verify(jobs, [2, 7])
-    assert name in str(failure.value)
+    next(job for job in jobs if job["name"] == name)["conclusion"] = conclusion
+    assert ci_gate_queue.verify(jobs, [2, 7])
 
 
 @pytest.mark.parametrize("name", ["select", "unit (3.12, 2)", "shard-check (3.12)"])
@@ -104,8 +106,9 @@ def test_recovery_requires_the_matching_successful_rerun_and_confirmed_loss(orig
             ci_gate_queue.verify(jobs + [dict(rerun, conclusion=result)], [2, 7], lost=lambda job: True)
 
 
-def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes():
-    watcher = ci_gate_queue.watcher("runner")
+@pytest.mark.parametrize("deferred", [False, True])
+def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(deferred):
+    watcher = ci_gate_queue.watcher("runner", deferred=deferred)
     workflow = {
         "test.yml": {
             "jobs": {
@@ -146,6 +149,8 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
             }
         }
     }
+    if "install-smoke" in ci_gate_queue.SKIPPED:
+        workflow["test.yml"]["jobs"]["gate-required"]["needs"].append("install-smoke")
     normalized = ci_gate_queue.normalize(workflow)
     assert normalized["test.yml"]["jobs"]["gate-required"]["name"] == "Gate — Required"
     assert normalized["test.yml"]["jobs"]["queue-fail-fast"]["name"] == "queue-fail-fast"
@@ -159,16 +164,23 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
     changed["test.yml"]["jobs"]["gate-required"]["name"] = "other"
     with pytest.raises(ValueError):
         ci_gate_queue.normalize(changed)
+    announced = copy.deepcopy(workflow)
+    announced["test.yml"]["jobs"]["gate-required"]["needs"].append("install-smoke")
+    ci_gate_queue.normalize(announced)
+    announced["test.yml"]["jobs"]["gate-required"]["needs"].append("unannounced")
+    with pytest.raises(ValueError):
+        ci_gate_queue.normalize(announced)
 
 
-def test_the_early_watcher_binds_the_plan_and_uses_protected_code_and_app_quota():
-    job = ci_gate_queue.watcher("runner")
+@pytest.mark.parametrize("deferred", [False, True])
+def test_the_early_watcher_binds_the_plan_and_uses_protected_code_and_app_quota(deferred):
+    job = ci_gate_queue.watcher("runner", deferred=deferred)
     assert job["name"] == "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
     assert (
         ci_gate_queue.SUMMARY_NAME
         == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
     )
-    assert job["needs"] == ["split", "select", "reuse", "admission"]
+    assert job["needs"] == ["split", "select", "reuse", "admission"] + (["shard-check"] if deferred else [])
     assert job["runs-on"] == "runner"
     assert job["timeout-minutes"] == 60
     assert job["outputs"] == {"failed": "${{ steps.watch.outputs.failed }}"}
@@ -321,7 +333,7 @@ def test_missing_jobs_timeout_and_an_api_failure_never_claims_success(monkeypatc
         ci_gate_queue, "api", lambda endpoint: [[{"ref": "refs/queue", "object": {"sha": "head"}}]], raising=False
     )
     monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint, size: [], raising=False)
-    clock = iter([0, 0, 1200])
+    clock = iter([0, 0, ci_gate_queue.DEADLINE_SECONDS])
     monkeypatch.setattr(ci_gate_queue.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(ci_gate_queue.time, "sleep", lambda seconds: None)
     with pytest.raises(TimeoutError, match=re.compile("expected job", re.I)):
@@ -332,6 +344,33 @@ def test_missing_jobs_timeout_and_an_api_failure_never_claims_success(monkeypatc
     )
     with pytest.raises(RuntimeError, match="API unavailable"):
         ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")
+
+
+def test_shards_still_waiting_for_runners_at_twenty_minutes_keep_the_group_alive(monkeypatch):
+    monkeypatch.setattr(
+        ci_gate_queue, "api", lambda endpoint: [[{"ref": "refs/queue", "object": {"sha": "head"}}]], raising=False
+    )
+    polls = iter([[], complete()])
+    monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint, size: next(polls), raising=False)
+    clock = iter([0, 0, 1200])
+    monkeypatch.setattr(ci_gate_queue.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(ci_gate_queue.time, "sleep", lambda seconds: None)
+    ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")
+
+
+def test_the_verifier_deadline_ends_inside_the_queue_check_timeout():
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    ruleset = json.loads((root / ".github" / "rulesets" / "dev-no-delete.json").read_text())
+    queue = next(rule for rule in ruleset["rules"] if rule["type"] == "merge_queue")["parameters"]
+    jobs = yaml.safe_load((root / ".github" / "workflows" / "test.yml").read_text())["jobs"]
+    assert ci_gate_queue.DEADLINE_SECONDS < queue["check_response_timeout_minutes"] * 60
+    assert ci_gate_queue.DEADLINE_SECONDS < jobs["queue-fail-fast"]["timeout-minutes"] * 60
+    shard_check = int(re.search(r"merge_group' && (\d+)", jobs["shard-check"]["timeout-minutes"])[1]) * 60
+    assert ci_gate_queue.DEADLINE_SECONDS < shard_check < queue["check_response_timeout_minutes"] * 60
 
 
 def test_the_early_gate_rejects_a_changed_graded_job_inventory():

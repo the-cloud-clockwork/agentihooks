@@ -10,8 +10,8 @@ from itertools import groupby
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
 OUTCOMES = ("done", "blocked")
 UNADDRESSED = (
-    "chat is the operator's conversation: send it to the operator or answer his line, "
-    "and talk to agents through the inbox"
+    "chat is reply only: the front door master answers an operator line by its id and never writes first; "
+    'every other word goes by inbox with agentihooks msg send master@<slug> "<text>"'
 )
 RULES = (
     ("clock time", re.compile(r"\b\d{1,2}:[\dx]{2}(?::\d{2})?(?:\.\d+)?\s?(?:Z|UTC)?\b", re.I)),
@@ -143,8 +143,6 @@ def refused(text, kind, where, ctx):
 
 
 def addressed(thread, op):
-    if op.get("to") == "operator":
-        return True
     return any(e["id"] == op.get("reply_to") and e.get("by") == "operator" and not e.get("deleted") for e in thread)
 
 

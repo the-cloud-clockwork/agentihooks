@@ -1,0 +1,6 @@
+{
+  "hooks/observability/consultation.py:hooks.observability.consultation.x\u01c1Metrics\u01c1report__mutmut_30:2f0b66b3c7ce376ecb6af4cfac52fff69c309c96c8709e5e42f18116819aa1a7": {
+    "reader": "Standards",
+    "reason": "Review validation permits only false_block on a denial and requires every false_block to target a denial. The two predicates identify the same authorized persisted reviews."
+  }
+}

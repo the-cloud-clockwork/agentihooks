@@ -164,7 +164,7 @@ class OnePush:
         )
 
     def pushing(self, who, where, args):
-        task = next((t for t in self.ledger().tasks(who.swarm) if t.get("id") == who.task), {})
+        task = self.ledger().task(who.swarm, who.task) or {}
         found = PULL_REPO.search(str(task.get("pr_url")))
         if not found or (
             "$" not in str(where) and git(where, "rev-parse", "--is-inside-work-tree").stdout.strip() != "true"

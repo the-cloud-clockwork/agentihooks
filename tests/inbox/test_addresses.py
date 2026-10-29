@@ -54,7 +54,8 @@ def test_real_names_seats_operator_and_session_ids_still_accept_messages(inbox, 
     monkeypatch.setattr(addresses, "get_active_sessions", lambda **kwargs: {"session-bob": {"name": "bob"}})
     assert cli.main(["send", address, "hello"]) == 0
     result = json.loads(capsys.readouterr().out)
-    assert result["to"] == ("master@123456-0001" if address == "old-master" else address)
+    routed = {"old-master": "master@123456-0001", "operator": "master@crew"}
+    assert result["to"] == routed.get(address, address)
     assert inbox.get(result["id"]).state == "pending"
 
 

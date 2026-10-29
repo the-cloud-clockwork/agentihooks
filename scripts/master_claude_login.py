@@ -13,6 +13,7 @@ from pathlib import Path
 from hooks import config as hooks_config
 from hooks.context.account_sessions import API_MARKER, INTERACTIVE_PREFIX, TOKEN_PREFIX
 from scripts import aicode_tokens, openbao_kv
+from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import binding
 from scripts.routing import master_account
 from scripts.routing.settings import SettingsStore, open_store
@@ -229,21 +230,31 @@ def build(rendered: Path, report: str | None = None) -> Path:
     return target
 
 
-def _rebuild(folder: Path, rendered: Path) -> Path:
+def _rebuild(folder: Path, rendered: Path, linked: tuple[str, ...] = (), config: Path | None = None) -> Path:
     target, staging = folder / "claude", folder / "staging"
     kept = _private(target)
     grant = kept.read_bytes() if kept else None
     account = _read(target / CONFIG).get(ACCOUNT)
     shutil.rmtree(staging, ignore_errors=True)
     shutil.copytree(
-        rendered, staging, symlinks=True, ignore=lambda found, _: [CREDENTIALS] if Path(found) == rendered else []
+        rendered,
+        staging,
+        symlinks=True,
+        ignore=lambda found, _: [CREDENTIALS, *linked] if Path(found) == rendered else [],
     )
     staging.chmod(PRIVATE_DIR)
+    for name in linked:
+        shared = (rendered / name).resolve()
+        shared.mkdir(parents=True, exist_ok=True)
+        (staging / name).symlink_to(shared)
+        copied = target / name
+        if copied.is_dir() and not copied.is_symlink():
+            shutil.copytree(copied, shared, ignore=_links, dirs_exist_ok=True, copy_function=_copy_newer)
     if grant is not None:
         (staging / CREDENTIALS).write_bytes(grant)
         (staging / CREDENTIALS).chmod(PRIVATE_FILE)
-    config = {key: value for key, value in _read(staging / CONFIG).items() if key != ACCOUNT}
-    _write(staging / CONFIG, {**config, **({ACCOUNT: account} if account else {})})
+    kept_config = {key: value for key, value in _read(config or staging / CONFIG).items() if key != ACCOUNT}
+    _write(staging / CONFIG, {**kept_config, **({ACCOUNT: account} if account else {})})
     evidence = _read(staging / binding.FILE)
     (staging / binding.FILE).write_text(json.dumps({**evidence, "home": str(target.resolve())}) + "\n")
     for name in MANIFESTS:
@@ -252,6 +263,16 @@ def _rebuild(folder: Path, rendered: Path) -> Path:
     shutil.rmtree(target, ignore_errors=True)
     staging.rename(target)
     return target
+
+
+def _copy_newer(source: str, destination: str) -> None:
+    found = Path(destination)
+    if not found.exists() or Path(source).stat().st_mtime > found.stat().st_mtime:
+        shutil.copy2(source, destination)
+
+
+def _links(folder: str, names: list[str]) -> list[str]:
+    return [name for name in names if (Path(folder) / name).is_symlink()]
 
 
 def _adopt() -> None:
@@ -389,20 +410,23 @@ def recover(target: Path, environ: Mapping[str, str]) -> bool:
     return number is not None and restore(stored(openbao_kv.from_env(environ), number), target, force=True)
 
 
-def checked(target: Path, environ: Mapping[str, str], found: str) -> bool:
+def _usable(target: Path, environ: Mapping[str, str], found: str) -> bool:
     from scripts.routing import native_login
 
     try:
         native_login.check(child(environ, target), found)
     except native_login.LoginError:
-        with _locked(target.parent) as folder:
-            if len(holders(folder)) < 2 and not recover(target, environ):
-                return False
-        try:
-            native_login.check(child(environ, target), found)
-        except native_login.LoginError:
+        return False
+    return not native_login.rejected(child(environ, target), found)
+
+
+def checked(target: Path, environ: Mapping[str, str], found: str) -> bool:
+    if _usable(target, environ, found):
+        return True
+    with _locked(target.parent) as folder:
+        if len(holders(folder)) < 2 and not recover(target, environ):
             return False
-    return True
+    return _usable(target, environ, found)
 
 
 def stored(bao: openbao_kv.OpenBao | None, number: int | None = None) -> dict[str, str]:
@@ -450,6 +474,7 @@ def _preferred() -> dict[str, int]:
 
 def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str, str]]:
     from scripts import master_logins
+    from scripts.routing import reservation
 
     offered = _offered(bao)
     if not offered:
@@ -466,6 +491,7 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
         ranks = _preferred()
         order.sort(
             key=lambda number: (
+                master_logins.usage(named[number], now)[1] >= reservation.MASTER_LEAVES,
                 ranks.get(named[number], len(ranks)),
                 -master_logins.left(named[number], now),
                 number != slot(),
@@ -484,7 +510,7 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
 
 
 def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
-    rendered = Path(environ["CLAUDE_CONFIG_DIR"])
+    rendered = claude_home(environ)
     refused = refusal(rendered, cwd)
     if refused:
         raise LoginRefused(refused)
@@ -495,7 +521,7 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
         target = home(number)
         shared = any(owner != name for owner in holders(folder)) and (target / binding.FILE).is_file()
         if not shared:
-            target = _rebuild(folder, rendered)
+            target = _rebuild(folder, rendered, config=claude_json(environ))
         if environ.get(binding.REPORT):
             binding.rehome(Path(environ[binding.REPORT]), target, shared=shared)
         if not shared:
@@ -511,7 +537,7 @@ def browser_home(environ: Mapping[str, str]) -> Path:
             if _private(home(number)) or holders(folder):
                 continue
             _claim(folder, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), _alive, 0, True)
-            return _rebuild(folder, Path(environ["CLAUDE_CONFIG_DIR"]))
+            return _rebuild(folder, claude_home(environ), config=claude_json(environ))
     raise LoginRefused(FULL.format(cap=MAX_SLOTS))
 
 
@@ -600,7 +626,7 @@ def _token_folder(environ: Mapping[str, str]) -> Path:
 def token_home(environ: Mapping[str, str]) -> Path:
     folder = _token_folder(environ)
     with _locked(folder):
-        target = _rebuild(folder, Path(environ["CLAUDE_CONFIG_DIR"]))
+        target = _rebuild(folder, claude_home(environ), config=claude_json(environ))
         (target / CREDENTIALS).unlink(missing_ok=True)
         path = target / "settings.json"
         settings = _read(path)
@@ -642,12 +668,14 @@ def _token_lock(environ: Mapping[str, str]):
 def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from hooks.context.account_sessions import sessions_by_account
     from scripts import master_login_chain as chain
-    from scripts.claude_quota_balancer import API_ACCOUNT, launch_environment, select_credential
+    from scripts.claude_quota_balancer import API_ACCOUNT, launch_environment, select_master_credential
     from scripts.hive.account_slots import execute
     from scripts.install import _claude_command, _write_route_report
 
     with _token_lock(environ):
-        decision = select_credential(environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,))
+        decision = select_master_credential(
+            environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,)
+        )
         target = token_home(environ)
         child_env = {**launch_environment(decision, environ), **dict.fromkeys(SELECTORS, str(target))}
         chain.notification(target, "token", "routed")

@@ -13,6 +13,69 @@ AT = 1_792_850_000_000
 WATCHDOG = "master-watchdog"
 
 
+def test_configured_watchdog_receives_tick_and_done_reports(env, monkeypatch):  # noqa: F811
+    from scripts.swarm import cli
+    from scripts.swarm.store import RedisStore
+
+    store, ledger, runtime = env
+    run("sw", "create", "--repo", "/repo")
+    assert run("sw", "set", "watchdog-address=watchdog-session") == 0
+    assert RedisStore(store.redis).config("sw").watchdog_address == "watchdog-session"
+    monkeypatch.setenv(doc_report.ADDRESS_ENV, "wrong-address")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    ledger.rows["t1"]["doc_items"] = ["1 First item"]
+    assert run("sw", "done", "--pr", PR) == 0
+    inbox = InboxStore(store.redis)
+    assert len(inbox.inbox("watchdog-session")) == 1
+    ledger.rows["t2"].update(state="done", pr_url=PR, doc_items=["2 Second item"])
+    cli.run_tick(store, "sw", ledger=ledger, runtime=runtime)
+    assert {item.task for item in inbox.inbox("watchdog-session")} == {"t1", "t2"}
+    assert not inbox.inbox("wrong-address")
+
+
+def test_report_without_a_recipient_uses_the_legacy_watchdog(world):
+    inbox, ledger = world
+    assert doc_report.report(inbox, ledger, SLUG, task("t1"), AT)
+    [item] = inbox.inbox(WATCHDOG)
+    assert item.task == "t1"
+
+
+def test_report_pass_sends_directly_to_the_configured_watchdog(world, monkeypatch):
+    inbox, ledger = world
+    monkeypatch.setenv(doc_report.ADDRESS_ENV, "wrong-address")
+    actions = doc_report.report_pass(inbox, ledger, SLUG, [task("t1")], AT, "configured-watchdog")
+    assert len(actions) == 1
+    [item] = inbox.inbox("configured-watchdog")
+    assert item.task == "t1" and not inbox.inbox("wrong-address")
+    inbox.reply(item.id, "configured-watchdog", "Consumed report")
+    doc_report.report_pass(inbox, ledger, SLUG, [task("t1")], AT + 60_000, "configured-watchdog")
+    assert task("t1")["watchdog"]["ack"] == "Consumed report"
+
+
+def test_swarm_config_reads_persisted_watchdog_and_legacy_default():
+    from unittest.mock import Mock
+
+    from scripts.swarm.store import RedisStore
+
+    redis = Mock()
+    raw = {"slug": "sw", "repo": "/repo", "max_eng": "1", "max_ci": "1", "state": "paused"}
+    redis.hgetall.return_value = raw
+    store = RedisStore(redis)
+    assert store.config("sw").watchdog_address == ""
+    raw["watchdog_address"] = "configured-watchdog"
+    assert store.config("sw").watchdog_address == "configured-watchdog"
+    redis.hgetall.assert_called_with(store.key("sw", "config"))
+
+
+def test_configured_address_precedes_environment_with_legacy_fallback(monkeypatch):
+    monkeypatch.setenv(doc_report.ADDRESS_ENV, "environment-watchdog")
+    assert doc_report.address("configured-watchdog") == "configured-watchdog"
+    assert doc_report.address("") == "environment-watchdog"
+    monkeypatch.delenv(doc_report.ADDRESS_ENV)
+    assert doc_report.address("") == WATCHDOG
+
+
 @pytest.fixture
 def world(monkeypatch, tmp_path):
     import fakeredis

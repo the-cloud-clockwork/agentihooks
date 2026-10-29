@@ -54,11 +54,15 @@ def run(current: Callable[[], T | None], browser: Callable[[], str], token: Call
     return token()
 
 
-def notification(target: Path, step: str, outcome: str, transport: str = "none", agent: str = "") -> None:
+def notification(
+    target: Path, step: str, outcome: str, transport: str = "none", agent: str = "", reason: str = ""
+) -> None:
     path = target.parent / "login-notifications.jsonl"
     record = {"step": step, "outcome": outcome, "transport": transport}
     if agent:
         record["agent"] = agent
+    if reason:
+        record["reason"] = reason
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
         stream.write(json.dumps(record) + "\n")
@@ -83,7 +87,9 @@ def alert(environ: Mapping[str, str], target: Path, outcome: str, repo: str) -> 
         f"the current claude.ai session failed and the browser authorization ended in {outcome}."
     )
     refused = operator_email.send("Master login fell back to token routing", text, environ, repo)
-    if not refused:
+    if refused:
+        notification(target, "token", outcome, "refused", agent, refused)
+    else:
         notification(target, "token", outcome, "email", agent)
     return refused
 

@@ -47,13 +47,20 @@ def _rearms_hung_test_dump(fixture: ast.FunctionDef) -> bool:
     )
 
 
-def _slowest_committed_test(skip_rearmed: bool = True) -> float:
+def _slowest_committed_test(skip_rearmed: bool = True, skip_own_timeout: bool = False) -> float:
     rearmed = {
         path.relative_to(_ROOT).as_posix()
         for path in (_ROOT / "tests").rglob("test_*.py")
         if skip_rearmed
         and any(
             isinstance(node, ast.FunctionDef) and _rearms_hung_test_dump(node)
+            for node in ast.parse(path.read_text()).body
+        )
+        or skip_own_timeout
+        and any(
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "pytestmark" for target in node.targets)
+            and any(isinstance(call, ast.Attribute) and call.attr == "timeout" for call in ast.walk(node.value))
             for node in ast.parse(path.read_text()).body
         )
     }
@@ -163,6 +170,47 @@ def test_tests_workflow_cache_restores_bound_download_timeout():
         assert step.get("env", {}).get("SEGMENT_DOWNLOAD_TIMEOUT_MINS") == "1", step.get("name", step["with"]["path"])
 
 
+def test_every_delivery_upload_uses_the_bounded_retry_action():
+    action = yaml.safe_load((_ROOT / ".github/actions/retry-upload/action.yml").read_text())
+    default = int(action["inputs"]["attempt-seconds"]["default"])
+    assert 0 < default <= 120
+    pending = []
+    for path in (_ROOT / ".github/workflows").glob("*.y*ml"):
+        workflow = yaml.safe_load(path.read_text())
+        triggers = workflow.get("on", workflow.get(True, {}))
+        push = triggers.get("push") or {}
+        dev_push = (
+            "push" in triggers
+            and any(Path("dev").match(pattern) for pattern in push.get("branches", ["dev"]))
+            and not any(Path("dev").match(pattern) for pattern in push.get("branches-ignore", []))
+        )
+        if any(event in triggers for event in ("pull_request", "pull_request_target", "merge_group")) or dev_push:
+            pending.append(path)
+    seen = set()
+    plain = []
+    uploads = []
+    while pending:
+        path = pending.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        workflow = yaml.safe_load(path.read_text())
+        for name, job in workflow["jobs"].items():
+            uses = job.get("uses", "")
+            if uses.startswith("./.github/workflows/"):
+                pending.append(_ROOT / uses)
+            for step in job.get("steps", []):
+                uses = step.get("uses", "")
+                if uses.lower().startswith("actions/upload-artifact@"):
+                    plain.append((path.name, name, step.get("name")))
+                if uses.endswith("/.github/actions/retry-upload"):
+                    uploads.append(step)
+    assert not plain, plain
+    assert uploads
+    for step in uploads:
+        assert 0 < int(step.get("with", {}).get("attempt-seconds", default)) <= 120
+
+
 def test_nats_server_download_retries_fit_inside_every_step_timeout():
     action = yaml.safe_load((_ROOT / ".github/actions/nats-server/action.yml").read_text())
     lines = [line for step in action["runs"]["steps"] for line in step.get("run", "").splitlines()]
@@ -192,6 +240,47 @@ def _nats_server_steps() -> dict[str, dict]:
     return {step["name"]: step for step in action["runs"]["steps"]}
 
 
+@pytest.mark.parametrize("version", ["matching", "different", "broken", "missing"])
+def test_nats_server_reuses_only_the_exact_runner_version(tmp_path, version):
+    step = _nats_server_steps()["Resolve the pinned nats server"]
+    commands = tmp_path / "bin"
+    commands.mkdir()
+    (commands / "uname").symlink_to("/usr/bin/uname")
+    if version != "missing":
+        binary = commands / "nats-server"
+        expected = step["env"]["NATS_SERVER_RELEASE"] if version in {"matching", "broken"} else "v0.0.0"
+        binary.write_text(f"#!/bin/bash\necho 'nats-server: {expected}'\nexit {1 if version == 'broken' else 0}\n")
+        binary.chmod(0o755)
+    output = tmp_path / "output"
+    required = tmp_path / "env"
+    subprocess.run(
+        ["/bin/bash", "-euo", "pipefail", "-c", step["run"]],
+        env={
+            **step["env"],
+            "PATH": str(commands),
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_ENV": str(required),
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert values.get("installed", "false") == ("true" if version == "matching" else "false")
+    assert required.read_text() == "NATS_SERVER_REQUIRED=1\n" if version == "matching" else not required.exists()
+
+
+def test_nats_server_skips_archive_work_when_the_runner_version_matches():
+    steps = _nats_server_steps()
+    for name in (
+        "Restore the pinned nats server archive",
+        "Install the pinned nats server",
+        "Save the pinned nats server archive",
+    ):
+        assert "steps.pin.outputs.installed != 'true'" in steps[name]["if"]
+
+
 def test_nats_server_archive_is_cached_on_its_pinned_release_and_checksum():
     steps = _nats_server_steps()
     names = list(steps)
@@ -207,7 +296,10 @@ def test_nats_server_archive_is_cached_on_its_pinned_release_and_checksum():
     }
     assert install["env"]["CACHE_HIT"] == "${{ steps.cache.outputs.cache-hit }}"
     assert save["uses"] == "actions/cache/save@v4"
-    assert save["if"] == "steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'"
+    assert (
+        save["if"]
+        == "steps.pin.outputs.installed != 'true' && steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'"
+    )
     assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.cache.outputs.cache-primary-key }}"}
 
 
@@ -285,9 +377,9 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     assert install["env"] == {"PYTHON_PATH": "${{ steps.python.outputs.python-path }}"}
     assert install["run"].strip().splitlines() == [
         'uv venv --python "$PYTHON_PATH" "$HOME/venv"',
-        'uv pip install --offline --no-index --find-links /opt/wheelhouse --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
+        'uv pip install --offline --no-index --find-links /opt/wheelhouse --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
         'echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"',
-        'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
+        'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
     ]
 
 
@@ -299,6 +391,7 @@ def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
     assert "${{ runner.os }}" in key
     assert f"${{{{ steps.{python['id']}.outputs.python-version }}}}" in key
     assert "${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}" in key
+    assert "${{ hashFiles('.github/test-requirements.lock') }}" in key
     _, day = _unit_step_index(lambda s: s.get("id") == "day")
     assert day["run"] == 'echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"'
     assert "${{ steps.day.outputs.date }}" in key
@@ -390,7 +483,11 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
 
 def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs():
     workflow = _workflow()
-    assert (_ROOT / ".github/test-constraints.txt").read_text().strip() == "playwright==1.63.0"
+    assert (_ROOT / ".github/test-constraints.txt").read_text().splitlines() == [
+        "playwright==1.63.0",
+        "pytest<9.2",
+        "--constraint test-requirements.lock",
+    ]
     for job in ("test-count", "split", "unit"):
         assert workflow["jobs"][job]["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
         cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
@@ -501,7 +598,9 @@ def test_a_hung_unit_test_dumps_every_thread_stack_within_a_minute():
     slowest_test = _slowest_committed_test()
     timeout = int(re.search(r"-o faulthandler_timeout=(\d+)", command).group(1))
     assert slowest_test < timeout <= 60
-    assert _slowest_committed_test(skip_rearmed=False) < int(re.search(r"--timeout=(\d+)", command).group(1))
+    assert _slowest_committed_test(skip_rearmed=False, skip_own_timeout=True) < int(
+        re.search(r"--timeout=(\d+)", command).group(1)
+    )
     assert "no:faulthandler" not in command
     assert "faulthandler_exit_on_timeout" not in command
 
@@ -538,6 +637,25 @@ def test_the_hung_test_bound_skips_a_file_that_rearms_its_own_dump(tmp_path, mon
     assert _slowest_committed_test() == 1.0
     (tmp_path / "tests/test_slow.py").write_text("def test_slow():\n    pass\n")
     assert _slowest_committed_test() == 90.0
+
+
+def test_the_timeout_bound_skips_only_a_file_that_sets_its_own_timeout(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_a.py").write_text("def test_a():\n    pass\n")
+    (tmp_path / "tests/test_slow.py").write_text("pytestmark = pytest.mark.timeout(250)\n")
+    durations = {"tests/test_a.py::test_a": 1.0, "tests/test_slow.py::test_slow": 90.0}
+    for name in (".test_durations", ".test_durations-3.12"):
+        (tmp_path / name).write_text(json.dumps(durations))
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "d"], check=True
+    )
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    assert _slowest_committed_test(skip_rearmed=False, skip_own_timeout=True) == 1.0
+    assert _slowest_committed_test(skip_rearmed=False) == 90.0
+    (tmp_path / "tests/test_slow.py").write_text("@pytest.mark.timeout(250)\ndef test_other():\n    pass\n")
+    assert _slowest_committed_test(skip_rearmed=False, skip_own_timeout=True) == 90.0
 
 
 def test_tests_keep_dev_pull_request_and_integration_triggers():
@@ -699,7 +817,7 @@ def test_equivalence_plants_each_fault_in_a_file_that_exists():
 def test_equivalence_grades_with_the_base_copy():
     steps = _equivalence_steps()
     [base] = [step for step in steps if step.get("with", {}).get("path") == "base"]
-    assert base["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    assert base["with"]["ref"] == "${{ steps.comparison-base.outputs.sha }}"
     [pick] = [step for step in steps if step.get("name") == "Pick the protected grader"]
     assert pick["run"].startswith("if [[ -f base/tests/swarm_ledger/equivalence.sh ]]; then\n")
     assert pick["run"].index('"GRADER=$PWD/base"') < pick["run"].index("else") < pick["run"].index('"GRADER=$PWD/head"')
@@ -716,6 +834,42 @@ def test_equivalence_grades_with_the_base_copy():
         assert step is pick or "GITHUB_ENV" not in run
     script = _EQUIVALENCE.read_text()
     assert 'replays=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)' in script and "head/tests" not in script
+
+
+def test_equivalence_compares_against_the_dev_parent_of_the_tested_merge(tmp_path):
+    steps = _equivalence_steps()
+    assert steps[0]["with"]["fetch-depth"] == 2
+    [selector] = [step for step in steps if step.get("id") == "comparison-base"]
+    head = tmp_path / "head"
+    head.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-c", "user.name=CI", "-c", "user.email=ci@example.invalid", "-c", "commit.gpgsign=false", *args],
+            cwd=head,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    git("init", "-q", "-b", "dev")
+    git("commit", "-q", "--allow-empty", "-m", "event base")
+    event_base = git("rev-parse", "HEAD")
+    git("switch", "-q", "-c", "pr")
+    git("commit", "-q", "--allow-empty", "-m", "pull request")
+    git("switch", "-q", "dev")
+    git("commit", "-q", "--allow-empty", "-m", "page change merged to dev later")
+    dev = git("rev-parse", "HEAD")
+    git("merge", "-q", "--no-ff", "pr", "-m", "tested merge")
+    output = tmp_path / "output"
+    subprocess.run(
+        ["bash", "-e", "-c", selector["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "GITHUB_OUTPUT": str(output)},
+        check=True,
+    )
+    assert output.read_text() == f"sha={dev}\n"
+    assert dev != event_base
 
 
 def _equivalence_steps() -> list[dict]:
@@ -736,6 +890,25 @@ def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
     [head] = [step for step in job["steps"] if step.get("with", {}).get("path") == "head"]
     assert "ref" not in head["with"]
     assert "paths" not in workflow[True]["pull_request"]
+
+
+def test_mutation_gate_plants_itself_whenever_its_code_changes():
+    steps = _workflow()["jobs"]["lint"]["steps"]
+    [changed] = [step for step in steps if step.get("id") == "self-plant"]
+    assert changed["if"] == "${{ !cancelled() && github.event_name == 'pull_request' }}"
+    listed = changed["run"].split("for path in ", 1)[1].split("; do", 1)[0].replace("\\\n", " ").split()
+    assert {"scripts/ci_mutation", "tests/mutation_self_plant", "hooks/context/conditions.py", "pyproject.toml"} <= set(
+        listed
+    )
+    assert '! diff -rq "$RUNNER_TEMP/base/$path" "$path"' in changed["run"]
+    [grade] = [step for step in steps if "self-plant-$mode" in step.get("run", "")]
+    assert grade["run"].startswith('grader="$RUNNER_TEMP/grader/tests/mutation_self_plant/plant.py"\n')
+    assert "for mode in kill survive; do" in grade["run"] and " &\n" in grade["run"]
+    assert 'exit "$failed"' in grade["run"]
+    later = steps[steps.index(changed) + 1 : steps.index(grade) + 1]
+    assert all("steps.self-plant.outputs.changed == 'true'" in step["if"] for step in later)
+    names = [step.get("name") for step in steps]
+    assert names.index("Check out the protected grader") < names.index(changed["name"])
 
 
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
@@ -986,7 +1159,7 @@ def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports
         "tests.shard_check shard-reports/durations-*/durations.json --collected collected-data/collected.json" in check
     )
     assert "REUSED" in check
-    assert job["timeout-minutes"] == 25
+    assert job["timeout-minutes"] == "${{ github.event_name == 'merge_group' && 42 || 60 }}"
     assert job["permissions"] == {"contents": "read"}
 
 
@@ -995,7 +1168,10 @@ def test_queue_gate_is_the_early_verifier_and_the_standard_gate_summarizes_queue
     jobs = workflow["jobs"]
     summary = jobs["gate-required"]
     assert summary["name"] == ci_gate_queue.SUMMARY_NAME
-    assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(summary["runs-on"])
+    assert jobs["queue-fail-fast"] in (
+        ci_gate_queue.watcher(summary["runs-on"]),
+        ci_gate_queue.watcher(summary["runs-on"], deferred=True),
+    )
     normalized = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
     assert normalized["gate-required"]["name"] == "Gate — Required"
     assert normalized["queue-fail-fast"]["name"] == "queue-fail-fast"
@@ -1316,7 +1492,11 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
     upload_index, upload = _unit_step_index(lambda s: s.get("name") == "Upload durations")
     run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
     job = _workflow()["jobs"]["unit"]
-    between = job["steps"][run_index + 1 : upload_index]
+    between = [
+        step
+        for step in job["steps"][run_index + 1 : upload_index]
+        if not step["name"].endswith((", wait before attempt 2", ", attempt 2"))
+    ]
     assert [step["name"] for step in between] in (
         [],
         [
@@ -1389,6 +1569,10 @@ def test_unit_shards_upload_elapsed_time_after_failed_pytest():
 def test_selected_legs_record_elapsed_time_and_their_job_and_preserve_pytest_status(tmp_path, status):
     steps = _workflow()["jobs"]["unit-selected"]["steps"]
     step = next(item for item in steps if item.get("name") == "Run the selected tests")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "__init__.py").touch()
+    (scripts / "ci_cpu_quota.py").write_text("print(1)\n")
     (tmp_path / "pytest.py").write_text(
         f"def main(args):\n    open('durations.json', 'w').write('{{}}')\n    return {status}\n"
     )
@@ -1409,6 +1593,155 @@ def test_selected_legs_upload_elapsed_time_beside_their_durations():
     steps = _workflow()["jobs"]["unit-selected"]["steps"]
     upload = next(step for step in steps if step.get("name") == "Upload selected test durations")
     assert upload["with"]["path"].split() == ["durations.json", "elapsed.json"]
+
+
+def _selected_step(name: str) -> dict:
+    return next(step for step in _workflow()["jobs"]["unit-selected"]["steps"] if step.get("name") == name)
+
+
+def test_selected_legs_size_workers_by_the_container_cpu_quota():
+    run = _selected_step("Run the selected tests")["run"]
+    assert "workers=$(python -m scripts.ci_cpu_quota)" in run
+    assert '-n "$workers"' in run
+    assert "-n auto" not in run
+
+
+def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_only_for_the_grader():
+    steps = _workflow()["jobs"]["unit-selected"]["steps"]
+    checkouts = [step for step in steps if step.get("uses", "").startswith("actions/checkout")]
+    assert [checkout["with"] for checkout in checkouts] == [{"ref": "${{ github.sha }}", "fetch-depth": 1}]
+    fetch = _selected_step("Fetch the protected grader's dev head")
+    assert fetch["if"] == "steps.collection.outcome == 'success'"
+    names = [step.get("name") for step in steps]
+    assert (
+        names.index("Wait for the early collection")
+        < names.index(fetch["name"])
+        < names.index("Adopt the reused tests from the protected grader")
+    )
+
+
+def test_the_grader_fetch_gives_a_shallow_leg_the_dev_head(tmp_path):
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "protocol.file.allow=always"]
+    upstream = tmp_path / "upstream"
+    subprocess.run([*git, "init", "-q", "-b", "dev", str(upstream)], check=True)
+    for message in ("one", "two"):
+        subprocess.run([*git, "-C", str(upstream), "commit", "-q", "--allow-empty", "-m", message], check=True)
+    subprocess.run([*git, "-C", str(upstream), "branch", "head"], check=True)
+    leg = tmp_path / "leg"
+    url = upstream.as_uri()
+    subprocess.run(
+        [*git, "clone", "-q", "--depth=1", "--no-tags", "-b", "head", "--single-branch", url, str(leg)], check=True
+    )
+    run = _selected_step("Fetch the protected grader's dev head")["run"]
+    subprocess.run(["bash", "-e", "-c", run], cwd=leg, check=True, capture_output=True)
+    rev = ["git", "-C", str(leg), "rev-parse"]
+    dev = subprocess.run([*rev, "origin/dev"], check=True, capture_output=True, text=True).stdout
+    assert (
+        dev
+        == subprocess.run(
+            ["git", "-C", str(upstream), "rev-parse", "dev"], check=True, capture_output=True, text=True
+        ).stdout
+    )
+    assert (
+        subprocess.run([*rev, "--is-shallow-repository"], check=True, capture_output=True, text=True).stdout == "true\n"
+    )
+
+
+def test_selected_legs_download_the_nats_server_while_setup_runs_and_fall_back_to_the_action():
+    names = [step.get("name") for step in _workflow()["jobs"]["unit-selected"]["steps"]]
+    start = _selected_step("Start the pinned nats server download")
+    use = _selected_step("Use the pinned nats server download")
+    fallback = _selected_step("Install the pinned nats server for the bus backend tests")
+    assert names.index(start["name"]) == 1
+    assert names.index("Adopt latest dev durations") < names.index(use["name"]) < names.index(fallback["name"])
+    assert names.index(fallback["name"]) < names.index("Run the selected tests")
+    assert start["continue-on-error"] is True and use["continue-on-error"] is True
+    assert use["if"] == f"steps.{start['id']}.outcome == 'success'"
+    assert fallback["if"] == f"steps.{use['id']}.outcome != 'success'"
+    assert fallback["uses"] == "./.github/actions/nats-server"
+    assert fallback["timeout-minutes"] == 3
+    assert use["timeout-minutes"] == 3
+
+
+def _run_background_nats(tmp_path: Path, curl_works: bool) -> subprocess.CompletedProcess:
+    name = "nats-server-v0-linux-amd64"
+    binary = tmp_path / "src" / name / "nats-server"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\necho nats-server: v0\n")
+    binary.chmod(0o755)
+    good = tmp_path / "good.tar.gz"
+    with tarfile.open(good, "w:gz") as tar:
+        tar.add(binary.parent, arcname=name)
+    action = (_ROOT / ".github/actions/nats-server/action.yml").read_text()
+    action = re.sub(r"NATS_SERVER_RELEASE: v[0-9.]+", "NATS_SERVER_RELEASE: v0", action)
+    action = re.sub(
+        r"NATS_SERVER_SHA256_AMD64: [0-9a-f]{64}",
+        f"NATS_SERVER_SHA256_AMD64: {hashlib.sha256(good.read_bytes()).hexdigest()}",
+        action,
+    )
+    workspace = tmp_path / "workspace"
+    (workspace / ".github/actions/nats-server").mkdir(parents=True)
+    (workspace / ".github/actions/nats-server/action.yml").write_text(action)
+    stub = tmp_path / "bin" / "curl"
+    stub.parent.mkdir()
+    copy = 'while [[ $# -gt 0 ]]; do [[ "$1" == -o ]] && cp "$GOOD" "$2"; shift; done\n' if curl_works else "exit 22\n"
+    stub.write_text(f'#!/usr/bin/env bash\necho "$@" >> "$CURL_LOG"\n{copy}')
+    stub.chmod(0o755)
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    env = {
+        **os.environ,
+        "PATH": f"{stub.parent}:{os.environ['PATH']}",
+        "CURL_LOG": str(tmp_path / "curl.log"),
+        "GOOD": str(good),
+        "RUNNER_TEMP": str(runner),
+        "GITHUB_PATH": str(tmp_path / "path"),
+        "GITHUB_ENV": str(tmp_path / "env"),
+    }
+    for step in ("Start the pinned nats server download", "Use the pinned nats server download"):
+        result = subprocess.run(
+            ["bash", "-e", "-c", _selected_step(step)["run"]], cwd=workspace, env=env, capture_output=True, text=True
+        )
+        if result.returncode:
+            return result
+    return result
+
+
+def test_the_background_nats_download_puts_the_verified_pinned_server_on_the_path(tmp_path):
+    result = _run_background_nats(tmp_path, curl_works=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    server = tmp_path / "runner/nats-bg/nats-server"
+    assert (
+        subprocess.run([str(server), "--version"], check=True, capture_output=True, text=True).stdout
+        == "nats-server: v0\n"
+    )
+    assert (tmp_path / "path").read_text() == f"{server.parent}\n"
+    assert (tmp_path / "env").read_text() == "NATS_SERVER_REQUIRED=1\n"
+    assert "releases/download/v0/nats-server-v0-linux-amd64.tar.gz" in (tmp_path / "curl.log").read_text()
+
+
+def test_a_failed_background_nats_download_leaves_the_install_to_the_action(tmp_path):
+    result = _run_background_nats(tmp_path, curl_works=False)
+    assert result.returncode != 0
+    assert not (tmp_path / "path").exists()
+    assert not (tmp_path / "env").exists()
+
+
+def test_the_nats_wait_stops_at_once_when_the_background_download_died_without_a_status(tmp_path):
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    (tmp_path / "nats-bg.pid").write_text(f"{dead.pid}\n")
+    (tmp_path / "nats-bg.log").write_text("")
+    env = {
+        **os.environ,
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_PATH": str(tmp_path / "path"),
+        "GITHUB_ENV": str(tmp_path / "env"),
+    }
+    run = _selected_step("Use the pinned nats server download")["run"]
+    result = subprocess.run(["bash", "-e", "-c", run], env=env, capture_output=True, text=True, timeout=20)
+    assert result.returncode != 0
+    assert not (tmp_path / "path").exists()
 
 
 def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
@@ -1607,7 +1940,7 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
         == 'python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
         + " --stats .mutation-stats"
     )
-    artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact"))
+    artifact = next(step for step in steps if step.get("name") == "Upload complete mutation evidence")
     assert artifact["if"] == "always() && needs.mutation-plan.outputs.forwarded != 'true'"
     assert artifact["with"]["include-hidden-files"] is True
     assert artifact["with"]["name"] == "mutation-report-${{ matrix.shard }}"
@@ -1640,6 +1973,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         "BASE": "${{ inputs.base || 'origin/dev' }}",
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
         "MUTATION_SHARD_CPU_QUOTA": "3",
+        "PYTHONUNBUFFERED": "1",
     }
     names = [item.get("id") for item in plan["steps"]]
     mint = plan["steps"][names.index("app-token")]
@@ -1701,8 +2035,19 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         "matrix": {"part": "${{ fromJSON(needs.mutation-plan.outputs.stats_parts) }}"},
     }
     setup = [step for step in mutation["steps"] if not str(step.get("name", "")).startswith(("Mutate", "Upload"))]
-    downloads = ("Download the shared mutation stats", "Download the reused preflight report")
-    setup = [step for step in setup if step.get("name") not in downloads]
+    downloads = (
+        "Download the shared mutation stats",
+        "Download the reused preflight report",
+        "Download every part's test stats cache",
+    )
+    setup = [
+        step
+        for step in setup
+        if not str(step.get("name", "")).startswith(
+            (*downloads, "Cap the merged test stats", "Check for merged test stats")
+        )
+        and step.get("with", {}).get("path") != ".mutation-stats-cache"
+    ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
     assert stats_steps[: len(setup)] == setup
     collect = stats_steps[len(setup)]
@@ -1712,7 +2057,8 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         assert restore["uses"] == "actions/cache/restore@v4"
         assert save["uses"] == "actions/cache/save@v4"
         assert restore["with"]["key"] == save["with"]["key"]
-        assert restore["if"] == save["if"] == "needs.mutation-plan.outputs.forwarded != 'true'"
+        assert restore["if"] == "needs.mutation-plan.outputs.forwarded != 'true'"
+        assert save["if"] == "strategy.job-total == 1 && needs.mutation-plan.outputs.forwarded != 'true'"
         assert stats["steps"].index(restore) < stats["steps"].index(collect) < stats["steps"].index(save)
         assert stats["env"]["MUTATION_STATS_CACHE"] == "${{ github.workspace }}/.mutation-stats-cache"
     assert collect["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"
@@ -1723,16 +2069,15 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         ' --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"'
     )
     upload = stats_steps[len(setup) + 1]
-    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["uses"] == "./.workflow-revision/.github/actions/retry-upload"
     assert upload["with"]["name"] == "mutation-stats-${{ matrix.part }}"
     assert upload["with"]["path"] == ".mutation-stats/"
     assert upload["with"]["include-hidden-files"] is True
     assert upload["with"]["if-no-files-found"] == "error"
-    assert upload["with"]["overwrite"] is True
     evidence = stats_steps[len(setup) + 2]
     assert evidence["if"] == "failure()"
     assert evidence["with"]["name"] == "mutation-evidence-stats-${{ matrix.part }}"
-    assert evidence["with"]["overwrite"] is True
+    assert evidence["uses"] == "./.workflow-revision/.github/actions/retry-upload"
     names = [step.get("name") for step in mutation["steps"]]
     download = mutation["steps"][names.index("Download the shared mutation stats")]
     assert names.index("Download the shared mutation stats") < names.index("Mutate changed Python files")
@@ -1765,6 +2110,101 @@ def test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job():
         report["with"]["path"] == "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
     )
     assert names.index(mutate["name"]) < names.index(report["name"])
+
+
+def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_after_all_parts_finish():
+    jobs = _mutation_workflow()["jobs"]
+    skipped = "needs.mutation-plan.outputs.forwarded != 'true'"
+    key = "mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}"
+    cached = {
+        "path": ".mutation-stats-cache",
+        "key": key,
+        "restore-keys": "mutation-test-stats-v2-${{ runner.os }}-",
+    }
+    steps = jobs["mutation-stats"]["steps"]
+    names = [step.get("name") for step in steps]
+    restore = steps[names.index("Restore compatible test stats")]
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["if"] == skipped
+    assert restore["with"] == cached
+    single = steps[names.index("Save the merged test stats")]
+    assert single["uses"] == "actions/cache/save@v4"
+    assert single["if"] == f"strategy.job-total == 1 && {skipped}"
+    assert single["with"] == {"path": ".mutation-stats-cache", "key": key}
+    fresh = steps[names.index("Keep only the test stats this part wrote")]
+    assert fresh["if"] == skipped
+    assert fresh["env"] == {"PART": "${{ matrix.part }}"}
+    assert fresh["run"] == (
+        "mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f"
+        ' -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \\;'
+    )
+    part = steps[names.index("Upload this part's test stats cache")]
+    assert part["if"] == skipped
+    assert part["uses"] == "./.workflow-revision/.github/actions/retry-upload"
+    assert part["with"] == {
+        "name": "mutation-test-stats-cache-${{ matrix.part }}",
+        "path": ".mutation-stats-fresh/",
+        "include-hidden-files": True,
+        "if-no-files-found": "ignore",
+        "retention-days": 7,
+    }
+    stats_part = steps[names.index("Upload mutation stats part")]
+    assert stats_part["if"] == skipped
+    assert stats_part["uses"] == part["uses"]
+    assert stats_part["with"] == {
+        "name": "mutation-stats-${{ matrix.part }}",
+        "path": ".mutation-stats/",
+        "include-hidden-files": True,
+        "if-no-files-found": "error",
+        "retention-days": 1,
+    }
+    actions = steps[names.index("Take the local actions from the workflow revision")]
+    assert actions["if"] == skipped
+    assert names.index(actions["name"]) < names.index(stats_part["name"])
+    order = [
+        restore["name"],
+        "Collect one stats part for every mutation shard",
+        single["name"],
+        fresh["name"],
+        part["name"],
+    ]
+    assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
+    assert [step for step in steps if step.get("uses", "").startswith("actions/cache/save")] == [single]
+    first = f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}"
+    mutation = jobs["mutation"]["steps"]
+    mutation_names = [step.get("name") for step in mutation]
+    base = mutation[mutation_names.index("Restore compatible test stats")]
+    assert base["uses"] == "actions/cache/restore@v4"
+    assert base["if"] == first
+    assert base["with"] == cached
+    download = mutation[mutation_names.index("Download every part's test stats cache")]
+    assert download["if"] == first
+    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["with"] == {
+        "pattern": "mutation-test-stats-cache-*",
+        "path": ".mutation-stats-cache",
+        "merge-multiple": True,
+    }
+    merged = mutation[mutation_names.index("Save the merged test stats")]
+    assert merged["uses"] == "actions/cache/save@v4"
+    assert merged["if"] == f"{first} && steps.merged-stats.outputs.found == 'true'"
+    assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
+    capped = mutation[mutation_names.index("Cap the merged test stats")]
+    assert capped["if"] == first
+    assert capped["run"] == (
+        "python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap;"
+        ' print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")\' .mutation-stats-cache'
+    )
+    assert mutation_names.index(base["name"]) == 1
+    order = [
+        base["name"],
+        download["name"],
+        capped["name"],
+        merged["name"],
+        "Install dependencies",
+        "Mutate changed Python files",
+    ]
+    assert [mutation_names.index(name) for name in order] == sorted(mutation_names.index(name) for name in order)
 
 
 PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "tomlkit": "tomlkit"}
@@ -1819,7 +2259,7 @@ def test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pin
     specs = [declared[name] for name in sorted(PLANNER_PACKAGES)]
     assert (
         install["run"]
-        == 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system '
+        == 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" '
         + " ".join(f'"{spec}"' for spec in specs)
     )
     assert _planner_third_party() == set(PLANNER_PACKAGES.values())
@@ -1874,11 +2314,23 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"github.event_name == 'workflow_dispatch' && {skipped}",
         f"always() && {skipped}",
         f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",
+        f"strategy.job-total == 1 && {skipped}",
+        f"strategy.job-total != 1 && {skipped}",
+        f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}",
+        f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}"
+        " && steps.merged-stats.outputs.found == 'true'",
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
     )
     for job in (stats, mutation):
-        assert all(step["if"] == skipped or step["if"] in unguarded for step in job["steps"])
+        guarded = {step.get("id") for step in job["steps"] if step["if"] == skipped or step["if"] in unguarded}
+        assert all(
+            step["if"] == skipped
+            or step["if"] in unguarded
+            or (retry := re.fullmatch(r"steps\.(.+)\.outcome == 'failure'", step["if"])) is not None
+            and retry[1] in guarded
+            for step in job["steps"]
+        )
     steps = {step.get("name"): step for step in mutation["steps"]}
     assert steps["Mutate changed Python files"]["if"] == f"github.event_name == 'pull_request' && {skipped}"
     assert steps["Mutate dispatched Python files"]["if"] == f"github.event_name == 'workflow_dispatch' && {skipped}"
@@ -1894,8 +2346,16 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         for name, job in jobs.items()
         if name.startswith("mutation") and any(s.get("with", {}).get("ref") == head for s in job.get("steps", []))
     }
-    assert {"mutation-stats", "mutation"} <= set(local)
-    assert all(not steps for name, steps in local.items() if name not in {"mutation-stats", "mutation"})
+    assert {"mutation-plan", "mutation-stats", "mutation"} == set(local)
+    plan = jobs["mutation-plan"]["steps"]
+    take = next(step for step in plan if step.get("name") == "Take the upload action from the workflow revision")
+    assert take["run"].splitlines() == [
+        'git fetch --no-tags origin "$GITHUB_SHA"',
+        "mkdir -p .workflow-revision",
+        'git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision',
+    ]
+    assert {step["uses"] for step in local["mutation-plan"]} == {"./.workflow-revision/.github/actions/retry-upload"}
+    assert all(plan.index(take) < plan.index(step) for step in local["mutation-plan"])
     for name in ("mutation-stats", "mutation"):
         steps = jobs[name]["steps"]
         names = [step.get("name") for step in steps]
@@ -1909,6 +2369,7 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         assert {step["uses"] for step in local[name]} == {
             "./.workflow-revision/.github/actions/nats-server",
             "./.workflow-revision/.github/actions/browser-cache",
+            "./.workflow-revision/.github/actions/retry-upload",
         }
         assert all(steps.index(take) < steps.index(step) for step in local[name])
         assert all("hashFiles" not in step.get("if", "") for step in local[name])
@@ -1927,7 +2388,7 @@ def test_a_head_that_predates_the_local_actions_gets_them_from_the_workflow_revi
     git("add", ".")
     git("commit", "-qm", "head without the actions")
     head = git("rev-parse", "HEAD").strip()
-    for action in ("nats-server", "browser-cache"):
+    for action in ("nats-server", "browser-cache", "retry-upload"):
         (tmp_path / ".github/actions" / action).mkdir(parents=True)
         (tmp_path / ".github/actions" / action / "action.yml").write_text(f"name: {action}\n")
     git("add", ".")
@@ -1945,3 +2406,83 @@ def test_a_head_that_predates_the_local_actions_gets_them_from_the_workflow_revi
         if step.get("uses", "").startswith("./."):
             assert (tmp_path / step["uses"] / "action.yml").read_text() == f"name: {Path(step['uses']).name}\n"
     assert git("status", "--porcelain", "--", ".github") == ""
+
+
+@pytest.mark.parametrize("failure", ["", "revision", "archive"])
+def test_antoncore_app_rest_retains_all_checker_inputs_when_git_is_refused(tmp_path, failure):
+    step = next(s for s in _workflow()["jobs"]["lint"]["steps"] if s.get("id") == "antoncore-checkout")
+    source = tmp_path / "source"
+    inputs = {
+        "scripts/swarm_dashboard_columns.py": "checker",
+        "stacks/observability/provisioning/dashboards/Swarm/dashboard.json": "dashboard",
+        "k8s/values-overlays/agentihooks-swarm-nats/values.yaml": "values",
+        "k8s/values-overlays/agentihooks-swarm-nats/users.yaml": "users",
+        "k8s/values-overlays/agentihooks-swarm-nats/trust.yaml": "trust",
+    }
+    for path, value in {**inputs, "unselected.txt": "excluded"}.items():
+        target = source / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(value)
+    archive = tmp_path / "source.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(source, arcname="antoncore-revision")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for name, body in {
+        "git": 'echo "git refused" >> "$CALLS"; exit 128\n',
+        "gh": (
+            '[[ "$GH_TOKEN" == fixture-app ]]\n'
+            'echo "$*" >> "$CALLS"\n'
+            'case "$*" in\n'
+            '  *commits/dev*) [[ "$FAILURE" != revision ]]; echo trusted-revision ;;\n'
+            '  *tarball/trusted-revision*) [[ "$FAILURE" != archive ]]; cat "$ARCHIVE" ;;\n'
+            "  *) exit 1 ;;\n"
+            "esac\n"
+        ),
+    }.items():
+        tool = tools / name
+        tool.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body)
+        tool.chmod(0o755)
+    calls = tmp_path / "calls"
+    output = tmp_path / "output"
+    result = subprocess.run(
+        ["bash", "-c", step["run"]],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            **{key: value for key, value in step["env"].items() if key != "GH_TOKEN"},
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "GH_TOKEN": "fixture-app",
+            "GITHUB_OUTPUT": str(output),
+            "CALLS": str(calls),
+            "ARCHIVE": str(archive),
+            "FAILURE": failure,
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) == (not failure), result.stderr
+    if failure:
+        assert not output.exists()
+    else:
+        for path, value in inputs.items():
+            assert (tmp_path / ".antoncore" / path).read_text() == value
+        assert not (tmp_path / ".antoncore/unselected.txt").exists()
+        assert output.read_text() == "revision=trusted-revision\n"
+    assert calls.read_text().splitlines() == (
+        ["api repos/the-cloud-clockwork/antoncore/commits/dev --jq .sha"]
+        + ([] if failure == "revision" else ["api repos/the-cloud-clockwork/antoncore/tarball/trusted-revision"])
+    )
+
+
+def test_lint_keeps_the_pinned_archive_on_the_same_antoncore_app():
+    steps = _workflow()["jobs"]["lint"]["steps"]
+    checkout = next(s for s in steps if s.get("id") == "antoncore-checkout")
+    assert "steps.app-token.outcome == 'success'" in checkout["if"]
+    assert checkout["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    assert checkout["env"]["REPOSITORY"] == "the-cloud-clockwork/antoncore"
+    assert checkout["env"]["REF"] == "dev"
+    assert "git " not in checkout["run"]
+    check = next(s for s in steps if s.get("name", "").startswith("Run every Swarm Ledger dashboard query"))
+    assert check["env"]["ANTONCORE_REVISION"] == "${{ steps.antoncore-checkout.outputs.revision }}"
+    assert 'echo "$ANTONCORE_REVISION"' in check["run"]

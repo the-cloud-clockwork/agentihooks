@@ -48,7 +48,10 @@ def _usable(run: dict, repository: str, event: str) -> bool:
 
 def _complete(evidence: Path, run: dict) -> bool:
     folder = evidence / str(run["id"])
-    kept = {item["name"] for item in ci_reuse._lines(folder / "artifacts.jsonl") if not item["expired"]}
+    artifacts = ci_reuse._lines(folder / "artifacts.jsonl")
+    if any(item["name"].startswith("reused-branch-") for item in artifacts):
+        return False
+    kept = {item["name"] for item in artifacts if not item["expired"]}
     jobs = ci_reuse._lines(folder / "jobs.jsonl")
     expected = {f"unit (3.12, {shard})" for shard in range(1, 21)}
     passed = {job["name"] for job in jobs if job["conclusion"] == "success"}

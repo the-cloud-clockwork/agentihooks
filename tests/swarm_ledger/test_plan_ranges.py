@@ -321,6 +321,64 @@ def test_typed_phase_lines_are_refused(published):
     assert state["phases"][0]["plan_ref"] == ref
 
 
+def test_an_appended_phase_with_a_correct_plan_ref_is_stored(published):
+    ref = core.sync(published)[0]["phases"][0]["plan_ref"]
+    op = {
+        "op": "phase_append",
+        "id": "append-ship",
+        "by": "planner",
+        "phases": [{"phase": "p2", "title": "Ship", "plan_ref": {**ref, "lines": "13-14"}}],
+    }
+    core.check_op(op)
+    state, rejected = core.sync(published, ops=[op])
+    assert rejected == []
+    added = next(p for p in state["phases"] if p["id"] == "p2")
+    assert added["plan_ref"] == {**ref, "lines": "13-14"}
+
+
+def test_an_appended_phase_with_a_wrong_plan_ref_is_refused_and_adds_nothing(published):
+    before = core.sync(published)[0]
+    ref = before["phases"][0]["plan_ref"]
+    op = {
+        "op": "phase_append",
+        "id": "append-ship",
+        "by": "planner",
+        "phases": [{"phase": "p2", "title": "Ship", "plan_ref": {**ref, "lines": "1-5"}}],
+    }
+    core.check_op(op)
+    state, rejected = core.sync(published, ops=[op])
+    assert rejected == ["append-ship"]
+    assert state["phases"] == before["phases"]
+    assert "plan_ref lines for phase p2 must be the range computed from its plan" in state["_meta"]["warnings"]
+
+
+def test_an_appended_phase_sees_a_plan_add_and_a_prior_artifact_in_the_same_batch(published):
+    ref = core.sync(published)[0]["phases"][0]["plan_ref"]
+    ops = [
+        {
+            "op": "plan_add",
+            "id": "add-plan2",
+            "by": "planner",
+            "plan": "plan2",
+            "title": "Second",
+            "artifact": ref["artifact"],
+        },
+        {
+            "op": "phase_append",
+            "id": "append-ship",
+            "by": "planner",
+            "phases": [{"phase": "p2", "title": "Ship", "plan": "plans/plan2", "plan_ref": {**ref, "lines": "13-14"}}],
+        },
+    ]
+    for op in ops:
+        core.check_op(op)
+    state, rejected = core.sync(published, ops=ops)
+    assert rejected == []
+    added = next(p for p in state["phases"] if p["id"] == "p2")
+    assert added["plan"] == "plans/plan2"
+    assert added["plan_ref"] == {**ref, "lines": "13-14"}
+
+
 def refusal(call, *args):
     with pytest.raises(ValueError) as raised:
         call(*args)

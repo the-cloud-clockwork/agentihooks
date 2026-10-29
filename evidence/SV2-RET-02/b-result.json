@@ -1,0 +1,60 @@
+{
+  "after_full_propagation": {},
+  "case": "B",
+  "diagnostics_name_no_source": true,
+  "foreign_grant_pack": "the cached context is not available to this grant",
+  "reads_during_vector_only_state": {
+    "exposures": {
+      "chunk_cutover": 1,
+      "chunk_generation": 1,
+      "context_pack": 1,
+      "derived_lesson": 2,
+      "search_chunk": 5
+    },
+    "lessons": {
+      "lesson-lock-only": {
+        "lesson_id": "lesson-lock-only",
+        "state": "redacted",
+        "support": [],
+        "text": null
+      },
+      "lesson-shared": {
+        "lesson_id": "lesson-shared",
+        "state": "inferred",
+        "support": [
+          "symbol",
+          "kernel"
+        ],
+        "text": "Retry a locked catalog write instead of failing the ingest."
+      }
+    },
+    "packs": {
+      "cited": "the cached context is not available to this grant",
+      "kept": "readable"
+    },
+    "range_reads": {
+      "get_session_segment": "evidence_unavailable",
+      "session_records": "evidence_unavailable"
+    },
+    "searched_sessions": {
+      "search_sessions": [
+        "kernel"
+      ],
+      "session_search": [
+        "kernel"
+      ]
+    }
+  },
+  "state_unchanged_by_refused_reads": true,
+  "unknown_consumer": "the consumer must be search, packs or lessons",
+  "vector_only_deletion": {
+    "contract_failed": true,
+    "exposures": {
+      "chunk_cutover": 1,
+      "chunk_generation": 1,
+      "context_pack": 1,
+      "derived_lesson": 2,
+      "search_chunk": 5
+    }
+  }
+}

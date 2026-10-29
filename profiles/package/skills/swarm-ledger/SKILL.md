@@ -182,7 +182,7 @@ Run `ack` after acting. Done when `events` prints nothing.
 | `retext <item> "<text>"` | rewrite a follow-up or question in plain words |
 | `edit <chat\|item> <entry> "<text>"` / `delete <chat\|item> <entry>...` | fix or remove entries: yours, or (orchestrator) any agent's |
 | `audit` | every agent text the filter refuses today: the cleanup worklist |
-| `priority add <item> "<text>"` / `priority clear <id>` / `priority clear --all` | ask the operator something only the operator can answer and that blocks the work, one line of at most 20 plain words per item; clear it once answered |
+| `priority add <item> "<text>"` / `priority clear <id>` / `priority clear --all` | operator and swarm only: the ledger refuses an agent priority add; agents send the ask to `master@<slug>` by inbox. Clear one once answered |
 | `relay <item> "<text>" --quote "<operator words>"` | the orchestrator posts a decision the operator gave in its pane: his answer on a question, his comment on any other item, marked relayed from the master pane with the operator's recorded words. Refused for any other agent, and unless the quoted words are in an operator prompt or question answer the session recorded in the last hour; a swarm session's first prompt is its launch prompt and never counts |
 | — | notifications: none to send. The page raises one by itself when you add a follow-up or question, or answer an operator comment or chat message; nothing you run creates or clears one |
 | `claim <item>` | take an item's operator events |

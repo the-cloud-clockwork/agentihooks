@@ -67,11 +67,20 @@ def as_services(server: object) -> Services:
     )
 
 
-def serve_document(monkeypatch, repository: object, document: dict) -> None:
-    from scripts.swarm_ledger.api import resources, task_list
+def task_rows(entry_of) -> object:
+    def rows(slug: str, since: tuple | None = None) -> tuple:
+        entry = entry_of()
+        if since is not None and since[0] == entry.generation:
+            return since
+        return entry.generation, entry.state.get("_meta", {}), entry.state.get("tasks") or []
 
-    monkeypatch.setattr(repository, "current", lambda slug: SimpleNamespace(state=document, views={}))
-    monkeypatch.setattr(repository, "read", lambda slug, *keys: document)
-    version = (int(resources.resource_revision(document, "tasks"), 16), 0)
-    monkeypatch.setattr(repository, "task_version", lambda slug: version)
+    return rows
+
+
+def serve_document(monkeypatch, repository: object, document: dict) -> None:
+    from scripts.swarm_ledger.api import task_list
+
+    entry = SimpleNamespace(generation=1, state=document, views={})
+    monkeypatch.setattr(repository, "current", lambda slug: entry)
+    monkeypatch.setattr(repository, "task_rows", task_rows(lambda: entry))
     monkeypatch.setattr(task_list, "HELD", {})

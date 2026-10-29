@@ -519,6 +519,14 @@ def test_a_failed_poll_is_logged_with_its_swarm_lane_and_error(monkeypatch, caps
     assert "hive spoke for swarm rig lane eng poll failed (RuntimeError: unavailable)" in capsys.readouterr().err
 
 
+def test_a_refused_spawn_is_logged_with_the_runtime_status_and_detail(rig, capsys):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room")
+    assert rig.spoke.poll() == "retry"
+    assert "poll failed (RuntimeError: spawn unavailable: no room)" in capsys.readouterr().err
+
+
 def test_failed_work_and_a_failed_attempt_check_are_logged_before_the_nack(rig, capsys):
     from unittest.mock import PropertyMock
 

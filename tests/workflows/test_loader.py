@@ -33,6 +33,7 @@ def test_the_package_ships_simple_workflow():
     assert errors == []
     simple = found["simple-workflow"]
     assert simple.layer == "package"
+    assert simple.workflow.head == "scout"
     assert simple.workflow.exit == "build-verdict.pass"
     assert simple.workflow.stages["scout"].count == 3
 

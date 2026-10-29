@@ -91,6 +91,17 @@ def test_sessions_omit_a_registered_non_agent_process(tmp_path):
         assert sessions(tmp_path / "proc", registry=registry) == []
 
 
+@pytest.mark.parametrize("flag", ["-p", "--print"])
+def test_sessions_omit_an_unregistered_print_mode_claude(tmp_path, flag):
+    from scripts.terminate_agent import sessions
+
+    printing = process(200, argv=("claude", flag, "hello"))
+    interactive = process(201, argv=("claude", "--name", "kept"))
+    with patch("scripts.terminate_agent.processes", return_value={200: printing, 201: interactive}):
+        found = sessions(tmp_path / "proc", registry={})
+    assert [item.process.pid for item in found] == [201]
+
+
 @pytest.mark.parametrize("state,alive", [("S", True), ("Z", False), ("X", False)])
 def test_alive_counts_a_zombie_or_a_process_being_reaped_as_ended(monkeypatch, state, alive):
     from scripts.terminate_agent import _alive

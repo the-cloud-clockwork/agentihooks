@@ -1,10 +1,11 @@
 import json
 
-from scripts.hive.placement import NO_UI_HIVE
+from scripts.hive.placement import HAS_ROOM, HIVE, NEEDS_WORKSTATION, NO_UI_HIVE
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import RedisStore
 
 WAIT_MS = 30 * 60_000
+FRESH_MS = 5 * 60_000
 WAITS = "hive-placement-waits"
 
 
@@ -12,7 +13,7 @@ def read(store: RedisStore, slug: str) -> dict:
     return {task: json.loads(raw) for task, raw in store.redis.hgetall(store.key(slug, WAITS)).items()}
 
 
-def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now: int) -> None:
+def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now: int, workstation: str = "") -> None:
     from redis.exceptions import WatchError
 
     key = store.key(slug, WAITS)
@@ -28,6 +29,8 @@ def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now
                 pipe.multi()
                 if reason:
                     row = {"lane": lane, "reason": reason, "started_at": started, "seen_at": now}
+                    if workstation:
+                        row["workstation"] = workstation
                     pipe.hset(key, task, json.dumps(row))
                 else:
                     pipe.hdel(key, task)
@@ -41,6 +44,20 @@ def prune(store: RedisStore, slug: str, tasks: list[dict]) -> None:
     active = {task["id"] for task in tasks if task.get("state") not in ("done", "cancelled")}
     for task in read(store, slug).keys() - active:
         store.redis.hdel(store.key(slug, WAITS), task)
+
+
+def workstation_waiting(store: RedisStore, machine: str, now: int) -> int:
+    return sum(
+        1
+        for slug in store.slugs()
+        for row in read(store, slug).values()
+        if row.get("workstation") == machine
+        and now - row["seen_at"] < FRESH_MS
+        and (
+            (row["reason"].startswith(f"no {HIVE} ") and f" {HAS_ROOM}" in row["reason"])
+            or row["reason"] == NEEDS_WORKSTATION
+        )
+    )
 
 
 def findings(store: RedisStore, slug: str, now: int) -> list[Finding]:

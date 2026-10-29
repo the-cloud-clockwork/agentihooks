@@ -1,6 +1,8 @@
 # A hub install on the bundled NATS; the NATS and JetStream switches repeat the defaults on purpose.
 hub:
   enabled: true
+  bus:
+    scoped: true
 
 nats:
   enabled: true

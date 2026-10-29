@@ -25,7 +25,7 @@ def no_managed_settings(tmp_path, monkeypatch):
 
 @pytest.fixture
 def ah(tmp_path, monkeypatch):
-    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", tmp_path / "ah")
     return tmp_path / "ah"
 
 
@@ -572,6 +572,51 @@ def test_checked_fails_when_the_recovered_login_is_still_refused(tmp_path, monke
     assert login.checked(_home(tmp_path), {}, "masteratexample_com") is False
 
 
+@pytest.mark.parametrize("recovered", [True, False])
+def test_checked_refuses_a_signed_in_login_the_provider_revoked(tmp_path, monkeypatch, recovered):
+    from scripts.routing import native_login
+
+    target = _home(tmp_path)
+    probed = []
+    monkeypatch.setattr(native_login, "check", lambda environ, account: dict(native_login.PROOF))
+
+    def rejected(environ, account):
+        probed.append((environ["CLAUDE_CONFIG_DIR"], account))
+        return True
+
+    monkeypatch.setattr(native_login, "rejected", rejected)
+    monkeypatch.setattr(login, "recover", lambda found, environ: recovered)
+    assert login.checked(target, {}, "masteratexample_com") is False
+    assert probed == [(str(target), "masteratexample_com")] * (2 if recovered else 1)
+
+
+def test_checked_passes_a_login_the_recovered_copy_restored(tmp_path, monkeypatch):
+    from scripts.routing import native_login
+
+    target = _home(tmp_path)
+    answers = iter([True, False])
+    monkeypatch.setattr(native_login, "check", lambda environ, account: dict(native_login.PROOF))
+    monkeypatch.setattr(native_login, "rejected", lambda environ, account: next(answers))
+    monkeypatch.setattr(login, "recover", lambda found, environ: True)
+    assert login.checked(target, {}, "masteratexample_com") is True
+
+
+def test_a_revoked_master_login_falls_back_to_the_token_route(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+    from scripts.swarm import operator_email
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.setattr(native_login, "check", lambda environ, account: dict(native_login.PROOF))
+    monkeypatch.setattr(native_login, "rejected", lambda environ, account: True)
+    monkeypatch.setattr(chain, "authorize", lambda *_: "failure", raising=False)
+    monkeypatch.setattr(operator_email, "send", lambda *_: "")
+    assert login.prepare_launch(_environ(rendered), tmp_path) is None
+    token_records = (login._token_folder(_environ(rendered)) / "login-notifications.jsonl").read_text()
+    assert [json.loads(line)["step"] for line in token_records.splitlines()] == ["token"]
+
+
 def test_stored_reads_the_swarm_copy_and_reports_an_outage(monkeypatch, capsys):
     FakeBao({"epoch": "3"}).install(monkeypatch)
     assert login.stored("bao") == {"epoch": "3"}
@@ -848,7 +893,7 @@ def test_slot_zero_falls_back_to_slot_one(ah, monkeypatch):
 
 def test_use_creates_a_nested_missing_home(tmp_path, monkeypatch):
     nested = tmp_path / "a" / "b" / "ah"
-    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(nested))
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", nested)
     monkeypatch.delenv(login.SLOT_ENV, raising=False)
     login.use(2)
     assert (nested / login.SLOT_FILE).read_text() == "2\n"
@@ -950,6 +995,47 @@ def test_launch_preparation_reports_a_refused_operator_email(ah, rendered, tmp_p
     monkeypatch.setattr(operator_email, "send", lambda *_: "email failed: down")
     assert login.prepare_launch(_environ(rendered), tmp_path) is None
     assert capsys.readouterr().err == "[agenti] operator login email refused: email failed: down\n"
+    token_records = (login._token_folder(_environ(rendered)) / "login-notifications.jsonl").read_text()
+    assert [json.loads(line) for line in token_records.splitlines()] == [
+        {
+            "step": "token",
+            "outcome": "captcha",
+            "transport": "refused",
+            "agent": "master@a-1",
+            "reason": "email failed: down",
+        }
+    ]
+
+
+def test_a_forced_fallback_sends_once_through_the_gateway_notifications_tool(ah, rendered, tmp_path, monkeypatch):
+    from hooks.integrations.mailer import EmailClient
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+    from scripts.swarm import operator_email
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+
+    def check(environ, account):
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", lambda *_: "failure")
+    monkeypatch.setattr(EmailClient, "reachable", lambda self, timeout=3.0: False)
+    sent = []
+    monkeypatch.setattr(operator_email, "gateway_send", lambda *args: sent.append(args) or {"status": "sent"})
+    environ = {
+        **_environ(rendered),
+        "AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com",
+        "MCP_KEY_GATEWAY": "k",
+        "LANGFUSE_MCP_URL": "https://gw/mcp/",
+    }
+    assert login.prepare_launch(environ, tmp_path) is None
+    assert [(url, key, arguments["to"], arguments["subject"]) for url, key, arguments in sent] == [
+        ("https://gw/mcp/", "k", "op@example.com", "Master login fell back to token routing")
+    ]
+    token_records = (login._token_folder(environ) / "login-notifications.jsonl").read_text()
+    assert [json.loads(line)["transport"] for line in token_records.splitlines()] == ["email"]
 
 
 def test_launch_preparation_recovers_the_stored_login_before_any_browser_step(ah, rendered, tmp_path, monkeypatch):
@@ -1364,3 +1450,88 @@ def test_token_home_creates_settings_when_rendered_settings_are_absent(ah, rende
     (rendered / "settings.json").unlink()
     target = login.token_home(_environ(rendered))
     assert json.loads((target / "settings.json").read_text()) == {}
+
+
+def _plain_shell(tmp_path, monkeypatch):
+    operator = tmp_path / "plain"
+    (operator / ".claude").mkdir(parents=True)
+    (operator / ".claude" / "settings.json").write_text('{"forceLoginMethod": "claudeai"}')
+    (operator / ".claude" / "CLAUDE.md").write_text("operator persona")
+    (operator / ".claude.json").write_text(
+        json.dumps({"hasCompletedOnboarding": True, login.ACCOUNT: OPERATOR_ACCOUNT})
+    )
+    monkeypatch.setenv("HOME", str(operator))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: operator))
+    decoy = tmp_path / "process-claude"
+    decoy.mkdir()
+    (decoy / "CLAUDE.md").write_text("process persona")
+    (decoy / ".claude.json").write_text(json.dumps({"decoy": True}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(decoy))
+    for name in ("CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    environ = {key: value for key, value in _environ(operator).items() if key != "CLAUDE_CONFIG_DIR"}
+    return operator, {**environ, "HOME": str(operator)}
+
+
+def test_prepare_from_a_plain_shell_builds_from_the_default_claude_home(ah, tmp_path, monkeypatch):
+    operator, environ = _plain_shell(tmp_path, monkeypatch)
+    _login(login.build(operator / ".claude"))
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.setattr(login, "keep", lambda *_: True)
+    target, found = login.prepare(environ, tmp_path)
+    assert (target, found) == (login.home(), "masteratexample_com")
+    assert (target / "CLAUDE.md").read_text() == "operator persona"
+    assert json.loads((target / login.CONFIG).read_text()) == {
+        "hasCompletedOnboarding": True,
+        login.ACCOUNT: MASTER_ACCOUNT,
+    }
+
+
+def test_browser_home_from_a_plain_shell_builds_from_the_default_claude_home(ah, tmp_path, monkeypatch):
+    _, environ = _plain_shell(tmp_path, monkeypatch)
+    target = login.browser_home(environ)
+    assert target == login.home()
+    assert (target / "CLAUDE.md").read_text() == "operator persona"
+    assert json.loads((target / login.CONFIG).read_text()) == {"hasCompletedOnboarding": True}
+
+
+def test_token_home_from_a_plain_shell_builds_from_the_default_claude_home(ah, tmp_path, monkeypatch):
+    _, environ = _plain_shell(tmp_path, monkeypatch)
+    target = login.token_home(environ)
+    assert target == ah / "master-token" / "masterata_1" / "claude"
+    assert (target / "CLAUDE.md").read_text() == "operator persona"
+    assert json.loads((target / "settings.json").read_text()) == {}
+    assert json.loads((target / login.CONFIG).read_text()) == {"hasCompletedOnboarding": True}
+
+
+def test_the_master_token_route_takes_a_seat_past_full_lane_agents(ah, rendered, tmp_path, monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer as router
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.chdir(tmp_path)
+    full = {"workeratexample_com": 6}
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: full)
+    env = _environ(rendered)
+    picked = []
+
+    def overflow(environ, **options):
+        picked.append((environ, options))
+        credential = router.Credential("AH_CC_TOKEN_workeratexample_com", "routed")
+        return router.RouteDecision(credential, None, "master overflow", 6, 6)
+
+    monkeypatch.setattr(router, "select_master_credential", overflow)
+    monkeypatch.setattr(account_slots, "execute", lambda harness, account, environ, launch: launch(environ))
+    executed = []
+    monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, environ: executed.append(environ))
+    report = tmp_path / "route"
+    login.launch_token("/opt/claude", ["--model", "opus"], env, str(report))
+    assert picked == [(env, {"claude_bin": "/opt/claude", "sessions": full, "exclude": (router.API_ACCOUNT,)})]
+    assert report.read_text().splitlines() == [
+        "status=routed",
+        "account=workeratexample_com",
+        "placement=fallback",
+        "remote_control=off",
+    ]
+    assert executed[0]["CLAUDE_CODE_OAUTH_TOKEN"] == "routed"

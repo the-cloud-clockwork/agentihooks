@@ -57,7 +57,7 @@ def refresh(lesson: str) -> None:
     with patch("hooks._async.fork_and_call") as fork:
         project_cache.project_context(SESSION)
     with patch(
-        "hooks.context.project_memory.VaultProjectSource.fetch",
+        "hooks.context.project_memory.KernelProjectSource.fetch",
         return_value=ProjectMemory(IDENTITY.project, lessons=[lesson]),
     ):
         project_cache.refresh_project_cache(*fork.call_args.args[1:])
@@ -154,7 +154,7 @@ def test_public_behaviour_matches_the_preceding_code(world, monkeypatch):
     with patch("hooks._async.fork_and_call") as fork:
         assert project_cache.project_context(SESSION) == golden["empty_context"]
     with patch(
-        "hooks.context.project_memory.VaultProjectSource.fetch",
+        "hooks.context.project_memory.KernelProjectSource.fetch",
         return_value=ProjectMemory(IDENTITY.project, lessons=["golden lesson"]),
     ):
         project_cache.refresh_project_cache(*fork.call_args.args[1:])

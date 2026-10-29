@@ -19,10 +19,9 @@ REMINDER = (
     "Operator not present: he never reads this pane. End the turn with no report, summary or ask addressed to him "
     "and skip the response template; any pane text stays within {words} words. {route}"
 )
-MASTER_ROUTE = "Put anything he must decide only in Priorities with agentihooks ledger priority add."
+MASTER_ROUTE = "Never write to him first; answer only what he writes."
 WORKER_ROUTE = (
-    "Put anything he must decide in a ledger question with agentihooks ledger question add; "
-    "the master answers it or raises it to him."
+    "Never write to him: send anything he must decide to the front door master by inbox with agentihooks msg send."
 )
 SWITCH = re.compile(r"(?<![\w-])operator (on|off)(?![\w-])")
 ON_NOTICE = "Operator on: the operator is present in this pane until he types operator off or the session restarts."
@@ -35,14 +34,12 @@ REPLY_RETRIES = 3
 MARKER = re.compile(r"\s*@(/?)(\w+)")
 QUESTION_TOOL = "AskUserQuestion"
 ASK_REFUSAL = (
-    "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
-    'agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
-    "and keep working; the master answers it or raises it to the operator."
+    "The operator is not present in this pane, so the question tool is off. Send the question to the front door "
+    'master by inbox with agentihooks msg send master@{slug} "<the question in plain words>" and keep working.'
 )
 MASTER_ASK_REFUSAL = (
-    "The operator is not present in this pane, so the question tool is off. Never write the questions as chat text. "
-    "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
-    'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
+    "The operator is not present in this pane, so the question tool is off. Never write to him first, as chat text "
+    "or anywhere else: hold the question until he writes, then answer what he asks."
 )
 PROMPT_REFUSAL = (
     "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
@@ -93,6 +90,10 @@ def observe(session_id, prompt, typed, now=None):
         if word or (typed and _on(state, now)):
             state.update(on=word != "off", at=now)
         state["turn_at"] = now if typed and word != "off" else None
+        if word == "off":
+            state.pop("pane_at", None)
+        elif typed:
+            state["pane_at"] = now
         operator_expiry.cancel(session_id, state)
     return word
 
@@ -106,6 +107,7 @@ def reset(payload: dict) -> None:
     with operator_expiry.state_lock(session_id):
         state = _load(session_id)
         state.update(on=False, turn_at=None)
+        state.pop("pane_at", None)
         operator_expiry.cancel(session_id, state)
 
 
@@ -113,16 +115,26 @@ def notice(payload, typed, now=None):
     session_id = payload.get("session_id")
     word = observe(session_id, payload.get("prompt"), typed, now)
     text = {"on": ON_NOTICE, "off": OFF_NOTICE}.get(word, "")
-    if _away(session_id, None):
+    if typed and not word and not _heard(session_id) and not _away(session_id, None, now):
+        return "Operator present in this pane during the quiet window. Answer his message."
+    if _away(session_id, None, now):
         return "\n".join(filter(None, (text, _reminder_text(None, session_id))))
     return text
 
 
 def present(session_id, environ=None, now=None):
+    from scripts.inbox.wake import quiet_ms
+
     env = os.environ if environ is None else environ
     if not _attached(env, session_id):
         return True
-    return _on(_load(session_id), time.time() if now is None else now)
+    state = _load(session_id)
+    now = time.time() if now is None else now
+    if _on(state, now):
+        return True
+    _, name = _binding(env, session_id)
+    at = state.get("pane_at")
+    return name.startswith("master@") and at is not None and 0 <= (now - at) * 1000 < quiet_ms(env)
 
 
 def _attached(env, session_id):
@@ -158,8 +170,8 @@ def _heard(session_id, environ=None):
     return not _attached(env, session_id) or (bool(session_id) and bool(_load(session_id).get("on")))
 
 
-def _away(session_id, environ):
-    return bool(session_id) and not present(session_id, environ)
+def _away(session_id, environ, now=None):
+    return bool(session_id) and not present(session_id, environ, now)
 
 
 def _limit(environ):
@@ -217,7 +229,7 @@ def reminder(session_id, environ=None, now=None):
     if not session_id:
         return ""
     with operator_expiry.state_lock(session_id):
-        if not _away(session_id, environ):
+        if not _away(session_id, environ, now):
             return ""
         state = _load(session_id)
         calls = state.get("calls", 0) + 1

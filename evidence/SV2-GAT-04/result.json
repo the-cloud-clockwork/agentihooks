@@ -1,0 +1,55 @@
+{
+  "package": "SV2-GAT-04",
+  "dependencies": [
+    "SV2-GAT-03"
+  ],
+  "dependency_evidence": "SV2-GAT-03 merged into dev as pull request 7586; this package binds a consultation receipt to the delivery that path already records and checks it on covered writes.",
+  "integration_gate": "G6",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7621",
+  "pull_request": "",
+  "package_complete": false,
+  "evidence_class": "mocked: fixture cases run in a temporary agentihooks home and a temporary SQLite ledger with the brain refresh and project retrieval patched to return the fixture packs; no live agent session runs the gate yet",
+  "interfaces": [
+    "scripts.gates.brain.bind(task, row, brain) returns the binding: purpose task, the task id, the sha256 of the task title, description, plan slice, plan lines and phase, the claim generation and the brain id; a state, claimant or pull request change keeps the revision",
+    "scripts.gates.brain.check(receipt, current, now) returns the first reason a receipt fails: missing, another purpose, another task, an older claim generation, an older spec revision, another brain, expired, or a result other than delivered or empty; it returns nothing for a valid receipt, a valid empty result included",
+    "scripts.gates.brain.BrainGate, registered as the gate named brain in scripts.gates.entry, matches only Edit, Write, MultiEdit, NotebookEdit and Serena edit calls, passes every session not bound to a swarm task, refuses when the task spec cannot be read, and never queries the brain; its default mode is observe (log only) and enforce (deny) is the required mode",
+    "hooks.context.task_context.offer writes, beside the delivery receipt, a consultation receipt bound to the session's current task binding with a result of delivered, empty or failed, the pack digest and an expiry of AGENTIHOOKS_BRAIN_RECEIPT_TTL seconds (default 14400); an unchanged pack is deduplicated only while that receipt still passes check, so a spec change, a new claim, a brain change, expiry or a failed result redelivers the pack at the next refresh",
+    "hooks.context.task_context.classify reads the rendered pack by line: the stale project memory line marks a brain failure, the exact no project memory line marks a valid empty result"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "targets": "Claude edit tool names and Serena edit tools; Codex apply_patch is not matched"
+  },
+  "states": {
+    "observed": "The fixture cases A, B and C passed in the focused Proofs run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40417667842 at df5f12feb68aad912e50fc5fa94467d707fa876e (2824 passed); they failed before the change in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40415890504 at 4c0aa46eb.",
+    "accepted": "A consultation is accepted when offer delivers a pack to a session bound to a swarm task; the consultation receipt is written in the same call.",
+    "committed": "The consultation receipt file under the agentihooks home brain state folder, namespaced by installation and brain, and gate log rows in the swarm gate log are the only writes.",
+    "externally_verified": "None: no role condition attaches the gate to agent sessions yet, so no live session has been gated; that belongs to the G6 rollout gate."
+  },
+  "metrics": {
+    "brain_gate_false_block_rate": {
+      "value": 0.0,
+      "label": "mocked",
+      "definition": "covered writes refused while the session held a receipt that check accepts, over covered writes made with such a receipt, across the fixture cases"
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-GAT-04/a-result.json",
+    "b": "evidence/SV2-GAT-04/b-result.json",
+    "c": "evidence/SV2-GAT-04/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "agentihooks swarm <swarm> set \"brain-gate=log only\" returns the gate to observe mode.",
+    "authoritative_objects": "The ledger task row and the brain's project memory are authoritative and untouched; consultation receipts and gate log rows are history and are kept.",
+    "proof": "test_b_rollback_to_observe_keeps_the_receipt_and_the_gate_log refuses a covered write in enforce mode, lets it through in observe mode, and keeps both gate log rows and the receipt."
+  },
+  "remaining_limitations": [
+    "No role condition runs the gate yet; writing condition files needs an operator request, filed as a ledger follow up.",
+    "The receipt is an unsigned record in the session's hook state; the gate guides an agent and is no security boundary against one that controls its own files, as Swarm v2 section 11.3 accepts; signing is filed as a follow up.",
+    "The receipt does not yet bind project id, policy version, knowledge revision or selected evidence; filed as a follow up.",
+    "Refresh on entering a governed subsystem or on a repeated error pattern, and ledger page visibility of gate results, are filed as follow ups; outcome recording belongs to SV2-GAT-05.",
+    "A stale receipt is renewed at the next brain refresh, every BRAIN_REFRESH_TOOL_CALLS tool calls, so a required mode gate refuses covered writes until then."
+  ],
+  "compatibility": "Sessions not bound to a swarm task deliver and deduplicate packs exactly as in SV2-GAT-03 and write no consultation receipt; inside a task the pack is redelivered only when the consultation no longer passes.",
+  "authority": "The binding comes from the ledger task row named by the session's swarm and task variables and the session's brain id; a receipt for another task, purpose or brain never satisfies the gate."
+}

@@ -9,6 +9,7 @@ from scripts.swarm_ledger import ports
 
 RANKS = ("urgent", "high", "normal", "low")
 ALIASES = {"next": "urgent"}
+SPOKEN = {"urgency": "urgent", "urgently": "urgent"}
 DEFAULT = "normal"
 GENERATED_PROFILE = "documentation"
 OPERATOR = "operator"
@@ -86,7 +87,7 @@ def pinned(task_id, owner) -> str:
 
 def quoted(rank, words) -> bool:
     said = set(re.findall(r"[a-z]+", words.lower()))
-    names = {rank} | {alias for alias, target in ALIASES.items() if target == rank}
+    names = {rank} | {word for word, target in (ALIASES | SPOKEN).items() if target == rank}
     return len(words.split()) >= QUOTE_WORDS and bool(names & said)
 
 

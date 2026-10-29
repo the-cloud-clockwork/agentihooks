@@ -253,6 +253,19 @@ def test_every_home_exports_the_grant_file_path_and_never_a_grant(fixture):
     assert not (attempt / "run" / "launch-grant").exists()
 
 
+def test_launch_endpoints_win_over_a_conflicting_profile_value(fixture):
+    templates, volume = fixture
+    overrides = templates / "fixture-claude" / ".claude" / "settings.overrides.json"
+    document = json.loads(overrides.read_text())
+    document["env"] |= {"AGENTIHOOKS_HOSTED_LEDGER_URL": "https://bundle.example", "BRAIN_URL": "https://bundle.brain"}
+    overrides.write_text(json.dumps(document))
+    hosted = {"AGENTIHOOKS_HOSTED_LEDGER_URL": "https://ledger.hosted.svc"}
+    worker_home.bootstrap(request(templates, volume, endpoints=ENDPOINTS | hosted))
+    settings = json.loads((volume / "attempt-1/homes/claude/.claude/settings.json").read_text())
+    assert {k: settings["env"][k] for k in ENDPOINTS | hosted} == ENDPOINTS | hosted
+    assert settings["env"]["FIXTURE_PROFILE"] == "fixture-claude"
+
+
 def comparable(volume: Path) -> dict:
     attempt = volume / "attempt-1"
     hooks = attempt / "homes/codex/.codex/hooks.json"

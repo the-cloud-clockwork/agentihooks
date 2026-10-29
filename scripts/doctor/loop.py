@@ -25,6 +25,16 @@ FIXES = ("code", "tune")
 FIX_PHASE = "p2"
 SENDER = "doctor-timer"
 IDLE = ("stopped", "stopping")
+WORKSTATION_KINDS = (
+    "failed spawn",
+    "fresh restore",
+    "scheduled tick",
+    "master launch failed",
+    "master launch evidence unavailable",
+    "master waiting on input",
+    "ci reruns",
+    "runtime storage",
+)
 
 
 def verdicts(store, doctor):
@@ -200,9 +210,9 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
         )
     cooldown_ms = limits().cooldown_minutes * MINUTE_MS
     judgments = store.redis.hgetall(verdicts(store, doctor).key)
-    eligible = {finding.id for finding in found}
     found = ci_speed.unjudged(found, judgments, now_ms, cooldown_ms)
     record(store, doctor, found, now_ms, cooldown_ms)
+    eligible = ci_speed.raisable(found, store.redis.hgetall(verdicts(store, doctor).key), now_ms, cooldown_ms)
     report["retracted"] = len(retract(store, doctor, watched, gone, now_ms))
     report["unverified"] = snapshot.get("unverified", 0)
     mail = InboxStore(store.redis)
@@ -221,11 +231,11 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
         groups, run_ids = ci_speed.fresh_groups(state["groups"], eligible, store.redis.smembers(run_notified))
         fresh.update({finding.id: finding for finding in ci_speed.grouped(groups)})
         if fresh:
-            mail.send(
-                SENDER,
-                seat_address(slug, MASTER),
-                news(watched, [{"id": finding.id, **finding.as_dict(), "verdict": None} for finding in fresh.values()]),
-            )
+            shown = [
+                {"id": finding.id, **finding.as_dict(), "verdict": eligible.get(finding.id)}
+                for finding in fresh.values()
+            ]
+            mail.send(SENDER, seat_address(slug, MASTER), news(watched, shown))
             store.redis.sadd(notified, *fresh)
             if run_ids:
                 store.redis.sadd(run_notified, *run_ids)
@@ -328,6 +338,8 @@ def fix_tasks(watched, finding, verdict, fix, tasks):
             "judge": "the Standards reader",
         },
     }
+    if kind in WORKSTATION_KINDS:
+        cause["workstation"] = True
     fixed = {
         "task": f"{stem}-{fix}",
         "title": f"Move the number behind the {kind} finding",

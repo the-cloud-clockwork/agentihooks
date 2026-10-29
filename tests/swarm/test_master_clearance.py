@@ -41,6 +41,7 @@ def swarm(monkeypatch, tmp_path):
     ledger.notify = lambda slug, text: ledger.notes.append(text if slug == "demo" else (slug, text))
     ledger.summarize = ledger.mark_closed = ledger.reopen = lambda *args: None
     monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(cli, "run_tick", lambda *args: [])
     monkeypatch.setattr(cli, "HerdrRuntime", FakeRuntime)

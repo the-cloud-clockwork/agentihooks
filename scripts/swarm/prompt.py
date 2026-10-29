@@ -60,6 +60,14 @@ INBOX_LINE = (
     "Operator writes on the ledger reach you as inbox messages at your next tool call, and the swarm wakes you with a "
     "prompt when you sit idle."
 )
+FIRST_CONTACT = (
+    "Never write to the operator first: the ledger refuses every chat line, question, priority and needs operator "
+    "follow up that does not answer a message he sent. Speak to him only to answer what he writes."
+)
+NO_ASKS = (
+    "Never ask the operator yourself: the ledger refuses every agent question, priority and needs operator follow up. "
+    'Send anything he must decide to the front door master by inbox: agentihooks msg send master@{slug} "<text>".'
+)
 
 LANE_ROLE = {
     "plan": "a planner whose task is to slice its phase into tasks for review",
@@ -103,14 +111,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "each filter optional.",
         f"Run once: {led} join --role orchestrator. {INBOX_LINE} Act on every OPERATOR line, then run {led} ack.",
         "",
-        (
-            "After posting your summary acknowledgement in ledger chat, send the ledger page link as your second chat line: "
-            if summary
-            else "Your first message after joining gives the operator the ledger page link: "
-        )
-        + f"run {me} url and post its line "
-        f'with {me} say --to operator "<line>". Answer any question like what is my ledger link with that line at '
-        "once.",
+        f"{FIRST_CONTACT} When he asks for his ledger link, answer with the line {me} url prints.",
         "",
         "Your standing duties:",
         *([codex_master.waiting(slug, push)] if codex else []),
@@ -126,8 +127,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         ),
         "- Answer every operator chat message. Messages from the page reach this session as inbox messages from "
         'operator: answer each with agentihooks msg reply <id> "<text>", which shows the answer on the page and '
-        f'closes the message. Post your own updates with {me} say --to operator "<text>". Answer what the operator '
-        "types in this pane here.",
+        "closes the message. Answer what the operator types in this pane here.",
         "- A message that needs no work, such as a thanks, a confirmation or a reply that asks for nothing, carries "
         '--fyi: agentihooks msg send <address> --fyi "<text>", agentihooks msg reply <id> --fyi "<text>" or '
         f'{me} say "<text>" --to <agent name> --fyi. Information closes on read or confirmed receipt. '
@@ -135,7 +135,6 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "keep unresolved work and proof checks open.",
         f'- Keep the ledger current: {led} phase <phase id> done|open, {led} comment phases/<phase id> "<status>", '
         f'{led} followup add "<text>", and {led} time-left "<duration>" whenever progress or blockers change it.',
-        f"- {waiting_line(led)}",
         f"- {artifact_line(led)} When the operator asks for a file to review, add or set its task with --artifact "
         "or artifact=yes so its agent may publish it.",
         f"- {WORKSTATION_LINE}",
@@ -211,7 +210,7 @@ def summary_lines(slug):
     return [
         "Ledger summary from the previous close:",
         f"Summary\n{summary}",
-        "In your first ledger chat line, name this summary and say where the work stopped in plain words.",
+        "When the operator writes, use this summary to say where the work stopped in plain words.",
     ]
 
 
@@ -280,9 +279,8 @@ def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str 
         "Settle each trigger within the swarm's autonomy with the agentihooks commands, the classifiers and read only sub "
         f'agents: comment on its item with {led} comment <item> "<text>", close a decided follow up, rank a task, and '
         f"clear the priority once it is resolved with {led} priority clear <priority id>.",
-        "For a decision only the operator can make, tell the master and hand its priority to the operator with "
-        f'{led} priority add <item> "<the ask in plain words>": it stays in his Priorities and no longer counts as your '
-        "trigger. Never ask the operator yourself. You never edit code or config files, commit, merge or claim a task.",
+        "For a decision only the operator can make, tell the master by inbox and leave the trigger open. "
+        f"{NO_ASKS.format(slug=slug)} You never edit code or config files, commit, merge or claim a task.",
         f'After each trigger, tell the master what you did: agentihooks msg send {MASTER}@{slug} "<plain words>".',
         'New triggers arrive as inbox messages: answer one with agentihooks msg reply <id> "<text>", or close it with '
         'agentihooks msg close <id> done "<where the work went>".',
@@ -336,7 +334,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
         "events are unhandled or you have gone many tool calls without a ledger command.",
-        waiting_line(led),
+        NO_ASKS.format(slug=slug),
         artifact_line(led),
         f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson because reason>" (a note; add '
         "--maturity data for a raw figure or insight for one that held up more than once).",
@@ -353,7 +351,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
             f'branch, open a draft pull request, then {me} block "<plain words naming the blocker>" and stop.'
         ),
         "",
-        f'Talk to the swarm and the operator with {me} say "<text>" (add --to <agent name>, eng or ci). '
+        f'Talk to the swarm with {me} say "<text>" --to <agent name>, eng or ci. '
         'Messages for you arrive in this session as inbox messages: answer one with agentihooks msg reply <id> "<text>". '
         "Mark status reports with --fyi when they request no receiver action; information closes on receipt. "
         "After handling confirmed work, explicitly reply or close it with an outcome. "
@@ -363,15 +361,6 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         "Other agents work other tasks in parallel. Touch only what your task needs.",
     ]
     return "\n".join(lines) + "\n"
-
-
-def waiting_line(led):
-    return (
-        "Whenever you wait on the operator, raise it where he looks instead of only writing it in chat: "
-        f'{led} priority add <item> "<the ask in plain words>", where the item is phases/<id>, questions/<id>, '
-        f'followups/<id> or tasks/<id>, or {led} followup add "<text>" --needs-operator for a decision only he can '
-        "make. Unanswered questions, blocked tasks and merge approvals show in Priorities on their own."
-    )
 
 
 def artifact_line(led):

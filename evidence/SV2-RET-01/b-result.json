@@ -1,0 +1,85 @@
+{
+  "case": "B",
+  "refusals": {
+    "ckpt-live-2": "object ckpt-live-2 is not eligible for deletion: latest_checkpoint",
+    "ckpt-restore": "object ckpt-restore is not eligible for deletion: active_restore",
+    "evidence-held": "object evidence-held is not eligible for deletion: evidence_hold",
+    "restore-native": "object restore-native is not eligible for deletion: active_restore"
+  },
+  "restore_started_mid_run": {
+    "deleted": [
+      "ckpt-live-1",
+      "ckpt-live-3",
+      "log-old",
+      "personal-preview"
+    ],
+    "journal": [
+      [
+        "planned",
+        "",
+        ""
+      ],
+      [
+        "deleted",
+        "ckpt-live-1",
+        ""
+      ],
+      [
+        "deleted",
+        "ckpt-live-3",
+        ""
+      ],
+      [
+        "skipped",
+        "ckpt-old",
+        "active_restore"
+      ],
+      [
+        "deleted",
+        "log-old",
+        ""
+      ],
+      [
+        "skipped",
+        "old-native",
+        "active_restore"
+      ],
+      [
+        "skipped",
+        "old-transcript",
+        "active_restore"
+      ],
+      [
+        "deleted",
+        "personal-preview",
+        ""
+      ]
+    ],
+    "restore_objects_present": true,
+    "skipped": {
+      "ckpt-old": "active_restore",
+      "old-native": "active_restore",
+      "old-transcript": "active_restore"
+    }
+  },
+  "rollback_dry_run": {
+    "eligible": [
+      "ckpt-live-1",
+      "ckpt-live-3",
+      "ckpt-old",
+      "log-old",
+      "old-native",
+      "old-transcript",
+      "personal-preview"
+    ],
+    "journal": [
+      [
+        "planned",
+        "",
+        ""
+      ]
+    ],
+    "removals": []
+  },
+  "state_unchanged_after_refusals": true
+}

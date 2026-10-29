@@ -14,6 +14,7 @@ runs, replace the tool output the agent sees, or deny the call. A `stop` conditi
 runs when the agent stops and can keep it working. A `start` condition runs at
 SessionStart and can only add context. The filename is the whole configuration:
 `pre-bash.git-guard.sh` runs before every Bash call that runs `git`.
+See also: [Filters](../reference/filters.md).
 
 1. TOC
 {:toc}
@@ -42,6 +43,7 @@ No install step: the hook reads condition directories in place on every call.
 | Layer (lowest to highest priority) | Directory | Source label |
 |---|---|---|
 | Bundle (global) | `<bundle>/.claude/conditions/` | `bundle` |
+| User bundle (personal) | `<user bundle>/.claude/conditions/` | `user-bundle` |
 | Each profile in the active chain | `<profile>/.claude/conditions/` | `profile:<name>` |
 | Runtime (machine-wide, used when no bundle is linked) | `~/.agentihooks/conditions/` | `runtime` |
 | Directory (the repository the session runs in) | `<git-root>/.agentihooks/conditions/` | `directory` |
@@ -89,6 +91,7 @@ Where `condition_set` writes (`scope`):
 | `scope` | Target |
 |---|---|
 | `global` (default) | `<bundle>/.claude/conditions/`; `~/.agentihooks/conditions/` when no bundle is linked |
+| `user` | `<user bundle>/.claude/conditions/`; refused when no user bundle is linked. A destination only: creating still needs the operator's request |
 | `profile` | `<profile>/.claude/conditions/` of the chain's first profile, or `profile="<name>"` |
 | `directory` | `<git-root>/.agentihooks/conditions/` of the session's repository |
 
@@ -279,7 +282,7 @@ out fails open, as on the other steps.
 
 - Synchronous conditions that match one call run in parallel, each on the original
   payload, each in its own process group. A timeout kills the whole group.
-- Results merge in a fixed order: the bundle layer, then each profile layer, then by
+- Results merge in a fixed order: the bundle layer, then the user bundle layer, then each profile layer, then by
   filename.
   - `context` parts are concatenated.
   - `tool_input` patches merge in order, so a later key wins.

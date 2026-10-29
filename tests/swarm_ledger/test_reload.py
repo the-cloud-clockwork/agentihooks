@@ -31,6 +31,7 @@ class Reload(unittest.TestCase):
         self.calls = []
         self.server = FakeServer()
         self.ready = True
+        server.HANDOFF.clear()
         self.addCleanup(server.HANDOFF.clear)
 
     def hand_off(self, *args, **kwargs):
@@ -144,6 +145,7 @@ class ImportedCode(unittest.TestCase):
             path.write_text("")
             os.utime(path, ns=(1, 1_000_000_000))
         self.calls = []
+        self.addCleanup(server.HANDOFF.clear)
 
     def hand_off(self, *args, **kwargs):
         self.calls.append(args)

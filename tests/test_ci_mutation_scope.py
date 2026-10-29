@@ -132,6 +132,7 @@ def test_selection_parses_only_test_modules_that_name_a_reached_module(tmp_path,
     parse = scope.ast.parse
     monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
     scope.imported_names.cache_clear()
+    scope.module_facts.cache_clear()
     assert select_tests(tmp_path, Path("hooks/context/parsed_sample.py")) == [
         "tests/test_direct.py",
         "tests/test_helper_user.py",
@@ -468,6 +469,30 @@ def test_weakened_tests_name_every_test_change_beyond_added_tests(tmp_path):
     assert weakened_tests(tmp_path, base, "HEAD") == {"tests/test_skip.py", "tests/test_moved.py"}
 
 
+def test_discovery_fetches_each_base_diff_in_one_request_before_reading_files(tmp_path, monkeypatch):
+    from scripts.ci_mutation import scope
+
+    git, commit = _repo(tmp_path)
+    first = commit("own.py", "a = 1\n")
+    second = commit("own.py", "a = 2\n")
+    commit("own.py", "a = 3\n")
+    calls = []
+    check_output = scope.subprocess.check_output
+
+    def recorded(command, **kwargs):
+        calls.append((command, kwargs))
+        return check_output(command, **kwargs)
+
+    monkeypatch.setattr(scope.subprocess, "check_output", recorded)
+    monkeypatch.setattr(scope, "select_tests", lambda root, path: [])
+    scope.discover_changes(tmp_path, [first, second], "HEAD")
+    paths = ["--", "hooks/*.py", "scripts/*.py", "tests/*.py"]
+    assert calls[:2] == [
+        (["git", "diff", "--no-renames", "--numstat", first, "HEAD", *paths], {"cwd": tmp_path}),
+        (["git", "diff", "--no-renames", "--numstat", second, "HEAD", *paths], {"cwd": tmp_path}),
+    ]
+
+
 @pytest.mark.parametrize(
     ("edit", "regraded"),
     [
@@ -746,6 +771,60 @@ def test_a_word_inside_a_longer_identifier_does_not_mark_a_file_for_parsing(tmp_
     parse = scope.ast.parse
     monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
     scope.imported_names.cache_clear()
+    scope.module_facts.cache_clear()
     scope.mentions.cache_clear()
     assert select_tests(tmp_path, Path("hooks/context/word_sample.py")) == ["tests/test_direct.py"]
     assert parsed == ["from hooks.context import word_sample\n"]
+
+
+def test_a_file_naming_only_the_last_part_of_a_module_is_not_parsed(tmp_path, monkeypatch):
+    from scripts.ci_mutation import scope
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_direct.py").write_text("from hooks.context import part_sample\n")
+    (tests / "test_other.py").write_text("from scripts.other import part_sample\n")
+    parsed = []
+    parse = scope.ast.parse
+    monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
+    scope.imported_names.cache_clear()
+    scope.module_facts.cache_clear()
+    scope.mentions.cache_clear()
+    assert select_tests(tmp_path, Path("hooks/context/part_sample.py")) == ["tests/test_direct.py"]
+    assert parsed == ["from hooks.context import part_sample\n"]
+
+
+def test_a_text_naming_exactly_every_part_of_a_module_is_mentioned():
+    from scripts.ci_mutation import scope
+
+    assert scope.mentioned("hooks.exact_sample", [frozenset({"hooks", "exact_sample"})])
+    assert not scope.mentioned("hooks.other", [frozenset({"hooks", "exact_sample"})])
+
+
+def test_module_facts_names_every_import_and_nested_function_from_one_parse(monkeypatch):
+    from scripts.ci_mutation import scope
+
+    source = (
+        "import os.path\n"
+        "try:\n    from . import sibling\nexcept ImportError:\n    from .. import parent as p\n"
+        "class TestGroup:\n    def test_one(self):\n        import json\n"
+        "        def helper():\n            pass\n"
+        "async def test_two():\n    match 1:\n        case 1:\n            from hooks import context\n"
+    )
+    parsed = []
+    parse = scope.ast.parse
+    monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
+    scope.imported_names.cache_clear()
+    scope.module_facts.cache_clear()
+    assert scope.imported_names(source, ("tests", "unit")) == {
+        "os.path",
+        "tests.unit",
+        "tests.unit.sibling",
+        "tests",
+        "tests.parent",
+        "json",
+        "hooks",
+        "hooks.context",
+    }
+    assert scope.module_facts(source)[1] == {"TestGroup.test_one", "TestGroup.test_one.helper", "test_two"}
+    assert parsed == [source]

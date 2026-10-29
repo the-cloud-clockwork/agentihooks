@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.hive.placement import Wait
-from scripts.swarm import commands
+from scripts.swarm import commands, lease
 from scripts.swarm.tick import SpawnError
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
@@ -52,6 +52,21 @@ def test_local_deployment_obeys_the_workstation_cap(setup, monkeypatch):
     local_agents(setup, 8)
     with pytest.raises(SpawnError, match="the local machine runs"):
         fenced.spawn(setup.config, "ci", "next", {"id": "task"})
+
+
+def test_local_deployment_logs_the_workstation_cap_as_the_task_wait(setup):
+    from scripts.hive import placement_waits
+    from scripts.hive.placement import LOCAL_FULL
+    from scripts.swarm.controller import FencedRuntime
+
+    fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+    local_agents(setup, 8)
+    before = lease.now_ms(setup.store)
+    refused = fenced.placement_refusal("ci", {"id": "task"})
+    row = placement_waits.read(setup.store, setup.config.slug)["task"]
+    assert LOCAL_FULL in refused
+    assert (row["lane"], row["reason"]) == ("ci", refused)
+    assert before <= row["started_at"] == row["seen_at"] <= lease.now_ms(setup.store)
 
 
 def test_failed_root_publication_releases_the_shared_local_reservation(setup, monkeypatch):
@@ -280,3 +295,25 @@ def test_a_hybrid_master_falling_back_to_the_workstation_counts_against_it(setup
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
     assert fenced.spawn(setup.config, "master", "master-new", {"id": "master"}) == "placed on the workstation"
     assert admission.pending(setup.store.redis, "workstation") == 1
+
+
+def test_a_mixed_batch_counts_launched_agents_still_starting_after_their_claim_window(setup, monkeypatch):
+    from scripts import terminate_agent
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=6)
+    local_agents(setup, 3, state="starting", pane_id="w:p")
+    selected = SimpleNamespace(hive="workstation", master_placement=None)
+    for name in ("root-1", "root-2"):
+        assert setup.launcher.reserve_room(SimpleNamespace(name=name, lane="eng", task={"id": name}), selected) == ""
+    setup.herdr._quota_accounts = []
+    assert fenced.spawn(setup.config, "eng", "over-1", {"id": "over-1", "seat": "eng-1@fixture"}) == (
+        "placed on the workstation"
+    )
+    with pytest.raises(SpawnError, match="the local machine runs 6 of its 6 agents"):
+        fenced.spawn(setup.config, "eng", "over-2", {"id": "over-2", "seat": "eng-2@fixture"})
+    third = SimpleNamespace(name="root-3", lane="eng", task={"id": "root-3"})
+    assert "runs 6 of its 6 agents" in setup.launcher.reserve_room(third, selected)

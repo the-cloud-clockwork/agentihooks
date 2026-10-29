@@ -262,6 +262,16 @@ class SwarmPanel(unittest.TestCase):
             ["swarm", SLUG, "set", "max-eng-agents=3", "max-ci-agents=0"],
         )
 
+    def test_set_writes_focus_weight_and_refuses_values_outside_percent_bounds(self):
+        for weight in (0, 50, 100):
+            code, _, run = self.control({"action": "set", "focus_weight": weight})
+            self.assertEqual(code, 200)
+            self.assertEqual(run.call_args_list[0].args[3], ["set", f"focus-weight={weight}"])
+        for weight in (-1, 101, True, "50"):
+            code, _, run = self.control({"action": "set", "focus_weight": weight})
+            self.assertEqual(code, 400)
+            run.assert_not_called()
+
     def test_set_writes_the_swarm_compact_limit(self):
         for limit in (100, 450, 1000):
             code, _, run = self.control({"action": "set", "compact_limit": limit})
@@ -542,7 +552,7 @@ class SwarmPanel(unittest.TestCase):
         )
 
     def test_step_buttons_at_a_bound_are_disabled(self):
-        low = {"max_eng": 0, "max_ci": 50, "max_plan": 1, "masters_step": 12, "compact_limit": 100}
+        low = {"max_eng": 0, "max_ci": 50, "max_plan": 1, "masters_step": 12, "compact_limit": 100, "focus_weight": 0}
         out = self.run_js(["capBounds"], f"capBounds({json.dumps(low)}, LIMITS)")
         self.assertEqual(
             out,
@@ -557,6 +567,8 @@ class SwarmPanel(unittest.TestCase):
                 "masters_up": False,
                 "compact_down": True,
                 "compact_up": False,
+                "focus_down": True,
+                "focus_up": False,
                 "effort_min_down": True,
                 "effort_min_up": True,
                 "effort_max_down": True,
@@ -637,7 +649,27 @@ class SwarmPanel(unittest.TestCase):
             "agents": [{"lane": "eng"}, {"lane": "eng", "state": "finished"}, {"lane": "ci"}, {"lane": "master"}],
         }
         self.assertEqual(
-            self.run_js(["liveAgents", "liveCaps"], f"liveCaps({json.dumps(sw)})"), ["eng 1/3", "ci 1/1", "plan 0/1"]
+            self.run_js(["liveAgents", "laneCeilings", "liveCaps"], f"liveCaps({json.dumps(sw)})"),
+            ["eng 1/3", "ci 1/1", "plan 0/1"],
+        )
+
+    def test_open_stale_claims_name_their_task_claimant_and_last_nudge(self):
+        stale = {
+            "kind": "stale claim",
+            "subject": "t1",
+            "evidence": ["task One", "claimed by eng", "no stale nudge sent"],
+        }
+        sw = {
+            "findings": [
+                stale,
+                {**stale, "subject": "t2", "evidence": ["task Two", "claimed by ci", "last stale nudge 3 minutes ago"]},
+                {**stale, "subject": "t3", "verdict": "false-positive"},
+                {"kind": "idle with claim", "subject": "eng", "evidence": ["task One"]},
+            ]
+        }
+        self.assertEqual(
+            self.run_js(["openFindings", "staleClaims"], f"staleClaims({json.dumps(sw)})"),
+            ["t1 · claimed by eng · no stale nudge sent", "t2 · claimed by ci · last stale nudge 3 minutes ago"],
         )
 
     def test_seat_names_read_as_lane_and_number_and_the_master_seat_stays_whole(self):

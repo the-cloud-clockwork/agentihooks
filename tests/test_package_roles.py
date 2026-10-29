@@ -46,12 +46,13 @@ def test_role_renders_with_its_role_file_and_no_bundle(world, role):
 
 
 QUESTIONS_RULE = (
-    "Never write operator questions as plain chat text: ask them with the question tool, and when it is refused "
-    "say only one short line, type operator on to answer the questions here, or leave them in Priorities."
+    "Never write to the operator first: answer only what he writes. Ask operator questions with the question tool "
+    "only after he typed operator on in your pane; when it is refused, hold them until he writes."
 )
 QUESTIONS_COMMAND = (
-    "- Operator questions: the question tool, never chat text; refused, one short line, type operator on to answer "
-    'the questions here, or `agentihooks ledger --slug <slug> --as <name> priority add <item> "<the ask>"`.'
+    "- Operator questions: the question tool after his typed operator on, never chat text; refused, hold them until "
+    "he writes. The ledger refuses every agent chat line that does not answer his line by its id, and every agent "
+    "question, priority and needs operator follow up."
 )
 
 
@@ -62,7 +63,7 @@ def test_only_the_rendered_master_home_carries_the_operator_questions_rule(world
     world["install"]._save_state({})
     persona = (render.render_claude(role) / "CLAUDE.md").read_text()
 
-    found = [line for line in persona.splitlines() if "type operator on" in line]
+    found = [line for line in persona.splitlines() if "typed operator on" in line]
     assert found == ([f"- {QUESTIONS_RULE}", QUESTIONS_COMMAND] if role == "master" else [])
 
 

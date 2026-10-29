@@ -12,16 +12,18 @@ from scripts.events.nats_state import ScopedStateStore
 
 pytestmark = pytest.mark.unit
 
+SCOPE = nats_payload.scope("key", 9)
+
 
 def test_codec_keeps_fitting_values_inline_and_rejects_an_unusable_budget():
     write = AsyncMock()
-    assert asyncio.run(nats_payload.encode(write, b"a" * 128, 128)) == b"a" * 128
+    assert asyncio.run(nats_payload.encode(write, b"a" * 128, 128, SCOPE)) == b"a" * 128
     write.assert_not_awaited()
     with pytest.raises(ValueError, match="^server payload budget is too small for state references$"):
-        asyncio.run(nats_payload.encode(write, b"x", 127))
+        asyncio.run(nats_payload.encode(write, b"x", 127, SCOPE))
     value = random.Random(3).randbytes(512) * 4
     compressed = nats_payload.COMPRESSED + zlib.compress(value)
-    assert asyncio.run(nats_payload.encode(write, value, len(compressed))) == compressed
+    assert asyncio.run(nats_payload.encode(write, value, len(compressed), SCOPE)) == compressed
     write.assert_not_awaited()
 
 
@@ -41,7 +43,7 @@ def test_page_geometry_remains_readable_across_budgets_without_empty_pages():
         return pages[key]
 
     for budget in [128, 256, len(compressed) // 2, len(compressed) - 1]:
-        encoded = asyncio.run(nats_payload.encode(write, value, budget))
+        encoded = asyncio.run(nats_payload.encode(write, value, budget, SCOPE))
         assert len(encoded) <= budget
         assert asyncio.run(nats_payload.decode(read, encoded)) == value
 

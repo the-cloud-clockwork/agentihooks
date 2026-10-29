@@ -1,9 +1,12 @@
+import asyncio
+import json
 import subprocess
 
 MAIL_TO = "AGENTIHOOKS_OPERATOR_EMAIL"
-NOTIFY_ENV = "NOTIFICATIONS_API_KEY"
-NOTIFY_URL = "AGENTIHOOKS_NOTIFICATIONS_URL"
-DEFAULT_NOTIFY_URL = "https://email.homeofanton.com/api/v1/send"
+GATEWAY_KEY = "MCP_KEY_GATEWAY"
+GATEWAY_URL = "LANGFUSE_MCP_URL"
+TOOL = "notifications-send_email"
+TIMEOUT_S = 10
 
 
 def send(subject: str, text: str, environ: dict, repo: str) -> str:
@@ -20,21 +23,42 @@ def send(subject: str, text: str, environ: dict, repo: str) -> str:
 
 
 def _notify(to: str, subject: str, text: str, environ: dict) -> str:
-    bearer = environ.get(NOTIFY_ENV)
-    if not bearer:
-        return f"email failed: the SMTP relay is unreachable and {NOTIFY_ENV} is not set"
-    import httpx
-
+    bearer, url = environ.get(GATEWAY_KEY), environ.get(GATEWAY_URL)
+    for name, value in ((GATEWAY_KEY, bearer), (GATEWAY_URL, url)):
+        if not value:
+            return f"email failed: the SMTP relay is unreachable and {name} is not set"
     try:
-        answer = httpx.post(
-            environ.get(NOTIFY_URL) or DEFAULT_NOTIFY_URL,
-            headers={"Authorization": "Bearer " + bearer},
-            json={"to": to, "subject": subject, "body": text},
-            timeout=10,
-        )
-    except httpx.HTTPError as exc:
-        return f"email failed: {exc}"
-    return "" if answer.status_code == 200 else f"email failed: notifications answered {answer.status_code}"
+        reply = gateway_send(url, bearer, {"to": to, "subject": subject, "body": text})
+    except Exception as exc:
+        return f"email failed: the gateway notifications tool raised {exc}"
+    return "" if reply.get("status") == "sent" else f"email failed: the gateway answered {json.dumps(reply)}"
+
+
+async def _send(url: str, bearer: str, arguments: dict) -> dict:
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    from scripts.swarm.langfuse_read import gateway_client
+
+    headers = {"Authorization": f"Bearer {bearer}", "Host": "llm.homeofanton.com", "x-mcp-servers": "notifications"}
+    async with asyncio.timeout(TIMEOUT_S):
+        async with streamablehttp_client(
+            url, headers=headers, timeout=TIMEOUT_S, httpx_client_factory=gateway_client
+        ) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(TOOL, arguments)
+    texts = [item.text for item in result.content if item.type == "text"]
+    if result.isError:
+        raise RuntimeError(texts[0] if texts else "an error")
+    reply = json.loads(texts[0]) if texts else {}
+    if not isinstance(reply, dict):
+        raise RuntimeError(f"a reply that is not an object: {texts[0]}")
+    return reply
+
+
+def gateway_send(url: str, bearer: str, arguments: dict) -> dict:
+    return asyncio.run(_send(url, bearer, arguments))
 
 
 def _git_email(repo: str) -> str:

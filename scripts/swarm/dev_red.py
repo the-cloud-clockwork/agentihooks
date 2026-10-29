@@ -8,6 +8,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 
+from scripts.swarm import github_reads
 from scripts.swarm.ci_speed import FINISHED, WORKFLOW
 from scripts.swarm.store import PREFIX
 
@@ -24,8 +25,15 @@ def key(slug: str) -> str:
 
 
 def latest(repo_dir: str, run: Callable = subprocess.run) -> dict | None:
-    output = run(
-        ["gh", "api", ENDPOINT, "--jq", JQ], cwd=repo_dir, capture_output=True, text=True, check=True, timeout=60
+    output = github_reads.rest(
+        "swarm.dev_red",
+        ["api", ENDPOINT, "--jq", JQ],
+        run,
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
     ).stdout
     runs = [json.loads(line) for line in output.splitlines()]
     return max((r for r in runs if r["conclusion"] in FINISHED), key=lambda r: r["id"], default=None)

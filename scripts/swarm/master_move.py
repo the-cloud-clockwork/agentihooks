@@ -132,7 +132,7 @@ def pinned(store, slug, task, transfer):
 
 def placed(store, slug):
     found, inbox = pending(store, slug), InboxStore(store.redis)
-    item = inbox.get(found["item"]) if found and found.get("item") else None
+    item = inbox.find(found["item"], "master-move") if found and found.get("item") else None
     if item and item.state not in CLOSED:
         inbox.close(item.id, item.address, "done", "the master moved to its hive")
     store.redis.delete(_key(store, slug))

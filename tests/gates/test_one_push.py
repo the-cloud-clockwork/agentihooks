@@ -50,7 +50,11 @@ class Ledger:
         self.pr_url, self.branch = pr_url, branch
 
     def tasks(self, slug):
-        return [{"id": "t1", "pr_url": self.pr_url, "branch": self.branch}] if slug == "demo" else []
+        raise AssertionError(f"read every task of {slug!r} on a push")
+
+    def task(self, slug, task_id):
+        found = slug == "demo" and task_id == "t1"
+        return {"id": "t1", "pr_url": self.pr_url, "branch": self.branch} if found else None
 
 
 def pull(state="OPEN", red=False, running=True, queued=False):
@@ -314,6 +318,27 @@ def test_a_push_while_checks_run_and_none_is_red_is_refused(tree, tmp_path):
 )
 def test_a_push_passes_once_a_check_is_red_or_checks_resolved_or_the_pull_request_is_gone(tree, tmp_path, found):
     assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed
+
+
+@pytest.mark.parametrize("suite_status", ["COMPLETED", "QUEUED", "IN_PROGRESS"])
+@pytest.mark.parametrize(
+    ("check_status", "conclusion", "allowed"),
+    [("COMPLETED", "CANCELLED", True), ("QUEUED", None, False), ("IN_PROGRESS", None, False)],
+)
+def test_cancelled_suites_finish_but_active_checks_still_hold_a_push(
+    tree, tmp_path, suite_status, check_status, conclusion, allowed
+):
+    raw = {
+        "state": "OPEN",
+        "statusCheckRollup": [
+            {"name": name, "status": check_status, "conclusion": conclusion} for name in ("unit", "lint")
+        ],
+        "checkSuites": [{"status": suite_status, "conclusion": "CANCELLED", "workflowRun": {"databaseId": 1}}],
+    }
+    decision = gate(pull_request(raw)).decide(bash("git push", tree), ME, state(tmp_path))
+    assert decision.allowed is allowed
+    if not allowed:
+        assert decision.reason == push_refusal("demo", URL)
 
 
 def test_a_push_passes_with_no_pull_request_or_into_another_repo(tree, tmp_path):

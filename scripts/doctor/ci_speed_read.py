@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 from scripts.doctor import ci_speed
+from scripts.swarm import github_reads
 from scripts.swarm.ledger_events import iso_ms
 
 REPO = "the-cloud-clockwork/agentihooks"
@@ -55,8 +56,14 @@ class _Api:
                     raise _BudgetExhausted("Actions API request or time budget exhausted")
                 self.calls += 1
             try:
-                response = self.run(
-                    ["gh", "api", endpoint], capture_output=True, text=True, check=True, timeout=min(25, remaining)
+                response = github_reads.rest(
+                    "doctor.ci_speed",
+                    ["api", endpoint],
+                    self.run,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=min(25, remaining),
                 )
             except subprocess.CalledProcessError as exc:
                 status = re.search(r"\bHTTP ([1-5][0-9]{2})\b", exc.stderr or "")

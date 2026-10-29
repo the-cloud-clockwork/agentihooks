@@ -1,0 +1,35 @@
+{
+  "case": "C",
+  "during_interruption": {
+    "after_rowid": 4,
+    "migration_rows_remaining": 5,
+    "rows_done": 4,
+    "state": "added"
+  },
+  "identities_unchanged": true,
+  "interrupted": "the backfill process stopped inside a batch",
+  "provenance_rows": 9,
+  "reactivated": "active",
+  "replay_after_resume": {
+    "after_rowid": 9,
+    "migration_rows_remaining": 0,
+    "rows_done": 9,
+    "state": "backfilled"
+  },
+  "resumed": {
+    "after_rowid": 9,
+    "migration_rows_remaining": 0,
+    "rows_done": 9,
+    "state": "backfilled"
+  },
+  "rollback_rehearsal": {
+    "previous_reader": {
+      "columns": 10,
+      "rows": 9
+    },
+    "provenance_read": "the event provenance projection is not active",
+    "provenance_rows_retained": 9,
+    "state": "verified"
+  },
+  "stale_attempt": "the migration cursor revision is stale; nothing changed"
+}

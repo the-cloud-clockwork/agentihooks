@@ -1,0 +1,62 @@
+{
+  "brain_url": "https://swarm-brain-api.example.test",
+  "quiet": {"project": "quiet", "repo": "org/quiet", "remote": "org/quiet", "project_id": "github.com/org/quiet"},
+  "empty": {"project": "empty", "repo": "org/empty", "remote": "org/empty", "project_id": "github.com/org/empty"},
+  "fleet_entries": [
+    {
+      "id": "hot-arcs-fleet",
+      "title": "Active Hot Arcs",
+      "content": "| loud-1 | 90 | pineal | active | Loud release |\n| loud-2 | 80 | pineal | active | Loud migration |"
+    },
+    {"id": "fleet-warning", "title": "Active Signals", "content": "Fleet wide deploy freeze."}
+  ],
+  "scoped": {
+    "github.com/org/quiet": {
+      "scope": "project",
+      "project_id": "github.com/org/quiet",
+      "brain_id": "swarm-brain",
+      "revision": "quiet-r1",
+      "freshness": {"state": "fresh", "generated_at": "2026-10-26T09:00:00+00:00", "checked_at": "2026-10-26T09:00:00+00:00", "age_seconds": 0},
+      "arcs": [
+        {"ref": "arc:quiet-cold", "projects": ["github.com/org/quiet"], "title": "Quiet cold task", "status": "active", "heat": 1, "task_id": ""},
+        {"ref": "arc:loud-1", "projects": ["github.com/org/loud"], "title": "Loud release", "status": "active", "heat": 90, "task_id": ""}
+      ],
+      "lessons": [
+        {"ref": "lesson:quiet", "projects": ["github.com/org/quiet"], "content": "Quiet lesson.", "entry_ts": "2026-10-26T08:00:00+00:00", "arcs": ["quiet-cold"]},
+        {"ref": "lesson:shared", "projects": ["github.com/org/quiet", "github.com/org/loud"], "content": "Shared lesson.", "entry_ts": "2026-10-26T08:00:00+00:00", "arcs": []}
+      ],
+      "decisions": [],
+      "signals": [],
+      "intent": null,
+      "fleet_warnings": [{"scope": "fleet", "severity": "warning", "content": "Fleet wide deploy freeze."}],
+      "metrics": {"project_feed_cross_scope_failures": 0}
+    },
+    "github.com/org/empty": {
+      "scope": "project",
+      "project_id": "github.com/org/empty",
+      "brain_id": "swarm-brain",
+      "revision": "empty-r1",
+      "freshness": {"state": "missing", "generated_at": null, "checked_at": null, "age_seconds": null},
+      "arcs": [],
+      "lessons": [],
+      "decisions": [],
+      "signals": [],
+      "intent": null,
+      "fleet_warnings": [{"scope": "fleet", "severity": "warning", "content": "Fleet wide deploy freeze."}],
+      "metrics": {"project_feed_cross_scope_failures": 0}
+    }
+  },
+  "restored_revision": {"revision": "quiet-r2", "arcs": [{"ref": "arc:quiet-next", "projects": ["github.com/org/quiet"], "title": "Quiet next task", "status": "active", "heat": 2, "task_id": ""}]},
+  "legacy": {
+    "generated_at": "2026-10-26T09:00:00+00:00",
+    "hash": "legacyhash",
+    "vault_root": "/vault",
+    "entry_count": 1,
+    "entries": [{"id": "hot-arcs-fleet", "title": "Active Hot Arcs", "content": "| quiet-legacy | 5 | pineal | active | Quiet legacy arc |"}]
+  },
+  "legacy_vault": {
+    "cluster_id: quiet-legacy": {"results": [{"path": "pineal/quiet-legacy.md"}]},
+    "pineal/quiet-legacy.md": {"content": "---\ncluster_id: quiet-legacy\nproject: quiet\ntitle: Quiet legacy arc\nstatus: active\n---\n"}
+  },
+  "stale_seconds": 3600
+}

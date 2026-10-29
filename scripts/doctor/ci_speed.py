@@ -286,7 +286,7 @@ def class_growth(finding: Finding, verdict: dict, grew: bool) -> bool:
     return worst > baseline[0] * (1 + GROWTH_MARGIN) or middle > baseline[1]
 
 
-def fresh_groups(groups: dict, eligible: set[str], raised: set[str]) -> tuple[dict, set[str]]:
+def fresh_groups(groups: dict, eligible: dict, raised: set[str]) -> tuple[dict, set[str]]:
     fresh = {}
     runs = set()
     for identity, entry in groups.items():
@@ -339,6 +339,17 @@ def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int)
         if finding.evidence_identity is None
         or not any(_covered(finding, identity, bar) for identity, bar in bars.items())
     ]
+
+
+def raisable(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int) -> dict:
+    """Unjudged, returned or inside the cooldown, each with the verdict it came back after."""
+    raised = {}
+    for finding in found:
+        record = json.loads(records[finding.id])
+        verdict = record["verdict"]
+        if not verdict or record["returned"] or now_ms < verdict["at"] + cooldown_ms:
+            raised[finding.id] = {k: verdict[k] for k in ("value", "note", "by", "at")} if verdict else None
+    return raised
 
 
 def notice_key(finding: Finding, records: dict) -> str:

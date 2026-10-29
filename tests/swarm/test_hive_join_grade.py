@@ -150,6 +150,61 @@ def test_every_optional_hive_check_is_report_only():
     assert "hive_brain" in launch_check.REPORT_ONLY
 
 
+def test_hive_launch_failures_raise_one_finding_per_check_and_error_class():
+    import hashlib
+    import json
+
+    from fakeredis import FakeRedis
+
+    from scripts.hive import join_report
+    from scripts.swarm import launch_check
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, state="running"))
+    code = store.ensure_code("sw").code
+
+    def fail(number, error, status=401):
+        name = f"engineer@{code}-000{number}"
+        agent = AgentRecord(name, "eng", f"t{number}", execution_id=f"x{number}", hive="w")
+        reason = {"error": error, "status": status, "message": f"token for {name} refused after {number} tries"}
+        checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
+        checks.update(ledger_join=False, errors={"ledger_join": reason})
+        join_report.start(store.redis, "sw", agent, "session", checks, {}, 1000)
+        found = launch_check.misses(store, "sw", agent, {}, {}, True, [])
+        launch_check.record(store, "sw", agent, found, 1793048400000 + number * 60_000, 60_000)
+        return name
+
+    def subject(error, status):
+        text = f"expected available; observed missing ({error} token for  refused after # tries)"
+        digest = hashlib.sha256(json.dumps([text, status]).encode()).hexdigest()[:8]
+        return f"hive_ledger_join/20261026T21-{digest}"
+
+    names = sorted(fail(number, "HTTPError") for number in (3, 1, 2))
+    assert launch_check.findings(store, "sw") == [
+        launch_check.Finding(
+            "launch check",
+            subject("HTTPError #", 401),
+            f"{', '.join(names)} failed the launch check on hive_ledger_join",
+            (
+                f"agents {', '.join(names)}",
+                f"expected available; observed missing (HTTPError 401 token for {names[2]} refused after 3 tries)",
+            ),
+            "a launch must pass within sixty seconds",
+            1,
+        )
+    ]
+    fail(4, "ConnectionError", None)
+    fail(5, "HTTPError", 403)
+    found = launch_check.findings(store, "sw")
+    assert {f.subject for f in found} == {
+        subject("HTTPError #", 401),
+        subject("ConnectionError", None),
+        subject("HTTPError #", 403),
+    }
+    assert len(found) == 3
+
+
 def test_failed_hive_launch_retires_records_and_drops_that_agent(monkeypatch):
     import importlib
     from types import SimpleNamespace

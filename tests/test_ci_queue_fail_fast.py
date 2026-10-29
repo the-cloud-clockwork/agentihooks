@@ -157,7 +157,9 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
     queued = set(jobs) - push_only - {"admission", "gate-required", "test-summary"}
     expected = {
         "promote",
+        "promotion-ready",
         "refresh-durations",
+        "mutation-stats-seed",
         "count-record",
         "flake-budget",
         "coverage-baseline",
@@ -173,6 +175,8 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
     }
     if (_ROOT / ".github/workflows/count-record.yml").exists():
         expected.remove("count-record")
+    if "install-smoke" in jobs:
+        expected.add("install-smoke")
     assert push_only == expected
     assert queued <= _gate_needs(jobs)
 

@@ -42,10 +42,13 @@ LANE_USERS = {
     "hive-worker.yml",
     "lost-runner.yml",
     "chart-release.yml",
+    "changelog.yml",
+    "changelog-seed.yml",
     *DIRECT,
 }
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
 CALLED = {
+    "semgrep.yml:feature-tests": "feature fixtures run in a called workflow and must not hold the caller lane",
     "semgrep.yml:charts": "a job added to a called workflow needs the called lane form for the branch lane grader",
 }
 EXCLUDED = {

@@ -9,10 +9,11 @@ import { doc, queue } from "./sync.js";
 import { tips } from "./state.js";
 import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
-import { quotaCount, renderHives } from "./hives.js";
+import { renderHives } from "./hives.js";
 import { agentCellTips, joinCell } from "./agent_cells.js";
 import { capacityShown, liveAgents, renderRoles } from "./roles.js";
 import { renderHandoffs, renderRecovery } from "./recovery.js";
+import { renderContext } from "./context.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
@@ -100,9 +101,18 @@ function openFindings(sw) {
   return (sw.findings || []).filter((f) => !f.verdict);
 }
 
+export function laneCeilings(sw) {
+  const scaled = (sw.config.scaling === "auto" && ((sw.quota_capacity || {}).autoscale || {}).ceilings) || {};
+  return Object.fromEntries(LIVE_LANES.map(([lane, key]) => [key, scaled[lane] ?? sw.config[key] ?? 0]));
+}
+
+function staleClaims(sw) {
+  return openFindings(sw).filter((f) => f.kind === "stale claim").map((f) => [f.subject, ...f.evidence.slice(1)].join(" · "));
+}
+
 function liveCaps(sw) {
-  const live = (lane) => liveAgents(sw).filter((a) => a.lane === lane).length;
-  return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${sw.config[key] ?? 0}`);
+  const live = (lane) => liveAgents(sw).filter((a) => a.lane === lane).length, caps = laneCeilings(sw);
+  return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${caps[key]}`);
 }
 
 function modelText(a) {
@@ -256,7 +266,6 @@ export function renderQuota(sw, now, force) {
   if (!sw || (!force && $("swarm-quota").contains(document.activeElement))) return;
   loadRouting();
   const quota = quotaRows(sw, now);
-  $("quota-count").textContent = quotaCount(sw, quota.length, now);
   $("swarm-quota").replaceChildren(...(quota.length ? quota.map(quotaRow) : [emptyRow(13, "No quota observed yet.")]));
 }
 
@@ -328,6 +337,7 @@ export function renderSwarm(sw) {
   $("swarm-alert").hidden = !open.length;
   $("alert-count").textContent = `${open.length} ${open.length === 1 ? "finding" : "findings"} open`;
   $("alert-kinds").textContent = [...new Set(open.map((f) => f.kind))].join(" · ");
+  $("alert-stale").replaceChildren(...staleClaims(sw).map((text) => h("span", { text })));
   $("alert-live").replaceChildren(...liveCaps(sw).map((text) => h("span", { text })));
   renderAgents(sw, now);
   renderOverlays(sw);
@@ -336,6 +346,7 @@ export function renderSwarm(sw) {
   renderDoctor(sw, now);
   renderHandoffs(sw.handoffs || [], sw);
   renderRecovery(sw);
+  renderContext(sw);
   renderStats();
 }
 

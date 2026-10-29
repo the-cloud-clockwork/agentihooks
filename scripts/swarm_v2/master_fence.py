@@ -145,14 +145,13 @@ def _doctor_master_send(inbox, seats, sender: str, address: str) -> bool:
     return sender in masters.held(inbox.redis, doctor, store.agents(doctor)).values()
 
 
-def handed_off(store, slug: str) -> set[str]:
-    """Seats asked to retire as the swarm shrank whose master has submitted its handoff: what they owned is the front
-    door's from then on, before the tick retires the seat."""
+def retiring(store, slug: str) -> set[str]:
+    """Seats asked to retire as the swarm shrank: what they owned is the front door's from the ask on, while the
+    master writes its handoff and before the tick retires the seat."""
     from scripts.swarm_v2 import master_scale
 
     table = masters.MasterSeats(store.redis)
-    retiring = json.loads(table.redis.hget(table.key(slug), master_scale.RETIRING) or "{}")
-    return {address for address in retiring if store.handoff(slug, address.removesuffix(f"@{slug}"))}
+    return set(json.loads(table.redis.hget(table.key(slug), master_scale.RETIRING) or "{}"))
 
 
 class Seats:
@@ -164,8 +163,8 @@ class Seats:
         self.slug, self.doc = slug, doc
         self.names = {a.name: a.seat or a.name for a in agents if a.lane == MASTER and a.state != "finished"}
         self.names.update({name: seat for seat, name in held.items()})
-        handed = handed_off(store, slug)
-        self.live = [address for address in held if address not in handed]
+        asked = retiring(store, slug)
+        self.live = [address for address in held if address not in asked]
         self.lead = masters.lead_of(slug, self.live)
         self.table = masters.MasterSeats(store.redis)
         self.count = self.table.count(slug)

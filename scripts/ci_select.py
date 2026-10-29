@@ -30,6 +30,8 @@ HARNESS = frozenset(
         "tests/__init__.py",
         "tests/shards.py",
         "tests/flake_ledger.py",
+        "tests/pass_record.py",
+        "tests/dep_inputs.py",
         "tests/browser_coverage.py",
         "tests/node_capture.cjs",
     }
@@ -40,7 +42,7 @@ SUITE_SPEED = "tests/test_suite_speed.py"
 FAKEREDIS = "fakeredis"
 # Only the queue ran these whole tree checks, so a pull request adding, removing or moving a file passed its own tier.
 TREE_CHECKS = (f"{TESTS}/test_codeowners.py", f"{TESTS}/test_ci_pull_request_api.py")
-# Stored test seconds one leg runs inside the unit step timeout; a full shard holds about 157 and runs in 217.
+# Stored test seconds per leg up to the leg limit; a larger selection shares the legs and each runs longer.
 LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
 
@@ -91,7 +93,7 @@ def selected_tests(root: Path, changed: list[str], tree_reshaped: bool, manifest
     needles = set()
     for path in changed:
         needles.add(path)
-        if Path(path).suffix == ".py" and Path(path).parts[0] in (*SOURCES, TESTS):
+        if Path(path).suffix == ".js" or Path(path).suffix == ".py" and Path(path).parts[0] in (*SOURCES, TESTS):
             tests.update(select_tests(root, Path(path)))
         else:
             needles.add(Path(path).name)
@@ -127,11 +129,8 @@ def file_seconds(durations: dict[str, float], files: set[str]) -> dict[str, floa
     return {path: total if total else UNKNOWN_SECONDS for path, total in seconds.items()}
 
 
-def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: int) -> list[list[str]] | None:
-    seconds = file_seconds(durations, tests)
-    total = sum(seconds.values())
-    if total > LEG_SECONDS * limit:
-        return None
+def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: int) -> list[list[str]]:
+    total = sum(file_seconds(durations, tests).values())
     count = min(limit, max(1, math.ceil(total / LEG_SECONDS)))
     files = sorted(tests - FIRST_SHARD_FILES)
     legs = assign_files(durations, files, count, source_sizes(root, files))
@@ -152,8 +151,7 @@ def decide(
     tests = selected_tests(root, changed, tree_reshaped, manifest)
     if not tests:
         return (NONE if all(is_doc(path) for path in changed) else FULL), []
-    legs = legs_for(root, tests, durations, limit)
-    return (FULL, []) if legs is None else (SELECTED, legs)
+    return SELECTED, legs_for(root, tests, durations, limit)
 
 
 def main(argv: list[str] | None = None) -> int:
