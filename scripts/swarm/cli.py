@@ -97,6 +97,7 @@ from scripts.swarm import (
     doc_report,
     done_gate,
     failed_panes,
+    hive_ledger,
     idle,
     launch_check,
     ledger_client,
@@ -361,6 +362,7 @@ def run_tick(
         timing.call(relay.relay, store.redis)
         timing.call(LaunchSlots(store.redis).refresh_reported, now_ms())
         outage.providers(store, slug, runtime, now_ms())
+        hive_ledger.observe(store, slug, now_ms())
         if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
             slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
         ):
