@@ -117,6 +117,8 @@ controller:
               - key: anton.io/capacity-type
                 operator: DoesNotExist
   tolerations: []
+  # Scheduler lease and slot store: redis or bus, the controller's configured NATS bus; empty follows AGENTIHOOKS_STATE_BACKEND.
+  schedulerState: ""
   # Required with workers: the Kubernetes runtime creates worker Pods with this account's token.
   serviceAccountName: ""
   # Swarms in this Redis that their own host ticks; the controller never ticks them or probes their lease.
@@ -276,8 +278,8 @@ workers:
     enabled: false
     namespace: default
     leaseName: agentihooks-hive-rollout
-    drainSeconds: 300
-    # Release image the image updater writes; each new value rolls the hives one at a time through the lease.
+    drainSeconds: 1200
+    # Optional pod stamp; each new value rolls the hives one at a time. Release hives leave it unset and roll on the chart version.
     release: ""
   excluded: [master]
   # Swarms whose masters this hive takes although it excludes master; every other swarm still sees masters excluded.

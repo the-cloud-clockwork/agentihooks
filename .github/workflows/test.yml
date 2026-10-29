@@ -616,11 +616,13 @@ jobs:
           ls -A ~/dev-durations
           echo "queued=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      # The head reuses the protected checkout's full history instead of cloning it again.
+      - name: Check out the head from the protected checkout
         if: github.event_name == 'pull_request'
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
+        run: |
+          mv "$GITHUB_WORKSPACE/provenance-grader" "$RUNNER_TEMP/repository"
+          git -C "$RUNNER_TEMP/repository" fetch --no-tags origin "$GITHUB_SHA"
+          git -C "$RUNNER_TEMP/repository" worktree add --detach "$GITHUB_WORKSPACE" "$GITHUB_SHA"
 
       # The protected copy selects, so a pull request cannot widen what it may skip.
       - name: Check out the protected grader
@@ -752,7 +754,7 @@ jobs:
 
       - &venv
         name: Restore the test environment
-        if: env.UNIT_SOURCE == ''
+        if: env.UNIT_SOURCE == '' && (env.UNIT_WHEELHOUSE != '1' || runner.environment != 'self-hosted')
         id: venv
         uses: actions/cache/restore@v4
         env:
@@ -1675,6 +1677,7 @@ jobs:
       CODEX_RELEASE: rust-v0.160.0
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
       UNIT_SOURCE: ""
+      UNIT_WHEELHOUSE: "1"
       LEG: ${{ matrix.leg }}
     strategy:
       fail-fast: false
@@ -1894,8 +1897,9 @@ jobs:
           jq -r 'select(.outcome == "flaky") | "::warning title=Flaky test::\(.test) passed on attempt \(.attempts) in run \(.run)"' flakes.jsonl
           jq -r 'select(.crashes) | "::warning title=Worker crash::\(.test) crashed its worker \(.crashes) time(s) in run \(.run)"' flakes.jsonl
 
+      # Sonar takes a leg's branch coverage in place of this artifact, so a leg uploads its database once.
       - name: Upload coverage
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.12' && (github.base_ref != 'dev' || github.event.pull_request.head.repo.full_name != github.repository || hashFiles('branch-record/record.json') == '' || hashFiles('.coverage') == '')
         uses: ./.github/actions/retry-upload
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.leg }}
@@ -2153,7 +2157,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with: &sonar-download-shard-coverage
-          pattern: coverage-3.12-*
+          pattern: ${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}
           path: .coverage-shards
 
       - name: Download shard coverage, wait before attempt 2
@@ -2167,6 +2171,22 @@ jobs:
         if: steps.download-shard-coverage.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *sonar-download-shard-coverage
+
+      - name: Take each selected leg's latest branch coverage
+        if: needs.select.outputs.scope == 'selected'
+        run: |
+          shopt -s nullglob
+          declare -A latest
+          for folder in .coverage-shards/branch-coverage-3.12-*; do
+            [[ "$folder" =~ branch-coverage-3\.12-([0-9]+)-([0-9]+)$ ]] || continue
+            if (( BASH_REMATCH[2] > ${latest[${BASH_REMATCH[1]}]:-0} )); then latest[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]}; fi
+          done
+          for leg in "${!latest[@]}"; do
+            if [[ ! -e ".coverage-shards/coverage-3.12-$leg" ]]; then
+              mv ".coverage-shards/branch-coverage-3.12-$leg-${latest[$leg]}" ".coverage-shards/coverage-3.12-$leg"
+            fi
+          done
+          rm -rf .coverage-shards/branch-coverage-3.12-*
 
       - name: Mint the token that reads the pull request runs' coverage
         id: app-token
@@ -2232,27 +2252,6 @@ jobs:
             echo "$status" > "$RUNNER_TEMP/combine.next"
             mv "$RUNNER_TEMP/combine.next" "$RUNNER_TEMP/combine.status"
           ) < /dev/null > "$RUNNER_TEMP/combine.log" 2>&1 &
-          echo "pid=$!" >> "$GITHUB_OUTPUT"
-
-      # Builds beside the proxy start, outside the scanned tree; the wait before the scan holds its result.
-      - name: Build the test dependency manifest
-        id: manifest
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
-        env:
-          ENVIRONMENT: py3.12-${{ hashFiles('pyproject.toml') }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/dep-manifest"
-          (
-            status=0
-            shopt -s nullglob
-            python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep --data-file="$RUNNER_TEMP/dep-manifest/.coverage" \
-              .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage || status=$?
-            [[ "$status" != 0 ]] || python -m tests.dep_manifest build --coverage "$RUNNER_TEMP/dep-manifest/.coverage" --inputs .coverage-shards --root . \
-              --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out "$RUNNER_TEMP/dep-manifest/manifest.json" \
-              --packed "$RUNNER_TEMP/dep-manifest/packed.json" || status=$?
-            echo "$status" > "$RUNNER_TEMP/manifest.next"
-            mv "$RUNNER_TEMP/manifest.next" "$RUNNER_TEMP/manifest.status"
-          ) < /dev/null > "$RUNNER_TEMP/manifest.log" 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
 
       - name: Start Cloudflare Access proxy
@@ -2328,23 +2327,6 @@ jobs:
           cat "$RUNNER_TEMP/combine.log"
           exit "$(< "$RUNNER_TEMP/combine.status")"
 
-      - name: Wait for the test dependency manifest
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
-        timeout-minutes: 10
-        env:
-          MANIFEST_PID: ${{ steps.manifest.outputs.pid }}
-        run: |
-          until [[ -s "$RUNNER_TEMP/manifest.status" ]]; do
-            if ! kill -0 "$MANIFEST_PID" 2> /dev/null && [[ ! -s "$RUNNER_TEMP/manifest.status" ]]; then
-              echo "::error::The test dependency manifest build ended without a status."
-              cat "$RUNNER_TEMP/manifest.log" 2> /dev/null || true
-              exit 1
-            fi
-            sleep 0.2
-          done
-          cat "$RUNNER_TEMP/manifest.log"
-          exit "$(< "$RUNNER_TEMP/manifest.status")"
-
       # Runs the CLI directly: sonarqube-scan-action never finds its tool cache entry, since a four part version is not semver.
       - name: SonarQube Scan
         env:
@@ -2369,24 +2351,6 @@ jobs:
           threads=$(python "$GITHUB_WORKSPACE/scripts/ci_cpu_quota.py")
           bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" --unless .scannerwork/report-task.txt "SonarQube Scan" -- "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. -Dsonar.python.analysis.threads="$threads" "${extra[@]}"
           [[ ! -s "$RUNNER_TEMP/sonar-gc.log" ]] || awk '/Pause/ { n++; sub(/ms$/, "", $NF); t += $NF } END { printf "GC pauses %d, %.0f ms\n", n, t }' "$RUNNER_TEMP/sonar-gc.log"
-
-      - name: Upload the test dependency manifest
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
-        uses: ./.github/actions/retry-upload
-        with:
-          name: dep-manifest
-          path: ${{ runner.temp }}/dep-manifest/manifest.json
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload the packed test dependency manifest
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
-        uses: ./.github/actions/retry-upload
-        with:
-          name: dep-manifest-packed
-          path: ${{ runner.temp }}/dep-manifest/packed.json
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Upload coverage and analysis evidence
         if: always()
@@ -2480,6 +2444,79 @@ jobs:
         env:
           PROXY_PID: ${{ steps.proxy.outputs.pid }}
         run: kill "$PROXY_PID"
+
+  dep-manifest:
+    if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    # Its own runner: built beside the Sonar scanner, it pushed the runner past its memory limit.
+    needs: [unit, select, reuse, admission]
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage
+        run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4" PyYAML==6.0.3
+
+      - name: Download shard coverage
+        id: download-shard-coverage
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &dep-manifest-download-shard-coverage
+          pattern: coverage-3.12-*
+          path: .coverage-shards
+
+      - name: Download shard coverage, wait before attempt 2
+        if: steps.download-shard-coverage.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download shard coverage failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download shard coverage, attempt 2
+        if: steps.download-shard-coverage.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *dep-manifest-download-shard-coverage
+
+      - name: Build the test dependency manifest
+        env:
+          ENVIRONMENT: py3.12-${{ hashFiles('pyproject.toml') }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/dep-manifest"
+          shopt -s nullglob
+          python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep --data-file="$RUNNER_TEMP/dep-manifest/.coverage" \
+            .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage
+          python -m tests.dep_manifest build --coverage "$RUNNER_TEMP/dep-manifest/.coverage" --inputs .coverage-shards --root . \
+            --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out "$RUNNER_TEMP/dep-manifest/manifest.json" \
+            --packed "$RUNNER_TEMP/dep-manifest/packed.json"
+
+      - name: Upload the test dependency manifest
+        uses: ./.github/actions/retry-upload
+        with:
+          name: dep-manifest
+          path: ${{ runner.temp }}/dep-manifest/manifest.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the packed test dependency manifest
+        uses: ./.github/actions/retry-upload
+        with:
+          name: dep-manifest-packed
+          path: ${{ runner.temp }}/dep-manifest/packed.json
+          if-no-files-found: error
+          retention-days: 7
 
   docs:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}
@@ -3069,7 +3106,7 @@ jobs:
 
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
-    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse]
+    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse]
     if: ${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 3
@@ -3142,7 +3179,7 @@ jobs:
 
   gate-required:
     name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}
-    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
+    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
     if: ${{ always() }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
@@ -3524,6 +3561,13 @@ jobs:
 
       - name: Compute the coverage baseline
         run: |
+          previous="$HOME/coverage-baseline/baseline.json"
+          if [[ -f "$previous" ]]; then
+            commit=$(jq -r '.commit // empty' "$previous")
+            if [[ -z "$commit" ]] || ! git merge-base --is-ancestor "$commit" HEAD; then
+              rm "$previous"
+            fi
+          fi
           python -m tests.coverage_baseline --shards 20 \
             --head-shards baseline-coverage \
             --out "$HOME/coverage-baseline/baseline.json" \
@@ -3542,34 +3586,6 @@ jobs:
           path: ~/coverage-baseline
           if-no-files-found: error
           retention-days: 90
-
-      - name: Download the test dependency manifest
-        if: needs.gate-required.result == 'success'
-        id: download-the-test-dependency-manifest
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with: &coverage-baseline-download-the-test-dependency-manifest
-          name: dep-manifest
-          path: dep-manifest
-
-      - name: Download the test dependency manifest, wait before attempt 2
-        if: steps.download-the-test-dependency-manifest.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Download the test dependency manifest failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Download the test dependency manifest, attempt 2
-        if: steps.download-the-test-dependency-manifest.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        with: *coverage-baseline-download-the-test-dependency-manifest
-
-      - name: Save the dev test dependency manifest
-        if: needs.gate-required.result == 'success'
-        uses: actions/cache/save@v4
-        with:
-          path: dep-manifest
-          key: dep-manifest-${{ github.sha }}
 
   mutation-plan:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
@@ -3714,7 +3730,9 @@ jobs:
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-selection
-          path: .mutation-selection.json
+          path: |
+            .mutation-selection.json
+            .mutation-direct.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1

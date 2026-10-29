@@ -17,11 +17,15 @@ if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
 else
   bash scripts/packaging/pull-runtime-image.sh ghcr.io/the-cloud-clockwork/agentihooks-swarm:release
 fi
-"${SWARM_INIT_PYTHON:-python3}" -m venv "$work/venv"
-SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 "$work/venv/bin/pip" install --quiet .
+start=$SECONDS
+uv venv --python "${SWARM_INIT_PYTHON:-python3}" "$work/venv"
+SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 uv pip install --quiet --python "$work/venv/bin/python" .
+printf 'Swarm init smoke package installation: %ss\n' "$((SECONDS - start))"
 cd "$work"
 for run in first second; do
+  start=$SECONDS
   "$work/venv/bin/agentihooks" swarm init smoke-swarm --operator-asked "run the swarm init smoke" | tee "$work/$run.log"
+  printf 'Swarm init smoke %s init: %ss\n' "$run" "$((SECONDS - start))"
   grep -qx 'Swarm stack ready: redis, nats, swarm and controller are healthy.' "$work/$run.log"
 done
 first="$(sed -n 's/^  1\. Open the ledger: //p' "$work/first.log")"

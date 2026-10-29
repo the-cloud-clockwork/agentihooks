@@ -348,6 +348,7 @@ rm -rf ~/.agentihooks
 |---------|---------------|
 | **[The Four Pillars]({{ site.baseurl }}/docs/pillars/)** | Identity, Guardrails, Context Intelligence, Fleet Command — the conceptual foundation |
 | **[Getting Started]({{ site.baseurl }}/docs/getting-started/)** | Install, init, per-project config, profiles |
+| **[Retrace a rewritten task]({{ site.baseurl }}/docs/pillars/swarm/#retrace-a-plan-after-rewriting-a-task)** | Task text changes, plan verdict reuse, gate configuration and stale verdict recovery |
 | **[Cost Management]({{ site.baseurl }}/docs/cost-management/)** | Output filtering, read dedup, lazy loading, rate limit display |
 | **[Hook System]({{ site.baseurl }}/docs/hooks/)** | All 10 hook events, broadcast system, lifecycle reference |
 | **[MCP Tools]({{ site.baseurl }}/docs/mcp-tools/)** | MCP tools across 3 categories (channels, enforcement, conditions) |

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from scripts.inbox.seats import is_seat
+from scripts.swarm import timing
 
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend", "transport")
 WRITE_ATTEMPTS = 5
@@ -91,7 +92,7 @@ return result
 """
 _MANAGED = """
 for _, raw in ipairs(redis.call('HVALS', KEYS[1])) do
-    if cjson.decode(raw).name == ARGV[1] then
+    if string.sub(raw, 1, #ARGV[1]) == ARGV[1] then
         return 1
     end
 end
@@ -169,10 +170,16 @@ class ExecutionRegistry:
         return {agent.seat: agent for agent in agents}
 
     def managed(self, slug: str, name: str, reader: Redis | Pipeline | None = None) -> bool:
+        from scripts.hive import scope
+
         source = reader if reader is not None else self.redis
-        if source.eval(_MANAGED, 1, self.store.key(slug, "executions"), name):
+        head = f'{{"name": {json.dumps(name)},'
+        if source.eval(_MANAGED, 1, self.store.key(slug, "executions"), head):
             return True
-        return any(json.loads(raw)["name"] == name for raw in source.hvals(self.store.key(slug, ARCHIVE)))
+        archive = self.store.key(slug, ARCHIVE)
+        if scope.member():
+            return any(json.loads(raw)["name"] == name for raw in source.hvals(archive))
+        return bool(source.eval(_MANAGED, 1, archive, head))
 
     def archive(self, slug: str) -> int:
         keys = (self.store.key(slug, "executions"), self.store.key(slug, "agents"), self.store.key(slug, ARCHIVE))
@@ -210,7 +217,7 @@ class ExecutionRegistry:
 
     def put(self, slug: str, agent: AgentRecord) -> None:
         with _writes(slug):
-            self._put(slug, agent)
+            timing.timed(self._put, slug, agent)
 
     def _put(self, slug: str, agent: AgentRecord) -> None:
         from redis.exceptions import WatchError
@@ -229,7 +236,7 @@ class ExecutionRegistry:
                     pipe.multi()
                     _write_projection(pipe, self.store, slug, agent)
                     self.write_status(pipe, slug, agent, previous)
-                    pipe.execute()
+                    timing.timed(pipe.execute)
                     return
                 except WatchError:
                     continue
@@ -353,7 +360,7 @@ class ExecutionRegistry:
 
     def update(self, slug: str, agent: AgentRecord) -> None:
         with _writes(slug):
-            self._update(slug, agent)
+            timing.timed(self._update, slug, agent)
 
     def _update(self, slug: str, agent: AgentRecord) -> None:
         from redis.exceptions import WatchError
@@ -380,7 +387,7 @@ class ExecutionRegistry:
                         return
                     pipe.multi()
                     self.write(pipe, slug, agent, current)
-                    pipe.execute()
+                    timing.timed(pipe.execute)
                     return
                 except WatchError:
                     continue
