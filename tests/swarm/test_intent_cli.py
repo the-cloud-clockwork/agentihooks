@@ -30,17 +30,23 @@ def started(env, monkeypatch):  # noqa: F811
 def test_swarm_pr_arms_the_intent_check_and_stamps_the_body(started, capsys, monkeypatch, autonomy, awaiting):
     store, ledger, stamped = started
     store.update("sw", autonomy=autonomy)
-    calls, update, state = [], ledger.update_task, ledger.state
+    calls, update, state, read = [], ledger.update_task, ledger.state, ledger.task
     ledger.update_task = lambda slug, task, fields, by="swarm": calls.append((slug, by)) or update(slug, task, fields)
     ledger.state = lambda slug: calls.append((slug, "state")) or state(slug)
+    ledger.task = lambda slug, task_id: calls.append((slug, f"tasks/{task_id}")) or read(slug, task_id)
+    ledger.item = lambda slug, path: (
+        calls.append((slug, path)) or next(p for p in ledger.phases if f"phases/{p['id']}" == path)
+    )
+    ledger.metadata = lambda slug: calls.append((slug, "metadata")) or {"overview": "Project intent", "_meta": {}}
     monkeypatch.setattr(cli, "now_ms", lambda: 4242)
     assert run("sw", "pr", URL) == 0
     out = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert out == {"task": "t1", "pr_url": URL, "intent": {"verdict": "pending", "body": True}}
     assert [ledger.rows["t1"][k] for k in ("state", "pr_url", "awaiting")] == ["pr", URL, awaiting]
-    assert calls == [("sw", "state"), ("sw", ME)]
+    assert calls == [("sw", "tasks/t1"), ("sw", "phases/p1"), ("sw", "metadata"), ("sw", ME)]
     [(url, doc, task)] = stamped
-    assert (url, task["id"], task["title"], doc["phases"]) == (URL, "t1", "Intent", ledger.phases)
+    assert (url, task["id"], task["title"]) == (URL, "t1", "Intent")
+    assert (doc["overview"], doc["phases"], doc["tasks"]) == ("Project intent", ledger.phases, [task])
     assert Verdicts("sw", "intent").read("t1") == {"verdict": "pending", "reason": "intent check running", "at": 4242}
 
 
