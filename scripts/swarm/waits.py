@@ -247,4 +247,4 @@ def settle_notices(inbox, agent, action):
             for item in world.inbox(address):
                 if item.sender != SENDER or item.state in CLOSED or _pick_up(agent.task) not in item.text:
                     continue
-                world.close(item.id, SENDER, "done", f"{agent.name} recorded {action} on task {agent.task}")
+                world.settle(item.id, SENDER, "done", f"{agent.name} recorded {action} on task {agent.task}")

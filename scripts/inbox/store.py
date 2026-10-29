@@ -27,6 +27,7 @@ REDELIVERED = "redelivered: never confirmed inside the redelivery window"
 REDELIVERER = "inbox"
 RECLAIMED = "returned to the master pool: its master is gone"
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
+OPEN = tuple(state for state in STATES if state not in CLOSED)
 CLOSE_KINDS = {"done": "done", "handoff": "handed_off", "blocked": "blocked", "cancel": "cancelled"}
 NEEDS_DETAIL = {"handoff": "the address the work went to", "blocked": "what it is blocked on"}
 OPERATOR = "operator"
@@ -47,6 +48,10 @@ class Unreachable(InboxError):
 
 
 class Contended(InboxError):
+    pass
+
+
+class Gone(InboxError):
     pass
 
 
@@ -457,7 +462,9 @@ class InboxStore:
     def read(self, item_id, reader):
         return self._move(item_id, reader, lambda item: (item.address,), "read", "")
 
-    def close(self, item_id, closer, kind, detail=""):
+    def close(
+        self, item_id: str, closer: str, kind: str, detail: str = "", only_from: tuple[str, ...] | None = None
+    ) -> Item | None:
         state, reason = close_reason(kind, detail)
         return self._move(
             item_id,
@@ -465,7 +472,15 @@ class InboxStore:
             lambda item: (item.address, item.sender, master_of(item.address, NameRegistry(self.redis))),
             state,
             reason,
+            only_from,
         )
+
+    def settle(self, item_id: str, closer: str, kind: str, detail: str = "") -> Item | None:
+        """None once another path closed the item or its record is gone."""
+        try:
+            return self.close(item_id, closer, kind, detail, OPEN)
+        except Gone:
+            return None
 
     def withdraw(
         self, item_id: str, by: str, reason: str, expected_address: str = "", expected_receiver: str | None = ""
@@ -1109,7 +1124,7 @@ def _present(item_ids, rows):
 
 def _item(raw, item_id):
     if not raw:
-        raise InboxError(f"no message {item_id}")
+        raise Gone(f"no message {item_id}")
     return _parsed(raw)
 
 

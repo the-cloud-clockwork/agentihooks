@@ -787,7 +787,7 @@ def test_a_red_notice_whose_close_races_stays_indexed_and_closes_next_pass(store
     red, item = red_notice(store)
     store.redis.hset(store.key("sw", "red-notices"), "gone", URL)
 
-    def changed_meanwhile(self, item_id, closer, kind, detail=""):
+    def changed_meanwhile(self, item_id, closer, kind, detail="", only_from=None):
         raise ledger_events.InboxError(f"message {item_id} changed meanwhile")
 
     with monkeypatch.context() as patched:
