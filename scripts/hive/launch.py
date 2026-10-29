@@ -51,6 +51,7 @@ class _Placing:
     rows: list[capacity.Account]
     hives: list[dict]
     now: int
+    listed: tuple[dict, ...] = ()
 
 
 ROOM_DETAILS = {"reason": "", "detail": ""}
@@ -289,6 +290,7 @@ class HiveLaunch:
         hives, refused = _pinned(_by_origin(hives, config.repo), task, role)
         if refused:
             return self._record_wait(lane, task, refused)
+        listed = tuple(hives)
         hives = [hive for hive in hives if placement.hosts(lane, hive, (decision.profile,))]
         harness = saved.get("harness") or chosen.get("agent") or "auto"
         auto = harness == "auto"
@@ -315,7 +317,7 @@ class HiveLaunch:
                     bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
                     taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
                     hives[index] = _local_capped(hive, taken, bound)
-        placing = _Placing(config, task, saved, decision, role, rows, hives, now)
+        placing = _Placing(config, task, saved, decision, role, rows, hives, now, listed)
         found = self._account_selection(placing, harness)
         if auto and harness == "codex" and isinstance(found, placement.Wait):
             claude = self._account_selection(placing, "claude")
@@ -358,7 +360,8 @@ class HiveLaunch:
             fallback=fallback,
             origin=matched,
             first=ranked,
-            spill=choice.spill,
+            spill=choice.spill
+            or placement.unhosted(role, list(placing.listed), placing.now, (placing.decision.profile,)),
         )
 
     def _master_selection(self, config, decision, hives, now, rows, front):
