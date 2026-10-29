@@ -462,7 +462,9 @@ class InboxStore:
     def read(self, item_id, reader):
         return self._move(item_id, reader, lambda item: (item.address,), "read", "")
 
-    def close(self, item_id, closer, kind, detail="", only_from=None):
+    def close(
+        self, item_id: str, closer: str, kind: str, detail: str = "", only_from: tuple[str, ...] | None = None
+    ) -> Item | None:
         state, reason = close_reason(kind, detail)
         return self._move(
             item_id,
@@ -473,7 +475,7 @@ class InboxStore:
             only_from,
         )
 
-    def settle(self, item_id, closer, kind, detail=""):
+    def settle(self, item_id: str, closer: str, kind: str, detail: str = "") -> Item | None:
         """None once another path closed the item or its record is gone."""
         try:
             return self.close(item_id, closer, kind, detail, OPEN)
