@@ -1163,8 +1163,10 @@ def test_scheduler_deadline_covers_the_complete_timer_lifecycle(monkeypatch, pha
     from scripts.scheduler import process_timer
 
     real_sleep, finished = time.sleep, []
-    previous = signal.getsignal(signal.SIGALRM)
     context = MagicMock()
+
+    def unowned_alarm(_signum, _frame):
+        raise AssertionError("the exporter did not install its deadline handler")
 
     def stall(at):
         if phase == at or phase == "wait-and-retire" and at in ("wait", "retire"):
@@ -1181,13 +1183,17 @@ def test_scheduler_deadline_covers_the_complete_timer_lifecycle(monkeypatch, pha
     monkeypatch.setattr(trace_flush, "POLL_LIMIT_SEC", 0.01)
     sleep = Mock()
     monkeypatch.setattr(trace_flush.time, "sleep", sleep)
-    trace_flush.scheduled_wait(trace_flush.POLL_SEC)
-    assert finished == []
-    sleep.assert_called_once_with(trace_flush.POLL_SEC)
-    assert signal.getsignal(signal.SIGALRM) is previous
-    assert capsys.readouterr().err == (
-        "trace_flush unknown: scheduler fallback: TimeoutError: scheduler lifecycle deadline exceeded\n"
-    )
+    previous = signal.signal(signal.SIGALRM, unowned_alarm)
+    try:
+        trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+        assert finished == []
+        sleep.assert_called_once_with(trace_flush.POLL_SEC)
+        assert signal.getsignal(signal.SIGALRM) is unowned_alarm
+        assert capsys.readouterr().err == (
+            "trace_flush unknown: scheduler fallback: TimeoutError: scheduler lifecycle deadline exceeded\n"
+        )
+    finally:
+        signal.signal(signal.SIGALRM, previous)
 
 
 def test_scheduler_failure_names_the_exporting_session(monkeypatch, capsys):
