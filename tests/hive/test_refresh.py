@@ -648,7 +648,6 @@ def test_a_daemon_first_start_keys_every_scheduler_key_under_its_redis_member(
         scheduler = Scheduler(RedisStateStore(redis, bucket()), machine="pod")
         user = redis.connection_pool.connection_kwargs["username"]
         started.append((user, local_id, [scheduler.key(suffix) for suffix in SCHEDULER_SUFFIXES]))
-        scheduler.timer(owner="pod", payload="probe", delay=1)
         raise KeyboardInterrupt
 
     monkeypatch.setattr(daemon, "beat", beat)
