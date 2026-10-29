@@ -29,11 +29,8 @@ def host(redis: "Redis", slug: str, name: str) -> str:
     """The joined member that runs name in slug, '' for any other host; a member recognises only itself."""
     from scripts.swarm.store import RedisStore
 
-    hosts = joined(redis)
-    if not hosts:
-        return ""
     placed = RedisStore(redis).execution_registry.hive(slug, name)
-    return placed if placed in hosts else ""
+    return placed if placed and placed in joined(redis) else ""
 
 
 def joined(redis: "Redis") -> list[str]:
