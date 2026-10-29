@@ -24,7 +24,8 @@ def test_a_function_without_a_recorded_kill_keeps_the_duration_order(tmp_path):
 
 
 def test_tests_covering_the_changed_lines_run_before_faster_fallback_tests(tmp_path):
-    memory = killers.KillMemory(tmp_path / "killers", {"tests/test_c.py::slow"})
+    memory = killers.KillMemory(tmp_path / "killers", {"scripts.a.": ["tests/test_c.py::slow"]})
+    assert memory.order("scripts.b.x_f__mutmut_1", TESTS) == TESTS
     tests = [*TESTS, "tests/test_c.py::slow_too"]
     assert memory.order("scripts.a.x_f__mutmut_1", tests) == [
         "tests/test_c.py::slow",
