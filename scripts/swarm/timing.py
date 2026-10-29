@@ -16,6 +16,7 @@ from scripts.swarm import tick_stop
 SWARM = ContextVar("tick_swarm", default=None)
 BEFORE_STEP = ContextVar("tick_before_step", default=None)
 ON_FAILURE = ContextVar("tick_failure", default=None)
+AGENT = ContextVar("tick_agent", default=None)
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ("scripts", "hooks", "tests")
 
@@ -45,6 +46,15 @@ def tick(slug: str) -> Iterator[None]:
 
 
 @contextmanager
+def acting(name: str) -> Iterator[None]:
+    token = AGENT.set(name)
+    try:
+        yield
+    finally:
+        AGENT.reset(token)
+
+
+@contextmanager
 def step(name: str, report: bool = True) -> Iterator[None]:
     slug = SWARM.get()
     if slug is None:
@@ -61,6 +71,8 @@ def step(name: str, report: bool = True) -> Iterator[None]:
         "step": name,
         "started": started,
     }
+    if (agent := AGENT.get()) is not None:
+        record["agent"] = agent
     emit(sys.stderr, json.dumps(record))
     outcome = "success"
     try:
