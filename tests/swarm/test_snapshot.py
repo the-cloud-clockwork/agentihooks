@@ -75,6 +75,16 @@ def test_export_then_restore_after_losing_redis_gives_back_the_same_swarm_state(
     assert store.redis.pttl(store.key("sw", "claim", "t1")) > 0
 
 
+def test_a_snapshot_taken_before_names_were_exported_still_restores(store):
+    seed(store, "sw")
+    alone = everything(store.redis)
+    state = store.export("sw")
+    del state["names"]
+    store.redis.flushall()
+    store.restore("sw", json.loads(json.dumps(state)))
+    assert everything(store.redis) == alone
+
+
 def test_snapshot_remove_restore_gives_back_the_same_swarm_state(store):
     seed(store, "sw")
     seed(store, "other")

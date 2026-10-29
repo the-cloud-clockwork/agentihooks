@@ -34,7 +34,7 @@ def git(root: Path, *args: str) -> str:
 
 
 def task_row(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
-    task = next((row for row in ledger.tasks(slug) if row.get("id") == agent.task), {})
+    task = ledger.task(slug, agent.task) or {}
     if task.get("claimed_by") != agent.name or task.get("state") not in ("claimed", "pr"):
         raise SwarmError("publication requires this agent's claimed task")
     if task.get("branch"):
