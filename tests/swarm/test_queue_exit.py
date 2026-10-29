@@ -41,7 +41,10 @@ def runner(*pages, total=None, code=0, jobs=None):
         if "/jobs?" in path:
             listed = (jobs or {}).get(int(path.split("/runs/")[1].split("/")[0]), [[]])
             page = listed[int(path.rsplit("page=", 1)[1]) - 1]
-            body = {"total_count": sum(map(len, listed)), "jobs": [c if isinstance(c, dict) else {"name": "unit", "conclusion": c} for c in page]}
+            body = {
+                "total_count": sum(map(len, listed)),
+                "jobs": [c if isinstance(c, dict) else {"name": "unit", "conclusion": c} for c in page],
+            }
         elif "/commits/" in path:
             body = {"commit": {"committer": {"date": COMMITTED}}}
         else:
@@ -160,6 +163,7 @@ def test_a_head_with_no_group_run_since_it_landed_may_queue():
     run = runner([run_of(8, "failure"), run_of(7, None, run_id=2)])
     assert queue_exit.require_fresh(URL, "abc", run) is None
     assert run.calls == [["gh", "api", "repos/o/r/commits/abc"], ["gh", "api", FRESH]]
+
 
 @pytest.mark.parametrize("conclusion", ["failure", "timed_out", "startup_failure"])
 @pytest.mark.parametrize("name", ["Queue gate summary", "unit (3.12, 0)", "Gate — Required"])
