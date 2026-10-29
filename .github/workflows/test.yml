@@ -1900,7 +1900,8 @@ jobs:
       # Sonar takes a leg's branch coverage in its place, so a same-repo leg uploads its database once.
       - name: Stamp coverage with its attempt
         if: &upload-selected-coverage matrix.python-version == '3.12' && (steps.upload-branch-coverage.outcome != 'success' || hashFiles('.coverage') == '')
-        run: echo "$GITHUB_RUN_ATTEMPT" > coverage-attempt
+        shell: bash
+        run: '[[ ! -f .coverage ]] || echo "$GITHUB_RUN_ATTEMPT" > coverage-attempt'
 
       - name: Upload coverage
         if: *upload-selected-coverage

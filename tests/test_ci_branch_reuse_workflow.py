@@ -553,6 +553,21 @@ def test_a_selected_leg_uploads_its_coverage_once(values, database, uploaded):
     assert _evaluate(condition, {"matrix.python-version": "3.12", **values}) is uploaded
 
 
+@pytest.mark.parametrize("database", [True, False])
+def test_a_leg_without_a_database_leaves_no_stamp_to_upload(tmp_path, database):
+    stamp = _step("unit-selected", "Stamp coverage with its attempt")
+    if database:
+        (tmp_path / ".coverage").write_text("db")
+    result = subprocess.run(
+        ["bash", "-c", stamp["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "GITHUB_RUN_ATTEMPT": "2"},
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "coverage-attempt").exists() is database
+
+
 @pytest.mark.parametrize(
     ("values", "taken"),
     [
