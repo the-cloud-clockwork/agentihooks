@@ -587,7 +587,11 @@ def test_sonar_downloads_the_branch_coverage_only_for_a_selected_scope():
     take = _step("sonar", "Take each selected leg's latest branch coverage")
     assert take["if"] == "needs.select.outputs.scope == 'selected'"
     names = [step.get("name") for step in _jobs()["sonar"]["steps"]]
-    assert names.index("Download shard coverage, attempt 2") < names.index(take["name"]) < names.index("Merge shard coverage")
+    assert (
+        names.index("Download shard coverage, attempt 2")
+        < names.index(take["name"])
+        < names.index("Merge shard coverage")
+    )
 
 
 def test_sonar_takes_each_legs_latest_branch_coverage_and_keeps_an_uploaded_one(tmp_path):
@@ -604,5 +608,9 @@ def test_sonar_takes_each_legs_latest_branch_coverage_and_keeps_an_uploaded_one(
     run = _step("sonar", "Take each selected leg's latest branch coverage")["run"]
     subprocess.run(["bash", "-e", "-c", run], cwd=tmp_path, check=True)
     assert sorted(path.name for path in shards.iterdir()) == ["coverage-3.12-1", "coverage-3.12-12", "coverage-3.12-2"]
-    assert [(shards / f"coverage-3.12-{leg}/.coverage").read_text() for leg in (1, 2, 12)] == ["new", "uploaded", "twelve"]
+    assert [(shards / f"coverage-3.12-{leg}/.coverage").read_text() for leg in (1, 2, 12)] == [
+        "new",
+        "uploaded",
+        "twelve",
+    ]
     assert (shards / "coverage-3.12-1/js-coverage").is_dir()
