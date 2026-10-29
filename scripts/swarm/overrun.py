@@ -152,7 +152,8 @@ def _end(watch, mail, agent, minutes, mark):
     watch.store.mark_restart(watch.slug, tid, CAUSE)
     watch.store.release(watch.slug, tid, agent.name)
     watch.store.drop_agent(watch.slug, agent.name)
-    if mail.inbox.get(mark["ask"]).state not in CLOSED:
+    asked = mail.inbox.find(mark["ask"], KEY)
+    if asked and asked.state not in CLOSED:
         mail.inbox.close(mark["ask"], SENDER, DONE, ASK_CLOSED)
     exits.settle(mail.inbox, agent.name, agent.seat, STOPPED)
     said = {"slug": watch.slug, "agent": agent.name, "minutes": minutes, "task": tid, "grace": GRACE_MINUTES}

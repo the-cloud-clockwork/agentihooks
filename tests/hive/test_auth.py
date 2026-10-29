@@ -665,3 +665,54 @@ def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts
     assert host.gate_lift("proof", "agents", "t1", "subagents") == {"at": 1.0}
     with pytest.raises(NoPermissionError):
         member.hset(host.key("proof", "gate-lifts", "tasks", "t1"), "subagents", "{}")
+
+
+def test_a_member_credential_records_its_pull_request_before_a_lift_cleanup_refusal(monkeypatch):
+    import fakeredis
+    from redis.exceptions import NoPermissionError
+
+    from scripts.swarm import cli as swarm_cli
+
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    starved = [pattern for pattern in auth._acl_keys("m1") if "gate-lift-drops" not in pattern]
+    admin.acl_setuser(
+        "hive-m1", enabled=True, nopass=True, categories=auth.ACL_CATEGORIES, keys=starved, channels=auth.ACL_PATTERNS
+    )
+    reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "HVALS", "HMGET"}
+
+    # fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client.
+    class Member(fakeredis.FakeRedis):
+        def execute_command(self, *args, **options):
+            if str(args[0]).upper() in reads:
+                return admin.execute_command(*args, **options)
+            return super().execute_command(*args, **options)
+
+    member = Member(server=server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    member.time = lambda: (100, 5)
+    host = store.RedisStore(admin)
+    host.create(store.SwarmConfig("proof", "/repo", 1, 0, "running"))
+    host.put_agent("proof", store.AgentRecord(name="engineer@0001-0001", lane="eng", task="t1"))
+    host.put_gate_lift("proof", "tasks", "t1", "subagents", {"at": 1.0})
+    url = "https://github.com/o/r/pull/3"
+    updates = []
+
+    class Ledger:
+        def state(self, slug):
+            return {"tasks": [{"id": "t1", "lane": "eng", "state": "claimed"}], "phases": []}
+
+        def update_task(self, slug, task, fields, by=None):
+            updates.append((task, fields, by))
+
+    swarm = store.RedisStore(member)
+    swarm.agents = host.agents
+    monkeypatch.setattr(swarm_cli, "connect", lambda: swarm)
+    monkeypatch.setattr(swarm_cli, "LedgerClient", Ledger)
+    monkeypatch.setattr(swarm_cli, "pull_branch", lambda pull: ("", ""))
+    monkeypatch.setattr("scripts.gates.intent.stamp_body", lambda *args, **kwargs: False)
+
+    with pytest.raises(NoPermissionError):
+        swarm_cli.main(["proof", "--as", "engineer@0001-0001", "pr", url])
+
+    assert updates == [("t1", {"state": "pr", "awaiting": "", "pr_url": url}, "engineer@0001-0001")]

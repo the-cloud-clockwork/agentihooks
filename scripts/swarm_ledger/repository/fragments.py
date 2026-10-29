@@ -40,6 +40,8 @@ def members(parts: dict) -> bytes:
 
 
 def leaf(value: object, previous: Fragment | None = None) -> Fragment:
+    if previous is not None and value is previous.value:
+        return previous
     try:
         signature = hash(orjson.dumps(value))
     except orjson.JSONEncodeError:

@@ -347,3 +347,4 @@ def test_a_minute_due_while_the_supervisor_recycles_fires_once_on_the_restarted_
     assert scheduler.run_due(now=due + 31) == 0
     assert fired == [due]
     assert scheduler.get(entry_id).record["due"] == due + 60
+
