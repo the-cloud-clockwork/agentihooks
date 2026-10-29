@@ -8,7 +8,7 @@ from scripts.gates import intent
 from scripts.gates import log as gate_log
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, commands, dispatcher, lease, publish, runtime, timer
+from scripts.swarm import cli, commands, dispatcher, fencing, lease, publish, runtime, timer
 from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
@@ -132,8 +132,6 @@ def test_done_closes_the_task_and_marks_the_agent_finished(env, monkeypatch):
 
 
 def test_done_refuses_distributed_task_before_proof_or_ledger_mutations(env, monkeypatch):
-    from scripts.swarm import fencing
-
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
