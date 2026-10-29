@@ -27,7 +27,11 @@ def _client_names(module):
     tree = ast.parse(inspect.getsource(importlib.import_module(module)))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            yield from (alias.name for alias in node.names if alias.name.split(".")[0] == "redis")
+            yield from (
+                alias.name
+                for alias in node.names
+                if alias.name.split(".")[0] == "redis" or alias.name == "hooks._redis"
+            )
         elif isinstance(node, ast.ImportFrom) and node.module:
             if node.module.split(".")[0] == "redis" or node.module == "hooks._redis":
                 yield node.module

@@ -181,29 +181,24 @@ def _offline_swarm(name):
     return None if parse(name) else legacy_slug(name)
 
 
-def _legacy_swarms(paths, registry):
+def _legacy_swarms(paths):
+    from scripts.swarm.naming import registered_slug
     from scripts.swarm.store import store_errors
 
     swarms = dict.fromkeys(paths)
     for path in paths:
-        if registry is None:
-            swarms[path] = _offline_swarm(path.stem)
-            continue
         try:
-            # slug_of swallows a failed alias lookup; this read raises it so the name stays pending.
-            registry.redis.get(registry.key("alias", path.stem))
-            swarms[path] = registry.slug_of(path.stem)
+            swarm = registered_slug(path.stem)
         except store_errors():
             break
+        swarms[path] = _offline_swarm(path.stem) if swarm is None else swarm
     return swarms
 
 
 def _migrate(connection):
-    from scripts.swarm import naming
-
     if connection.execute("SELECT 1 FROM legacy WHERE name = ''").fetchone():
         return
-    swarms = _legacy_swarms([path for path in _dir().glob("*.json") if _load(path.stem)["rows"]], naming.registry())
+    swarms = _legacy_swarms([path for path in _dir().glob("*.json") if _load(path.stem)["rows"]])
     clean = {}
     with connection:
         connection.execute("BEGIN IMMEDIATE")
