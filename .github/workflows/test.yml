@@ -3453,6 +3453,7 @@ jobs:
         run: python -m tests.flake_budget --history ~/flake-history/history.jsonl --reports ~/flake-reports --out flake-budget.json | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Publish the flake budget
+        if: steps.restore-flake-history.outputs.cache-matched-key || steps.restore-flake-history-2.outputs.cache-matched-key
         uses: ./.github/actions/retry-upload
         with:
           name: flake-budget

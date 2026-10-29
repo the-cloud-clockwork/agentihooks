@@ -162,11 +162,12 @@ def test_a_dev_push_keeps_the_flake_history_and_publishes_the_budget():
         " --out flake-budget.json"
     )
     assert steps["Count flaky tests over seven days"]["shell"] == "bash"
+    matched = "steps.restore-flake-history.outputs.cache-matched-key || steps.restore-flake-history-2.outputs.cache-matched-key"
     assert steps["Publish the flake budget"]["with"]["name"] == "flake-budget"
     assert steps["Publish the flake budget"]["with"]["path"] == "flake-budget.json"
     assert steps["Publish the flake budget"]["with"]["if-no-files-found"] == "error"
     assert steps["Save the flake history"]["uses"] == "actions/cache/save@v4"
-    matched = "steps.restore-flake-history.outputs.cache-matched-key || steps.restore-flake-history-2.outputs.cache-matched-key"
+    assert steps["Publish the flake budget"]["if"] == matched
     assert steps["Save the flake history"]["with"] == {
         "path": "~/flake-history",
         "key": f"${{{{ ({matched}) && 'flake-history' || 'flake-seed' }}}}-${{{{ github.run_id }}}}-${{{{ github.run_attempt }}}}",
