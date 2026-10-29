@@ -1156,7 +1156,7 @@ def test_scheduler_wait_returns_within_its_bound_when_the_timer_never_rings(monk
 
 
 @pytest.mark.parametrize("phase", ["construct", "wait", "retire", "wait-and-retire"])
-def test_scheduler_deadline_covers_the_complete_timer_lifecycle(monkeypatch, phase):
+def test_scheduler_deadline_covers_the_complete_timer_lifecycle(monkeypatch, phase, capsys):
     import signal
     from unittest.mock import MagicMock, Mock
 
@@ -1185,6 +1185,9 @@ def test_scheduler_deadline_covers_the_complete_timer_lifecycle(monkeypatch, pha
     assert finished == []
     sleep.assert_called_once_with(trace_flush.POLL_SEC)
     assert signal.getsignal(signal.SIGALRM) is previous
+    assert capsys.readouterr().err == (
+        "trace_flush unknown: scheduler fallback: TimeoutError: scheduler lifecycle deadline exceeded\n"
+    )
 
 
 def test_scheduler_failure_names_the_exporting_session(monkeypatch, capsys):
@@ -1198,14 +1201,15 @@ def test_scheduler_failure_names_the_exporting_session(monkeypatch, capsys):
     assert capsys.readouterr().err == "trace_flush export-session: scheduler fallback: StateConflict: changed\n"
 
 
-def test_scheduler_deadline_restores_the_previous_alarm_after_interruption(monkeypatch):
+@pytest.mark.parametrize(("remaining", "restored"), [(30.0, 28.0), (1.0, 0.001)])
+def test_scheduler_deadline_restores_the_previous_alarm_after_interruption(monkeypatch, remaining, restored):
     import signal
     from types import SimpleNamespace
     from unittest.mock import Mock, call
 
     previous = Mock()
     handler = Mock(return_value=previous)
-    timer = Mock(return_value=(30.0, 2.0))
+    timer = Mock(return_value=(remaining, 2.0))
     monkeypatch.setattr(trace_flush.signal, "signal", handler)
     monkeypatch.setattr(trace_flush.signal, "setitimer", timer)
     monkeypatch.setattr(trace_flush, "time", SimpleNamespace(monotonic=Mock(side_effect=[10.0, 12.0]), sleep=Mock()))
@@ -1216,7 +1220,7 @@ def test_scheduler_deadline_restores_the_previous_alarm_after_interruption(monke
     assert timer.call_args_list == [
         call(signal.ITIMER_REAL, trace_flush.POLL_LIMIT_SEC, trace_flush.POLL_LIMIT_SEC),
         call(signal.ITIMER_REAL, 0),
-        call(signal.ITIMER_REAL, 28.0, 2.0),
+        call(signal.ITIMER_REAL, restored, 2.0),
     ]
     trace_flush.time.sleep.assert_not_called()
 
@@ -1245,6 +1249,31 @@ def test_default_supervisor_scheduler_failure_names_its_session(home, tmp_path, 
         == "owner exited"
     )
     assert capsys.readouterr().err == "trace_flush export-session: scheduler fallback: StateConflict: changed\n"
+
+
+def test_supervisor_keeps_the_supplied_wait_instead_of_the_default(home, tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    transcript = tmp_path / "transcript.jsonl"
+    _grow(transcript)
+    _request("export-session", transcript)
+    clock, owner = Clock(), {"alive": True}
+    clock.hooks.append((1, lambda: owner.update(alive=False)))
+    default_wait = Mock(side_effect=AssertionError("the supplied wait was replaced"))
+    monkeypatch.setattr(trace_flush, "scheduled_wait", default_wait)
+    assert (
+        trace_flush.supervise(
+            "export-session",
+            trace_flush.Budget(15, 5, 3),
+            lambda *args: True,
+            clock,
+            clock.sleep,
+            lambda record: owner["alive"],
+            timer_wait=clock.sleep,
+        )
+        == "owner exited"
+    )
+    default_wait.assert_not_called()
 
 
 def test_terminal_exporter_failure_names_the_session(monkeypatch, capsys):
