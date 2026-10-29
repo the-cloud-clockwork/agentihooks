@@ -769,3 +769,9 @@ def test_a_write_before_any_hive_ack_keeps_its_own_launch_fields(store, agent):
     written = replace(stale, pane_id="w1:p2", model="opus")
     store.put_agent("fixture", written)
     assert store.execution("fixture", stale.execution_id) == written
+
+
+def test_the_hive_ack_binds_the_full_target_over_the_host_only_target(store, agent):
+    stale = store.start_execution("fixture", replace(agent, state="launching", runtime_target={"host_id": "hive"}))
+    store.put_agent("fixture", replace(stale, state="working", runtime_target=HIVE_TARGET, pane_id="w1:p2"))
+    assert store.execution("fixture", stale.execution_id).runtime_target == HIVE_TARGET
