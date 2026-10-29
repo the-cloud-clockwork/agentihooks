@@ -93,12 +93,16 @@ def test_an_alias_held_before_the_move_is_never_pointed_elsewhere(client, agent)
     client.set(_legacy("alias", "sw-eng-1"), new)
     with pytest.raises(naming.NamingError, match=f"^{re.escape(f'alias sw-eng-1 already belongs to {new}')}$"):
         names.alias("sw-eng-1", other)
+    names.alias("sw-eng-2", new)
+    with pytest.raises(naming.NamingError, match=f"^{re.escape(f'alias sw-eng-2 already belongs to {new}')}$"):
+        names.alias("sw-eng-2", other)
     assert _shared(client, "aliases-of", other) is None
 
 
 def test_an_alias_lost_to_a_racing_owner_leaves_no_membership_behind(client, agent):
     names, new = agent
     other = names.next("sw", "eng")
+    names.alias("sw-eng-9", new)
     racing = naming.NameRegistry(client)
     real = names.names_state.amend
 
@@ -111,7 +115,7 @@ def test_an_alias_lost_to_a_racing_owner_leaves_no_membership_behind(client, age
     with pytest.raises(naming.NamingError, match=f"^{re.escape(f'alias sw-eng-1 already belongs to {other}')}$"):
         names.alias("sw-eng-1", new)
     names.names_state.amend = real
-    assert names.aliases(new) == []
+    assert names.aliases(new) == ["sw-eng-9"]
     assert names.aliases(other) == ["sw-eng-1"]
     assert names.resolve("sw-eng-1") == other
 
@@ -195,9 +199,22 @@ def test_a_registered_slug_raises_a_failed_store_read(client, on_redis, monkeypa
     assert raised.value is failure
 
 
+def test_a_registered_slug_asks_the_swarm_of_the_name_an_alias_points_at(client, agent, monkeypatch):
+    from hooks import _redis
+
+    names, new = agent
+    names.alias("sw-eng-1", new)
+    monkeypatch.setattr(_redis, "get_redis", lambda: client)
+    monkeypatch.setattr(naming.NameRegistry, "slug_of", lambda self, name: f"{name} in demo")
+    assert naming.registered_slug("sw-eng-1") == f"{new} in demo"
+    assert naming.registered_slug("stranger") == "stranger in demo"
+
+
 def test_export_lists_the_swarm_aliases_as_store_rows_that_restore_writes_back(client, agent):
     names, new = agent
     quiet = names.next("sw", "eng")
+    last = names.next("sw", "ci")
+    names.alias("sw-ci-3", last)
     client.set(_legacy("alias", "sw-eng-2"), new)
     client.sadd(_legacy("aliases-of", new), "sw-eng-2")
     names.alias("sw-eng-1", new)
@@ -209,6 +226,8 @@ def test_export_lists_the_swarm_aliases_as_store_rows_that_restore_writes_back(c
         name_state.state_key("aliases-of", new): ["sw-eng-1", "sw-eng-2"],
         name_state.state_key("alias", "sw-eng-1"): new,
         name_state.state_key("alias", "sw-eng-2"): new,
+        name_state.state_key("aliases-of", last): ["sw-ci-3"],
+        name_state.state_key("alias", "sw-ci-3"): last,
     }
     assert name_state.state_key("aliases-of", quiet) not in rows
     assert names.export("missing") == {}

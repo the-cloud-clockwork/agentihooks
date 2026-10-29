@@ -297,9 +297,15 @@ class NameRegistry:
     def _legacy_aliases_of(self, name):
         return lambda client: sorted(client.smembers(self.key("aliases-of", name)))
 
+    def _alias_of(self, name, reader=None):
+        return self.names_state.get("alias", name, self._legacy_alias(name), reader)
+
+    def _amend_aliases_of(self, name, change):
+        self.names_state.amend("aliases-of", name, change, self._legacy_aliases_of(name))
+
     def resolve(self, name, reader=None):
         try:
-            return self.names_state.get("alias", name, self._legacy_alias(name), reader) or name
+            return self._alias_of(name, reader) or name
         except state.unavailable() as exc:
             logging.getLogger(__name__).warning("alias lookup failed for %s: %s", name, exc)
             return name
@@ -346,22 +352,12 @@ class NameRegistry:
                 raise NamingError(f"alias {old} already belongs to {held}")
             return KEEP if held == new else new
 
-        point(self.names_state.get("alias", old, self._legacy_alias(old)))
-        self.names_state.amend(
-            "aliases-of",
-            new,
-            lambda held: KEEP if old in (held or []) else sorted({*(held or []), old}),
-            self._legacy_aliases_of(new),
-        )
+        point(self._alias_of(old))
+        self._amend_aliases_of(new, lambda held: sorted({*(held or []), old}))
         try:
             self.names_state.amend("alias", old, point, self._legacy_alias(old))
         except NamingError:
-            self.names_state.amend(
-                "aliases-of",
-                new,
-                lambda held: [kept for kept in held or [] if kept != old],
-                self._legacy_aliases_of(new),
-            )
+            self._amend_aliases_of(new, lambda held: [kept for kept in held or [] if kept != old])
             raise
 
     def aliases(self, name, reader=None):
@@ -532,5 +528,4 @@ def registered_slug(name):
     names = registry()
     if names is None:
         return None
-    names.names_state.get("alias", name, names._legacy_alias(name))
-    return names.slug_of(name)
+    return names.slug_of(names._alias_of(name) or name)

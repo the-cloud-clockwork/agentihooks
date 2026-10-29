@@ -899,6 +899,13 @@ def test_a_seen_mark_watches_the_alias_and_the_resolved_owner(store, watched):
     assert set(watched) == {*NameRegistry(store.redis).watched("alias", "old-name"), owner_key("bob")}
 
 
+def test_a_mailbox_read_watches_the_alias_and_the_owner_alias_list(store, watched):
+    store.redis.set(NameRegistry.key("alias", "old-name"), "bob")
+    store.mailbox("old-name")
+    names = NameRegistry(store.redis)
+    assert {*names.watched("alias", "old-name"), *names.watched("aliases-of", "bob")} <= set(watched)
+
+
 def test_a_seen_mark_expires(store):
     SeenMarks(store.redis).mark("bob", "sw:3:c1")
     assert 0 < store.redis.ttl(SeenMarks.key("bob")) <= 30 * 24 * 3600
