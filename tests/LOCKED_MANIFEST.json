@@ -17,7 +17,7 @@
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_checkout_dev": {
   "assertions": 0,
-  "calls": 2,
+  "calls": 1,
   "cases": 1,
   "texts": []
  },
