@@ -383,6 +383,8 @@ def test_a_class_that_only_groups_functions_is_red_naming_it(tmp_path):
         "    def keep(self, n: int) -> None:\n        self.n = n\n",
         "    def read(self) -> int:\n        return len([self])\n",
         "    def read(self) -> int:\n        return (lambda: self.n)()\n",
+        "    def read(self, /) -> int:\n        return self.n\n",
+        "    async def read(self) -> int:\n        return self.n\n",
     ],
 )
 def test_a_method_that_uses_its_receiver_keeps_the_class_green(tmp_path, method):
@@ -394,6 +396,7 @@ def test_a_method_that_uses_its_receiver_keeps_the_class_green(tmp_path, method)
     [
         "class Limits:\n    MAX = 3\n",
         "from abc import ABC\n\nclass Tools(ABC):\n    def run(self) -> int:\n        return 1\n",
+        "class Tools(object, dict):\n    def run(self) -> int:\n        return 1\n",
         "class Tools(Exception):\n    def run(self) -> int:\n        return 1\n",
         "class Meta(type):\n    pass\n\nclass Tools(metaclass=Meta):\n    def run(self) -> int:\n        return 1\n",
         "from dataclasses import dataclass\n\n@dataclass\nclass Tools:\n    def run(self) -> int:\n        return 1\n",
@@ -408,12 +411,18 @@ def test_an_existing_function_group_whose_body_changes_is_not_graded(tmp_path):
     assert _grade(tmp_path, {"scripts/tools.py": GROUPED}, head) == (0, [])
 
 
+def test_an_existing_class_that_gains_a_method_is_graded(tmp_path):
+    head = {"scripts/tools.py": GROUPED + "    def stop(self) -> None:\n        pass\n"}
+    assert _grade(tmp_path, {"scripts/tools.py": GROUPED}, head) == (1, [_groups("scripts/tools.py::Tools")])
+
+
 def _impl(name: str, methods: str, bases: str = "") -> str:
     return f"class {name}{bases}:\n    def __init__(self) -> None:\n        self.n = 1\n{methods}\n\n"
 
 
+FETCH_CALL = "    def fetch(self, key: str, /, *rest: str, limit: int = 1) -> str:"
 FETCH = (
-    "    def fetch(self, key: str, *rest: str, limit: int = 1) -> str:\n        return key\n"
+    f"{FETCH_CALL}\n        return key\n"
     "    @staticmethod\n    def parse(text: str) -> str:\n        return text\n"
     "    def _own(self) -> None:\n        pass\n"
 )
@@ -422,8 +431,16 @@ PRIVATE = FETCH.replace("def fetch", "def _fetch").replace("def parse", "def _pa
 
 def test_concrete_classes_sharing_a_call_contract_without_a_seam_are_red(tmp_path):
     head = {
-        "scripts/a.py": _impl("Http", FETCH),
+        "scripts/a.py": _impl("Http", FETCH, "(object)"),
         "scripts/b.py": _impl("Disk", FETCH.replace("_own", "_other"), "(object)"),
+    }
+    assert _errors(tmp_path, head) == [_seam("scripts/a.py::Http, scripts/b.py::Disk", "fetch/2, parse/1")]
+
+
+def test_a_base_on_only_one_side_leaves_the_seam_untyped(tmp_path):
+    head = {
+        "scripts/a.py": f"import argparse\n\n{_impl('Http', FETCH, '(argparse.Action)')}",
+        "scripts/b.py": _impl("Disk", FETCH),
     }
     assert _errors(tmp_path, head) == [_seam("scripts/a.py::Http, scripts/b.py::Disk", "fetch/2, parse/1")]
 
@@ -441,38 +458,44 @@ def test_a_different_contract_or_no_public_methods_is_green(tmp_path, first, sec
 
 
 @pytest.mark.parametrize(
-    "seam, imports, bases",
+    "seam, first, second",
     [
-        ("from abc import ABC\n\nclass Source(ABC):\n    pass\n", "from scripts.seam import Source", "(Source)"),
+        ("from abc import ABC\n\nclass Source(ABC):\n    pass\n", "Source", "Source"),
         (
-            "from abc import ABC\n\nclass Root(ABC):\n    pass\n\nclass Source(Root):\n    pass\n",
-            "from scripts.seam import Source",
-            "(Source)",
+            "from abc import ABC\n\nclass Root(ABC):\n    pass\n\nclass One(Root):\n    pass\n\n"
+            "class Two(Root):\n    pass\n",
+            "One",
+            "Two",
         ),
-        ("X = 1\n", "import argparse", "(argparse.Action)"),
     ],
 )
-def test_a_common_abstract_or_external_base_types_the_seam(tmp_path, seam, imports, bases):
+def test_a_common_abstract_base_types_the_seam(tmp_path, seam, first, second):
     head = {
         "scripts/seam.py": seam,
-        "scripts/a.py": f"{imports}\n\n{_impl('Http', FETCH, bases)}",
-        "scripts/b.py": f"{imports}\n\n{_impl('Disk', FETCH, bases)}",
+        "scripts/a.py": f"from scripts.seam import {first}\n\n{_impl('Http', FETCH, f'({first})')}",
+        "scripts/b.py": f"from scripts.seam import {second}\n\n{_impl('Disk', FETCH, f'({second})')}",
     }
     assert _errors(tmp_path, head, {"scripts/seam.py": seam}) == []
+
+
+def test_a_common_external_base_types_the_seam(tmp_path):
+    head = {
+        "scripts/a.py": f"import argparse\n\n{_impl('Http', FETCH, '(argparse.Action)')}",
+        "scripts/b.py": f"import argparse\n\n{_impl('Disk', FETCH, '(argparse.Action)')}",
+    }
+    assert _errors(tmp_path, head) == []
 
 
 @pytest.mark.parametrize(
     "protocol, errors",
     [
-        (
-            "    def fetch(self, key: str, *rest: str, limit: int = 1) -> str: ...\n"
-            "    @staticmethod\n    def parse(text: str) -> str: ...\n",
-            0,
-        ),
-        ("    def fetch(self, key: str, *rest: str, limit: int = 1) -> str: ...\n", 1),
+        (f"{FETCH_CALL} ...\n    @staticmethod\n    def parse(text: str) -> str: ...\n", 0),
+        (f"{FETCH_CALL} ...\n", 0),
+        (f"{FETCH_CALL} ...\n    def close(self) -> None: ...\n", 1),
+        ("    pass\n", 1),
     ],
 )
-def test_a_structural_protocol_in_the_tree_covering_the_contract_types_the_seam(tmp_path, protocol, errors):
+def test_a_structural_protocol_the_classes_satisfy_types_the_seam(tmp_path, protocol, errors):
     seam = f"from typing import Protocol\n\nclass Source(Protocol):\n{protocol}"
     unchanged = {"scripts/seam.py": seam, "tests/test_seam.py": "def broken(:\n"}
     head = {**unchanged, "scripts/a.py": _impl("Http", FETCH), "scripts/b.py": _impl("Disk", FETCH)}
@@ -484,6 +507,7 @@ def test_only_changed_concrete_classes_are_grouped(tmp_path):
     head = {
         "scripts/a.py": old,
         "scripts/b.py": _impl("Disk", FETCH),
+        "scripts/c.py": "from abc import ABC\n\nclass Shape(ABC):\n" + FETCH,
         "scripts/d.py": "class Failure(ValueError):\n" + FETCH,
         "scripts/e.py": "from dataclasses import dataclass\n\n@dataclass\nclass Row:\n" + FETCH,
     }

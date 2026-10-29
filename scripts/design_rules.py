@@ -278,11 +278,11 @@ def seams(index: Index, classes: list[tuple[str, str, ast.ClassDef]]) -> list[st
         calls = contract(node)
         if calls and _concrete(node):
             shared.setdefault(calls, []).append((module, key, node))
-    errors, protocols = [], _protocols(index)
+    errors = []
     for calls, group in shared.items():
         if len(group) < 2 or set.intersection(*(_ancestors(index, module, node) for module, _, node in group)):
             continue
-        if not any(calls <= protocol for protocol in protocols):
+        if not any(protocol and protocol <= calls for protocol in _protocols(index)):
             keys = ", ".join(key for _, key, _ in group)
             methods = ", ".join(f"{name}/{arity}" for name, arity in sorted(calls))
             errors.append(
@@ -302,10 +302,6 @@ def violations(index: Index, module: str, key: str, unit: Unit) -> list[str]:
                     f"inheritance: {key} inherits the concrete project class {'.'.join(project)}; "
                     "inherit an abstract base or Protocol and compose the shared behaviour"
                 )
-        if groups_functions(unit.node):
-            errors.append(
-                f"functions: {key} only groups functions and holds no instance state; make them module functions"
-            )
         return errors
     if not unit.public:
         return []
@@ -323,7 +319,19 @@ def _graded(rel: str) -> bool:
     return not rel.startswith(UNGRADED)
 
 
-def _file_errors(index: Index, rel: str, old: str | None, classes: list) -> tuple[int, list[str]]:
+def _shape(node: ast.ClassDef) -> list[tuple[str, ...]]:
+    return [(method.name, *_signature(method)) for method in _methods(node)]
+
+
+def _reshaped(previous: Unit | None, unit: Unit) -> bool:
+    if previous is None or previous.signature != unit.signature:
+        return True
+    return _shape(previous.node) != _shape(unit.node)
+
+
+def _file_errors(
+    index: Index, rel: str, old: str | None, classes: list[tuple[str, str, ast.ClassDef]]
+) -> tuple[int, list[str]]:
     syntax, module = index.load(rel)
     before = {} if old is None else units(ast.parse(old, filename=rel), rel)
     changed, errors = 0, []
@@ -332,8 +340,12 @@ def _file_errors(index: Index, rel: str, old: str | None, classes: list) -> tupl
         if previous is None or previous.signature != unit.signature:
             changed += 1
             errors += violations(index, module.name, key, unit)
-            if isinstance(unit.node, ast.ClassDef):
-                classes.append((module.name, key, unit.node))
+        if isinstance(unit.node, ast.ClassDef) and _reshaped(previous, unit):
+            classes.append((module.name, key, unit.node))
+            if groups_functions(unit.node):
+                errors.append(
+                    f"functions: {key} only groups functions and holds no instance state; make them module functions"
+                )
     return changed, errors
 
 
