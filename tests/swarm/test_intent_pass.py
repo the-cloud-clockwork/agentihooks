@@ -1,3 +1,5 @@
+import threading
+
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import cli
@@ -16,22 +18,39 @@ def test_ready_intent_is_delivered_before_a_slow_runtime_launch(env, monkeypatch
     )
     ledger.pulls[url] = PullRequest("OPEN", None, None, False, head="h1")
     clock, delivered, at_launch = [1_000_000], [], []
+    launching = threading.Event()
     monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
-    monkeypatch.setattr(intent, "pr_view", lambda url: {"title": "Ready", "body": "", "files": [], "head": "h1"})
+
+    def view(url):
+        launching.wait()
+        return {"title": "Ready", "body": "", "files": [], "head": "h1"}
+
+    monkeypatch.setattr(intent, "pr_view", view)
 
     def judge(state):
         delivered.append(clock[0])
         return {"verdict": "pass", "reason": "the phase can use it"}
 
     launch = runtime.spawn
+    intent_pass = cli._intent_pass
+    passed = threading.Event()
+
+    def observed_pass(*args):
+        try:
+            return intent_pass(*args)
+        finally:
+            passed.set()
 
     def slow_launch(*args, **kwargs):
+        launching.set()
+        passed.wait()
         at_launch.append(Verdicts("sw", "intent").read("t1"))
         clock[0] += 780_000
         return launch(*args, **kwargs)
 
     monkeypatch.setattr(intent, "judged", judge)
     monkeypatch.setattr(runtime, "spawn", slow_launch)
+    monkeypatch.setattr(cli, "_intent_pass", observed_pass)
     cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     wait_ms = delivered[0] - 1_000_000
     print(f"ready_to_verdict_ms={wait_ms}; runtime_launch_delay_ms=780000")

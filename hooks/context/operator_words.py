@@ -55,7 +55,7 @@ def _store(migrate=True):
             "name TEXT NOT NULL, hash TEXT NOT NULL, entry INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE);"
             "CREATE INDEX IF NOT EXISTS line_hash ON lines(name, hash);"
             "CREATE TABLE IF NOT EXISTS legacy (name TEXT PRIMARY KEY);"
-            "CREATE TABLE IF NOT EXISTS published ("
+            "CREATE TABLE IF NOT EXISTS stored ("
             "entry INTEGER PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE);"
         )
         if migrate:
@@ -94,19 +94,6 @@ def _shared():
     return _SHARED[0]
 
 
-def _legacy():
-    from scripts.events.redis_state import RedisStateStore
-
-    shared = _shared()
-    return shared.redis if isinstance(shared, RedisStateStore) else None
-
-
-def _shared_key(*parts):
-    from scripts.swarm.store import PREFIX
-
-    return ":".join((PREFIX, "operator-words", *parts))
-
-
 def _shared_call(action, default):
     from scripts.events import state
 
@@ -116,18 +103,6 @@ def _shared_call(action, default):
     try:
         return action(shared)
     except state.unavailable():
-        return default
-
-
-def _legacy_call(action, default):
-    from redis.exceptions import RedisError
-
-    redis = _legacy()
-    if redis is None:
-        return default
-    try:
-        return action(redis)
-    except RedisError:
         return default
 
 
@@ -169,7 +144,7 @@ def _mirror(swarm, name, at, words):
 def _publish_pending(connection):
     rows = connection.execute(
         "SELECT id, swarm, name, at, words FROM entries WHERE swarm != '' "
-        "AND id NOT IN (SELECT entry FROM published) ORDER BY at, id"
+        "AND id NOT IN (SELECT entry FROM stored) ORDER BY at, id"
     ).fetchall()
     published = []
     for entry, swarm, name, at, words in rows:
@@ -177,20 +152,11 @@ def _publish_pending(connection):
             break
         published.append((entry,))
     with connection:
-        connection.executemany("INSERT OR IGNORE INTO published VALUES (?)", published)
+        connection.executemany("INSERT OR IGNORE INTO stored VALUES (?)", published)
 
 
 def _shared_rows(name):
-    def read(redis):
-        return [
-            json.loads(row)
-            for row in [
-                *redis.zrevrange(_shared_key(name, "entries"), 0, -1),
-                *redis.lrange(_shared_key(name), 0, -1),
-            ]
-        ]
-
-    rows = [*_shared_call(lambda shared: _read(shared, _rows_key(name)), []), *_legacy_call(read, [])]
+    rows = _shared_call(lambda shared: _read(shared, _rows_key(name)), [])
     return sorted(rows, key=lambda row: row["at"], reverse=True)
 
 
@@ -206,18 +172,7 @@ def _shared_forget(swarm):
         for name in _read(shared, NAMES_KEY):
             _amend(shared, _rows_key(name), lambda rows: [row for row in rows if row["swarm"] != swarm])
 
-    def drop_legacy(redis):
-        for name in redis.smembers(_shared_key()):
-            for raw in {
-                *redis.zrange(_shared_key(name, "entries"), 0, -1),
-                *redis.lrange(_shared_key(name), 0, -1),
-            }:
-                if json.loads(raw)["swarm"] == swarm:
-                    redis.zrem(_shared_key(name, "entries"), raw)
-                    redis.lrem(_shared_key(name), 0, raw)
-
     _shared_call(drop, None)
-    _legacy_call(drop_legacy, None)
 
 
 def _offline_swarm(name):
@@ -226,32 +181,24 @@ def _offline_swarm(name):
     return None if parse(name) else legacy_slug(name)
 
 
-def _legacy_swarms(paths, redis):
-    from redis.exceptions import RedisError
-
-    from scripts.swarm.naming import NameRegistry
+def _legacy_swarms(paths):
+    from scripts.swarm.naming import registered_slug
+    from scripts.swarm.store import store_errors
 
     swarms = dict.fromkeys(paths)
-    registry = NameRegistry(redis)
     for path in paths:
-        if redis is None:
-            swarms[path] = _offline_swarm(path.stem)
-            continue
         try:
-            # slug_of swallows a failed alias lookup; this read raises it so the name stays pending.
-            redis.get(registry.key("alias", path.stem))
-            swarms[path] = registry.slug_of(path.stem)
-        except RedisError:
+            swarm = registered_slug(path.stem)
+        except store_errors():
             break
+        swarms[path] = _offline_swarm(path.stem) if swarm is None else swarm
     return swarms
 
 
 def _migrate(connection):
-    from hooks._redis import get_redis
-
     if connection.execute("SELECT 1 FROM legacy WHERE name = ''").fetchone():
         return
-    swarms = _legacy_swarms([path for path in _dir().glob("*.json") if _load(path.stem)["rows"]], get_redis())
+    swarms = _legacy_swarms([path for path in _dir().glob("*.json") if _load(path.stem)["rows"]])
     clean = {}
     with connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -296,10 +243,7 @@ def _load(name):
 def recorded(pattern: str) -> list[str]:
     with _store() as connection:
         names = connection.execute("SELECT DISTINCT name FROM entries").fetchall()
-    shared = {
-        *_shared_call(lambda state: _read(state, NAMES_KEY), []),
-        *_legacy_call(lambda redis: redis.smembers(_shared_key()), set()),
-    }
+    shared = set(_shared_call(lambda state: _read(state, NAMES_KEY), []))
     return sorted(name for name in {name for (name,) in names} | shared if fnmatchcase(name, pattern))
 
 

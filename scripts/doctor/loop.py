@@ -338,8 +338,6 @@ def fix_tasks(watched, finding, verdict, fix, tasks):
             "judge": "the Standards reader",
         },
     }
-    if kind in WORKSTATION_KINDS:
-        cause["workstation"] = True
     fixed = {
         "task": f"{stem}-{fix}",
         "title": f"Move the number behind the {kind} finding",
@@ -355,4 +353,6 @@ def fix_tasks(watched, finding, verdict, fix, tasks):
             "judge": "the Doctor master",
         },
     }
+    if kind in WORKSTATION_KINDS:
+        cause["workstation"] = fixed["workstation"] = True
     return [cause, fixed]

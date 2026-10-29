@@ -47,6 +47,20 @@ def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path,
     metrics = importlib.import_module("scripts.swarm_ledger.request_metrics")
     monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
     monkeypatch.setattr(metrics, "SAMPLES", deque(maxlen=metrics.MAX_SAMPLES))
+    started, release = threading.Event(), threading.Event()
+
+    def in_flight(handler):
+        started.set()
+        release.wait(10)
+
+    leaked = server.Handler.__new__(server.Handler)
+    leaked.command = "GET"
+    leaked.path = "/api/v1/ledgers/earlier/events"
+    leftover = threading.Thread(target=metrics.measured(in_flight), args=(leaked,))
+    leftover.start()
+    assert started.wait(10)
+    record, own = metrics.record, threading.get_ident()
+    monkeypatch.setattr(metrics, "record", lambda *row: record(*row) if threading.get_ident() == own else None)
     clock = Clock()
     monkeypatch.setattr(metrics, "time", clock)
     repo = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3", domain=server.core)
@@ -70,7 +84,11 @@ def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path,
     handler = server.Handler.__new__(server.Handler)
     handler.path = "/api/v1/ledgers/timing/operations?private=hidden"
     handler.command = "POST"
-    handler.do_POST()
+    try:
+        handler.do_POST()
+    finally:
+        release.set()
+        leftover.join(10)
     monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{ledger_port}"})
     with ThreadingHTTPServer(("127.0.0.1", ledger_port), server.Handler) as http:
         thread = threading.Thread(target=http.serve_forever)

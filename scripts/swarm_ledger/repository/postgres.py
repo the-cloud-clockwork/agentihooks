@@ -25,6 +25,9 @@ REFUSED_CODE = "LW001"
 SESSION = {
     "options": f"-c lock_timeout={LOCK_WAIT}s -c idle_in_transaction_session_timeout=15s -c statement_timeout=60s"
     f" -c {VERSION_SETTING}={VERSION}",
+    "connect_timeout": 10,
+    # keepalives probe only an idle socket; this ends a request whose bytes a dead link never acknowledges
+    "tcp_user_timeout": 30000,
     "keepalives": 1,
     "keepalives_idle": 30,
     "keepalives_interval": 10,
