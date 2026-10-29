@@ -556,7 +556,7 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
     ]
     calls.clear()
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
-    assert [argv[2] for argv, _ in calls] == ["enable"] * 4
+    assert [argv[2] for argv, _ in calls] == ["enable"] * 5
 
 
 def test_ensure_fails_and_keeps_the_tick_timer_when_registration_fails_before_any_delivery(tmp_path, monkeypatch):
