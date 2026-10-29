@@ -135,7 +135,7 @@ def test_mutation_jobs_adopt_dev_durations_before_the_sandbox_copies_the_record(
     names = [step.get("name") for step in steps]
     restore = steps[names.index("Restore latest dev durations")]
     adopt = steps[names.index("Adopt latest dev durations")]
-    mutate = next(i for i, step in enumerate(steps) if "python -m scripts.ci_mutation" in step.get("run", ""))
+    mutate = next(i for i, step in enumerate(steps) if "scripts.ci_mutation" in step.get("run", "").split())
     assert names.index("Restore latest dev durations") + 1 == names.index("Adopt latest dev durations") < mutate
     assert restore["uses"] == "actions/cache/restore@v4"
     assert restore["with"]["path"] == "~/dev-durations"
