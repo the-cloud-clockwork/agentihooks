@@ -322,6 +322,11 @@ def test_a_change_leaving_the_bare_syntax_tree_unchanged_selects_no_line(tmp_pat
         ),
         ("a: int = 1\n", "a: float = 1\n", {"hooks/own.py": {1}}),
         ("@cache\ndef f(a):\n    return a\n", "@cache\ndef f(a: int) -> int:\n    return a\n", {"hooks/own.py": {2}}),
+        (
+            "def f():\n    @cache\n    def g(a):\n        return a\n",
+            "def f():\n    @cache\n    def g(a: int):\n        return a\n",
+            {"hooks/own.py": {3}},
+        ),
     ],
 )
 def test_runtime_read_annotations_stay_graded_while_docstrings_and_plain_signatures_do_not(
