@@ -295,7 +295,7 @@ def write_env(home: Path | str, url: str, grant: dict) -> Path:
 
 def kept_bus(home: Path | str, member_id: str) -> dict | None:
     creds, saved = Path(home) / NATS_CREDS_FILE, Path(home) / ENV_FILE
-    if not creds.is_file() or not saved.is_file():
+    if not creds.is_file():
         return None
     values = dotenv_values(saved, interpolate=False)
     if values.get("AGENTIHOOKS_HIVE_ID") != member_id:

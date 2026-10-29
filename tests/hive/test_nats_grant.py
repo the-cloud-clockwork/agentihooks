@@ -596,6 +596,11 @@ def test_a_grant_for_another_member_drops_the_bus_credential_saved_for_the_previ
     assert not (tmp_path / auth.NATS_CREDS_FILE).exists()
 
 
+def test_a_bus_credential_with_no_saved_membership_is_dropped(tmp_path):
+    (tmp_path / auth.NATS_CREDS_FILE).write_text("creds text")
+    assert auth.kept_bus(tmp_path, "m1") is None
+
+
 def test_a_kept_bus_credential_carries_the_saved_scope_as_written(tmp_path):
     (tmp_path / auth.NATS_CREDS_FILE).write_text("creds text")
     (tmp_path / auth.ENV_FILE).write_text(
