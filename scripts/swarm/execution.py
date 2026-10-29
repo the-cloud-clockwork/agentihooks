@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterable
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -29,7 +30,7 @@ def _record(row: dict) -> AgentRecord:
     return AgentRecord(**row)
 
 
-def latest(rows, by: str) -> dict:
+def latest(rows: Iterable[dict], by: str) -> dict:
     found: dict = {}
     for row in rows:
         previous = found.get(row[by])

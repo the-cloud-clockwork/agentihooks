@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 
 from scripts.events import state
 from scripts.events.bus import StateConflict
+from scripts.events.redis_state import RedisStateStore
 
 BUCKET = "fencing"
 COUNTERS = "counters"
@@ -163,9 +164,9 @@ def bump(store: Any, slug: str, part: str) -> None:
 
 def watch(store: Any, pipe: Any) -> None:
     """Makes a Redis transaction abort when any fencing document changes; other backends have nothing to watch."""
-    key = getattr(_states(store), "_current", None)
-    if key is not None:
-        pipe.watch(key)
+    states = _states(store)
+    if isinstance(states, RedisStateStore):
+        states.guard(pipe)
 
 
 def replace(store: Any, slug: str, saved: dict | None) -> None:

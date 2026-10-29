@@ -397,7 +397,7 @@ class RedisStore:
             except WatchError:
                 return False
 
-    def authority_held(self, slug, task):
+    def authority_held(self, slug: str, task: str) -> bool:
         from scripts.swarm import fencing
 
         return fencing.authority_held(self, slug, task)
