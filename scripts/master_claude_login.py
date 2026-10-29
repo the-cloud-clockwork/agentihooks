@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from hooks import config as hooks_config
+from hooks.context import profile_chain
 from hooks.context.account_sessions import API_MARKER, INTERACTIVE_PREFIX, TOKEN_PREFIX
 from scripts import aicode_tokens, openbao_kv
 from scripts.claude_config import claude_home, claude_json
@@ -28,6 +29,7 @@ CONFIG = ".claude.json"
 ACCOUNT = "oauthAccount"
 GRANT = "claudeAiOauth"
 MANIFESTS = ("claude.sources.json", "claude.mounts.json")
+RENDERS = "renders.json"
 OWNER = "owner.json"
 LOCK = "owner.lock"
 CREDS = "agentihooks/master-claude-login"
@@ -522,6 +524,7 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
         shared = any(owner != name for owner in holders(folder)) and (target / binding.FILE).is_file()
         if not shared:
             target = _rebuild(folder, rendered, config=claude_json(environ))
+        _write(folder / RENDERS, {**_read(folder / RENDERS), name: profile_chain.rendered_overlays(rendered)})
         if environ.get(binding.REPORT):
             binding.rehome(Path(environ[binding.REPORT]), target, shared=shared)
         if not shared:
@@ -529,6 +532,11 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
     found = account(target, environ, number=number)
     keep(bao, target, epoch, number)
     return target, found
+
+
+def rendered_overlays(home: Path, name: str) -> list[str]:
+    found = _read(home.parent / RENDERS).get(name)
+    return found if isinstance(found, list) else profile_chain.rendered_overlays(home)
 
 
 def browser_home(environ: Mapping[str, str]) -> Path:
