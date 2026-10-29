@@ -1583,6 +1583,23 @@ def test_a_hand_launch_with_no_account_launches_bare_claude_with_its_channel(mon
     assert "export MCP_PROTOCOL_NEGOTIATION=legacy" in lines
 
 
+@pytest.mark.parametrize(
+    ("state", "named", "expected"),
+    [("OPEN", [], "codex"), ("CLOSED", [], "codex"), ("OPEN", ["--agent", "claude"], "claude")],
+)
+def test_a_hand_launch_on_a_codex_only_machine_starts_codex_unless_a_harness_is_named(
+    monkeypatch, tmp_path, capsys, state, named, expected
+):
+    from scripts.swarm import capacity
+
+    row = capacity.Account("codex", "cx", state, 0, 90, 90, 6 if state == "OPEN" else 0)
+    monkeypatch.setattr(capacity, "accounts", lambda environ, now: [row])
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
+    argv = ["--dir", str(tmp_path), *named, "--dry-run"]
+    assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
+    assert f"agent={expected}" in capsys.readouterr().out.splitlines()
+
+
 def _codex_hooks(home, first):
     ours = {"hooks": [{"type": "command", "command": str(home / "agentihooks-hook.sh")}]}
     herdr = {"hooks": [{"command": "bash herdr-agent-state.sh session", "timeout": 10, "type": "command"}]}

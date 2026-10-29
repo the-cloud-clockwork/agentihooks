@@ -679,6 +679,8 @@ class HerdrRuntime:
     def _fallback_choice(self, saved, profile, quota_transfer, environ, requested, avoid):
         if saved:
             return self._saved_choice(saved, profile, quota_transfer, environ)
+        if not hasattr(self, "_quota_accounts") and plugins.claude_only(profile):
+            self._claude_held(profile, environ)
         return self._rotation(requested, environ, _prefer(profile, avoid))
 
     def _route_kind(self, lane, harness, task, slug, forced=()):
@@ -938,16 +940,30 @@ class HerdrRuntime:
             desired_route_kind=agent.desired_route_kind,
         )
 
-    def operator(self, config, name, profile, text):
-        """Open a claude session for the operator in the swarm's space, bound to the swarm with no task or lane slot."""
-        argv = self._argv(config, name, "claude", text, f"{name}.md", profile)
+    def operator(self, config: SwarmConfig, name: str, profile: str, text: str, agent: str = "") -> Placed:
+        """Open a session for the operator in the swarm's space, bound to the swarm with no task or lane slot."""
+        environ = dict(os.environ)
+        if plugins.claude_only(profile):
+            if agent not in ("", "claude"):
+                raise SpawnError(f"{agent} cannot mount the claude only profile {profile}", "unsupported")
+            self._claude_held(profile, environ)
+            agent = "claude"
+        agent = self.choose(agent, environ)[0] or "claude"
+        argv = self._argv(config, name, agent, text, f"{name}.md", profile)
         model = _model_args(
-            "claude",
-            model_pick.frontier("claude", default_models.model(config, "claude")).__dict__,
-            dict(os.environ),
+            agent,
+            model_pick.frontier(agent, default_models.model(config, agent)).__dict__,
+            environ,
             effort_range.of(config),
         )
         return self._launch(config, naming.OPERATOR, "", name, [*argv, "--", *model])
+
+    def _claude_held(self, profile, environ):
+        read = self.quota_accounts or capacity.accounts
+        if not any(row.harness == "claude" for row in read(environ, time.time(), refresh=False)):
+            raise SpawnError(
+                f"the claude only profile {profile} needs a Claude account and this machine has none", "unavailable"
+            )
 
     def _account_launch(self, config, lane, task, name, argv):
         if task.get("account_slot_hive"):
