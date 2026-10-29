@@ -483,3 +483,18 @@ def test_a_tick_of_a_swarm_holding_the_in_cluster_address_uses_the_default_ledge
     work(store, "other")
     assert seen == [ledger_link.base(slug="other")]
     assert "svc" not in seen[0]
+
+
+def test_a_pinned_ledger_command_of_a_swarm_holding_the_in_cluster_address_uses_the_default_ledger_base(
+    store, workstation, monkeypatch
+):
+    seen = []
+    store.redis.hset(store.key("selected", "config"), "api_url", IN_CLUSTER)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "selected")
+    monkeypatch.delenv("SWARM_URL", raising=False)
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+    monkeypatch.setattr(ledger, "cmd_url", lambda args: seen.append(ledger_link.base(slug=args.slug)))
+    with patch("sys.argv", ["ledger", "--slug", "selected", "url"]):
+        ledger.main()
+    assert seen == [ledger_link.base(slug="selected")]
+    assert "svc" not in seen[0]

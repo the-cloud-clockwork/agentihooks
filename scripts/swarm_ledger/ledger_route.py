@@ -43,7 +43,7 @@ def session(slug: str) -> Iterator[None]:
         and not os.environ.get("SWARM_URL")
     ):
         store = ports.swarm().store.connect()
-        with scoped(slug, store.config(slug).api_url):
+        with scoped(slug, configured(store, slug)):
             yield
             _acknowledge(store, slug, Who.from_env())
     else:
