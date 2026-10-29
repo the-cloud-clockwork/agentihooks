@@ -696,6 +696,12 @@ def test_the_hive_registry_store_keys_name_the_probe_hive():
     assert keys == [f"{base}:current", f"{base}:revision", f"{base}:history:probe"]
 
 
+def test_the_hive_stores_are_opened_where_auth_and_the_registry_open_them():
+    credentials, registry = redis_commands.STORES["hive credentials"], redis_commands.STORES["hive registry"]
+    assert (credentials.opener, credentials.skipped) == ("scripts.hive.auth:_store", ("hooks",))
+    assert (registry.opener, registry.skipped) == ("scripts.hive.hive_state:records", ())
+
+
 STATE_FILES = {
     "scripts/events/__init__.py": "",
     "scripts/events/bus.py": "class StateStore:\n    def get(self, key): ...\n\n    def watch(self, key): ...\n",

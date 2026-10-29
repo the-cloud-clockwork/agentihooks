@@ -80,12 +80,12 @@ def store_keys(store: Store) -> list[str]:
 
 def consumer_map(deployment: str, root: Path = ROOT) -> dict:
     """Each consumer's Redis role, the commands it reaches with the code that sends each, its scheduler keys, and the
-    keys of each hive state store it opens with the commands the store sends on them."""
+    keys of each hive state store it opens with every command the storage protocol may send on them."""
     program = Program(parse(root))
     keys = scheduler_keys(deployment)
     protocol = tuple(STATE_STORE + unit.removeprefix(PROTOCOL) for unit in program.units if unit.startswith(PROTOCOL))
-    found = program.commands(program.reach(protocol))
-    store_commands = {command: sorted(units) for command, units in sorted(found.items()) if command not in KEYLESS}
+    sent = program.commands(program.reach(protocol))
+    store_commands = {command: sorted(units) for command, units in sorted(sent.items()) if command not in KEYLESS}
     consumers = {}
     for name, consumer in CONSUMERS.items():
         reached = program.reach(consumer.entries)
