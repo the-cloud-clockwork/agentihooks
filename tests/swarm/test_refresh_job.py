@@ -66,7 +66,8 @@ def test_the_job_runs_every_refresh_with_its_own_arguments(store, called):
 def test_doctor_detection_runs_in_the_background_job(store, called, monkeypatch):
     import json
 
-    from scripts.doctor import cli as doctor, detect
+    from scripts.doctor import cli as doctor
+    from scripts.doctor import detect
     from scripts.swarm import timing
 
     store.update("sw", template="doctor")
