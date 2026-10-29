@@ -1,5 +1,4 @@
 import threading
-import time
 
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
@@ -32,24 +31,24 @@ def test_ready_intent_is_delivered_before_a_slow_runtime_launch(env, monkeypatch
         delivered.append(clock[0])
         return {"verdict": "pass", "reason": "the phase can use it"}
 
-    launch = runtime.spawn
+    launch, intent_pass, passed = runtime.spawn, cli._intent_pass, threading.Event()
 
-    def wait_for_verdict(deadline):
-        verdicts = Verdicts("sw", "intent")
-        while True:
-            record = verdicts.read("t1")
-            if record and record["verdict"] != "pending" or time.monotonic() >= deadline:
-                return record
-            time.sleep(0.01)
+    def observed_pass(*args):
+        try:
+            return intent_pass(*args)
+        finally:
+            passed.set()
 
     def slow_launch(*args, **kwargs):
         launching.set()
-        at_launch.append(wait_for_verdict(time.monotonic() + 10))
+        passed.wait()
+        at_launch.append(Verdicts("sw", "intent").read("t1"))
         clock[0] += 780_000
         return launch(*args, **kwargs)
 
     monkeypatch.setattr(intent, "judged", judge)
     monkeypatch.setattr(runtime, "spawn", slow_launch)
+    monkeypatch.setattr(cli, "_intent_pass", observed_pass)
     cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     wait_ms = delivered[0] - 1_000_000
     print(f"ready_to_verdict_ms={wait_ms}; runtime_launch_delay_ms=780000")
