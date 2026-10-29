@@ -1890,8 +1890,10 @@ def cmd_block(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
     row = ledger.task(args.slug, agent.task)
+    if row is None:
+        raise SwarmError(f"ledger {args.slug} has no task {agent.task}")
     for dependency in prerequisite_wait.dependencies(store, args.slug, agent, row, args.note):
-        if ledger.task(args.slug, dependency)["state"] != "done":
+        if (ledger.task(args.slug, dependency) or {}).get("state") != "done":
             held = waits.on("task", dependency)
             at = now_ms()
             until = at + waits.CHECKED_MINUTES * 60_000
