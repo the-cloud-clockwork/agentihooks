@@ -1,5 +1,6 @@
 from dataclasses import replace
 
+from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.store import MASTER
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks
@@ -39,5 +40,7 @@ def test_a_finished_agent_is_never_written_back_to_working(store):
     store.put_agent("sw", replace(old, state="finished"))
     store.put_agent("sw", replace(old, state="working", idle_ticks=2))
     assert [(a.state, a.idle_ticks) for a in masters(store)] == [("finished", 2)]
-    store.execution_registry.update("sw", replace(old, state="ended"))
-    assert store.execution_registry.get("sw", old.execution_id).state == "ended"
+    registry = store.execution_registry
+    assert isinstance(registry, ExecutionRegistry)
+    registry.update("sw", replace(old, state="ended"))
+    assert registry.get("sw", old.execution_id).state == "ended"
