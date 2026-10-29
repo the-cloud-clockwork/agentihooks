@@ -5,6 +5,8 @@ from scripts.ci_mutation.stats_dependencies import SHARED
 
 
 def test_report_counts_shared_bytes_once_and_preserves_every_file(tmp_path, capsys):
+    tmp_path = tmp_path / "cache"
+    tmp_path.mkdir()
     values = {"inputs": "é", "dependencies": "abc", "orphan": "unused"}
     for name, value in values.items():
         (tmp_path / f"{name}{SHARED}").write_text(value)
