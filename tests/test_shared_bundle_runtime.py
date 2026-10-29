@@ -218,7 +218,7 @@ def test_the_overlay_revision_has_three_parts_whenever_a_shared_bundle_is_linked
     assert overlays.revision() == f"{commits['root']}:{commits['shared']}:"
 
 
-def test_a_shared_bundle_without_a_commit_is_left_out_of_the_revision_with_one_warning(layers3, capsys):
+def test_a_shared_bundle_without_a_commit_is_encoded_as_a_dash_in_the_revision_with_one_warning(layers3, capsys):
     from scripts.swarm import overlays, runtime
 
     commits = {name: _commit(layers3[name]) for name in ("root", "user")}
@@ -228,14 +228,14 @@ def test_a_shared_bundle_without_a_commit_is_left_out_of_the_revision_with_one_w
 
     revision = overlays.revision()
 
-    assert revision == f"{commits['root']}:{commits['user']}"
+    assert revision == f"{commits['root']}:-:{commits['user']}"
     err = capsys.readouterr().err
     assert err.count("WARNING") == 1
     assert f"the shared bundle at {layers3['shared']} has no commit to record; launching without it" in err
     assert runtime._pinned(["tuner"], revision) == ["--bundle-revision", revision]
 
     bundles.unlink(user=True)
-    assert overlays.revision() == commits["root"]
+    assert overlays.revision() == f"{commits['root']}:-:"
 
 
 def _commit(root: Path) -> str:

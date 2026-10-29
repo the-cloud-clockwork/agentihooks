@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts.profiles import bundle_copy, bundles, render
-from tests.test_user_bundle_install import _write, world  # noqa: F401
+from tests.test_user_bundle_install import _isolate_stamp, _write, world  # noqa: F401
 
 
 def _commit(root: Path) -> str:
@@ -147,20 +147,64 @@ def test_a_three_part_revision_with_an_empty_shared_field_is_refused_while_a_sha
         render.render("claude", "tiny", bundle_revision=f"{commits['root']}::{commits['user']}")
 
 
-def test_a_revision_that_recorded_no_shared_commit_warns_and_renders_without_the_linked_shared_bundle(
+def test_a_pre_link_two_part_pin_renders_with_the_current_shared_commit_and_stamps_it(
     three, monkeypatch, tmp_path, capsys
 ):
+    _write(three["shared"] / ".claude" / "rules" / "late.md", "LATE\n")
+    current = _commit(three["shared"])
+    assert current != three["commits"]["shared"]
     bundles.link(three["root"])
     bundles.link(three["shared"], shared=True)
-    seen = _record_calls(monkeypatch, tmp_path)
+    _isolate_stamp(monkeypatch)
+    seen = {}
+
+    def fake_render(name, **kwargs):
+        pinned = bundle_copy.current_shared()
+        seen["stamp"] = render._stamp(render._bundle(), [])
+        seen["pinned"] = pinned
+        seen["late"] = (pinned / ".claude" / "rules" / "late.md").read_text()
+        return tmp_path
+
+    monkeypatch.setattr(render, "render_claude", fake_render)
 
     render.render("claude", "tiny", bundle_revision=three["commits"]["root"])
 
     err = capsys.readouterr().err
     assert "the launch recorded no shared bundle commit" in err
-    assert f"the shared bundle at {three['shared']} is linked; rendering without it" in err
+    assert f"rendering with its current commit {current}" in err
+    assert seen["late"] == "LATE\n"
+    assert seen["pinned"] != three["shared"]
+    assert seen["stamp"]["shared_bundle_commit"] == current
+    assert seen["stamp"]["bundle_commit"] == three["commits"]["root"]
+
+
+def test_an_unpinnable_shared_bundle_round_trips_through_the_revision_and_renders_without_it(
+    three, monkeypatch, tmp_path, capsys
+):
+    from scripts.swarm import overlays
+
+    plain = three["root"].parent / "plain"
+    plain.mkdir()
+    bundles.link(three["root"])
+    bundles.link(plain, shared=True)
+    seen = _record_calls(monkeypatch, tmp_path)
+    revision = overlays.revision()
+    capsys.readouterr()
+
+    assert revision == f"{three['commits']['root']}:-:"
+    assert bundle_copy.split_revision(revision) == (three["commits"]["root"], bundle_copy.UNPINNED, "")
+
+    render.render("claude", "tiny", bundle_revision=revision)
+
+    assert "recorded no commit for the shared bundle; rendering without it" in capsys.readouterr().err
     assert seen["args"][1] == three["commits"]["root"]
     assert not seen["kwargs"].get("shared_revision")
+
+
+def test_an_unpinned_shared_field_never_parses_as_root_user():
+    assert bundle_copy.split_revision("r:-:") == ("r", bundle_copy.UNPINNED, "")
+    assert bundle_copy.split_revision("r:-:u") == ("r", bundle_copy.UNPINNED, "u")
+    assert bundle_copy.split_revision("r:-") == ("r", None, "-")
 
 
 def test_rendering_a_root_user_revision_without_a_shared_bundle_is_unchanged(three, monkeypatch, tmp_path):
