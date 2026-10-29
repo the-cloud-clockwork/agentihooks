@@ -742,3 +742,50 @@ def test_stale_update_cannot_overwrite_a_concurrent_replacement(store, agent, mo
     assert store.agents("fixture") == replacements
     assert store.execution("fixture", current.execution_id) == current
     assert store.executions("fixture", agent.seat) == [current, replacements[0]]
+
+
+HIVE_TARGET = {"host_id": "hive", "process_namespace": "boot/pid:[1]", "pid": 7, "pid_start": 9}
+
+
+def test_a_write_read_before_the_hive_ack_keeps_the_recorded_launch_binding(store, agent):
+    stale = store.start_execution("fixture", replace(agent, state="launching", runtime_target={"host_id": "hive"}))
+    bound = replace(
+        stale,
+        state="working",
+        runtime_target=HIVE_TARGET,
+        pane_id="w1:p2",
+        account="acct",
+        model="opus",
+        effort="high",
+        profile_decision={"profile": "engineer"},
+        launched_at=456,
+        launch_timings={"spawn": 1},
+        overlays=["frontend"],
+    )
+    store.put_agent("fixture", bound)
+    store.put_agent("fixture", replace(stale, state="finished"))
+    assert store.execution("fixture", stale.execution_id) == replace(bound, state="finished")
+    assert store.execution_identity_conflicts_total("fixture") == 0
+
+
+def test_a_write_read_before_the_hive_ack_on_another_host_is_refused(store, agent):
+    stale = store.start_execution("fixture", replace(agent, state="launching", runtime_target={"host_id": "other"}))
+    store.put_agent("fixture", replace(stale, state="working", runtime_target={**HIVE_TARGET, "host_id": "other"}))
+    before = protected(store)
+    with pytest.raises(SwarmError) as error:
+        store.put_agent("fixture", replace(stale, state="finished", runtime_target={"host_id": "hive"}))
+    assert str(error.value) == "runtime target identity is immutable after binding"
+    assert protected(store) == before
+
+
+def test_a_write_before_any_hive_ack_keeps_its_own_launch_fields(store, agent):
+    stale = store.start_execution("fixture", replace(agent, state="launching", runtime_target={"host_id": "hive"}))
+    written = replace(stale, pane_id="w1:p2", model="opus")
+    store.put_agent("fixture", written)
+    assert store.execution("fixture", stale.execution_id) == written
+
+
+def test_the_hive_ack_binds_the_full_target_over_the_host_only_target(store, agent):
+    stale = store.start_execution("fixture", replace(agent, state="launching", runtime_target={"host_id": "hive"}))
+    store.put_agent("fixture", replace(stale, state="working", runtime_target=HIVE_TARGET, pane_id="w1:p2"))
+    assert store.execution("fixture", stale.execution_id).runtime_target == HIVE_TARGET

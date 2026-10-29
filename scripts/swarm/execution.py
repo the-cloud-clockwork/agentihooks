@@ -12,6 +12,17 @@ from scripts.swarm import fencing
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend", "transport")
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
 PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control", "desired_route_kind")
+LAUNCH_BINDING = (
+    "runtime_target",
+    "pane_id",
+    "account",
+    "model",
+    "effort",
+    "profile_decision",
+    "launched_at",
+    "launch_timings",
+    "overlays",
+)
 WRITES: dict[str, threading.RLock] = {}
 
 
@@ -211,15 +222,18 @@ class ExecutionRegistry:
             current = occupants_of(doc).get(agent.seat)
             if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                 self.conflict(slug, "stale or changed execution identity")
-            _check_binding(current.runtime_target, agent.runtime_target, lambda message: self.conflict(slug, message))
-            self.check_uid(slug, agent, doc)
-            if agent != current:
-                doc["executions"][agent.execution_id] = asdict(agent)
-            return current
+            written = agent
+            if _read_before_ack(agent.runtime_target, current.runtime_target):
+                written = replace(agent, **{field: getattr(current, field) for field in LAUNCH_BINDING})
+            _check_binding(current.runtime_target, written.runtime_target, lambda message: self.conflict(slug, message))
+            self.check_uid(slug, written, doc)
+            if written != current:
+                doc["executions"][written.execution_id] = asdict(written)
+            return written, current
 
-        current = self._fenced(slug, change)
-        if agent != current:
-            self.store.project_agent(slug, agent, current)
+        written, current = self._fenced(slug, change)
+        if written != current:
+            self.store.project_agent(slug, written, current)
 
     def set_pane(self, slug: str, execution_id: str, pane_id: str) -> None:
         with _writes(slug):
@@ -310,6 +324,10 @@ def _check_binding(previous, current, refuse):
             continue
         if previous.get(field) != current.get(field):
             refuse("runtime target identity is immutable after binding")
+
+
+def _read_before_ack(written, stored):
+    return set(written) == {"host_id"} and stored != written and stored.get("host_id") == written["host_id"]
 
 
 def _has_identity(agent):
