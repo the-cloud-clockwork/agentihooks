@@ -3,9 +3,9 @@ import json
 from pathlib import Path
 
 import pytest
-from hooks.memory.cutover import ConsumerRoutes, shadow
 
 from hooks.memory.api import records
+from hooks.memory.cutover import ConsumerRoutes, shadow
 from tests.sv2_idx04_cases import grant
 from tests.sv2_idx05_cases import Bank
 
