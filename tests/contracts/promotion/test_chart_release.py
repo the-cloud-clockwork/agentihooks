@@ -18,7 +18,7 @@ def _workflow():
     return yaml.safe_load(path.read_text())
 
 
-def test_the_chart_publishes_only_after_the_release_hive_image_moved_release():
+def test_the_chart_publishes_only_after_the_release_image_workflow_succeeds():
     workflow = _workflow()
     assert workflow.get("on", workflow.get(True)) == {
         "workflow_run": {"workflows": ["Swarm worker image"], "types": ["completed"]}
@@ -37,7 +37,7 @@ def test_the_chart_publishes_only_after_the_release_hive_image_moved_release():
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
     assert checkout["with"] == {
-        "ref": "${{ github.event.workflow_run.head_branch }}",
+        "ref": "${{ github.event.workflow_run.head_sha }}",
         "fetch-depth": 0,
         "persist-credentials": False,
     }
