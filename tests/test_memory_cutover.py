@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 from pathlib import Path
 
@@ -6,11 +7,13 @@ import pytest
 
 from hooks.memory.api import records
 from hooks.memory.cutover import ConsumerRoutes, shadow
+from tests import sv2_mig04_cases as cases
 from tests.sv2_idx04_cases import grant
 from tests.sv2_idx05_cases import Bank
 
 pytestmark = pytest.mark.unit
 FIXTURE = Path(__file__).parent / "fixtures/swarm_v2/session-tools.json"
+EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-MIG-04"
 
 
 @pytest.fixture
@@ -158,3 +161,25 @@ def test_consumer_dispatch_uses_versioned_route_and_expiring_aliases(bank, tmp_p
     with pytest.raises(ValueError):
         routes.call({"session.v1": bank.tools}, allowed, "keeper", "session_search", request, 5000.0)
     routes.close()
+
+
+@pytest.mark.parametrize("case", ["A", "B", "C"])
+def test_package_cases_match_committed_evidence(tmp_path, case):
+    observed = json.loads(json.dumps(cases.run_case(case, tmp_path)))
+    path = EVIDENCE / f"{case.lower()}-result.json"
+    expected = json.loads(path.read_text()) if path.exists() else None
+    assert observed == expected, json.dumps(observed, sort_keys=True)
+
+
+def test_package_record_and_manifest_match_the_fixture_inputs():
+    record = json.loads((EVIDENCE / "result.json").read_text())
+    found = json.loads((EVIDENCE / "manifest.json").read_text())
+    inputs = (cases.FIXTURE, cases.QUESTIONS, cases.CASES_MODULE)
+    expected = {
+        path.relative_to(cases.CASES_MODULE.parent).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in inputs
+    }
+    assert found["input_sha256"] == expected
+    assert found["fixture_inputs"] == record["fixture_inputs"] == cases.FIXTURE_INPUTS
+    assert found["tested_commit"] == record["tested_commit"]
+    assert record["evidence_class"] == cases.EVIDENCE_CLASS
