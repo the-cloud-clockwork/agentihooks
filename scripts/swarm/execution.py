@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from scripts.inbox.seats import is_seat
+from scripts.swarm import timing
 
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend", "transport")
 WRITE_ATTEMPTS = 5
@@ -216,7 +217,7 @@ class ExecutionRegistry:
 
     def put(self, slug: str, agent: AgentRecord) -> None:
         with _writes(slug):
-            self._put(slug, agent)
+            timing.timed(self._put, slug, agent)
 
     def _put(self, slug: str, agent: AgentRecord) -> None:
         from redis.exceptions import WatchError
@@ -227,7 +228,7 @@ class ExecutionRegistry:
             with self.redis.pipeline() as pipe:
                 try:
                     pipe.watch(self.store.key(slug, "executions"), self.store.key(slug, "agents"))
-                    if _has_identity(agent) or self.managed(slug, agent.name, pipe):
+                    if _has_identity(agent) or timing.timed(self.managed, slug, agent.name, pipe):
                         pipe.unwatch()
                         self.update(slug, agent)
                         return
@@ -235,7 +236,7 @@ class ExecutionRegistry:
                     pipe.multi()
                     _write_projection(pipe, self.store, slug, agent)
                     self.write_status(pipe, slug, agent, previous)
-                    pipe.execute()
+                    timing.timed(pipe.execute)
                     return
                 except WatchError:
                     continue
@@ -359,7 +360,7 @@ class ExecutionRegistry:
 
     def update(self, slug: str, agent: AgentRecord) -> None:
         with _writes(slug):
-            self._update(slug, agent)
+            timing.timed(self._update, slug, agent)
 
     def _update(self, slug: str, agent: AgentRecord) -> None:
         from redis.exceptions import WatchError
@@ -372,7 +373,7 @@ class ExecutionRegistry:
             with self.redis.pipeline() as pipe:
                 try:
                     pipe.watch(key)
-                    current = self.occupants(slug, pipe).get(agent.seat)
+                    current = timing.timed(self.occupants, slug, pipe).get(agent.seat)
                     if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                         self.conflict(slug, "stale or changed execution identity")
                     if _read_before_ack(agent.runtime_target, current.runtime_target):
@@ -380,13 +381,13 @@ class ExecutionRegistry:
                     _check_binding(
                         current.runtime_target, agent.runtime_target, lambda message: self.conflict(slug, message)
                     )
-                    self.check_uid(slug, agent, pipe)
+                    timing.timed(self.check_uid, slug, agent, pipe)
                     if agent == current:
                         pipe.unwatch()
                         return
                     pipe.multi()
                     self.write(pipe, slug, agent, current)
-                    pipe.execute()
+                    timing.timed(pipe.execute)
                     return
                 except WatchError:
                     continue
