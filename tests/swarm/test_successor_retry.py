@@ -29,9 +29,12 @@ def _successor(store, *failures):
 
 
 def test_a_successor_retries_a_refused_routed_spawn_on_another_route(store):
-    ledger, runtime = _successor(store, SpawnError("route refused", harness="codex"))
+    from scripts.swarm import failed_panes
+
+    ledger, runtime = _successor(store, SpawnError("route refused", pane_id="w:p9", harness="codex"))
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     name = ledger.rows["t1"]["claimed_by"]
+    assert failed_panes.held(store, "sw")["w:p9"]["failed_at"] == 1_000
     assert runtime.asked == [(name, ""), (name, "codex")]
     assert runtime.spawned == [("eng", name, "t1")]
     assert any(action.startswith(f"retrying {name} for t1 away from codex") for action in actions)
@@ -84,37 +87,59 @@ class RoutedJobs(DetachedRuntime):
         placed = super().spawn(config, lane, name, task)
         if lane == MASTER:
             return placed
+        assert (config.slug, lane) == ("sw", "eng")
         self.asked.append((name, task.get("avoid_harness", "")))
         job = {**placed.launch_job, "started_at": self.at, "request": str(self.home / f"{name}.request.json")}
         (self.home / f"{name}.request.json").write_text(json.dumps({"name": name, "job": job}))
         return Placed("", placed.harness, launch_job=job)
 
 
-def _refused(tmp_path, name, message, harness):
-    error = {"message": message, "status": "refused", "pane_id": "", "harness": harness}
+def _refused(tmp_path, name, message, harness, pane=""):
+    error = {"message": message, "status": "refused", "pane_id": pane, "harness": harness}
     (tmp_path / f"{name}.json").write_text(json.dumps({"error": error}))
 
 
-@pytest.fixture
-def jobs(store, tmp_path, monkeypatch):
+def _launching(store, tmp_path, monkeypatch, *ids):
     from scripts.swarm import runtime as runtime_module
 
-    monkeypatch.setattr(launch_job, "spawn", lambda job: None)
+    ledger, runtime = tasks(*[(task, "eng") for task in ids]), RoutedJobs(tmp_path)
+    runtime.started = []
+    monkeypatch.setattr(launch_job, "spawn", runtime.started.append)
     monkeypatch.setattr(runtime_module, "_opened_pane", lambda name, at: "")
-    store.put_handoff("sw", "t1", "pushed, waiting on checks")
-    ledger, runtime = tasks(("t1", "eng")), RoutedJobs(tmp_path)
+    for task in ids:
+        store.put_handoff("sw", task, "pushed, waiting on checks")
     tick("sw", store, ledger, runtime, now_ms=1000)
     store.update("sw", state="paused")
     return ledger, runtime
 
 
+@pytest.fixture
+def jobs(store, tmp_path, monkeypatch):
+    return _launching(store, tmp_path, monkeypatch, "t1")
+
+
+def test_every_refused_successor_job_in_one_collection_is_retried(store, tmp_path, monkeypatch):
+    ledger, runtime = _launching(store, tmp_path, monkeypatch, "t1", "t2")
+    for name in runtime.jobs:
+        _refused(tmp_path, name, "route refused", "claude")
+    tick("sw", store, ledger, runtime, now_ms=2000)
+    assert sorted(runtime.asked) == sorted(
+        [(name, "") for name in runtime.jobs[:2]] + [(name, "claude") for name in runtime.jobs[:2]]
+    )
+    assert [ledger.rows[task]["state"] for task in ("t1", "t2")] == ["claimed", "claimed"]
+
+
 def test_a_workstation_successor_job_retries_then_reopens_after_two_refused_routes(store, tmp_path, jobs):
     ledger, runtime = jobs
     name = runtime.jobs[0]
-    _refused(tmp_path, name, "route refused", "claude")
+    from scripts.swarm import failed_panes
+
+    _refused(tmp_path, name, "route refused", "claude", "w:p8")
     runtime.at = 2000
     actions = tick("sw", store, ledger, runtime, now_ms=2000)
     assert runtime.asked == [(name, ""), (name, "claude")]
+    assert runtime.collected == []
+    assert failed_panes.held(store, "sw")["w:p8"]["failed_at"] == 2000
     assert any(action.startswith(f"retrying {name} for t1 away from claude") for action in actions)
     assert ledger.rows["t1"]["claimed_by"] == name
     assert not (tmp_path / f"{name}.json").exists()
@@ -122,6 +147,8 @@ def test_a_workstation_successor_job_retries_then_reopens_after_two_refused_rout
     assert saved["placed"]["launch_job"]["started_at"] == 1000
     request = json.loads((tmp_path / f"{name}.request.json").read_text())
     assert request == {"name": name, "job": saved["placed"]["launch_job"]}
+    assert runtime.started[-1] == saved["placed"]["launch_job"]
+    assert (saved["primed"]["avoid_harness"], saved["primed"]["successor_retried"]) == ("claude", True)
     _refused(tmp_path, name, "second route refused", "codex")
     actions = tick("sw", store, ledger, runtime, now_ms=3000)
     assert len(runtime.asked) == 2

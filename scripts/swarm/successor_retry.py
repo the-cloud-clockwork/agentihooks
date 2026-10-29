@@ -4,13 +4,18 @@ or no start within the first attempt's launch window, falls through to the tick'
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scripts.swarm import failed_panes
+from scripts.swarm.store import AgentRecord, RedisStore
+
+if TYPE_CHECKING:
+    from scripts.swarm.tick import Runtime, SpawnError, _Pass
 
 RETRIED = "successor_retried"
 
 
-def due(task: dict, primed: dict, error) -> str:
+def due(task: dict, primed: dict, error: Exception | None) -> str:
     from scripts.swarm.tick import SpawnError
 
     if not task.get("handoff") or primed.get(RETRIED) or not isinstance(error, SpawnError):
@@ -25,14 +30,16 @@ def steered(primed: dict, harness: str) -> dict:
     return task
 
 
-def note(slug: str, store, runtime, record, error, now_ms: int) -> str:
+def note(
+    slug: str, store: RedisStore, runtime: "Runtime", record: AgentRecord, error: "SpawnError", now_ms: int
+) -> str:
     failed_panes.hold(store, slug, replace(record, pane_id=error.pane_id), now_ms)
     runtime.reap_name(record.name)
     store.note_launch_failure(slug, record.task, str(error), error.harness)
     return f"retrying {record.name} for {record.task} away from {error.harness} after: {error}"
 
 
-def relaunch(run, agent, saved: dict, error) -> tuple[str, Exception | None]:
+def relaunch(run: "_Pass", agent: AgentRecord, saved: dict, error: "SpawnError") -> tuple[str, Exception | None]:
     from scripts.swarm import launch_job
     from scripts.swarm.tick import SpawnError
 
@@ -41,7 +48,7 @@ def relaunch(run, agent, saved: dict, error) -> tuple[str, Exception | None]:
     if not harness:
         return "", error
     picked = saved["placed"]["launch_job"]
-    Path(picked["path"]).unlink(missing_ok=True)
+    Path(picked["path"]).unlink()
     said = note(run.slug, run.store, run.runtime, agent, error, run.now_ms)
     retried = steered(primed, harness)
     try:
