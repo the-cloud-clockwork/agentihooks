@@ -510,17 +510,12 @@ class RedisStore:
                     pipe.hdel(self.key(slug, "desired-routes"), name)
                     pipe.hdel(self.key(slug, "state-since"), name)
                     pipe.hdel(self.key(slug, "retire-failures"), name)
-                    self._retire_name(pipe, name, ended)
                     pipe.execute()
+                    self.names.retire(name, ended)
                     return True
                 except WatchError:
                     continue
         raise SwarmError("agent registry kept changing; retirement was not committed")
-
-    def _retire_name(self, pipe, name, ended):
-        row = self.names.entry(name)
-        if row and not row["retired_at"]:
-            pipe.hset(self.names.key("name", name), "retired_at", ended)
 
     def count_spawn(self, slug, harness):
         self.redis.hincrby(self.key(slug, "spawns"), harness or "unknown", 1)
