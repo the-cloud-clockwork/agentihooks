@@ -288,7 +288,7 @@ class NameRegistry:
     def key(*parts):
         return ":".join((PREFIX, *parts))
 
-    def watched(self, *parts):
+    def watched(self, *parts: str) -> list[str]:
         return self.names_state.watched(self.key(*parts))
 
     def _legacy_alias(self, name):
@@ -434,7 +434,7 @@ class NameRegistry:
             keys += [self.key("alias", old) for old in self.aliases(name)]
         return keys
 
-    def export(self, slug):
+    def export(self, slug: str) -> dict[str, str | list[str]]:
         """The swarm's aliases as names state store rows, each state key with its value, for a snapshot."""
         code = self.code_of(slug)
         if not code:
