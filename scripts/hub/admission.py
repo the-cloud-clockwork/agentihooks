@@ -75,10 +75,11 @@ class Admission:
         self.store.seats.occupy(seat, name, now)
         task = tick.primed(self.store, slug, seat, {**row, **live})
         identity = {"execution_id": agent.execution_id, "execution_generation": agent.generation}
+        avoid = self.store.failed_harness(slug, task_id)
         admitted = {
             "hive": request["hive"],
             "name": name,
-            "task": {**task, **identity, **tick._steer(slug, self.store, task, "")},
+            "task": {**task, **identity, **({"avoid_harness": avoid} if avoid else {})},
         }
         self.store.redis.set(self._key(slug, request), json.dumps(admitted), px=ADMITTED_MS)
         return admitted
