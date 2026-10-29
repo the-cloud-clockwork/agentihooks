@@ -6,7 +6,7 @@ from scripts.events import memory
 from scripts.events.config import BusConfig
 from scripts.events.redis_state import RedisStateStore
 from scripts.swarm import naming
-from scripts.swarm.store import RedisStore, SwarmConfig
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 pytestmark = pytest.mark.unit
 
@@ -132,5 +132,6 @@ def test_retiring_an_agent_records_retired_at_through_the_registry(client, on_re
     store = RedisStore(client)
     store.create(SwarmConfig("sw", "/home/x/dev/agentihooks", max_eng=2, max_ci=1))
     name = store.next_name("sw", "eng", at=3)
-    store._retire_name(name, 11)
+    store.put_agent("sw", AgentRecord(name, "eng", "t1"))
+    store.drop_agent("sw", name, at=11)
     assert store.names.entry(name)["retired_at"] == 11

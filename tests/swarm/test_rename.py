@@ -3,11 +3,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import naming
 from scripts.swarm.naming import NamingError
-from scripts.swarm.store import APP_SERVER_TRANSPORT, PREFIX, AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore, SwarmConfig
 from scripts.terminate_agent import Session, resolve
 
 pytestmark = pytest.mark.unit
@@ -232,7 +233,7 @@ def test_alias_survives_snapshot_restore_without_affecting_another_swarm(store):
     store.names.alias("other-eng-1", other)
     snapshot = store.export("sw")
     store.redis.hdel(
-        f"{PREFIX}:state:{naming.BUCKET}:current",
+        RedisStateStore(store.redis, naming.BUCKET).watch_key,
         naming.state_key("alias", old),
         naming.state_key("aliases-of", new),
     )
