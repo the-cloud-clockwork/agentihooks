@@ -246,16 +246,17 @@ def test_confirmation_does_not_requeue_a_delivery_updated_during_the_hook(store,
     previous = InboxStore(store.redis, session_id="previous")
     item = previous.deliver(previous.send("alice", "bob", "review").id, "bob")
     before = item.updated_at + 1
-    get = store.get
+    listed_in = store.listed_in
 
-    def update_delivery(item_id):
-        current = get(item_id)
-        store.redis.hset(store.key("item", item_id), "updated_at", before)
+    def update_delivery(index, item_ids):
+        current = listed_in(index, item_ids)
+        for item_id in item_ids:
+            store.redis.hset(store.key("item", item_id), "updated_at", before)
         return current
 
-    monkeypatch.setattr(store, "get", update_delivery)
+    monkeypatch.setattr(store, "listed_in", update_delivery)
     assert store.confirm_shown("bob", before) == []
-    assert get(item.id).state == "delivered"
+    assert store.get(item.id).state == "delivered"
 
 
 def test_connect_binds_deliveries_to_the_supplied_session(store, monkeypatch):

@@ -1,0 +1,6 @@
+{
+  "scripts/hive/remove.py:scripts.hive.remove.x_forget__mutmut_17:ee6d8b56c5a6fbabcd7a15d3f91db35a00fdc640a1e8992b9043b5f4436d82ad": {
+    "reader": "standards_reader",
+    "reason": "The present flag of hive_state.indexed is read only for truthiness, so None behaves exactly like False; no record, index or Redis set differs."
+  }
+}

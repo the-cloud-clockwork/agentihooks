@@ -746,6 +746,17 @@ def test_estimate_refuses_changed_function_lines_that_produce_no_mutant(tmp_path
     assert plan.estimate(tmp_path, {"scripts/cached.py": {1}})[1] == 0
 
 
+@pytest.mark.parametrize("decorator", ["@functools.lru_cache(maxsize=1)", "@functools.cache"])
+def test_estimate_plans_cached_function_body_mutants(tmp_path, monkeypatch, decorator):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    source = f"import functools\n\n{decorator}\ndef doubled(value):\n    return value * 2\n"
+    (tmp_path / "scripts/cached.py").write_text(source)
+    (tmp_path / "tests/test_cached.py").write_text("from scripts.cached import doubled\n")
+    assert plan.estimate(tmp_path, {"scripts/cached.py": {5}})[1:] == (2, ["tests/test_cached.py"])
+
+
 @pytest.mark.parametrize("decorator, refused", [("@opaque\nclass Box:\n    ", True), ("", False)])
 def test_estimate_refuses_an_ungraded_changed_function_beside_a_graded_one(tmp_path, monkeypatch, decorator, refused):
     monkeypatch.chdir(tmp_path)
