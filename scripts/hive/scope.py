@@ -53,9 +53,9 @@ def members(redis: "Redis") -> list[str]:
     memo = PASS.get()
     if memo is None:
         return sorted(auth.members(redis))
-    if id(redis) not in memo:
-        memo[id(redis)] = sorted(auth.members(redis))
-    return memo[id(redis)]
+    if redis not in memo:
+        memo[redis] = sorted(auth.members(redis))
+    return memo[redis]
 
 
 @contextmanager
