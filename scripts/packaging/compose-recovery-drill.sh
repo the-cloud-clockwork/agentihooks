@@ -229,7 +229,8 @@ volume() {
 }
 
 settle() {
-  for _ in $(seq 30); do
+  local deadline=$((SECONDS + 150))
+  while ((SECONDS < deadline)); do
     found="$(drill pass)"
     local missing=0 want
     for want in "$@"; do
