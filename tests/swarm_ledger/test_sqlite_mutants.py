@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from pathlib import Path
+from unittest.mock import Mock, call
 
 import ledger_core
 import new_ledger
@@ -83,6 +84,56 @@ def test_init_sets_the_explicit_path_and_default_domain_cache_and_guard():
     assert bare._cache == {}
     with bare._guard:
         pass
+
+
+def test_store_registers_its_reader_finalizer(monkeypatch):
+    finalize = Mock(wraps=sqlite.weakref.finalize)
+    monkeypatch.setattr(sqlite.weakref, "finalize", finalize)
+
+    store = SQLiteLedgerRepository(Path("some/ledgers.sqlite3"))
+
+    finalize.assert_called_once_with(store, sqlite.close_all, store._held)
+
+
+def test_open_forwards_connection_options_without_schema_work(tmp_path, monkeypatch):
+    connection = Mock()
+    connect = Mock(return_value=connection)
+    monkeypatch.setattr(sqlite.sqlite3, "connect", connect)
+    path = tmp_path / sqlite.DATABASE
+    store = SQLiteLedgerRepository(path)
+    store._ready.add(path)
+
+    assert store._open(check_same_thread=False) == (path, connection)
+
+    connect.assert_called_once_with(path, timeout=30, check_same_thread=False)
+    assert connection.execute.call_args_list == [
+        call("PRAGMA foreign_keys=ON"),
+        call("PRAGMA synchronous=FULL"),
+    ]
+
+
+def test_release_reader_removes_and_closes_only_its_connection():
+    connection, other = Mock(), Mock()
+    held = {connection: Mock(), other: Mock()}
+
+    sqlite.release_reader(held, connection)
+
+    assert list(held) == [other]
+    connection.close.assert_called_once_with()
+    other.close.assert_not_called()
+
+
+def test_close_all_releases_every_reader_while_callbacks_remove_them():
+    connections = [Mock(), Mock()]
+    held = {
+        connection: lambda connection=connection: sqlite.release_reader(held, connection) for connection in connections
+    }
+
+    sqlite.close_all(held)
+
+    assert held == {}
+    for connection in connections:
+        connection.close.assert_called_once_with()
 
 
 def test_bound_returns_self_when_path_is_fixed_or_domain_already_matches():
