@@ -9,7 +9,7 @@ pytestmark = pytest.mark.unit
 
 TYPED = "def load(path: str, count: int = 1) -> str:\n    return path * count\n"
 UNTYPED = "def load(path, count: int = 1):\n    return path * count\n"
-CONCRETE = "class Store:\n    def put(self, key: str) -> None:\n        pass\n"
+CONCRETE = "class Store:\n    def put(self, key: str) -> None:\n        self.key = key\n"
 KEEP = {"scripts/keep.py": "X = 1\n"}
 
 
@@ -87,7 +87,7 @@ def test_functions_under_a_statement_block_keep_their_scope(tmp_path):
         "import sys\n\n"
         "if sys:\n    def load(path):\n        return path\n\n\n"
         "class Job(object):\n"
-        "    if sys:\n        def run(self, n: int) -> int:\n            return n\n\n"
+        "    if sys:\n        def run(self, n: int) -> int:\n            return self.n\n\n"
         "        def stop(self, n):\n            return n\n"
     )
     assert _errors(tmp_path, {"scripts/job.py": source}) == [
@@ -112,7 +112,7 @@ def test_methods_skip_the_receiver_but_grade_every_other_parameter(tmp_path):
 
 
 def test_methods_of_a_private_class_are_not_public(tmp_path):
-    source = "class _Job:\n    def run(self, n):\n        return n\n"
+    source = "class _Job:\n    def run(self, n):\n        return self.n\n"
     assert _errors(tmp_path, {"scripts/job.py": source}) == []
 
 
@@ -351,6 +351,151 @@ def test_tests_and_semgrep_fixtures_are_not_graded(tmp_path):
 def test_a_tracked_python_script_without_the_suffix_is_skipped(tmp_path):
     head = {"scripts/tool": "#!/usr/bin/env python\ndef run(x):\n    return x\n", **KEEP}
     assert _grade(tmp_path, KEEP, head) == (0, [])
+
+
+def _groups(key: str) -> str:
+    return f"functions: {key} only groups functions and holds no instance state; make them module functions"
+
+
+def _seam(keys: str, methods: str) -> str:
+    return (
+        f"protocol: {keys} share the call contract {methods} with no common Protocol or abstract base; "
+        "type the seam with one"
+    )
+
+
+GROUPED = (
+    "class Tools(object):\n"
+    "    @staticmethod\n    def parse(text: str) -> int:\n        return len(text)\n"
+    "    @classmethod\n    def make(cls) -> str:\n        return cls.__name__\n"
+    "    def run(self, n: int) -> int:\n        return n\n"
+    "    def bare() -> int:\n        return 3\n"
+)
+
+
+def test_a_class_that_only_groups_functions_is_red_naming_it(tmp_path):
+    assert _errors(tmp_path, {"scripts/tools.py": GROUPED}) == [_groups("scripts/tools.py::Tools")]
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "    def keep(self, n: int) -> None:\n        self.n = n\n",
+        "    def read(self) -> int:\n        return len([self])\n",
+        "    def read(this) -> int:\n        return this.n\n",
+    ],
+)
+def test_a_method_that_uses_its_receiver_keeps_the_class_green(tmp_path, method):
+    assert _errors(tmp_path, {"scripts/tools.py": GROUPED + method}) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "class Limits:\n    MAX = 3\n",
+        "from abc import ABC\n\nclass Tools(ABC):\n    def run(self) -> int:\n        return 1\n",
+        "class Tools(Exception):\n    def run(self) -> int:\n        return 1\n",
+        "class Meta(type):\n    pass\n\nclass Tools(metaclass=Meta):\n    def run(self) -> int:\n        return 1\n",
+        "from dataclasses import dataclass\n\n@dataclass\nclass Tools:\n    def run(self) -> int:\n        return 1\n",
+    ],
+)
+def test_a_class_with_no_methods_a_base_or_a_declared_kind_is_not_a_function_group(tmp_path, source):
+    assert _errors(tmp_path, {"scripts/tools.py": source}) == []
+
+
+def test_an_existing_function_group_whose_body_changes_is_not_graded(tmp_path):
+    head = {"scripts/tools.py": GROUPED + "    LIMIT = 3\n"}
+    assert _grade(tmp_path, {"scripts/tools.py": GROUPED}, head) == (0, [])
+
+
+def _impl(name: str, methods: str, bases: str = "") -> str:
+    return f"class {name}{bases}:\n    def __init__(self) -> None:\n        self.n = 1\n{methods}\n\n"
+
+
+FETCH = (
+    "    def fetch(self, key: str, *rest: str, limit: int = 1) -> str:\n        return key\n"
+    "    @staticmethod\n    def parse(text: str) -> str:\n        return text\n"
+    "    def _own(self) -> None:\n        pass\n"
+)
+PRIVATE = FETCH.replace("def fetch", "def _fetch").replace("def parse", "def _parse")
+
+
+def test_concrete_classes_sharing_a_call_contract_without_a_seam_are_red(tmp_path):
+    head = {
+        "scripts/a.py": _impl("Http", FETCH),
+        "scripts/b.py": _impl("Disk", FETCH.replace("_own", "_other"), "(object)"),
+    }
+    assert _errors(tmp_path, head) == [_seam("scripts/a.py::Http, scripts/b.py::Disk", "fetch/2, parse/1")]
+
+
+@pytest.mark.parametrize(
+    "first, second",
+    [
+        (FETCH, FETCH.replace("limit: int = 1", "limit: int = 1, extra: int = 2")),
+        (FETCH, FETCH.replace("def fetch", "def get")),
+        (PRIVATE, PRIVATE),
+    ],
+)
+def test_a_different_contract_or_no_public_methods_is_green(tmp_path, first, second):
+    assert _errors(tmp_path, {"scripts/a.py": _impl("Http", first), "scripts/b.py": _impl("Disk", second)}) == []
+
+
+@pytest.mark.parametrize(
+    "seam, imports, bases",
+    [
+        ("from abc import ABC\n\nclass Source(ABC):\n    pass\n", "from scripts.seam import Source", "(Source)"),
+        (
+            "from abc import ABC\n\nclass Root(ABC):\n    pass\n\nclass Source(Root):\n    pass\n",
+            "from scripts.seam import Source",
+            "(Source)",
+        ),
+        ("X = 1\n", "import argparse", "(argparse.Action)"),
+    ],
+)
+def test_a_common_abstract_or_external_base_types_the_seam(tmp_path, seam, imports, bases):
+    head = {
+        "scripts/seam.py": seam,
+        "scripts/a.py": f"{imports}\n\n{_impl('Http', FETCH, bases)}",
+        "scripts/b.py": f"{imports}\n\n{_impl('Disk', FETCH, bases)}",
+    }
+    assert _errors(tmp_path, head, {"scripts/seam.py": seam}) == []
+
+
+@pytest.mark.parametrize(
+    "protocol, errors",
+    [
+        (
+            "    def fetch(self, key: str, *rest: str, limit: int = 1) -> str: ...\n"
+            "    @staticmethod\n    def parse(text: str) -> str: ...\n",
+            0,
+        ),
+        ("    def fetch(self, key: str, *rest: str, limit: int = 1) -> str: ...\n", 1),
+    ],
+)
+def test_a_structural_protocol_in_the_tree_covering_the_contract_types_the_seam(tmp_path, protocol, errors):
+    seam = f"from typing import Protocol\n\nclass Source(Protocol):\n{protocol}"
+    unchanged = {"scripts/seam.py": seam, "tests/test_seam.py": "def broken(:\n"}
+    head = {**unchanged, "scripts/a.py": _impl("Http", FETCH), "scripts/b.py": _impl("Disk", FETCH)}
+    assert len(_errors(tmp_path, head, unchanged)) == errors
+
+
+def test_only_changed_concrete_classes_are_grouped(tmp_path):
+    old = _impl("Http", FETCH)
+    head = {
+        "scripts/a.py": old,
+        "scripts/b.py": _impl("Disk", FETCH),
+        "scripts/d.py": "class Failure(ValueError):\n" + FETCH,
+        "scripts/e.py": "from dataclasses import dataclass\n\n@dataclass\nclass Row:\n" + FETCH,
+    }
+    assert _errors(tmp_path, head, {"scripts/a.py": old}) == []
+
+
+def test_a_concrete_inheritance_cycle_sharing_a_contract_terminates(tmp_path):
+    source = _impl("A", FETCH, "(B)") + _impl("B", FETCH, "(A)")
+    assert _errors(tmp_path, {"scripts/job.py": source}) == [
+        _inherits("scripts/job.py::A", "scripts.job.B"),
+        _inherits("scripts/job.py::B", "scripts.job.A"),
+    ]
 
 
 def test_main_names_every_rule_and_exits_red(tmp_path, capsys):
