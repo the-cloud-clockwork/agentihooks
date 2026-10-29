@@ -285,6 +285,24 @@ def test_an_acknowledged_execution_keeps_its_placement_spill(setup):  # noqa: F8
     assert acked.profile_decision == {"validation": {"pid": 12}, "placement_spill": spill.record()}
 
 
+def test_a_refused_first_ranked_hive_takes_no_further_launch_in_the_pass(setup, monkeypatch):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1})
+    write_hive(setup, id="spare")
+    launcher = setup.launcher
+    launcher.placement_cache = {}
+    reserve = launcher.reserve_room
+    monkeypatch.setattr(
+        launcher,
+        "reserve_room",
+        lambda request, selected: "remote ram: full" if selected.hive == "remote" else reserve(request, selected),
+    )
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    assert launcher.spawn(request).status is Status.PENDING
+    assert launcher.orders_for(request.task["id"]).hive == "spare"
+    assert launcher.select(setup.config, "eng", {"id": "next"}).hive == "spare"
+
+
 def test_a_local_slot_cap_limits_the_first_room_and_keeps_first_mode():
     from scripts.hive import launch, placement
 
