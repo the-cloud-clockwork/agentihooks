@@ -889,6 +889,30 @@ def test_run_on_an_unchanged_plan_asks_nothing_and_writes_nothing(ask, tmp_path)
     assert again["failures"] == 1 and len(rows(home)) == 1
 
 
+@pytest.mark.parametrize("field", ["task", "task intent"])
+@pytest.mark.parametrize("append", [False, True])
+def test_rewritten_task_text_retraces_every_piece(ask, tmp_path, field, append):
+    folder, home, ledger = tmp_path / "t1", tmp_path / "home", Ledger()
+    state = {**INTENT, "task": "Build the doghouse", "task intent": "Keep the dog warm"}
+    write_plan(folder)
+    ask(0.9, 0.9, 0.1)
+    first, _ = trace_plan.run(folder, state, ledger, WHO, "observe", home=home, now_ms=11)
+    state[field] = "Keep the generator too"
+    if append:
+        write_plan(folder, DOGHOUSE + "- a switch | doghouse/switch | turn the light on\n")
+    fake = ask(*([0.9] * (4 if append else 3)))
+    again, block = trace_plan.run(folder, state, ledger, WHO, "observe", home=home, now_ms=22)
+    assert len(fake.calls) == 1
+    assert again["plan_hash"] != first["plan_hash"]
+    assert all(row["kept"] for row in again["pieces"])
+    assert again["at"] == 22 and not block
+    assert len(fake.calls[0][0]["pieces"]) == (4 if append else 3)
+    assert fake.calls[0][0][field] == state[field]
+    fake = ask(0.1, 0.1, 0.1)
+    reused, block = trace_plan.run(folder, state, ledger, WHO, "observe", home=home, now_ms=33)
+    assert (reused, block, fake.calls) == (again, False, [])
+
+
 def test_run_files_nothing_for_a_failed_plan_and_logs_the_would_be_refusal(ask, tmp_path):
     folder, home, ledger = tmp_path / "t1", tmp_path / "home", Ledger()
     write_plan(folder)
