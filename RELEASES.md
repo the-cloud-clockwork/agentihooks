@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.477 · 2026-10-29
+
+### 2026-10-29 · 1a78d66d05b5 · #8708 · @agenticore-app
+
+**Judge launched literals by command position in the local test guard**
+
+This change fixes a false positive in the local test guard, which previously flagged any subprocess-launching script that contained a string literal matching a runner name, even in unrelated contexts like CI job labels such as "unit pytest shard." Now the guard only treats literals as runner invocations when they appear in an actual command position—at line start, after shell separators, wrappers, flags, assignments, or path prefixes like uv run or .venv/bin/—while still scanning non-literal code normally. This prevents legitimate scripts from being wrongly denied.
+
 ## v2.17.476 · 2026-10-29
 
 ### 2026-10-29 · ea708842345e · #8673 · @agenticore-app
