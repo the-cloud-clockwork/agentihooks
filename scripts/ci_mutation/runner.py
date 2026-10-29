@@ -6,7 +6,9 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import tomlkit
@@ -20,24 +22,83 @@ from scripts.ci_mutation.scope import select_tests
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 
 IDENTITY = "scripts/ci_mutation/identity.py"
+SHARED_MEMORY = Path("/dev/shm")
+MEMORY_FLOOR = 8 << 20
+
+
+def memory_usage(root: Path, depth: int = 6, top: int = 30) -> str:
+    sizes: dict[Path, int] = {}
+    for folder, _, files in os.walk(root):
+        for name in files:
+            path = Path(folder, name)
+            try:
+                size = path.lstat().st_size
+            except OSError:
+                continue
+            parts = path.relative_to(root).parts
+            for count in range(1, min(depth, len(parts)) + 1):
+                key = root.joinpath(*parts[:count])
+                sizes[key] = sizes.get(key, 0) + size
+    largest = sorted(sizes.items(), key=lambda item: -item[1])[:top]
+    return "\n".join(f"{size} {path}" for path, size in largest)
+
+
+@contextmanager
+def memory_temp():
+    if not SHARED_MEMORY.is_dir() or shutil.disk_usage(SHARED_MEMORY).free < 4 * MEMORY_FLOOR:
+        yield None
+        return
+    folder = Path(tempfile.mkdtemp(prefix="mutation-tmp-", dir=SHARED_MEMORY))
+    low: list[str] = []
+    done = threading.Event()
+
+    def check() -> None:
+        try:
+            free = shutil.disk_usage(folder).free
+        except OSError:
+            free = 0
+        if not low and free < MEMORY_FLOOR:
+            low.append(memory_usage(SHARED_MEMORY))
+
+    def watch():
+        while not done.wait(0.1):
+            check()
+
+    watcher = threading.Thread(target=watch, daemon=True)
+    watcher.start()
+    try:
+        yield folder, low, check
+    finally:
+        done.set()
+        watcher.join()
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int | None:
-    with log.open("w") as stream:
+    with log.open("w") as stream, memory_temp() as temp:
         process = subprocess.Popen(
             command,
             cwd=cwd,
             stdout=stream,
             stderr=subprocess.STDOUT,
             start_new_session=True,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", **({"TMPDIR": str(temp[0])} if temp else {})},
         )
         try:
-            return process.wait(timeout=timeout)
+            status = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
             return None
+        if temp:
+            temp[2]()
+            stream.flush()
+            if not temp[1] and "No space left on device" in log.read_text(errors="replace"):
+                temp[1].append(memory_usage(SHARED_MEMORY))
+            if temp[1]:
+                stream.write(f"temporary folder {temp[0]} fell below {MEMORY_FLOOR} free bytes\n{temp[1][0]}\n")
+                return status or 1
+        return status
 
 
 def failing_tests(log: Path) -> list[str]:
@@ -277,7 +338,16 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         (work / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(root / name, work / name)
     git_files = prepare_git_inputs(root, work)
-    pytest_args = ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
+    pytest_args = [
+        "-q",
+        "-x",
+        "-o",
+        "addopts=",
+        "-o",
+        "tmp_path_retention_policy=failed",
+        "-p",
+        "pytest_asyncio.plugin",
+    ]
     # pytest would load the plugin from its own mutated copy, whose hooks raise in mutmut's forced fail run.
     if IDENTITY not in paths:
         pytest_args += ["-p", "scripts.ci_mutation.identity", *(f"--mutated-path={path}" for path in paths)]

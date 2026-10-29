@@ -1,3 +1,4 @@
+import shutil
 import sys
 from pathlib import Path
 
@@ -25,6 +26,7 @@ def ledger_dir(tmp_path_factory):
                 for name, value in values.items():
                     patch.setattr(sys.modules[module], name, value)
         yield path
+    shutil.rmtree(path, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
