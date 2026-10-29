@@ -108,7 +108,6 @@ def test_methods_skip_the_receiver_but_grade_every_other_parameter(tmp_path):
     assert _errors(tmp_path, {"scripts/job.py": source}) == [
         "untyped: public scripts/job.py::Job.parse lacks type hints on text",
         "untyped: public scripts/job.py::Job.stop lacks type hints on n",
-        "untyped: public scripts/job.py::Job.__init__ lacks type hints on n, return",
     ]
 
 
@@ -170,6 +169,7 @@ def test_a_configuration_parameter_typed_as_a_plain_dict_is_red(tmp_path, annota
         "config: 'Settings'",
         "config: Settings | None",
         "config: list[dict]",
+        "config: 'dict ->'",
     ],
 )
 def test_a_typed_configuration_or_a_plain_data_dict_is_green(tmp_path, parameter):

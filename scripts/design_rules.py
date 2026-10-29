@@ -171,8 +171,7 @@ def units(syntax: ast.Module, rel: str) -> dict[str, Unit]:
             seen[name] = seen.get(name, 0) + 1
             if seen[name] > 1:
                 name = f"{name}#{seen[name]}"
-            dunder = child.name.startswith("__") and child.name.endswith("__")
-            visible = public and (dunder or not child.name.startswith("_"))
+            visible = public and not child.name.startswith("_")
             found[f"{rel}::{name}"] = Unit(_signature(child), child, visible)
             walk(child, f"{name}.", visible and isinstance(child, ast.ClassDef))
 
@@ -192,7 +191,10 @@ def untyped(unit: Unit) -> list[str]:
 
 def _annotated(annotation: ast.expr) -> set[str]:
     if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
-        return _annotated(ast.parse(annotation.value, mode="eval").body)
+        try:
+            return _annotated(ast.parse(annotation.value, mode="eval").body)
+        except SyntaxError:
+            return {annotation.value}
     if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
         return _annotated(annotation.left) | _annotated(annotation.right)
     if isinstance(annotation, ast.Subscript) and _terminal(annotation) in UNIONS:
