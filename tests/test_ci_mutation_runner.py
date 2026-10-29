@@ -889,7 +889,11 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
         "4",
     ]
     assert json.loads((tmp_path / "work/changed-lines.json").read_text()) == {
-        "hooks/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"], "direct": ["tests/test_sample.py::test_f"]},
+        "hooks/sample.py": {
+            "lines": [2],
+            "tests": ["tests/test_sample.py"],
+            "direct": ["tests/test_sample.py::test_f"],
+        },
         "scripts/other.py": {"lines": [3, 4], "tests": ["tests/test_o.py"], "direct": []},
     }
     if len(commands) == 2:

@@ -134,7 +134,9 @@ def test_the_selection_runner_orders_by_kills_and_records_them_only_for_mutants(
     monkeypatch.chdir(tmp_path)
     selection_file = tmp_path / "selection.json"
     selection_file.write_text(
-        json.dumps({"scripts/a.py": {"lines": [2], "tests": ["tests/test_a.py"], "direct": ["tests/test_b.py::middle"]}})
+        json.dumps(
+            {"scripts/a.py": {"lines": [2], "tests": ["tests/test_a.py"], "direct": ["tests/test_b.py::middle"]}}
+        )
     )
     runs = []
 
