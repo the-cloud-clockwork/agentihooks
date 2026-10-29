@@ -138,6 +138,13 @@ def authority_held(store: Any, slug: str, task: str) -> bool:
     return task in doc["claims"] or task in doc["journals"]
 
 
+def watch(store: Any, pipe: Any) -> None:
+    """Makes a Redis transaction abort when any fencing document changes; other backends have nothing to watch."""
+    key = getattr(_states(store), "_current", None)
+    if key is not None:
+        pipe.watch(key)
+
+
 def replace(store: Any, slug: str, saved: dict | None) -> None:
     """Puts back a saved document; a snapshot taken before the document existed is imported from its keys."""
     restored = _legacy(store, slug) if saved is None else {**copy.deepcopy(EMPTY), **saved}
