@@ -1135,7 +1135,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead of the critical request, and waiting entries behind it when it is already queued, are removed tail first in one pass and requeued in their original order after it: the critical request, then the displaced entries, then the later arrivals. Earlier critical requests replayed in the same refresh stay in place on either side. Each owner still working its task receives an inbox notice sent as information only (see [Merge priority owner notices](#merge-priority-owner-notices)). A failed insertion still restores the displaced entries, and a critical request the queue ejected during the pass is queued again. Restoring stops at the first refused entry and reports it; the swarm then requeues every entry still left out in queue order, earlier priorities first, at once and on every refresh. Each reorder, deferral, replay and restore is recorded in the [queue journal](../reference/delivery-tiers.md#the-queue-journal). |
 | `agentihooks swarm <id> ready DOC` | Release the seat of a task of any kind whose reviewed pull request waits only on checks and the merge queue ([Ready on a task of any kind](#ready-on-a-task-of-any-kind)). Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. A task of a kind other than code or ci is not closed on the merge: it goes back to `open` with no claimant, its pull request and handoff kept and a comment that it awaits its proof, and the worktree is removed. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff and leave the worktree in place; a green ejection with no failed merge group run of its own is queued again instead ([Ready merge pass queue exits](#ready-merge-pass-queue-exits)). Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
 | `agentihooks swarm <id> block NOTE` | At delegate or full autonomy, refused until the task's blocker record has escalated through `resolve` (`--dev-red` is exempt). Comment the blocker, mark the task `blocked`, end the session. A dependency that is not `done` turns the block into a checked wait on that task instead, keeping the claim. Before blocking, refuses while a task worktree holds commits its remote branch lacks, naming the push to run, and records a pushed branch on the task; see [Blocking with unpushed commits](#blocking-with-unpushed-commits). |
-| `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
+| `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone when the task title, description and scope authorizations are unchanged; a task text rewrite retraces every piece. See [Retrace a plan after rewriting a task](#retrace-a-plan-after-rewriting-a-task) for reuse, configuration and upgrade recovery. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
 | `agentihooks swarm <id> plan approve PHASE [--note TEXT]` / `plan send-back PHASE --note TEXT` | Decide the slice of a phase in review. At `manual` and `assist` autonomy the operator decides with the **Approve plan** and **Send back** buttons on the phase row, and the command refuses an agent naming them (at `assist` the master posts its recommendation as a phase comment). At `delegate` and `full` only the master decides. Approve moves the phase to building and the tick claims its tasks on the same pass. Send back reopens the plan task, records the note for the planner's steering and counts a round; when the planner finishes again the tick reopens the review. The third send back leaves the plan task done, marks the review escalated and raises a priority naming the notes; only the operator decides after that, and an operator send back reopens the plan task whatever the count. |
 | `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|merge PR_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, a queued pull request merges or leaves the merge queue, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), or until it expires after MINUTES, or 12 hours when MINUTES is omitted. When the thing resolves the tick ends the wait and sends you an inbox item; expiry sends none. For a red Actions run the item names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read; [When a checks wait ends](#when-a-checks-wait-ends) gives the green and red rule for pull request checks. A bare wait lasts MINUTES, at most 60. An accepted checked wait prints a `next` field telling the agent to finish its turn; [Wait notice and end of turn](#wait-notice-and-end-of-turn) covers it and the notice a worker gets for an undeclared wait. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), writes the branch and head as a ledger comment on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. The `one-push` gate, in the same roles on Bash calls running `git` or `gh`, keeps a pull request to one push: an eng or ci agent's `gh pr create` or `gh pr ready` is refused until the `standards-reader` and `spec-reader` sub-agents ran for its task (Claude sessions only) and its checkout is committed and on origin, with `--draft` open for the block path; a `git push` to the task branch is refused while the task's open pull request has checks running or waits in the merge queue, unless a check is red; a required check that has not reported yet counts as running. A reader counts once launched; the gate cannot see a review close. See [One push per pull request](#one-push-per-pull-request) for the refusals, configuration and troubleshooting. |
 | `agentihooks swarm <id> progress --doing TEXT --ends-when TEXT` | Say what you are doing and when it ends: a ledger line on your task, a line in its work folder `progress.md` and an outcome on the progress signal. The tick raises a quiet flag (`gates/quiet/<agent>`, a gate log `count` row) on an eng or ci agent holding a claimed or pr task with no progress signal (last outcome, work folder progress line, start) for 30 minutes and no live checked wait. While it stands the `quiet` gate (`python -m scripts.gates quiet`, behind a bash flag test on every tool call) refuses every call except `agentihooks ledger`, `swarm` and `msg` commands; `progress` clears it. The stale claim finding reads the same quiet minutes, and each idle tick is a gate log `count` row (`idle-ticks`) for `doctor rates`. |
@@ -1144,6 +1144,116 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> restack` | After the parked blockers finish, fetch origin and rebase task work from `stacked_base` onto `origin/dev`. Run in a clean branch cut from the parked branch. Success clears `parked_on`; a conflict lists the files and retains the parked list. Resolve the files, run `git rebase --continue`, then run restack again to finish. |
 | `agentihooks swarm <id> learned TEXT [--maturity data\|note\|insight\|canon]` | Add a lesson to your seat's learned notes, kept for every later occupant. The maturity defaults to `note`; only the master writes `canon`. |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
+
+## Retrace a plan after rewriting a task
+
+A traced plan belongs to the task's current title and description as well as
+its plan pieces. Changing either field invalidates the saved trace, even when
+the plan text has not changed. Run `trace-plan` again before continuing edits:
+
+```bash
+agentihooks swarm example-swarm trace-plan
+```
+
+Run this from the agent session that owns the task; the command resolves its
+task work folder and reads the current ledger task. Keep the plan pieces that
+still describe the required work. There is no need to edit a piece just to
+force a fresh verdict.
+
+For example, a task originally titled **Build the doghouse**, with description
+**Keep the dog warm**, might have these pieces in its task work folder's
+`plan.md`:
+
+```text
+- Build walls and a roof | doghouse/frame | Keep the dog warm
+- Add a lamp | doghouse/light | Light the doghouse
+- Add a generator | doghouse/power | Supply the lamp
+```
+
+If the master rewrites the description to **Keep the dog warm and power the
+lamp without mains electricity**, rerunning `trace-plan` judges all three
+pieces against that description. An earlier cut of the generator is judged
+again and can now be kept; the classifier decides the new result. Changing
+only the title, for example to **Build a self-powered doghouse**, also causes
+a fresh trace. Appending another piece at the same time still retraces the
+whole plan, including its earlier prefix.
+
+### When a verdict is reused
+
+| Inputs on the next trace | Result |
+|---|---|
+| Same title, description, plan pieces and scope authorizations | Reuse the saved trace without another scope classification. |
+| Same task text and authorizations, with an unchanged prefix from a passing plan and new pieces appended | Reuse the earlier pieces and classify only the appended pieces. |
+| Changed title or description, with or without appended pieces | Classify every piece against the current task text. Earlier kept and cut decisions are reconsidered. |
+| Changed scope authorizations | Retrace as described in [Task scope authorizations](#task-scope-authorizations). |
+
+Before the pull request opens, the separate intent plan check also requires
+the same plan hash, current intent fingerprint and phase before reusing a
+stored verdict. The fingerprint includes the task title and description.
+A rewrite therefore refreshes the intent judgment and its reason even if
+the plan and phase stay the same. With unchanged inputs, the stored intent
+verdict remains reusable. After the pull request opens, the pull request
+intent check takes over as described in the command reference.
+
+Retracing does not withdraw follow ups already filed for earlier cuts. Check
+the existing follow ups when the revised task brings a cut piece into scope;
+see [Task scope authorizations](#task-scope-authorizations).
+
+### Configuration
+
+Task text invalidation is automatic and has no separate enable flag or cache
+setting. The operator or master controls enforcement with the existing gates:
+
+```bash
+agentihooks swarm example-swarm set \
+  trace-plan-gate=deny \
+  build-gate=deny \
+  intent-gate=deny
+agentihooks swarm example-swarm status --json
+```
+
+Read `gate_modes` in the status report. Each of these gates defaults to
+`log only`; an observation configuration is:
+
+```bash
+agentihooks swarm example-swarm set \
+  "trace-plan-gate=log only" \
+  "build-gate=log only" \
+  "intent-gate=log only"
+```
+
+For build and intent checks, `deny` enforces refusals, `log only` records the
+would-be refusal and permits the action, and `skip` skips that gate. The trace
+gate has different enforcement: `deny` logs failed plans and blocks the task
+on its second distinct failed plan; `log only` logs failures; `skip` still
+runs and saves the trace but does not log a failure row or block the task.
+Changing modes does not make an old verdict current. Swarm configuration,
+rather than an agent's environment override, supplies these modes.
+
+### Upgrade and stale verdict recovery
+
+Existing traced plans need one `trace-plan` run after upgrading to the task
+text invalidation behavior. Stored intent plan verdicts without the current
+fingerprint are judged once more when that check next runs. No manual cache
+deletion or ledger rewrite is required.
+
+The build gate compares the saved trace with both the current plan and the
+ledger task text. Under `build-gate=deny`, a stale trace refuses edits or
+commits with:
+
+```text
+build gate: plan.md has no verdict for its current text. Run agentihooks swarm example-swarm trace-plan
+```
+
+This message can follow a task rewrite even when `plan.md` is unchanged.
+Rerun the command in the owning agent session, then read its `verdict`,
+`kept`, `cut`, `reasons` and `intent` report. A passing current trace restores
+the build gate's normal checks on kept areas and task territory. If the
+classifier does not answer, the trace is `unchecked`; edits are allowed and
+counted, and the report asks for another trace later. An unchecked result
+does not establish that the plan fits the rewritten task. If the plan fails,
+revise the pieces using the reported reasons and trace again; enforcement
+still follows the configured mode and failed-plan limit.
 
 ## Task scope authorizations
 
