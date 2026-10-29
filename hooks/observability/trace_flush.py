@@ -289,9 +289,11 @@ def _lock(session_id: str, wait: float, clock: Callable[[], float], sleep: Calla
 def scheduled_wait(delay: float) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
+    from scripts.events.bus import StateConflict
+
     try:
         timer_wait(delay, timeout=POLL_LIMIT_SEC)
-    except (ConnectionError, TimeoutError):
+    except (ConnectionError, TimeoutError, StateConflict):
         time.sleep(delay)
 
 
