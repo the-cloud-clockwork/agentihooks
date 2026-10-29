@@ -10,6 +10,14 @@ One entry per change merged into dev, newest release first. Each entry names its
 
 This change updates the swarm guide to explain that rewriting a task's title or description invalidates any existing traced plan, forcing a fresh plan and a new intent plan judgment, while unchanged rewrites still reuse the prior verdict and incremental tracing continues to apply. It also documents gate configuration, upgrade recovery steps, and adds a home navigation link so operators can find this section quickly. Clarifying this behavior prevents confusion when task edits silently invalidate cached plans, and ensures operators know how to recover gracefully after upgrades without re-deriving context manually.
 
+## v2.17.485 · 2026-10-29
+
+### 2026-10-29 · b7f901945c65 · #8779 · @nestorcolt
+
+**Select the locked tests manifest check for locked test and manifest changes**
+
+This change updates the pull request test selector so that editing a locked test module or the locked tests manifest now triggers `tests/test_locked_tests.py` directly on that pull request, rather than waiting for the merge group to catch problems. Previously, a manifest that under-recorded assertions could slip through pull request checks since only the queue ran that test, even though the lint grader already caught over-recorded manifests. This closes the gap so stale or incomplete manifests fail fast on the originating pull request.
+
 ## v2.17.484 · 2026-10-29
 
 ### 2026-10-29 · b5afc17f17dd · #8764 · @agenticore-app
