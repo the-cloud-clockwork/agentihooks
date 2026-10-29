@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 from scripts.swarm.execution import ExecutionRegistry
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, AgentRecord
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks
 
@@ -47,3 +47,12 @@ def test_a_finished_agent_is_never_written_back_to_working(store):
     store.put_agent("sw", replace(old, state="finished"))
     store.put_agent("sw", replace(old, state="working", pane_id="w1:relaunched"))
     assert [(a.state, a.pane_id) for a in masters(store)] == [("working", "w1:relaunched")]
+
+
+def test_a_finished_execution_can_still_end(store):
+    agent = store.start_execution("sw", AgentRecord(store.next_name("sw", "eng"), "eng", "task", seat="eng-1@sw"))
+    store.put_agent("sw", replace(agent, state="finished"))
+    store.put_agent("sw", replace(agent, state="working"))
+    assert store.execution("sw", agent.execution_id).state == "finished"
+    store.put_agent("sw", replace(agent, state="ended"))
+    assert store.execution("sw", agent.execution_id).state == "ended"
