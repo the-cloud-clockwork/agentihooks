@@ -120,3 +120,16 @@ def test_the_readers_survive_redis_and_bus_failures_on_the_bus_backend(monkeypat
     assert acc.managed_held() == {("exe-old", "alpha")}
     assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {}
     assert acc.hive_held("claude") == {}
+
+
+def test_the_readers_survive_redis_failures_on_an_unknown_backend(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "carrier-pigeon")
+    monkeypatch.setattr(acc, "_LAST_HELD", {("exe-old", "alpha")})
+    monkeypatch.setattr("scripts.codex_session.binding.transport_records", _redis_down)
+    monkeypatch.setattr("scripts.swarm_v2.accounts.fleet_held_now", _redis_down)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-1")
+    monkeypatch.setattr("scripts.routing.aggregate.held_elsewhere", _hive_failure(_redis_down))
+
+    assert acc.managed_held() == {("exe-old", "alpha")}
+    assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {}
+    assert acc.hive_held("claude") == {}
