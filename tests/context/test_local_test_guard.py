@@ -662,7 +662,8 @@ GH_JOB_READER = (
     "import json\n"
     "import subprocess\n"
     "out = subprocess.run(['gh', 'api', 'repos/o/r/actions/runs/1/jobs'], capture_output=True, text=True).stdout\n"
-    "wanted = ('unit pytest shard 1', 'Tests / unit (pytest 3.12)', 'mutation stats')\n"
+    "wanted = ('unit pytest shard 1', 'Tests / unit (pytest 3.12)', 'mutation stats', 'pytest shard 1', 'pytest 3.12')\n"
+    "print('Re-run locally with python -m pytest')\n"
     "for job in json.loads(out)['jobs']:\n"
     "    if job['name'] in wanted:\n"
     "        print(f\"{job['name']} pytest {job['conclusion']}\")\n"
@@ -698,6 +699,11 @@ def test_a_script_that_launches_gh_and_names_a_runner_in_data_passes(tmp_path, m
         "subprocess.run(['python', '-mpytest', 'tests'])",
         "os.system('%s -m pytest' % sys.executable)",
         "os.system('$PY -m pytest')",
+        "os.system('bash -c pytest')",
+        "os.system('sh -lc pytest')",
+        "os.system('$(which pytest) -q')",
+        "os.system('uv run --extra dev pytest')",
+        "os.system('pytest tests/context')",
     ],
 )
 def test_a_gh_reader_that_also_launches_a_runner_is_blocked(launch, tmp_path, monkeypatch):

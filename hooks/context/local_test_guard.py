@@ -84,9 +84,11 @@ _LAUNCH = re.compile(
     r"|\brequire\s*\(\s*[A-Za-z_$]"
 )
 _WRAPPER = (
-    r"(?:\S+=\S*|-\S*|\d\S*|(?:[\w.$~{}-]*/)*(?:python[\d.]*|pypy[\d.]*|uvx?|poetry|pipenv|hatch|pdm|rye|npx|pnpx"
-    r"|bunx|pnpm|yarn|npm|bun|xargs|sudo|nice|time|timeout|env|exec|run|command|nohup|stdbuf|coverage|import|from))"
+    r"(?:\S+=\S*|--\S+\s+[^-\s]\S*|-\S*|\d\S*|(?:[\w.$~{}-]*/)*(?:python[\d.]*|pypy[\d.]*|uvx?|poetry|pipenv|hatch|pdm"
+    r"|rye|npx|pnpx|bunx|pnpm|yarn|npm|bun|xargs|sudo|nice|time|timeout|env|exec|run|command|nohup|stdbuf|coverage"
+    r"|import|from|sh|bash|zsh|dash|ksh|which|type))"
 )
+_RUNNER_ARGS = r"(?=\s*$|\s*[;&|)`'\"]|\s+(?:-|[^\s\d]\S*[/.:]|\S*test))"
 _NAME_LITERAL = re.compile(r"([\"'`])\w+\1")
 _FORMAT_PREFIX = re.compile(r"(?i)(?<!\w)[rb]?f[rb]?$")
 _READERS = frozenset({"getsource", "getsourcelines", "getsourcefile", "getfile", "getdoc", "signature"})
@@ -136,7 +138,8 @@ def _launches(source: str, comment: str) -> bool:
 def _launched_literal(runners: re.Pattern) -> re.Pattern:
     runner, attached = runners.pattern, runners.pattern.removeprefix(r"\b")
     return re.compile(
-        rf"(?m)(?:^|[;&|`'\"]|\$\()\s*(?:{_WRAPPER}\s+)*(?:[\w.$~{{}}-]*/)*(?:{runner})|-m\s*(?:{attached})"
+        rf"(?m)(?:^|[;&|`'\"]|\$\()\s*(?:{_WRAPPER}\s+)*(?:[\w.$~{{}}-]*/)*(?:{runner}){_RUNNER_ARGS}"
+        rf"|(?:^|[;&|`'\"]|\$\()\s*(?:\S+\s+)?-m\s*(?:{attached})"
     )
 
 
