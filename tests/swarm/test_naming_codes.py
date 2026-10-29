@@ -77,6 +77,10 @@ def test_swarm_codes_written_before_the_move_still_read_and_release_hides_them(c
     assert names.mint_code("sw", "sw", "/repo") == "abcdef"
     assert names.swarm("abcdef") == _record("sw", "abcdef")
     assert names.swarm_slug("swarm@abcdef") == "sw"
+    assert names.slugs_of(["engineer@abcdef-0001", "ci@ffffff-0001"]) == {
+        "engineer@abcdef-0001": "sw",
+        "ci@ffffff-0001": "",
+    }
     names.release("sw")
     assert names.code_of("sw") == ""
     assert client.hget(_legacy("code-of"), "sw") == "abcdef"
