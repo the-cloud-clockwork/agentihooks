@@ -311,6 +311,16 @@ def test_a_change_leaving_the_bare_syntax_tree_unchanged_selects_no_line(tmp_pat
     assert discover_changes(tmp_path, base, "HEAD") == expected
 
 
+def test_a_new_docstring_module_selects_no_line_and_an_annotated_assignment_still_does(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    base = commit("own.py", "class Own:\n    a = 1\n")
+    commit("notes.py", '"""Notes."""\n')
+    commit("own.py", 'class Own:\n    """Own."""\n\n    a: int = 1\n')
+    assert discover_changes(tmp_path, base, "HEAD") == {"hooks/own.py": {2, 3, 4}}
+
+
 def test_a_branch_that_merged_dev_and_edited_a_test_grades_only_its_own_lines_from_current_dev(tmp_path):
     import yaml
 
