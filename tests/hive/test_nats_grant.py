@@ -588,6 +588,14 @@ def test_refresh_writes_the_bus_credential_beside_the_member_env(tmp_path):
     assert env.endswith(f"AGENTIHOOKS_BUS_CREDENTIALS={creds}\nAGENTIHOOKS_BUS_BIND=1\n")
 
 
+def test_a_grant_for_another_member_drops_the_bus_credential_saved_for_the_previous_one(tmp_path):
+    grant = {"id": "m1", "ledger_credential": "l", "redis_url": "r", "nats_credentials": "creds text"}
+    auth.write_env(tmp_path, "https://hive", grant)
+    env = auth.write_env(tmp_path, "https://hive", {**grant, "id": "m2", "nats_credentials": None}).read_text()
+    assert "AGENTIHOOKS_BUS_CREDENTIALS" not in env
+    assert not (tmp_path / auth.NATS_CREDS_FILE).exists()
+
+
 def test_a_grant_without_a_bus_credential_and_no_saved_one_names_none(tmp_path):
     grant = {"id": "m1", "ledger_credential": "l", "redis_url": "r", "nats_credentials": None}
     env = auth.write_env(tmp_path, "https://hive", grant).read_text()

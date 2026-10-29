@@ -11,13 +11,13 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "deploy/compose"
 
 
-@pytest.fixture
-def tailnet(tmp_path, monkeypatch):
+@pytest.fixture(params=[ASSETS, ROOT / "scripts/swarm/stack/deploy/compose"], ids=["deploy", "bundled"])
+def tailnet(tmp_path, monkeypatch, request):
     monkeypatch.setenv("SWARM_REDIS_PASSWORD", secrets.token_urlsafe())
     stack = tmp_path / "stack"
     stack.mkdir()
     shutil.copyfile(ROOT / "compose.yaml", stack / "compose.yaml")
-    shutil.copytree(ASSETS, stack / "deploy/compose")
+    shutil.copytree(request.param, stack / "deploy/compose")
     (stack / ".env").write_text(
         "SWARM_ADOPT_HOME=/fixture\nSWARM_ADOPT_UID=1000\nSWARM_ADOPT_GID=1000\n"
         "SWARM_ADOPT_CODE=/fixture/code\nSWARM_ADOPT_LEDGER_DIR=/fixture/ledger\n"
