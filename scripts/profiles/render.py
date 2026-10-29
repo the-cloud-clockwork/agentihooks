@@ -676,7 +676,7 @@ def render(
                 file=sys.stderr,
             )
             shared_revision = ""
-        if shared is not None and shared_revision is None:
+        if shared is not None and not shared_revision:
             raise ValueError(
                 f"the launch recorded bundle commit {root_revision} and no shared bundle commit, but the shared "
                 f"bundle at {shared} is linked; launch again to record all of them"
