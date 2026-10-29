@@ -5,7 +5,17 @@ import pytest
 from scripts.inbox import exits, wake
 from scripts.inbox.seen import SeenMarks
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import automated_gc, ledger_events, overrun, stall_watch, waits
+from scripts.swarm import (
+    affinity,
+    automated_gc,
+    ledger_events,
+    master_move,
+    master_retire,
+    master_wake,
+    overrun,
+    stall_watch,
+    waits,
+)
 from scripts.swarm.ledger_events import Mail, PullRequest
 from scripts.swarm.store import AgentRecord, RedisStore
 from tests.inbox.test_decided_events import crew, queue_event  # noqa: F401
@@ -185,3 +195,31 @@ def test_automated_activity_records_an_answer_closed_meanwhile(world, race):  # 
     assert sweep(world, START + LIMIT + 1) == [f"recorded activity answer from {agent.name}"]
     assert race.closed_meanwhile(inbox, reply)
     assert automated_gc.state(world[0], GC_SLUG, agent)["request"] == ""
+
+
+def test_master_wake_passes_an_earlier_backstop_closed_meanwhile(store, race):
+    inbox = InboxStore(store.redis)
+    earlier = inbox.send(wake.BY, "sw-master-1", "backstop", ref=f"{master_wake.BACKSTOP_REF}:sw-master-1")
+    inbox.deliver(earlier.id, "sw-master-1")
+    race.arm()
+    assert master_wake._backstop(inbox, "sw-master-1", "master@sw", True)
+    assert race.closed_meanwhile(inbox, earlier)
+
+
+@pytest.mark.parametrize("module", [affinity, master_move])
+def test_a_master_order_closed_meanwhile_is_passed(store, race, module):
+    inbox = InboxStore(store.redis)
+    order = inbox.send("operator", "master@sw", "move the master")
+    store.redis.set(module._key(store, "sw"), json.dumps({"item": order.id, "to": "", "master": ""}))
+    race.arm()
+    (module.handed_off if module is affinity else module.placed)(store, "sw")
+    assert race.closed_meanwhile(inbox, order)
+
+
+def test_master_retire_passes_a_request_closed_meanwhile(store, race):
+    inbox = InboxStore(store.redis)
+    request = inbox.send(exits.BY, "master@sw", "retire the master")
+    store.redis.hset(master_retire._key(store, "sw"), "sw-master-1", json.dumps({"item": request.id}))
+    race.arm()
+    assert master_retire.forget(store, "sw", "sw-master-1")
+    assert race.closed_meanwhile(inbox, request)
