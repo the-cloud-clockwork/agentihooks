@@ -245,12 +245,11 @@ class MasterSeats:
                     held = json.loads(pipe.hget(key, RETIRED) or "[]")
                     hives = json.loads(pipe.hget(key, HIVES) or "{}")
                     handed = json.loads(pipe.hget(key, HANDED) or "[]")
-                    owners = _handed(saved, address, front)
                     pipe.multi()
                     pipe.hset(
                         key,
                         mapping={
-                            "owners": json.dumps(owners),
+                            "owners": json.dumps(_handed(saved, address, front)),
                             HIVES: json.dumps(_handed(hives, address, front)),
                             RETIRED: json.dumps(_added(held, address)),
                             HANDED: json.dumps(sorted({*handed, *(p for p in saved if saved[p] == address)})),
@@ -258,7 +257,6 @@ class MasterSeats:
                         },
                     )
                     pipe.execute()
-                    tell(self.redis, slug, moves(saved, owners), [front])
                     return
                 except WatchError:
                     continue

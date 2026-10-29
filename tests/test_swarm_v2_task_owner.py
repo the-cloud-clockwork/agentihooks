@@ -589,16 +589,16 @@ def test_a_refilled_seat_leaves_the_front_door_the_claimants_its_retirement_hand
     assert world.refusals() == 0
 
 
-def test_a_retirement_tells_the_front_door_each_phase_it_takes(world):
+def test_a_retirement_leaves_its_phase_notice_to_the_retire_handoff_and_records_what_it_handed(world):
     table = masters.MasterSeats(world.redis)
     table.owners(SLUG, world.doc())
     world.down(SECOND_NAME)
 
     table.retire(SLUG, SECOND, 1)
+    table.owners(SLUG, world.doc())
 
-    texts = [item.text for item in inbox(world).inbox(LEAD)]
-    assert texts == [f"Master phase owners of swarm {SLUG} changed: p2 moved from {SECOND} to {LEAD}."]
-    assert inbox(world).inbox(SECOND) == []
+    assert inbox(world).inbox(LEAD) == []
+    assert json.loads(world.redis.hget(table.key(SLUG), masters.HANDED)) == ["p2"]
 
 
 def test_a_rebalance_tells_both_masters_each_phase_that_changes_owner(world):

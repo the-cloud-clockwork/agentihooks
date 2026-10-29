@@ -518,8 +518,9 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
   to hand off at once and the count falls from the top as they leave; an asked seat below a live higher seat retires
   as soon as it is empty. A retired seat's phases, with their tasks, and its handoff and open inbox items go to the front door
   in the same step, and stay there when the seat is filled again: a refilled seat takes its share only from phases
-  no retirement handed over. Once the new owners are saved, each counted seat a phase moves from or to gets one
-  inbox item naming every phase that moved; the notice is best effort and a failed send is not repeated. The front
+  no retirement handed over. When a seat count change or a refill moves phases, each counted seat a phase moves
+  from or to gets one inbox item naming every phase that moved, once the new owners are saved; the notice is best
+  effort and a failed send is not repeated. A retirement tells the front door through its handoff instead. The front
   door never retires by
   scaling.
 - **Inbox pool.** With two or more live masters, items for the master seat from agents and the tick wait in one
