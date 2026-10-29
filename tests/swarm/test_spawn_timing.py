@@ -92,3 +92,27 @@ def test_the_spawn_order_follows_the_dispatched_key_over_the_ledger_rank(store, 
         "sw", store.config("sw"), store, [], ledger.rows, ledger.state("sw"), FakeRuntime()
     )
     assert [task["id"] for _, task in order] == ["t2", "t1"]
+
+
+def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
+    from scripts.hub.reconciler import legacy_agents
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    capsys.readouterr()
+    with timing.tick("sw"):
+        tick("sw", store, ledger, runtime, now_ms=2_000)
+    steps = [row["step"] for row in finished(capsys)]
+    parts = [
+        timing.named(FakeRuntime.live_names),
+        timing.named(legacy_agents),
+        timing.named(tick_module._acknowledging),
+        timing.named(tick_module._remote_gone_reason),
+        timing.named(tick_module._restore_owner),
+        timing.named(FakeRuntime.observe),
+        timing.named(tick_module._watch_agent),
+    ]
+    assert [part for part in parts if part not in steps] == []
+    reap = steps.index(timing.named(tick_module._reap))
+    assert all(steps.index(part) < reap for part in parts)
+    assert steps.count(timing.named(tick_module._watch_agent)) == 1
