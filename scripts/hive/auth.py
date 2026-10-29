@@ -208,14 +208,20 @@ def ledger_member(redis, credential: str) -> str | None:
 
 
 def issue_agent(redis, member_id: str, slug: str, name: str) -> str:
+    found = member(redis, member_id)
+    if found is None:
+        raise HiveError("Hive membership was revoked")
+    digest = found["ledger"]
+    store = _store(redis)
+    current = hive_state.read(store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}")))
+    if current != member_id:
+        raise HiveError("Hive membership was revoked")
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"
-
-    def record(current: dict | None) -> dict:
-        if current is None:
-            raise HiveError("Hive membership was revoked")
-        return {**current, "agents": {**current.get("agents", {}), _digest(token): [slug, name]}}
-
-    hive_state.amend(_store(redis), f"member.{member_id}", record, _legacy(redis, _legacy_member(member_id)))
+    key = f"agent.{member_id}.{_digest(token)}"
+    hive_state.amend(store, key, lambda _: {"ledger": digest, "scope": [slug, name]})
+    if agent_member(redis, token, slug, name) != member_id:
+        hive_state.amend(store, key, lambda _: None)
+        raise HiveError("Hive membership was revoked")
     return token
 
 

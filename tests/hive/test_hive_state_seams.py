@@ -379,17 +379,35 @@ def test_agent_tokens_leave_the_member_record_and_revision_unchanged(backend, re
 
 @pytest.mark.parametrize("backend", ["bus", "on_redis"])
 @pytest.mark.parametrize("mapping", [None, "another"])
-def test_agent_issuance_refuses_an_absent_or_changed_ledger_mapping(backend, request, client, mapping):
+def test_agent_issuance_refuses_an_absent_or_changed_ledger_mapping(backend, request, client, mapping, monkeypatch):
     request.getfixturevalue(backend)
     store = auth._store(client)
     hive_state.amend(store, "member.m1", lambda _: {"name": "n", "ledger": "d"})
     hive_state.amend(store, "ledger.d", lambda _: mapping)
     before = store.get("member.m1")
 
+    def no_token():
+        raise AssertionError("revoked membership must be refused before creating a token")
+
+    monkeypatch.setattr(auth.secrets, "token_urlsafe", no_token)
     with pytest.raises(auth.HiveError, match="^Hive membership was revoked$"):
         auth.issue_agent(client, "m1", "alpha", "engineer@1")
 
     assert store.get("member.m1") == before
+
+
+def test_legacy_member_issuance_preserves_the_legacy_record(on_redis, client):
+    client.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "old", "ledger": "d"})
+    client.set(f"{auth.PREFIX}:ledger:d", "m1")
+    before = client.hgetall(f"{auth.PREFIX}:member:m1")
+
+    token = auth.issue_agent(client, "m1", "alpha", "engineer@1")
+
+    assert client.hgetall(f"{auth.PREFIX}:member:m1") == before
+    assert auth._store(client).get("member.m1") is None
+    assert auth.agent_member(client, token, "alpha", "engineer@1") == "m1"
+    client.delete(f"{auth.PREFIX}:ledger:d")
+    assert auth.agent_member(client, token, "alpha", "engineer@1") is None
 
 
 @pytest.mark.parametrize("backend", ["bus", "on_redis"])
