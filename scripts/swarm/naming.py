@@ -288,23 +288,30 @@ class NameRegistry:
     def key(*parts):
         return ":".join((PREFIX, *parts))
 
-    def resolve(self, name, reader=None):
-        from redis.exceptions import RedisError
+    def watched(self, *parts):
+        return self.names_state.watched(self.key(*parts))
 
+    def _legacy_alias(self, name):
+        return lambda client: client.get(self.key("alias", name))
+
+    def _legacy_aliases_of(self, name):
+        return lambda client: sorted(client.smembers(self.key("aliases-of", name)))
+
+    def resolve(self, name, reader=None):
         try:
-            return (reader if reader is not None else self.redis).get(self.key("alias", name)) or name
-        except RedisError as exc:
+            return self.names_state.get("alias", name, self._legacy_alias(name), reader) or name
+        except state.unavailable() as exc:
             logging.getLogger(__name__).warning("alias lookup failed for %s: %s", name, exc)
             return name
 
     def resolve_many(self, names):
-        from redis.exceptions import RedisError
-
         if not names:
             return {}
         try:
-            found = self.redis.mget([self.key("alias", name) for name in names])
-        except RedisError as exc:
+            found = self.names_state.get_many(
+                "alias", names, lambda client, missing: client.mget([self.key("alias", name) for name in missing])
+            )
+        except state.unavailable() as exc:
             logging.getLogger(__name__).warning("alias lookup failed for %d names: %s", len(names), exc)
             return {name: name for name in names}
         return {name: alias or name for name, alias in zip(names, found)}
@@ -324,35 +331,33 @@ class NameRegistry:
         return {name: swarms[found.code] if found else legacy_slug(resolved[name]) for name, found in parsed.items()}
 
     def alias(self, old, new):
-        from redis.exceptions import WatchError
-
+        """Records the alias membership before the alias itself, so a reader that finds the alias finds its owner's
+        list holding it."""
         new = self.resolve(new)
         if old == new:
             return
         if not self.entry(new):
             raise NamingError(f"no registered agent {new}")
-        key = self.key("alias", old)
-        for _ in range(4):
-            with self.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(key)
-                    held = pipe.get(key)
-                    if held and held != new:
-                        raise NamingError(f"alias {old} already belongs to {held}")
-                    if pipe.exists(self.key("name", old)):
-                        raise NamingError(f"registered name {old} cannot be an alias")
-                    pipe.multi()
-                    pipe.set(key, new)
-                    pipe.sadd(self.key("aliases-of", new), old)
-                    pipe.execute()
-                    return
-                except WatchError:
-                    continue
-        raise NamingError(f"alias {old} changed meanwhile")
+        if self.redis.exists(self.key("name", old)):
+            raise NamingError(f"registered name {old} cannot be an alias")
+
+        def point(held):
+            if held and held != new:
+                raise NamingError(f"alias {old} already belongs to {held}")
+            return KEEP if held == new else new
+
+        point(self.names_state.get("alias", old, self._legacy_alias(old)))
+        self.names_state.amend(
+            "aliases-of",
+            new,
+            lambda held: KEEP if old in (held or []) else sorted({*(held or []), old}),
+            self._legacy_aliases_of(new),
+        )
+        self.names_state.amend("alias", old, point, self._legacy_alias(old))
 
     def aliases(self, name, reader=None):
-        reader = reader if reader is not None else self.redis
-        return sorted(reader.smembers(self.key("aliases-of", self.resolve(name, reader))))
+        name = self.resolve(name, reader)
+        return sorted(self.names_state.get("aliases-of", name, self._legacy_aliases_of(name), reader) or [])
 
     def _legacy_code_of(self, slug):
         return lambda client: client.hget(self.key("code-of"), slug)
@@ -505,5 +510,5 @@ def registered_slug(name):
     names = registry()
     if names is None:
         return None
-    names.redis.get(names.key("alias", name))
+    names.names_state.get("alias", name, names._legacy_alias(name))
     return names.slug_of(name)
