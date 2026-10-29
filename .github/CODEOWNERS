@@ -15,6 +15,7 @@
 /scripts/dead_code.py @nestorcolt
 /scripts/swallowed_exceptions.py @nestorcolt
 /scripts/locked_tests.py @nestorcolt
+/scripts/design_rules.py @nestorcolt
 /scripts/threshold_pins.py @nestorcolt
 /scripts/check_* @nestorcolt
 /scripts/github_access.sh @nestorcolt
@@ -70,6 +71,7 @@
 /tests/DEAD_CODE_ALLOWLIST.json @nestorcolt
 /tests/test_swallowed_exceptions.py @nestorcolt
 /tests/test_locked_tests.py @nestorcolt
+/tests/test_design_rules.py @nestorcolt
 /mutation-cleared.txt @nestorcolt
 /mutation-clearances/ @nestorcolt
 /delivery.yaml @nestorcolt
