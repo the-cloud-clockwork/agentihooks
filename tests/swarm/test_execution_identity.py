@@ -762,3 +762,10 @@ def test_a_write_read_before_the_hive_ack_on_another_host_is_refused(store, agen
         store.put_agent("fixture", replace(stale, state="finished", runtime_target={"host_id": "hive"}))
     assert str(error.value) == "runtime target identity is immutable after binding"
     assert protected(store) == before
+
+
+def test_a_write_before_any_hive_ack_keeps_its_own_launch_fields(store, agent):
+    stale = store.start_execution("fixture", replace(agent, state="launching", runtime_target={"host_id": "hive"}))
+    written = replace(stale, pane_id="w1:p2", model="opus")
+    store.put_agent("fixture", written)
+    assert store.execution("fixture", stale.execution_id) == written
