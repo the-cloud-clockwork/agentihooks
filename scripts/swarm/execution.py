@@ -232,7 +232,7 @@ class ExecutionRegistry:
                         self.update(slug, agent)
                         return
                     previous = pipe.hget(self.store.key(slug, "agents"), agent.name)
-                    if previous and json.loads(previous)["state"] == "finished" and agent.state != "ended":
+                    if previous and _finished_life(json.loads(previous), agent):
                         agent = replace(agent, state="finished")
                     pipe.multi()
                     _write_projection(pipe, self.store, slug, agent)
@@ -513,6 +513,10 @@ def _check_binding(previous, current, refuse):
 
 def _read_before_ack(written, stored):
     return set(written) == {"host_id"} and stored != written and stored.get("host_id") == written["host_id"]
+
+
+def _finished_life(row, agent):
+    return row["state"] == "finished" and row["pane_id"] == agent.pane_id and agent.state != "ended"
 
 
 def _has_identity(agent):

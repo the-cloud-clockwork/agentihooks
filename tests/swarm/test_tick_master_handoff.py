@@ -44,3 +44,6 @@ def test_a_finished_agent_is_never_written_back_to_working(store):
     assert isinstance(registry, ExecutionRegistry)
     store.put_agent("sw", replace(old, state="ended"))
     assert [a.state for a in masters(store)] == ["ended"]
+    store.put_agent("sw", replace(old, state="finished"))
+    store.put_agent("sw", replace(old, state="working", pane_id="w1:relaunched"))
+    assert [(a.state, a.pane_id) for a in masters(store)] == [("working", "w1:relaunched")]
