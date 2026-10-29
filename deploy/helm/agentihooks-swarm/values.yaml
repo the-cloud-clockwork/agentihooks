@@ -278,7 +278,8 @@ workers:
     enabled: false
     namespace: default
     leaseName: agentihooks-hive-rollout
-    drainSeconds: 300
+    # Long enough for each agent to write its handoff; agents still running at the end get a recovery handoff.
+    drainSeconds: 1200
     # Release image the image updater writes; each new value rolls the hives one at a time through the lease.
     release: ""
   excluded: [master]

@@ -32,6 +32,26 @@ ROLL = (
     "run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your successor on "
     "another hive."
 )
+RECOVERY = """## Intent
+Continue task {task}; hive {hive} stopped for a release while {name} still worked it.
+
+## Done
+unknown: {name} left no handoff document within {wait} seconds of its handoff order; its task folder records its steps and evidence.
+
+## Stopped at
+Hive {hive} stopped with {name} still running.
+
+## Decisions and promises
+unknown: none recorded outside the task folder and the ledger.
+
+## Next
+Read the task folder {folder} (steering.md, progress.md, proof.md) and the ledger task {task}, then continue the task.
+
+## Read first
+{folder}/progress.md
+
+<!-- handoff complete -->
+"""
 MANIFESTS = (
     "k8s/argocd/apps/{release}.yaml",
     "k8s/manifests/{release}/",
@@ -129,13 +149,37 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
     registry.update(store.redis, hive, ["draining=yes"])
     inbox, ordered = InboxStore(store.redis), set()
     deadline = host.clock() + wait_s
-    while remaining := hosted(store, hive):
+    while remaining := _unhanded(store, hive):
         _order(inbox, ordered, remaining, ROLL, hive)
         if host.clock() >= deadline:
-            names = ", ".join(agent.name for _, agent in remaining)
-            return f"hive {hive} stops after {wait_s} seconds with {names} still running"
+            return _recover(store, hive, wait_s, remaining)
         host.sleep(POLL_S)
-    return f"hive {hive} drained: no agents running, {len(ordered)} ordered to hand off"
+    return f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
+
+
+def _unhanded(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
+    return [(slug, agent) for slug, agent in hosted(store, hive) if not store.handoff(slug, agent.task)]
+
+
+def _recover(store: "RedisStore", hive: str, wait_s: int, remaining: list[tuple[str, "AgentRecord"]]) -> str:
+    from scripts.handoff import transfers
+    from scripts.swarm_ledger.ledger_workspace import folder
+
+    recovered = [(slug, agent) for slug, agent in remaining if agent.task]
+    for slug, agent in recovered:
+        text = RECOVERY.format(
+            name=agent.name, task=agent.task, hive=hive, wait=wait_s, folder=folder(slug, agent.task)
+        )
+        store.put_handoff(slug, agent.task, text, seat=agent.seat)
+        transfers.record(store, slug, agent, "exit", text, int(time.time() * 1000))
+    if not recovered:
+        names = ", ".join(agent.name for _, agent in remaining)
+        return f"hive {hive} stops after {wait_s} seconds with {names} still running and no task to hand off"
+    names = ", ".join(agent.name for _, agent in recovered)
+    return (
+        f"hive {hive} stops after {wait_s} seconds; {names} did not hand off, "
+        "so each got a recovery handoff and its task reopens"
+    )
 
 
 def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None, dry_run: bool = False) -> list[str]:
