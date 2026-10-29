@@ -117,24 +117,18 @@ def test_a_member_knows_its_own_agents_without_reading_member_records(redis, swa
     assert scope.host(redis, "fixture", other) == ""
 
 
-def test_the_controller_skips_the_member_records_for_an_agent_no_hive_runs(redis, swarm, monkeypatch):
-    from scripts.hive import scope
+def test_one_pass_reads_the_member_records_once_per_redis_client(redis, swarm, monkeypatch):
+    from scripts.hive import auth, scope
 
-    local = place(swarm, "")
-    monkeypatch.setattr(scope, "members", lambda client: pytest.fail("read the member records for a local agent"))
+    reads = []
+    monkeypatch.setattr(auth, "members", lambda client: reads.append(client) or {"m1": {}})
+    placed = place(swarm, "m1")
 
-    assert scope.host(redis, "fixture", local) == ""
-    assert scope.host(redis, "fixture", "engineer@unplaced-0001") == ""
-
-
-def test_the_controller_finds_a_placed_agent_only_on_a_joined_member(redis, swarm, monkeypatch):
-    from scripts.hive import scope
-
-    joined, gone = place(swarm, "m1"), place(swarm, "m2", seat="eng-2@fixture")
-    monkeypatch.setattr(scope, "members", lambda client: ["m1"])
-
-    assert scope.host(redis, "fixture", joined) == "m1"
-    assert scope.host(redis, "fixture", gone) == ""
+    with scope.one_pass():
+        assert [scope.host(redis, "fixture", placed) for _ in range(3)] == ["m1"] * 3
+    assert reads == [redis]
+    assert scope.host(redis, "fixture", placed) == "m1"
+    assert reads == [redis, redis]
 
 
 def test_the_controller_ends_a_member_agents_wait_below_its_member(redis, swarm, monkeypatch):
