@@ -42,6 +42,7 @@ printf 'stack up: redis, nats and swarm healthy in project %s\n' "$run"
 
 export SLUG="recovery-drill" LEDGER_HOST="127.0.0.1"
 DRILL="$(cat <<'PY'
+import contextlib
 import json
 import os
 import subprocess
@@ -54,6 +55,7 @@ from scripts.events.config import BusConfig
 from scripts.events.factory import open_bus
 from scripts.hive import execution_events, presence, registry, reports
 from scripts.hive.spoke import Spoke, SpokeConfig
+from scripts.hub import runner
 from scripts.swarm import freeze, readiness
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmConfig, connect
@@ -64,6 +66,7 @@ from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 TASKS = ("t1", "t2", "t3", "t4", "t5", "t6")
 HIVE = "recovery-hive"
 LAUNCHES = "/data/recovery-launches.jsonl"
+FETCH_MS = 100
 store, slug, ledger = connect(), os.environ["SLUG"], LedgerClient(service=True)
 
 
@@ -193,6 +196,18 @@ def state():
     return {"tasks": found, "agents": sorted(agent.task for agent in store.agents(slug) if agent.state != "finished")}
 
 
+class QuickPass(runner.HubRunner):
+    def run_once(self, batch=runner.BATCH, timeout_ms=FETCH_MS):
+        return super().run_once(batch, timeout_ms=timeout_ms)
+
+
+def hub():
+    runner.HubRunner = QuickPass
+    with contextlib.redirect_stdout(sys.stderr):
+        runner.main(["run", "--once"])
+    return state()
+
+
 def beat():
     bus = open_bus(BusConfig.from_environ())
     presence.beat(bus, HIVE, int(time.time() * 1000))
@@ -202,19 +217,12 @@ def beat():
 
 step, args = sys.argv[1], sys.argv[2:]
 result = {"seed": lambda: seed(args), "take": lambda: take(int(args[0])), "done": lambda: done(args),
-          "die": lambda: die(args), "beat": beat, "state": state}[step]()
+          "die": lambda: die(args), "beat": beat, "state": state, "pass": hub}[step]()
 print(json.dumps(result))
 PY
 )"
 drill() {
-  local t=$SECONDS
   docker compose exec -T -e SLUG -e LEDGER_HOST swarm python - "$@" <<<"$DRILL"
-  printf 'Recovery drill call %s: %ss\n' "$1" "$((SECONDS - t))" >&2
-}
-hub() {
-  local t=$SECONDS
-  docker compose exec -T -e LEDGER_HOST swarm agentihooks hub run --once >/dev/null
-  printf 'Recovery drill call hub: %ss\n' "$((SECONDS - t))" >&2
 }
 volume() {
   docker run --rm --entrypoint sh -v "${run}_nats-data:/data" -v "$backup:/backup" "$nats_image" -c "$1"
@@ -222,8 +230,7 @@ volume() {
 
 settle() {
   for _ in $(seq 30); do
-    hub
-    found="$(drill state)"
+    found="$(drill pass)"
     local missing=0 want
     for want in "$@"; do
       [[ $found == *"$want"* ]] || missing=1
@@ -259,8 +266,7 @@ printf 'JetStream restored from the backup, losing every write after it\n'
 lap 'restore'
 
 printf 'hive heartbeat resumed: %s\n' "$(drill beat)"
-hub
-printf 'state after the first hub pass: %s\n' "$(drill state)"
+printf 'state after the first hub pass: %s\n' "$(drill pass)"
 printf 'agents died after the restore: %s\n' "$(drill die t2 t4)"
 settle '"t2": {"ledger": "open"' '"t4": {"ledger": "open"'
 lap 'reopen'
