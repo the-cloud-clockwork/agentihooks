@@ -578,7 +578,7 @@ def test_a_tied_supervisor_ends_between_runners_once_its_starter_is_gone(monkeyp
     assert stop.wait.call_count == 2
 
 
-def _unit_home(monkeypatch, tmp_path, service, *, marked, installed):
+def _unit_home(monkeypatch, tmp_path, service, *, marked, installed, returncode=0):
     monkeypatch.setattr(service.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(service, "installed", lambda: True)
     environ = {"AGENTIHOOKS_SWARM_REDIS_URL": "redis://unit.invalid:6379/0"}
@@ -590,8 +590,17 @@ def _unit_home(monkeypatch, tmp_path, service, *, marked, installed):
         units = tmp_path / ".config" / "systemd" / "user"
         units.mkdir(parents=True)
         (units / "agentihooks-scheduler.service").write_text("[Service]\n")
-    spawn, run = Mock(), Mock()
-    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn, run=run, DEVNULL=subprocess.DEVNULL))
+    spawn, run = Mock(), Mock(return_value=subprocess.CompletedProcess([], returncode))
+    monkeypatch.setattr(
+        service,
+        "subprocess",
+        SimpleNamespace(
+            Popen=spawn,
+            run=run,
+            DEVNULL=subprocess.DEVNULL,
+            SubprocessError=subprocess.SubprocessError,
+        ),
+    )
     return environ, spawn, run
 
 
@@ -611,6 +620,25 @@ def test_a_runtime_folder_its_unit_owns_starts_the_scheduler_unit_instead_of_a_c
     with service.machine_lock("supervisor", environ=environ):
         assert service.ensure_running(environ) is False
     run.assert_called_once()
+
+
+def test_a_scheduler_unit_that_will_not_start_falls_back_to_a_child(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    environ, spawn, run = _unit_home(monkeypatch, tmp_path, service, marked=True, installed=True, returncode=1)
+    assert service.ensure_running(environ) is True
+    run.assert_called_once()
+    assert spawn.call_args.args[0] == [sys.executable, "-m", "scripts.scheduler.service", "supervise"]
+
+
+@pytest.mark.parametrize("failure", [OSError("no systemctl"), subprocess.TimeoutExpired("systemctl", 30)])
+def test_a_scheduler_unit_start_that_raises_falls_back_to_a_child(monkeypatch, tmp_path, failure):
+    from scripts.scheduler import service
+
+    environ, spawn, run = _unit_home(monkeypatch, tmp_path, service, marked=True, installed=True)
+    run.side_effect = failure
+    assert service.ensure_running(environ) is True
+    assert spawn.call_count == 1
 
 
 @pytest.mark.parametrize(("marked", "installed"), [(True, False), (False, True), (False, False)])
@@ -638,6 +666,19 @@ def test_a_supervisor_started_by_its_unit_marks_its_runtime_folder_before_it_loc
         with pytest.raises(service.AlreadyRunning):
             service.supervise(stopped)
     assert (tmp_path / "scheduler" / "agentihooks-scheduler.service").read_text() == "agentihooks-scheduler.service"
+
+
+def test_a_supervisor_started_by_its_unit_creates_and_marks_a_new_runtime_folder(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    folder = tmp_path / "cache" / "scheduler"
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: folder)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    monkeypatch.setenv("AGENTIHOOKS_SCHEDULER_UNIT", "1")
+    stopped = Event()
+    stopped.set()
+    service.supervise(stopped)
+    assert (folder / "agentihooks-scheduler.service").read_text() == "agentihooks-scheduler.service"
 
 
 @pytest.mark.parametrize("value", [None, ""])

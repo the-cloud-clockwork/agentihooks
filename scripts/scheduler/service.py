@@ -129,8 +129,11 @@ def _unit_owns(directory: Path) -> bool:
 
 def _start_unit() -> bool:
     start = ["systemctl", "--user", "start", "--no-block", UNIT]
-    subprocess.run(start, stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=False)
-    return True
+    try:
+        started = subprocess.run(start, stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return started.returncode == 0
 
 
 def _abandoned(starter: int) -> bool:
@@ -208,8 +211,8 @@ def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
         with machine_lock("startup", environ=active):
             with machine_lock("supervisor", environ=active):
                 pass
-            if _unit_owns(runtime_dir(active)):
-                return _start_unit()
+            if _unit_owns(runtime_dir(active)) and _start_unit():
+                return True
             with (runtime_dir(active) / "scheduler.log").open("ab") as log:
                 subprocess.Popen(
                     _command("supervise"),
