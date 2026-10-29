@@ -184,3 +184,59 @@ def test_publisher_reads_shards_without_the_optional_sonar_report():
     assert download["pattern"] == "coverage-3.12-*"
     assert "name" not in download
     assert f"--head-shards {download['path']} " in steps["Compute the coverage baseline"]["run"]
+
+
+@pytest.mark.parametrize("restored", ["ancestor", "sibling", "unknown", "missing-commit", "absent"])
+def test_publisher_records_only_ancestor_history(tmp_path, restored):
+    import json
+    import os
+    import subprocess
+
+    project = Path(__file__).parents[1]
+    job = yaml.safe_load((project / ".github/workflows/test.yml").read_text())["jobs"]["coverage-baseline"]
+    checkout = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"]["fetch-depth"] == 0
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path / "home"),
+        "PYTHONPATH": str(project),
+        "GIT_AUTHOR_NAME": "Coverage",
+        "GIT_AUTHOR_EMAIL": "coverage@example.invalid",
+        "GIT_COMMITTER_NAME": "Coverage",
+        "GIT_COMMITTER_EMAIL": "coverage@example.invalid",
+    }
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, env=env, text=True, capture_output=True, check=True).stdout.strip()
+
+    git("init")
+    (repo / "hooks").mkdir()
+    (repo / "hooks/example.py").write_text("value = 1\n")
+    git("add", "hooks/example.py")
+    git("commit", "-m", "Base")
+    ancestor = git("rev-parse", "HEAD")
+    tree = git("rev-parse", "HEAD^{tree}")
+    sibling = git("commit-tree", tree, "-p", ancestor, "-m", "Sibling")
+    git("commit", "--allow-empty", "-m", "Head")
+    head = git("rev-parse", "HEAD")
+    target = Path(env["HOME"]) / "coverage-baseline/baseline.json"
+    target.parent.mkdir(parents=True)
+    previous = {"tree": tree, "executed": {"hooks/example.py": [1]}, "history": [], "shards": 20}
+    if restored != "missing-commit":
+        previous["commit"] = {"ancestor": ancestor, "sibling": sibling}.get(restored, "f" * 40)
+    if restored != "absent":
+        target.write_text(json.dumps(previous))
+    for index in range(1, 21):
+        folder = repo / "baseline-coverage" / f"coverage-3.12-{index}"
+        folder.mkdir(parents=True)
+        data = CoverageData(basename=str(folder / ".coverage"))
+        data.add_lines({"hooks/example.py": {1}})
+        data.write()
+    script = next(step["run"] for step in job["steps"] if step.get("name") == "Compute the coverage baseline")
+    result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", script], cwd=repo, env=env, text=True, capture_output=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    value = json.loads(target.read_text())
+    assert value["commit"] == head
+    assert [entry["commit"] for entry in value["history"]] == ([ancestor] if restored == "ancestor" else [])
