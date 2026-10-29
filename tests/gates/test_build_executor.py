@@ -81,7 +81,7 @@ def hook(tmp_path):
             {"what": p.what, "areas": list(p.areas), "why": p.why, "probability": prob, "kept": prob >= 0.3}
             for p, prob in zip(pieces, (0.95, 0.9, 0.1), strict=True)
         ]
-        record = {"verdict": "pass", "plan_hash": trace_plan.plan_hash(pieces), "pieces": rows, "reasons": []}
+        record = {"verdict": "pass", "plan_hash": trace_plan.plan_hash(pieces, {}), "pieces": rows, "reasons": []}
         (folder / trace_plan.VERDICT).write_text(json.dumps(record))
 
     def rows():

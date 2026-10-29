@@ -364,3 +364,47 @@ def test_agent_tokens_accumulate_on_a_member_record_without_agents(bus, client):
         "ledger": "d",
         "agents": {auth._digest(first): ["alpha", "engineer@1"], auth._digest(second): ["alpha", "engineer@2"]},
     }
+
+
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
+def test_an_independent_token_authenticates_without_loading_the_member(backend, request, client, monkeypatch):
+    request.getfixturevalue(backend)
+    token = "hive.m1.independent"
+    store = auth._store(client)
+    hive_state.amend(store, "ledger.d", lambda _: "m1")
+    hive_state.amend(
+        store, f"agent.m1.{auth._digest(token)}", lambda _: {"ledger": "d", "scope": ["alpha", "engineer@1"]}
+    )
+
+    def no_member(*args):
+        raise AssertionError("independent tokens must not read the growing member map")
+
+    monkeypatch.setattr(auth, "member", no_member)
+    assert auth.agent_member(client, token, "alpha", "engineer@1") == "m1"
+    assert auth.agent_member(client, token, "other", "engineer@1") is None
+    assert auth.agent_member(client, token, "alpha", "engineer@2") is None
+    hive_state.amend(store, "ledger.d", lambda _: None)
+    assert auth.agent_member(client, token, "alpha", "engineer@1") is None
+
+
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
+def test_an_independent_token_cannot_use_another_members_ledger_mapping(backend, request, client):
+    request.getfixturevalue(backend)
+    token = "hive.m1.independent"
+    store = auth._store(client)
+    hive_state.amend(store, "ledger.d", lambda _: "m2")
+    hive_state.amend(
+        store, f"agent.m1.{auth._digest(token)}", lambda _: {"ledger": "d", "scope": ["alpha", "engineer@1"]}
+    )
+    assert auth.agent_member(client, token, "alpha", "engineer@1") is None
+
+
+def test_an_independent_token_reads_a_legacy_redis_ledger_mapping(on_redis, client):
+    token = "hive.m1.independent"
+    client.set(f"{auth.PREFIX}:ledger:d", "m1")
+    hive_state.amend(
+        auth._store(client),
+        f"agent.m1.{auth._digest(token)}",
+        lambda _: {"ledger": "d", "scope": ["alpha", "engineer@1"]},
+    )
+    assert auth.agent_member(client, token, "alpha", "engineer@1") == "m1"
