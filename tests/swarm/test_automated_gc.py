@@ -489,21 +489,30 @@ def test_hive_hosted_agent_answer_is_read_from_its_member_world(world):
 
     from scripts.hive import auth
     from scripts.swarm import automated_gc
+    from scripts.swarm.store import SwarmConfig
 
-    _, _, agent, runtime, ledger = world
+    _, _, _, runtime, ledger = world
     redis = fakeredis.FakeRedis(decode_responses=True)
+    store = RedisStore(redis)
+    store.create(SwarmConfig(SLUG, "agentihooks", 1, 0))
     redis.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "m1", "ledger": "digest"})
     redis.sadd(auth.INDEX, "m1")
-    store = RedisStore(redis)
-    store.put_agent(SLUG, replace(agent, hive="m1"))
+    seat = f"eng-1@{SLUG}"
+    name = store.next_name(SLUG, "eng")
+    decision = {"automated": {"swarm": SLUG, "seat": seat}}
+    store.start_execution(
+        SLUG, AgentRecord(name, "eng", "t1", seat=seat, hive="m1", started_at=START, profile_decision=decision)
+    )
+    store.seats.occupy(seat, name, 1)
     controller, member = InboxStore(redis), InboxStore(redis, world="m1")
-    asked = [f"asked automated agent {agent.name} what it is doing"]
+    asked = [f"asked automated agent {name} what it is doing"]
     assert automated_gc.run(SLUG, store, ledger, runtime, START + LIMIT) == asked
-    question = next(item for item in member.inbox(agent.name) if item.state not in CLOSED)
+    question = next(item for item in member.inbox(name) if item.state not in CLOSED)
     assert not redis.exists(controller.key("item", question.id))
-    reply = member.reply(question.id, agent.name, "nothing to do")
-    recorded = [f"recorded activity answer from {agent.name}"]
+    reply = member.reply(question.id, name, "nothing to do")
+    recorded = [f"recorded activity answer from {name}"]
     assert automated_gc.run(SLUG, store, ledger, runtime, START + LIMIT + 1) == recorded
+    agent = next(a for a in store.agents(SLUG) if a.name == name)
     state = automated_gc.state(store, SLUG, agent)
     assert state["idle_answers"] == 1
     assert state["request"] == ""
