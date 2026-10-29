@@ -375,6 +375,8 @@ class ExecutionRegistry:
                     current = self.occupants(slug, pipe).get(agent.seat)
                     if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                         self.conflict(slug, "stale or changed execution identity")
+                    if current.state == "finished" and agent.state != "ended":
+                        agent = replace(agent, state="finished")
                     if _read_before_ack(agent.runtime_target, current.runtime_target):
                         agent = replace(agent, **{field: getattr(current, field) for field in LAUNCH_BINDING})
                     _check_binding(
