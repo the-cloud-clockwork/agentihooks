@@ -41,6 +41,13 @@ HASHES = {
     "registrations": "launch-registrations",
     "operations": "runtime-operations",
 }
+LEGACY_OWNER = "control-owner"
+LEGACY_COUNTERS = {"epoch": "control-epoch", "leader_changes": "controller-leader-changes"}
+LEGACY_CLAIMS = "task-authority"
+LEGACY_FENCES = "heartbeat-sequence"
+LEGACY_JOURNALS = "claim-journal"
+LEGACY_DISABLED = "launch-grants-disabled"
+LEGACY_ORPHANS = "controller-orphans"
 T = TypeVar("T")
 
 
@@ -80,24 +87,22 @@ def _lists(store: Any, slug: str, part: str):
 
 def _legacy(store: Any, slug: str) -> dict:
     doc = {**EMPTY}
-    raw = store.redis.get(store.key(slug, "control-owner"))
+    raw = store.redis.get(store.key(slug, LEGACY_OWNER))
     if raw and raw.startswith("{"):
         doc["lease"] = json.loads(raw)
     elif raw:
         doc["legacy_owner"] = raw
-    doc["epoch"] = int(store.redis.get(store.key(slug, "control-epoch")) or 0)
-    doc["leader_changes"] = int(store.redis.get(store.key(slug, "controller-leader-changes")) or 0)
+    for field, part in LEGACY_COUNTERS.items():
+        doc[field] = int(store.redis.get(store.key(slug, part)) or 0)
     for section, part in HASHES.items():
         doc[section] = {key: json.loads(raw) for key, raw in store.redis.hgetall(store.key(slug, part)).items()}
-    doc["claims"] = {_task(key): json.loads(raw) for key, raw in _values(store, slug, "task-authority")}
+    doc["claims"] = {_task(key): json.loads(raw) for key, raw in _values(store, slug, LEGACY_CLAIMS)}
+    doc["fences"] = {key: json.loads(raw) for key, raw in _values(store, slug, LEGACY_FENCES)}
     doc["journals"] = {
-        _task(key): [json.loads(row) for row in rows] for key, rows in _lists(store, slug, "claim-journal")
+        _task(key): [json.loads(row) for row in rows] for key, rows in _lists(store, slug, LEGACY_JOURNALS)
     }
-    doc["fences"] = {key: json.loads(raw) for key, raw in _values(store, slug, "heartbeat-sequence")}
-    doc["grants_disabled"] = store.redis.get(store.key(slug, "launch-grants-disabled")) or ""
-    doc["orphans"] = {
-        key: int(value) for key, value in store.redis.hgetall(store.key(slug, "controller-orphans")).items()
-    }
+    doc["grants_disabled"] = store.redis.get(store.key(slug, LEGACY_DISABLED)) or ""
+    doc["orphans"] = {key: int(value) for key, value in store.redis.hgetall(store.key(slug, LEGACY_ORPHANS)).items()}
     return doc
 
 

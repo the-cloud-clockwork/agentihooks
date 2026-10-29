@@ -21,6 +21,9 @@ PREFIX = f"{ROOT}:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
 DEFAULT_URL = "redis://127.0.0.1:6379/0"
 MASTER = "master"
+PROJECTION_ATTEMPTS = 5
+PROJECTION_CONTENTION = "agent registry kept changing; the agent was not shown"
+LEGACY_PROJECTION_CONTENTION = "agent registry kept changing; update was not committed"
 DISPATCH = "dispatch"
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
@@ -492,64 +495,53 @@ class RedisStore:
         removed: str | None = None,
         listed_only: bool = False,
     ) -> None:
-        from redis.exceptions import WatchError
+        def write(pipe):
+            if listed_only and not pipe.hexists(self.key(slug, "agents"), agent.name):
+                return
+            pipe.multi()
+            self._project_row(pipe, slug, agent, previous)
+            if removed:
+                pipe.hdel(self.key(slug, "agents"), removed)
+            pipe.execute()
 
-        from scripts.swarm.execution import PROJECTION_OMITTED
-        from scripts.swarm.tick import agent_status
-
-        row = {field: value for field, value in asdict(agent).items() if field not in PROJECTION_OMITTED}
-        key = self.key(slug, "agents")
-        for _ in range(5):
-            with self.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(key)
-                    if listed_only and not pipe.hexists(key, agent.name):
-                        return
-                    pipe.multi()
-                    pipe.hset(key, agent.name, json.dumps(row))
-                    if agent.desired_route_kind:
-                        pipe.hset(self.key(slug, "desired-routes"), agent.name, agent.desired_route_kind)
-                    else:
-                        pipe.hdel(self.key(slug, "desired-routes"), agent.name)
-                    if previous is None or agent_status(previous) != agent_status(agent):
-                        pipe.hset(self.key(slug, "state-since"), agent.name, int(time.time() * 1000))
-                    if removed:
-                        pipe.hdel(key, removed)
-                    pipe.execute()
-                    return
-                except WatchError:
-                    continue
-        raise SwarmError("agent registry kept changing; the agent was not shown")
+        self._projection(slug, write, PROJECTION_CONTENTION)
 
     def project_legacy(self, slug: str, agent: AgentRecord, managed: Callable[[], bool]) -> bool:
+        def write(pipe):
+            if managed():
+                return False
+            raw = pipe.hget(self.key(slug, "agents"), agent.name)
+            pipe.multi()
+            self._project_row(pipe, slug, agent, AgentRecord(**json.loads(raw)) if raw else None)
+            pipe.execute()
+            return True
+
+        return self._projection(slug, write, LEGACY_PROJECTION_CONTENTION)
+
+    def _projection(self, slug: str, write: Callable, contention: str):
         from redis.exceptions import WatchError
 
+        for _ in range(PROJECTION_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(self.key(slug, "agents"))
+                    return write(pipe)
+                except WatchError:
+                    continue
+        raise SwarmError(contention)
+
+    def _project_row(self, pipe, slug: str, agent: AgentRecord, previous: AgentRecord | None) -> None:
         from scripts.swarm.execution import PROJECTION_OMITTED
         from scripts.swarm.tick import agent_status
 
         row = {field: value for field, value in asdict(agent).items() if field not in PROJECTION_OMITTED}
-        key = self.key(slug, "agents")
-        for _ in range(5):
-            with self.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(key)
-                    if managed():
-                        return False
-                    raw = pipe.hget(key, agent.name)
-                    previous = AgentRecord(**json.loads(raw)) if raw else None
-                    pipe.multi()
-                    pipe.hset(key, agent.name, json.dumps(row))
-                    if agent.desired_route_kind:
-                        pipe.hset(self.key(slug, "desired-routes"), agent.name, agent.desired_route_kind)
-                    else:
-                        pipe.hdel(self.key(slug, "desired-routes"), agent.name)
-                    if previous is None or agent_status(previous) != agent_status(agent):
-                        pipe.hset(self.key(slug, "state-since"), agent.name, int(time.time() * 1000))
-                    pipe.execute()
-                    return True
-                except WatchError:
-                    continue
-        raise SwarmError("agent registry kept changing; update was not committed")
+        pipe.hset(self.key(slug, "agents"), agent.name, json.dumps(row))
+        if agent.desired_route_kind:
+            pipe.hset(self.key(slug, "desired-routes"), agent.name, agent.desired_route_kind)
+        else:
+            pipe.hdel(self.key(slug, "desired-routes"), agent.name)
+        if previous is None or agent_status(previous) != agent_status(agent):
+            pipe.hset(self.key(slug, "state-since"), agent.name, int(time.time() * 1000))
 
     def publication(self, slug: str, seat: str) -> str:
         from scripts.codex_session.binding import PUBLISHING
