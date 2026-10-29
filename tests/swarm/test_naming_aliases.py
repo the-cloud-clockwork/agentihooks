@@ -141,6 +141,16 @@ def test_a_reader_sees_aliases_in_the_store_and_before_the_move(client, agent):
         assert names.aliases("sw-eng-1", pipe) == ["sw-eng-1"]
 
 
+def test_aliases_resolve_the_name_through_the_reader(client, agent):
+    import fakeredis
+
+    names, new = agent
+    names.alias("sw-eng-1", new)
+    elsewhere = naming.NameRegistry(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
+    assert elsewhere.aliases("sw-eng-1", client) == ["sw-eng-1"]
+    assert elsewhere.aliases("sw-eng-1") == []
+
+
 def test_watched_names_the_legacy_key_and_the_store_on_redis(client, on_redis):
     names = naming.NameRegistry(client)
     shared = RedisStateStore(client, name_state.BUCKET).watch_key
