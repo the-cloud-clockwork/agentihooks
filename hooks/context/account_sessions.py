@@ -281,8 +281,12 @@ def _held(raw: str) -> tuple[str, str] | None:
 def _unavailable() -> tuple[type[BaseException], ...]:
     from scripts.events import state
 
-    # Store families may read Redis whatever the configured backend.
-    return (*state.unavailable({}), *state.unavailable())
+    # Store families may read Redis whatever the configured backend, known or not.
+    try:
+        configured = state.unavailable()
+    except ValueError:
+        configured = ()
+    return (*state.unavailable({}), *configured)
 
 
 def managed_held() -> set[tuple[str, str]]:
