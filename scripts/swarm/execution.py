@@ -91,7 +91,7 @@ return result
 """
 _MANAGED = """
 for _, raw in ipairs(redis.call('HVALS', KEYS[1])) do
-    if string.find(raw, ARGV[2], 1, true) and cjson.decode(raw).name == ARGV[1] then
+    if string.sub(raw, 1, #ARGV[1]) == ARGV[1] then
         return 1
     end
 end
@@ -172,12 +172,13 @@ class ExecutionRegistry:
         from scripts.hive import scope
 
         source = reader if reader is not None else self.redis
-        if source.eval(_MANAGED, 1, self.store.key(slug, "executions"), name, json.dumps(name)):
+        head = f'{{"name": {json.dumps(name)},'
+        if source.eval(_MANAGED, 1, self.store.key(slug, "executions"), head):
             return True
         archive = self.store.key(slug, ARCHIVE)
         if scope.member():
             return any(json.loads(raw)["name"] == name for raw in source.hvals(archive))
-        return bool(source.eval(_MANAGED, 1, archive, name, json.dumps(name)))
+        return bool(source.eval(_MANAGED, 1, archive, head))
 
     def archive(self, slug: str) -> int:
         keys = (self.store.key(slug, "executions"), self.store.key(slug, "agents"), self.store.key(slug, ARCHIVE))
