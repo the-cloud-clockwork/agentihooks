@@ -1125,7 +1125,7 @@ def test_scheduler_connection_failures_back_off_before_retrying(monkeypatch, fai
     for _ in range(3):
         trace_flush.scheduled_wait(trace_flush.POLL_SEC)
     assert clock.now == 2
-    assert wait.call_args_list == [call(trace_flush.POLL_SEC)] * 3
+    assert wait.call_args_list == [call(trace_flush.POLL_SEC, timeout=trace_flush.POLL_LIMIT_SEC)] * 3
 
 
 def test_scheduler_wait_preserves_interruption(monkeypatch):
@@ -1137,8 +1137,21 @@ def test_scheduler_wait_preserves_interruption(monkeypatch):
     monkeypatch.setattr(trace_flush.time, "sleep", sleep)
     with pytest.raises(KeyboardInterrupt):
         trace_flush.scheduled_wait(trace_flush.POLL_SEC)
-    wait.assert_called_once_with(trace_flush.POLL_SEC)
+    wait.assert_called_once_with(trace_flush.POLL_SEC, timeout=trace_flush.POLL_LIMIT_SEC)
     sleep.assert_not_called()
+
+
+def test_scheduler_wait_returns_within_its_bound_when_the_timer_never_rings(monkeypatch):
+    waited = []
+
+    def never_rings(delay, timeout=None):
+        if timeout is None:
+            raise AssertionError("an unbounded timer wait hangs the exporter")
+        waited.append(timeout)
+
+    monkeypatch.setattr(trace_flush, "timer_wait", never_rings)
+    trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    assert waited == [trace_flush.POLL_LIMIT_SEC] == [5.0]
 
 
 IDENTITY = {
