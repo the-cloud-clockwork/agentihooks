@@ -1,5 +1,5 @@
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import pytest
 
@@ -115,8 +115,8 @@ def test_a_hive_successor_is_bound_by_its_hive_execution_report(setup, monkeypat
         execution_id="x2",
         generation=3,
     )
-    store.drop_agent("sw", old.name)
-    store.put_agent("sw", new)
+    store.redis.hset(store.key("sw", "executions"), new.execution_id, json.dumps(asdict(new)))
+    store.redis.hset(store.key("sw", "agents"), new.name, json.dumps(asdict(new)))
     store.seats.occupy(new.seat, new.name, 3)
     transfers.attach(store, "sw", new)
     report = {"names": [], "panes": {}, "executions": {"x2": {"name": new.name, "generation": generation}}}
