@@ -250,7 +250,7 @@ def _unless_held(value):
     return lambda found: KEEP if found is not None else value
 
 
-def _default_registry():
+def registry():
     if state.backend() != "redis":
         return NameRegistry(None)
     from hooks._redis import get_redis
@@ -260,17 +260,17 @@ def _default_registry():
 
 
 def resolve_name(name):
-    names = _default_registry()
+    names = registry()
     return names.resolve(name) if names is not None else name
 
 
 def resolve_names(names):
-    registry = _default_registry()
-    return registry.resolve_many(names) if registry is not None else {name: name for name in names}
+    found = registry()
+    return found.resolve_many(names) if found is not None else {name: name for name in names}
 
 
 def addresses(name):
-    names = _default_registry()
+    names = registry()
     if names is None:
         return [name]
     return [names.resolve(name), *names.aliases(name)]
@@ -541,10 +541,6 @@ class NameRegistry:
             if found.get("type") == parsed.kind and not found.get("retired_at"):
                 return other
         return ""
-
-
-def registry():
-    return _default_registry()
 
 
 def registered_slug(name):
