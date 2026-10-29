@@ -1910,7 +1910,7 @@ def _under_tick_lock(slug, store, act):
 def _settle(slug, config, store, ledger, rows, doc):
     agents = store.agents(slug)
     if config.state == "stopping":
-        if agents:
+        if _undecided_left(slug, store, agents):
             return []
         store.update(slug, state="stopped")
         return ["stopped"]
@@ -1923,3 +1923,13 @@ def _settle(slug, config, store, ledger, rows, doc):
     waiting = {0: "", 1: ", one blocked task waits for you"}.get(blocked, f", {blocked} blocked tasks wait for you")
     ledger.notify(slug, freeze.notice(doc, rows.values(), freeze.fix_phase(config)) + waiting)
     return ["drained"]
+
+
+def _undecided_left(slug, store, agents):
+    if any(a.lane == MASTER for a in agents):
+        return agents
+    for agent in agents:
+        if agent.state == resume.AWAITING:
+            store.release(slug, agent.task, agent.name)
+            store.drop_agent(slug, agent.name)
+    return [a for a in agents if a.state != resume.AWAITING]
