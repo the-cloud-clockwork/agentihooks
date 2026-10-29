@@ -1,4 +1,5 @@
 import ast
+import functools
 import os
 import posixpath
 import re
@@ -83,6 +84,10 @@ _LAUNCH = re.compile(
     r"|\b(?:eval|compile|Function|vm|_?run_module\w*|run_path|__import__|import_module|child_process)\b"
     r"|\brequire\s*\(\s*[A-Za-z_$]"
 )
+_WRAPPER = (
+    r"(?:\S+=\S*|-\S*|\d\S*|(?:[\w.$~{}-]*/)*(?:python[\d.]*|pypy[\d.]*|uvx?|poetry|pipenv|hatch|pdm|rye|npx|pnpx"
+    r"|bunx|pnpm|yarn|npm|bun|xargs|sudo|nice|time|timeout|env|exec|run|command|nohup|stdbuf|coverage|import|from))"
+)
 _NAME_LITERAL = re.compile(r"([\"'`])\w+\1")
 _FORMAT_PREFIX = re.compile(r"(?i)(?<!\w)[rb]?f[rb]?$")
 _READERS = frozenset({"getsource", "getsourcelines", "getsourcefile", "getfile", "getdoc", "signature"})
@@ -129,8 +134,19 @@ def _launches(source: str, comment: str) -> bool:
     return bool(_LAUNCH.search(_strip(source, comment, _named_literal)))
 
 
+@functools.cache
+def _launched_literal(runners: re.Pattern) -> Callable[[str, re.Match], bool]:
+    launched = re.compile(rf"(?m)(?:^|[;&|`'\"]|\$\()\s*(?:{_WRAPPER}\s+)*(?:[\w.$~{{}}-]*/)*(?:{runners.pattern})")
+
+    def keep(source: str, match: re.Match) -> bool:
+        return bool(launched.search(source[match.end("q") : match.end() - len(match["q"])]))
+
+    return keep
+
+
 def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
-    return bool(runners.search(source if _launches(source, comment) else _strip(source, comment, _module_literal)))
+    keep = _launched_literal(runners) if _launches(source, comment) else _module_literal
+    return bool(runners.search(_strip(source, comment, keep)))
 
 
 def _imports(tree: ast.Module) -> list[tuple[str, str]]:
