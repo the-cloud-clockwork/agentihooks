@@ -226,3 +226,43 @@ def test_child_closes_redis_even_when_consumption_fails(setup, monkeypatch):
     with pytest.raises(RuntimeError, match="broken launcher"):
         dispatch.run("host", item, "parent-pod")
     closed.assert_called_once_with()
+
+
+def test_retirement_during_validation_fences_a_later_successful_spawn(setup):
+    from scripts.hive.orders import CommandOrder
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    entered, release = threading.Event(), threading.Event()
+    outcome = setup.runtime.spawn.return_value
+
+    def spawn(request):
+        entered.set()
+        assert release.wait(10)
+        return outcome
+
+    setup.runtime.spawn.side_effect = spawn
+    setup.runtime.terminate.return_value = Outcome("terminate", Status.OK, "local")
+    setup.orders.send("host", setup.order)
+    worker = threading.Thread(target=setup.consumer.poll)
+    worker.start()
+    try:
+        assert entered.wait(3)
+        retired = setup.consumer.command(
+            CommandOrder(
+                "retire",
+                "retire",
+                "fixture",
+                execution_id=setup.agent.execution_id,
+                generation=setup.agent.generation,
+            )
+        )
+        assert retired.status == "done"
+    finally:
+        release.set()
+        worker.join(10)
+    assert not worker.is_alive()
+    ack = setup.orders.ack(setup.order)
+    assert ack.status == "failed"
+    assert ack.failure == "retired"
+    assert setup.runtime.terminate.call_count == 2
+    assert setup.runtime.terminate.call_args.args[0].runtime_target["pid"] == 12
