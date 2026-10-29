@@ -108,7 +108,7 @@ class ExecutionRegistry:
         if name not in self.store.listed(slug):
             return ""
         rows = [row for row in fencing.read(self.store, slug)["executions"].values() if row["name"] == name]
-        hive = max(rows, key=lambda row: row["generation"]).get("hive", "") if rows else ""
+        hive = max(rows, key=lambda row: row["generation"]).get("hive") if rows else None
         return hive if isinstance(hive, str) else ""
 
     def agents(self, slug: str) -> list[AgentRecord]:

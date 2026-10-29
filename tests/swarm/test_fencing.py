@@ -156,14 +156,20 @@ def test_a_first_write_imports_the_legacy_redis_lease_once(store, clock):
 
 def test_a_first_read_imports_legacy_task_claims_journals_and_fences(store):
     store.redis.set(store.key("sw", "task-authority", "t1"), json.dumps({"holder": "eng-a"}))
-    store.redis.rpush(store.key("sw", "claim-journal", "t1"), json.dumps({"event": "a"}), json.dumps({"event": "b"}))
+    rows = [json.dumps({"event": event}) for event in "abc"]
+    store.redis.rpush(store.key("sw", "claim-journal", "t1"), *rows)
     store.redis.set(store.key("sw", "heartbeat-sequence", "h1"), json.dumps({"sequence": 2}))
+    store.redis.set(store.key("sw", "launch-grants-disabled"), "2026-10-29T00:00:00Z")
+    store.redis.hset(store.key("sw", "controller-orphans"), "missing_pod", "2")
 
     doc = fencing.read(store, "sw")
 
     assert doc["claims"] == {"t1": {"holder": "eng-a"}}
-    assert doc["journals"] == {"t1": [{"event": "a"}, {"event": "b"}]}
+    assert doc["journals"] == {"t1": [{"event": "a"}, {"event": "b"}, {"event": "c"}]}
     assert doc["fences"] == {store.key("sw", "heartbeat-sequence", "h1"): {"sequence": 2}}
+    assert doc["grants_disabled"] == "2026-10-29T00:00:00Z"
+    assert doc["orphans"] == {"missing_pod": 2}
+    assert fencing.read(store, "fresh")["grants_disabled"] == ""
 
 
 def test_replacing_without_a_saved_document_imports_the_legacy_keys(store):
@@ -187,6 +193,26 @@ def test_a_watched_transaction_aborts_when_the_fencing_document_changes(store):
         with pytest.raises(WatchError):
             pipe.execute()
     assert store.redis.get("probe") is None
+
+
+def test_the_document_is_stored_as_compact_json(store):
+    fencing.write(store, "sw", lambda doc: doc.update(epoch=3))
+
+    raw = state.for_store(store, fencing.BUCKET).get("sw").value
+    text = raw.decode() if isinstance(raw, bytes) else raw
+
+    assert text == json.dumps(json.loads(text), separators=(",", ":"))
+
+
+def test_a_stored_document_missing_a_section_shares_none_with_other_swarms(store):
+    saved = {key: value for key, value in fencing.EMPTY.items() if key != "fences"}
+    state.for_store(store, fencing.BUCKET).create("old", json.dumps(saved).encode())
+
+    fencing.write(store, "old", lambda doc: doc["fences"].update(probe={"sequence": 1}))
+
+    assert fencing.read(store, "old")["fences"] == {"probe": {"sequence": 1}}
+    assert fencing.read(store, "fresh")["fences"] == {}
+    assert fencing.EMPTY["fences"] == {}
 
 
 def test_a_refusal_count_leaves_the_fencing_document_unchanged(store):

@@ -92,9 +92,21 @@ def test_renewal_and_release_read_the_clock_of_their_own_store(store, monkeypatc
     monkeypatch.setattr(lease, "now_ms", lambda given: 1000 if given is store else 10**12)
     held = lease.acquire(store, "sw", "home")
 
+    assert held == lease.Lease("home", 1, 1000 + lease.ttl_ms())
     assert lease.renew(store, "sw", held) == held
     assert lease.release(store, "sw", held) is True
     assert fencing.read(store, "sw")["lease"] is None
+
+
+def test_a_hosted_fenced_write_checks_the_hosted_lease(store, monkeypatch):
+    from dataclasses import asdict
+
+    held = lease.Lease("home", 1, 10**13)
+    monkeypatch.setattr(lease, "_address", lambda slug: "https://ledger.example")
+    monkeypatch.setattr(lease, "_remote", lambda slug, action, fields=None: asdict(held))
+
+    assert lease.fenced(store, "sw", held, lambda doc: doc.update(epoch=7) or "done") == "done"
+    assert fencing.read(store, "sw")["epoch"] == 7
 
 
 def test_legacy_owner_keeps_ownership_until_expiry(store, monkeypatch):

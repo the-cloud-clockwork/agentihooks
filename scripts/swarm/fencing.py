@@ -62,15 +62,24 @@ def _task(key: str) -> str:
     return key.rsplit(":", 1)[1]
 
 
-def _scan(store: Any, slug: str, part: str, reader: str):
-    for key in store.redis.scan_iter(match=store.key(slug, part, "*")):
-        found = store.redis.lrange(key, 0, -1) if reader == "lrange" else store.redis.get(key)
-        if found:
+def _scan(store: Any, slug: str, part: str):
+    return store.redis.scan_iter(match=store.key(slug, part, "*"))
+
+
+def _values(store: Any, slug: str, part: str):
+    for key in _scan(store, slug, part):
+        if found := store.redis.get(key):
+            yield key, found
+
+
+def _lists(store: Any, slug: str, part: str):
+    for key in _scan(store, slug, part):
+        if found := store.redis.lrange(key, 0, -1):
             yield key, found
 
 
 def _legacy(store: Any, slug: str) -> dict:
-    doc = copy.deepcopy(EMPTY)
+    doc = {**EMPTY}
     raw = store.redis.get(store.key(slug, "control-owner"))
     if raw and raw.startswith("{"):
         doc["lease"] = json.loads(raw)
@@ -80,11 +89,11 @@ def _legacy(store: Any, slug: str) -> dict:
     doc["leader_changes"] = int(store.redis.get(store.key(slug, "controller-leader-changes")) or 0)
     for section, part in HASHES.items():
         doc[section] = {key: json.loads(raw) for key, raw in store.redis.hgetall(store.key(slug, part)).items()}
-    doc["claims"] = {_task(key): json.loads(raw) for key, raw in _scan(store, slug, "task-authority", "get")}
+    doc["claims"] = {_task(key): json.loads(raw) for key, raw in _values(store, slug, "task-authority")}
     doc["journals"] = {
-        _task(key): [json.loads(row) for row in rows] for key, rows in _scan(store, slug, "claim-journal", "lrange")
+        _task(key): [json.loads(row) for row in rows] for key, rows in _lists(store, slug, "claim-journal")
     }
-    doc["fences"] = {key: json.loads(raw) for key, raw in _scan(store, slug, "heartbeat-sequence", "get")}
+    doc["fences"] = {key: json.loads(raw) for key, raw in _values(store, slug, "heartbeat-sequence")}
     doc["grants_disabled"] = store.redis.get(store.key(slug, "launch-grants-disabled")) or ""
     doc["orphans"] = {
         key: int(value) for key, value in store.redis.hgetall(store.key(slug, "controller-orphans")).items()

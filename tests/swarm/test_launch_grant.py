@@ -773,6 +773,27 @@ def test_writes_retry_a_concurrent_change_then_give_up(store, authority, executi
     assert len(calls) == fencing.ATTEMPTS * WRITE_TRIES
 
 
+def test_enabling_clears_the_disabled_mark_or_names_its_contention(store, authority, monkeypatch):
+    from redis.exceptions import WatchError
+
+    authority.disable("fixture")
+    authority.enable("fixture")
+    assert fencing.read(store, "fixture")["grants_disabled"] == ""
+
+    authority.disable("fixture")
+
+    def always_raced(pipe):
+        raise WatchError("fixture conflict")
+
+    hook_pipelines(store, monkeypatch, always_raced)
+    with pytest.raises(GrantRefused) as error:
+        authority.enable("fixture")
+    assert (error.value.error_class, str(error.value)) == (
+        "dependency_unavailable",
+        "launch grants kept changing; nothing was enabled",
+    )
+
+
 def test_a_grant_issued_while_disabling_is_refused(store, authority, execution, monkeypatch):
     disabled = []
 
