@@ -33,6 +33,7 @@ def complete():
         "ledger-load",
         "stage-budget",
         "reuse",
+        "dep-manifest",
     ]
     if "install-smoke" in ci_gate_queue.SKIPPED:
         skipped.append("install-smoke")
@@ -141,6 +142,7 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
                         "ledger-load",
                         "stage-budget",
                         "reuse",
+                        "dep-manifest",
                         "queue-fail-fast",
                     ],
                 },
