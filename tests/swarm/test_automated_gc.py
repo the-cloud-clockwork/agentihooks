@@ -402,6 +402,8 @@ def test_unrelated_activity_answers_are_not_recorded(world, wrong):
     _, _, agent, _, _ = world
     record = {"request": "question", "answers": [], "idle_answers": 0}
     inbox = Mock()
+    inbox.worlds.return_value = [inbox]
+    inbox.redis.exists.return_value = True
     inbox.get.side_effect = [
         SimpleNamespace(id="question", reason=automated_gc.REPLY_PREFIX + "answer"),
         SimpleNamespace(ref="other" if wrong == "reference" else "question", sender="stranger"),
@@ -481,3 +483,99 @@ def test_legacy_agent_without_a_start_timestamp_is_probed_at_thirty_minutes(worl
     assert sweep(world, LIMIT) == [f"asked automated agent {agent.name} what it is doing"]
     assert len(inbox.inbox(agent.name)) == 1
     runtime.retire.assert_not_called()
+
+
+def test_hive_hosted_agent_answer_is_read_from_its_member_world(world):
+    import fakeredis
+
+    from scripts.hive import auth
+    from scripts.swarm import automated_gc
+    from scripts.swarm.store import SwarmConfig
+
+    _, _, _, runtime, ledger = world
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    store = RedisStore(redis)
+    store.create(SwarmConfig(SLUG, "agentihooks", 1, 0))
+    redis.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "m1", "ledger": "digest"})
+    redis.sadd(auth.INDEX, "m1")
+    seat = f"eng-1@{SLUG}"
+    name = store.next_name(SLUG, "eng")
+    decision = {"automated": {"swarm": SLUG, "seat": seat}}
+    store.start_execution(
+        SLUG, AgentRecord(name, "eng", "t1", seat=seat, hive="m1", started_at=START, profile_decision=decision)
+    )
+    store.seats.occupy(seat, name, 1)
+    controller, member = InboxStore(redis), InboxStore(redis, world="m1")
+    asked = [f"asked automated agent {name} what it is doing"]
+    assert automated_gc.run(SLUG, store, ledger, runtime, START + LIMIT) == asked
+    question = next(item for item in member.inbox(name) if item.state not in CLOSED)
+    assert not redis.exists(controller.key("item", question.id))
+    reply = member.reply(question.id, name, "nothing to do")
+    recorded = [f"recorded activity answer from {name}"]
+    assert automated_gc.run(SLUG, store, ledger, runtime, START + LIMIT + 1) == recorded
+    agent = next(a for a in store.agents(SLUG) if a.name == name)
+    state = automated_gc.state(store, SLUG, agent)
+    assert state["idle_answers"] == 1
+    assert state["request"] == ""
+    held = next(w for w in controller.worlds() if redis.exists(w.key("item", reply.id)))
+    assert held.get(reply.id).reason == "done: activity answer recorded"
+
+
+def test_a_question_gone_from_every_world_is_asked_again(world):
+    from scripts.swarm import automated_gc
+
+    store, inbox, agent, _, _ = world
+    sweep(world, START + LIMIT)
+    gone = question(world)
+    inbox.redis.delete(inbox.key("item", gone.id))
+    at = START + LIMIT * 2
+    assert sweep(world, at) == [f"asked automated agent {agent.name} what it is doing"]
+    record = automated_gc.state(store, SLUG, agent)
+    assert record["request"] == question(world).id
+    assert record["request"] != gone.id
+    assert record["last_probe"] == at
+
+
+def test_a_question_whose_answer_is_gone_is_asked_again(world):
+    from scripts.swarm import automated_gc
+
+    store, inbox, agent, _, _ = world
+    sweep(world, START + LIMIT)
+    first = question(world).id
+    reply = answer(world, "nothing to do")
+    inbox.redis.delete(inbox.key("item", reply.id))
+    at = START + LIMIT * 2
+    assert sweep(world, at) == [f"asked automated agent {agent.name} what it is doing"]
+    record = automated_gc.state(store, SLUG, agent)
+    assert record["idle_answers"] == 0
+    assert record["request"] == question(world).id
+    assert record["request"] != first
+    assert record["last_probe"] == at
+
+
+@pytest.mark.parametrize("gone", ["request", "answer"])
+def test_a_gone_request_or_answer_leaves_an_empty_request(world, gone):
+    from scripts.swarm import automated_gc
+
+    _, inbox, agent, _, _ = world
+    asked = inbox.send("swarm", agent.name, "still there?")
+    reply = inbox.reply(asked.id, agent.name, "working")
+    inbox.redis.delete(inbox.key("item", asked.id if gone == "request" else reply.id))
+    record = {"request": asked.id, "answers": [], "idle_answers": 0}
+    assert automated_gc._answer(inbox, agent, record, START) is False
+    assert record == {"request": "", "answers": [], "idle_answers": 0}
+
+
+def test_an_answer_already_cancelled_is_recorded_without_failing_the_sweep(world):
+    from scripts.swarm import automated_gc
+
+    store, inbox, agent, _, _ = world
+    sweep(world, START + LIMIT)
+    reply = answer(world, "nothing to do")
+    reason = "cancelled: recipient no longer resolves: swarm"
+    assert inbox.withdraw(reply.id, "swarm", reason, reply.address)
+    assert sweep(world, START + LIMIT + 1) == [f"recorded activity answer from {agent.name}"]
+    record = automated_gc.state(store, SLUG, agent)
+    assert record["idle_answers"] == 1
+    assert record["request"] == ""
+    assert inbox.get(reply.id).reason == reason
