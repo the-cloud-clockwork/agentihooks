@@ -184,7 +184,8 @@ def test_closing_a_timer_twice_retires_its_entry_once(state, monkeypatch):
 
     retire.assert_called_once_with(timer.entry.id)
     assert timer.closed
-    assert timer.entry.state == "retired"
+    assert timer.entry.state == "cancelled"
+    assert timer.entry.scheduler.document()["retired"][timer.entry.id] is True
 
 
 def test_wait_passes_its_bound_to_the_timer(state, monkeypatch):
