@@ -17,12 +17,11 @@ def api(endpoint: str, *, binary: bool = False) -> list | bytes:
     for delay in RETRY_DELAYS:
         try:
             result = gh_api(command, timeout=60)
-            break
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return result.stdout if binary else json.loads(result.stdout)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, UnicodeDecodeError):
             if delay is None:
                 raise
             time.sleep(delay)
-    return result.stdout if binary else json.loads(result.stdout)
 
 
 def ready(jobs: list[dict], shards: list[int]) -> bool:
