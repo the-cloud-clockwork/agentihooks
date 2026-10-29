@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.487 · 2026-10-29
+
+### 2026-10-29 · 1e512ef06b7b · #8790 · @nestorcolt
+
+**Let the protected grader accept an announced dependency manifest gate need**
+
+This change updates the protected grader so its base branch now accepts the dep-manifest entry in the Gate — Required needs inventory, mirroring the fix previously made for install-smoke in #7692. It exists specifically to unblock a follow-up pull request that adds the dep-manifest job to the gate, since that PR needs a base branch whose grader already recognizes this new need rather than flagging it as unexpected or missing.
+
 ## v2.17.486 · 2026-10-29
 
 ### 2026-10-29 · c0a1ee139fc7 · #8791 · @nestorcolt
