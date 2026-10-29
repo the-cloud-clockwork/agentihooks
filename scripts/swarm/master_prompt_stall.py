@@ -109,7 +109,7 @@ def run(slug, config, store, ledger, runtime, now_ms):
     master_retire.forget(store, slug, master.name, RECYCLED)
     GATE.allows(store, who, "recycle", reason, now_ms)
     text = RECOVERY.format(slug=slug, name=master.name, minutes=minutes, prompt=prompt)
-    master_stall.recycle(slug, store, ledger, master, text, now_ms)
+    master_stall.recycle(slug, store, ledger, master, text, now_ms, master_stall.STALLED)
     store.redis.delete(key)
     return [
         f"recycled master {master.name} in its seat after {minutes} minutes {HELD}{prompt} with operator items waiting"

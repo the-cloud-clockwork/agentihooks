@@ -53,6 +53,8 @@ ledger:
   tolerations: []
   port: 8765
   publicUrl: ""
+  # Extra host:port names the ledger answers, such as the internal address hives reach when publicUrl is the public route.
+  allowedHosts: []
   # Secret with tls.crt, tls.key and ca.crt; clients refuse to send ledger credentials over plain http off loopback.
   # The certificate must name <fullname>-ledger, the service and ingress backend name, as a SAN.
   tls:
@@ -270,6 +272,11 @@ workers:
   maxAgents: 20
   # A stopping hive takes no new agents and waits this long for its agents to finish before it exits.
   drainSeconds: 3600
+  rollout:
+    enabled: false
+    namespace: default
+    leaseName: agentihooks-hive-rollout
+    drainSeconds: 300
   excluded: [master]
   # Swarms whose masters this hive takes although it excludes master; every other swarm still sees masters excluded.
   masterSwarms: []
