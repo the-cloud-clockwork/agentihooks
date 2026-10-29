@@ -239,6 +239,14 @@ class InboxStore:
     def get(self, item_id):
         return _item(self.redis.hgetall(self.key("item", item_id)), item_id)
 
+    def find(self, item_id, by):
+        """The item a tick pass stored the id of, or None once its record is gone; by names the pass in the log."""
+        raw = self.redis.hgetall(self.key("item", item_id))
+        if not raw:
+            print(f"agentihooks inbox: {by} holds message {item_id} whose record is gone; skipped it", file=sys.stderr)
+            return None
+        return _parsed(raw)
+
     def inbox(self, address):
         return sorted(self._listed(self.redis.zrange(self.key("address", address), 0, -1), address), key=_order)
 

@@ -144,6 +144,22 @@ def test_unanswered_alarm_notifies_the_operator_after_ten_further_minutes(stalle
     assert len(ledger.notes) == 1
 
 
+def test_an_alarm_whose_record_is_gone_is_treated_as_closed(stalled, capsys):
+    store, ledger, _, clock, _ = stalled
+    tick_failure(stalled)
+    clock[0] += 600_000
+    tick_failure(stalled)
+    (item,) = InboxStore(store.redis).pending_mail("master@sw")
+    store.redis.delete(InboxStore(store.redis).key("item", item.id))
+    clock[0] += 600_000
+    tick_failure(stalled)
+    assert ledger.notes == []
+    assert (
+        f"agentihooks inbox: {spawn_stall.REF} holds message {item.id} whose record is gone; skipped it"
+        in capsys.readouterr().err.splitlines()
+    )
+
+
 def test_answered_alarm_never_notifies_the_operator(stalled):
     store, ledger, _, clock, _ = stalled
     tick_failure(stalled)
