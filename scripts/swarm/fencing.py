@@ -49,7 +49,7 @@ def unavailable() -> tuple[type[BaseException], ...]:
 
 
 def now_ms() -> int:
-    return time.time_ns() // 1_000_000
+    return round(time.time() * 1000)
 
 
 def _states(store: Any):
@@ -131,3 +131,8 @@ def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
             continue
         return result
     raise SwarmError(CONTENTION)
+
+
+def authority_held(store: Any, slug: str, task: str) -> bool:
+    doc = read(store, slug)
+    return task in doc["claims"] or task in doc["journals"]

@@ -63,9 +63,10 @@ def _split_refusal(task, url, github):
 
 
 def require_local(store: object, slug: str, task_id: str) -> None:
+    from scripts.swarm import fencing
     from scripts.swarm.store import SwarmError
 
-    if store.authority_held(slug, task_id):
+    if fencing.authority_held(store, slug, task_id):
         raise SwarmError("distributed final mutations require the controller outcome path")
 
 

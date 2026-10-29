@@ -210,18 +210,18 @@ def test_the_lease_expires_on_the_host_wall_clock(store, monkeypatch):
     import time
 
     held = lease.acquire(store, "sw", "home")
-    monkeypatch.setattr(time, "time_ns", lambda: (held.expires_at - 1) * 1_000_000)
+    monkeypatch.setattr(time, "time", lambda: (held.expires_at - 1) / 1000)
     assert lease.current(store, "sw") == held
-    monkeypatch.setattr(time, "time_ns", lambda: held.expires_at * 1_000_000)
+    monkeypatch.setattr(time, "time", lambda: held.expires_at / 1000)
     assert lease.current(store, "sw") is None
     assert lease.acquire(store, "sw", "other") == lease.Lease("other", 2, held.expires_at + lease.ttl_ms())
 
 
-@pytest.mark.parametrize("nanoseconds", [2_234_567_000, 2_234_000_001])
-def test_the_host_clock_is_converted_to_milliseconds(store, monkeypatch, nanoseconds):
+@pytest.mark.parametrize("seconds", [2.2341, 2.2339, 2.234])
+def test_the_host_clock_is_converted_to_milliseconds(store, monkeypatch, seconds):
     import time
 
-    monkeypatch.setattr(time, "time_ns", lambda: nanoseconds)
+    monkeypatch.setattr(time, "time", lambda: seconds)
     assert lease.now_ms(store) == 2234
 
 

@@ -396,8 +396,7 @@ class RedisStore:
     def authority_held(self, slug, task):
         from scripts.swarm import fencing
 
-        doc = fencing.read(self, slug)
-        return task in doc["claims"] or task in doc["journals"]
+        return fencing.authority_held(self, slug, task)
 
     def put_handoff(self, slug, task, text, seat="", envelope=None):
         with self.redis.pipeline() as pipe:
