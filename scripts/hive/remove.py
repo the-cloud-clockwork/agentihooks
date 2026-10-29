@@ -159,7 +159,11 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
 
 
 def _unhanded(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
-    return [(slug, agent) for slug, agent in hosted(store, hive) if agent.task and not store.handoff(slug, agent.task)]
+    return [(slug, agent) for slug, agent in hosted(store, hive) if agent.task and not _handed(store, slug, agent)]
+
+
+def _handed(store: "RedisStore", slug: str, agent: "AgentRecord") -> bool:
+    return (store.handoff_envelope(slug, agent.task) or {}).get("agent") == agent.name
 
 
 def _recover(store: "RedisStore", hive: str, wait_s: int, remaining: list, host: Host) -> str:
@@ -177,7 +181,7 @@ def _recover(store: "RedisStore", hive: str, wait_s: int, remaining: list, host:
     names = ", ".join(agent.name for _, agent in remaining)
     return (
         f"hive {hive} stops after {wait_s} seconds; {names} did not hand off, "
-        "so each got a recovery handoff and its task reopens"
+        "so each got a recovery handoff and its task reopens once the swarm retires it"
     )
 
 
