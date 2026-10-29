@@ -12,7 +12,7 @@ never compared. Package record: `evidence/SV2-MIG-04/result.json`.
 | `ConsumerRoutes.qualify` | Runs the shadow replay and stores the proof, bound to the consumer and the grant, under a deterministic operation id. |
 | `ConsumerRoutes.switch` | Moves a consumer to `session.v1` or `local.v1` with compare and set on the route revision, only with an accepted proof for that consumer and grant. Replaying the same switch returns the same route. |
 | `ConsumerRoutes.rollback` | Undoes the switch at the given revision by restoring the route accepted before it, as a new revision. Only a switch can be rolled back, so a second rollback never reinstates the route just left. Capture, the catalog and stored proofs are untouched. Replaying the same rollback returns the same route. |
-| `ConsumerRoutes.call` | Dispatches a consumer request to the endpoint its route names, refusing an endpoint the caller does not serve and a request whose protocol major differs from the endpoint version. Expiring aliases stay enforced by `hooks.memory.api.records`, removal deadline `2027-01-31T00:00:00Z`. |
+| `ConsumerRoutes.call` | Dispatches a consumer request to the session endpoint its route names, refusing an endpoint the caller does not serve and a request whose protocol major differs from the endpoint version. A consumer routed to `local.v1` keeps calling its own local path unchanged; `call` never dispatches or rewrites a local request. Expiring aliases stay enforced by `hooks.memory.api.records`, removal deadline `2027-01-31T00:00:00Z`. |
 
 Supported endpoint versions: `local.v1` (the last qualified local path, the default route) and `session.v1`
 (session tools protocol 1 requests, answered by the protocol 2.0 tools).

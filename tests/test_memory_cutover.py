@@ -217,8 +217,9 @@ def test_consumer_dispatch_uses_versioned_route_and_expiring_aliases(bank, tmp_p
     with pytest.raises(ValueError):
         routes.switch(allowed, "keeper", "unsupported.v2", 1, proof["operation_id"])
     routes.rollback(allowed, "keeper", 1)
-    with pytest.raises(ValueError):
-        routes.call({"session.v1": bank.tools}, allowed, "keeper", "session_search", request, 5000.0)
+    for served in ({"session.v1": bank.tools}, {"local.v1": bank.tools}):
+        with pytest.raises(ValueError, match="routes to 'local.v1', which this caller does not serve"):
+            routes.call(served, allowed, "keeper", "session_search", request, 5000.0)
     routes.close()
 
 

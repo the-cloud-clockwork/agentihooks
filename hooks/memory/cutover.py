@@ -172,7 +172,7 @@ class ConsumerRoutes:
 
     def call(self, endpoints: dict, grant: Grant, consumer: str, name: str, request: dict, now: float) -> dict:
         endpoint = self.route(grant, consumer)["endpoint"]
-        if endpoint not in endpoints:
+        if endpoint not in endpoints or endpoint not in PROTOCOLS:
             raise ValueError(f"consumer {consumer!r} routes to {endpoint!r}, which this caller does not serve")
         if str(request.get("schema_version")).split(".")[0] != PROTOCOLS[endpoint]:
             raise ValueError(f"endpoint {endpoint!r} accepts only protocol {PROTOCOLS[endpoint]} requests")
