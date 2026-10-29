@@ -1155,7 +1155,7 @@ def test_scheduler_wait_returns_within_its_bound_when_the_timer_never_rings(monk
     assert waited == [trace_flush.POLL_LIMIT_SEC] == [5.0]
 
 
-@pytest.mark.parametrize("phase", ["construct", "wait", "retire"])
+@pytest.mark.parametrize("phase", ["construct", "wait", "retire", "wait-and-retire"])
 def test_scheduler_deadline_covers_the_complete_timer_lifecycle(monkeypatch, phase):
     import signal
     from unittest.mock import MagicMock, Mock
@@ -1167,7 +1167,7 @@ def test_scheduler_deadline_covers_the_complete_timer_lifecycle(monkeypatch, pha
     context = MagicMock()
 
     def stall(at):
-        if phase == at:
+        if phase == at or phase == "wait-and-retire" and at in ("wait", "retire"):
             real_sleep(0.1)
             finished.append(at)
 
