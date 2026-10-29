@@ -42,8 +42,7 @@ def test_a_revision_splits_into_root_shared_user_and_the_two_part_form_has_no_sh
 
 def test_a_three_part_revision_with_an_empty_user_never_parses_as_root_user():
     assert bundle_copy.split_revision("r:s:") == ("r", "s", "")
-    assert bundle_copy.split_revision("r:s:") != ("r", None, "s:")
-    assert bundle_copy.split_revision("r:s:") != bundle_copy.split_revision("r:s")
+    assert bundle_copy.split_revision("r:s") == ("r", None, "s")
 
 
 def test_a_revision_with_more_than_three_parts_is_refused():

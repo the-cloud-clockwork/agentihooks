@@ -132,12 +132,15 @@ def test_bundle_commands_take_shared_on_the_command_line(trees, monkeypatch, cap
     assert _state()["bundle"]["path"] == str(root)
 
 
-def test_a_bundle_command_takes_either_shared_or_user_never_both(trees, monkeypatch):
+def test_a_bundle_command_takes_either_shared_or_user_never_both(trees, monkeypatch, capsys):
     _, _, shared, _ = trees
     monkeypatch.setattr(sys, "argv", ["agentihooks", "bundle", "link", "--shared", "--user", str(shared)])
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as raised:
         install.main()
+
+    assert raised.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
 
 
 def test_a_configured_shared_path_that_is_gone_is_reported_and_not_applied(trees, capsys):
