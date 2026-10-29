@@ -67,6 +67,7 @@
   "test.yml/admission": "light",
   "test.yml/coverage-baseline": "light",
   "test.yml/coverage-ratchet": "light",
+  "test.yml/dep-manifest": "standard",
   "test.yml/docs": "standard",
   "test.yml/flake-budget": "light",
   "test.yml/gate-required": "light",
