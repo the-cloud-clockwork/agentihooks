@@ -30,6 +30,11 @@ jobs:
           path: ${{ runner.temp }}/swarm-smoke-layers
           key: swarm-smoke-layers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile', 'pyproject.toml', 'README.md', 'docker/swarm/requirements.lock', 'docker/swarm-node/versions.lock', 'docker/swarm-node/requirements.lock', 'scripts/swarm_v2/worker_image.py') }}
           restore-keys: swarm-smoke-layers-${{ runner.os }}-${{ runner.arch }}-
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
       - name: Build the swarm image
         id: build
         env:
@@ -56,12 +61,6 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:
           python-version: '3.12'
-      - uses: astral-sh/setup-uv@v10.2.0
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        with:
-          version: '0.12.23'
-          enable-cache: true
-          cache-dependency-glob: pyproject.toml
       - name: Run the hive launch, Compose install, hive join, Compose hive, Compose task, recovery drill and swarm init scenarios in parallel
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
