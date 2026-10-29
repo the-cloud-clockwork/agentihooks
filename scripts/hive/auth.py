@@ -283,12 +283,15 @@ def revoke(redis, member_id: str) -> None:
     if not found:
         raise HiveError(f"no hive member {member_id}")
     store = _store(redis)
+    digest = found["ledger"]
     try:
-        hive_state.amend(store, f"ledger.{found['ledger']}", lambda _: None)
+        hive_state.amend(
+            store, f"ledger.{digest}", lambda _: None, _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
+        )
         hive_state.indexed(redis, member_id, False)
         redis_acl.drop(redis, f"hive-{member_id}")
         redis_acl.save(redis)
-        hive_state.amend(store, f"member.{member_id}", lambda _: None)
+        hive_state.amend(store, f"member.{member_id}", lambda _: None, _legacy(redis, _legacy_member(member_id)))
     except _refusals() as exc:
         raise HiveError(
             f"revoking {member_id} is incomplete and a Redis restart before it completes revives its Redis user; "
