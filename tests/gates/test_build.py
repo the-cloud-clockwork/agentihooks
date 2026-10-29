@@ -39,7 +39,7 @@ def world(tmp_path):
             {"what": p.what, "areas": list(p.areas), "why": p.why, "probability": None, "kept": k}
             for p, k in zip(pieces, kept, strict=False)
         ]
-        digest = "stale" if stale else trace_plan.plan_hash(pieces)
+        digest = "stale" if stale else trace_plan.plan_hash(pieces, {})
         record = {"verdict": verdict, "plan_hash": digest, "pieces": rows, "reasons": list(reasons)}
         (folder / trace_plan.VERDICT).write_text(json.dumps(record))
 
@@ -73,6 +73,27 @@ def world(tmp_path):
 
 def edit(world, rel, **extra):
     return world.decide(file_path=str(world.repo / rel), **extra)
+
+
+@pytest.mark.parametrize("field", ["title", "description"])
+def test_task_text_rewrite_requires_a_fresh_trace(world, field):
+    task = {"id": TASK, "title": "Build the doghouse", "description": "Keep the dog warm"}
+    doc = {"tasks": [task]}
+    legacy_page.store(world.repo.parent / "ledgers", SLUG, doc)
+    world.plan()
+    pieces = trace_plan.parse(DOGHOUSE, TASK)
+    record = trace_plan.load(world.folder)
+    record["plan_hash"] = trace_plan.plan_hash(pieces, trace_plan.intent(doc, TASK))
+    trace_plan.save(world.folder, record)
+    assert edit(world, "doghouse/light/lamp.py").allowed
+    task[field] += " rewritten"
+    legacy_page.store(world.repo.parent / "ledgers", SLUG, doc)
+    decision = edit(world, "doghouse/light/lamp.py")
+    assert not decision.allowed
+    assert "no verdict for its current text" in decision.reason
+    record["plan_hash"] = trace_plan.plan_hash(pieces, trace_plan.intent(doc, TASK))
+    trace_plan.save(world.folder, record)
+    assert edit(world, "doghouse/light/lamp.py").allowed
 
 
 class TestMatches:
@@ -336,6 +357,20 @@ class TestMore:
         ledgers = world.repo.parent / "ledgers"
         legacy_page.store(ledgers, SLUG, {"tasks": [{"id": task}]})
         result = world.decide(file_path=str(world.repo / "doghouse/frame/a.py"), task=task)
+        assert result.allowed, result.reason
+
+    def test_the_plan_parses_with_the_swarm_task_ids(self, world):
+        other = "fx-8be892c4-code"
+        doc = {"tasks": [{"id": TASK}, {"id": other}]}
+        legacy_page.store(world.repo.parent / "ledgers", SLUG, doc)
+        world.plan()
+        text = f"- walls once {other} lands | doghouse/frame | the house needs a shell\n"
+        (world.folder / trace_plan.PLAN).write_text(text)
+        pieces = trace_plan.parse(text, TASK, (TASK, other))
+        record = trace_plan.load(world.folder)
+        record["plan_hash"] = trace_plan.plan_hash(pieces, trace_plan.intent(doc, TASK))
+        trace_plan.save(world.folder, record)
+        result = edit(world, "doghouse/frame/a.py")
         assert result.allowed, result.reason
 
     def test_the_unchecked_count_names_the_tool_and_the_paths(self, world):

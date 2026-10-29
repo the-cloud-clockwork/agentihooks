@@ -754,7 +754,7 @@ jobs:
 
       - &venv
         name: Restore the test environment
-        if: env.UNIT_SOURCE == ''
+        if: env.UNIT_SOURCE == '' && (env.UNIT_WHEELHOUSE != '1' || runner.environment != 'self-hosted')
         id: venv
         uses: actions/cache/restore@v4
         env:
@@ -1677,6 +1677,7 @@ jobs:
       CODEX_RELEASE: rust-v0.160.0
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
       UNIT_SOURCE: ""
+      UNIT_WHEELHOUSE: "1"
       LEG: ${{ matrix.leg }}
     strategy:
       fail-fast: false
@@ -1896,8 +1897,9 @@ jobs:
           jq -r 'select(.outcome == "flaky") | "::warning title=Flaky test::\(.test) passed on attempt \(.attempts) in run \(.run)"' flakes.jsonl
           jq -r 'select(.crashes) | "::warning title=Worker crash::\(.test) crashed its worker \(.crashes) time(s) in run \(.run)"' flakes.jsonl
 
+      # Sonar takes a leg's branch coverage in place of this artifact, so a leg uploads its database once.
       - name: Upload coverage
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.12' && (github.base_ref != 'dev' || github.event.pull_request.head.repo.full_name != github.repository || hashFiles('branch-record/record.json') == '' || hashFiles('.coverage') == '')
         uses: ./.github/actions/retry-upload
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.leg }}
@@ -2155,7 +2157,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with: &sonar-download-shard-coverage
-          pattern: coverage-3.12-*
+          pattern: ${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}
           path: .coverage-shards
 
       - name: Download shard coverage, wait before attempt 2
@@ -2169,6 +2171,22 @@ jobs:
         if: steps.download-shard-coverage.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *sonar-download-shard-coverage
+
+      - name: Take each selected leg's latest branch coverage
+        if: needs.select.outputs.scope == 'selected'
+        run: |
+          shopt -s nullglob
+          declare -A latest
+          for folder in .coverage-shards/branch-coverage-3.12-*; do
+            [[ "$folder" =~ branch-coverage-3\.12-([0-9]+)-([0-9]+)$ ]] || continue
+            if (( BASH_REMATCH[2] > ${latest[${BASH_REMATCH[1]}]:-0} )); then latest[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]}; fi
+          done
+          for leg in "${!latest[@]}"; do
+            if [[ ! -e ".coverage-shards/coverage-3.12-$leg" ]]; then
+              mv ".coverage-shards/branch-coverage-3.12-$leg-${latest[$leg]}" ".coverage-shards/coverage-3.12-$leg"
+            fi
+          done
+          rm -rf .coverage-shards/branch-coverage-3.12-*
 
       - name: Mint the token that reads the pull request runs' coverage
         id: app-token
