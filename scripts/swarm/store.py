@@ -570,7 +570,7 @@ class RedisStore:
     def drop_agent(self, slug, name, at=None, expected=None, before=None):
         from redis.exceptions import WatchError
 
-        from scripts.swarm import fencing
+        from scripts.swarm import fencing, lease
 
         ended = int(time.time() * 1000) if at is None else at
         for _ in range(5):
@@ -619,7 +619,7 @@ class RedisStore:
                 if doc["executions"][execution_id]["state"] != "finished":
                     doc["executions"][execution_id] = {**doc["executions"][execution_id], "state": "ended"}
 
-        fencing.write(self, slug, end)
+        lease.fenced(self, slug, lease.EPOCH.get(), end)
         return True
 
     def _retire_name(self, pipe, name, ended):

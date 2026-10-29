@@ -6,7 +6,7 @@ from scripts.events import factory, memory, state
 from scripts.events.bus import StateConflict
 from scripts.events.config import BusConfig
 from scripts.swarm import fencing, lease
-from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 
 pytestmark = pytest.mark.unit
 
@@ -215,5 +215,13 @@ def test_a_stale_lease_holder_cannot_write_executions(store, monkeypatch):
             registry.archive("sw")
         with pytest.raises(SwarmError, match="the controller lease is stale"):
             registry.set_pane("sw", "missing", "%1")
+        agent = AgentRecord("eng-a", "eng", "task", seat="eng-1@sw")
+        with pytest.raises(SwarmError, match="the controller lease is stale"):
+            registry.update("sw", agent)
+        with pytest.raises(SwarmError, match="the controller lease is stale"):
+            registry.end_orphan("sw", agent, 0)
+        with pytest.raises(SwarmError, match="the controller lease is stale"):
+            store.drop_agent("sw", "eng-a")
+    assert fencing.read(store, "sw")["executions"] == {}
     with lease.fencing(second.epoch):
         assert registry.archive("sw") == 0

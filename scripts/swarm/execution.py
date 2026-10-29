@@ -268,7 +268,7 @@ class ExecutionRegistry:
             return False
         if agent.name not in self.store.listed(slug):
             return True
-        fencing.write(self.store, slug, undo)
+        self._fenced(slug, undo)
         return False
 
 
