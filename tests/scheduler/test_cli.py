@@ -3,6 +3,7 @@ import json
 import pytest
 
 from scripts import cli_delegates
+from scripts.events.redis_state import RedisStateStore
 from scripts.scheduler import cli, commands
 
 pytestmark = pytest.mark.unit
@@ -18,8 +19,8 @@ def scheduler(monkeypatch):
     from scripts.scheduler.core import Scheduler
     from scripts.swarm.store import RedisStore, SwarmConfig
 
-    found = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
-    RedisStore(found.redis).create(SwarmConfig("sw", "/repo", 2, 1))
+    found = Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof")
+    RedisStore(found.state.redis).create(SwarmConfig("sw", "/repo", 2, 1))
     monkeypatch.setattr(commands, "connect", lambda: found)
     monkeypatch.setattr(commands.time, "time", lambda: NOW)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", OWNER)

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.swarm import cli, controller, lease, timing
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -560,7 +561,7 @@ def test_scheduler_delivery_reaches_the_doctor_timer(env, clock, monkeypatch, tm
         assert scheduled_tick.main(popen=start_tick) == 0
 
     monkeypatch.setattr(scheduled_tick, "subprocess", SimpleNamespace(Popen=start_holder, DEVNULL=subprocess.DEVNULL))
-    scheduler = Scheduler(store.redis)
+    scheduler = Scheduler(RedisStateStore(store.redis, "scheduler"))
     entry = scheduler.get(scheduled_tick.ensure(scheduler))
     due = entry.record["due"]
     assert scheduler.run_due(now=due) == 1
