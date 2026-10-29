@@ -271,7 +271,7 @@ def test_the_coverage_shards_record_per_test_contexts_and_inputs():
     assert "dep-inputs/" in _step("unit", "Upload coverage")["with"]["path"]
 
 
-def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
+def test_sonar_builds_and_uploads_the_manifest_that_nothing_caches():
     steps = [step.get("name") for step in _job("sonar")["steps"]]
     assert (
         steps.index("Merge shard coverage")
@@ -299,12 +299,12 @@ def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
     assert upload["with"]["name"] == "dep-manifest"
     assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/manifest.json"
     assert not any("cache/save" in step.get("uses", "") for step in _job("sonar")["steps"])
-    assert "github.event_name == 'push'" in _job("coverage-baseline")["if"]
-    assert _step("coverage-baseline", "Download the test dependency manifest")["with"]["name"] == "dep-manifest"
-    save = _step("coverage-baseline", "Save the dev test dependency manifest")
-    assert save["if"] == "needs.gate-required.result == 'success'"
-    assert save["uses"].startswith("actions/cache/save@")
-    assert save["with"]["key"] == "dep-manifest-${{ github.sha }}"
+
+
+def test_the_coverage_baseline_carries_no_dependency_manifest_step():
+    baseline = _job("coverage-baseline")["steps"]
+    assert not any("dependency manifest" in step.get("name", "") for step in baseline)
+    assert not any("dep-manifest" in str(step.get("with", {})) for step in baseline)
 
 
 def test_the_plan_reuses_every_test_the_change_left_valid_without_its_group_suffix():

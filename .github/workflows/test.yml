@@ -3570,34 +3570,6 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Download the test dependency manifest
-        if: needs.gate-required.result == 'success'
-        id: download-the-test-dependency-manifest
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with: &coverage-baseline-download-the-test-dependency-manifest
-          name: dep-manifest
-          path: dep-manifest
-
-      - name: Download the test dependency manifest, wait before attempt 2
-        if: steps.download-the-test-dependency-manifest.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Download the test dependency manifest failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Download the test dependency manifest, attempt 2
-        if: steps.download-the-test-dependency-manifest.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        with: *coverage-baseline-download-the-test-dependency-manifest
-
-      - name: Save the dev test dependency manifest
-        if: needs.gate-required.result == 'success'
-        uses: actions/cache/save@v4
-        with:
-          path: dep-manifest
-          key: dep-manifest-${{ github.sha }}
-
   mutation-plan:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
     needs: [admission]
