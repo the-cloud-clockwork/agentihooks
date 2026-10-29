@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.493 · 2026-10-29
+
+### 2026-10-29 · 7551daf897c7 · #8787 · @nestorcolt
+
+**Run a mutant's direct tests before the fallback cohort**
+
+This change improves how mutation testing prioritizes which tests run first for each mutant: after the previously known killer, it now runs tests whose recorded coverage actually reaches the mutant's changed lines, before falling back to mutmut's default ordering. The planner records this mapping in a new direct-tests file, and the runner and KillMemory use it to rank tests accordingly. The payoff is substantial: a benchmark replay that previously finished only 217 of 225 shard units within the time budget now completes all 347 of 347, comfortably inside the limit, meaning more mutants get properly graded instead of timing out.
+
 ## v2.17.492 · 2026-10-29
 
 ### 2026-10-29 · c14df669b14a · #8807 · @nestorcolt
