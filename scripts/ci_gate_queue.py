@@ -36,6 +36,7 @@ SKIPPED = {
     "ledger-load",
     "stage-budget",
     "reuse",
+    "dep-manifest",
 }
 
 # A promotion gate the protected grader accepts before the pull request that adds it lands.
