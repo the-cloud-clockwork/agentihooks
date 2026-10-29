@@ -34,10 +34,10 @@ def warn_unavailable() -> None:
     _i = _install_module()
     for kind, path in profile_chain.missing_bundle_roots(_i._load_state()):
         _i._cprint(f"  [WARN] Configured {kind} bundle {path} is missing - not applied.")
-    holders = profile_chain.profile_holders(
-        _i._get_bundle_path(), _i._get_user_bundle_path(), _i._get_shared_bundle_path()
-    )
-    for name, kinds in sorted(holders.items()):
+    roots = (_i._get_bundle_path(), _i._get_user_bundle_path(), _i._get_shared_bundle_path())
+    holders = profile_chain.profile_holders(*roots)
+    for name in profile_chain.profile_collisions(*roots):
+        kinds = holders[name]
         _i._cprint(f"  [WARN] Profile '{name}' exists in {_holders(kinds)} bundle - {_WINNERS[kinds[0]]} is used.")
 
 
