@@ -89,3 +89,14 @@ runs:
         done
         rm -f "$ZIP"
         exit 1
+    - name: Verify the refetch
+      if: steps.verify.outcome == 'failure'
+      shell: bash
+      env:
+        VERIFY: ${{ inputs.verify }}
+        ARTIFACT: ${{ inputs.name }}
+      run: |
+        if ! bash -c "$VERIFY"; then
+          echo "::error title=Retried download::$ARTIFACT is still torn after the REST refetch."
+          exit 1
+        fi

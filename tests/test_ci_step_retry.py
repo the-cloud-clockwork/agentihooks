@@ -28,7 +28,10 @@ def _steps(job):
 
 _APP = {"client-id": "${{ secrets.TCC_CI_CLIENT_ID }}", "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}"}
 _REFETCH = "steps.primary.outcome == 'failure' || steps.verify.outcome == 'failure'"
-_SPLIT_VERIFY = "python3 -c 'import json, sys; [json.loads(open(path).read()) for path in sys.argv[1:]]' ~/dev-durations/.test_durations*"
+_SPLIT_VERIFY = (
+    "python3 -c 'import json, sys; from pathlib import Path;"
+    " [json.loads(Path(path).read_text()) for path in sys.argv[1:]]' ~/dev-durations/.test_durations*"
+)
 _SHARD_VERIFY = '[[ "$(sha256sum .test_durations | cut -d \' \' -f 1)" == "$(< durations.sha256)" ]]'
 
 
@@ -37,7 +40,7 @@ def _fallback():
 
 
 def test_one_download_then_a_rest_fallback_only_when_it_fails_or_arrives_torn():
-    primary, verify, mint, fallback = _action()["runs"]["steps"]
+    primary, verify, mint, fallback, refetched = _action()["runs"]["steps"]
     assert primary["uses"] == "actions/download-artifact@v4"
     assert primary["continue-on-error"] is True and "if" not in primary
     assert primary["with"] == {"name": "${{ inputs.name }}", "path": "${{ inputs.path || github.workspace }}"}
@@ -53,6 +56,9 @@ def test_one_download_then_a_rest_fallback_only_when_it_fails_or_arrives_torn():
     assert "continue-on-error" not in fallback
     assert "actions/artifacts/$id/zip" in fallback["run"]
     assert "${{" not in fallback["run"]
+    assert refetched["if"] == "steps.verify.outcome == 'failure'"
+    assert "continue-on-error" not in refetched
+    assert refetched["env"] == verify["env"]
 
 
 def _run_fallback(tmp_path, gh, token="app-token", attempt="1"):
@@ -134,8 +140,8 @@ def test_the_durations_downloads_retry_in_place(job, name, given):
     assert step["with"] == given
 
 
-def _verify(tmp_path, command):
-    step = next(s for s in _action()["runs"]["steps"] if s.get("id") == "verify")
+def _verify(tmp_path, command, step="Verify the download"):
+    step = next(s for s in _action()["runs"]["steps"] if s.get("name") == step)
     env = {**os.environ, **step["env"], "VERIFY": command, "ARTIFACT": "split-3.12", "HOME": str(tmp_path)}
     return subprocess.run(
         ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
@@ -150,15 +156,26 @@ def _verify(tmp_path, command):
 _TORN = '{\n    "t.py::a": 2.0,\n    "t.py::b'
 
 
-@pytest.mark.parametrize("torn", [False, True])
-def test_the_split_verify_refetches_only_a_torn_dev_durations_file(tmp_path, torn):
+@pytest.mark.parametrize("version", ['{"t.py::a": 3.0}', _TORN, None])
+def test_the_split_verify_refetches_only_a_torn_or_missing_dev_durations_file(tmp_path, version):
     folder = tmp_path / "dev-durations"
     folder.mkdir()
-    (folder / ".test_durations").write_text('{"t.py::a": 2.0}')
-    (folder / ".test_durations-3.12").write_text(_TORN if torn else '{"t.py::a": 3.0}')
+    if version is not None:
+        (folder / ".test_durations").write_text('{"t.py::a": 2.0}')
+        (folder / ".test_durations-3.12").write_text(version)
+    torn = version != '{"t.py::a": 3.0}'
     done = _verify(tmp_path, _SPLIT_VERIFY)
     assert done.returncode == (1 if torn else 0), done.stdout + done.stderr
     assert ("downloaded torn" in done.stdout) is torn
+
+
+@pytest.mark.parametrize("torn", [False, True])
+def test_a_refetch_still_torn_is_red(tmp_path, torn):
+    (tmp_path / "durations.sha256").write_text(hashlib.sha256(b"{}").hexdigest() + "\n")
+    (tmp_path / ".test_durations").write_text(_TORN if torn else "{}")
+    done = _verify(tmp_path, _SHARD_VERIFY, step="Verify the refetch")
+    assert done.returncode == (1 if torn else 0), done.stdout + done.stderr
+    assert ("still torn after the REST refetch" in done.stdout) is torn
 
 
 @pytest.mark.parametrize("torn", [False, True])
