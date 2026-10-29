@@ -64,10 +64,10 @@ def _bare_timer(entry):
 
 
 def test_a_wait_with_no_ring_by_its_recheck_starts_the_scheduler_again(monkeypatch):
-    ensure = Mock()
+    timer = _bare_timer(_Entry(fired_after=40))
+    ensure = Mock(side_effect=lambda: timer.entry.reads or pytest.fail("restarted before any read"))
     monkeypatch.setattr(process_timer.service, "ensure_running", ensure)
     monkeypatch.setattr(process_timer, "RECHECK_S", 0.03)
-    timer = _bare_timer(_Entry(fired_after=40))
     timer.wait()
     assert timer.entry.reads == 41
     assert ensure.call_count >= 1
@@ -118,6 +118,7 @@ def test_an_active_timer_sleeps_until_its_recheck(monkeypatch):
     timer = _bare_timer(_Entry(fired_after=10**9))
     slept = []
     monkeypatch.setattr(process_timer.time, "monotonic", lambda: 10.0 + len(slept))
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: pytest.fail("restarted the scheduler"))
     monkeypatch.setattr(timer.cancelled, "wait", slept.append)
     timer.wait(timeout=2)
     assert slept == [process_timer.POLL_S, process_timer.POLL_S]
