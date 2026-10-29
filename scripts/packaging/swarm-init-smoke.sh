@@ -18,8 +18,8 @@ else
   bash scripts/packaging/pull-runtime-image.sh ghcr.io/the-cloud-clockwork/agentihooks-swarm:release
 fi
 start=$SECONDS
-"${SWARM_INIT_PYTHON:-python3}" -m venv "$work/venv"
-SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 "$work/venv/bin/pip" install --quiet .
+uv venv --python "${SWARM_INIT_PYTHON:-python3}" "$work/venv"
+SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 uv pip install --quiet --python "$work/venv/bin/python" .
 printf 'Swarm init smoke package installation: %ss\n' "$((SECONDS - start))"
 cd "$work"
 for run in first second; do
