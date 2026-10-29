@@ -4,7 +4,7 @@ import pytest
 
 from scripts.inbox import exits, wake
 from scripts.inbox.seen import SeenMarks
-from scripts.inbox.store import CLOSED, InboxStore
+from scripts.inbox.store import CLOSED, InboxStore, close_reason
 from scripts.swarm import (
     affinity,
     automated_gc,
@@ -84,6 +84,20 @@ def test_settle_passes_an_item_closed_meanwhile(store, race):
     race.arm()
     assert inbox.settle(item.id, "swarm", "done", "handled") is None
     assert race.closed_meanwhile(inbox, item)
+
+
+def test_settle_without_detail_closes_with_the_bare_reason(store):
+    inbox = InboxStore(store.redis)
+    item = inbox.send("swarm", "bob", "hi")
+    assert inbox.settle(item.id, "swarm", "cancel").reason == close_reason("cancel")[1]
+
+
+def test_wake_settles_a_decided_event_with_its_reason(crew):  # noqa: F811
+    _, inbox, ledger, _ = crew
+    item = queue_event(crew, "questions", "added")
+    ledger.doc["questions"][0].update({"answers": [{"text": "Use port 8765", "by": "operator"}]})
+    wake_at(crew, item.created_at + 1)
+    assert inbox.get(item.id).reason == "done: decided on the ledger"
 
 
 def test_wake_passes_a_decided_event_closed_meanwhile(crew, race):  # noqa: F811
