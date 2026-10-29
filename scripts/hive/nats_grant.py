@@ -71,6 +71,7 @@ CONTROLLER_BUCKETS = (
     "inbox",
     "inbox-wake",
     "inbox_legacy",
+    "scheduler",
 )
 # Queue stream names hash the swarm and lane into one token, so stream level API grants take any stream name.
 CONTROLLER_PUBLISH = (
