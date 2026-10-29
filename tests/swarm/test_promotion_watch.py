@@ -392,6 +392,7 @@ def test_a_run_read_again_after_the_master_closed_its_alert_raises_no_fresh_aler
     refresh(store, ledger, gh([RED], JOBS))
     ledger.close_alert(SLUG, ledger.alerts[0]["id"], "judged")
     store.redis.delete(promotion_watch.key(SLUG, "seen"))
+    store.redis.hdel(promotion_watch.promotion_owner.key("/repo"), "seen")
     assert refresh(store, ledger, gh([RED], JOBS), NOW * 2) == []
     assert len(ledger.raised) == 1
 
