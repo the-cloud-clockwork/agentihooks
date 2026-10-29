@@ -245,6 +245,10 @@ def _record(slug, code, ledger, repo):
     return {"swarm": slug, "name": swarm_name(code), "ledger": ledger, "repo": repo}
 
 
+def _unless_held(value):
+    return lambda found: KEEP if found is not None else value
+
+
 def resolve_name(name):
     from hooks._redis import get_redis
 
@@ -370,14 +374,9 @@ class NameRegistry:
         for _ in range(MINT_ATTEMPTS):
             code = self.mint()
             record = _record(slug, code, ledger, repo)
-            if (
-                self.names_state.amend("codes", code, lambda found: KEEP if found else record, self._legacy_codes(code))
-                is not record
-            ):
+            if self.names_state.amend("codes", code, _unless_held(record), self._legacy_codes(code)) is not record:
                 continue
-            owner = self.names_state.amend(
-                "code-of", slug, lambda found: KEEP if found else code, self._legacy_code_of(slug)
-            )
+            owner = self.names_state.amend("code-of", slug, _unless_held(code), self._legacy_code_of(slug))
             if owner == code:
                 return code
             self.names_state.amend("codes", code, lambda _: None, self._legacy_codes(code))
@@ -387,8 +386,8 @@ class NameRegistry:
     def adopt(self, slug, code, ledger, repo):
         """Register a code the swarm record already carries, as after a restore into an emptied Redis."""
         record = _record(slug, code, ledger, repo)
-        self.names_state.amend("codes", code, lambda found: KEEP if found else record, self._legacy_codes(code))
-        self.names_state.amend("code-of", slug, lambda found: KEEP if found else code, self._legacy_code_of(slug))
+        self.names_state.amend("codes", code, _unless_held(record), self._legacy_codes(code))
+        self.names_state.amend("code-of", slug, _unless_held(code), self._legacy_code_of(slug))
 
     def swarm_slug(self, ref):
         """The ledger slug a swarm name `swarm@<code>` stands for while that swarm holds the code; ref otherwise."""

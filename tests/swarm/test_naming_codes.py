@@ -3,6 +3,7 @@ import json
 import pytest
 
 from scripts.events import memory
+from scripts.events.bus import StateConflict
 from scripts.events.config import BusConfig
 from scripts.events.redis_state import RedisStateStore
 from scripts.swarm import name_state, naming
@@ -79,13 +80,15 @@ def test_swarm_codes_written_before_the_move_still_read_and_release_hides_them(c
     names.release("sw")
     assert names.code_of("sw") == ""
     assert client.hget(_legacy("code-of"), "sw") == "abcdef"
+    assert RedisStateStore(client, name_state.BUCKET).get(name_state.state_key("code-of", "sw")).value == b""
 
 
-def test_a_code_held_only_before_the_move_is_never_minted_again(client, on_redis):
-    client.hset(_legacy("codes"), "abcdef", json.dumps({"swarm": "other"}))
+@pytest.mark.parametrize("held", [{"swarm": "other"}, {}])
+def test_a_code_held_only_before_the_move_is_never_minted_again(client, on_redis, held):
+    client.hset(_legacy("codes"), "abcdef", json.dumps(held))
     names = naming.NameRegistry(client, mint=iter(["abcdef", "123456"]).__next__)
     assert names.mint_code("sw", "sw", "/repo") == "123456"
-    assert names.swarm("abcdef") == {"swarm": "other"}
+    assert names.swarm("abcdef") == held
 
 
 def test_a_swarm_that_gained_a_code_meanwhile_keeps_it_and_frees_the_new_one(client, on_redis):
@@ -120,13 +123,15 @@ def test_adopt_keeps_a_code_already_registered(client, on_redis):
     assert names.code_of("sw") == "abcdef"
 
 
-def test_swarm_slug_keeps_the_ref_when_the_store_fails(client, on_redis, monkeypatch, caplog):
+@pytest.mark.parametrize("error", ["redis", OSError, StateConflict])
+def test_swarm_slug_keeps_the_ref_when_the_store_fails(client, on_redis, monkeypatch, caplog, error):
     from redis.exceptions import RedisError
 
     names = naming.NameRegistry(client, mint=lambda: "abcdef")
+    raised = RedisError if error == "redis" else error
 
     def down(*_):
-        raise RedisError("down")
+        raise raised("down")
 
     monkeypatch.setattr(names.names_state.shared, "get", down)
     assert names.swarm_slug("swarm@abcdef") == "swarm@abcdef"
