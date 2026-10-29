@@ -21,6 +21,7 @@ from scripts.swarm.commands import hive_id
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.events.bus import StateStore
     from scripts.hive.orders import Consumer
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
@@ -207,7 +208,7 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
     return redis.hlen(key) > 0
 
 
-def timer_state(waiter: "Redis"):
+def timer_state(waiter: "Redis") -> "StateStore":
     from scripts.events import state
     from scripts.events.redis_state import RedisStateStore
     from scripts.events.scheduler_state import open_scheduler_state

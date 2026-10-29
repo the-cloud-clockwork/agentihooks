@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from scripts.events.bus import StateStore
+    from scripts.swarm.store import RedisStore
 
 
 class Slot(Protocol):
@@ -53,7 +54,7 @@ def _inbox(state: "StateStore"):
     return store.connect() if redis is None else store.InboxStore(redis)
 
 
-def swarm_store(state: "StateStore"):
+def swarm_store(state: "StateStore") -> "RedisStore":
     from scripts.swarm import store
 
     redis = _legacy(state)
