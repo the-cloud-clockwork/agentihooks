@@ -1118,7 +1118,6 @@ def test_a_second_slow_failed_launch_spends_the_budget(store, monkeypatch):
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
 
 
-
 def test_a_spawn_claims_its_task_for_one_lease_and_records_its_seat_at_launch_time(store):
     from scripts.swarm.tick import LEASE_MS
 
