@@ -16,7 +16,7 @@
     "hooks.memory.cutover.shadow replays fixed questions through session_search and expands every hit with session_records under the same grant; an expected range counts as recalled only when each of its sequences was expanded",
     "ConsumerRoutes.qualify stores the shadow proof bound to consumer and grant under an operation id derived from the inputs and the outcome",
     "ConsumerRoutes.switch moves a consumer between local.v1 and session.v1 by compare and set on the route revision and only with an accepted proof for that consumer and grant",
-    "ConsumerRoutes.rollback restores the previous route as a new revision without touching capture, the catalog or stored proofs",
+    "ConsumerRoutes.rollback undoes the switch at the given revision by restoring the route accepted before it, as a new revision; only a switch can be rolled back, and capture, the catalog and stored proofs are untouched",
     "ConsumerRoutes.call dispatches to the routed endpoint, checks the request protocol major against the endpoint version and keeps alias expiry from hooks.memory.api.records"
   ],
   "metrics": "shadow_search_source_recall is recalled expected ranges over expected ranges for the fixture questions; case A observed 1.0 over two questions and two ranges, case B observed 0.0 for the unexpandable consumer",
@@ -34,6 +34,7 @@
     "No consumer outside agentihooks routes through ConsumerRoutes yet.",
     "Route changes are authorized by the caller grant; the route store has no separate operator role."
   ],
+  "repeat": "case A runs a second fixture whose session identities differ from the first, in its own folder, and compares the outcomes with operation ids set aside",
   "rollback_rehearsal": "case C switched the consumer, restarted the route store, captured a new turn, rolled back to local.v1 at revision 2, replayed the rollback with the same result, kept the shadow proof and refused the stale switch",
   "status": "fixture_verified",
   "supported_versions": {

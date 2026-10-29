@@ -26,8 +26,12 @@ FIXTURE_INPUTS = {
 }
 
 
-def bank(root: Path) -> Bank:
-    return Bank(json.loads(FIXTURE.read_text()), root)
+def bank(root: Path, native: str | None = None) -> Bank:
+    inputs = json.loads(FIXTURE.read_text())
+    if native:
+        for item in inputs["sessions"]:
+            item["session_uid"] = f"{item['session_uid'].rsplit(':', 1)[0]}:{native}-{item['name']}"
+    return Bank(inputs, root)
 
 
 def questions(found: Bank) -> list[dict]:
@@ -74,18 +78,24 @@ def _dispatch(found: Bank, routes: ConsumerRoutes, name: str, at: float) -> dict
 
 
 def case_a(root: Path) -> dict:
-    runs = []
-    for name in ("first", "second"):
-        found = bank(root / name)
+    runs = {}
+    for name, native in (("first", None), ("second", "independent")):
+        found = bank(root / name, native)
         allowed = grant(found.inputs)
         routes = ConsumerRoutes(root / name / "routes.sqlite3")
         proof = routes.qualify(found.tools, allowed, CONSUMER, questions(found), now(found))
         switched = routes.switch(allowed, CONSUMER, SESSION, 0, proof["operation_id"])
-        runs.append(
-            {"proof": proof, "route": switched, "dispatch": _dispatch(found, routes, "session_search", now(found))}
-        )
+        runs[name] = {
+            "proof": proof,
+            "route": switched,
+            "dispatch": _dispatch(found, routes, "session_search", now(found)),
+        }
         routes.close()
-    return {"case": "A", "independent_runs_equal": runs[0] == runs[1], "run": runs[0]}
+    outcomes = [
+        {**run, "proof": {**run["proof"], "operation_id": None}, "route": {**run["route"], "operation_id": None}}
+        for run in runs.values()
+    ]
+    return {"case": "A", "independent_outcomes_equal": outcomes[0] == outcomes[1], "runs": runs}
 
 
 def case_b(root: Path) -> dict:

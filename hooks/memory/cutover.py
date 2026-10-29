@@ -153,8 +153,8 @@ class ConsumerRoutes:
         current = self.route(grant, consumer)
         if current["revision"] == expected + 1 and current["action"] == "rollback":
             return current
-        if expected < 1:
-            raise ValueError("there is no earlier route to restore")
+        if current["action"] != "switch":
+            raise ValueError("there is no switched route to roll back")
         row = self.db.execute(PREVIOUS, (grant.corpus, consumer, expected - 1)).fetchone()
         previous = row[0] if row else LOCAL
         return self._write(grant, consumer, expected, (previous, "rollback", current["operation_id"]))

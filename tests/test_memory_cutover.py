@@ -1,4 +1,3 @@
-import copy
 import hashlib
 import json
 from pathlib import Path
@@ -43,7 +42,10 @@ def replay(bank):
 
 
 def test_shadow_resolves_source_ranges_in_two_independent_catalogs(bank, tmp_path):
-    second = Bank(copy.deepcopy(bank.inputs), tmp_path / "independent")
+    second = cases.bank(tmp_path / "independent", "independent")
+    assert {item["session_uid"] for item in second.inputs["sessions"]}.isdisjoint(
+        item["session_uid"] for item in bank.inputs["sessions"]
+    )
     for instance in (bank, second):
         answer = replay(instance)
         assert answer["state"] == "accepted"
@@ -205,20 +207,23 @@ def test_consumer_dispatch_uses_versioned_route_and_expiring_aliases(bank, tmp_p
     routes.close()
 
 
-def test_rollback_restores_the_route_held_before_the_given_revision(bank, tmp_path):
+def test_rollback_restores_the_last_accepted_route_before_the_switch(bank, tmp_path):
     routes = ConsumerRoutes(tmp_path / "routes.sqlite3")
     allowed = grant(bank.inputs)
-    with pytest.raises(ValueError, match="no earlier route to restore"):
+    with pytest.raises(ValueError, match="no switched route to roll back"):
         routes.rollback(allowed, "keeper", 0)
-    proof = routes.qualify(bank.tools, allowed, "keeper", questions(bank), 5000.0)
-    routes.switch(allowed, "keeper", "session.v1", 0, proof["operation_id"])
-    with pytest.raises(ValueError, match="no earlier route to restore"):
-        routes.rollback(allowed, "keeper", 0)
-    with pytest.raises(ValueError, match="the route changed since the given revision"):
-        routes.rollback(allowed, "keeper", 2)
+    proof = routes.qualify(bank.tools, allowed, "keeper", questions(bank), 5000.0)["operation_id"]
+    routes.switch(allowed, "keeper", "session.v1", 0, proof)
+    for stale in (0, 2):
+        with pytest.raises(ValueError, match="the route changed since the given revision"):
+            routes.rollback(allowed, "keeper", stale)
     assert routes.rollback(allowed, "keeper", 1)["endpoint"] == "local.v1"
-    again = routes.rollback(allowed, "keeper", 2)
-    assert (again["endpoint"], again["revision"], again["action"]) == ("session.v1", 3, "rollback")
+    with pytest.raises(ValueError, match="no switched route to roll back"):
+        routes.rollback(allowed, "keeper", 2)
+    routes.switch(allowed, "keeper", "session.v1", 2, proof)
+    routes.switch(allowed, "keeper", "local.v1", 3, proof)
+    again = routes.rollback(allowed, "keeper", 4)
+    assert (again["endpoint"], again["revision"], again["action"]) == ("session.v1", 5, "rollback")
     routes.close()
 
 
