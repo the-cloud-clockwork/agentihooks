@@ -940,7 +940,7 @@ class HerdrRuntime:
             desired_route_kind=agent.desired_route_kind,
         )
 
-    def operator(self, config, name, profile, text, agent=""):
+    def operator(self, config: SwarmConfig, name: str, profile: str, text: str, agent: str = "") -> Placed:
         """Open a session for the operator in the swarm's space, bound to the swarm with no task or lane slot."""
         environ = dict(os.environ)
         if plugins.claude_only(profile):

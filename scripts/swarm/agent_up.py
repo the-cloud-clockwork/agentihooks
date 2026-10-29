@@ -1,10 +1,14 @@
 """Launch any role or overlay profile on a swarm for the operator: a name from code, no task and no lane slot."""
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from hooks.context import profile_chain
 from scripts.swarm import prompt
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm.store import MASTER, RedisStore, SwarmError
+
+if TYPE_CHECKING:
+    from scripts.swarm.runtime import HerdrRuntime
 
 KINDS = {"planner": "plan", "engineer": "eng", "qa": "eng", "cicd": "ci", "documentation": "eng"}
 
@@ -44,7 +48,7 @@ def resolve(profile):
     return Resolved(profile, role, KINDS[role])
 
 
-def up(store, slug, runtime, profile, at, agent=""):
+def up(store: RedisStore, slug: str, runtime: "HerdrRuntime", profile: str, at: int, agent: str = "") -> "Launched":
     found = resolve(profile)
     config = store.ensure_code(slug)
     name = store.next_name(slug, found.lane, at)
