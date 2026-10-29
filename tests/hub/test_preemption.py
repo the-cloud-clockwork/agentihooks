@@ -32,7 +32,7 @@ def rig():
     found = rows()
     ledger = SimpleNamespace(
         metadata=lambda slug: {"_meta": {"rev": 1}},
-        state=lambda slug: {"tasks": list(found.values()), "phases": [], "freezes": []},
+        state=lambda slug: {SLUG: {"tasks": list(found.values()), "phases": [], "freezes": []}}[slug],
     )
     now = SimpleNamespace(ms=1_000)
     reactor = preemption.Preemption(store, ledger, clock=lambda: now.ms)
@@ -54,14 +54,31 @@ def test_the_hub_registers_preemption_as_a_singleton_poll():
     from scripts.events.config import BusConfig
     from scripts.events.memory import open_bus
 
+    def clock():
+        return 5
+
     bus = open_bus(BusConfig())
     try:
-        found = {reactor.name: reactor for reactor in registry.configured(bus)}
+        found = {reactor.name: reactor for reactor in registry.configured(bus, clock)}
     finally:
         bus.close()
     reactor = found["preemption"]
-    assert reactor.singleton and reactor.poll is not None
+    assert reactor.singleton and reactor.poll.__self__._clock is clock
     assert reactor.subject == "swarm.*.preemption.requested"
+    assert reactor.handler(None) is None
+
+
+def test_a_hub_without_a_ledger_reads_through_a_service_ledger_client(rig, monkeypatch):
+    made = []
+    monkeypatch.setattr(preemption, "LedgerClient", lambda **kwargs: made.append(kwargs) or rig.reactor._ledger)
+    reactor = preemption.Preemption(rig.store, clock=lambda: 1_000)
+    reactor.poll()
+    assert made == [{"service": True}]
+
+
+def test_a_hub_started_at_time_zero_preempts_one_interval_later(rig):
+    poll_at(rig, 0, preemption.INTERVAL_MS)
+    assert len(asks(rig.store, "e2")) == 1
 
 
 def test_an_urgent_task_still_waiting_a_tick_later_asks_the_lowest_holder_and_logs_it(rig, capsys):
