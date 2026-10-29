@@ -346,9 +346,12 @@ class RedisStore:
     def ensure_claim(self, slug: str, agent: AgentRecord, lease_ms: int) -> bool:
         from redis.exceptions import WatchError
 
+        from scripts.swarm import fencing
+
         key = self.key(slug, "claim", agent.task)
         with self.redis.pipeline() as pipe:
             try:
+                fencing.watch(self, pipe)
                 pipe.watch(key, self.key(slug, "agents"))
                 current = next((a for a in self.agents(slug) if a.name == agent.name), None)
                 if current != agent or agent.state not in ("starting", "working", "awaiting-decision"):

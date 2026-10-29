@@ -81,9 +81,19 @@ def test_renew_retries_a_conflicting_transaction(store, clock, monkeypatch):
             return real.update(key, value, revision)
 
     monkeypatch.setattr(fencing.state, "for_store", lambda *args, **kwargs: Racing())
-    clock[0] = 2000
-    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 182000)
+    clock[0] = 70000
+    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 250000)
     assert conflicts == []
+
+
+def test_a_renewal_within_one_tick_of_the_last_writes_nothing(store, clock):
+    held = lease.acquire(store, "sw", "home")
+    before = fencing.state.for_store(store, fencing.BUCKET).get("sw").revision
+    clock[0] = 61000
+    assert lease.renew(store, "sw", held) == held
+    assert fencing.state.for_store(store, fencing.BUCKET).get("sw").revision == before
+    clock[0] = 61001
+    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 241001)
 
 
 def test_a_tick_slower_than_the_lease_keeps_writing(store, clock):

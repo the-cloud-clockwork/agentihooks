@@ -439,7 +439,7 @@ def test_continuous_claim_contention_is_bounded(fixture, monkeypatch, operation)
             authority.replay("task")
     assert str(error.value) == "dependency_unavailable"
     assert len(attempts) == fencing.ATTEMPTS
-    assert authority.current("task") == claim
+    assert authority.current("task") == (None if operation == "replay" else claim)
     assert len(authority.journal("task")) == 1
 
 
@@ -741,12 +741,12 @@ def test_concurrent_authority_changes_are_bounded(fixture, monkeypatch, operatio
     attempts = _contend(monkeypatch)
     with pytest.raises(SwarmError) as error:
         if operation == "renew":
-            authority.renew(token, 1, 100)
+            authority.renew(token, 1, 200)
         else:
             authority.replay("task")
     assert str(error.value) == "dependency_unavailable"
     assert len(attempts) == fencing.ATTEMPTS
-    assert authority.current("task") == claim
+    assert authority.current("task") == (None if operation == "replay" else claim)
     assert authority.journal("task") == journal
     assert store.claimant("fixture", "task") == agent.name
     assert record

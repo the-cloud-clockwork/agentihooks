@@ -4,6 +4,7 @@ import time
 
 import pytest
 
+from scripts.swarm import fencing
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
 
@@ -145,7 +146,8 @@ def test_lease_repair_rejects_a_concurrent_ownership_change(store, monkeypatch, 
     def admit_concurrently():
         if not fired:
             fired.append(True)
-            store.start_execution("smoke", owner)
+            row = {**asdict(owner), "execution_id": "exe-race", "generation": 1, "seat": "eng-1@smoke"}
+            fencing.write(store, "smoke", lambda doc: doc["executions"].update({"exe-race": row}))
 
     changes = {
         "lease": lambda: store.redis.set(store.key("smoke", "claim", "t1"), "successor"),
