@@ -29,8 +29,17 @@ class RedisStateStore:
         self._revision = f"{base}:revision"
         self._history = f"{base}:history:"
 
+    @property
+    def watch_key(self) -> str:
+        return self._current
+
     def get(self, key: str) -> StateEntry | None:
         return _entry(key, self.redis.hget(self._current, key))
+
+    def get_many(self, keys: list[str]) -> list[StateEntry | None]:
+        if not keys:
+            return []
+        return [_entry(key, raw) for key, raw in zip(keys, self.redis.hmget(self._current, keys))]
 
     def create(self, key: str, value: bytes) -> int:
         return self._write(key, value, None, f"state key {key!r} exists")

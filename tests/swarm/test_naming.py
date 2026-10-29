@@ -64,7 +64,7 @@ def test_a_clashing_code_is_minted_again(redis):
 
 def test_an_existing_swarm_without_a_code_gets_one(store):
     store.redis.hset(store.key("sw", "config"), "code", "")
-    store.redis.hdel(naming.NameRegistry.key("code-of"), "sw")
+    store.names.release("sw")
     assert store.ensure_code("sw").code
     assert store.config("sw").code == store.ensure_code("sw").code
 
@@ -190,7 +190,7 @@ def test_a_swarm_without_a_code_gets_one_at_its_next_tick_and_spawns_new_names(s
     from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
     store.redis.hset(store.key("sw", "config"), "code", "")
-    store.redis.hdel(naming.NameRegistry.key("code-of"), "sw")
+    store.names.release("sw")
     rt = FakeRuntime()
     tick("sw", store, FakeLedger([{"id": "t1"}]), rt, 1_000)
     code = store.config("sw").code
@@ -382,7 +382,9 @@ def test_resolve_many_keeps_every_name_when_redis_fails(redis, monkeypatch, capl
     ]
 
 
-def test_slugs_of_answers_slug_of_for_every_name_in_two_reads(store, redis, monkeypatch):
+def test_slugs_of_answers_slug_of_for_every_name_with_one_legacy_read_for_codes_the_store_lacks(
+    store, redis, monkeypatch
+):
     store.create(SwarmConfig("other", "/home/x/dev/other", max_eng=1, max_ci=1))
     mine, theirs = store.next_name("sw", "eng"), store.next_name("other", "ci")
     store.names.alias("sw-eng-1", mine)
@@ -395,7 +397,7 @@ def test_slugs_of_answers_slug_of_for_every_name_in_two_reads(store, redis, monk
         monkeypatch.setattr(redis, command, lambda *a, real=real, command=command: reads.append(command) or real(*a))
     assert naming.NameRegistry(redis).slugs_of(names) == expected
     assert expected == {"sw-eng-1": "sw", mine: "sw", theirs: "other", "sw-ci-2": "sw", "stranger": "", orphan: ""}
-    assert reads == ["mget", "hmget"]
+    assert reads == ["mget", "hmget", "hmget"]
     reads.clear()
     assert naming.NameRegistry(redis).slugs_of(["stranger"]) == {"stranger": ""}
     assert reads == ["mget"]
