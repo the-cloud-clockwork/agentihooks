@@ -227,7 +227,9 @@ def agent_member(redis, token: str, slug: str, name: str) -> str | None:
         if scoped["scope"] != [slug, name]:
             return None
         digest = scoped["ledger"]
-        current = hive_state.read(store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}")))
+        current = hive_state.read(
+            store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
+        )
         return member_id if current == member_id else None
     scope = (member(redis, member_id) or {}).get("agents", {}).get(_digest(token))
     return member_id if scope == [slug, name] else None
