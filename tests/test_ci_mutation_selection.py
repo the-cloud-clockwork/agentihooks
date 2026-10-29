@@ -17,6 +17,11 @@ def _no_pytest(self, params, **kwargs):
     return 0
 
 
+def _refuse_named(mutant_name, error):
+    if mutant_name == "refused":
+        raise error(mutant_name)
+
+
 @pytest.mark.parametrize("lines", [{1}, {2}, {2, 5}])
 def test_gate_runs_only_changed_line_mutants_including_untested_code(tmp_path, monkeypatch, lines):
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
@@ -220,12 +225,14 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     engine.duration_by_test["tests/test_other.py::test_o"] = 3
     engine.duration_by_test["tests/test_sample.py::TestCase::test_m"] = 0
     test_calls = []
+    refused = type("Refused", (Exception,), {})
 
     class PytestRunner:
         execute_pytest = _no_pytest
 
         def run_tests(self, *, mutant_name, tests):
             assert isinstance(self, PytestRunner)
+            _refuse_named(mutant_name, refused)
             test_calls.append((mutant_name, tests))
             return 9
 
@@ -236,6 +243,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         SourceFileMutationData=mutation_data,
         Config=SimpleNamespace(get=lambda: config),
         PytestRunner=PytestRunner,
+        BadTestExecutionCommandsException=refused,
         mutmut=engine,
     )
     mutmut = SimpleNamespace(__main__=runner)
@@ -318,6 +326,9 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
             ("m", ["tests/test_y.py::t"]),
         ]
         _assert_units_run_their_own_tests(monkeypatch, selection_module, runner, test_calls)
+        with monkeypatch.context() as planned:
+            planned.setattr(selection_module, "shard_tests", lambda tests, name, index: tests)
+            assert runner.PytestRunner().run_tests(mutant_name="refused", tests=["tests/test_z.py::t"]) == 1
         data.exit_code_by_key = {}
         with pytest.raises(SystemExit) as empty:
             runner.collect_or_load_stats(test_runner)
@@ -1325,6 +1336,24 @@ def test_gate_mutates_a_function_its_module_calls_at_import(tmp_path, monkeypatc
     (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n\nLOADED = value(1)\n")
     (tmp_path / "tests/test_sample.py").write_text(
         "from scripts.sample import LOADED, value\n\ndef test_value():\n    assert LOADED == 2\n    assert value(1) == 2\n"
+    )
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
+    assert report["not_mutated"] == []
+    assert report["failed"] is False
+    assert report["files"][0]["counts"] == {"killed": 2}
+
+
+def test_a_mutant_that_renames_its_selected_test_ids_is_killed_within_the_budget(tmp_path, monkeypatch):
+    _gate_tree(tmp_path, monkeypatch)
+    (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n")
+    (tmp_path / "tests/test_sample.py").write_text(
+        "import os\nimport threading\n\nimport pytest\n\nfrom scripts.sample import value\n\n"
+        "NUMBER = value(1)\n"
+        # A test server thread left running keeps a mutant child alive unless it leaves through os._exit.
+        "if '__mutmut_' in os.environ.get('MUTANT_UNDER_TEST', ''):\n"
+        "    threading.Thread(target=threading.Event().wait).start()\n\n"
+        "@pytest.mark.parametrize('number', [NUMBER])\n"
+        "def test_value(number):\n    assert number == 2\n"
     )
     report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
     assert report["not_mutated"] == []
