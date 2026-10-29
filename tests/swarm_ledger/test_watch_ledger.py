@@ -111,6 +111,7 @@ def live(monkeypatch):
     yield base
     httpd.shutdown()
     httpd.server_close()
+    assert server.HUB.watched() == []
 
 
 def test_stream_reads_the_snapshot_with_the_header_credential(live):
