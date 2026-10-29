@@ -7,10 +7,13 @@ from dataclasses import replace
 import pytest
 
 from scripts import openbao_kv
+from scripts.handoff import transfers
+from scripts.handoff.transfers import first_next
 from scripts.hive import auth, cli, create, machine, registry, remove
 from scripts.hive.placement import choose, place_master
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord
+from scripts.swarm_ledger.ledger_workspace import folder
 
 PUBLIC = "redis://hive.example:6380/2"
 TARGET = "ssh://worker@10.10.30.207:2222"
@@ -35,6 +38,16 @@ class Swarm:
     def __init__(self, redis):
         self.redis = redis
         self.rows = []
+        self.handoffs = {}
+
+    def key(self, slug, *parts):
+        return ":".join(["swarm", slug, *parts])
+
+    def handoff(self, slug, task):
+        return self.handoffs.get((slug, task), ("", ""))[0]
+
+    def put_handoff(self, slug, task, text, seat=""):
+        self.handoffs[(slug, task)] = (text, seat)
 
     def slugs(self):
         return [SLUG] if self.rows else []
@@ -384,7 +397,7 @@ def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_a
 
     settled = remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
 
-    assert settled == f"hive {member} drained: no agents running, 1 ordered to hand off"
+    assert settled == f"hive {member} drained: every agent handed off, 1 ordered to hand off"
     assert (clock.now, clock.slept) == (2 * remove.POLL_S, 2)
     assert registry.show(store.redis, member)["draining"] == "yes"
     orders = _orders(store, SEAT)
@@ -402,7 +415,7 @@ def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
 
     settled = remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
 
-    assert settled == f"hive {member} drained: no agents running, 0 ordered to hand off"
+    assert settled == f"hive {member} drained: every agent handed off, 0 ordered to hand off"
     assert clock.slept == 0
     assert _orders(store, SEAT) == []
 
@@ -430,12 +443,12 @@ def test_a_release_roll_ends_its_drain_one_poll_after_its_agents_obey_the_order_
 
     settled = remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
 
-    assert settled == f"hive {member} drained: no agents running, 2 ordered to hand off"
+    assert settled == f"hive {member} drained: every agent handed off, 2 ordered to hand off"
     assert (clock.now, clock.slept) == (remove.POLL_S, 1)
     assert remove.hosted(store, member) == []
 
 
-def test_a_stopping_hive_gives_up_on_its_agents_at_the_deadline(store, tmp_path):
+def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_at_the_deadline(store, tmp_path):
     member = _member(store)
     _agent(store, member)
     store.put_agent(SLUG, AgentRecord("engineer@2", "eng", "t2", seat=f"eng-2@{SLUG}", hive=member))
@@ -443,9 +456,44 @@ def test_a_stopping_hive_gives_up_on_its_agents_at_the_deadline(store, tmp_path)
 
     settled = remove.settle(store, member, 30, _host(clock, Run(), tmp_path))
 
-    assert settled == f"hive {member} stops after 30 seconds with engineer@1, engineer@2 still running"
+    assert settled == (
+        f"hive {member} stops after 30 seconds; engineer@1, engineer@2 did not hand off, "
+        "so each got a recovery handoff and its task reopens"
+    )
     assert (clock.now, clock.slept) == (30, 2)
     assert [len(_orders(store, seat)) for seat in (SEAT, f"eng-2@{SLUG}")] == [1, 1]
+    for name, task, seat in (("engineer@1", "t1", SEAT), ("engineer@2", "t2", f"eng-2@{SLUG}")):
+        text = remove.RECOVERY.format(name=name, task=task, hive=member, wait=30, folder=folder(SLUG, task))
+        assert store.handoffs[(SLUG, task)] == (text, seat)
+        transfer = next(row for row in transfers.list_transfers(store, SLUG) if row["task"] == task)
+        assert (transfer["predecessor"], transfer["seat"], transfer["reason"]) == (name, seat, "exit")
+        assert transfer["handoff"] == text
+        assert transfer["next"] == first_next(text)
+
+
+def test_an_agent_with_a_recorded_handoff_no_longer_holds_the_drain_and_keeps_its_document(store, tmp_path):
+    member = _member(store)
+    _agent(store, member)
+    store.put_handoff(SLUG, "t1", "his own document", seat=SEAT)
+    clock = Clock(store, member, 99)
+
+    settled = remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
+
+    assert settled == f"hive {member} drained: every agent handed off, 0 ordered to hand off"
+    assert clock.slept == 0
+    assert store.handoffs[(SLUG, "t1")] == ("his own document", SEAT)
+    assert transfers.list_transfers(store, SLUG) == []
+
+
+def test_an_agent_with_no_task_gets_no_recovery_handoff(store, tmp_path):
+    member = _member(store)
+    store.put_agent(SLUG, AgentRecord("engineer@3", "eng", "", seat=f"eng-3@{SLUG}", hive=member, state="working"))
+
+    settled = remove.settle(store, member, 0, _host(Clock(store, member, 99), Run(), tmp_path))
+
+    assert settled == f"hive {member} stops after 0 seconds with engineer@3 still running and no task to hand off"
+    assert store.handoffs == {}
+    assert transfers.list_transfers(store, SLUG) == []
 
 
 def test_a_stopping_hive_with_no_record_is_refused_and_never_recorded(store, tmp_path):
