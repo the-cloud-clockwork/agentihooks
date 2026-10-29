@@ -14,6 +14,17 @@ WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
 PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control", "desired_route_kind")
 ARCHIVE = "executions-archive"
+LAUNCH_BINDING = (
+    "runtime_target",
+    "pane_id",
+    "account",
+    "model",
+    "effort",
+    "profile_decision",
+    "launched_at",
+    "launch_timings",
+    "overlays",
+)
 WRITES: dict[str, threading.RLock] = {}
 
 
@@ -358,6 +369,8 @@ class ExecutionRegistry:
                     current = self.occupants(slug, pipe).get(agent.seat)
                     if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                         self.conflict(slug, "stale or changed execution identity")
+                    if _read_before_ack(agent.runtime_target, current.runtime_target):
+                        agent = replace(agent, **{field: getattr(current, field) for field in LAUNCH_BINDING})
                     _check_binding(
                         current.runtime_target, agent.runtime_target, lambda message: self.conflict(slug, message)
                     )
@@ -486,6 +499,10 @@ def _check_binding(previous, current, refuse):
             continue
         if previous.get(field) != current.get(field):
             refuse("runtime target identity is immutable after binding")
+
+
+def _read_before_ack(written, stored):
+    return set(written) == {"host_id"} and stored != written and stored.get("host_id") == written["host_id"]
 
 
 def _has_identity(agent):
