@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.480 · 2026-10-29
+
+### 2026-10-29 · 0a112ea5e313 · #8738 · @agenticore-app
+
+**Skip promotion red fixers for checks a newer dev run already passed**
+
+This change makes the promotion step smarter about red-to-green test fixing by checking whether a more recent development run has already passed a given check; if so, the promotion red fixer skips re-fixing it, avoiding redundant work and wasted cycles chasing failures that newer runs have already resolved. It closes issue #8735 and ships as a tests-only commit, with the actual fix link to follow, reducing noise and saving compute by trusting fresher passing evidence over stale red results.
+
+### 2026-10-29 · 4169a5862712 · #8707 · @agenticore-app
+
+**Use the runner wheelhouse for selected shard setup**
+
+Selected pull request shards now reuse the pinned uv installer and runner wheelhouse instead of restoring a 123 MB dependency cache, cutting a median 9-second step on self-hosted runners while keeping the same constraints, virtual environment, PyPI fallback, and test commands; hosted runners are unaffected and keep their existing cache path. A one-run pilot (40870061916) showed a 59-second test-to-job difference versus the 60-second target, but this doesn't replace the required ten-run after-merge validation, which is still pending alongside an unrelated, separately owned locked-manifest CI blocker.
+
 ## v2.17.479 · 2026-10-29
 
 ### 2026-10-29 · e00e4d101c45 · #8759 · @agenticore-app
