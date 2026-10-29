@@ -192,4 +192,3 @@ def test_a_restore_that_matched_nothing_saves_a_seed_the_history_prefix_never_re
     assert prefixes == ["flake-history-", "flake-seed-"]
     save = steps["Save the flake history"]["with"]["key"]
     assert "|| 'flake-seed' }}-" in save
-    assert not "flake-seed-".startswith(prefixes[0])
