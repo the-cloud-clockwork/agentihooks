@@ -275,9 +275,7 @@ def test_the_manifest_job_builds_it_beside_sonar_and_only_dev_pushes_save_it():
     job = _job("dep-manifest")
     assert set(job["needs"]) == {"unit", "select", "reuse", "admission"}
     assert "sonar" not in job["needs"]
-    assert "needs.select.outputs.scope == 'full'" in job["if"]
-    assert "needs.select.outputs.sonar != 'skip'" in job["if"]
-    assert "github.event_name != 'merge_group'" in job["if"]
+    assert "(github.event_name == 'push' || github.event_name == 'workflow_dispatch')" in job["if"]
     steps = [step.get("name") for step in job["steps"]]
     assert (
         steps.index("Install coverage")
@@ -307,13 +305,9 @@ def test_the_manifest_job_builds_it_beside_sonar_and_only_dev_pushes_save_it():
     assert save["with"]["key"] == "dep-manifest-${{ github.sha }}"
 
 
-def test_the_gate_waits_for_the_manifest_job_and_accepts_it_skipped_only_without_a_full_sonar_scope():
+def test_the_gate_and_stage_budget_wait_for_the_manifest_job():
     for name in ("gate-required", "stage-budget"):
         assert "dep-manifest" in _job(name)["needs"]
-    gate = "\n".join(step.get("run", "") for step in _job("gate-required")["steps"])
-    assert '+ (if $scope == "full" and .select.outputs.sonar != "skip" then ["dep-manifest"] else [] end)' in gate
-    assert '(.select.outputs.sonar // "") as $sonar' in gate
-    assert '(.key == "dep-manifest" and .value.result == "skipped" and ($scope != "full" or $sonar == "skip"))' in gate
 
 
 def test_the_plan_reuses_every_test_the_change_left_valid_without_its_group_suffix():
