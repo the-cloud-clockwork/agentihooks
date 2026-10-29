@@ -134,6 +134,7 @@ def _launches(source: str, comment: str) -> bool:
     return bool(_LAUNCH.search(_strip(source, comment, _named_literal)))
 
 
+@functools.cache
 def _launched_literal(runners: re.Pattern) -> re.Pattern:
     runner, attached = runners.pattern, runners.pattern.removeprefix(r"\b")
     return re.compile(
