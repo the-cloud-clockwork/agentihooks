@@ -11,6 +11,7 @@ from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig
 
 RUNS = "repos/{owner}/{repo}/actions/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=20"
+NEWER_RUNS = "repos/{owner}/{repo}/actions/workflows/test.yml/runs?branch=dev&event=push&per_page=20"
 JOBS_JQ = ".jobs[] | {id, name, conclusion, check_run_url, steps} | @json"
 SHA = "c0ffee" + "0" * 34
 RED = {"id": 900, "conclusion": "failure", "head_sha": SHA, "html_url": "https://github.com/o/r/actions/runs/900"}
@@ -270,6 +271,7 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
             ],
             kwargs,
         ),
+        (["gh", "api", NEWER_RUNS, "--jq", ".workflow_runs[] | {id, head_sha} | @json"], kwargs),
     ]
     assert {(slug, by) for slug, _, by in ledger.added} == {(SLUG, "swarm")}
     assert [fields for _, fields, _ in ledger.added] == [
@@ -321,6 +323,71 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
         "and raised a promotion alert: https://github.com/o/r/actions/runs/900"
     ]
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "900"
+
+
+NEWER = {"id": 902, "head_sha": "a" * 40}
+
+
+def history(newer, jobs_by_run, compare="ahead", calls=None):
+    def run(argv, **kwargs):
+        endpoint = argv[2]
+        if calls is not None:
+            calls.append(endpoint)
+        if "/compare/" in endpoint:
+            body = [{"status": compare}]
+        elif "/jobs" in endpoint:
+            body = jobs_by_run[int(endpoint.split("/runs/")[1].split("/")[0])]
+        elif endpoint == NEWER_RUNS:
+            body = newer
+        else:
+            body = [RED]
+        return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(item) for item in body), "")
+
+    return run
+
+
+PASSED = [{"name": "helm-kind", "conclusion": "success"}, {"name": "unit (3.11, 1)", "conclusion": "success"}]
+
+
+def test_an_older_red_run_files_nothing_for_checks_a_newer_run_containing_its_head_already_passed(store):
+    calls, ledger = [], Ledger()
+    actions = refresh(store, ledger, history([NEWER, RED], {900: JOBS, 902: PASSED}, calls=calls))
+    assert f"repos/{{owner}}/{{repo}}/compare/{SHA}...{NEWER['head_sha']}" in calls
+    assert ledger.added == [] and ledger.raised == [] and master_items(store) == []
+    assert actions == ["dev push run 900 failed only on checks a newer dev push run already passed"]
+    assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "900"
+
+
+def test_an_older_red_run_still_files_the_checks_no_newer_run_passed(store):
+    ledger = Ledger()
+    newer_jobs = [{"name": "helm-kind", "conclusion": "success"}, {"name": "unit (3.11, 1)", "conclusion": "failure"}]
+    refresh(store, ledger, history([NEWER], {900: JOBS, 902: newer_jobs}))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: unit (3.11, 1)"]
+    assert len(ledger.raised) == 1
+
+
+def test_a_red_run_on_the_newest_head_still_files_every_failed_check(store):
+    ledger = Ledger()
+    refresh(store, ledger, history([RED], {900: JOBS}))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: helm-kind",
+        "Promotion red: unit (3.11, 1)",
+    ]
+    assert len(ledger.raised) == 1
+
+
+@pytest.mark.parametrize("status", ["behind", "diverged"])
+def test_a_newer_run_whose_head_does_not_contain_the_red_head_does_not_hold_its_checks(store, status):
+    ledger = Ledger()
+    refresh(store, ledger, history([NEWER], {900: JOBS, 902: PASSED}, compare=status))
+    assert len(ledger.added) == 2 and len(ledger.raised) == 1
+
+
+def test_a_newer_run_on_the_same_head_holds_the_checks_it_passed_without_a_compare(store):
+    calls, ledger = [], Ledger()
+    refresh(store, ledger, history([{"id": 902, "head_sha": SHA}], {900: JOBS, 902: PASSED}, calls=calls))
+    assert ledger.added == [] and ledger.raised == []
+    assert not any("/compare/" in endpoint for endpoint in calls)
 
 
 def test_a_job_with_an_open_promotion_task_is_not_filed_again_and_done_ones_are_forgotten(store):
