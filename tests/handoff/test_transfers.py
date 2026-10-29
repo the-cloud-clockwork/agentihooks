@@ -98,6 +98,17 @@ def test_a_launched_successor_missing_from_the_live_names_is_absent(setup):
     assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "absent"
 
 
+def test_a_hive_successor_is_live_from_seat_occupancy_without_a_workstation_session(setup):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2", state="working", launched_at=40, hive="hive-1")
+    store.put_agent("sw", new)
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    transfers.observe(store, "sw", set())
+    assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "live"
+
+
 def test_a_live_binding_is_kept_when_the_successor_later_leaves_the_live_names(setup):
     store, old = setup
     transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
