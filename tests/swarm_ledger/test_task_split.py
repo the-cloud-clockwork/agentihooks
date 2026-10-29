@@ -188,6 +188,24 @@ def test_task_set_preserves_bracketed_territory_as_a_comma_list(monkeypatch):
     assert sent == [{"item": "tasks/t1", "fields": {"territory": ["[local]", "remote"]}}]
 
 
+def test_task_set_stores_parked_on_as_a_list(monkeypatch):
+    from scripts.swarm_ledger import ledger
+
+    core.sync(SLUG, ops=[{"op": "task_add", "id": "seed-2", "by": "swarm", "task": "t2", "title": "two", "lane": "eng"}])
+
+    def send(args, kind, **fields):
+        operation = ledger.op(kind, args, **fields)
+        ledger_tasks.check(operation)
+        state, rejected = core.sync(SLUG, ops=[operation])
+        assert rejected == []
+        assert row(state, "r1")["parked_on"] == ["t1", "t2"]
+
+    monkeypatch.setattr(ledger, "send", send)
+    args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", MASTER, "task", "set", "r1", "parked_on=t1,t2"])
+    ledger.cmd_task(args)
+    assert row(core.sync(SLUG)[0], "r1")["parked_on"] == ["t1", "t2"]
+
+
 def test_task_split_cli_sends_the_ordered_halves(monkeypatch, capsys):
     from scripts.swarm_ledger import ledger
 
