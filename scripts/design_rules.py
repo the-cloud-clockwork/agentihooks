@@ -13,6 +13,7 @@ ROOTS = frozenset(
 )
 PLAIN_DICTS = frozenset({"dict", "Dict", "Mapping", "MutableMapping"})
 CONFIG_NAME = re.compile(r"(^|_)(config|conf|cfg|settings|options|opts|params)$")
+RECEIVERS = frozenset({"self", "cls"})
 
 
 @dataclass
@@ -25,11 +26,9 @@ class Module:
 
 @dataclass(frozen=True)
 class Unit:
-    signature: str
+    signature: tuple[str, ...]
     node: ast.AST
-    module: str
     public: bool
-    method: bool
 
 
 def _module_name(rel: str) -> tuple[str, str]:
@@ -42,7 +41,7 @@ def _module_name(rel: str) -> tuple[str, str]:
 
 def _imported(module: Module, node: ast.ImportFrom) -> str:
     if not node.level:
-        return node.module or ""
+        return node.module
     package = module.package.split(".") if module.package else []
     package = package[: len(package) - node.level + 1]
     return ".".join([*package, *([node.module] if node.module else [])])
@@ -113,7 +112,7 @@ def _terminal(expr: ast.expr) -> str:
         return _terminal(expr.func)
     if isinstance(expr, ast.Attribute):
         return expr.attr
-    return expr.id if isinstance(expr, ast.Name) else ""
+    return ast.unparse(expr)
 
 
 def _builtin_exception(name: str) -> bool:
@@ -146,45 +145,40 @@ def shareable(index: Index, target: tuple[str, str], seen: frozenset = frozenset
     return False
 
 
-def _signature(node: ast.AST) -> str:
+def _signature(node: ast.AST) -> tuple[str, ...]:
     if isinstance(node, ast.ClassDef):
         parts = [*node.decorator_list, *node.bases, *node.keywords]
     else:
         parts = [*node.decorator_list, node.args, *([node.returns] if node.returns else [])]
-    return "|".join(ast.dump(part) for part in parts)
+    return tuple(ast.dump(part) for part in parts)
 
 
-def units(syntax: ast.Module, module: str, rel: str) -> dict[str, Unit]:
+def units(syntax: ast.Module, rel: str) -> dict[str, Unit]:
     found, seen = {}, {}
 
-    def walk(node, prefix, public, in_class):
+    def walk(node, prefix, public):
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.expr):
                 continue
             if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                walk(child, prefix, public, in_class)
+                walk(child, prefix, public)
                 continue
             name = f"{prefix}{child.name}"
             seen[name] = seen.get(name, 0) + 1
             if seen[name] > 1:
                 name = f"{name}#{seen[name]}"
             visible = public and not child.name.startswith("_")
-            found[f"{rel}::{name}"] = Unit(_signature(child), child, module, visible, in_class)
-            nested = isinstance(child, ast.ClassDef)
-            walk(child, f"{name}.", visible and nested, nested)
+            found[f"{rel}::{name}"] = Unit(_signature(child), child, visible)
+            walk(child, f"{name}.", visible and isinstance(child, ast.ClassDef))
 
-    walk(syntax, "", True, False)
+    walk(syntax, "", True)
     return found
-
-
-def _bound(unit: Unit) -> bool:
-    return unit.method and not any(_terminal(decorator) == "staticmethod" for decorator in unit.node.decorator_list)
 
 
 def untyped(unit: Unit) -> list[str]:
     args = unit.node.args
     params = [*args.posonlyargs, *args.args]
-    if _bound(unit) and params:
+    if params and params[0].arg in RECEIVERS:
         params = params[1:]
     params += [arg for arg in (args.vararg, *args.kwonlyargs, args.kwarg) if arg is not None]
     missing = [arg.arg for arg in params if arg.annotation is None]
@@ -193,18 +187,18 @@ def untyped(unit: Unit) -> list[str]:
 
 def plain_configs(unit: Unit) -> list[str]:
     args = unit.node.args
-    found = [f"**{args.kwarg.arg}"] if args.kwarg else []
+    found = []
     for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs):
         if arg.annotation is not None and _terminal(arg.annotation) in PLAIN_DICTS and CONFIG_NAME.search(arg.arg):
             found.append(arg.arg)
-    return found
+    return found + ([f"**{args.kwarg.arg}"] if args.kwarg else [])
 
 
-def violations(index: Index, key: str, unit: Unit) -> list[str]:
+def violations(index: Index, module: str, key: str, unit: Unit) -> list[str]:
     if isinstance(unit.node, ast.ClassDef):
         errors = []
         for base in unit.node.bases:
-            project = resolve(index, unit.module, base)
+            project = resolve(index, module, base)
             if project is not None and not shareable(index, project):
                 errors.append(
                     f"inheritance: {key} inherits the concrete project class {'.'.join(project)}; "
@@ -229,13 +223,13 @@ def _graded(rel: str) -> bool:
 
 def _file_errors(index: Index, rel: str, old: str | None) -> tuple[int, list[str]]:
     syntax, module = index.load(rel)
-    before = {} if old is None else units(ast.parse(old, filename=rel), module.name, rel)
+    before = {} if old is None else units(ast.parse(old, filename=rel), rel)
     changed, errors = 0, []
-    for key, unit in units(syntax, module.name, rel).items():
+    for key, unit in units(syntax, rel).items():
         previous = before.get(key)
         if previous is None or previous.signature != unit.signature:
             changed += 1
-            errors += violations(index, key, unit)
+            errors += violations(index, module.name, key, unit)
     return changed, errors
 
 
