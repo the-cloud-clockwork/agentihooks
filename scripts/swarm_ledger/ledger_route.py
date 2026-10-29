@@ -15,7 +15,7 @@ def configured(store: object, slug: str) -> str:
 
     if not ledger_link.local_mode(os.environ):
         return ""
-    address = store.redis.hget(store.key(slug, "config"), "api_url") or ""
+    address = store.redis.hget(store.key(slug, "config"), "api_url")
     return address if address and ledger_link.reachable(address) else ""
 
 

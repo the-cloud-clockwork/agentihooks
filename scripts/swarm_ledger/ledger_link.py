@@ -86,8 +86,8 @@ def guard(url: str, headers: dict) -> None:
 
 def reachable(url: str, environ=os.environ) -> bool:
     parts = urllib.parse.urlsplit(url)
-    host = parts.hostname or ""
-    if host.endswith(CLUSTER_SUFFIXES) and not environ.get("KUBERNETES_SERVICE_HOST"):
+    host = parts.hostname
+    if str(host).endswith(CLUSTER_SUFFIXES) and not environ.get("KUBERNETES_SERVICE_HOST"):
         return False
     return parts.scheme == "https" or loopback(host)
 
