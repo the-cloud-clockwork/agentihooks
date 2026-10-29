@@ -527,7 +527,8 @@ def test_a_handoff_an_earlier_occupant_left_on_the_task_still_holds_the_drain(st
     assert settled.startswith(f"hive {member} stops after 30 seconds; engineer@1 did not hand off")
     assert clock.slept == 2
     assert store.envelopes[(SLUG, "t1")] == {"agent": "engineer@1"}
-    assert store.handoffs[(SLUG, "t1")][0] != "an earlier document"
+    text = remove.RECOVERY.format(name="engineer@1", task="t1", hive=member, wait=30, folder=folder(SLUG, "t1"))
+    assert store.handoffs[(SLUG, "t1")] == (text, SEAT)
 
 
 def test_an_agent_with_no_task_holds_no_drain_and_gets_no_recovery_handoff(store, tmp_path):

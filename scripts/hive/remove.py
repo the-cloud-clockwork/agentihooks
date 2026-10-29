@@ -166,7 +166,9 @@ def _handed(store: "RedisStore", slug: str, agent: "AgentRecord") -> bool:
     return (store.handoff_envelope(slug, agent.task) or {}).get("agent") == agent.name
 
 
-def _recover(store: "RedisStore", hive: str, wait_s: int, remaining: list, host: Host) -> str:
+def _recover(
+    store: "RedisStore", hive: str, wait_s: int, remaining: list[tuple[str, "AgentRecord"]], host: Host
+) -> str:
     from scripts.handoff import envelope, transfers
     from scripts.swarm_ledger.ledger_workspace import folder
 
