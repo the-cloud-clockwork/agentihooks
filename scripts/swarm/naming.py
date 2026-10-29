@@ -437,8 +437,10 @@ class NameRegistry:
     def export(self, slug):
         """The swarm's aliases as names state store rows, each state key with its value, for a snapshot."""
         code = self.code_of(slug)
+        if not code:
+            return {}
         rows = {}
-        for name in self.redis.lrange(self.key("names", code), 0, -1) if code else []:
+        for name in self.redis.lrange(self.key("names", code), 0, -1):
             olds = self.aliases(name)
             if olds:
                 rows[state_key("aliases-of", name)] = olds
