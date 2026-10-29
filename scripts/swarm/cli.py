@@ -1880,10 +1880,10 @@ def _dispatcher_done(store, slug, agent):
 
 
 def _close_members(ledger, slug, agent, lead, fields):
-    members = set(lead.get("group_members") or [])
-    for task in ledger.tasks(slug):
-        if task["id"] in members and task["state"] != "done":
-            ledger.update_task(slug, task["id"], fields, by=agent.name)
+    for member in lead.get("group_members") or []:
+        task = ledger.task(slug, member)
+        if task is not None and task["state"] != "done":
+            ledger.update_task(slug, member, fields, by=agent.name)
 
 
 def cmd_block(store, args):
