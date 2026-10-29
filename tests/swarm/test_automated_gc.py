@@ -481,3 +481,39 @@ def test_legacy_agent_without_a_start_timestamp_is_probed_at_thirty_minutes(worl
     assert sweep(world, LIMIT) == [f"asked automated agent {agent.name} what it is doing"]
     assert len(inbox.inbox(agent.name)) == 1
     runtime.retire.assert_not_called()
+
+
+def test_hive_hosted_agent_answer_is_read_from_its_member_world(world):
+    from scripts.hive import auth
+    from scripts.swarm import automated_gc
+
+    store, controller, agent, _, _ = world
+    redis = store.redis
+    redis.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "m1", "ledger": "digest"})
+    redis.sadd(auth.INDEX, "m1")
+    store.put_agent(SLUG, replace(agent, hive="m1"))
+    member = InboxStore(redis, world="m1")
+    assert sweep(world, START + LIMIT) == [f"asked automated agent {agent.name} what it is doing"]
+    asked = next(item for item in member.inbox(agent.name) if item.state not in CLOSED)
+    assert not redis.exists(controller.key("item", asked.id))
+    reply = member.reply(asked.id, agent.name, "nothing to do")
+    assert sweep(world, START + LIMIT + 1) == [f"recorded activity answer from {agent.name}"]
+    state = automated_gc.state(store, SLUG, agent)
+    assert state["idle_answers"] == 1
+    assert state["request"] == ""
+    held = next(w for w in controller.worlds() if redis.exists(w.key("item", reply.id)))
+    assert held.get(reply.id).reason == "done: activity answer recorded"
+
+
+def test_a_question_gone_from_every_world_is_asked_again(world):
+    from scripts.swarm import automated_gc
+
+    store, inbox, agent, _, _ = world
+    sweep(world, START + LIMIT)
+    gone = question(world)
+    inbox.redis.delete(inbox.key("item", gone.id))
+    at = START + LIMIT * 2
+    assert sweep(world, at) == [f"asked automated agent {agent.name} what it is doing"]
+    record = automated_gc.state(store, SLUG, agent)
+    assert record["request"] not in ("", gone.id)
+    assert record["last_probe"] == at
