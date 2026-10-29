@@ -317,6 +317,7 @@ def test_inbox_membership_from_transfer_and_unoccupied_seat(source):
             "sequence": item.sequence,
             "fyi": False,
             "task": "",
+            "delivery_session": "",
         }
 
 
