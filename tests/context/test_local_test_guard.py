@@ -708,6 +708,8 @@ def test_a_script_that_launches_gh_and_names_a_runner_in_data_passes(tmp_path, m
         "os.system('pytest > out.log')",
         "os.system('pytest>out.log')",
         "os.system('pytest .')",
+        "os.system('python -W ignore -m pytest')",
+        "os.system('python3 -X dev -B -m unittest discover')",
     ],
 )
 def test_a_gh_reader_that_also_launches_a_runner_is_blocked(launch, tmp_path, monkeypatch):

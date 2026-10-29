@@ -139,7 +139,7 @@ def _launched_literal(runners: re.Pattern) -> re.Pattern:
     runner, attached = runners.pattern, runners.pattern.removeprefix(r"\b")
     return re.compile(
         rf"(?m)(?:^|[;&|`'\"]|\$\()\s*(?:{_WRAPPER}\s+)*(?:[\w.$~{{}}-]*/)*(?:{runner}){_RUNNER_ARGS}"
-        rf"|(?:^|[;&|`'\"]|\$\()\s*(?:\S+\s+)?-m\s*(?:{attached})"
+        rf"|(?:^|[;&|`'\"]|\$\()\s*(?:\S+\s+(?:-[WXQ]\s+\S+\s+|-[^\sm-]\S*\s+)*)?-m\s*(?:{attached})"
     )
 
 
