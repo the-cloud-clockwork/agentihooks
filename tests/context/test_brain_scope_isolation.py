@@ -146,6 +146,23 @@ def test_a_publish_retires_unscoped_feed_entries_left_by_an_older_install(brains
     assert broadcast.retire_channel_source("brain", "brain-adapter") == 0
 
 
+def test_retiring_unscoped_entries_locks_the_shared_broadcast_file(brains, monkeypatch):
+    import contextlib
+
+    locked = []
+    real_lock = broadcast._file_lock
+
+    @contextlib.contextmanager
+    def recording_lock(path):
+        locked.append(path)
+        with real_lock(path):
+            yield
+
+    monkeypatch.setattr(broadcast, "_file_lock", recording_lock)
+    assert broadcast.retire_channel_source("brain", "brain-adapter") == 0
+    assert locked == [broadcast._broadcast_path()]
+
+
 def test_a_wildcard_subscriber_never_reads_another_brain_feed(brains, monkeypatch):
     two_feeds(brains)
     publish(brains, monkeypatch, PERSONAL)

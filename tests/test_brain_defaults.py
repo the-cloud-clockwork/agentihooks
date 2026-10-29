@@ -224,7 +224,11 @@ def test_status_ignores_coordination_messages_on_the_brain_channel(brain_env, mo
     monkeypatch.setattr(
         adapter,
         "_get_source",
-        lambda: type("Source", (), {"fetch": lambda self: [adapter.BrainEntry("id", "title", "body")]})(),
+        lambda: type(
+            "Source",
+            (),
+            {"fetch": lambda self: [adapter.BrainEntry("id", "title", "body"), adapter.BrainEntry("id2", "t", "b")]},
+        )(),
     )
     monkeypatch.setattr(
         "hooks.context.broadcast._load_broadcasts",
