@@ -10,6 +10,9 @@ from scripts.events import state
 from scripts.events.bus import StateConflict
 
 BUCKET = "fencing"
+COUNTERS = "counters"
+IDENTITY_CONFLICTS = "identity-conflicts"
+STALE_REJECTIONS = "stale-generation-rejections"
 ATTEMPTS = 16
 CONTENTION = "the swarm fencing state kept changing; nothing was committed"
 EMPTY: dict[str, Any] = {
@@ -21,14 +24,12 @@ EMPTY: dict[str, Any] = {
     "orphans": {},
     "executions": {},
     "archive": {},
-    "identity_conflicts": 0,
     "grants": {},
     "registrations": {},
     "grants_disabled": "",
     "claims": {},
     "journals": {},
     "fences": {},
-    "stale_rejections": 0,
     "operations": {},
 }
 HASHES = {
@@ -76,10 +77,8 @@ def _legacy(store: Any, slug: str) -> dict:
         doc["legacy_owner"] = raw
     doc["epoch"] = int(store.redis.get(store.key(slug, "control-epoch")) or 0)
     doc["leader_changes"] = int(store.redis.get(store.key(slug, "controller-leader-changes")) or 0)
-    doc["identity_conflicts"] = int(store.redis.get(store.key(slug, "identity-conflicts")) or 0)
     for section, part in HASHES.items():
         doc[section] = {key: json.loads(raw) for key, raw in store.redis.hgetall(store.key(slug, part)).items()}
-    doc["stale_rejections"] = int(store.redis.get(store.key(slug, "stale-generation-rejections")) or 0)
     doc["claims"] = {_task(key): json.loads(raw) for key, raw in _scan(store, slug, "task-authority", "get")}
     doc["journals"] = {
         _task(key): [json.loads(row) for row in rows] for key, rows in _scan(store, slug, "claim-journal", "lrange")
@@ -112,7 +111,8 @@ def _decode(value: bytes) -> dict:
 
 
 def read(store: Any, slug: str) -> dict:
-    return _decode(_entry(_states(store), store, slug).value)
+    entry = _states(store).get(slug)
+    return _legacy(store, slug) if entry is None else _decode(entry.value)
 
 
 def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
@@ -136,6 +136,30 @@ def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
 def authority_held(store: Any, slug: str, task: str) -> bool:
     doc = read(store, slug)
     return task in doc["claims"] or task in doc["journals"]
+
+
+def count(store: Any, slug: str, part: str) -> int:
+    entry = state.for_store(store, COUNTERS).get(f"{slug}.{part}")
+    return int(store.redis.get(store.key(slug, part)) or 0) if entry is None else int(entry.value)
+
+
+def bump(store: Any, slug: str, part: str) -> None:
+    """Counts a refused write outside the document, so a refusal leaves every fenced row untouched."""
+    from scripts.swarm.store import SwarmError
+
+    counters = state.for_store(store, COUNTERS)
+    key = f"{slug}.{part}"
+    for _ in range(ATTEMPTS):
+        entry = counters.get(key)
+        try:
+            if entry is None:
+                counters.create(key, str(count(store, slug, part) + 1).encode())
+            else:
+                counters.update(key, str(int(entry.value) + 1).encode(), entry.revision)
+        except StateConflict:
+            continue
+        return
+    raise SwarmError(CONTENTION)
 
 
 def watch(store: Any, pipe: Any) -> None:

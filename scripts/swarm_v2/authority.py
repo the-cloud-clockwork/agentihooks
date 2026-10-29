@@ -156,10 +156,10 @@ class TaskAuthority:
         return self._write(token, "completed", update)
 
     def stale_generation_rejections_total(self) -> int:
-        return fencing.read(self.store, self.slug)["stale_rejections"]
+        return fencing.count(self.store, self.slug, fencing.STALE_REJECTIONS)
 
     def _stale(self) -> None:
-        fencing.write(self.store, self.slug, lambda doc: doc.update(stale_rejections=doc["stale_rejections"] + 1))
+        fencing.bump(self.store, self.slug, fencing.STALE_REJECTIONS)
         raise SwarmError("stale_generation")
 
     def _duration(self, lease_ms: int) -> None:

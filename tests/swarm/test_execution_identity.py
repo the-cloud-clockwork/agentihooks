@@ -86,9 +86,12 @@ def test_identity_queries_do_not_download_past_attempts(store, agent, query):
 
 
 def protected(store, slug="fixture"):
-    dumped = {key: store.redis.dump(key) for key in store.redis.scan_iter() if ":state:fencing:" not in key}
-    doc = fencing.read(store, slug)
-    dumped["fencing"] = {k: v for k, v in doc.items() if k not in ("identity_conflicts", "stale_rejections")}
+    dumped = {
+        key: store.redis.dump(key)
+        for key in store.redis.scan_iter()
+        if ":state:fencing:" not in key and ":state:counters:" not in key
+    }
+    dumped["fencing"] = fencing.read(store, slug)
     return dumped
 
 

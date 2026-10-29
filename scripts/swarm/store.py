@@ -472,7 +472,7 @@ class RedisStore:
     def execution_identity_conflicts_total(self, slug: str) -> int:
         from scripts.swarm import fencing
 
-        return fencing.read(self, slug)["identity_conflicts"]
+        return fencing.count(self, slug, fencing.IDENTITY_CONFLICTS)
 
     def listed(self, slug: str) -> set[str]:
         return set(self.redis.hkeys(self.key(slug, "agents")))

@@ -102,11 +102,11 @@ def protected(store, slug="fixture"):
     raw = {
         key: store.redis.dump(key)
         for key in store.redis.scan_iter()
-        if not key.endswith("launch-grant-rejections") and ":state:fencing:" not in key
+        if not key.endswith("launch-grant-rejections")
+        and ":state:fencing:" not in key
+        and ":state:counters:" not in key
     }
-    doc = fencing.read(store, slug)
-    stripped = {k: v for k, v in doc.items() if k not in ("identity_conflicts", "stale_rejections")}
-    return raw, stripped
+    return raw, fencing.read(store, slug)
 
 
 def claims_of(token):

@@ -55,7 +55,7 @@ class ExecutionRegistry:
     def conflict(self, slug: str, message: str) -> None:
         from scripts.swarm.store import SwarmError
 
-        fencing.write(self.store, slug, lambda doc: doc.update(identity_conflicts=doc["identity_conflicts"] + 1))
+        fencing.bump(self.store, slug, fencing.IDENTITY_CONFLICTS)
         raise SwarmError(message)
 
     def _doc(self, slug: str, doc: dict | None) -> dict:

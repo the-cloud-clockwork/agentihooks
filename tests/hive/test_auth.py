@@ -77,6 +77,7 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:agents",
                     f"~{ROOT}:swarm:*:executions",
                     f"~{ROOT}:swarm:state:fencing:*",
+                    f"~{ROOT}:swarm:state:counters:*",
                     f"~{ROOT}:swarm:*:execution-publishing",
                     f"~{ROOT}:swarm:*:codex-transport",
                     f"~{ROOT}:swarm:*:codex-endpoints",

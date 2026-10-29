@@ -139,11 +139,12 @@ def test_the_lease_lives_on_the_bus_state_store_and_writes_no_redis_key(store, b
     assert lease.current(store, "sw") == held
 
 
-def test_a_first_read_imports_the_legacy_redis_lease_once(store, clock):
+def test_a_first_write_imports_the_legacy_redis_lease_once(store, clock):
     store.redis.set(store.key("sw", "control-owner"), json.dumps({"owner": "home", "epoch": 3, "expires_at": 9000}))
     store.redis.set(store.key("sw", "control-epoch"), 3)
     store.redis.set(store.key("sw", "controller-leader-changes"), 2)
     assert lease.current(store, "sw") == lease.Lease("home", 3, 9000)
+    fencing.write(store, "sw", lambda doc: None)
     store.redis.delete(store.key("sw", "control-owner"))
     doc = fencing.read(store, "sw")
     assert (doc["lease"], doc["epoch"], doc["leader_changes"]) == (
@@ -151,3 +152,57 @@ def test_a_first_read_imports_the_legacy_redis_lease_once(store, clock):
         3,
         2,
     )
+
+
+def test_a_read_leaves_the_store_unchanged(store):
+    store.redis.set(store.key("sw", "control-epoch"), 3)
+    before = {key: store.redis.dump(key) for key in store.redis.scan_iter()}
+    assert fencing.read(store, "sw")["epoch"] == 3
+    assert {key: store.redis.dump(key) for key in store.redis.scan_iter()} == before
+
+
+def test_a_refusal_count_leaves_the_fencing_document_unchanged(store):
+    fencing.write(store, "sw", lambda doc: doc.update(epoch=2))
+    before = fencing.read(store, "sw")
+    fencing.bump(store, "sw", fencing.STALE_REJECTIONS)
+    fencing.bump(store, "sw", fencing.STALE_REJECTIONS)
+    assert fencing.read(store, "sw") == before
+    assert fencing.count(store, "sw", fencing.STALE_REJECTIONS) == 2
+    assert fencing.count(store, "sw", fencing.IDENTITY_CONFLICTS) == 0
+
+
+def test_a_refusal_count_continues_from_the_legacy_redis_counter(store):
+    store.redis.set(store.key("sw", fencing.IDENTITY_CONFLICTS), 4)
+    assert fencing.count(store, "sw", fencing.IDENTITY_CONFLICTS) == 4
+    fencing.bump(store, "sw", fencing.IDENTITY_CONFLICTS)
+    store.redis.delete(store.key("sw", fencing.IDENTITY_CONFLICTS))
+    assert fencing.count(store, "sw", fencing.IDENTITY_CONFLICTS) == 5
+
+
+def test_a_refusal_count_retries_a_competing_bump(store, monkeypatch):
+    counters = state.for_store(store, fencing.COUNTERS)
+    real = counters.update
+    raced = []
+
+    def racing(key, value, revision):
+        if not raced:
+            raced.append(real(key, b"7", revision))
+        return real(key, value, revision)
+
+    monkeypatch.setattr(counters, "update", racing)
+    monkeypatch.setattr(state, "for_store", lambda *args: counters)
+    fencing.bump(store, "sw", fencing.STALE_REJECTIONS)
+    fencing.bump(store, "sw", fencing.STALE_REJECTIONS)
+    assert fencing.count(store, "sw", fencing.STALE_REJECTIONS) == 8
+
+
+def test_a_refusal_count_that_keeps_conflicting_is_refused(store, monkeypatch):
+    counters = state.for_store(store, fencing.COUNTERS)
+
+    def conflict(*args):
+        raise StateConflict("moved")
+
+    monkeypatch.setattr(counters, "create", conflict)
+    monkeypatch.setattr(state, "for_store", lambda *args: counters)
+    with pytest.raises(SwarmError, match="kept changing"):
+        fencing.bump(store, "sw", fencing.STALE_REJECTIONS)
