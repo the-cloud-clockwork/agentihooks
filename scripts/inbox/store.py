@@ -324,7 +324,7 @@ class InboxStore:
         items, gone = _present(item_ids, self._rows(item_ids))
         if gone:
             self.redis.zrem(index, *gone)
-        _report_gone(index, gone)
+        _report_dropped(index, gone)
         return items
 
     def drop_gone(self, address, gone):
@@ -348,7 +348,7 @@ class InboxStore:
         pipe.decrby(self.key("open-size", address), len(gone))
 
     def _report_gone(self, address, gone):
-        _report_gone(self.key("address", address), gone)
+        _report_dropped(self.key("address", address), gone)
 
     def mailbox(self, me):
         return self._with_seat(me, self.inbox)
@@ -885,7 +885,7 @@ class InboxStore:
             if not raw or raw["state"] != "delivered":
                 pipe.execute()
                 if not raw:
-                    _report_gone(self.key("delivered"), [item_id])
+                    _report_dropped(self.key("delivered"), [item_id])
                 return None
             item = _item(raw, item_id)
             moved = replace(item, state="pending", updated_at=now_ms(), reason=reason)
@@ -1089,7 +1089,7 @@ def _order(item: Item) -> tuple[int, int, str]:
     return item.created_at, item.sequence, item.id
 
 
-def _report_gone(index, gone):
+def _report_dropped(index, gone):
     for item_id in gone:
         print(f"agentihooks inbox: {index} lists message {item_id} whose record is gone; dropped it", file=sys.stderr)
 
