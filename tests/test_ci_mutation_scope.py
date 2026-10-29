@@ -311,6 +311,30 @@ def test_a_change_leaving_the_bare_syntax_tree_unchanged_selects_no_line(tmp_pat
     assert discover_changes(tmp_path, base, "HEAD") == expected
 
 
+@pytest.mark.parametrize(
+    ("base", "head", "expected"),
+    [
+        ("class C:\n    a = 1\n", 'class C:\n    """C."""\n    a = 1\n', {}),
+        (
+            "async def f(a, *b, **c):\n    return a\n",
+            'async def f(a: int, *b: int, **c: int) -> int:\n    """F."""\n    return a\n',
+            {},
+        ),
+        ("a: int = 1\n", "a: float = 1\n", {"hooks/own.py": {1}}),
+        ("@cache\ndef f(a):\n    return a\n", "@cache\ndef f(a: int) -> int:\n    return a\n", {"hooks/own.py": {2}}),
+    ],
+)
+def test_runtime_read_annotations_stay_graded_while_docstrings_and_plain_signatures_do_not(
+    tmp_path, base, head, expected
+):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    first = commit("own.py", base)
+    commit("own.py", head)
+    assert discover_changes(tmp_path, first, "HEAD") == expected
+
+
 def test_a_new_docstring_module_selects_no_line_and_an_annotated_assignment_still_does(tmp_path):
     from scripts.ci_mutation.scope import discover_changes
 

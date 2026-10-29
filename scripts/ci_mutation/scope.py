@@ -176,10 +176,11 @@ def bare_tree(source: bytes | None) -> str:
         if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
             if ast.get_docstring(node) is not None:
                 node.body = node.body[1:]
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and not node.decorator_list:
             node.returns = None
-        if isinstance(node, ast.arg | ast.AnnAssign):
-            node.annotation = None
+            for arg in ast.walk(node.args):
+                if isinstance(arg, ast.arg):
+                    arg.annotation = None
     return ast.dump(tree)
 
 
