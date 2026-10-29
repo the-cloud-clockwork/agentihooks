@@ -1,4 +1,6 @@
 import json
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -38,8 +40,10 @@ def test_a_managed_swarm_launch_wears_the_swarm_brain(world, kernel_brain, monke
     from scripts.profiles import render
     from scripts.swarm import brain_binding
 
-    binding = {"status": "bound", "mcp": SWARM_MCP, "mcp_header": "X-API-Key", "mcp_scheme": ""}
-    monkeypatch.setenv(brain_binding.VARIABLE, json.dumps({**binding, "mcp_env": "SWARM_BRAIN_MCP_KEY"}))
+    binding = {"status": "bound", "api": "https://swarm-brain-api.example.test", "api_env": "SWARM_BRAIN_API_TOKEN"}
+    binding |= {"mcp": SWARM_MCP, "mcp_header": "X-API-Key", "mcp_scheme": "", "mcp_env": "SWARM_BRAIN_MCP_KEY"}
+    monkeypatch.setenv(brain_binding.VARIABLE, json.dumps(binding))
+    monkeypatch.setattr(world["install"], "_resolve_hooks_python", lambda: Path(sys.executable))
 
     out = render.render_claude("rb-role")
 
