@@ -13,6 +13,8 @@ from pathlib import Path
 from scripts.ci_mutation.mutant_shards import function_name, holds
 from scripts.ci_mutation.stats import SharedStats
 
+SHARD_PLAN = "shard-plan.json"
+
 
 def plan_fingerprint(plan: dict) -> str:
     content = {key: value for key, value in plan.items() if key != "probe"}
@@ -58,7 +60,7 @@ def probe_elapsed(stats: SharedStats | None) -> float:
 
 
 def mark_probe_results(work: Path, results: dict) -> dict:
-    early, _ = read_probe_results(work / "shard-plan.json")
+    early, _ = read_probe_results(work / SHARD_PLAN)
     for values in results.values() if early else ():
         for row in values:
             if early.get(row["name"]) == "killed":
@@ -186,7 +188,7 @@ def main() -> int:
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     record = run_probe(root, selected, SharedStats(args.stats, head), (args.shard, args.shards), args.budget)
     (args.stats / f"probe-{args.shard}.json").write_text(json.dumps(record))
-    print(json.dumps(record), flush=True)
+    print(json.dumps(record))
     return 0
 
 

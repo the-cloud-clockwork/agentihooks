@@ -34,12 +34,13 @@ def split_names(plan: dict) -> set[str]:
 
 
 def unit_tests(plan: dict, name: str, index: int) -> set[str] | None:
-    split = plan.get("splits", {}).get(function_name(name))
     if plan.get("probe_mode"):
+        split = plan["splits"].get(function_name(name))
         return set(split["head"]) if split else None
     assignment = plan["assignments"].get(name)
     if not isinstance(assignment, list) or index not in assignment:
         return None
+    split = plan["splits"][function_name(name)]
     head = () if name in plan.get("probe", {}).get("results", {}) else split["head"]
     return {*head, *split["slices"][assignment.index(index)]}
 

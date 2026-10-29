@@ -18,7 +18,7 @@ from scripts.ci_cpu_quota import quota_cpus
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
-from scripts.ci_mutation.probe import read_probe_results, reuse_kills
+from scripts.ci_mutation.probe import SHARD_PLAN, read_probe_results, reuse_kills
 from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.scope import selects, test_file
 from scripts.ci_mutation.stats import write_part
@@ -599,7 +599,7 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     changes = json.loads(selection.read_text())
     tests_by_prefix = {get_mutant_name(Path(path), ""): set(change["tests"]) for path, change in changes.items()}
     related = set()
-    early, _ = read_probe_results(Path("shard-plan.json"))
+    early, _ = read_probe_results(Path(SHARD_PLAN))
 
     def write_selected(*, out, source, filename):
         code, names = selected_mutants(str(filename), source, set(changes[str(filename)]["lines"]))

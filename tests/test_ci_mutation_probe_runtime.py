@@ -65,6 +65,72 @@ def test_a_shard_without_split_mutants_emits_an_empty_result_without_starting_a_
     assert not (tmp_path / ".mutation-probe").exists()
 
 
+def test_a_rerun_early_probe_reuses_its_folders_and_a_survivor_within_a_spent_budget_is_shared(tmp_path, monkeypatch):
+    plan = _plan()
+    stats = _shared(tmp_path, plan)
+    (tmp_path / ".mutation-probe/0/stats").mkdir(parents=True)
+    (tmp_path / ".mutation-probe/0/group-0").mkdir()
+    monkeypatch.setattr(probe.time, "monotonic", lambda: 100)
+    seen = []
+
+    def mutate(root, work, selected, deadline, shard, shared):
+        seen.append((work, shared))
+        return {"scripts/a.py": [{"name": "scripts.a.x_f__mutmut_1", "status": "survived"}]}, ""
+
+    monkeypatch.setattr(runner, "mutate_files", mutate)
+    record = probe.run_probe(tmp_path, {"scripts/a.py": ({2}, ["tests/a.py"])}, stats, (0, 2), 0)
+    assert record["results"] == {"scripts.a.x_f__mutmut_1": "survived"}
+    folder = tmp_path / ".mutation-probe/0"
+    assert seen == [(folder / "group-0", SharedStats(folder / "stats/group-0", "revision"))]
+    assert json.loads((folder / "stats/plan.json").read_text()) == probe.probe_plan(plan, (0, 2))
+
+
+def test_an_early_probe_runs_the_identity_group_alone_when_only_it_owns_split_mutants(tmp_path, monkeypatch):
+    split = {"head": ["early"], "slices": [["left"]], "costs": [1]}
+    plan = {
+        "head": "revision",
+        "keys": ["selection"],
+        "shards": 1,
+        "assignments": {"scripts.ci_mutation.identity.x_h__mutmut_1": [0], "scripts.a.x_g__mutmut_1": 0},
+        "splits": {"scripts.ci_mutation.identity.x_h": split},
+    }
+    stats = _shared(tmp_path, plan)
+    monkeypatch.setattr(probe.time, "monotonic", lambda: 100)
+    calls = []
+
+    def mutate(root, work, selected, deadline, shard, shared):
+        calls.append((work.name, selected, shared.folder.name))
+        return {
+            "scripts/ci_mutation/identity.py": [
+                {"name": "scripts.ci_mutation.identity.x_h__mutmut_1", "status": "killed"}
+            ]
+        }, ""
+
+    monkeypatch.setattr(runner, "mutate_files", mutate)
+    selected = {"scripts/a.py": ({2}, ["tests/a.py"]), "scripts/ci_mutation/identity.py": ({3}, ["tests/identity.py"])}
+    record = probe.run_probe(tmp_path, selected, stats, (0, 1), 1080)
+    assert record["results"] == {"scripts.ci_mutation.identity.x_h__mutmut_1": "killed"}
+    assert calls == [
+        ("group-1", {"scripts/ci_mutation/identity.py": selected["scripts/ci_mutation/identity.py"]}, "group-1")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reason", "rows", "error", "message"),
+    [
+        ("over budget", [], RuntimeError, "early mutation failed: over budget\n"),
+        ("", [], ValueError, "early mutation did not completely grade its assigned mutants within budget"),
+    ],
+)
+def test_a_refused_early_probe_names_its_cause(tmp_path, monkeypatch, reason, rows, error, message):
+    stats = _shared(tmp_path, _plan())
+    monkeypatch.setattr(probe.time, "monotonic", lambda: 100)
+    monkeypatch.setattr(runner, "mutate_files", lambda *args: ({"scripts/a.py": rows}, reason))
+    with pytest.raises(error) as raised:
+        probe.run_probe(tmp_path, {"scripts/a.py": ({2}, ["tests/a.py"])}, stats, (0, 2), 1080)
+    assert str(raised.value) == message
+
+
 def test_shared_early_elapsed_time_is_charged_before_the_remaining_worker_starts(tmp_path, monkeypatch):
     plan = _plan()
     stats = _shared(tmp_path, probe.merge_probes(plan, _records(plan)))
@@ -87,7 +153,9 @@ def test_shared_early_elapsed_time_is_charged_before_the_remaining_worker_starts
 
 
 @pytest.mark.parametrize("planned", [False, True])
-def test_probe_command_uses_the_declared_scope_budget_and_shard_and_writes_its_record(tmp_path, monkeypatch, planned):
+def test_probe_command_uses_the_declared_scope_budget_and_shard_and_writes_its_record(
+    tmp_path, monkeypatch, capsys, planned
+):
     import sys
 
     from scripts.ci_mutation import scope
@@ -102,7 +170,11 @@ def test_probe_command_uses_the_declared_scope_budget_and_shard_and_writes_its_r
     if planned:
         (tmp_path / ".mutation-selection.json").write_text(
             json.dumps(
-                {"scripts/a.py": ["tests/a.py"], "scripts/b.py": [], "scripts/constant.py": ["tests/constants.py"]}
+                {
+                    "scripts/a.py": ["tests/planned.py"],
+                    "scripts/b.py": [],
+                    "scripts/constant.py": ["tests/constants.py"],
+                }
             )
         )
     seen = []
@@ -114,11 +186,13 @@ def test_probe_command_uses_the_declared_scope_budget_and_shard_and_writes_its_r
     monkeypatch.setattr(
         scope,
         "select_tests",
-        lambda root, path: {"scripts/a.py": ["tests/a.py"], "scripts/constant.py": ["tests/constants.py"]}.get(
+        lambda root, path: {"scripts/a.py": [f"{root}/tests/a.py"], "scripts/constant.py": ["tests/constants.py"]}.get(
             path.as_posix(), []
         ),
     )
-    monkeypatch.setattr(probe.subprocess, "check_output", lambda *args, **kwargs: "revision\n")
+    monkeypatch.setattr(
+        probe.subprocess, "check_output", lambda *args, **kwargs: seen.append((args, kwargs)) or "revision\n"
+    )
     record = _records(plan)[0]
 
     def run(root, selected, shared, shard, budget):
@@ -133,30 +207,27 @@ def test_probe_command_uses_the_declared_scope_budget_and_shard_and_writes_its_r
     else:
         monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
     monkeypatch.setattr(probe, "run_probe", run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "probe",
-            "--stats",
-            str(stats.folder),
-            "--bases",
-            "base-one,base-two",
-            "--shard",
-            "0",
-            "--shards",
-            "2",
-            "--budget",
-            "100",
-        ],
-    )
+    budget = ["--budget", "100"] if planned else []
+    argv = ["probe", "--stats", str(stats.folder), "--bases", "base-one,base-two", "--shard", "0", "--shards", "2"]
+    monkeypatch.setattr(sys, "argv", argv + budget)
     assert probe.main() == 0
+    tests = ["tests/planned.py"] if planned else [f"{tmp_path}/tests/a.py"]
     assert seen == [
         (tmp_path, ["base-one", "base-two"], "HEAD"),
-        (tmp_path, {"scripts/a.py": ({2}, ["tests/a.py"])}, stats, (0, 2), 100),
+        ((["git", "rev-parse", "HEAD"],), {"text": True}),
+        (tmp_path, {"scripts/a.py": ({2}, tests)}, stats, (0, 2), 100 if planned else 1080),
         ("1", str(tmp_path) if planned else None),
     ]
     assert json.loads((stats.folder / "probe-0.json").read_text()) == record
+    assert capsys.readouterr().out == json.dumps(record) + "\n"
+
+
+def test_probe_command_requires_the_shared_stats_folder(monkeypatch):
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["probe", "--bases", "base", "--shard", "0", "--shards", "1"])
+    with pytest.raises(SystemExit):
+        probe.main()
 
 
 def test_merge_command_validates_every_part_before_publishing_the_shared_plan(tmp_path, monkeypatch, capsys):

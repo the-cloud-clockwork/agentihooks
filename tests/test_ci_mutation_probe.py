@@ -108,3 +108,75 @@ def test_a_shared_probe_cannot_be_reused_after_its_plan_or_result_changes():
     merged["probe"]["results"].pop("scripts.a.x_f__mutmut_1")
     with pytest.raises(ValueError):
         probe.probe_results(merged)
+
+
+def test_the_plan_fingerprint_ignores_key_order_and_the_shared_probe():
+    plan = _plan()
+    reordered = dict(reversed(list(plan.items())))
+    assert probe.plan_fingerprint(reordered) == probe.plan_fingerprint(plan)
+    assert probe.plan_fingerprint({**plan, "probe": {"results": {}}}) == probe.plan_fingerprint(plan)
+    assert probe.plan_fingerprint({**plan, "head": "other"}) != probe.plan_fingerprint(plan)
+
+
+@pytest.mark.parametrize("shard", [(0, 3), (2, 2), (-1, 2)])
+def test_an_early_shard_outside_the_measured_plan_is_refused(shard):
+    with pytest.raises(ValueError, match="^early mutation shard does not match the measured plan$"):
+        probe.probe_plan(_plan(), shard)
+
+
+def test_an_early_plan_drops_the_shared_probe_of_its_source():
+    plan = _plan()
+    merged = probe.merge_probes(plan, _records(plan))
+    early = probe.probe_plan(merged, (1, 2))
+    assert "probe" not in early
+    assert early == {**plan, "assignments": early["assignments"], "probe_mode": True}
+
+
+@pytest.mark.parametrize("seconds", [-1, -0.5, float("inf"), float("nan")])
+def test_shared_probe_seconds_must_be_finite_and_not_negative(seconds):
+    plan = _plan()
+    merged = probe.merge_probes(plan, _records(plan))
+    merged["probe"]["seconds"] = seconds
+    with pytest.raises(ValueError, match="^early mutation results are stale, incomplete or invalid$"):
+        probe.probe_results(merged)
+
+
+def test_a_probe_that_took_no_measurable_time_is_still_shared():
+    plan = _plan()
+    records = _records(plan)
+    for record in records:
+        record["seconds"] = 0
+    merged = probe.merge_probes(plan, records)
+    assert probe.probe_results(merged) == (merged["probe"]["results"], 0)
+
+
+@pytest.mark.parametrize(
+    ("fault", "message"),
+    [
+        ("missing", "early mutation results are missing or duplicated"),
+        ("duplicate", "early mutation results are missing or duplicated"),
+        ("stale", "early mutation results do not match their revision, selection or shard"),
+        ("negative", "early mutation results do not match their revision, selection or shard"),
+    ],
+)
+def test_each_refused_probe_merge_names_its_cause(fault, message):
+    plan = _plan()
+    records = _records(plan)
+    if fault == "missing":
+        records.pop()
+    elif fault == "duplicate":
+        records[1] = records[0]
+    elif fault == "stale":
+        records[1]["plan"] = "another revision"
+    else:
+        records[1]["seconds"] = -0.5
+    with pytest.raises(ValueError, match=f"^{message}$"):
+        probe.merge_probes(plan, records)
+
+
+def test_a_failed_early_worker_reports_its_reason_and_the_tail_of_its_log(tmp_path):
+    assert str(probe.worker_failure(tmp_path, "over budget")) == "early mutation failed: over budget\n"
+    (tmp_path / "run.log").write_text("a" * 5 + "b" * 12000)
+    assert (
+        str(probe.worker_failure(tmp_path, "report failed")) == f"early mutation failed: report failed\n{'b' * 12000}"
+    )
