@@ -145,6 +145,16 @@ def test_the_charted_placement_rank_is_registered_on_every_start(tmp_path, monke
     ) in commands.splitlines()
 
 
+def test_the_charted_release_name_is_registered_on_every_start(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIVE_NAME", "swarm-hive-002")
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (
+        "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        "max-agents=20 prefer= name=swarm-hive-002"
+    ) in commands.splitlines()
+
+
 def test_mounted_member_clones_repo_and_configures_before_run(tmp_path):
     result, commands, home, repo = startup(tmp_path)
     assert result.returncode == 0, result.stderr

@@ -73,6 +73,7 @@ from scripts.swarm import (
     release_wait,
     resume,
     retire_watch,
+    revoked_seats,
     run_window,
     seat_spawn,
     session_model,
@@ -694,13 +695,13 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             actions += _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live and agent.lane == MASTER:
             runtime.name_pane(agent)
-            actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
+            actions += _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live:
             _restore_owner(slug, store, ledger, rows, agent)
             if _ended(agent, rows):
                 actions += _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms)
             else:
-                actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
+                actions += _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms)
         elif resume.recovery_pending(store, slug, agent):
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
@@ -734,7 +735,7 @@ def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
     if agent.state == SUSPECT:
         agent = replace(agent, state="working")
         store.put_agent(slug, agent)
-    return _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
+    return _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms)
 
 
 def _strays(slug, config, store, runtime):
@@ -777,6 +778,25 @@ def _free_refused(slug, store, ledger, runtime, rows, agent, now_ms):
     return [
         f"freed {agent.name} after repeated content refusals" + _drop(slug, store, ledger, rows, agent, refund=True)
     ]
+
+
+def _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms):
+    account = f"{agent.harness} account {agent.account}"
+    if agent.lane == MASTER:
+        revoked_seats.recycle_master(slug, store, ledger, agent, now_ms)
+        return [f"recycled master {agent.name} in its seat: {account} was revoked"]
+    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+        return [f"could not retire {agent.name} on revoked {account}, retrying next tick"]
+    revoked_seats.worker_handoff(store, slug, agent, now_ms)
+    return [
+        f"freed the seat of {agent.name}: {account} was revoked" + _drop(slug, store, ledger, rows, agent, refund=True)
+    ]
+
+
+def _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms):
+    if revoked_seats.on_revoked(agent):
+        return _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms)
+    return _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
 
 
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
