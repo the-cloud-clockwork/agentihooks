@@ -121,6 +121,7 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:dev-red",
                     f"~{ROOT}:swarm:*:prerequisite-waits",
                     f"~{ROOT}:swarm:*:stage-covers",
+                    f"~{ROOT}:swarm:*:gate-lifts:tasks:*",
                     f"~{ROOT}:swarm:*:gate-lift-drops",
                     f"~{ROOT}:swarm:*:ledger-ready",
                     f"~{ROOT}:seat:*:recaps",
