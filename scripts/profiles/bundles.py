@@ -6,7 +6,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hooks.context import profile_chain
+from hooks.context import conditions, profile_chain
 from scripts.targets._common import _install_module
 
 
@@ -106,6 +106,8 @@ def link(bundle_dir: Path | None, user: bool = False) -> None:
         "path": str(bundle_dir),
         "linked_at": datetime.now(timezone.utc).isoformat(),
     }
+    if not user:
+        state[key]["owner"] = conditions._remote_owner(bundle_dir)
 
     _i._save_state(state)
 
