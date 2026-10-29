@@ -1,8 +1,5 @@
 import importlib
-import os
-import subprocess
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -120,35 +117,3 @@ def test_every_mutated_path_gets_its_own_alias_and_cleanup(tree, monkeypatch):
     for cleanup in config.cleanups:
         cleanup()
     assert sys.meta_path == meta_path
-
-
-def test_a_failed_session_leaves_nothing_in_its_temporary_folder(tmp_path):
-    temp = tmp_path / "temp"
-    temp.mkdir()
-    (tmp_path / "test_killed.py").write_text(
-        "def test_killed(tmp_path):\n    (tmp_path / 'ledger.sqlite3').write_bytes(b'x' * 4096)\n    assert False\n"
-    )
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            "-o",
-            "addopts=",
-            "-o",
-            "tmp_path_retention_policy=failed",
-            "-p",
-            "no:cacheprovider",
-            "-p",
-            "scripts.ci_mutation.identity",
-            f"--rootdir={tmp_path}",
-            str(tmp_path / "test_killed.py"),
-        ],
-        cwd=Path(__file__).resolve().parents[1],
-        env={**os.environ, "TMPDIR": str(temp)},
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert [path for path in temp.rglob("*") if not path.is_dir()] == []

@@ -65,6 +65,7 @@ jobs:
         run: |
           cp -a ../candidate/scripts/ci_mutation/. scripts/ci_mutation/
           cp ../candidate/tests/writer_mutation_cost_proof.py tests/writer_mutation_cost_proof.py
+          cp ../candidate/tests/swarm_ledger/conftest.py tests/swarm_ledger/conftest.py
           python -m tests.writer_mutation_cost_proof prepare ../baseline
       - uses: ./candidate/.github/actions/nats-server
       - uses: ./candidate/.github/actions/browser-cache
@@ -115,6 +116,7 @@ jobs:
         run: |
           cp -a ../candidate/scripts/ci_mutation/. scripts/ci_mutation/
           cp ../candidate/tests/writer_mutation_cost_proof.py tests/writer_mutation_cost_proof.py
+          cp ../candidate/tests/swarm_ledger/conftest.py tests/swarm_ledger/conftest.py
           python -m tests.writer_mutation_cost_proof prepare ../baseline
       - uses: ./candidate/.github/actions/nats-server
       - uses: ./candidate/.github/actions/browser-cache
@@ -172,6 +174,7 @@ jobs:
         run: |
           cp -a ../candidate/scripts/ci_mutation/. scripts/ci_mutation/
           cp ../candidate/tests/writer_mutation_cost_proof.py tests/writer_mutation_cost_proof.py
+          cp ../candidate/tests/swarm_ledger/conftest.py tests/swarm_ledger/conftest.py
           python -m tests.writer_mutation_cost_proof prepare ../baseline
       - uses: ./candidate/.github/actions/nats-server
       - uses: ./candidate/.github/actions/browser-cache
