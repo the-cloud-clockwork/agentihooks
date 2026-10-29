@@ -66,7 +66,6 @@ def test_the_whole_lock_waits_for_ledgers_and_blocks_them():
     second, other = runs(lock.acquire)
     assert second is False
     assert lock.waiting == 2
-    assert lock.acquire(blocking=False) is False
     queued, behind = runs(lock.ledger("two").acquire)
     assert queued is False
     lock.ledger("one").release()
@@ -81,6 +80,17 @@ def test_the_whole_lock_waits_for_ledgers_and_blocks_them():
     assert lock.whole is False
     for waiter in (thread, other, behind):
         waiter.join(PATIENCE)
+
+
+def test_a_non_blocking_whole_lock_refuses_at_once_while_a_ledger_holds():
+    lock = LedgerLock()
+    assert lock.ledger("one").acquire() is True
+    later = threading.Timer(0.5, lock.ledger("one").release)
+    later.start()
+    assert lock.acquire(blocking=False) is False
+    later.join(PATIENCE)
+    assert lock.whole is False
+    assert not lock.locked()
 
 
 def test_a_free_whole_lock_answers_true_and_refuses_a_second_release():
