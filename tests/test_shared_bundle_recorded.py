@@ -148,13 +148,20 @@ def test_a_three_part_revision_with_an_empty_shared_field_is_refused_while_a_sha
         render.render("claude", "tiny", bundle_revision=f"{commits['root']}::{commits['user']}")
 
 
-def test_rendering_a_two_part_revision_is_refused_while_a_shared_bundle_is_linked(three, monkeypatch, tmp_path):
+def test_a_revision_that_recorded_no_shared_commit_warns_and_renders_without_the_linked_shared_bundle(
+    three, monkeypatch, tmp_path, capsys
+):
     bundles.link(three["root"])
     bundles.link(three["shared"], shared=True)
-    _record_calls(monkeypatch, tmp_path)
+    seen = _record_calls(monkeypatch, tmp_path)
 
-    with pytest.raises(ValueError, match="shared bundle"):
-        render.render("claude", "tiny", bundle_revision=three["commits"]["root"])
+    render.render("claude", "tiny", bundle_revision=three["commits"]["root"])
+
+    err = capsys.readouterr().err
+    assert "the launch recorded no shared bundle commit" in err
+    assert f"the shared bundle at {three['shared']} is linked; rendering without it" in err
+    assert seen["args"][1] == three["commits"]["root"]
+    assert not seen["kwargs"].get("shared_revision")
 
 
 def test_rendering_a_root_user_revision_without_a_shared_bundle_is_unchanged(three, monkeypatch, tmp_path):
