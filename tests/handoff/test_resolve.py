@@ -11,6 +11,12 @@ from scripts.swarm_ledger import ledger_workspace
 LEDGER = {"tasks": [{"id": "t1"}], "phases": [{"id": "p7"}], "questions": [], "followups": [{"id": "f1"}]}
 
 
+def _item(slug, path):
+    name, _, item_id = path.partition("/")
+    found = [entry for entry in LEDGER.get(name, []) if slug == "sw" and entry["id"] == item_id]
+    return found[0] if found else None
+
+
 @pytest.fixture
 def redis():
     import fakeredis
@@ -24,7 +30,7 @@ def _resolver(redis, gh_code=0, seen=None):
             seen.append(argv)
         return subprocess.CompletedProcess(argv, gh_code, stdout="", stderr="")
 
-    return Resolver("sw", redis, ledger_state=lambda slug: LEDGER if slug == "sw" else {}, run=run)
+    return Resolver("sw", redis, ledger_item=_item, run=run)
 
 
 @pytest.mark.parametrize("address", ["ledger:sw/tasks/t1", "ledger:sw/phases/p7", "ledger:sw/followups/f1"])
@@ -66,13 +72,32 @@ def test_an_inbox_item_resolves_when_it_exists(redis):
 
 
 def test_without_redis_seat_and_inbox_addresses_do_not_resolve():
-    resolver = Resolver("sw", None, ledger_state=lambda slug: LEDGER)
+    resolver = Resolver("sw", None, ledger_item=_item)
     assert not resolver("recap:eng-1@sw") and not resolver("inbox:deadbeef0000")
     assert resolver("ledger:sw/tasks/t1")
 
 
 def test_an_unreadable_ledger_resolves_nothing(redis):
-    def broken(slug):
+    def broken(slug, path):
         raise SwarmError("ledger server down")
 
-    assert not Resolver("sw", redis, ledger_state=broken)("ledger:sw/tasks/t1")
+    assert not Resolver("sw", redis, ledger_item=broken)("ledger:sw/tasks/t1")
+
+
+@pytest.mark.parametrize("address", ["ledger:sw/tasks/", "ledger:sw/tasks", "ledger:sw"])
+def test_a_ledger_address_without_an_item_never_reads_the_ledger(redis, address):
+    def read(slug, path):
+        pytest.fail(f"read {path} for an address without an item")
+
+    assert not Resolver("sw", redis, ledger_item=read)(address)
+
+
+def test_a_ledger_item_is_read_by_its_own_path(redis):
+    reads = []
+
+    def read(slug, path):
+        reads.append((slug, path))
+        return {"id": "p7"}
+
+    assert Resolver("sw", redis, ledger_item=read)("ledger:other/phases/p7")
+    assert reads == [("other", "phases/p7")]

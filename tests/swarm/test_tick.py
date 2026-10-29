@@ -38,6 +38,10 @@ class FakeLedger:
     def task(self, slug, task_id):
         return self.rows.get(task_id)
 
+    def item(self, slug, path):
+        name, _, item_id = path.partition("/")
+        return next((entry for entry in self.state(slug).get(name) or [] if entry.get("id") == item_id), None)
+
     def events(self, slug):
         return []
 

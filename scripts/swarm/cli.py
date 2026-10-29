@@ -2045,7 +2045,7 @@ def cmd_handoff(store, args):
     agent = _me(store, args)
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
-    found = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.state))
+    found = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.item))
     if found:
         raise SwarmError(handoff_check.refusal(found))
     envelope, transfer = _hand_off(store, args.slug, agent, text, args.reason, ledger)
@@ -2106,7 +2106,7 @@ def cmd_ready(store, args):
         now_ms(),
         ready.continuation(store, args.slug, agent.task),
     )
-    problems = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.state))
+    problems = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.item))
     if problems:
         raise SwarmError(handoff_check.refusal(problems))
     ready.release(store, args.slug, agent.task, found, ledger, agent.name, ledger_events.view)
