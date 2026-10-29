@@ -403,6 +403,7 @@ def test_unrelated_activity_answers_are_not_recorded(world, wrong):
     record = {"request": "question", "answers": [], "idle_answers": 0}
     inbox = Mock()
     inbox.worlds.return_value = [inbox]
+    inbox.redis.exists.return_value = True
     inbox.get.side_effect = [
         SimpleNamespace(id="question", reason=automated_gc.REPLY_PREFIX + "answer"),
         SimpleNamespace(ref="other" if wrong == "reference" else "question", sender="stranger"),
@@ -530,5 +531,23 @@ def test_a_question_gone_from_every_world_is_asked_again(world):
     at = START + LIMIT * 2
     assert sweep(world, at) == [f"asked automated agent {agent.name} what it is doing"]
     record = automated_gc.state(store, SLUG, agent)
-    assert record["request"] not in ("", gone.id)
+    assert record["request"] == question(world).id
+    assert record["request"] != gone.id
+    assert record["last_probe"] == at
+
+
+def test_a_question_whose_answer_is_gone_is_asked_again(world):
+    from scripts.swarm import automated_gc
+
+    store, inbox, agent, _, _ = world
+    sweep(world, START + LIMIT)
+    first = question(world).id
+    reply = answer(world, "nothing to do")
+    inbox.redis.delete(inbox.key("item", reply.id))
+    at = START + LIMIT * 2
+    assert sweep(world, at) == [f"asked automated agent {agent.name} what it is doing"]
+    record = automated_gc.state(store, SLUG, agent)
+    assert record["idle_answers"] == 0
+    assert record["request"] == question(world).id
+    assert record["request"] != first
     assert record["last_probe"] == at
