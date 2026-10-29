@@ -104,12 +104,14 @@ def live(monkeypatch):
     monkeypatch.setattr(stream, "HEARTBEAT_S", 0.2)
     monkeypatch.setattr(seen, "marks_for", lambda slug, environ=None: None)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd.daemon_threads = False
     threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
     monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda: base)
     monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{httpd.server_address[1]}"})
     yield base
     httpd.shutdown()
+    server.HUB.drain()
     httpd.server_close()
     assert server.HUB.watched() == []
 
