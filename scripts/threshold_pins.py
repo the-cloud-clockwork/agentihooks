@@ -81,7 +81,7 @@ def _rebinds(node: ast.AST, name: str) -> bool:
     return isinstance(node, ast.Call) and _calls(node, name)
 
 
-def constant(tree: Path, path: str, name: str):
+def constant(tree: Path, path: str, name: str) -> object:
     source = tree / path
     if not source.is_file():
         return None
@@ -101,7 +101,7 @@ def constant(tree: Path, path: str, name: str):
     return ast.literal_eval(bound[0].value)
 
 
-def loosened(kind: str, base, head) -> str | None:
+def loosened(kind: str, base: object, head: object) -> str | None:
     if kind == COVERS:
         missing = [item for item in base if item not in head]
         return f"drops {missing}" if missing else None
@@ -121,7 +121,7 @@ def loosened(kind: str, base, head) -> str | None:
     return f"rose from {base} to {head}" if head > base else None
 
 
-def pin_errors(base: Path, head: Path, pins=PINS) -> tuple[list[str], int]:
+def pin_errors(base: Path, head: Path, pins: tuple[tuple[str, str, str], ...] = PINS) -> tuple[list[str], int]:
     errors, compared = [], 0
     for path, name, kind in pins:
         was = constant(base, path, name)
@@ -136,7 +136,7 @@ def pin_errors(base: Path, head: Path, pins=PINS) -> tuple[list[str], int]:
     return errors, compared
 
 
-def shrunk(base, head, where: str) -> list[str]:
+def shrunk(base: object, head: object, where: str) -> list[str]:
     if isinstance(base, dict) and isinstance(head, dict):
         errors = [f"{where}{key} is new; the base does not allow it" for key in sorted(set(head) - set(base))]
         for key in sorted(set(head) & set(base)):
@@ -147,7 +147,7 @@ def shrunk(base, head, where: str) -> list[str]:
     return [] if base == head else [f"{where}changed from {base!r} to {head!r}"]
 
 
-def allowlist_errors(base: Path, head: Path, allowlists=SHRINK_ONLY) -> tuple[list[str], int]:
+def allowlist_errors(base: Path, head: Path, allowlists: tuple[str, ...] = SHRINK_ONLY) -> tuple[list[str], int]:
     errors, compared = [], 0
     for path in allowlists:
         if not (base / path).is_file():
@@ -168,7 +168,9 @@ def tracked(tree: Path) -> list[str]:
     return [name for name in result.stdout.decode().split("\0") if name]
 
 
-def registry_errors(head: Path, allowlists=SHRINK_ONLY, graded=GRADED_BY) -> list[str]:
+def registry_errors(
+    head: Path, allowlists: tuple[str, ...] = SHRINK_ONLY, graded: tuple[tuple[str, str], ...] = GRADED_BY
+) -> list[str]:
     known = set(allowlists) | {path for path, _ in graded}
     found = [
         name
