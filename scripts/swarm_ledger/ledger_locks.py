@@ -14,7 +14,7 @@ class LedgerLock:
                 return False
             self.waiting += 1
             try:
-                self.state.wait_for(lambda: not self.whole and not self.held)
+                self.state.wait_for(self.free)
             finally:
                 self.waiting -= 1
             self.whole = True
@@ -27,9 +27,12 @@ class LedgerLock:
             self.whole = False
             self.state.notify_all()
 
+    def free(self) -> bool:
+        return not self.whole and not self.held
+
     def locked(self) -> bool:
         with self.state:
-            return self.whole or bool(self.held)
+            return not self.free()
 
     def __enter__(self) -> bool:
         return self.acquire()
