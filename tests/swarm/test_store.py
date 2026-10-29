@@ -24,6 +24,20 @@ def test_create_then_read_config_and_list(store):
     assert store.slugs() == ["smoke"]
 
 
+def test_queue_refusals_are_timestamped_and_shared_between_clients(store, monkeypatch):
+    monkeypatch.setattr("scripts.swarm.store.time.time", lambda: 123.456)
+    evidence = {"head": "abc", "reason": "failed group", "cancelled_without_failed_test": False}
+    store.record_queue_refusal("sw", evidence)
+    store.record_queue_refusal("sw", {**evidence, "head": "def", "cancelled_without_failed_test": None})
+    other = RedisStore(store.redis)
+    assert other.queue_refusals("sw") == [
+        {**evidence, "at": 123456},
+        {**evidence, "head": "def", "cancelled_without_failed_test": None, "at": 123456},
+    ]
+    assert other.queue_refusals("other") == []
+    assert evidence == {"head": "abc", "reason": "failed group", "cancelled_without_failed_test": False}
+
+
 def test_handoff_tasks_reads_presence_in_one_batch(store, monkeypatch):
     from unittest.mock import Mock
 

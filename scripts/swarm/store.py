@@ -528,6 +528,12 @@ class RedisStore:
     def spawns(self, slug):
         return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
 
+    def record_queue_refusal(self, slug: str, record: dict) -> None:
+        self.redis.rpush(self.key(slug, "queue-refusals"), json.dumps({**record, "at": int(time.time() * 1000)}))
+
+    def queue_refusals(self, slug: str) -> list[dict]:
+        return [json.loads(row) for row in self.redis.lrange(self.key(slug, "queue-refusals"), 0, -1)]
+
     def count_claim(self, slug, task):
         self.redis.hdel(self.key(slug, "pending-lives"), task)
         self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))

@@ -40,6 +40,7 @@ WORKER_KEYS = (
     "swarm:*:findings",
     "swarm:*:checks:*",
     "swarm:*:merge-stall",
+    "swarm:*:queue-refusals",
     "swarm:*:merge-stall-notice",
     "swarm:*:hive-placement-waits",
     "swarm:*:dev-red",

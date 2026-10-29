@@ -790,13 +790,18 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
 
 @pytest.mark.parametrize("failed", [False, True])
 def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(monkeypatch, capsys, failed):
-    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
+    swarm = swarm_of("eng")
+    seen, recorded = [], []
+    swarm.record_queue_refusal = lambda slug, record: recorded.append((slug, record))
+    monkeypatch.setattr(cli, "connect", lambda: swarm)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
-    seen = []
+    evidence = {"pull": URL, "head": "abc", "reason": "failed group", "cancelled_without_failed_test": False}
 
-    def fresh(url, head):
+    def fresh(url, head, record=None):
         seen.append(("fresh", url, head))
+        assert record is not None
         if failed:
+            record(evidence)
             raise SwarmError(f"head {head} failed its last merge group run (Tests run)")
 
     monkeypatch.setattr(queue_exit, "require_fresh", fresh)
@@ -809,6 +814,7 @@ def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(monkeypat
     assert cli.main(["sw", "merge", "queue", URL]) == (1 if failed else 0)
     assert seen == [("intent", "abc"), ("fresh", URL, "abc")]
     assert queued == ([] if failed else [URL])
+    assert recorded == ([("sw", {"agent": "engineer@a1b2c3-0001", "task": "t1", **evidence})] if failed else [])
     if failed:
         assert "head abc failed its last merge group run (Tests run)" in capsys.readouterr().err
 
