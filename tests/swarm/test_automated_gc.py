@@ -402,6 +402,7 @@ def test_unrelated_activity_answers_are_not_recorded(world, wrong):
     _, _, agent, _, _ = world
     record = {"request": "question", "answers": [], "idle_answers": 0}
     inbox = Mock()
+    inbox.worlds.return_value = [inbox]
     inbox.get.side_effect = [
         SimpleNamespace(id="question", reason=automated_gc.REPLY_PREFIX + "answer"),
         SimpleNamespace(ref="other" if wrong == "reference" else "question", sender="stranger"),
@@ -484,20 +485,25 @@ def test_legacy_agent_without_a_start_timestamp_is_probed_at_thirty_minutes(worl
 
 
 def test_hive_hosted_agent_answer_is_read_from_its_member_world(world):
+    import fakeredis
+
     from scripts.hive import auth
     from scripts.swarm import automated_gc
 
-    store, controller, agent, _, _ = world
-    redis = store.redis
+    _, _, agent, runtime, ledger = world
+    redis = fakeredis.FakeRedis(decode_responses=True)
     redis.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "m1", "ledger": "digest"})
     redis.sadd(auth.INDEX, "m1")
+    store = RedisStore(redis)
     store.put_agent(SLUG, replace(agent, hive="m1"))
-    member = InboxStore(redis, world="m1")
-    assert sweep(world, START + LIMIT) == [f"asked automated agent {agent.name} what it is doing"]
-    asked = next(item for item in member.inbox(agent.name) if item.state not in CLOSED)
-    assert not redis.exists(controller.key("item", asked.id))
-    reply = member.reply(asked.id, agent.name, "nothing to do")
-    assert sweep(world, START + LIMIT + 1) == [f"recorded activity answer from {agent.name}"]
+    controller, member = InboxStore(redis), InboxStore(redis, world="m1")
+    asked = [f"asked automated agent {agent.name} what it is doing"]
+    assert automated_gc.run(SLUG, store, ledger, runtime, START + LIMIT) == asked
+    question = next(item for item in member.inbox(agent.name) if item.state not in CLOSED)
+    assert not redis.exists(controller.key("item", question.id))
+    reply = member.reply(question.id, agent.name, "nothing to do")
+    recorded = [f"recorded activity answer from {agent.name}"]
+    assert automated_gc.run(SLUG, store, ledger, runtime, START + LIMIT + 1) == recorded
     state = automated_gc.state(store, SLUG, agent)
     assert state["idle_answers"] == 1
     assert state["request"] == ""
