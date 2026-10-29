@@ -117,7 +117,6 @@ def test_an_open_panel_follows_its_icon_when_the_page_resizes_or_the_strip_scrol
     assert bell.bounding_box()["y"] == pytest.approx(moved - 40, abs=0.5)
 
 
-@pytest.mark.xfail(strict=True, reason="rollback rehearsal #8385 reverts the resize fix")
 def test_a_window_resize_keeps_the_strip_scroll_and_the_focused_icon(tab):
     strip = tab.locator("#icon-strip")
     desktop = tab.viewport_size["width"] >= 1024

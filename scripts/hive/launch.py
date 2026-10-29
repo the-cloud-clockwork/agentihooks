@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from hooks.context import profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts.hive import admission, headroom, orders, placement, placement_waits, registry
 from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
@@ -399,6 +400,8 @@ class HiveLaunch:
         selected = self.select(request.config, request.lane, request.task)
         excluded = set()
         while isinstance(selected, Selection):
+            if self.user_bundle_refusal(selected):
+                return selected
             refused = self.queue_refusal(request, selected, self.store.redis.xlen(self.orders.stream(selected.hive)))
             refused = refused or self.reserve_room(request, selected)
             if not refused:
@@ -444,6 +447,8 @@ class HiveLaunch:
         selected = self._admitted_selection(request)
         if isinstance(selected, placement.Wait):
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
+        if refused := self.user_bundle_refusal(selected):
+            return Outcome("spawn", Status.REFUSED, HIVE, detail=refused)
         try:
             named = replace(
                 request,
@@ -466,6 +471,17 @@ class HiveLaunch:
             admission.release(self.store.redis, selected.hive, f"{self.slug}/{request.name}")
             local_slots.release(self.store, selected.hive, self.slug, request.name)
             raise
+
+    def user_bundle_refusal(self, selected: Selection) -> str:
+        from scripts.swarm.commands import hive_id
+
+        user = profile_chain.registered_user_bundle(profile_chain.read_state(), os.environ)
+        if user is None or selected.hive == hive_id():
+            return ""
+        return (
+            f"hive {selected.hive} cannot run this seat: the user bundle at {user} is registered on this host and a "
+            "remote hive carries only the root bundle; run agentihooks bundle unlink --user to place it remotely"
+        )
 
     def queue_refusal(self, request: SpawnRequest, selected: Selection, queued: int) -> str:
         from scripts.master_login_chain import BUDGET

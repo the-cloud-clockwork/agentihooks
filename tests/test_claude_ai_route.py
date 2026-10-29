@@ -475,7 +475,7 @@ def _front_door(rendered):
     return _environ(rendered, AGENTIHOOKS_PROFILE="master")
 
 
-def test_an_expired_front_door_login_falls_back_to_a_quota_token_route(rendered, monkeypatch, executed):
+def test_an_expired_front_door_login_falls_back_to_a_quota_token_route(rendered, monkeypatch, executed, capsys):
     def expired(environ, cwd):
         raise login.LoginRefused(native_login.EXPIRED)
 
@@ -487,6 +487,7 @@ def test_an_expired_front_door_login_falls_back_to_a_quota_token_route(rendered,
     claude_ai.launch_claude("/opt/claude", args, environ, "/run/route")
     assert tokens == [("/opt/claude", args, environ, "/run/route")]
     assert executed == []
+    assert capsys.readouterr() == ("", f"[agenti] claude ai login refused: {native_login.EXPIRED}\n")
 
 
 def test_a_refused_login_outside_the_front_door_still_fails_the_route(rendered, monkeypatch):
