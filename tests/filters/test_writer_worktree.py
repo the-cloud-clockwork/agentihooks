@@ -276,8 +276,12 @@ def test_a_server_holding_no_profile_state_trusts_only_a_listed_owner(server_els
     with pytest.raises(ValueError) as refused:
         ledger_agent_ops.check(_followup(stranger, "A plain line"))
     assert str(refused.value) == UNTRUSTED
+    with pytest.raises(ValueError) as refused:
+        ledger_core.check_op(_comment(stranger, "A plain line"))
+    assert str(refused.value) == UNTRUSTED
     monkeypatch.setattr("hooks.config.CONDITIONS_TRUSTED_OWNERS", "someone, stranger")
     assert ledger_agent_ops.check(_followup(stranger, "A plain line")) is None
+    assert ledger_core.check_op(_comment(stranger, "A plain line")) is None
 
 
 def test_the_folder_check_validates_only_a_carried_folder():
