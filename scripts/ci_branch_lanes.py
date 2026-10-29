@@ -145,7 +145,7 @@ def per_run_mutation_group(name: str, block: object, job: dict, trusted: dict) -
 def dedicated_chart_group(name: str, block: object, job: dict, trusted: dict) -> bool:
     return (
         trusted.get("name") == "Helm chart release"
-        and events(trusted) == [{"release": {"types": ["published"]}}]
+        and events(trusted) == [{"workflow_run": {"workflows": ["Swarm worker image"], "types": ["completed"]}}]
         and name in {"publish", "kind"}
         and job == (trusted.get("jobs") or {}).get(name)
         and block == {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
