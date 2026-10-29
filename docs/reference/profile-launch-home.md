@@ -86,8 +86,8 @@ expires instead of being stopped as `expired`.
 ### Timeout output
 
 A canary wait that runs out prints `profile_validation=failed` with the rest of
-the launch report on stdout, the reason on stderr, and exits 3. A wait capped
-by `--canary-timeout` keeps the plain reason:
+the launch report on stdout, the reason on stderr, and exits 3. A canary that
+fails or times out before the launch deadline runs out keeps the plain reason:
 
 ```text
 agentihooks init-agent: mounted profile canary did not validate before timeout: the codex agent reported no canary within 90s

@@ -463,6 +463,8 @@ def test_queued_orders_with_full_length_launches_all_acknowledge_live_inside_the
     from scripts.swarm import lease
     from scripts.swarm.store import AgentRecord
 
+    monkeypatch.setattr(lease, "ttl_ms", lambda: 3_600_000)
+    lease.renew(setup.store, "fixture", setup.held)
     sent = lease.now_ms(setup.store)
     now = [sent]
     monkeypatch.setattr(lease, "now_ms", lambda store: now[0])

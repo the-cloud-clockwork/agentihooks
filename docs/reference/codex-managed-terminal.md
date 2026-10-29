@@ -397,7 +397,7 @@ uses whole seconds; a live launch prints the fractional grant, such as
 agentihooks init-agent: the 270s launch deadline ran out in the profile canary wait after Codex ready 120s, Codex ready for the opening prompt 120s, profile canary 30s: the codex agent reported no canary within 30s
 ```
 
-A canary wait capped by `--canary-timeout` that runs out inside that limit keeps its plain reason,
+A canary wait that fails before the launch deadline runs out keeps its plain reason,
 `mounted profile canary did not validate before timeout: the codex agent
 reported no canary within 90s`; see [Profile launch home](profile-launch-home.md).
 In a swarm either reason is written to the swarm timer journal as

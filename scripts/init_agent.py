@@ -120,8 +120,9 @@ class LaunchDeadline:
         try:
             result = waiter(granted)
         except ValueError as exc:
-            self.spent[wait] = self.spent.get(wait, 0.0) + time.monotonic() - began
-            if granted < limit:
+            ended = time.monotonic()
+            self.spent[wait] = self.spent.get(wait, 0.0) + ended - began
+            if granted < limit and ended >= self.ends:
                 raise ValueError(f"{self._overrun()}: {exc}") from exc
             raise
         self.spent[wait] = self.spent.get(wait, 0.0) + time.monotonic() - began
