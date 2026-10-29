@@ -353,7 +353,16 @@ class NameRegistry:
             lambda held: KEEP if old in (held or []) else sorted({*(held or []), old}),
             self._legacy_aliases_of(new),
         )
-        self.names_state.amend("alias", old, point, self._legacy_alias(old))
+        try:
+            self.names_state.amend("alias", old, point, self._legacy_alias(old))
+        except NamingError:
+            self.names_state.amend(
+                "aliases-of",
+                new,
+                lambda held: [kept for kept in held or [] if kept != old],
+                self._legacy_aliases_of(new),
+            )
+            raise
 
     def aliases(self, name, reader=None):
         name = self.resolve(name, reader)

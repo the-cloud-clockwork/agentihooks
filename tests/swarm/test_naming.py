@@ -283,7 +283,7 @@ def test_a_proof_swarm_space_is_closed_and_renamed_by_its_slug(proof_store):
     assert runtime.close_space(proof_store.config(PROOF)) is False
 
 
-def test_resolve_many_reads_every_alias_in_one_round_trip(store, redis, monkeypatch):
+def test_resolve_many_reads_the_store_once_then_the_legacy_keys_it_lacks_once(store, redis, monkeypatch):
     new = store.next_name("sw", "eng")
     store.names.alias("sw-eng-1", new)
     reads = []
@@ -292,15 +292,15 @@ def test_resolve_many_reads_every_alias_in_one_round_trip(store, redis, monkeypa
     monkeypatch.setattr(redis, "hget", lambda *a: reads.append(a))
     monkeypatch.setattr(redis, "hmget", lambda key, fields: reads.append("hmget") or hmget(key, fields))
     monkeypatch.setattr(redis, "mget", lambda keys: reads.append(list(keys)) or mget(keys))
-    keys = ["hmget", [f"{naming.PREFIX}:alias:{name}" for name in (new, "stranger")]]
+    expected = ["hmget", [f"{naming.PREFIX}:alias:{name}" for name in (new, "stranger")]]
     assert naming.NameRegistry(redis).resolve_many(["sw-eng-1", new, "stranger"]) == {
         "sw-eng-1": new,
         new: new,
         "stranger": "stranger",
     }
-    assert reads == keys
+    assert reads == expected
     assert naming.NameRegistry(redis).resolve_many([]) == {}
-    assert reads == keys
+    assert reads == expected
 
 
 def test_names_batches_alias_and_record_reads_without_changing_rows(store, redis, monkeypatch):

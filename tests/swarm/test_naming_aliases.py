@@ -96,6 +96,26 @@ def test_an_alias_held_before_the_move_is_never_pointed_elsewhere(client, agent)
     assert _shared(client, "aliases-of", other) is None
 
 
+def test_an_alias_lost_to_a_racing_owner_leaves_no_membership_behind(client, agent):
+    names, new = agent
+    other = names.next("sw", "eng")
+    racing = naming.NameRegistry(client)
+    real = names.names_state.amend
+
+    def amend(kind, part, change, legacy):
+        if kind == "alias":
+            racing.alias("sw-eng-1", other)
+        return real(kind, part, change, legacy)
+
+    names.names_state.amend = amend
+    with pytest.raises(naming.NamingError, match=f"^{re.escape(f'alias sw-eng-1 already belongs to {other}')}$"):
+        names.alias("sw-eng-1", new)
+    names.names_state.amend = real
+    assert names.aliases(new) == []
+    assert names.aliases(other) == ["sw-eng-1"]
+    assert names.resolve("sw-eng-1") == other
+
+
 def test_a_registered_name_or_an_unknown_agent_cannot_take_an_alias(client, agent):
     names, new = agent
     other = names.next("sw", "eng")
