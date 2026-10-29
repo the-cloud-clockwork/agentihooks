@@ -378,7 +378,9 @@ def preflight(api: ResourceClient, name: str, item: str) -> None:
     try:
         reply = api.mutate(SLUG, [{**op, "text": "Load check write preflight landed."}])
     except urllib.error.HTTPError as exc:
-        raise SystemExit(f"write preflight refused: HTTP {exc.code} {exc.reason}: {exc.read().decode(errors='replace')}")
+        raise SystemExit(
+            f"write preflight refused: HTTP {exc.code} {exc.reason}: {exc.read().decode(errors='replace')}"
+        )
     except Exception as exc:  # any refusal fails the gate before the timed window
         raise SystemExit(f"write preflight refused: {type(exc).__name__}: {exc}")
     if rejected := (reply.get("data") or reply).get("rejected"):
