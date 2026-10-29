@@ -21,6 +21,8 @@ ROOT = Path(__file__).resolve().parents[2]
 RECORD = "supervisor.json"
 DRAIN_S = 30
 STARTER = "AGENTIHOOKS_SCHEDULER_STARTER"
+UNIT = "agentihooks-scheduler.service"
+UNIT_ENV = "AGENTIHOOKS_SCHEDULER_UNIT"
 
 
 class AlreadyRunning(RuntimeError):
@@ -97,6 +99,7 @@ def supervise(stop: Event | None = None) -> None:
     stopped = stop if stop is not None else Event()
     loaded = revision(ROOT)
     starter = int(os.environ.get(STARTER) or 0)
+    _mark_unit()
     with machine_lock("supervisor"):
         _identify(loaded)
         while not stopped.is_set():
@@ -108,6 +111,26 @@ def supervise(stop: Event | None = None) -> None:
                     return
             if stopped.wait(1) or _abandoned(starter):
                 return
+
+
+def _mark_unit() -> None:
+    if not os.environ.get(UNIT_ENV):
+        return
+    import hooks.config  # noqa: F401  the folder must match callers that load ~/.agentihooks/*.env
+
+    directory = runtime_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / UNIT).write_text(UNIT)
+
+
+def _unit_owns(directory: Path) -> bool:
+    return (directory / UNIT).is_file() and (Path.home() / ".config" / "systemd" / "user" / UNIT).is_file()
+
+
+def _start_unit() -> bool:
+    start = ["systemctl", "--user", "start", "--no-block", UNIT]
+    subprocess.run(start, stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=False)
+    return True
 
 
 def _abandoned(starter: int) -> bool:
@@ -185,6 +208,8 @@ def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
         with machine_lock("startup", environ=active):
             with machine_lock("supervisor", environ=active):
                 pass
+            if _unit_owns(runtime_dir(active)):
+                return _start_unit()
             with (runtime_dir(active) / "scheduler.log").open("ab") as log:
                 subprocess.Popen(
                     _command("supervise"),
