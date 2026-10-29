@@ -31,11 +31,11 @@ def _save(store, slug, agent, record):
 
 
 def _answer(inbox, agent, record, now_ms):
-    request = inbox.get(record["request"])
-    if not request.reason.startswith(REPLY_PREFIX):
+    request = inbox.find(record["request"], "automated-gc")
+    if not request or not request.reason.startswith(REPLY_PREFIX):
         return False
-    answer = inbox.get(request.reason.removeprefix(REPLY_PREFIX))
-    if answer.ref != request.id or not inbox.acts_for(answer.sender, agent.name):
+    answer = inbox.find(request.reason.removeprefix(REPLY_PREFIX), "automated-gc")
+    if not answer or answer.ref != request.id or not inbox.acts_for(answer.sender, agent.name):
         return False
     record["answers"].append({"id": answer.id, "text": answer.text, "at": now_ms})
     record["answers"] = record["answers"][-3:]

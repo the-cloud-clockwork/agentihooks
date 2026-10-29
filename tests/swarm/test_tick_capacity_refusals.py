@@ -51,3 +51,16 @@ def test_missing_capacity_and_refusal_harness_stay_unknown(store, error_type):
     actions = reconcile.tick("sw", store, ledger, runtime, now_ms=1_000)
     context = next(action for action in actions if action.startswith("spawn capacity for t1: "))
     assert json.loads(context.split(": ", 1)[1]) == {"harness": "", "accounts": []}
+
+
+def test_a_placement_refusal_skips_capacity_only_until_it_expires(store):
+    from scripts.hive import placement_waits
+
+    placement_waits.observe(store, "sw", "ci", "t1", "no hive for ci has room: h1 holds 4 queued launches", 0)
+    placement_waits.observe(store, "sw", "ci", "t2", "no hive for ci has room: h1 holds 4 queued launches", 0)
+    ready = {"ci": [{"id": "t1"}, {"id": "t2"}, {"id": "t3"}]}
+    fresh, skipped = capacity._placement_ready(store, "sw", ready, placement_waits.FRESH_MS - 1)
+    assert fresh == {"ci": [{"id": "t3"}]}
+    assert len(skipped) == 2
+    expired, skipped = capacity._placement_ready(store, "sw", ready, placement_waits.FRESH_MS)
+    assert (expired, skipped) == (ready, [])

@@ -702,11 +702,15 @@ def _metric(value: float | None) -> float:
     return -1.0 if value is None else value
 
 
+def refused(result: ProbeResult) -> bool:
+    return result.provider_status in ("rejected", REVOKED)
+
+
 def account_cap(
     result: ProbeResult, now: float | None = None, include_fable: bool = False, ceiling: int | None = None
 ) -> int | None:
     """Live sessions the account may hold under the session bands; None without a full reading."""
-    if result.provider_status in ("rejected", REVOKED):
+    if refused(result):
         return 0
     timestamp = time.time() if now is None else now
     weeks = [result.seven_day, *([result.fable] if include_fable else [])]
@@ -833,7 +837,7 @@ def select_master_credential(environ: Mapping[str, str], **options: Any) -> Rout
         timestamp = time.time() if options.get("now") is None else options["now"]
         excluded = set(options.get("exclude", ()))
         reserve = {slug.strip() for slug in environ.get("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",")}
-        fable = options.get("include_fable", False)
+        fable = options.get("include_fable")
         open_results = [
             result for result in exc.results if result.account not in excluded and is_routable(result, timestamp, fable)
         ]

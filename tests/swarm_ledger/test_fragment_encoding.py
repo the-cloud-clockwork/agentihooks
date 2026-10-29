@@ -148,3 +148,18 @@ def test_a_leaf_is_encoded_canonically_and_its_signature_tells_number_spellings_
     signatures = [leaf(1).signature, leaf(1.0).signature, leaf(True).signature]
     assert len(set(signatures)) == 3
     assert leaf({"a": 1, "b": 2}).signature != leaf({"b": 2, "a": 1}).signature
+
+
+def test_a_document_sharing_unchanged_rows_with_the_previous_one_reuses_them_without_encoding(monkeypatch):
+    from scripts.swarm_ledger.repository import fragments
+
+    previous = document({"tasks": [{"id": "t1"}, {"id": "t2"}], "title": "x"})
+    rows = previous.value["tasks"]
+    dumped = []
+    dumps = fragments.orjson.dumps
+    monkeypatch.setattr(fragments.orjson, "dumps", lambda value: dumped.append(value) or dumps(value))
+    updated = document({"tasks": [rows[0], {"id": "t2", "done": True}], "title": previous.value["title"]}, previous)
+    assert updated.parts["tasks"].parts[0] is previous.parts["tasks"].parts[0]
+    assert updated.parts["title"] is previous.parts["title"]
+    assert dumped == [{"id": "t2", "done": True}]
+    assert encoded(updated) == encode(updated.value)

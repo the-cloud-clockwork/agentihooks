@@ -692,6 +692,14 @@ def test_a_task_whose_launch_failed_falls_behind_its_band_in_the_dispatcher_queu
     assert spawned(store, config, ledger, found) == [("eng", t) for t in ("l4", "s", "l1", "l2")]
 
 
+def test_a_handed_off_task_keeps_its_place_after_a_failed_launch(store):
+    config, ledger, found = queue_ledger(store, "delegate")
+    store.note_launch_failure(SLUG, "h1", "hive launch failed: refused: canary timeout")
+    store.note_launch_failure(SLUG, "l4", "boom")
+    store.put_handoff(SLUG, "h1", "released for an operator priority", seat="eng-3@" + SLUG)
+    assert spawned(store, config, ledger, found) == [("eng", t) for t in ("l4", "h1", "s", "l1")]
+
+
 @pytest.mark.parametrize("autonomy", ["assist", "manual"])
 def test_below_delegate_the_tick_keeps_claiming_by_rank(store, autonomy):
     config, ledger, found = queue_ledger(store, autonomy)

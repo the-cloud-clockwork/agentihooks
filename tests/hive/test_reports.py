@@ -1060,3 +1060,93 @@ def test_forgetting_a_hive_clears_its_pending_absence_observation(remote):
 
     assert not remote.runtime.hive.removed(agent, NOW + registry.LIVE_MS)
     assert remote.runtime.hive.removed(agent, NOW + registry.LIVE_MS * 2)
+
+
+LAUNCHED = 5_000
+
+
+@pytest.mark.parametrize(
+    ("listed", "observed_after", "pod_started_after", "retired"),
+    [
+        (False, 0, None, True),
+        (False, -1, None, False),
+        (True, 0, None, False),
+        (True, 0, 1, True),
+        (True, 0, 0, False),
+        (True, 0, -1, False),
+        (False, -1, 1, True),
+        (None, 0, None, False),
+        (None, 0, 1, True),
+    ],
+)
+@pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED}], indirect=True)
+def test_a_paneless_hive_worker_whose_process_or_pod_is_gone_is_retired_and_its_seat_freed(
+    remote, listed, observed_after, pod_started_after, retired
+):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import tick
+
+    agent = replace(remote.agent, pane_id="")
+    remote.store.put_agent("fixture", agent)
+    _publish(remote, state="unknown")
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    report.update(
+        names={True: [agent.name], False: ["someone-else"], None: []}[listed],
+        pane_ids=[],
+        process_namespace="theirs",
+        observed_at=LAUNCHED + remote.reports.STARTUP_MS + observed_after,
+    )
+    if pod_started_after is not None:
+        report["started_at"] = LAUNCHED + pod_started_after
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report))
+    remote.store.claim("fixture", "task", agent.name, 60000)
+    rows = {"task": {"state": "open", "claimed_by": ""}}
+    remote.runtime.retire = Mock(side_effect=AssertionError("a gone hive process needs no remote command"))
+
+    actions = tick._reap("fixture", remote.store, Mock(), remote.runtime, rows, LAUNCHED + 10**9)
+
+    if retired:
+        assert actions == [f"retired {agent.name}: its hive pane is gone"]
+        assert remote.store.agents("fixture") == []
+        assert remote.store.claimant("fixture", "task") is None
+        assert remote.store.execution_registry.occupants("fixture")[agent.seat].state == "ended"
+        exit_record = InboxStore(remote.redis).seats.exit_of(agent.name)
+        assert (exit_record["reason"], exit_record["seat"]) == ("stopped", "")
+    else:
+        assert [found.name for found in remote.store.agents("fixture")] == [agent.name]
+        assert remote.store.claimant("fixture", "task") == agent.name
+
+
+def test_hive_report_carries_the_pod_start_time(remote, monkeypatch):
+    from scripts.hive import daemon
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm_v2.runtime import process
+
+    monkeypatch.setattr(process, "local_namespace", lambda: "pod-namespace")
+    monkeypatch.setattr(process, "started_ms", lambda: 4321)
+    herdr = Mock()
+    herdr.live_names.return_value = set()
+    herdr.bindings.return_value = {}
+    herdr.conversations.return_value = {}
+    herdr.observe.return_value = PaneObservation("unknown")
+    herdr.reported.return_value = False
+    herdr.herdr.return_value = {"panes": []}
+
+    assert daemon.execution_report(remote.redis, HIVE, herdr)["started_at"] == 4321
+
+
+def test_the_pod_start_time_is_process_one_start_after_boot(tmp_path, monkeypatch):
+    from scripts.swarm_v2.runtime import process
+
+    (tmp_path / "stat").write_text("cpu  1 2 3\nbtime 1700000000\nprocesses 9\n")
+    (tmp_path / "1").mkdir()
+    fields = ["S", *["0"] * 18, "250"]
+    (tmp_path / "1" / "stat").write_text(
+        f"1 (init) 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 proc) {' '.join(fields)} 0 0\n"
+    )
+    monkeypatch.setattr(process.os, "sysconf", lambda name: 3 if name == "SC_CLK_TCK" else 0)
+
+    started = process.started_ms(tmp_path)
+    assert started == 1700000000 * 1000 + 83333
+    assert type(started) is int
+    assert process.started_ms(tmp_path / "missing") == 0
