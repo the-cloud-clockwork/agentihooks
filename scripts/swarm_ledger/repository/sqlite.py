@@ -388,7 +388,7 @@ class Snapshot:
         return None if row is None else row[0]
 
 
-def release_reader(held: dict, connection) -> None:
+def release_reader(held: dict, connection: sqlite3.Connection) -> None:
     held.pop(connection, None)
     connection.close()
 

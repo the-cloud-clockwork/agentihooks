@@ -98,7 +98,7 @@ def test_store_registers_its_reader_finalizer(monkeypatch):
 def test_open_forwards_connection_options_without_schema_work(tmp_path, monkeypatch):
     connection = Mock()
     connect = Mock(return_value=connection)
-    monkeypatch.setattr(sqlite.sqlite3, "connect", connect)
+    monkeypatch.setattr(sqlite, "sqlite3", Mock(connect=connect))
     path = tmp_path / sqlite.DATABASE
     store = SQLiteLedgerRepository(path)
     store._ready.add(path)
