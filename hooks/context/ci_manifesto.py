@@ -1,7 +1,7 @@
 """Inject enabled CI manifestos at session start and on the refresh cadence.
 
 Publication requires release dance. Legacy fenced signal blocks supply hotfix,
-branch creation and non-protected PR vocabulary.
+branch creation and PR vocabulary.
 
 Configuration: CI_MANIFESTO_ENABLED, AGENTIHOOKS_SKIP_MANIFESTO,
 CI_MANIFESTO_REFRESH_EVERY.
