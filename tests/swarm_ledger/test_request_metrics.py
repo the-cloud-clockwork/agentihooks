@@ -47,6 +47,20 @@ def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path,
     metrics = importlib.import_module("scripts.swarm_ledger.request_metrics")
     monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
     monkeypatch.setattr(metrics, "SAMPLES", deque(maxlen=metrics.MAX_SAMPLES))
+    started, release = threading.Event(), threading.Event()
+
+    def in_flight(handler):
+        started.set()
+        release.wait(10)
+
+    leaked = server.Handler.__new__(server.Handler)
+    leaked.command = "GET"
+    leaked.path = "/api/v1/ledgers/earlier/events"
+    leftover = threading.Thread(target=metrics.measured(in_flight), args=(leaked,))
+    leftover.start()
+    assert started.wait(10)
+    record, own = metrics.record, threading.get_ident()
+    monkeypatch.setattr(metrics, "record", lambda *row: record(*row) if threading.get_ident() == own else None)
     clock = Clock()
     monkeypatch.setattr(metrics, "time", clock)
     repo = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3", domain=server.core)
@@ -70,7 +84,11 @@ def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path,
     handler = server.Handler.__new__(server.Handler)
     handler.path = "/api/v1/ledgers/timing/operations?private=hidden"
     handler.command = "POST"
-    handler.do_POST()
+    try:
+        handler.do_POST()
+    finally:
+        release.set()
+        leftover.join(10)
     monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{ledger_port}"})
     with ThreadingHTTPServer(("127.0.0.1", ledger_port), server.Handler) as http:
         thread = threading.Thread(target=http.serve_forever)
@@ -227,3 +245,37 @@ def test_failed_write_keeps_its_file_lock_wait(tmp_path, monkeypatch):
     assert result["writes"]["cpu_seconds"] == 1.5
     assert result["writes"]["lock_wait_seconds"] == 2.0
     assert result["writes"]["other_wall_seconds"] == 4.5
+
+
+def test_a_write_waiting_on_another_load_of_its_ledger_counts_that_wait(tmp_path, monkeypatch):
+    from scripts.swarm_ledger.repository import sqlite
+
+    metrics = importlib.import_module("scripts.swarm_ledger.request_metrics")
+    monkeypatch.setattr(metrics, "SAMPLES", deque(maxlen=metrics.MAX_SAMPLES))
+    repo = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3", domain=server.core)
+    repo.import_document(
+        "timing",
+        server.core.normalize(
+            {
+                **new_ledger.build_doc({"title": "Timing"}),
+                "_meta": {"rev": 1, "stamps": {}, "events": [], "members": {}},
+            }
+        ),
+    )
+    reader = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3", domain=server.core)
+    clock = Clock()
+    monkeypatch.setattr(metrics, "time", clock)
+    monkeypatch.setattr(sqlite.threading, "Lock", lambda: DelayedLock(clock))
+
+    def write(handler, module):
+        reader.current("timing")
+        clock.wall += 1.0
+
+    monkeypatch.setattr(api, "handle", write)
+    handler = server.Handler.__new__(server.Handler)
+    handler.path, handler.command = "/api/v1/ledgers/timing/operations", "POST"
+    handler.do_POST()
+    result = metrics.report(1.0)
+    assert result["writes"]["count"] == 1
+    assert result["writes"]["lock_wait_seconds"] == 2.0
+    assert result["writes"]["other_wall_seconds"] == 1.0

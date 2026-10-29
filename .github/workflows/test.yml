@@ -2660,6 +2660,16 @@ jobs:
             exit 1
           fi
 
+      # dev's copy grades the head's new and changed units, so a pull request cannot loosen its own design rules.
+      # Until dev carries the grader, the head's copy grades.
+      - name: Hold the design rules on new and changed units
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/design_rules.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.design_rules --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
       # dev's copy measures the base and the head, so a pull request cannot grade or allowlist its own dead code.
       # Until dev carries the grader, the head's copy measures them.
       - name: Hold dead code in hooks and scripts

@@ -459,6 +459,25 @@ def test_the_shared_follow_reads_every_watched_ledger_each_quarter_second(monkey
     assert capsys.readouterr().err == "shared follow broken: unreadable\n"
 
 
+def test_the_shared_follow_skips_its_pass_while_a_write_holds_the_ledger_lock(monkeypatch):
+    read, slept = [], []
+
+    def sleep(seconds):
+        slept.append(seconds)
+        raise StopIteration
+
+    monkeypatch.setattr(server, "SCHEDULER_UNAVAILABLE", threading.Event())
+    monkeypatch.setattr(server.HUB, "watched", lambda: ["kept"])
+    monkeypatch.setattr(server.repository, "current", read.append)
+    monkeypatch.setattr("scripts.scheduler.process_timer.wait", sleep)
+    held = threading.Lock()
+    monkeypatch.setattr(server.core, "LOCK", held)
+    with held, pytest.raises(StopIteration):
+        server.follow_shared()
+    assert read == []
+    assert slept == [0.25]
+
+
 class Conflict(Exception):
     def __init__(self, pid):
         self.holder = {"pid": pid}
