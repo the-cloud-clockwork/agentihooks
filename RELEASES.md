@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.483 · 2026-10-29
+
+### 2026-10-29 · 8fe6ea0b6ec5 · #8775 · @nestorcolt
+
+**Bound concurrent hive credential work in the ledger server**
+
+Hosted ledger pods were OOM killed because every hive credential request spun up an unbounded thread decoding a member's full token map, each costing tens of megabytes; under swarm load dozens of concurrent requests exhausted the 4Gi pod limit. This change caps hive credential reads and token issues at four concurrent operations in the ledger server, with a five second wait before returning a 503 "busy" that clients already retry. It directly targets the memory spike measured on ledger-0 and leaves the underlying token-map storage work for later fixes.
+
+### 2026-10-29 · ba6014fd4e71 · #8778 · @nestorcolt
+
+**Skip consumed handoffs in Doctor reads**
+
+This change fixes a race in the Doctor's handoff diagnostics where a successor consuming a pending handoff between separate reads could make the removed record look like an unattributed finding. It now fetches the document, seat, and envelope together in a single Redis MGET and skips any record whose document has disappeared, while still correctly flagging genuinely malformed records and preserving the successor-prompt reader. CI reproduced the original phantom finding and confirmed it's resolved, with reviews and regression tests passing.
+
 ## v2.17.480 · 2026-10-29
 
 ### 2026-10-29 · 0a112ea5e313 · #8738 · @agenticore-app
