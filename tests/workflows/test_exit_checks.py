@@ -89,6 +89,7 @@ def test_classify_with_headless_builds_the_exact_runner_call(monkeypatch):
             "sealed",
             "low",
             "low",
+            "auto",
         )
     ]
 
@@ -106,8 +107,23 @@ def test_check_falls_back_to_the_default_classifier_when_none_is_given(monkeypat
             "sealed",
             "low",
             "low",
+            "auto",
         )
     ]
+
+
+def test_a_classifier_refused_a_codex_route_answers_on_claude(monkeypatch):
+    asked = []
+
+    def run(*a):
+        asked.append(a[6])
+        if a[6] != "claude":
+            raise runner.RouteRefused("codex refused to route: every session is taken")
+        return {"satisfied": True}
+
+    monkeypatch.setattr(runner, "run", run)
+    assert exit_checks.classify_with_headless("cond", "OUT") is True
+    assert asked == ["auto", "claude"]
 
 
 @pytest.mark.parametrize("expression", ["", "   "])

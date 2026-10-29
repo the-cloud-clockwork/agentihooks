@@ -142,6 +142,29 @@ def test_the_record_defaults_next_to_the_case_and_follows_tier_and_harness(files
     assert (fake.calls[0]["tier"], fake.calls[0]["harness"]) == ("low", "codex")
 
 
+def test_a_codex_route_refusal_is_judged_on_claude(files, filters, monkeypatch, capsys):
+    case_path, evidence_path = files()
+    filters(ALLOW)
+    monkeypatch.delenv("AGENTIHOOKS_TIER_HIGH_CLAUDE", raising=False)
+    asked = []
+
+    def run(profile_prompt, user_input, schema, clamp, tier, effort, harness="auto"):
+        asked.append(harness)
+        if harness == "codex":
+            raise runner.RouteRefused("codex refused to route: every session is taken")
+        return PASS
+
+    monkeypatch.setattr(runner, "run", run)
+
+    code = cli.main(["--case", str(case_path), "--evidence", str(evidence_path), "--harness", "codex"])
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out) == PASS
+    assert asked == ["codex", "claude"]
+    entry = json.loads(case_path.with_suffix(".verdict.json").read_text())
+    assert (entry["harness"], entry["model"]) == ("claude", "opus")
+
+
 def test_a_filter_deny_exits_three_with_the_findings(files, fake_runner, filters, capsys):
     case_path, evidence_path = files()
     fake = fake_runner()

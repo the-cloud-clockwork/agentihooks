@@ -229,3 +229,48 @@ def test_an_unknown_clamp_is_refused(routed):
 
 def test_validated_accepts_a_parsed_reply():
     assert runner.validated({"verdict": "x"}, SCHEMA) == {"verdict": "x"}
+
+
+def test_a_codex_routing_refusal_is_a_headless_route_refusal(fake_cli, monkeypatch):
+    calls = fake_cli("codex", ['{"verdict": "pass"}'])
+
+    def refuse(environ):
+        raise codex_router.RoutingError("no signed in Codex account has a free session")
+
+    monkeypatch.setattr(codex, "route", refuse)
+    with pytest.raises(runner.RouteRefused) as caught:
+        runner.run("P", "I", SCHEMA, "sealed", "low", "low", harness="codex")
+    assert isinstance(caught.value, HeadlessError)
+    assert str(caught.value) == "codex refused to route: no signed in Codex account has a free session"
+    assert calls() == []
+
+
+def test_an_answer_on_the_asked_harness_is_kept():
+    asked = []
+    assert runner.on_claude_if_refused("codex", lambda harness: asked.append(harness) or "v") == ("codex", "v")
+    assert asked == ["codex"]
+
+
+def test_a_route_refusal_is_asked_again_on_claude():
+    asked = []
+
+    def ask(harness):
+        asked.append(harness)
+        if harness != "claude":
+            raise runner.RouteRefused("codex refused to route: full")
+        return "v"
+
+    assert runner.on_claude_if_refused("auto", ask) == ("claude", "v")
+    assert asked == ["auto", "claude"]
+
+
+def test_other_headless_errors_are_not_asked_again():
+    asked = []
+
+    def ask(harness):
+        asked.append(harness)
+        raise HeadlessError("codex exited 1")
+
+    with pytest.raises(HeadlessError, match="^codex exited 1$"):
+        runner.on_claude_if_refused("codex", ask)
+    assert asked == ["codex"]
