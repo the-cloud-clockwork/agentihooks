@@ -98,6 +98,37 @@ def test_a_pass_stopped_by_a_lost_lease_runs_on_the_next_poll(rig):
     assert len(asks(rig.store, "e2")) == 1
 
 
+def test_an_unanswered_ask_passes_to_the_next_holder_after_the_answer_window(rig):
+    asked_at = 1_000 + preemption.INTERVAL_MS
+    poll_at(rig, 1_000, asked_at, asked_at + preemption.INTERVAL_MS)
+    assert asks(rig.store, "e1") == []
+    poll_at(rig, asked_at + preempt.ANSWER_MS)
+    assert len(asks(rig.store, "e1")) == 1 and len(asks(rig.store, "e2")) == 1
+
+
+def test_an_urgent_task_a_hive_refused_to_place_asks_nobody(rig):
+    from scripts.hive import placement_waits
+
+    placement_waits.observe(rig.store, SLUG, "eng", "t3", "no eng hive has room: cpu", 1_000)
+    poll_at(rig, 1_000, 1_000 + preemption.INTERVAL_MS, 1_000 + 2 * preemption.INTERVAL_MS)
+    assert asks(rig.store, "e1") == asks(rig.store, "e2") == []
+
+
+def test_a_refused_ledger_write_skips_the_swarm_and_keeps_the_interval(rig, monkeypatch, capsys):
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    def refused(*args):
+        raise LedgerRefused("busy")
+
+    monkeypatch.setattr(preempt, "run", refused)
+    poll_at(rig, 1_000, 2_000)
+    name = f"{refused.__module__}.{refused.__qualname__}"
+    assert capsys.readouterr().err.splitlines() == [
+        f"{name} skipped, the ledger refused its write: busy",
+        f"hub: preemption swarm={SLUG}: skipped {name}: the ledger refused its write",
+    ]
+
+
 def test_the_memory_bus_without_a_store_runs_nothing(monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_BUS", raising=False)
     reactor = preemption.Preemption(clock=lambda: 1_000)

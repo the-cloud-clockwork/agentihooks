@@ -51,6 +51,7 @@ class Preemption:
             return
         doc = self._source.state(slug)
         rows = {task["id"]: task for task in doc["tasks"]}
+        # The hub has no runtime to probe; hives record placement refusals in placement_waits, which the step reads.
         seats = preempt.Seats(rows, tick._ended, tick._current_owner, tick.ready_in_order, preempt._places)
-        for action in preempt.run(slug, config, self._store, doc, now, seats):
+        for action in tick.skip_refused(preempt.run, slug, config, self._store, doc, now, seats):
             print(f"hub: preemption swarm={slug}: {action}", file=sys.stderr)
