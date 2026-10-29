@@ -50,12 +50,13 @@ class Admission:
         if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
             print(f"hub: events claim cap swarm={slug} task={task_id}: {reason}", file=sys.stderr)
             return None
-        return self._claim(slug, request, view.rows[task_id])
+        return self._claim(slug, request, view.rows)
 
-    def _claim(self, slug: str, request: dict, row: dict) -> dict | None:
+    def _claim(self, slug: str, request: dict, rows: dict) -> dict | None:
         from scripts.swarm import tick
 
         task_id, lane, now = request["task"], request["lane"], self.clock()
+        row = rows[task_id]
         name = self.store.next_name(slug, lane, now)
         if not self.store.claim(slug, task_id, name, tick.LEASE_MS):
             return None
@@ -74,6 +75,7 @@ class Admission:
         self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))
         self.store.seats.occupy(seat, name, now)
         task = tick.primed(self.store, slug, seat, {**row, **live})
+        task["stack_base"] = self._stack_base(slug, task, rows)
         identity = {"execution_id": agent.execution_id, "execution_generation": agent.generation}
         admitted = {
             "hive": request["hive"],
@@ -82,6 +84,15 @@ class Admission:
         }
         self.store.redis.set(self._key(slug, request), json.dumps(admitted), px=ADMITTED_MS)
         return admitted
+
+    def _stack_base(self, slug: str, task: dict, rows: dict) -> list[dict]:
+        """The hub holds no checkout, so a stored repository origin stands in for the checkout's own."""
+        from scripts.swarm import stack, tick
+
+        config = self.store.config(slug)
+        if config.repo_origin:
+            return tick._stack_base(task, rows, config.repo_origin, stack.repo_key)
+        return tick._stack_base(task, rows, config.repo)
 
     def _mark(self, slug: str, request: dict, row: dict, name: str) -> dict | None:
         """The ledger row once claimed by name; its claim generation is one past the offer's."""
