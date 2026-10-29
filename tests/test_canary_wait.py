@@ -7,7 +7,7 @@ from scripts import init_agent
 from scripts.profiles import binding
 
 
-def _launch(tmp_path, monkeypatch, target, extra):
+def _launch(tmp_path, monkeypatch, target, extra, canary=None):
     from scripts import select_profile
 
     home = tmp_path / "engineer" / target
@@ -35,7 +35,7 @@ def _launch(tmp_path, monkeypatch, target, extra):
         return {"account": "routed-account"}
 
     monkeypatch.setattr(init_agent, "_start_herdr", launch)
-    monkeypatch.setattr(binding, "wait", wait)
+    monkeypatch.setattr(binding, "wait", canary or wait)
     monkeypatch.setattr(init_agent, "_detach", lambda: False)
     argv = ["--host", "herdr", "--agent", target, "--profile", "engineer", "--dir", str(tmp_path)]
     result = init_agent.main([*argv, "--route-timeout", "30", *extra], {"XDG_RUNTIME_DIR": str(tmp_path / "rt")})
@@ -43,9 +43,41 @@ def _launch(tmp_path, monkeypatch, target, extra):
     return waited
 
 
-@pytest.mark.parametrize(("target", "seconds"), [("claude", 120.0), ("codex", 90.0)])
-def test_the_canary_wait_uses_the_harness_deadline_not_the_route_timeout(tmp_path, monkeypatch, target, seconds):
-    assert _launch(tmp_path, monkeypatch, target, []) == [seconds]
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_the_canary_wait_gets_the_rest_of_the_launch_deadline(tmp_path, monkeypatch, target):
+    monkeypatch.setattr(init_agent.time, "monotonic", lambda: 0.0)
+    assert _launch(tmp_path, monkeypatch, target, []) == [270.0]
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_an_agent_reporting_its_canary_late_inside_the_launch_deadline_passes(tmp_path, monkeypatch, target):
+    now = [0.0]
+    waited = []
+    monkeypatch.setattr(init_agent.time, "monotonic", lambda: now[0])
+
+    def late(report, timeout):
+        waited.append(timeout)
+        if timeout < 150.0:
+            now[0] += timeout
+            raise ValueError(f"the {target} agent reported no canary within {timeout:g}s")
+        now[0] += 150.0
+        return {"account": "routed-account"}
+
+    _launch(tmp_path, monkeypatch, target, [], late)
+    assert waited == [270.0]
+
+
+@pytest.mark.parametrize(("until", "seconds"), [("1100000", 100.0), ("2000000", 270.0), ("900000", 0.0)])
+def test_a_launch_until_bounds_the_canary_wait_by_the_order_lifetime(tmp_path, monkeypatch, until, seconds):
+    monkeypatch.setattr(init_agent.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(init_agent.time, "time", lambda: 1000.0)
+    assert _launch(tmp_path, monkeypatch, "claude", ["--launch-until", until]) == [seconds]
+
+
+def test_the_launch_until_help_names_its_unit():
+    (action,) = [a for a in init_agent._parser()._actions if "--launch-until" in a.option_strings]
+    assert action.help == "Epoch milliseconds by which the launch must return; bounds the launch deadline"
+    assert action.default is None
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -56,7 +88,7 @@ def test_a_canary_timeout_flag_overrides_the_harness_deadline(tmp_path, monkeypa
 def test_the_canary_timeout_help_names_both_harness_defaults():
     (action,) = [a for a in init_agent._parser()._actions if "--canary-timeout" in a.option_strings]
     assert action.help == (
-        "Seconds to wait for the new session to run its profile canary; default 120 for Claude, 90 for Codex"
+        "Seconds to wait for the new session to run its profile canary; default the rest of the launch deadline"
     )
 
 
