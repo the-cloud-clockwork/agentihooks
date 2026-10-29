@@ -222,19 +222,23 @@ def test_a_master_compares_a_full_one_slot_hive_with_a_partly_filled_hive():
     assert placement.choose("master", "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice("b")
 
 
-@pytest.mark.parametrize(("used_percent", "expected"), [(79, "worker-one"), (81, "oracle")])
 def test_the_preferred_hive_takes_agents_until_its_node_memory_crosses_eighty_percent(used_percent, expected):
     from scripts.hive import admission, placement
 
     total = 92_000
-    reading = {"cpus": 16, "load5": 1.0, "total_mb": total, "available_mb": total * (100 - used_percent) // 100}
+    reading = {"cpus": 16, "load5": 14.0, "total_mb": total, "available_mb": total * (100 - used_percent) // 100}
     records = [
         hive("oracle", ui="no", max_agents=24),
         hive("worker-one", ui="no", max_agents=28, agents=20, prefer={"eng": 1, "ci": 1, "plan": 1}),
     ]
-    records[1]["room"] = admission.capped(admission.room(reading), 20, 28).room
+    found = admission.capped(admission.room(reading, first=True), 20, 28)
+    records[1].update(room=0, first_room=found.room, first_refusal=admission.refusal(found))
 
-    assert placement.choose("eng", "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice(expected)
+    chosen = placement.choose("eng", "claude", "acct", "subscription", REPO, records, NOW)
+    assert chosen.hive == expected
+    refused = "ram: 17480 of 92000 MB available, 81 percent used, at or above the 80 percent line"
+    spill = None if expected == "worker-one" else {"preferred": "worker-one", "refusal": refused}
+    assert (chosen.spill and chosen.spill.record()) == spill
 
 
 def test_round_robin_keeps_at_most_the_node_limit_of_live_hives_listing_the_repo_by_id():
