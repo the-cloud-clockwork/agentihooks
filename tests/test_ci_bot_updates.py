@@ -69,6 +69,7 @@ def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run
     download = next(s for s in steps if s.get("name") == "Download the durations this run splits on")
     assert download["with"] == {
         "name": "split-${{ matrix.python-version }}",
+        "verify": '[[ "$(sha256sum .test_durations | cut -d \' \' -f 1)" == "$(< durations.sha256)" ]]',
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
     }

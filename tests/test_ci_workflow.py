@@ -1754,6 +1754,7 @@ def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
     _, download = _unit_step_index(lambda s: s.get("name") == "Download the durations this run splits on")
     assert download["with"] == {
         "name": upload["with"]["name"],
+        "verify": '[[ "$(sha256sum .test_durations | cut -d \' \' -f 1)" == "$(< durations.sha256)" ]]',
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
     }
