@@ -115,6 +115,7 @@ def test_a_hive_successor_is_bound_by_its_hive_execution_report(setup, monkeypat
         execution_id="x2",
         generation=3,
     )
+    store.drop_agent("sw", old.name)
     store.put_agent("sw", new)
     store.seats.occupy(new.seat, new.name, 3)
     transfers.attach(store, "sw", new)
