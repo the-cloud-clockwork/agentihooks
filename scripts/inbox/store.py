@@ -474,7 +474,7 @@ class InboxStore:
         )
 
     def settle(self, item_id, closer, kind, detail=""):
-        """close for a swarm pass: None once another path closed the item or its record is gone."""
+        """None once another path closed the item or its record is gone."""
         try:
             return self.close(item_id, closer, kind, detail, OPEN)
         except Gone:

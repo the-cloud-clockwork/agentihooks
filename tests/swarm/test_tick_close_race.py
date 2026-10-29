@@ -8,6 +8,7 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
     automated_gc,
+    delivery,
     ledger_events,
     master_move,
     master_retire,
@@ -223,3 +224,12 @@ def test_master_retire_passes_a_request_closed_meanwhile(store, race):
     race.arm()
     assert master_retire.forget(store, "sw", "sw-master-1")
     assert race.closed_meanwhile(inbox, request)
+
+
+def test_a_refused_ledger_write_passes_its_item_closed_meanwhile(store, race):
+    inbox = InboxStore(store.redis)
+    item = inbox.send("sw-eng-1", "master@sw", "a question for the operator")
+    race.arm()
+    assert delivery.post(inbox, item, lambda: False) is False
+    assert race.closed_meanwhile(inbox, item)
+    assert inbox.inbox("sw-eng-1") == []
