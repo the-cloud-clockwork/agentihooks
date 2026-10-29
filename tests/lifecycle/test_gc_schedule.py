@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from scripts.events.redis_state import RedisStateStore
+from scripts.scheduler.slots import first_delivery
 
 pytestmark = pytest.mark.unit
 
@@ -206,6 +207,7 @@ def test_the_gc_slot_starts_one_detached_sweep_per_delivery(monkeypatch):
     timer.sweep(event, "delivery-1", state)
     timer.sweep(event, "delivery-1", state)
     started.assert_called_once()
+    assert first_delivery(state, timer.UNIT, "delivery-1") is False
     assert started.call_args.args == (
         ["nice", "-n", "10", "/venv/bin/python", "-m", "scripts.gc_cli", "gc", "--enforce"],
     )

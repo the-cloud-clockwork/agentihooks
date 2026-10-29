@@ -80,3 +80,102 @@ def test_a_due_timer_delivers_to_its_slot_through_the_state_store(state):
     assert [(payload, target) for payload, _, target in DELIVERED] == [("ring", state)]
     assert entry.state == "fired"
     assert scheduler.records()[0]["id"] == entry.id
+
+
+def test_a_change_that_leaves_the_sorted_document_alone_writes_nothing(state):
+    from scripts.scheduler.core import Scheduler
+
+    scheduler = Scheduler(state, machine="proof")
+    key = scheduler.name("entries")
+    state.create(key, b'{"retired": {}, "entries": {}}')
+    assert scheduler.change(lambda document: "kept") == "kept"
+    assert state.get(key).value == b'{"retired": {}, "entries": {}}'
+
+
+def test_a_scheduler_write_that_never_settles_is_refused(state, monkeypatch):
+    from scripts.events.bus import StateConflict
+    from scripts.scheduler import core
+
+    scheduler = core.Scheduler(state, machine="proof")
+    key = scheduler.name("entries")
+    attempts = []
+
+    def conflict(name, value):
+        attempts.append(name)
+        raise StateConflict("raced")
+
+    monkeypatch.setattr(state, "create", conflict)
+    with pytest.raises(StateConflict) as changing:
+        scheduler.change(lambda document: document["entries"].__setitem__("a", {}))
+    assert str(changing.value) == f"scheduler state {key!r} kept changing"
+    with pytest.raises(StateConflict) as putting:
+        scheduler.put("wake", "d1")
+    assert str(putting.value) == f"scheduler state {scheduler.name('wake')!r} kept changing"
+    assert attempts == [key] * core.WRITE_TRIES + [scheduler.name("wake")] * core.WRITE_TRIES
+
+
+def test_a_conflicting_put_retries_on_the_new_revision(state, monkeypatch):
+    from scripts.events.bus import StateConflict
+    from scripts.scheduler.core import Scheduler
+
+    scheduler = Scheduler(state, machine="proof")
+    create = state.create
+
+    def racing(name, value):
+        monkeypatch.setattr(state, "create", create)
+        create(name, b"d0")
+        raise StateConflict("raced")
+
+    monkeypatch.setattr(state, "create", racing)
+    scheduler.put("wake", "d1")
+    assert scheduler.read("wake") == "d1"
+
+
+def test_a_retired_timer_is_marked_retired(state):
+    from scripts.scheduler.core import Scheduler
+
+    scheduler = Scheduler(state, machine="proof")
+    entry = scheduler.timer(owner="proof", payload="ring", delay=1, now=0)
+    scheduler.retire(entry.id)
+    assert scheduler.document()["retired"] == {entry.id: True}
+
+
+def test_reaping_skips_unknown_ids_and_refuses_a_lost_lease(state):
+    from scripts.scheduler.core import Scheduler
+    from scripts.scheduler.lease import Lease, acquire
+
+    scheduler = Scheduler(state, machine="proof")
+    kept = scheduler.timer(owner="proof", payload="ring", delay=1, now=0)
+    scheduler.change(lambda document: document["retired"].__setitem__("gone", True))
+    with pytest.raises(RuntimeError, match="^scheduler lost its dispatch lock$"):
+        scheduler._reap(Lease(scheduler.name("entries"), "stranger"))
+    scheduler._reap(acquire(state, scheduler.name("entries")))
+    assert (list(scheduler.document()["entries"]), scheduler.document()["retired"]) == ([kept.id], {})
+
+
+def test_claiming_marks_only_active_entries_due_by_now(monkeypatch):
+    from unittest.mock import Mock
+
+    from scripts.scheduler import core
+
+    monkeypatch.setattr(core.uuid, "uuid4", lambda: Mock(hex="pending-id"))
+    slot = {"id": "s", "signal": "timeout"}
+    document = {
+        "entries": {
+            "due": {"state": "active", "due": 5, "signal": "timeout", "slots": [slot, {"id": "x", "signal": "other"}]},
+            "later": {"state": "active", "due": 6, "signal": "timeout", "slots": []},
+            "ready": {"state": "ready", "due": 0, "signal": "timeout", "slots": []},
+        }
+    }
+    assert core.Scheduler._claim(document, 5) == 1
+    assert document["entries"] == {
+        "due": {
+            "state": "pending",
+            "due": 5,
+            "signal": "timeout",
+            "slots": [slot, {"id": "x", "signal": "other"}],
+            "pending": {"id": "pending-id", "scheduled_at": 5, "fired_at": 5, "slots": [slot], "delivered": []},
+        },
+        "later": {"state": "active", "due": 6, "signal": "timeout", "slots": []},
+        "ready": {"state": "ready", "due": 0, "signal": "timeout", "slots": []},
+    }

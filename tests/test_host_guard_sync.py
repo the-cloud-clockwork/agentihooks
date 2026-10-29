@@ -8,6 +8,7 @@ import pytest
 from scripts import gc_cli
 from scripts.events.redis_state import RedisStateStore
 from scripts.host_guard import sync
+from scripts.scheduler.slots import first_delivery
 
 pytestmark = pytest.mark.unit
 
@@ -437,7 +438,9 @@ def test_the_stranded_scheduler_is_the_local_redis_only_when_the_swarm_moved(mon
     monkeypatch.setattr(store, "redis_url", lambda environ: environ is os.environ and current[0])
     assert sync._stranded_scheduler() is None
     current[0] = "redis://remote:6379/0"
-    options = sync._stranded_scheduler().state.redis.connection_pool.connection_kwargs
+    stranded = sync._stranded_scheduler()
+    assert stranded.state._current == RedisStateStore(None, "scheduler")._current
+    options = stranded.state.redis.connection_pool.connection_kwargs
     assert (options["host"], options["port"], options["db"]) == ("127.0.0.1", 6379, 0)
     assert options["decode_responses"] is True
     assert (options["socket_connect_timeout"], options["socket_timeout"]) == (3, 10)
@@ -476,6 +479,7 @@ def test_tick_runs_the_home_script_once_per_delivery(monkeypatch):
         )
     ]
     assert len(redis.hkeys(state._current)) == 1
+    assert first_delivery(state, sync.OWNER, "delivery") is False
     sync.tick(event, "next", state)
     assert len(started) == 2
 

@@ -113,3 +113,74 @@ def test_lease_verification_rejects_absent_changed_or_expired_ownership(state, s
         state.create("proof.lock", json.dumps({"lease": stored}).encode())
     with pytest.raises(RuntimeError, match="^scheduler lost its dispatch lock$"):
         lease.verify_lease(state, lease.Lease("proof.lock", "owner"))
+
+
+def test_a_lease_is_written_with_sorted_keys(state, monkeypatch):
+    from scripts.scheduler import lease
+
+    monkeypatch.setattr(lease.uuid, "uuid4", lambda: Mock(hex="owner"))
+    state.create("proof.lock", b'{"z": 1}')
+    lease.acquire(state, "proof.lock", now=100.0)
+    assert state.get("proof.lock").value == b'{"lease": {"expires": 130.0, "token": "owner"}, "z": 1}'
+
+
+def test_a_lease_is_lost_at_its_exact_expiry(state):
+    from scripts.scheduler import lease
+
+    held = lease.acquire(state, "proof.lock", now=100.0)
+    with pytest.raises(RuntimeError, match="^scheduler lost its dispatch lock$"):
+        lease.verify_lease(state, held, now=100.0 + lease.LEASE_SECONDS)
+
+
+def test_a_release_by_a_former_holder_writes_nothing(state):
+    from scripts.scheduler import lease
+
+    lease.acquire(state, "proof.lock", now=100.0)
+    before = state.get("proof.lock")
+    lease.release(state, lease.Lease("proof.lock", "stranger"))
+    assert state.get("proof.lock") == before
+
+
+def test_a_conflicting_lease_write_retries_on_the_new_revision(state, monkeypatch):
+    from scripts.events.bus import StateConflict
+    from scripts.scheduler import lease
+
+    create = state.create
+
+    def racing(key, value):
+        monkeypatch.setattr(state, "create", create)
+        create(key, b'{"z": 1}')
+        raise StateConflict("raced")
+
+    monkeypatch.setattr(state, "create", racing)
+    held = lease.acquire(state, "proof.lock", now=100.0)
+    lease.verify_lease(state, held, now=101.0)
+    assert json.loads(state.get("proof.lock").value)["z"] == 1
+
+
+def test_a_lease_that_never_settles_is_refused(state, monkeypatch):
+    from scripts.events.bus import StateConflict
+    from scripts.scheduler import lease
+
+    attempts = []
+
+    def conflict(key, value):
+        attempts.append(key)
+        raise StateConflict("raced")
+
+    monkeypatch.setattr(state, "create", conflict)
+    with pytest.raises(StateConflict) as refused:
+        lease.acquire(state, "proof.lock", now=100.0)
+    assert str(refused.value) == "scheduler lease 'proof.lock' kept changing"
+    assert attempts == ["proof.lock"] * lease.WRITE_TRIES
+
+
+def test_a_held_wait_gives_up_at_its_exact_deadline(state, monkeypatch):
+    from scripts.scheduler import lease
+
+    lease.acquire(state, "proof.lock")
+    monkeypatch.setattr(lease.time, "monotonic", lambda: 5.0)
+    monkeypatch.setattr(lease.time, "sleep", lambda seconds: pytest.fail(f"slept {seconds}"))
+    with pytest.raises(RuntimeError, match="^another scheduler"):
+        with lease.held(state, "proof.lock", 0):
+            pass

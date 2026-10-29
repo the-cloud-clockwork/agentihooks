@@ -12,6 +12,7 @@ pytestmark = pytest.mark.unit
 
 PUBLISH_HEADROOM = daemon.publish_headroom
 PUBLISH_HERDR_STATS = daemon.publish_herdr_stats
+TIMER_STATE = daemon.timer_state
 
 
 @pytest.fixture(autouse=True)
@@ -24,6 +25,25 @@ def redis():
     import fakeredis
 
     return fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+
+
+@pytest.mark.parametrize("backend", ["redis", "bus"])
+def test_the_timer_state_follows_the_state_backend(redis, monkeypatch, backend):
+    from scripts.events import scheduler_state
+    from scripts.events.redis_state import RedisStateStore
+    from scripts.scheduler.core import bucket
+
+    opened = Mock()
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", backend)
+    monkeypatch.setattr(scheduler_state, "open_scheduler_state", opened)
+    found = TIMER_STATE(redis)
+    if backend == "bus":
+        assert found is opened.return_value
+        opened.assert_called_once_with(bucket())
+        return
+    opened.assert_not_called()
+    assert found.redis is redis
+    assert found._current == RedisStateStore(None, bucket())._current
 
 
 def test_beat_refreshes_reported_fields_and_expires_telemetry(redis, monkeypatch):

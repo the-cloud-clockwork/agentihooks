@@ -92,6 +92,51 @@ def test_a_removed_entry_ends_the_wait():
     _bare_timer(Gone()).wait(timeout=5)
 
 
+def _frozen_wait(monkeypatch, timer):
+    monkeypatch.setattr(process_timer.time, "monotonic", lambda: 10.0)
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: pytest.fail("restarted the scheduler"))
+    monkeypatch.setattr(timer.cancelled, "wait", lambda timeout: pytest.fail(f"waited {timeout}"))
+    timer.wait(timeout=5)
+
+
+def test_a_removed_entry_ends_the_wait_without_sleeping(monkeypatch):
+    class Gone:
+        @property
+        def state(self):
+            raise KeyError("gone")
+
+    _frozen_wait(monkeypatch, _bare_timer(Gone()))
+
+
+def test_a_rung_timer_ends_the_wait_without_sleeping(monkeypatch):
+    timer = _bare_timer(_Entry(fired_after=0))
+    _frozen_wait(monkeypatch, timer)
+    assert timer.entry.reads == 1
+
+
+def test_an_active_timer_sleeps_until_its_recheck(monkeypatch):
+    timer = _bare_timer(_Entry(fired_after=10**9))
+    slept = []
+    monkeypatch.setattr(process_timer.time, "monotonic", lambda: 10.0 + len(slept))
+    monkeypatch.setattr(timer.cancelled, "wait", slept.append)
+    timer.wait(timeout=2)
+    assert slept == [process_timer.POLL_S, process_timer.POLL_S]
+
+
+def test_the_recheck_never_passes_the_deadline(monkeypatch):
+    monkeypatch.setattr(process_timer.time, "monotonic", lambda: 10.0)
+    assert process_timer._recheck(None) == process_timer.RECHECK_S
+    assert process_timer._recheck(12.5) == 2.5
+    assert process_timer._recheck(10.5) == 0.5
+    assert process_timer._recheck(5.0) == 0.0
+
+
+def test_a_timer_entry_carries_its_delay(state, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    with process_timer.Timer(2, state=state) as timer:
+        assert timer.entry.record["payload"] == '{"delay": 2}'
+
+
 def test_wait_passes_its_bound_to_the_timer(state, monkeypatch):
     bounds = []
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)

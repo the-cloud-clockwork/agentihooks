@@ -1,4 +1,5 @@
 import json
+import math
 import time
 import uuid
 from collections.abc import Iterator
@@ -88,7 +89,7 @@ def renew(state: StateStore, lease: Lease, *, now: float | None = None) -> None:
 
 def release(state: StateStore, lease: Lease) -> None:
     def drop(document):
-        if not holds(document, lease, float("-inf")):
+        if not holds(document, lease, -math.inf):
             return False
         document.pop("lease")
 

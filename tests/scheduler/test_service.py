@@ -576,3 +576,29 @@ def test_a_tied_supervisor_ends_between_runners_once_its_starter_is_gone(monkeyp
     assert spawn.call_count == 2
     child.terminate.assert_not_called()
     assert stop.wait.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("environ", "identity"),
+    [
+        ({}, ["memory", "", "", "", None]),
+        (
+            {
+                "AGENTIHOOKS_BUS": "nats",
+                "AGENTIHOOKS_BUS_URL": "nats://bus:4222",
+                "AGENTIHOOKS_DEPLOYMENT": "distributed",
+                "AGENTIHOOKS_HIVE_ID": "h1",
+            },
+            ["nats", "nats://bus:4222", "distributed", "h1", None],
+        ),
+    ],
+    ids=["defaults", "named"],
+)
+def test_a_bus_runtime_folder_is_named_by_its_bus_identity(environ, identity):
+    import hashlib
+
+    from scripts.scheduler import service
+
+    folder = service.runtime_dir({"AGENTIHOOKS_STATE_BACKEND": "bus", **environ})
+    digest = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+    assert folder == Path.home() / ".cache" / "agentihooks" / "scheduler" / digest

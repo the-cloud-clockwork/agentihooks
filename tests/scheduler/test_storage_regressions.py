@@ -42,6 +42,25 @@ def test_distinct_concurrent_deliveries_are_not_acknowledged_without_delivery(st
     assert results == [True, True]
 
 
+def test_a_delivery_is_kept_under_its_hashed_owner_and_id(state):
+    import hashlib
+
+    assert slots.first_delivery(state, "owner", "A") is True
+    key = "delivered." + hashlib.sha256(json.dumps(["owner", "A"]).encode()).hexdigest()
+    assert state.get(key).value == b"A"
+
+
+def test_a_delivery_key_holding_another_id_is_refused(state):
+    import hashlib
+
+    from scripts.events.bus import StateConflict
+
+    key = "delivered." + hashlib.sha256(json.dumps(["owner", "A"]).encode()).hexdigest()
+    state.create(key, b"B")
+    with pytest.raises(StateConflict):
+        slots.first_delivery(state, "owner", "A")
+
+
 def test_legacy_schedules_preserve_pending_delivery_and_retirement(state, monkeypatch):
     import fakeredis
 
