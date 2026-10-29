@@ -99,6 +99,9 @@ spec:
         app.kubernetes.io/component: worker-hive{{ $suffix }}
       annotations:
         checksum/worktrees: {{ toJson $worktrees | sha256sum }}
+        {{- if and $root.Values.workers.rollout.enabled $root.Values.workers.rollout.release }}
+        agentihooks.io/release: {{ $root.Values.workers.rollout.release | quote }}
+        {{- end }}
     spec:
       {{- include "swarm.podSecurity" $root | nindent 6 }}
       {{- with $workers.nodeSelector }}

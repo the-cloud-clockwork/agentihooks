@@ -1115,6 +1115,7 @@ def test_a_shard_mutates_with_every_matching_stats_part(tmp_path, monkeypatch):
 def test_shards_reuse_exact_measured_plan_and_refuse_independently_stale_inputs(tmp_path, monkeypatch, stale):
     import json
 
+    from scripts.ci_mutation.killers import KillMemory
     from scripts.ci_mutation.runner import mutate_files
     from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
 
@@ -1128,18 +1129,22 @@ def test_shards_reuse_exact_measured_plan_and_refuse_independently_stale_inputs(
         "keys": ["other" if stale == "selection" else key],
         "shards": 4,
         "assignments": {"mutant": 2},
+        "splits": {"hooks.sample.x_f": {"head": ["a"], "slices": [["b"], ["c"]], "costs": [1.0, 1.0]}},
     }
     (stats.folder / "plan.json").write_text(json.dumps(plan))
     rows, reason = mutate_files(tmp_path, tmp_path / "work", selected, 20, (2, 4), stats.group(0))
+    kept = KillMemory(tmp_path / "work/killers").split("hooks.sample.x_f", ["c", "b", "a"])
     if stale:
         assert rows == {}
         assert reason == "measured mutation plan stale for this commit or selection"
         assert commands == []
+        assert kept is None
     else:
         assert reason == ""
         assert rows == {"hooks/sample.py": [{"status": "killed"}]}
         assert json.loads((tmp_path / "work/shard-plan.json").read_text()) == plan
         assert commands[0][-4:] == ["2", "4", "reuse", str(tmp_path / "work/shared-stats.json")]
+        assert kept == {"head": ["a"], "slices": [["b"], ["c"]]}
 
 
 @pytest.mark.parametrize("kept", [True, False])

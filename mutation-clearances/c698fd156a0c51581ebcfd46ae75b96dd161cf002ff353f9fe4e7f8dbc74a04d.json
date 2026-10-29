@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/measured.py:scripts.ci_mutation.measured.x_measured_plan:c5f853299c2978e3fb9c959fc66bca5111ac99d746ebf79eef08f410b312f2c9": {
+    "reader": "Standards",
+    "reason": "Both producers of the split dict, split_tests and the kept split branch of measured_splits, emit exactly one cost per slice, so the zipped lists always have equal length and strict true, false, none or omitted iterate identically."
+  }
+}

@@ -91,7 +91,7 @@ def test_beat_exports_the_registered_capabilities_before_launching(redis, monkey
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
     monkeypatch.setattr(
-        daemon, "poll_orders", lambda consumer: seen.append(daemon.os.environ[profile_chain.HIVE_CAPABILITIES])
+        daemon.dispatch, "poll", lambda consumer: seen.append(daemon.os.environ[profile_chain.HIVE_CAPABILITIES])
     )
     monkeypatch.setenv(profile_chain.HIVE_CAPABILITIES, "headed")
     registry.update(redis, "machine", ["name=Worker"])
@@ -981,6 +981,7 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
     server = fakeredis.FakeServer()
     clients, sleeps, queued, now = [], [], [], [1000.0]
     stream = f"{registry.key('machine')}:orders"
+    monkeypatch.setattr(daemon.dispatch, "poll", lambda consumer: consumer.poll())
 
     def connect():
         assert len(clients) < 3
@@ -1783,6 +1784,8 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
     herdr.observe.return_value = PaneObservation("idle", typed="half")
     herdr.reported.return_value = True
     consumer = Mock(runtime=Mock(herdr=herdr))
+    launched = Mock()
+    monkeypatch.setattr(daemon.dispatch, "poll", launched)
     monkeypatch.setattr(orders.Consumer, "local", lambda redis, hive: consumer)
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
@@ -1819,7 +1822,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
         },
     }
     assert redis.ttl(reports.key("machine")) == 45
-    consumer.poll.assert_called_once_with()
+    launched.assert_called_once_with(consumer)
     consumer.poll_commands.assert_called_once_with()
 
 
@@ -1828,6 +1831,7 @@ def test_a_hive_with_no_executions_reports_names_without_asking_herdr_more(redis
 
     herdr = Mock()
     herdr.live_names.return_value = set()
+    monkeypatch.setattr(daemon.dispatch, "poll", lambda consumer: None)
     monkeypatch.setattr(orders.Consumer, "local", lambda redis, hive: Mock(runtime=Mock(herdr=herdr)))
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
@@ -1991,6 +1995,7 @@ def test_each_beat_closes_dead_tabs_against_the_reported_live_names(redis, monke
 
     herdr = Mock()
     herdr.live_names.return_value = {"engineer@323133-2505"}
+    monkeypatch.setattr(daemon.dispatch, "poll", lambda consumer: None)
     monkeypatch.setattr(orders.Consumer, "local", lambda redis, hive: Mock(runtime=Mock(herdr=herdr)))
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}

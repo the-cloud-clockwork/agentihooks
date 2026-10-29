@@ -1023,14 +1023,14 @@ def _parked(task, rows):
     return any(rows.get(dep, {}).get("state") != "done" for dep in task.get("parked_on") or [])
 
 
-def _stack_base(task, rows, repo):
+def _stack_base(task, rows, repo, origin=None):
     deps = [dep for dep in task.get("depends_on") or [] if rows[dep].get("state") != "done"]
-    return [_stacked_dep(dep, rows[dep], repo) for dep in deps]
+    return [_stacked_dep(dep, rows[dep], repo, origin or stack.origin_key) for dep in deps]
 
 
-def _stacked_dep(dep, row, repo):
+def _stacked_dep(dep, row, repo, origin):
     base = {"task": dep, "branch": row["branch"]}
-    elsewhere = row.get("branch_repo") and stack.repo_key(row["branch_repo"]) != stack.origin_key(repo)
+    elsewhere = row.get("branch_repo") and stack.repo_key(row["branch_repo"]) != origin(repo)
     return {**base, "repo": row["branch_repo"]} if elsewhere else base
 
 

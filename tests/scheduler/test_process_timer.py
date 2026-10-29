@@ -173,6 +173,21 @@ def test_a_timer_entry_carries_its_delay(state, monkeypatch):
         assert timer.entry.record["payload"] == '{"delay": 2}'
 
 
+def test_closing_a_timer_twice_retires_its_entry_once(state, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    timer = process_timer.Timer(2, state=state)
+    retire = Mock(wraps=timer.entry.scheduler.retire)
+    monkeypatch.setattr(timer.entry.scheduler, "retire", retire)
+
+    timer.close()
+    timer.close()
+
+    retire.assert_called_once_with(timer.entry.id)
+    assert timer.closed
+    assert timer.entry.state == "cancelled"
+    assert timer.entry.scheduler.document()["retired"][timer.entry.id] is True
+
+
 def test_wait_passes_its_bound_to_the_timer(state, monkeypatch):
     bounds = []
     monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
