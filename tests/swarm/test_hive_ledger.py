@@ -141,7 +141,7 @@ def test_a_report_without_a_redis_connects_and_stamps_the_current_time(store, hi
     before = time.time_ns() // 1_000_000
     assert hive_ledger.report(502) is True
     [[at, code]] = hive_ledger.read(store.redis, "sw", NAME)["failed"]
-    assert before <= at <= time.time_ns() // 1_000_000 and code == 502
+    assert before <= at <= time.time_ns() // 1_000_000 and type(at) is int and code == 502
 
 
 @pytest.mark.parametrize("missing", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_HIVE_ID"])
