@@ -27,3 +27,16 @@ def test_hive_reads_the_latest_placement_of_a_current_agent(store):
     assert registry.hive("fixture", "eng-a") == "m2"
     assert registry.hive("fixture", "eng-b") == ""
     assert registry.hive("fixture", "nobody") == ""
+
+
+@pytest.mark.parametrize("rows", [[], [{}], [{"hive": 7}]])
+def test_hive_is_empty_for_a_listed_agent_without_a_named_placement(store, rows):
+    store.redis.hset(store.key("fixture", "agents"), "eng-a", "{}")
+    for generation, row in enumerate(rows, 1):
+        store.redis.hset(
+            store.key("fixture", "executions"),
+            f"exe-{generation}",
+            json.dumps({"name": "eng-a", "generation": generation, **row}),
+        )
+
+    assert ExecutionRegistry(store).hive("fixture", "eng-a") == ""

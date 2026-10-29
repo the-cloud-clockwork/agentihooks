@@ -123,7 +123,7 @@ class OperationJournal:
         def create(doc):
             from scripts.swarm import lease
 
-            agent = self._current(slug, request.execution_id, request.generation, doc)
+            agent = self._current(request.execution_id, request.generation, doc)
             expected = Operation(
                 operation_id,
                 agent.execution_id,
@@ -151,7 +151,7 @@ class OperationJournal:
 
     def settle(self, slug: str, operation: Operation, observation: Observation, attempted: bool = False) -> Operation:
         def update(doc):
-            agent = self._current(slug, operation.execution_id, operation.generation, doc)
+            agent = self._current(operation.execution_id, operation.generation, doc)
             if agent.runtime_backend != operation.backend or agent.runtime_target != operation.target:
                 raise OperationConflict(_ERRORS["target"])
             raw = doc["operations"].get(operation.operation_id)
@@ -173,7 +173,7 @@ class OperationJournal:
 
     def supersede_legacy_spawn(self, slug: str, operation: Operation) -> Operation:
         def update(doc):
-            self._current(slug, operation.execution_id, operation.generation, doc)
+            self._current(operation.execution_id, operation.generation, doc)
             raw = doc["operations"].get(operation.operation_id)
             if not raw or _decode(raw) != operation:
                 raise OperationConflict(_ERRORS["identity"])
@@ -188,11 +188,13 @@ class OperationJournal:
 
         return self._write(slug, update)
 
-    def _current(self, slug: str, execution_id: str, generation: int, doc: dict) -> Any:
+    def _current(self, execution_id: str, generation: int, doc: dict) -> Any:
+        from scripts.swarm.execution import occupants_of
+
         agent = doc["executions"].get(execution_id) or doc["archive"].get(execution_id)
         if not agent:
             raise OperationConflict(_ERRORS["admission"])
-        occupant = self.store.execution_registry.occupants(slug, doc).get(agent["seat"])
+        occupant = occupants_of(doc).get(agent["seat"])
         if not occupant or (occupant.execution_id, occupant.generation) != (execution_id, generation):
             raise OperationConflict(_ERRORS["stale"])
         return occupant

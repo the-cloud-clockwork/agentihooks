@@ -112,7 +112,7 @@ class Outcomes:
 
     def _inherit(self, doc: dict, task_id: str, outcome: dict) -> dict:
         operations = {}
-        for entry in doc["journals"].get(task_id, []):
+        for entry in doc["journals"][task_id]:
             prior = entry["claim"]["result"]
             if prior.get("operation_id"):
                 operations[prior["operation_id"]] = prior
@@ -129,7 +129,7 @@ class Outcomes:
         return outcome
 
     def integrate(self, token: str, generation: int) -> dict:
-        scope = self.authority._scope(token)
+        scope = self.authority.scoped(token)
         claim = self.authority.current(scope.task_id)
         self.authority.controller.require()
         self.authority._identity(scope, generation, claim)
@@ -168,7 +168,7 @@ class Outcomes:
         return self._settle(token, generation, observed)
 
     def complete(self, token: str, generation: int, repository: LedgerRepository) -> dict:
-        scope = self.authority._scope(token)
+        scope = self.authority.scoped(token)
         claim = self.authority.current(scope.task_id)
         self.authority.controller.require()
         self.authority._identity(scope, generation, claim)

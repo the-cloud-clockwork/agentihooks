@@ -171,7 +171,7 @@ def watch(store: Any, pipe: Any) -> None:
 
 def replace(store: Any, slug: str, saved: dict | None) -> None:
     """Puts back a saved document; a snapshot taken before the document existed is imported from its keys."""
-    restored = _legacy(store, slug) if saved is None else {**copy.deepcopy(EMPTY), **saved}
+    restored = _legacy(store, slug) if saved is None else {**EMPTY, **saved}
 
     def change(doc):
         doc.clear()

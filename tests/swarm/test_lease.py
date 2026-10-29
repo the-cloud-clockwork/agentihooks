@@ -88,6 +88,15 @@ def test_release_preserves_epoch_and_refuses_old_owner(store, monkeypatch):
     assert lease.release(store, "sw", first) is False
 
 
+def test_renewal_and_release_read_the_clock_of_their_own_store(store, monkeypatch):
+    monkeypatch.setattr(lease, "now_ms", lambda given: 1000 if given is store else 10**12)
+    held = lease.acquire(store, "sw", "home")
+
+    assert lease.renew(store, "sw", held) == held
+    assert lease.release(store, "sw", held) is True
+    assert fencing.read(store, "sw")["lease"] is None
+
+
 def test_legacy_owner_keeps_ownership_until_expiry(store, monkeypatch):
     monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
     store.redis.set(store.key("sw", "control-owner"), "legacy")

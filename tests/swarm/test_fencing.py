@@ -154,6 +154,41 @@ def test_a_first_write_imports_the_legacy_redis_lease_once(store, clock):
     )
 
 
+def test_a_first_read_imports_legacy_task_claims_journals_and_fences(store):
+    store.redis.set(store.key("sw", "task-authority", "t1"), json.dumps({"holder": "eng-a"}))
+    store.redis.rpush(store.key("sw", "claim-journal", "t1"), json.dumps({"event": "a"}), json.dumps({"event": "b"}))
+    store.redis.set(store.key("sw", "heartbeat-sequence", "h1"), json.dumps({"sequence": 2}))
+
+    doc = fencing.read(store, "sw")
+
+    assert doc["claims"] == {"t1": {"holder": "eng-a"}}
+    assert doc["journals"] == {"t1": [{"event": "a"}, {"event": "b"}]}
+    assert doc["fences"] == {store.key("sw", "heartbeat-sequence", "h1"): {"sequence": 2}}
+
+
+def test_replacing_without_a_saved_document_imports_the_legacy_keys(store):
+    fencing.write(store, "sw", lambda doc: doc.update(epoch=9))
+    store.redis.set(store.key("sw", "control-epoch"), 4)
+
+    fencing.replace(store, "sw", None)
+
+    assert fencing.read(store, "sw")["epoch"] == 4
+
+
+def test_a_watched_transaction_aborts_when_the_fencing_document_changes(store):
+    from redis.exceptions import WatchError
+
+    fencing.write(store, "sw", lambda doc: doc.update(epoch=1))
+    with store.redis.pipeline() as pipe:
+        fencing.watch(store, pipe)
+        fencing.write(store, "sw", lambda doc: doc.update(epoch=2))
+        pipe.multi()
+        pipe.set("probe", "1")
+        with pytest.raises(WatchError):
+            pipe.execute()
+    assert store.redis.get("probe") is None
+
+
 def test_a_refusal_count_leaves_the_fencing_document_unchanged(store):
     fencing.write(store, "sw", lambda doc: doc.update(epoch=2))
     before = fencing.read(store, "sw")

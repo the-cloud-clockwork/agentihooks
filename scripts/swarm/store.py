@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
 from scripts.swarm import default_models, effort_range
-from scripts.swarm.execution import ExecutionRegistry
+from scripts.swarm.execution import ExecutionRegistry, occupants_of, records_of
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
 
@@ -489,7 +489,7 @@ class RedisStore:
         slug: str,
         agent: AgentRecord,
         previous: AgentRecord | None = None,
-        removed: str = "",
+        removed: str | None = None,
         listed_only: bool = False,
     ) -> None:
         from redis.exceptions import WatchError
@@ -579,10 +579,10 @@ class RedisStore:
                     pipe.watch(self.key(slug, "agents"))
                     previous = pipe.hget(self.key(slug, "agents"), name)
                     doc = fencing.read(self, slug)
-                    executions = [a for a in self.execution_registry.occupants(slug, doc).values() if a.name == name]
+                    executions = [a for a in occupants_of(doc).values() if a.name == name]
                     if expected is not None and expected.execution_id not in {a.execution_id for a in executions}:
                         return False
-                    lives = self.execution_registry.records(slug, doc) if previous else []
+                    lives = records_of(doc) if previous else []
                     pipe.multi()
                     if before is not None:
                         before(pipe)

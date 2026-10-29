@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 
 from scripts.swarm import fencing, lease
+from scripts.swarm.execution import occupants_of
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2.auth_context import GrantRefused, Registration
 from scripts.swarm_v2.controller import Controller
@@ -53,7 +54,7 @@ class TaskAuthority:
             if current is not None and current != recovered:
                 raise SwarmError("journal_conflict")
             if recovered is not None:
-                self._commit(doc, recovered, current, "replayed")
+                self._commit(doc, recovered, None, "replayed")
             return recovered
 
         recovered = self._fenced(change)
@@ -79,7 +80,10 @@ class TaskAuthority:
             )
         return AgentRecord(**row)
 
-    def _scope(self, token: str, doc: dict | None = None) -> Registration:
+    def scoped(self, token: str) -> Registration:
+        return self._scope(token, fencing.read(self.store, self.slug))
+
+    def _scope(self, token: str, doc: dict) -> Registration:
         try:
             scope = self.authorize(token)
         except GrantRefused as error:
@@ -88,11 +92,10 @@ class TaskAuthority:
             raise
         if not isinstance(scope, Registration) or scope.swarm_id != self.slug:
             raise SwarmError("forbidden_scope")
-        doc = doc if doc is not None else fencing.read(self.store, self.slug)
         agent = self._execution(doc, scope.execution_id)
         if (agent.task, agent.seat, agent.generation) != (scope.task_id, scope.seat_id, scope.generation):
             raise SwarmError("forbidden_scope")
-        current = self.store.execution_registry.occupants(self.slug, doc).get(scope.seat_id)
+        current = occupants_of(doc).get(scope.seat_id)
         if current is None or (current.execution_id, current.generation) != (scope.execution_id, scope.generation):
             self._stale()
         return scope
@@ -192,7 +195,7 @@ class TaskAuthority:
     def _write(
         self, token: str, event: str, action: Callable[..., TaskClaim], fence: RenewalFence | None = None
     ) -> TaskClaim:
-        scope = self._scope(token)
+        scope = self.scoped(token)
         projected = self.store.claimant(self.slug, scope.task_id)
 
         def change(doc):
@@ -200,9 +203,10 @@ class TaskAuthority:
             if self._scope(token, doc) != scope:
                 raise SwarmError("forbidden_scope")
             previous = _claim(doc, scope.task_id)
-            journal = doc["journals"].get(scope.task_id, [])
-            if previous is not None and (not journal or previous != TaskClaim(**journal[-1]["claim"])):
-                raise SwarmError("journal_conflict")
+            if previous is not None:
+                journal = doc["journals"].get(scope.task_id)
+                if not journal or previous != TaskClaim(**journal[-1]["claim"]):
+                    raise SwarmError("journal_conflict")
             current = action(doc, scope, previous, projected)
             if current == previous and fence is None:
                 return current, False

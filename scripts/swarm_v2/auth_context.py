@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, NoReturn
 from uuid import uuid4
 
 from hooks.context.project_sessions import SessionGrant
+from scripts.swarm.execution import occupants_of
 from scripts.swarm.store import SwarmError
 
 if TYPE_CHECKING:
@@ -26,6 +27,8 @@ DEFAULT_TTL_SECONDS = 300
 MAX_TTL_SECONDS = 900
 WRITE_ATTEMPTS = 5
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+ENABLED = ""
+ENABLE_CONTENTION = "launch grants kept changing; nothing was enabled"
 BOUND = ("swarm_id", "execution_id", "generation", "seat_id", "task_id", "account", "brain_id", "project_ids")
 AUDIT = ("grant_id", "issuer", "audience", "key_id")
 CLAIMS = {*BOUND, *AUDIT, "schema_version", "issued_at", "expires_at"}
@@ -158,7 +161,7 @@ class LaunchAuthority:
         def change(doc):
             if doc["grants_disabled"]:
                 self.refuse(slug, "forbidden_scope", "launch grants are disabled for this swarm")
-            occupants = self.store.execution_registry.occupants(slug, doc).values()
+            occupants = occupants_of(doc).values()
             if execution.execution_id not in {occupant.execution_id for occupant in occupants}:
                 self.refuse(slug, "stale_generation", "execution is not the current attempt of its seat")
             doc["grants"][audit["grant_id"]] = audit
@@ -257,11 +260,10 @@ class LaunchAuthority:
 
     def admit(self, doc: dict, slug: str, claims: dict) -> Registration:
         audit = self.issued(doc, slug, claims)
-        occupants = self.store.execution_registry.occupants(slug, doc).values()
+        occupants = occupants_of(doc).values()
         if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
             self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
-        row = doc["executions"].get(claims["execution_id"]) or doc["archive"].get(claims["execution_id"])
-        if row["state"] == "ended":
+        if doc["executions"][claims["execution_id"]]["state"] == "ended":
             self.refuse(slug, "stale_generation", "launch grant is for an ended execution")
         existing = doc["registrations"].get(claims["execution_id"])
         if existing:
@@ -276,23 +278,22 @@ class LaunchAuthority:
         doc["grants"][claims["grant_id"]] = {**audit, "state": "registered"}
         return registration
 
-    def registration(self, slug: str, execution_id: str, doc: dict | None = None) -> Registration | None:
+    def registration(self, slug: str, execution_id: str) -> Registration | None:
         from scripts.swarm import fencing
 
-        row = (doc if doc is not None else fencing.read(self.store, slug))["registrations"].get(execution_id)
-        return Registration(**row) if row else None
+        return _registered(fencing.read(self.store, slug), execution_id)
 
     def bound(self, slug: str, token: str) -> Registration:
         from scripts.swarm import fencing
 
         claims = self._verify(slug, token)
         doc = fencing.read(self.store, slug)
-        registration = self.registration(slug, claims["execution_id"], doc)
+        registration = _registered(doc, claims["execution_id"])
         if registration is None or registration.grant_id != claims["grant_id"]:
             self.refuse(slug, "unauthenticated", "launch grant is not registered")
-        if self._audit(doc, slug, registration.grant_id)["state"] == "revoked":
+        if doc["grants"][registration.grant_id]["state"] == "revoked":
             self.refuse(slug, "unauthenticated", "launch grant was revoked")
-        occupants = self.store.execution_registry.occupants(slug, doc).values()
+        occupants = occupants_of(doc).values()
         if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
             self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
         return registration
@@ -321,12 +322,9 @@ class LaunchAuthority:
         claims = self._verify(slug, token)
         return self._rewrite(slug, claims["grant_id"], _revoked, "the grant was not withdrawn") is not None
 
-    def _audit(self, doc: dict, slug: str, grant_id: str) -> dict:
-        return doc["grants"][grant_id]
-
     def _rewrite(self, slug: str, grant_id: str, change: Callable[[dict], dict | None], failure: str) -> dict | None:
         def rewrite(doc):
-            audit = change(self._audit(doc, slug, grant_id))
+            audit = change(doc["grants"][grant_id])
             if audit is not None:
                 doc["grants"][grant_id] = audit
             return audit
@@ -344,9 +342,12 @@ class LaunchAuthority:
         return self._write(slug, change, "launch grants kept changing; revocation was not committed")
 
     def enable(self, slug: str) -> None:
-        self._write(
-            slug, lambda doc: doc.update(grants_disabled=""), "launch grants kept changing; nothing was enabled"
-        )
+        self._write(slug, lambda doc: doc.update(grants_disabled=ENABLED), ENABLE_CONTENTION)
+
+
+def _registered(doc: dict, execution_id: str) -> Registration | None:
+    row = doc["registrations"].get(execution_id)
+    return Registration(**row) if row else None
 
 
 def _registration(claims: dict, registered_at: str) -> Registration:

@@ -114,6 +114,78 @@ def test_ready_cleanup_compares_the_record_even_when_the_lease_did_not_change(st
     assert store.redis.hget(ready_key, "t1") is None
 
 
+def test_claim_repair_and_ready_cleanup_leave_a_task_under_scoped_authority_alone(store):
+    store.create(config())
+    owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
+    store.put_agent("smoke", owner)
+    store.redis.hset(store.key("smoke", "ready"), "t1", "ready")
+    fencing.write(store, "smoke", lambda doc: doc["claims"].update(t1={"holder": "scoped"}))
+
+    assert not store.ensure_claim("smoke", owner, 60_000)
+    assert not store.release_ready("smoke", "t1", "owner", 0, "ready")
+    assert store.redis.get(store.key("smoke", "claim", "t1")) is None
+    assert store.redis.hget(store.key("smoke", "ready"), "t1") == "ready"
+
+
+def _raced_pipelines(store, monkeypatch, times):
+    from redis.exceptions import WatchError
+
+    original, raced = store.redis.pipeline, []
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def run(*args, **kwargs):
+            if len(raced) < times:
+                raced.append(True)
+                raise WatchError("raced")
+            return execute(*args, **kwargs)
+
+        pipe.execute = run
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    return raced
+
+
+def test_a_projection_retries_a_raced_commit_and_records_the_desired_route(store, monkeypatch):
+    from dataclasses import replace
+
+    store.create(config())
+    owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
+    store.put_agent("smoke", owner)
+    raced = _raced_pipelines(store, monkeypatch, 1)
+
+    store.project_agent("smoke", replace(owner, desired_route_kind="codex"))
+
+    assert raced == [True]
+    assert store.redis.hget(store.key("smoke", "desired-routes"), "owner") == "codex"
+
+
+def test_a_projection_that_keeps_racing_is_refused_after_five_attempts(store, monkeypatch):
+    store.create(config())
+    owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
+    raced = _raced_pipelines(store, monkeypatch, 10)
+
+    with pytest.raises(SwarmError, match="^agent registry kept changing; the agent was not shown$"):
+        store.project_agent("smoke", owner)
+    assert len(raced) == 5
+
+
+def test_an_update_that_keeps_the_status_keeps_its_state_since(store):
+    from dataclasses import replace
+
+    store.create(config())
+    store.put_agent("smoke", AgentRecord("owner", "eng", "t1", started_at=1_000))
+    [current] = store.agents("smoke")
+    store.redis.hset(store.key("smoke", "state-since"), "owner", 1)
+
+    store.execution_registry.update("smoke", replace(current, model="opus"))
+
+    assert store.redis.hget(store.key("smoke", "state-since"), "owner") == "1"
+
+
 def race_at_multi(store, monkeypatch, change):
     original = store.redis.pipeline
 

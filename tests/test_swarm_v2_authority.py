@@ -750,3 +750,118 @@ def test_concurrent_authority_changes_are_bounded(fixture, monkeypatch, operatio
     assert authority.journal("task") == journal
     assert store.claimant("fixture", "task") == agent.name
     assert record
+
+
+def test_admission_reads_the_clock_of_its_own_store(fixture, monkeypatch):
+    from scripts.swarm import lease
+
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    monkeypatch.setattr(lease, "now_ms", lambda given: clock[0] if given is store else 10**15)
+
+    claim = authority.admit(token, 100)
+
+    assert authority.current("task") == claim
+    assert store.claimant("fixture", "task") == agent.name
+
+
+def test_an_admission_whose_lease_ends_before_its_commit_is_stale(fixture, monkeypatch):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    original = authority._execution
+
+    def late(doc, execution_id):
+        found = original(doc, execution_id)
+        clock[0] += 100
+        return found
+
+    monkeypatch.setattr(authority, "_execution", late)
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        authority.admit(token, 100)
+    assert authority.current("task") is None
+
+
+def test_a_release_whose_lease_ends_before_its_commit_is_stale(fixture, monkeypatch):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    claim = authority.admit(token, 100)
+    original = authority._holder
+
+    def late(scope, generation, previous):
+        original(scope, generation, previous)
+        clock[0] = previous.lease_deadline_ms
+
+    monkeypatch.setattr(authority, "_holder", late)
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        authority.release(token, claim.generation)
+    assert authority.current("task") == claim
+
+
+def test_a_claim_projects_no_holder_from_the_moment_its_lease_ends(fixture, monkeypatch):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    claim = authority.admit(token, 100)
+    projected = []
+    monkeypatch.setattr(store, "project_claim", lambda *args: projected.append(args))
+
+    clock[0] = claim.lease_deadline_ms - 1
+    authority._project(claim)
+    clock[0] = claim.lease_deadline_ms
+    authority._project(claim)
+
+    assert projected == [
+        ("fixture", "task", agent.name, claim.lease_deadline_ms),
+        ("fixture", "task", None, claim.lease_deadline_ms),
+    ]
+
+
+def test_a_repeated_admission_writes_and_projects_nothing(fixture):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    claim = authority.admit(token, 100)
+    store.redis.delete(store.key("fixture", "claim", "task"))
+
+    assert authority.admit(token, 100) == claim
+    assert store.claimant("fixture", "task") is None
+    assert len(authority.journal("task")) == 1
+
+
+def _pinned(authority, registration):
+    from scripts.swarm_v2.authority import TaskAuthority
+
+    return TaskAuthority(authority.store, authority.controller, lambda token: registration)
+
+
+def test_an_archived_attempt_is_stale_and_an_unknown_one_is_an_identity_conflict(fixture):
+    from scripts.swarm import fencing
+
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    registration = authority.authorize(token)
+    fencing.write(
+        store,
+        "fixture",
+        lambda doc: doc["archive"].update({agent.execution_id: doc["executions"].pop(agent.execution_id)}),
+    )
+    conflicts = fencing.count(store, "fixture", fencing.IDENTITY_CONFLICTS)
+
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        _pinned(authority, registration).admit("pinned", 100)
+    unknown = replace(registration, execution_id="exe-unknown")
+    with pytest.raises(SwarmError, match="^unknown execution identity; display labels cannot identify attempts$"):
+        _pinned(authority, unknown).admit("pinned", 100)
+    assert fencing.count(store, "fixture", fencing.IDENTITY_CONFLICTS) == conflicts + 1
+
+
+def test_task_authority_writes_are_fenced_by_the_controller_lease(fixture, monkeypatch):
+    from scripts.swarm import fencing, lease
+
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    registration = authority.authorize(token)
+    fencing.write(store, "fixture", lambda doc: doc.update(lease={**doc["lease"], "owner": "usurper"}))
+    monkeypatch.setattr(controller, "require", lambda: None)
+
+    with pytest.raises(SwarmError, match=f"^{lease.STALE}$"):
+        _pinned(authority, registration).admit("pinned", 100)
+    assert authority.current("task") is None

@@ -30,6 +30,19 @@ def _record(row: dict) -> AgentRecord:
     return AgentRecord(**row)
 
 
+def records_of(doc: dict) -> list[AgentRecord]:
+    rows = {}
+    for section in ("executions", "archive"):
+        for row in doc[section].values():
+            rows.setdefault(row["execution_id"], _record(row))
+    return sorted(rows.values(), key=lambda a: (a.seat, a.generation))
+
+
+def occupants_of(doc: dict) -> dict[str, AgentRecord]:
+    heads = latest(doc["executions"].values(), "seat")
+    return {seat: _record(heads[seat]) for seat in sorted(heads)}
+
+
 def latest(rows: Iterable[dict], by: str) -> dict:
     found: dict = {}
     for row in rows:
@@ -64,23 +77,14 @@ class ExecutionRegistry:
 
         return lease.fenced(self.store, slug, lease.EPOCH.get(), change)
 
-    def _doc(self, slug: str, doc: dict | None) -> dict:
-        return doc if doc is not None else fencing.read(self.store, slug)
+    def records(self, slug: str) -> list[AgentRecord]:
+        return records_of(fencing.read(self.store, slug))
 
-    def records(self, slug: str, doc: dict | None = None) -> list[AgentRecord]:
-        doc = self._doc(slug, doc)
-        rows = {}
-        for section in ("executions", "archive"):
-            for row in doc[section].values():
-                rows.setdefault(row["execution_id"], _record(row))
-        return sorted(rows.values(), key=lambda a: (a.seat, a.generation))
+    def occupants(self, slug: str) -> dict[str, AgentRecord]:
+        return occupants_of(fencing.read(self.store, slug))
 
-    def occupants(self, slug: str, doc: dict | None = None) -> dict[str, AgentRecord]:
-        heads = latest(self._doc(slug, doc)["executions"].values(), "seat")
-        return {seat: _record(heads[seat]) for seat in sorted(heads)}
-
-    def managed(self, slug: str, name: str, doc: dict | None = None) -> bool:
-        doc = self._doc(slug, doc)
+    def managed(self, slug: str, name: str) -> bool:
+        doc = fencing.read(self.store, slug)
         return any(row["name"] == name for section in ("executions", "archive") for row in doc[section].values())
 
     def archive(self, slug: str) -> int:
@@ -162,10 +166,10 @@ class ExecutionRegistry:
         epoch = lease.EPOCH.get()
 
         def admit(doc):
-            previous = self.occupants(slug, doc).get(agent.seat)
+            previous = occupants_of(doc).get(agent.seat)
             if (previous.execution_id if previous else "") != previous_execution_id:
                 self.conflict(slug, "replacement does not match the current execution")
-            rows = self.records(slug, doc)
+            rows = records_of(doc)
             if any(row.name == agent.name and row.seat != agent.seat for row in rows):
                 self.conflict(slug, "canonical agent already belongs to another execution seat")
             self.check_uid(slug, agent, doc)
@@ -188,11 +192,11 @@ class ExecutionRegistry:
         self.store.project_agent(slug, current, removed=removed)
         return current
 
-    def check_uid(self, slug: str, agent: AgentRecord, doc: dict | None = None) -> None:
+    def check_uid(self, slug: str, agent: AgentRecord, doc: dict) -> None:
         uid = agent.runtime_target.get("pod_uid")
         if uid and any(
             row.execution_id != agent.execution_id and row.runtime_target.get("pod_uid") == uid
-            for row in self.records(slug, doc)
+            for row in records_of(doc)
         ):
             self.conflict(slug, "Pod UID already belongs to another execution")
 
@@ -204,7 +208,7 @@ class ExecutionRegistry:
         self.validate(slug, agent)
 
         def change(doc):
-            current = self.occupants(slug, doc).get(agent.seat)
+            current = occupants_of(doc).get(agent.seat)
             if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                 self.conflict(slug, "stale or changed execution identity")
             _check_binding(current.runtime_target, agent.runtime_target, lambda message: self.conflict(slug, message))
@@ -229,7 +233,7 @@ class ExecutionRegistry:
             if not raw:
                 self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
             current = _record(raw)
-            heads = {head.execution_id for head in self.occupants(slug, doc).values()}
+            heads = {head.execution_id for head in occupants_of(doc).values()}
             updated = replace(current, pane_id=pane_id)
             doc["executions"][execution_id] = asdict(updated)
             return (updated, current) if execution_id in heads and current.name in listed else None
@@ -254,7 +258,7 @@ class ExecutionRegistry:
         ended = asdict(replace(agent, state="ended"))
 
         def end(doc):
-            current = self.occupants(slug, doc).get(agent.seat)
+            current = occupants_of(doc).get(agent.seat)
             if current != agent or not _orphan_state(agent, now_ms) or agent.name in listed:
                 return False
             doc["executions"][agent.execution_id] = ended
