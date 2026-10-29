@@ -325,6 +325,23 @@ def test_health_recomputes_when_the_published_findings_are_stale(monkeypatch):
     assert detect.reported(store, ledger, "s") == {"current"}
 
 
+@pytest.mark.parametrize("at, expected", [(0, {"published"}), (300001, {"live"})])
+def test_health_without_a_published_tick_uses_the_epoch(monkeypatch, at, expected):
+    import json
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.redis.set(store.key("s", "published"), json.dumps({"status": {"findings": [{"id": "published"}]}}))
+    monkeypatch.setattr(detect.status, "now_ms", lambda: at)
+    ledger = type("Ledger", (), {"state": lambda self, slug: {}})()
+    monkeypatch.setattr(store, "config", lambda slug: None)
+    monkeypatch.setattr(detect.status, "findings", lambda *args: [{"id": "live"}])
+    assert detect.reported(store, ledger, "s") == expected
+
+
 def _canonical(call):
     import json
 
