@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.492 · 2026-10-29
+
+### 2026-10-29 · c14df669b14a · #8807 · @nestorcolt
+
+**Publish the release chart only after the hive worker image moved release**
+
+This change fixes a race where the Helm chart was published to the registry before the hive worker image actually finished moving its `:release` tag, which could cause hives to roll onto a stale image. Now the chart release is triggered by the completion of the Swarm worker image workflow itself, only for successful release-triggered runs, and it builds from that run's exact tag and commit rather than the default branch head. The kind install step is also sequenced after the images it depends on exist, ensuring each release rolls hives exactly once onto the correct image.
+
 ## v2.17.488 · 2026-10-29
 
 ### 2026-10-29 · 09120043fa79 · #8796 · @nestorcolt
