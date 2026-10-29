@@ -421,7 +421,7 @@ def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int)
     token = json.dumps({"epoch": held.epoch, "token": uuid.uuid4().hex, **_holder()})
     with store.redis.pipeline() as pipe:
         try:
-            pipe.watch(key, store.key(slug, "control-owner"))
+            pipe.watch(key)
             lease.require(store, slug, held)
             raw = pipe.get(key)
             if raw and not _dead(raw):

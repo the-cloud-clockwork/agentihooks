@@ -1,17 +1,20 @@
-import json
 import os
 import socket
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
+from typing import TypeVar
 
+from scripts.swarm import fencing as document
 from scripts.swarm.store import RedisStore, SwarmError
 
 TICK_MS = 60_000
 TICK_REFUSAL = "AGENTIHOOKS_CONTROLLER_TICK_SECONDS must be at least 1 second"
+STALE = "the controller lease is stale"
 EPOCH = ContextVar("controller_epoch", default=None)
+T = TypeVar("T")
 
 
 def tick_ms() -> int:
@@ -43,8 +46,7 @@ class Lease:
 
 
 def now_ms(store: RedisStore) -> int:
-    seconds, microseconds = store.redis.time()
-    return seconds * 1000 + microseconds // 1000
+    return document.now_ms()
 
 
 def _address(slug):
@@ -75,116 +77,119 @@ def _remote(slug, action, fields=None):
         raise SwarmError(f"hosted controller lease is unavailable: {exc}") from exc
 
 
+def _recorded(doc: dict) -> Lease | None:
+    return Lease(**doc["lease"]) if doc["lease"] else None
+
+
+def _live(doc: dict, at: int) -> Lease | None:
+    held = _recorded(doc)
+    return held if held and held.expires_at > at else None
+
+
+def _hold(doc: dict, held: Lease) -> Lease:
+    doc["lease"] = asdict(held)
+    doc["epoch"] = held.epoch
+    doc["legacy_owner"] = ""
+    return held
+
+
 def current(store: RedisStore, slug: str) -> Lease | None:
     if _address(slug):
         data = _remote(slug, "current")
         return Lease(**data) if data is not None else None
-    raw = store.redis.get(store.key(slug, "control-owner"))
-    held = Lease(**json.loads(raw)) if raw and raw.startswith("{") else None
-    return held if held and held.expires_at > now_ms(store) else None
+    return _live(document.read(store, slug), now_ms(store))
 
 
 def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
     if _address(slug):
         data = _remote(slug, "acquire", {"owner": owner})
         return Lease(**data) if data is not None else None
-    from redis.exceptions import WatchError
-
     from scripts.swarm.commands import hive_id
 
     hostname = socket.gethostname() if owner == hive_id() else owner
-    key, epochs = store.key(slug, "control-owner"), store.key(slug, "control-epoch")
-    while True:
-        with store.redis.pipeline() as pipe:
-            try:
-                pipe.watch(key, epochs)
-                raw, at = pipe.get(key), now_ms(store)
-                held = Lease(**json.loads(raw)) if raw and raw.startswith("{") else None
-                if held and held.expires_at > at:
-                    if held.owner not in (owner, hostname):
-                        return None
-                    epoch, keeper = held.epoch, owner
-                else:
-                    epoch = int(pipe.get(epochs) or 0) + 1
-                    keeper = raw if raw and held is None and raw != hostname else owner
-                ttl = ttl_ms()
-                renewed = Lease(keeper, epoch, at + ttl)
-                pipe.multi()
-                pipe.set(key, json.dumps(asdict(renewed)), px=ttl)
-                pipe.set(epochs, epoch)
-                if held is None or held.expires_at <= at:
-                    pipe.incr(store.key(slug, "controller-leader-changes"))
-                pipe.execute()
-                return renewed if keeper == owner else None
-            except WatchError:
-                continue
+
+    def take(doc):
+        at, held, legacy = now_ms(store), _recorded(doc), doc["legacy_owner"]
+        if held and held.expires_at > at:
+            if held.owner not in (owner, hostname):
+                return None
+            epoch, keeper = held.epoch, owner
+        else:
+            epoch = doc["epoch"] + 1
+            keeper = legacy if legacy and held is None and legacy != hostname else owner
+            doc["leader_changes"] += 1
+        renewed = _hold(doc, Lease(keeper, epoch, at + ttl_ms()))
+        return renewed if keeper == owner else None
+
+    return document.write(store, slug, take)
 
 
 def transfer(store: RedisStore, slug: str, owner: str, source_epoch: int, expected_epoch: int) -> Lease:
-    from redis.exceptions import WatchError
-
     if _address(slug):
         return Lease(
             **_remote(
                 slug, "transfer", {"owner": owner, "source_epoch": source_epoch, "expected_epoch": expected_epoch}
             )
         )
-    key, epochs = store.key(slug, "control-owner"), store.key(slug, "control-epoch")
-    for _ in range(5):
+
+    def move(doc):
         at = now_ms(store)
-        with store.redis.pipeline() as pipe:
-            try:
-                pipe.watch(key, epochs)
-                raw = pipe.get(key)
-                held = Lease(**json.loads(raw)) if raw and raw.startswith("{") else None
-                if raw and held is None:
-                    raise SwarmError("the controller lease belongs to an incompatible owner")
-                live = held if held and held.expires_at > at else None
-                if (live.epoch if live else 0) != expected_epoch or (live and live.owner != owner):
-                    raise SwarmError("the controller lease is stale")
-                epoch = max(int(pipe.get(epochs) or 0), source_epoch, live.epoch if live else 0) + 1
-                ttl = ttl_ms()
-                moved = Lease(owner, epoch, at + ttl)
-                pipe.multi()
-                pipe.set(key, json.dumps(asdict(moved)), px=ttl)
-                pipe.set(epochs, epoch)
-                pipe.execute()
-                return moved
-            except WatchError:
-                continue
-    raise SwarmError("the controller lease kept changing; transfer was not committed")
+        if doc["legacy_owner"]:
+            raise SwarmError("the controller lease belongs to an incompatible owner")
+        live = _live(doc, at)
+        if (live.epoch if live else 0) != expected_epoch or (live and live.owner != owner):
+            raise SwarmError(STALE)
+        epoch = max(doc["epoch"], source_epoch, live.epoch if live else 0) + 1
+        return _hold(doc, Lease(owner, epoch, at + ttl_ms()))
+
+    return document.write(store, slug, move)
+
+
+def _check(doc: dict, at: int, held: Lease | int) -> None:
+    live = _live(doc, at)
+    if isinstance(held, Lease):
+        if live is None or (live.owner, live.epoch) != (held.owner, held.epoch):
+            raise SwarmError(STALE)
+    elif live is None or live.epoch != held:
+        raise SwarmError(STALE)
+
+
+def fenced(store: RedisStore, slug: str, held: Lease | int | None, change: Callable[[dict], T]) -> T:
+    """Commits change only while held, a lease or its epoch, is the live controller lease; None writes unfenced."""
+    if held is None:
+        return document.write(store, slug, change)
+    if _address(slug):
+        live = current(store, slug)
+        _check({"lease": asdict(live) if live else None}, now_ms(store), held)
+        return document.write(store, slug, change)
+
+    def guarded(doc):
+        _check(doc, now_ms(store), held)
+        return change(doc)
+
+    return document.write(store, slug, guarded)
 
 
 def require(store: RedisStore, slug: str, held: Lease) -> None:
     live = current(store, slug)
     if live is None or (live.owner, live.epoch) != (held.owner, held.epoch):
-        raise SwarmError("the controller lease is stale")
+        raise SwarmError(STALE)
 
 
 def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
     if _address(slug):
         return Lease(**_remote(slug, "renew", {"owner": held.owner, "epoch": held.epoch}))
-    from redis.exceptions import WatchError
 
-    key = store.key(slug, "control-owner")
-    while True:
-        with store.redis.pipeline() as pipe:
-            try:
-                pipe.watch(key)
-                require(store, slug, held)
-                ttl = ttl_ms()
-                renewed = Lease(held.owner, held.epoch, now_ms(store) + ttl)
-                pipe.multi()
-                pipe.set(key, json.dumps(asdict(renewed)), px=ttl)
-                pipe.execute()
-                return renewed
-            except WatchError:
-                continue
+    def extend(doc):
+        at = now_ms(store)
+        _check(doc, at, held)
+        doc["lease"] = asdict(Lease(held.owner, held.epoch, at + ttl_ms()))
+        return Lease(**doc["lease"])
+
+    return document.write(store, slug, extend)
 
 
 def beat(store: RedisStore, slug: str, held: Lease, stop: threading.Event) -> None:
-    from redis.exceptions import RedisError
-
     while not stop.is_set():
         if stop.wait(beat_s()):
             return
@@ -192,7 +197,7 @@ def beat(store: RedisStore, slug: str, held: Lease, stop: threading.Event) -> No
             renew(store, slug, held)
         except SwarmError:
             return
-        except RedisError:
+        except document.unavailable():
             continue
 
 
@@ -213,7 +218,7 @@ def kept(store: RedisStore, slug: str, held: Lease) -> Iterator[None]:
 def require_epoch(store: RedisStore, slug: str, epoch: int) -> None:
     live = current(store, slug)
     if live is None or live.epoch != epoch:
-        raise SwarmError("the controller lease is stale")
+        raise SwarmError(STALE)
 
 
 @contextmanager
@@ -228,16 +233,13 @@ def fencing(epoch: int | None) -> Iterator[None]:
 def release(store: RedisStore, slug: str, held: Lease) -> bool:
     if _address(slug):
         return _remote(slug, "release", {"owner": held.owner, "epoch": held.epoch})
-    from redis.exceptions import WatchError
 
-    key = store.key(slug, "control-owner")
-    with store.redis.pipeline() as pipe:
-        try:
-            pipe.watch(key)
-            require(store, slug, held)
-            pipe.multi()
-            pipe.delete(key)
-            pipe.execute()
-            return True
-        except (SwarmError, WatchError):
-            return False
+    def drop(doc):
+        _check(doc, now_ms(store), held)
+        doc["lease"] = None
+        return True
+
+    try:
+        return document.write(store, slug, drop)
+    except SwarmError:
+        return False

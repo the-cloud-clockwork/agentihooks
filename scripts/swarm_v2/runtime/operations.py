@@ -92,10 +92,8 @@ def digest(payload: dict) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _decode(raw: str) -> Operation:
-    values = json.loads(raw)
-    values["phase"] = Phase(values["phase"])
-    return Operation(**values)
+def _decode(row: dict) -> Operation:
+    return Operation(**{**row, "phase": Phase(row["phase"])})
 
 
 class OperationJournal:
@@ -103,11 +101,15 @@ class OperationJournal:
         self.store = store
 
     def get(self, slug: str, operation_id: str) -> Operation | None:
-        raw = self.store.redis.hget(self.store.key(slug, "runtime-operations"), operation_id)
-        return _decode(raw) if raw else None
+        from scripts.swarm import fencing
+
+        row = fencing.read(self.store, slug)["operations"].get(operation_id)
+        return _decode(row) if row else None
 
     def records(self, slug: str) -> list[Operation]:
-        return [_decode(raw) for raw in self.store.redis.hvals(self.store.key(slug, "runtime-operations"))]
+        from scripts.swarm import fencing
+
+        return [_decode(row) for row in fencing.read(self.store, slug)["operations"].values()]
 
     def prepare(self, slug: str, request: OperationRequest, specs: Mapping[str, str] | None = None) -> Operation:
         if not request.execution_id or not request.key or request.action not in ACTIONS:
@@ -118,10 +120,10 @@ class OperationJournal:
         operation_id = f"op-{uuid5(NAMESPACE_URL, json.dumps([slug, request.execution_id, key])).hex}"
         payload_digest = digest({"action": request.action, "payload": request.payload})
 
-        def create(pipe):
+        def create(doc):
             from scripts.swarm import lease
 
-            agent = self._current(slug, request.execution_id, request.generation, pipe)
+            agent = self._current(slug, request.execution_id, request.generation, doc)
             expected = Operation(
                 operation_id,
                 agent.execution_id,
@@ -133,7 +135,7 @@ class OperationJournal:
                 controller_epoch=lease.EPOCH.get(),
                 spec_digest=(specs or {}).get(agent.runtime_backend, ""),
             )
-            raw = pipe.hget(self.store.key(slug, "runtime-operations"), operation_id)
+            raw = doc["operations"].get(operation_id)
             if not raw:
                 return expected
             previous = _decode(raw)
@@ -148,11 +150,11 @@ class OperationJournal:
         return self._write(slug, create)
 
     def settle(self, slug: str, operation: Operation, observation: Observation, attempted: bool = False) -> Operation:
-        def update(pipe):
-            agent = self._current(slug, operation.execution_id, operation.generation, pipe)
+        def update(doc):
+            agent = self._current(slug, operation.execution_id, operation.generation, doc)
             if agent.runtime_backend != operation.backend or agent.runtime_target != operation.target:
                 raise OperationConflict(_ERRORS["target"])
-            raw = pipe.hget(self.store.key(slug, "runtime-operations"), operation.operation_id)
+            raw = doc["operations"].get(operation.operation_id)
             if not raw:
                 raise OperationConflict(_ERRORS["missing"])
             current = _decode(raw)
@@ -170,9 +172,9 @@ class OperationJournal:
         return self._write(slug, update)
 
     def supersede_legacy_spawn(self, slug: str, operation: Operation) -> Operation:
-        def update(pipe):
-            self._current(slug, operation.execution_id, operation.generation, pipe)
-            raw = pipe.hget(self.store.key(slug, "runtime-operations"), operation.operation_id)
+        def update(doc):
+            self._current(slug, operation.execution_id, operation.generation, doc)
+            raw = doc["operations"].get(operation.operation_id)
             if not raw or _decode(raw) != operation:
                 raise OperationConflict(_ERRORS["identity"])
             if (
@@ -186,42 +188,30 @@ class OperationJournal:
 
         return self._write(slug, update)
 
-    def _current(self, slug: str, execution_id: str, generation: int, pipe: Any) -> Any:
-        from scripts.swarm.execution import ARCHIVE
-
-        raw = pipe.hget(self.store.key(slug, "executions"), execution_id) or pipe.hget(
-            self.store.key(slug, ARCHIVE), execution_id
-        )
-        if not raw:
+    def _current(self, slug: str, execution_id: str, generation: int, doc: dict) -> Any:
+        agent = doc["executions"].get(execution_id) or doc["archive"].get(execution_id)
+        if not agent:
             raise OperationConflict(_ERRORS["admission"])
-        agent = json.loads(raw)
-        occupant = self.store.execution_registry.occupants(slug, pipe).get(agent["seat"])
+        occupant = self.store.execution_registry.occupants(slug, doc).get(agent["seat"])
         if not occupant or (occupant.execution_id, occupant.generation) != (execution_id, generation):
             raise OperationConflict(_ERRORS["stale"])
         return occupant
 
     def _write(self, slug: str, change: Any) -> Operation:
-        from redis.exceptions import WatchError
+        from scripts.swarm import fencing, lease
+        from scripts.swarm.store import SwarmError
 
-        key = self.store.key(slug, "runtime-operations")
-        for _ in range(WRITE_ATTEMPTS):
-            with self.store.redis.pipeline() as pipe:
-                try:
-                    from scripts.swarm import lease
+        def commit(doc):
+            operation = change(doc)
+            doc["operations"][operation.operation_id] = asdict(operation)
+            return operation
 
-                    epoch = lease.EPOCH.get()
-                    keys = (key, self.store.key(slug, "executions"))
-                    pipe.watch(*keys, *((self.store.key(slug, "control-owner"),) if epoch is not None else ()))
-                    if epoch is not None:
-                        lease.require_epoch(self.store, slug, epoch)
-                    operation = change(pipe)
-                    pipe.multi()
-                    pipe.hset(key, operation.operation_id, json.dumps(asdict(operation)))
-                    pipe.execute()
-                    return operation
-                except WatchError:
-                    continue
-        raise OperationConflict(_ERRORS["contention"])
+        try:
+            return lease.fenced(self.store, slug, lease.EPOCH.get(), commit)
+        except SwarmError as error:
+            if str(error) == fencing.CONTENTION:
+                raise OperationConflict(_ERRORS["contention"]) from None
+            raise
 
 
 class Operations:

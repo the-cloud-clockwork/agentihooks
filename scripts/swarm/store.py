@@ -301,11 +301,17 @@ class RedisStore:
             self.key(slug, "claim", task),
             None,
             lambda pipe, key: (pipe.set(key, agent, nx=True, px=lease_ms), pipe.incr(f"{key}:generation")),
-            self._claim_guards(slug, task),
+            (slug, task),
         )
 
     def claimant(self, slug, task):
         return self.redis.get(self.key(slug, "claim", task))
+
+    def project_claim(self, slug: str, task: str, holder: str | None, deadline_ms: int) -> None:
+        if holder is None:
+            self.redis.delete(self.key(slug, "claim", task))
+        else:
+            self.redis.set(self.key(slug, "claim", task), holder, pxat=deadline_ms)
 
     def claimed(self, slug: str, tasks: list[str]) -> set[str]:
         found = self.redis.mget([self.key(slug, "claim", task) for task in tasks]) if tasks else []
@@ -318,15 +324,14 @@ class RedisStore:
         from redis.exceptions import WatchError
 
         key, ready = self.key(slug, "claim", task), self.key(slug, "ready")
-        guards = self._claim_guards(slug, task)
         with self.redis.pipeline() as pipe:
             try:
-                pipe.watch(key, f"{key}:generation", ready, *guards)
+                pipe.watch(key, f"{key}:generation", ready)
                 if (
                     pipe.get(key) not in (None, agent)
                     or int(pipe.get(f"{key}:generation") or 0) != generation
                     or pipe.hget(ready, task) != expected_ready
-                    or any(pipe.exists(guard) for guard in guards)
+                    or self.authority_held(slug, task)
                 ):
                     return False
                 pipe.multi()
@@ -341,15 +346,14 @@ class RedisStore:
         from redis.exceptions import WatchError
 
         key = self.key(slug, "claim", agent.task)
-        guards = self._claim_guards(slug, agent.task)
         with self.redis.pipeline() as pipe:
             try:
-                pipe.watch(key, self.key(slug, "agents"), self.key(slug, "executions"), *guards)
+                pipe.watch(key, self.key(slug, "agents"))
                 current = next((a for a in self.agents(slug) if a.name == agent.name), None)
                 if current != agent or agent.state not in ("starting", "working", "awaiting-decision"):
                     return False
                 holder = pipe.get(key)
-                if holder not in (None, agent.name) or any(pipe.exists(guard) for guard in guards):
+                if holder not in (None, agent.name) or self.authority_held(slug, agent.task):
                     return False
                 pipe.multi()
                 pipe.set(key, agent.name, px=lease_ms)
@@ -364,7 +368,7 @@ class RedisStore:
             self.key(slug, "claim", task),
             agent,
             lambda pipe, key: pipe.pexpire(key, lease_ms),
-            self._claim_guards(slug, task),
+            (slug, task),
         )
 
     def release(self, slug: str, task: str, agent: str) -> bool:
@@ -372,16 +376,16 @@ class RedisStore:
             self.key(slug, "claim", task),
             agent,
             lambda pipe, key: pipe.delete(key),
-            self._claim_guards(slug, task),
+            (slug, task),
         )
 
-    def _if_holder(self, key, agent, action, guards=()):
+    def _if_holder(self, key, agent, action, task):
         from redis.exceptions import WatchError
 
         with self.redis.pipeline() as pipe:
             try:
-                pipe.watch(key, *guards)
-                if any(pipe.exists(guard) for guard in guards) or pipe.get(key) != agent:
+                pipe.watch(key)
+                if self.authority_held(*task) or pipe.get(key) != agent:
                     return False
                 pipe.multi()
                 action(pipe, key)
@@ -389,8 +393,11 @@ class RedisStore:
             except WatchError:
                 return False
 
-    def _claim_guards(self, slug, task):
-        return self.key(slug, "task-authority", task), self.key(slug, "claim-journal", task)
+    def authority_held(self, slug, task):
+        from scripts.swarm import fencing
+
+        doc = fencing.read(self, slug)
+        return task in doc["claims"] or task in doc["journals"]
 
     def put_handoff(self, slug, task, text, seat="", envelope=None):
         with self.redis.pipeline() as pipe:
@@ -460,7 +467,52 @@ class RedisStore:
         return self.execution_registry.occupants(slug)
 
     def execution_identity_conflicts_total(self, slug: str) -> int:
-        return int(self.redis.get(self.key(slug, "identity-conflicts")) or 0)
+        from scripts.swarm import fencing
+
+        return fencing.read(self, slug)["identity_conflicts"]
+
+    def listed(self, slug: str) -> set[str]:
+        return set(self.redis.hkeys(self.key(slug, "agents")))
+
+    def projections(self, slug: str) -> tuple[dict[str, dict], dict[str, str]]:
+        with self.redis.pipeline() as pipe:
+            pipe.hgetall(self.key(slug, "agents"))
+            pipe.hgetall(self.key(slug, "desired-routes"))
+            rows, desired = pipe.execute()
+        return {name: json.loads(raw) for name, raw in rows.items()}, desired
+
+    def projected(self, slug: str, name: str) -> AgentRecord | None:
+        raw = self.redis.hget(self.key(slug, "agents"), name)
+        return AgentRecord(**json.loads(raw)) if raw else None
+
+    def project_agent(
+        self, slug: str, agent: AgentRecord, previous: AgentRecord | None = None, removed: str = ""
+    ) -> None:
+        from scripts.swarm.execution import PROJECTION_OMITTED
+        from scripts.swarm.tick import agent_status
+
+        row = {field: value for field, value in asdict(agent).items() if field not in PROJECTION_OMITTED}
+        with self.redis.pipeline() as pipe:
+            pipe.hset(self.key(slug, "agents"), agent.name, json.dumps(row))
+            if agent.desired_route_kind:
+                pipe.hset(self.key(slug, "desired-routes"), agent.name, agent.desired_route_kind)
+            else:
+                pipe.hdel(self.key(slug, "desired-routes"), agent.name)
+            if previous is None or agent_status(previous) != agent_status(agent):
+                pipe.hset(self.key(slug, "state-since"), agent.name, int(time.time() * 1000))
+            if removed:
+                pipe.hdel(self.key(slug, "agents"), removed)
+            pipe.execute()
+
+    def publication(self, slug: str, seat: str) -> str:
+        from scripts.codex_session.binding import PUBLISHING
+
+        return self.redis.hget(self.key(slug, PUBLISHING), seat) or ""
+
+    def hive_report(self, hive: str) -> dict | None:
+        from scripts.hive import reports
+
+        return reports.Reports(self.redis).read(hive)
 
     def put_agent(self, slug, agent):
         self.execution_registry.put(slug, agent)
@@ -471,16 +523,19 @@ class RedisStore:
     def drop_agent(self, slug, name, at=None, expected=None, before=None):
         from redis.exceptions import WatchError
 
+        from scripts.swarm import fencing
+
         ended = int(time.time() * 1000) if at is None else at
         for _ in range(5):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(self.key(slug, "agents"), self.key(slug, "executions"))
+                    pipe.watch(self.key(slug, "agents"))
                     previous = pipe.hget(self.key(slug, "agents"), name)
-                    executions = [a for a in self.execution_registry.occupants(slug, pipe).values() if a.name == name]
+                    doc = fencing.read(self, slug)
+                    executions = [a for a in self.execution_registry.occupants(slug, doc).values() if a.name == name]
                     if expected is not None and expected.execution_id not in {a.execution_id for a in executions}:
                         return False
-                    lives = self.execution_registry.records(slug) if previous else []
+                    lives = self.execution_registry.records(slug, doc) if previous else []
                     pipe.multi()
                     if before is not None:
                         before(pipe)
@@ -499,23 +554,25 @@ class RedisStore:
                             self.key(slug, "history"),
                             json.dumps({**row, **placement, "ended_at": ended, "reason": reason}),
                         )
-                    for agent in executions:
-                        if agent.state != "finished":
-                            pipe.hset(
-                                self.key(slug, "executions"),
-                                agent.execution_id,
-                                json.dumps(asdict(replace(agent, state="ended"))),
-                            )
                     pipe.hdel(self.key(slug, "agents"), name)
                     pipe.hdel(self.key(slug, "desired-routes"), name)
                     pipe.hdel(self.key(slug, "state-since"), name)
                     pipe.hdel(self.key(slug, "retire-failures"), name)
                     self._retire_name(pipe, name, ended)
                     pipe.execute()
-                    return True
+                    break
                 except WatchError:
                     continue
-        raise SwarmError("agent registry kept changing; retirement was not committed")
+        else:
+            raise SwarmError("agent registry kept changing; retirement was not committed")
+        live = {agent.execution_id for agent in executions if agent.state != "finished"}
+
+        def end(doc):
+            for execution_id in live & set(doc["executions"]):
+                doc["executions"][execution_id] = {**doc["executions"][execution_id], "state": "ended"}
+
+        fencing.write(self, slug, end)
+        return True
 
     def _retire_name(self, pipe, name, ended):
         row = self.names.entry(name)
@@ -538,16 +595,15 @@ class RedisStore:
 
         key, lives = self.key(slug, "claim", task), self.key(slug, "started-lives")
         pending = self.key(slug, "pending-lives")
-        guards = self._claim_guards(slug, task)
         for _ in range(3):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(key, f"{key}:generation", f"{key}:refunded", lives, pending, *guards)
+                    pipe.watch(key, f"{key}:generation", f"{key}:refunded", lives, pending)
                     if (
                         pipe.get(key) != agent
                         or int(pipe.get(f"{key}:generation") or 0) != generation
                         or pipe.get(f"{key}:refunded") == str(generation)
-                        or any(pipe.exists(guard) for guard in guards)
+                        or self.authority_held(slug, task)
                     ):
                         return False
                     waiting = pipe.hget(pending, task)

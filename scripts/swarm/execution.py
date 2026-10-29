@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import json
 import threading
-import time
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from scripts.inbox.seats import is_seat
+from scripts.swarm import fencing
 
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend", "transport")
-WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
 PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control", "desired_route_kind")
 ARCHIVE = "executions-archive"
@@ -22,224 +20,107 @@ def _writes(slug: str) -> threading.RLock:
 
 
 if TYPE_CHECKING:
-    from redis import Redis
-    from redis.client import Pipeline
-
     from scripts.swarm.store import AgentRecord, RedisStore
     from scripts.swarm.tick import Runtime
 
 
-ADMIT = """
-local raw = redis.call('GET', KEYS[4])
-if not raw then return 'controller_stale' end
-local leader = cjson.decode(raw)
-local expected = cjson.decode(ARGV[3])
-local clock = redis.call('TIME')
-local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
-if leader.owner ~= expected.owner or leader.epoch ~= expected.epoch or leader.expires_at <= now then
-    return 'controller_stale'
-end
-local agent = cjson.decode(ARGV[1])
-redis.call('HSET', KEYS[1], agent.execution_id, ARGV[1])
-redis.call('HSET', KEYS[2], agent.name, ARGV[2])
-redis.call('HSET', KEYS[3], agent.name, ARGV[4])
-redis.call('HSET', KEYS[5], agent.execution_id, ARGV[6])
-if ARGV[5] ~= '' then redis.call('HDEL', KEYS[2], ARGV[5]) end
-return 'committed'
-"""
+def _record(row: dict) -> AgentRecord:
+    from scripts.swarm.store import AgentRecord
+
+    return AgentRecord(**row)
 
 
-_LATEST = """
-local latest = {}
-local current = nil
-if ARGV[1] == 'name' then
-    current = {}
-    for _, name in ipairs(redis.call('HKEYS', KEYS[2])) do
-        current[name] = true
-    end
-end
-for _, raw in ipairs(redis.call('HVALS', KEYS[1])) do
-    local named = current and string.match(raw, '^{"name": "([^"\\\\]*)"')
-    if not named or current[named] then
-        local row = cjson.decode(raw)
-        local key = row[ARGV[1]]
-        local previous = latest[key]
-        if not previous or row.generation > previous.row.generation
-            or (ARGV[1] == 'seat' and row.generation == previous.row.generation) then
-            latest[key] = {row = row, raw = raw}
-        end
-    end
-end
-local result = {}
-for _, entry in pairs(latest) do
-    if ARGV[1] == 'seat' or redis.call('HEXISTS', KEYS[2], entry.row.name) == 1 then
-        result[#result + 1] = entry.raw
-    end
-end
-return result
-"""
-_MANAGED = """
-for _, raw in ipairs(redis.call('HVALS', KEYS[1])) do
-    if cjson.decode(raw).name == ARGV[1] then
-        return 1
-    end
-end
-return 0
-"""
-_ARCHIVE = """
-local rows = redis.call('HGETALL', KEYS[1])
-local head, decoded = {}, {}
-for i = 1, #rows, 2 do
-    local row = cjson.decode(rows[i + 1])
-    if type(row.name) == 'string' and type(row.seat) == 'string' and type(row.generation) == 'number' then
-        decoded[i] = row
-        if not head[row.seat] or row.generation > head[row.seat] then
-            head[row.seat] = row.generation
-        end
-    end
-end
-local moved = 0
-for i = 1, #rows, 2 do
-    local row = decoded[i]
-    if row and row.generation < head[row.seat] and redis.call('HEXISTS', KEYS[2], row.name) == 0 then
-        redis.call('HSET', KEYS[3], rows[i], rows[i + 1])
-        redis.call('HDEL', KEYS[1], rows[i])
-        moved = moved + 1
-    end
-end
-return moved
-"""
-_HIVE = """
-if redis.call('HEXISTS', KEYS[2], ARGV[1]) == 0 then
-    return ''
-end
-local generation, hive = nil, ''
-for _, raw in ipairs(redis.call('HVALS', KEYS[1])) do
-    if string.find(raw, ARGV[2], 1, true) then
-        local row = cjson.decode(raw)
-        if row.name == ARGV[1] and (not generation or row.generation > generation) then
-            generation, hive = row.generation, row.hive
-        end
-    end
-end
-return type(hive) == 'string' and hive or ''
-"""
+def latest(rows, by: str) -> dict:
+    found: dict = {}
+    for row in rows:
+        previous = found.get(row[by])
+        if previous is None or row["generation"] > previous["generation"]:
+            found[row[by]] = row
+        elif by == "seat" and row["generation"] == previous["generation"]:
+            found[row[by]] = row
+    return found
 
 
 class ExecutionRegistry:
     def __init__(self, store: RedisStore) -> None:
         self.store = store
-        self.redis = store.redis
 
     def conflict(self, slug: str, message: str) -> None:
         from scripts.swarm.store import SwarmError
 
-        self.redis.incr(self.store.key(slug, "identity-conflicts"))
+        fencing.write(self.store, slug, lambda doc: doc.update(identity_conflicts=doc["identity_conflicts"] + 1))
         raise SwarmError(message)
 
-    def records(self, slug: str, reader: Redis | Pipeline | None = None) -> list[AgentRecord]:
-        from scripts.swarm.store import AgentRecord
+    def _doc(self, slug: str, doc: dict | None) -> dict:
+        return doc if doc is not None else fencing.read(self.store, slug)
 
-        source = reader if reader is not None else self.redis
+    def records(self, slug: str, doc: dict | None = None) -> list[AgentRecord]:
+        doc = self._doc(slug, doc)
         rows = {}
-        for key in (self.store.key(slug, "executions"), self.store.key(slug, ARCHIVE)):
-            for raw in source.hvals(key):
-                row = AgentRecord(**json.loads(raw))
-                rows.setdefault(row.execution_id, row)
+        for section in ("executions", "archive"):
+            for row in doc[section].values():
+                rows.setdefault(row["execution_id"], _record(row))
         return sorted(rows.values(), key=lambda a: (a.seat, a.generation))
 
-    def occupants(self, slug: str, reader: Redis | Pipeline | None = None) -> dict[str, AgentRecord]:
-        from scripts.swarm.store import AgentRecord
+    def occupants(self, slug: str, doc: dict | None = None) -> dict[str, AgentRecord]:
+        heads = latest(self._doc(slug, doc)["executions"].values(), "seat")
+        return {seat: _record(heads[seat]) for seat in sorted(heads)}
 
-        rows = (reader if reader is not None else self.redis).eval(
-            _LATEST, 1, self.store.key(slug, "executions"), "seat"
-        )
-        agents = sorted((AgentRecord(**json.loads(row)) for row in rows), key=lambda a: a.seat)
-        return {agent.seat: agent for agent in agents}
-
-    def managed(self, slug: str, name: str, reader: Redis | Pipeline | None = None) -> bool:
-        source = reader if reader is not None else self.redis
-        if source.eval(_MANAGED, 1, self.store.key(slug, "executions"), name):
-            return True
-        return any(json.loads(raw)["name"] == name for raw in source.hvals(self.store.key(slug, ARCHIVE)))
+    def managed(self, slug: str, name: str, doc: dict | None = None) -> bool:
+        doc = self._doc(slug, doc)
+        return any(row["name"] == name for section in ("executions", "archive") for row in doc[section].values())
 
     def archive(self, slug: str) -> int:
-        keys = (self.store.key(slug, "executions"), self.store.key(slug, "agents"), self.store.key(slug, ARCHIVE))
-        return self.redis.eval(_ARCHIVE, len(keys), *keys)
+        listed = self.store.listed(slug)
+
+        def move(doc):
+            heads = latest(doc["executions"].values(), "seat")
+            old = [
+                key
+                for key, row in doc["executions"].items()
+                if row["generation"] < heads[row["seat"]]["generation"] and row["name"] not in listed
+            ]
+            for key in old:
+                doc["archive"][key] = doc["executions"].pop(key)
+            return len(old)
+
+        return fencing.write(self.store, slug, move)
 
     def hive(self, slug: str, name: str) -> str:
-        return self.redis.eval(
-            _HIVE, 2, self.store.key(slug, "executions"), self.store.key(slug, "agents"), name, json.dumps(name)
-        )
+        if name not in self.store.listed(slug):
+            return ""
+        rows = [row for row in fencing.read(self.store, slug)["executions"].values() if row["name"] == name]
+        hive = max(rows, key=lambda row: row["generation"]).get("hive", "") if rows else ""
+        return hive if isinstance(hive, str) else ""
 
     def agents(self, slug: str) -> list[AgentRecord]:
-        from scripts.swarm.store import AgentRecord
-
-        with self.redis.pipeline() as pipe:
-            pipe.hgetall(self.store.key(slug, "agents"))
-            pipe.eval(_LATEST, 2, self.store.key(slug, "executions"), self.store.key(slug, "agents"), "name")
-            pipe.hgetall(self.store.key(slug, "desired-routes"))
-            projections, attempts, desired = pipe.execute()
-        latest = {}
-        for raw in attempts:
-            row = json.loads(raw)
-            if row["name"] not in latest or row["generation"] > latest[row["name"]]["generation"]:
-                latest[row["name"]] = row
+        projections, desired = self.store.projections(slug)
+        attempts = [row for row in fencing.read(self.store, slug)["executions"].values() if row["name"] in projections]
+        heads = latest(attempts, "name")
         result = []
-        for name, raw in sorted(projections.items()):
-            row = json.loads(raw)
-            if name in latest:
-                row.update({field: latest[name][field] for field in EXECUTION_FIELDS})
-                row["hive"] = latest[name].get("hive", "")
-                row["transport"] = latest[name].get("transport", "")
-                row["remote_control"] = latest[name].get("remote_control", {})
-            row["desired_route_kind"] = desired.get(name) or latest.get(name, {}).get("desired_route_kind", "")
-            result.append(AgentRecord(**row))
+        for name, row in sorted(projections.items()):
+            if name in heads:
+                row.update({field: heads[name][field] for field in EXECUTION_FIELDS})
+                row["hive"] = heads[name].get("hive", "")
+                row["transport"] = heads[name].get("transport", "")
+                row["remote_control"] = heads[name].get("remote_control", {})
+            row["desired_route_kind"] = desired.get(name) or heads.get(name, {}).get("desired_route_kind", "")
+            result.append(_record(row))
         return result
 
     def put(self, slug: str, agent: AgentRecord) -> None:
         with _writes(slug):
-            self._put(slug, agent)
-
-    def _put(self, slug: str, agent: AgentRecord) -> None:
-        from redis.exceptions import WatchError
-
-        from scripts.swarm.store import SwarmError
-
-        for _ in range(WRITE_ATTEMPTS):
-            with self.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(self.store.key(slug, "executions"), self.store.key(slug, "agents"))
-                    if _has_identity(agent) or self.managed(slug, agent.name, pipe):
-                        pipe.unwatch()
-                        self.update(slug, agent)
-                        return
-                    previous = pipe.hget(self.store.key(slug, "agents"), agent.name)
-                    pipe.multi()
-                    _write_projection(pipe, self.store, slug, agent)
-                    self.write_status(pipe, slug, agent, previous)
-                    pipe.execute()
-                    return
-                except WatchError:
-                    continue
-        raise SwarmError("agent registry kept changing; update was not committed")
-
-    def write_status(self, pipe: Pipeline, slug: str, agent: AgentRecord, previous: str | None) -> None:
-        from scripts.swarm.store import AgentRecord
-        from scripts.swarm.tick import agent_status
-
-        if not previous or agent_status(AgentRecord(**json.loads(previous))) != agent_status(agent):
-            pipe.hset(self.store.key(slug, "state-since"), agent.name, int(time.time() * 1000))
+            if _has_identity(agent) or self.managed(slug, agent.name):
+                self._update(slug, agent)
+                return
+            self.store.project_agent(slug, agent, self.store.projected(slug, agent.name))
 
     def get(self, slug: str, execution_id: str) -> AgentRecord:
-        from scripts.swarm.store import AgentRecord
-
-        raw = self.redis.hget(self.store.key(slug, "executions"), execution_id) or self.redis.hget(
-            self.store.key(slug, ARCHIVE), execution_id
-        )
-        if not raw:
+        doc = fencing.read(self.store, slug)
+        row = doc["executions"].get(execution_id) or doc["archive"].get(execution_id)
+        if not row:
             self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
-        return AgentRecord(**json.loads(raw))
+        return _record(row)
 
     def validate(self, slug: str, agent: AgentRecord) -> None:
         if agent.runtime_backend not in ("local", "kubernetes"):
@@ -253,8 +134,7 @@ class ExecutionRegistry:
             return self._start(slug, agent, previous_execution_id)
 
     def _start(self, slug: str, agent: AgentRecord, previous_execution_id: str) -> AgentRecord:
-        from redis.exceptions import WatchError
-
+        from scripts.swarm import lease
         from scripts.swarm.store import SwarmError
 
         agent = replace(agent, name=self.store.names.resolve(agent.name))
@@ -263,80 +143,42 @@ class ExecutionRegistry:
         if agent.execution_id or agent.generation:
             self.conflict(slug, "new execution identity and generation must be allocated by the store")
         self.validate(slug, agent)
-        from scripts.codex_session.binding import PUBLISHING
+        if self.store.publication(slug, agent.seat):
+            raise SwarmError("current execution publication is in flight; retry after it finishes")
+        epoch = lease.EPOCH.get()
 
-        key = self.store.key(slug, "executions")
-        publishing = self.store.key(slug, PUBLISHING)
-        for _ in range(WRITE_ATTEMPTS):
-            with self.redis.pipeline() as pipe:
-                try:
-                    from scripts.swarm import lease
+        def admit(doc):
+            previous = self.occupants(slug, doc).get(agent.seat)
+            if (previous.execution_id if previous else "") != previous_execution_id:
+                self.conflict(slug, "replacement does not match the current execution")
+            rows = self.records(slug, doc)
+            if any(row.name == agent.name and row.seat != agent.seat for row in rows):
+                self.conflict(slug, "canonical agent already belongs to another execution seat")
+            self.check_uid(slug, agent, doc)
+            current = replace(
+                agent, execution_id=f"exe-{uuid4().hex}", generation=previous.generation + 1 if previous else 1
+            )
+            if current.execution_id in doc["executions"]:
+                self.conflict(slug, "execution identity already exists")
+            doc["executions"][current.execution_id] = asdict(current)
+            if epoch is not None:
+                doc["intents"][current.execution_id] = {
+                    "execution_id": current.execution_id,
+                    "generation": current.generation,
+                    "controller_epoch": epoch,
+                }
+            return current, previous
 
-                    pipe.watch(key, publishing)
-                    if pipe.hget(publishing, agent.seat):
-                        raise SwarmError("current execution publication is in flight; retry after it finishes")
-                    epoch = lease.EPOCH.get()
-                    held = lease.current(self.store, slug) if epoch is not None else None
-                    if epoch is not None and (held is None or held.epoch != epoch):
-                        raise SwarmError("the controller lease is stale")
-                    previous = self.occupants(slug, pipe).get(agent.seat)
-                    if (previous.execution_id if previous else "") != previous_execution_id:
-                        self.conflict(slug, "replacement does not match the current execution")
-                    rows = self.records(slug, pipe)
-                    if any(row.name == agent.name and row.seat != agent.seat for row in rows):
-                        self.conflict(slug, "canonical agent already belongs to another execution seat")
-                    self.check_uid(slug, agent, pipe)
-                    current = replace(
-                        agent, execution_id=f"exe-{uuid4().hex}", generation=previous.generation + 1 if previous else 1
-                    )
-                    if pipe.hexists(key, current.execution_id):
-                        self.conflict(slug, "execution identity already exists")
-                    self._admit(pipe, slug, current, previous, held)
-                    return current
-                except WatchError:
-                    continue
-        raise SwarmError("execution history kept changing; admission was not committed")
-
-    def _admit(self, pipe, slug, current, previous, held) -> None:
-        from scripts.swarm.store import SwarmError
-
+        current, previous = lease.fenced(self.store, slug, epoch, admit)
         removed = previous.name if previous and previous.name != current.name else ""
-        pipe.multi()
-        if held is None:
-            self.write(pipe, slug, current)
-            if removed:
-                pipe.hdel(self.store.key(slug, "agents"), removed)
-            pipe.execute()
-            return
-        row = asdict(current)
-        intent = {
-            "execution_id": current.execution_id,
-            "generation": current.generation,
-            "controller_epoch": held.epoch,
-        }
-        keys = [
-            self.store.key(slug, part)
-            for part in ("executions", "agents", "state-since", "control-owner", "controller-intents")
-        ]
-        pipe.eval(
-            ADMIT,
-            len(keys),
-            *keys,
-            json.dumps(row),
-            json.dumps({field: value for field, value in row.items() if field not in PROJECTION_OMITTED}),
-            json.dumps(asdict(held)),
-            int(time.time() * 1000),
-            removed,
-            json.dumps(intent),
-        )
-        if pipe.execute()[0] != "committed":
-            raise SwarmError("the controller lease is stale")
+        self.store.project_agent(slug, current, removed=removed)
+        return current
 
-    def check_uid(self, slug: str, agent: AgentRecord, reader: Redis | Pipeline) -> None:
+    def check_uid(self, slug: str, agent: AgentRecord, doc: dict | None = None) -> None:
         uid = agent.runtime_target.get("pod_uid")
         if uid and any(
             row.execution_id != agent.execution_id and row.runtime_target.get("pod_uid") == uid
-            for row in self.records(slug, reader)
+            for row in self.records(slug, doc)
         ):
             self.conflict(slug, "Pod UID already belongs to another execution")
 
@@ -345,70 +187,42 @@ class ExecutionRegistry:
             self._update(slug, agent)
 
     def _update(self, slug: str, agent: AgentRecord) -> None:
-        from redis.exceptions import WatchError
-
-        from scripts.swarm.store import SwarmError
-
         self.validate(slug, agent)
-        key = self.store.key(slug, "executions")
-        for _ in range(WRITE_ATTEMPTS):
-            with self.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(key)
-                    current = self.occupants(slug, pipe).get(agent.seat)
-                    if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
-                        self.conflict(slug, "stale or changed execution identity")
-                    _check_binding(
-                        current.runtime_target, agent.runtime_target, lambda message: self.conflict(slug, message)
-                    )
-                    self.check_uid(slug, agent, pipe)
-                    if agent == current:
-                        pipe.unwatch()
-                        return
-                    pipe.multi()
-                    self.write(pipe, slug, agent, current)
-                    pipe.execute()
-                    return
-                except WatchError:
-                    continue
-        raise SwarmError("execution history kept changing; update was not committed")
+
+        def change(doc):
+            current = self.occupants(slug, doc).get(agent.seat)
+            if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
+                self.conflict(slug, "stale or changed execution identity")
+            _check_binding(current.runtime_target, agent.runtime_target, lambda message: self.conflict(slug, message))
+            self.check_uid(slug, agent, doc)
+            if agent != current:
+                doc["executions"][agent.execution_id] = asdict(agent)
+            return current
+
+        current = fencing.write(self.store, slug, change)
+        if agent != current:
+            self.store.project_agent(slug, agent, current)
 
     def set_pane(self, slug: str, execution_id: str, pane_id: str) -> None:
         with _writes(slug):
             self._set_pane(slug, execution_id, pane_id)
 
     def _set_pane(self, slug: str, execution_id: str, pane_id: str) -> None:
-        from redis.exceptions import WatchError
+        listed = self.store.listed(slug)
 
-        from scripts.swarm.store import AgentRecord, SwarmError
+        def change(doc):
+            raw = doc["executions"].get(execution_id) or doc["archive"].pop(execution_id, None)
+            if not raw:
+                self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
+            current = _record(raw)
+            heads = {head.execution_id for head in self.occupants(slug, doc).values()}
+            updated = replace(current, pane_id=pane_id)
+            doc["executions"][execution_id] = asdict(updated)
+            return (updated, current) if execution_id in heads and current.name in listed else None
 
-        key = self.store.key(slug, "executions")
-        for _ in range(WRITE_ATTEMPTS):
-            with self.redis.pipeline() as pipe:
-                try:
-                    archived = self.store.key(slug, ARCHIVE)
-                    agents = self.store.key(slug, "agents")
-                    pipe.watch(key, agents)
-                    live = pipe.hget(key, execution_id)
-                    raw = live or pipe.hget(archived, execution_id)
-                    if not raw:
-                        pipe.unwatch()
-                        self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
-                    current = AgentRecord(**json.loads(raw))
-                    heads = {head.execution_id for head in self.occupants(slug).values()}
-                    listed = execution_id in heads and pipe.hexists(agents, current.name)
-                    pipe.multi()
-                    if not live:
-                        pipe.hdel(archived, execution_id)
-                    if listed:
-                        self.write(pipe, slug, replace(current, pane_id=pane_id), current)
-                    else:
-                        pipe.hset(key, execution_id, json.dumps(asdict(replace(current, pane_id=pane_id))))
-                    pipe.execute()
-                    return
-                except WatchError:
-                    continue
-        raise SwarmError("execution history kept changing; pane was not committed")
+        shown = fencing.write(self.store, slug, change)
+        if shown is not None:
+            self.store.project_agent(slug, *shown)
 
     def reconcile(self, slug: str, runtime: Runtime, now_ms: int) -> list[str]:
         self.archive(slug)
@@ -417,39 +231,21 @@ class ExecutionRegistry:
         for agent in self.occupants(slug).values():
             if not _orphan_state(agent, now_ms) or agent.name in recorded or agent.name in live:
                 continue
-            if _process_gone(self.redis, agent, runtime) and self.end_orphan(slug, agent, now_ms):
+            if _process_gone(self.store, agent, runtime) and self.end_orphan(slug, agent, now_ms):
                 actions.append(f"ended orphan execution {agent.execution_id} for {agent.name}")
         return actions
 
     def end_orphan(self, slug: str, agent: AgentRecord, now_ms: int) -> bool:
-        from redis.exceptions import WatchError
+        listed = self.store.listed(slug)
 
-        key = self.store.key(slug, "executions")
-        with self.redis.pipeline() as pipe:
-            try:
-                pipe.watch(key, self.store.key(slug, "agents"))
-                current = self.occupants(slug).get(agent.seat)
-                if (
-                    current != agent
-                    or not _orphan_state(agent, now_ms)
-                    or pipe.hexists(self.store.key(slug, "agents"), agent.name)
-                ):
-                    return False
-                pipe.multi()
-                pipe.hset(key, agent.execution_id, json.dumps(asdict(replace(agent, state="ended"))))
-                pipe.execute()
-                return True
-            except WatchError:
+        def end(doc):
+            current = self.occupants(slug, doc).get(agent.seat)
+            if current != agent or not _orphan_state(agent, now_ms) or agent.name in listed:
                 return False
+            doc["executions"][agent.execution_id] = asdict(replace(agent, state="ended"))
+            return True
 
-    def write(self, pipe: Pipeline, slug: str, agent: AgentRecord, previous: AgentRecord | None = None) -> None:
-        from scripts.swarm.tick import agent_status
-
-        raw = json.dumps(asdict(agent))
-        pipe.hset(self.store.key(slug, "executions"), agent.execution_id, raw)
-        _write_projection(pipe, self.store, slug, agent)
-        if previous is None or agent_status(previous) != agent_status(agent):
-            pipe.hset(self.store.key(slug, "state-since"), agent.name, int(time.time() * 1000))
+        return fencing.write(self.store, slug, end)
 
 
 def _validate_target(backend, target, refuse):
@@ -502,27 +298,15 @@ def _orphan_state(agent: AgentRecord, now_ms: int) -> bool:
     return agent.state == "working"
 
 
-def _process_gone(redis: Redis, agent: AgentRecord, runtime: Runtime) -> bool:
+def _process_gone(store: RedisStore, agent: AgentRecord, runtime: Runtime) -> bool:
     from scripts.hive import reports
 
     if runtime.reported(agent):
         return False
     remote = reports.host(agent)
     if remote:
-        report = reports.Reports(redis).read(remote)
+        report = store.hive_report(remote)
         return report is not None and agent.name not in report["names"]
     if agent.runtime_backend != "local":
         return runtime.observe(agent).state == "dead"
     return True
-
-
-def _write_projection(pipe, store, slug, agent):
-    pipe.hset(
-        store.key(slug, "agents"),
-        agent.name,
-        json.dumps({field: value for field, value in asdict(agent).items() if field not in PROJECTION_OMITTED}),
-    )
-    if agent.desired_route_kind:
-        pipe.hset(store.key(slug, "desired-routes"), agent.name, agent.desired_route_kind)
-    else:
-        pipe.hdel(store.key(slug, "desired-routes"), agent.name)

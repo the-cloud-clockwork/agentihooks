@@ -1,0 +1,133 @@
+"""One revisioned document per swarm holds every write the controller lease fences, so each commits whole or not at all."""
+
+import copy
+import json
+import time
+from collections.abc import Callable
+from typing import Any, TypeVar
+
+from scripts.events import state
+from scripts.events.bus import StateConflict
+
+BUCKET = "fencing"
+ATTEMPTS = 16
+CONTENTION = "the swarm fencing state kept changing; nothing was committed"
+EMPTY: dict[str, Any] = {
+    "lease": None,
+    "legacy_owner": "",
+    "epoch": 0,
+    "leader_changes": 0,
+    "intents": {},
+    "orphans": {},
+    "executions": {},
+    "archive": {},
+    "identity_conflicts": 0,
+    "grants": {},
+    "registrations": {},
+    "grants_disabled": "",
+    "claims": {},
+    "journals": {},
+    "fences": {},
+    "stale_rejections": 0,
+    "operations": {},
+}
+HASHES = {
+    "executions": "executions",
+    "archive": "executions-archive",
+    "intents": "controller-intents",
+    "grants": "launch-grants",
+    "registrations": "launch-registrations",
+    "operations": "runtime-operations",
+}
+T = TypeVar("T")
+
+
+def unavailable() -> tuple[type[BaseException], ...]:
+    from scripts.swarm.store import store_errors
+
+    return (*store_errors(), *state.unavailable())
+
+
+def now_ms() -> int:
+    return time.time_ns() // 1_000_000
+
+
+def _states(store: Any):
+    return state.for_store(store, BUCKET)
+
+
+def _task(key: str) -> str:
+    return key.rsplit(":", 1)[1]
+
+
+def _scan(store: Any, slug: str, part: str, reader: str):
+    for key in store.redis.scan_iter(match=store.key(slug, part, "*")):
+        found = store.redis.lrange(key, 0, -1) if reader == "lrange" else store.redis.get(key)
+        if found:
+            yield key, found
+
+
+def _legacy(store: Any, slug: str) -> dict:
+    doc = copy.deepcopy(EMPTY)
+    raw = store.redis.get(store.key(slug, "control-owner"))
+    if raw and raw.startswith("{"):
+        doc["lease"] = json.loads(raw)
+    elif raw:
+        doc["legacy_owner"] = raw
+    doc["epoch"] = int(store.redis.get(store.key(slug, "control-epoch")) or 0)
+    doc["leader_changes"] = int(store.redis.get(store.key(slug, "controller-leader-changes")) or 0)
+    doc["identity_conflicts"] = int(store.redis.get(store.key(slug, "identity-conflicts")) or 0)
+    for section, part in HASHES.items():
+        doc[section] = {key: json.loads(raw) for key, raw in store.redis.hgetall(store.key(slug, part)).items()}
+    doc["stale_rejections"] = int(store.redis.get(store.key(slug, "stale-generation-rejections")) or 0)
+    doc["claims"] = {_task(key): json.loads(raw) for key, raw in _scan(store, slug, "task-authority", "get")}
+    doc["journals"] = {
+        _task(key): [json.loads(row) for row in rows] for key, rows in _scan(store, slug, "claim-journal", "lrange")
+    }
+    doc["fences"] = {key: json.loads(raw) for key, raw in _scan(store, slug, "heartbeat-sequence", "get")}
+    doc["grants_disabled"] = store.redis.get(store.key(slug, "launch-grants-disabled")) or ""
+    doc["orphans"] = {
+        key: int(value) for key, value in store.redis.hgetall(store.key(slug, "controller-orphans")).items()
+    }
+    return doc
+
+
+def _encode(doc: dict) -> bytes:
+    return json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _entry(states: Any, store: Any, slug: str):
+    entry = states.get(slug)
+    if entry is not None:
+        return entry
+    try:
+        states.create(slug, _encode(_legacy(store, slug)))
+    except StateConflict:
+        pass
+    return states.get(slug)
+
+
+def _decode(value: bytes) -> dict:
+    return {**copy.deepcopy(EMPTY), **json.loads(value)}
+
+
+def read(store: Any, slug: str) -> dict:
+    return _decode(_entry(_states(store), store, slug).value)
+
+
+def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
+    from scripts.swarm.store import SwarmError
+
+    states = _states(store)
+    for _ in range(ATTEMPTS):
+        entry = _entry(states, store, slug)
+        doc = _decode(entry.value)
+        result = change(doc)
+        if doc == _decode(entry.value):
+            return result
+        try:
+            states.update(slug, _encode(doc), entry.revision)
+        except StateConflict:
+            continue
+        return result
+    raise SwarmError(CONTENTION)

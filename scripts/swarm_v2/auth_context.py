@@ -17,9 +17,6 @@ from hooks.context.project_sessions import SessionGrant
 from scripts.swarm.store import SwarmError
 
 if TYPE_CHECKING:
-    from redis import Redis
-    from redis.client import Pipeline
-
     from scripts.swarm.store import AgentRecord, RedisStore
 
 SCHEMA_VERSION = "2.0"
@@ -158,25 +155,25 @@ class LaunchAuthority:
         return self.sign(claims)
 
     def record(self, slug: str, execution: AgentRecord, audit: dict) -> None:
-        from redis.exceptions import WatchError
+        def change(doc):
+            if doc["grants_disabled"]:
+                self.refuse(slug, "forbidden_scope", "launch grants are disabled for this swarm")
+            occupants = self.store.execution_registry.occupants(slug, doc).values()
+            if execution.execution_id not in {occupant.execution_id for occupant in occupants}:
+                self.refuse(slug, "stale_generation", "execution is not the current attempt of its seat")
+            doc["grants"][audit["grant_id"]] = audit
 
-        disabled = self.store.key(slug, "launch-grants-disabled")
-        for _ in range(WRITE_ATTEMPTS):
-            with self.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(disabled, self.store.key(slug, "executions"))
-                    if pipe.exists(disabled):
-                        self.refuse(slug, "forbidden_scope", "launch grants are disabled for this swarm")
-                    occupants = self.store.execution_occupants(slug).values()
-                    if execution.execution_id not in {occupant.execution_id for occupant in occupants}:
-                        self.refuse(slug, "stale_generation", "execution is not the current attempt of its seat")
-                    pipe.multi()
-                    pipe.hset(self.store.key(slug, "launch-grants"), audit["grant_id"], json.dumps(audit))
-                    pipe.execute()
-                    return
-                except WatchError:
-                    continue
-        self.refuse(slug, "dependency_unavailable", "launch grants kept changing; the grant was not issued")
+        self._write(slug, change, "launch grants kept changing; the grant was not issued")
+
+    def _write(self, slug: str, change: Callable[[dict], object], contention: str):
+        from scripts.swarm import fencing
+
+        try:
+            return fencing.write(self.store, slug, change)
+        except SwarmError as error:
+            if str(error) != fencing.CONTENTION:
+                raise
+        self.refuse(slug, "dependency_unavailable", contention)
 
     def sign(self, claims: Mapping) -> str:
         payload = _encode(json.dumps(claims, sort_keys=True, separators=(",", ":")).encode())
@@ -234,74 +231,68 @@ class LaunchAuthority:
             raise
 
     def commit(self, slug: str, token: str, body: object) -> Registration:
-        from redis.exceptions import WatchError
-
         claims = self._verify(slug, token)
         self.check_body(slug, claims, body)
-        parts = ("executions", "launch-registrations", "launch-grants", "launch-grants-disabled")
-        keys = [self.store.key(slug, part) for part in parts]
-        for _ in range(WRITE_ATTEMPTS):
-            with self.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(*keys)
-                    return self.admit(pipe, slug, claims)
-                except WatchError:
-                    continue
-        self.refuse(
-            slug, "dependency_unavailable", "launch registrations kept changing; registration was not committed"
+        return self._write(
+            slug,
+            lambda doc: self.admit(doc, slug, claims),
+            "launch registrations kept changing; registration was not committed",
         )
 
-    def issued(self, reader: Redis | Pipeline, slug: str, claims: dict) -> dict:
-        raw = reader.hget(self.store.key(slug, "launch-grants"), claims["grant_id"])
-        if not raw:
+    def issued(self, doc: dict, slug: str, claims: dict) -> dict:
+        audit = doc["grants"].get(claims["grant_id"])
+        if not audit:
             self.refuse(slug, "unauthenticated", "launch grant was not issued by this controller")
-        audit = json.loads(raw)
         if audit["state"] == "revoked":
             self.refuse(slug, "unauthenticated", "launch grant was revoked")
         return audit
 
     def verify(self, slug: str, token: str) -> Registration:
         """Checks the grant without registering it and without judging currency; issue and register judge that."""
+        from scripts.swarm import fencing
+
         claims = self._verify(slug, token)
-        self.issued(self.redis, slug, claims)
+        self.issued(fencing.read(self.store, slug), slug, claims)
         return _registration(claims, "")
 
-    def admit(self, pipe: Pipeline, slug: str, claims: dict) -> Registration:
-        grants = self.store.key(slug, "launch-grants")
-        registrations = self.store.key(slug, "launch-registrations")
-        audit = self.issued(pipe, slug, claims)
-        occupants = self.store.execution_occupants(slug).values()
+    def admit(self, doc: dict, slug: str, claims: dict) -> Registration:
+        audit = self.issued(doc, slug, claims)
+        occupants = self.store.execution_registry.occupants(slug, doc).values()
         if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
             self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
-        if self.store.execution(slug, claims["execution_id"]).state == "ended":
+        row = doc["executions"].get(claims["execution_id"]) or doc["archive"].get(claims["execution_id"])
+        if row["state"] == "ended":
             self.refuse(slug, "stale_generation", "launch grant is for an ended execution")
-        existing = pipe.hget(registrations, claims["execution_id"])
+        existing = doc["registrations"].get(claims["execution_id"])
         if existing:
-            registration = Registration(**json.loads(existing))
+            registration = Registration(**existing)
             if registration.grant_id != claims["grant_id"]:
                 self.refuse(slug, "forbidden_scope", "execution is already registered under another launch grant")
             return registration
-        if pipe.exists(self.store.key(slug, "launch-grants-disabled")):
+        if doc["grants_disabled"]:
             self.refuse(slug, "forbidden_scope", "launch grants are disabled for this swarm")
         registration = _registration(claims, _timestamp(int(self.clock())))
-        pipe.multi()
-        pipe.hset(registrations, claims["execution_id"], json.dumps(asdict(registration)))
-        pipe.hset(grants, claims["grant_id"], json.dumps({**audit, "state": "registered"}))
-        pipe.execute()
+        doc["registrations"][claims["execution_id"]] = asdict(registration)
+        doc["grants"][claims["grant_id"]] = {**audit, "state": "registered"}
         return registration
 
-    def registration(self, slug: str, execution_id: str) -> Registration | None:
-        raw = self.redis.hget(self.store.key(slug, "launch-registrations"), execution_id)
-        return Registration(**json.loads(raw)) if raw else None
+    def registration(self, slug: str, execution_id: str, doc: dict | None = None) -> Registration | None:
+        from scripts.swarm import fencing
+
+        row = (doc if doc is not None else fencing.read(self.store, slug))["registrations"].get(execution_id)
+        return Registration(**row) if row else None
 
     def bound(self, slug: str, token: str) -> Registration:
+        from scripts.swarm import fencing
+
         claims = self._verify(slug, token)
-        registration = self.registration(slug, claims["execution_id"])
+        doc = fencing.read(self.store, slug)
+        registration = self.registration(slug, claims["execution_id"], doc)
         if registration is None or registration.grant_id != claims["grant_id"]:
             self.refuse(slug, "unauthenticated", "launch grant is not registered")
-        if self._audit(self.redis, slug, registration.grant_id)["state"] == "revoked":
+        if self._audit(doc, slug, registration.grant_id)["state"] == "revoked":
             self.refuse(slug, "unauthenticated", "launch grant was revoked")
-        occupants = self.store.execution_occupants(slug).values()
+        occupants = self.store.execution_registry.occupants(slug, doc).values()
         if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
             self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
         return registration
@@ -330,50 +321,32 @@ class LaunchAuthority:
         claims = self._verify(slug, token)
         return self._rewrite(slug, claims["grant_id"], _revoked, "the grant was not withdrawn") is not None
 
-    def _audit(self, reader: Redis | Pipeline, slug: str, grant_id: str) -> dict:
-        return json.loads(reader.hget(self.store.key(slug, "launch-grants"), grant_id))
+    def _audit(self, doc: dict, slug: str, grant_id: str) -> dict:
+        return doc["grants"][grant_id]
 
     def _rewrite(self, slug: str, grant_id: str, change: Callable[[dict], dict | None], failure: str) -> dict | None:
-        from redis.exceptions import WatchError
+        def rewrite(doc):
+            audit = change(self._audit(doc, slug, grant_id))
+            if audit is not None:
+                doc["grants"][grant_id] = audit
+            return audit
 
-        key = self.store.key(slug, "launch-grants")
-        for _ in range(WRITE_ATTEMPTS):
-            with self.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(key)
-                    audit = change(self._audit(pipe, slug, grant_id))
-                    if audit is None:
-                        return None
-                    pipe.multi()
-                    pipe.hset(key, grant_id, json.dumps(audit))
-                    pipe.execute()
-                    return audit
-                except WatchError:
-                    continue
-        self.refuse(slug, "dependency_unavailable", f"launch grants kept changing; {failure}")
+        return self._write(slug, rewrite, f"launch grants kept changing; {failure}")
 
     def disable(self, slug: str) -> list[str]:
-        from redis.exceptions import WatchError
+        def change(doc):
+            revoked = sorted(grant_id for grant_id, audit in doc["grants"].items() if audit["state"] == "issued")
+            doc["grants_disabled"] = _timestamp(int(self.clock()))
+            for grant_id in revoked:
+                doc["grants"][grant_id] = {**doc["grants"][grant_id], "state": "revoked"}
+            return revoked
 
-        key = self.store.key(slug, "launch-grants")
-        for _ in range(WRITE_ATTEMPTS):
-            with self.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(key)
-                    rows = {grant_id: json.loads(raw) for grant_id, raw in pipe.hgetall(key).items()}
-                    revoked = sorted(grant_id for grant_id, audit in rows.items() if audit["state"] == "issued")
-                    pipe.multi()
-                    pipe.set(self.store.key(slug, "launch-grants-disabled"), _timestamp(int(self.clock())))
-                    for grant_id in revoked:
-                        pipe.hset(key, grant_id, json.dumps({**rows[grant_id], "state": "revoked"}))
-                    pipe.execute()
-                    return revoked
-                except WatchError:
-                    continue
-        self.refuse(slug, "dependency_unavailable", "launch grants kept changing; revocation was not committed")
+        return self._write(slug, change, "launch grants kept changing; revocation was not committed")
 
     def enable(self, slug: str) -> None:
-        self.redis.delete(self.store.key(slug, "launch-grants-disabled"))
+        self._write(
+            slug, lambda doc: doc.update(grants_disabled=""), "launch grants kept changing; nothing was enabled"
+        )
 
 
 def _registration(claims: dict, registered_at: str) -> Registration:

@@ -125,11 +125,11 @@ class Transport:
         if pipe is not None:
             from scripts.codex_session.binding import RECORDS
 
-            pipe.watch(store.key(self.slug, "executions"), store.key(self.slug, RECORDS))
+            pipe.watch(store.key(self.slug, RECORDS))
         record = self.bindings.get(self.slug, self.execution_id)
         if record is None or record.state in {EXITED, FAILED, STOOD_DOWN}:
             raise StaleExecution("execution is no longer current")
-        current = store.execution_registry.occupants(self.slug, pipe).get(record.seat)
+        current = store.execution_registry.occupants(self.slug).get(record.seat)
         if (
             current is None
             or (current.execution_id, current.generation, current.name, current.task)
