@@ -271,7 +271,7 @@ def test_the_coverage_shards_record_per_test_contexts_and_inputs():
     assert "dep-inputs/" in _step("unit", "Upload coverage")["with"]["path"]
 
 
-def test_the_manifest_job_builds_it_beside_sonar_and_only_dev_pushes_save_it():
+def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_it():
     job = _job("dep-manifest")
     assert set(job["needs"]) == {"unit", "select", "reuse", "admission"}
     assert "sonar" not in job["needs"]
@@ -297,12 +297,12 @@ def test_the_manifest_job_builds_it_beside_sonar_and_only_dev_pushes_save_it():
     sonar = [step.get("name") for step in _job("sonar")["steps"]]
     assert not any("dependency manifest" in (name or "") for name in sonar)
     assert not any("cache/save" in step.get("uses", "") for step in job["steps"] + _job("sonar")["steps"])
-    assert "github.event_name == 'push'" in _job("coverage-baseline")["if"]
-    assert _step("coverage-baseline", "Download the test dependency manifest")["with"]["name"] == "dep-manifest"
-    save = _step("coverage-baseline", "Save the dev test dependency manifest")
-    assert save["if"] == "needs.gate-required.result == 'success'"
-    assert save["uses"].startswith("actions/cache/save@")
-    assert save["with"]["key"] == "dep-manifest-${{ github.sha }}"
+
+
+def test_the_coverage_baseline_carries_no_dependency_manifest_step():
+    baseline = _job("coverage-baseline")["steps"]
+    assert not any("dependency manifest" in step.get("name", "") for step in baseline)
+    assert not any("dep-manifest" in str(step.get("with", {})) for step in baseline)
 
 
 def test_the_gate_and_stage_budget_wait_for_the_manifest_job():
