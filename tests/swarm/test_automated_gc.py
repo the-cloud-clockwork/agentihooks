@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.inbox.store import CLOSED, InboxStore
+from scripts.inbox.store import CLOSED, InboxError, InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore
 
 SLUG = "proof-323133-t1701-2"
@@ -409,6 +409,18 @@ def test_unrelated_activity_answers_are_not_recorded(world, wrong):
     inbox.acts_for.return_value = wrong != "sender"
     assert not automated_gc._answer(inbox, agent, record, START)
     assert record == {"request": "question", "answers": [], "idle_answers": 0}
+    inbox.close.assert_not_called()
+
+
+def test_gone_request_or_answer_is_dropped_instead_of_raising(world):
+    from scripts.swarm import automated_gc
+
+    _, _, agent, _, _ = world
+    record = {"request": "gone-id", "answers": [], "idle_answers": 0}
+    inbox = Mock()
+    inbox.get.side_effect = InboxError("no message gone-id")
+    assert automated_gc._answer(inbox, agent, record, START)
+    assert record["request"] == ""
     inbox.close.assert_not_called()
 
 

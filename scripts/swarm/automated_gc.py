@@ -1,6 +1,6 @@
 import json
 
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import idle, outage
 
 LIMIT_MS = 30 * 60 * 1000
@@ -31,10 +31,18 @@ def _save(store, slug, agent, record):
 
 
 def _answer(inbox, agent, record, now_ms):
-    request = inbox.get(record["request"])
+    try:
+        request = inbox.get(record["request"])
+    except InboxError:
+        record["request"] = ""
+        return True
     if not request.reason.startswith(REPLY_PREFIX):
         return False
-    answer = inbox.get(request.reason.removeprefix(REPLY_PREFIX))
+    try:
+        answer = inbox.get(request.reason.removeprefix(REPLY_PREFIX))
+    except InboxError:
+        record["request"] = ""
+        return True
     if answer.ref != request.id or not inbox.acts_for(answer.sender, agent.name):
         return False
     record["answers"].append({"id": answer.id, "text": answer.text, "at": now_ms})
