@@ -85,6 +85,10 @@ CLEARED = "A later dev push run of Tests passed, so the swarm closed this promot
 REPLACED = "Dev push run {run_id} of Tests failed on a new cause, so the swarm raised a new promotion alert."
 PROMOTE_JOB = "promote"
 HELD = "dev push run {run_id} passed but its promote job did not succeed, so the promotion red stays open"
+NEWER_RUNS = f"repos/{{owner}}/{{repo}}/actions/workflows/{dev_red.WORKFLOW}/runs?branch=dev&event=push&per_page=20"
+NEWER_JQ = ".workflow_runs[] | {id, head_sha} | @json"
+CONTAINS = ("ahead", "identical")
+REPAIRED = "dev push run {run_id} failed only on checks a newer dev push run already passed"
 
 
 def key(slug: str, part: str) -> str:
@@ -116,6 +120,33 @@ def superseded(repo_dir: str, job: dict, run: Callable = subprocess.run) -> bool
     found = _read(repo_dir, f"{job['check_run_url']}/annotations?per_page=100", ANNOTATIONS_JQ, run)
     messages = {a["message"] for a in found if a["annotation_level"] == "failure"}
     return SUPERSEDED in messages and messages <= {SUPERSEDED, STEP_EXIT}
+
+
+def _list(repo_dir: str, endpoint: str, jq: str, run: Callable) -> list[dict]:
+    output = github_reads.rest(
+        "swarm.promotion_watch",
+        ["api", endpoint, "--jq", jq],
+        run,
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    ).stdout
+    return [json.loads(line) for line in output.splitlines() if line]
+
+
+def repaired(repo_dir: str, last: dict, failed: list[str], run: Callable = subprocess.run) -> set[str]:
+    passed: set[str] = set()
+    for newer in _list(repo_dir, NEWER_RUNS, NEWER_JQ, run):
+        if newer["id"] <= last["id"] or set(failed) <= passed:
+            continue
+        if newer["head_sha"] != last["head_sha"]:
+            compare = f"repos/{{owner}}/{{repo}}/compare/{last['head_sha']}...{newer['head_sha']}"
+            if _list(repo_dir, compare, "{status} | @json", run)[0]["status"] not in CONTAINS:
+                continue
+        passed |= {j["name"] for j in jobs(repo_dir, newer["id"], run) if j["conclusion"] == "success"}
+    return passed & set(failed)
 
 
 def cause(repo_dir: str, job: dict, run: Callable = subprocess.run) -> str:
@@ -375,6 +406,9 @@ def _refresh(
         failed = failed_jobs(found)
         stale = bool(failed) and all(superseded(config.repo, j, run) for j in found if j["name"] in failed)
         named = {j["name"]: j for j in found}
+        red = bool(failed) and not stale and last["conclusion"] == "failure"
+        held = repaired(config.repo, last, failed, run) if red else set()
+        failed = [job for job in failed if job not in held]
         causes = [] if stale else outages([(job, cause(config.repo, named[job], run)) for job in failed], named)
         causes = test_causes(causes, named, config.repo, run)
     except dev_red.READ_ERRORS as exc:
@@ -383,6 +417,8 @@ def _refresh(
         return []
     if stale:
         actions = [f"dev push run {last['id']} was superseded before Sonar analysis"]
+    elif held and not failed:
+        actions = [REPAIRED.format(run_id=last["id"])]
     elif last["conclusion"] == "failure":
         actions = _red(slug, store, ledger, doc, last, causes, config.repo)
     elif not promoted(found):
