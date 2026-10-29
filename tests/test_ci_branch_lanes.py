@@ -844,6 +844,9 @@ def test_tests_dev_pushes_may_share_three_promotion_lanes(change):
     elif change == "untrusted":
         baseline = None
     assert bool(lanes.problems(updated, baseline)) == (change is not None)
+
+
+def test_the_promotion_lanes_apply_only_to_dev_pushes():
     assert "github.event_name == 'push' && format('promotion-dev-{0}', " in lanes.TESTS_GROUPS[1]
 
 
