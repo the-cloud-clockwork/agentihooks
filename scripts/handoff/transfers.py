@@ -126,14 +126,20 @@ def detach(store, slug: str, agent) -> None:
 
 
 def observe(store, slug: str, live: set[str]) -> None:
-    unlaunched = {agent.name for agent in store.agents(slug) if agent.state in ("starting", "launching")}
+    from scripts.hive import reports
+
+    agents = {agent.name: agent for agent in store.agents(slug)}
+    unlaunched = {name for name, agent in agents.items() if agent.state in ("starting", "launching")}
+    hives = reports.Reports(store.redis)
     for row in list_transfers(store, slug):
         if not row["successor"] or row["binding"]["state"] == "live" or row["successor"] in unlaunched:
             continue
         occupancy = store.seats.occupant(row["seat"])
         if occupancy.occupant != row["successor"] or occupancy.generation != row["generation"]:
             continue
-        state = "live" if row["successor"] in live else "absent"
+        agent = agents.get(row["successor"])
+        hosted = agent is not None and bool(reports.host(agent)) and bool(hives.execution(agent))
+        state = "live" if row["successor"] in live or hosted else "absent"
 
         def change(current, state=state):
             current["binding"] = {"state": state, "at": now_ms(), "session": current["successor"]}
