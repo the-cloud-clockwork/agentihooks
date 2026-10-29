@@ -131,6 +131,8 @@ def test_a_stop_on_red_checks_preserves_an_open_dependency_wait(rig, kind):
         rig.ledger.rows["repair"]["state"] = "done"
     else:
         rig.pulls[target] = MERGED
+    assert rig.stop().allowed
+    rig.clock[0] += 60_000
     assert not rig.stop().allowed
 
 
@@ -185,6 +187,8 @@ def test_a_stop_with_the_required_gate_green_and_another_job_red_passes_on_its_w
     idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"merge of {URL}", rig.clock[0], on=on)
     assert rig.stop().allowed
     rig.pulls[URL] = PullRequest("OPEN", None, 1, True, True, ("Gate — Required",), queued=queued)
+    assert rig.stop().allowed
+    rig.clock[0] += 60_000
     decision = rig.stop()
     assert not decision.allowed
     assert decision.reason.startswith(f"checks failed on {URL}: Gate — Required. Fix")
@@ -448,6 +452,8 @@ def test_the_second_half_stops_on_its_own_pull_request_and_its_merge_owes_done(r
     rig.pulls[URL], rig.pulls[second] = MERGED, PENDING
     assert rig.stop().allowed
     rig.pulls[second] = MERGED
+    assert rig.stop().allowed
+    rig.clock[0] += CHECKS_WAIT_MS
     decision = rig.stop()
     assert not decision.allowed and f"{second} merged: close the task now" in decision.reason
     assert rig.ledger.updates == []
@@ -785,7 +791,7 @@ def test_the_gate_entry_runs_it_by_name():
     assert isinstance(GATES["claim-stop"], ClaimStop)
 
 
-def test_a_live_checks_wait_on_another_pull_request_grades_that_pull_request_only(rig):
+def test_a_live_checks_wait_on_another_pull_request_passes_until_expiry(rig):
     other = URL + "1"
     rig.task.update(state="pr", pr_url=URL)
     rig.pulls[URL], rig.pulls[other] = RED, PENDING
@@ -796,11 +802,12 @@ def test_a_live_checks_wait_on_another_pull_request_grades_that_pull_request_onl
     rig.pulls[other] = GREEN
     assert rig.stop().allowed
     rig.pulls[other] = RED
-    decision = rig.stop()
-    assert decision.reason.startswith(f"checks failed on {other}: tests (1), lint. Fix")
-    rig.pulls[URL], rig.pulls[other] = PENDING, MERGED
+    assert rig.stop().allowed
+    rig.pulls[other] = MERGED
     assert rig.stop().allowed
     assert idle.wait(rig.store.redis, SLUG, ME)["on"] == on
+    rig.clock[0] += 60_000
+    assert rig.stop().reason.startswith(f"checks failed on {URL}: tests (1), lint. Fix")
 
 
 def test_a_live_checks_wait_on_a_run_lets_a_red_pull_request_stop(rig):
