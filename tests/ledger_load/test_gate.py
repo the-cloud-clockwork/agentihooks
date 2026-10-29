@@ -324,6 +324,7 @@ def test_the_load_server_trusts_its_writer_but_refuses_an_unrelated_project(monk
         ledger_load.stop_server(server)
     assert os.environ["CONDITIONS_TRUSTED_OWNERS"] == ""
 
+
 @pytest.mark.parametrize("unwritable_log", [False, True])
 def test_a_server_that_fails_at_startup_names_its_exit_status_and_stderr(monkeypatch, tmp_path, unwritable_log):
     script = tmp_path / "failing_server.py"
