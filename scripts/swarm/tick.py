@@ -736,15 +736,15 @@ def _lost(slug, store, ledger, runtime, rows, agent, now_ms):
 def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
     """A remote agent is judged by its own runtime, never by this host's process table: no answer keeps it suspect,
     holding its claim, neither retired nor dropped."""
-    timing.timed(store.refresh, slug, agent.task, agent.name, LEASE_MS)
-    if timing.timed(_observe, runtime, agent).state == "unknown":
+    store.refresh(slug, agent.task, agent.name, LEASE_MS)
+    if runtime.observe(agent).state == "unknown":
         if agent.state == SUSPECT:
             return []
-        timing.timed(store.put_agent, slug, replace(agent, state=SUSPECT))
+        store.put_agent(slug, replace(agent, state=SUSPECT))
         return [f"suspect {agent.name}: its runtime did not answer"]
     if agent.state == SUSPECT:
         agent = replace(agent, state="working")
-        timing.timed(store.put_agent, slug, agent)
+        store.put_agent(slug, agent)
     return _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms)
 
 
@@ -823,14 +823,18 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         title = observed.prompt_title or "Waiting on input"
         same = agent.input_prompt == title
         ticks = agent.input_ticks + 1 if same else 1
-        input_wait.mark(store, slug, agent.name, now_ms, same)
+        timing.timed(input_wait.mark, store, slug, agent.name, now_ms, same)
         waiting = replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0)
         timing.timed(store.put_agent, slug, waiting)
-        return master_questions.dismiss(slug, store, ledger, runtime, waiting, now_ms) if agent.lane == MASTER else []
+        return (
+            timing.timed(master_questions.dismiss, slug, store, ledger, runtime, waiting, now_ms)
+            if agent.lane == MASTER
+            else []
+        )
     if agent.input_prompt:
-        input_wait.clear(store, slug, agent.name)
+        timing.timed(input_wait.clear, store, slug, agent.name)
         if agent.lane == MASTER:
-            master_questions.drop(store, slug, agent.name)
+            timing.timed(master_questions.drop, store, slug, agent.name)
     agent = replace(agent, input_prompt="", input_ticks=0)
     held = timing.timed(outage.held, store, slug, agent.name)
     exhausted = timing.timed(resume.recovery_exhausted, store, slug, agent)
