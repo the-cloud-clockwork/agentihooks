@@ -9,7 +9,7 @@ from scripts.size_limits import GradeError, files
 
 UNGRADED = ("tests/", ".semgrep/")
 ROOTS = frozenset(
-    {"ABC", "Protocol", "NamedTuple", "TypedDict", "Generic", "Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "object"}
+    {"ABC", "Protocol", "NamedTuple", "TypedDict", "Generic", "Enum", "IntEnum", "StrEnum", "Flag", "IntFlag"}
 )
 PLAIN_DICTS = frozenset({"dict", "Dict", "Mapping", "MutableMapping"})
 CONFIG_NAME = re.compile(r"(^|_)(config|conf|cfg|settings|options|opts|params)$")

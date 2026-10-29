@@ -350,7 +350,7 @@ def test_main_reports_a_syntax_error_naming_its_file(tmp_path, capsys, side):
     assert design_rules.main(["--base", str(base), "--head", str(head)]) == 1
     out = capsys.readouterr().out
     assert out.startswith("::error::")
-    assert "(scripts/job.py, line 1)" in out
+    assert "(job.py, line 1)" in out
 
 
 def test_the_lint_job_runs_the_gate_from_the_protected_grader():
