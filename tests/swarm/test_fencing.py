@@ -1,0 +1,153 @@
+import json
+
+import pytest
+
+from scripts.events import factory, memory, state
+from scripts.events.bus import StateConflict
+from scripts.events.config import BusConfig
+from scripts.swarm import fencing, lease
+from scripts.swarm.store import RedisStore, SwarmError
+
+pytestmark = pytest.mark.unit
+
+
+@pytest.fixture
+def store():
+    import fakeredis
+
+    return RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    at = [1000]
+    monkeypatch.setattr(fencing, "now_ms", lambda: at[0])
+    return at
+
+
+@pytest.fixture
+def bus(monkeypatch):
+    opened = memory.open_bus(BusConfig())
+    monkeypatch.setattr(factory, "open_bus", lambda config: opened)
+    monkeypatch.setenv(state.BACKEND_ENV, "bus")
+    return opened
+
+
+def _saved(states, slug):
+    return json.loads(states.get(slug).value)
+
+
+def test_a_new_swarm_reads_an_empty_fencing_document(store):
+    doc = fencing.read(store, "sw")
+    assert doc["lease"] is None
+    assert doc["epoch"] == 0
+    assert doc["executions"] == {}
+
+
+def test_a_write_commits_the_change_and_returns_its_result(store):
+    def change(doc):
+        doc["epoch"] = 4
+        return "done"
+
+    assert fencing.write(store, "sw", change) == "done"
+    assert fencing.read(store, "sw")["epoch"] == 4
+    assert fencing.read(store, "other")["epoch"] == 0
+
+
+def test_a_write_that_raises_leaves_the_document_unchanged(store):
+    fencing.write(store, "sw", lambda doc: doc.update(epoch=3))
+
+    def refused(doc):
+        doc["epoch"] = 9
+        raise SwarmError("refused")
+
+    with pytest.raises(SwarmError, match="refused"):
+        fencing.write(store, "sw", refused)
+    assert fencing.read(store, "sw")["epoch"] == 3
+
+
+def test_a_write_retries_on_a_competing_revision_and_sees_the_competitor(store, monkeypatch):
+    fencing.write(store, "sw", lambda doc: doc.update(epoch=1))
+    states = state.for_store(store, fencing.BUCKET)
+    raced, seen = [], []
+
+    def change(doc):
+        seen.append(doc["epoch"])
+        if not raced:
+            raced.append(True)
+            entry = states.get("sw")
+            states.update("sw", json.dumps({**json.loads(entry.value), "epoch": 5}).encode(), entry.revision)
+        doc["epoch"] += 1
+
+    monkeypatch.setattr(fencing.state, "for_store", lambda *args, **kwargs: states)
+    fencing.write(store, "sw", change)
+    assert seen == [1, 5]
+    assert fencing.read(store, "sw")["epoch"] == 6
+
+
+def test_a_write_that_keeps_conflicting_is_refused(store, monkeypatch):
+    class Racing:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def get(self, key):
+            return self.inner.get(key)
+
+        def create(self, key, value):
+            return self.inner.create(key, value)
+
+        def update(self, key, value, revision):
+            raise StateConflict("raced")
+
+    states = Racing(state.for_store(store, fencing.BUCKET))
+    monkeypatch.setattr(fencing.state, "for_store", lambda *args, **kwargs: states)
+    with pytest.raises(SwarmError, match="the swarm fencing state kept changing"):
+        fencing.write(store, "sw", lambda doc: doc.update(epoch=2))
+
+
+def test_a_stale_lease_holder_cannot_write_through_the_fence(store, monkeypatch):
+    at = [1000]
+    monkeypatch.setattr(lease, "now_ms", lambda saved: at[0])
+    first = lease.acquire(store, "sw", "home")
+    at[0] = first.expires_at
+    second = lease.acquire(store, "sw", "other")
+    with pytest.raises(SwarmError, match="the controller lease is stale"):
+        lease.fenced(store, "sw", first, lambda doc: doc["intents"].update(stale={"epoch": first.epoch}))
+    assert fencing.read(store, "sw")["intents"] == {}
+    lease.fenced(store, "sw", second, lambda doc: doc["intents"].update(live={"epoch": second.epoch}))
+    assert fencing.read(store, "sw")["intents"] == {"live": {"epoch": second.epoch}}
+
+
+def test_a_fenced_write_is_refused_once_the_lease_expires(store, monkeypatch):
+    at = [1000]
+    monkeypatch.setattr(lease, "now_ms", lambda saved: at[0])
+    held = lease.acquire(store, "sw", "home")
+    at[0] = held.expires_at
+    with pytest.raises(SwarmError, match="the controller lease is stale"):
+        lease.fenced(store, "sw", held, lambda doc: doc.update(orphans={"a": 1}))
+    assert fencing.read(store, "sw")["orphans"] == {}
+
+
+def test_the_lease_lives_on_the_bus_state_store_and_writes_no_redis_key(store, bus, clock):
+    before = set(store.redis.keys("*"))
+    held = lease.acquire(store, "sw", "home")
+    assert set(store.redis.keys("*")) == before
+    saved = _saved(bus.state(fencing.BUCKET), "sw")
+    assert saved["lease"] == {"owner": "home", "epoch": 1, "expires_at": held.expires_at}
+    assert saved["epoch"] == 1
+    assert saved["leader_changes"] == 1
+    assert lease.current(store, "sw") == held
+
+
+def test_a_first_read_imports_the_legacy_redis_lease_once(store, clock):
+    store.redis.set(store.key("sw", "control-owner"), json.dumps({"owner": "home", "epoch": 3, "expires_at": 9000}))
+    store.redis.set(store.key("sw", "control-epoch"), 3)
+    store.redis.set(store.key("sw", "controller-leader-changes"), 2)
+    assert lease.current(store, "sw") == lease.Lease("home", 3, 9000)
+    store.redis.delete(store.key("sw", "control-owner"))
+    doc = fencing.read(store, "sw")
+    assert (doc["lease"], doc["epoch"], doc["leader_changes"]) == (
+        {"owner": "home", "epoch": 3, "expires_at": 9000},
+        3,
+        2,
+    )
