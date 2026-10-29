@@ -407,9 +407,7 @@ def test_master_waits_when_its_only_private_login_probe_is_revoked(setup, monkey
     write_hive(setup, excluded=[], ui="yes", master_login={"claude": "work-login"})
     result = balancer.revoked_result("work_login", 100)
     monkeypatch.setattr(balancer, "cached_observations", lambda **_: [(100, result)])
-    assert setup.launcher.select(setup.config, "master", task) == placement.Wait(
-        "no hive for master advertises a claude slot"
-    )
+    assert setup.launcher.select(setup.config, "master", task) == placement.Wait("no live hive takes master")
 
 
 def test_a_master_login_without_a_hive_slot_holds_no_account_cap(setup):
