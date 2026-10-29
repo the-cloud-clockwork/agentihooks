@@ -32,10 +32,19 @@ def test_plan_publishes_each_file_selection_and_browser_requirement_once(tmp_pat
         return tests
 
     monkeypatch.setattr(plan, "select_tests", select)
+    estimate = plan.estimate
+
+    def direct_estimate(*args):
+        args[5]["scripts/sample.py"] = ["tests/test_sample.py::test_sample"]
+        return estimate(*args)
+
+    monkeypatch.setattr(plan, "estimate", direct_estimate)
     assert plan.main() == 0
     values = dict(line.split("=", 1) for line in output.read_text().splitlines())
     assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {"scripts/sample.py": tests}
-    assert json.loads((tmp_path / ".mutation-direct.json").read_text()) == {}
+    assert json.loads((tmp_path / ".mutation-direct.json").read_text()) == {
+        "scripts/sample.py": ["tests/test_sample.py::test_sample"]
+    }
     assert values["browser"] == browser
     assert calls == [(tmp_path, Path("scripts/sample.py"))]
 
@@ -438,6 +447,7 @@ def test_the_plan_names_the_tests_whose_recorded_lines_reach_each_changed_line(t
     manifest, source = _line_project(tmp_path, monkeypatch, "line")
     (tmp_path / "scripts/core.py").write_text("\n" * shift + source.replace("value - 1", "value - 2"))
     _commit(tmp_path, "edited branch")
+    del manifest["lines"]["tests/test_core.py::test_other"]["scripts/core.py"]
     direct = {}
     plan.estimate(tmp_path, {"scripts/core.py": {4 + shift}}, {}, manifest, direct=direct)
     assert direct == {"scripts/core.py": ["tests/test_core.py::test_g", "tests/test_helper.py::test_helper"]}

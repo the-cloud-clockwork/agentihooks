@@ -554,7 +554,7 @@ def direct_tests(manifest: dict, lines: dict[str, set[int]], changes: dict[str, 
             {
                 node(test).partition("[")[0]
                 for test, covered in manifest["lines"].items()
-                if lines.get(path, set()).intersection(covered.get(path, ()))
+                if lines[path].intersection(covered.get(path, ()))
             }
         )
         for path in changes
