@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.xǁSQLiteLedgerRepositoryǁ_set_up__mutmut_11:a60d03df1aa85a37dce5f2907935ff96a3bc0d3f0879149eda5c97eb10d7392d": {
+    "reader": "standards_reader",
+    "reason": "Uppercases the column names and keywords of the per table CREATE TABLE statement; SQLite identifiers and keywords are case insensitive, every query names these columns in SQL, and no ledger code reads sqlite_master schema text, row_factory or cursor.description, so behavior is unchanged."
+  }
+}

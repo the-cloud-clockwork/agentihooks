@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/plan_packages.py:scripts.swarm_ledger.plan_packages.x_name__mutmut_15:6ead4440bbbdf468ce16d622c60b378c8a6b763ea397b6af54dce862e831d8e4": {
+    "reader": "Standards",
+    "reason": "Both empty string and XXXX description defaults contain no package identifier. Explicit slices and present descriptions are unchanged; the same task id is returned. Verified against CI run 37861955536 at head 680e7e3c."
+  }
+}

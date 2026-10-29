@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__line_match__mutmut_7:28d2b70a3f4b91aad03cfa28b7eafd7ecdbd245401abda855296787a6853cf54": {
+    "reader": "Standards",
+    "reason": "Only ASCII ENTRIES, WORDS, LINES, ID and ENTRY identifier casing changes; SQLite resolves the same tables and columns with identical join results."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__line_match__mutmut_5:ba0d594d54a3a9afc7963399bb2c3a62db11960158b81c2196b5087e3c64c700": {
+    "reader": "standards_reader",
+    "reason": "SQLite keywords and the unquoted identifiers `entries`, `at` and `id` are case-insensitive, so the uppercased ORDER BY/LIMIT clause parses to the same query."
+  }
+}

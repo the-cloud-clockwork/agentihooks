@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1launch_room__mutmut_11:ca1cf5eea502ae7f51460e06486ec2191a0bfe22b061b4f78b100654c57b7a00": {
+    "reader": "standards_reader",
+    "reason": "HerdrRuntime._quota_open treats any lane other than master the same way, so passing None instead of the empty string selects the same rows: lane == MASTER is false for both, no other use of the lane exists in _quota_open, and launch_room returns the same seat sum."
+  }
+}

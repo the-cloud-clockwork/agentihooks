@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/merge_queue.py:scripts.swarm.merge_queue.x_operate__mutmut_16:7a5dcb84a44d7b8b43ec8d53be3fbcf6d15da04acd28fad0c8b9165901169e34": {
+    "reader": "standards_reader",
+    "reason": "Only the falsey body fallback passed directly to declaration changes from empty string to XXXX; neither contains MARKER, so both return without proof lookup and preserve admission."
+  }
+}

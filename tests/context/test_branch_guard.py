@@ -2,6 +2,8 @@
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("outside_a_guarded_repository")
+
 
 class TestBranchGuard:
     """Test that git commands targeting main/master are blocked."""
@@ -188,11 +190,7 @@ class TestOnlyTheCommandsOwnOperands:
 
 
 class TestPRBaseGuard:
-    """gh pr create must name an explicit --base.
-
-    A dev→main snapshot PR is the sanctioned way into main (CI Manifesto §4/§5),
-    so --base main is allowed under the PR signal. Only a bare create is blocked,
-    because it targets the default branch implicitly."""
+    """Only CI creates promotion pull requests into protected branches."""
 
     def _check(self, command: str):
         from hooks.context.branch_guard import check_branch_guard
@@ -221,12 +219,9 @@ class TestPRBaseGuard:
         with s1, s2, s3:
             self._check(command)  # should not raise
 
-    def test_pr_base_main_allowed(self):
-        # The dev→main snapshot PR is the only sanctioned path into main.
-        self._assert_allowed_with_signal("gh pr create --base main --fill")
-
-    def test_pr_base_master_allowed(self):
-        self._assert_allowed_with_signal("gh pr create --base master -t x")
+    @pytest.mark.parametrize("base", ["main", "master", "v1"])
+    def test_protected_pr_base_blocked_with_signal(self, base):
+        self._assert_blocked_with_signal(f"gh pr create --base {base} --fill")
 
     def test_pr_bare_create_blocked(self):
         # a bare create defaults to the repo default branch (main)
@@ -292,3 +287,49 @@ class TestPrSignalResetsCounter:
             # Operator re-signal must reset it
             branch_guard.set_pr_signal(sid)
             assert branch_guard._get_pr_counter(sid) == 0
+
+
+class TestResolveCwd:
+    @pytest.mark.parametrize("quote", ['"', "'", ""])
+    def test_a_cd_prefix_names_the_directory(self, tmp_path, quote):
+        from hooks.context.branch_guard import _resolve_cwd
+
+        work = tmp_path / "workX"
+        work.mkdir()
+
+        assert _resolve_cwd(f"cd {quote}{work}{quote} && git push", "/") == str(work)
+
+    def test_a_cd_prefix_expands_home_and_variables(self, tmp_path, monkeypatch):
+        from hooks.context.branch_guard import _resolve_cwd
+
+        (tmp_path / "work").mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("WORK_DIR", str(tmp_path / "work"))
+
+        assert _resolve_cwd("cd ~/work && git push", "/") == str(tmp_path / "work")
+        assert _resolve_cwd("cd $WORK_DIR && git push", "/") == str(tmp_path / "work")
+
+    def test_a_missing_payload_folder_falls_back_to_the_process_folder(self, tmp_path, monkeypatch):
+        from hooks.context.branch_guard import _resolve_cwd
+
+        monkeypatch.chdir(tmp_path)
+
+        assert _resolve_cwd("git commit -m x", str(tmp_path / "missing")) == str(tmp_path)
+
+
+def test_a_push_of_a_head_that_skipped_the_cheap_gates_is_blocked(tmp_path):
+    import subprocess
+
+    from hooks.context.branch_guard import check_branch_guard
+    from hooks.hook_manager import BlockAction
+
+    (tmp_path / "scripts" / "ci_prepush").mkdir(parents=True)
+    (tmp_path / "scripts" / "ci_prepush" / "__init__.py").write_text("")
+    for args in (
+        ["init", "-q"],
+        ["-c", "user.email=t@x", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "b"],
+    ):
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True)
+
+    with pytest.raises(BlockAction, match="python -m scripts.ci_prepush"):
+        check_branch_guard({"tool_input": {"command": "git push origin HEAD"}, "cwd": str(tmp_path)})

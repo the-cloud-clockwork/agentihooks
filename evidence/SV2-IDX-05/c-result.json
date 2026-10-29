@@ -1,0 +1,150 @@
+{
+  "case": "T-SV2-IDX-05-C",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket, and a recording stub stands in for the MCP server; no model, HTTP server, MCP transport or Pod runs",
+  "input_sha256": {
+    "session-tools.json": "88df786b2ad1eb5fbf9875b1735643b1ddbb09ac66b8a04cc1c01b358764a69d"
+  },
+  "observed": {
+    "changed_listing_cursor": {
+      "error": {
+        "class": "cursor_expired",
+        "detail": "the listing changed since the cursor was issued; start the listing again without a cursor",
+        "retry": "never"
+      },
+      "state": "rejected"
+    },
+    "cursor_page_after_restart_identical": true,
+    "cursor_page_before_restart": [
+      "kernel"
+    ],
+    "cursor_replay_identical": true,
+    "cursor_rows": {
+      "after_replay": 3,
+      "after_tail": 3,
+      "before_restart": 3
+    },
+    "durability": {
+      "archive_objects_unchanged": {
+        "after": 3,
+        "before": 3
+      },
+      "authoritative_rows_changed": [
+        "kernel"
+      ],
+      "authoritative_rows_survived_restart": {
+        "archive_manifest": 3,
+        "chunk_cutover": 3,
+        "chunk_generation": 3,
+        "chunk_vector": 0,
+        "embedding_work": 0,
+        "index_cutover": 0,
+        "index_generation": 0,
+        "search_chunk": 5,
+        "session_event": 10,
+        "session_ingest_batch": 3,
+        "session_quarantine": 0,
+        "session_record": 3,
+        "session_source": 3,
+        "session_watermark": 3
+      },
+      "cursor_rows_survived_restart": {
+        "after": 3,
+        "before": 3
+      },
+      "expired": {
+        "lifetime": "cursor_expired",
+        "listing_changed": "cursor_expired"
+      }
+    },
+    "evidence_reference_resolution_failures": {
+      "access_domain": "swarm-fixture",
+      "principal": "tools-fixture",
+      "value": 0
+    },
+    "expansion_across_restart": {
+      "head": [
+        {
+          "cited": true,
+          "kind": "tool_call",
+          "project_id": null,
+          "sequence": 2,
+          "task_id": "fixture-lock",
+          "timestamp": "2026-10-20T09:00:05Z"
+        },
+        {
+          "cited": true,
+          "kind": "tool_result",
+          "project_id": "github.com/the-cloud-clockwork/agentihooks",
+          "sequence": 3,
+          "task_id": "fixture-lock",
+          "timestamp": "2026-10-20T09:00:09Z"
+        }
+      ],
+      "sequences": [
+        2,
+        3,
+        4
+      ],
+      "tail_pages": 1
+    },
+    "expansion_replay_identical": true,
+    "expired_cursor": {
+      "error": {
+        "class": "cursor_expired",
+        "detail": "the cursor is unknown or expired; start the listing again without a cursor",
+        "retry": "never"
+      },
+      "state": "rejected"
+    },
+    "listing_restarted_without_cursor": [
+      [
+        "lock"
+      ],
+      [
+        "readme"
+      ]
+    ],
+    "rollback_rehearsal": {
+      "accepted_search_after_hiding": {
+        "results": 2,
+        "state": "answered"
+      },
+      "archive_evidence_after_hiding": {
+        "complete": true,
+        "sources": 1
+      },
+      "authoritative_state_matches_case_start": true,
+      "rows_the_tools_write": [
+        "session_cursor rows",
+        "evidence_reference_resolution_failures, session_alias_calls and session_search_scope_rejections counters"
+      ],
+      "tools_hidden": [],
+      "tools_with_aliases": [
+        "get_session",
+        "get_session_segment",
+        "list_sessions",
+        "search_semantic",
+        "search_sessions",
+        "session_get",
+        "session_list",
+        "session_records",
+        "session_search"
+      ],
+      "tools_with_catalog": [
+        "session_get",
+        "session_list",
+        "session_records",
+        "session_search"
+      ]
+    },
+    "stale_cursor_after_newer_listing": {
+      "error": {
+        "class": "cursor_expired",
+        "detail": "the listing changed since the cursor was issued; start the listing again without a cursor",
+        "retry": "never"
+      },
+      "state": "rejected"
+    }
+  },
+  "state": "passed"
+}

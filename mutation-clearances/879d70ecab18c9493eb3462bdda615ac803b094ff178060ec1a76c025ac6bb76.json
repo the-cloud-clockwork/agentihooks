@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_collection_revisions__mutmut_10:984cbe126f53850a348f8b6f3546cf22830e539100dd7c16cf4551aa7fc5cb9e": {
+    "reader": "standards_reader",
+    "reason": "ensure_ascii False to None: JSONEncoder.iterencode reads ensure_ascii only by truth test (if self.ensure_ascii selects encode_basestring_ascii), and dumps skips the cached encoder because sort_keys and separators are set, so None takes the same branch as False. Encoded bytes and every row and collection digest are identical."
+  }
+}

@@ -15,8 +15,7 @@ import watch_ledger
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "image-delivery"
 GIF = b"GIF89a\x01\x00\x01\x00"
@@ -31,8 +30,8 @@ def delivery(monkeypatch, tmp_path):
     RedisStore(box.redis).create(SwarmConfig(SLUG, "/repo", 1, 0))
     monkeypatch.setattr("scripts.inbox.store.connect", lambda environ=None: box)
     content = {"title": "Images", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html, _ = core.paths(SLUG)
-    html.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765))
+    html, _ = legacy_page.paths(SLUG, core)
+    html.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765))
     core.sync(SLUG)
     attachments = [media.store(SLUG, GIF), media.store(SLUG, GIF + b"another")]
     paths = [str(media.path_of(SLUG, att["id"]).resolve()) for att in attachments]

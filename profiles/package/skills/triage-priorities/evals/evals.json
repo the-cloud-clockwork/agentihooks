@@ -4,6 +4,7 @@
     "files": [],
     "expected_behavior": [
       "runs list_priorities.py with the ledger slug and --clear-resolved before asking anything",
+      "reads the complete priorities collection through the ledger API and fetches each referenced item individually without a full ledger download",
       "asks the open priorities with AskUserQuestion in rounds of at most four questions, one per priority, each with a Later option",
       "never tells the operator to open the ledger page or type in another pane"
     ]
@@ -24,6 +25,15 @@
       "maps the deferred broker question to a keep entry so its priority stays listed",
       "reruns list_priorities.py after applying and stops when only kept or failed items remain open",
       "names the kept broker question in plain words in the final report"
+    ]
+  },
+  {
+    "query": "triage priorities (the question tool is refused because the operator is not present)",
+    "files": [],
+    "expected_behavior": [
+      "never writes the priority prompts as plain chat text",
+      "says only one short line: type operator on to answer the questions here, or leave them in Priorities",
+      "clears no open priority and writes no plan for the refused round"
     ]
   }
 ]

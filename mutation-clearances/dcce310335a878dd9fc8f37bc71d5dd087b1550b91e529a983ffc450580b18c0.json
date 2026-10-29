@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_expiry.py:hooks.context.operator_expiry.x_start__mutmut_15:5e6044487cb160514e778dec4826876e87916ca2d2cba45a2fa9be1cbbc82089": {
+    "reader": "standards_reader",
+    "reason": "Equivalent in the operator expiry consumer: omitting the constructor clock changes only the ready record due, which unconditional Entry.start(now=now) replaces before activation."
+  }
+}

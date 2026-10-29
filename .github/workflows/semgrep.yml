@@ -1,0 +1,152 @@
+name: Semgrep
+
+on:
+  workflow_call:
+    inputs:
+      base:
+        description: Revision whose findings are already known
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        env:
+          SEMGREP_VERSION: "1.177.0"
+        run: |
+          if [[ "$(semgrep --version 2>/dev/null)" != "$SEMGREP_VERSION" ]]; then
+            python -m pip install "semgrep==$SEMGREP_VERSION"
+          fi
+          test "$(semgrep --version)" = "$SEMGREP_VERSION"
+
+      - name: Own rules hold on their fixtures and the code
+        env:
+          RULES: .semgrep
+        run: |
+          # Callers ignore their fixture folder; an empty ignore file in a fresh copy grades every fixture.
+          copy="$(mktemp -d -p "$RUNNER_TEMP")"
+          cp -r "$RULES" "$copy/rules"
+          : > "$copy/.semgrepignore"
+          (cd "$copy" && semgrep --metrics off --test --config rules rules)
+          semgrep scan --error --strict --metrics off --config "$RULES" .
+
+      - name: Resolve the merge base of the head and the base
+        id: baseline
+        env:
+          BASE: ${{ inputs.base }}
+        run: |
+          sha="$(git merge-base "$BASE" HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      # A rule that times out drops its findings, so a scan whose only errors are timeouts runs once more.
+      - name: Fail on findings new against the base
+        env:
+          BASE: ${{ steps.baseline.outputs.sha }}
+          CONFIGS: p/ci p/secrets p/python .semgrep-incidents
+          EXCLUDE_RULES: yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
+          TIMEOUT: "30"
+        run: |
+          args=()
+          for config in $CONFIGS; do args+=(--config "$config"); done
+          for rule in $EXCLUDE_RULES; do args+=(--exclude-rule "$rule"); done
+          report="$RUNNER_TEMP/semgrep.json"
+          scan() {
+            semgrep scan --error --strict --verbose --timeout "$TIMEOUT" --metrics off "${args[@]}" --baseline-commit "$BASE" --json-output="$report"
+          }
+          code=0
+          scan || code=$?
+          if [[ "$code" != 0 ]] && jq -e '(.results | length) == 0 and (.errors | length) > 0 and all(.errors[]; .type == "Timeout")' "$report" > /dev/null 2>&1; then
+            echo "Semgrep timed out with no other error, scanning once more: $(jq -r '[.errors[] | "\(.rule_id) on \(.path)"] | unique | join(", ")' "$report")" >&2
+            code=0
+            scan || code=$?
+          fi
+          exit "$code"
+
+  feature-tests:
+    concurrency:
+      group: ${{ github.workflow == 'Semgrep' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('semgrep-features-{0}', github.run_id) }}
+      queue: ${{ github.workflow == 'Semgrep' && 'max' || 'single' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: python -m pip install semgrep==1.177.0
+
+      - name: Operator feature regressions and passing fixtures
+        run: semgrep --metrics off --test .semgrep/features
+
+      # Each rule matches a pattern behind an outage; the scan job fails only instances new against the base.
+      - name: Outage rules fire on their planted faults and pass their clean cases
+        run: semgrep --metrics off --test .semgrep-incidents
+
+  charts:
+    concurrency:
+      group: ${{ github.workflow == 'Semgrep' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('semgrep-charts-{0}', github.run_id) }}
+      queue: ${{ github.workflow == 'Semgrep' && 'max' || 'single' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The light runner image ships Semgrep; hosted runners install it.
+      - name: Install PyYAML and Semgrep
+        env:
+          SEMGREP_VERSION: "1.177.0"
+        run: |
+          if [[ "$(semgrep --version 2>/dev/null)" == "$SEMGREP_VERSION" ]]; then
+            python -m pip install pyyaml==6.0.2
+          else
+            python -m pip install pyyaml==6.0.2 "semgrep==$SEMGREP_VERSION"
+          fi
+          test "$(semgrep --version)" = "$SEMGREP_VERSION"
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.18.6
+
+      - name: Guard rules hold on their fixtures and at their computed floors
+        env:
+          BASE: ${{ inputs.base }}
+        run: |
+          git fetch --no-tags --depth=1 origin "${BASE#origin/}"
+          grader=scripts/ci_semgrep_floors.py
+          if git cat-file -e FETCH_HEAD:scripts/ci_semgrep_floors.py; then
+            grader="$RUNNER_TEMP/ci_semgrep_floors.py"
+            git show FETCH_HEAD:scripts/ci_semgrep_floors.py > "$grader"
+          fi
+          python "$grader" check --base FETCH_HEAD
+
+      # The timer guard reads source only, so a CronJob a chart template renders is checked on the rendered manifests.
+      - name: Charts render no CronJob outside the scheduler
+        run: python tests/ci_charts/chart_timers.py

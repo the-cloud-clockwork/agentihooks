@@ -1,0 +1,15 @@
+version: 1
+purpose: score
+fallbacks: cli
+questions:
+  - name: verdict
+    type: score
+    instructions: "{instructions}"
+    levels:
+      - "{low}"
+      - "{high}"
+thresholds:
+  confidence: 0.6
+rule:
+  type: score
+  threshold: confidence

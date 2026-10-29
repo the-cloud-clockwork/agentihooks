@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__exact__mutmut_14:f329674047c61cfa887d8bce3988bc85a4fb029d7d076edf3c96c935a92edfcf": {
+    "reader": "standards_reader",
+    "reason": "Only the case of the ORDER BY keyword and records.chunk_index identifier changes, which SQLite treats as case-insensitive."
+  }
+}

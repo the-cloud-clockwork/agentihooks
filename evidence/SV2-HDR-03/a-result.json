@@ -1,0 +1,116 @@
+{
+  "case": "T-SV2-HDR-03-A",
+  "state": "passed",
+  "evidence_class": "mocked: a recording stand in for the Anton herdr client answers herdr machine list, add, rename and remove with the 0.9.1 reply shapes captured in the SV2-HDR-01 live proof, and its status and schema replies are the SV2-HDR-01 captures; no herdr process, SSH connection or cluster runs in these cases",
+  "input_sha256": {
+    "herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
+  },
+  "observed": {
+    "checks": {
+      "each_registration_maps_to_its_own_execution": true,
+      "verdicts_keyed_by_endpoint_incarnation": true,
+      "two_workers_beside_local": true,
+      "store_matches_catalog": true,
+      "nothing_refused": true,
+      "manual_machine_untouched": true,
+      "replay_adds_nothing": true,
+      "independent_repeat_identical": true
+    },
+    "first": {
+      "first": {
+        "registered": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "eefed520946b717557bfbc5ef89d91ee"
+        },
+        "refused": {},
+        "retired": [],
+        "unverified": [],
+        "drift": {
+          "missing": 2
+        },
+        "herdr_registration_drift": 2
+      },
+      "replayed": {
+        "registered": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "eefed520946b717557bfbc5ef89d91ee"
+        },
+        "refused": {},
+        "retired": [],
+        "unverified": [],
+        "drift": {},
+        "herdr_registration_drift": 0
+      },
+      "registrations": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+          "id": "eda75d4e8494f54c8a6fe05759524de3",
+          "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "target": "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local",
+          "session": "default"
+        },
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          "id": "eefed520946b717557bfbc5ef89d91ee",
+          "label": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "target": "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local",
+          "session": "default"
+        }
+      },
+      "records": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+          "execution_id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generation": 2,
+          "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "target": "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local",
+          "session": "default",
+          "profile_id": "eda75d4e8494f54c8a6fe05759524de3",
+          "before": []
+        },
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          "execution_id": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "generation": 1,
+          "label": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "target": "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local",
+          "session": "default",
+          "profile_id": "eefed520946b717557bfbc5ef89d91ee",
+          "before": []
+        }
+      },
+      "verified_incarnations": {
+        "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2",
+        "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/1"
+      },
+      "sidebar": [
+        "Local",
+        "devbox",
+        "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+        "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal"
+      ],
+      "manual_untouched": true,
+      "commands_naming_manual": [],
+      "mutating": [
+        [
+          "herdr",
+          "machine",
+          "add",
+          "--label",
+          "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "--remote-session",
+          "default",
+          "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local"
+        ],
+        [
+          "herdr",
+          "machine",
+          "add",
+          "--label",
+          "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "--remote-session",
+          "default",
+          "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local"
+        ]
+      ]
+    },
+    "second_identical": true
+  }
+}

@@ -10,8 +10,6 @@ from scripts.swarm import cli, overlays, profile_choice, runtime, status, store,
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_cli import env  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def bundle(tmp_path, monkeypatch):
@@ -65,7 +63,7 @@ def test_setting_stores_a_role_default_and_an_empty_value_clears_it():
             "overlays-frontend",
             "tuner",
             "overlays are set per base role: overlays-master, overlays-engineer, overlays-planner, overlays-qa, "
-            "overlays-cicd",
+            "overlays-cicd, overlays-documentation",
         ),
         ("overlays-engineer", "a,b,c,d", "a role wears at most 3 overlays; 4 were set: a, b, c, d"),
         ("overlays-engineer", "tuner,nope", "overlay nope not found"),
@@ -333,7 +331,9 @@ def test_resume_wears_the_overlays_the_agent_was_launched_with(tmp_path, monkeyp
 def test_status_carries_agent_overlays_and_the_overlays_a_bundle_offers(bundle, swarm, monkeypatch):
     monkeypatch.setattr(status, "page_quota", lambda: [])
     swarm.put_agent("sw", store.AgentRecord("engineer@a1b2c3-0001", "eng", "t1", overlays=["tuner"]))
-    report = status.status_report(swarm, "sw", {"tasks": []})
+    report = status.status_report(
+        swarm, "sw", {"tasks": []}, SimpleNamespace(live_names=lambda: {"engineer@a1b2c3-0001"})
+    )
     assert report["agents"][0]["overlays"] == ["tuner"]
     assert report["config"]["overlays"] == {}
     assert {"name": "trader", "wears": ["engineer", "qa"]} in report["overlays_available"]

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_prepare_git_inputs__mutmut_88:f216db48d2c2e62c0eae508bd07d7c5679fc7cd3089110d325a4a851872ebe2f": {
+    "reader": "/root/standards_reader",
+    "reason": "Independent equivalence review: unresolved and XXunresolvedXX are nonempty origins without colon or slash, so _remote_owner returns None for both. directory_trust therefore returns the same unknown-owner rejection, or the same wildcard acceptance. Only the intentionally malformed placeholder spelling changes. Evidence: run 40203530102 job 121201786872 and independent inspection of the parser and trust symbols."
+  }
+}

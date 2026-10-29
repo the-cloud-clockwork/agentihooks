@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_route__mutmut_136:243f2c2529298504b9ceb3b31d10747a068430599f8846e7f5678cf479fce3f6": {
+    "reader": "Standards",
+    "reason": "ValueError is caught inside the migration route and becomes the same fixed APIError envelope; its internal message is neither returned nor logged by the APIError handler."
+  }
+}

@@ -34,6 +34,14 @@ def test_purge_removes_only_the_named_ledgers_media():
     assert kept.exists()
 
 
+def test_served_media_is_the_stored_file_of_that_ledger():
+    make_ledger("served-media")
+    entry = ledger_media.store("served-media", png(2, 3))
+    assert ledger_media.served("served-media", entry["id"]) == png(2, 3)
+    with pytest.raises(ValueError, match="no stored image"):
+        ledger_media.served("kept", entry["id"])
+
+
 def test_cleanup_removes_old_orphans_and_keeps_references_and_pending_uploads():
     make_ledger("sweep-media")
     files = [ledger_media.store("sweep-media", png(n, n)) for n in range(1, 6)]
@@ -58,6 +66,27 @@ def test_cleanup_removes_old_orphans_and_keeps_references_and_pending_uploads():
     artifacts.sweep("sweep-media", doc, core.Context(state["_meta"], core.now_ms()))
     assert paths[2].exists()
     assert paths[3].exists()
+
+
+def test_sweep_scans_the_ledger_for_files_in_use_once_unless_trash_expires(monkeypatch):
+    make_ledger("scan-media")
+    kept, expired = (ledger_media.store("scan-media", png(n, n)) for n in (5, 6))
+    doc = core.sync("scan-media")[0]
+    doc["artifacts"] = [{"file": kept}]
+    doc["artifact_trash"] = []
+    scans = []
+    real = artifacts.in_use
+    monkeypatch.setattr(artifacts, "in_use", lambda doc: scans.append(1) or real(doc))
+    ctx = core.Context(doc["_meta"], core.now_ms())
+    artifacts.sweep("scan-media", doc, ctx)
+    assert len(scans) == 1
+    assert not ctx.dirty
+    doc["artifact_trash"] = [{"file": expired, "deleted_at": 0}]
+    artifacts.sweep("scan-media", doc, ctx)
+    assert len(scans) == 3
+    assert doc["artifact_trash"] == []
+    assert not (ledger_media.folder("scan-media") / expired["id"]).exists()
+    assert (ledger_media.folder("scan-media") / kept["id"]).exists()
 
 
 def test_pending_upload_expires_after_one_hour_and_nonfiles_are_kept():

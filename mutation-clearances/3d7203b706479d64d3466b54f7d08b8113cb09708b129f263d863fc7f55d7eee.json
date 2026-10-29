@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_apply__mutmut_7:7b97f084a378d929e6892609b94ec11ab741729903e9765b7ef1994c3a5efe85": {
+    "reader": "Standards continuation reader",
+    "reason": "Every apply_ops that receives this call tests copy_state by truthiness only, so None and False take the same branch and forward identical arguments."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/naming.py:scripts.swarm.naming.x__clean__mutmut_12:532d33f6a5ac674bbaa7fd3bf2023c338aa2f41863e18df42c9780c1bc068c3b": {
+    "reader": "standards-reader",
+    "reason": "The substitution restricts the intermediate string to lowercase ASCII letters, digits and hyphen. Uppercase X cannot reach strip, so adding X to its character set changes no return value."
+  }
+}

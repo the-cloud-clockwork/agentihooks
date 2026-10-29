@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/channel.py:scripts.inbox.channel.x_register__mutmut_39:1a584848f81e2c836dddb7e75238c10ba12c4ce39db284e58c52474492242284": {
+    "reader": "Standards",
+    "reason": "Both False and None select the identical main(active=False) entry, producing byte-identical registration arguments and configuration. Source inspected at df2de8574be4510aead8d69b89951d94427424a8; preflight 39062082096."
+  }
+}

@@ -72,6 +72,7 @@ def test_a_proof_swarm_on_a_scratch_folder_spare_port_and_own_redis_is_created(e
     as_lane(monkeypatch, "eng", tmp_path / "scratch")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://127.0.0.1:6390/0")
     assert run("sw", "create", "--repo", "/repo") == 0 and "sw" in store.slugs()
+    assert store.config("sw").scratch is True
 
 
 def test_a_doctor_crew_needs_a_master_or_the_operator_but_no_task_floor(env, monkeypatch, capsys):

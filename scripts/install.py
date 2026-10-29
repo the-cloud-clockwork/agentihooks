@@ -5,72 +5,6 @@ exec python3 "$0" "$@"
 exit
 """
 
-# NOTE: The triple-quoted polyglot string above becomes __doc__ in Python,
-# so the real usage text is stored in _USAGE_TEXT and used as the argparse epilog.
-_USAGE_TEXT = """
-Quick start:
-    agentihooks init --bundle /path/to/bundle --profile colt
-    agentihooks init --profile colt          # re-run (bundle already linked)
-
-Commands:
-    agentihooks init [--bundle PATH] [--profile NAME]
-        First-time setup or re-install. Links a bundle, selects a profile,
-        and installs everything into ~/.claude: hooks, settings, skills,
-        agents, commands, rules, CLAUDE.md, and MCP servers.
-
-    agentihooks uninstall [--yes]
-        Remove all agentihooks artifacts: symlinks, settings, CLAUDE.md,
-        MCP servers, and the CLI. Preserves ~/.agentihooks/state.json.
-
-    agentihooks prune [-v]
-        Remove stale MCP entries from disabledMcpServers and known-mcp-servers.json.
-
-    agentihooks ignore [path] [--force]
-        Create a .claudeignore in the current directory.
-
-    agentihooks claude [--route SLUG] [extra flags]
-        Route to the OAuth account with a free place under its five hour session band
-        and the fewest live sessions, and launch Claude.
-        --route SLUG selects AH_CC_TOKEN_<SLUG> directly, ignoring the band.
-        Alias: agenti (added to ~/.bashrc by init)
-
-    agentihooks init-agent [launcher options] [--handoff] -- [claude flags]
-        Open a routed Claude session in a new terminal on WSL, macOS, or Linux.
-        --handoff moves this session's work to another account (quota handoff).
-
-    agentihooks herdr [status|install|configure|enable|disable]
-        Install and configure herdr, the terminal host init-agent opens agents in.
-
-    agentihooks quota [--json] [--refresh]
-        Quota left for every agent harness: each Claude account and Codex.
-
-    agentihooks balance --dry-run [--fable] [--refresh]
-        Show ranked OAuth account capacity without launching Claude.
-
-    agentihooks conditions list [--step pre|post|stop] [--tool NAME] [--command CMD]
-        Show bundle and profile conditions, invalid files, and what fires for a call.
-
-    agentihooks --list-profiles     # show available profiles
-    agentihooks --query             # print active profile name
-
-Profile layout (mirrors Claude Code project structure):
-    profiles/<name>/
-    ├── CLAUDE.md                    # system prompt (→ ~/.claude/CLAUDE.md)
-    └── .claude/
-        ├── settings.overrides.json  # merged into ~/.claude/settings.json
-        ├── .mcp.json                # profile MCP servers
-        ├── skills/                  # → ~/.claude/skills/
-        ├── agents/                  # → ~/.claude/agents/
-        ├── commands/                # → ~/.claude/commands/
-        ├── rules/                   # → ~/.claude/rules/
-        └── conditions/              # run in place on matching tool calls
-
-3-layer merge: agentihooks built-in → bundle global → profile-specific.
-The built-in layer (skills/agents/commands/rules) lives under profiles/package/
-— the packaged emulation of a .claude/ tree, shipped in the wheel.
-All commands are idempotent. Data directory: ~/.agentihooks/
-"""
-
 import argparse
 import contextlib
 import fcntl
@@ -84,16 +18,20 @@ import textwrap
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
-from importlib import metadata
+from importlib import import_module, metadata
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 import yaml
 
+from scripts import balance_cli, runtime_env
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
+from scripts.cli_delegates import delegated_cli
+from scripts.cli_help import USAGE as _USAGE_TEXT
 from scripts.cli_parser import ArgumentParser
+from scripts.profiles import bundles
 from scripts.targets import DEFAULT_TARGET, SUPPORTED_TARGETS, get_adapter, resolve_target
 from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
 
@@ -151,6 +89,11 @@ def _resolve_claude_home() -> Path:
 
 
 CLAUDE_HOME = _resolve_claude_home()
+ROUTE_LAUNCHERS = {
+    "interactive": "scripts.routing.interactive",
+    "master-login": "scripts.master_claude_login",
+    "claude-ai": "scripts.routing.claude_ai",
+}
 
 # Persistent state directory for user-level agentihooks configuration.
 # Overridable via AGENTIHOOKS_HOME for per-pod isolation on shared filesystems.
@@ -159,6 +102,7 @@ STATE_JSON = AGENTIHOOKS_STATE_DIR / "state.json"
 
 # Repeated path fragment constants (avoids S1192 duplicate-literal warnings)
 _CLAUDE_SUBDIR = ".claude"
+_USER_BUNDLE_ENV = "AGENTIHOOKS_USER_BUNDLE_PATH"
 _CLAUDE_MD_NAME = "CLAUDE.md"
 _MCP_JSON_NAME = ".mcp.json"
 
@@ -607,6 +551,12 @@ def _managed_roots() -> list[Path]:
     env_bundle = os.environ.get("AGENTIHOOKS_BUNDLE_PATH", "")
     if env_bundle:
         roots.append(Path(env_bundle).expanduser())
+    user_bundle = state.get("user_bundle")
+    if isinstance(user_bundle, dict) and user_bundle.get("path"):
+        roots.append(Path(user_bundle["path"]))
+    env_user_bundle = os.environ.get(_USER_BUNDLE_ENV, "")
+    if env_user_bundle:
+        roots.append(Path(env_user_bundle).expanduser())
     for entry in _get_linked_profiles():
         p = entry.get("path")
         if p:
@@ -852,6 +802,43 @@ def _get_bundle_path() -> Path | None:
     return None
 
 
+def _get_user_bundle_path() -> Path | None:
+    """Return the linked user bundle path from state.json, or AGENTIHOOKS_USER_BUNDLE_PATH."""
+    from hooks.context.profile_chain import user_bundle_path
+
+    linked = user_bundle_path(_load_state())
+    if linked:
+        return linked
+    env_path = os.environ.get(_USER_BUNDLE_ENV, "")
+    if env_path:
+        p = Path(env_path).expanduser().resolve()
+        if p.is_dir():
+            return p
+    return None
+
+
+def _bundle_roots() -> list[tuple[str, Path]]:
+    from hooks.context.profile_chain import bundle_roots
+
+    found = (("bundle", _get_bundle_path()), ("user_bundle", _get_user_bundle_path()))
+    return bundle_roots({key: {"path": str(path)} for key, path in found if path})
+
+
+def _bundle_feature_layers(subdir: str, label: str) -> list[tuple[str, Path]]:
+    return [
+        (f"{'bundle' if kind == 'root' else 'user bundle'} {label}", root / _CLAUDE_SUBDIR / subdir)
+        for kind, root in _bundle_roots()
+        if (root / _CLAUDE_SUBDIR / subdir).is_dir()
+    ]
+
+
+def _bundle_profile_dir(profile_name: str) -> Path | None:
+    for _kind, root in _bundle_roots():
+        if (root / "profiles" / profile_name).is_dir():
+            return root / "profiles" / profile_name
+    return None
+
+
 def _get_linked_profiles() -> list[dict]:
     """Return the list of externally linked profiles from state.json."""
     state = _load_state()
@@ -889,12 +876,9 @@ def _resolve_profile_dir(profile_name: str) -> Path | None:
     local = PROFILES_DIR / profile_name
     if local.is_dir():
         return local
-    # Bundle profiles
-    bundle = _get_bundle_path()
-    if bundle:
-        bp = bundle / "profiles" / profile_name
-        if bp.is_dir():
-            return bp
+    bundle_profile = _bundle_profile_dir(profile_name)
+    if bundle_profile:
+        return bundle_profile
     # Linked external profiles
     linked = _resolve_linked_profile_dir(profile_name)
     if linked is not None:
@@ -903,12 +887,12 @@ def _resolve_profile_dir(profile_name: str) -> Path | None:
 
 
 def _profile_source_label(profile_name: str) -> str:
-    """Return 'built-in', 'bundle', 'linked' or 'package' for a profile name."""
+    """Return 'built-in', 'bundle', 'user bundle', 'linked' or 'package' for a profile name."""
     if (PROFILES_DIR / profile_name).is_dir():
         return "built-in"
-    bundle = _get_bundle_path()
-    if bundle and (bundle / "profiles" / profile_name).is_dir():
-        return "bundle"
+    for kind, root in _bundle_roots():
+        if (root / "profiles" / profile_name).is_dir():
+            return "bundle" if kind == "root" else "user bundle"
     if _resolve_linked_profile_dir(profile_name) is not None:
         return "linked"
     if _package_role_dir(profile_name) is not None:
@@ -942,152 +926,6 @@ def _resolve_profile_chain(profile_input: str) -> list[tuple[str, Path]]:
 
     resolved = {name: path for name, path in dirs}
     return [(name, _resolve_profile_dir(name)) for name in expand_profiles(list(resolved), _resolve_profile_dir)]
-
-
-def cmd_bundle(action: str, path: str | None = None, rebase: bool = False) -> None:
-    """Handle 'agentihooks bundle' subcommands."""
-    if action == "link":
-        _bundle_link(Path(path).expanduser().resolve() if path else None)
-    elif action == "unlink":
-        _bundle_unlink()
-    elif action == "list":
-        _bundle_list()
-    elif action == "pull":
-        _bundle_pull(rebase=rebase)
-    else:
-        print(f"Unknown bundle action: {action}", file=sys.stderr)
-        sys.exit(1)
-
-
-def _bundle_pull(rebase: bool = False) -> None:
-    """Git pull the linked bundle directory."""
-    import subprocess as _sp
-
-    bundle_dir = _get_bundle_path()
-    if not bundle_dir:
-        print("No bundle linked.", file=sys.stderr)
-        sys.exit(1)
-
-    if not (bundle_dir / ".git").exists():
-        print(f"ERROR: {bundle_dir} is not a git repository.", file=sys.stderr)
-        sys.exit(1)
-
-    cmd = ["git", "-C", str(bundle_dir), "pull"]
-    if rebase:
-        cmd.append("--rebase")
-
-    print(f"Pulling bundle: {bundle_dir}")
-    print(f"  $ {' '.join(cmd)}")
-    result = _sp.run(cmd, capture_output=True, text=True)
-
-    if result.stdout.strip():
-        print(result.stdout.strip())
-    if result.stderr.strip():
-        print(result.stderr.strip())
-
-    if result.returncode != 0:
-        print("ERROR: git pull failed.", file=sys.stderr)
-        sys.exit(1)
-
-    _cprint("[OK] Bundle updated.")
-
-
-def _bundle_link(bundle_dir: Path | None) -> None:
-    """Link a bundle directory."""
-    if bundle_dir is None:
-        print("ERROR: Provide the path to a bundle directory.", file=sys.stderr)
-        sys.exit(1)
-
-    if not bundle_dir.is_dir():
-        print(f"ERROR: {bundle_dir} is not a directory.", file=sys.stderr)
-        sys.exit(1)
-
-    state = _load_state()
-    old_bundle = state.get("bundle")
-    if old_bundle:
-        print(f"Replacing existing bundle: {old_bundle['path']}")
-
-    state["bundle"] = {
-        "path": str(bundle_dir),
-        "linked_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    _save_state(state)
-
-    # Summary
-    profiles_dir = bundle_dir / "profiles"
-    profile_names = sorted(p.name for p in profiles_dir.iterdir() if p.is_dir()) if profiles_dir.is_dir() else []
-    has_claude = (bundle_dir / ".claude").is_dir()
-
-    _cprint(f"[OK] Linked bundle: {bundle_dir}")
-    if profile_names:
-        print(f"     Profiles: {', '.join(profile_names)}")
-    if has_claude:
-        print("     Global .claude/: skills, commands, agents")
-    print()
-    print("Run 'agentihooks init' to apply.")
-
-
-def _bundle_unlink() -> None:
-    """Unlink the current bundle."""
-    state = _load_state()
-    bundle = state.get("bundle")
-    if not bundle:
-        print("No bundle linked.")
-        return
-
-    bundle_path = bundle["path"]
-
-    # Remove bundle-sourced connectors
-    connectors = state.get("connectors", {})
-    to_remove = [name for name, info in connectors.items() if info.get("source") == "bundle"]
-    for name in to_remove:
-        del connectors[name]
-        _cprint(f"  [OK] Removed bundle connector: {name}")
-
-    del state["bundle"]
-    _save_state(state)
-    _cprint(f"[OK] Unlinked bundle: {bundle_path}")
-    print()
-    print("Run 'agentihooks init' to remove bundle settings.")
-
-
-def _bundle_list() -> None:
-    """Show the linked bundle and its contents."""
-    bundle = _get_bundle_path()
-    if not bundle:
-        print("No bundle linked.")
-        print()
-        print("Link one with:")
-        print("  agentihooks bundle link /path/to/.agentihooks")
-        return
-
-    state = _load_state()
-    linked_at = state.get("bundle", {}).get("linked_at", "?")
-
-    print(f"Bundle: {bundle}")
-    print(f"Linked: {linked_at}")
-    print()
-
-    # Profiles
-    profiles_dir = bundle / "profiles"
-    if profiles_dir.is_dir():
-        profile_names = sorted(p.name for p in profiles_dir.iterdir() if p.is_dir())
-        if profile_names:
-            print(f"Profiles ({len(profile_names)}):")
-            for name in profile_names:
-                print(f"  {name}")
-            print()
-
-    # Connectors
-    conn_dir = bundle / "connectors"
-    if conn_dir.is_dir():
-        conn_names = sorted(d.name for d in conn_dir.iterdir() if d.is_dir() and (d / "connector.yml").exists())
-        if conn_names:
-            print(f"Connectors ({len(conn_names)}):")
-            for name in conn_names:
-                print(f"  {name}")
-            print()
 
 
 # ---------------------------------------------------------------------------
@@ -1156,6 +994,8 @@ def cmd_link_profile(
     *outside* the lock to avoid a same-process flock deadlock (it acquires
     its own ``_sync_lock``).
     """
+    if action in ("link", "unlink"):
+        _refuse_inside_rendered_home()
     if action == "link":
         with _sync_lock():
             targets = _chain_targets(for_target)
@@ -1219,8 +1059,7 @@ def _link_profile_link(
             file=sys.stderr,
         )
         sys.exit(1)
-    bundle = _get_bundle_path()
-    if bundle and (bundle / "profiles" / derived_name).is_dir():
+    if _bundle_profile_dir(derived_name):
         print(
             f"ERROR: Name '{derived_name}' collides with a bundle profile. Pass --name <alias> to disambiguate.",
             file=sys.stderr,
@@ -2057,14 +1896,15 @@ def _keep_chained_linked_profiles(profile_name: str, previous_record: dict, stat
 def _refuse_inside_rendered_home() -> None:
     from scripts.profiles import render
 
-    home = claude_home()
-    if not home.resolve().is_relative_to(render.rendered_root().resolve()):
+    homes = (os.environ.get(key) for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME"))
+    if not (os.environ.get("AGENTIHOOKS_SWARM") or os.environ.get("AGENTIHOOKS_PROFILE")) and not any(
+        Path(home).expanduser().resolve().is_relative_to(render.rendered_root().resolve()) for home in homes if home
+    ):
         return
     print(
-        f"ERROR: this session runs in a rendered profile home, so init would have written the rendered "
-        f"profile home {home} instead of the operator home.\n"
-        "Run `agentihooks init` from the operator's own shell, where CLAUDE_CONFIG_DIR and "
-        "AGENTIHOOKS_PROFILE are unset.",
+        "ERROR: agent sessions cannot change the operator's global profile install.\n"
+        "Run this command from the operator's own shell with AGENTIHOOKS_SWARM, AGENTIHOOKS_PROFILE, "
+        "CLAUDE_CONFIG_DIR, CODEX_HOME and COPILOT_HOME unset.",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -2100,7 +1940,9 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     if getattr(args, "force", False):
         _kept_state = _load_state()
         _clean_state_dir()
-        _identity = {k: _kept_state[k] for k in ("bundle", "linked_profiles", "herdr") if _kept_state.get(k)}
+        _identity = {
+            k: _kept_state[k] for k in ("bundle", "user_bundle", "linked_profiles", "herdr") if _kept_state.get(k)
+        }
         if _identity:
             _save_state(_identity)
     bundle_path = getattr(args, "bundle", None)
@@ -2119,8 +1961,9 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
                 print("HINT: Point --bundle at the repo root, not .agentihooks/")
             print(f"ERROR: No profiles/ directory found in {bundle_dir}", file=sys.stderr)
             sys.exit(1)
-        _bundle_link(bundle_dir)
+        bundles.link(bundle_dir)
         print()
+    bundles.link_user_arg(getattr(args, "user_bundle", None))
 
     # B1: process --link-profile NAME=PATH (repeatable) BEFORE profile resolution
     # so the new profile names are visible to the chain validation downstream.
@@ -2147,6 +1990,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
 
     # Check bundle (optional — works without one using built-in profiles only)
     bundle = _get_bundle_path()
+    bundles.warn_unavailable()
     if not bundle:
         print(f"{_DIM}[--] No bundle linked — using built-in profiles only.{_RESET}")
         # B2: auto-discover hint — don't auto-link, just suggest the command.
@@ -2157,11 +2001,8 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
             )
             _print_bundle_discover_hint(profile_hint=_hint_profile)
 
-    # Resolve profile — prefer: CLI flag > env var > state.json > interactive prompt
     _is_force = getattr(args, "force", False)
     profile_name = args.profile
-    if not profile_name:
-        profile_name = os.environ.get("AGENTIHOOKS_PROFILE", "")
     _prev_state = _load_state()
     _migrate_profile_rename(_prev_state, "colt", "anton")
     # Resolve install target — flag > AGENTIHOOKS_TARGET env > exactly-one-
@@ -2182,9 +2023,9 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     # Profile recall: this target's record first; a fresh target borrows the
     # default target's chain so `init --target codex` on a claude machine
     # installs the same persona instead of falling to 'default'.
-    _prev_global = _global_record(_prev_state, install_target) or _global_record(_prev_state)
-    if _is_force:
-        _prev_global = _global_record(_kept_state, install_target) or _global_record(_kept_state)
+    from scripts.init_reporter import previous_install
+
+    _prev_global = previous_install(sys.modules[__name__], _kept_state if _is_force else _prev_state, install_target)
     if not profile_name:
         if _prev_global.get("profile", ""):
             profile_name = _prev_global["profile"]
@@ -2214,13 +2055,8 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     # CLAUDE.md on disk was installed from a different profile means state.json
     # has lost (or never had) the profile record — silently stomping the live
     # profile with 'default' is exactly the failure this blocks. Explicit
-    # --profile / AGENTIHOOKS_PROFILE / --force still win.
-    if (
-        profile_name == "default"
-        and not args.profile
-        and not os.environ.get("AGENTIHOOKS_PROFILE", "")
-        and not _is_force
-    ):
+    # --profile / --force still win.
+    if profile_name == "default" and not args.profile and not _is_force:
         _md_path = Path(_prev_state.get("managed_claude_md") or (claude_home() / "CLAUDE.md"))
         _marker_profile = ""
         try:
@@ -2272,14 +2108,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
 def _rerender_profile_homes(target: str) -> None:
     from scripts.profiles import render
 
-    for name in render.rendered_profiles(target):
-        profile, overlays = render.split_key(name)
-        try:
-            render.render(target, profile, force=True, overlays=overlays)
-        except ValueError as exc:
-            print(f"{_DIM}[--] Profile home {name} kept as it was: {exc}{_RESET}")
-            continue
-        print(f"{_GREEN}[OK]{_RESET} Re-rendered the {name} profile home")
+    render.rerender(target)
 
 
 def _remove_bashrc_block() -> bool:
@@ -2355,11 +2184,11 @@ def _update_bashrc_block() -> None:
         f"}}\n"
         f"agentienv\n"
         f'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n'
+        f'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)" && eval "$(agentihooks access env)"\n'
         f'alias agenti="agentihooks claude"\n'
         f"{_BLOCK_END}\n"
     )
 
-    # Always remove first, then append at the end
     _remove_bashrc_block()
     bashrc_text = _BASHRC.read_text(encoding="utf-8") if _BASHRC.exists() else ""
     sep = "\n" if bashrc_text and not bashrc_text.endswith("\n") else ""
@@ -2753,9 +2582,8 @@ def _available_profiles() -> list[str]:
     names = {d.name for d in PROFILES_DIR.iterdir() if d.is_dir() and not d.name.startswith("_")}
     if PACKAGE_ROLES.is_dir():
         names.update(d.name for d in PACKAGE_ROLES.iterdir() if d.is_dir() and not d.name.startswith("_"))
-    bundle = _get_bundle_path()
-    if bundle:
-        bp = bundle / "profiles"
+    for _kind, root in _bundle_roots():
+        bp = root / "profiles"
         if bp.is_dir():
             names.update(d.name for d in bp.iterdir() if d.is_dir() and not d.name.startswith("_"))
     for entry in _get_linked_profiles():
@@ -2938,6 +2766,7 @@ def _skill_dir_filter() -> Callable[[Path], bool]:
 
 
 def install_global(args: argparse.Namespace) -> None:
+    _refuse_inside_rendered_home()
     with _sync_lock():
         _install_global_inner(args)
 
@@ -3008,37 +2837,6 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         print(f"ERROR: {_base_settings} not found.", file=sys.stderr)
         sys.exit(1)
 
-    raw_settings = _load_native_layer(_base_settings)
-    rendered: dict = substitute_paths(raw_settings)
-    rendered = substitute_paths(rendered, "__PYTHON__", _canonical_python)
-
-    # --- 1a. Bundle-global native overrides ---
-    # Settings gain the bundle rung that MCP already had; without it a bundle
-    # can only express fleet-wide settings by repeating them in every profile.
-    _bundle_root = _get_bundle_path()
-    if _bundle_root:
-        _bundle_overrides = _native_layer_path(_bundle_root, install_target, _NATIVE_SETTINGS_NAME)
-        if _bundle_overrides:
-            _data = _load_native_layer(_bundle_overrides)
-            if install_target == "claude":
-                _data = _resolve_profile_hook_paths(_data, _bundle_root)
-            rendered = _deep_merge(rendered, _data)
-            print(f"Applied bundle overrides: {_bundle_overrides}")
-
-    # --- 1b. Apply per-profile overrides (chained: each profile merges on top) ---
-    for pname, pdir in profile_dirs:
-        overrides_path = _native_layer_path(pdir, install_target, _NATIVE_SETTINGS_NAME)
-        if overrides_path:
-            overrides = _load_native_layer(overrides_path)
-            # Resolve relative paths in hook commands against the profile's root
-            # (claude only — codex/copilot hooks are adapter-written, never
-            # declared in their native settings files).
-            if install_target == "claude":
-                overrides = _resolve_profile_hook_paths(overrides, pdir)
-            rendered = _deep_merge(rendered, overrides)
-            print(f"Applied profile overrides: {overrides_path}")
-
-    # --- 1b2. Apply settings-profile overlay (settings.json + MCP only, not rules/CLAUDE.md) ---
     settings_profile_name: str = getattr(args, "settings_profile", "") or ""
     settings_profile_dir: Path | None = None
     if settings_profile_name:
@@ -3048,41 +2846,18 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             print(f"ERROR: Settings profile '{settings_profile_name}' not found.", file=sys.stderr)
             print(f"Available profiles: {', '.join(available)}", file=sys.stderr)
             sys.exit(1)
+    settings_profile = (settings_profile_name, settings_profile_dir) if settings_profile_dir else None
+    from scripts.native_settings import native_settings
 
-        sp_overrides = _native_layer_path(settings_profile_dir, install_target, _NATIVE_SETTINGS_NAME)
-        if sp_overrides:
-            sp_data = _load_native_layer(sp_overrides)
-            if install_target == "claude":
-                sp_data = _resolve_profile_hook_paths(sp_data, settings_profile_dir)
-            rendered = _deep_merge(rendered, sp_data)
-            src = _profile_source_label(settings_profile_name)
-            print(f"Applied settings-profile overlay: {settings_profile_name} ({src})")
-
-    # --- 1c. Apply linked connectors (from last profile in chain) ---
+    rendered = native_settings(install_target, profile_dirs, settings_profile)
     last_profile = profile_chain[-1]
-    conn_env, conn_deny, conn_disabled = _load_connectors(last_profile)
-    if conn_env:
-        rendered.setdefault("env", {}).update(conn_env)
-        _cprint(f"  [OK] Connector env: {list(conn_env.keys())}")
-    if conn_deny:
-        rendered.setdefault("permissions", {}).setdefault("deny", []).extend(conn_deny)
-        _cprint(f"  [OK] Connector deny rules: {len(conn_deny)}")
-    if conn_disabled:
-        existing_disabled = rendered.get("disabledMcpjsonServers", [])
-        merged_disabled = list(dict.fromkeys(existing_disabled + conn_disabled))
-        rendered["disabledMcpjsonServers"] = merged_disabled
-        _cprint(f"  [OK] Connector disabled MCP servers: {merged_disabled}")
-
-    from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
-
-    apply_langfuse_env(rendered, profile_dirs, settings_profile_dir)
-    apply_collector_env(rendered)
 
     # --- 2 + 3. Personal-key merge, backup, and settings write (target-specific) ---
     existing_settings_path = adapter.write_settings(rendered)
 
-    # --- 4. Symlink skills/agents/commands/rules (layers: agentihooks → bundle → each profile in chain) ---
+    # --- 4. Symlink skills/agents/commands/rules (layers: agentihooks → bundle → user bundle → each profile in chain) ---
     bundle_dir = _get_bundle_path()
+    user_dir = _get_user_bundle_path()
 
     for subdir, label, filter_fn in [
         ("skills", "skill", _skill_dir_filter()),
@@ -3097,8 +2872,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         # emulated .claude tree — shipped in the wheel, unlike the old repo-root .claude/)
         layers.append((label, PACKAGE_FEATURES_DIR / subdir))
         # Layer 2: bundle top-level .claude/ (inherits to all profiles)
-        if bundle_dir and (bundle_dir / _CLAUDE_SUBDIR / subdir).is_dir():
-            layers.append((f"bundle {label}", bundle_dir / _CLAUDE_SUBDIR / subdir))
+        layers.extend(_bundle_feature_layers(subdir, label))
         # Layer 3+: each profile in chain (later profiles override earlier for same-name files)
         for pname, pdir in profile_dirs:
             if (pdir / _CLAUDE_SUBDIR / subdir).is_dir():
@@ -3107,7 +2881,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         adapter.install_features(subdir, layers, filter_fn)
 
     # --- 5 + 5a + 5b. Persona install (target-specific writer) ---
-    adapter.install_persona(profile_dirs, profile_chain, bundle_dir)
+    adapter.install_persona(profile_dirs, profile_chain, bundle_dir, user_dir)
 
     # --- 6. Install MCP servers (target-specific registration) ---
     # Layer 1: the agentihooks MCP server
@@ -3129,10 +2903,10 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         _remove_systemd_user_unit()
 
     from hooks.lifecycle.guard import enabled as _gc_enabled
-    from hooks.lifecycle.timer import install_timer, remove_timer
+    from hooks.lifecycle.timer import reconcile_units
 
     _gc_python, _gc_root = str(_resolve_hooks_python()), str(AGENTIHOOKS_ROOT)
-    _cprint("  " + (install_timer(_gc_python, _gc_root) if _gc_enabled() else remove_timer()))
+    _cprint("  " + reconcile_units(_gc_python, _gc_root, _gc_enabled()))
 
     # MCP layers, target-native. A layer that ships the target's own MCP file
     # (copilot: mcp-config.overrides.json, codex: mcp.overrides.toml) is used
@@ -3155,8 +2929,8 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             _cprint(f"  [WARN] Could not read {path}: {exc}")
 
     # Layer 2: bundle — always installed; profile MCPs layer on top (override per-name)
-    if bundle_dir:
-        _register_mcp_layer(bundle_dir, "Bundle")
+    for kind, root in _bundle_roots():
+        _register_mcp_layer(root, "Bundle" if kind == "root" else "User bundle")
 
     # Layer 3+: each profile (chained)
     for pname, pdir in profile_dirs:
@@ -3188,7 +2962,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
 
     # --- 11. Seed ~/.agentihooks/.env from .env.example (first run only) ---
     print()
-    _seed_user_env_file()
+    runtime_env.seed(_seed_user_env_file, _ENV_FILE_DST, rendered)
 
     # --- 12. Register install in state.json ---
     # Persist the OPERATOR-INTENT chain (profile_input), not the shrunk
@@ -3229,6 +3003,7 @@ def _install_claude_persona(
     profile_dirs: list[tuple[str, Path]],
     profile_chain: list[str],
     bundle_dir: Path | None,
+    user_dir: Path | None = None,
 ) -> None:
     """Steps 5/5a/5b of the Claude install: CLAUDE.md (single or chained),
     bundle shared prepend, CI-manifesto append. Bodies moved verbatim from
@@ -3296,10 +3071,10 @@ def _install_claude_persona(
     # --- 5a. Prepend bundle shared CLAUDE.md (cross-profile directives) ---
     # Runs once, outside the single-profile/chain branch, so a chained install gets
     # the shared block exactly once at the top rather than once per profile.
-    _prepend_bundle_claude_md(bundle_dir)
+    _prepend_bundle_claude_md(bundle_dir, user_dir)
 
     # --- 5b. Append CI manifesto to ~/.claude/CLAUDE.md (memory channel) ---
-    _append_ci_manifesto_to_claude_md(bundle_dir)
+    _append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs, user_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -3893,9 +3668,8 @@ def _reseed_managed_mcp_sources() -> None:
         except Exception as exc:
             _cprint(f"  [WARN] Could not reseed the agentihooks MCP server: {exc}")
 
-    # Layer 2: bundle .mcp.json
-    bundle_dir = _get_bundle_path()
-    if bundle_dir:
+    # Layer 2: bundle .mcp.json, root then user
+    for kind, bundle_dir in _bundle_roots():
         for candidate in (bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME):
             if candidate.exists():
                 try:
@@ -3903,7 +3677,7 @@ def _reseed_managed_mcp_sources() -> None:
                     if servers:
                         _merge_mcp_to_user_scope(servers)
                 except (json.JSONDecodeError, OSError) as exc:
-                    _cprint(f"  [WARN] Could not reseed bundle .mcp.json: {exc}")
+                    _cprint(f"  [WARN] Could not reseed {kind} bundle .mcp.json: {exc}")
                 break
 
     # Layer 3: active profile .mcp.json (full chain — see collector note)
@@ -4326,7 +4100,11 @@ def _symlink_dir_contents(
     _state_record_links(records)
 
 
-def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
+def _append_ci_manifesto_to_claude_md(
+    bundle_dir: Path | None = None,
+    profile_dirs: list[tuple[str, Path]] | None = None,
+    user_dir: Path | None = None,
+) -> None:
     """Append every enabled bundle manifesto to ~/.claude/CLAUDE.md as a fenced block.
 
     The manifesto used to be injected at SessionStart via stdout, but Claude
@@ -4345,7 +4123,9 @@ def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
         return
     if not getattr(_cfg, "CI_MANIFESTO_ENABLED", True):
         return
-    manifesto_paths = [Path(path) for path in _cfg._resolve_manifesto_paths(bundle_dir)]
+    from scripts.profiles import manifestos
+
+    manifesto_paths = manifestos.paths(bundle_dir, profile_dirs or [], user_dir)
     if not manifesto_paths:
         _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
         return
@@ -4354,7 +4134,9 @@ def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
         # Nothing to append to — install_system_prompt handles its own write
         return
     bodies = [
-        f"<!-- manifesto: {path.name} -->\n{path.read_text().rstrip()}" for path in manifesto_paths if path.is_file()
+        f"<!-- manifesto: {path.name} -->\n{_cfg.manifesto_body(path).rstrip()}"
+        for path in manifesto_paths
+        if path.is_file()
     ]
     if not bodies:
         _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
@@ -4569,7 +4351,7 @@ def _same_content(a: str, b: str) -> bool:
     return norm(a) == norm(b)
 
 
-def _prepend_bundle_claude_md(bundle_dir: Path | None) -> None:
+def _prepend_bundle_claude_md(bundle_dir: Path | None, user_dir: Path | None = None) -> None:
     """Prepend the bundle's optional ``<bundle>/.claude/CLAUDE.md`` to ~/.claude/CLAUDE.md.
 
     Lets an operator write cross-profile directives once in the bundle instead of
@@ -4596,10 +4378,12 @@ def _prepend_bundle_claude_md(bundle_dir: Path | None) -> None:
     current = dst.read_text()
     had_block = _BUNDLE_CLAUDE_MD_BEGIN in current and _BUNDLE_CLAUDE_MD_END in current
 
-    bundle_md = (bundle_dir / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME) if bundle_dir else None
-    body = ""
-    if bundle_md and bundle_md.exists():
-        body = bundle_md.read_text().strip()
+    sections = []
+    for directory in (bundle_dir, user_dir):
+        bundle_md = (directory / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME) if directory else None
+        if bundle_md and bundle_md.exists() and (text := bundle_md.read_text().strip()):
+            sections.append((bundle_md, text))
+    body = "\n\n".join(text for _, text in sections)
 
     if not body:
         # Bundle unlinked, file removed, or emptied. Drop a previously-prepended
@@ -4615,15 +4399,17 @@ def _prepend_bundle_claude_md(bundle_dir: Path | None) -> None:
     # First-occurrence splices are used both here and by the manifesto appender,
     # so an embedded marker inside bundle prose would silently eat real content
     # or duplicate on every run. Refuse rather than corrupt.
-    for marker in _MANAGED_BLOCK_MARKERS:
-        if marker in body:
-            _cprint(
-                f"  [!!] Bundle {_CLAUDE_MD_NAME} contains the managed marker {marker!r} — "
-                f"skipping prepend. Remove it from {bundle_md} (quote it differently)."
-            )
-            return
+    for bundle_md, text in sections:
+        for marker in _MANAGED_BLOCK_MARKERS:
+            if marker in text:
+                _cprint(
+                    f"  [!!] Bundle {_CLAUDE_MD_NAME} contains the managed marker {marker!r} — "
+                    f"skipping prepend. Remove it from {bundle_md} (quote it differently)."
+                )
+                return
 
-    block = f"{_BUNDLE_CLAUDE_MD_BEGIN}\n<!-- Source: {bundle_md} -->\n\n{body}\n\n{_BUNDLE_CLAUDE_MD_END}\n\n"
+    shared = "\n\n".join(f"<!-- Source: {bundle_md} -->\n\n{text}" for bundle_md, text in sections)
+    block = f"{_BUNDLE_CLAUDE_MD_BEGIN}\n{shared}\n\n{_BUNDLE_CLAUDE_MD_END}\n\n"
 
     if had_block:
         after = current.split(_BUNDLE_CLAUDE_MD_END, 1)[1].lstrip("\n")
@@ -4641,7 +4427,8 @@ def _prepend_bundle_claude_md(bundle_dir: Path | None) -> None:
         return
 
     dst.write_text(new_content)
-    _cprint(f"  [OK] Prepended bundle {_CLAUDE_MD_NAME} ({len(body):,} bytes) from {bundle_md}")
+    sources = ", ".join(str(bundle_md) for bundle_md, _ in sections)
+    _cprint(f"  [OK] Prepended bundle {_CLAUDE_MD_NAME} ({len(body):,} bytes) from {sources}")
 
 
 def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
@@ -4805,9 +4592,8 @@ def _collect_all_managed_mcp_servers() -> dict:
     mcp_config = _build_mcp_config("all")
     merged.update(mcp_config["mcpServers"])
 
-    # --- 2. Bundle .mcp.json ---
-    bundle_dir = _get_bundle_path()
-    if bundle_dir:
+    # --- 2. Bundle .mcp.json, root then user ---
+    for _kind, bundle_dir in _bundle_roots():
         for candidate in [bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME]:
             if candidate.exists():
                 try:
@@ -5498,20 +5284,17 @@ def cmd_ignore(target_dir: Path, *, force: bool = False) -> None:
     print("       Edit it to add project-specific exclusions.")
 
 
-def _load_claude_runtime_env() -> None:
+def _load_claude_runtime_env(*, shell_wins: bool = False) -> None:
     env_file = _ENV_FILE_DST
     if env_file.is_file():
         from dotenv import dotenv_values
 
-        for k, v in dotenv_values(env_file).items():
-            if v is not None:
-                os.environ[k] = v
-        # Also load companion .env files
-        for f in sorted(env_file.parent.glob("*.env")):
-            if f != env_file:
-                for k, v in dotenv_values(f).items():
-                    if v is not None:
-                        os.environ[k] = v
+        shell = set(os.environ) if shell_wins else set()
+        companions = [f for f in sorted(env_file.parent.glob("*.env")) if f != env_file]
+        for f in [env_file, *companions]:
+            for k, v in dotenv_values(f).items():
+                if v is not None and k not in shell:
+                    os.environ[k] = v
 
 
 def _extract_claude_route(extra_args: list[str]) -> tuple[str, list[str]]:
@@ -5568,24 +5351,18 @@ def _claude_command(claude_bin: str, extra_args: list[str]) -> list[str]:
 
 
 def cmd_claude(extra_args: list[str]) -> None:
-    """Route to the healthiest Claude account, then replace this process with Claude.
-
-    The account with a free place under its session band and the fewest live sessions
-    wins; --route forces one account.
-    """
-    import fcntl
-
     from hooks.context.account_sessions import sessions_by_account
     from scripts.claude_quota_balancer import (
         RoutingError,
-        _cache_path,
-        credential_for_slug,
-        discover_credentials,
+        forced,
         format_selection,
+        launch_environment,
         render_table,
         route_requires_fable,
         select_credential,
     )
+    from scripts.hive.account_slots import execute
+    from scripts.master_claude_login import _token_lock
 
     fallback_flag = "--agentihooks-fallback-bare"
     fallback_bare = fallback_flag in extra_args
@@ -5608,57 +5385,47 @@ def cmd_claude(extra_args: list[str]) -> None:
         deps_ensure()
     except Exception as exc:  # noqa: BLE001 - a broken manifest must not stop a launch
         print(f"[agentihooks] deps: preflight skipped: {exc}", file=sys.stderr)
-    route_lock_path = _cache_path(os.environ).with_name("claude-route.lock")
-    route_lock_path.parent.mkdir(parents=True, exist_ok=True)
-    # Held until exec: the descriptor is close-on-exec, so the next launch counts this
-    # process only once it already runs as claude.
-    route_lock = route_lock_path.open("a+", encoding="utf-8")
-    fcntl.flock(route_lock, fcntl.LOCK_EX)
+    route_lock = _token_lock(os.environ)
     try:
-        if route:
-            selected_credential = credential_for_slug(discover_credentials(os.environ), route)
-        else:
-            decision = select_credential(
+        if route in ROUTE_LAUNCHERS:
+            if route != "interactive":
+                route_lock.close()
+            return import_module(ROUTE_LAUNCHERS[route]).launch_claude(claude_bin, extra_args, os.environ, report)
+        decision = (
+            forced(os.environ, route)
+            if route
+            else select_credential(
                 os.environ,
                 include_fable=include_fable,
                 claude_bin=claude_bin,
                 sessions=sessions_by_account(),
                 exclude=excluded,
             )
-            selected_credential = decision.credential
+        )
     except RoutingError as exc:
         if fallback_bare and not route:
             print(f"[agenti] router unavailable ({exc}); launching bare Claude", file=sys.stderr, flush=True)
             _write_route_report(report, status="bare", error=str(exc))
             os.environ.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
             cmd = _claude_command(claude_bin, extra_args)
-            os.execvpe(claude_bin, cmd, os.environ)
+            execute("claude", "unrouted", os.environ, lambda env: os.execvpe(claude_bin, cmd, env))
         print(f"agentihooks: {exc}", file=sys.stderr)
         if exc.results:
             print(render_table(exc.results, include_fable=include_fable), file=sys.stderr)
         _write_route_report(report, status="failed", error=str(exc))
         raise SystemExit(3) from exc
-    _write_route_report(
-        report,
-        status="routed",
-        account=selected_credential.account,
-        placement="forced" if route else "open",
-    )
-
-    os.environ.pop("ANTHROPIC_API_KEY", None)
-    for name in [name for name in os.environ if name.startswith("AH_CC_TOKEN_")]:
-        if name != selected_credential.env_name:
-            os.environ.pop(name, None)
-    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = selected_credential.token
-    os.environ["AGENTIHOOKS_ROUTE_ACCOUNT"] = selected_credential.account
+    _write_route_report(report, status="routed", account=decision.account, placement="forced" if route else "open")
     print(
-        f"[agenti] account={selected_credential.account} route=forced"
-        if route
-        else format_selection(decision, include_fable),
+        f"[agenti] account={decision.account} route=forced" if route else format_selection(decision, include_fable),
         flush=True,
     )
-    cmd = _claude_command(claude_bin, extra_args)
-    os.execvpe(claude_bin, cmd, os.environ)
+    # nosemgrep: python.lang.security.audit.dangerous-os-exec-tainted-env-args.dangerous-os-exec-tainted-env-args
+    execute(
+        "claude",
+        decision.account,
+        launch_environment(decision, os.environ),
+        lambda env: os.execvpe(claude_bin, _claude_command(claude_bin, extra_args), env),
+    )
 
 
 def cmd_balance(
@@ -5669,8 +5436,10 @@ def cmd_balance(
     show_account_metadata: str = "",
     current: bool = False,
 ) -> int:
+    import time
+
     from hooks.context.account_sessions import sessions_by_account
-    from scripts.agents_quota import codex_table
+    from scripts.agents_quota import balance_table, current_table, router_environ, tokenless_table
     from scripts.claude_quota_balancer import (
         RoutingError,
         ancestor_oauth_token,
@@ -5681,12 +5450,12 @@ def cmd_balance(
         discover_credentials,
         identify_session_account,
         is_routable,
-        render_table,
     )
+    from scripts.routing import master_account
 
     session_env = dict(os.environ)
     _load_claude_runtime_env()
-    credentials = discover_credentials(os.environ)
+    credentials = discover_credentials(router_environ(dict(os.environ)))
     live = sessions_by_account()
     if current:
         known = discover_credentials(session_env) + credentials
@@ -5701,24 +5470,14 @@ def cmd_balance(
                 timeout=timeout,
                 claude_bin=shutil.which("claude") or "claude",
             )
-        observations = cached_observations(include_fable=include_fable)
-        rows = {result.account: result for _, result in observations}
-        observed = {result.account: seen for seen, result in observations}
-        rows.update({result.account: result for result in probed})
+        cached = cached_observations(include_fable=include_fable)
         print(f"current={session.account or 'none'} method={session.method}")
-        if rows:
-            print(
-                render_table(
-                    list(rows.values()),
-                    include_fable=include_fable,
-                    current=session.account,
-                    observed=observed,
-                    sessions=live,
-                )
-            )
+        table = current_table(cached, probed, {c.account for c in known}, live, include_fable, session.account)
+        if table:
+            print(table)
         return 0 if session.account else 1
     if not credentials:
-        print(codex_table())
+        print(tokenless_table(master_account.row_marks().master, live))
         print("agentihooks: no non-empty AH_CC_TOKEN_* variables found", file=sys.stderr)
         return 2
     if show_account_metadata:
@@ -5735,16 +5494,14 @@ def cmd_balance(
         )
         print(json.dumps(metadata, indent=2, sort_keys=True))
         return 0 if all(account["return_code"] == 0 for account in metadata["accounts"]) else 1
-    results, source = collect_results(
+    results, _ = collect_results(
         credentials,
         include_fable=include_fable,
         refresh=refresh,
         timeout=timeout,
         claude_bin=shutil.which("claude") or "claude",
     )
-    print(render_table(results, include_fable=include_fable, sessions=live))
-    print(f"\nsource={source}")
-    print(f"\n{codex_table()}")
+    print(balance_table(results, live, time.time(), include_fable))
     return 0 if any(is_routable(result) for result in results) else 1
 
 
@@ -5942,14 +5699,10 @@ def _detect_active_profile() -> str:
 def _cmd_refresh_rules(args: argparse.Namespace) -> None:
     """Handle the refresh-rules CLI command — push rules to running sessions."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
-    from hooks.context.rules_refresh import (
-        _delete_marker,
-        _load_marker,
-        write_refresh_marker,
-    )
-    from scripts.targets.claude_target import refresh_rules
+    from hooks.context.rules_refresh import _delete_marker, _load_marker, home_profile, write_refresh_marker
+    from scripts.targets.claude_target import refresh_every_home, refresh_rules
 
-    profile = args.profile or _detect_active_profile()
+    profile = args.profile or home_profile(claude_home()) or _detect_active_profile()
     rules_dir = claude_home() / "rules"
     claude_md = claude_home() / "CLAUDE.md"
     claude_local_md = claude_home() / "CLAUDE.local.md"
@@ -6006,6 +5759,8 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
         print("  No running sessions to notify — marker will GC in 24h.")
     else:
         print("  Each session will consume the refresh on its next UserPromptSubmit.")
+
+    refresh_every_home(profile)
 
 
 def _cmd_broadcast(args: argparse.Namespace) -> None:
@@ -6263,7 +6018,7 @@ def _cmd_conditions(args: argparse.Namespace) -> None:
         index = conditions.build_index(entries)
         command = getattr(args, "bash_command", "") or ""
         call = f"{tool} {command!r}" if command else tool
-        for s in [step] if step else list(conditions.STEPS):
+        for s in [s for s in conditions.TOOL_STEPS if not step or s == step]:
             fired = conditions.matching(s, tool, {"command": command} if command else {}, index)
             print(f"\n{s} {call}: {', '.join(e['file'] for e in fired) or 'no conditions fire'}")
 
@@ -6385,7 +6140,7 @@ def _crew_doctor(argv: list[str]) -> bool:
 
 
 def main() -> None:
-    _argv = sys.argv[1:]
+    _argv = bundles.user_last(sys.argv[1:])
     if _argv[:1] == ["enforcement"] and "--local" in _argv[2:]:
         _argv.remove("--local")
         _argv.insert(1, "--local")
@@ -6400,12 +6155,11 @@ def main() -> None:
     # Fast path: "agentihooks claude ..." bypasses argparse entirely
     # so that any claude flags (-r, --resume, -p, etc.) pass through untouched
     if _argv and _argv[0] == "claude":
-        cmd_claude(_argv[1:])
-        return
+        return import_module("scripts.claude_login").dispatch(_argv[1:], cmd_claude)
     if _argv and _argv[0] == "codex":
         from scripts.codex_router import main as codex_main
 
-        _load_claude_runtime_env()
+        _load_claude_runtime_env(shell_wins=True)
         raise SystemExit(codex_main(_argv[1:]))
     if _argv and _argv[0] == "init-agent":
         from scripts.init_agent import main as terminal_main
@@ -6419,22 +6173,17 @@ def main() -> None:
         from scripts.swarm_ledger import run as ledger_run
 
         raise SystemExit(ledger_run(_argv[1:]))
-    if _argv and _argv[0] == "swarm":
-        from scripts.swarm.cli import main as swarm_main
+    if _argv and _argv[0] in ("swarm", "controller"):
+        from scripts.swarm import cli, controller
 
-        raise SystemExit(swarm_main(_argv[1:]))
+        raise SystemExit({"swarm": cli.typed, "controller": controller.main}[_argv[0]](_argv[1:]))
     if _crew_doctor(_argv):
         from scripts.doctor.cli import main as doctor_main
 
         raise SystemExit(doctor_main(_argv[1:]))
-    if _argv and _argv[0] == "msg":
-        from scripts.inbox.cli import main as msg_main
-
-        raise SystemExit(msg_main(_argv[1:]))
-    if _argv and _argv[0] == "trace":
-        from scripts.trace_cli import main as trace_main
-
-        raise SystemExit(trace_main(_argv[1:]))
+    _delegated = delegated_cli(_argv)
+    if _delegated:
+        raise SystemExit(_delegated(_argv[1:]))
     if _argv and _argv[0] == "classify":
         from hooks.classifier import cli as classifier_cli
 
@@ -6447,21 +6196,17 @@ def main() -> None:
         from scripts.select_profile import dispatch
 
         raise SystemExit(dispatch(_argv))
-    if _argv and _argv[0] == "deps":
-        from scripts.deps_preflight import main as deps_main
-
-        raise SystemExit(deps_main(_argv[1:]))
-    if _argv and _argv[0] == "quota":
-        from scripts.agents_quota import main as quota_main
-
-        raise SystemExit(quota_main(_argv[1:]))
     if _argv and _argv[0] == "skill":
         from scripts.skill_eval import main as skill_eval_main
 
         if _argv[1:2] != ["eval"]:
             raise SystemExit("usage: agentihooks skill eval [--agent {claude,codex}] -- <command>")
+        skill_eval_main(_argv[2:])
+        return
+    if _argv and _argv[0] == "manifestos":
+        from scripts.profiles.manifestos import main as manifestos_main
 
-        raise SystemExit(skill_eval_main(_argv[2:]))
+        raise SystemExit(manifestos_main(_argv[1:]))
     if _argv and _argv[0] == "herdr":
         from scripts.herdr_setup import main as herdr_main
 
@@ -6478,7 +6223,7 @@ def main() -> None:
         from scripts.profiles.scaffold import main as scaffold_main
 
         raise SystemExit(scaffold_main(_argv))
-    if _argv and _argv[0] in ("gc", "lease", "scratch", "name"):
+    if _argv and _argv[0] in ("gc", "lease", "scratch", "name", "host-guard"):
         from scripts.gc_cli import main as gc_main
 
         raise SystemExit(gc_main(_argv))
@@ -6517,14 +6262,19 @@ def main() -> None:
     init_p.add_argument(
         "--bundle", default=None, help="Path to bundle directory (first-time setup: link bundle + global install)"
     )
+    init_p.add_argument(
+        "--user-bundle", default=None, help="Path to the personal user bundle applied beside the root bundle"
+    )
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
     init_p.add_argument(
         "--target",
         dest="init_target",
         choices=list(SUPPORTED_TARGETS),
         default=None,
-        help=("Install only one agent CLI (claude | codex | copilot). Without this flag, installs all supported CLIs."),
+        help="Install only one agent CLI (claude | codex | copilot). Defaults to Claude and Codex.",
     )
+    init_p.add_argument("--with-copilot", action="store_true", help="Include Copilot in this install")
+    init_p.add_argument("--verbose", "-v", action="store_true", help="Show full installation details")
     init_p.add_argument(
         "--force",
         action="store_true",
@@ -6563,14 +6313,7 @@ def main() -> None:
         help="Skip bundle auto-discovery hint when state has no bundle linked.",
     )
 
-    bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (new, link, unlink, list, pull)")
-    bundle_p.add_argument(
-        "action",
-        choices=["new", "link", "unlink", "list", "pull"],
-        help="new <path> | link <path> | unlink | list | pull",
-    )
-    bundle_p.add_argument("bundle_path", nargs="?", default=None, help="Bundle directory path (for link)")
-    bundle_p.add_argument("--rebase", action="store_true", help="Use --rebase when pulling")
+    bundles.add_parser(sub)
 
     lp_p = sub.add_parser(
         "link-profile",
@@ -6602,7 +6345,7 @@ def main() -> None:
         help="Edit only this target's chain (default: every installed target). Ignored by unlink.",
     )
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
-    sub.add_parser("codex", help="Route to the default login or an AH_CX_TOKEN account and launch Codex")
+    sub.add_parser("codex", help="Route to an AH_CX_TOKEN account (default login if none is set) and launch Codex")
     sub.add_parser("select-profile", help="Select a profile, model and effort for one routed run")
     sub.add_parser("init-agent", help="Open a routed Claude session in a new terminal")
     sub.add_parser("terminate-agent", help="List or terminate a Claude Code or Codex session")
@@ -6611,20 +6354,22 @@ def main() -> None:
         "herdr",
         help="Install and configure herdr, the terminal host for agents: status|install|configure|enable|disable",
     )
-    sub.add_parser("quota", help="Quota left for every agent harness (Claude accounts and Codex)")
+    sub.add_parser("quota", help="One table for every Claude and Codex account")
     sub.add_parser("skill", help="Run skill evaluations with quota routed Claude authentication: eval -- <command>")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
-    sub.add_parser("ledger", help="Swarm ledger: agent CLI, or new|serve|watch|chat|decline <args>")
+    sub.add_parser("ledger", help="Swarm ledger: agent CLI, or new|serve|watch|chat <args>")
     sub.add_parser(
         "swarm",
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
     )
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
+    sub.add_parser("recall", help="Recall archive of ledgers and swarms: search|get|timeline|sources, reindex, eval")
+    sub.add_parser("plan", help="Read only your task's plan chunk: read [--task ID] [--phase ID]")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )
     sub.add_parser("classify", help="Ask the decision models typed questions: --state FILE --questions FILE")
-    sub.add_parser("classifier", help="Decision classifier records: stats [--purpose P]")
+    sub.add_parser("classifier", help="Decision classifier records: stats [--purpose P], eval NAME [--live N]")
     sub.add_parser(
         "profile",
         help="Render a profile into its own home: render NAME --target claude|codex|copilot [--force] [--out DIR [--bundle DIR]]",
@@ -6632,22 +6377,7 @@ def main() -> None:
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
     sub.add_parser("overlay", help="Overlay profiles in the linked bundle: new NAME --wears ROLES | check NAME")
 
-    balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
-    balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
-    balance_p.add_argument("--fable", action="store_true", help="Include the separate Fable weekly quota")
-    balance_p.add_argument(
-        "--show-account-metadata",
-        metavar="SLUG",
-        default="",
-        help="Print every JSON event returned by a fresh probe for AH_CC_TOKEN_<SLUG>",
-    )
-    balance_p.add_argument("--refresh", action="store_true", help="Ignore the 60-second quota cache")
-    balance_p.add_argument(
-        "--current",
-        action="store_true",
-        help="Name the account this Claude session runs on; other accounts come from the quota cache",
-    )
-    balance_p.add_argument("--timeout", type=float, default=60, help="Per-account probe timeout in seconds")
+    balance_cli.add_parser(sub)
 
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
     ign_p.add_argument(
@@ -6856,7 +6586,7 @@ examples:
         help="Inspect bundle and profile conditions (scripts run on matching tool calls)",
     )
     cond_p.add_argument("action", choices=["list"], help="Conditions action")
-    cond_p.add_argument("--step", choices=["pre", "post", "stop"], help="Only this step")
+    cond_p.add_argument("--step", choices=["pre", "post", "stop", "start"], help="Only this step")
     cond_p.add_argument("--tool", default="", help="Show which conditions fire for this tool name")
     cond_p.add_argument("--command", dest="bash_command", default="", help="Bash command to match with --tool Bash")
 
@@ -6916,7 +6646,7 @@ notes:
     elif args.command == "uninstall":
         uninstall_global(args)
     elif args.command == "bundle":
-        cmd_bundle(args.action, path=args.bundle_path, rebase=args.rebase)
+        bundles.cmd_bundle(args.action, path=args.bundle_path, rebase=args.rebase, user=args.user)
     elif args.command == "link-profile":
         if args.action == "link":
             cmd_link_profile(
@@ -6937,23 +6667,9 @@ notes:
         elif args.action == "list":
             cmd_link_profile("list")
     elif args.command == "init":
-        args.profile = getattr(args, "init_profile", None)
-        args.settings_profile = getattr(args, "init_settings_profile", None) or ""
-        # NB: attribute name avoids link-profile's positional `args.target`.
-        args.install_target = getattr(args, "init_target", None)
-        env_target = os.environ.get("AGENTIHOOKS_TARGET", "").strip()
-        targets = (args.install_target or env_target,) if args.install_target or env_target else SUPPORTED_TARGETS
-        for index, target in enumerate(targets):
-            target_args = deepcopy(args)
-            target_args.install_target = target
-            if index:
-                target_args.force = False
-                target_args.bundle = None
-                target_args.link_profile = []
-            cmd_init_unified(target_args)
-        from scripts.herdr_setup import init_step
+        from scripts.init_reporter import run_init
 
-        init_step(args.init_herdr, sys.stdin.isatty())
+        run_init(args, sys.modules[__name__])
     elif args.command == "settings-profile":
         _cmd_settings_profile(args)
     elif args.command == "ignore":
@@ -6967,15 +6683,7 @@ notes:
             extra = []
         cmd_claude(extra)
     elif args.command == "balance":
-        sys.exit(
-            cmd_balance(
-                include_fable=args.fable,
-                refresh=args.refresh,
-                timeout=args.timeout,
-                show_account_metadata=args.show_account_metadata,
-                current=args.current,
-            )
-        )
+        sys.exit(balance_cli.run(args, cmd_balance))
     elif args.command == "lint-claude":
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
         from scripts.claude_linter import format_report, lint_report

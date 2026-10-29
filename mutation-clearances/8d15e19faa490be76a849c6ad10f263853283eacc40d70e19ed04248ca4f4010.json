@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/stack.py:scripts.swarm.stack.x__restack_base__mutmut_27:2df13485b079c3d0d60681ea4f5e25e142548d07fe81019eacd02367b7f644cd": {
+    "reader": "Standards",
+    "reason": "Standards reader ruled output equivalent: only the missing branch default changes. Present values are identical; an absent branch makes the unchanged branch predicate false before ancestry uses the reference. Captured show-ref output is ignored, and checkpoint and refusal outputs remain identical."
+  }
+}

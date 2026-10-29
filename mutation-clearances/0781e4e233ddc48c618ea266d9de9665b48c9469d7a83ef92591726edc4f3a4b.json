@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_swarm.py:scripts.swarm.metrics_swarm.x_pull_targets__mutmut_33:f837f7306e240511b05a76991daa584b2630d9b8881cdd5a8369077a63277c15": {
+    "reader": "Standards",
+    "reason": "Acceptable for the complete current call graph: uppercase PR_URL affects only the discarded returned classification. Current tick_view and pull_rows use only tuple element1, and metric exclusion still compares against the unchanged lowercase pr_url field."
+  }
+}

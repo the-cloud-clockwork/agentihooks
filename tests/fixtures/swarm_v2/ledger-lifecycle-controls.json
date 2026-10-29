@@ -1,0 +1,23 @@
+{
+  "swarm": "sv2-ux-02",
+  "agents": [
+    {"seat": "eng-1", "task": "t1", "backend": "kubernetes", "pod": "worker-1"},
+    {"seat": "eng-2", "task": "t2", "backend": "kubernetes", "pod": "worker-2"},
+    {"seat": "eng-3", "task": "t3", "backend": "local", "pid": 4321}
+  ],
+  "task_revisions": {"t1": 4, "t2": 7, "t3": 2},
+  "partial_drain": {
+    "seat": "eng-1",
+    "op": "op-drain-eng-1",
+    "outcome": {"status": "checkpointed", "checkpoint": "ckpt-sv2-ux-02-eng-1"}
+  },
+  "duplicated_click": {"seat": "eng-1", "op": "op-drain-eng-1", "clicks": 2},
+  "stale_browser_tab": {"seat": "eng-3", "op": "op-force-stop-old-tab", "successor_pid": 4322},
+  "unsupported_attach_target": {"seat": "eng-3", "op": "op-attach-local-pane"},
+  "lost_acknowledgement": {
+    "seat": "eng-2",
+    "op": "op-drain-eng-2",
+    "next_op": "op-cancel-eng-2-after",
+    "outcome": {"status": "checkpointed", "checkpoint": "ckpt-sv2-ux-02-eng-2"}
+  }
+}

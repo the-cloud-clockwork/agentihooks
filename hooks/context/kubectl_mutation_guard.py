@@ -19,16 +19,24 @@ scale, drain, cordon, taint, debug, annotate, label, create, apply -f, delete)
 because those are part of operational troubleshooting and the operator wants
 them available without ceremony.
 
-This is a HARD FLOOR. The hook does not honor bypass mode, hotfix signals, or
-release-gate signals. To change a running system's behavior, change code.
+Bypass mode (operator said ``disable controls``) unlocks this guard for
+troubleshooting, per CI Manifesto §2 — the HARD FLOOR itself (direct
+push/commit/tag/reset on main, secrets in files) is a different, narrower
+set enforced elsewhere and is unaffected by this toggle.
+
+KUBECTL_MUTATION_GUARD_EXEC_ALLOW lists comma-separated `namespace/pod-glob`
+entries (matched with fnmatch) whose `kubectl exec` / `kubectl cp` target
+pod is let through without bypass mode.
 
 References:
-- agentihooks-bundle/manifestos/ANTON-CORE-CI-MANIFESTO.md §3.5
+- agentihooks-bundle/manifestos/ANTON-CORE-CI-MANIFESTO.md §2
 - agentihooks-bundle/profiles/*/.claude/rules/code-is-source.md
 """
 
 from __future__ import annotations
 
+import fnmatch
+import os
 import re
 import shlex
 from typing import Optional
@@ -302,12 +310,8 @@ def _violation(rule: str, description: str) -> str:
         "BLOCKED by kubectl_mutation_guard: live-system state mutation forbidden.\n"
         f"  Rule:        {rule}\n"
         f"  Reason:      {description}\n"
-        "  Doctrine:    CI Manifesto §3.5 + rules/code-is-source.md\n"
-        "  Action:      change the source code, commit, push to dev, let CI deploy.\n"
-        "  Note:        this rule is HARD FLOOR — bypass mode, hotfix signals,\n"
-        "               and release-gate signals do NOT unlock it. To disable\n"
-        "               the hook itself for a session, set\n"
-        "               KUBECTL_MUTATION_GUARD_ENABLED=false (logged)."
+        "  Doctrine:    CI Manifesto §2 + rules/code-is-source.md\n"
+        "  Action:      change the source code, commit, push to dev, let CI deploy."
     )
     return msg
 
@@ -357,6 +361,113 @@ def _strip_quoted_strings(cmd: str) -> str:
     return cleaned
 
 
+_OTEL_KUBECTL_MUTATION = "agentihooks.guardrail.kubectl_mutation_detected"
+
+
+def _exec_allowlist_entries() -> list[str]:
+    """Parse KUBECTL_MUTATION_GUARD_EXEC_ALLOW: comma-separated `namespace/pod-glob` entries."""
+    raw = os.environ.get("KUBECTL_MUTATION_GUARD_EXEC_ALLOW")
+    if not raw:
+        return []
+    entries = (entry.strip() for entry in raw.split(","))
+    return [entry for entry in entries if "/" in entry]
+
+
+def _target_allowlisted(namespace: Optional[str], pod: Optional[str]) -> bool:
+    """True when `namespace/pod` matches an entry in KUBECTL_MUTATION_GUARD_EXEC_ALLOW."""
+    if not pod:
+        return False
+    candidate = f"{namespace or ''}/{pod}"
+    return any(fnmatch.fnmatch(candidate, entry) for entry in _exec_allowlist_entries())
+
+
+_VALUE_FLAGS = ("-n", "--namespace", "-c", "--container")
+# Any other flag may take the next token as its value, so the target is unknown and nothing is allowlisted.
+_BOOL_FLAGS = ("-i", "-t", "-it", "-ti", "--stdin", "--tty", "-q", "--quiet", "--no-preserve")
+
+
+def _kubectl_positionals(args: str) -> tuple[Optional[str], list[str]]:
+    """Split kubectl arguments into the namespace flag value and the positional arguments."""
+    try:
+        tokens = shlex.split(args)
+    except ValueError:
+        return None, []
+    namespace: Optional[str] = None
+    positional: list[str] = []
+    remaining = iter(tokens)
+    for tok in remaining:
+        flag, sep, value = tok.partition("=")
+        if flag in _VALUE_FLAGS:
+            value = value if sep else next(remaining, "")
+            if flag in ("-n", "--namespace"):
+                namespace = value
+        elif not tok.startswith("-"):
+            positional.append(tok)
+        elif not sep and tok not in _BOOL_FLAGS:
+            return None, []
+    return namespace, positional
+
+
+def _parse_kubectl_target(args: str) -> tuple[Optional[str], Optional[str]]:
+    """Extract (namespace, pod) from the flags+target text before `--` in a kubectl exec command."""
+    namespace, positional = _kubectl_positionals(args)
+    if not positional:
+        return namespace, None
+    return namespace, positional[0].rpartition("/")[2]
+
+
+def _cp_dest_target(cmd_args: str) -> tuple[Optional[str], Optional[str]]:
+    """Extract (namespace, pod) of the destination side of a `kubectl cp` INTO a pod."""
+    namespace, positional = _kubectl_positionals(cmd_args)
+    if len(positional) < 2:
+        return namespace, None
+    remote = positional[1].partition(":")[0]
+    dest_namespace, _, pod = remote.rpartition("/")
+    return dest_namespace or namespace, pod
+
+
+def _violation_or_allow(rule: str, description: str, namespace: Optional[str], pod: Optional[str]) -> Optional[str]:
+    """Return the violation message, unless the target pod is allowlisted (then log and allow)."""
+    if _target_allowlisted(namespace, pod):
+        from hooks.observability import otel
+
+        otel.emit_event(
+            _OTEL_KUBECTL_MUTATION,
+            {"rule": rule, "namespace": namespace or "", "pod": pod, "action": "allow", "allowlisted": True},
+        )
+        return None
+    return _violation(rule, description)
+
+
+def _exec_violation(target_args: str, after_dash: str) -> Optional[str]:
+    """Return the violation for one `kubectl exec` segment, or None when it is safe or its pod is allowlisted."""
+    namespace, pod = _parse_kubectl_target(target_args)
+    for pattern, rule, description in _EXEC_MUTATION_PATTERNS:
+        if not pattern.search(after_dash):
+            continue
+        if rule != "exec-shell-c":
+            return _violation_or_allow(rule, description, namespace, pod)
+        for inner_pat, inner_rule in _INNER_SHELL_PATTERNS:
+            if inner_pat.search(after_dash):
+                return _violation_or_allow(
+                    f"exec-shell-c:{inner_rule}",
+                    f"kubectl exec ... -- sh/bash -c with mutation pattern ({inner_rule})",
+                    namespace,
+                    pod,
+                )
+    return None
+
+
+def _controls_disabled(session_id: str) -> bool:
+    """True when the operator has disabled controls for this session (bypass mode)."""
+    try:
+        from hooks.context.controls_toggle import is_controls_disabled
+
+        return is_controls_disabled(session_id)
+    except Exception:
+        return False
+
+
 def check_kubectl_mutation_command(command: str) -> Optional[str]:
     """Return a rejection message if `command` is a forbidden mutation.
 
@@ -387,27 +498,23 @@ def check_kubectl_mutation_command(command: str) -> Optional[str]:
     # the after-dash content may include quoted sh -c bodies we want to
     # introspect)
     for match in _KUBECTL_EXEC_RE.finditer(command):
-        after_dash = match.group(2)
-        for pattern, rule, description in _EXEC_MUTATION_PATTERNS:
-            if pattern.search(after_dash):
-                if rule == "exec-shell-c":
-                    for inner_pat, inner_rule in _INNER_SHELL_PATTERNS:
-                        if inner_pat.search(after_dash):
-                            return _violation(
-                                f"exec-shell-c:{inner_rule}",
-                                f"kubectl exec ... -- sh/bash -c with mutation pattern ({inner_rule})",
-                            )
-                    continue
-                return _violation(rule, description or f"kubectl exec mutation ({rule})")
+        reason = _exec_violation(match.group(1), match.group(2))
+        if reason:
+            return reason
 
     # 3. kubectl cp direction (run on stripped — positional paths don't
     # carry quotes legitimately, and stripping suppresses text mentions)
     for match in _KUBECTL_CP_RE.finditer(stripped):
         if _check_kubectl_cp_into_pod(match.group(1)):
-            return _violation(
+            namespace, pod = _cp_dest_target(match.group(1))
+            reason = _violation_or_allow(
                 "kubectl-cp-into-pod",
                 "kubectl cp <local> <pod>:<path> (copy INTO a pod — push the file via the image build)",
+                namespace,
+                pod,
             )
+            if reason:
+                return reason
 
     # 4. SSH with remote write patterns (run on ORIGINAL — the SSH remote
     # command is by definition inside quotes that the hook needs to inspect)
@@ -447,18 +554,16 @@ def check_kubectl_mutation(payload: dict) -> None:
 
     When bypass mode is active (operator said ``disable controls``), the
     guard steps aside — the operator is explicitly authorizing live
-    troubleshooting / experimentation.
+    troubleshooting / experimentation — and logs the pass-through.
     """
     from hooks.hook_manager import BlockAction
 
     session_id = payload.get("session_id", "")
-    try:
-        from hooks.context.controls_toggle import is_controls_disabled
+    if _controls_disabled(session_id):
+        from hooks.observability import otel
 
-        if is_controls_disabled(session_id):
-            return
-    except Exception:
-        pass
+        otel.emit_event(_OTEL_KUBECTL_MUTATION, {"session.id": session_id, "action": "allow", "bypass": True})
+        return
 
     tool_input = payload.get("tool_input", {}) or {}
     command = tool_input.get("command", "") or ""

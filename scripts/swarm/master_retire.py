@@ -4,11 +4,12 @@ import json
 import os
 
 from scripts.inbox import exits
-from scripts.inbox.store import CLOSED, InboxStore
+from scripts.inbox.store import CLOSED, Contended, InboxError, InboxStore
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 MINUTES = "AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES"
 REF = "master-retire-handoff"
+CLOSE_ATTEMPTS = 3
 ASK = (
     "The swarm is retiring you: {reason}. Write your Handoff v2 now with the handoff skill and submit it with "
     "agentihooks swarm {slug} handoff <doc>, then stop; your successor starts from it. "
@@ -33,8 +34,10 @@ def hold(store: RedisStore, slug: str, agent: AgentRecord, reason: str, live: bo
     raw = store.redis.hget(_key(store, slug), agent.name)
     if raw is None:
         text = ASK.format(reason=reason, slug=slug, minutes=f"{minutes:g}")
-        item = InboxStore(store.redis).send(exits.BY, agent.name, text, ref=REF)
-        store.redis.hset(_key(store, slug), agent.name, json.dumps({"at": now_ms, "reason": reason, "item": item.id}))
+        inbox = InboxStore(store.redis)
+        item = inbox.send(exits.BY, agent.name, text, ref=REF)
+        request = {"at": now_ms, "reason": reason, "item": item.id, "world": inbox.world or inbox.home(agent.name)}
+        store.redis.hset(_key(store, slug), agent.name, json.dumps(request))
         return f"asked {agent.name} for a handoff before retiring it: {reason}"
     if now_ms - json.loads(raw)["at"] < minutes * 60 * 1000:
         return f"waiting on {agent.name}'s handoff before retiring it: {reason}"
@@ -42,15 +45,23 @@ def hold(store: RedisStore, slug: str, agent: AgentRecord, reason: str, live: bo
     return ""
 
 
-def forget(store: RedisStore, slug: str, name: str) -> bool:
+def forget(store: RedisStore, slug: str, name: str, why: str = "the master handed off or was retired") -> bool:
     raw = store.redis.hget(_key(store, slug), name)
     if raw is None:
         return False
     store.redis.hdel(_key(store, slug), name)
-    inbox = InboxStore(store.redis)
-    item = inbox.get(json.loads(raw)["item"])
-    if item.state not in CLOSED:
-        inbox.close(item.id, exits.BY, "done", "the master handed off or was retired")
+    request = json.loads(raw)
+    inbox = InboxStore(store.redis, world=request.get("world"))
+    for _ in range(CLOSE_ATTEMPTS):
+        try:
+            item = inbox.get(request["item"])
+            if item.state not in CLOSED:
+                inbox.close(item.id, exits.BY, "done", why)
+        except Contended:
+            continue
+        except InboxError:
+            pass
+        break
     return True
 
 

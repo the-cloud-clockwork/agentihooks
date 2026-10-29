@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_relay_to_inbox__mutmut_32:d0a1bcc9895632c7acea978247ff13e62c0aa9e1a2c3cae9f611855e4e74cda4": {
+    "reader": "standards_reader",
+    "reason": "Every stored ledger carries _meta.events (legacy adoption sets it and the SQLite insert and reads keep it), so the events default is never taken."
+  }
+}

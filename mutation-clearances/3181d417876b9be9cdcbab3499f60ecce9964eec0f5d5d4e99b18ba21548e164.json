@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_main__mutmut_53:44e2866ce1ccf76d0fd9bae5dd8896423ea23aac4d77d93758538dabee0a782e": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "Dropping sort_keys leaves the refused dict in attribute()'s sorted pod order and the top-level keys in source order refused then samples, which is already sorted, so the printed line is identical."
+  }
+}

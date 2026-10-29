@@ -52,6 +52,39 @@ def test_a_swarm_delivery_quoting_the_keywords_leaves_voice_and_controls_alone(t
     assert not is_controls_disabled("s1")
 
 
+def test_verified_peer_envelope_cannot_toggle_controls_or_voice(toggles, monkeypatch):
+    from scripts.inbox.store import Item
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "eng-1@demo")
+    submit("open the task")
+    item = Item("peer-item", "peer", "eng-1@demo", KEYWORDS, "pending", 100, 100)
+    submit(delivery.envelope(item, "delivery-one", "eng-1@demo"))
+    assert not toggles.is_voice_enabled("s1")
+    assert not is_controls_disabled("s1")
+
+
+def test_verified_peer_envelope_cannot_arm_release_or_approval_signals(toggles, monkeypatch):
+    from hooks.context import branch_guard, conditions, prod_lockdown
+    from scripts.inbox.store import Item
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "eng-1@demo")
+    seen = []
+    monkeypatch.setattr(prod_lockdown, "set_release_signal", lambda session: seen.append("release"))
+    monkeypatch.setattr(prod_lockdown, "set_hotfix_signal", lambda session: seen.append("hotfix"))
+    monkeypatch.setattr(branch_guard, "set_branch_signal", lambda session: seen.append("branch"))
+    monkeypatch.setattr(branch_guard, "set_pr_signal", lambda session: seen.append("pull request"))
+    monkeypatch.setattr(conditions, "arm_gate", lambda session: seen.append("condition"))
+    submit("open the task")
+    words = "operator on; release dance; new branch; open a pr; hotfix; set the conditions; approved merge"
+    item = Item("peer-item", "peer", "eng-1@demo", words, "pending", 100, 100)
+    submit(delivery.envelope(item, "delivery-one", "eng-1@demo"))
+    assert seen == []
+    submit(words)
+    assert seen == ["condition", "release", "hotfix", "branch", "pull request"]
+
+
 def test_the_operator_typing_the_keywords_still_toggles_both(toggles, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@a1-1")

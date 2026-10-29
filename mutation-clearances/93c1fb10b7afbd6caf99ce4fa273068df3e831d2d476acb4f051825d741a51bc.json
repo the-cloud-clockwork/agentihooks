@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/publish.py:scripts.swarm.publish.x_publishing_root__mutmut_2:746d9114cf57e1e9bebfdcf8ca4e039036e799fcb09f1ee60e48c881e0586e66": {
+    "reader": "Standards standards-reader",
+    "reason": "publishing_root reaches this call only when the process cwd is inside the worktree root whose common repository is primary, so git with no cwd reads the same origin and remote refs."
+  }
+}

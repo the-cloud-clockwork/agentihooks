@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker_base_revision.py:scripts.swarm_v2.worker_base_revision.x_get__mutmut_8:930fa2940ab96ab2d15b921850d7555107ae5b8e0681f3af647d741e36c12bc0": {
+    "reader": "Standards code-reviewer sub-agent",
+    "reason": "Request.__init__ stores every header through add_header as key.capitalize(). Probe: headers={'ACCEPT': 'a'} gives header_items() [('Accept', 'a')], identical to the original."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.x\u01c1InboxStore\u01c1redeliver__mutmut_22:efd703dd736216e054cc95215d1562c1c828060fd2ad0918e09885071cf9e6ad": {
+    "reader": "Standards reader, pull request 1795",
+    "reason": "Equivalent: Redis parses score bounds with strtod, which accepts INF in any case, and fakeredis returned the same members for -inf and -INF."
+  }
+}

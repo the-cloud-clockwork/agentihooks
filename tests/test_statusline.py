@@ -13,11 +13,12 @@ pytestmark = pytest.mark.unit
 _PROJECT_ROOT = Path(__file__).parent.parent
 
 
-def _run_statusline(account: str = "") -> str:
-    env = dict(os.environ)
+def _run_statusline(account: str = "", markers: tuple[str, ...] = ()) -> str:
+    env = {name: value for name, value in os.environ.items() if not name.startswith(("AH_CC_TOKEN_", "AH_ROUTE_"))}
     env.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
     if account:
         env["AGENTIHOOKS_ROUTE_ACCOUNT"] = account
+    env.update(dict.fromkeys(markers, "1"))
     result = subprocess.run(
         [sys.executable, "-m", "hooks.statusline"],
         input=json.dumps(
@@ -55,6 +56,27 @@ def test_statusline_shows_default_for_direct_authentication():
 
     assert "account:" in output
     assert "default" in output
+
+
+def test_statusline_names_the_master_login_account_instead_of_default():
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", _run_statusline(markers=("AH_ROUTE_INTERACTIVE_masterslug",)))
+
+    assert "account:masterslug" in plain
+    assert "default" not in plain
+
+
+def test_the_account_slug_prefers_the_route_marker_over_a_stale_route_account(monkeypatch):
+    from hooks import statusline
+
+    for name in [name for name in os.environ if name.startswith(("AH_CC_TOKEN_", "AH_ROUTE_"))]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("AGENTIHOOKS_ROUTE_ACCOUNT", "stale")
+    monkeypatch.setenv("AH_ROUTE_INTERACTIVE_masterslug", "1")
+    assert statusline._account_slug() == "masterslug"
+    monkeypatch.delenv("AH_ROUTE_INTERACTIVE_masterslug")
+    assert statusline._account_slug() == "stale"
+    monkeypatch.delenv("AGENTIHOOKS_ROUTE_ACCOUNT")
+    assert statusline._account_slug() == "default"
 
 
 def test_statusline_names_selected_run_profile(monkeypatch, capsys):
@@ -129,3 +151,19 @@ def test_the_statusline_reports_the_live_model_and_effort_to_the_swarm(monkeypat
     statusline.main()
 
     assert seen == [reported]
+
+
+@pytest.mark.parametrize("branch", ["coverage-branch", ""])
+def test_statusline_branch_display_ignores_working_directory(monkeypatch, tmp_path, capsys, branch):
+    from hooks import statusline
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(statusline, "_git_branch", lambda: branch)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
+    statusline.main()
+
+    output = capsys.readouterr().out
+    if branch:
+        assert f"{statusline._MAGENTA}{branch}{statusline._RESET}\n" in output
+    else:
+        assert "coverage-branch" not in output

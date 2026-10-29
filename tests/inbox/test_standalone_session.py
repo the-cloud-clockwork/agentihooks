@@ -6,7 +6,7 @@ import pytest
 from scripts.inbox import cli
 from scripts.inbox.store import InboxStore
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SID = "standalone-session-id"
 NAME = "solo-canary"

@@ -6,8 +6,9 @@ Parallel to broadcast.py but semantically distinct:
 - Permanent until operator clears (runtime) or removed in git (bundle/profile).
 - Cadence-driven: each enforcement re-injects every N tool calls.
 
-Four-source resolution (priority: local > runtime > profile chain > bundle):
+Resolution (priority: local > runtime > profile chain > user bundle > bundle):
   1. <bundle_path>/enforcements.json                          → source: "bundle"
+     <user_bundle_path>/enforcements.json                     → source: "user_bundle"
   2. each active built-in, bundle, or linked profile            → source: "profile"
   3. ~/.agentihooks/enforcements.json                          → source: "runtime"
   4. <project>/.agentihooks/enforcements.json                  → source: "local"
@@ -23,6 +24,7 @@ import functools
 import json
 import os
 import uuid
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -155,6 +157,10 @@ def _get_bundle_path() -> Path | None:
     return profile_chain.bundle_path(profile_chain.read_state())
 
 
+def _get_user_bundle_path() -> Path | None:
+    return profile_chain.user_bundle_path(profile_chain.read_state())
+
+
 def _get_active_profile() -> str | None:
     return profile_chain.active_profile(profile_chain.read_state())
 
@@ -191,6 +197,13 @@ def _load_bundle_enforcements() -> list[dict]:
     return _load_json_enforcements(bp / "enforcements.json", "bundle")
 
 
+def _load_user_bundle_enforcements() -> list[dict]:
+    up = _get_user_bundle_path()
+    if not up:
+        return []
+    return _load_json_enforcements(up / "enforcements.json", "user_bundle")
+
+
 def _load_profile_enforcements() -> list[dict]:
     profile = _get_active_profile()
     if not profile:
@@ -198,7 +211,9 @@ def _load_profile_enforcements() -> list[dict]:
     home = {"claude": claude_home, "codex": codex_home, "copilot": copilot_home}[current_target()]()
     profile = ",".join([profile, *profile_chain.rendered_overlays(home)])
     entries = []
-    for _name, profile_dir in profile_chain.rendered_dirs(_get_bundle_path(), profile, _get_linked_profiles()):
+    for _name, profile_dir in profile_chain.rendered_dirs(
+        _get_bundle_path(), profile, _get_linked_profiles(), _get_user_bundle_path()
+    ):
         entries.extend(_load_json_enforcements(profile_dir / "enforcements.json", "profile"))
     return entries
 
@@ -219,9 +234,9 @@ def _load_local_enforcements(cwd: str | Path | None) -> list[dict]:
 
 
 def load_all_enforcements(cwd: str | Path | None = None) -> list[dict]:
-    """Merge bundle → profile → runtime → local."""
+    """Merge bundle → user bundle → profile → runtime → local."""
     by_id: dict[str, dict] = {}
-    for e in _load_bundle_enforcements():
+    for e in [*_load_bundle_enforcements(), *_load_user_bundle_enforcements()]:
         eid = e.get("id")
         if eid:
             by_id[eid] = e
@@ -484,10 +499,9 @@ def _due_enforcements(entries: list[dict], tool_call_count: int) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def format_enforcement_banner(msg: dict) -> str:
-    enforcement_type = msg.get("type", "message")
+def _enforcement_message(msg: dict) -> str:
     message = msg.get("message", "")
-    if enforcement_type == "rule":
+    if msg.get("type") == "rule":
         try:
             path = resolve_rule_path(msg.get("path"))
             message = path.read_text(encoding="utf-8")
@@ -496,6 +510,11 @@ def format_enforcement_banner(msg: dict) -> str:
 
             log("rule enforcement file unavailable", {"id": msg.get("id"), "error": str(e)})
             message = f"RULE FILE UNAVAILABLE: {e}"
+    return message
+
+
+def format_enforcement_banner(msg: dict) -> str:
+    message = _enforcement_message(msg)
     tag = msg.get("tag") or ""
     enforcement_id = msg.get("id", "")
     cadence = msg.get("cadence", "")
@@ -506,7 +525,7 @@ def format_enforcement_banner(msg: dict) -> str:
     ]
     if msg.get("matcher"):
         lines.append(f"Matcher: {msg['matcher']}")
-    if enforcement_type == "rule":
+    if msg.get("type") == "rule":
         lines.extend(["Type: rule", f"Path: {msg.get('path', '')}"])
     if tag:
         lines.append(f"Tag: {tag}")
@@ -520,7 +539,23 @@ def format_enforcement_context(msgs: list[dict]) -> str:
     return "\n\n".join(format_enforcement_banner(m) for m in msgs)
 
 
-def _deliver(session_id: str, entries: list[dict], *, record: bool = True) -> str | None:
+def format_enforcement_digest(msgs: list[dict]) -> str:
+    lines = ["=== ENFORCEMENTS [IMPORTANT] ==="]
+    for m in msgs:
+        if m.get("type") == "rule":
+            lines.append(f"{m.get('id')} (rule {m.get('path')}):\n{_enforcement_message(m)}")
+        else:
+            lines.append(f"{m.get('id')}: {_enforcement_message(m)}")
+    return "\n".join(lines)
+
+
+def _deliver(
+    session_id: str,
+    entries: list[dict],
+    *,
+    record: bool = True,
+    render: Callable[[list[dict]], str] = format_enforcement_context,
+) -> str | None:
     entries = quarantine.keep(
         session_id, "enforcement", entries, lambda e: [e.get("id")], lambda e: e.get("message") or e.get("path")
     )
@@ -528,7 +563,7 @@ def _deliver(session_id: str, entries: list[dict], *, record: bool = True) -> st
         return None
     if record:
         injection_trace.record_enforcements(session_id, entries)
-    return format_enforcement_context(entries)
+    return render(entries)
 
 
 # ---------------------------------------------------------------------------
@@ -541,7 +576,7 @@ def get_session_start_enforcements(session_id: str, cwd: str | Path | None = Non
         return None
     try:
         plain, _ = _split_by_matcher(load_all_enforcements(cwd))
-        return _deliver(session_id, _claim_unseen_enforcements(session_id, plain))
+        return _deliver(session_id, _claim_unseen_enforcements(session_id, plain), render=format_enforcement_digest)
     except Exception:
         return None
 

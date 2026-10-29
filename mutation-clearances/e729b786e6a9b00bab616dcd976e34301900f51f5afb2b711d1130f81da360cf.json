@@ -1,0 +1,6 @@
+{
+  "hooks/context/scheduled_broadcasts.py:hooks.context.scheduled_broadcasts.x_publish__mutmut_8:f9eb0c16eef2b2ac5565e9ec502e0dbf74133094ae564e130476bb3df69a8c49": {
+    "reader": "Standards",
+    "reason": "SQLite resolves ASCII table identifiers case-insensitively. EMISSIONS and emissions identify the same table; INSERT OR IGNORE behavior, parameters and persisted output remain identical."
+  }
+}

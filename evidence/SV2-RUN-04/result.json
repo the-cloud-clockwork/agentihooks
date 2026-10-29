@@ -1,0 +1,72 @@
+{
+  "package": "SV2-RUN-04",
+  "dependency": "SV2-RUN-03",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1874",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1896",
+  "tested_commit": "6c93f545a41e49eea00cc96d384e49822d26612b",
+  "status": "implemented-fixture-qualified-not-live",
+  "evidence_class": "mocked signals and isolated fakeredis; no live Kubernetes, SSH or rollout proof",
+  "interfaces": [
+    "Signal, Source, Reading, Thresholds and Mode",
+    "classify returning Classification with State, Terminal, Failure, Confidence, observed_at, confirmed_at, classified_at, denied sources, suspect_since, proof_since and needs_operator",
+    "Observer.observe, get, records, audit and execution_observation_age_seconds; ObservationRefused carries error_class and retryable",
+    "scripts.swarm.status.observation, carried as the observation field of every agent row in status_report"
+  ],
+  "supported_versions": {
+    "runtime_protocol": "SV2-RUN-01 to SV2-RUN-03 unchanged; observation classification introduced by SV2-RUN-04",
+    "record": "Redis hash observations keyed by execution id, holding the latest reading per source; a write is refused when its classification time is older than the stored one; lost transitions append to the observation-audit list; both are retained by swarm snapshots"
+  },
+  "authority": "Observation is a read path. Observer acts only on executions of its own backend that are the current occupant of their seat by execution id and generation (forbidden_scope and stale_generation refusals); signals naming another execution or generation are discarded and counted. No display label and no operator grant is consulted; operator grant derivation applies to the mutation paths of later packages.",
+  "classification": {
+    "terminal_loss": "fresh heartbeat with unreachable terminal: working, terminal degraded",
+    "worker_loss": "stale heartbeat with a running Pod: suspect without proof, never lost. Pod ended or deleted, or supervisor exited: suspect with proof_since; lost only when that proof has held lost_after_s since its first observation",
+    "pod_scheduling": "pending Pod without a fresh heartbeat: pending; a fresh heartbeat from a pending Pod is a suspect contradiction",
+    "provider_wait": "fresh heartbeat with provider quota_wait: waiting_quota",
+    "observation_denied": "forbidden or unauthenticated read: never classified as a deleted Pod, never lost",
+    "observation_unavailable": "unreachable or missing Kubernetes view: suspect, never lost",
+    "starting": "running Pod before any heartbeat: starting until the supervisor handshake, then working"
+  },
+  "thresholds": {
+    "fresh_s": 120.0,
+    "lost_after_s": 600.0,
+    "mode": "standard, or conservative through AGENTIHOOKS_OBSERVATION_MODE"
+  },
+  "states": {
+    "observed": "Local runs on tested_commit: 69 passed over the observe, status rows and status publication tests with two workers; observe module coverage 100 percent; ruff check and format clean; size gate 0 errors.",
+    "accepted": "Acceptance A, B and C pass on two independent fixtures each; Standards and Spec readers closed review after three rounds; the master accepted the heartbeat and operation id deviations.",
+    "committed": "Implementation and fixture inputs committed on tested_commit; generated case manifest identifies exact input hashes.",
+    "externally_verified": "CI run 37861903812 on b39654bc passed the full unit suite, the required gate, sonar, lint, size and mutation with no survivors. The implementation inputs equal tested_commit; this completion record update changes metadata only."
+  },
+  "cases": {
+    "a": "evidence/SV2-RUN-04/a-result.json",
+    "b": "evidence/SV2-RUN-04/b-result.json",
+    "c": "evidence/SV2-RUN-04/c-result.json"
+  },
+  "migrations": [],
+  "rollback_rehearsal": {
+    "action": "Construct Observer with Thresholds.from_environ and AGENTIHOOKS_OBSERVATION_MODE=conservative: it never declares lost and marks every suspect attempt needs_operator, which the status observation projection shows for operator classification. The observations hash and audit list are retained; the local tick suspect path and RuntimeRouter are unchanged.",
+    "evidence": "Case C restores a snapshot into a new store, recovers by relist with execution attempts and spawns unchanged, ignores a stale replay, then a conservative observer holds a deleted Pod as suspect needing the operator past the lost threshold.",
+    "wiring": "No production caller constructs Observer at G1, so the switch takes effect when the adapter package that produces signals constructs it."
+  },
+  "remaining_limitations": [
+    "No Kubernetes, SSH or supervisor signal producer exists at G1; signals are fixture built. Backend adapters in later packages produce them and construct Observer.",
+    "The tick still uses its existing remote suspect path; routing tick suspect and lost decisions through Observer belongs to later runtime packages.",
+    "Lost is recorded with an audit entry; fencing the old generation on lost is the controller claim path of later packages, not this observer.",
+    "ObservationRefused carries the section 13.4 error class and retry classification; observations have no operation id because they mutate no runtime object.",
+    "Legacy local agents without an execution record project their heartbeat only, as state unclassified; with no heartbeat, observed_at is null and sources empty.",
+    "The required fixture stale heartbeat with running Pod is exercised in case C and the unit tests; case B covers forbidden and unauthenticated reads; case A covers fresh heartbeat with SSH failure.",
+    "Section 13.4 operation ids and section 4.2 old generation fencing on lost are not part of this read path, and no command records an operator classification for a needs_operator attempt yet; both are proposed on the ledger for the operator to decide."
+  ],
+  "next_action": "Produce signals from the Kubernetes adapter and route tick suspect and lost decisions through Observer.",
+  "decisions": [
+    "A fresh heartbeat without a supervisor handshake classifies as working with partial confidence. Section 4.2 ties working to a confirmed main-agent identity, but the T-SV2-RUN-04-A output contract requires a terminal disconnect with fresh worker heartbeats to leave the task working; heartbeats are written by the main agent's own hooks, so the acceptance contract governs and the confidence field carries the weaker identity proof.",
+    "Each observation merges new signals into the stored latest reading per source; an older signal for a source is ignored, so a stale cursor cannot overwrite newer evidence while an empty batch still reclassifies known evidence as time passes.",
+    "Confirmed confidence needs an agreeing Kubernetes or supervisor reading inside fresh_s; older remembered readings stay visible in sources with their own observed_at but no longer confirm."
+  ],
+  "compatibility": "Status report agent rows keep every earlier field and add observation, asserted by the status report rows test. SV2-RUN-01 to SV2-RUN-03 interfaces are unchanged.",
+  "review": "Standards and Spec readers ran three rounds. Standards held one low finding: the watched write loop duplicates the operations journal loop; kept because sharing it would change the SV2-RUN-03 module outside this package.",
+  "mutation_resolution": "First CI mutation run left 18 survivors in observe. Remembered readings became an identity free Seen record and OK values a mapping, removing three equivalent mutants. Tests added for the freshness boundary, empty evidence time, the recovered flag, the record and audit keys, an unoccupied seat, accumulated discards, audit of several executions, a same time reclassification, the audit at the lost transition and exact refusal messages. No mutation clearances used.",
+  "ci_head": "b39654bc3290c4be6fc02d93bb09ad1d4ebb8d0e",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37861903812"
+}

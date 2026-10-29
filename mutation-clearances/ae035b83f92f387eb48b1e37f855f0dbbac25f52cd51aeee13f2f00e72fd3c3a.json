@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_5:6ed3fcfb5352784a27c6fa60de02aa2b45a4366c65abe830f4bb1836e9093616": {
+    "reader": "standards_reader",
+    "reason": "layout() reads handler.headers.get on the real request object, and its only production caller is routes.global_resource passing the server request handler, so ORIGIN and Origin resolve identically on the stdlib case-insensitive HTTPMessage; no production path hands layout a plain dict."
+  }
+}

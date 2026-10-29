@@ -1,0 +1,60 @@
+{
+  "package": "SV2-ACC-02",
+  "case": "T-SV2-ACC-02-A",
+  "title": "successful behavior: two concurrent controllers cannot both allocate the last slot",
+  "tested_commit": "6ab5b7036792e591123b1f04999b089af814f8d0",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38052074829",
+  "fixture": "tests/fixtures/swarm_v2/account-capacity.json: account fixture with cap 2, seat eng-1 holding one slot, and two simultaneous launch requests from seats eng-2 and eng-3",
+  "fixture_clock": "build() patches time.time to the fixture clock; AccountCapacity reads the same list",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_two_concurrent_controllers_cannot_both_take_the_last_slot[first]",
+      "job": 114213747871,
+      "output": "PASSED at 2026-10-10T12:35:18.5270050Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_two_concurrent_controllers_cannot_both_take_the_last_slot[second]",
+      "job": 114213747871,
+      "output": "PASSED at 2026-10-10T12:35:18.5301535Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_simultaneous_launch_threads_take_one_slot",
+      "job": 114213747917,
+      "output": "PASSED at 2026-10-10T12:36:41.0204261Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_an_account_with_no_slots_refuses_without_writing",
+      "job": 114213747910,
+      "output": "PASSED at 2026-10-10T12:35:59.9143431Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_fleet_held_counts_what_a_local_process_table_cannot_see",
+      "job": 114213747910,
+      "output": "PASSED at 2026-10-10T12:36:00.0235625Z"
+    },
+    {
+      "test": "tests/context/test_account_sessions.py::test_fleet_slots_add_to_the_local_counts",
+      "job": 114213747871,
+      "output": "PASSED at 2026-10-10T12:34:57.3240519Z"
+    },
+    {
+      "test": "tests/context/test_account_sessions.py::test_fleet_slots_are_read_from_the_account_store",
+      "job": 114213747910,
+      "output": "PASSED at 2026-10-10T12:35:51.5492162Z"
+    }
+  ],
+  "state_assertions": {
+    "racing_controllers": "the second controller commits first; the first controller's WATCH transaction retries, sees the account full and refuses account_full",
+    "threads": "two threads released by one barrier: exactly one account_full, the other outcome is one of the two requesting holders",
+    "stored_rows": "the account hash holds the occupied eng-1 slot and the one reserved winner",
+    "launch_caps": "sessions_by_account adds fleet reservations and remote occupancies to the local process counts, so init-agent routing and the swarm capacity rows see the held slot"
+  },
+  "repeat_assertion": "the racing test runs twice on independent fakeredis fixtures (first, second)",
+  "account_reservation_conflicts_total": {
+    "value": 1,
+    "dimension": "account fixture, one refused request per run"
+  },
+  "cleanup": "fakeredis per test; no live resource mutations",
+  "passed": true
+}

@@ -1,0 +1,64 @@
+{
+  "package": "SV2-LDG-02",
+  "dependency": "SV2-LDG-01",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2371",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2384",
+  "tested_commit": "6850d5aacc0225b255b6e24d3e33b994675991c2",
+  "status": "fixture-qualified-awaiting-full-ci",
+  "evidence_class": "Mocked Redis server (fakeredis with Lua) and fixture server clock; signed fixture launch grants; no live controller service or deployment.",
+  "interfaces": [
+    "scripts.swarm_v2.api.server.serve(api, host, port) returns a ThreadingHTTPServer that serves POST /v2/executions/register and PUT /v2/executions/{id}/heartbeat with JSON bodies of at most 65536 bytes; the controller process starts it with its ExecutionsAPI",
+    "ExecutionsAPI.route for POST /v2/executions/register and PUT /v2/executions/{id}/heartbeat, register, heartbeat, command_watermark",
+    "heartbeat_rejections and heartbeat_rejections_total per error class",
+    "LaunchAuthority.bound authenticates a registered, current launch grant",
+    "TaskAuthority.renew accepts a RenewalFence; the COMMIT script refuses an older or altered renewal sequence before any lease write and admits an identical retry",
+    "urn:swarm-v2:heartbeat gains optional archive_watermark (default 0) and resources (default empty)"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "heartbeat_contract": "major 2, minors 2.0 to 2.1 read; producers write 2.1",
+    "grant": "LaunchAuthority version 2.0 signed grants",
+    "redis": "Redis 7 with Lua, server TIME for lease deadlines"
+  },
+  "authority": "Actor and scope derive from the registered launch grant and the execution registry; the URL subject must equal the credential's execution; display names confer nothing.",
+  "states": {
+    "observed": "Cases A, B and C each ran twice from independent fake Redis state and matched the committed results; archive_watermark is observed, worker-reported, not externally verified.",
+    "accepted": "Heartbeats renew only the bound execution's task lease at server time; forged subjects, other epochs, stale generations and older sequences are refused without writes.",
+    "committed": "Code, fixture and case results at tested_commit.",
+    "externally_verified": "None: no controller HTTP service mounts the routes yet and no G3 deployment was exercised."
+  },
+  "validation": {
+    "red": "Mutation preflight run 38048244543 on 8df9384b failed its baseline against a stub module.",
+    "mutation_preflight": "Run 38049819628 on 6850d5aa: executions 458 killed, auth_context 44 killed, authority 41 killed, zero survivors.",
+    "lint": "ruff check and ruff format --check passed; size gate zero errors"
+  },
+  "cases": {
+    "a": "evidence/SV2-LDG-02/a-result.json",
+    "b": "evidence/SV2-LDG-02/b-result.json",
+    "c": "evidence/SV2-LDG-02/c-result.json"
+  },
+  "measurement": "heartbeat_rejections_total; case B records 4 (forbidden_scope 1, stale_generation 3), case C records 1 (revision_conflict).",
+  "rollback_rehearsal": {
+    "action": "LaunchAuthority.disable: new grants refused forbidden_scope, unregistered grants revoked so their registration is refused unauthenticated, registered executions keep heartbeating until their leases drain.",
+    "authoritative_objects": "Execution registry, launch grant audit rows and registrations, task authority and claim journal, heartbeat records and renewal fences; none are deleted by rollback.",
+    "proof": "Case C."
+  },
+  "remaining_limitations": [
+    "The heartbeat credential is the launch grant (at most 900 seconds); credential rotation is a ledger follow-up.",
+    "archive_watermark is worker-reported and not verified against an archive authority.",
+    "command_watermark is provisional: the count of non-spawn runtime operations for the execution until the commands endpoint defines a cursor.",
+    "A heartbeat whose renewal committed before a newer one but whose record write landed after it is refused 409 although its lease renewal was in order.",
+    "No deployed controller process starts serve() yet; the antoncore controller service package wires it with the controller's LaunchAuthority, TaskAuthority and listen address."
+  ],
+  "reviews": {
+    "Standards": "Five rounds; closed at 6ed68827 with the release finding fixed at beb7ac57 and the retry finding fixed at 014a5fcd.",
+    "Spec": "Five rounds; the timestamp dispute ruled keep gmtime with a timezone test; retry and timezone findings fixed at 014a5fcd."
+  },
+  "test_outputs": {
+    "pull_request_checks": "PR 2384 at 1272656e: 41 checks passed, 4 skipped, including every unit shard on Python 3.11 and 3.12 and Gate Required (run 38050825920).",
+    "earlier_red": "PR 2384 at 68d476bc: unit 3.11 shard 2 passed 6308 and unit 3.12 shard 1 passed 2953 with one failure each, the suite speed gate, fixed at 1272656e.",
+    "mutation_preflight": "Run 38049819628 on 6850d5aa: executions 458 killed, auth_context 44 killed, authority 41 killed, zero survivors.",
+    "http_entrypoint": "test_the_served_endpoints_register_and_renew_a_worker_over_http, test_the_served_endpoints_refuse_forged_subjects_and_unreadable_bodies and test_the_served_endpoints_refuse_a_body_over_the_limit_without_reading_it drive a real HTTP server on a loopback port."
+  }
+}

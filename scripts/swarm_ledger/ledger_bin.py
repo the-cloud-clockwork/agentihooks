@@ -13,14 +13,6 @@ DAY_MS = 24 * 60 * 60 * 1000
 LOCK = threading.Lock()
 
 
-def bin_path():
-    return core.LEDGER_DIR / ".bin.json"
-
-
-def restored_path():
-    return core.LEDGER_DIR / ".bin-restored.json"
-
-
 def restored():
     from scripts.swarm_ledger.repository import bin_storage
 
@@ -33,29 +25,36 @@ def entries():
     return bin_storage.entries()
 
 
-def _save(found):
-    from scripts.swarm_ledger.repository import bin_storage
-
-    return bin_storage._save(found)
-
-
 def days_left(deleted_at, now):
     return max(0, -((now - deleted_at - KEEP_DAYS * DAY_MS) // DAY_MS))
 
 
 def delete(slug, now=None):
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     return repository.delete(slug, now)
 
 
+def require_local(slug: str) -> None:
+    from scripts.swarm_ledger import ledger_link
+
+    if ledger_link.remote():
+        raise SystemExit(f"remote ledger clients must use /api/v1/ledgers/{slug}/lifecycle/actions")
+
+
 def restore(slug, now=None):
-    from scripts.swarm_ledger.repository import repository
+    require_local(slug)
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     return repository.restore(slug, now)
 
 
 def bin_closed(slug, closed_at, now=None):
+    require_local(slug)
     from scripts.swarm_ledger.repository import bin_storage
 
     return bin_storage.bin_closed(slug, closed_at, now)
@@ -81,12 +80,10 @@ def finished(doc):
     )
 
 
-def due(state, now, restored_at=None):
-    meta = state.get("_meta", {})
-    changed = meta.get("updated_at") or meta.get("created_at") or 0
+def idle_due(done, changed, now, restored_at=None):
     if restored_at is not None and changed <= restored_at:
         return now - restored_at > IDLE_DAYS * DAY_MS
-    return finished(state) or now - changed > IDLE_DAYS * DAY_MS
+    return done or now - changed > IDLE_DAYS * DAY_MS
 
 
 def auto_bin(now=None):

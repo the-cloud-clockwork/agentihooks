@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x\u01c1InputFramer\u01c1_sequence__mutmut_42:f7851d6d8fe175d9757dac29b54dba4fb9906b3a2eafb222a8820c6ee060c5ca": {
+    "reader": "standards-reader round three",
+    "reason": "approved; assigned literals have identical bytes."
+  }
+}

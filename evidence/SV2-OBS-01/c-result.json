@@ -1,0 +1,81 @@
+{
+  "case": "T-SV2-OBS-01-C",
+  "evidence_class": "mocked: fakeredis execution registry, transition audit, latency counters and observability record, a fake lease clock, a fixed step telemetry clock, an in process exporter that can be switched off, an in process API server whose Pods carry fixture statuses and the SV2-KUB-05 recovery world; no Kubernetes API server, node, worker Pod or telemetry backend was used",
+  "input_sha256": {
+    "pod-failures.json": "13b5e8d94825f40ea87fada359454c47dee84fd4161945eebcdea4e235fff4b4",
+    "pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
+    "pod-policy.json": "25a857c36e7d1ea9c579b0a285cf746f9f965064a3dfb770a8ae25502605d610",
+    "transition-telemetry.json": "7961b6446f02d25c61cec6cce0308b2d34ffe21d307757cd48cacee7d1f4b822"
+  },
+  "observed": {
+    "after_restore": {
+      "events": 4,
+      "export_failures": 3,
+      "last_error": "ConnectionError: collector unreachable with token=[redacted]",
+      "state": "ok",
+      "unexported": 0
+    },
+    "attempts": [
+      [
+        "<old>",
+        1
+      ]
+    ],
+    "commands": [
+      "<op-1>",
+      "<op-1>",
+      ""
+    ],
+    "committed_during_outage": [
+      "<old>",
+      [
+        "swarm-<old>"
+      ]
+    ],
+    "during_outage": {
+      "events": 3,
+      "export_failures": 3,
+      "last_error": "ConnectionError: collector unreachable with token=[redacted]",
+      "state": "degraded",
+      "unexported": 3
+    },
+    "exported": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "leaked": [],
+    "occupant_after_stale": "<old>",
+    "replayed_operation": [
+      "<op-1>",
+      "applied"
+    ],
+    "rollback": {
+      "audited": [
+        "admission",
+        "command"
+      ],
+      "execution_transition_latency_seconds": {
+        "admission": {
+          "accepted": 1
+        },
+        "command": {
+          "accepted": 1
+        }
+      },
+      "observability": {
+        "events": 2,
+        "export_failures": 0,
+        "last_error": "",
+        "state": "disabled",
+        "unexported": 0
+      }
+    },
+    "stale": [
+      "the controller lease is stale",
+      "the controller lease is stale"
+    ]
+  },
+  "state": "passed"
+}

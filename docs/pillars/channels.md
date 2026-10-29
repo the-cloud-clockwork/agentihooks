@@ -7,7 +7,7 @@ nav_order: 6
 # Broadcast Channels + Brain Adapter
 {: .no_toc }
 
-**Targeted messaging for a fleet that thinks.**
+Channels target Claude Code and Codex sessions that share the broadcast store. Claude settings examples below use its native `env` hierarchy; configure Codex using its [native settings](../reference/CODEX-COMPAT.md).
 
 > The broadcast system talks to every session. Channels let you whisper to the right ones. The brain adapter pumps knowledge — hot arcs, active context, operational memory — into your agents automatically. Together, they turn a fleet of isolated sessions into a coordinated nervous system.
 

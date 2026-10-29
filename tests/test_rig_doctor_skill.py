@@ -41,6 +41,32 @@ def test_stop_closes_saved_doctor_without_stopping_watched_swarm(runner):
     assert json.loads((module.HOME / "rig-doctor.json").read_text())["active"] == ""
 
 
+def test_the_master_relays_the_operator_order_and_caps_to_the_doctor(runner):
+    module, calls = runner
+    order = "restart the doctor crew with two engineers"
+    assert module.main(["work", "--max-eng-agents", "2", "--max-ci-agents", "0", "--quote", order]) == 0
+    assert calls[0] == (
+        "agentihooks",
+        "doctor",
+        "work",
+        "start",
+        "--max-eng-agents",
+        "2",
+        "--max-ci-agents",
+        "0",
+        "--quote",
+        order,
+    )
+    calls.clear()
+    assert module.main(["stop", "--quote", order]) == 0
+    assert calls == [("agentihooks", "doctor", "work", "stop", "--quote", order)]
+    calls.clear()
+    assert module.main(["work", "stop", "--quote", order]) == 0
+    assert calls == [("agentihooks", "doctor", "work", "stop", "--quote", order)]
+    with pytest.raises(SystemExit):
+        module.main(["work", "--max-eng-agents", "two"])
+
+
 def test_start_refuses_without_bundle_before_mutating(runner, monkeypatch, capsys):
     module, calls = runner
     monkeypatch.setattr(module, "linked_bundle", lambda: None)

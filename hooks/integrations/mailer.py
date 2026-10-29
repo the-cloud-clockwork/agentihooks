@@ -37,6 +37,7 @@ import json
 import os
 import re
 import smtplib
+import socket
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -185,6 +186,16 @@ class EmailClient:
             )
             return True
 
+        return False
+
+    def reachable(self, timeout: float = 3.0) -> bool:
+        hosts = [self._smtp_server, self._smtp_server_ip] if self._smtp_server else []
+        for host in filter(None, hosts):
+            try:
+                socket.create_connection((host, self._smtp_port), timeout=timeout).close()
+            except OSError:
+                continue
+            return True
         return False
 
     def _authenticate_smtp(self, server: smtplib.SMTP) -> None:

@@ -1,0 +1,6 @@
+{
+  "scripts/hive/daemon.py:scripts.hive.daemon.x__claude_snapshots__mutmut_34:d1998d9c4331615ae9405990f116e999c202a0e7edf5eaa3755f75e576110f9a": {
+    "reader": "standards_reader",
+    "reason": "The result account field is unused; attribution uses the observed mapping key."
+  }
+}

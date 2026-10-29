@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x_judge__mutmut_10:50a044edcab40591552c6d9c64ce57d0926118d2796b5a394473c665e232a69b": {
+    "reader": "standards_reader",
+    "reason": "Changes only nonsemantic XX padding in the operator-facing message 'the tests first part requires a complete pull request diff to judge gate behaviour'. The named shortfall and action remain present, with the same verdict and branch condition; exact typography is not part of the behavior contract."
+  }
+}

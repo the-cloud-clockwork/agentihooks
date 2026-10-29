@@ -1,0 +1,15 @@
+{
+  "fixture_inputs": {
+    "brain_backup": "a brain export copied beside the ledger and coordination snapshot, each under its own key id",
+    "catalog_backup": "a session catalog with two retained sessions, copied without its chunk and vector projections",
+    "immutable_objects": "content addressed archive objects for every session batch and the fixture task checkpoint",
+    "missing_source_object": "the second archive object of the lost session, deleted from the source store before capture"
+  },
+  "input_sha256": {
+    "fixture.json": "9b59056aa01454ad8791a8f2308a87599f5c1f2986d789dd0eadd0c5d383c935",
+    "sv2_ret04_cases.py": "8f035739906213a84ea96e2c4d7de467d532ccd8f23591c33829a32a2b8da5d1"
+  },
+  "mocked": true,
+  "package": "SV2-RET-04",
+  "tested_commit": "fcc25dddecd7e9609adf0acc8fedf48770519915"
+}

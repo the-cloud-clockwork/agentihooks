@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x_sample__mutmut_64:00c70a5b8f9a76cc765866fa6cb088faae574d5df799df931ec9106d4a9f6e7f": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "The mutant only changes the comparison when Pod created is missing or exactly 0 and Scheduled is exactly Unix ms 0, a case where the pod reset is a no-op or occurs only at the epoch; no real cluster records epoch 0 timestamps."
+  }
+}

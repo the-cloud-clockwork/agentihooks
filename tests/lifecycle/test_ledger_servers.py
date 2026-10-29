@@ -26,6 +26,21 @@ def plant(tmp_path, row, folder, port=9000, owner=None, cwd=None):
     return proc
 
 
+@pytest.fixture
+def pidfd(monkeypatch):
+    handles = []
+
+    def opened(pid):
+        handles.append(os.open(os.devnull, os.O_RDONLY))
+        return handles[-1]
+
+    sent = Mock()
+    monkeypatch.setattr(ledger_servers.os, "pidfd_open", opened)
+    monkeypatch.setattr(ledger_servers.signal, "pidfd_send_signal", sent)
+    monkeypatch.setattr(ledger_servers.os, "kill", Mock(side_effect=AssertionError("signal by pid")))
+    return handles, sent
+
+
 @pytest.mark.parametrize("reason", ["folder", "cwd", "owner", "legacy", "reused", "zombie"])
 def test_sweep_stops_orphan_servers_and_logs_their_identity(tmp_path, monkeypatch, reason):
     folder = tmp_path / "ledger"
@@ -65,9 +80,10 @@ def test_sweep_stops_orphan_servers_and_logs_their_identity(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("vanished_at", ["identity", "sigterm", "sigkill"])
-def test_sweep_counts_a_server_that_vanishes_before_stopping_as_stopped(tmp_path, monkeypatch, vanished_at):
+def test_sweep_counts_a_server_that_vanishes_before_stopping_as_stopped(tmp_path, monkeypatch, pidfd, vanished_at):
     import signal
 
+    handles, kill = pidfd
     folder = tmp_path / "ledger"
     folder.mkdir()
     row = process()
@@ -76,8 +92,7 @@ def test_sweep_counts_a_server_that_vanishes_before_stopping_as_stopped(tmp_path
         ledger_servers, "_process", Mock(side_effect=[None] if vanished_at == "identity" else [row, row])
     )
     missing = ProcessLookupError(3, "No such process")
-    kill = Mock(side_effect=[None, missing] if vanished_at == "sigkill" else missing)
-    monkeypatch.setattr(ledger_servers.os, "kill", kill)
+    kill.side_effect = [None, missing] if vanished_at == "sigkill" else missing
     monkeypatch.setattr(ledger_servers.time, "monotonic", Mock(side_effect=[1, 2]))
 
     result = ledger_servers.sweep_servers({row.pid: row}, tmp_path, act=True, proc=proc)
@@ -91,22 +106,22 @@ def test_sweep_counts_a_server_that_vanishes_before_stopping_as_stopped(tmp_path
         kill.call_args_list
         == {
             "identity": [],
-            "sigterm": [call(42, signal.SIGTERM)],
-            "sigkill": [call(42, signal.SIGTERM), call(42, signal.SIGKILL)],
+            "sigterm": [call(handles[0], signal.SIGTERM)],
+            "sigkill": [call(handles[0], signal.SIGTERM), call(handles[0], signal.SIGKILL)],
         }[vanished_at]
     )
 
 
 @pytest.mark.parametrize("failed_signal", ["sigterm", "sigkill"])
-def test_sweep_reports_signal_permission_errors(tmp_path, monkeypatch, failed_signal):
+def test_sweep_reports_signal_permission_errors(tmp_path, monkeypatch, pidfd, failed_signal):
+    _, kill = pidfd
     folder = tmp_path / "ledger"
     folder.mkdir()
     row = process()
     proc = plant(tmp_path, row, folder, owner=(7, 99))
     monkeypatch.setattr(ledger_servers, "_process", Mock(side_effect=[row, row]))
     error = PermissionError(1, "Operation not permitted")
-    kill = Mock(side_effect=[None, error] if failed_signal == "sigkill" else error)
-    monkeypatch.setattr(ledger_servers.os, "kill", kill)
+    kill.side_effect = [None, error] if failed_signal == "sigkill" else error
     monkeypatch.setattr(ledger_servers.time, "monotonic", Mock(side_effect=[1, 2]))
 
     result = ledger_servers.sweep_servers({row.pid: row}, tmp_path, act=True, proc=proc)
@@ -236,18 +251,17 @@ def test_sweep_defaults_to_a_report_without_signalling_or_logging(tmp_path, monk
     assert not (tmp_path / "gc-ledger-servers.jsonl").exists()
 
 
-def test_terminate_allows_a_grace_period_before_escalating(tmp_path, monkeypatch):
+def test_terminate_allows_a_grace_period_before_escalating(tmp_path, monkeypatch, pidfd):
+    handles, sent = pidfd
     row = process()
     monkeypatch.setattr(ledger_servers, "_process", Mock(side_effect=[row, row, None]))
     monkeypatch.setattr(ledger_servers.time, "monotonic", Mock(side_effect=[1, 1.5]))
     sleep = Mock()
     monkeypatch.setattr(ledger_servers.time, "sleep", sleep)
-    kill = Mock()
-    monkeypatch.setattr(ledger_servers.os, "kill", kill)
     ledger_servers.terminate(row, tmp_path)
     import signal
 
-    kill.assert_called_once_with(42, signal.SIGTERM)
+    sent.assert_called_once_with(handles[0], signal.SIGTERM)
     sleep.assert_called_once_with(0.02)
 
 
@@ -281,7 +295,8 @@ def test_unreadable_servers_are_reported_without_stopping_other_candidates(tmp_p
 
 
 @pytest.mark.parametrize("outcome", ["gone", "zombie", "reused", "stuck"])
-def test_terminate_signals_only_the_observed_process(tmp_path, monkeypatch, outcome):
+def test_terminate_signals_only_the_observed_process(tmp_path, monkeypatch, pidfd, outcome):
+    handles, sent = pidfd
     row = process()
     gone = {
         "gone": None,
@@ -290,39 +305,64 @@ def test_terminate_signals_only_the_observed_process(tmp_path, monkeypatch, outc
         "stuck": row,
     }[outcome]
     read = Mock(side_effect=[row, gone])
-    kill = Mock()
     monkeypatch.setattr(ledger_servers, "_process", read)
-    monkeypatch.setattr(ledger_servers.os, "kill", kill)
     monkeypatch.setattr(ledger_servers.time, "monotonic", Mock(side_effect=[1, 2]))
     ledger_servers.terminate(row, tmp_path)
     import signal
 
-    assert kill.call_args_list == [call(42, signal.SIGTERM)] + (
-        [call(42, signal.SIGKILL)] if outcome == "stuck" else []
+    assert sent.call_args_list == [call(handles[0], signal.SIGTERM)] + (
+        [call(handles[0], signal.SIGKILL)] if outcome == "stuck" else []
     )
     assert read.call_args_list == [call(42, tmp_path), call(42, tmp_path)]
 
 
 @pytest.mark.parametrize("current", [process(start=101), process(start=99)])
-def test_terminate_refuses_a_changed_process_identity(tmp_path, monkeypatch, current):
+def test_terminate_refuses_a_changed_process_identity(tmp_path, monkeypatch, pidfd, current):
+    _, sent = pidfd
     monkeypatch.setattr(ledger_servers, "_process", lambda pid, proc: current)
-    kill = Mock()
-    monkeypatch.setattr(ledger_servers.os, "kill", kill)
     with pytest.raises(ProcessLookupError, match="^server identity changed$"):
         ledger_servers.terminate(process(), tmp_path)
-    kill.assert_not_called()
+    sent.assert_not_called()
 
 
-def test_terminate_stops_a_server_whose_state_changed_since_the_snapshot(tmp_path, monkeypatch):
+def test_terminate_stops_a_server_whose_state_changed_since_the_snapshot(tmp_path, monkeypatch, pidfd):
+    handles, sent = pidfd
     row = Process(42, 7, 42, 42, 100, "R", "python", ("python", "ledger_server.py", "--serve"))
     monkeypatch.setattr(ledger_servers, "_process", Mock(side_effect=[process(), None]))
-    kill = Mock()
-    monkeypatch.setattr(ledger_servers.os, "kill", kill)
     monkeypatch.setattr(ledger_servers.time, "monotonic", Mock(side_effect=[1, 1.5]))
     ledger_servers.terminate(row, tmp_path)
     import signal
 
-    kill.assert_called_once_with(42, signal.SIGTERM)
+    sent.assert_called_once_with(handles[0], signal.SIGTERM)
+
+
+def test_terminate_pins_the_process_before_checking_its_identity(tmp_path, monkeypatch, pidfd):
+    handles, sent = pidfd
+    row = process()
+    steps = []
+
+    def read(pid, proc):
+        steps.append(("read", len(handles)))
+        return row if len(steps) == 1 else None
+
+    monkeypatch.setattr(ledger_servers, "_process", read)
+    monkeypatch.setattr(ledger_servers.time, "monotonic", Mock(side_effect=[1, 1.5]))
+    ledger_servers.terminate(row, tmp_path)
+
+    assert steps == [("read", 1), ("read", 1)]
+    assert len(sent.call_args_list) == 1
+    with pytest.raises(OSError):
+        os.fstat(handles[0])
+
+
+def test_terminate_skips_a_server_that_exited_before_it_was_pinned(tmp_path, monkeypatch, pidfd):
+    _, sent = pidfd
+    monkeypatch.setattr(ledger_servers.os, "pidfd_open", Mock(side_effect=ProcessLookupError))
+    read = Mock()
+    monkeypatch.setattr(ledger_servers, "_process", read)
+    ledger_servers.terminate(process(), tmp_path)
+    read.assert_not_called()
+    sent.assert_not_called()
 
 
 def test_scope_accepts_the_working_folder_even_when_data_is_elsewhere(tmp_path, monkeypatch):

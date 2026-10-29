@@ -1,0 +1,19 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-LDG-02",
+  "swarm": "fixture",
+  "task": "task",
+  "other_task": "other",
+  "seat": "eng-1@fixture",
+  "other_seat": "eng-2@fixture",
+  "clock_ms": 1000,
+  "lease_ms": 100,
+  "project": "github.com/the-cloud-clockwork/agentihooks",
+  "credential": "Signed fixture launch grant bound by its registration; never a deployed credential",
+  "accepted_sequence": 5,
+  "out_of_order_sequence": 3,
+  "archive_watermark": 12,
+  "resources": {"cpu_millicores": 64000, "memory_bytes": 549755813888},
+  "forged_lease_deadline_ms": 99999999,
+  "cases": ["a", "b", "c"]
+}

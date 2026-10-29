@@ -1,0 +1,22 @@
+{
+  "version": 3,
+  "description": "Ghost detector — only kills processes with 30+ instances hanging for 1h+",
+  "threshold": 30,
+  "timeout": "1h",
+  "logMaxSizeMB": 10,
+  "excludes": [
+    "bash", "sh", "zsh", "fish",
+    "node", "npm", "npx",
+    "python3", "python",
+    "docker", "containerd-shim",
+    "sleep", "claude",
+    "systemd", "init", "(sd-pam)",
+    "dbus-daemon", "dbus-broker"
+  ],
+  "excludeCommands": [
+    "(^|[ /])agentihooks swarm tick( |$)",
+    " -m scripts[.]swarm[.]scheduled_tick( |$)",
+    "(^|[ /])agentihooks select-profile( |$)",
+    "(^|[ /])agentihooks swarm (tick-watch|prober|waker)( |$)"
+  ]
+}

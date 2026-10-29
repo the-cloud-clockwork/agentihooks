@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x\u01c1InputFramer\u01c1_consume__mutmut_15:fa35bf77dd8da77136199c190f786e8e715953b7e527f672178dbd39296f30ba": {
+    "reader": "standards-reader round three",
+    "reason": "hexadecimal escape spelling changes case; both literals contain byte 27."
+  }
+}

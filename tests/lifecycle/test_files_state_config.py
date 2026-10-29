@@ -2,7 +2,7 @@ import json
 import os
 import time
 
-from hooks.lifecycle.config import load_roots
+from hooks.lifecycle.config import _entries, load_roots
 from hooks.lifecycle.files import classify_files
 from hooks.lifecycle.model import Finding, Root
 from hooks.lifecycle.state import confirm
@@ -58,6 +58,15 @@ def test_boot_change_or_action_change_resets_confirmation(tmp_path):
     assert confirm([snapshot_item], replace(snap(uptime=30_000), boot_id="boot-2"), state)[0].due is False
 
 
+def test_immediate_finding_is_due_on_first_sight(tmp_path):
+    state = tmp_path / "gc-state.json"
+    now = Finding("/w/a", "r", "worktree", "remove", "x", immediate=True)
+    later = Finding("/w/b", "r", "worktree", "remove", "x")
+    assert [item.due for item in confirm([now, later], snap(uptime=10_000), state)] == [True, False]
+    assert [item.due for item in confirm([now, later], snap(uptime=13_599), state)] == [True, False]
+    assert [item.due for item in confirm([now, later], snap(uptime=13_600), state)] == [True, True]
+
+
 def test_roots_merge_by_id_and_drop_disabled_or_invalid(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     overlay = tmp_path / "lifecycle.json"
@@ -79,3 +88,18 @@ def test_roots_merge_by_id_and_drop_disabled_or_invalid(tmp_path, monkeypatch):
     assert "chat-state" not in roots and "bad" not in roots
     assert roots["extra"].kind == "ttl"
     assert roots["worktrees"].path == str(tmp_path / "dev" / "worktrees")
+
+
+def test_entries_skip_a_missing_file_a_directory_or_invalid_json(tmp_path):
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text("{not json")
+    valid = tmp_path / "valid.json"
+    roots = [{"id": "extra"}, {"path": "~/x"}, {"id": ""}, {"id": None}, "x", None, 1]
+    valid.write_text(json.dumps({"roots": roots}))
+    assert _entries(tmp_path / "missing.json") == []
+    assert _entries(tmp_path) == []
+    assert _entries(invalid) == []
+    for text in ("null", "[]", "{}"):
+        invalid.write_text(text)
+        assert _entries(invalid) == []
+    assert _entries(valid) == [{"id": "extra"}]

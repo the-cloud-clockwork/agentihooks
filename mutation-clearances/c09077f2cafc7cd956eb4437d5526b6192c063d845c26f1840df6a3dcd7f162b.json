@@ -1,0 +1,6 @@
+{
+  "hooks/context/quota_usage.py:hooks.context.quota_usage.x_record_rate_limits__mutmut_21:d626c9775fc79710d9f11a4b0f5796db621f6a35ffa249f4ed2bf9f8e59bdffe": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: json.dumps defaults to ensure_ascii=True, so the payload is pure ASCII and any ASCII-compatible default encoding writes identical bytes."
+  }
+}

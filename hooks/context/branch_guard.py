@@ -198,17 +198,10 @@ def _has_pr_signal(session_id: str) -> bool:
 
 # PR creation pattern (CI Manifesto §15). Blocks `gh pr create` in any form.
 # Other gh pr subcommands (list/view/status/comment/review/edit/merge) pass.
-_PR_CREATE_PATTERN = re.compile(r"\bgh\s+pr\s+create\b")
+_PR_CREATE_PATTERN = re.compile(r"\bgh\b[^|&;\n]*?\bpr\s+create\b")
 
-# PR base-branch enforcement (CI Manifesto §4/§5). main is the SNAPSHOT branch:
-# dev is the stable working branch, and a dev→main PR is the mechanism for
-# stamping a known-good snapshot of main. A PR into dev needs no signal; any
-# other base is operator-initiated (PR signal + per-session counter), and for
-# main/master/v1 bypass mode does not lift that. Direct push / commit / merge
-# to main remain HARD FLOOR — snapshots
-# reach main only through a PR. A bare `gh pr create` is still rejected so the
-# base is always explicit (no accidental default-branch PR).
-_PR_BASE_RE = re.compile(r"\bgh\s+pr\s+create\b[^|&;\n]*--base[\s=]+(\S+)")
+# CI alone promotes dev into protected branches.
+_PR_BASE_RE = re.compile(r"(?:^|\s)(?:--base[\s=]+|-B\s*)(\S+)")
 PROTECTED_PR_BASES = frozenset({"main", "master", "v1"})
 
 
@@ -310,6 +303,58 @@ def _command_lines(command: str) -> str:
     return "\n".join(lines)
 
 
+def _check_pr_creation(check_text: str, command: str, session_id: str) -> None:
+    if create := _PR_CREATE_PATTERN.search(check_text):
+        bases = _PR_BASE_RE.findall(check_text[create.end() :])
+        if not bases:
+            log(
+                "branch_guard: PR creation blocked (no explicit base — defaults to main)",
+                {"command": command[:200], "session_id": session_id},
+            )
+            raise BlockAction(
+                "BLOCKED: gh pr create needs an explicit --base.\n"
+                "A bare `gh pr create` targets the default branch implicitly.\n"
+                "Use --base dev for a worktree PR. CI alone opens promotion PRs."
+            )
+        base = bases[-1]
+        if base == "dev":
+            log("branch_guard: PR into dev allowed", {"session_id": session_id})
+            return
+        if base in PROTECTED_PR_BASES:
+            raise BlockAction(
+                f"BLOCKED: agent PR creation into '{base}' is forbidden. CI alone promotes dev into protected branches."
+            )
+        try:
+            from hooks.context.controls_toggle import is_controls_disabled as _ctl_off
+
+            _bypass_active = _ctl_off(session_id)
+        except Exception:
+            _bypass_active = False
+        if not _bypass_active and not _has_pr_signal(session_id):
+            log(
+                "branch_guard: PR creation blocked (no signal)",
+                {"command": command[:200], "base": base, "session_id": session_id},
+            )
+            raise BlockAction(
+                f"BLOCKED: agent PR creation into '{base}' is disabled (CI Manifesto §15).\n"
+                "PRs into dev need no signal; CI alone promotes into main, master and v1.\n"
+                "To unlock for this session, the operator includes a PR phrase in a message\n"
+                "(e.g. 'open a PR', 'create a PR', 'make a PR', 'pr please')."
+            )
+        count = _get_pr_counter(session_id)
+        if not _bypass_active and count >= _PR_SIGNAL_MAX_COUNT:
+            log(
+                "branch_guard: PR creation blocked (counter limit)",
+                {"count": count, "session_id": session_id},
+            )
+            raise BlockAction(
+                f"BLOCKED: PR creation limit reached ({_PR_SIGNAL_MAX_COUNT} PRs this session).\n"
+                "Include a PR phrase in your next message to re-authorize and reset the counter."
+            )
+        new_count = increment_pr_counter(session_id)
+        log("branch_guard: PR creation allowed", {"count": new_count, "base": base, "session_id": session_id})
+
+
 def check_branch_guard(payload: dict) -> None:
     """Raise BlockAction if the Bash command targets main/master, or creates a
     branch without an active branch-creation signal (§14).
@@ -352,12 +397,14 @@ def check_branch_guard(payload: dict) -> None:
             )
             raise BlockAction(f"BLOCKED: {message}")
 
+    from hooks.context.prepush_guard import check_prepush
+
+    check_prepush(payload)
+
     # Branch creation — default-deny unless operator signaled this turn (§14)
     session_id = payload.get("session_id", "")
     for pattern in _BRANCH_CREATE_PATTERNS:
-        if pattern.search(check_text):
-            if _has_branch_signal(session_id):
-                return
+        if pattern.search(check_text) and not _has_branch_signal(session_id):
             log(
                 "branch_guard: branch creation blocked",
                 {"command": command[:200], "pattern": pattern.pattern, "session_id": session_id},
@@ -369,55 +416,10 @@ def check_branch_guard(payload: dict) -> None:
                 "(e.g. 'new branch', 'create branch', 'branch allowed')."
             )
 
-    # PR creation (§15): --base dev is open to agents; main/master/v1 always need the
-    # operator's PR signal (bypass mode does not lift it); any other base needs the
-    # signal or bypass mode.
-    if _PR_CREATE_PATTERN.search(check_text):
-        base_match = _PR_BASE_RE.search(check_text)
-        if not base_match:
-            log(
-                "branch_guard: PR creation blocked (no explicit base — defaults to main)",
-                {"command": command[:200], "session_id": session_id},
-            )
-            raise BlockAction(
-                "BLOCKED: gh pr create needs an explicit --base.\n"
-                "A bare `gh pr create` targets the default branch implicitly.\n"
-                "Use --base main for a release PR, or --base dev for a feature PR."
-            )
-        base = base_match.group(1).strip("'\"")
-        if base == "dev":
-            log("branch_guard: PR into dev allowed", {"session_id": session_id})
-            return
-        protected = base in PROTECTED_PR_BASES
-        try:
-            from hooks.context.controls_toggle import is_controls_disabled as _ctl_off
+    from hooks.context.prod_lockdown import _strip_safe_content
 
-            _bypass_active = not protected and _ctl_off(session_id)
-        except Exception:
-            _bypass_active = False
-        if not _bypass_active and not _has_pr_signal(session_id):
-            log(
-                "branch_guard: PR creation blocked (no signal)",
-                {"command": command[:200], "base": base, "session_id": session_id},
-            )
-            raise BlockAction(
-                f"BLOCKED: agent PR creation into '{base}' is disabled (CI Manifesto §15).\n"
-                "PRs into dev need no signal; main, master and v1 are protected.\n"
-                "To unlock for this session, the operator includes a PR phrase in a message\n"
-                "(e.g. 'open a PR', 'create a PR', 'make a PR', 'pr please')."
-            )
-        count = _get_pr_counter(session_id)
-        if not _bypass_active and count >= _PR_SIGNAL_MAX_COUNT:
-            log(
-                "branch_guard: PR creation blocked (counter limit)",
-                {"count": count, "session_id": session_id},
-            )
-            raise BlockAction(
-                f"BLOCKED: PR creation limit reached ({_PR_SIGNAL_MAX_COUNT} PRs this session).\n"
-                "Include a PR phrase in your next message to re-authorize and reset the counter."
-            )
-        new_count = increment_pr_counter(session_id)
-        log("branch_guard: PR creation allowed", {"count": new_count, "base": base, "session_id": session_id})
+    for line in _strip_safe_content(command).splitlines():
+        _check_pr_creation(line, command, session_id)
 
 
 _COMMIT_PATTERN = re.compile(r"\bgit\s+commit\b")
@@ -428,7 +430,7 @@ def _resolve_cwd(command: str, payload_cwd: str) -> str:
     """Return the effective cwd — honors `cd <path> && ...` prefix in command."""
     m = _CD_PREFIX_PATTERN.match(command)
     if m:
-        path = m.group(1).strip('"').strip("'")
+        path = os.path.expanduser(os.path.expandvars(m.group(1).strip('"').strip("'")))
         if os.path.isdir(path):
             return path
     if payload_cwd and os.path.isdir(payload_cwd):

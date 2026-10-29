@@ -12,6 +12,11 @@ argument-hint: "[--dir PATH] [--name NAME] [--prompt-file PATH] [-- <claude flag
 
 # Init Agent
 
+Run it when the operator asks for it; no typed phrase and no guard gate it.
+
+A quota handoff's `init-agent --handoff` passes while the runtime's quota
+policy has the handoff due.
+
 `agentihooks init-agent` owns host detection, terminal quoting, OAuth
 account routing, and the start check. Never build a `herdr`, `wt.exe`,
 `osascript`, or terminal command by hand.

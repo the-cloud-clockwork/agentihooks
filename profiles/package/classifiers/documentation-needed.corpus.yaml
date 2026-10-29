@@ -1,0 +1,257 @@
+version: 1
+notes: Synthetic behavioral and threshold controls for the shared documentation policy.
+  These fixture answers do not measure model quality.
+cases:
+- name: new-command
+  state:
+    description: A new retry command has no documentation.
+    changes: Delivered change evidence
+    docs: []
+  expected:
+    needs_documentation: true
+    size: small
+  control: false
+  samples:
+  - source: fixture
+    latency_ms: 0
+    answers:
+      needed:
+        type: noul
+        noul: 0.95
+      covered:
+        type: noul
+        noul: 0.05
+      size:
+        type: choice
+        choice: small
+        confidence: 0.95
+  notes: Constructed deterministic replay case; answers are fixtures, not live model
+    measurements.
+- name: new-workflow
+  state:
+    description: A multi service retry workflow replaces an older workflow; the handbook
+      mentions only the old one.
+    changes: Delivered change evidence
+    docs: []
+  expected:
+    needs_documentation: true
+    size: large
+  control: false
+  samples:
+  - source: fixture
+    latency_ms: 0
+    answers:
+      needed:
+        type: noul
+        noul: 0.95
+      covered:
+        type: noul
+        noul: 0.1
+      size:
+        type: choice
+        choice: large
+        confidence: 0.95
+  notes: Constructed deterministic replay case; answers are fixtures, not live model
+    measurements.
+- name: covered-setting
+  state:
+    description: The delivered retry limit and its examples are already documented.
+    changes: Delivered change evidence
+    docs: []
+  expected:
+    needs_documentation: false
+    size: small
+  control: false
+  samples:
+  - source: fixture
+    latency_ms: 0
+    answers:
+      needed:
+        type: noul
+        noul: 0.95
+      covered:
+        type: noul
+        noul: 0.95
+      size:
+        type: choice
+        choice: small
+        confidence: 0.95
+  notes: Constructed deterministic replay case; answers are fixtures, not live model
+    measurements.
+- name: format-only
+  state:
+    description: The closing job reformatted files without changing behavior.
+    changes: Delivered change evidence
+    docs: []
+  expected:
+    needs_documentation: false
+    size: none
+  control: true
+  samples:
+  - source: fixture
+    latency_ms: 0
+    answers:
+      needed:
+        type: noul
+        noul: 0.05
+      covered:
+        type: noul
+        noul: 0.05
+      size:
+        type: choice
+        choice: none
+        confidence: 0.95
+  notes: Constructed deterministic replay case; answers are fixtures, not live model
+    measurements.
+- name: documentation-only
+  state:
+    description: The closing job added an explanatory page without changing behavior.
+    changes: Delivered change evidence
+    docs: []
+  expected:
+    needs_documentation: false
+    size: none
+  control: true
+  samples:
+  - source: fixture
+    latency_ms: 0
+    answers:
+      needed:
+        type: noul
+        noul: 0.05
+      covered:
+        type: noul
+        noul: 0.1
+      size:
+        type: choice
+        choice: none
+        confidence: 0.95
+  notes: Constructed deterministic replay case; answers are fixtures, not live model
+    measurements.
+- name: coverage-boundary
+  state:
+    description: The existing guide covers the delivered medium sized behavior.
+    changes: Delivered change evidence
+    docs: []
+  expected:
+    needs_documentation: false
+    size: medium
+  control: false
+  samples:
+  - source: fixture
+    latency_ms: 0
+    answers:
+      needed:
+        type: noul
+        noul: 0.95
+      covered:
+        type: noul
+        noul: 0.7
+      size:
+        type: choice
+        choice: medium
+        confidence: 0.95
+  notes: Constructed deterministic replay case; answers are fixtures, not live model
+    measurements.
+- name: need-boundary
+  state:
+    description: The closing job does not introduce behavior that needs new documentation.
+    changes: Delivered change evidence
+    docs: []
+  expected:
+    needs_documentation: false
+    size: none
+  control: true
+  samples:
+  - source: fixture
+    latency_ms: 0
+    answers:
+      needed:
+        type: noul
+        noul: 0.3
+      covered:
+        type: noul
+        noul: 0.1
+      size:
+        type: choice
+        choice: none
+        confidence: 0.95
+  notes: Constructed deterministic replay case; answers are fixtures, not live model
+    measurements.
+- name: affirmative-boundaries
+  state:
+    description: A new localized setting needs documentation and existing sources
+      do not cover it.
+    changes: Delivered change evidence
+    docs: []
+  expected:
+    needs_documentation: true
+    size: small
+  control: false
+  samples:
+  - source: fixture
+    latency_ms: 0
+    answers:
+      needed:
+        type: noul
+        noul: 0.7
+      covered:
+        type: noul
+        noul: 0.3
+      size:
+        type: choice
+        choice: small
+        confidence: 0.7
+  notes: Constructed deterministic replay case; answers are fixtures, not live model
+    measurements.
+- name: uncertain-need
+  state:
+    description: The evidence is insufficient to determine whether behavior changed.
+    changes: Delivered change evidence
+    docs: []
+  expected:
+    needs_documentation: null
+    size: medium
+  control: false
+  samples:
+  - source: fixture
+    latency_ms: 0
+    answers:
+      needed:
+        type: noul
+        noul: 0.5
+      covered:
+        type: noul
+        noul: 0.1
+      size:
+        type: choice
+        choice: medium
+        confidence: 0.95
+  notes: Constructed deterministic replay case; answers are fixtures, not live model
+    measurements.
+- name: uncertain-size
+  state:
+    description: The change needs documentation but the classifier is uncertain about
+      its impact.
+    changes: Delivered change evidence
+    docs: []
+  expected:
+    needs_documentation: null
+    size: medium
+  control: false
+  samples:
+  - source: fixture
+    latency_ms: 0
+    answers:
+      needed:
+        type: noul
+        noul: 0.95
+      covered:
+        type: noul
+        noul: 0.1
+      size:
+        type: choice
+        choice: medium
+        confidence: 0.4
+  notes: Constructed deterministic replay case; answers are fixtures, not live model
+    measurements.

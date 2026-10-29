@@ -33,6 +33,7 @@ def test_snapshot_pushes_wip_with_skip_ci_and_skips_big_files(repo, monkeypatch)
     files = git(repo.origin, "ls-tree", "-r", "--name-only", f"refs/heads/{ref}").split()
     assert "notes.txt" in files and "big.bin" not in files
     assert git(repo.origin, "show", f"refs/heads/{ref}:README") == "changed"
+    assert git(repo.primary, "for-each-ref", "refs/heads/wip") == ""
     assert git(path, "status", "--porcelain")
 
 
@@ -79,6 +80,19 @@ def test_enforce_acts_only_on_the_second_agreeing_sweep(repo, tmp_path):
     assert "refs/heads/wip/primary/dirty-" in remote_refs(repo)
 
 
+def test_departed_owner_worktree_is_removed_on_the_first_sweep(repo, tmp_path):
+    left = repo.worktree("left")
+    held = repo.worktree("held")
+    add_holder(left, "worktree", Holder("sess-gone", 4242, 77, "boot-1"), 0.0)
+    add_holder(held, "worktree", Holder("", 5151, 9, "boot-1"), 0.0)
+    age(left, 60)
+    age(held, 60)
+    view = snap(uptime=10_000, table={5151: process(5151, start=9)})
+    report = sweep([repo.root()], view, tmp_path / "state", act=True, fresh=lambda: view)
+    assert outcomes(report) == {"left": "removed", "held": ""}
+    assert not left.exists() and held.exists()
+
+
 def test_failed_push_keeps_the_worktree(repo, tmp_path):
     dirty = repo.worktree("dirty")
     (dirty / "work.txt").write_text("unsaved\n")
@@ -87,6 +101,38 @@ def test_failed_push_keeps_the_worktree(repo, tmp_path):
     _first, second = run_twice(repo, tmp_path / "state")
     assert outcomes(second)["dirty"].startswith("failed: git push")
     assert (dirty / "work.txt").exists()
+
+
+def test_scratch_repository_push_failure_removes_the_worktree(repo, tmp_path):
+    scratch = Root("scratchpad", str(tmp_path), "scratch")
+    fixture = repo.worktree("fixture", base=tmp_path / "group" / "task")
+    (fixture / "work.txt").write_text("unsaved\n")
+    age(fixture, 25 * HOUR)
+    repo.origin.rename(repo.origin.with_name("moved.git"))
+    home = tmp_path / "state"
+    sweep([scratch], snap(uptime=10_000), home, act=True, fresh=lambda: snap(uptime=10_000))
+    report = sweep([scratch], snap(uptime=14_000), home, act=True, fresh=lambda: snap(uptime=14_000))
+    outcome = outcomes(report)["fixture"]
+    [ref] = git(repo.primary, "for-each-ref", "--format=%(refname:short)", "refs/heads/wip").split()
+    assert ref.startswith("wip/primary/fixture-")
+    assert outcome.startswith("kept a local wip/ branch, push failed (git push: ")
+    assert outcome.endswith("); removed")
+    assert git(repo.primary, "show", f"{ref}:work.txt") == "unsaved"
+    assert not fixture.exists()
+
+
+def test_scratch_repository_snapshot_is_pushed_when_origin_answers(repo, tmp_path):
+    scratch = Root("scratchpad", str(tmp_path), "scratch")
+    fixture = repo.worktree("fixture", base=tmp_path / "group" / "task")
+    (fixture / "work.txt").write_text("unsaved\n")
+    age(fixture, 25 * HOUR)
+    home = tmp_path / "state"
+    sweep([scratch], snap(uptime=10_000), home, act=True, fresh=lambda: snap(uptime=10_000))
+    report = sweep([scratch], snap(uptime=14_000), home, act=True, fresh=lambda: snap(uptime=14_000))
+    [ref] = remote_refs(repo).split()
+    assert outcomes(report)["fixture"] == f"pushed {ref.removeprefix('refs/heads/')}; removed"
+    assert git(repo.origin, "show", f"{ref}:work.txt") == "unsaved"
+    assert not fixture.exists()
 
 
 def test_enforce_rechecks_safety_right_before_acting(repo, tmp_path):

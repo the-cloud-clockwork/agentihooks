@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_apply__mutmut_56:0ce6b59e7ddf0d6865ff5521d8b82885be132276bdf1246e0860f81bbc2f4357": {
+    "reader": "standards_reader",
+    "reason": "Passes copy_state None instead of False. Every apply_ops implementation reads copy_state only by truthiness: the SQLite repository returns the stored state when it is falsy and the publishing repository forwards copy_state False when it is falsy, so None takes the same branch with the same output."
+  }
+}

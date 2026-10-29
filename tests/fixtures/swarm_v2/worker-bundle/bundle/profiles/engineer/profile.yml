@@ -1,0 +1,3 @@
+name: engineer
+extends: [anton-base, package:engineer]
+description: "Fixture bundle engineer"

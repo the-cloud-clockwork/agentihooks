@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x_matching__mutmut_22:18208ec61da4cc7c671b90fb8b18d7d6e53e8f35b7b708ab9c18ae194ac6c55a": {
+    "reader": "Standards",
+    "reason": "Only SELECT, FROM, WHERE and AND keyword casing changes; SQLite preserves the substring predicate, bound values and selected words."
+  }
+}

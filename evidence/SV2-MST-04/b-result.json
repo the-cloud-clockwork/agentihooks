@@ -1,0 +1,31 @@
+{
+  "case": "T-SV2-MST-04-B",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-MST-04-B",
+    "evidence_class": "fakeredis swarm store, seats and masters channel; a temporary ledger folder written through the ledger write path with the master fence; no live swarm or ledger server",
+    "input_sha256": "a11c82985cdf497aa9f0644d8381ed5e34b2cf4f3c2145206aa6e262ba70ad96",
+    "observed": {
+      "answers": [],
+      "cross": {},
+      "deciders": {},
+      "followup_done": false,
+      "operator_write_kept": true,
+      "posts": [],
+      "refusals": 3,
+      "refused": {
+        "answer": [
+          "questions/q1 belongs to master@race-2026-01-01, so master@abcdef-0009 cannot answer it"
+        ],
+        "decide": [
+          "followups/f1 belongs to master@race-2026-01-01, so master@abcdef-0009 cannot decide it"
+        ],
+        "set_task": [
+          "tasks/t1 belongs to master@race-2026-01-01, so master@abcdef-0009 cannot set it"
+        ]
+      },
+      "t1_description": ""
+    },
+    "state": "passed"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1Transaction\u01c1prepare_fence__mutmut_46:1d323f4a7cde6e502b593f90972d5fec5ee5ef7c894b83422c2c5a7af9e157db": {
+    "reader": "Standards",
+    "reason": "SQLite SQL keywords, identifiers, column names and trigger names are case insensitive; the message literals are unchanged and nothing reads the stored trigger text."
+  }
+}

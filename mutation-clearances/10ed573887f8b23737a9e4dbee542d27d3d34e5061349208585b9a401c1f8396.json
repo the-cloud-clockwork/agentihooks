@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/publish.py:scripts.swarm.publish.x_tracked__mutmut_17:da6b77156fedc1dd2740a95dec0f22b023bdf276edcad11d3bbf5a409152da10": {
+    "reader": "standards_reader",
+    "reason": "Git parses the upstream suffix case insensitively: rev-parse --symbolic-full-name with @{UPSTREAM} prints the same tracked ref as @{upstream} on a tracking branch, and the same fatal error with the same exit status without one, so tracked returns the same branch."
+  }
+}

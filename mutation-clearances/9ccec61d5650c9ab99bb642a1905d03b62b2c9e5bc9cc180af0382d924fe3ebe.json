@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_read__mutmut_3:07a61a271a44dadc3bb445f942557024c89726addbb8fe9e6239a95f46526a39": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "The listing JSON read with encoding=None uses the locale, which is UTF-8 in CI and the worker image per the precedent, so decoding is identical; the listings are JSON from kubectl and aws that decode the same under UTF-8."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/scheduler/process_timer.py:scripts.scheduler.process_timer.x_async_wait__mutmut_12:bb8fcb7aa048829069cad2b3a36045a44c045c4939f5f35575ad55003c4e2c52": {
+    "reader": "/root/standards_reader",
+    "reason": "Both marker variants only unblock BLPOP; Timer.wait discards their contents."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/pane_evidence.py:scripts.swarm.pane_evidence.x__write__mutmut_3:354a988898889f94da604c2ab58de20cfe77470587586e4f2634101fc1591b4f": {
+    "reader": "Standards",
+    "reason": "Standards reader ruled equivalent: NamedTemporaryFile delete=False and delete=None are both falsy and disable automatic deletion. Verified against complete preflight 39082836472."
+  }
+}

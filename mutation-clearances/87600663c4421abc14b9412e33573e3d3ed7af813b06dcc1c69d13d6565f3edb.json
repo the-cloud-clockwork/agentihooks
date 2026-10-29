@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x__bin_stop__mutmut_11:6ad626de7710d429daa0d80870807c3f39834ed628e297ca5b322a3eef4776f8": {
+    "reader": "standards-reader",
+    "reason": "The ledger-binned marker is consumed only through Redis key existence and deletion. Values 1 and 2 produce identical behavior."
+  }
+}

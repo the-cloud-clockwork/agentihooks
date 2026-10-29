@@ -1,0 +1,11 @@
+{
+  "classified_within_grace": true,
+  "node": "anton-oci-6ypnuv65ry4q",
+  "outage_seconds": 90,
+  "pool": "oci-research",
+  "recovered": true,
+  "registry_applied": "2026-10-16T20:48:47.382347Z",
+  "registry_ready": true,
+  "scheduled_seen": "2026-10-16T20:47:15.811538Z",
+  "started_event": true
+}

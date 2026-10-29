@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/codex.py:scripts.inbox.codex.xǁPumpǁ__init____mutmut_1:ee631aa0779288ddd64c518dd16df75836b778a293855880e0e552dbede17739": {
+    "reader": "standards_reader",
+    "reason": "Pump.leased is written in __init__ and set True in start after own succeeds; its only read is the truthiness test in _pause, where None and False behave identically. No other reader exists, so no output changes."
+  }
+}

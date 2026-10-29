@@ -25,7 +25,7 @@ def admin_dir(worktree: Path) -> Path | None:
 def lease_path(path: Path, kind: str) -> Path | None:
     if kind == "scratch":
         return path / SCRATCH_LEASE
-    admin = admin_dir(path)
+    admin = admin_dir(path) if kind in ("worktree", "ephemeral") else None
     return admin / WORKTREE_LEASE if admin else None
 
 

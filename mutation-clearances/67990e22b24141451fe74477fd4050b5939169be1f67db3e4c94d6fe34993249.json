@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_swarm.py:scripts.swarm.metrics_swarm.x__log_batch__mutmut_14:28fdff2eb1f5cdbe5187a54ee100b8ea6e03d6f8808d22a195fa209df8a8fd5e": {
+    "reader": "standards_reader",
+    "reason": "Only SQL keyword letter case changes. SQLite parses the same CREATE TABLE statement; identical source and position columns and constraints are created."
+  }
+}

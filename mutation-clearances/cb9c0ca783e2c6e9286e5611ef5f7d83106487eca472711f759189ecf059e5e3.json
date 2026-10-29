@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x_pump__mutmut_28:001d41f74e245048f38aa32c06f2daed5e920b752bcc9350967f514e22fa35f6": {
+    "reader": "standards-survivor successor ruling",
+    "reason": "Both empty bytes and None remove the master reader and bypass forwarding after EIO; subsequent reads overwrite data, and other paths remain unchanged."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/store.py:scripts.swarm.store.xǁRedisStoreǁhandoff_tasks__mutmut_17:860032fb4e4d3c02fe6d15799b6ae1501682f66762c2b672bae1009ac8819f41": {
+    "reader": "Standards",
+    "reason": "Redis MGET returns one value per requested key, including nil for missing keys. Both zip inputs therefore have equal length; omitting strict cannot change the returned handoff task set."
+  }
+}

@@ -1,0 +1,4 @@
+rollout: rollout-2026-10-16T17-23-05-01a1454f-45f4-7111-a07c-c247c6be6587.jsonl
+wait --inbox occurrences: 4
+swarm delivery occurrences: 4
+AGENTS.md wait --inbox occurrences: 7

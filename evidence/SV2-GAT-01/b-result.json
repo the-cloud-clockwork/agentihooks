@@ -1,0 +1,53 @@
+{
+  "case": "T-SV2-GAT-01-B",
+  "evidence_class": "mocked: in-process environments and operator owned files in a temporary home stand in for a launched session, its hooks and the operator's routes and swarm binding files; no brain server, network call or Pod runs",
+  "input_sha256": {
+    "brain-routes.json": "487ae92e28708e9196297f4dc95d9b2178be5fd04514ce7bb157f2870379c479"
+  },
+  "state": "passed",
+  "observed": {
+    "repository_override": {
+      "receipt": {
+        "status": "refused",
+        "reason": "the session BRAIN_URL is not an authorized brain origin"
+      },
+      "session_brain_variables": {
+        "BRAIN_URL": null,
+        "BRAIN_HTTP_TOKEN": null,
+        "KB_ROUTER_TOKEN": null,
+        "BRAIN_ENABLED": "false"
+      }
+    },
+    "swarm_repository_override": {
+      "receipt": {
+        "status": "refused",
+        "reason": "the session BRAIN_URL is not an authorized brain origin"
+      },
+      "session_brain_variables": {
+        "BRAIN_URL": null,
+        "BRAIN_HTTP_TOKEN": null,
+        "KB_ROUTER_TOKEN": null,
+        "BRAIN_ENABLED": "false"
+      }
+    },
+    "unknown_route": {
+      "status": "refused",
+      "reason": "no authorized brain route named attacker"
+    },
+    "repository_checkout_routes_file": {
+      "status": "refused",
+      "reason": "the brain routes file is not an operator owned file"
+    },
+    "corrected_request": {
+      "status": "routed",
+      "route": "personal",
+      "origin": "http://localhost:8104"
+    },
+    "protected_state_unchanged": true,
+    "brain_route_resolution_failures": {
+      "attacker": 1,
+      "default": 2,
+      "swarm": 1
+    }
+  }
+}

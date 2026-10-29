@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_cache.py:scripts.doctor.ci_cache.x__trim__mutmut_2:8079c3e535316372ab64fa7eb9af8c0c5683c1ffcb9e091cfd57ad67cf0a55fa": {
+    "reader": "Standards",
+    "reason": "redis-py stores transaction as given and only tests its truthiness, and None and False are both falsy, so the pipeline runs the same way."
+  }
+}

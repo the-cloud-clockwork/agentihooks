@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x\u01c1InputFramer\u01c1_consume__mutmut_10:fd273e187f6772ebd91afd902c5d1bda278629e5c9234250cc5740f9712c7ab8": {
+    "reader": "standards-reader round three",
+    "reason": "approved; comparison literals have identical bytes."
+  }
+}

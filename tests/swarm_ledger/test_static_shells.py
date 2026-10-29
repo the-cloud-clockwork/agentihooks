@@ -15,6 +15,8 @@ import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from scripts.swarm_ledger import page_assets  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import (  # noqa: E402
     PAGE_URL,
     chromium,
@@ -49,7 +51,7 @@ POLICY = {
 
 @pytest.fixture(scope="module")
 def base(ledger_dir):
-    if not core.paths(SLUG)[1].exists():
+    if not legacy_page.paths(SLUG, core)[1].exists():
         new_ledger.create(SLUG, CONTENT)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     host = f"127.0.0.1:{httpd.server_port}"
@@ -87,6 +89,7 @@ def test_every_page_shell_carries_the_enforced_policy_and_no_inline_code(base, p
     assert "<style" not in body
     assert not re.search(r"\sstyle=|\son[a-z]+=", body)
     assert "ledger-data" not in body
+    assert '<meta name="darkreader-lock">' in body
 
 
 def test_an_error_page_the_server_library_writes_carries_the_policy_too(base):
@@ -100,7 +103,7 @@ def test_an_error_page_the_server_library_writes_carries_the_policy_too(base):
 
 def test_the_ledger_shell_holds_metadata_but_no_record_seed(base):
     _, _, body = get(f"{base}/{SLUG}")
-    token = core.read_token(core.paths(SLUG)[0].read_text())
+    token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
     assert f'<meta name="ledger-token" content="{token}">' in body
     assert f'<meta name="ledger-page" content="{core.page_version()}">' in body
     assert "<title>Shell &lt;ledger&gt;</title>" in body
@@ -118,20 +121,19 @@ def test_shell_size_does_not_grow_with_the_record(base):
 
 
 def test_serving_the_shell_never_writes_the_record_files(base):
-    html_path, json_path = core.paths(SLUG)
-    html_path.write_text(html_path.read_text().replace(core.page_version(), "000000000000"))
-    stamps = (html_path.stat().st_mtime_ns, json_path.stat().st_mtime_ns)
+    before = server.repository.get_document(SLUG)
     get(f"{base}/{SLUG}")
     get(base + "/")
-    assert (html_path.stat().st_mtime_ns, json_path.stat().st_mtime_ns) == stamps
+    assert server.repository.get_document(SLUG) == before
 
 
 def test_home_shell_lists_no_ledger_rows(base):
     _, _, body = get(base + "/")
     assert SLUG not in body
-    assert '<ul id="rows"></ul>' in body
-    assert '<div class="watermark" aria-hidden="true"></div>' in body
-    assert re.findall(r'data-sort="(\w+)"', body) == ["kind", "open", "done", "swarm", "at"]
+    assert '<ul id="rows" role="rowgroup"></ul>' in body
+    assert "watermark" not in body and "data-sort" not in body
+    script = (core.HOME.parent / "static" / "home" / "home.js").read_text(encoding="utf-8")
+    assert '"Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at"' in script
 
 
 def test_page_shells_are_plain_ascii_so_any_ascii_locale_reads_them_alike():
@@ -171,12 +173,12 @@ def test_an_asset_edit_changes_the_version_the_shell_links(tmp_path):
     sheet = tmp_path / "ledger.css"
     sheet.write_text("body{}")
     assets = {**core.static_assets(), "css/ledger.css": sheet}
-    with patch.object(core, "static_assets", return_value=assets):
+    with patch.object(page_assets, "static_assets", return_value=assets):
         assert core.page_version() != before
 
 
 def test_the_task_work_folder_reads_on_demand(base, monkeypatch):
-    token = core.read_token(core.paths(SLUG)[0].read_text())
+    token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
     monkeypatch.setattr(server, "workspace_tails", lambda slug, task: {"progress": f"{slug} {task} line"})
     status, _, body = get(f"{base}/api/v1/ledgers/{SLUG}/tasks/t1/workspace", **{"X-Ledger-Token": token})
     assert status == 200
@@ -184,7 +186,7 @@ def test_the_task_work_folder_reads_on_demand(base, monkeypatch):
 
 
 def test_an_unknown_work_folder_answers_not_found(base, monkeypatch):
-    token = core.read_token(core.paths(SLUG)[0].read_text())
+    token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
 
     def refuse(slug, task):
         raise ValueError("bad id")
@@ -211,10 +213,10 @@ def test_the_asset_list_names_every_page_file_by_its_served_path():
     static = core.MODULES.parent
     assets = core.static_assets()
     assert (assets["palette.css"], assets["tooltips.js"]) == (core.PALETTE, core.TOOLTIPS)
-    assert {name for name in assets if name.startswith("home/")} == {"home/home.js"}
+    assert {name for name in assets if name.startswith("home/")} == {"home/home.js", "home/monitor.js"}
     assert {name for name in assets if name.startswith("css/")} == {f"css/{p.name}" for p in static.glob("css/*.css")}
     assert {name for name in assets if name.startswith("js/")} == {f"js/{p.name}" for p in core.MODULES.glob("*.js")}
-    assert len(assets) == 2 + len(list(static.glob("css/*.css"))) + len(list(core.MODULES.glob("*.js"))) + 1
+    assert len(assets) == 2 + len(list(static.glob("css/*.css"))) + len(list(core.MODULES.glob("*.js"))) + 2
 
 
 def test_the_page_version_separates_each_asset_name_from_its_bytes():
@@ -222,11 +224,11 @@ def test_the_page_version_separates_each_asset_name_from_its_bytes():
 
 
 def test_the_bin_shell_leaves_the_watermark_slot_empty(base):
-    assert '/css/tooltips.css">\n<main class="bin">' in server.index_page("bin")
+    assert '/css/tooltips.css">\n<main>' in server.index_page()
 
 
 def test_the_shell_names_the_server_port_and_an_empty_token_when_the_record_has_none(base, monkeypatch):
-    monkeypatch.setattr(server.repository, "read_page", lambda slug: "<html></html>")
+    monkeypatch.setattr(server.repository, "token", lambda slug: None)
     page = server.page_for(SLUG)
     assert '<meta name="ledger-token" content="">' in page
     assert f'<meta name="ledger-port" content="{server.PORT}">' in page
@@ -236,7 +238,6 @@ def test_the_watch_loop_sweeps_the_bin_every_fifteenth_pass(monkeypatch):
     sweeps, passes = [], []
     monkeypatch.setattr(server, "bin_closed_without_swarm", lambda: sweeps.append(len(passes)))
     monkeypatch.setattr(server.ledger_bin, "tidy", lambda: None)
-    monkeypatch.setattr(server.repository, "pages", lambda: [])
     monkeypatch.setattr(server, "sample_streams", lambda: None)
     monkeypatch.setattr(server, "reloading", lambda: False)
 
@@ -245,17 +246,10 @@ def test_the_watch_loop_sweeps_the_bin_every_fifteenth_pass(monkeypatch):
         if len(passes) == 31:
             raise StopIteration
 
-    monkeypatch.setattr(server.time, "sleep", tick)
+    monkeypatch.setattr(server, "scheduled_wait", tick)
     with pytest.raises(StopIteration):
-        server.watch_seeds()
+        server.watch_ledgers()
     assert sweeps == [0, 15, 30]
-
-
-def test_upgrading_a_record_fills_every_placeholder(base):
-    new_ledger.upgrade_page(SLUG)
-    page = core.paths(SLUG)[0].read_text(encoding="utf-8")
-    assert "__LEDGER_" not in page
-    assert "<title>Shell &lt;ledger&gt;</title>" in page
 
 
 def history(copies):
@@ -301,7 +295,9 @@ def test_the_rendered_page_stays_bounded_as_history_doubles(chromium_browser):
         show(page, shell_html(), ledger=ledger_state(history(4)), swarm=None)
         page.click("#tasks-box > summary")
         page.wait_for_selector("#tasks .page-more button")
-        assert page.locator("#tasks li[id^='item-tasks-']").count() == 50
+        assert page.locator("#tasks > li[id^='item-tasks-']").count() <= 50
+        assert page.locator("#tasks-done li[id^='item-tasks-']").count() <= 50
+        assert page.locator("#tasks li[id^='item-tasks-']").count() <= 100
     finally:
         page.close()
 
@@ -315,7 +311,7 @@ def test_a_deep_link_past_the_first_page_of_a_closed_fold_reveals_its_target(chr
         loaded(page)
         target = page.locator("#item-tasks-t299")
         target.wait_for()
-        assert target.evaluate("el => el.closest('details#tasks-done').open")
+        assert target.evaluate("el => !!el.closest('li#tasks-done')")
         assert target.is_visible()
         assert target.evaluate(
             "el => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; }"

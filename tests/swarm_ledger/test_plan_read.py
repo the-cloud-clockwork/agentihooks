@@ -1,0 +1,509 @@
+import io
+import json
+import re
+
+import pytest
+
+from scripts.swarm_ledger import ledger_artifacts, plan_read
+from scripts.swarm_ledger import ledger_core as core
+from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
+from tests.swarm_ledger import legacy_page
+
+PLAN = "".join(f"line {n}\n" for n in range(1, 41))
+
+
+def numbered(first, last):
+    return "".join(f"line {n}\n" for n in range(first, last + 1))
+
+
+@pytest.fixture
+def slug(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    file = ledger_artifacts.store("chunks", "plan.md", PLAN.encode())
+    ref = {"artifact": f"http://127.0.0.1:8765/artifacts/chunks/{file['id']}", "lines": "12-35"}
+    doc = {
+        "artifacts": [{"plan": True, "file": file}],
+        "phases": [{"id": "p1", "plan_ref": ref}, {"id": "p2"}],
+        "tasks": [
+            {"id": "mid", "phase": "p1", "plan_lines": "15-17", "description": "Do not print this description."},
+            {"id": "top", "phase": "p1", "plan_lines": "2-3"},
+            {
+                "id": "bare",
+                "phase": "p1",
+                "description": "Keep engineers moving.\n\nUse this whole task specification.",
+            },
+            {"id": "loose", "phase": "p2", "plan_lines": "4-5"},
+            {"id": "empty", "phase": "p2"},
+        ],
+    }
+    SQLiteLedgerRepository(tmp_path / DATABASE).import_document("chunks", {**doc, "_meta": {"rev": 1}})
+    return "chunks"
+
+
+def run(capsys, argv, environ):
+    assert plan_read.main(["read", *argv], environ) == 0
+    return capsys.readouterr().out
+
+
+def refusal(argv, environ):
+    with pytest.raises(SystemExit) as caught:
+        plan_read.main(["read", *argv], environ)
+    return caught.value.code
+
+
+def test_task_chunk_carries_ten_lines_of_margin_each_side(slug, capsys):
+    assert run(capsys, ["--task", "mid"], {"AGENTIHOOKS_SWARM": slug}) == numbered(5, 27)
+
+
+def test_task_without_plan_lines_prints_its_description_as_the_whole_spec(slug, capsys):
+    assert run(capsys, ["--task", "bare"], {"AGENTIHOOKS_SWARM": slug}) == (
+        "This task has no plan lines; its description is the whole spec.\n\n"
+        "Keep engineers moving.\n\nUse this whole task specification.\n"
+    )
+
+
+def test_task_without_a_description_prints_an_empty_spec(slug, capsys):
+    assert run(capsys, ["--task", "empty"], {"AGENTIHOOKS_SWARM": slug}) == (
+        "This task has no plan lines; its description is the whole spec.\n\n\n"
+    )
+
+
+def test_margin_is_clamped_to_the_plan_start(slug, capsys):
+    assert run(capsys, ["--task", "top"], {"AGENTIHOOKS_SWARM": slug}) == numbered(1, 13)
+
+
+def test_task_and_swarm_default_to_the_session(slug, capsys):
+    environ = {"AGENTIHOOKS_SWARM": slug, "AGENTIHOOKS_SWARM_TASK": "mid"}
+    assert run(capsys, [], environ) == numbered(5, 27)
+
+
+def test_slug_option_wins_over_the_session(slug, capsys):
+    environ = {"AGENTIHOOKS_SWARM": "other", "AGENTIHOOKS_SWARM_TASK": "mid"}
+    assert run(capsys, ["--slug", slug], environ) == numbered(5, 27)
+
+
+def test_phase_option_prints_the_phase_range_clamped_to_the_plan_end(slug, capsys):
+    environ = {"AGENTIHOOKS_SWARM": slug, "AGENTIHOOKS_SWARM_TASK": "mid"}
+    assert run(capsys, ["--phase", "p1"], environ) == numbered(2, 40)
+
+
+def test_chunk_keeps_the_plan_lines_verbatim():
+    assert plan_read.chunk("a\nb\nc\n", "2-2") == "a\nb\nc\n"
+
+
+def test_exact_is_the_range_without_margin_and_refuses_an_empty_one(slug):
+    doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(slug, "phases", "artifacts")
+    task = {"phase": doc["phases"][0]["id"], "plan_lines": "15-17"}
+    assert plan_read.exact(doc, task) == numbered(15, 17)
+    with pytest.raises(ValueError) as caught:
+        plan_read.exact(doc, {**task, "plan_lines": "45-46"})
+    assert str(caught.value) == "plan lines 45-46 hold no text"
+
+
+ISSUE = "https://github.com/o/r/issues/7"
+
+
+def test_exact_reads_a_swarm_v2_package_slice_from_the_package_plan(monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    monkeypatch.setattr(plan_packages, "text", lambda: "".join(f"row {n}\n" for n in range(1, 30)))
+    task = {"phase": "p9", "plan_lines": "3-4", "plan_slice": "SV2-CTL-04", "plan_url": ISSUE}
+    assert plan_read.exact({"phases": [{"id": "p9"}]}, task) == "row 3\nrow 4\n"
+
+
+def test_exact_prefers_the_phase_range_over_a_package_slice(slug, monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    monkeypatch.setattr(plan_packages, "text", lambda: "wrong\n" * 50)
+    doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(slug, "phases", "artifacts")
+    task = {"phase": doc["phases"][0]["id"], "plan_lines": "15-17", "plan_slice": "SV2-CTL-04", "plan_url": ISSUE}
+    assert plan_read.exact(doc, task) == numbered(15, 17)
+
+
+def test_exact_reads_the_task_plan_url_when_the_phase_has_no_range(slug):
+    doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(slug, "phases", "artifacts")
+    artifact = doc["phases"][0].pop("plan_ref")["artifact"]
+    task = {"phase": doc["phases"][0]["id"], "plan_lines": "15-17", "plan_url": artifact}
+    assert plan_read.exact(doc, task) == numbered(15, 17)
+
+
+@pytest.mark.parametrize(
+    "task",
+    [{"phase": "nope", "plan_lines": "1-2"}, {"phase": "p9", "plan_lines": "1-2", "plan_url": ISSUE}],
+)
+def test_exact_refuses_a_slice_without_a_readable_plan(task):
+    with pytest.raises(ValueError):
+        plan_read.exact({"phases": [{"id": "p9"}], "artifacts": []}, task)
+
+
+def test_numbered_keeps_the_plan_line_numbers_and_skips_blank_rows():
+    assert plan_read.numbered(" a \n\n  \nd\n", "7-10") == [(7, "a"), (10, "d")]
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["--task", "gone"], "no task gone in ledger chunks"),
+        (["--task", "loose"], "phase p2 has no plan range"),
+        (["--phase", "p2"], "phase p2 has no plan range"),
+        (["--phase", "p9"], "no phase p9 in ledger chunks"),
+        ([], "plan read needs a task: pass --task or run it inside a swarm task session"),
+    ],
+)
+def test_refusals_are_plain(slug, argv, message):
+    assert refusal(argv, {"AGENTIHOOKS_SWARM": slug}) == message
+
+
+def test_refused_without_a_swarm(slug):
+    assert refusal(["--task", "mid"], {}) == "plan read needs a swarm: pass --slug or run it inside a swarm session"
+
+
+def test_refused_for_a_missing_ledger(slug):
+    assert refusal(["--task", "mid"], {"AGENTIHOOKS_SWARM": "nowhere"}) == "no ledger nowhere"
+
+
+def test_refused_for_an_invalid_slug_or_a_ledger_file_that_is_not_stored(slug):
+    assert refusal(["--task", "mid", "--slug", "../x"], {}) == "no ledger ../x"
+    legacy_page.paths("filed", core)[1].write_text(json.dumps({"tasks": [{"id": "mid"}]}))
+    assert refusal(["--task", "mid"], {"AGENTIHOOKS_SWARM": "filed"}) == "no ledger filed"
+
+
+def test_pointer_names_the_command_only_for_a_sliced_task():
+    assert plan_read.pointer({"plan_lines": "15-17", "phase": "p1"}) == (
+        "Plan: run agentihooks plan read to read only your slice of the plan, lines 15-17 "
+        "with ten lines of margin each side; add --phase p1 for the whole phase."
+    )
+    assert plan_read.pointer({"plan_url": "https://example.com/plan"}) == ""
+
+
+def test_installer_delegates_plan_deps_and_quota():
+    import scripts.agents_quota
+    import scripts.deps_preflight
+    from scripts.cli_delegates import delegated_cli
+
+    assert delegated_cli(["plan", "read"]) is plan_read.main
+    assert delegated_cli(["deps", "check"]) is scripts.deps_preflight.main
+    assert delegated_cli(["quota"]) is scripts.agents_quota.main
+
+
+def test_installer_help_lists_the_plan_command(monkeypatch, capsys):
+    import sys
+
+    from scripts import install
+
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(sys, "argv", ["agentihooks", "--help"])
+    with pytest.raises(SystemExit):
+        install.main()
+    help_text = capsys.readouterr().out
+    assert re.search(r"^ +plan +Read only your task's plan chunk: read \[--task ID\] \[--phase ID\]$", help_text, re.M)
+
+
+def test_help_names_the_command_and_its_options(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        plan_read.main(["--help"], {})
+    top = capsys.readouterr().out
+    assert top.startswith("usage: agentihooks plan [-h] {read} ...\n")
+    assert "agentihooks plan read: the task's plan chunk with ten lines of margin on each side." in top
+    assert re.search(r"^ +read +print the task's plan chunk with ten lines of margin on each side$", top, re.M)
+    with pytest.raises(SystemExit):
+        plan_read.main(["read", "--help"], {})
+    reader = capsys.readouterr().out
+    for line in (
+        r"--task TASK +task id; defaults to AGENTIHOOKS_SWARM_TASK",
+        r"--phase PHASE +print this phase's whole plan range instead",
+        r"--slug SLUG +ledger slug; defaults to AGENTIHOOKS_SWARM",
+    ):
+        assert re.search(rf"^ +{line}$", reader, re.M)
+
+
+def test_a_subcommand_is_required(capsys):
+    with pytest.raises(SystemExit) as caught:
+        plan_read.main([], {})
+    assert caught.value.code == 2
+    assert capsys.readouterr().err.endswith("error: the following arguments are required: command\n")
+
+
+def test_read_refuses_a_ledger_without_tasks_or_phases():
+    with pytest.raises(ValueError) as task:
+        plan_read.read({}, "bare", "mid", None)
+    assert str(task.value) == "no task mid in ledger bare"
+    with pytest.raises(ValueError) as phase:
+        plan_read.read({}, "bare", None, "p1")
+    assert str(phase.value) == "no phase p1 in ledger bare"
+
+
+def test_ledger_modules_load_with_the_ledger_folder_first_on_the_path(monkeypatch):
+    import sys
+
+    from scripts.swarm_ledger import HERE
+
+    monkeypatch.setattr(sys, "path", [entry for entry in sys.path if entry != str(HERE)])
+    assert plan_read._ledger("plan_ranges").__name__ == "scripts.swarm_ledger.plan_ranges"
+    assert sys.path[0] == str(HERE)
+    plan_read._ledger("plan_ranges")
+    assert sys.path.count(str(HERE)) == 1
+
+
+LINKED_PLAN = """# Plan
+## Work
+### W1
+- Positive: [A](#case.a).
+- Negative: [B](#case-b), again [A](#case.a).
+- Recovery: [C](#case-c), gone [X](#missing), bare [D](#no-heading).
+### W2
+- outside link [E](#case-e).
+## Cases
+<a id="case.a"></a>
+
+### Case A
+- a body
+```
+## fenced, not a heading
+```
+#### Detail
+- a detail
+
+<a id="case-b"></a>
+
+### Case B
+- b body
+## Tail
+<a id="case-c"></a>
+
+#### Case C
+- c body
+### After
+<a id="case-e"></a>
+### Case E
+- e body
+<a id="no-heading"></a>
+"""
+CASE_A = "### Case A\n- a body\n```\n## fenced, not a heading\n```\n#### Detail\n- a detail\n"
+CASE_B = "### Case B\n- b body\n"
+CASE_C = "#### Case C\n- c body\n"
+
+
+def test_linked_appends_each_anchored_section_once_in_link_order():
+    assert plan_read.linked(LINKED_PLAN, "3-6") == f"\n{CASE_A}\n{CASE_B}\n{CASE_C}"
+
+
+@pytest.mark.parametrize(
+    ("source", "lines", "margin", "expected"),
+    [
+        ('[A](#a)\n<a id="a"></a>\n### A\nbody\n', "1-1", 3, ""),
+        ('<a id="a"></a>\n### A\nfirst\nlast\n### Work\n[A](#a)\n', "6-6", 2, "\n### A\nfirst\n"),
+        (
+            '[A](#a) [B](#b)\n<a id="a"></a>\n### A\nsame\n<a id="b"></a>\n#### B\nsame\n',
+            "1-1",
+            0,
+            '\n### A\nsame\n<a id="b"></a>\n#### B\nsame\n',
+        ),
+    ],
+)
+def test_linked_omits_printed_lines_without_dropping_distinct_equal_rows(source, lines, margin, expected):
+    assert plan_read.linked(source, lines, margin=margin) == expected
+
+
+def test_linked_keeps_unprinted_earlier_cases_when_links_are_reversed():
+    source = '[B](#b) [A](#a)\n<a id="a"></a>\n### A\nfirst\n<a id="b"></a>\n### B\nlast\n'
+    assert plan_read.linked(source, "1-1") == "\n### B\nlast\n\n### A\nfirst\n"
+
+
+def test_linked_defaults_to_excluding_only_the_slice():
+    source = '<a id="a"></a>\n### A\n[A](#a)\nbody\n'
+    assert plan_read.linked(source, "3-3") == "\n### A\nbody\n"
+
+
+def test_linked_follows_only_links_inside_the_slice():
+    assert plan_read.linked(LINKED_PLAN, "4-4") == f"\n{CASE_A}"
+    assert plan_read.linked(LINKED_PLAN, "3-5") == f"\n{CASE_A}\n{CASE_B}"
+
+
+def test_linked_skips_a_section_anchored_inside_the_slice():
+    source = '## W\n- see [A](#ca) and [B](#cb), quoting <a id="cb"></a>\n  <a id="ca"></a>\n### A\n- a\n<a id="cb"></a>\n### B\n- b\n'
+    assert plan_read.linked(source, "1-5") == "\n### B\n- b\n"
+
+
+def test_linked_is_empty_for_a_slice_without_anchor_links():
+    assert plan_read.linked(LINKED_PLAN, "1-2") == ""
+
+
+def test_section_runs_to_the_plan_end_without_a_later_heading():
+    assert plan_read.section('<a id="z"></a>\n## Z\n- z\n  \n<a id="y.1"></a>\n', "z") == "## Z\n- z\n"
+
+
+def test_section_is_empty_unless_a_heading_follows_the_anchor():
+    assert plan_read.section(LINKED_PLAN, "no-heading") == ""
+    assert plan_read.section(LINKED_PLAN, "missing") == ""
+    assert plan_read.section('<a id="x"></a>\n\nprose\n## Other\n- o\n', "x") == ""
+    assert plan_read.section("## W\n- [M](#m)\nlast prose\n", "m") == ""
+
+
+def test_section_skips_blank_lines_after_the_anchor_and_stops_at_any_higher_heading():
+    assert plan_read.section('<a id="w"></a>\n   \n## W\n- w\n', "w") == "## W\n- w\n"
+    assert plan_read.section('<a id="e"></a>\n## E\n# F\n- f\n', "e") == "## E\n"
+    assert plan_read.section('<a id="e"></a>\n## E\n', "e") == "## E\n"
+
+
+def test_task_read_appends_the_linked_cases_after_the_slice(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    file = ledger_artifacts.store("linked", "plan.md", LINKED_PLAN.encode())
+    ref = {"artifact": f"http://127.0.0.1:8765/artifacts/linked/{file['id']}", "lines": "1-33"}
+    doc = {
+        "artifacts": [{"plan": True, "file": file}],
+        "phases": [{"id": "p1", "plan_ref": ref}],
+        "tasks": [{"id": "w1", "phase": "p1", "plan_lines": "3-6"}, {"id": "head", "phase": "p1", "plan_lines": "1-1"}],
+    }
+    SQLiteLedgerRepository(tmp_path / DATABASE).import_document("linked", {**doc, "_meta": {"rev": 1}})
+    rows = LINKED_PLAN.splitlines()
+    margin = "".join(f"{row}\n" for row in rows[:16])
+    assert (
+        run(capsys, ["--task", "w1"], {"AGENTIHOOKS_SWARM": "linked"})
+        == f"{margin}\n#### Detail\n- a detail\n\n{CASE_B}\n{CASE_C}"
+    )
+    assert run(capsys, ["--task", "head"], {"AGENTIHOOKS_SWARM": "linked"}) == "".join(f"{row}\n" for row in rows[:11])
+    assert run(capsys, ["--phase", "p1"], {"AGENTIHOOKS_SWARM": "linked"}) == LINKED_PLAN
+
+
+def test_task_read_resolves_its_anchor_after_lines_are_inserted(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    original = "<!-- slice: first -->\n### First\nEarlier work\n\n<!-- slice: assigned -->\n### Assigned\nDo assigned work\n\n<!-- slice: later -->\n### Later\nLater work\n"
+    inserted = "".join(f"Inserted row {n}\n" for n in range(30))
+    file = ledger_artifacts.store("shifted", "plan.md", (inserted + original).encode())
+    ref = {"artifact": f"http://127.0.0.1:8765/artifacts/shifted/{file['id']}", "lines": "1-11"}
+    doc = {
+        "artifacts": [{"plan": True, "file": file}],
+        "phases": [{"id": "p1", "plan_ref": ref}],
+        "tasks": [{"id": "assigned", "phase": "p1", "plan_slice": "assigned", "plan_lines": "5-7"}],
+    }
+    SQLiteLedgerRepository(tmp_path / DATABASE).import_document("shifted", {**doc, "_meta": {"rev": 1}})
+    assert run(capsys, ["--task", "assigned"], {"AGENTIHOOKS_SWARM": "shifted"}) == (
+        "".join(f"Inserted row {n}\n" for n in range(24, 30)) + original
+    )
+
+
+def test_task_read_refuses_a_missing_anchor_instead_of_using_stored_lines(monkeypatch):
+    task = {"id": "assigned", "phase": "p1", "plan_slice": "missing", "plan_lines": "1-1"}
+    doc = {"tasks": [task], "phases": [{"id": "p1", "plan_ref": {"lines": "1-1"}}]}
+    monkeypatch.setattr(plan_read, "_stored", lambda *args: "# Other section\n")
+    with pytest.raises(ValueError, match="slice anchor missing is missing or repeated"):
+        plan_read.read(doc, "missing", "assigned", None)
+
+
+def test_task_read_resolves_a_package_anchor_from_current_text(monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    original = "## 1. One\n## 2. Two\n## 3. Three\n## 4. Packages\n<!-- slice: SV2-CTL-04 -->\n### Assigned\nDo assigned work\n"
+    source = original.replace("## 4. Packages\n", "## 4. Packages\n" + "Earlier row\n" * 30)
+    monkeypatch.setattr(plan_packages, "text", lambda: source)
+    task = {"id": "assigned", "phase": "p9", "plan_lines": "4-6", "plan_slice": "SV2-CTL-04", "plan_url": ISSUE}
+    doc = {"phases": [{"id": "p9"}], "tasks": [task]}
+    assert plan_read.read(doc, "package", "assigned", None) == (
+        "## 1. One\n## 2. Two\n## 3. Three\n\n"
+        + "Earlier row\n" * 10
+        + "<!-- slice: SV2-CTL-04 -->\n### Assigned\nDo assigned work\n"
+    )
+
+
+def test_swarm_v2_package_read_appends_the_linked_cases(monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    plan = "## 1. One\n## 2. Two\n## 3. Three\n" + LINKED_PLAN.replace("# Plan\n", "")
+    monkeypatch.setattr(plan_packages, "text", lambda: plan)
+    result = plan_packages.read("5-8")
+    assert result.endswith(f"\n#### Detail\n- a detail\n\n{CASE_B}\n{CASE_C}")
+    assert result.count("### Case A\n") == 1
+    assert result.count("- a body\n") == 1
+
+
+def test_remote_hive_reads_the_ledger_and_plan_through_the_hosted_server(slug, tmp_path, monkeypatch, capsys):
+    from scripts.swarm_ledger import ledger, ledger_link
+    from scripts.swarm_ledger.storage import read_ledger
+
+    served = read_ledger(tmp_path, slug, "tasks", "phases", "artifacts")
+    file_id = served["artifacts"][0]["file"]["id"]
+    plan = ledger_artifacts.path_of(slug, file_id).read_bytes()
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path / "absent")
+    reads, opened = [], []
+
+    def resource(name, path, collection=False):
+        reads.append((name, path, collection))
+        return served[path]
+
+    def urlopen(request, timeout, environ):
+        opened.append((request.full_url, timeout, environ))
+        return io.BytesIO(plan)
+
+    monkeypatch.setattr(ledger, "resource", resource)
+    monkeypatch.setattr(ledger_link, "urlopen", urlopen)
+    environ = {"AGENTIHOOKS_SWARM": slug, "AGENTIHOOKS_DEPLOYMENT": "compose", "LEDGER_URL": "https://ledger.test/"}
+    assert run(capsys, ["--task", "mid"], environ) == numbered(5, 27)
+    assert reads == [(slug, "tasks", True), (slug, "phases", True), (slug, "artifacts", True)]
+    assert opened == [(f"https://ledger.test/artifacts/{slug}/{file_id}", ledger.REQUEST_TIMEOUT, environ)]
+
+
+def hosted_refusal(monkeypatch, code):
+    import urllib.error
+
+    from scripts.swarm_ledger import ledger
+
+    def resource(name, path, collection=False):
+        raise urllib.error.HTTPError(f"https://ledger.test/{path}", code, "refused", {}, None)
+
+    monkeypatch.setattr(ledger, "resource", resource)
+    return {"AGENTIHOOKS_SWARM": "gone", "AGENTIHOOKS_DEPLOYMENT": "compose", "LEDGER_URL": "https://ledger.test"}
+
+
+def test_remote_hive_names_a_ledger_the_hosted_server_does_not_hold(monkeypatch):
+    assert refusal(["--task", "mid"], hosted_refusal(monkeypatch, 404)) == "no ledger gone"
+
+
+def test_remote_hive_passes_on_other_hosted_server_refusals(monkeypatch):
+    import urllib.error
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        plan_read.main(["read", "--task", "mid"], hosted_refusal(monkeypatch, 503))
+    assert caught.value.code == 503
+
+
+def served_refusal(monkeypatch, code):
+    import urllib.error
+
+    from scripts.swarm_ledger import ledger_link
+
+    def urlopen(request, timeout, environ):
+        raise urllib.error.HTTPError(request.full_url, code, "refused", {}, None)
+
+    monkeypatch.setattr(ledger_link, "urlopen", urlopen)
+    return {"LEDGER_URL": "https://ledger.test", "AGENTIHOOKS_DEPLOYMENT": "compose"}
+
+
+def test_a_plan_the_hosted_server_does_not_hold_reads_as_a_missing_artifact(monkeypatch):
+    with pytest.raises(ValueError) as caught:
+        plan_read._served(served_refusal(monkeypatch, 404), "chunks", "abc.md")
+    assert str(caught.value) == "no stored artifact abc.md"
+
+
+def test_other_plan_refusals_from_the_hosted_server_pass_on(monkeypatch):
+    import urllib.error
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        plan_read._served(served_refusal(monkeypatch, 503), "chunks", "abc.md")
+    assert caught.value.code == 503
+
+
+def test_stored_plan_text_comes_from_the_given_loader(slug, tmp_path):
+    from scripts.swarm_ledger import plan_ranges
+    from scripts.swarm_ledger.storage import read_ledger
+
+    doc = read_ledger(tmp_path, slug, "phases", "artifacts")
+    asked = []
+
+    def load(name, file_id):
+        asked.append((name, file_id))
+        return b"served plan\n"
+
+    assert plan_ranges.stored_text(doc["phases"][0]["plan_ref"], doc, load) == "served plan\n"
+    assert asked == [(slug, doc["artifacts"][0]["file"]["id"])]

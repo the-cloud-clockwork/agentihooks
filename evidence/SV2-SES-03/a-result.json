@@ -1,0 +1,68 @@
+{
+  "case": "T-SV2-SES-03-A",
+  "evidence_class": "mocked: a local transcript file and an in-process destination stand in for the provider and central ingestion; no network, Pod or hive collector runs",
+  "input_sha256": {
+    "spool-outage.json": "3bec0d07f5174291b15e1aa49fb80f12039bee302153d213499ab409f1f25406"
+  },
+  "observed": {
+    "acknowledged": 4,
+    "archive_lag_seconds": 0.0,
+    "buffered_steps": [
+      {
+        "archive_lag_seconds": 5.0,
+        "flush_error": "ConnectionError",
+        "level": "ok",
+        "transcript_spool_bytes": 309
+      },
+      {
+        "archive_lag_seconds": 10.0,
+        "flush_error": "ConnectionError",
+        "level": "ok",
+        "transcript_spool_bytes": 622
+      },
+      {
+        "archive_lag_seconds": 15.0,
+        "flush_error": "ConnectionError",
+        "level": "ok",
+        "transcript_spool_bytes": 934
+      },
+      {
+        "archive_lag_seconds": 20.0,
+        "flush_error": "ConnectionError",
+        "level": "warning",
+        "transcript_spool_bytes": 1236
+      }
+    ],
+    "central_copies": 4,
+    "central_texts": [
+      "café outage prompt one",
+      "日本 outage prompt two",
+      "outage prompt three ✓",
+      "outage prompt four"
+    ],
+    "recovery_uploaded": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "transcript_spool_bytes": 0,
+    "upload_attempts": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      2,
+      3,
+      4
+    ],
+    "warning_sequences": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "state": "passed"
+}

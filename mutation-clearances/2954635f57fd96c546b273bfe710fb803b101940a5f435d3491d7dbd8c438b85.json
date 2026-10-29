@@ -1,0 +1,6 @@
+{
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x_check_prod_lockdown__mutmut_21:04c15c998c7edbdbff513a14fffc44e6aa6ab2ec1a1d25180dfe6c90eee0baba": {
+    "reader": "standards_reader",
+    "reason": "equivalent. Omitting the dictionary default changes only an absent cwd from an empty string to None. _resolve_cwd treats both as false and follows the same command prefix or getcwd fallback."
+  }
+}

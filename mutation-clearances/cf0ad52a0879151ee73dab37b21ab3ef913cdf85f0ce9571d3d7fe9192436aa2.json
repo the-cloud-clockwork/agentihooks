@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_outbox.py:scripts.swarm.metrics_outbox.x\u01c1Outbox\u01c1flush__mutmut_16:af4a30f5f89fe8034154a7d2c212b28160760f8c49c002910af2756c8b9858e8": {
+    "reader": "Standards",
+    "reason": "Equivalent ordering for canonical stored schemas: Table.ddl prefixes every name with the same CREATE TABLE IF NOT EXISTS swarm. text and follows it with a space. Valid names match [a-z][a-z0-9_]*; the following space sorts before every allowed continuation character. DDL ordering therefore equals table name ordering, including prefix-related names; the rotation partition is unchanged."
+  }
+}

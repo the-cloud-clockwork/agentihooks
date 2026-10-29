@@ -1,0 +1,6 @@
+{
+  "hooks/lifecycle/refresh.py:hooks.lifecycle.refresh.x__retain_exit__mutmut_29:3d4f6534df5ecc4513b92ad43d04dffb139a5a4641c7c61ea4969cda5187043a": {
+    "reader": "Standards /root/standards_reader round two",
+    "reason": "UTF-8 and utf-8 resolve to the identical Python codec and encode identical JSON bytes."
+  }
+}

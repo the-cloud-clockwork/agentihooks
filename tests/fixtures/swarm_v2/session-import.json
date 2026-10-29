@@ -1,0 +1,56 @@
+{
+ "grant": {
+  "principal": "importer-fixture",
+  "corpus": "swarm-fixture",
+  "projects": [
+   "github.com/acme/agentihooks"
+  ]
+ },
+ "roots": [
+  {
+   "provider": "claude",
+   "installation": "workstation-a",
+   "folder": "claude/projects",
+   "corpus": "swarm-fixture",
+   "expected": [
+    "-fixture-dev-agentihooks/7c3d-lost.jsonl"
+   ]
+  },
+  {
+   "provider": "codex",
+   "installation": "workstation-a",
+   "folder": "codex/sessions",
+   "corpus": "swarm-fixture",
+   "expected": []
+  }
+ ],
+ "personal_root": {
+  "provider": "claude",
+  "installation": "laptop-personal",
+  "folder": "personal/projects",
+  "corpus": "personal",
+  "expected": []
+ },
+ "missing_root": {
+  "provider": "codex",
+  "installation": "retired-host",
+  "folder": "retired/sessions",
+  "corpus": "swarm-fixture",
+  "expected": []
+ },
+ "aliases": {
+  "/fixture/dev/agentihooks": "github.com/acme/agentihooks"
+ },
+ "basename_aliases": {
+  "agentihooks": "github.com/acme/agentihooks"
+ },
+ "files": {
+  "claude/projects/-fixture-dev-agentihooks/0a1b2c3d-old.jsonl": "{\"type\":\"user\",\"sessionId\":\"0a1b2c3d-old\",\"cwd\":\"/fixture/dev/agentihooks\",\"timestamp\":\"2025-01-05T10:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"why does the retry breaker trip early\"}}\n{\"type\":\"assistant\",\"message\":\n{\"type\":\"assistant\",\"sessionId\":\"0a1b2c3d-old\",\"cwd\":\"/fixture/dev/agentihooks\",\"timestamp\":\"2025-01-05T10:00:05Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"the breaker counts identical failures\"},{\"type\":\"tool_use\",\"id\":\"toolu_old\",\"name\":\"Bash\",\"input\":{\"command\":\"git log\"}}]}}\n{\"type\":\"user\",\"sessionId\":\"0a1b2c3d-old\",\"cwd\":\"/fixture/scratch\",\"timestamp\":\"2025-01-05T10:01:00Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_old\",\"content\":\"breaker log café\"}]}}\n",
+  "claude/projects/-fixture-personal-agentihooks/5e6f-dup.jsonl": "{\"type\":\"user\",\"cwd\":\"/fixture/personal/agentihooks\",\"version\":\"2.0.14\",\"timestamp\":\"2026-03-01T09:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"draft the duplicate basename notes\"}}\n{\"type\":\"assistant\",\"cwd\":\"/fixture/personal/agentihooks\",\"version\":\"2.0.14\",\"timestamp\":\"2026-03-01T09:00:03Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"notes drafted 日本\"}]}}\n",
+  "codex/sessions/2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl": "{\"timestamp\":\"2026-02-10T08:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"0199aa00-codex\",\"cwd\":\"/fixture/dev/agentihooks/hooks\",\"cli_version\":\"0.147.0\"}}\n{\"timestamp\":\"2026-02-10T08:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"tail the rollout cursor\"}]}}\n{\"timestamp\":\"2026-02-10T08:00:02Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"shell\",\"arguments\":\"{\\\"command\\\":[\\\"ls\\\"]}\",\"call_id\":\"call_1\"}}\n{\"timestamp\":\"2026-02-10T08:00:03Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"call_1\",\"output\":\"cursor.py\"}}\n{\"timestamp\":\"2026-02-10T08:00:04Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"the rollout cursor advances\"}]}}\n{\"timestamp\":\"2026-02-10T08:00:05Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"last_agent_message\":\"the rollout cursor advances\"}}\n{\"timestamp\":\"2026-02-10T08:00:09Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"cut off",
+  "personal/projects/-fixture-dev-agentihooks/9f-personal.jsonl": "{\"type\":\"user\",\"sessionId\":\"9f-personal\",\"cwd\":\"/fixture/dev/agentihooks\",\"timestamp\":\"2026-04-01T20:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"private personal prompt about my taxes\"}}\n"
+ },
+ "appended": {
+  "codex/sessions/2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl": "\"}]}}\n"
+ }
+}

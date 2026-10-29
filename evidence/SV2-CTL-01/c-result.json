@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "confirmed_operation": {
+    "operation_id": "op-8fc1729a53a4540aaa344f5a88055935",
+    "execution_id": "exe-913d9f5b9c384075b5dc74b0707a6b60",
+    "generation": 1,
+    "action": "spawn",
+    "backend": "kubernetes",
+    "payload_digest": "e76c045effad9aea34dc4a93878c4be708ef94cb392b671f0f5147d45a35938a",
+    "target": {
+      "pod_namespace": "workers",
+      "pod_name": "attempt"
+    },
+    "phase": "applied",
+    "result": {
+      "uid": "confirmed"
+    },
+    "controller_epoch": 1
+  },
+  "external_creations": 1,
+  "rollback_admission_refused": true,
+  "retained_intents": [
+    {
+      "execution_id": "exe-913d9f5b9c384075b5dc74b0707a6b60",
+      "generation": 1,
+      "controller_epoch": 1
+    }
+  ],
+  "controller_leader_changes_total": 3
+}

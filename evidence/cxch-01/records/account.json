@@ -1,0 +1,31 @@
+{
+  "account_read_error": null,
+  "account_type": "chatgpt",
+  "plan_present": true,
+  "requires_openai_auth": true,
+  "turn": {
+    "turn": "01a11cc9-33e7-77e2-b1b6-a044f39f3ccf",
+    "completed": true,
+    "status": "completed",
+    "agent_text": [
+      "KILO"
+    ],
+    "methods": [
+      "account/rateLimits/updated",
+      "account/updated",
+      "configWarning",
+      "hook/completed",
+      "hook/started",
+      "item/agentMessage/delta",
+      "item/completed",
+      "item/started",
+      "mcpServer/startupStatus/updated",
+      "remoteControl/status/changed",
+      "thread/started",
+      "thread/status/changed",
+      "thread/tokenUsage/updated",
+      "turn/completed",
+      "turn/started"
+    ]
+  }
+}

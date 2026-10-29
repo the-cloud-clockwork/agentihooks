@@ -1,32 +1,17 @@
+import json
 import os
 import pwd
+import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 UNIT = "agentihooks-gc"
-
-SERVICE = """[Unit]
-Description=agentihooks workspace lifecycle sweep
-
-[Service]
-Type=oneshot
-WorkingDirectory={root}
-ExecStart={python} -m scripts.gc_cli gc --enforce
-Nice=10
-IOSchedulingClass=idle
-TimeoutStartSec=3600
-{environment}"""
-
-TIMER = """[Unit]
-Description=Hourly agentihooks workspace lifecycle sweep
-
-[Timer]
-OnBootSec=2h
-OnUnitActiveSec=1h
-
-[Install]
-WantedBy=timers.target
-"""
+CRON = "0 * * * *"
+LIVE = ("ready", "active", "pending")
 
 
 def unit_dir() -> Path:
@@ -44,50 +29,100 @@ def _systemctl(*args: str) -> bool:
         return False
 
 
-def render(python: str, root: str) -> tuple[str, str]:
-    home = os.environ.get("AGENTIHOOKS_HOME", "")
-    environment = f"Environment=AGENTIHOOKS_HOME={home}\n" if home else ""
-    return SERVICE.format(python=python, root=root, environment=environment), TIMER
+def _scheduler():
+    from scripts.scheduler import Scheduler
+    from scripts.swarm.store import redis_client
+
+    return Scheduler(redis_client())
 
 
-def installed() -> bool:
-    return (unit_dir() / f"{UNIT}.timer").exists()
+def scheduled(scheduler) -> list[str]:
+    entries = (json.loads(raw) for raw in scheduler.redis.hvals(scheduler.key("entries")))
+    return [entry["id"] for entry in entries if entry["owner"] == UNIT and entry["state"] in LIVE]
 
 
 def install_timer(python: str, root: str) -> str:
-    service, timer = render(python, root)
-    folder = unit_dir()
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / f"{UNIT}.service").write_text(service, encoding="utf-8")
-    (folder / f"{UNIT}.timer").write_text(timer, encoding="utf-8")
-    if not _live_home():
-        return f"[OK] Wrote {UNIT}.timer (not enabled: HOME is not this user's home)"
-    if _systemctl("daemon-reload") and _systemctl("enable", "--now", f"{UNIT}.timer"):
-        return f"[OK] Lifecycle sweep {UNIT}.timer enabled (hourly, first run 2 h after boot)"
-    return f"[--] Wrote {UNIT}.timer; no systemd user session, sessions trigger the sweep instead"
+    from hooks.lifecycle.maintenance import setup
+
+    return "\n  ".join([*_remove_units(), _schedule(python, root), *setup()])
+
+
+def _schedule(python: str, root: str) -> str:
+    from redis.exceptions import RedisError
+
+    from hooks.config import AGENTIHOOKS_HOME
+    from scripts.scheduler.service import ensure_running
+    from scripts.swarm.store import redis_url
+
+    try:
+        scheduler = _scheduler()
+        for entry_id in scheduled(scheduler):
+            scheduler.get(entry_id).cancel()
+        payload = json.dumps({"python": python, "root": root, "home": str(AGENTIHOOKS_HOME)})
+        cron = scheduler.cron(owner=UNIT, payload=payload, expression=CRON)
+        cron.timeout.connect(sweep)
+        cron.start()
+    except RedisError:
+        return "[--] Redis unreachable: lifecycle sweep not scheduled, sessions trigger the sweep instead"
+    ensure_running({**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)})
+    return f"[OK] Lifecycle sweep scheduled hourly on the agentihooks scheduler ({CRON})"
+
+
+def _remove_units() -> list[str]:
+    units = [unit_dir() / f"{UNIT}.{suffix}" for suffix in ("timer", "service")]
+    if not any(unit.exists() for unit in units):
+        return []
+    if _live_home():
+        _systemctl("disable", "--now", f"{UNIT}.timer")
+    for unit in units:
+        unit.unlink(missing_ok=True)
+    if _live_home():
+        _systemctl("daemon-reload")
+    return [f"[OK] Removed the systemd {UNIT}.timer"]
 
 
 def remove_timer() -> str:
-    if not installed():
-        return f"[--] {UNIT}.timer not installed"
-    if _live_home():
-        _systemctl("disable", "--now", f"{UNIT}.timer")
-    for suffix in ("timer", "service"):
-        (unit_dir() / f"{UNIT}.{suffix}").unlink(missing_ok=True)
-    if _live_home():
-        _systemctl("daemon-reload")
-    return f"[OK] Removed {UNIT}.timer"
+    from redis.exceptions import RedisError
+
+    messages = _remove_units()
+    try:
+        scheduler = _scheduler()
+        entries = scheduled(scheduler)
+        for entry_id in entries:
+            scheduler.get(entry_id).cancel()
+    except RedisError:
+        return "\n  ".join([*messages, "[--] Redis unreachable: lifecycle sweep schedule not checked"])
+    if entries:
+        messages.append("[OK] Lifecycle sweep removed from the agentihooks scheduler")
+    return "\n  ".join(messages or [f"[--] {UNIT} not scheduled"])
 
 
-def start_now() -> bool:
-    if not (installed() and _live_home()):
-        return False
+def reconcile_units(python: str, root: str, enabled: bool) -> str:
+    from scripts.host_guard.sync import reconcile
+
+    schedule = install_timer(python, root) if enabled else remove_timer()
+    return f"{schedule}\n  {reconcile(Path.home())}"
+
+
+def sweep(event: dict, delivery_id: str, redis: "Redis") -> None:
+    from hooks._redis import redis_key
+
+    if not redis.set(redis_key("scheduler", f"{UNIT}:{delivery_id}"), "1", nx=True, ex=86400):
+        return
+    target = json.loads(event["payload"])
+    limit = ["timeout", "3600"] if shutil.which("timeout") else []
+    idle = ["ionice", "-c", "3"] if shutil.which("ionice") else []
     try:
         subprocess.Popen(
-            ["systemctl", "--user", "start", "--no-block", f"{UNIT}.service"],
+            [*limit, "nice", "-n", "10", *idle, target["python"], "-m", "scripts.gc_cli", "gc", "--enforce"],
+            cwd=target["root"],
+            env={**os.environ, "AGENTIHOOKS_HOME": target["home"]},
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
-    except OSError:
-        return False
-    return True
+    except OSError as error:
+        from hooks.common import log
+
+        log("lifecycle sweep failed to start", {"error": str(error)})

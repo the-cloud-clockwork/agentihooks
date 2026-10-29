@@ -1,0 +1,83 @@
+{
+  "package": "SV2-HDR-04",
+  "package_complete": false,
+  "dependency": "SV2-HDR-03",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2536",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2545",
+  "tested_commit": "617b95cfb335795a9e22374228678268ca769910",
+  "status": "fixture-qualified: remote pane operations route only through a server qualified target and the local runtime refuses remote agents; no controller or operator UI calls the router yet, so nothing runs on Anton",
+  "evidence_class": "mocked: a recording stand in for the Anton herdr client serves Local and two saved worker machines that share pane w1:p1 and the agent label; no herdr process, SSH connection or cluster runs in these cases",
+  "interfaces": [
+    "scripts.swarm_v2.herdr.target.Target(profile_id, session, incarnation, pane_id, conversation_id) is a remote pane address: the saved machine profile id herdr returned at registration, the remote session, the server incarnation <execution_id>/<generation> and the herdr pane id; a pane id alone is never a remote address",
+    "Router(store, catalog, qualifier, run, journal, mutations=True).command(target, operation, *args) returns herdr --machine <profile id> <operation> <pane id> ... only for a pane operation (pane read, wait output, process info, run, send text, send keys, close; agent get, prompt, rename) after checking the target against the SV2-HDR-03 ownership record and the client's saved machine list: a bare pane (bare_pane), a malformed pane id (pane_id), a profile the controller does not own or that drifted from its record (unregistered), another remote session (session_mismatch), a replaced incarnation (stale_incarnation), an incompatible server (incompatible) and a non pane operation (operation) are refused before any pane command and counted in herdr_target_mismatch_total by profile and reason",
+    "Router.resolve(label, pane_id, conversation_id) turns a display label into a Target only through the controller's registration record and only when exactly one confirmed record carries that label; the agent label every server shares, a hand saved machine's label or a label two records carry is refused as unregistered without naming any other machine",
+    "Router.send(target, operation, operation_id, *args) runs one pane mutation: it refuses a missing operation id before any herdr command; when the target names a conversation it reads herdr agent get on that pane and refuses another pane or conversation (conversation_mismatch) or a reply that reports no id conversation (conversation_unconfirmed); it journals the operation id durably (deliveries.json, mode 0600, file and folder fsync, the SV2-HDR-03 lock) as pending before the send and sent after it, returns None without sending for a repeated id on the same incarnation and pane, refuses an id reused on another pane (operation_reused, counted) and never resends an id whose send was not confirmed: a timeout, a broken pipe or a non zero herdr exit leaves it pending (ambiguous_delivery on retry), so a corrected send needs a new operation id; pending ids are never evicted, only the oldest sent ids beyond 1024; once 64 sends await an audit of their unknown outcome, every new send is refused as journal_full; the journal read, a replay and this refusal all run before any herdr command",
+    "Router.settle(operation_id, delivered) is the operator's audit of a send whose outcome was unknown: delivered keeps the id as sent so a retry sends nothing, otherwise the id is released so a new request may use it; a sent or unknown id is refused as not_pending, and no herdr command runs",
+    "Router.refresh(target) is the reconnect path: it re-reads the registration for the target's incarnation and returns the same pane, incarnation and conversation under the profile id and session saved now, running no herdr command; a newer generation refuses the old target as stale_incarnation",
+    "remote_environ(environ) and client_runner(environ) run herdr without the caller's HERDR_PANE_ID, HERDR_WORKSPACE_ID, HERDR_TAB_ID and HERDR_SOCKET_PATH",
+    "scripts.swarm.runtime.HerdrRuntime.observe (and status), nudge, name_pane and retire_process refuse an agent whose runtime backend is not local, without any herdr call, so a remote agent's pane id never reaches the Local server (INV-R04); RoutedRuntime already sends observe, command, terminate and recover to the owning backend, and its inspection fallthrough (status, name_pane) now stops here"
+  ],
+  "supported_versions": {
+    "herdr": "0.9.1: herdr --machine takes a label or a profile id (herdr --help); the router always passes the profile id",
+    "ownership_record": "registrations.json version 1 (SV2-HDR-03)",
+    "delivery_journal": "deliveries.json version 1"
+  },
+  "authority": "Actor and scope stay those of the SV2-HDR-02 terminal scope that SV2-HDR-03 recorded: the router only addresses profiles the controller ownership record names, and a display label grants nothing; resolving a label goes through that record.",
+  "authoritative_objects": "The ownership record is authoritative for which profile id and session serve an execution incarnation; the herdr client's saved machine list must agree with it. The delivery journal is authoritative for which operation ids were sent or may have been sent. Neither the router nor its rollback removes either.",
+  "states": {
+    "observed": "Cases A, B and C run the router against the recording client (evidence/SV2-HDR-04/a-result.json, b-result.json, c-result.json).",
+    "accepted": "Mutation preflight 38117028654 on the tested commit ran every test importing the changed modules (cases A, B and C included) green and killed every mutant: scripts/swarm/runtime.py 25 of 25, scripts/swarm_v2/herdr/target.py 497 of 497",
+    "committed": "Case records, result and manifest committed on the task branch",
+    "externally_verified": "Not on Anton: no controller loop or operator UI calls the router yet"
+  },
+  "validation": {
+    "red": "Tests run 38113282967 on the tests only commit 39e39e5be failed collecting tests/test_swarm_v2_herdr_target.py: ImportError cannot import name REMOTE_PANE from scripts.swarm.runtime",
+    "tests": "Mutation preflight 38117028654 at the tested commit (its stats step runs every test that imports a changed module); the full Tests run is the pull request check",
+    "mutation": "Mutation preflight 38117028654: runtime.py 25 killed, target.py 497 killed, 0 survivors, 0 cleared",
+    "lint": "ruff check, ruff format and size limits through python -m scripts.ci_prepush",
+    "review": "Standards and Spec readers; findings and rulings on the pull request"
+  },
+  "measurements": {
+    "herdr_target_mismatch_total": {
+      "a": 0,
+      "b": {
+        "bare_pane": 2,
+        "conversation_mismatch": 1,
+        "pane_id": 1,
+        "stale_incarnation": 1,
+        "unregistered": 1
+      }
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-HDR-04/a-result.json",
+    "b": "evidence/SV2-HDR-04/b-result.json",
+    "c": "evidence/SV2-HDR-04/c-result.json",
+    "manifest": "evidence/SV2-HDR-04/manifest.json"
+  },
+  "obligations": {
+    "input_preparation": "tests/fixtures/swarm_v2/herdr-pane-routing.json gives Local and both remote servers pane w1:p1 with the same agent label and distinct conversations; the remote servers are the two SV2-HDR-03 managed endpoints",
+    "output_contract": "Case A check each_server_receives_only_its_message (Local receives nothing) and every_mutation_names_its_machine",
+    "rejection_contract": "Case B checks refused_by_reason and no_pane_mutated_before_refusal: a bare pane, a pane without a machine, a malformed pane, a hand saved label, another conversation and a stale incarnation",
+    "recovery_contract": "Case C checks refresh_keeps_pane_incarnation_and_conversation, replay_sends_nothing and restart_never_resends_an_ambiguous_prompt",
+    "mutation_scope": "Every pane command names one profile id whose record holds one incarnation; the router never removes a machine, closes a session or touches the worker server beyond the requested pane operation",
+    "compatibility": "The local runtime keeps every behaviour for local agents (test_the_local_runtime_still_reaches_a_local_agent_with_the_same_pane); only agents of another backend lose the local fallback, which addressed the wrong server",
+    "authority": "See authority",
+    "state": "See states"
+  },
+  "rollback_rehearsal": {
+    "action": "Revert UI actions to explicit read only inspection: Router(..., mutations=False) refuses every send as read_only before any herdr command or journal write while command() still builds read operations.",
+    "proof": "tests/test_swarm_v2_herdr_target.py::test_rollback_keeps_read_only_inspection_and_refuses_every_pane_mutation"
+  },
+  "remaining_limitations": [
+    "No caller yet: the controller, the operator UI and the swarm tick do not build a Router; wiring it to remote agent nudges and the operator terminal view belongs to SV2-HDR-05 and later packages.",
+    "The incarnation is asserted from the ownership record (one supervised herdr server per execution attempt, SV2-HDR-01); herdr does not report a server incarnation, so a server restarted inside the same attempt is not detected here.",
+    "A target that names no expected conversation is sent on its pane id and incarnation alone; when it names one, the pane must report that id conversation through herdr agent get.",
+    "The journal keeps every pending operation id and the newest 1024 sent ids; a sent id older than that is no longer recognised as sent.",
+    "No live proof against the pinned herdr: the cases use the recorded 0.9.1 reply shapes.",
+    "A pending operation id is cleared only by Router.settle, the operator's audit; at 64 pending ids every new send, on any machine, is refused (journal_full) until the operator settles them. No operator command calls settle yet.",
+    "RoutedRuntime.nudge discards the Outcome of the backend command, so the tick reports a nudge for a remote agent whatever its runtime answered; this predates the package and is filed as a ledger follow up."
+  ],
+  "rollout_safety": "Only the new routing path and the local runtime's refusal of remote agents change; local agents and the SV2-HDR-03 registration path behave as before."
+}

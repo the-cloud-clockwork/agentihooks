@@ -1,0 +1,6 @@
+{
+  "scripts/events/memory.py:scripts.events.memory.x\u01c1MemoryBus\u01c1for_swarm__mutmut_6:95c096ba60bf2849334114156e46c3f8f77cb8d3531b1a03fb1a9b78076155ed": {
+    "reader": "standards-reader",
+    "reason": "The changed constant is a valid subject suffix. The returned subject is discarded; swarm validation and all observable results are identical."
+  }
+}

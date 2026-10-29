@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_route__mutmut_111:4302acd738fbdd387aa5ae9ded401e2ab265edd9edf72ea0af36475d3954249d": {
+    "reader": "Standards",
+    "reason": "An absent Content Length changes only the caught ValueError or TypeError cause and returns the same invalid envelope without consuming the body."
+  }
+}

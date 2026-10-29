@@ -1,0 +1,19 @@
+{
+  "package": "SV2-MST-05",
+  "cases": [
+    "T-SV2-MST-05-A",
+    "T-SV2-MST-05-B",
+    "T-SV2-MST-05-C"
+  ],
+  "independent_runs": 2,
+  "evidence_class": "Mocked Redis, production ledger file operations and master fence, event relay and inbox store; no running hive, agent session, deployed controller or cloud worker.",
+  "fixture": "Scratch ledger folder, independent fakeredis server, admitted master execution per hive, two master seats and hive owners, one task in each of two phases.",
+  "mutation_scope": "Fixture ledger items and event cursor, master seats and execution admission records, inbox items, private channel posts and unread cursors; nothing in a live swarm.",
+  "cleanup": "Pytest manages the isolated ledger folder under tmp_path with its retention policy; no explicit deletion at fixture teardown is claimed. Fake servers are process local. No processes, live Redis keys, shared ledger or cloud resources created.",
+  "inputs": {
+    "tests/fixtures/swarm_v2/master-race.json": "a11c82985cdf497aa9f0644d8381ed5e34b2cf4f3c2145206aa6e262ba70ad96",
+    "tests/test_swarm_v2_two_hives.py": "ff29d36657ccf596d26e694ff2facccadbf92fd48c36395e6f6ef00cea42b62f"
+  },
+  "tested_commit": "af0045fb6c2a763192e7ced826750104194ca1fb",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38244642965"
+}

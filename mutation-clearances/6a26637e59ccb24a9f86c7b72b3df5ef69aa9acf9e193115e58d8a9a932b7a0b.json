@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/master_scale.py:scripts.swarm_v2.master_scale.x__resize__mutmut_86:903078cb6ffe70379f507d6daffff55e540b8f9dd86e86c31b497010d64f588b": {
+    "reader": "standards_reader",
+    "reason": "range(count + 1) only adds indices 0 to want, all at most want, and want is already in the list, so keep is unchanged; the index 0 address is built without raising. Equivalent."
+  }
+}

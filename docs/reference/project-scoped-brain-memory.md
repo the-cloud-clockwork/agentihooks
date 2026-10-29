@@ -317,6 +317,15 @@ Every hook event is a fresh `python -m hooks` process, so the cache cannot live 
 - **When it goes stale.** When the `/feed` hash changes (new hot arcs), or when it is older
   than `BRAIN_PROJECT_MEMORY_TTL` (default 600 seconds). The TTL bounds how long a lesson
   appended to today's log can be missed, since lesson logs sit outside the feed hash.
+- **Where it comes from (SV2-GAT-02).** `KernelProjectSource` asks the session brain for
+  `/feed?project=<canonical project id>` and keeps only rows naming exactly that project.
+  An empty, refused or foreign answer stores empty memory, never fleet memory. Only a brain
+  that answers the plain fleet feed falls back to `VaultProjectSource`.
+  `BRAIN_PROJECT_FEED_SOURCE=vault` selects `VaultProjectSource` for rollback.
+- **When the brain is down.** The cached memory of the same brain and project is served
+  with a "Stale project memory" line until `BRAIN_PROJECT_MEMORY_STALE_SECONDS` (default
+  86400) after its last refresh, then no memory. `brain_status` reports
+  `scoped_feed_fallback_total`, counting `legacy_endpoint` and `kernel_outage` refreshes.
 - **Cold path cost.** One `/feed` call (already made today), at most
   `BRAIN_HOT_ARCS_TOP_N` arc path lookups and reads (20), and one lesson log read per day of
   `BRAIN_STALE_LESSON_DAYS` (14). That is at most 35 requests. A path lookup is necessary because an arc can live in a different folder than its region label.

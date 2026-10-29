@@ -1,0 +1,122 @@
+{
+  "case": "T-SV2-CKP-02-A",
+  "evidence_class": "mocked: local git repositories, a local durable directory backend behind a granted artifact store and fixture launch registrations; no object store, worker Pod or harness was used",
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda"
+  },
+  "observed": {
+    "fixture": {
+      "allowed_untracked_text": "allowed untracked draft\n",
+      "archive_members": [
+        "draft.md"
+      ],
+      "branch_state": "bundled",
+      "checkpoint_source_bytes": {
+        "source_bundle": 437,
+        "staged_patch": 401,
+        "unstaged_patch": 400,
+        "untracked_archive": 10240
+      },
+      "committed": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "original": {
+        "branch": "engineer-fixture-0001",
+        "head": "acc25b2817fb635401ede6123348092fe9995bd8",
+        "staged_sha256": "7560e330b65568b126e178e4b409c806e0648f8edaef0df18b5006fa2a049ae5",
+        "tracked_status": [
+          "MM notes.md",
+          " D old.txt",
+          "A  staged.py"
+        ],
+        "unstaged_sha256": "65ff35f1b178eee886a00157c69f640615a17ef5a83f92777b764524797543c7",
+        "untracked": [
+          ".env",
+          "draft.md"
+        ]
+      },
+      "prohibited_restored": false,
+      "recaptured_commits_equal": true,
+      "recaptured_patches_and_archive_equal": true,
+      "restored": {
+        "branch": "engineer-fixture-0001",
+        "head": "acc25b2817fb635401ede6123348092fe9995bd8",
+        "staged_sha256": "7560e330b65568b126e178e4b409c806e0648f8edaef0df18b5006fa2a049ae5",
+        "tracked_status": [
+          "MM notes.md",
+          " D old.txt",
+          "A  staged.py"
+        ],
+        "unstaged_sha256": "65ff35f1b178eee886a00157c69f640615a17ef5a83f92777b764524797543c7",
+        "untracked": [
+          "draft.md"
+        ]
+      },
+      "restored_by_next_attempt_after_worker_removed": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "worker_files_left": false
+    },
+    "second_fixture": {
+      "allowed_untracked_text": "allowed untracked draft\n",
+      "archive_members": [
+        "draft.md"
+      ],
+      "branch_state": "bundled",
+      "checkpoint_source_bytes": {
+        "source_bundle": 437,
+        "staged_patch": 401,
+        "unstaged_patch": 400,
+        "untracked_archive": 10240
+      },
+      "committed": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "original": {
+        "branch": "engineer-fixture-0001",
+        "head": "acc25b2817fb635401ede6123348092fe9995bd8",
+        "staged_sha256": "7560e330b65568b126e178e4b409c806e0648f8edaef0df18b5006fa2a049ae5",
+        "tracked_status": [
+          "MM notes.md",
+          " D old.txt",
+          "A  staged.py"
+        ],
+        "unstaged_sha256": "65ff35f1b178eee886a00157c69f640615a17ef5a83f92777b764524797543c7",
+        "untracked": [
+          ".env",
+          "draft.md"
+        ]
+      },
+      "prohibited_restored": false,
+      "recaptured_commits_equal": true,
+      "recaptured_patches_and_archive_equal": true,
+      "restored": {
+        "branch": "engineer-fixture-0001",
+        "head": "acc25b2817fb635401ede6123348092fe9995bd8",
+        "staged_sha256": "7560e330b65568b126e178e4b409c806e0648f8edaef0df18b5006fa2a049ae5",
+        "tracked_status": [
+          "MM notes.md",
+          " D old.txt",
+          "A  staged.py"
+        ],
+        "unstaged_sha256": "65ff35f1b178eee886a00157c69f640615a17ef5a83f92777b764524797543c7",
+        "untracked": [
+          "draft.md"
+        ]
+      },
+      "restored_by_next_attempt_after_worker_removed": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "worker_files_left": false
+    }
+  },
+  "state": "passed"
+}

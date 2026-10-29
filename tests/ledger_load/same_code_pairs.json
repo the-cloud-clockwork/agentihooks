@@ -1,0 +1,29 @@
+{
+  "runs": {
+    "39148204008": [
+      [{"errors": 0, "write_p50_s": 0.069, "busiest_cores": 0.164}, {"errors": 0, "write_p50_s": 0.068, "busiest_cores": 0.163}],
+      [{"errors": 0, "write_p50_s": 0.068, "busiest_cores": 0.159}, {"errors": 0, "write_p50_s": 0.068, "busiest_cores": 0.16}]
+    ],
+    "39336613129": [
+      [{"errors": 0, "write_p50_s": 0.142, "busiest_cores": 0.185}, {"errors": 0, "write_p50_s": 0.117, "busiest_cores": 0.157}],
+      [{"errors": 0, "write_p50_s": 0.119, "busiest_cores": 0.186}, {"errors": 0, "write_p50_s": 0.13, "busiest_cores": 0.181}],
+      [{"errors": 0, "write_p50_s": 0.128, "busiest_cores": 0.168}, {"errors": 0, "write_p50_s": 0.137, "busiest_cores": 0.187}],
+      [{"errors": 0, "write_p50_s": 0.13, "busiest_cores": 0.188}, {"errors": 0, "write_p50_s": 0.127, "busiest_cores": 0.187}],
+      [{"errors": 0, "write_p50_s": 0.13, "busiest_cores": 0.17}, {"errors": 0, "write_p50_s": 0.127, "busiest_cores": 0.169}]
+    ],
+    "39336616389": [
+      [{"errors": 0, "write_p50_s": 0.112, "busiest_cores": 0.188}, {"errors": 0, "write_p50_s": 0.095, "busiest_cores": 0.159}],
+      [{"errors": 0, "write_p50_s": 0.103, "busiest_cores": 0.152}, {"errors": 0, "write_p50_s": 0.097, "busiest_cores": 0.151}],
+      [{"errors": 0, "write_p50_s": 0.095, "busiest_cores": 0.145}, {"errors": 0, "write_p50_s": 0.099, "busiest_cores": 0.161}],
+      [{"errors": 0, "write_p50_s": 0.11, "busiest_cores": 0.168}, {"errors": 0, "write_p50_s": 0.112, "busiest_cores": 0.156}],
+      [{"errors": 0, "write_p50_s": 0.096, "busiest_cores": 0.152}, {"errors": 0, "write_p50_s": 0.099, "busiest_cores": 0.147}]
+    ],
+    "39336620008": [
+      [{"errors": 0, "write_p50_s": 0.105, "busiest_cores": 0.165}, {"errors": 0, "write_p50_s": 0.102, "busiest_cores": 0.164}],
+      [{"errors": 0, "write_p50_s": 0.104, "busiest_cores": 0.153}, {"errors": 0, "write_p50_s": 0.095, "busiest_cores": 0.151}],
+      [{"errors": 0, "write_p50_s": 0.126, "busiest_cores": 0.169}, {"errors": 0, "write_p50_s": 0.135, "busiest_cores": 0.171}],
+      [{"errors": 0, "write_p50_s": 0.109, "busiest_cores": 0.159}, {"errors": 0, "write_p50_s": 0.099, "busiest_cores": 0.155}],
+      [{"errors": 0, "write_p50_s": 0.098, "busiest_cores": 0.148}, {"errors": 0, "write_p50_s": 0.1, "busiest_cores": 0.169}]
+    ]
+  }
+}

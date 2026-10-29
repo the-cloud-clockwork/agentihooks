@@ -1,0 +1,6 @@
+{
+  "scripts/hub/timers.py:scripts.hub.timers.x\u01c1Timers\u01c1__init____mutmut_7:6a2b768f8b4b6ffe88f56e5112f4c9cb1419e877c2b1b711e4be4e37b166d049": {
+    "reader": "standards_reader",
+    "reason": "Absent state leaves either pending sentinel false; present state replaces it with a list before indexing or mutation."
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-ACC-04",
+  "fixture": "Local and remote subscribers, expired warning, personal message, and duplicate delivery acknowledgement",
+  "local_seat": "eng-1@fixture",
+  "remote_seat": "eng-2@fixture",
+  "channels": ["brain", "amygdala"],
+  "operator": "operator",
+  "project": "github.com/the-cloud-clockwork/agentihooks",
+  "publish_ms": 1000,
+  "claim_ms": 61000,
+  "warning": {
+    "broadcast_id": "fleet-warning",
+    "channel": "amygdala",
+    "severity": "critical",
+    "message": "Freeze merges into dev until the registry migration lands.",
+    "ttl_seconds": 600,
+    "brain_id": "swarm"
+  },
+  "expired": {
+    "broadcast_id": "expired-warning",
+    "channel": "amygdala",
+    "severity": "warning",
+    "message": "Capacity on the general pool was low an hour ago.",
+    "ttl_seconds": 30,
+    "brain_id": "swarm"
+  },
+  "personal": {
+    "broadcast_id": "personal-note",
+    "channel": "brain",
+    "severity": "critical",
+    "message": "Personal brain lesson meant for the operator alone.",
+    "ttl_seconds": 600,
+    "brain_id": "personal"
+  },
+  "other_fleet": {
+    "broadcast_id": "other-warning",
+    "channel": "amygdala",
+    "severity": "critical",
+    "message": "Another fleet froze its merges.",
+    "ttl_seconds": 600,
+    "brain_id": "swarm"
+  },
+  "agent_note": {
+    "broadcast_id": "agent-note",
+    "channel": "brain",
+    "severity": "info",
+    "message": "The registry schema moved; rebase before touching it.",
+    "ttl_seconds": 600,
+    "project_id": "github.com/the-cloud-clockwork/agentihooks"
+  },
+  "followup": {
+    "broadcast_id": "fleet-followup",
+    "channel": "amygdala",
+    "severity": "alert",
+    "message": "The registry migration is half done; avoid the executions hash.",
+    "ttl_seconds": 600,
+    "brain_id": "swarm"
+  },
+  "grant": "Signed fixture launch grant, validated on every request; never a deployed credential",
+  "operator_token": "Fixture operator credential resolved by the test's operator callback; never a deployed credential"
+}

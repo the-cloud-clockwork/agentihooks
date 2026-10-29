@@ -1,0 +1,65 @@
+{
+  "source": "SV2-HDR-02 fixture: a private worker terminal service, an unauthorized client, a changed host key and a missing cluster DNS route",
+  "namespace": "swarm-workers",
+  "clients": {
+    "namespace": "swarm-control",
+    "labels": {
+      "app.kubernetes.io/name": "agentihooks-controller"
+    }
+  },
+  "registration": {
+    "grant_id": "lgr-cccccccccccccccccccccccccccccccc",
+    "swarm_id": "fixture-swarm",
+    "execution_id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "generation": 2,
+    "seat_id": "eng-1",
+    "task_id": "fixture-task",
+    "account": "fixture@example.com",
+    "brain_id": "swarm-brain",
+    "project_ids": [
+      "github.com/the-cloud-clockwork/agentihooks"
+    ],
+    "issuer": "fixture-controller",
+    "audience": "fixture-swarm",
+    "key_id": "fixture-key",
+    "registered_at": "2026-10-11T00:00:00Z"
+  },
+  "other_execution": {
+    "execution_id": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "generation": 1
+  },
+  "pod": {
+    "apiVersion": "v1",
+    "kind": "Pod",
+    "metadata": {
+      "name": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "namespace": "swarm-workers",
+      "uid": "11111111-2222-3333-4444-555555555555",
+      "labels": {
+        "swarm.agentihooks.io/controller-owner": "agentihooks-swarm-fixture-swarm",
+        "swarm.agentihooks.io/execution-id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "swarm.agentihooks.io/generation": "2"
+      }
+    },
+    "spec": {
+      "containers": [
+        {
+          "name": "agent",
+          "volumeMounts": []
+        }
+      ],
+      "volumes": []
+    }
+  },
+  "routes": {
+    "private": [
+      "10.43.12.7",
+      "10.43.12.9"
+    ],
+    "public": [
+      "10.43.12.7",
+      "1.1.1.1"
+    ]
+  },
+  "now": 1791676800
+}

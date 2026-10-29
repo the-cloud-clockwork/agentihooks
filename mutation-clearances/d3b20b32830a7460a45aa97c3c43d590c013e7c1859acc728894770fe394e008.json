@@ -1,0 +1,6 @@
+{
+  "scripts/ci_stats_minutes.py:scripts.ci_stats_minutes.x_main__mutmut_71:853be11f35efa7a8a0c25876f189dd9b4db3a7afa9c30b81cdce95a754c04901": {
+    "reader": "standards-reader",
+    "reason": "Omitting flush uses its False default. All row and summary bytes remain identical after normal CLI completion; only buffering changes, outside the completed measurement contract."
+  }
+}

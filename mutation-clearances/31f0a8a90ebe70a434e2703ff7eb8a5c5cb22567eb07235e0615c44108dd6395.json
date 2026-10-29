@@ -1,0 +1,6 @@
+{
+  "scripts/scheduler/core.py:scripts.scheduler.core.x\u01c1Scheduler\u01c1_deliver__mutmut_11:45988b63b014c5f296abce3a4d34d895651272f4c606a3a5716c5a54fc7e20fb": {
+    "reader": "standards_reader",
+    "reason": "failed is a local list whose only read is the truthiness test if not failed; it is never logged, returned, stored or captured by a closure, so appending None instead of connection_id changes no output. A non-empty list is truthy regardless of its element values."
+  }
+}

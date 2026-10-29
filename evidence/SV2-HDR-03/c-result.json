@@ -1,0 +1,204 @@
+{
+  "case": "T-SV2-HDR-03-C",
+  "state": "passed",
+  "evidence_class": "mocked: a recording stand in for the Anton herdr client answers herdr machine list, add, rename and remove with the 0.9.1 reply shapes captured in the SV2-HDR-01 live proof, and its status and schema replies are the SV2-HDR-01 captures; no herdr process, SSH connection or cluster runs in these cases",
+  "input_sha256": {
+    "herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
+  },
+  "observed": {
+    "checks": {
+      "restart_restores_the_missing_registration": true,
+      "restart_duplicates_nothing": true,
+      "durability_survivors_and_losses_recorded": true,
+      "replay_has_no_drift": true,
+      "label_drift_renamed_back": true,
+      "new_generation_keeps_its_profile": true,
+      "stale_generation_cannot_overwrite": true,
+      "retired_registration_removed_only": true,
+      "interrupted_add_left_pending": true,
+      "interrupted_add_adopted_not_duplicated": true
+    },
+    "restart": {
+      "accepted": {
+        "registered": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "eefed520946b717557bfbc5ef89d91ee"
+        },
+        "refused": {},
+        "retired": [],
+        "unverified": [],
+        "drift": {
+          "missing": 2
+        },
+        "herdr_registration_drift": 2
+      },
+      "restored": {
+        "registered": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "1fd37913c66d88de9c4405d58e184635"
+        },
+        "refused": {},
+        "retired": [],
+        "unverified": [],
+        "drift": {
+          "missing": 1
+        },
+        "herdr_registration_drift": 1
+      },
+      "replayed": {
+        "registered": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "1fd37913c66d88de9c4405d58e184635"
+        },
+        "refused": {},
+        "retired": [],
+        "unverified": [],
+        "drift": {},
+        "herdr_registration_drift": 0
+      },
+      "relabelled": {
+        "registered": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "1fd37913c66d88de9c4405d58e184635"
+        },
+        "refused": {},
+        "retired": [],
+        "unverified": [],
+        "drift": {
+          "label": 1
+        },
+        "herdr_registration_drift": 1
+      },
+      "bumped": {
+        "registered": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "1fd37913c66d88de9c4405d58e184635"
+        },
+        "refused": {},
+        "retired": [],
+        "unverified": [],
+        "drift": {},
+        "herdr_registration_drift": 0
+      },
+      "stale": {
+        "registered": {
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "1fd37913c66d88de9c4405d58e184635"
+        },
+        "refused": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "stale_generation"
+        },
+        "retired": [],
+        "unverified": [],
+        "drift": {},
+        "herdr_registration_drift": 0
+      },
+      "generation_after_stale": 3,
+      "retired": {
+        "registered": {
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "1fd37913c66d88de9c4405d58e184635"
+        },
+        "refused": {},
+        "retired": [
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ],
+        "unverified": [],
+        "drift": {
+          "retired": 1
+        },
+        "herdr_registration_drift": 1
+      },
+      "kept_profile_survived": true,
+      "durability": {
+        "survived": "eda75d4e8494f54c8a6fe05759524de3",
+        "lost": "eefed520946b717557bfbc5ef89d91ee",
+        "restored_as": "1fd37913c66d88de9c4405d58e184635",
+        "lost_still_saved": false
+      },
+      "adds": {
+        "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal": 1,
+        "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal": 2
+      },
+      "renames": [
+        [
+          "herdr",
+          "machine",
+          "rename",
+          "eda75d4e8494f54c8a6fe05759524de3",
+          "--label",
+          "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal"
+        ]
+      ],
+      "records": {
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          "execution_id": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "generation": 1,
+          "label": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "target": "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local",
+          "session": "default",
+          "profile_id": "1fd37913c66d88de9c4405d58e184635",
+          "before": []
+        }
+      },
+      "sidebar": [
+        "Local",
+        "devbox",
+        "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal"
+      ]
+    },
+    "interrupted_add": {
+      "first": {
+        "registered": {
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "eefed520946b717557bfbc5ef89d91ee"
+        },
+        "refused": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "catalog_unreachable"
+        },
+        "retired": [],
+        "unverified": [],
+        "drift": {
+          "missing": 2
+        },
+        "herdr_registration_drift": 2
+      },
+      "pending_profile_id": null,
+      "replayed": {
+        "registered": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "eefed520946b717557bfbc5ef89d91ee"
+        },
+        "refused": {},
+        "retired": [],
+        "unverified": [],
+        "drift": {
+          "interrupted": 1
+        },
+        "herdr_registration_drift": 1
+      },
+      "adds": 1,
+      "saved": [
+        "eda75d4e8494f54c8a6fe05759524de3"
+      ],
+      "records": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+          "execution_id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generation": 2,
+          "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "target": "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local",
+          "session": "default",
+          "profile_id": "eda75d4e8494f54c8a6fe05759524de3",
+          "before": []
+        },
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          "execution_id": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "generation": 1,
+          "label": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "target": "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local",
+          "session": "default",
+          "profile_id": "eefed520946b717557bfbc5ef89d91ee",
+          "before": []
+        }
+      }
+    }
+  }
+}

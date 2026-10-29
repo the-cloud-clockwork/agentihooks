@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/lifecycle.py:scripts.swarm.lifecycle.x_destructive_on__mutmut_6:0b7de15e3042c3d449f1e4f3689ff989aed0daea20567c1c5eb4780faaec3ab4": {
+    "reader": "standards_reader",
+    "reason": "\"XXonXX\".lower() is \"xxonxx\", which differs from \"off\", so the unset path returns True as the original does."
+  }
+}

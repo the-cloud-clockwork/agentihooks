@@ -23,7 +23,7 @@ def good_markdown(**changes):
         "page_overflow": False,
         "body_overflow": False,
         "close_visible": True,
-        "json_folds": 0,
+        "json_nodes": 0,
         "ch": 8.0,
         "width": 1440.0,
         "font_px": 13.0,
@@ -143,10 +143,10 @@ class TestCheck:
             "1 table cells under 8ch, first Async rewake hook",
         ]
 
-    def test_json_needs_folds(self):
+    def test_json_needs_nested_blocks(self):
         base = {"page_overflow": False, "body_overflow": False, "close_visible": True}
-        assert sanity.check({**base, "kind": "json", "json_folds": 3}) == []
-        assert sanity.check({**base, "kind": "json", "json_folds": 0}) == ["the JSON viewer shows no folds"]
+        assert sanity.check({**base, "kind": "json", "json_nodes": 3}) == []
+        assert sanity.check({**base, "kind": "json", "json_nodes": 0}) == ["the JSON viewer shows no nested blocks"]
 
     def test_images_must_load_inside_the_viewer(self):
         base = {"page_overflow": False, "body_overflow": False, "close_visible": True, "kind": "image"}
@@ -305,7 +305,13 @@ def test_the_harness_routes_the_page_its_assets_and_its_stream_then_closes_the_t
     tab = browser.tab
     assert browser.viewport == sanity.VIEWPORT
     assert tab.visited == [sanity.PAGE_URL]
-    assert tab.waited == ["() => document.getElementById('status').textContent !== 'loading'"]
+    assert tab.waited == [
+        """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          await (await import(new URL("sync.js", main))).loaded;
+          return true;
+        }"""
+    ]
     assert tab.closed
     assert answered(tab.routes[sanity.PAGE_URL]) == {
         "body": sanity.page_html(),

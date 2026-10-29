@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/authority_context.py:scripts.swarm_ledger.authority_context.x__clear__mutmut_1:25e9d23349c168b02047c5aabd8fca4f02e614b1aad1e832245e35e276cd4ebd": {
+    "reader": "Standards",
+    "reason": "Covered survivor: None and empty string both erase private authority and remain falsey for the secret fallback and tick header checks; the private sentinel has no public output."
+  }
+}

@@ -8,6 +8,8 @@ permalink: /docs/pillars/context/
 # Pillar 3: Context Intelligence
 {: .no_toc }
 
+AgentiHooks supports Claude Code and Codex; see the [Codex reference](../reference/CODEX-COMPAT.md) for hook context-delivery differences.
+
 **Your agents never forget their instructions, even 200 turns deep.**
 
 > "Your protection window stops being effective when Claude's context window pushes your rules toward the attention horizon. Context Intelligence keeps the highest-signal directives live in the recent window — without paying to re-emit what the harness already holds at position zero."
@@ -100,7 +102,10 @@ What covers live re-emphasis now, at a fraction of the token cost:
 - **One-shot `agentihooks refresh-rules`** — when a rule file is *edited*
   mid-session, this pushes the new content to already-running sessions exactly
   once. This is the only case where re-sending a rule file earns its tokens: the
-  copy at position zero is now stale.
+  copy at position zero is now stale. It also re-renders every installed
+  profile home from the bundle checkout, so merged bundle doctrine, once pulled
+  into that checkout, reaches every profile with no operator `init`; see
+  [`agentihooks refresh-rules`](../reference/cli-commands.md#agentihooks-refresh-rules).
 
 ## Token Compression Preprocessor
 

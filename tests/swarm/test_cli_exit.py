@@ -1,0 +1,142 @@
+import copy
+
+import pytest
+
+from scripts.swarm import cli
+from scripts.swarm.store import AgentRecord
+from tests.swarm.test_cli import env, run  # noqa: F401
+
+
+@pytest.mark.parametrize("case", ["obsolete_wait", "blocked_dependency"])
+def test_a_claimless_worker_exits_and_its_seat_is_free_on_the_next_tick(env, monkeypatch, capsys, case):  # noqa: F811
+    from scripts.swarm import difficulty
+    from scripts.swarm.tick import tick
+
+    store, ledger, runtime = env
+    run("sw", "create", "--repo", ".", "--max-eng-agents", "0", "--max-ci-agents", "0")
+    name = store.next_name("sw", "eng", 1000)
+    agent = AgentRecord(name, "eng", "t1", pane_id="w1:p1", seat="eng-1@sw", started_at=1000)
+    store.put_agent("sw", agent)
+    store.seats.occupy(agent.seat, name, 1000)
+    runtime.live.add(name)
+    ledger.rows["t1"].update(state="open", claimed_by="", parked=True)
+    if case == "obsolete_wait":
+        ledger.rows["t1"].update(state="claimed", claimed_by="successor")
+        assert store.claim("sw", "t1", "successor", 60_000)
+    else:
+        ledger.rows["t1"]["depends_on"] = ["t2"]
+        ledger.rows["t2"].update(state="blocked")
+    difficulty.size_pass("sw", ledger, ledger.state("sw"))
+    before = copy.deepcopy(ledger.rows)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setattr(cli, "now_ms", lambda: 5000)
+    capsys.readouterr()
+
+    assert run("sw", "exit") == 0
+    assert capsys.readouterr().out == f'{{"exited": "{name}"}}\n'
+    assert runtime.reaped == [name]
+    assert name not in runtime.live
+    assert store.agents("sw")[0].state == "finished"
+    assert store.seats.exit_of(name) == {
+        "seat": "",
+        "reason": "finished its session without a claim",
+        "generation": 1,
+    }
+    assert ledger.rows == before
+    assert store.claimant("sw", "t1") == ("successor" if case == "obsolete_wait" else None)
+
+    store.update("sw", state="stopped")
+    assert tick("sw", store, ledger, runtime, now_ms=6000) == []
+    assert store.agents("sw")[0].state == "finished"
+    assert runtime.closed == []
+    store.update("sw", state="paused")
+    tick("sw", store, ledger, runtime, now_ms=6001)
+    assert [a for a in store.agents("sw") if a.lane != "master"] == []
+    assert runtime.closed == ["w1:p1"]
+    assert ledger.rows == before
+    assert store.claimant("sw", "t1") == ("successor" if case == "obsolete_wait" else None)
+
+
+def test_exit_does_not_abandon_an_active_worker_claim(env, monkeypatch):  # noqa: F811
+    store, _, runtime = env
+    run("sw", "create", "--repo", ".")
+    name = store.next_name("sw", "eng", 1000)
+    agent = AgentRecord(name, "eng", "t1", seat="eng-1@sw", started_at=1000)
+    store.put_agent("sw", agent)
+    assert store.claim("sw", "t1", name, 60_000)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+
+    assert run("sw", "exit") == 1
+    assert store.agents("sw") == [agent]
+    assert store.claimant("sw", "t1") == name
+    assert runtime.reaped == []
+
+
+@pytest.mark.parametrize(("owner", "hive"), [("", True), ("successor", False), ("successor", True)])
+def test_exit_retires_a_worker_whose_ledger_claim_moved_while_its_store_claim_holds(
+    env,  # noqa: F811
+    monkeypatch,
+    owner,
+    hive,
+):
+    from scripts.hive import scope
+
+    store, ledger, runtime = env
+    run("sw", "create", "--repo", ".")
+    name = store.next_name("sw", "eng", 1000)
+    store.put_agent("sw", AgentRecord(name, "eng", "t1", seat="eng-1@sw", started_at=1000))
+    assert store.claim("sw", "t1", name, 60_000)
+    ledger.rows["t1"].update(state="claimed" if owner else "open", claimed_by=owner)
+    monkeypatch.setattr(scope, "member", lambda environ=None: "hive-3" if hive else "")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+
+    assert run("sw", "exit") == 0
+    assert store.agents("sw")[0].state == "finished"
+    assert store.claimant("sw", "t1") is None
+    assert runtime.reaped == [name]
+
+
+def test_exit_keeps_a_workstation_worker_whose_emptied_claim_the_tick_restores(env, monkeypatch):  # noqa: F811
+    from scripts.hive import scope
+
+    store, ledger, runtime = env
+    run("sw", "create", "--repo", ".")
+    name = store.next_name("sw", "eng", 1000)
+    agent = AgentRecord(name, "eng", "t1", seat="eng-1@sw", started_at=1000)
+    store.put_agent("sw", agent)
+    assert store.claim("sw", "t1", name, 60_000)
+    ledger.rows["t1"].update(state="open", claimed_by="")
+    monkeypatch.setattr(scope, "member", lambda environ=None: "")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+
+    assert run("sw", "exit") == 1
+    assert store.agents("sw") == [agent]
+    assert store.claimant("sw", "t1") == name
+    assert runtime.reaped == []
+
+
+@pytest.mark.parametrize("hive", [True, False])
+def test_claimless_checks_the_exact_ledger_claimant_and_lookup(env, monkeypatch, hive):  # noqa: F811
+    from scripts.hive import scope
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", ".")
+    name = store.next_name("sw", "eng", 1000)
+    agent = AgentRecord(name, "eng", "t1", seat="eng-1@sw", started_at=1000)
+    store.put_agent("sw", agent)
+    assert store.claim("sw", "t1", name, 60_000)
+    row = {"id": "t1", "state": "claimed", "claimed_by": name}
+    calls = []
+
+    def task(slug, task_id):
+        calls.append((slug, task_id))
+        return row
+
+    monkeypatch.setattr(ledger, "task", task)
+    monkeypatch.setattr(scope, "member", lambda: "hive-3" if hive else "")
+    assert cli._claimless(store, "sw", agent) is False
+    assert calls == [("sw", "t1")]

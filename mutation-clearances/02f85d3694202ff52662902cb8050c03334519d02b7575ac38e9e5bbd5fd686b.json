@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_speed_read.py:scripts.doctor.ci_speed_read.x\u01c1_Api\u01c1pages__mutmut_9:2fc25728ac1499d8c72a6f1cc33cff3d92caa4f1f13e2042c872dc02b874a701": {
+    "reader": "Standards reader /root/standards_reader",
+    "reason": "Public read constructs every pages endpoint with an existing query delimiter: run discovery uses a query string and job discovery uses filter=latest. Pending run refreshes use get directly. The changed fallback separator is unreachable through valid public read inputs."
+  }
+}

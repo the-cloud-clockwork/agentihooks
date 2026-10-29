@@ -1,21 +1,10 @@
-"""Production operations lockdown — PreToolUse hard guardrail.
+"""Production workflow and image guards; CI alone owns protected promotion."""
 
-Default-denies prod-impacting commands; unlocks per-turn when the operator's
-message contains a release-gate or hotfix signal (CI Manifesto §9).
-
-Blocked by default:
-  - Docker/image operations with :latest/:prod/:stable tags  (hotfix bypass only)
-  - gh workflow run release.yml                              (release-gate OR hotfix)
-  - gh pr merge targeting main/master/v1                     (release-gate OR hotfix; bypass mode does not lift it)
-
-Signal vocabulary is parsed from the CI Manifesto (source of truth).
-Fallback vocabulary in ci_manifesto.py mirrors manifesto §9.
-
-Note: kubectl anton-prod is NOT blocked (operator unlocked 2026-04-15).
-"""
-
+import json
+import os
 import re
 import shlex
+import subprocess
 from pathlib import Path
 
 import tree_sitter_bash
@@ -34,8 +23,13 @@ _SESSION_SIGNAL_TTL = 14400  # 4 hours — session-scoped signals (release, hotf
 # Full signal vocabulary now sourced from CI Manifesto via ci_manifesto.py.
 BYPASS_PHRASES: list[str] = ["--emergency-prod", "prod override", "emergency"]
 
-# Block category: "hotfix" → only hotfix signals unlock
-#                 "release" → release-gate OR hotfix signals unlock
+_MERGE_QUEUE = (
+    "query($url: URI!, $branch: String!) { resource(url: $url) { ... on PullRequest {"
+    " repository { mergeQueue(branch: $branch) { id } } } } }"
+)
+
+_ENQUEUE_READERS = frozenset({"agentihooks", "cat", "echo", "grep", "head", "jq", "ls", "printf", "tail", "wc"})
+
 _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
     (
         re.compile(r"(ghcr\.io|docker\.io)/[^/\s]+/[^:\s]+:(latest|prod|stable)\b", re.I),
@@ -52,8 +46,8 @@ _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
     (
         re.compile(r"\bgh\b[^|&;\n]*workflow\s+run\s+release\.yml\b", re.I),
         "release.yml workflow trigger",
-        "release-gate signal required — see CI Manifesto §4",
-        "release",
+        "CI alone creates releases.",
+        "ci",
     ),
     (
         re.compile(
@@ -61,7 +55,13 @@ _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
             re.I,
         ),
         "gh pr merge to main/master/v1",
-        "release-gate signal required — see CI Manifesto §4",
+        "CI alone promotes dev into protected branches.",
+        "ci",
+    ),
+    (
+        re.compile(r"\bgh\b[^|&;\n]*workflow\s+run\s+publish-pypi\.yml\b", re.I),
+        "PyPI publication",
+        "release dance required — see CI Manifesto §4.1",
         "release",
     ),
 ]
@@ -213,14 +213,14 @@ def _production_operands(node: Node) -> list[str]:
     ]
     values = [shlex.split(word)[0] for word in words]
     text = _command_lines(strip_non_command_content(" ".join(words)))
-    merge = re.search(r"\bgh\b[^|&;\n]*\bpr\s+merge\b", text)
-    message_flags = {"--subject", "--body", "-t", "-b"}
+    pull_request = re.search(r"\bgh\b[^|&;\n]*\bpr\s+(merge|create)\b", text)
+    message_flags = {"--subject", "--title", "--body", "-t", "-b"}
     operands, message_next = [], False
     for word, value in zip(words, values):
         if message_next:
             message_next = False
             continue
-        if merge and value.split("=", 1)[0] in message_flags:
+        if pull_request and value.split("=", 1)[0] in message_flags:
             message_next = "=" not in value
             continue
         operands.append(word)
@@ -265,20 +265,118 @@ def _has_release_signal(session_id: str) -> bool:
         return False
 
 
+def _merge_view_command(line: str) -> list[str] | None:
+    merge = re.search(r"\bgh\b(.*?)\bpr\s+merge\b(.*)", line)
+    if not merge:
+        return None
+    words = iter(shlex.split(" ".join(merge.groups())))
+    selectors, repo = [], ""
+    for word in words:
+        option, separator, value = word.partition("=")
+        if option in {"--repo", "-R", "--match-head-commit", "--author-email", "-A", "--body-file", "-F"}:
+            value = value if separator else next(words)
+            if option in {"--repo", "-R"}:
+                repo = value
+        elif word.startswith("-R"):
+            repo = word[2:]
+        elif not word.startswith("-"):
+            selectors.append(word)
+    if len(selectors) > 1:
+        raise ValueError
+    command = ["gh", "pr", "view", *selectors]
+    if repo:
+        command.extend(["--repo", repo])
+    return [*command, "--json", "baseRefName,url", "--jq", '.baseRefName + " " + .url']
+
+
+def _check_pr_merge(line: str, cwd: str, bypass: bool) -> None:
+    try:
+        command = _merge_view_command(line)
+        if command is None:
+            return
+        base, url = subprocess.run(
+            command, capture_output=True, text=True, check=True, timeout=10, cwd=cwd
+        ).stdout.split()
+    except (OSError, ValueError, StopIteration, subprocess.SubprocessError):
+        raise BlockAction(
+            "BLOCKED: Cannot resolve the pull request base; promotion protection remains closed."
+        ) from None
+    if base in {"main", "master", "v1"}:
+        raise BlockAction("BLOCKED [gh pr merge to main/master/v1]: CI alone promotes dev into protected branches.")
+    if bypass:
+        return
+    try:
+        queue = subprocess.run(
+            ["gh", "api", "graphql", "-f", f"query={_MERGE_QUEUE}", "-f", f"url={url}", "-f", f"branch={base}"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+            cwd=cwd,
+        ).stdout
+        queued = json.loads(queue)["data"]["resource"]["repository"]["mergeQueue"] is not None
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        raise BlockAction(f"BLOCKED: Cannot tell whether '{base}' has a merge queue; the merge stays closed.") from None
+    if queued:
+        raise BlockAction(
+            f"BLOCKED [gh pr merge into a merge queue branch]: '{base}' merges only through its merge queue, "
+            "and gh pr merge lands it directly. Queue it with `agentihooks swarm <slug> merge queue "
+            f"{url}`, or outside a swarm with the GitHub enqueuePullRequest mutation."
+        )
+
+
+def _check_swarm_enqueue(command: str) -> None:
+    slug = os.environ.get("AGENTIHOOKS_SWARM")
+    if not slug or "enqueuePullRequest" not in command:
+        return
+    tree = Parser(Language(tree_sitter_bash.language())).parse(command.encode())
+    if tree.root_node.has_error or _runs_enqueue(tree.root_node):
+        raise BlockAction(
+            "BLOCKED [raw enqueuePullRequest in a swarm]: the swarm queue command records every merge queue "
+            f"entry in its journal. Queue it with `agentihooks swarm {slug} merge queue <url>`."
+        )
+
+
+def _runs_enqueue(node: Node) -> bool:
+    if b"enqueuePullRequest" in node.text:
+        command = node.child_by_field_name("body") if node.type == "redirected_statement" else node
+        if command and command.type == "command" and _sends_enqueue(command):
+            return True
+        if node.type == "pipeline" and _feeds_enqueue(node.named_children):
+            return True
+    return any(_runs_enqueue(child) for child in node.named_children)
+
+
+def _program(node: Node) -> str | None:
+    if node.type == "command":
+        return Path(shlex.split(node.child_by_field_name("name").text.decode())[0]).name
+
+
+def _sends_enqueue(command: Node) -> bool:
+    arguments = [
+        child.text.decode()
+        for index, child in enumerate(command.named_children)
+        if command.field_name_for_named_child(index) == "argument"
+    ]
+    program = _program(command)
+    return program not in _ENQUEUE_READERS and (program != "gh" or "api" in arguments)
+
+
+def _feeds_enqueue(stages: list[Node]) -> bool:
+    first = next(index for index, stage in enumerate(stages) if b"enqueuePullRequest" in stage.text)
+    return any(_program(stage) not in _ENQUEUE_READERS for stage in stages[first + 1 :])
+
+
 def check_prod_lockdown(payload: dict) -> None:
     session_id = payload.get("session_id", "")
-    # Operator-toggled bypass mode — unlocks everything, session-scoped
     try:
         from hooks.context.controls_toggle import is_controls_disabled
 
         controls_off = is_controls_disabled(session_id)
     except Exception:
         controls_off = False
-    # Legacy full bypass (--emergency-prod etc.) — unlocks everything, per-turn
     full_bypass = bool(session_id and is_bypass_active(session_id))
-    # Session-scoped hotfix signal — unlocks everything
     hotfix_unlock = bool(session_id and _has_hotfix_signal(session_id))
-    # Session-scoped release-gate signal — unlocks only release-category blocks
     release_unlock = bool(session_id and _has_release_signal(session_id))
 
     command = payload.get("tool_input", {}).get("command", "")
@@ -290,16 +388,20 @@ def check_prod_lockdown(payload: dict) -> None:
     for pattern, name, reason, category in _BLOCKED:
         if not any(pattern.search(line) for line in check_text.splitlines()):
             continue
-        # Bypass mode never opens a merge into a protected branch.
-        if controls_off and name != "gh pr merge to main/master/v1":
+        if category == "ci":
+            raise BlockAction(f"BLOCKED [{name}]: {reason}")
+        if category == "release":
+            if release_unlock:
+                continue
+            raise BlockAction(f"BLOCKED [{name}]: {reason}\nThe operator must request the release dance.")
+        if controls_off or full_bypass or hotfix_unlock:
             continue
-        if full_bypass or hotfix_unlock:
-            return
-        if category == "release" and release_unlock:
-            continue
-        hint = (
-            "Add a release-gate phrase (e.g. 'merge to main', 'ship it', 'release to prod') or --emergency-prod."
-            if category == "release"
-            else "Add --emergency-prod / 'prod override' / 'emergency' to your message."
+        raise BlockAction(
+            f"BLOCKED [{name}]: {reason}\nAdd --emergency-prod / 'prod override' / 'emergency' to your message."
         )
-        raise BlockAction(f"BLOCKED [{name}]: {reason}\n{hint}")
+    _check_swarm_enqueue(command)
+    from hooks.context.branch_guard import _resolve_cwd
+
+    cwd = _resolve_cwd(command, payload.get("cwd", ""))
+    for line in check_text.splitlines():
+        _check_pr_merge(line, cwd, controls_off)

@@ -7,6 +7,8 @@ import re
 
 import ledger_priorities
 
+from scripts.swarm_ledger import ports
+
 ITEM_RE = re.compile(r"^(phases|questions|followups|tasks)/[^/]+$")
 OPS = ("verdict",)
 VERDICTS = ("approved", "denied")
@@ -23,7 +25,7 @@ def check(op):
 
 
 def text(verdict, ask):
-    from hooks.context.conditions import contains_condition_signal
+    contains_condition_signal = ports.hooks().conditions.contains_condition_signal
 
     if verdict == "denied" or ask is None:
         return verdict
@@ -42,5 +44,6 @@ def apply(doc, op, ctx):
     item["comments"].append({"id": op["id"], "by": "operator", "at": ctx.at, "text": said})
     ctx.record("operator", "comment added", op["item"], id=op["id"], text=said)
     ctx.stamp(f"{op['item']}/comments", "operator")
-    ledger_priorities.apply(doc, {"op": ledger_priorities.OPS[1], "target": op["item"]}, ctx)
+    if ask is not None:
+        ledger_priorities.apply(doc, {"op": ledger_priorities.OPS[1], "target": op["item"]}, ctx)
     return True

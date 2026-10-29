@@ -1,0 +1,181 @@
+import json
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+import yaml
+
+pytestmark = pytest.mark.unit
+
+_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _semgrep():
+    return yaml.safe_load((_ROOT / ".github/workflows/semgrep.yml").read_text())
+
+
+def _jobs():
+    return _semgrep()["jobs"]
+
+
+def test_wrapper_runs_the_inline_scan_feature_tests_and_chart_guard():
+    assert set(_jobs()) == {"scan", "feature-tests", "charts"}
+
+
+def test_scan_runs_inline_without_private_organization_workflow_calls():
+    assert "uses" not in _jobs()["scan"]
+    for workflow in (_ROOT / ".github/workflows").glob("*.yml"):
+        document = yaml.safe_load(workflow.read_text())
+        assert all(
+            not job.get("uses", "").lower().startswith("the-cloud-clockwork/.github/")
+            for job in document["jobs"].values()
+        )
+
+
+def test_scan_keeps_the_reusable_workflow_steps():
+    steps = _jobs()["scan"]["steps"]
+    assert steps[0] == {"uses": "actions/checkout@v4", "with": {"ref": "${{ github.sha }}", "fetch-depth": 0}}
+    assert steps[1] == {"name": "Set up Python", "uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}}
+    assert [step.get("name") for step in steps[2:]] == [
+        "Install Semgrep",
+        "Own rules hold on their fixtures and the code",
+        "Resolve the merge base of the head and the base",
+        "Fail on findings new against the base",
+    ]
+    assert steps[2]["env"] == {"SEMGREP_VERSION": "1.177.0"}
+    assert _jobs()["scan"]["timeout-minutes"] == 5
+
+
+def test_scan_grades_new_findings_against_the_caller_base():
+    document = _semgrep()
+    base = document[True]["workflow_call"]["inputs"]["base"]
+    assert base["type"] == "string"
+    assert base["required"] is True
+    baseline = _jobs()["scan"]["steps"][-2]
+    assert baseline["id"] == "baseline"
+    assert baseline["env"] == {"BASE": "${{ inputs.base }}"}
+    assert 'git merge-base "$BASE" HEAD' in baseline["run"]
+    scan = _jobs()["scan"]["steps"][-1]
+    assert scan["env"]["BASE"] == "${{ steps.baseline.outputs.sha }}"
+    assert '--baseline-commit "$BASE"' in scan["run"]
+
+
+def test_scan_runs_the_registry_packs_and_the_outage_rules():
+    assert set(_jobs()["scan"]["steps"][-1]["env"]["CONFIGS"].split()) == {
+        "p/ci",
+        "p/secrets",
+        "p/python",
+        ".semgrep-incidents",
+    }
+
+
+def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step():
+    assert ".semgrep-incidents" in _jobs()["scan"]["steps"][-1]["env"]["CONFIGS"].split()
+    assert any(_ROOT.glob(".semgrep-incidents/*.yml"))
+    runs = [step.get("run") for step in _jobs()["feature-tests"]["steps"]]
+    assert "semgrep --metrics off --test .semgrep-incidents" in runs
+    assert ".semgrep-incidents/" in (_ROOT / ".semgrepignore").read_text().splitlines()
+
+
+def test_scan_excludes_only_the_mutable_action_tag_rule():
+    assert _jobs()["scan"]["steps"][-1]["env"]["EXCLUDE_RULES"].split() == [
+        "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"
+    ]
+
+
+def test_scan_reads_the_domain_rules_folder_that_holds_rule_files():
+    step = _jobs()["scan"]["steps"][3]
+    rules_dir = _ROOT / step["env"]["RULES"]
+    assert rules_dir == _ROOT / ".semgrep"
+    assert any(_ROOT.glob(".semgrep/*.yml"))
+    assert "semgrep --metrics off --test --config rules rules" in step["run"]
+    assert 'semgrep scan --error --strict --metrics off --config "$RULES" .' in step["run"]
+
+
+def test_scan_and_charts_run_on_the_select_runner_expression():
+    jobs = _jobs()
+    select = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["select"]
+    assert jobs["scan"]["runs-on"] == jobs["charts"]["runs-on"] == select["runs-on"]
+
+
+def test_charts_run_the_chart_timer_guard():
+    steps = _jobs()["charts"]["steps"]
+    assert steps[-1]["run"] == "python tests/ci_charts/chart_timers.py"
+    assert (_ROOT / "tests/ci_charts/chart_timers.py").is_file()
+
+
+def test_charts_grade_the_guard_rules_against_the_base_floors():
+    steps = _jobs()["charts"]["steps"]
+    install = next(step for step in steps if step.get("name") == "Install PyYAML and Semgrep")
+    guard = next(
+        step for step in steps if step.get("name") == "Guard rules hold on their fixtures and at their computed floors"
+    )
+    assert install["env"] == {"SEMGREP_VERSION": "1.177.0"}
+    assert guard["env"] == {"BASE": "${{ inputs.base }}"}
+    assert guard["run"].splitlines() == [
+        'git fetch --no-tags --depth=1 origin "${BASE#origin/}"',
+        "grader=scripts/ci_semgrep_floors.py",
+        "if git cat-file -e FETCH_HEAD:scripts/ci_semgrep_floors.py; then",
+        '  grader="$RUNNER_TEMP/ci_semgrep_floors.py"',
+        '  git show FETCH_HEAD:scripts/ci_semgrep_floors.py > "$grader"',
+        "fi",
+        'python "$grader" check --base FETCH_HEAD',
+    ]
+    assert steps.index(install) < steps.index(guard) < len(steps) - 1
+
+
+SEMGREP_STUB = '#!/usr/bin/env bash\n[[ -f "$STUBS/version" ]] || exit 127\ncat "$STUBS/version"\n'
+PYTHON_STUB = (
+    '#!/usr/bin/env bash\necho "$*" >> "$STUBS/calls"\n'
+    'if [[ "$*" == *semgrep==* ]]; then echo "$PIP_GIVES" > "$STUBS/version"; fi\n'
+)
+
+
+def _run_install(tmp_path, installed, pip_gives="1.177.0"):
+    install = next(step for step in _jobs()["charts"]["steps"] if step.get("name") == "Install PyYAML and Semgrep")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "python").write_text(PYTHON_STUB)
+    (bin_dir / "semgrep").write_text(SEMGREP_STUB)
+    for tool in bin_dir.iterdir():
+        tool.chmod(0o755)
+    if installed:
+        (tmp_path / "version").write_text(installed + "\n")
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "STUBS": str(tmp_path), "PIP_GIVES": pip_gives}
+    env.update(install["env"])
+    done = subprocess.run(["bash", "-euo", "pipefail", "-c", install["run"]], env=env, capture_output=True, text=True)
+    calls = tmp_path / "calls"
+    return done.returncode, calls.read_text().splitlines() if calls.exists() else []
+
+
+def test_charts_use_the_runner_semgrep_when_it_matches_the_pin(tmp_path):
+    assert _run_install(tmp_path, "1.177.0") == (0, ["-m pip install pyyaml==6.0.2"])
+
+
+@pytest.mark.parametrize("installed", ["", "1.176.0"])
+def test_charts_install_the_pinned_semgrep_without_a_matching_runner_copy(tmp_path, installed):
+    assert _run_install(tmp_path, installed) == (0, ["-m pip install pyyaml==6.0.2 semgrep==1.177.0"])
+
+
+def test_charts_fail_when_the_install_leaves_another_semgrep(tmp_path):
+    assert _run_install(tmp_path, "", pip_gives="1.176.0") == (1, ["-m pip install pyyaml==6.0.2 semgrep==1.177.0"])
+
+
+def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error():
+    jobs = _jobs()
+    assert not {"if", "continue-on-error"} & (set(jobs["scan"]) | set(jobs["charts"]))
+    assert all("if" not in step and "continue-on-error" not in step for job in jobs.values() for step in job["steps"])
+
+
+def test_wrapper_holds_only_read_permission():
+    assert _semgrep()["permissions"] == {"contents": "read"}
+
+
+def test_feature_tests_and_charts_have_runner_classes():
+    classes = json.loads((_ROOT / ".github/runner-classes.json").read_text())
+    assert {key for key in classes if key.startswith("semgrep.yml/")} == {
+        "semgrep.yml/charts",
+        "semgrep.yml/feature-tests",
+        "semgrep.yml/scan",
+    }

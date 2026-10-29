@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__recover_master__mutmut_15:3152a2f4accc1581981e62539f40ff73effe7b64218f45c4d3670955c58cc29a": {
+    "reader": "standards_reader",
+    "reason": "The line runs only after the early return for any unfinished live lead record, so a lead seat record the mutant adds to finished is either finished already or unfinished with a name outside live; live minus finished is unchanged. Equivalent."
+  }
+}

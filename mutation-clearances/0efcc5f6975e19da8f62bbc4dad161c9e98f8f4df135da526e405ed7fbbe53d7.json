@@ -1,0 +1,6 @@
+{
+  "scripts/hub/timers.py:scripts.hub.timers.x\u01c1Timers\u01c1handle__mutmut_6:b49be1153e36bbe9510296f843c41fb8f4aadcf31224e79d423d357a1b400296": {
+    "reader": "standards_reader",
+    "reason": "The store operation uses complete solely in boolean branches; False and None select identical storage and comparison behavior."
+  }
+}

@@ -51,7 +51,7 @@ SHELL_RC = {
     ".zsh_history",
 }
 
-CREDENTIAL_FILES = {".netrc", ".npmrc", ".pypirc", ".git-credentials", ".pgpass"}
+CREDENTIAL_FILES = {".netrc", ".npmrc", ".pypirc", ".git-credentials", ".pgpass", "launch-grant"}
 
 KIND_DOTENV = "dotenv"
 KIND_SHELLRC = "shellrc"
@@ -76,6 +76,8 @@ def sensitive_kind(token):
         return KIND_CREDENTIAL
     if base == "credentials" and ".aws" in token:
         return KIND_CREDENTIAL
+    if base == "environ" and token.startswith("/") and PROC_DIR.match("/" + token.lstrip("/")):
+        return KIND_ENVIRONMENT
     return None
 
 
@@ -97,6 +99,12 @@ SECRETISH_NAME = re.compile(
     r"(?i)(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|APIKEY|CREDENTIAL"
     r"|PRIVATE_?KEY|ACCESS_?KEY|SESSION_?KEY|AUTH)"
 )
+
+QUOTING = re.compile(r"[\"'\\]")
+PROC_DIR = re.compile(r"/proc\b")
+SHELL_WORD_BREAK = re.compile(r"[\s;|&()<>]+")
+CD_OPERAND = re.compile(r"\b(?:cd|pushd)(?:\s+-\S*)*\s+(\S+)")
+BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
 
 # --- bash lexing --------------------------------------------------------------
 
@@ -145,6 +153,7 @@ INTERPRETERS = {"python", "python2", "python3", "node", "ruby", "perl", "php", "
 GREP_FAMILY = {"grep", "egrep", "fgrep", "rg", "ack"}
 PAGERS = {"cat", "head", "tail", "less", "more", "bat", "tac", "nl"}
 WRAPPERS = {"docker", "podman", "nerdctl", "kubectl", "ssh"}
+GH_TOKEN_SUBCOMMANDS = {"status", "token"}
 GIT_READ_SUBCOMMANDS = {"diff", "show", "grep", "log", "blame", "cat-file", "difftool"}
 PATTERN_FLAGS = {"-e", "--regexp"}
 FIND_NAME_FLAGS = {
@@ -163,6 +172,7 @@ FIND_EXEC_FLAGS = {"-exec", "-execdir", "-ok", "-okdir"}
 # Options whose value names what to SKIP; the value is never a read.
 EXCLUSION_OPTS = re.compile(r"^--?(?:exclude|exclude-dir|exclude-from|glob|iglob|ignore|ignore-file|g)$")
 GIT_VALUE_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
+ACCESS_ENV = r"(?:(?:agentihooks\s+access|-m\s+scripts\.access_env)\s+env\b|access_env\.(?:main|values)\s*\()"
 
 # grep/rg flags that emit counts or filenames rather than matching lines
 NON_CONTENT_GREP = re.compile(r"(?:^|\s)-[A-Za-z]*[clLq]")
@@ -176,9 +186,9 @@ SENSITIVE_FRAGMENT = re.compile(
     r"|[\w-]+\.env"
     r"|\.bashrc|\.bash_profile|\.bash_login|\.profile"
     r"|\.zshrc|\.zprofile|\.zshenv|\.bash_history|\.zsh_history"
-    r"|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass"
+    r"|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass|launch-grant"
     r"|\.aws/credentials"
-    r")"
+    r")(?![\w-])"
 )
 
 GREP_VERBS = ("grep", "egrep", "fgrep")
@@ -461,6 +471,28 @@ def env_dump_verdict(command):
     )
 
 
+def proc_environ_verdict(command, cwd):
+    flat = QUOTING.sub("", command)
+    entered = [op.lstrip("/").split("/")[0] for op in CD_OPERAND.findall(flat)]
+    in_proc = bool(PROC_DIR.match(cwd)) or any(fnmatch.fnmatchcase("proc", top) for top in entered)
+    words = SHELL_WORD_BREAK.split(flat)
+    named = any(path_reads_environ(w) for w in words) or (in_proc and any(leaf_names_environ(w) for w in words))
+    if named or ((in_proc or PROC_DIR.search(flat)) and BARE_ENVIRON.search(flat)):
+        return block("reading a process environment file under /proc", KIND_ENVIRONMENT)
+    return None
+
+
+def path_reads_environ(word):
+    *dirs, leaf = word.split("/")
+    if any(fnmatch.fnmatchcase("proc", d) for d in dirs[:-1]):
+        return leaf_names_environ(leaf)
+    return any("$" in d for d in dirs) and fnmatch.fnmatchcase("environ", leaf)
+
+
+def leaf_names_environ(leaf):
+    return "$" in leaf or "`" in leaf or fnmatch.fnmatchcase("environ", leaf)
+
+
 def echo_secret_verdict(command):
     if not re.search(r"\b(echo|printf)\b", command):
         return None
@@ -498,6 +530,37 @@ def renderer_verdict(command):
                 KIND_ENVIRONMENT,
             )
             + "\nkubectl describe secret <name> shows the keys and byte sizes without the values."
+        )
+    if len(re.findall(ACCESS_ENV, low)) > len(re.findall(rf'\beval\s+"\$\([^()]*{ACCESS_ENV}\s*\)"', low)):
+        return (
+            block("printing the Cloudflare Access service token (agentihooks access env)", KIND_ENVIRONMENT)
+            + '\nEvaluate it instead:  eval "$(agentihooks access env)", then test each variable by name.'
+        )
+    return None
+
+
+def prints_gh_token(toks):
+    wrapped = verb_of(toks) in WRAPPERS
+    for i, tok in enumerate(toks):
+        nested = " " in tok and (wrapped or toks[i - 1 : i] == ["-c"])
+        if nested and prints_gh_token(tokens_of(tok)):
+            return True
+        if tok.split("/")[-1] == "gh":
+            rest = toks[i + 1 :]
+            args = [t for t in rest if not t.startswith("-")]
+            leading = 2 if rest and rest[0].startswith("-") else 1
+            if any(a == "auth" and b in GH_TOKEN_SUBCOMMANDS for a, b in zip(args[:leading], args[1:])):
+                return True
+    return False
+
+
+def gh_token_verdict(command):
+    inner = [next(g for g in m.groups() if g is not None) for m in SUBSTITUTION.finditer(command)]
+    if any(prints_gh_token(tokens_of(text)) for text in split_stages(command) + inner):
+        return (
+            block("printing the GitHub token (gh auth status or gh auth token)", KIND_ENVIRONMENT)
+            + '\nTo test whether the token is set:  test -n "${GH_TOKEN:-}" && echo set || echo unset'
+            + "\nTo test whether it works:  gh api rate_limit --jq .rate.remaining"
         )
     return None
 
@@ -813,6 +876,9 @@ def decide_bash(tool_input, ctx=None):
     if not command:
         return ALLOW
     ctx = ctx or Context()
+    reason = proc_environ_verdict(command, ctx.cwd)
+    if reason:
+        return Verdict(block=reason)
     command, heredocs = mask_heredocs(command)
     parts = split_outside_quotes(SEGMENT_DELIM, command)
     changed = False
@@ -820,7 +886,7 @@ def decide_bash(tool_input, ctx=None):
         seg = parts[i]
         if not seg.strip():
             continue
-        for check in (env_dump_verdict, echo_secret_verdict, renderer_verdict):
+        for check in (env_dump_verdict, echo_secret_verdict, renderer_verdict, gh_token_verdict):
             reason = check(seg)
             if reason:
                 return Verdict(block=reason)

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/merge_queue.py:scripts.swarm.merge_queue.x_operate__mutmut_5:7209e0e6132ff193fff2ba789b5e403b47149c2a5480c9cffa8bbf823d111bf0": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "Equivalent: overwritten; otherwise only truthiness."
+  }
+}

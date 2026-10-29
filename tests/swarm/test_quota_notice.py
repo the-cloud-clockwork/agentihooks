@@ -7,8 +7,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import quota_notice
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 HURRY = "Your account has fifteen percent or less quota left. Finish the current step and push."
 
 
@@ -31,7 +29,15 @@ def agent(store, **fields):
 def decision(five=90, week=90, **fields):
     return {
         "accounts": [
-            {"harness": "claude", "name": "a", "state": "NORMAL", "five_left": five, "week_left": week, **fields}
+            {
+                "harness": "claude",
+                "name": "a",
+                "state": "NORMAL",
+                "sessions": 1,
+                "five_left": five,
+                "week_left": week,
+                **fields,
+            }
         ]
     }
 
@@ -124,7 +130,7 @@ def test_only_running_lane_agents_on_the_observed_account_are_notified(store, fi
 @pytest.mark.parametrize("harness", ["claude", "codex"])
 def test_each_lane_and_harness_uses_its_own_account(store, lane, harness):
     row = agent(store, lane=lane, harness=harness)
-    readings = decision(15, 90, harness=harness)
+    readings = decision(15, 15, harness=harness)
     readings["accounts"].append(decision(0, 0, harness="other")["accounts"][0])
     quota_notice.apply("sw", store, readings)
     assert [item.text for item in messages(store, row)] == [HURRY]
@@ -183,7 +189,7 @@ def test_tick_sends_notices_from_the_just_refreshed_accounts(store, monkeypatch)
     assert "quota refreshed" in actions
     assert f"sent {row.name} the quota hurry" in actions
     actions = tick("sw", store, ledger, runtime, 2000)
-    assert f"sent {row.name} the quota handoff" in actions
+    assert f"early quota handoff warning sent to {row.name}" in actions
     actions = tick("sw", store, ledger, runtime, 3000)
     assert not any("quota handoff" in text for text in actions)
     assert len(messages(store, row)) == 2
@@ -254,3 +260,11 @@ def test_skipped_agent_does_not_prevent_the_next_agent_notice(store, monkeypatch
     assert quota_notice.apply("sw", store, reading) == [f"sent {last.name} the quota hurry"]
     assert messages(store, first) == []
     assert len(messages(store, last)) == 1
+
+
+@pytest.mark.parametrize("five", [None, 0.0, 3.0])
+@pytest.mark.parametrize("week,expected", [(73.0, ""), (15.0, "hurry"), (2.0, "handoff")])
+def test_codex_notices_ignore_the_five_hour_window(store, five, week, expected):
+    row = agent(store, harness="codex")
+    observed = quota_notice.apply("sw", store, decision(five, week, harness="codex"))
+    assert observed == ([f"sent {row.name} the quota {expected}"] if expected else [])

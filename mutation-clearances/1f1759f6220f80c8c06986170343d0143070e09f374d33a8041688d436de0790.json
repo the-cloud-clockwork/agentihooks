@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x_image_pulls__mutmut_11:b68d6c11933bda5a72a9282a4c8be444f040454ebc510ba4c56f12a476b0d411": {
+    "reader": "standards_reader",
+    "reason": "Kubelet messages contain one quoted image; partition and rpartition at its closing quote give the same image."
+  }
+}

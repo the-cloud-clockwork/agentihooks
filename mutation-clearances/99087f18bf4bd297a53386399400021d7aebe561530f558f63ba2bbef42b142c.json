@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/plan.py:scripts.ci_mutation.plan.x_recorded_lines__mutmut_18:d41a5d3bab6891f04146a4c79de224889205d98ec7ec46e35eda870f2fd0baee": {
+    "reader": "Spec arbitration /root/spec_reader_replacement",
+    "reason": "Production changes returns missing source for non-Python data and the planner continues before parsing. Changed test modules stay whole and have no production coverage contexts. Extra mappings cannot alter selected IDs. Independent arbitration of Standards finding, CI 39256519947."
+  }
+}

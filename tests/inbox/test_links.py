@@ -4,8 +4,6 @@ from scripts.inbox import links
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 LINKS = [
     {"from": "eng", "to": "ci", "kind": "delegates-to"},
     {"from": "ci-1", "to": "eng-1", "kind": "can-observe"},

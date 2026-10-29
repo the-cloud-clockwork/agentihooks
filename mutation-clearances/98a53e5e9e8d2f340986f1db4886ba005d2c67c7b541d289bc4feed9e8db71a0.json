@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ready.py:scripts.swarm.ready.x_release__mutmut_24:808065914704faf3ee5ea6b9c7e3895dcf28b588c0a0bd986260f44e4dfd527f": {
+    "reader": "standards_reader",
+    "reason": "named_tasks uses mine only for intent waits; dependency accepts only task or external merge waits, so replacing mine with None cannot change the dependency record or release result."
+  }
+}

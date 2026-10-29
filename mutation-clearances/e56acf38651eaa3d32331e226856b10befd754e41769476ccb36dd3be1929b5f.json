@@ -1,0 +1,6 @@
+{
+  "scripts/gate_protected.py:scripts.gate_protected.x__duration_problems__mutmut_57:ec03e502e3a6801d4834731b6f695072c091754a270fa6cd73ea321836b7ab0a": {
+    "reader": "Standards",
+    "reason": "Cosmetic delimiters preserve operands and rejection behavior."
+  }
+}

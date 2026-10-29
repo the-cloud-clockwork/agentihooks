@@ -6,7 +6,9 @@ Usage:
     python -m hooks
 """
 
-from hooks.hook_manager import main
+from hooks import hook_manager
+from hooks.prompt_budget import process_start
 
 if __name__ == "__main__":
-    main()
+    hook_manager._EVENT_STARTED = process_start()
+    hook_manager.main()

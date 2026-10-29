@@ -7,7 +7,7 @@ nav_order: 1
 # Pillar 1: Identity
 {: .no_toc }
 
-**One command transforms your agent's entire identity.**
+Profiles define identity for **Claude Code and Codex**. Claude Code uses `CLAUDE.md`; Codex uses `AGENTS.md` and native TOML settings. See the [Codex reference](../reference/CODEX-COMPAT.md) for asset mapping and limits.
 
 > A profile is not just a config file — it is the complete persona, permissions, and toolset your agent carries into every session. Swap it in seconds. Layer them for precision.
 
@@ -274,3 +274,15 @@ Hooks are always wired from `_base/settings.base.json`. Profiles control persona
 ---
 
 *Next: [Pillar 2 — Guardrails](guardrails.md) — What your agents are protected from.*
+
+## Agent card catalogue
+
+`agentihooks agents list` prints a JSON array of profile cards. Each card has
+`name`, `description` and `capabilities` from the profile manifest.
+`agentihooks agents list --capability review` selects cards declaring `review`.
+`agentihooks agents show NAME` prints one card as a JSON object and refuses an
+unknown profile name.
+
+The catalogue includes built-in, bundle, linked profiles and package roles.
+Duplicate names resolve in that order. Use `package:NAME` with `show` to select
+a package role explicitly when another profile has the same name.

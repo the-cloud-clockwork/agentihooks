@@ -60,6 +60,21 @@ def test_process_env_beats_every_file(env_home, monkeypatch):
     assert os.environ["SOME_KEY"] == "from-process"
 
 
+def test_shared_config_cannot_restore_a_server_secret_removed_by_the_launcher(env_home, monkeypatch):
+    home, load = env_home
+    monkeypatch.delenv("SWARM_SECRET", raising=False)
+    (home / ".env").write_text("SWARM_SECRET=$FIXTURE_SWARM_SECRET\nSOME_KEY=allowed\n")
+    (home / "swarm.env").write_text("export SWARM_SECRET=$OTHER_FIXTURE_SWARM_SECRET\n")
+    config = load()
+    assert "SWARM_SECRET" not in os.environ
+    assert os.environ["SOME_KEY"] == "allowed"
+    config.reload_brain_env(force=True)
+    assert "SWARM_SECRET" not in os.environ
+    monkeypatch.setenv("SWARM_SECRET", "$TRUSTED_SWARM_SECRET")
+    config._load_user_env()
+    assert os.environ["SWARM_SECRET"] == "$TRUSTED_SWARM_SECRET"
+
+
 def test_reload_agrees_with_boot(env_home):
     """A reloaded process resolves the same value a fresh one would."""
     home, load = env_home

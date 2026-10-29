@@ -1,0 +1,112 @@
+{
+  "version": "codex-cli 0.160.0",
+  "binary": "~/.codex/packages/standalone/releases/0.160.0-x86_64-unknown-linux-musl/bin/codex",
+  "binary_sha256": "12eb3e81114588aca3b7998f4f19e8997b056aca08e57a7ca7c8a3ec8c652aad",
+  "binary_bytes": 289101384,
+  "schema": {
+    "command": "codex app-server generate-json-schema --out schema",
+    "files": 314,
+    "digest_method": "cd schema && find . -type f -name '*.json' | sort | xargs sha256sum | sha256sum",
+    "digest": "534d1246b1a6450cfe91391de982f2f77668bf5874c8debc7c62757c06941545",
+    "client_request_methods": 104,
+    "server_request_methods": 10,
+    "server_request_method_names": [
+      "item/commandExecution/requestApproval",
+      "item/fileChange/requestApproval",
+      "item/tool/requestUserInput",
+      "mcpServer/elicitation/request",
+      "item/permissions/requestApproval",
+      "item/tool/call",
+      "account/chatgptAuthTokens/refresh",
+      "attestation/generate",
+      "applyPatchApproval",
+      "execCommandApproval"
+    ],
+    "client_methods_used_by_probe": [
+      "account/read",
+      "command/exec",
+      "config/batchWrite",
+      "hooks/list",
+      "initialize",
+      "thread/compact/start",
+      "thread/loaded/list",
+      "thread/read",
+      "thread/resume",
+      "thread/start",
+      "turn/start",
+      "turn/steer"
+    ],
+    "turn_steer_required": [
+      "expectedTurnId",
+      "input",
+      "threadId"
+    ],
+    "hook_event_names": [
+      "preToolUse",
+      "permissionRequest",
+      "postToolUse",
+      "preCompact",
+      "postCompact",
+      "sessionStart",
+      "sessionEnd",
+      "userPromptSubmit",
+      "subagentStart",
+      "subagentStop",
+      "stop",
+      "interrupt"
+    ],
+    "thread_compacted_notification": "present in schema, described as 'Deprecated: Use `ContextCompaction` item type instead.'"
+  },
+  "flags": {
+    "codex_app_server_help": [
+      "-c, --config <key=value>",
+      "--enable <FEATURE>",
+      "--disable <FEATURE>",
+      "--code-mode-host <URL>",
+      "--strict-config",
+      "--listen <URL>",
+      "--stdio",
+      "--analytics-default-enabled",
+      "--ws-auth <MODE>",
+      "--ws-token-file <PATH>",
+      "--ws-token-sha256 <HEX>",
+      "--ws-shared-secret-file <PATH>",
+      "--ws-issuer <ISSUER>",
+      "--ws-audience <AUDIENCE>",
+      "--ws-max-clock-skew-seconds <SECONDS>",
+      "-h, --help"
+    ],
+    "codex_help": [
+      "-c, --config <key=value>",
+      "--enable <FEATURE>",
+      "--disable <FEATURE>",
+      "--remote <ADDR>",
+      "--remote-auth-token-env <ENV_VAR>",
+      "--strict-config",
+      "-i, --image <FILE>...",
+      "-m, --model <MODEL>",
+      "--oss",
+      "--local-provider <OSS_PROVIDER>",
+      "-p, --profile <CONFIG_PROFILE_V2>",
+      "-s, --sandbox <SANDBOX_MODE>",
+      "--approve-for-me",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--dangerously-bypass-hook-trust",
+      "-C, --cd <DIR>",
+      "--worktree",
+      "--add-dir <DIR>",
+      "-a, --ask-for-approval <APPROVAL_POLICY>",
+      "--search",
+      "--no-alt-screen",
+      "--no-daemon",
+      "-h, --help",
+      "-V, --version"
+    ],
+    "features_list": {
+      "hooks": "stable true",
+      "remote_control": "removed false",
+      "steer": "removed true",
+      "tui_app_server": "removed true"
+    }
+  }
+}

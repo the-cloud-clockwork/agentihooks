@@ -1,6 +1,20 @@
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def merge_base(monkeypatch):
+    import subprocess
+
+    def run(argv, **kwargs):
+        if argv[1:3] == ["api", "graphql"]:
+            return subprocess.CompletedProcess(
+                argv, 0, '{"data": {"resource": {"repository": {"mergeQueue": null}}}}', ""
+            )
+        return subprocess.CompletedProcess(argv, 0, "dev https://github.com/owner/repo/pull/123\n", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+
 def _check(command):
     from hooks.context.branch_guard import check_branch_guard
     from hooks.context.prod_lockdown import check_prod_lockdown
@@ -15,8 +29,8 @@ def _check(command):
     [
         'git status && gh issue comment 791 --body "do not run gh pr merge main"',
         "gh issue comment 791 --body 'gh workflow run release.yml is gated'; git status",
-        'gh pr merge 123 --base dev && gh issue comment 791 --body "merged into main"',
-        'gh pr merge 123 --base dev --subject "merge into main"',
+        'gh pr merge 123 --squash && gh issue comment 791 --body "merged into main"',
+        'gh pr merge 123 --squash --subject "merge into main"',
         'gh issue comment 791 --body "docker push ghcr.io/anton/agent:latest is gated"',
         'git commit -m "gh pr merge main"',
     ],
@@ -29,11 +43,11 @@ def test_quoted_message_is_not_an_operation(command):
     "message", ['--subject "main"', "--subject='master'", '-t "v1"', '--body "main"', "-b 'master'"]
 )
 def test_single_word_merge_message_is_not_a_branch(message):
-    _check(f"gh pr merge 123 --base dev {message}")
+    _check(f"gh pr merge 123 --squash {message}")
 
 
 def test_merge_message_may_contain_several_equals():
-    _check('gh pr merge 123 --base dev --subject="main=checkpoint=done"')
+    _check('gh pr merge 123 --squash --subject="main=checkpoint=done"')
 
 
 def test_inline_message_cannot_hide_the_following_real_target():
@@ -130,9 +144,9 @@ def test_arithmetic_does_not_turn_a_literal_message_into_an_operation():
     [
         "gh issue comment 791 --body '$(gh pr merge 123 --base main)'",
         "gh issue comment 791 --body '`gh pr merge 123 --base main`'",
-        'gh --repo owner/repo pr merge 123 --base dev --subject "main"',
-        'gh pr merge 123 --subject "main" --base dev',
-        'gh pr merge 123 --subject="main" --body=master --base dev',
+        'gh --repo owner/repo pr merge 123 --squash --subject "main"',
+        'gh pr merge 123 --subject "main" --squash',
+        'gh pr merge 123 --subject="main" --body=master --squash',
         "git status # gh pr merge main",
         "cat <<'EOF'\ngh pr merge main\nEOF\ngit status",
     ],
@@ -168,7 +182,7 @@ def test_allowed_controls_operation_cannot_skip_a_protected_merge():
     from hooks.hook_manager import BlockAction
 
     with pytest.raises(BlockAction, match="gh pr merge to main/master/v1"):
-        _check("gh workflow run release.yml; gh pr merge 123 --base main")
+        _check(f"{_TAG_PUSH}; gh pr merge 123 --base main")
 
 
 _SIGNAL_SESSION = "test-prod-operands"
@@ -194,12 +208,9 @@ def grant(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("signal", "command"),
     [
-        ("release", "gh workflow run release.yml --ref dev"),
-        ("release", _MAIN_MERGE),
+        ("release", "gh workflow run publish-pypi.yml --ref main"),
         ("hotfix", _TAG_PUSH),
-        ("hotfix", _MAIN_MERGE),
         ("controls", _TAG_PUSH),
-        ("controls", "gh workflow run release.yml --ref dev"),
     ],
 )
 def test_signal_authorizes_its_own_operation(grant, signal, command):
@@ -211,13 +222,19 @@ def test_signal_authorizes_its_own_operation(grant, signal, command):
 @pytest.mark.parametrize(
     ("signal", "authorized", "refused", "block"),
     [
-        ("release", "gh workflow run release.yml --ref dev", _TAG_PUSH, "BLOCKED [image tag"),
-        ("release", _MAIN_MERGE, _TAG_PUSH, "BLOCKED [image tag"),
-        ("release", _MAIN_MERGE, "git push origin main", "BLOCKED: Pushing directly to main/master"),
+        ("release", "gh workflow run publish-pypi.yml --ref main", _TAG_PUSH, "BLOCKED [image tag"),
+        ("release", "gh workflow run publish-pypi.yml --ref main", _MAIN_MERGE, "BLOCKED [gh pr merge"),
+        (
+            "release",
+            "gh workflow run publish-pypi.yml --ref main",
+            "git push origin main",
+            "BLOCKED: Pushing directly to main/master",
+        ),
         ("hotfix", _TAG_PUSH, "git push origin main", "BLOCKED: Pushing directly to main/master"),
-        ("hotfix", _MAIN_MERGE, "git push origin main", "BLOCKED: Pushing directly to main/master"),
-        ("controls", _TAG_PUSH, _MAIN_MERGE, "BLOCKED [gh pr merge to main/master/v1]"),
-        ("controls", "gh workflow run release.yml --ref dev", _MAIN_MERGE, "BLOCKED [gh pr merge to main/master/v1]"),
+        ("hotfix", _TAG_PUSH, _MAIN_MERGE, "BLOCKED [gh pr merge"),
+        ("controls", _TAG_PUSH, _MAIN_MERGE, "BLOCKED [gh pr merge"),
+        ("controls", _TAG_PUSH, "gh workflow run release.yml", "BLOCKED [release.yml"),
+        ("controls", _TAG_PUSH, "gh workflow run publish-pypi.yml", "BLOCKED [PyPI publication"),
     ],
 )
 @pytest.mark.parametrize("refused_first", [False, True])
@@ -233,7 +250,7 @@ def test_signal_does_not_authorize_another_command_in_the_chain(
     assert str(blocked.value).startswith(block)
 
 
-@pytest.mark.parametrize("authorized", ["gh workflow run release.yml --ref dev", _MAIN_MERGE])
+@pytest.mark.parametrize("authorized", ["gh workflow run publish-pypi.yml --ref main"])
 def test_release_signal_cannot_skip_a_blocked_rule_in_any_order(grant, monkeypatch, authorized):
     from itertools import permutations
 
@@ -245,3 +262,68 @@ def test_release_signal_cannot_skip_a_blocked_rule_in_any_order(grant, monkeypat
         monkeypatch.setattr(prod_lockdown, "_BLOCKED", rules)
         with pytest.raises(BlockAction):
             _check(f"{authorized}; {_TAG_PUSH}")
+
+
+_ENQUEUE = (
+    "gh api graphql -f query='mutation($id: ID!) { enqueuePullRequest(input: {pullRequestId: $id})"
+    " { mergeQueueEntry { id } } }' -f id=PR_kwDO123"
+)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        _ENQUEUE,
+        f"git status && GH_TOKEN=$T {_ENQUEUE}",
+        _ENQUEUE.replace("gh api", "gh -R owner/repo api"),
+        _ENQUEUE.replace("gh api", "env gh api"),
+        f'bash -c "{_ENQUEUE}"',
+        f'git -c alias.q="!{_ENQUEUE}" q',
+        f'rg --pre "{_ENQUEUE}" x',
+        'echo \'{"query": "mutation { enqueuePullRequest(input: {}) { clientMutationId } }"}\' | gh api graphql --input -',
+        "cat q.json | grep enqueuePullRequest | gh api graphql --input -",
+        'grep -h enqueuePullRequest q.graphql | (read -r q; gh api graphql -f query="$q")',
+        "python3 - <<'EOF'\nrequests.post(url, json={'query': 'mutation { enqueuePullRequest(input: {}) { clientMutationId } }'})\nEOF",
+        'gh api graphql -f query="$(cat <<\'EOF\'\nmutation { enqueuePullRequest(input: {pullRequestId: "x"}) { clientMutationId } }\nEOF\n)"',
+        'curl -s https://api.github.com/graphql -d \'{"query": "mutation { enqueuePullRequest(input: {}) { clientMutationId } }"}\'',
+    ],
+)
+def test_swarm_session_cannot_run_the_raw_enqueue_mutation(monkeypatch, command):
+    from hooks.hook_manager import BlockAction
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+    with pytest.raises(BlockAction) as blocked:
+        _check(command)
+    assert str(blocked.value) == (
+        "BLOCKED [raw enqueuePullRequest in a swarm]: the swarm queue command records every merge queue "
+        "entry in its journal. Queue it with `agentihooks swarm rig merge queue <url>`."
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "agentihooks swarm rig merge queue https://github.com/owner/repo/pull/123",
+        "grep -rn enqueuePullRequest scripts/swarm",
+        "gh api repos/owner/repo/pulls/12 --jq .title; grep -rn enqueuePullRequest scripts/swarm",
+        "curl -s https://example.com/merge_queue.py | grep enqueuePullRequest",
+        "\\grep -n enqueuePullRequest scripts/swarm/merge_queue.py > hits.txt",
+        'gh pr comment 12 --body "queued with the swarm command, not the enqueuePullRequest api"',
+        "cat <<'EOF' > notes.md\nenqueuePullRequest writes no journal row\nEOF",
+        "MUTATION=enqueuePullRequest",
+        "echo enqueuePullRequest is the mutation name",
+        "printf '%s\\n' enqueuePullRequest | wc -c",
+        "head -n 20 scripts/swarm/merge_queue.py | grep -c enqueuePullRequest",
+        "tail -n 20 notes/enqueuePullRequest.md",
+        "ls scripts/enqueuePullRequest",
+        "jq '.enqueuePullRequest' response.json",
+        'agentihooks swarm rig say "never call enqueuePullRequest by hand"',
+    ],
+)
+def test_swarm_session_keeps_the_swarm_queue_command(monkeypatch, command):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+    _check(command)
+
+
+def test_raw_enqueue_mutation_outside_a_swarm_is_unchanged():
+    _check(_ENQUEUE)

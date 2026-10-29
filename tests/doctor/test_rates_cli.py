@@ -8,7 +8,6 @@ from scripts.doctor import rates, rates_read
 from scripts.swarm import cli as swarm_cli
 from tests.doctor.test_doctor_cli import DOCTOR, WATCHED, env  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 HOUR = 3_600_000
 NOW = 1_791_295_200_000
 AT = "2026-10-06T10:00Z"

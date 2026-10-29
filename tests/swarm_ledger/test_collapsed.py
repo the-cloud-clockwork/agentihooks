@@ -2,11 +2,8 @@ import json
 import re
 import subprocess
 import unittest
-from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
-
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 
 
 def page():
@@ -18,7 +15,11 @@ def function_source(name):
 
 
 def run_js(names, expr):
-    script = "".join(function_source(n) + "\n" for n in names) + f"process.stdout.write(JSON.stringify({expr}));"
+    script = (
+        "function closedLeft() { return 0; }\n"
+        + "".join(function_source(n) + "\n" for n in names)
+        + f"process.stdout.write(JSON.stringify({expr}));"
+    )
     return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
 
 

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/findings.py:scripts.swarm.health.findings.x_master_fallback_auth__mutmut_4:feda0c9f08a72da574e0482d8456e538187ce63fe39ff2f288dbd4820c156340": {
+    "reader": "standards_reader",
+    "reason": "partition and rpartition produce the same seat prefix for every generated master seat: master seat names contain no @, ledger slug validation excludes @, and seat_address inserts exactly one @. Legacy unseated masters use the empty string. Multi-delimiter or unqualified backend seats cannot be produced by these interfaces."
+  }
+}

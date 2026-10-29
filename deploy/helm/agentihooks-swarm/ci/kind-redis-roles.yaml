@@ -1,0 +1,19 @@
+redis:
+  enabled: false
+  existingSecret:
+    name: swarm-redis-admin
+    key: url
+  roles:
+    ledger:
+      name: swarm-redis-ledger
+      key: url
+    controller:
+      name: swarm-redis-controller
+      key: url
+    worker:
+      name: swarm-redis-worker
+      key: url
+worker:
+  enabled: true
+  replicas: 1
+  command: [agentihooks, hive, worker]

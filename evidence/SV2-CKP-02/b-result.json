@@ -1,0 +1,102 @@
+{
+  "case": "T-SV2-CKP-02-B",
+  "evidence_class": "mocked: local git repositories, a local durable directory backend behind a granted artifact store and fixture launch registrations; no object store, worker Pod or harness was used",
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda"
+  },
+  "observed": {
+    "fixture": {
+      "archive_members": [
+        "draft.md"
+      ],
+      "checkpoint_source_bytes": {
+        "source_bundle": 437,
+        "staged_patch": 401,
+        "unstaged_patch": 400,
+        "untracked_archive": 10240
+      },
+      "escape_reason": "the untracked archive holds a member that is not a regular file inside the worktree",
+      "escaped_file_written": false,
+      "escaping_archive_committed_outside_checkpoint": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "escaping_archive_refused_at_checkpoint": "the untracked archive holds a member that is not a regular file inside the worktree",
+      "escaping_checkpoint_stored_keys": [],
+      "exclusions": [
+        "untracked files git ignores",
+        "cache directories: .mypy_cache, .pytest_cache, .ruff_cache, .tox, .venv, __pycache__, node_modules",
+        "compiled files: .pyc, .pyo",
+        "credential files by name",
+        "untracked files whose content matches a secret pattern",
+        "links and other files that are not regular",
+        "untracked files over 1048576 bytes",
+        "untracked files past 16777216 bytes in total",
+        "excluded credential: 1",
+        "excluded link: 1"
+      ],
+      "manifest_names_the_link": false,
+      "manifest_names_the_prohibited_file": false,
+      "manifest_names_the_prohibited_value": false,
+      "new_valid_request": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "reason_names_the_member": false,
+      "store_unchanged_by_rejection": true,
+      "target_unchanged_by_rejection": true,
+      "untracked_after_valid_request": [
+        "draft.md"
+      ]
+    },
+    "second_fixture": {
+      "archive_members": [
+        "draft.md"
+      ],
+      "checkpoint_source_bytes": {
+        "source_bundle": 437,
+        "staged_patch": 401,
+        "unstaged_patch": 400,
+        "untracked_archive": 10240
+      },
+      "escape_reason": "the untracked archive holds a member that is not a regular file inside the worktree",
+      "escaped_file_written": false,
+      "escaping_archive_committed_outside_checkpoint": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "escaping_archive_refused_at_checkpoint": "the untracked archive holds a member that is not a regular file inside the worktree",
+      "escaping_checkpoint_stored_keys": [],
+      "exclusions": [
+        "untracked files git ignores",
+        "cache directories: .mypy_cache, .pytest_cache, .ruff_cache, .tox, .venv, __pycache__, node_modules",
+        "compiled files: .pyc, .pyo",
+        "credential files by name",
+        "untracked files whose content matches a secret pattern",
+        "links and other files that are not regular",
+        "untracked files over 1048576 bytes",
+        "untracked files past 16777216 bytes in total",
+        "excluded credential: 1",
+        "excluded link: 1"
+      ],
+      "manifest_names_the_link": false,
+      "manifest_names_the_prohibited_file": false,
+      "manifest_names_the_prohibited_value": false,
+      "new_valid_request": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "reason_names_the_member": false,
+      "store_unchanged_by_rejection": true,
+      "target_unchanged_by_rejection": true,
+      "untracked_after_valid_request": [
+        "draft.md"
+      ]
+    }
+  },
+  "state": "passed"
+}

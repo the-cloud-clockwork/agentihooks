@@ -9,8 +9,6 @@ from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from scripts.swarm.tick import _claimable, tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PAGE = "scripts/swarm_ledger/static/js/render.js"
 
 
@@ -312,6 +310,22 @@ def test_a_refused_group_write_goes_on_to_the_next_set(asked, store):
     assert store.redis.hget(store.key("sw", grouping.SEEN), "a,b") == "refused"
 
 
+def test_a_dropped_proposal_is_recorded_as_refused(asked, store):
+    asked(0.9)
+
+    class Dropping(GroupLedger):
+        def priority(self, slug, item, text):
+            super().priority(slug, item, text)
+            return False
+
+    ledger = Dropping([])
+    config = store.update("sw", autonomy="assist")
+    actions = grouping.group_pass("sw", config, store, ledger, doc(task("a"), task("b")))
+    assert actions == ["skipped grouping under task a: the ledger refused its write"]
+    assert store.redis.hget(store.key("sw", grouping.SEEN), "a,b") == "refused"
+    assert InboxStore(store.redis).inbox(seat_address("sw", MASTER)) == []
+
+
 def test_nothing_to_group_asks_nothing(asked, store):
     calls = asked()
     assert grouping.group_pass("sw", store.config("sw"), store, GroupLedger([]), doc(task("a"))) == []
@@ -323,6 +337,18 @@ def test_a_grouped_member_leaves_the_claim_queue(store):
     assert [t["id"] for t in _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng")] == [
         "a"
     ]
+
+
+def test_the_claim_queue_judges_readiness_on_the_swarm_snapshot(monkeypatch, store):
+    from scripts.swarm import readiness
+
+    seen = []
+    monkeypatch.setattr(readiness, "claimable", lambda t, lane, view: seen.append((t["id"], lane, view.slug)) or True)
+    rows = {"a": task("a")}
+    assert [t["id"] for t in _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng")] == [
+        "a"
+    ]
+    assert seen == [("a", "eng", "sw")]
 
 
 def test_the_tick_groups_open_tasks(asked, store):
@@ -539,3 +565,11 @@ def test_the_tick_releases_members_of_a_stopped_lead(store):
     actions = tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
     assert ledger.ungrouped == ["a"]
     assert "released tasks b, c from task a: its lead is blocked and its agent let it go" in actions
+
+
+def test_grouping_confidence_is_read_from_its_definition(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_TASK_GROUPING_CONFIDENCE", "0.7")
+    assert grouping.MIN_CONFIDENCE == 0.7
+    with pytest.raises(AttributeError) as missing:
+        grouping.ABSENT
+    assert missing.value.args == ("ABSENT",)

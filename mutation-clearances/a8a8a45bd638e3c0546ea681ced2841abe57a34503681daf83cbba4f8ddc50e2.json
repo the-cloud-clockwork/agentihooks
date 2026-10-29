@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_export_bytes__mutmut_10:8f5ab0f6e924169aaf6907a52a2bad6ae0646984f45d63235b7d793c8396f409": {
+    "reader": "Standards reader /root/standards_reader",
+    "reason": "Equivalent: JSONEncoder.__init__ stores ensure_ascii unchanged, and iterencode tests its truth value only to select the string encoder. False and None select the identical encode_basestring branch for every input; the flag is not passed to the iterator afterward."
+  }
+}

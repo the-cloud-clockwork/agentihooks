@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME
+from hooks.memory.records import is_inbox_delivery
 
 CURSOR_DIR = AGENTIHOOKS_HOME / "agent_trace"
 SYSTEM = "anthropic"
@@ -120,8 +121,10 @@ def _blocks(entry: dict) -> list:
 
 
 def _is_prompt(entry: dict) -> bool:
-    if entry.get("type") != "user" or entry.get("isMeta"):
+    if entry.get("type") != "user":
         return False
+    if entry.get("isMeta"):
+        return is_inbox_delivery(entry)
     text = _text(_blocks(entry))
     if (
         entry.get("uuid", "").startswith("codex-")
@@ -158,9 +161,9 @@ def _field(text: str) -> str:
 
 def _field_info(text: str) -> tuple[str, int]:
     from hooks import config
-    from hooks.secrets import redact
+    from hooks.observability.transcript import mask_value
 
-    text = redact(text, mode="strict")
+    text = mask_value(text)
     cap = config.LANGFUSE_FIELD_MAX_CHARS
     removed = max(0, len(text) - cap)
     return (f"{text[:cap]}…[truncated {removed} chars]" if removed else text), removed
@@ -376,7 +379,9 @@ def session_spans(
     for number, turn in enumerate(all_turns[first_turn:], start=offset + first_turn + 1):
         carry = paged.get("open") if number == offset + 1 else None
         spans.extend(_turn_spans(session_id, number, turn, root_id, results, carry))
-    shared = {"langfuse.session.id": session_id, "langfuse.user.id": identity.user_id()}
+    from hooks.observability.transcript import mask_value
+
+    shared = mask_value({"langfuse.session.id": session_id, "langfuse.user.id": identity.user_id()})
     for span in spans:
         span.attributes.update({key: value for key, value in shared.items() if value})
     return spans
@@ -590,6 +595,19 @@ def _pending_bytes(state: dict, records: dict, pending: list) -> int:
     return len(json.dumps({"records": _waiting(state, records), "pending": pending}, ensure_ascii=False).encode())
 
 
+def _paged_digest(value: object) -> str:
+    return _digest("paged", str(value))[:8].hex()
+
+
+def _paged_out(paged: Mapping, key: str, record: dict) -> bool:
+    from hooks.observability.transcript import mask_value
+
+    message = _message_id(record)
+    return _paged_digest(key) in paged["keys"] or (
+        message is not None and _paged_digest(mask_value(message)) in paged["messages"]
+    )
+
+
 def _stage_source(state: dict, transcript_path: str) -> None:
     from hooks.observability.transcript import iter_complete_records, mask_value, record_id
 
@@ -597,6 +615,11 @@ def _stage_source(state: dict, transcript_path: str) -> None:
     legacy = "legacy_turns" in state and not merged
     point = _resume_point(state, transcript_path)
     position, count, unsupported = point["offset"], point["records"], point["unsupported"]
+    revisions = state.setdefault("source_revisions", {})
+    points = state.setdefault("source_points", {})
+    paged = {name: set((state.get("paged") or {}).get(name, ())) for name in ("keys", "messages")}
+    staged_bytes = 0
+    state.pop("deferred_source", None)
     size = _pending_bytes(state, merged, state["pending"])
     waiting = bool(_waiting(state, merged))
     empty = not state["pending"]
@@ -606,6 +629,17 @@ def _stage_source(state: dict, transcript_path: str) -> None:
             unsupported, position = unsupported + 1, end
             continue
         key = record_id(record)
+        revision = _record_revisions({key: record})[key]
+        if key in merged and revisions.get(key) == revision:
+            points[key] = [position, end, count + 1, unsupported]
+            position, count = end, count + 1
+            continue
+        if key not in merged and _paged_out(paged, key, record):
+            position, count = end, count + 1
+            continue
+        if staged_bytes >= 256 * 1024:
+            state["deferred_source"] = True
+            break
         masked = mask_value(record)
         source_id = str(count) if legacy and record.get("type") == "response_item" else key
         masked["_source_id"] = merged.get(key, {}).get("_source_id", source_id)
@@ -617,6 +651,9 @@ def _stage_source(state: dict, transcript_path: str) -> None:
                 break
             size, empty, waiting = size + weight, False, True
             merged[key] = masked
+            staged_bytes += end - position
+        revisions[key] = revision
+        points[key] = [position, end, count + 1, unsupported]
         position, count = end, count + 1
     state["records"] = merged
     state["unsupported_records"] = unsupported
@@ -640,8 +677,9 @@ def _resume_point(state: dict, transcript_path: str) -> dict:
     point = paged.get("source") or {}
     if (point.get("device"), point.get("inode")) != (stat.st_dev, stat.st_ino) or not _still_at(transcript_path, point):
         point = {"device": stat.st_dev, "inode": stat.st_ino, **start}
+        state["source_points"] = {}
     if point.get("boundary") != paged["boundary"]:
-        point = _scan_to(transcript_path, point, paged["boundary"])
+        point = _scan_to(transcript_path, point, paged, state["records"])
     paged["source"] = point
     return point
 
@@ -655,21 +693,26 @@ def _still_at(transcript_path: str, point: dict) -> bool:
         handle.seek(point["line"])
         line = handle.read(point["offset"] - point["line"])
     try:
-        return line.endswith(b"\n") and record_id(json.loads(line)) == point["boundary"]
+        return line.endswith(b"\n") and record_id(json.loads(line)) == point.get("record", point["boundary"])
     except (ValueError, UnicodeDecodeError, AttributeError):
         return False
 
 
-def _scan_to(transcript_path: str, point: dict, boundary: str) -> dict:
+def _scan_to(transcript_path: str, point: dict, paged: dict, merged: dict) -> dict:
+    """Past the boundary, or when it is gone, past the last paged record before any unpaged record."""
     from hooks.observability.transcript import iter_complete_records, record_id
 
+    boundary = paged["boundary"]
     line, records, unsupported = point["offset"], point["records"], point["unsupported"]
+    known = {name: set(paged.get(name, ())) for name in ("keys", "messages")}
+    past, history = {}, True
     for record, end in iter_complete_records(transcript_path, point["offset"]):
         if record is None:
             unsupported += 1
         else:
             records += 1
-            if record_id(record) == boundary:
+            key = record_id(record)
+            if key == boundary:
                 return {
                     **point,
                     "line": line,
@@ -677,9 +720,13 @@ def _scan_to(transcript_path: str, point: dict, boundary: str) -> dict:
                     "records": records,
                     "unsupported": unsupported,
                     "boundary": boundary,
+                    "record": boundary,
                 }
+            history = history and key not in merged
+            if history and _paged_out(known, key, record):
+                past = {"line": line, "offset": end, "records": records, "unsupported": unsupported, "record": key}
         line = end
-    return {**point, "boundary": boundary}
+    return {**point, **past, "boundary": boundary}
 
 
 def _revision(spec: SpanSpec) -> str:
@@ -746,10 +793,11 @@ def _prepare_pending(session_id: str, state: dict, identity: Identity) -> None:
         previous_entries = [entry for turn in turns(entries)[: state["legacy_turns"]] for entry in turn]
         for spec in session_spans(previous_entries, identity):
             state["accepted"].setdefault(f"{spec.span_id:016x}", "legacy")
+    if spans:
+        spans[0].attributes = mask_value(spans[0].attributes)
     pending = []
     for spec in spans:
         spec.name = mask_value(spec.name)
-        spec.attributes = mask_value(spec.attributes)
         key = f"{spec.span_id:016x}"
         if state["accepted"].get(key) != _revision(spec):
             pending.append(asdict(spec))
@@ -832,18 +880,23 @@ def _send_pending(session_id: str, state: dict, exporter) -> None:
             state["accepted"][f"{spec.span_id:016x}"] = _revision(spec)
         state["pending"] = state["pending"][len(batch) :]
         state["accepted_at"] = datetime.now(timezone.utc).isoformat()
+        _accept_source(state)
         _save_progress(session_id, state)
         _collector_outcomes(session_id, new, "accepted", _truncated_fields(new))
         updated = [spec for spec in batch if spec not in new]
         if updated:
             _collector_outcomes(session_id, updated, "updated", _truncated_fields(updated))
     if not state["pending"] and state["accepted"]:
-        state.setdefault("accepted_records", {}).update(state.get("pending_records", {}))
-        accepted_source = state.get("pending_source", {})
-        state["source"]["accepted_bytes"] = accepted_source.get("buffered_bytes", 0)
-        state["turns"] = state.get("buffered_turns", 0)
         _page_accepted(session_id, state)
         _save_progress(session_id, state)
+
+
+def _accept_source(state: dict) -> None:
+    if state["pending"] or not state["accepted"]:
+        return
+    state.setdefault("accepted_records", {}).update(state["pending_records"])
+    state["source"]["accepted_bytes"] = state["pending_source"]["buffered_bytes"]
+    state["turns"] = state["buffered_turns"]
 
 
 def _message_id(entry: dict) -> object:
@@ -908,6 +961,29 @@ def _kept_records(values: list[dict], all_turns: list[list[dict]], cut: tuple[in
     return sorted(kept)
 
 
+def _paged_point(state: dict, keys: list, dropped: list[int], earlier: dict | None) -> tuple[str, dict | None]:
+    """The dropped record read last and the source position just past it; record ids repeat in a transcript."""
+    points = state["source_points"]
+    if any(keys[index] not in points for index in dropped):
+        return keys[dropped[-1]], earlier
+    last = keys[max(dropped, key=lambda index: points[keys[index]])]
+    line, offset, records, unsupported = points[last]
+    if earlier and offset <= earlier["offset"]:
+        return earlier["boundary"], earlier
+    source = state["source"]
+    point = {"device": source["device"], "inode": source["inode"], "line": line, "offset": offset}
+    return last, {**point, "records": records, "unsupported": unsupported, "boundary": last}
+
+
+def _paged_ids(paged: Mapping, keys: list, values: list[dict], dropped: list[int], kept: list[int]) -> dict:
+    open_messages = {_message_id(values[index]) for index in kept}
+    messages = {_message_id(values[index]) for index in dropped} - open_messages - {None}
+    return {
+        "keys": sorted({*paged.get("keys", ()), *(_paged_digest(keys[index]) for index in dropped)}),
+        "messages": sorted({*paged.get("messages", ()), *map(_paged_digest, messages)}),
+    }
+
+
 def _page_accepted(session_id: str, state: dict) -> None:
     """Drop accepted records whose observations can no longer change, carrying what the root still needs."""
     records = state["records"]
@@ -947,13 +1023,15 @@ def _page_accepted(session_id: str, state: dict) -> None:
         model=full["model"],
         input=paged.get("input", _prompt_text(all_turns[0])),
         start_ns=full["start_ns"],
-        boundary=keys[dropped[-1]],
-        source=paged.get("source"),
     )
+    target["boundary"], target["source"] = _paged_point(state, keys, dropped, paged.get("source"))
+    target.update(_paged_ids(paged, keys, values, dropped, kept))
     for span_id in full["spans"] - rest["spans"]:
         del state["accepted"][f"{span_id:016x}"]
     state["records"] = {keys[index]: values[index] for index in kept}
     for name in ("accepted_records", "pending_records"):
+        state[name] = {key: value for key, value in state[name].items() if key in state["records"]}
+    for name in ("source_revisions", "source_points"):
         state[name] = {key: value for key, value in state[name].items() if key in state["records"]}
     state["paged"] = target
 
@@ -975,6 +1053,7 @@ def export_session(session_id: str, transcript_path: str, identity: Identity | N
             _stage_source(state, transcript_path)
             if not state["pending"]:
                 _prepare_pending(session_id, state, identity or identity_from_env(session_id))
+            _accept_source(state)
             _save_progress(session_id, state)
             _send_pending(session_id, state, exporter)
     except Exception as error:  # noqa: BLE001

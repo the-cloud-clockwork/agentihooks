@@ -1,0 +1,422 @@
+{
+  "case": "T-SV2-CKP-04-C",
+  "evidence_class": "mocked: a local durable directory backend behind a granted artifact store, fixture launch registrations, a backend wrapper that loses acknowledgements and a fake clock; no object store, worker Pod or harness was used",
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda"
+  },
+  "observed": {
+    "fixture": {
+      "boundaries": [
+        {
+          "boundary": "write staging",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "move objects",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "write staging",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "move artifacts/ckpt-g2-s2.normalized_transcript.json",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "write staging",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "move objects",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "write staging",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "move artifacts/ckpt-g2-s2.json",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "write pointers/0000000002",
+          "latest_after_loss": "ckpt-g2-s2",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "replayed",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        }
+      ],
+      "crash_latest": "ckpt-g2-s1",
+      "crash_manifest_recorded": false,
+      "crash_old_checkpoint": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "latest_after_republish": "ckpt-g2-s2",
+      "latest_after_restore": "ckpt-g2-s3",
+      "latest_after_rollback": "ckpt-g2-s2",
+      "old_checkpoint_after_reclaim": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "old_object_state_after_reclaim": "verified",
+      "orphan_state_after_reclaim": "absent",
+      "orphan_state_before_reclaim": "verified",
+      "reclaim_committed": [],
+      "reclaimed": [
+        "ckpt-g2-s2.normalized_transcript"
+      ],
+      "republished": {
+        "promoted": true,
+        "reason": "promoted",
+        "verdict": {
+          "authoritative": true,
+          "completeness": "complete",
+          "reason": "context"
+        }
+      },
+      "restored_publish": {
+        "promoted": true,
+        "reason": "promoted",
+        "verdict": {
+          "authoritative": true,
+          "completeness": "complete",
+          "reason": "context"
+        }
+      },
+      "rollback_publish": {
+        "promoted": false,
+        "reason": "promotion_disabled",
+        "verdict": {
+          "authoritative": false,
+          "completeness": "incomplete",
+          "reason": "promotion_disabled"
+        }
+      }
+    },
+    "second_fixture": {
+      "boundaries": [
+        {
+          "boundary": "write staging",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "move objects",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "write staging",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "move artifacts/ckpt-g2-s2.normalized_transcript.json",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "write staging",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "move objects",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "write staging",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "move artifacts/ckpt-g2-s2.json",
+          "latest_after_loss": "ckpt-g2-s1",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "promoted",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        },
+        {
+          "boundary": "write pointers/0000000002",
+          "latest_after_loss": "ckpt-g2-s2",
+          "latest_after_retry": "ckpt-g2-s2",
+          "latest_authoritative": true,
+          "pointers_after_retry": 2,
+          "raised": true,
+          "retry": {
+            "promoted": true,
+            "reason": "replayed",
+            "verdict": {
+              "authoritative": true,
+              "completeness": "complete",
+              "reason": "context"
+            }
+          }
+        }
+      ],
+      "crash_latest": "ckpt-g2-s1",
+      "crash_manifest_recorded": false,
+      "crash_old_checkpoint": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "latest_after_republish": "ckpt-g2-s2",
+      "latest_after_restore": "ckpt-g2-s3",
+      "latest_after_rollback": "ckpt-g2-s2",
+      "old_checkpoint_after_reclaim": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "old_object_state_after_reclaim": "verified",
+      "orphan_state_after_reclaim": "absent",
+      "orphan_state_before_reclaim": "verified",
+      "reclaim_committed": [],
+      "reclaimed": [
+        "ckpt-g2-s2.normalized_transcript"
+      ],
+      "republished": {
+        "promoted": true,
+        "reason": "promoted",
+        "verdict": {
+          "authoritative": true,
+          "completeness": "complete",
+          "reason": "context"
+        }
+      },
+      "restored_publish": {
+        "promoted": true,
+        "reason": "promoted",
+        "verdict": {
+          "authoritative": true,
+          "completeness": "complete",
+          "reason": "context"
+        }
+      },
+      "rollback_publish": {
+        "promoted": false,
+        "reason": "promotion_disabled",
+        "verdict": {
+          "authoritative": false,
+          "completeness": "incomplete",
+          "reason": "promotion_disabled"
+        }
+      }
+    }
+  },
+  "state": "passed"
+}

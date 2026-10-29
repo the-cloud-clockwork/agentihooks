@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/exits.py:scripts.inbox.exits.x__rehome_seat_mail__mutmut_18:1dbbbfdfdb669213f822a87f1769bc719ed757d3d0ed8d7ec69f46a0a63524c3": {
+    "reader": "standards_reader",
+    "reason": "The guard's default is empty and the check treats None and empty alike, so these mutants only drop the refusal of an item another writer moved off the seat between the listing and the WATCH, which no single threaded test can observe."
+  }
+}

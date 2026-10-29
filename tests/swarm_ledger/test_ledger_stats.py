@@ -275,6 +275,8 @@ class TestStatsSyncEvent:
             "tiers": TIERS,
             "stale": True,
             "gap": "",
+            "frozen": 0,
+            "frozen_work": 0,
         }
         assert ctx.stamps["time_left_minutes"] == {"at": NOW, "rev": ctx.rev, "by": "stats"}
         assert ctx.events[0] == {
@@ -385,6 +387,8 @@ class TestStatsSyncEvent:
                 "tiers": TIERS,
                 "stale": True,
                 "gap": "",
+                "frozen": 0,
+                "frozen_work": 0,
             },
         }
         assert d["time_left_minutes"] == 60

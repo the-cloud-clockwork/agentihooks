@@ -66,6 +66,9 @@ _STRIP_RE = re.compile(
     re.VERBOSE,
 )
 
+# Codex shell results are plain text whose header names the exit status
+_SHELL_EXIT_RE = re.compile(r"^(?:Exit code: |Process exited with code )(-?\d+)$", re.MULTILINE)
+
 
 # ---------------------------------------------------------------------------
 # Fingerprinting
@@ -260,10 +263,23 @@ Retry-breaker is not a suggestion. It is operator policy."""
 # ---------------------------------------------------------------------------
 
 
+def _failure_text(payload: dict, tool_result) -> str | None:
+    """The failure text when the call failed by its error field or exit status, else None."""
+    from hooks.tool_memory import _is_error
+
+    if payload.get("error"):
+        return str(payload["error"])
+    if isinstance(tool_result, str) and payload.get("tool_name") == "Bash":
+        header = tool_result.partition("\nOutput:")[0] if "\nOutput:" in tool_result else tool_result.partition("\n")[0]
+        match = _SHELL_EXIT_RE.search(header)
+        return tool_result if match and int(match.group(1)) != 0 else None
+    detected, error_text = _is_error(tool_result, strict=True)
+    return error_text if detected else None
+
+
 def on_post_tool_result(payload: dict) -> None:
     """PostToolUse handler: track failures, inject research instructions at threshold."""
     from hooks.config import RETRY_BREAKER_MAX
-    from hooks.tool_memory import _is_error, strict_detection
 
     tool_name = payload.get("tool_name", "unknown")
     tool_input = payload.get("tool_input", {})
@@ -274,9 +290,9 @@ def on_post_tool_result(payload: dict) -> None:
         return
 
     op_key = _payload_operation_key(payload)
-    detected, error_text = _is_error(tool_result, strict=strict_detection(tool_name))
+    error_text = _failure_text(payload, tool_result)
 
-    if not detected:
+    if error_text is None:
         # Success — reset counter for this operation
         state = _get_state(session_id, op_key)
         if state["count"] > 0:

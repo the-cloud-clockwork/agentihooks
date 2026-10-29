@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shlex
@@ -52,22 +53,49 @@ def _used(session_id: str) -> int | None:
 
 
 def _overrun(session_id: str, environ) -> tuple[str, int] | None:
-    slug = _swarm_of(os.environ if environ is None else environ)
+    slug = _swarm_of(os.environ if environ is None else environ, session_id)
     used = _used(session_id) if slug and session_id else None
     if used is None or used < _gate_limit() * 1000:
         return None
     return slug, used
 
 
-def _gate_limit() -> int:
-    return COMPACT_LIMIT + HANDOFF_MARGIN
+def _gate_limit(compact_limit: int | None = None) -> int:
+    return (COMPACT_LIMIT if compact_limit is None else compact_limit) + HANDOFF_MARGIN
 
 
-def _swarm_of(environ) -> str:
-    name = environ.get("AGENTIHOOKS_AGENT_NAME", "")
-    if not naming.lane_of(name):
+def _marker(session_id: str, stage: str) -> Path:
+    return AGENTIHOOKS_HOME / "context_usage" / f"{session_id}.{stage}"
+
+
+def _swarm_of(environ, session_id: str = "") -> str:
+    if environ.get("AGENTIHOOKS_SWARM_LANE") == naming.OPERATOR:
         return ""
-    return naming.legacy_slug(name) or environ.get("AGENTIHOOKS_SWARM", "")
+    name = environ.get("AGENTIHOOKS_AGENT_NAME")
+    slug = (naming.legacy_slug(name) or environ.get("AGENTIHOOKS_SWARM")) if naming.lane_of(name) else ""
+    if not session_id:
+        return slug
+    if not slug:
+        return _pinned_swarm(session_id).get("swarm")
+    if _used(session_id) is not None:
+        pin_swarm(session_id, slug)
+    return slug
+
+
+def _pinned_swarm(session_id: str) -> dict:
+    try:
+        return json.loads(_marker(session_id, "swarm").read_bytes())
+    except (OSError, ValueError):
+        return {}
+
+
+def pin_swarm(session_id: str, slug: str, compact_limit: int | None = None) -> None:
+    pin = _marker(session_id, "swarm")
+    if not pin.exists():
+        pin.parent.mkdir(parents=True, exist_ok=True)
+        pin.write_text(
+            json.dumps({"swarm": slug, "compact_limit": COMPACT_LIMIT if compact_limit is None else compact_limit})
+        )
 
 
 def over_limit(session_id: str, environ=None) -> str | None:
@@ -76,13 +104,12 @@ def over_limit(session_id: str, environ=None) -> str | None:
 
 
 def directive(session_id: str, environ=None, now: datetime | None = None) -> str | None:
-    slug = _swarm_of(os.environ if environ is None else environ)
+    slug = _swarm_of(os.environ if environ is None else environ, session_id)
     used = _used(session_id) if slug and session_id else None
     if used is None or used < COMPACT_LIMIT * 1000:
         return None
     hard = used >= _gate_limit() * 1000
-    stage = "recycle" if hard else "prepare"
-    marker = AGENTIHOOKS_HOME / "context_usage" / f"{session_id}.{stage}"
+    marker = _marker(session_id, "recycle" if hard else "prepare")
     if marker.exists():
         return None
     marker.parent.mkdir(parents=True, exist_ok=True)
@@ -95,6 +122,14 @@ def directive(session_id: str, environ=None, now: datetime | None = None) -> str
         f"Deadline: {deadline:%Y-%m-%d %H:%M UTC}, or before the {_gate_limit()}k hard gate, whichever comes first. "
         + _INSTRUCTIONS.format(slug=slug)
     )
+
+
+def unmarked_overrun(session_id: str, compact_limit: int) -> int | None:
+    used = _used(session_id)
+    limit = _pinned_swarm(session_id).get("compact_limit", compact_limit)
+    if used is None or used < _gate_limit(limit) * 1000:
+        return None
+    return None if any(_marker(session_id, stage).exists() for stage in ("prepare", "recycle")) else used
 
 
 def _in_scratchpad(path: str) -> bool:

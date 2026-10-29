@@ -8,6 +8,9 @@ from pathlib import Path
 
 import ledger_core as core
 
+from scripts.swarm_ledger import request_metrics
+from scripts.swarm_ledger.repository import media_files
+
 MAX_BYTES = 8 << 20
 MAX_PER_ENTRY = 6
 EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif"}
@@ -69,7 +72,14 @@ def inspect(data):
 
 
 def write_file(path: Path, data: bytes) -> None:
-    with core.LOCK:
+    from scripts.swarm_ledger.storage_migration.hosted import media_mutation
+
+    with (
+        request_metrics.locked(core.LOCK),
+        media_mutation(path.parent.parent, path.parent.name.removesuffix(".media")) as writable,
+    ):
+        if not writable:
+            raise Refused(409, "ledger moved to hosted service")
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".part")
@@ -85,6 +95,7 @@ def store(slug, data):
     media_id = f"{hashlib.sha256(data).hexdigest()}.{EXTENSIONS[kind]}"
     path = folder(slug) / media_id
     write_file(path, data)
+    media_files.save(slug, media_id, data, core.now_ms())
     return {"id": media_id, "type": kind, "size": len(data), "width": width, "height": height}
 
 
@@ -97,8 +108,21 @@ def path_of(slug, media_id):
     return path
 
 
+def read(slug, media_id, adopt=False):
+    data = media_files.load(slug, media_id)
+    if data is None:
+        data = path_of(slug, media_id).read_bytes()
+        if adopt:
+            media_files.save(slug, media_id, data, core.now_ms())
+    return data
+
+
+def served(slug, media_id):
+    return read(slug, media_id, adopt=True)
+
+
 def entry(slug, media_id):
-    data = path_of(slug, media_id).read_bytes()
+    data = read(slug, media_id)
     kind, width, height = inspect(data)
     return {"id": media_id, "type": kind, "size": len(data), "width": width, "height": height}
 
@@ -124,19 +148,34 @@ def attach_paths(slug: str, doc: dict, events: list[dict]) -> None:
         target = event.get("target", "")
         thread = core.get_thread(doc, "chat" if target == "chat" else f"{target}/comments")
         item = next((item for item in thread or [] if item["id"] == event.get("id")), None)
-        if item and item.get("attachments"):
-            event["image_paths"] = [str(path_of(slug, att["id"]).resolve()) for att in item["attachments"]]
+        ids = [att["id"] for att in (item or {}).get("attachments", []) if ID_RE.match(str(att["id"]))]
+        here = [folder(slug) / media_id for media_id in ids]
+        paths = [str(path.resolve()) for path in here if path.is_file()]
+        if paths:
+            event["image_paths"] = paths
 
 
 def purge(slug):
+    from scripts.swarm_ledger.storage_migration.hosted import media_mutation
+
     if not isinstance(slug, str) or not core.SLUG_RE.match(slug):
         raise ValueError(f"refusing to purge media for {slug!r}: not a ledger slug")
-    shutil.rmtree(folder(slug), ignore_errors=True)
+    with media_mutation(core.LEDGER_DIR, slug) as writable:
+        if writable:
+            shutil.rmtree(folder(slug), ignore_errors=True)
 
 
-def sweep(slug: str, used: set[str], now: int) -> None:
+def sweep(slug: str, used: set[str], now: int) -> set[str]:
+    from scripts.swarm_ledger.storage_migration.hosted import media_mutation
+
     # Uploads and their entry writes arrive in separate requests.
     cutoff = now / 1000 - 3600
-    for path in folder(slug).glob("*"):
-        if path.is_file() and path.name not in used and path.stat().st_mtime < cutoff:
-            path.unlink()
+    with media_mutation(core.LEDGER_DIR, slug) as writable:
+        if not writable:
+            return set()
+        for path in folder(slug).glob("*"):
+            if path.is_file() and path.name not in used and path.stat().st_mtime < cutoff:
+                path.unlink()
+    return {
+        media_id for media_id, at in media_files.ages(slug).items() if media_id not in used and at < now - 3_600_000
+    }

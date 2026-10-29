@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/store.py:scripts.swarm.store.x\u01c1RedisStore\u01c1drop_agent__mutmut_3:2a97c441fe2ad83d49b97030e73352ac4627be395be51b3abd155c8e28aa884e": {
+    "reader": "standards_reader",
+    "reason": "Before MULTI, pipeline and ordinary Redis EVAL read identical current server state. WATCH on executions and agents detects writes before EXEC on either connection, preserving the same retirement decision and atomic side effects."
+  }
+}

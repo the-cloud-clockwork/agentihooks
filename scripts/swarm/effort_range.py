@@ -1,7 +1,8 @@
 """The effort range a swarm holds every lane agent's launch effort inside; both harnesses' levels share one rank."""
 
-EFFORTS = {"claude": ("low", "medium", "high", "max"), "codex": ("low", "medium", "high", "xhigh")}
-DEFAULT = ("medium", "high")
+EFFORTS = {"claude": ("low", "medium", "high", "xhigh", "max"), "codex": ("low", "medium", "high", "xhigh")}
+DEFAULT = ("medium", "xhigh")
+MASTER_FLOOR = "high"
 VARIABLE = "AGENTIHOOKS_SWARM_EFFORT_RANGE"
 
 
@@ -17,8 +18,26 @@ def level(effort):
     return None if found is None else EFFORTS["claude"][found]
 
 
+def named(harness, effort):
+    found = rank(effort)
+    return effort if found is None else _at(harness, found)
+
+
+def _at(harness, found):
+    levels = EFFORTS[harness]
+    return levels[min(found, len(levels) - 1)]
+
+
 def of(config):
     return getattr(config, "effort_min", DEFAULT[0]), getattr(config, "effort_max", DEFAULT[1])
+
+
+def bounds(config, lane):
+    """The range a lane launches inside: the swarm range, lifted for a master so it never starts below high."""
+    found = of(config)
+    if lane != "master":
+        return found
+    return tuple(max(edge, MASTER_FLOOR, key=rank) for edge in found)
 
 
 def clamp(harness, effort, bounds):
@@ -26,13 +45,13 @@ def clamp(harness, effort, bounds):
     if found is None:
         return effort
     low, high = (rank(edge) for edge in bounds)
-    return EFFORTS[harness][min(max(found, low), high)]
+    return _at(harness, min(max(found, low), high))
 
 
 def refusal(bounds, lanes):
     low, high = bounds
     if level(low) is None or level(high) is None:
-        return f"effort-min and effort-max are one of {', '.join(EFFORTS['claude'])}, Codex xhigh standing for max"
+        return f"effort-min and effort-max are one of {', '.join(EFFORTS['claude'])}, Codex running max as xhigh"
     if rank(low) > rank(high):
         return f"effort-min {low} is above effort-max {high}"
     for name, lane in sorted(lanes.items()):

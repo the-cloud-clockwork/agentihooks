@@ -5,7 +5,7 @@ browser=false
 if [[ -z "$BASE" || "$BASE" =~ ^0+$ ]] || ! git rev-parse --verify "$BASE^{commit}" >/dev/null 2>&1; then
   browser=true
 else
-  changed="$(git diff --no-renames --name-only "$BASE" HEAD)"
+  changed="$(git diff --no-renames --name-only "$BASE"...HEAD)"
   while IFS= read -r path; do
     case "$path" in
       scripts/swarm_ledger/*|tests/swarm_ledger/*|tests/fixtures/artifacts/*|.github/*|pyproject.toml)

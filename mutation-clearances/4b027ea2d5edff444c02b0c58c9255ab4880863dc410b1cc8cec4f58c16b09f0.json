@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_authority.py:scripts.swarm_ledger.ledger_authority.x_tick_principal__mutmut_14:e20401746d8babd780b2ad23f14ba986c8486f9c1fdf4dc7c3e9e48b98618488": {
+    "reader": "Standards",
+    "reason": "Valid tokens contain one dot and parse identically; extra dot variants cannot equal the exact signed token, so every variant rejects them."
+  }
+}

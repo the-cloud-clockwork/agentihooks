@@ -28,7 +28,7 @@ def confirm(findings: list[Finding], snap: Snapshot, path: Path) -> list[Finding
         if first.get("action") != item.action:
             first = {"action": item.action, "uptime": snap.uptime}
         current[item.path] = first
-        result.append(replace(item, due=snap.uptime - first["uptime"] >= CONFIRM_AFTER))
+        result.append(replace(item, due=item.immediate or snap.uptime - first["uptime"] >= CONFIRM_AFTER))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"boot_id": snap.boot_id, "seen": current}), encoding="utf-8")
     return result

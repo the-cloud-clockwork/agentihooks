@@ -1,0 +1,6 @@
+{
+  "scripts/gates/lift.py:scripts.gates.lift.x_held__mutmut_1:a76493c67905490dc439e07b3a86a6c9ecf4f69c2dc4e8c963b217edf3331c5e": {
+    "reader": "Standards",
+    "reason": "When command is omitted, XXXX is forwarded only to task_lifted, where it produces no recognized merge targets just like the original empty string. The same saved head check runs. The agent-lift branch never uses command, and explicit command callers are unchanged."
+  }
+}

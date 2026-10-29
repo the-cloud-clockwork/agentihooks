@@ -25,7 +25,7 @@ def launch(monkeypatch):
     monkeypatch.setattr(install, "_load_claude_runtime_env", loader)
     monkeypatch.setattr(operator_env, "accounts", Mock(return_value={}))
     monkeypatch.setattr(skill_eval.shutil, "which", Mock(return_value="/usr/bin/claude"))
-    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"winner": 1, "peer": 3})
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **_: {"winner": 1, "peer": 3})
     result = balancer.ProbeResult(
         account="winner",
         provider_status="allowed",
@@ -64,6 +64,7 @@ def test_claude_evaluation_routes_without_default_login(launch, monkeypatch, tmp
         include_fable=False,
         claude_bin="/usr/bin/claude",
         sessions={"winner": 1, "peer": 3},
+        exclude=["api"],
     )
     executable, argv, child = execute.call_args.args
     assert executable == "python3"
@@ -203,6 +204,15 @@ def test_agentihooks_serves_skill_eval_as_a_subcommand(agent, launch, monkeypatc
     assert execute.call_args.args[:2] == (agent, command)
     expected = "[skill-eval] account=winner\n" if agent == "claude" else ""
     assert capsys.readouterr().err == expected
+
+
+def test_skill_eval_subcommand_returns_none(launch, monkeypatch):
+    _, _, _, execute = launch
+    execute.side_effect = None
+    monkeypatch.setattr(install.sys, "argv", ["agentihooks", "skill", "eval", "--agent", "codex", "--", "codex"])
+
+    install.main()
+    execute.assert_called_once()
 
 
 def test_skill_eval_subcommand_names_itself_in_usage(launch, monkeypatch, capsys):

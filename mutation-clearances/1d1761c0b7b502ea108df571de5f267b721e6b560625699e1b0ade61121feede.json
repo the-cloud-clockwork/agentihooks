@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/provider_probe.py:scripts.swarm.provider_probe.x__run__mutmut_46:ac869e49ee70b9d2f87dd488ced7ca26e4bd28930819c40cb2770582d4ff3e47": {
+    "reader": "Standards reader for swarm outage detector",
+    "reason": "check is the sole production consumer of this private transport result. It never reads CompletedProcess args or stderr. Timeout returncode remains 124, so stdout parsing is skipped. Launch, kill and reap, public Result and persisted probe state are identical."
+  }
+}

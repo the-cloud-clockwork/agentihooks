@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x__write__mutmut_8:43e45dbdf3b81a810085baa6979c5a0d868da3336c204bc204b473a3ab017963": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "_write serializes with json.dumps at its default ensure_ascii=True, so the bytes are pure ASCII and any ASCII-compatible encoding, including the locale default under the UTF-8 CI and worker image, writes identical bytes."
+  }
+}

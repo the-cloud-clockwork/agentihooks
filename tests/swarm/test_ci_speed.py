@@ -10,8 +10,6 @@ import pytest
 from scripts.swarm import ci_speed
 from scripts.swarm.store import PREFIX
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 RUNS = json.loads((Path(__file__).resolve().parent.parent / "fixtures" / "ci_speed_runs.json").read_text())
 NOW_MS = 1_791_454_000_000
 HOUR_MS = 3_600_000
@@ -30,6 +28,15 @@ def test_median_counts_finished_pull_request_runs_into_dev_from_recorded_data():
 
 def test_median_is_none_without_finished_runs():
     assert ci_speed.median_minutes(ci_speed.durations([r for r in RUNS if r["conclusion"] == "cancelled"])) is None
+
+
+def test_runs_of_another_event_are_read_on_request():
+    calls = []
+    ci_speed.read_runs("/repo", 0, gh("", calls), event="push")
+    assert sorted(argv[2] for argv, _ in calls) == [
+        endpoint(conclusion, "1970-01-01T00:00:00Z").replace("event=pull_request", "event=push")
+        for conclusion in ("failure", "success")
+    ]
 
 
 @pytest.fixture
@@ -72,7 +79,8 @@ def read_call(conclusion, since):
             endpoint(conclusion, since),
             "--paginate",
             "--jq",
-            ".workflow_runs[] | {id, event, status, conclusion, head_branch, run_started_at, updated_at} | @json",
+            ".workflow_runs[] | {id, event, status, conclusion, head_branch, head_sha, created_at, run_started_at,"
+            " updated_at, run_attempt} | @json",
         ],
         {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60},
     )

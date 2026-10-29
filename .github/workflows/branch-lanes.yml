@@ -1,0 +1,47 @@
+name: Branch workflow lanes
+
+# A workflow that exists only on a branch cannot be capped from dev, so dev's grader refuses one whose jobs skip the shared hosted lanes and cancels its runs on that head.
+on:
+  push:
+    branches-ignore: [dev, main, "gh-readonly-queue/**"]
+
+concurrency:
+  group: branch-lanes-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  grade:
+    if: ${{ !github.event.deleted }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 1
+          sparse-checkout: |
+            /.github/workflows/
+            /scripts/__init__.py
+            /scripts/gh_config.py
+            /scripts/ci_branch_lanes.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install workflow parser
+        run: python -m pip install "pyyaml>=6.0"
+
+      - name: Fetch the head as data
+        run: git fetch --no-tags --depth 1 origin "$GITHUB_SHA"
+
+      - name: Refuse branch only workflows off the shared hosted lanes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.ci_branch_lanes --head "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY"

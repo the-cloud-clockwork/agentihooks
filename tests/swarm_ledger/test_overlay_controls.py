@@ -11,12 +11,14 @@ from scripts.swarm_ledger import ledger_server
 SWARM_JS = Path(ledger_server.__file__).parent / "static" / "js" / "swarm.js"
 
 
-def test_the_page_offers_the_server_roles_and_overlay_cap():
+def test_the_page_offers_the_server_roles_and_reads_the_overlay_cap_from_the_tips():
+    from scripts.swarm_ledger import page_tips
+
     source = SWARM_JS.read_text()
     roles = re.search(r"^const ROLES = (\[.*\]);$", source, re.M).group(1)
-    cap = re.search(r"^const OVERLAY_CAP = (\d+);$", source, re.M).group(1)
     assert tuple(json.loads(roles)) == overlays.ROLES
-    assert int(cap) == OVERLAY_CAP
+    assert "tips.overlays" in source and not re.search(r"OVERLAY_CAP = \d", source)
+    assert page_tips.values()["overlays"] == OVERLAY_CAP
 
 
 def test_page_sets_overlays_per_role_in_role_order():
@@ -59,7 +61,7 @@ def test_page_overlays_need_known_roles_and_plain_unique_names(overlays):
     with pytest.raises(ValueError) as caught:
         ledger_server.control_argv({"action": "set", "overlays": overlays})
     assert str(caught.value) == (
-        "overlays maps a base role of master, engineer, planner, qa, cicd to a list of distinct overlay names"
+        "overlays maps a base role of master, engineer, planner, qa, cicd, documentation to a list of distinct overlay names"
     )
 
 

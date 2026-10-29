@@ -18,5 +18,9 @@
   {
     "query": "an engineer's resume failed and the seat awaits a decision",
     "expected_behavior": "Runs swarm restore-decision for that agent with resume or fresh."
+  },
+  {
+    "query": "the dispatcher proposes rank high for a task at assist autonomy",
+    "expected_behavior": "Treats ranking as the dispatcher's, asks the operator where the proposal asks for him, then applies the named task set command or declines with msg close cancel and a reason; never re-ranks on its own."
   }
 ]

@@ -1,0 +1,40 @@
+{
+  "tested_commit": "2ddf3613965d4132eef6552a401ce3b0194b34ca",
+  "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI and the process reaper behind HerdrRuntime, the local process table and PID namespace are fixture values, and the remote backend is an in-memory fake; not live rollout proof",
+  "then": "a terminate request lacking execution identity fails even when a local PID happens to match",
+  "result": {
+    "status": "refused",
+    "detail": "no execution identity",
+    "signals_sent": 0,
+    "pane_commands_before_correction": 0,
+    "record_unchanged": true,
+    "discloses_runtime_target": false,
+    "remote_without_identity": [
+      "refused",
+      "no execution identity",
+      0
+    ],
+    "unqualified_process_actions_rejected_total": 2,
+    "rejections_by_backend": [
+      [
+        "kubernetes",
+        "no execution identity"
+      ],
+      [
+        "local",
+        "no execution identity"
+      ]
+    ],
+    "corrected_request": [
+      "ok",
+      [
+        [
+          "engineer@a1b2c3-0001",
+          4321,
+          777
+        ]
+      ]
+    ]
+  },
+  "passed": true
+}

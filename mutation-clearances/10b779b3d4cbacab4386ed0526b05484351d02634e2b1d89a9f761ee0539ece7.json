@@ -1,0 +1,6 @@
+{
+  "hooks/filters/finders/explanation_tail.py:hooks.filters.finders.explanation_tail.x_find__mutmut_4:44835602d244a56524859005efc73d8223f78ae6ca270c9413ddc83ff8630112": {
+    "reader": "Standards reader",
+    "reason": "The string literal leaf ignores tool. Replacing the forwarded tool with None gives equal findings in six reader comparisons."
+  }
+}

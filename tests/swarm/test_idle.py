@@ -5,8 +5,6 @@ from scripts.swarm import idle
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.store import SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 NOW = 10_000_000
 
 

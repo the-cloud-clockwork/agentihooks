@@ -19,7 +19,7 @@ def test_unhandled_for_resolves_the_name_once_however_many_events(monkeypatch):
 
 
 def test_crew_finds_each_event_owner_once_for_every_member(monkeypatch):
-    monkeypatch.setattr(naming, "resolve_name", lambda name: name)
+    monkeypatch.setattr(naming, "resolve_names", lambda names: {name: name for name in names})
     looked = []
     owner = ledger_gate.owner
     monkeypatch.setattr(ledger_gate, "owner", lambda event, *args: looked.append(event["rev"]) or owner(event, *args))
@@ -56,5 +56,51 @@ def test_unhandled_for_routes_owned_events_only_to_their_owner(monkeypatch):
 
 def test_a_ledger_without_events_owes_nothing(monkeypatch):
     monkeypatch.setattr(naming, "resolve_name", lambda name: name)
+    monkeypatch.setattr(naming, "resolve_names", lambda names: {name: name for name in names})
     assert ledger_gate.unhandled_for({"members": {"eng": {}}}, "eng") == []
     assert ledger_gate.crew({"members": {"eng": {}}})[0]["unhandled"] == 0
+
+
+class Events(list):
+    passes = 0
+
+    def __iter__(self):
+        Events.passes += 1
+        return super().__iter__()
+
+
+def test_crew_resolves_every_member_in_one_call_and_reads_the_events_once(monkeypatch):
+    batches = []
+
+    def one_at_a_time(name):
+        raise AssertionError(f"resolved {name} on its own")
+
+    monkeypatch.setattr(naming, "resolve_name", one_at_a_time)
+    monkeypatch.setattr(naming, "resolve_names", lambda names: batches.append(list(names)) or {n: n for n in names})
+    members = {f"eng{n}": {"handled_rev": 0} for n in range(50)}
+    Events.passes = 0
+    events = Events([operator(1), {"rev": 2, "by": "eng0", "kind": "comment", "target": "phases/p1"}, operator(3)])
+    crew = ledger_gate.crew({"members": members, "events": events})
+    assert batches == [list(members)]
+    assert Events.passes == 1
+    assert {member["unhandled"] for member in crew} == {2}
+
+
+def test_crew_counts_a_renamed_member_by_the_name_it_resolves_to(monkeypatch):
+    monkeypatch.setattr(naming, "resolve_names", lambda names: {n: "new" if n == "old" else n for n in names})
+    members = {"old": {"handled_rev": 0}, "new": {"handled_rev": 3}, "eng": {"handled_rev": 1}}
+    events = [operator(1), operator(2), operator(3, "sync requested", "chat", text="sync")]
+    crew = ledger_gate.crew({"members": members, "events": events})
+    assert [(m["name"], m["handled_rev"], m["unhandled"]) for m in crew] == [
+        ("old", 0, 0),
+        ("new", 3, 0),
+        ("eng", 1, 2),
+    ]
+
+
+def test_crew_reads_an_event_without_a_revision_as_revision_zero_and_a_ledger_without_members_as_empty(monkeypatch):
+    monkeypatch.setattr(naming, "resolve_names", lambda names: {n: n for n in names})
+    events = [{"by": "operator", "kind": "comment", "target": "phases/p1"}, operator(1)]
+    crew = ledger_gate.crew({"members": {"eng": {}, "old": {"handled_rev": 1}}, "events": events})
+    assert [(m["name"], m["unhandled"]) for m in crew] == [("eng", 1), ("old", 0)]
+    assert ledger_gate.crew({"events": events}) == []

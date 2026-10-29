@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__line_match__mutmut_12:02f7e1258e984d15744bbf9d30ef7ad7475352b42d5e75749a04019d2a5cf70f": {
+    "reader": "Standards",
+    "reason": "Only ORDER BY, DESC and LIMIT keyword casing changes; SQLite retains descending entry id ordering and the one-row limit."
+  }
+}

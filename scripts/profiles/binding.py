@@ -46,6 +46,18 @@ def request(report: Path, profile: str, target: str, home: Path | None = None) -
     _report(report, data)
 
 
+def rehome(report: Path, home: Path, shared: bool = False) -> None:
+    requested = json.loads(report.read_text())
+    try:
+        rendered = inspect(home, requested["profile"], requested["harness"])
+        if not shared and rendered.get("canary") != requested["rendered"].get("canary"):
+            raise ValueError("execution home canary differs from the launch request")
+    except ValueError as exc:
+        refuse(report, str(exc))
+        raise
+    _report(report, {**requested, "rendered": rendered})
+
+
 def refuse(report: Path, reason: str) -> None:
     requested = json.loads(report.read_text())
     if requested["state"] == "pending":
@@ -153,21 +165,38 @@ def wait(report: Path, timeout: float) -> dict:
         if data["state"] == "validated":
             return data["validation"]
         time.sleep(0.25)
-    raise ValueError("mounted profile canary did not validate before timeout")
+    harness = json.loads(report.read_text())["harness"]
+    raise ValueError(
+        f"mounted profile canary did not validate before timeout: the {harness} agent reported no canary within {timeout:g}s"
+    )
 
 
 def fields(data: dict, profile: str, target: str) -> dict:
     result = json.loads(data.get("profile_binding", "{}"))
-    if (
-        not isinstance(result, dict)
-        or data.get("profile_validation") != "validated"
-        or result.get("state") != "validated"
-    ):
+    if not isinstance(result, dict) or data.get("profile_validation") != "validated":
+        raise ValueError("mounted profile validation is missing or failed")
+    return checked(result, profile, target)
+
+
+def checked(result: dict, profile: str, target: str) -> dict:
+    if result.get("state") != "validated":
         raise ValueError("mounted profile validation is missing or failed")
     if result.get("profile") != profile or result.get("harness") != target:
         raise ValueError("validated live profile differs from requested choice")
     if not all(result.get(key) for key in ("pid", "home", "persona", "sources")):
         raise ValueError("validated profile lacks process or rendered source evidence")
+    return result
+
+
+def confirm(report: Path, profile: str, target: str, account: str) -> dict:
+    data = json.loads(report.read_text())
+    if data["state"] == "failed":
+        raise ValueError(data["reason"])
+    if data["state"] != "validated":
+        return {}
+    result = checked(data["validation"], profile, target)
+    if account and result.get("account") != account:
+        raise ValueError("live process account differs from requested route")
     return result
 
 
@@ -184,10 +213,13 @@ def continuation(args: list[str], target: str, environ: dict[str, str] | None = 
     if not model or not effort:
         raise ValueError("unsupported quota transfer: original model and effort binding unavailable")
     from scripts.swarm import effort_range
+    from scripts.swarm.store import MASTER
 
-    flags = model_flags(target, model, effort)
-    _, bounded, _ = _native_options(target, effort_range.launch_args(target, flags, environ or {}))
-    if bounded != effort:
+    environ = environ or {}
+    named = effort_range.named(target, effort)
+    flags = model_flags(target, model, named)
+    _, bounded, _ = _native_options(target, effort_range.launch_args(target, flags, environ))
+    if effort_range.rank(bounded) != effort_range.rank(named) and environ.get("AGENTIHOOKS_SWARM_LANE") != MASTER:
         raise ValueError("unsupported quota transfer: saved effort is outside the current swarm range")
     return [*flags, *remaining]
 

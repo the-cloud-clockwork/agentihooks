@@ -1,0 +1,22 @@
+{
+  "package": "SV2-PRF-01",
+  "tested_commit": "c69fb66a1ef99a8cd56d37d30dcfe310a1ece97d",
+  "measured_commit": "99ab72b5d4f2aee4d7e86327d2388c788f08027a",
+  "inputs": {
+    "tests/fixtures/swarm_v2/worker-resources/measurements.json": "a32d3d92a843b1860aeeb20584a3c74ed7f1ab27dcfa4794f2550a92cf834406",
+    "tests/fixtures/swarm_v2/worker-resources/repeat.json": "ede1a4cd1cc69e9351f2001954f5832441aee3d95184c3af05e5a705c4ea7500",
+    "tests/fixtures/swarm_v2/worker-resources/update.json": "73352ce1ac1a4ff3ac10761d296d29fabfdadfa3ce3dc5ec2e961648095791ec",
+    "tests/fixtures/swarm_v2/worker-resources/nodes.json": "74b07c4f56bb476f57707b29aca310d35a40f2841a6bfa685811cd613feb1e7a",
+    "tests/fixtures/swarm_v2/worker-resources/disclosure.json": "5619b504a31319971f751190ca09241f1e9ac8bef2c9454d660f46662d65041c",
+    "tests/performance/swarm_v2/workloads/suite.json": "c8a7be21dd67762ed06f08b43e943dbd51a9eb63e180766810350c3525b3ad70",
+    "tests/performance/swarm_v2/workloads/suite-update.json": "72559460df0f2d2370c9ad99e5f42af845cf62805703a8bf44363d3bd94c52e2",
+    "tests/performance/swarm_v2/workloads/general.py": "707735e2a52b9f88096d75510b3d02ec1fb17e4b894785f44563c6388305251d",
+    "tests/performance/swarm_v2/workloads/compiler.py": "757c054de710818c3454f4adb1fa69f6a2a50f17d7beddf47712dfe831bd4da8",
+    "tests/performance/swarm_v2/workloads/browser.py": "1d72b514691125d9f71f73b8128fa2a12a8cae6a7ccc8b5732389129732f1531",
+    "tests/performance/swarm_v2/workloads/memory.py": "d45dd766ca8fc33fc2da17d41d8c9392369486334d6dfc587bc2fcc5c62e58e3",
+    "tests/performance/swarm_v2/workloads/idle.py": "fa5992c463e78783ea4484c6b0ad0aa907525f3c767e737c025ff4135dce4a03",
+    "scripts/swarm_v2/resource_sampling.py": "0d823daea8a3765a646da3ec212adb9bb6217548444432d6b751621fa133cd93",
+    "scripts/swarm_v2/resource_bench.py": "eca89be179a50a6cb4d3337e055a02d496ba3a4e3b2901595758d83858f9ec27",
+    "scripts/swarm_v2/resource_profiles.py": "41a519ab6269ab93a35cd4ef8bda460ff4ef5a44879bb18649ee16124cb8cd9c"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_dispatch__mutmut_4:2d29a0d517d0a01554464e966a18c40a25687868816eb691a028b56c6e92a67c": {
+    "reader": "standards_reader",
+    "reason": "The route tuple slug is read only by url(), which tests not slug or equality against a truthy slug, so None and the empty string produce identical results, and command treats both as falsy before calling configured."
+  }
+}

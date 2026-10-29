@@ -1,0 +1,58 @@
+{
+  "package": "SV2-SES-05",
+  "dependency": "SV2-SES-04",
+  "integration_gate": "G4",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/6858",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/6875",
+  "tested_commit": "2e383a033",
+  "package_complete": false,
+  "evidence_class": "mocked: fixture transcript files in a temporary folder and SQLite catalog and import ledger files stand in for the operator's real Claude and Codex homes and the central database; no live provider home was read",
+  "interfaces": [
+    "hooks.memory.importer.import_sessions(catalog, imports, grant, plan, dry_run=False) refuses the whole plan before any read or write when it names no root, a provider other than claude or codex, an alias folder that is not an absolute path without '..', an alias project outside the Grant, or a root whose corpus is not the granted corpus; otherwise it reads every regular *.jsonl file under each approved root in path order, skipping symlinks and anything that resolves outside the root, and reports every source with outcome committed, replayed, already_imported, would_import, no_records or refused",
+    "hooks.memory.importer.read_source(provider, data, aliases) splits the source bytes into newline terminated lines, normalizes each parseable object line once with the SV2-SES-01 decoders, drops the raw entry and adds source_time, gives each record its own sequence and the line's byte range, keeps a final line without a newline when it parses, and reports a final line that does not parse as truncated and any other line that is not a JSON object as unparseable, each with its byte range",
+    "hooks.memory.importer.resolve_project(cwd, aliases) returns the project of the longest aliased absolute folder containing the working folder in effect at that line, and None for anything else, so a folder sharing only a basename with an aliased folder stays unattributed and is listed in ambiguous_basenames",
+    "Each committed source carries provenance: provider, installation, path relative to its root, sha256 and size of the source bytes, importer_version, native session id and whether it came from the transcript or the file name, provider version, working folders, first and last event time, projects, unattributed event count, ambiguous basenames and losses; every optional field the source lacks is null and named in unknown, with project named when any event is unattributed",
+    "Each source is one hooks.memory.api.ingest batch with batch_id and source_generation import:<source sha256> and session_uid <corpus>:<provider>:<installation>:<native session id>; hooks.memory.importer.ImportLedger marks it only after ingest returned committed or replayed, so a rerun skips it by source hash and a source committed before its mark is replayed by the catalog with no second copy",
+    "hooks.memory.importer.ImportLedger.search(catalog, grant, text) reads only the grant's corpus and the current generation of each source, returns unattributed events and events of granted projects whose text, tool name, tool input or tool result contains the text, ignoring case, with session, generation, event id, sequence, byte range, project, record and source attribution including the source's unknown field list",
+    "hooks.memory.importer.ImportLedger.export(catalog, domain) returns every import projection of every generation with its catalog events and their digest; retire(catalog, domain, destination) holds the import ledger write lock with BEGIN IMMEDIATE from the export to the delete, refuses an existing destination, writes that full export there with fsync of the file and its folder, reads it back, and only when its records match the current digest deletes the domain's import ledger rows; catalog events are kept",
+    "python -m scripts.swarm_v2.import_sessions takes --catalog, --imports, --corpus, --principal, repeated --project, --root PROVIDER:INSTALLATION:FOLDER, --alias FOLDER=PROJECT and --expected PROVIDER:INSTALLATION:RELATIVE_PATH --dry-run, or --retire EXPORT alone without roots or a dry run, prints the report and exits 0 when the import completed with no refused source or the retire succeeded, else 2"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "providers": "Claude Code JSONL transcripts and Codex JSONL rollouts as the SV2-SES-01 decoders read them; a bare JSON array transcript is reported as unparseable lines",
+    "schema_version": "ingest 2.x through SV2-SES-04",
+    "storage": "SQLite catalog and import ledger with WAL journal and synchronous FULL"
+  },
+  "states": {
+    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records.",
+    "accepted": "A plan is accepted when every root is approved for the granted corpus and every alias is an absolute folder of a granted project; a source is accepted when ingest returns committed or replayed.",
+    "committed": "A source is marked imported in the import ledger only after its catalog transaction committed; the report names each source's outcome.",
+    "externally_verified": "None: no real provider home, central database or deployed service was read or written."
+  },
+  "metrics": {
+    "historical_import_unknown_attribution": "events committed with a null project: per run in the report and durable per access domain through ImportLedger.unknown_attribution"
+  },
+  "cases": {
+    "a": "evidence/SV2-SES-05/a-result.json",
+    "b": "evidence/SV2-SES-05/b-result.json",
+    "c": "evidence/SV2-SES-05/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "ImportLedger.retire with a new destination writes the full export of every import projection and its events there, verifies the written records against the current digest, then removes only the import ledger rows, after which search returns nothing for the domain.",
+    "authoritative_objects": "The source transcript files and the catalog's session_event, session_quarantine, session_ingest_batch and session_watermark rows; retire deletes none of them.",
+    "proof": "Case C, after a crash, resume, rerun and grown source, retires to a new export file whose digest equals the export taken just before, finds no import projection or search hit, and counts the same catalog events as the export holds."
+  },
+  "remaining_limitations": [
+    "The importer reads only roots the caller names; it does not locate provider homes on its own.",
+    "One source file is one ingest batch, so a very large transcript is committed in one transaction.",
+    "A Claude sub agent transcript that reuses its parent's session id gets the parent's session_uid with its own source generation; parent and child are not linked.",
+    "Bare JSON array transcripts and Copilot sessions are not imported.",
+    "Search is a substring scan over the import ledger and catalog, not an index.",
+    "Retire removes only import ledger rows; the committed catalog events stay because they are authoritative evidence, so imported events remain readable through the catalog by session and generation.",
+    "Unattributed imported events are readable by any grant of the corpus; only events attributed to a project are filtered by the grant's projects.",
+    "Export and retire act on a whole access domain and are operator operations; they take no project grant.",
+    "A source that grows after import is imported again as a new source generation; earlier generations stay in the catalog and the export, and search reads only the newest generation of each source path."
+  ],
+  "compatibility": "Explicitly local compatibility path: imported events go through hooks.memory.api.ingest unchanged, so they share the SV2-SES-04 event identity, scope check and quarantine rules; the collector, spool, whole file reader and catalog are untouched.",
+  "authority": "The corpus and projects come from the caller's Grant and the roots and aliases the operator names, on import and on search; a project label, folder basename or display name in a transcript never grants a project. Unattributed events follow the accepted SV2-SES-04 ingest rule that an event without a project belongs to the corpus whose grant committed it, so a search under that corpus returns them; access to them comes from the operator approving the root for the corpus, never from a basename."
+}

@@ -7,7 +7,8 @@ import pytest
 
 
 @pytest.mark.parametrize("order", [("a", "root", "b"), ("root", "a", "b"), ("a", "b", "root")])
-def test_grouped_files_keep_directory_fixtures(tmp_path, order):
+@pytest.mark.parametrize("disable_autoload", ["", "1"])
+def test_grouped_files_keep_directory_fixtures(tmp_path, order, disable_autoload):
     package = tmp_path / "checks"
     nested = package / "swarm"
     nested.mkdir(parents=True)
@@ -37,11 +38,16 @@ def test_grouped_files_keep_directory_fixtures(tmp_path, order):
         "    assert 'GROUPED_CLASSIFIER' not in os.environ\n"
     )
     files = {"root": package / "test_root.py", "a": nested / "test_a.py", "b": nested / "test_b.py"}
-    environ = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1]))
+    environ = dict(
+        os.environ,
+        PYTHONPATH=str(Path(__file__).resolve().parents[1]),
+        PYTEST_DISABLE_PLUGIN_AUTOLOAD=disable_autoload,
+    )
     environ.pop("PYTEST_ADDOPTS", None)
+    environ.pop("PYTEST_DISABLE_PLUGIN_AUTOLOAD", None)
     environ.pop("GROUPED_CLASSIFIER", None)
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-n", "0", *(str(files[name]) for name in order)],
+        [sys.executable, "-m", "pytest", "-q", *(str(files[name]) for name in order)],
         cwd=tmp_path,
         env=environ,
         capture_output=True,

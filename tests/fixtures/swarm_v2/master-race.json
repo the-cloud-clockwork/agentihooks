@@ -1,0 +1,15 @@
+{
+  "slug": "race-2026-01-01",
+  "phases": ["Deploy probe", "Release notes"],
+  "lead": "master@abcdef-0001",
+  "second": "master@abcdef-0002",
+  "former": "master@abcdef-0009",
+  "engineer": "engineer@abcdef-0005",
+  "tasks": [
+    {"id": "t1", "title": "Probe the deploy", "phase": "p1"},
+    {"id": "t2", "title": "Write the notes", "phase": "p2"}
+  ],
+  "followup": {"id": "f1", "text": "Retry the deploy probe once the node is back"},
+  "question": {"id": "q1", "text": "Which spare port should the probe use"},
+  "racers": 2
+}

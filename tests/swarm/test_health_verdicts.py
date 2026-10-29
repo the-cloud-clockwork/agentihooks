@@ -7,8 +7,6 @@ from scripts.swarm.health.findings import Finding
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.store import SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 KEY = f"{KEY_ROOT}:swarm:sw:findings"
 HOUR = 60 * 60_000
 T0 = 10_000_000_000
@@ -100,6 +98,28 @@ def test_a_verdict_kept_without_its_evidence_compares_with_the_last_pass(board):
     assert store.visible([aging(100, 0)], T0 + 2 * HOUR, HOUR, new_evidence=True) == []
     [back] = store.visible([aging(110, 1)], T0 + 2 * HOUR, HOUR, new_evidence=True)
     assert back["id"] == "inbox-past-window/i1"
+
+
+def stretch(minutes, since):
+    return Finding(
+        "urgent unclaimable", "t1", "unclaimed", ("claimable",), "ten minutes", minutes, evidence_identity=(since,)
+    )
+
+
+def test_an_identity_finding_returns_on_a_new_identity_whatever_its_measure(board):
+    _, store = board
+    store.visible([stretch(150, 0)], T0, HOUR)
+    store.judge("urgent-unclaimable/t1", "established", "", "operator", T0)
+    assert shown(store, [stretch(400, 0)], T0 + 5 * HOUR) == []
+    assert shown(store, [stretch(20, 7)], T0 + HOUR - 1) == []
+    assert shown(store, [stretch(20, 7)], T0 + HOUR) == ["urgent-unclaimable/t1"]
+
+
+def test_with_new_evidence_required_a_new_identity_still_needs_a_grown_measure(board):
+    _, store = board
+    store.visible([stretch(150, 0)], T0, HOUR, new_evidence=True)
+    store.judge("urgent-unclaimable/t1", "established", "", "operator", T0)
+    assert store.visible([stretch(20, 7)], T0 + 2 * HOUR, HOUR, new_evidence=True) == []
 
 
 def test_it_returns_at_most_once_and_carries_its_earlier_verdict(board):

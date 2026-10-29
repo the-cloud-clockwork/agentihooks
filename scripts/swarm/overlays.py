@@ -6,7 +6,7 @@ import yaml
 
 from hooks.context import profile_chain
 
-ROLES = ("master", "engineer", "planner", "qa", "cicd")
+ROLES = ("master", "engineer", "planner", "qa", "cicd", "documentation")
 KEY = "overlays-"
 
 
@@ -44,21 +44,30 @@ def chosen(profile: str, task: dict, defaults: dict) -> tuple[str, ...]:
 
 
 def available() -> list[dict]:
-    bundle = _install()._get_bundle_path()
-    found = []
-    for manifest in sorted((bundle / "profiles").glob("*/profile.yml")) if bundle else []:
-        try:
-            roles = profile_chain.wears(manifest.parent)
-        except (AttributeError, ValueError, yaml.YAMLError):
-            continue
-        if roles:
-            found.append({"name": manifest.parent.name, "wears": roles})
-    return found
+    found: dict[str, dict] = {}
+    for _kind, bundle in _install()._bundle_roots():
+        for manifest in sorted((bundle / "profiles").glob("*/profile.yml")):
+            try:
+                roles = profile_chain.wears(manifest.parent)
+            except (AttributeError, ValueError, yaml.YAMLError):
+                continue
+            if roles and manifest.parent.name not in found:
+                found[manifest.parent.name] = {"name": manifest.parent.name, "wears": roles}
+    return sorted(found.values(), key=lambda overlay: overlay["name"])
+
+
+def _head(bundle) -> str:
+    done = subprocess.run(["git", "-C", str(bundle), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+    return done.stdout.strip() if done.returncode == 0 else ""
 
 
 def revision() -> str:
-    bundle = _install()._get_bundle_path()
+    installer = _install()
+    bundle, user = installer._get_bundle_path(), installer._get_user_bundle_path()
     if bundle is None:
         return ""
-    done = subprocess.run(["git", "-C", str(bundle), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
-    return done.stdout.strip() if done.returncode == 0 else ""
+    root = _head(bundle)
+    if user is None or not root:
+        return root
+    mine = _head(user)
+    return f"{root}:{mine}" if mine else ""

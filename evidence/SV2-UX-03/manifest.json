@@ -1,0 +1,27 @@
+{
+  "case_runs": [
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40084661327"
+  ],
+  "cases": [
+    "T-SV2-UX-03-A",
+    "T-SV2-UX-03-B",
+    "T-SV2-UX-03-C"
+  ],
+  "evidence_class": "mocked: checkpoints committed and verified through a granted local artifact store, one with a corrupted native session object; fakeredis execution registry, fences and recovery records; a fake lease clock; an in process API server whose Pods carry fixture statuses; the ledger page projection read from the same store; no ledger HTTP server, browser, worker Pod or cluster runs",
+  "inputs": {
+    "scripts/swarm/recovery_view.py": "c3926939d584327399056426e268bf78e50ec37dc89062e78ba926f848b5d94a",
+    "scripts/swarm/resume.py": "d6632f07405772b5dcd2d943fbe7c60d042e9020af45bff465e1206c14946385",
+    "scripts/swarm_ledger/static/js/recovery.js": "a7a560cfd976ceaab168bdb9030b2734e166da1e63de46833ac9ed809d3e61ea",
+    "scripts/swarm_v2/kubernetes/failures.py": "8d1c0f885f092acdd216bc48a9f3b2fba9c01ff3c96d5c42c9827b31c5af6677",
+    "tests/e2e/swarm_v2/test_recovery_material.py": "3c3f3934e0c4422bcbe392db6b4a699f5ad9de57486e36111a55360faf081133",
+    "tests/fixtures/swarm_v2/checkpoints/context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda",
+    "tests/fixtures/swarm_v2/checkpoints/native-resume.json": "c39dc9e0d89ee5d0f846ab5bca487ab16cc187c77077c6d9d1bde8e3723f2349",
+    "tests/fixtures/swarm_v2/pod-failures.json": "13b5e8d94825f40ea87fada359454c47dee84fd4161945eebcdea4e235fff4b4",
+    "tests/fixtures/swarm_v2/recovery-material.json": "46893d64cb14ba14b6c86b4566bc3a70c97b051ca8db6a8138a25c59062a8a4d",
+    "tests/sv2_ux03_cases.py": "595b376223dec4f2599c6a70e31180bd0ebfcd3fda05b18574e73656ad5dc242"
+  },
+  "red_runs": [
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38154268722"
+  ],
+  "tested_commit": "ffad25a52"
+}

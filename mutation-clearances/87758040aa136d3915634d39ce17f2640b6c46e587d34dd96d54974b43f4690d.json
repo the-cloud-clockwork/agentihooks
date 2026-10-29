@@ -1,0 +1,6 @@
+{
+  "scripts/events/memory.py:scripts.events.memory.xǁMemoryStateStoreǁwatch__mutmut_1:ff71aa433bf05d3425b66f810a2c35b6977bc617fae59ed55e2d6965a3b40e5c": {
+    "reader": "standards_reader",
+    "reason": "State revisions start at 1 and only grow, so filtering by revision >= 0 or revision >= 1 selects the same entries and the default change yields no different output."
+  }
+}

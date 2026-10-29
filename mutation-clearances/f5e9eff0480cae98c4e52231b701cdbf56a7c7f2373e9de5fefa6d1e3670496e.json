@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats_legacy.py:scripts.events.nats_legacy.x_legacy_target__mutmut_8:63ab0896d64622438077efdab36c79eb3b3a4f06dcce909d2e7c4fa13e8d4702": {
+    "reader": "standards-reader",
+    "reason": "A missing allow list becomes either [] or None. Both are falsy, so the existing short circuit permits the candidate without iterating. Existing values and every output are unchanged."
+  }
+}

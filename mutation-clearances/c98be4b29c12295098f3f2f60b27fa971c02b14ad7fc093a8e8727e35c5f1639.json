@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x__bind_pulls__mutmut_37:1bfb0c0591141c398f901db5d085812184deb409babd4b7433d8344babb66113": {
+    "reader": "Standards",
+    "reason": "Uppercasing the internal registry description changes only unused metadata. No production consumer compares or displays that reason; registered pull membership, expected fingerprints and per-pull intent verdicts remain identical."
+  }
+}

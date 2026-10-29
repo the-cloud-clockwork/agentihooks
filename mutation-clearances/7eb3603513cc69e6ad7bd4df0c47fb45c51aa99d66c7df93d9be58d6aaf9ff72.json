@@ -1,0 +1,6 @@
+{
+  "scripts/account_env.py:scripts.account_env.x_from_openbao__mutmut_20:a1b580851ae21a81ee88ebc18c2eb5549d742e1ad84fcef8468f16c4f701efab": {
+    "reader": "standards_reader",
+    "reason": "Changes the request header name from X-Vault-Token to x-vault-token. urllib.request.Request stores every header through add_header as key.capitalize(), so both spellings become X-vault-token and the outgoing request is identical."
+  }
+}

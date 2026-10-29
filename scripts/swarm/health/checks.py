@@ -1,6 +1,7 @@
 """Which held tasks have a pull request waiting on checks or operator approval."""
 
 import subprocess
+from collections.abc import Callable
 
 CACHE_SECONDS = 60
 
@@ -43,6 +44,18 @@ def cached(redis, prefix, run=subprocess.run, approval=False):
 
 def cached_green(redis, prefix, run=subprocess.run):
     return lambda pr_url: _memo(redis, f"{prefix}:green:{pr_url}", lambda: passing(pr_url, run))
+
+
+def from_view(view: Callable, approval: bool = False) -> tuple[Callable, Callable]:
+    def pending(pr_url):
+        current = view(pr_url)
+        return current is not None and (current.checks_pending or approval and current.checks_passed)
+
+    def passing(pr_url):
+        current = view(pr_url)
+        return current is not None and current.checks_passed
+
+    return pending, passing
 
 
 def waiting(agents, tasks, limits, probe=pending):

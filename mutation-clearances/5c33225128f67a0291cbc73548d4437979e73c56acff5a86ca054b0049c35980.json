@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/dispatch_seat.py:scripts.swarm.dispatch_seat.x_refusal__mutmut_22:4021a8f1477bc87795733649c7baf7e99d280f44287bc6978fddb8fb8e8e5eb3": {
+    "reader": "standards_reader",
+    "reason": "Passes write=None instead of write=False to open_triggers, which hands write only to truthiness tests (`if affected and write:`, `if write:` in uncovered and stage_cover.covered); None and False take the same branch everywhere."
+  }
+}

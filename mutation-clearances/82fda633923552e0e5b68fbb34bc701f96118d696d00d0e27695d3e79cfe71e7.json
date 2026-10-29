@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_alerts.py:scripts.swarm_ledger.ledger_alerts.x_deliver__mutmut_16:032b1369d8bf612f713496e02365ece07a1f1fa86aa3bfa3c46491686c583d31": {
+    "reader": "standards_reader",
+    "reason": "Alerts are built only by ledger_alerts.derive with rev set to the context revision, so the rev default is never taken; revisions start at 0, so any negative default fails the lower bound the same way, and a missing rev is unreachable."
+  }
+}

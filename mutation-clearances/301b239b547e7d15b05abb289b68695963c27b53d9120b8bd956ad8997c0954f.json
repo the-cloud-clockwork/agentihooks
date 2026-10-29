@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x__update__mutmut_12:730293c7dccedd597f82fba725e40c3fb174c8b26e339c636b104e76fa7817ff": {
+    "reader": "Standards",
+    "reason": "Accepted ledger documents always contain tasks: the legacy load path and the fresh-ledger path both run core.normalize, which setdefaults tasks, and new_ledger seeds the field. Only a document without tasks reaches the changed default. There base and head both raise KeyError from the others comprehension in _gated, before any state is written; the mutant raises TypeError at the same point. No handler on the apply path catches either exception (mutation.py has none; the KeyError/TypeError handler in watch_ledger.py is the watch loop), so the observable failure is the same uncaught crash."
+  }
+}

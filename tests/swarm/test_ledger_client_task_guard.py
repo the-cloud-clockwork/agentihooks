@@ -41,6 +41,12 @@ def test_a_guarded_update_sends_its_states_and_returns_the_live_row(sent):
     assert sent[0][1]["id"].startswith("task_update-")
 
 
+def test_an_ownership_guard_reaches_the_atomic_ledger_update(sent):
+    expected = {"claimed_by": "owner", "claim_generation": 7, "pr_url": "https://github.com/o/r/pull/1"}
+    ledger_client.LedgerClient().update_task("demo", "t1", {"state": "open"}, if_match=expected)
+    assert sent[0][1]["if_match"] == expected
+
+
 def test_an_unguarded_update_carries_no_guard_and_names_its_author(sent):
     live = ledger_client.LedgerClient().update_task("demo", "t0", {"pr_url": "https://x/1"}, by="engineer@a1b2c3-0002")
     assert live == ROWS[0]

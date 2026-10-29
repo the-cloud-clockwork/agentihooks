@@ -10,6 +10,9 @@ import ledger_comments
 import ledger_core as core
 import ledger_media as media
 
+from scripts.swarm_ledger import ports
+from scripts.swarm_ledger.repository import artifact_files
+
 OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
 TRASH = "artifact_trash"
 KEEP_DAYS = 30
@@ -89,6 +92,7 @@ def store(slug, name, data):
     artifact_id = f"{hashlib.sha256(data).hexdigest()}.{ext}"
     path = media.folder(slug) / artifact_id
     media.write_file(path, data)
+    artifact_files.save(slug, artifact_id, data)
     return {"id": artifact_id, **fields, "size": len(data)}
 
 
@@ -101,8 +105,34 @@ def path_of(slug, artifact_id):
     return path
 
 
+def read(slug, artifact_id, adopt=False):
+    data = artifact_files.load(slug, artifact_id)
+    if data is None:
+        data = path_of(slug, artifact_id).read_bytes()
+        if adopt:
+            artifact_files.save(slug, artifact_id, data)
+    return data
+
+
+def served(slug, artifact_id):
+    return read(slug, artifact_id, adopt=True)
+
+
+def adopt_disk(slug):
+    """Every stored file only this host's disk holds, copied into the shared database so any host serves it."""
+    paths = sorted(media.folder(slug).glob("*"))
+    if not paths:
+        return
+    stored, imaged = artifact_files.ids(slug), media.media_files.ages(slug)
+    for path in paths:
+        if ID_RE.match(path.name) and path.name not in stored:
+            artifact_files.save(slug, path.name, path.read_bytes())
+        if media.ID_RE.match(path.name) and path.name not in imaged:
+            media.media_files.save(slug, path.name, path.read_bytes(), core.now_ms())
+
+
 def entry(slug, artifact_id):
-    data = path_of(slug, artifact_id).read_bytes()
+    data = read(slug, artifact_id)
     ext = artifact_id.rsplit(".", 1)[1]
     if ext in TEXT_TYPES:
         return {"id": artifact_id, "type": TEXT_TYPES[ext], "size": len(data)}
@@ -159,13 +189,13 @@ def operator_asked(doc, entry_id):
 
 
 def refusal(doc: dict, op: dict, members: dict) -> str:
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     member = members.get(op["by"], {})
     if op["by"] not in members:
         return "join the ledger first and name a task it holds"
     if op["task"] == "master" and member.get("role") == "orchestrator" and lane_of(op["by"]) == "master":
-        return "" if operator_asked(doc, op.get("request")) else REFUSED
+        return "" if op.get("plan") is True or operator_asked(doc, op.get("request")) else REFUSED
     task = next((t for t in doc["tasks"] if t["id"] == op["task"]), None)
     if op["task"] and task is None:
         return "join the ledger first and name a task it holds"
@@ -182,7 +212,7 @@ def _add(doc, op, ctx):
         if reason == REFUSED:
             ctx.refused.append(reason)
         return False
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     if (
         op["task"] == "master"
@@ -247,13 +277,20 @@ def in_use(doc):
 
 
 def sweep(slug, doc, ctx):
-    trash = doc[TRASH]
-    expired = [row for row in trash if ctx.at - row["deleted_at"] > KEEP_DAYS * DAY_MS]
-    if expired:
-        doc[TRASH] = [row for row in trash if row not in expired]
-        ctx.dirty = True
-    dropped = {row["file"]["id"] for row in expired} | set(ctx.dropped)
+    from scripts.swarm_ledger.storage_migration.hosted import media_mutation
+
     used = in_use(doc)
-    media.sweep(slug, used, ctx.at)
-    for file_id in dropped - used:
-        (media.folder(slug) / file_id).unlink(missing_ok=True)
+    stale = media.sweep(slug, used, ctx.at)
+    with media_mutation(media.core.LEDGER_DIR, slug) as writable:
+        if not writable:
+            return
+        trash = doc[TRASH]
+        expired = [row for row in trash if ctx.at - row["deleted_at"] > KEEP_DAYS * DAY_MS]
+        if expired:
+            doc[TRASH] = [row for row in trash if row not in expired]
+            ctx.dirty = True
+            used = in_use(doc)
+        dropped = {row["file"]["id"] for row in expired} | set(ctx.dropped)
+        for file_id in dropped - used:
+            (media.folder(slug) / file_id).unlink(missing_ok=True)
+        ctx.unstored = (dropped - used) | stale

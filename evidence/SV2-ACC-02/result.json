@@ -1,0 +1,72 @@
+{
+  "package": "SV2-ACC-02",
+  "dependency": [
+    "SV2-ACC-01"
+  ],
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2377",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2386",
+  "tested_commit": "6ab5b7036792e591123b1f04999b089af814f8d0",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "Scoped fixture launch grants from LaunchAuthority, fakeredis, fixture clock; no live rollout. Live G3 qualification is separate.",
+  "interfaces": [
+    "scripts.swarm_v2.accounts.AccountCapacity.reserve(token, cap, ttl_ms): one Redis WATCH/MULTI transaction adds a reservation with an expiry only while the account's live reservations and occupancies are below cap; account, seat, execution and generation come from the validated launch grant; ttl_ms is at most the launch grant lifetime (MAX_TTL_SECONDS * 1000); a full account refuses account_full and counts the conflict",
+    "AccountCapacity.occupy(token, scope, session_id): converts the caller's reservation to occupancy only while the SV2-ACC-01 fleet registry holds a live record of the same execution and generation; the registry hash is watched",
+    "AccountCapacity.release(token): frees only the slot held by the caller's execution and generation; anything else is stale_generation",
+    "AccountCapacity.slots, account_reservation_conflicts, account_reservation_conflicts_total",
+    "AccountCapacity.freeze, thaw, frozen, reconstruct(registry, registration): the rollback controls",
+    "scripts.swarm_v2.accounts.fleet_held(store, now) and live_record",
+    "hooks.context.account_sessions.fleet_held(environ) and sessions_by_account: the per account counts init-agent routing and the swarm capacity rows read now add fleet reservations and remote occupancies while distributed launches are on, and fail open on a Redis error"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 unit shards in the linked CI run",
+    "coordination": "SV2-CTL launch grants (LaunchAuthority registration), execution generations, SV2-ACC-01 fleet registry records",
+    "keyspace": "<root>:accounts:<account> hashes keyed by <swarm>/<seat>, <root>:accounts-frozen, <root>:account-reservation-conflicts",
+    "compatibility": "With AGENTIHOOKS_RUNTIME_BACKEND unset, local, or disabled, sessions_by_account reads no Redis and counts /proc exactly as before (INV-R11)"
+  },
+  "states": {
+    "observed": "Local /proc session counts and registry records; a suspect record still holds its slot, a closed or missing one does not",
+    "accepted": "A request whose launch grant validates for this swarm, execution and generation",
+    "committed": "Redis WATCH/MULTI transaction on the account hash (and the swarm's fleet-sessions hash for occupy)",
+    "externally_verified": "None; no live distributed launch issues grants yet"
+  },
+  "validation": {
+    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049190619 on the tests-only commit 5f6b0572 failed: ModuleNotFoundError: No module named 'scripts.swarm_v2.accounts'",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38052074829",
+    "mutation": "Branch mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38050200722 passed on 4ba9f5c5 (accounts.py 365 killed, one equivalent survivor cleared on the Standards reader ruling); later survivors on 1a483029, 70b62af9 and 7f81f25f were killed by tests",
+    "review": "Standards and Spec readers closed after three rounds",
+    "local": "No local tests or mutation ran; static prepush passed on every pushed head"
+  },
+  "measurements": {
+    "account_reservation_conflicts_total": {
+      "a": [
+        1,
+        1
+      ],
+      "b": 0,
+      "c": 1
+    },
+    "dimension": "Each test has its own fakeredis store built from account-capacity.json; counts are per account fixture"
+  },
+  "failure_fixture": "tests/fixtures/swarm_v2/account-capacity.json with the racing store wrapper in tests/test_swarm_v2_accounts.py (Racing commits the other controller's reservation between read and commit; Ambiguous loses the reply after commit)",
+  "rollback_rehearsal": {
+    "action": "freeze() refuses new distributed reservations; reconstruct() rebuilds this swarm's occupancy from current confirmed registry records and launch registrations, drops unconfirmed occupancies, keeps reservations and other swarms' rows",
+    "data_safety": "Registry records and launch registrations are the authority and are only read; other swarms' account rows are byte-equal before and after",
+    "test": "tests/test_swarm_v2_accounts.py::test_freeze_refuses_new_reservations_and_reconstruct_rebuilds_occupancy",
+    "job": 114213747876,
+    "output": "PASSED at 2026-10-10T12:36:16.0747400Z"
+  },
+  "remaining_limitations": [
+    "No production path issues launch grants yet, so nothing calls reserve, occupy or release in a live launch; the distributed spawn wiring is its own follow-up task. The package stays incomplete until that path reserves, occupies and releases.",
+    "reserve accepts any integer cap from its caller; the controller supplies it with the worker's grant, and SV2-ACC-03 owns the quota source of that cap",
+    "A closed execution whose launch grant is still valid can take a reservation until the grant expires (at most 900 s); occupy refuses it",
+    "Fleet slots are counted under the grant's account name, which must match the AH_CC_TOKEN_<slug> routing slug"
+  ],
+  "cases": {
+    "a": "evidence/SV2-ACC-02/a-result.json",
+    "b": "evidence/SV2-ACC-02/b-result.json",
+    "c": "evidence/SV2-ACC-02/c-result.json",
+    "manifest": "evidence/SV2-ACC-02/manifest.json"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x_main__mutmut_32:5bdec8752e742311bb096213657415ecb9e1bebd557c73b52cfbccd62945ae5f": {
+    "reader": "standards_reader",
+    "reason": "Presentation only: separators=None selects default JSON whitespace for the same validated string array. Output remains one-line actors= JSON and downstream fromJSON reconstructs identical names and membership."
+  }
+}

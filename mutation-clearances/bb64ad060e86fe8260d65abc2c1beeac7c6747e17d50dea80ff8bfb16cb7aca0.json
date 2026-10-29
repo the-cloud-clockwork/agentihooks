@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_cmd_autoscale__mutmut_5:8ba14e343f70ce69d9bc615ced06eefdd6b467a0c8dab048601bc52dc912d182": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "SwarmConfig has no constructor validation. The fallback repo is neither consumed by autoscaled nor printed. Setting it to None changes no command output."
+  }
+}

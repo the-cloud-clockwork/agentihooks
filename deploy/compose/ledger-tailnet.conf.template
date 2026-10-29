@@ -1,0 +1,15 @@
+server {
+    listen ${SWARM_TAILNET_IP}:8765 ssl;
+    ssl_certificate /tls/cert.pem;
+    ssl_certificate_key /tls/key.pem;
+    client_max_body_size 64m;
+    location / {
+        proxy_pass http://127.0.0.1:8765;
+        proxy_http_version 1.1;
+        proxy_set_header Host 127.0.0.1:8765;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}

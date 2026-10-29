@@ -2,8 +2,6 @@ import pytest
 
 from scripts.inbox.store import InboxError, InboxStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def store():
     import fakeredis

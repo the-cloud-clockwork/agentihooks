@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_dispatch__mutmut_13:f3f064ce4b71405b4c4cee717275d58b7441d36a79abb13e0bdcabdb75ff6524": {
+    "reader": "standards_reader",
+    "reason": "The body of ledger_route.command in this tree is with scoped(...): yield and never reads who, so passing None changes no output."
+  }
+}

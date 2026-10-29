@@ -1,0 +1,172 @@
+{
+  "case": "T-SV2-CKP-01-C",
+  "evidence_class": "mocked: a local durable directory backend behind a granted artifact store and fixture launch registrations; no object store, worker Pod or harness was used",
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda",
+    "native-resume.json": "c39dc9e0d89ee5d0f846ab5bca487ab16cc187c77077c6d9d1bde8e3723f2349",
+    "path-only-snapshot.json": "44c0b83757dc61441a2872c8e416393e12a6db4cd8b63befd97f2638ea331b39"
+  },
+  "observed": {
+    "fixture": {
+      "after_restart": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "limitations": [],
+        "reason": "native"
+      },
+      "checkpoint_completeness_by_reason": {
+        "complete/native": 4,
+        "diagnostic_only/legacy_minor": 1,
+        "incomplete/missing_object": 1,
+        "incomplete/promotion_disabled": 1,
+        "incomplete/unsupported_version": 1
+      },
+      "interrupted_upload": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "missing_object"
+      },
+      "manifest_written_before_materials": false,
+      "older_minor_manifest": {
+        "authoritative": false,
+        "completeness": "diagnostic_only",
+        "continuation": "none",
+        "limitations": [
+          "material sizes are unrecorded",
+          "reconstruction metadata is unrecorded",
+          "continuation is undeclared"
+        ],
+        "reason": "legacy_minor"
+      },
+      "previous_checkpoint_after_unsupported_version": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "limitations": [],
+        "reason": "native"
+      },
+      "replay": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "limitations": [],
+        "reason": "native"
+      },
+      "replay_added_keys": [],
+      "rollback_durable_keys_unchanged": true,
+      "rollback_new_promotion": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "promotion_disabled"
+      },
+      "rollback_reads_committed_checkpoint": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "limitations": [],
+        "reason": "native"
+      },
+      "stale_attempt_added_keys": [],
+      "stale_attempt_after_commit": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "scope_mismatch"
+      },
+      "unsupported_version": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "unsupported_version"
+      }
+    },
+    "second_fixture": {
+      "after_restart": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "limitations": [],
+        "reason": "native"
+      },
+      "checkpoint_completeness_by_reason": {
+        "complete/native": 4,
+        "diagnostic_only/legacy_minor": 1,
+        "incomplete/missing_object": 1,
+        "incomplete/promotion_disabled": 1,
+        "incomplete/unsupported_version": 1
+      },
+      "interrupted_upload": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "missing_object"
+      },
+      "manifest_written_before_materials": false,
+      "older_minor_manifest": {
+        "authoritative": false,
+        "completeness": "diagnostic_only",
+        "continuation": "none",
+        "limitations": [
+          "material sizes are unrecorded",
+          "reconstruction metadata is unrecorded",
+          "continuation is undeclared"
+        ],
+        "reason": "legacy_minor"
+      },
+      "previous_checkpoint_after_unsupported_version": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "limitations": [],
+        "reason": "native"
+      },
+      "replay": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "limitations": [],
+        "reason": "native"
+      },
+      "replay_added_keys": [],
+      "rollback_durable_keys_unchanged": true,
+      "rollback_new_promotion": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "promotion_disabled"
+      },
+      "rollback_reads_committed_checkpoint": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "limitations": [],
+        "reason": "native"
+      },
+      "stale_attempt_added_keys": [],
+      "stale_attempt_after_commit": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "scope_mismatch"
+      },
+      "unsupported_version": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "limitations": [],
+        "reason": "unsupported_version"
+      }
+    }
+  },
+  "state": "passed"
+}

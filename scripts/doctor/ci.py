@@ -1,6 +1,11 @@
 from scripts.gates.reruns import RerunBudget
 from scripts.swarm import ledger_events
+from scripts.swarm.ci_speed import WORKFLOW
 from scripts.swarm.health.findings import Finding
+
+DEV_STREAK = 5
+DEV_FAILED = {"failure", "timed_out", "startup_failure"}
+DEV_FINISHED = DEV_FAILED | {"success"}
 
 
 def reruns(record: dict) -> list[Finding]:
@@ -75,6 +80,41 @@ def flaky_tests(record: dict) -> list[Finding]:
                     1,
                 )
             )
+    return found
+
+
+def red_streaks(runs: list[dict]) -> dict[str, list[dict]]:
+    by_path = {}
+    for found in sorted(runs, key=lambda r: -r["id"]):
+        if found["conclusion"] in DEV_FINISHED and found["path"].split("/")[-1] != WORKFLOW:
+            by_path.setdefault(found["path"], []).append(found)
+    streaks = {}
+    for path, finished in by_path.items():
+        streak = next((finished[:n] for n, r in enumerate(finished) if r["conclusion"] not in DEV_FAILED), finished)
+        if len(streak) >= DEV_STREAK:
+            streaks[path] = streak
+    return streaks
+
+
+def red_dev_workflows(record: dict) -> list[Finding]:
+    found = []
+    for path, streak in red_streaks(record["runs"]).items():
+        latest, green = streak[0], record["green"].get(path)
+        jobs = record["jobs"].get(latest["id"]) or ["none read"]
+        found.append(
+            Finding(
+                "red dev workflow",
+                path.split("/")[-1],
+                f"{latest['name']} failed its last {len(streak)} dev push runs",
+                (
+                    f"last green {green['created_at']} {green['html_url']}" if green else "no green dev push run found",
+                    f"failing jobs in run {latest['id']}: {', '.join(jobs)}",
+                    *(r["html_url"] for r in streak),
+                ),
+                f"{DEV_STREAK} consecutive failed dev push runs outside the promotion gate",
+                len(streak),
+            )
+        )
     return found
 
 

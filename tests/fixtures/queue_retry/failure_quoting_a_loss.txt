@@ -1,0 +1,5 @@
+2026-10-23T15:19:43.2056739Z [gw2] [ 82%] PASSED tests/test_ci_queue_fail_fast.py::test_a_failed_timed_out_or_cancelled_job_is_named[failure]
+2026-10-23T15:19:43.2100969Z ##[error]Process completed with exit code 1.\n##[error]The runner has received a shutdown signal.-True]
+2026-10-23T15:20:00.2737626Z     }
+2026-10-23T15:20:00.2737893Z == 1 failed, 3324 passed, 2 skipped, 8 warnings, 2 rerun in 310.55s (0:05:10) ==
+2026-10-23T15:20:00.4528415Z ##[error]Process completed with exit code 1.

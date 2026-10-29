@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_main__mutmut_17:65a740ef6042f63c4c25e133c903a2ce696602d32cb923b4d35741dd910f0380": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "Spelling variant of the same utf-8 codec on the read of the reduced JSON; output is identical."
+  }
+}

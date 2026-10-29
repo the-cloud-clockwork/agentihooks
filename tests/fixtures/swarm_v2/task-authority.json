@@ -1,0 +1,14 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-CTL-02",
+  "swarm": "fixture",
+  "task": "task",
+  "old_seat": "eng-1@fixture",
+  "new_seat": "eng-2@fixture",
+  "clock_ms": 1000,
+  "lease_ms": 100,
+  "partition_until_ms": 1100,
+  "project": "github.com/the-cloud-clockwork/agentihooks",
+  "grant": "Signed fixture launch grant, validated on every request; never a deployed credential",
+  "cases": ["a", "b", "c"]
+}

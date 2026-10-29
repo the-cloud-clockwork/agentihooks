@@ -1,0 +1,171 @@
+import json
+import os
+import statistics
+import sys
+import time
+
+assert os.environ["AGENTIHOOKS_SWARM_REDIS_URL"] == "redis://127.0.0.1:6439/0"
+assert os.environ["LEDGER_PORT"] == "8839"
+
+from scripts.inbox.store import connect as inbox_connect
+from scripts.swarm import cli
+from scripts.swarm.store import connect
+
+SLUG = "proof-323133-cxc9-1"
+SENT = "/home/iamroot/scratchpad/agentihooks/rig-grade-swarm-cxc9/sent.jsonl"
+store = connect()
+mode = sys.argv[1]
+
+
+def record(kind, item, **extra):
+    with open(SENT, "a") as out:
+        out.write(json.dumps({"kind": kind, "id": item.id, "address": item.address, "created_at": item.created_at, **extra}) + "\n")
+
+
+def accepted_at(inbox, item_id):
+    for entry in inbox.history(item_id):
+        if entry.get("state") in ("delivered", "confirmed", "read", "done"):
+            return entry.get("at")
+    return None
+
+
+if mode == "config":
+    pairs = dict(arg.split("=", 1) for arg in sys.argv[2:])
+    fields = {}
+    for key, value in pairs.items():
+        if key.startswith("lane."):
+            _, lane, field = key.split(".")
+            lanes = {k: dict(v) for k, v in store.config(SLUG).lanes.items()}
+            lanes.setdefault(lane, {})[field] = value
+            fields["lanes"] = lanes
+        else:
+            fields[key] = int(value) if value.isdigit() else value
+    store.update(SLUG, **fields)
+    config = store.config(SLUG)
+    print(json.dumps({"state": config.state, "max_eng": config.max_eng, "transport": config.codex_inbox_transport,
+                      "lanes": {k: v.get("agent") for k, v in config.lanes.items()}}))
+elif mode == "tick":
+    from scripts.swarm import promotion_watch
+
+    promotion_watch.refresh = lambda *args, **kwargs: []
+    for _ in range(int(sys.argv[2]) if len(sys.argv) > 2 else 1):
+        for action in cli.run_tick(store, SLUG):
+            print(time.strftime("%H:%M:%S"), action, flush=True)
+        time.sleep(int(sys.argv[3]) if len(sys.argv) > 3 else 20)
+elif mode == "list":
+    import redis
+
+    inbox = inbox_connect()
+    r = redis.Redis.from_url(os.environ["AGENTIHOOKS_SWARM_REDIS_URL"], decode_responses=True)
+    for address in sys.argv[2:]:
+        for item_id in r.zrange(inbox.key("address", address), 0, -1):
+            item = inbox.get(item_id)
+            print(json.dumps({"id": item.id, "address": item.address, "sender": item.sender, "state": item.state,
+                              "fyi": item.fyi, "created_at": item.created_at, "updated_at": item.updated_at,
+                              "reason": item.reason[:80]}))
+elif mode == "unlock":
+    import redis
+
+    print(redis.Redis.from_url(os.environ["AGENTIHOOKS_SWARM_REDIS_URL"]).delete(f"agentihooks:swarm:{SLUG}:tick-lock"))
+elif mode == "agents":
+    for agent in store.agents(SLUG):
+        data = {k: v for k, v in agent.__dict__.items() if k in ("name", "task", "lane", "harness", "status", "seat", "pane", "execution", "account", "generation")}
+        print(json.dumps(data, default=str))
+elif mode == "send":
+    sender, address, kind, text = sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+    task = sys.argv[6] if len(sys.argv) > 6 else ""
+    item = inbox_connect().send(sender, address, text, fyi=kind == "fyi", task=task)
+    record(kind, item, sender=sender, task=task)
+    print(json.dumps({"id": item.id, "address": item.address, "state": item.state, "fyi": item.fyi, "task": item.task}))
+elif mode == "fanout":
+    from scripts.swarm import delivery
+
+    sent = delivery.send(store, SLUG, sys.argv[3], sender=sys.argv[2], to="all", fyi=True)
+    print(json.dumps({"sent": sent}, default=str))
+elif mode == "burst":
+    sender, address, count, gap = sys.argv[2], sys.argv[3], int(sys.argv[4]), float(sys.argv[5])
+    inbox = inbox_connect()
+    for n in range(count):
+        item = inbox.send(sender, address, f"latency probe {n + 1} of {count}: no reply needed, keep going", fyi=True)
+        record("latency", item, n=n + 1)
+        time.sleep(gap)
+    print(json.dumps({"sent": count, "address": address}))
+elif mode == "item":
+    inbox = inbox_connect()
+    for item_id in sys.argv[2:]:
+        item = inbox.get(item_id)
+        states = [(e.get("state"), e.get("at"), e.get("by", e.get("actor", ""))) for e in inbox.history(item_id)]
+        print(json.dumps({"id": item.id, "address": item.address, "sender": item.sender, "state": item.state,
+                          "fyi": item.fyi, "task": item.task, "reason": item.reason, "history": states}))
+elif mode == "receipts":
+    import redis
+
+    inbox = inbox_connect()
+    r = redis.Redis.from_url(os.environ["AGENTIHOOKS_SWARM_REDIS_URL"], decode_responses=True)
+    wanted = set(sys.argv[2:])
+    for key in r.scan_iter(match=inbox.key("delivery", "*")):
+        raw = r.hgetall(key)
+        if not wanted or raw.get("item") in wanted:
+            print(json.dumps({k: raw.get(k) for k in ("id", "recipient", "owner", "item", "state", "at", "reason", "committed")}))
+elif mode == "latency":
+    import redis
+
+    inbox = inbox_connect()
+    r = redis.Redis.from_url(os.environ["AGENTIHOOKS_SWARM_REDIS_URL"], decode_responses=True)
+    commits = {}
+    for key in r.scan_iter(match=inbox.key("delivery", "*")):
+        raw = r.hgetall(key)
+        if raw.get("state") == "accepted" and raw.get("committed") == "True":
+            commits[raw["item"]] = int(raw["at"])
+    rows = [json.loads(line) for line in open(SENT) if json.loads(line)["kind"] == (sys.argv[2] if len(sys.argv) > 2 else "latency")]
+    samples, missing = [], []
+    for row in rows:
+        at = commits.get(row["id"])
+        (samples.append((at - row["created_at"]) / 1000) if at else missing.append(row["id"]))
+    samples.sort()
+    p95 = samples[max(0, int(round(0.95 * len(samples))) - 1)] if samples else None
+    print(json.dumps({"samples": len(samples), "missing": len(missing), "min_s": samples[0] if samples else None,
+                      "median_s": statistics.median(samples) if samples else None, "p95_s": p95,
+                      "max_s": samples[-1] if samples else None, "over_10s": sum(s > 10 for s in samples)}))
+elif mode == "export":
+    import redis
+
+    inbox = inbox_connect()
+    r = redis.Redis.from_url(os.environ["AGENTIHOOKS_SWARM_REDIS_URL"], decode_responses=True)
+    prefix = inbox.key("address", "")
+    for key in sorted(r.scan_iter(match=prefix + "*")):
+        for item_id in r.zrange(key, 0, -1):
+            item = inbox.get(item_id)
+            print(json.dumps({"id": item.id, "address": item.address, "sender": item.sender, "state": item.state,
+                              "fyi": item.fyi, "task": item.task, "created_at": item.created_at,
+                              "history": [[e.get("state"), e.get("at"), e.get("by", e.get("actor", ""))] for e in inbox.history(item_id)]}))
+elif mode == "latency-history":
+    inbox = inbox_connect()
+    rows = [json.loads(line) for line in open(SENT) if json.loads(line)["kind"] == "latency"]
+    samples = []
+    for row in rows:
+        at = next((e["at"] for e in inbox.history(row["id"]) if e.get("state") == "delivered"), None)
+        if at:
+            samples.append((at - row["created_at"]) / 1000)
+    samples.sort()
+    p95 = samples[max(0, int(round(0.95 * len(samples))) - 1)] if samples else None
+    print(json.dumps({"samples": len(samples), "missing": len(rows) - len(samples), "min_s": samples[0],
+                      "median_s": statistics.median(samples), "p95_s": p95, "max_s": samples[-1],
+                      "over_2s": sum(s > 2 for s in samples), "over_10s": sum(s > 10 for s in samples)}))
+elif mode == "retire":
+    from scripts.swarm.runtime import HerdrRuntime
+
+    runtime = HerdrRuntime()
+    for agent in store.agents(SLUG):
+        if len(sys.argv) > 2 and agent.name not in sys.argv[2:]:
+            continue
+        ok = runtime.retire(agent)
+        print(json.dumps({"agent": agent.name, "retired": ok, "refusal": runtime.refusals.get(agent.name)}))
+        if ok:
+            store.release(SLUG, agent.task, agent.name)
+            store.drop_agent(SLUG, agent.name)
+elif mode == "chat":
+    from scripts.swarm.ledger_client import LedgerClient
+
+    LedgerClient().say(SLUG, sys.argv[2])
+    print(json.dumps({"chat": "posted", "by": "operator page"}))

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/checkpoints/capture.py:scripts.swarm_v2.checkpoints.capture.x_publish__mutmut_27:bad914dcaa5e1a99752457b05d01fb7cf22225722c05442d71f338e52788bc1b": {
+    "reader": "standards_reader",
+    "reason": "Canonical capture stamps execution_generation from the same immutable launch registration used for the Validator expectation; native.merged preserves it. Pointer history parses pointers without this Validator, and immutable manifest references prevent substitution. This comparison is redundant only in capture.publish; standalone Validator callers still require the expected generation."
+  }
+}

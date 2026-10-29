@@ -1,0 +1,133 @@
+{
+  "package": "SV2-OBS-05",
+  "package_complete": false,
+  "dependency": "SV2-OBS-04",
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2609",
+  "tested_commit": "4c6cd711f5f43a93913cd6777d4853bd283e077f",
+  "status": "fixture-qualified",
+  "evidence_class": "Mixed: the two live runs of the recorded SV2-CAP-02 scaling canary on the Anton anton-k3s-swarm group (antoncore evidence, copied verbatim), joined with synthetic quota wait, stale checkpoint and denied cross brain query readings, plus two independent synthetic traces; a fakeredis incident store behind a server that can be disconnected and an in process notification sink that can fail. No live controller, deployed brain or alert backend was used.",
+  "interfaces": [
+    "scripts.swarm_v2.fleet_dashboard.definition(path) loads observability/swarm-v2.json: panels with one label per series, limits (archive_lag_ms, checkpoint_stale_ms, knowledge_stale_ms) and alert rules (id, severity, for_ms, limit, owner, action)",
+    "viewer(grant) builds a Viewer from the grant's brains list and a sanitized actor; a grant without a list of non empty brain ids raises ViewRefused, and a display label or role field grants nothing",
+    "dashboard(sample, viewer, definition) returns seq, at_ms, viewer and panels attempts, capacity (configured_maximum, observed_nodes, active_tasks, pending_requests per pool, each with its own label), quota_wait, archive_lag, checkpoint_age, connectivity (terminal and authority counted apart) and knowledge (feed age, stale flag, denials whose session title and target brain show only to a viewer granted that brain)",
+    "evaluate(sample, definition, environ) returns alerts whose condition held for the rule window: protected_idle_pod, impossible_pending (no_permitted_template_fits or permitted_pools_at_configured_maximum) and cross_scope_denial, at most limit per rule with the rest counted in suppressed; facts are sanitized, carry no session title or target brain name, and every alert names owner and action with automatic false; AGENTIHOOKS_FLEET_ALERTS=off returns state disabled; held lists the fingerprints of every held alert, shown or suppressed",
+    "alert_actionability_review(evaluated, definition) counts alerts whose owner and action match their rule, that name their subject and never act, and lists the rest as unactionable",
+    "IncidentStore(store, slug).record(evaluated) opens one incident per fingerprint, refreshes or resolves it, resolves an open incident only when its fingerprint is no longer held, and changes nothing for a disabled, replayed or older evaluation; writes watch both the incident hash and the evaluated sequence and every write, including the notice mark, retries up to WRITE_ATTEMPTS; deliver(sink, environ) hands each opened incident to the sink once in opening order as <fingerprint>:<opened_seq> and leaves it for the next call when the sink fails",
+    "scripts.swarm_v2.fleet_canary.record_samples(record, overlay) turns each live run of a recorded SV2-CAP-02 scaling canary into its own trace: one sample at the canary Pod's creation and one per recorded stage, with the group's configured maximum, the node once ready, the Pod pending until it starts, and the overlay's quota, archive, checkpoint and brain readings; the record carries no resource shape, and an unknown request or template never proves a request impossible",
+    "python -m scripts.swarm_v2.fleet_view --grant <file> (--samples <trace> | --canary <record> --overlay <readings>) [--definition <file>] prints per trace the dashboard of its last sample, the alerts held at every sample and the actionability review; a grant without a brains list exits 2 with the refusal on stderr; AGENTIHOOKS_FLEET_ALERTS=off empties the timeline and keeps the dashboard",
+    "scripts.ci_mutation.runner.prepare_workspace also copies observability/ so the dashboard definition is present inside the mutation workspace"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "redis": "new keys under the swarm: fleet-incidents and fleet-incidents-seq",
+    "compatibility": "New interface: no earlier accepted protocol exists for fleet dashboards, alerts or incidents, so the comparison is with the explicitly local path, which is unchanged. No existing behaviour changes. The archive panel reads the SV2-OBS-04 Health.diagnose archive entry shape unchanged; the dashboard, alerts and incidents add only the fleet-incidents and fleet-incidents-seq keys; local execution never reads the definition or the module, so with alerts off or the module absent local execution behaves as before. The mutation workspace gains one copied folder."
+  },
+  "authority": "The dashboard and alerts hold no authority and never act. Viewer scope comes only from the grant's brains list; actor and display labels grant nothing.",
+  "authoritative_objects": "Execution registry, quota, archive, checkpoint and brain records stay authoritative and are only read through recorded samples. The incident hash and evaluated sequence are operational records owned by this package.",
+  "states": {
+    "observed": "Cases A, B and C passed in proofs run 38160615183 at tested_commit; the committed records are that run's output.",
+    "accepted": "Case A, recorded: both live Anton scale ups (pending 155 s and 179 s, past the 120 s window) raise no impossible_pending alert while their group sits below its configured maximum of 4, and the same recorded runs with the maximum set to 0 raise it first at sample 5; capacity reads anton-k3s-swarm with configured maximum 4, 1 observed node, 1 active task and 0 pending; the stale checkpoint and the quota wait show, the denial alerts at sample 1 and no session title leaks. Case A: in the first trace impossible_pending fires at sample 3, cross_scope_denial at 4 and protected_idle_pod at 5, the scaling pending attempt never alerts, capacity labels differ per series, a stale checkpoint, a quota wait and a disconnected terminal with held authority show; the second independent trace fires impossible_pending at the pool maximum at sample 3, never alerts a protected pod that turned busy, suppresses one of six denials and reads knowledge stale; every alert is actionable and no session title leaks. Case B: a grant with only a label and role is refused, the swarm viewer reads the withheld marker for both title and target brain, the operator viewer granted the personal brain reads the title, alerts, incidents and notices carry no title, and the refused request changed no stored key. Case C: an incident store outage refuses the write, the restarted store opens the idle incident once, replayed and older evaluations are stale, a failing sink raises and the next delivery sends one notice, each incident notified once, and with alerts off evaluation, recording and delivery stop while the dashboard renders and the store is unchanged.",
+    "committed": "Code, definition, the recorded canary copy, the overlay and both synthetic fixtures are at tested_commit; manifest.json hashes them and names the antoncore commit the canary came from.",
+    "externally_verified": "None: no live sample collector, Grafana or alert backend was exercised; G10 live evidence is outstanding."
+  },
+  "validation": {
+    "red": "proofs run 38149502432 on tests only commit ece33d8a1: collection error, the module absent",
+    "tests": "proofs run 38160615183 at tested_commit: 70 passed, 3 parity failures only because the records changed, records regenerated from it; proofs run 38160536009 at 30b0f917e: entrypoint, canary and mutation runner suites passed (117 passed)",
+    "lint": "ruff check, ruff format and size limits passed through python -m scripts.ci_prepush",
+    "mutation": "mutation preflight 38159055518 at eae9c8bb8: fleet_dashboard 849 killed, none survived; earlier survivors (91 at 6e47090e6, 1 at e20ea5d3f) were killed by tests or removed in code",
+    "review": "Standards reader closed after three rounds, Spec reader after two; every finding fixed, documented in metrics-contract.md, or ruled with evidence in the task proof; intent check round 1 asked for the recorded canary, the observability path, an entrypoint and explicit compatibility, data safety and completion records, delivered at tested_commit"
+  },
+  "measurements": {
+    "alert_actionability_review": {
+      "first": {
+        "actionable": 3,
+        "alerts": 3,
+        "by_rule": {
+          "cross_scope_denial": 1,
+          "impossible_pending": 1,
+          "protected_idle_pod": 1
+        },
+        "state": "enabled",
+        "suppressed": {
+          "cross_scope_denial": 0,
+          "impossible_pending": 0,
+          "protected_idle_pod": 0
+        },
+        "unactionable": []
+      },
+      "second": {
+        "actionable": 6,
+        "alerts": 6,
+        "by_rule": {
+          "cross_scope_denial": 5,
+          "impossible_pending": 1
+        },
+        "state": "enabled",
+        "suppressed": {
+          "cross_scope_denial": 1,
+          "impossible_pending": 0,
+          "protected_idle_pod": 0
+        },
+        "unactionable": []
+      }
+    },
+    "recorded_canary": {
+      "swarm-scaling-a-1791735630": {
+        "at_maximum_first_fired_seq": {
+          "cross_scope_denial:deny-anton-1": 1,
+          "impossible_pending:swarm-scaling-a-1791735630": 5
+        },
+        "capacity": [
+          "anton-k3s-swarm",
+          4,
+          1,
+          1,
+          0
+        ],
+        "checkpoint_stale": 1,
+        "first_fired_seq": {
+          "cross_scope_denial:deny-anton-1": 1
+        },
+        "leaked": [],
+        "pending_ms": 155000,
+        "quota_waiting": 1
+      },
+      "swarm-scaling-a-1791737269": {
+        "at_maximum_first_fired_seq": {
+          "cross_scope_denial:deny-anton-1": 1,
+          "impossible_pending:swarm-scaling-a-1791737269": 5
+        },
+        "capacity": [
+          "anton-k3s-swarm",
+          4,
+          1,
+          1,
+          0
+        ],
+        "checkpoint_stale": 1,
+        "first_fired_seq": {
+          "cross_scope_denial:deny-anton-1": 1
+        },
+        "leaked": [],
+        "pending_ms": 179000,
+        "quota_waiting": 1
+      }
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-OBS-05/a-result.json",
+    "b": "evidence/SV2-OBS-05/b-result.json",
+    "c": "evidence/SV2-OBS-05/c-result.json",
+    "manifest": "evidence/SV2-OBS-05/manifest.json"
+  },
+  "rollback_rehearsal": "Case C sets AGENTIHOOKS_FLEET_ALERTS=off: evaluate reads disabled, record reports disabled without writing, deliver sends nothing, the dashboard renders every panel and the incident store is byte identical. No earlier dashboard existed, so restoring the previous dashboard means removing the definition and module; worker execution never reads them.",
+  "limitations": [
+    "The recorded SV2-CAP-02 canary carries no resource request or node template, so recorded runs exercise only the at maximum path of impossible_pending; the template fit path is exercised on the synthetic traces.",
+    "The stale checkpoint, quota wait and denied cross brain query are synthetic readings joined with the recorded canary; no recording of those exists yet.",
+    "The fleet view entrypoint reads recorded or exported samples; no collector builds a sample from the live execution registry, pool readings, quota store, Health.diagnose, checkpoint manifests and brain denials yet.",
+    "No Grafana dashboard or alert backend consumes the definition; incidents are delivered to a sink function."
+  ],
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2636",
+  "data_safety": "Authoritative objects: the execution registry, quota, archive, checkpoint and brain records, only read. Operational objects owned here: the fleet-incidents hash and fleet-incidents-seq; rollback leaves them for audit and removing them touches no authoritative object."
+}

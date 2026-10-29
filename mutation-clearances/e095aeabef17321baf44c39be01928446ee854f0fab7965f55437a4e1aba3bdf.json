@@ -1,0 +1,6 @@
+{
+  "scripts/master_login_chain.py:scripts.master_login_chain.x_authorize__mutmut_41:bca862addc3099b50f4c33e63fca3af5cb4f4e5afb7873a188bc1ae4da5a2e3e": {
+    "reader": "Standards",
+    "reason": "Python never writes through this text stream. The subprocess receives the raw file descriptor and writes bytes, so the wrapper encoding is unobserved."
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "cases": [
+    "T-SV2-HDR-04-A",
+    "T-SV2-HDR-04-B",
+    "T-SV2-HDR-04-C"
+  ],
+  "evidence_class": "mocked: a recording stand in for the Anton herdr client serves Local and two saved worker machines that share pane w1:p1 and the agent label; no herdr process, SSH connection or cluster runs in these cases",
+  "inputs": {
+    "scripts/swarm_v2/herdr/target.py": "f7adfa5184cbdb86a6f8227e2fbf11906b34553133e95615b2329892a22b7d7c",
+    "scripts/swarm/runtime.py": "b2440199bab29d5bc4d9dfbb475ac6f99f3cd47db4d57dbe2928b737971a374f",
+    "tests/test_swarm_v2_herdr_target.py": "c83f1301ba9ba80477db4b96ca183592f1342067b1424b453240423197430e11",
+    "tests/sv2_hdr04_cases.py": "ee89ac67d6ae862959865a6de48b4e590d70e2d99e09042cd57139e2e325bb8a",
+    "tests/swarm/test_runtime.py": "94339e865b755773363ba2d12c209aeff6a48fca123a3e656c5847554cc92790",
+    "tests/fixtures/swarm_v2/herdr-pane-routing.json": "36a84ba856cd6c2cdc3f57e7ca84227a9908e2de7046ea57056ca2329a8c730d",
+    "tests/fixtures/swarm_v2/herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "tests/fixtures/swarm_v2/herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
+  },
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38113282967",
+  "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38117028654",
+  "tested_commit": "617b95cfb335795a9e22374228678268ca769910"
+}

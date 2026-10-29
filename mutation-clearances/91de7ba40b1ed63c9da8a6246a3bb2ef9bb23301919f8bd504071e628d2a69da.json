@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/launch_evidence.py:scripts.swarm.launch_evidence.x_retain__mutmut_43:71c13aab9761ec2c26f3b5deb9be4074df58c01bd50bcd8b43977bd9b7b5d61b": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: omitting dict.get default yields None for a missing validation reason. Its text contains no classification trigger. Existing reasons and all retained fields are unchanged."
+  }
+}

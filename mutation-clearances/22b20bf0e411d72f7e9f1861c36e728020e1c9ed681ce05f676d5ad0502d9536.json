@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/continuation.py:scripts.swarm.continuation.x_resolve__mutmut_65:f0c0cd6de4a204ab3a2635bac41d287bc5817e06e3e115a5056dd8c835bed38f": {
+    "reader": "standards-reader",
+    "reason": "Changing the missing continue_from default from empty to XXXX cannot match a generated task life branch. If the recorded branch is XXXX, assigning that same value leaves it unchanged. Both paths pass identical recorded, lives and forbidden inputs to reclaim and preserve the same envelope. Standards independently ruled output-equivalent after reading the mutant from run 38715247925."
+  }
+}

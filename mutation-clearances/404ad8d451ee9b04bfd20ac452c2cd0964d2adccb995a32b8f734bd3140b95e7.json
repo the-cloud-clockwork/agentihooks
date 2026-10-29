@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker_image.py:scripts.swarm_v2.worker_image.x_observed_inventory__mutmut_32:558c5b63226c610ae791473ce9399f83899ae1c91409737b733182a4f56e8022": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "dpkg-query emits one equals delimiter between valid Debian package names and versions, which cannot contain equals; the split variants produce identical package inventory for supported dpkg output. Ruling on CI run 37875940883."
+  }
+}

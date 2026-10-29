@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_current__mutmut_20:67317ad8844d960b9399a6963753f6144bf53bcf4aafc4e61098226e2d3c2d58": {
+    "reader": "standards-reader",
+    "reason": "ValueError XX wrapping changes; exact error annotation, every original diagnostic fact and failure outcome remain unchanged. Independently approved from complete CI report 40169108156."
+  }
+}

@@ -1,0 +1,45 @@
+name: Retried exact cache restore
+description: Restore the same required cache up to three times without substituting another baseline.
+inputs:
+  key:
+    description: Exact required cache key
+    required: true
+  path:
+    description: Cache destination
+    required: true
+  fail-on-cache-miss:
+    description: Fail when the required cache cannot be restored
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Restore, attempt 1
+      id: first
+      continue-on-error: true
+      uses: actions/cache/restore@v4
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.key }}
+        fail-on-cache-miss: ${{ inputs.fail-on-cache-miss }}
+    - name: Restore, attempt 2
+      id: second
+      if: steps.first.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/cache/restore@v4
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.key }}
+        fail-on-cache-miss: ${{ inputs.fail-on-cache-miss }}
+    - name: Restore, attempt 3
+      if: steps.second.outcome == 'failure'
+      uses: actions/cache/restore@v4
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.key }}
+        fail-on-cache-miss: ${{ inputs.fail-on-cache-miss }}

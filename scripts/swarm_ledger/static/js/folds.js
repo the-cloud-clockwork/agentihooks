@@ -1,6 +1,7 @@
 import { FOLD_KEY, TOGGLES_KEY } from "./config.js";
 import { $, store, stored } from "./dom.js";
 import { rememberComment } from "./threads.js";
+import { doc } from "./sync.js";
 import { outlineBoxes, sectionBoxes } from "./outline.js";
 
 export const toggles = stored(TOGGLES_KEY, {});
@@ -50,14 +51,24 @@ export function collapsible(box) {
   if (typeof saved[box.id] === "boolean") box.open = saved[box.id];
   box.querySelector(":scope > summary").addEventListener("click", (ev) => { if (ev.target.closest("button, a")) ev.preventDefault(); });
   box.addEventListener("toggle", () => {
+    if ("fresh" in box.dataset) return void delete box.dataset.fresh;
     const state = foldSaved();
     state[box.id] = box.open;
     try { localStorage.setItem(FOLD_KEY, JSON.stringify(state)); } catch (e) { /* storage blocked: defaults return on reload */ }
   });
 }
 
+export function closeComplete(boxes, complete) {
+  const saved = foldSaved();
+  for (const box of boxes) if (box.open && typeof saved[box.id] !== "boolean" && complete(box)) {
+    box.dataset.fresh = "";
+    box.open = false;
+  }
+}
+
 export function setAllComments(section, open) {
   if (open) section.querySelector("details.fold").open = true;
+  if (section.id === "sec-phases") for (const p of doc.phases) rememberComment(`phases/${p.id}`, open);
   for (const box of commentBoxes(section)) {
     rememberComment(box.dataset.key, open);
     box.open = open;

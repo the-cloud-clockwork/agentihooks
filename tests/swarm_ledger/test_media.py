@@ -17,6 +17,7 @@ import ledger_core as core  # noqa: E402
 import ledger_media as media  # noqa: E402
 import ledger_server as server  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.test_bin import DAY_MS, make_ledger  # noqa: E402
 
 
@@ -62,14 +63,14 @@ class Store(unittest.TestCase):
 
     def test_an_image_is_stored_once_by_content_hash_next_to_the_ledger(self):
         data = png(4, 4)
-        first = media.store("shots", data)
-        again = media.store("shots", data)
+        first = media.store("shots-once", data)
+        again = media.store("shots-once", data)
         self.assertEqual(first, again)
         self.assertEqual(set(first), {"id", "type", "size", "width", "height"})
         self.assertEqual(
             (first["type"], first["size"], first["width"], first["height"]), ("image/png", len(data), 4, 4)
         )
-        folder = core.LEDGER_DIR / "shots.media"
+        folder = core.LEDGER_DIR / "shots-once.media"
         self.assertEqual([p.name for p in folder.iterdir()], [first["id"]])
         self.assertEqual((folder / first["id"]).read_bytes(), data)
 
@@ -104,7 +105,7 @@ class Endpoint(unittest.TestCase):
     def setUpClass(cls):
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
         html_path, _ = make_ledger("via-media")
-        cls.token = core.read_token(html_path.read_text(encoding="utf-8"))
+        cls.token = legacy_page.stored_token(html_path)
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()
@@ -180,10 +181,11 @@ class Endpoint(unittest.TestCase):
         forged = {**entry, "width": 9999, "type": "text/html"}
         code, _, body = self.put([{"op": "add", "thread": "chat", "id": "m-pic", "text": "", "attachments": [forged]}])
         self.assertEqual(code, 200)
-        state = json.loads(body)
+        self.assertEqual(json.loads(body)["rejected"], [])
+        state = server.repository.get_document("via-media")
         line = next(e for e in state["chat"] if e["id"] == "m-pic")
         self.assertEqual(line["attachments"], [entry])
-        stored = core.paths("via-media")[1].read_text(encoding="utf-8")
+        stored = json.dumps(server.repository.export_document("via-media"))
         self.assertNotIn("GIF89a", stored)
 
     def test_an_attachment_the_server_does_not_hold_is_refused(self):

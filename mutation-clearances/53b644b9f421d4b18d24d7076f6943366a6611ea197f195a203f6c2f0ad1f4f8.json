@@ -1,0 +1,6 @@
+{
+  "hooks/memory/spool.py:hooks.memory.spool.xǁSpoolǁappend__mutmut_45:1d5ec1b1216099637f172c7996c345e7ced710084bef84ebf1fb982fc60065a0": {
+    "reader": "standards-reader",
+    "reason": "json.dumps reads ensure_ascii only by truthiness, so None and False produce byte-identical output; the True and removed mutants are killed by test_sequences_grow_and_keep_utf8."
+  }
+}

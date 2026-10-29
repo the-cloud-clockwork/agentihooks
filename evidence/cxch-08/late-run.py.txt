@@ -1,0 +1,42 @@
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from scripts import codex_router
+from scripts.codex_router import CodexAccount
+
+scratch, name, scenario = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+env_name = f"AH_CX_TOKEN_{name}"
+account = codex_router.credential(CodexAccount(name, env_name), os.environ)
+home = scratch / f"home-{name}"
+home.mkdir(parents=True, exist_ok=True)
+repo = scratch / f"repo-{name}"
+repo.mkdir(exist_ok=True)
+subprocess.run(["git", "init", "-q", str(repo)], check=True)
+sock = scratch / f"app-{name}.sock"
+sock.unlink(missing_ok=True)
+child = codex_router.child_environment(account, os.environ)
+child["CODEX_HOME"] = str(home)
+args = ["app-server", "--listen", f"unix://{sock}"]
+log = open(scratch / f"app-{name}.log", "w")
+server = subprocess.Popen(codex_router.command(account, "codex", args), env=child, stdout=log, stderr=log, cwd=repo)
+try:
+    for _ in range(100):
+        if sock.exists():
+            break
+        time.sleep(0.2)
+    out = scratch / f"{scenario}-{'bearer' if account.bearer else 'token'}-{name.rsplit('_', 1)[-1]}.json"
+    probe = subprocess.run(
+        [sys.executable, "-m", "scripts.codex_app_server_probe", str(sock), str(repo), scenario, str(out)],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    print(json.dumps({"account_kind": codex_router.credential_kind(account, os.environ), "exit": probe.returncode,
+                      "stderr_tail": probe.stderr[-400:], "record": str(out)}))
+finally:
+    server.terminate()
+    server.wait(timeout=20)

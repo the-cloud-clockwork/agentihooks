@@ -1,0 +1,79 @@
+{
+  "case": "T-SV2-SES-04-C",
+  "evidence_class": "mocked: an in-process caller and a SQLite catalog file stand in for the collector, the network and the central database; no HTTP server, Pod or hive collector runs",
+  "input_sha256": {
+    "ingest-batches.json": "b753db254a09046f47a578915d99de5dccbe5ce94a5826a801bb0d3838bba485"
+  },
+  "observed": {
+    "advanced": {
+      "accepted": {
+        "event_ids": [
+          "d505e906f67fcf6de3fda0ccef380196ec205a4eb98dcd36c5f6d56dc347e291"
+        ],
+        "first_sequence": 4,
+        "last_sequence": 4
+      },
+      "batch_id": "next-4",
+      "duplicates": [],
+      "durable_through": 4,
+      "indexed": false,
+      "rejected": [],
+      "source_generation": "device-1:inode-7:anchor-0",
+      "state": "committed"
+    },
+    "canonical_copies": 4,
+    "metrics": {
+      "access_domain": "swarm-fixture",
+      "ingest_duplicate_events_total": 6
+    },
+    "retried_after_restart": {
+      "accepted": {
+        "event_ids": [
+          "e6ef12af919ecb3c5bc059d5d0003d47442c569bd19a1eb4dff05e537b7f1b08",
+          "704ac3e8b9f91413a459e31d2b80a331bfe1207b3204fef95d9a7b05bcb716fd",
+          "576b69a584020d94a47dc4954787e6c902227320ee9d40b64c171e1981fac293"
+        ],
+        "first_sequence": 1,
+        "last_sequence": 3
+      },
+      "batch_id": "valid-1-3",
+      "duplicates": [],
+      "durable_through": 3,
+      "indexed": false,
+      "rejected": [],
+      "source_generation": "device-1:inode-7:anchor-0",
+      "state": "replayed"
+    },
+    "stale_retry": {
+      "accepted": {
+        "event_ids": [
+          "e6ef12af919ecb3c5bc059d5d0003d47442c569bd19a1eb4dff05e537b7f1b08",
+          "704ac3e8b9f91413a459e31d2b80a331bfe1207b3204fef95d9a7b05bcb716fd",
+          "576b69a584020d94a47dc4954787e6c902227320ee9d40b64c171e1981fac293"
+        ],
+        "first_sequence": 1,
+        "last_sequence": 3
+      },
+      "batch_id": "valid-1-3",
+      "duplicates": [],
+      "durable_through": 4,
+      "indexed": false,
+      "rejected": [],
+      "source_generation": "device-1:inode-7:anchor-0",
+      "state": "replayed"
+    },
+    "stored_sequences": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "survived_crash": [
+      1,
+      2,
+      3
+    ],
+    "watermark": 4
+  },
+  "state": "passed"
+}

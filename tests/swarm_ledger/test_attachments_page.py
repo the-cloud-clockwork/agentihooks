@@ -8,7 +8,7 @@ PNG_ID = "a" * 64 + ".png"
 ATT = {"id": PNG_ID, "type": "image/png", "size": 10, "width": 30, "height": 20}
 PRELUDE = (
     "const SLUG = 'shots'; const TOKEN = 'tok'; const API = '/api/shots'; const MAX_ATTACH = 6;"
-    "const MEDIA_API = '/api/media/shots'; const attaching = {}; const attachNote = {}; const nodes = {};"
+    "const API_V1 = '/api/v1/ledgers/shots'; const attaching = {}; const attachNote = {}; const nodes = {};"
     "const $ = id => nodes[id] ||= {value: '', kids: [], replaceChildren(...k) { this.kids = k; }};"
     "const h = (tag, attrs, ...kids) => ({tag, ...attrs, kids: kids.filter(Boolean)});"
     "let sent = []; const queue = op => sent.push(op); const grow = () => {}; const newId = () => 'm-1';"
@@ -47,7 +47,7 @@ def test_a_line_without_attachments_stays_plain():
 
 def test_the_optimistic_entry_shows_its_attachments_before_the_server_answers():
     result = run(
-        ["itemOf", "threadOf", "applyOp"],
+        ["itemOf", "threadOf", "pendingKey", "applyOp"],
         "const d = {chat: []};"
         f"applyOp(d, {{op: 'add', thread: 'chat', id: 'm-2', text: '', attachments: [{json.dumps(ATT)}]}});"
         "console.log(JSON.stringify(d.chat[0].attachments));",
@@ -63,7 +63,12 @@ def test_an_attachment_opens_the_same_page_viewer():
     assert button["tag"] == "button" and button["aria-label"] == "Open image viewer"
     assert "href" not in button and "target" not in button
     img = button["kids"][0]
-    assert (img["tag"], img["src"], img["width"], img["height"]) == ("img", f"/media/shots/{PNG_ID}", 30, 20)
+    assert (img["tag"], img["src"], img["width"], img["height"]) == (
+        "img",
+        f"/api/v1/ledgers/shots/files/media/{PNG_ID}",
+        30,
+        20,
+    )
 
 
 def test_no_attachments_render_nothing():
@@ -85,8 +90,8 @@ def test_each_file_is_uploaded_with_the_token_and_a_refusal_is_shown_on_the_tray
         " console.log(JSON.stringify({calls, list: attaching['tasks/t1/comments'], note: attachNote['tasks/t1/comments']})));",
     )
     assert result["calls"] == [
-        ["/api/media/shots", "POST", "tok", {"name": "a.png"}],
-        ["/api/media/shots", "POST", "tok", {"name": "b.txt"}],
+        ["/api/v1/ledgers/shots/uploads/media", "POST", "tok", {"name": "a.png"}],
+        ["/api/v1/ledgers/shots/uploads/media", "POST", "tok", {"name": "b.txt"}],
     ]
     assert result["list"] == [ATT]
     assert "PNG, JPEG, WebP or GIF" in result["note"]

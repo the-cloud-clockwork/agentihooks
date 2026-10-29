@@ -1,0 +1,6 @@
+{
+  "scripts/hive/account_slots.py:scripts.hive.account_slots.xǁSlotsǁlaunch__mutmut_20:694daf7ffc32bcc5792d6742b5945b68b812a5ea432fc456faa0b87cfcd1cd54": {
+    "reader": "standards-reader",
+    "reason": "Absent status defaults remain unequal to ambiguous; existing status ignores the default. Release and the reraised exception are identical."
+  }
+}

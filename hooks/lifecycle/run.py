@@ -6,12 +6,14 @@ from pathlib import Path
 from typing import Callable
 
 from hooks.lifecycle.act import ActionError, Journal, apply, finish_pending
+from hooks.lifecycle.codex_homes import sweep_codex_homes
 from hooks.lifecycle.config import load_roots
 from hooks.lifecycle.files import classify_files, classify_traces
 from hooks.lifecycle.lease import read_lease
 from hooks.lifecycle.ledger_servers import sweep_servers
 from hooks.lifecycle.liveness import Snapshot, lease_alive, path_in_use, take_snapshot
 from hooks.lifecycle.locks import removing
+from hooks.lifecycle.maintenance import maintain, primaries
 from hooks.lifecycle.model import ACTIONABLE, Finding, Root
 from hooks.lifecycle.scratch import classify_scratch, walk_stats
 from hooks.lifecycle.state import confirm
@@ -110,11 +112,15 @@ def sweep(
         snap = snap or take_snapshot()
         roots = load_roots() if roots is None else roots
         findings = confirm(collect(roots, snap), snap, home / "gc-state.json")
+        checkouts = primaries([Path(item.path) for item in findings if item.category == "worktree"])
         if scope:
             findings = [item for item in findings if _within(item.path, scope)]
         if act:
             findings = enforce(findings, roots, home, fresh)
         report = summarize(findings, snap)
         report["ledger_servers"] = sweep_servers(snap.table, home, scope, act)
+        report["codex_homes"] = sweep_codex_homes(snap, home, scope, act)
+        checkouts = [path for path in checkouts if not scope or _within(str(path), scope)]
+        report["git_maintenance"] = maintain(checkouts, act)
         (home / "gc-last.json").write_text(json.dumps(report), encoding="utf-8")
         return report

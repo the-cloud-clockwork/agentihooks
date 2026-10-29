@@ -1,0 +1,62 @@
+{
+  "thread": "01a11cc6-5e05-7511-86b6-b9dd6393812a",
+  "first": {
+    "turn": "01a11cc6-5e2b-7ac1-84c0-79eb8b014565",
+    "completed": true,
+    "status": "completed",
+    "agent_text": [
+      "INDIA"
+    ],
+    "methods": [
+      "account/rateLimits/updated",
+      "account/updated",
+      "configWarning",
+      "hook/completed",
+      "hook/started",
+      "item/agentMessage/delta",
+      "item/completed",
+      "item/started",
+      "mcpServer/startupStatus/updated",
+      "remoteControl/status/changed",
+      "thread/started",
+      "thread/status/changed",
+      "thread/tokenUsage/updated",
+      "turn/completed",
+      "turn/started"
+    ]
+  },
+  "compact_response": {},
+  "compacted_notification": false,
+  "methods": [
+    "account/rateLimits/updated",
+    "hook/completed",
+    "hook/started",
+    "item/completed",
+    "item/started",
+    "thread/closed",
+    "thread/status/changed",
+    "thread/tokenUsage/updated",
+    "turn/completed",
+    "turn/started"
+  ],
+  "after": {
+    "turn": "01a11cc9-2a5e-7330-9c27-bdc0d7daa307",
+    "completed": true,
+    "status": "completed",
+    "agent_text": [
+      "JULIET"
+    ],
+    "methods": [
+      "account/rateLimits/updated",
+      "hook/completed",
+      "hook/started",
+      "item/agentMessage/delta",
+      "item/completed",
+      "item/started",
+      "thread/status/changed",
+      "thread/tokenUsage/updated",
+      "turn/completed",
+      "turn/started"
+    ]
+  }
+}

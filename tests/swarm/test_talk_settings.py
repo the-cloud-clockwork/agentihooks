@@ -5,8 +5,6 @@ from scripts.swarm.health import findings
 from scripts.swarm.store import SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize("mode", ["enforce", "observe", "off"])
 def test_the_operator_sets_the_talk_gate_mode(env, monkeypatch, mode):  # noqa: F811

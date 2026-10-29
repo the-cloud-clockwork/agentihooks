@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_cmd_autoscale__mutmut_12:87417831604e63b7db718a8ce3fb8f75d192273eeaf1bb138c4e52330c601844": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The fallback repo is neither consumed by autoscaled nor printed. Replacing the empty string with XXXX changes no command output."
+  }
+}

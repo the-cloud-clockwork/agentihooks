@@ -1,0 +1,26 @@
+{
+  "turn": "01a11cc9-e5c2-7521-8731-2ee1942a6185",
+  "completed": true,
+  "status": "completed",
+  "agent_text": [
+    "LIMA"
+  ],
+  "methods": [
+    "account/rateLimits/updated",
+    "account/updated",
+    "configWarning",
+    "deprecationNotice",
+    "hook/completed",
+    "hook/started",
+    "item/agentMessage/delta",
+    "item/completed",
+    "item/started",
+    "remoteControl/status/changed",
+    "thread/goal/cleared",
+    "thread/started",
+    "thread/status/changed",
+    "thread/tokenUsage/updated",
+    "turn/completed",
+    "turn/started"
+  ]
+}

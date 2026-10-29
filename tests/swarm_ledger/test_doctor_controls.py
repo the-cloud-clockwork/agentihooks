@@ -17,6 +17,7 @@ import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.test_swarm_panel import STATUS, function_source  # noqa: E402
 
 SLUG = "doctor-controls"
@@ -32,7 +33,7 @@ class DoctorControls(unittest.TestCase):
     def setUpClass(cls):
         content = {"title": "Demo", "overview": "o", "phases": [{"title": "One", "description": "d"}]}
         new_ledger.create(SLUG, content)
-        cls.token = core.read_token(core.paths(SLUG)[0].read_text(encoding="utf-8"))
+        cls.token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()
@@ -81,7 +82,7 @@ class DoctorControls(unittest.TestCase):
 
     def test_the_panel_carries_doctor_buttons(self):
         page = page_source()
-        box = page.split('id="doctor-box"', 1)[1].split('id="health-box"', 1)[0]
+        box = page.split('id="doctor-row"', 1)[1].split('<p class="sw-note"', 1)[0]
         self.assertIn('data-swarm="doctor_start"', box)
         self.assertIn('data-swarm="doctor_stop"', box)
 
@@ -94,8 +95,11 @@ class DoctorControls(unittest.TestCase):
     def test_stop_doctor_asks_for_a_confirm_and_names_itself(self):
         page = page_source()
         self.assertIn('doctor_stop: "Stop the Doctor crew and close its linked ledger."', page)
-        out = run_js(["opNote"], '[opNote("done", "doctor_start"), opNote("pending", "doctor_stop")]')
+        out = run_js(["opNote"], '[opNote("error", "doctor_start", "x"), opNote("error", "doctor_stop", "y")]')
         self.assertEqual(
             out,
-            [{"cls": "ok", "text": "Start doctor: acknowledged"}, {"cls": "pending", "text": "Stop doctor: sending"}],
+            [
+                {"cls": "bad", "text": "Could not start doctor: x. Try again or ask the master."},
+                {"cls": "bad", "text": "Could not stop doctor: y. Try again or ask the master."},
+            ],
         )

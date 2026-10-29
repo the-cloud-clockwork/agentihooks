@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__text__mutmut_7:c3852ccf367798df2532bf80a5c2cc1bb572cba444ef47b015cdb424e340a0ea": {
+    "reader": "standards_reader",
+    "reason": "Only keyword case changes in the chunk-text query, and the identifiers text, records, source, ref, chunk_index resolve the same."
+  }
+}

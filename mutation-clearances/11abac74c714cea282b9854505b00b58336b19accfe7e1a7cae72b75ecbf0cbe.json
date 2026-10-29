@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_serve__mutmut_10:43a4bfa3f05ec8697afc0a95a4b3cd8691f50792c489fa8afcbacdfa37dc30f5": {
+    "reader": "Standards reader /root/standards_reader",
+    "reason": "The exact backlog mutation 128 to 129 is equivalent for the agreed seam: both exceed five and hold all twenty pending connections from sixteen writers and four readers. No response, operation, persistence or error output differs within this workload. Evidence: mutation preflight 38331580770 records nine killed and this sole survivor; Proofs 38331581047 passed 150 cases. This clearance does not claim equivalence for larger bursts."
+  }
+}

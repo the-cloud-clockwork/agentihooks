@@ -13,9 +13,10 @@ import ledger  # noqa: E402
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
-from scripts.swarm_ledger.repository.file import FileLedgerRepository
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
-storage = FileLedgerRepository(core)
+storage = default_repository()
 
 SLUG = "time_left_minutes-2026-01-01"
 
@@ -30,9 +31,9 @@ class TimeLeft(unittest.TestCase):
             "questions": [],
             "followups": [],
         }
-        html_path, json_path = core.paths(SLUG)
+        html_path, json_path = legacy_page.paths(SLUG, core)
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-        html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+        html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
         json_path.unlink(missing_ok=True)
         storage.apply_ops(SLUG)
 
@@ -60,32 +61,6 @@ class TimeLeft(unittest.TestCase):
             ("boss", "time left changed", "time_left_minutes", "200m"),
         )
         self.assertGreater(event["at"], 0)
-        seed = core.parse_seed(core.paths(SLUG)[0].read_text(encoding="utf-8"))
-        self.assertEqual(seed["time_left_minutes"], 200)
-
-    def test_seed_edit_and_page_upgrade_preserve_the_estimate(self):
-        html_path, _ = core.paths(SLUG)
-        html = html_path.read_text(encoding="utf-8")
-        seed = core.parse_seed(html)
-        seed["time_left_minutes"] = 35
-        core.rewrite_seed(html_path, html, seed, seed["_rev"])
-        self.assertEqual(storage.apply_ops(SLUG)[0]["time_left_minutes"], 35)
-        self.assertEqual(new_ledger.upgrade_page(SLUG)["time_left_minutes"], 35)
-        with self.assertRaises(ValueError):
-            core.validate({"time_left_minutes": "State at 12:23Z. No ETA."})
-
-    def test_stale_seed_keeps_the_newer_estimate_when_it_did_not_edit_it(self):
-        html_path, _ = core.paths(SLUG)
-        stale = html_path.read_text(encoding="utf-8")
-        storage.apply_ops(
-            SLUG, ops=[{"op": "set", "id": "estimate", "by": "boss", "path": "time_left_minutes", "value": 20}]
-        )
-        seed = core.parse_seed(stale)
-        seed["overview"] = "Updated overview"
-        core.rewrite_seed(html_path, html_path.read_text(encoding="utf-8"), seed, seed["_rev"])
-        state = storage.apply_ops(SLUG)[0]
-        self.assertEqual(state["time_left_minutes"], 20)
-        self.assertEqual(state["overview"], "Updated overview")
 
     def test_server_accepts_only_nonnegative_whole_minutes(self):
         for value in (0, 20, 200, 1500):
@@ -113,21 +88,6 @@ class TimeLeft(unittest.TestCase):
             with self.subTest(value=value), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 parser.parse_args(["--slug", SLUG, "--as", "boss", "time-left", value])
 
-    def test_saved_projection_is_removed_without_becoming_a_duration(self):
-        html_path, json_path = core.paths(SLUG)
-        for old in (85, "85%", "State at 12:23Z. No ETA."):
-            state = storage.apply_ops(SLUG)[0]
-            state["projection"] = old
-            json_path.write_text(json.dumps(state), encoding="utf-8")
-            seed = core.parse_seed(html_path.read_text(encoding="utf-8"))
-            seed["projection"] = old
-            core.rewrite_seed(html_path, html_path.read_text(encoding="utf-8"), seed, seed["_rev"])
-            migrated = new_ledger.upgrade_page(SLUG)
-            self.assertNotIn("projection", migrated)
-            self.assertIsNone(migrated["time_left_minutes"])
-            self.assertEqual(migrated["phases"], state["phases"])
-            self.assertEqual(migrated["title"], state["title"])
-
     def test_stats_show_one_duration_independent_of_time_and_completion(self):
         from tests.swarm_ledger.test_fold import function_source
 
@@ -139,13 +99,23 @@ const inScope = list => list;
 const activeAgents = () => 0;
 const swarm = null;
 const inboxPending = () => 0;
+const document = {dispatchEvent: () => true};
+const closedLeft = () => 0;
 let meta = {created_at: Date.now() - 3600000};
 let doc = {phases: [{done: true}, {done: false}], followups: [], questions: [], tasks: [], time_left_minutes: 200};
 """
-        script += function_source("span") + function_source("timeLeftInputs") + function_source("renderStats")
+        script += (
+            function_source("span")
+            + function_source("timeLeftInputs")
+            + function_source("statKey")
+            + function_source("statGrip")
+            + function_source("bottleneckStat")
+            + function_source("withRefusals")
+            + function_source("renderStats")
+        )
         script += """
 const assert = require("node:assert/strict");
-const timeLeft = () => { renderStats(); return $("stats").textContent.split(" · ")[2]; };
+const timeLeft = () => { renderStats(); return $("stats").textContent.split(" · ").find(row => row.startsWith("Time left ")); };
 assert.equal(timeLeft(), "Time left 3h 20m");
 meta.created_at -= 86400000;
 doc.phases[1].done = true;

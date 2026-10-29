@@ -1,0 +1,6 @@
+{
+  "hooks/context/scheduled_broadcasts.py:hooks.context.scheduled_broadcasts.x_save__mutmut_28:191b725e8e21b9899e82ba806b480f1bf7f2f51f6807fb87f5b516ecfb8ce96c": {
+    "reader": "Standards",
+    "reason": "Only SQL keyword capitalization changes. SQLite executes the same existence query with the same bound identifier, preserving filtering behavior."
+  }
+}

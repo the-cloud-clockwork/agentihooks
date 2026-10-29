@@ -214,6 +214,29 @@ class TestCheckMcp:
             assert result["servers"]["test-http"]["type"] == "http"
             assert result["ok"] is True
 
+    @pytest.mark.parametrize(
+        ("cached_at", "expected"),
+        [
+            ("2026-01-01T12:00:00+00:00", {"fixture": 8}),
+            ("2026-01-01T11:00:00+00:00", {}),
+        ],
+    )
+    def test_cache_lifetime(self, tmp_path, monkeypatch, cached_at, expected):
+        from datetime import datetime, timezone
+
+        from scripts import status_checker
+
+        cache = tmp_path / "counts.json"
+        cache.write_text(json.dumps({"_cached_at": cached_at, "servers": {"fixture": 8}}))
+        monkeypatch.setattr(status_checker, "_MCP_CACHE_FILE", cache)
+        monkeypatch.setattr(status_checker, "_MCP_CACHE_TTL", 600)
+        now = datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc)
+        parse = datetime.fromisoformat
+        with patch("datetime.datetime") as clock:
+            clock.now.return_value = now
+            clock.fromisoformat.side_effect = parse
+            assert status_checker._load_tool_cache() == expected
+
 
 class TestCheckOtel:
     def test_disabled(self):

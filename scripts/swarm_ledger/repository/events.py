@@ -3,6 +3,13 @@ import json
 
 from .rows import changes, encode
 
+LAST = "SELECT MAX(position) FROM events WHERE slug=?"
+APPEND = "INSERT INTO events VALUES (?, ?, ?, ?, ?)"
+TRIM = (
+    "DELETE FROM events WHERE slug=? AND position NOT IN "
+    "(SELECT position FROM events WHERE slug=? ORDER BY position DESC LIMIT ?)"
+)
+
 
 def read_events(connection, slug: str, revision: int | None = None) -> list:
     query = "SELECT value FROM events WHERE slug=?"
@@ -19,6 +26,8 @@ def write_events(connection, slug: str, events: list) -> None:
     desired = {}
     occurrences = {}
     for position, event in enumerate(events):
+        if "rev" not in event:
+            raise ValueError("ledger event must have a revision")
         value = encode(event)
         digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
         occurrence = occurrences.get(digest, 0)
@@ -40,3 +49,40 @@ def write_events(connection, slug: str, events: list) -> None:
                 "INSERT INTO events VALUES (?, ?, ?, ?, ?)",
                 (slug, key, *row),
             )
+
+
+def append_events(connection, slug: str, events: list, kept: int) -> None:
+    """Add a mutation's events after the newest one and drop the oldest past `kept`; older rows stay untouched."""
+    if not events:
+        return
+    (last,) = connection.execute(LAST, (slug,)).fetchone()
+    start = -1 if last is None else last
+    for offset, event in enumerate(events, 1):
+        if "rev" not in event:
+            raise ValueError("ledger event must have a revision")
+        connection.execute(APPEND, (slug, f"p{start + offset}", event.get("rev"), start + offset, encode(event)))
+    connection.execute(TRIM, (slug, slug, kept))
+
+
+def trim_events(connection, slug: str, kept: int) -> None:
+    connection.execute(TRIM, (slug, slug, kept))
+
+
+def retained(events: list, ack: int | None, kept: int, ceiling: int, horizon: int | None = None) -> int:
+    """Index of the oldest event to keep: the newest `kept`, every one after `ack` or newer than `horizon`,
+    never more than `ceiling`."""
+    start = max(0, len(events) - kept)
+    if ack is not None:
+        start = min(start, next((index for index, event in enumerate(events) if event.get("rev", 0) > ack), start))
+    if horizon is not None:
+        start = next((index for index, event in enumerate(events[:start]) if event.get("at", 0) > horizon), start)
+    return max(start, len(events) - ceiling)
+
+
+def keep_events(meta: dict, events: list, core, at: int) -> None:
+    """Append events to the meta log, trim it by `retained` and mark the highest revision trimmed."""
+    log = meta["events"] + events
+    start = retained(log, meta.get("events_ack"), core.EVENTS_KEPT, core.EVENTS_CEILING, at - core.EVENTS_WINDOW_MS)
+    if start:
+        meta["events_trimmed"] = log[start - 1].get("rev", 0)
+    meta["events"] = log[start:]

@@ -1,0 +1,74 @@
+name: Retried artifact download
+description: Download an artifact of this run; when the download action fails, fetch it by id through the REST artifacts API, each attempt time boxed. A download is idempotent; deploys never use this.
+inputs:
+  name:
+    description: Artifact name
+    required: true
+  path:
+    description: Destination directory; the workspace when empty
+    required: false
+    default: ""
+  client-id:
+    description: App client id that mints the token the REST fallback reads artifacts with
+    required: false
+    default: ""
+  private-key:
+    description: App private key that mints the token the REST fallback reads artifacts with
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Download
+      id: primary
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path || github.workspace }}
+    - name: Mint the token that reads the artifact
+      id: app-token
+      if: steps.primary.outcome == 'failure' && inputs.client-id != '' && inputs.private-key != ''
+      continue-on-error: true
+      uses: actions/create-github-app-token@v3.2.0
+      with:
+        client-id: ${{ inputs.client-id }}
+        private-key: ${{ inputs.private-key }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: read
+    - name: Download through the REST artifacts API
+      if: steps.primary.outcome == 'failure'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        ARTIFACT: ${{ inputs.name }}
+        DEST: ${{ inputs.path || github.workspace }}
+        ATTEMPT_SECONDS: "60"
+        WAIT_SECONDS: "5"
+      run: |
+        if [[ -z "$GH_TOKEN" ]]; then
+          echo "::error title=Retried download::Downloading $ARTIFACT failed and no App token was minted for the REST fallback."
+          exit 1
+        fi
+        DEST="${DEST/#\~/$HOME}"
+        ZIP="$(mktemp)"
+        export DEST ZIP
+        fetch() {
+          local id
+          id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=$ARTIFACT&per_page=100" \
+            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | last | .id // empty')"
+          [[ -n "$id" ]] && gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$ZIP" &&
+            mkdir -p "$DEST" && python3 -m zipfile -e "$ZIP" "$DEST"
+        }
+        export -f fetch
+        echo "::warning title=Retried download::Downloading $ARTIFACT failed; fetching it through the REST artifacts API."
+        for attempt in 1 2 3; do
+          if timeout --kill-after=5s "${ATTEMPT_SECONDS}s" bash -c fetch; then
+            rm -f "$ZIP"
+            exit 0
+          fi
+          echo "::warning title=Retried download::REST attempt $attempt for $ARTIFACT failed or exceeded ${ATTEMPT_SECONDS}s."
+          [[ "$attempt" == 3 ]] || sleep "$WAIT_SECONDS"
+        done
+        rm -f "$ZIP"
+        exit 1

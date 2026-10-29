@@ -1,0 +1,37 @@
+{
+  "case": "T-SV2-LDG-02-B",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-LDG-02-B",
+    "evidence_class": "mocked Redis and server clock; signed fixture grants; no external runtime",
+    "input_sha256": "23a672c8a2243a860add3a69d90458928c2a0c9e6e776874a210994a8f2bd048",
+    "observed": {
+      "forged_url_subject": [
+        403,
+        "forbidden_scope",
+        "new_request"
+      ],
+      "heartbeat_rejections": {
+        "forbidden_scope": 1,
+        "stale_generation": 3
+      },
+      "heartbeat_rejections_total": 4,
+      "other_controller_epoch": [
+        409,
+        "stale_generation",
+        "new_request"
+      ],
+      "stale_generation": [
+        409,
+        "stale_generation",
+        "new_request"
+      ],
+      "stale_task_generation": [
+        409,
+        "stale_generation",
+        "new_request"
+      ]
+    },
+    "state": "passed"
+  }
+}

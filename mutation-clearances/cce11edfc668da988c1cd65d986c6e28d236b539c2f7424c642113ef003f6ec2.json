@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/trace_plan.py:scripts.swarm.trace_plan.x__read__mutmut_2:fba0a792d38cf4831a2c3a453063be159c3ba77df19cf223ec463cb479c8dce4": {
+    "reader": "/root/standards_reader",
+    "reason": "task_id passes through parse and _piece only to followup_text, which ignores it. Replacing who.task with None leaves followup text, validation, pieces, exceptions and logs unchanged; the separate task_ids validation argument is preserved."
+  }
+}

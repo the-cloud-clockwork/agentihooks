@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/runtime/process.py:scripts.swarm_v2.runtime.process.x_previous_boot__mutmut_3:0931a3eab1ed62fdd130df69b7045f6d889e1cf79d7d2ca5ef58917cd83b0dc1": {
+    "reader": "standards_reader",
+    "reason": "local_namespace generates a boot UUID followed by one slash and pid:[inode]. With exactly one slash, partition and rpartition return identical recorded boot identifiers and PID namespaces. Missing or empty namespace components also preserve the false result."
+  }
+}

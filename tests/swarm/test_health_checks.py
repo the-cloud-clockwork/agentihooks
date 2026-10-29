@@ -6,8 +6,6 @@ from scripts.swarm.health import checks
 from scripts.swarm.health.findings import Limits
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 URL = "https://github.com/o/r/pull/7"
 PENDING = "lint\tpass\t8s\thttps://x/1\nunit (3.11, 1)\tpending\t0\thttps://x/2\n"
 PASSED = "lint\tpass\t8s\thttps://x/1\nunit (3.11, 1)\tpass\t12s\thttps://x/2\n"
@@ -123,6 +121,7 @@ def test_status_raises_worker_ceremony_only_past_the_talk_budget(monkeypatch):
     events = [{"kind": "comment edited", "target": "phases/p1", "by": "sw-eng-1", "at": at} for _ in range(25)]
     store.redis.set(f"{store.key('green-proof', 'checks')}:green:{URL}", "0")
     marks = Progress(store.redis, "green-proof")
+    marks.outcome("sw-eng-1", "pushed", at)
     for _ in range(10):
         marks.talk("sw-eng-1")
     assert status.findings(store, "green-proof", config, tasks, events) == []
@@ -131,3 +130,60 @@ def test_status_raises_worker_ceremony_only_past_the_talk_budget(monkeypatch):
     assert [(f["kind"], f["subject"], f["evidence"]) for f in found] == [
         ("ceremony", "sw-eng-1", ["11 talk writes since its last outcome"])
     ]
+
+
+@pytest.mark.parametrize(("decided", "expected"), [(True, []), (False, [["53 ledger transitions", "0 outcomes"]])])
+def test_status_credits_the_dispatcher_seat_with_the_priorities_it_settled(monkeypatch, decided, expected):
+    import fakeredis
+
+    from scripts.swarm import status
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    seat = "dispatcher@323133-0001"
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    config = SwarmConfig("triage-proof", "/repo", max_eng=1, max_ci=0)
+    store.create(config)
+    store.put_agent("triage-proof", AgentRecord(seat, "dispatch", "dispatcher"))
+    monkeypatch.setattr(status.activity, "counts", lambda slug: {})
+    at = status.now_ms()
+    events = []
+    for n in range(24):
+        kind, target = ("comment added", f"followups/f{n}") if decided else ("comment edited", "phases/p1")
+        events.append({"kind": kind, "target": target, "by": seat, "at": at})
+        events.append({"kind": "checked", "target": f"followups/f{n}", "by": seat, "at": at})
+    events += [{"kind": "priority cleared", "target": f"followups/c{n}", "by": seat, "at": at} for n in range(5)]
+    found = status.findings(store, "triage-proof", config, [], events)
+    assert [f["evidence"] for f in found if f["kind"] == "ceremony"] == expected
+
+
+@pytest.mark.parametrize(
+    "pending,passed,approval,expected",
+    [
+        (None, None, False, (False, False)),
+        (True, False, False, (True, False)),
+        (False, True, False, (False, True)),
+        (False, True, True, (True, True)),
+        (False, False, True, (False, False)),
+    ],
+)
+def test_snapshot_check_probes_preserve_unknown_waiting_and_approval_states(pending, passed, approval, expected):
+    from types import SimpleNamespace
+
+    from scripts.swarm.health import checks
+
+    snapshot = None if pending is None else SimpleNamespace(checks_pending=pending, checks_passed=passed)
+
+    def view(url):
+        assert url == URL
+        return snapshot
+
+    waiting, green = checks.from_view(view, approval=approval)
+    assert (waiting(URL), green(URL)) == expected
+
+
+def test_default_snapshot_probe_treats_passing_checks_as_finished():
+    from types import SimpleNamespace
+
+    waiting, green = checks.from_view(lambda url: SimpleNamespace(checks_pending=False, checks_passed=True))
+    assert waiting(URL) is False
+    assert green(URL) is True

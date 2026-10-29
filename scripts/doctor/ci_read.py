@@ -3,9 +3,14 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
+from scripts import gh_audit
+from scripts.doctor import ci, ci_cache
+from scripts.swarm import github_reads
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -13,6 +18,21 @@ if TYPE_CHECKING:
 
 TEST = re.compile(
     r"(?:(PASSED|FAILED|SKIPPED) (tests/\S+::.+?)|(tests/\S+::.+?) (PASSED|FAILED|SKIPPED))(?:\s+\[\s*\d+%\])?\s*$"
+)
+
+RUNS = "repos/{owner}/{repo}/actions"
+DEV_PUSHES = f"{RUNS}/runs?branch=dev&event=push&status=completed&per_page=100"
+RUNS_JQ = ".workflow_runs[] | {id, name, path, conclusion, created_at, html_url} | @json"
+JOBS_JQ = ".jobs[] | {name, conclusion} | @json"
+
+PULL = f"{ROOT}:doctor:ci-pull:"
+PULL_TTL_S = 24 * 3600
+FULL_READS = 8
+STATE_CHUNK = 20
+STATE = (
+    "pullRequest(number: %d) { headRefOid commits(last: 1) { nodes { commit { checkSuites(first: 50) { nodes {"
+    " databaseId status conclusion checkRuns(first: 100) { totalCount nodes { databaseId status conclusion startedAt }"
+    " } } } } } } }"
 )
 
 
@@ -27,12 +47,22 @@ def test_results(log: str, job: str = "") -> list[dict]:
     return tests
 
 
-def _gh(args, run):
-    return run(["gh", *args], capture_output=True, text=True, check=True, timeout=60).stdout
+def _gh(args, run, shared=False):
+    endpoint = args[1]
+
+    def fetch():
+        caller = "doctor.ci.job_log" if endpoint.endswith("/logs") else "doctor.ci"
+        github_reads.charge(caller, endpoint, time.time())
+        with gh_audit.uncharged():
+            return run(["gh", *args], capture_output=True, text=True, check=True, timeout=60).stdout
+
+    if shared:
+        return github_reads.snapshot(json.dumps(args), time.time(), lambda: {"stdout": fetch()})["stdout"]
+    return fetch()
 
 
-def _pages(endpoint, field, run):
-    output = _gh(["api", endpoint, "--paginate", "--jq", f".{field}[] | @json"], run)
+def _pages(endpoint, field, run, shared=False):
+    output = _gh(["api", endpoint, "--paginate", "--jq", f".{field}[] | @json"], run, shared)
     return [json.loads(line) for line in output.splitlines()]
 
 
@@ -55,34 +85,122 @@ def _attempts(repo, runs, run, cache=None):
     return attempts
 
 
+def _job_tests(repo, job, run):
+    endpoint = f"repos/{repo}/actions/jobs/{job['id']}/logs"
+    try:
+        log = github_reads.job_log(endpoint, lambda: _gh(["api", endpoint, "--allow-escape-sequences"], run))
+    except subprocess.CalledProcessError as exc:
+        if "HTTP 404" not in exc.stderr:
+            raise
+        return []
+    return test_results(log, job["name"])
+
+
 def _attempt(repo, workflow, number, run, cache):
     key = f"{ROOT}:doctor:ci-attempt:{repo}:{workflow['id']}:{number}"
-    saved = cache.get(key) if cache is not None else None
+    saved = ci_cache.read(cache, key) if cache is not None else None
     if saved is not None:
-        return json.loads(saved)
+        return saved
     endpoint = f"repos/{repo}/actions/runs/{workflow['id']}/attempts/{number}/jobs?per_page=100"
     tests = []
     for job in _pages(endpoint, "jobs", run):
         if job["status"] == "completed" and job["conclusion"] != "skipped":
-            log = _gh(["api", f"repos/{repo}/actions/jobs/{job['id']}/logs"], run)
-            tests.extend(test_results(log, job["name"]))
+            tests.extend(_job_tests(repo, job, run))
     attempt = {"run_id": workflow["id"], "attempt": number, "head_sha": workflow["head_sha"], "tests": tests}
     if cache is not None:
-        cache.set(key, json.dumps(attempt), ex=604800)
+        ci_cache.write(cache, key, attempt)
     return attempt
 
 
-def pull_request(repo: str, number: int, run: Callable = subprocess.run, cache: Redis | None = None) -> dict:
+def _effective_checks(checks: list[dict], runs: list[dict]) -> list[dict]:
+    passed = {
+        (r["workflow_id"], r["head_sha"])
+        for r in runs
+        if r["status"] == "completed" and r["conclusion"] == "success" and "workflow_id" in r
+    }
+    superseded = {
+        r["check_suite_id"]
+        for r in runs
+        if r["conclusion"] == "cancelled" and (r.get("workflow_id"), r["head_sha"]) in passed and "check_suite_id" in r
+    }
+    return [c for c in checks if c.get("check_suite", {}).get("id") not in superseded]
+
+
+def pull_request(
+    repo: str, number: int, run: Callable = subprocess.run, cache: Redis | None = None, fresh: bool = False
+) -> dict:
     root = f"repos/{repo}"
+    shared = not fresh
     pr = json.loads(_gh(["api", f"{root}/pulls/{number}"], run))
     sha = pr["head"]["sha"]
-    checks = _pages(f"{root}/commits/{sha}/check-runs?per_page=100", "check_runs", run)
-    runs = [
-        r for r in _pages(f"{root}/actions/runs?head_sha={sha}&per_page=100", "workflow_runs", run) if _belongs(r, pr)
-    ]
+    checks = _pages(f"{root}/commits/{sha}/check-runs?per_page=100", "check_runs", run, shared)
+    workflows = _pages(f"{root}/actions/runs?head_sha={sha}&per_page=100", "workflow_runs", run, shared)
+    checks = _effective_checks(checks, workflows)
+    runs = [r for r in workflows if _belongs(r, pr)]
     return {
         "pr": pr,
         "checks": checks,
         "runs": runs,
         "attempts": _attempts(repo, runs, run, cache),
     }
+
+
+def _states(pulls, run):
+    states = []
+    for start in range(0, len(pulls), STATE_CHUNK):
+        fields = []
+        for i, (repo, number) in enumerate(pulls[start : start + STATE_CHUNK], start):
+            owner, name = repo.split("/")
+            fields.append(
+                f"p{i}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{ {STATE % number} }}"
+            )
+        data = json.loads(_gh(["api", "graphql", "-f", f"query={{ {' '.join(fields)} }}"], run))["data"]
+        states.extend(json.dumps(data[f"p{i}"]) for i in range(start, start + len(fields)))
+    return states
+
+
+def pull_requests(
+    pulls: list[tuple[str, int]], cache: Redis, run: Callable = subprocess.run, full_reads: int = FULL_READS
+) -> list[dict]:
+    if not pulls:
+        return []
+    states = _states(pulls, run)
+    keys = [f"{PULL}{repo}:{number}" for repo, number in pulls]
+    saved = [ci_cache.read(cache, key) for key in keys]
+    stale = [i for i, kept in enumerate(saved) if kept is None or kept["state"] != states[i]]
+    stale = sorted(stale, key=lambda i: saved[i] is not None and saved[i]["at"])[:full_reads]
+
+    def read(i):
+        record = pull_request(*pulls[i], run=run, cache=cache, fresh=True)
+        cache.set(keys[i], ci_cache.encode({"state": states[i], "at": time.time(), "record": record}), ex=PULL_TTL_S)
+        return i, record
+
+    with ThreadPoolExecutor() as pool:
+        fresh = dict(pool.map(read, stale))
+    return [fresh[i] if i in fresh else saved[i]["record"] for i in range(len(pulls)) if i in fresh or saved[i]]
+
+
+def _repo_rows(repo_dir, endpoint, jq, run):
+    output = run(
+        ["gh", "api", endpoint, "--jq", jq], cwd=repo_dir, capture_output=True, text=True, check=True, timeout=60
+    ).stdout
+    return [json.loads(line) for line in output.splitlines()]
+
+
+def dev_pushes(repo_dir: str, run: Callable = subprocess.run) -> dict:
+    runs = _repo_rows(repo_dir, DEV_PUSHES, RUNS_JQ, run)
+    green, jobs = {}, {}
+    for path, streak in ci.red_streaks(runs).items():
+        last = _repo_rows(
+            repo_dir,
+            f"{RUNS}/workflows/{path.split('/')[-1]}/runs?branch=dev&event=push&status=success&per_page=1",
+            RUNS_JQ,
+            run,
+        )
+        if last:
+            green[path] = last[0]
+        found = _repo_rows(
+            repo_dir, f"repos/{{owner}}/{{repo}}/actions/runs/{streak[0]['id']}/jobs?per_page=100", JOBS_JQ, run
+        )
+        jobs[streak[0]["id"]] = sorted(j["name"] for j in found if j["conclusion"] in ci.DEV_FAILED)
+    return {"runs": runs, "green": green, "jobs": jobs}

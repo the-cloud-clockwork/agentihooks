@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/proof_ledger.py:scripts.swarm_ledger.proof_ledger.x__control_call__mutmut_14:dc4fec1d1ab60c5064967d215e6cba39f5bd366809e8f1dc098dee99c2e909d9": {
+    "reader": "independent Standards reader",
+    "reason": "The endpoint checks HTTPMessage.get_content_type(), which normalizes media types to lowercase. APPLICATION/JSON and application/json are the same parsed media type, with identical JSON dispatch, authentication, responses and stored operations."
+  }
+}

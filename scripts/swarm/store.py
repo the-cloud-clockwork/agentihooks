@@ -1,25 +1,50 @@
 """Swarm runtime state in Redis: config, exclusive task claims with a lease, the agent registry and its seats."""
 
 import json
+import os
 import time
 from dataclasses import asdict, dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
-from scripts.swarm import effort_range
+from scripts.swarm import default_models, effort_range
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
+
+if TYPE_CHECKING:
+    from scripts.swarm_v2.runtime.operations import OperationJournal
 
 PREFIX = f"{ROOT}:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
 DEFAULT_URL = "redis://127.0.0.1:6379/0"
 MASTER = "master"
+DISPATCH = "dispatch"
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
+SCALING = ("auto", "manual")
+AUTO_SCALING, MANUAL_SCALING = SCALING
+DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW = 1.5, 1.0
+DEFAULT_MEMORY_PER_AGENT_MB = 700
+DEFAULT_SWAP_FULL_SHARE = 0.9
+DEFAULT_SWAP_FLOOR_MB = 4096
+DEFAULT_MASTERS_STEP = 12
+DEFAULT_MASTER_MOVE_GRACE = 300
+DEFAULT_LOCAL_MAX_AGENTS = 8
+EVENTS_ENGINE = "events"
+MAX_LOAD = 10.0
+CODEX_TRANSPORTS = ("legacy", "app_server")
+LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
+PLACEMENT_MODES = ("anton-first", "round-robin")
+ANTON_FIRST, ROUND_ROBIN = PLACEMENT_MODES
 
 
 class SwarmError(RuntimeError):
+    pass
+
+
+class Unreachable(SwarmError):
     pass
 
 
@@ -42,6 +67,60 @@ class SwarmConfig:
     effort_min: str = effort_range.DEFAULT[0]
     effort_max: str = effort_range.DEFAULT[1]
     overlays: dict = field(default_factory=dict)
+    scaling: str = AUTO_SCALING
+    load_high: float = DEFAULT_LOAD_HIGH
+    load_low: float = DEFAULT_LOAD_LOW
+    memory_per_agent_mb: int = DEFAULT_MEMORY_PER_AGENT_MB
+    lane_shift: int = 0
+    api_url: str = ""
+    claude_model: str = default_models.DEFAULTS["claude"]
+    codex_model: str = default_models.DEFAULTS["codex"]
+    scratch: bool = False
+    codex_inbox_transport: str = LEGACY_TRANSPORT
+    masters_step: int = 0
+    caps_pinned: bool = False
+    master_move_grace: int = DEFAULT_MASTER_MOVE_GRACE
+    pending_api_url: str = ""
+    ledger_staged_at: int = 0
+    swap_full_share: float = DEFAULT_SWAP_FULL_SHARE
+    swap_floor_mb: int = DEFAULT_SWAP_FLOOR_MB
+    hive_placement: bool = False
+    local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
+    engine: str = "legacy"
+    window: dict = field(default_factory=dict)
+    focus_weight: int = 50
+    watchdog_address: str = ""
+    placement_mode: str = ANTON_FIRST
+    placement_nodes: int = 0
+    repo_origin: str = ""
+
+    def __post_init__(self) -> None:
+        if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
+            raise SwarmError("focus weight must be a whole number from 0 to 100")
+        if self.placement_mode not in PLACEMENT_MODES:
+            raise SwarmError(f"placement mode must be one of {', '.join(PLACEMENT_MODES)}")
+        if type(self.placement_nodes) is not int or self.placement_nodes < 0:
+            raise SwarmError("placement-nodes takes a whole number of hives, 0 for no limit")
+        if self.engine not in ("legacy", "events"):
+            raise SwarmError("engine must be one of legacy, events")
+
+
+def scaling_refusal(config):
+    if config.scaling not in SCALING:
+        return f"scaling must be one of {', '.join(SCALING)}"
+    if (
+        type(config.load_low) not in (int, float)
+        or type(config.load_high) not in (int, float)
+        or not 0 < config.load_low <= config.load_high <= MAX_LOAD
+    ):
+        return f"load low must be above 0 and at most load high, and load high at most {MAX_LOAD:g}"
+    if type(config.memory_per_agent_mb) is not int or config.memory_per_agent_mb <= 0:
+        return "memory per agent must be a whole number of MB above 0"
+    if type(config.swap_full_share) not in (int, float) or not 0 < config.swap_full_share <= 1:
+        return "swap full share must be above 0 and at most 1"
+    if type(config.swap_floor_mb) is not int or config.swap_floor_mb <= 0:
+        return "swap floor must be a whole number of MB above 0"
+    return ""
 
 
 @dataclass(frozen=True)
@@ -74,6 +153,11 @@ class AgentRecord:
     runtime_backend: str = "local"
     runtime_target: dict = field(default_factory=dict)
     launch_timings: dict = field(default_factory=dict)
+    hive: str = ""
+    route_kind: str = "subscription"
+    transport: str = ""
+    remote_control: dict = field(default_factory=dict)
+    desired_route_kind: str = ""
 
 
 class RedisStore:
@@ -90,11 +174,41 @@ class RedisStore:
     def key(self, slug, *parts):
         return ":".join((PREFIX, slug, *parts))
 
+    def put_gate_lift(self, slug: str, scope: str, subject: str, gate: str, record: dict) -> None:
+        self.redis.hset(self.key(slug, "gate-lifts", scope, subject), gate, json.dumps(record))
+
+    def gate_lift(self, slug: str, scope: str, subject: str, gate: str) -> dict:
+        raw = self.redis.hget(self.key(slug, "gate-lifts", scope, subject), gate)
+        record = json.loads(raw) if raw else {}
+        dropped = self.redis.hget(self.key(slug, "gate-lift-drops"), subject) if scope == "tasks" else None
+        return {} if dropped and record.get("at", 0) <= float(dropped) else record
+
+    def drop_task_lifts(self, slug: str, task: str) -> None:
+        seconds, micros = self.redis.time()
+        self.redis.hset(self.key(slug, "gate-lift-drops"), task, f"{seconds}.{micros:06d}")
+
+    @property
+    def operation_journal(self) -> "OperationJournal":
+        from scripts.swarm_v2.runtime.operations import OperationJournal
+
+        return OperationJournal(self)
+
     def slugs(self):
         return sorted(self.redis.smembers(f"{PREFIX}:index"))
 
     def create(self, config):
-        refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes)
+        from scripts.swarm import model_catalog
+
+        changes = {
+            field: default_models.model(config, harness)
+            for harness, field in default_models.FIELDS.items()
+            if default_models.model(config, harness) != default_models.DEFAULTS[harness]
+        }
+        if changes and (
+            refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time()))
+        ):
+            raise SwarmError(refused)
+        refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes) or scaling_refusal(config)
         if refused:
             raise SwarmError(refused)
         if not self.redis.hsetnx(self.key(config.slug, "config"), "slug", config.slug):
@@ -125,13 +239,50 @@ class RedisStore:
             raw.get("effort_min") or effort_range.DEFAULT[0],
             raw.get("effort_max") or effort_range.DEFAULT[1],
             json.loads(raw.get("overlays") or "{}"),
+            raw.get("scaling") or AUTO_SCALING,
+            float(raw.get("load_high") or DEFAULT_LOAD_HIGH),
+            float(raw.get("load_low") or DEFAULT_LOAD_LOW),
+            int(raw.get("memory_per_agent_mb") or DEFAULT_MEMORY_PER_AGENT_MB),
+            int(raw.get("lane_shift") or 0),
+            raw.get("api_url", ""),
+            raw.get("claude_model") or default_models.DEFAULTS["claude"],
+            raw.get("codex_model") or default_models.DEFAULTS["codex"],
+            raw.get("scratch") == "True",
+            raw.get("codex_inbox_transport") or LEGACY_TRANSPORT,
+            int(raw.get("masters_step") or 0),
+            raw.get("caps_pinned", "True") == "True",
+            int(raw.get("master_move_grace") or DEFAULT_MASTER_MOVE_GRACE),
+            raw.get("pending_api_url", ""),
+            int(raw.get("ledger_staged_at") or 0),
+            float(raw.get("swap_full_share") or DEFAULT_SWAP_FULL_SHARE),
+            int(raw.get("swap_floor_mb") or DEFAULT_SWAP_FLOOR_MB),
+            raw.get("hive_placement") == "True",
+            int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
+            raw.get("engine", "legacy"),
+            json.loads(raw.get("window") or "{}"),
+            int(raw.get("focus_weight", 50)),
+            raw.get("watchdog_address", ""),
+            raw.get("placement_mode") or ANTON_FIRST,
+            int(raw.get("placement_nodes") or 0),
+            raw.get("repo_origin", ""),
         )
 
     def update(self, slug, **changes):
+        from scripts.swarm import model_catalog
+
         if changes.get("state", STATES[0]) not in STATES:
             raise SwarmError(f"state must be one of {STATES}")
         if changes.get("autonomy", DELEGATE) not in AUTONOMY:
             raise SwarmError(f"autonomy must be one of {AUTONOMY}")
+        if changes.get("codex_inbox_transport", LEGACY_TRANSPORT) not in CODEX_TRANSPORTS:
+            raise SwarmError(f"codex inbox transport must be one of {', '.join(CODEX_TRANSPORTS)}")
+        if set(default_models.FIELDS.values()) & changes.keys():
+            if refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time())):
+                raise SwarmError(refused)
+        if "pending_api_url" in changes:
+            from scripts.swarm import lease
+
+            changes["ledger_staged_at"] = lease.now_ms(self) if changes["pending_api_url"] else 0
         previous = self.config(slug)
         config = replace(previous, **changes)
         if {"lanes", "effort_min", "effort_max"} & set(changes):
@@ -140,35 +291,106 @@ class RedisStore:
                 raise SwarmError(refused)
             low, high = (effort_range.level(edge) for edge in (config.effort_min, config.effort_max))
             config = replace(config, effort_min=low, effort_max=high)
+        if refused := scaling_refusal(config):
+            raise SwarmError(refused)
         self.redis.hset(self.key(slug, "config"), mapping=_fields(config))
         return config
 
-    def claim(self, slug, task, agent, lease_ms):
-        return bool(self.redis.set(self.key(slug, "claim", task), agent, nx=True, px=lease_ms))
+    def claim(self, slug: str, task: str, agent: str, lease_ms: int) -> bool:
+        return self._if_holder(
+            self.key(slug, "claim", task),
+            None,
+            lambda pipe, key: (pipe.set(key, agent, nx=True, px=lease_ms), pipe.incr(f"{key}:generation")),
+            self._claim_guards(slug, task),
+        )
 
     def claimant(self, slug, task):
         return self.redis.get(self.key(slug, "claim", task))
 
-    def refresh(self, slug, task, agent, lease_ms):
-        return self._if_holder(self.key(slug, "claim", task), agent, lambda pipe, key: pipe.pexpire(key, lease_ms))
+    def claimed(self, slug: str, tasks: list[str]) -> set[str]:
+        found = self.redis.mget([self.key(slug, "claim", task) for task in tasks]) if tasks else []
+        return {task for task, claimant in zip(tasks, found) if claimant is not None}
 
-    def release(self, slug, task, agent):
-        return self._if_holder(self.key(slug, "claim", task), agent, lambda pipe, key: pipe.delete(key))
+    def claim_generation(self, slug: str, task: str) -> int:
+        return int(self.redis.get(f"{self.key(slug, 'claim', task)}:generation") or 0)
 
-    def _if_holder(self, key, agent, action):
+    def release_ready(self, slug: str, task: str, agent: str, generation: int, expected_ready: str | None) -> bool:
         from redis.exceptions import WatchError
 
+        key, ready = self.key(slug, "claim", task), self.key(slug, "ready")
+        guards = self._claim_guards(slug, task)
         with self.redis.pipeline() as pipe:
             try:
-                pipe.watch(key)
-                if pipe.get(key) != agent:
+                pipe.watch(key, f"{key}:generation", ready, *guards)
+                if (
+                    pipe.get(key) not in (None, agent)
+                    or int(pipe.get(f"{key}:generation") or 0) != generation
+                    or pipe.hget(ready, task) != expected_ready
+                    or any(pipe.exists(guard) for guard in guards)
+                ):
                     return False
                 pipe.multi()
-                action(pipe, key)
+                pipe.delete(key)
+                pipe.hdel(ready, task)
                 pipe.execute()
                 return True
             except WatchError:
                 return False
+
+    def ensure_claim(self, slug: str, agent: AgentRecord, lease_ms: int) -> bool:
+        from redis.exceptions import WatchError
+
+        key = self.key(slug, "claim", agent.task)
+        guards = self._claim_guards(slug, agent.task)
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key, self.key(slug, "agents"), self.key(slug, "executions"), *guards)
+                current = next((a for a in self.agents(slug) if a.name == agent.name), None)
+                if current != agent or agent.state not in ("starting", "working", "awaiting-decision"):
+                    return False
+                holder = pipe.get(key)
+                if holder not in (None, agent.name) or any(pipe.exists(guard) for guard in guards):
+                    return False
+                pipe.multi()
+                pipe.set(key, agent.name, px=lease_ms)
+                if holder is None:
+                    pipe.incr(f"{key}:generation")
+                return bool(pipe.execute()[0])
+            except WatchError:
+                return False
+
+    def refresh(self, slug: str, task: str, agent: str, lease_ms: int) -> bool:
+        return self._if_holder(
+            self.key(slug, "claim", task),
+            agent,
+            lambda pipe, key: pipe.pexpire(key, lease_ms),
+            self._claim_guards(slug, task),
+        )
+
+    def release(self, slug: str, task: str, agent: str) -> bool:
+        return self._if_holder(
+            self.key(slug, "claim", task),
+            agent,
+            lambda pipe, key: pipe.delete(key),
+            self._claim_guards(slug, task),
+        )
+
+    def _if_holder(self, key, agent, action, guards=()):
+        from redis.exceptions import WatchError
+
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key, *guards)
+                if any(pipe.exists(guard) for guard in guards) or pipe.get(key) != agent:
+                    return False
+                pipe.multi()
+                action(pipe, key)
+                return bool(pipe.execute()[0])
+            except WatchError:
+                return False
+
+    def _claim_guards(self, slug, task):
+        return self.key(slug, "task-authority", task), self.key(slug, "claim-journal", task)
 
     def put_handoff(self, slug, task, text, seat="", envelope=None):
         with self.redis.pipeline() as pipe:
@@ -186,6 +408,12 @@ class RedisStore:
 
     def handoff(self, slug, task):
         return self.redis.get(self.key(slug, "handoff", task)) or ""
+
+    def handoff_tasks(self, slug: str, tasks: list[str]) -> set[str]:
+        if not tasks:
+            return set()
+        values = self.redis.mget([self.key(slug, "handoff", task) for task in tasks])
+        return {task for task, value in zip(tasks, values, strict=True) if value}
 
     def handoff_seat(self, slug, task):
         return self.redis.get(self.key(slug, "handoff-seat", task)) or ""
@@ -240,19 +468,59 @@ class RedisStore:
     def agents(self, slug):
         return self.execution_registry.agents(slug)
 
-    def drop_agent(self, slug, name, at=None):
+    def drop_agent(self, slug, name, at=None, expected=None, before=None):
+        from redis.exceptions import WatchError
+
         ended = int(time.time() * 1000) if at is None else at
-        previous = self.redis.hget(self.key(slug, "agents"), name)
-        if previous:
-            row = json.loads(previous)
-            reason = "finished" if row["state"] == "finished" else "retired"
-            if self.handoff(slug, row["task"]):
-                reason = "handed off"
-            self.redis.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
-        self.redis.hdel(self.key(slug, "agents"), name)
-        self.redis.hdel(self.key(slug, "state-since"), name)
-        self.redis.hdel(self.key(slug, "retire-failures"), name)
-        self.names.retire(name, ended)
+        for _ in range(5):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(self.key(slug, "agents"), self.key(slug, "executions"))
+                    previous = pipe.hget(self.key(slug, "agents"), name)
+                    executions = [a for a in self.execution_registry.occupants(slug, pipe).values() if a.name == name]
+                    if expected is not None and expected.execution_id not in {a.execution_id for a in executions}:
+                        return False
+                    lives = self.execution_registry.records(slug) if previous else []
+                    pipe.multi()
+                    if before is not None:
+                        before(pipe)
+                    if previous:
+                        row = json.loads(previous)
+                        reason = "finished" if row["state"] == "finished" else "retired"
+                        if self.handoff(slug, row["task"]):
+                            reason = "handed off"
+                        placement = {
+                            field: getattr(agent, field)
+                            for agent in lives
+                            if (agent.name, agent.started_at) == (name, row.get("started_at"))
+                            for field in ("execution_id", "hive", "runtime_backend")
+                        }
+                        pipe.rpush(
+                            self.key(slug, "history"),
+                            json.dumps({**row, **placement, "ended_at": ended, "reason": reason}),
+                        )
+                    for agent in executions:
+                        if agent.state != "finished":
+                            pipe.hset(
+                                self.key(slug, "executions"),
+                                agent.execution_id,
+                                json.dumps(asdict(replace(agent, state="ended"))),
+                            )
+                    pipe.hdel(self.key(slug, "agents"), name)
+                    pipe.hdel(self.key(slug, "desired-routes"), name)
+                    pipe.hdel(self.key(slug, "state-since"), name)
+                    pipe.hdel(self.key(slug, "retire-failures"), name)
+                    self._retire_name(pipe, name, ended)
+                    pipe.execute()
+                    return True
+                except WatchError:
+                    continue
+        raise SwarmError("agent registry kept changing; retirement was not committed")
+
+    def _retire_name(self, pipe, name, ended):
+        row = self.names.entry(name)
+        if row and not row["retired_at"]:
+            pipe.hset(self.names.key("name", name), "retired_at", ended)
 
     def count_spawn(self, slug, harness):
         self.redis.hincrby(self.key(slug, "spawns"), harness or "unknown", 1)
@@ -261,12 +529,43 @@ class RedisStore:
         return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
 
     def count_claim(self, slug, task):
+        self.redis.hdel(self.key(slug, "pending-lives"), task)
         self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
         return self.redis.hincrby(self.key(slug, "started-lives"), task)
 
-    def refund_claim(self, slug, task):
-        self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
-        return self.redis.hincrby(self.key(slug, "started-lives"), task, -1)
+    def refund_held_claim(self, slug: str, task: str, agent: str, generation: int) -> bool:
+        from redis.exceptions import WatchError
+
+        key, lives = self.key(slug, "claim", task), self.key(slug, "started-lives")
+        pending = self.key(slug, "pending-lives")
+        guards = self._claim_guards(slug, task)
+        for _ in range(3):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(key, f"{key}:generation", f"{key}:refunded", lives, pending, *guards)
+                    if (
+                        pipe.get(key) != agent
+                        or int(pipe.get(f"{key}:generation") or 0) != generation
+                        or pipe.get(f"{key}:refunded") == str(generation)
+                        or any(pipe.exists(guard) for guard in guards)
+                    ):
+                        return False
+                    waiting = pipe.hget(pending, task)
+                    started = self._started_lives(slug, task)
+                    if not waiting and int(pipe.hget(lives, task) or started) <= 0:
+                        return False
+                    pipe.multi()
+                    pipe.set(f"{key}:refunded", generation)
+                    if waiting:
+                        self._cancel_pending(pipe, slug, task, waiting)
+                    else:
+                        pipe.hsetnx(lives, task, started)
+                        pipe.hincrby(lives, task, -1)
+                    pipe.execute()
+                    return True
+                except WatchError:
+                    continue
+        return False
 
     def claims(self, slug, task):
         counted = self.redis.hget(self.key(slug, "started-lives"), task)
@@ -275,18 +574,69 @@ class RedisStore:
         return self._started_lives(slug, task)
 
     def reset_claims(self, slug, task):
+        self.cancel_pending_life(slug, task)
         self.redis.hset(self.key(slug, "started-lives"), task, 0)
         self.redis.hdel(self.key(slug, "launch-failures"), task)
+        self.clear_failed_harness(slug, task)
 
-    def note_launch_failure(self, slug, task, reason):
+    def pend_life(self, slug: str, task: str, execution: str) -> None:
+        self.redis.hset(self.key(slug, "pending-lives"), task, execution)
+
+    def cancel_pending_life(self, slug: str, task: str) -> None:
+        if waiting := self.redis.hget(self.key(slug, "pending-lives"), task):
+            self._cancel_pending(self.redis, slug, task, waiting)
+
+    def _cancel_pending(self, client, slug: str, task: str, execution: str) -> None:
+        client.hsetnx(self.key(slug, "counted-executions"), execution, task)
+        client.hdel(self.key(slug, "pending-lives"), task)
+
+    def note_launch_failure(self, slug, task, reason, harness=""):
         self.redis.hset(self.key(slug, "launch-failures"), task, reason)
+        if harness:
+            self.redis.hset(self.key(slug, "launch-failure-harness"), task, harness)
 
     def launch_failure(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
 
-    def record_launch(self, slug: str, agent: AgentRecord, state: str, error: str = "") -> None:
-        row = {"agent": agent.name, "task": agent.task, "at": agent.started_at, "state": state, "error": error}
+    def launch_failures(self, slug: str) -> dict:
+        return self.redis.hgetall(self.key(slug, "launch-failures"))
+
+    def failed_harness(self, slug, task):
+        return self.redis.hget(self.key(slug, "launch-failure-harness"), task) or ""
+
+    def clear_failed_harness(self, slug, task):
+        self.redis.hdel(self.key(slug, "launch-failure-harness"), task)
+
+    def record_launch(
+        self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "", head: str | None = ""
+    ) -> None:
+        row = {
+            "agent": agent.name,
+            "task": agent.task,
+            "at": agent.started_at,
+            "state": state,
+            "error": error,
+            "pane_id": agent.pane_id,
+            "after": after,
+            "head": head,
+        }
         self.redis.hset(self.key(slug, "launches"), agent.name, json.dumps(row))
+
+    def mark_restart(self, slug: str, task: str, cause: str) -> None:
+        self.redis.hset(self.key(slug, "restart-causes"), task, cause)
+
+    def take_restart(self, slug: str, task: str) -> str:
+        cause = self.redis.hget(self.key(slug, "restart-causes"), task) or ""
+        self.redis.hdel(self.key(slug, "restart-causes"), task)
+        return cause
+
+    def note_launch_pane(self, slug: str, name: str, lines: list[str], reason: str = "") -> None:
+        raw = self.redis.hget(self.key(slug, "launches"), name)
+        if raw is None:
+            return
+        row = json.loads(raw)
+        row = {**row, "error": row["error"] or reason, "pane_lines": lines}
+        self.redis.hset(self.key(slug, "launches"), name, json.dumps(row))
 
     def launches(self, slug: str) -> list[dict]:
         rows = {name: json.loads(raw) for name, raw in self.redis.hgetall(self.key(slug, "launches")).items()}
@@ -396,6 +746,10 @@ def _dump(redis, keys):
 
 
 def redis_url(environ):
+    from scripts.swarm_ledger import ledger_link
+
+    if not ledger_link.local_mode(environ) and environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
+        return environ["AGENTIHOOKS_HIVE_REDIS_URL"]
     return environ.get("AGENTIHOOKS_SWARM_REDIS_URL") or DEFAULT_URL
 
 
@@ -406,7 +760,56 @@ def redis_client(environ=None):
 
     import hooks.config  # noqa: F401  loads ~/.agentihooks/*.env, where REDIS_URL lives
 
-    url = redis_url(os.environ if environ is None else environ)
+    environ = os.environ if environ is None else environ
+    _adopt_saved_member(environ)
+    url = redis_url(environ)
+    try:
+        return _pinged(redis, url)
+    except redis.AuthenticationError:
+        if url != environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
+            raise
+    return _hive_recovered(redis, environ, url)
+
+
+def _adopt_saved_member(environ):
+    from urllib.parse import urlsplit
+
+    from scripts.hive import cli
+    from scripts.swarm_ledger import ledger_link
+
+    if ledger_link.local_mode(environ):
+        return
+    saved = cli.saved_member(environ)
+    url, current = saved.get("AGENTIHOOKS_HIVE_REDIS_URL"), environ.get("AGENTIHOOKS_HIVE_REDIS_URL")
+    # A rejoined hive keeps its old member in the process env, whose Redis user may still answer elsewhere.
+    if url and current and urlsplit(url).username != urlsplit(current).username:
+        environ.update(saved)
+
+
+def _hive_recovered(redis, environ, refused):
+    from scripts.hive import auth, cli
+
+    # One refresh per host: a second would retire the password the first just saved.
+    with cli.refresh_lock(environ):
+        saved = cli.saved_redis_url(environ)
+        if saved not in (None, refused):
+            try:
+                client = _pinged(redis, saved)
+            except redis.AuthenticationError:
+                pass
+            else:
+                environ.update(cli.saved_member(environ))
+                return client
+        try:
+            cli.refresh_env(environ)
+        except auth.HiveError as exc:
+            raise redis.AuthenticationError(
+                f"the hive Redis credential was refused and the hive refused a refresh ({exc})"
+            ) from exc
+    return _pinged(redis, environ["AGENTIHOOKS_HIVE_REDIS_URL"])
+
+
+def _pinged(redis, url):
     client = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=3, socket_timeout=10)
     client.ping()
     return client
@@ -418,4 +821,10 @@ def connect(environ=None):
     try:
         return RedisStore(redis_client(environ))
     except redis.RedisError as exc:
-        raise SwarmError(f"Redis is unreachable ({exc}); the swarm refuses to run without it") from exc
+        raise Unreachable(f"Redis is unreachable ({exc}); the swarm refuses to run without it") from exc
+
+
+def store_errors() -> tuple[type[BaseException], ...]:
+    import redis
+
+    return (redis.RedisError,)

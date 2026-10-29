@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/measured.py:scripts.ci_mutation.measured.x_measured_costs__mutmut_30:58f216b237b7925a6298080331219aba1fad02e33820a0fcd2de2e50136ae6b3": {
+    "reader": "standards_reader",
+    "reason": "Standards reader independently verified: the empty-duration default changes from zero to one, but the outer max always includes MUTANT_SECONDS five point six, so every supported input returns the same cost. Nonempty values ignore the default."
+  }
+}

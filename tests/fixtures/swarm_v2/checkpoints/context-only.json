@@ -1,0 +1,58 @@
+{
+  "materials": {
+    "normalized_transcript": "{\"seq\":40,\"role\":\"user\",\"text\":\"context fixture prompt\"}\n{\"seq\":41,\"role\":\"assistant\",\"text\":\"context fixture reply\"}\n"
+  },
+  "manifest": {
+    "schema_version": "2.2",
+    "operation_id": "ckpt-context-0001",
+    "authority": {
+      "execution_id": "e1",
+      "task_id": "t1",
+      "task_generation": 2,
+      "project_id": "local:fixture"
+    },
+    "checkpoint_id": "ckpt-context-0001",
+    "checkpoint_sequence": 1,
+    "status": "complete",
+    "created_at": "2026-10-11T09:00:00Z",
+    "committed_at": "2026-10-11T09:00:30Z",
+    "continuation": "context",
+    "native_resume_capability": "unsupported",
+    "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "branch_name": "engineer-fixture-0001",
+    "branch_state": "pushed",
+    "transcript_durable_cursor": {
+      "sequence": 41,
+      "byte_offset": 118
+    },
+    "inventory": {
+      "normalized_transcript": {
+        "sha256": "07a59893e38437c8e66b374ab242964a346e41cd695bd8bbae08024a6568c382",
+        "size": 118
+      }
+    },
+    "artifact_hashes": {
+      "normalized_transcript": "sha256:07a59893e38437c8e66b374ab242964a346e41cd695bd8bbae08024a6568c382"
+    },
+    "exclusions": [
+      "environment variables",
+      "account authentication stores"
+    ],
+    "quiescence_method": "partial_capture",
+    "reconstruction": {
+      "harness": "codex",
+      "image_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "task_revision": 7,
+      "execution_generation": 2
+    },
+    "dependencies_manifest": {
+      "lockfiles": [
+        "uv.lock"
+      ]
+    },
+    "restore_constraints": [
+      "same harness major version"
+    ]
+  }
+}

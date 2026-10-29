@@ -1,0 +1,4 @@
+controller:
+  workers:
+    podPolicy: null
+    podPolicyConfigMap: swarm-pod-policy

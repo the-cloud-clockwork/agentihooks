@@ -7,7 +7,7 @@ nav_order: 8
 # Extending AgentiHooks
 {: .no_toc }
 
-AgentiHooks is designed to be extended. This page covers the main extension points: adding a new MCP tool category, adding a new hook handler, and adding custom skills/agents/commands/rules via the bundle system.
+AgentiHooks supports Claude Code and Codex. Shared hook handlers use target capabilities; native settings and installation behavior belong in each harness adapter. This page covers the main extension points: adding a new MCP tool category, adding a new hook handler, and adding custom skills/agents/commands/rules via the bundle system.
 
 ## Table of contents
 {: .no_toc .text-delta }

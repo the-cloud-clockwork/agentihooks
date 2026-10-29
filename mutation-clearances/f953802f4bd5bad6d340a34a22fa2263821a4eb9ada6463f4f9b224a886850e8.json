@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/runtime/commands.py:scripts.swarm_v2.runtime.commands.x\u01c1_GuardedTransport\u01c1apply_operation__mutmut_2:0a05f4f76ed570941baa5c757541de84d756d8ed721d9182ce7dac553b8782b2": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Observation(None) is converted by Operations._qualified into a fresh Observation(Phase.REFUSED) before journal settlement, with identical defaults and no backend effect. Standards isolated qualification equality returned true."
+  }
+}

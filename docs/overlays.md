@@ -5,8 +5,8 @@ nav_order: 10
 ---
 # Swarm Overlays
 
-Overlays add domain capabilities to the five swarm roles: `master`, `engineer`,
-`planner`, `qa` and `cicd`. A backtest tuner remains an engineer; a risk auditor
+Overlays add domain capabilities to the package swarm roles: `master`, `engineer`,
+`planner`, `qa`, `cicd` and `documentation`. A backtest tuner remains an engineer; a risk auditor
 can be an overlay for an engineer or qa. Each agent wears at most three selected
 overlays, and every overlay declares which roles can wear it.
 
@@ -42,8 +42,9 @@ agentihooks bundle new ~/dev/my-tools
 ```
 
 This creates the bundle layout, initializes Git and links the bundle. A
-nonempty directory is refused. Only one bundle can be linked at a time; reuse
-it when adding more capabilities.
+nonempty directory is refused. Only one root bundle can be linked at a time; reuse
+it when adding more capabilities. `agentihooks bundle new --user DIR` lays out a
+personal bundle and links it beside the root bundle without replacing the root link.
 
 Create an overlay in the linked bundle:
 
@@ -51,6 +52,11 @@ Create an overlay in the linked bundle:
 agentihooks overlay new backtest-tuner \
   --wears engineer
 ```
+
+With a user bundle linked, `overlay new` refuses until you choose where it lands:
+add `--dest root` for the shared bundle or `--dest user` for the personal one.
+`overlay check NAME --dest user` validates a personal overlay. The swarm offers the
+overlays of both bundles; a name in both resolves to the root bundle's.
 
 The scaffold writes:
 
@@ -100,7 +106,7 @@ agentihooks swarm SWARM set \
   overlays-engineer=backtest-tuner,trader
 ```
 
-Use any of the five role names after `overlays-`. The page's OVERLAYS box writes
+Use any of the package role names after `overlays-`. The page's OVERLAYS box writes
 the same role defaults. Selection is limited to three overlays whose `wears`
 include that role.
 

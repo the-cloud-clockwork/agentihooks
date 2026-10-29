@@ -1,0 +1,86 @@
+name: Promotion
+
+on:
+  push:
+    branches: [dev]
+
+concurrency:
+  group: promotion-dev-${{ github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Promotion checks
+    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    env:
+      DELIVERY_TIER: promotion
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install PyYAML==6.0.2
+      - name: Run delivery checks
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+          import yaml
+          commands = yaml.safe_load(Path('delivery.yaml').read_text())[os.environ['DELIVERY_TIER']]
+          for command in commands:
+              subprocess.run(['bash', '-euo', 'pipefail', '-c', command], check=True)
+          PY
+  promote:
+    needs: checks
+    environment: promotion
+    concurrency:
+      group: release-version
+      cancel-in-progress: false
+    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install PyYAML==6.0.2
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.PROMOTION_APP_ID }}
+          private-key: ${{ secrets.PROMOTION_APP_PRIVATE_KEY }}
+      - name: Promote the graded revision
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+          import yaml
+          repository = os.environ['GITHUB_REPOSITORY']
+          graded = os.environ['GITHUB_SHA']
+          main = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/commits/main'], text=True))
+          recorded = re.search(r'^Graded dev revision: ([0-9a-f]{40})$', main['commit']['message'], re.MULTILINE)
+          released = recorded[1] if recorded else main['sha']
+          comparison = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/compare/{released}...{graded}'], text=True))
+          if not recorded and comparison['status'] == 'diverged':
+              raise SystemExit('Graded head is not newer than the released dev revision: main lacks authoritative provenance; establish the released Graded dev revision marker before enabling promotion')
+          if comparison['status'] != 'ahead':
+              raise SystemExit('Graded head is not newer than the released dev revision')
+          commands = yaml.safe_load(Path('delivery.yaml').read_text())['promote']
+          for command in commands:
+              subprocess.run(['bash', '-euo', 'pipefail', '-c', command], check=True)
+          PY

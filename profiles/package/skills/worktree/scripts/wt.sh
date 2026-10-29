@@ -11,12 +11,14 @@
 #   wt.sh tmp  [name] [--repo DIR] [--from REF]  # throwaway detached worktree under <repo>/_tmp/; prints the path
 #   wt.sh ls   [--repo DIR | --all]           # branch, dirty, ahead/behind origin/<base>
 #   wt.sh done <name> [--repo DIR] [--force]  # remove a worktree + its local branch, fast-forward the primary checkout to origin/<base>
+#              [--pushed]                    # parked work: drop a clean worktree and its local branch once origin holds its head; keep the remote branch
 #                                             # (<name> may be a _tmp path printed by 'tmp'; those are removed even if dirty)
 #   wt.sh root                                # print the worktree root
 #
-# new and tmp refuse when free space (the smaller of the worktree filesystem and, on WSL, /mnt/c) is below
-# WT_MIN_FREE_GB (50) or the repo already has WT_MAX_PER_REPO (60) worktrees. Both record the calling agent
-# session as owner through 'agentihooks lease' when agentihooks is installed.
+# When free space (the smaller of the worktree filesystem and, on WSL, /mnt/c) is below WT_MIN_FREE_GB (50) or
+# the repo already has WT_MAX_PER_REPO (60) worktrees, new and tmp first evict the oldest safe worktrees through
+# 'agentihooks gc --make-room' and refuse only when nothing safe is left. Both record the calling agent session
+# as owner through 'agentihooks lease' when agentihooks is installed.
 #
 # Names come from code: with agentihooks installed, new and tmp take the name 'agentihooks name' builds for the
 # calling session when none is given, and refuse a given name it did not build. Without agentihooks or outside an
@@ -31,17 +33,19 @@ WT_MAX_PER_REPO="${WT_MAX_PER_REPO:-60}"
 BASE="${WT_BASE_BRANCH:-dev}"
 
 cmd="${1:-ls}"; shift || true
-NAME=""; BUILT=0; REPO_ARG=""; FORCE=0; ALL=0; FROM_REF="origin/${BASE}"
+NAME=""; BUILT=0; REPO_ARG=""; FORCE=0; PUSHED=0; ALL=0; FROM_REF="origin/${BASE}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) REPO_ARG="${2:-}"; shift 2 ;;
     --from) FROM_REF="${2:-}"; shift 2 ;;
     --force) FORCE=1; shift ;;
+    --pushed) PUSHED=1; shift ;;
     --all) ALL=1; shift ;;
     -*) die "unknown flag '$1'" ;;
     *) [[ -z "${NAME}" ]] || die "unexpected argument '$1'"; NAME="$1"; shift ;;
   esac
 done
+[[ "${FORCE}" -eq 1 && "${PUSHED}" -eq 1 ]] && die "--pushed and --force do not combine"
 
 primary_of() {
   local dir="$1" common
@@ -93,16 +97,30 @@ free_gb() {
   return 0
 }
 
-preflight() {
+shortfall() {
   local free count
   free="$(free_gb "${WT_DIR}")"
   if [[ -n "${free}" && "${free}" -lt "${WT_MIN_FREE_GB}" ]]; then
-    die "REFUSED — ${free} GB free, below the ${WT_MIN_FREE_GB} GB floor (WT_MIN_FREE_GB). Finish worktrees with 'wt.sh done <name>' and run 'agentihooks gc'."
+    echo "${free} GB free, below the ${WT_MIN_FREE_GB} GB floor (WT_MIN_FREE_GB)"
+    return 0
   fi
   count="$(git -C "${REPO}" worktree list --porcelain | awk '/^worktree /{n++} END{print n-1}')"
   if [[ "${count}" -ge "${WT_MAX_PER_REPO}" ]]; then
-    die "REFUSED — ${REPO_NAME} already has ${count} worktrees (cap ${WT_MAX_PER_REPO}, WT_MAX_PER_REPO). Finish some with 'wt.sh done <name>' or run 'agentihooks gc'."
+    echo "${REPO_NAME} already has ${count} worktrees (cap ${WT_MAX_PER_REPO}, WT_MAX_PER_REPO)"
   fi
+}
+
+preflight() {
+  local short
+  short="$(shortfall)"
+  [[ -n "${short}" ]] || return 0
+  command -v agentihooks >/dev/null 2>&1 \
+    || die "REFUSED — ${short}. Finish worktrees with 'wt.sh done <name>' and run 'agentihooks gc'."
+  agentihooks gc --make-room "${REPO}" --root "${WORKTREE_ROOT}" \
+    --min-free-gb "${WT_MIN_FREE_GB}" --max-per-repo "${WT_MAX_PER_REPO}" >&2 \
+    || echo "wt: worktree eviction failed (exit $?)" >&2
+  short="$(shortfall)"
+  [[ -z "${short}" ]] || die "REFUSED — ${short} and no safe worktree is left to evict"
 }
 
 lease() {
@@ -203,7 +221,14 @@ case "${cmd}" in
       git -C "${TARGET}" status -s | sed 's/^/  /' >&2
       exit 1
     fi
-    if [[ "${NAME}" != _tmp/* ]]; then
+    if [[ "${PUSHED}" -eq 1 && "${NAME}" != _tmp/* ]]; then
+      git -C "${REPO}" fetch --quiet --prune origin '+refs/heads/*:refs/remotes/origin/*' \
+        || die "cannot read origin branches — worktree kept"
+      REMOTE_HEAD="$(git -C "${REPO}" for-each-ref --format='%(refname)' --contains "$(git -C "${TARGET}" rev-parse HEAD)" refs/remotes/origin/)" \
+        || die "cannot check origin containment — worktree kept"
+      [[ -n "${REMOTE_HEAD}" ]] \
+        || die "branch '${BR}' is not contained in an origin branch — worktree kept"
+    elif [[ "${NAME}" != _tmp/* ]]; then
       if command -v gh >/dev/null 2>&1; then
         PR_STATE="$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | if .state == "MERGED" then .state elif .state == "CLOSED" then "CLOSED " + .url else .url end')" \
           || die "cannot read pull requests for '${BR}' — worktree kept"
@@ -257,7 +282,7 @@ case "${cmd}" in
       if [[ "${MERGED}" -eq 0 ]] && command -v gh >/dev/null 2>&1; then
         [[ -n "$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state merged --json number --jq '.[0].number' 2>/dev/null)" ]] && MERGED=1
       fi
-      if [[ "${MERGED}" -eq 1 || "${FORCE}" -eq 1 ]]; then
+      if [[ "${MERGED}" -eq 1 || "${FORCE}" -eq 1 || "${PUSHED}" -eq 1 ]]; then
         git -C "${REPO}" branch -D "${BR}" >/dev/null && echo "wt: removed ${TARGET} and branch ${BR}"
       else
         echo "wt: removed ${TARGET}; branch ${BR} has commits not on origin/${BASE} and no merged PR — kept (--force drops it)" >&2
@@ -272,7 +297,7 @@ case "${cmd}" in
     ;;
 
   -h|--help|help)
-    sed -n '2,19p' "${BASH_SOURCE[0]}"
+    sed -n '2,20p' "${BASH_SOURCE[0]}"
     ;;
 
   *)

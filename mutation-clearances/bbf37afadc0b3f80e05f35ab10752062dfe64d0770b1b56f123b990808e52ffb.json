@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/api/artifacts.py:scripts.swarm_v2.api.artifacts.x\u01c1ArtifactsAPI\u01c1route__mutmut_37:449bf3e99df2e5ee12f8912a24ec76cc9dbd7a8ceea0ad4a15250135407d89a1": {
+    "reader": "standards_reader",
+    "reason": "False and None are consumed only through if mutation in the current _scope implementation. For every token, authorization result, current claim and controller/task lease state, both take the same branch, execute identical checks and calls, return the same Registration or raise the same exception. Neither argument is exposed or type checked. This ruling covers only False to None at this call site."
+  }
+}

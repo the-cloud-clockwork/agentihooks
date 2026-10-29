@@ -1,0 +1,6 @@
+{
+  "scripts/master_login_chain.py:scripts.master_login_chain.x_notification__mutmut_33:de0c21392edc8ecb8d2b96a059f20c73e5cafa669fa9abec32aba88ece14fb0f": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 identify the same codec."
+  }
+}

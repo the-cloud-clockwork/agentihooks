@@ -1,0 +1,15 @@
+{
+  "cases": [
+    "T-SV2-IDX-03-A",
+    "T-SV2-IDX-03-B",
+    "T-SV2-IDX-03-C"
+  ],
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic hash embedder stand in for the session service, the central database, the archive bucket and the embedding provider; no model, HTTP server or Pod runs",
+  "inputs": {
+    "tests/fixtures/swarm_v2/session-embeddings.json": "f881f23ee6e596c67a9d934396ece582e6f2fced6823a1dfe292958f946dce21"
+  },
+  "package": "SV2-IDX-03",
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40182806818",
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40184086400",
+  "tested_commit": "c5a74dc935b045a3416b2f57459807ebcc5a62a0"
+}

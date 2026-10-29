@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__where__mutmut_26:e538764ac04a72156eff7afd016473aecb84380e1c1bba01a866bd339465ca5a": {
+    "reader": "standards_reader",
+    "reason": "Only the case of the SUBSTR function and the records.ref identifiers changes, and SQLite function and identifier names are case-insensitive."
+  }
+}

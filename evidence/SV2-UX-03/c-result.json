@@ -1,0 +1,52 @@
+{
+  "case": "T-SV2-UX-03-C",
+  "checks": {
+    "choices_disabled_after_acceptance": true,
+    "no_second_replacement": true,
+    "refresh_keeps_the_accepted_decision": true,
+    "repeated_request_returns_the_same_decision": true,
+    "replayed_click_refused_without_effect": true,
+    "wait_stays_at_the_decision": true
+  },
+  "evidence_class": "mocked: checkpoints committed and verified through a granted local artifact store, one with a corrupted native session object; fakeredis execution registry, fences and recovery records; a fake lease clock; an in process API server whose Pods carry fixture statuses; the ledger page projection read from the same store; no ledger HTTP server, browser, worker Pod or cluster runs",
+  "input_sha256": {
+    "checkpoints/context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda",
+    "checkpoints/native-resume.json": "c39dc9e0d89ee5d0f846ab5bca487ab16cc187c77077c6d9d1bde8e3723f2349",
+    "pod-failures.json": "13b5e8d94825f40ea87fada359454c47dee84fd4161945eebcdea4e235fff4b4",
+    "recovery-material.json": "46893d64cb14ba14b6c86b4566bc3a70c97b051ca8db6a8138a25c59062a8a4d"
+  },
+  "observed": {
+    "card": {
+      "accepted": {
+        "choice": "context",
+        "replacement": true,
+        "text": "accepted: context continuation"
+      },
+      "badge": "context only",
+      "choices": {
+        "context": "a recovery decision was already accepted",
+        "fresh": "a recovery decision was already accepted",
+        "native": "a recovery decision was already accepted"
+      },
+      "diagnosis": [
+        "native resume: no complete compatible native checkpoint to resume from",
+        "passed over ckpt-native-0001-s2: corrupt_object",
+        "native resume is not supported"
+      ],
+      "material": [
+        "ckpt-context-0001-s1 \u00b7 sequence 1 \u00b7 context",
+        "archive watermark 4096",
+        "transcript written by native session claude-session-fixture-one after archive offset 4096 was not archived before the node lost failure and is not recovered; its length is unknown"
+      ],
+      "requested": "",
+      "wait_seconds": 90
+    },
+    "first": "Recovery requested: context",
+    "metric": {
+      "eng-1@fixture": 90
+    },
+    "replay": "refused: This agent is not awaiting a restore decision"
+  },
+  "package": "SV2-UX-03",
+  "state": "passed"
+}

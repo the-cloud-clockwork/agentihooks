@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.xǁGuardedOperationsǁ__init____mutmut_1:640c298347d6c9264beeb58e7e6067f490c1ed7c4c0bfc3cccee843d0d304bb6": {
+    "reader": "standards_reader",
+    "reason": "Changes only the slug default. The single construction of GuardedOperations, in the API apply function, always passes the slug positionally, so the default is never read and no output changes."
+  }
+}

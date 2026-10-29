@@ -121,6 +121,14 @@ def start(python: str = sys.executable) -> int:
     return 1
 
 
+def ensure() -> bool:
+    try:
+        return os.environ.get("AGENTIHOOKS_SERENA") == "false" or start() == 0
+    except (OSError, subprocess.SubprocessError) as error:
+        print(f"serena router failed to start: {error}", file=sys.stderr)
+        return False
+
+
 def stop() -> int:
     if _unit_path().exists() and mcp_daemon._systemctl_usable():
         _systemctl("stop", UNIT_NAME)

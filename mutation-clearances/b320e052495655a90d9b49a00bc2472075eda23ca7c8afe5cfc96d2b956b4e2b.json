@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/seen.py:scripts.inbox.seen.x_receiving_session__mutmut_13:8b6cd4c2154b833c0ec6a977856ac7c17ee6e22f995238b96906318a7da2c07e": {
+    "reader": "standards_reader",
+    "reason": "Replacing a missing-key default with None preserves fallback selection. Both defaults are false; neither can pass if session_id. Registry lookup and returned identity remain unchanged."
+  }
+}

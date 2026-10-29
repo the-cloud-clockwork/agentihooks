@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_cache.py:scripts.doctor.ci_cache.x__trim__mutmut_28:88de5c817e035c1b7f5033dd86f3b2216b8de7ce2c2b9b571d1f59d88bf1c134": {
+    "reader": "Standards",
+    "reason": "One STRLEN is queued per key; execute returns matching cardinality or raises. strict=False changes no successful output."
+  }
+}

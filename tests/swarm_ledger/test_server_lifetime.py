@@ -1,6 +1,7 @@
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -41,6 +42,8 @@ def test_running_reads_a_zombie_or_a_process_being_reaped_as_gone(monkeypatch, s
 @pytest.mark.parametrize("explicit_owner", [True, False])
 @pytest.mark.parametrize("mode", ["--ensure", "--serve"])
 def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owner, mode, ledger_port):
+    from scripts.swarm_ledger import ledger_server
+
     port = ledger_port
     env = {
         **os.environ,
@@ -68,12 +71,17 @@ def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owne
             time.sleep(0.01)
         pid = int((tmp_path / ".server.pid").read_text())
         assert running(pid)
+        deadline = time.monotonic() + 10
+        while ledger_link.serving(timeout=0.1, url=f"http://127.0.0.1:{port}") != str(tmp_path):
+            assert run.poll() is None
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
         if ending == "exit":
             (tmp_path / "end").touch()
         else:
             getattr(run, ending)()
         run.wait(timeout=5)
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + ledger_server.DRAIN_S + 5
         while running(pid) and time.monotonic() < deadline:
             time.sleep(0.02)
         assert not running(pid), f"ledger server {pid} on port {port} survived its ended run"
@@ -93,6 +101,7 @@ def test_detached_server_cleanup_accepts_a_process_reaped_after_the_running_chec
     run = Mock()
     run.poll.return_value = 0
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=run))
+    monkeypatch.setattr(ledger_link, "serving", lambda **kwargs: str(tmp_path))
     monkeypatch.setitem(globals(), "running", Mock(side_effect=[True, False, False, True]))
     kill = Mock(side_effect=ProcessLookupError(3, "No such process"))
     monkeypatch.setattr(os, "kill", kill)
@@ -100,6 +109,59 @@ def test_detached_server_cleanup_accepts_a_process_reaped_after_the_running_chec
     test_detached_server_stops_when_its_run_ends(tmp_path, "exit", True, "--ensure", ledger_port)
 
     kill.assert_called_once_with(42, signal.SIGTERM)
+
+
+def test_detached_server_stop_deadline_excludes_startup_after_pid_publication(tmp_path, monkeypatch, ledger_port):
+    startup = tmp_path / "startup"
+    startup.mkdir()
+    (startup / "sitecustomize.py").write_text(
+        "import time\n"
+        "from pathlib import Path\n"
+        "write_text = Path.write_text\n"
+        "def publish(self, *args, **kwargs):\n"
+        "    result = write_text(self, *args, **kwargs)\n"
+        "    if self.name == '.server.pid':\n"
+        "        write_text(self.parent / 'startup-paused', 'yes')\n"
+        "        time.sleep(4)\n"
+        "    return result\n"
+        "Path.write_text = publish\n"
+    )
+    popen = subprocess.Popen
+
+    def start(*args, **kwargs):
+        kwargs["env"]["PYTHONPATH"] = os.pathsep.join((str(startup), kwargs["env"]["PYTHONPATH"]))
+        return popen(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", start)
+    test_detached_server_stops_when_its_run_ends(tmp_path, "kill", True, "--serve", ledger_port)
+    assert (tmp_path / "startup-paused").read_text() == "yes"
+
+
+@pytest.mark.wall_clock
+def test_detached_server_stop_deadline_covers_a_request_held_through_the_drain_bound(
+    tmp_path, monkeypatch, ledger_port
+):
+    held, held_at = [], []
+    serving = ledger_link.serving
+
+    def hold(**kwargs):
+        found = serving(**kwargs)
+        if found == str(tmp_path) and not held:
+            held.append(socket.create_connection(("127.0.0.1", ledger_port)))
+            held[0].sendall(b"GET / HTTP/1.1\r\n")
+            held_at.append(time.monotonic())
+        return found
+
+    monkeypatch.setattr(ledger_link, "serving", hold)
+    try:
+        test_detached_server_stops_when_its_run_ends(tmp_path, "exit", True, "--ensure", ledger_port)
+        stopped = time.monotonic()
+    finally:
+        for connection in held:
+            connection.close()
+    from scripts.swarm_ledger import ledger_server
+
+    assert stopped - held_at[0] >= ledger_server.DRAIN_S
 
 
 def fake_process(proc, pid=7, ppid=1, start=99, state="S", comm="python", argv=(b"python",)):
@@ -131,7 +193,7 @@ def test_unreadable_process_is_gone(tmp_path, stat):
     assert server_lifetime.process(7, tmp_path) is None
 
 
-@pytest.mark.parametrize("state,start,expected", [("S", 99, False), ("Z", 99, True), ("S", 100, True)])
+@pytest.mark.parametrize("state,start,expected", [("S", 99, False), ("Z", 99, True), ("X", 99, True), ("S", 100, True)])
 def test_owner_identity_rejects_zombies_and_reused_pids(tmp_path, state, start, expected):
     fake_process(tmp_path, start=start, state=state)
     assert server_lifetime.ended((7, 99), tmp_path) is expected
@@ -317,10 +379,12 @@ def test_server_closes_its_socket_and_cancels_the_watch_on_exit(tmp_path, monkey
     watch = Mock(return_value=stopped)
     monkeypatch.setattr(server_lifetime, "watch", watch)
     ledger_server.serve()
-    factory.assert_called_once_with((ledger_server.HOST, ledger_server.PORT), ledger_server.Handler)
+    factory.assert_called_once_with(
+        (ledger_server.HOST, ledger_server.PORT), ledger_server.Handler, bind_and_activate=False
+    )
     watch.assert_called_once_with(httpd, tmp_path, ledger_server.PORT)
     assert (tmp_path / ".server.pid").read_text() == str(os.getpid())
-    httpd.serve_forever.assert_called_once_with()
+    httpd.serve_forever.assert_called_once_with(ledger_server.POLL_S)
     stopped.set.assert_called_once_with()
     httpd.server_close.assert_called_once_with()
 
@@ -391,7 +455,7 @@ def test_ensure_passes_its_effective_folder_and_port_to_the_lifetime_owner(tmp_p
 
     monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(ledger_server, "LOGFILE", tmp_path / ".server.log")
-    monkeypatch.setattr(ledger_server, "serving_dir", Mock(side_effect=[None, str(tmp_path)]))
+    monkeypatch.setattr(ledger_server.ledger_link, "serving", Mock(side_effect=[None, str(tmp_path)]))
     monkeypatch.setattr(ledger_server, "port_held", lambda: False)
     monkeypatch.setattr(ledger_server, "server_process_alive", lambda: False)
     monkeypatch.setattr(ledger_server.subprocess, "Popen", Mock())

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/activity.py:scripts.swarm.health.activity.x_record__mutmut_8:03da84b6ead2c8f99bcc9bedea490d49b82c8c613c81f72ce827b21b898d44a3": {
+    "reader": "standards-reader",
+    "reason": "UTF-8 and utf-8 resolve to the identical codec; timestamp bytes are unchanged."
+  }
+}

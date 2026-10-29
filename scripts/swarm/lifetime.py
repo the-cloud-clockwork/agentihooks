@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import master_retire, reaper
+from scripts.swarm import master_retire, outage, reaper
 from scripts.swarm.store import MASTER, RedisStore
 
 if TYPE_CHECKING:
@@ -20,7 +20,7 @@ def retire_idle_master(
     slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, rows: dict, now_ms: int
 ) -> list[str]:
     agents = store.agents(slug)
-    if not agents or any(a.lane != MASTER for a in agents):
+    if not agents or any(a.lane != MASTER for a in agents) or outage.open_records(slug):
         return []
     inbox = InboxStore(store.redis)
     events = ledger.events(slug)
@@ -61,11 +61,12 @@ def retire_idle_master(
     return actions
 
 
-def sleeping(slug: str, store: RedisStore, rows: dict) -> bool:
+def sleeping(slug: str, store: RedisStore, rows: dict, write: bool = True) -> bool:
     previous = store.redis.get(store.key(slug, "master-retired-tasks"))
     if previous is None:
         return False
     if set(rows).difference(json.loads(previous)):
-        store.redis.delete(store.key(slug, "master-retired-tasks"))
+        if write:
+            store.redis.delete(store.key(slug, "master-retired-tasks"))
         return False
     return not InboxStore(store.redis).pending_items(seat_address(slug, MASTER))

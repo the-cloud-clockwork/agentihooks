@@ -1,0 +1,84 @@
+{
+  "case": "T-SV2-IDX-04-B",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic concept embedder stand in for the session service, the central database, the archive bucket and the embedding provider; no model, HTTP server, vector database or Pod runs",
+  "input_sha256": {
+    "session-search.json": "a8d3c56f8710490765686d36fb367d571edf1f1d9280a0d2168992908ee650b8"
+  },
+  "observed": {
+    "corrected": {
+      "mode": "hybrid",
+      "results": 3,
+      "state": "answered"
+    },
+    "hidden_names_absent_from_diagnostics": true,
+    "invalid": {
+      "context_above_bound": {
+        "class": "invalid_request",
+        "detail": "limit must be 1 to 50 and context 0 to 3",
+        "retry": "never"
+      },
+      "limit_above_bound": {
+        "class": "invalid_request",
+        "detail": "limit must be 1 to 50 and context 0 to 3",
+        "retry": "never"
+      },
+      "unknown_field": {
+        "class": "invalid_request",
+        "detail": "request carries unknown fields",
+        "retry": "never"
+      }
+    },
+    "protected_state_unchanged": true,
+    "provider_calls_while_rejected": 0,
+    "rejected": {
+      "authorized_and_unauthorized": {
+        "class": "forbidden_scope",
+        "detail": "the grant does not cover the requested search scope",
+        "retry": "never"
+      },
+      "foreign_corpus": {
+        "class": "forbidden_scope",
+        "detail": "the grant does not cover the requested search scope",
+        "retry": "never"
+      },
+      "project_outside_a_narrow_grant": {
+        "class": "forbidden_scope",
+        "detail": "the grant does not cover the requested search scope",
+        "retry": "never"
+      },
+      "unauthorized_project": {
+        "class": "forbidden_scope",
+        "detail": "the grant does not cover the requested search scope",
+        "retry": "never"
+      }
+    },
+    "response_fields": {
+      "authorized_and_unauthorized": [
+        "error",
+        "operation_id",
+        "schema_version",
+        "state"
+      ],
+      "foreign_corpus": [
+        "error",
+        "operation_id",
+        "schema_version",
+        "state"
+      ],
+      "project_outside_a_narrow_grant": [
+        "error",
+        "operation_id",
+        "schema_version",
+        "state"
+      ],
+      "unauthorized_project": [
+        "error",
+        "operation_id",
+        "schema_version",
+        "state"
+      ]
+    },
+    "session_search_scope_rejections": 4
+  },
+  "state": "passed"
+}

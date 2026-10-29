@@ -1,0 +1,55 @@
+› Validate your mounted profile using the binding canary command in its instructions before continuing. Stop if validation fails. You are ci@d44a5a-0093, a CI engineer who…
+    [117656246860,"split (3.12)","in_progress",null]
+    [117656246951,"split (3.11)","in_progress",null]
+    + 8 lines (^t to expand)
+
+• Ran printf '%s\n' 'Current head 774d1f7b3880c2db640cf91e4b1480dfa4c88d82. Focused Proofs 39120872055 passed both the ready parsing deadline and Unicode whitespace compati…
+  └ (no output)
+    + Show details
+
+• Ran gh api repos/The-Cloud-Clockwork/agentihooks/actions/jobs/117656047642/logs > /home/iamroot/.agentihooks/swarm/rig-grade-swarm-doctor/tasks/t365/parser-focused-green.…
+  └ 1164:2026-10-18T10:51:31.0745834Z [gw0] [ 50%] PASSED tests/swarm/test_staged_admission.py::test_ready_bounds_unterminated_declaration_parsing
+    1165:2026-10-18T10:51:31.2761005Z [gw1] [100%] PASSED tests/swarm/test_staged_admission.py::test_ready_preserves_unicode_whitespace_after_the_declaration_marker
+    1167:2026-10-18T10:51:31.2761940Z ============================== 2 passed in 1.66s ===============================
+    + Show details
+
+• System Directive: Focused CI passed both parser controls in 1.66 seconds. Full tests, mutation, and Sonar verification remain.
+
+• Ran gh api --paginate repos/The-Cloud-Clockwork/agentihooks/actions/runs/39120804281/jobs --jq '.jobs[]|select(.status!="completed" or .conclusion=="failure" or .name=="G…
+  └ [117656620600,"mutation (2)","in_progress",null]
+    [117656620606,"mutation (1)","in_progress",null]
+    [117656620670,"mutation (3)","in_progress",null]
+    + 19 lines (^t to expand)
+
+• Ran agentihooks ledger --slug rig-grade-swarm-doctor --as ci@d44a5a-0093 ack
+  └ {"acked": 30029}
+
+• Ran agentihooks swarm rig-grade-swarm-doctor say --to ci@d44a5a-0097 "No overlap. This change covers staged compatibility admission, readiness and queueing. Doctor reader…
+  └ {"sent": ["ci@d44a5a-0097"]}
+    {"posted": true}
+    + Show details
+
+• Ran gh api --paginate repos/The-Cloud-Clockwork/agentihooks/actions/runs/39120804281/jobs --jq '.jobs[]|select(.conclusion=="failure" or (.name|startswith("mutation (")))…
+  └ [117656620600,"mutation (2)","completed","success"]
+    [117656620606,"mutation (1)","completed","success"]
+    [117656620670,"mutation (3)","in_progress",null]
+    + 1 line (^t to expand)
+
+• System Directive: One mutation shard found a survivor in the refined parser. Its report will determine the remaining correction.
+
+• Ran gh api repos/The-Cloud-Clockwork/agentihooks/actions/jobs/117656620592/logs > /home/iamroot/.agentihooks/swarm/rig-grade-swarm-doctor/tasks/t365/literal-parser-mutati…
+  └ 1288:2026-10-18T10:55:40.0056957Z {"path": "scripts/swarm/ready.py", "counts": {"killed": 1}, "failures": [], "untouched_survivors": [], "cleared": []}
+    1289:2026-10-18T10:55:40.0116361Z {"path": "scripts/swarm/staged_compatibility.py", "counts": {"killed": 64, "survived": 5}, "failures": [{"name": "scripts.swarm.staged…
+    1290:2026-10-18T10:55:40.0128874Z survived on lines 17: scripts/swarm/staged_compatibility.py:scripts.swarm.staged_compatibility.x_declaration__mutmut_7:bf9bb22394021b4…
+    + 4 lines (^t to expand)
+
+ⓘ This content can’t be shown
+  We take extra care with some cybersecurity requests. If you’re doing authorized security work, apply for Daybreak to get broader access.
+  Learn more: https://help.openai.com/en/articles/20001326
+  Apply for Daybreak: https://openai.com/form/enterprise-trusted-access-for-cyber/
+
+
+› Ask Codex to do anything
+
+  GPT-6.1-Sol medium · ~/dev/tcc-ecosystem/agentihooks · Context 58% used · 828K window · Main [default]
+  ? for shortcuts                                                                                                                                  ⚠ 2 warnings · f2 to view

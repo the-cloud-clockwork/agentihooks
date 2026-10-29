@@ -1,13 +1,12 @@
 import json
 import subprocess
+from dataclasses import replace
 
 import pytest
 
-from scripts.handoff.envelope import REASONS, build, reclaim
+from scripts.handoff.envelope import REASONS, build, reclaim, remote_heads
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 WORKTREE = "/wt/repo/engineer-a1b2c3-0001"
 PR = "https://github.com/o/r/pull/9"
@@ -125,6 +124,37 @@ def test_the_envelope_carries_every_fact_the_runtime_holds(store):
     }
 
 
+@pytest.mark.parametrize(("harness", "saved", "recorded"), [("claude", "max", "xhigh"), ("codex", "xhigh", "xhigh")])
+def test_a_master_envelope_records_its_launch_effort_inside_the_swarm_range(store, harness, saved, recorded):
+    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness=harness, effort=saved)
+    envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))
+    assert envelope["launch"]["effort"] == recorded
+    assert envelope["launch"]["harness"] == harness
+
+
+@pytest.mark.parametrize(
+    ("bounds", "saved"), [(("low", "medium"), "max"), (("low", "medium"), "low"), (("medium", "xhigh"), "medium")]
+)
+def test_a_master_envelope_never_records_a_launch_effort_below_high(store, bounds, saved):
+    store.update("sw", effort_min=bounds[0], effort_max=bounds[1])
+    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness="claude", effort=saved)
+    envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))
+    assert envelope["launch"]["effort"] == "high"
+
+
+@pytest.mark.parametrize(("harness", "effort"), [("copilot", "max"), ("claude", "")])
+def test_a_master_envelope_keeps_an_effort_it_cannot_rank(store, harness, effort):
+    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness=harness, effort=effort)
+    envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))
+    assert envelope["launch"]["effort"] == effort
+
+
+def test_a_lane_envelope_records_its_exact_launch_effort(store):
+    agent = replace(_agent(), harness="claude", effort="max")
+    envelope = build(store, "sw", agent, "recycle", [], 0, run=_run([]))
+    assert envelope["launch"]["effort"] == "max"
+
+
 def test_facts_the_runtime_cannot_find_are_named_unknown(store):
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", seat="eng-1@sw")
     envelope = build(store, "sw", agent, "quota", None, 0, run=lambda argv, **_: _done(code=1))
@@ -229,9 +259,9 @@ def test_a_reclaim_skips_a_life_that_never_pushed_for_an_older_one_that_did():
     assert (verdict["continue_from"], verdict["remote_head"]) == ("origin/engineer-a1b2c3-0001", HEAD)
 
 
-def test_a_reclaim_follows_the_upstream_a_continuing_life_pushed_to():
+def test_a_reclaim_never_infers_task_ownership_from_a_worktree_upstream():
     run = _remote({"engineer-a1b2c3-0000": HEAD}, upstreams={WORKTREE: "origin/engineer-a1b2c3-0000"})
-    assert reclaim("/repo", [OLDER], "", run=run)["continue_from"] == "origin/engineer-a1b2c3-0000"
+    assert reclaim("/repo", [OLDER], "", run=run)["continue_from"] == "fresh"
 
 
 def test_a_reclaim_falls_back_to_the_branch_the_ledger_recorded():
@@ -244,8 +274,7 @@ def test_a_reclaim_with_no_pushed_branch_starts_fresh_and_names_what_it_checked(
         "remote_branch": "none",
         "remote_head": "none",
         "continue_from": "fresh",
-        "fresh_reason": "no earlier life pushed a branch: checked engineer-a1b2c3-0002, engineer-a1b2c3-0001 and "
-        "feature-x on the remote",
+        "fresh_reason": "no earlier life pushed a branch: checked feature-x on the remote",
     }
 
 
@@ -279,3 +308,122 @@ def test_a_reclaim_lists_every_remote_head_it_could_not_read():
     assert verdict["fresh_reason"] == (
         "the remote heads of engineer-a1b2c3-0002, engineer-a1b2c3-0001 could not be read"
     )
+
+
+def _no_git(argv, **kwargs):
+    raise AssertionError(argv)
+
+
+def test_a_reclaim_with_listed_heads_reads_no_remote_and_takes_the_newest_pushed_life():
+    heads = {"engineer-a1b2c3-0001": HEAD, "other": "f" * 40}
+    assert reclaim("/repo", [NEWER, OLDER], "", run=_no_git, heads=heads) == {
+        "remote_branch": "engineer-a1b2c3-0001",
+        "remote_head": HEAD,
+        "continue_from": "origin/engineer-a1b2c3-0001",
+        "fresh_reason": "none",
+    }
+
+
+def test_a_reclaim_with_listed_heads_starts_fresh_when_no_life_is_listed():
+    assert reclaim("/repo", [NEWER, OLDER], "", run=_no_git, heads={"other": HEAD}) == {
+        "remote_branch": "none",
+        "remote_head": "none",
+        "continue_from": "fresh",
+        "fresh_reason": (
+            "no earlier life pushed a branch: checked engineer-a1b2c3-0002 and engineer-a1b2c3-0001 on the remote"
+        ),
+    }
+
+
+def test_a_reclaim_with_an_empty_listing_starts_fresh_without_reading_the_remote():
+    verdict = reclaim("/repo", [OLDER], "", run=_no_git, heads={})
+    assert verdict["continue_from"] == "fresh"
+    assert verdict["fresh_reason"] == "no earlier life pushed a branch: checked engineer-a1b2c3-0001 on the remote"
+
+
+def test_remote_heads_lists_every_branch_head_in_one_call():
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _done(
+            f"{HEAD}\trefs/heads/feature-x\n{'a' * 40}\trefs/heads/dev\n{'b' * 40}\trefs/tags/v1\n"
+            f"{'c' * 40}\trefs/heads/split\tafter\n"
+        )
+
+    assert remote_heads("/repo", run=run) == {"feature-x": HEAD, "dev": "a" * 40, "split\tafter": "c" * 40}
+    assert calls == [(["git", "-C", "/repo", "ls-remote", "--heads", "origin"], {**GIT, "timeout": 20})]
+
+
+@pytest.mark.parametrize("failure", ["code", "raise"])
+def test_remote_heads_is_none_when_the_remote_cannot_be_read(failure):
+    def run(argv, **kwargs):
+        if failure == "raise":
+            raise subprocess.TimeoutExpired(argv, 20)
+        return _done(f"{HEAD}\trefs/heads/feature-x\n", code=128)
+
+    assert remote_heads("/repo", run=run) is None
+
+
+def _git(*args, cwd=None):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _hive(tmp_path, monkeypatch):
+    import fakeredis
+
+    for key, value in {"NAME": "hive", "EMAIL": "hive@example.com"}.items():
+        monkeypatch.setenv(f"GIT_AUTHOR_{key}", value)
+        monkeypatch.setenv(f"GIT_COMMITTER_{key}", value)
+    origin, checkout = tmp_path / "origin.git", tmp_path / "dev" / "agentihooks"
+    _git("init", "--bare", "-b", "dev", str(origin))
+    _git("clone", str(origin), str(checkout))
+    _git("commit", "--allow-empty", "-m", "base", cwd=checkout)
+    _git("push", "origin", "HEAD:dev", cwd=checkout)
+    worktree = tmp_path / "worktrees" / "engineer-a1b2c3-0000"
+    _git("worktree", "add", "-b", "engineer-a1b2c3-0000", str(worktree), cwd=checkout)
+    _git("commit", "--allow-empty", "-m", "task work", cwd=worktree)
+    _git("push", "-u", "origin", "engineer-a1b2c3-0000", cwd=worktree)
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "dev"))
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", str(tmp_path / "workstation" / "agentihooks"), 1, 1))
+    return store, worktree, _git("rev-parse", "HEAD", cwd=worktree)
+
+
+def _list_times_out(cmd, **kwargs):
+    if cmd[3:5] == ["worktree", "list"]:
+        raise subprocess.TimeoutExpired(cmd, 30)
+    return subprocess.run(cmd, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "row, run",
+    [
+        ({"branch": "engineer-a1b2c3-0000"}, subprocess.run),
+        (
+            {
+                "branch": "engineer-a1b2c3-0009",
+                "repository_branches": {"https://github.com/o/agentihooks": "engineer-a1b2c3-0000"},
+            },
+            subprocess.run,
+        ),
+        ({"branch": "engineer-a1b2c3-0000"}, _list_times_out),
+    ],
+    ids=["recorded branch", "repository branch", "worktree list times out"],
+)
+def test_a_hive_handoff_envelope_carries_the_task_branch_and_its_remote_head(tmp_path, monkeypatch, row, run):
+    store, worktree, head = _hive(tmp_path, monkeypatch)
+    envelope = build(store, "sw", _agent(), "operator", [{"id": "t1", "phase": "p7", **row}], 0, run=run)
+    assert {key: envelope[key] for key in ("worktree", "branch", "remote_branch", "remote_head", "continue_from")} == {
+        "worktree": str(worktree),
+        "branch": "engineer-a1b2c3-0000",
+        "remote_branch": "engineer-a1b2c3-0000",
+        "remote_head": head,
+        "continue_from": "origin/engineer-a1b2c3-0000",
+    }
+
+
+def test_a_hive_handoff_envelope_without_a_task_worktree_names_it_unknown(tmp_path, monkeypatch):
+    store, _, _ = _hive(tmp_path, monkeypatch)
+    envelope = build(store, "sw", _agent(), "operator", [{"id": "t1", "branch": "engineer-a1b2c3-0007"}], 0)
+    assert (envelope["worktree"], envelope["branch"]) == ("unknown", "unknown")

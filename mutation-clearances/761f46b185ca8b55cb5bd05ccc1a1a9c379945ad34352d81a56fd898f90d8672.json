@@ -1,0 +1,6 @@
+{
+  "scripts/herdr_gc.py:scripts.herdr_gc.xǁOwnersǁprompted_at__mutmut_31:cf3ec26d952b7411fda63b808c3025dd80250b39a2e1a7f8295299579dd5b6d7": {
+    "reader": "/root/standards_reader",
+    "reason": "Removing default=None makes an empty maximum raise ValueError, which the existing exception handler catches and returns as None. Nonempty maxima are unchanged."
+  }
+}

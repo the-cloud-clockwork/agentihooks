@@ -1,0 +1,6 @@
+{
+  "scripts/hub/readiness.py:scripts.hub.readiness.x\u01c1Readiness\u01c1reactor__mutmut_15:ec22be26be306140cefce2548443feecbeecf07fc66e0de5e3fcf6a40a13e45f": {
+    "reader": "Standards",
+    "reason": "HubRunner._deliver discards handler return values; changing the readiness callback return from None to zero preserves version recording, acknowledgement and polling behavior. Standards reader ruled equivalent against the exact mutant from preflight 39903938335."
+  }
+}

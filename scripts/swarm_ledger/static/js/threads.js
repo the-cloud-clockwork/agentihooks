@@ -5,7 +5,7 @@ import { attachable, attaching, attachmentsView, withAttachments } from "./media
 import { render } from "./render.js";
 import { jumpTo } from "./outline.js";
 import { toggles } from "./folds.js";
-import { lastPage, lazy, moreButton } from "./pages.js";
+import { COMMENT_PAGE, lazy, threadPage } from "./pages.js";
 
 export const composing = {};
 export const editing = {};
@@ -54,6 +54,10 @@ function relayMark(entry) {
   return entry.relayed_by ? h("span", { text: `relayed from the ${entry.relayed_from} by ${entry.relayed_by}` }) : null;
 }
 
+function hisWords(entry) {
+  return entry.relayed_by && entry.quote ? h("div", { class: "his-words" }, h("span", { class: "label", text: "His words" }), h("blockquote", { text: entry.quote })) : null;
+}
+
 function entryView(path, entry, noun) {
   const mine = entry.by === "operator";
   if (entry.id in editing) {
@@ -68,17 +72,16 @@ function entryView(path, entry, noun) {
     } } }));
   const head = h("div", { class: "entry-head" }, h("span", { class: "who", text: mine ? "You" : entry.by === "earlier" ? "earlier notes" : entry.by }),
     relayMark(entry), h("span", { text: when(entry.at) }), entry.edited_at ? h("span", { text: "edited" }) : null, entry.sending ? h("span", { text: "sending" }) : null, actions);
-  return h("div", { class: "entry" + (mine ? " mine" : "") + (entry.sending ? " sending" : ""), id: path === "notes" ? `item-notes-${entry.id}` : false }, head, entryBody(entry.text), attachmentsView(entry.attachments),
+  return h("div", { class: "entry" + (mine ? " mine" : "") + (entry.sending ? " sending" : ""), id: path === "notes" ? `item-notes-${entry.id}` : false }, head, entryBody(entry.text), hisWords(entry), attachmentsView(entry.attachments),
     path === "notes" ? commentsView(`notes/${entry.id}`, entry.comments || []) : null);
 }
 
-export function threadView(path, list, cls) {
+export function threadView(path, list, cls, page) {
   const noun = NOUN[path.split("/").pop()];
   const box = h("div", { class: cls });
   const live = list.filter((e) => !e.deleted);
-  const older = moreButton(path, live.length, `older ${noun}s`, render, "div");
-  if (older) box.append(older);
-  for (const entry of lastPage(path, live, (e) => `item-notes-${e.id}`)) box.append(entryView(path, entry, noun));
+  box.append(...threadPage(path, live, { idOf: (e) => `item-notes-${e.id}`, label: `older ${noun}s`, again: render,
+    make: (entry) => entryView(path, entry, noun) }, page));
   if (path in composing) {
     const close = () => { delete composing[path]; render(); };
     const line = lineBox(`compose:${path}`, composing[path], `Write a ${noun}…`, (text) => {
@@ -99,7 +102,7 @@ export function commentsView(key, list) {
   const shown = toggles[`sec-${key.split("/")[0]}`];
   box.open = openComments.has(key) || (!closedComments.has(key) && shown === true);
   box.addEventListener("toggle", () => rememberComment(key, box.open));
-  return lazy(box, () => threadView(`${key}/comments`, list, "thread flat"));
+  return lazy(box, () => threadView(`${key}/comments`, list, "thread flat", COMMENT_PAGE));
 }
 
 export function rememberComment(key, open) {
@@ -108,8 +111,8 @@ export function rememberComment(key, open) {
   store(COMMENTS_KEY, { opened: [...openComments], closed: [...closedComments] });
 }
 
-export function taskLink(id) {
-  return h("a", { class: "task-id", href: `#item-tasks-${id}`, text: id, on: { click: (ev) => jumpTo(ev, `tasks/${id}`) } });
+export function taskLink(id, focus) {
+  return h("a", { class: "task-id", href: `#item-tasks-${id}`, text: id, "data-focus": focus, on: { click: (ev) => jumpTo(ev, `tasks/${id}`) } });
 }
 
 function taskMentions(text, ids) {

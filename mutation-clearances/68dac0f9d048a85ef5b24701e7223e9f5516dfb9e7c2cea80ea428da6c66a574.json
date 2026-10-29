@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/rows.py:scripts.swarm_ledger.repository.rows.x_assemble__mutmut_3:1e15de484841cdd7ebc8e796dd04620fdfaec1d77a0b0f3f2fc7029748d94241": {
+    "reader": "standards_reader",
+    "reason": "Both None and an empty string replace the recursive build closure cell after return evaluation or exception unwinding. Neither value is read afterward, so both release the same rows and preserve returned JSON and raised exceptions. Independently cleared in review round two."
+  }
+}

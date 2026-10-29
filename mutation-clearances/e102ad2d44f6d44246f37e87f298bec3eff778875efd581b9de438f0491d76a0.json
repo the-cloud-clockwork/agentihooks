@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/quota_view.py:scripts.swarm.quota_view.x_lines__mutmut_2:895d404203739e2339aa3b8218f235d62b6e0c6045040a186c3d00195d9e7112": {
+    "reader": "Standards reader for task qc4",
+    "reason": "Inside if not decision, capacity.status_line returns the same fixed string for every falsy input, including None, so the substitution cannot change any output."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x_remediation__mutmut_10:02c6ff809abd60ba3258ea7c1ed7273c4346c0b14b1aef118567fcc04c28336a": {
+    "reader": "standards_reader",
+    "reason": "Changes only nonsemantic XX padding in the operator-facing message 'without changing gate behaviour. Deliver the gate implementation in the later pull request.'. The named shortfall and action remain present, with the same verdict and branch condition; exact typography is not part of the behavior contract."
+  }
+}

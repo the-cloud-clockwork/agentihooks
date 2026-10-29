@@ -4,13 +4,14 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
+import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
 import new_ledger  # noqa: E402
 
-from scripts.swarm_ledger import ledger_core as core  # noqa: E402
-from scripts.swarm_ledger.repository.file import FileLedgerRepository
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
-storage = FileLedgerRepository(core)
+storage = default_repository()
 
 SLUG = "sync-2026-01-01"
 
@@ -24,9 +25,9 @@ def make_ledger():
         "questions": [{"text": "which?"}],
         "followups": [{"text": "check disk"}],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     storage.apply_ops(SLUG)
     storage.apply_ops(
@@ -86,8 +87,7 @@ class Cooldown(unittest.TestCase):
         for event in state["_meta"]["events"]:
             if event["kind"] == "sync requested":
                 event["at"] -= core.SYNC_COOLDOWN_MS + 1000
-        json_path = core.paths(SLUG)[1]
-        json_path.write_text(core.json.dumps(state), encoding="utf-8")
+        storage.import_document(SLUG, state, replace=True)
         state, rejected = storage.apply_ops(SLUG, ops=[{"op": "sync", "id": "c4"}])
         self.assertEqual(rejected, [])
         self.assertEqual(len([e for e in state["_meta"]["events"] if e["kind"] == "sync requested"]), 2)
@@ -139,7 +139,7 @@ class StatsSync(unittest.TestCase):
         for event in state["_meta"]["events"]:
             if event["kind"] == "stats sync requested":
                 event["at"] -= core.SYNC_COOLDOWN_MS + 1000
-        core.paths(SLUG)[1].write_text(core.json.dumps(state), encoding="utf-8")
+        storage.import_document(SLUG, state, replace=True)
         rev = storage.apply_ops(SLUG, ops=[{"op": "stats_sync", "id": "t8"}])[0]["_meta"]["rev"]
         state, _ = storage.apply_ops(SLUG, ops=[{"op": "ack", "id": "a6", "by": "boss", "rev": rev}])
         self.assertEqual([e["id"] for e in self.answers(state)], ["t8"])
@@ -153,15 +153,16 @@ class StatsSync(unittest.TestCase):
         state["time_left_minutes"] = 400
         state["_meta"]["time_left"] = {"inputs": {"slots": 1, "ci_minutes": 35}}
         now = core.now_ms()
-        state["_meta"]["events"].append({"kind": "task done", "target": "tasks/closed", "at": now})
-        core.paths(SLUG)[1].write_text(core.json.dumps(state), encoding="utf-8")
+        state["_meta"]["events"].append(
+            {"kind": "task done", "target": "tasks/closed", "at": now, "rev": state["_meta"]["rev"]}
+        )
+        storage.import_document(SLUG, state, replace=True)
         reply, rejected = storage.apply_ops(SLUG, ops=[{"op": "stats_sync", "id": "persist"}])
         self.assertEqual(rejected, [])
         self.assertEqual(reply["time_left_minutes"], 60)
-        persisted = core.json.loads(core.paths(SLUG)[1].read_text(encoding="utf-8"))
+        persisted = storage.get_document(SLUG)
         self.assertEqual(persisted["_meta"]["stats_refresh"], reply["_meta"]["stats_refresh"])
         self.assertEqual(persisted["time_left_minutes"], 60)
-        self.assertEqual(core.parse_seed(core.paths(SLUG)[0].read_text(encoding="utf-8"))["time_left_minutes"], 60)
         self.assertEqual(reply["_meta"]["stats_refresh"]["state"], "refreshed")
         self.assertEqual(len(gate.unhandled_for(reply["_meta"], "boss")), 1)
 
@@ -188,6 +189,30 @@ class StatsSync(unittest.TestCase):
         self.assertEqual(reply["_meta"]["stats_refresh"]["counts"]["tasks"], {"done": 0, "total": 1})
         self.assertEqual(reply["_meta"]["stats_refresh"]["calculation"]["remaining"], 1)
         self.assertIsNone(reply["_meta"]["stats_refresh"]["calculation"]["minutes"])
+
+    def test_a_tick_write_through_the_api_leaves_a_frozen_chain_out_and_stamps_every_refresh(self):
+        task = {"op": "task_add", "by": "boss", "lane": "eng", "difficulty": "M"}
+        _, rejected = storage.apply_ops(
+            SLUG,
+            ops=[
+                {**task, "id": "n1", "task": "t1", "title": "Held head"},
+                {**task, "id": "n2", "task": "t2", "title": "Held tail", "depends_on": ["t1"]},
+                {**task, "id": "n3", "task": "t3", "title": "Live work"},
+                {"op": "freeze_set", "id": "f1", "verb": "freeze", "target": "tasks/t1", "reason": "hold"},
+            ],
+        )
+        self.assertEqual(rejected, [])
+        tick = {"op": "time_left", "id": "tl1", "by": "swarm", "slots": 1, "ci_minutes": 5}
+        core.check_body({"ops": [tick]})
+        first, rejected = storage.apply_ops(SLUG, ops=[tick])
+        self.assertEqual(rejected, [])
+        calculation = first["_meta"]["time_left"]["calculation"]
+        self.assertEqual((calculation["remaining"], calculation["frozen"], calculation["frozen_work"]), (1, 2, 60))
+        self.assertEqual(first["time_left_minutes"], 30)
+        second, _ = storage.apply_ops(SLUG, ops=[{**tick, "id": "tl2"}])
+        self.assertGreater(second["_meta"]["rev"], first["_meta"]["rev"])
+        self.assertGreaterEqual(second["_meta"]["time_left"]["at"], first["_meta"]["time_left"]["at"])
+        self.assertEqual(second["_meta"]["time_left"]["calculation"]["frozen"], 2)
 
 
 if __name__ == "__main__":

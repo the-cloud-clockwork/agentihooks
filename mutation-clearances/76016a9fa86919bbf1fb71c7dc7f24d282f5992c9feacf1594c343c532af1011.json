@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/plan.py:scripts.ci_mutation.plan.x_recorded_lines__mutmut_64:e5ce7602aa2732394aff70f761fa91fb2a5df383819073e8499984ec024e33ce": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The guarded zip inputs have equal lengths; extending only the first range adds no pair because the second range terminates zip. Independent Standards ruling, CI 39256519947."
+  }
+}

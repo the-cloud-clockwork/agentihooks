@@ -1,0 +1,6 @@
+{
+  "scripts/recall/store.py:scripts.recall.store.xǁSQLiteRecallStoreǁ_indexed__mutmut_6:51c75fe4ce34b6c40ca6520340141ad5da10dea028fdef2652a26fe4ba9cc104": {
+    "reader": "standards_reader",
+    "reason": "Lowercasing the SELECT 1 FROM indexed WHERE source = ? keywords and identifiers is a no-op under SQLite's case-insensitive matching, with the parameter tuple unchanged."
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "scenario": "Two attempts propose outcomes for one task and one merge response is lost",
+  "repository": "example/repo",
+  "pr_url": "https://github.com/example/repo/pull/1",
+  "head_sha": "tested-head",
+  "proof": {
+    "artifact": "fixture://test-report",
+    "run": "fixture-run",
+    "sha": "tested-head"
+  }
+}

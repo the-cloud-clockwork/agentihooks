@@ -1,0 +1,23 @@
+version: 1
+purpose: phase-slice
+fallbacks: cli
+questions:
+  - name: size
+    type: score
+    each: tasks
+    instructions: "How much work is task {item[id]}, titled {item[title]}?"
+    levels:
+      - trivial
+      - one pull request
+      - several pull requests
+      - a whole phase
+  - name: serves
+    type: yesno
+    each: tasks
+    instructions: "Does task {item[id]}, titled {item[title]}, serve the phase intent?"
+    "true": it advances the phase
+    "false": it serves something else
+thresholds:
+  off_intent: 0.3
+rule:
+  type: code

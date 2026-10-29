@@ -1,0 +1,180 @@
+{
+  "case": "T-SV2-CKP-03-A",
+  "evidence_class": "mocked: fixture Claude and Codex homes laid out as the qualified CLIs write them, a local durable directory backend behind a granted artifact store and fixture launch registrations; no CLI, account, worker Pod or object store was used",
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda"
+  },
+  "observed": {
+    "fixture": {
+      "claude": {
+        "auth_files_carried": false,
+        "auth_files_in_fresh_home": [],
+        "auth_value_carried": false,
+        "capture": {
+          "outcome": "captured",
+          "quiescence": "consistent_export",
+          "session_id": "5f0c1a2e-0000-4000-8000-00000000c1a0"
+        },
+        "committed": {
+          "authoritative": true,
+          "completeness": "complete",
+          "continuation": "native",
+          "reason": "native"
+        },
+        "conversation_placed_for_fresh_cwd": true,
+        "members": [
+          "companion/tool-results/r1.txt",
+          "conversation.jsonl"
+        ],
+        "native_resume_success_by_target": {
+          "capture": {
+            "claude/captured": 1
+          },
+          "restore": {
+            "claude/resumed": 1
+          }
+        },
+        "other_conversation_carried": false,
+        "placed_conversation_has_codeword": true,
+        "placed_file_count": 2,
+        "resumed_in_fresh_home": {
+          "command": [
+            "claude",
+            "--resume",
+            "5f0c1a2e-0000-4000-8000-00000000c1a0"
+          ],
+          "outcome": "resumed",
+          "session_id": "5f0c1a2e-0000-4000-8000-00000000c1a0"
+        },
+        "torn_record_carried": false
+      },
+      "codex": {
+        "auth_files_carried": false,
+        "auth_files_in_fresh_home": [],
+        "auth_value_carried": false,
+        "capture": {
+          "outcome": "captured",
+          "quiescence": "consistent_export",
+          "session_id": "01a12b75-0000-7000-8000-00000000c0de"
+        },
+        "committed": {
+          "authoritative": true,
+          "completeness": "complete",
+          "continuation": "native",
+          "reason": "native"
+        },
+        "conversation_placed_for_fresh_cwd": true,
+        "members": [
+          "rollout/2026/10/11/rollout-2026-10-11T09-00-00-01a12b75-0000-7000-8000-00000000c0de.jsonl"
+        ],
+        "native_resume_success_by_target": {
+          "capture": {
+            "codex/captured": 1
+          },
+          "restore": {
+            "codex/resumed": 1
+          }
+        },
+        "other_conversation_carried": false,
+        "placed_conversation_has_codeword": true,
+        "placed_file_count": 1,
+        "resumed_in_fresh_home": {
+          "command": [
+            "codex",
+            "resume",
+            "01a12b75-0000-7000-8000-00000000c0de"
+          ],
+          "outcome": "resumed",
+          "session_id": "01a12b75-0000-7000-8000-00000000c0de"
+        },
+        "torn_record_carried": false
+      }
+    },
+    "second_fixture": {
+      "claude": {
+        "auth_files_carried": false,
+        "auth_files_in_fresh_home": [],
+        "auth_value_carried": false,
+        "capture": {
+          "outcome": "captured",
+          "quiescence": "consistent_export",
+          "session_id": "5f0c1a2e-0000-4000-8000-00000000c1a0"
+        },
+        "committed": {
+          "authoritative": true,
+          "completeness": "complete",
+          "continuation": "native",
+          "reason": "native"
+        },
+        "conversation_placed_for_fresh_cwd": true,
+        "members": [
+          "companion/tool-results/r1.txt",
+          "conversation.jsonl"
+        ],
+        "native_resume_success_by_target": {
+          "capture": {
+            "claude/captured": 1
+          },
+          "restore": {
+            "claude/resumed": 1
+          }
+        },
+        "other_conversation_carried": false,
+        "placed_conversation_has_codeword": true,
+        "placed_file_count": 2,
+        "resumed_in_fresh_home": {
+          "command": [
+            "claude",
+            "--resume",
+            "5f0c1a2e-0000-4000-8000-00000000c1a0"
+          ],
+          "outcome": "resumed",
+          "session_id": "5f0c1a2e-0000-4000-8000-00000000c1a0"
+        },
+        "torn_record_carried": false
+      },
+      "codex": {
+        "auth_files_carried": false,
+        "auth_files_in_fresh_home": [],
+        "auth_value_carried": false,
+        "capture": {
+          "outcome": "captured",
+          "quiescence": "consistent_export",
+          "session_id": "01a12b75-0000-7000-8000-00000000c0de"
+        },
+        "committed": {
+          "authoritative": true,
+          "completeness": "complete",
+          "continuation": "native",
+          "reason": "native"
+        },
+        "conversation_placed_for_fresh_cwd": true,
+        "members": [
+          "rollout/2026/10/11/rollout-2026-10-11T09-00-00-01a12b75-0000-7000-8000-00000000c0de.jsonl"
+        ],
+        "native_resume_success_by_target": {
+          "capture": {
+            "codex/captured": 1
+          },
+          "restore": {
+            "codex/resumed": 1
+          }
+        },
+        "other_conversation_carried": false,
+        "placed_conversation_has_codeword": true,
+        "placed_file_count": 1,
+        "resumed_in_fresh_home": {
+          "command": [
+            "codex",
+            "resume",
+            "01a12b75-0000-7000-8000-00000000c0de"
+          ],
+          "outcome": "resumed",
+          "session_id": "01a12b75-0000-7000-8000-00000000c0de"
+        },
+        "torn_record_carried": false
+      }
+    }
+  },
+  "state": "passed"
+}

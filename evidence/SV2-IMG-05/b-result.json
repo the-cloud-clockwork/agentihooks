@@ -1,0 +1,34 @@
+{
+  "case": "T-SV2-IMG-05-B",
+  "disclosure": "probe output carries variable names only; no credential is mounted or passed",
+  "fixture": "candidate image with a herdr shim reporting protocol 21 and health_check false",
+  "fixture_manifest": {
+    "inputs": {
+      "docker/swarm-node/Dockerfile": "f36e23bd81a2c2f85942cd79de53bee3010e6e3fe9c381fd8a43a5ca33a8c448",
+      "docker/swarm-node/publish.sh": "ce45bb34a223c600af4795df4584eed62f572bae74188a1bc461c6a4edcaffc6",
+      "docker/swarm-node/qualify.sh": "3a109a0851e18c394283c1b472c351e185535731bf0a6b36a69fddee70d9126d",
+      "docker/swarm-node/versions.lock": "b544826239a51a515cf4e6a814844f60d2b8c15f390f0b8869454465686d9b58",
+      "tests/contracts/image_manifest/incompatible-herdr/Dockerfile": "e1414d36b233c16271d35c43a305ff69619a6a0b34fa1956d164beaf7fba9437",
+      "tests/contracts/image_manifest/incompatible-herdr/herdr": "ffe77581bb54fa4659a21a1d3b350e55f453d7336a96881d0cbda2246145ef96"
+    },
+    "tested_commit": "13654b4a725ccff96384786575614fad00752a08"
+  },
+  "incompatible_image_pushed": false,
+  "mocked": false,
+  "package": "SV2-IMG-05",
+  "promotable": false,
+  "refusals": [
+    "herdr protocol is not 22",
+    "herdr server lacks health_check=True"
+  ],
+  "run_attempt": 1,
+  "runner": "github-hosted",
+  "target_results": {
+    "claude": true,
+    "codex": true,
+    "herdr": false
+  },
+  "tested_commit": "13654b4a725ccff96384786575614fad00752a08",
+  "worker_image_qualified_targets": 2,
+  "workflow_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049448237"
+}

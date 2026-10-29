@@ -1,0 +1,38 @@
+{
+  "thread": "01a11ccb-18aa-7461-a3b8-bc4d92d8aca1",
+  "busy_turn": "01a11ccb-194e-75d3-87af-a91f3475b8d2",
+  "command_started_before_steer": true,
+  "steer_stale_expected_turn": {
+    "code": -32600,
+    "message": "expected active turn id `stale-turn-id` but found `01a11ccb-194e-75d3-87af-a91f3475b8d2`"
+  },
+  "steer_matching_expected_turn": {
+    "turnId": "01a11ccb-194e-75d3-87af-a91f3475b8d2"
+  },
+  "turn_start_while_busy": {
+    "turn": {
+      "id": "01a11ccb-194e-75d3-87af-a91f3475b8d2",
+      "items": [],
+      "itemsView": "notLoaded",
+      "status": "inProgress",
+      "error": null,
+      "startedAt": null,
+      "completedAt": null,
+      "durationMs": null
+    }
+  },
+  "busy_turn_status": "completed",
+  "command_item_status": [
+    "completed"
+  ],
+  "agent_text": [
+    "CHARLIE DELTA ECHO"
+  ],
+  "steer_after_completion": {
+    "code": -32600,
+    "message": "no active turn to steer"
+  },
+  "later_turn_completed": null,
+  "later_agent_text": [],
+  "turns_in_history": 1
+}

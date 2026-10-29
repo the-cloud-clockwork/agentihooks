@@ -1,0 +1,6 @@
+{
+  "scripts/recall/store.py:scripts.recall.store.x\u01c1SQLiteRecallStore\u01c1sync__mutmut_43:a40b283ed5d10295389aef23a8742a12f8fafdb1df11baa843c67fad3a44be0a": {
+    "reader": "Standards reader of the recall archive store pull request",
+    "reason": "Placeholder change in the existing.pop default tuple: the ref slot is discarded, a sha256 digest never equals the placeholder and state never equals present, so the write branch and the None rowid are unchanged."
+  }
+}

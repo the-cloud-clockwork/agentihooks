@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/publish.py:scripts.swarm.publish.x_publishing_root__mutmut_43:0730f7248756b76c128e599631d9dfefd2d9a165a6bfad7880283e508cdc675a": {
+    "reader": "Standards",
+    "reason": "This branch derives root from the current working directory. Git branch lookup from that directory and from its root is identical."
+  }
+}

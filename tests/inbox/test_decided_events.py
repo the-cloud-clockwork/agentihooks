@@ -5,19 +5,38 @@ from scripts.inbox.wake import wake_pass
 from scripts.swarm.ledger_events import event_pass
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 class Ledger:
     def __init__(self):
         self.doc = {"_meta": {"rev": 1, "events": []}, "followups": [], "questions": [], "tasks": []}
-        self.followups = []
+        self.followups, self.alerts = [], []
+        self.now = 0
+
+    def raise_alert(self, slug, source, text, item=None):
+        self.alerts.append((source, item))
+
+    def close_item_alerts(self, slug, item, outcome):
+        pass
 
     def state(self, slug):
         return self.doc
 
-    def followup(self, slug, text):
+    def followup(self, slug, text, needs_operator=False):
         self.followups.append(text)
+        meta = self.doc["_meta"]
+        meta["rev"] += 1
+        row = {"id": f"f{meta['rev']}", "text": text, "comments": [], "done": False}
+        self.doc["followups"].append({**row, **({"needs_operator": True} if needs_operator else {})})
+        if needs_operator:
+            target = f"followups/{row['id']}"
+            self.doc.setdefault("priorities", []).append({"item": target, "text": "Decide: it", "by": "ledger"})
+        added = {"rev": meta["rev"], "at": self.now, "by": "swarm", "kind": "added", "text": text}
+        meta["events"].append({**added, "target": f"followups/{row['id']}"})
+
+    def priority(self, slug, item, text):
+        pass
 
 
 class Herdr:
@@ -167,3 +186,14 @@ def test_an_unreferenced_message_is_preserved(crew):
     wake(crew, item.created_at + 1)
     assert inbox.pending() == [item]
     assert herdr.prompts == []
+
+
+def test_an_unread_master_item_yields_one_alert_that_never_returns_to_the_master(crew):
+    store, inbox, ledger, _ = crew
+    item = inbox.send("sw-eng-1", "master@sw", "Check the deployment")
+    for n in range(1, 25):
+        ledger.now = item.created_at + n * 300_000
+        wake(crew, ledger.now)
+        event_pass(inbox, store, "sw", ledger.doc, ledger, ledger.now)
+    assert ledger.alerts == [("inbox", item.id)] and ledger.followups == []
+    assert [i.id for i in inbox.inbox("master@sw")] == [item.id]

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_cmd_status__mutmut_2:986d827b3adf61fed2a8f7f0bc6c612a70fbfae35c27ddc8da532f04fd913eaa": {
+    "reader": "Standards reader for swarm outage detector",
+    "reason": "Unchanged outage.show only truth-tests as_json; False and None select identical text output and return value. The shifted hunk changes the fingerprint, not behavior."
+  }
+}

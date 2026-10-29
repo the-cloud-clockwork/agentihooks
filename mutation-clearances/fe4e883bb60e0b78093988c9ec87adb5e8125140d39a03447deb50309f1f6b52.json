@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/stall_watch.py:scripts.swarm.stall_watch.x__alert__mutmut_11:19d6638bacdf5b9991600316b998d404d3d32fd5a7354084f23a473be09cd039": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Invariant clearance: replacing the missing-lane default with XXXX is unreachable on the UNCLAIMED path. Its caller _unclaimed iterates LANES (eng and ci) and explicitly constructs task with lane overwritten to the current lane before calling _alert. Thus task.get returns that present lane independently of the default. Other alert cases do not execute the mutated statement."
+  }
+}

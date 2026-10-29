@@ -1,0 +1,70 @@
+{
+  "tested_commit": "1fda038ec3f7aa89770c66d407427b01883820ea",
+  "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 calls",
+  "case": "T-SV2-CTL-04-B",
+  "passed": true,
+  "independent_runs": [
+    {
+      "case": "T-SV2-CTL-04-B",
+      "state": "passed",
+      "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 call",
+      "input_sha256": "a0e09d77cc72f6a9a1b471dfe6acc6d6b1d0a335f64ca0e68f50c6a04a402e53",
+      "deleted_before_correction": [],
+      "protected_state_unchanged": true,
+      "unlabelled_lookalikes": [
+        "uid-lookalike",
+        "uid-lookalike-same-name"
+      ],
+      "unlabelled_lookalikes_listed": [],
+      "quarantined": [
+        "uid-blank",
+        "uid-other-swarm",
+        "uid-twin-a",
+        "uid-twin-b"
+      ],
+      "revoked_grant_refusal": "a scoped controller grant is required",
+      "deleted_after_corrected_labels": [
+        "uid-blank"
+      ],
+      "controller_orphans_by_class": {
+        "managed_orphan": 1,
+        "missing_pod": 0,
+        "foreign": 1,
+        "ambiguous": 2,
+        "terminating": 0,
+        "superseded": 0
+      }
+    },
+    {
+      "case": "T-SV2-CTL-04-B",
+      "state": "passed",
+      "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 call",
+      "input_sha256": "a0e09d77cc72f6a9a1b471dfe6acc6d6b1d0a335f64ca0e68f50c6a04a402e53",
+      "deleted_before_correction": [],
+      "protected_state_unchanged": true,
+      "unlabelled_lookalikes": [
+        "uid-lookalike",
+        "uid-lookalike-same-name"
+      ],
+      "unlabelled_lookalikes_listed": [],
+      "quarantined": [
+        "uid-blank",
+        "uid-other-swarm",
+        "uid-twin-a",
+        "uid-twin-b"
+      ],
+      "revoked_grant_refusal": "a scoped controller grant is required",
+      "deleted_after_corrected_labels": [
+        "uid-blank"
+      ],
+      "controller_orphans_by_class": {
+        "managed_orphan": 1,
+        "missing_pod": 0,
+        "foreign": 1,
+        "ambiguous": 2,
+        "terminating": 0,
+        "superseded": 0
+      }
+    }
+  ]
+}

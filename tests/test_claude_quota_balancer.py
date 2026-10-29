@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 
 from scripts import claude_quota_balancer as balancer
+from scripts import claude_usage
+from scripts.routing import place
+from scripts.routing.slots import API, API_UNBOUNDED, INTERACTIVE, SUBSCRIPTION
 
 
 def _stream(account_usage: float, weekly_usage: float, fable_usage: float | None = None) -> str:
@@ -95,6 +98,20 @@ def test_fable_mode_includes_separate_quota_in_margin_and_table():
     assert "15%" in table
 
 
+def test_an_email_named_account_is_discovered_routed_and_shown():
+    from scripts.account_names import token_env
+
+    name = token_env("NESTOR.COLT@GMAIL.COM")
+    credentials = balancer.discover_credentials({name: "tok-a", "AH_CC_TOKEN_other": "tok-b"})
+
+    assert [credential.account for credential in credentials] == ["nestor_coltatgmail_com", "other"]
+    assert balancer.credential_for_slug(credentials, "nestor_coltatgmail_com").env_name == name
+    result = balancer.parse_probe("nestor_coltatgmail_com", _stream(0.20, 0.30), 100)
+    table = balancer.render_table([result], now=1000, sessions={"nestor_coltatgmail_com": 2})
+    row = next(line for line in table.splitlines() if " nestor_coltatgmail_com " in line)
+    assert " 2/" in row and "80%" in row
+
+
 def test_probe_passes_only_selected_oauth_token(monkeypatch):
     observed = {}
 
@@ -103,6 +120,10 @@ def test_probe_passes_only_selected_oauth_token(monkeypatch):
         observed["env"] = kwargs["env"]
         return subprocess.CompletedProcess(command, 0, _stream(0.20, 0.30), "")
 
+    def unreachable(*args, **kwargs):
+        raise claude_usage.Unreachable
+
+    monkeypatch.setattr(claude_usage, "probe", unreachable)
     monkeypatch.setattr(balancer.subprocess, "run", run)
     credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "selected-secret")
     result = balancer.probe_credential(
@@ -214,6 +235,74 @@ def test_cache_refreshes_after_quota_reset(monkeypatch, tmp_path):
 
     assert source == "live"
     assert calls == [["ALPHA"], ["ALPHA"]]
+
+
+def test_a_revoked_account_is_cached_and_shown_as_revoked(monkeypatch, tmp_path):
+    calls = []
+
+    def probe(credentials, *args, **kwargs):
+        calls.append([credential.account for credential in credentials])
+        return [balancer.revoked_result(credential.account, 100) for credential in credentials]
+
+    monkeypatch.setattr(balancer, "probe_credentials", probe)
+    cache = tmp_path / "cache.json"
+    credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")
+
+    first, _ = balancer.collect_results([credential], cache_file=cache, environ={}, now=1000)
+    second, source = balancer.collect_results([credential], cache_file=cache, environ={}, now=1030)
+
+    assert (source, calls) == ("cached", [["ALPHA"]])
+    assert [(r.provider_status, r.state, r.margin) for r in second] == [("revoked", "REVOKED", 0.0)]
+    assert balancer.account_cap(second[0], 1030) == 0
+    assert second[0].five_hour == second[0].seven_day == balancer.QuotaWindow()
+    assert [result.state for result in balancer.rank_results([*first, *second])] == ["REVOKED", "REVOKED"]
+
+
+def _revoked_stream(status: int) -> str:
+    events = [
+        {"type": "system", "subtype": "api_retry", "error": "authentication_failed", "error_status": status},
+        {"type": "result", "is_error": True, "api_error_status": status, "result": "Failed to authenticate"},
+    ]
+    return "\n".join(json.dumps(event) for event in events)
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_the_cli_probe_reads_a_revoked_token_as_revoked(monkeypatch, returncode):
+    monkeypatch.setattr(
+        balancer.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, returncode, _revoked_stream(401), ""),
+    )
+    credential = balancer.Credential("AH_CC_TOKEN_A", "tok-a")
+    found = balancer.probe_credential(credential, "fable", 60, {}, include_fable=True)
+    assert (found.account, found.provider_status, found.state, found.error) == (
+        "A",
+        "revoked",
+        "REVOKED",
+        balancer.REVOKED_ERROR,
+    )
+    assert found.latency_ms is not None
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "",
+        "not json\n[1, 2]",
+        json.dumps({"type": "result", "api_error_status": 500}),
+        json.dumps({"type": "result", "api_error_status": 403}),
+        json.dumps({"type": "system", "error_status": 401}),
+        json.dumps({"type": "assistant", "error": "rate_limit"}),
+    ],
+)
+def test_only_a_401_api_error_reads_as_rejected(output):
+    assert not balancer.auth_rejected(output)
+    assert balancer.auth_rejected(output + "\n" + json.dumps({"api_error_status": 401}))
+
+
+def test_a_revoked_login_with_no_api_status_reads_as_rejected():
+    revoked = json.dumps({"type": "assistant", "error": "authentication_failed", "api_error_status": None})
+    assert balancer.auth_rejected(revoked)
 
 
 def test_corrupt_cache_is_replaced(monkeypatch, tmp_path):
@@ -410,17 +499,80 @@ def test_probing_one_account_keeps_other_cached_accounts(monkeypatch, tmp_path):
     beta = balancer.Credential("AH_CC_TOKEN_BETA", "secret-b")
 
     balancer.collect_results([alpha, beta], cache_file=cache, environ={}, now=1000)
-    balancer.collect_results([alpha], cache_file=cache, environ={}, refresh=True, now=1100)
+    monkeypatch.setattr(balancer.operator_env, "fill", lambda environ: environ.update(AH_CC_TOKEN_BETA="secret-b"))
+    (tmp_path / ".env").write_text("")
+    balancer.collect_results(
+        [alpha], cache_file=cache, environ={"AGENTIHOOKS_HOME": str(tmp_path)}, refresh=True, now=1100
+    )
     observations = balancer.cached_observations(cache_file=cache)
 
     assert sorted((result.account, seen) for seen, result in observations) == [("ALPHA", 1100.0), ("BETA", 1000.0)]
+
+
+def test_a_refresh_drops_cached_accounts_whose_token_is_gone_in_every_mode(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        balancer,
+        "probe_credentials",
+        lambda credentials, *args, **kwargs: [
+            balancer.parse_probe(item.account, _stream(0.20, 0.30), 100) for item in credentials
+        ],
+    )
+    cache = tmp_path / "cache.json"
+    reading = balancer._result_data(balancer.parse_probe("GONE", _stream(0.20, 0.30), 100))
+    stale = {"AH_CC_TOKEN_GONE": {"observed_at": 990.0, "result": reading}}
+    modes = {"normal": {"accounts": stale}, "fable": {"accounts": stale}, "broken": "x", "odd": {"accounts": "x"}}
+    cache.write_text(json.dumps({"version": 1, "modes": modes}))
+    alpha = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret-a")
+    (tmp_path / ".env").write_text("")
+    environ = {"AGENTIHOOKS_HOME": str(tmp_path)}
+    monkeypatch.setattr(balancer.operator_env, "fill", lambda filled: filled.update(AH_CC_TOKEN_KEPT="secret-k"))
+
+    balancer.collect_results([alpha], cache_file=cache, environ=environ, now=1000)
+
+    assert environ == {"AGENTIHOOKS_HOME": str(tmp_path)}
+    modes = json.loads(cache.read_text())["modes"]
+    assert (modes.pop("broken"), modes.pop("odd")) == ("x", {"accounts": "x"})
+    assert {mode: sorted(data["accounts"]) for mode, data in modes.items()} == {
+        "normal": ["AH_CC_TOKEN_ALPHA"],
+        "fable": [],
+    }
+    assert [result.account for _, result in balancer.cached_observations(cache_file=cache)] == ["ALPHA"]
+    assert balancer.cached_observations(include_fable=True, cache_file=cache) == []
+
+
+@pytest.mark.parametrize("env_file", [False, True])
+def test_a_refresh_keeps_every_cached_account_without_env_files_or_found_tokens(monkeypatch, tmp_path, env_file):
+    monkeypatch.setattr(
+        balancer,
+        "probe_credentials",
+        lambda credentials, *args, **kwargs: [
+            balancer.parse_probe(item.account, _stream(0.20, 0.30), 100) for item in credentials
+        ],
+    )
+    cache = tmp_path / "cache.json"
+    reading = balancer._result_data(balancer.parse_probe("GONE", _stream(0.20, 0.30), 100))
+    stale = {"AH_CC_TOKEN_GONE": {"observed_at": 990.0, "result": reading}}
+    cache.write_text(json.dumps({"version": 1, "modes": {"normal": {"accounts": stale}}}))
+    if env_file:
+        (tmp_path / ".env").write_text("")
+    fills = []
+    monkeypatch.setattr(balancer.operator_env, "fill", lambda filled: fills.append(sorted(filled)))
+    alpha = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret-a")
+
+    balancer.collect_results([alpha], cache_file=cache, environ={"AGENTIHOOKS_HOME": str(tmp_path)}, now=1000)
+
+    accounts = json.loads(cache.read_text())["modes"]["normal"]["accounts"]
+    assert sorted(accounts) == ["AH_CC_TOKEN_ALPHA", "AH_CC_TOKEN_GONE"]
+    assert fills == ([["AGENTIHOOKS_HOME"]] if env_file else [])
 
 
 def test_table_marks_current_account_and_cache_age():
     alpha = balancer.parse_probe("ALPHA", _stream(0.20, 0.30), 100)
     beta = balancer.parse_probe("BETA", _stream(0.10, 0.40), 100)
 
-    table = balancer.render_table([alpha, beta], now=1000, current="BETA", observed={"ALPHA": 400, "BETA": 1000})
+    table = balancer.render_table(
+        [alpha, beta], now=1000, marks=balancer.RowMarks(current="BETA"), observed={"ALPHA": 400, "BETA": 1000}
+    )
 
     assert "BETA (current)" in table
     assert "ALPHA (current)" not in table
@@ -526,6 +678,50 @@ def test_table_shows_live_sessions_against_each_band_cap():
     assert table.splitlines()[-1] == "unrouted: 2 session(s)"
 
 
+def test_table_marks_the_declared_master_row_with_its_tier():
+    from scripts.routing.master_account import MasterAccount
+
+    alpha = balancer.parse_probe("alpha", _stream(0.10, 0.20), 100)
+    beta = balancer.parse_probe("beta", _stream(0.10, 0.30), 100)
+
+    table = balancer.render_table(
+        [alpha, beta], now=0, marks=balancer.RowMarks(master=MasterAccount("claude", "beta", "max", SUBSCRIPTION))
+    )
+    rows = {line.split()[1]: line for line in table.splitlines()[2:]}
+
+    assert rows["beta"].split()[1:4] == ["beta", "MASTER", "max"]
+    assert "MASTER" not in rows["alpha"]
+    assert len(table.splitlines()) == 4
+
+
+def test_a_tokenless_master_is_an_interactive_row_serving_masters_only():
+    from scripts.routing.master_account import MasterAccount
+
+    alpha = balancer.parse_probe("alpha", _stream(0.10, 0.20), 100)
+    marks = balancer.RowMarks(master=MasterAccount("claude", "home", "", INTERACTIVE))
+
+    table = balancer.render_table([alpha], now=0, sessions={"home": 1}, marks=marks)
+    lines = table.splitlines()
+
+    assert lines[3].split() == ["-", "home", "MASTER", "interactive", "MASTERS", "1/?", "-", "?", *["n/a"] * 5]
+    assert "session(s)" not in table
+    wide = balancer.render_table([], now=0, include_fable=True, observed={}, sessions={}, marks=marks)
+    assert wide.splitlines()[2].split() == [
+        "-",
+        "home",
+        "MASTER",
+        "interactive",
+        "MASTERS",
+        "0/?",
+        "-",
+        "?",
+        *["n/a"] * 7,
+        "-",
+    ]
+    subscription = balancer.RowMarks(master=MasterAccount("claude", "home", "", SUBSCRIPTION))
+    assert len(balancer.render_table([alpha], now=0, marks=subscription).splitlines()) == 3
+
+
 def test_reserve_account_is_chosen_only_when_no_other_has_room(monkeypatch, tmp_path):
     env = _three(monkeypatch)
 
@@ -572,7 +768,7 @@ def test_todays_accounts_get_band_caps_and_the_next_session_rotates(monkeypatch,
         "tccgma": 6,
     }
     monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (TODAY, "live"))
-    env = {f"AH_CC_TOKEN_{result.account}": "secret" for result in TODAY}
+    env = {f"AH_CC_TOKEN_{result.account}": f"tok-{result.account}" for result in TODAY}
     live = {"ncgma": 4, "nchotma": 2, "tccgma": 3}
     order = []
     for _ in range(4):
@@ -591,6 +787,23 @@ def test_a_reset_window_counts_as_full_and_a_rejected_account_takes_no_session()
     assert balancer.account_cap(balancer._error_result("x", "failed"), NOW) is None
 
 
+def test_a_ceiling_scales_the_cap_with_the_tighter_window():
+    full = balancer.ProbeResult("a", "allowed", "NORMAL", 96.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(2.0))
+    assert balancer.account_cap(full, 1000) == 6
+    assert balancer.account_cap(full, 1000, ceiling=12) == 11
+    assert balancer.account_cap(full, 1000, ceiling=0) == 0
+    spent = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 0.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(100.0, 2000)
+    )
+    assert balancer.account_cap(spent, 1000, ceiling=12) == 0
+    fable = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 96.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(2.0), balancer.QuotaWindow(50.0)
+    )
+    assert balancer.account_cap(fable, 1000, include_fable=True, ceiling=12) == 6
+    rejected = balancer.ProbeResult("x", "rejected", "BLOCKED", 0.0, full.five_hour, full.seven_day)
+    assert balancer.account_cap(rejected, 1000, ceiling=12) == 0
+
+
 def test_fable_routing_caps_on_the_tighter_weekly_window():
     result = balancer.parse_probe("FABLE", _stream(0.20, 0.30, 0.97), 100, include_fable=True)
     assert balancer.account_cap(result, 1000) == 6
@@ -601,9 +814,273 @@ def test_fable_routing_caps_on_the_tighter_weekly_window():
     assert " 0/0 " in table.splitlines()[2]
 
 
+def test_an_api_slot_renders_as_its_own_open_row_with_weight_and_cap():
+    from scripts.routing.slots import Slot
+
+    result = balancer.ProbeResult("ALPHA", "allowed", "NORMAL", 70, balancer.QuotaWindow(20), balancer.QuotaWindow(30))
+    slot = Slot("claude", "api", 3, 1, kind=API, weight=25, provider="gateway")
+    table = balancer.render_table([result], now=1000, sessions={"ALPHA": 2, "api": 1}, api=[slot])
+    assert table.splitlines() == [
+        "#  ACCOUNT        KIND          STATE   SESSIONS  WEIGHT  CAP  ROUTING LEFT  5H LEFT  5H RESET  7D LEFT  7D RESET",
+        "-  -------------  ------------  ------  --------  ------  ---  ------------  -------  --------  -------  --------",
+        "1  ALPHA          subscription  NORMAL  2/6       -       6    70%           80%      ?         70%      ?       ",
+        "-  api (gateway)  api           OPEN    1/3       25%     3    n/a           n/a      n/a       n/a      n/a     ",
+    ]
+    wide = balancer.render_table([result], now=1000, include_fable=True, observed={"ALPHA": 990}, api=[slot])
+    assert wide.splitlines()[3] == (
+        "-  api (gateway)  api           OPEN    25%     3    n/a           n/a      n/a       n/a      n/a       "
+        "n/a         n/a          -  "
+    )
+
+
 def test_a_week_that_reset_before_now_counts_as_full():
     spent = balancer.ProbeResult(
         "a", "allowed", "NORMAL", 1.0, balancer.QuotaWindow(10.0), balancer.QuotaWindow(99.0, 500)
     )
     assert balancer.account_cap(spent, 1000) == 6
     assert balancer.account_cap(spent, 400) == 0
+
+
+def _weighted(monkeypatch, weight, cap=API_UNBOUNDED):
+    def policy(harness, environ):
+        assert harness == "claude"
+        return place.ApiPolicy(weight, cap)
+
+    monkeypatch.setattr(place, "policy", policy)
+
+
+def test_the_api_share_counts_live_sessions_on_reserved_accounts(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key", "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST"}
+    _weighted(monkeypatch, 25)
+    assert _pick(env, tmp_path, {"BEST": 4, "api": 1}).kind == API
+    assert _pick(env, tmp_path, {"BEST": 2, "api": 1}).account == "LOW"
+
+
+def test_an_unreadable_routing_setting_closes_only_the_api_side(monkeypatch, tmp_path, capsys):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key"}
+
+    def unreadable(harness, environ):
+        raise place.SettingsError("routing settings are unreadable: KeyError")
+
+    monkeypatch.setattr(place, "policy", unreadable)
+    assert _pick(env, tmp_path, {"BEST": 1, "MID": 1}).account == "LOW"
+    assert capsys.readouterr().err == "[claude] api side closed: routing settings are unreadable: KeyError\n"
+    with pytest.raises(balancer.RoutingError) as raised:
+        _pick(env, tmp_path, {"BEST": 9, "MID": 9, "LOW": 9})
+    assert str(raised.value) == "no Claude account has a free session under its quota band"
+
+
+def test_a_token_named_api_is_reserved_for_the_api_route():
+    env = {"AH_CC_TOKEN_api": "x", "AH_CC_TOKEN_": "y", "AH_CC_TOKEN_A": "a", "AH_CC_TOKEN_apix": "b"}
+    assert [credential.account for credential in balancer.discover_credentials(env)] == ["A", "apix"]
+
+
+def test_three_tokens_and_an_api_at_weight_25_give_api_one_of_every_four_sessions(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key"}
+    _weighted(monkeypatch, 25)
+    sessions, kinds = {}, []
+    for _ in range(8):
+        decision = _pick(env, tmp_path, dict(sessions))
+        kinds.append(decision.kind)
+        sessions[decision.account] = sessions.get(decision.account, 0) + 1
+    assert kinds == [API, SUBSCRIPTION, SUBSCRIPTION, SUBSCRIPTION] * 2
+    assert sessions == {"api": 2, "BEST": 2, "MID": 2, "LOW": 2}
+
+
+def test_with_every_token_week_below_five_percent_every_session_goes_to_api(monkeypatch, tmp_path):
+    spent = [balancer.parse_probe(name, _stream(0.10, 0.97), 100) for name in ("A", "B", "C")]
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (spent, "cached"))
+    env = {"AH_CC_TOKEN_A": "a", "AH_CC_TOKEN_B": "b", "AH_CC_TOKEN_C": "c", "ANTHROPIC_API_KEY": "key"}
+    _weighted(monkeypatch, 0)
+    for live in range(4):
+        decision = _pick(env, tmp_path, {"api": live})
+        assert decision == balancer.RouteDecision(None, None, "cached", live, API_UNBOUNDED, kind=API)
+        assert decision.account == "api"
+    assert balancer.format_selection(decision) == "[agenti] account=api kind=api sessions=3/1000000 source=cached"
+
+
+def test_an_api_endpoint_alone_routes_without_any_token(monkeypatch, tmp_path):
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: pytest.fail("probed without tokens"))
+    _weighted(monkeypatch, 0)
+    decision = _pick({"ANTHROPIC_API_KEY": "key"}, tmp_path)
+    assert decision == balancer.RouteDecision(None, None, "cached", 0, API_UNBOUNDED, kind=API)
+
+
+def test_without_an_api_endpoint_no_routing_setting_is_read(monkeypatch, tmp_path):
+    env = _three(monkeypatch)
+    monkeypatch.setattr(place, "policy", lambda harness, environ: pytest.fail("policy read without an api slot"))
+    decision = _pick(env, tmp_path)
+    assert (decision.kind, decision.account) == (SUBSCRIPTION, "BEST")
+    with pytest.raises(balancer.RoutingError) as raised:
+        _pick({}, tmp_path)
+    assert str(raised.value) == "no non-empty AH_CC_TOKEN_* variables found"
+
+
+def test_routing_fails_only_when_the_pool_and_the_api_are_both_closed(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key"}
+    full = {"BEST": 6, "MID": 6, "LOW": 4}
+    _weighted(monkeypatch, 0, cap=2)
+    assert _pick(env, tmp_path, {**full, "api": 1}).kind == API
+    with pytest.raises(balancer.RoutingError) as raised:
+        _pick(env, tmp_path, {**full, "api": 2})
+    assert str(raised.value) == "no Claude account has a free session under its quota band"
+    with pytest.raises(balancer.RoutingError) as raised:
+        _pick(env, tmp_path, full, exclude=["api"])
+    assert str(raised.value) == "no Claude account has a free session under its quota band outside api"
+
+
+def test_a_reserved_account_is_used_before_the_api_at_weight_0(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key", "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST,MID"}
+    _weighted(monkeypatch, 0, cap=1)
+    assert _pick(env, tmp_path, {"LOW": 4}).account == "BEST"
+    assert _pick(env, tmp_path, {"LOW": 3}).account == "LOW"
+
+
+def test_the_launch_time_reaches_the_api_side_and_an_excluded_api_has_no_weight(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key"}
+    seen = []
+
+    def api_side(source, harness, environ, now):
+        seen.append(now)
+        return [], 0
+
+    monkeypatch.setattr(place, "api_side", api_side)
+    _pick(env, tmp_path)
+    assert seen == [1000]
+    assert balancer._api_side(env, {}, {"api"}, 1000) == ([], 0)
+
+
+def test_an_api_pick_is_never_replaced_by_the_reserve_rule(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key", "AGENTIHOOKS_RESERVE_ACCOUNTS": "api"}
+    _weighted(monkeypatch, 100)
+    assert _pick(env, tmp_path).kind == API
+
+
+def test_route_api_resolves_to_the_api_endpoint_and_a_slug_to_its_token():
+    env = {"AH_CC_TOKEN_A": "a", "ANTHROPIC_API_KEY": "key"}
+    assert balancer.forced(env, "api") == balancer.RouteDecision(None, None, "forced", kind=API)
+    assert balancer.forced(env, "A") == balancer.RouteDecision(
+        balancer.Credential("AH_CC_TOKEN_A", "a"), None, "forced"
+    )
+    assert balancer.forced(env, "A").account == "A"
+    with pytest.raises(balancer.RoutingError) as raised:
+        balancer.forced({"AH_CC_TOKEN_A": "a"}, "api")
+    assert str(raised.value) == "account 'api' needs an api endpoint; none is configured"
+
+
+def test_an_api_launch_carries_no_subscription_token_and_the_route_marker():
+    env = {"HOME": "/h", "AH_CC_TOKEN_A": "a", "CLAUDE_CODE_OAUTH_TOKEN": "oauth", "ANTHROPIC_API_KEY": "key"}
+    decision = balancer.RouteDecision(None, None, "forced", kind=API)
+    assert balancer.launch_environment(decision, env) == {
+        "HOME": "/h",
+        "ANTHROPIC_API_KEY": "key",
+        "AH_ROUTE_API": "1",
+        "AGENTIHOOKS_ROUTE_ACCOUNT": "api",
+    }
+
+
+def test_a_token_launch_carries_only_its_own_token_and_no_api_credential():
+    env = {"HOME": "/h", "AH_CC_TOKEN_A": "a", "AH_CC_TOKEN_B": "b", "ANTHROPIC_API_KEY": "key", "AH_ROUTE_API": "1"}
+    decision = balancer.RouteDecision(balancer.Credential("AH_CC_TOKEN_A", "a"), None, "forced")
+    assert balancer.launch_environment(decision, env) == {
+        "HOME": "/h",
+        "AH_CC_TOKEN_A": "a",
+        "CLAUDE_CODE_OAUTH_TOKEN": "a",
+        "AGENTIHOOKS_ROUTE_ACCOUNT": "A",
+    }
+
+
+def test_the_master_takes_the_open_account_with_most_room_when_lane_agents_fill_every_seat(monkeypatch, tmp_path):
+    env = _three(monkeypatch)
+    full = {"BEST": 6, "MID": 6, "LOW": 4}
+    decision = balancer.select_master_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000)
+    assert (decision.account, decision.source, decision.sessions, decision.max_sessions) == (
+        "BEST",
+        "master overflow",
+        None,
+        None,
+    )
+    assert decision.credential == balancer.Credential("AH_CC_TOKEN_BEST", "b")
+    assert decision.result.account == "BEST"
+
+
+def test_the_master_takes_a_free_seat_the_normal_way_before_any_overflow(monkeypatch, tmp_path):
+    env = _three(monkeypatch)
+    decision = balancer.select_master_credential(
+        env, cache_file=tmp_path / "c.json", sessions={"BEST": 6, "MID": 6}, now=1000
+    )
+    assert (decision.account, decision.source) == ("LOW", "cached")
+
+
+def test_the_master_overflow_skips_closed_and_excluded_accounts(monkeypatch, tmp_path):
+    closed = balancer.parse_probe("CLOSED", _stream(0.10, 0.99), 100)
+    best = balancer.parse_probe("BEST", _stream(0.10, 0.20), 100)
+    mid = balancer.parse_probe("MID", _stream(0.30, 0.40), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([closed, best, mid], "cached"))
+    env = {"AH_CC_TOKEN_CLOSED": "c", "AH_CC_TOKEN_BEST": "b", "AH_CC_TOKEN_MID": "m"}
+    full = {"CLOSED": 0, "BEST": 6, "MID": 6}
+    decision = balancer.select_master_credential(
+        env, cache_file=tmp_path / "c.json", sessions=full, exclude=["BEST"], now=1000
+    )
+    assert (decision.account, decision.source) == ("MID", "master overflow")
+    assert decision.credential == balancer.Credential("AH_CC_TOKEN_MID", "m")
+
+
+def test_the_master_overflow_still_fails_when_every_account_is_closed(monkeypatch, tmp_path):
+    spent = [balancer.parse_probe(name, _stream(0.10, 0.99), 100) for name in ("A", "B")]
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (spent, "cached"))
+    with pytest.raises(balancer.RoutingError) as raised:
+        balancer.select_master_credential(
+            {"AH_CC_TOKEN_A": "a", "AH_CC_TOKEN_B": "b"}, cache_file=tmp_path / "c.json", sessions={}, now=1000
+        )
+    assert str(raised.value) == "no Claude account has a free session under its quota band"
+
+
+def test_the_master_overflow_keeps_off_a_reserved_account_while_another_is_open(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST, MID"}
+    full = {"BEST": 6, "MID": 6, "LOW": 4}
+    decision = balancer.select_master_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000)
+    assert (decision.account, decision.source) == ("LOW", "master overflow")
+    reserved = {**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST,MID,LOW"}
+    decision = balancer.select_master_credential(reserved, cache_file=tmp_path / "c.json", sessions=full, now=1000)
+    assert (decision.account, decision.source) == ("BEST", "master overflow")
+
+
+def test_the_master_overflow_reads_the_clock_when_no_time_is_given(monkeypatch, tmp_path):
+    env = _three(monkeypatch)
+    monkeypatch.setattr(balancer.time, "time", lambda: 1000)
+    full = {"BEST": 6, "MID": 6, "LOW": 4}
+    decision = balancer.select_master_credential(env, cache_file=tmp_path / "c.json", sessions=full)
+    assert (decision.account, decision.source) == ("BEST", "master overflow")
+
+
+def test_the_master_overflow_honours_the_fable_week_when_asked(monkeypatch, tmp_path):
+    spent = balancer.parse_probe("SPENT", _stream(0.10, 0.20, 0.99), 100)
+    open_ = balancer.parse_probe("OPEN", _stream(0.30, 0.40, 0.10), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([spent, open_], "cached"))
+    env = {"AH_CC_TOKEN_SPENT": "s", "AH_CC_TOKEN_OPEN": "o"}
+    decision = balancer.select_master_credential(
+        env, cache_file=tmp_path / "c.json", sessions={"SPENT": 6, "OPEN": 6}, include_fable=True, now=1000
+    )
+    assert (decision.account, decision.source) == ("OPEN", "master overflow")
+    assert (
+        balancer.select_master_credential(
+            env, cache_file=tmp_path / "c.json", sessions={"SPENT": 6, "OPEN": 6}, now=1000
+        ).account
+        == "SPENT"
+    )
+
+
+def test_the_master_overflow_ranks_by_the_fable_week_when_asked(monkeypatch, tmp_path):
+    first = balancer.parse_probe("A", _stream(0.10, 0.20, 0.50), 100)
+    second = balancer.parse_probe("B", _stream(0.10, 0.20, 0.10), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([first, second], "cached"))
+    env = {"AH_CC_TOKEN_A": "a", "AH_CC_TOKEN_B": "b"}
+    full = {"A": 6, "B": 6}
+    ranked = balancer.select_master_credential(
+        env, cache_file=tmp_path / "c.json", sessions=full, include_fable=True, now=1000
+    )
+    assert ranked.account == "B"
+    assert (
+        balancer.select_master_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000).account == "A"
+    )

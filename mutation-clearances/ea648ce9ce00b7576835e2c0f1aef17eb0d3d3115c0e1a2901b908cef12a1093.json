@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_restore__mutmut_25:b3dbcee60df449cfc4774068bfe0382e0747d852215ab6d71c7d99799a0aa72b": {
+    "reader": "Standards",
+    "reason": "The invalid registry ValueError cause is caught by the migration route and replaced by its fixed invalid APIError envelope; that cause is neither serialized nor logged."
+  }
+}

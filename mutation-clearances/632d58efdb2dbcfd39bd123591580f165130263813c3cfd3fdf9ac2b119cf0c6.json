@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x_reduce__mutmut_47:475f4e087b9efb66e7ec1983eb3a683b55eb6aa793217fd2914dd1bb7e1867ab": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "A larger maxsplit only adds splits to the left of the last slash, so the final element after the last slash is unchanged for every input."
+  }
+}

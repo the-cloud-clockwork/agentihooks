@@ -37,13 +37,16 @@ class Who:
     @classmethod
     def from_env(cls, environ=None):
         from hooks.context.account_sessions import agent_pid
-        from hooks.context.broadcast import session_name
+        from hooks.context.broadcast import session_name, session_swarm
+        from scripts.swarm_ledger.ledger_link import remote
 
         env = os.environ if environ is None else environ
-        name = session_name(agent_pid()) if env is os.environ else ""
+        pid = agent_pid() if env is os.environ else 0
+        name = session_name(pid) if pid else ""
+        swarm = env.get("AGENTIHOOKS_SWARM", "") or (session_swarm(pid) if pid and remote(env) else "")
         return cls(
             name=name or env.get("AGENTIHOOKS_AGENT_NAME", ""),
-            swarm=env.get("AGENTIHOOKS_SWARM", ""),
+            swarm=swarm,
             lane=env.get("AGENTIHOOKS_SWARM_LANE", ""),
             task=env.get("AGENTIHOOKS_SWARM_TASK", ""),
             profile=env.get("AGENTIHOOKS_PROFILE", ""),

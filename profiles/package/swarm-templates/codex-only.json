@@ -1,0 +1,39 @@
+{
+  "name": "codex-only",
+  "lanes": {
+    "eng": {
+      "role": "",
+      "cap": 2,
+      "agent": "codex",
+      "model": "auto",
+      "effort": "auto",
+      "kind": "auto",
+      "profile": "engineer"
+    },
+    "ci": {
+      "role": "",
+      "cap": 1,
+      "agent": "codex",
+      "model": "auto",
+      "effort": "auto",
+      "kind": "auto",
+      "profile": "cicd"
+    },
+    "plan": {
+      "role": "",
+      "cap": 1,
+      "agent": "codex",
+      "model": "auto",
+      "effort": "auto",
+      "kind": "auto",
+      "profile": "planner"
+    },
+    "master": {
+      "agent": "codex",
+      "profile": "master"
+    }
+  },
+  "compact_limit": 0,
+  "links": [],
+  "autonomy": ""
+}

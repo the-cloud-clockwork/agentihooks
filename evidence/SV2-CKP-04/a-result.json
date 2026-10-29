@@ -1,0 +1,106 @@
+{
+  "case": "T-SV2-CKP-04-A",
+  "evidence_class": "mocked: a local durable directory backend behind a granted artifact store, fixture launch registrations, a backend wrapper that loses acknowledgements and a fake clock; no object store, worker Pod or harness was used",
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda"
+  },
+  "observed": {
+    "fixture": {
+      "first": {
+        "promoted": true,
+        "reason": "promoted",
+        "verdict": {
+          "authoritative": true,
+          "completeness": "complete",
+          "reason": "context"
+        }
+      },
+      "latest_for_next_attempt": "ckpt-g2-s2",
+      "latest_for_writer": "ckpt-g2-s2",
+      "metrics": {
+        "checkpoint_age_seconds": 45.0,
+        "checkpoint_publish_failures": {}
+      },
+      "metrics_before_first_publish": {
+        "checkpoint_age_seconds": null,
+        "checkpoint_publish_failures": {}
+      },
+      "next_attempt_verdict": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "pointers": [
+        "s1/t1/pointers/0000000002/0000000001.json",
+        "s1/t1/pointers/0000000002/0000000002.json"
+      ],
+      "referenced_object_states": {
+        "ckpt-g2-s1": [
+          "verified"
+        ],
+        "ckpt-g2-s2": [
+          "verified"
+        ]
+      },
+      "second": {
+        "promoted": true,
+        "reason": "promoted",
+        "verdict": {
+          "authoritative": true,
+          "completeness": "complete",
+          "reason": "context"
+        }
+      },
+      "tick_before_interval": null
+    },
+    "second_fixture": {
+      "first": {
+        "promoted": true,
+        "reason": "promoted",
+        "verdict": {
+          "authoritative": true,
+          "completeness": "complete",
+          "reason": "context"
+        }
+      },
+      "latest_for_next_attempt": "ckpt-g2-s2",
+      "latest_for_writer": "ckpt-g2-s2",
+      "metrics": {
+        "checkpoint_age_seconds": 45.0,
+        "checkpoint_publish_failures": {}
+      },
+      "metrics_before_first_publish": {
+        "checkpoint_age_seconds": null,
+        "checkpoint_publish_failures": {}
+      },
+      "next_attempt_verdict": {
+        "authoritative": true,
+        "completeness": "complete",
+        "reason": "context"
+      },
+      "pointers": [
+        "s1/t1/pointers/0000000002/0000000001.json",
+        "s1/t1/pointers/0000000002/0000000002.json"
+      ],
+      "referenced_object_states": {
+        "ckpt-g2-s1": [
+          "verified"
+        ],
+        "ckpt-g2-s2": [
+          "verified"
+        ]
+      },
+      "second": {
+        "promoted": true,
+        "reason": "promoted",
+        "verdict": {
+          "authoritative": true,
+          "completeness": "complete",
+          "reason": "context"
+        }
+      },
+      "tick_before_interval": null
+    }
+  },
+  "state": "passed"
+}

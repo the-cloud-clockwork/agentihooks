@@ -1,0 +1,6 @@
+{
+  "scripts/hive/daemon.py:scripts.hive.daemon.x_beat__mutmut_11:8dcdc9ce856092292379d9270a454a070fd67eaaafde96e117405afda1e63bb8": {
+    "reader": "standards_reader",
+    "reason": "Retained defaults encode identically; the interactive map is overwritten by the report in the same atomic transaction before publication."
+  }
+}

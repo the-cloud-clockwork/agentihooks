@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x_sample__mutmut_42:20cd93c863168a16c0504b81ea9afa18085ac9cbcfef9e3cfeaa7fed040c6e5d": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "launches keys are always i- prefixed instance ids from the LAUNCH regex, never None, so read[launches].get(None) returns None, the same as the empty default that the original code uses."
+  }
+}

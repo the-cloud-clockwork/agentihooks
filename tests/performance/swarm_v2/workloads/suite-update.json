@@ -1,0 +1,8 @@
+{
+  "suite": "worker-resources-update",
+  "repeats": 3,
+  "interval": 0.1,
+  "workloads": [
+    {"name": "memory", "class": "memory", "version": "2", "children": [1, 2, 4], "command": ["{python}", "{workloads}/memory.py", "--children", "{children}", "--mib", "384", "--hold", "2"]}
+  ]
+}

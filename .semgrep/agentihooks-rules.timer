@@ -1,0 +1,7 @@
+[Unit]
+Description=agentihooks swarm tick every minute
+
+# ruleid: machine-timer-unit
+[Timer]
+# ruleid: machine-timer-unit
+OnUnitActiveSec=60s

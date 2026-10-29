@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "package": "SV2-KUB-03",
+  "credential": "Signed fixture launch grant bound by its registration; never a deployed credential",
+  "namespace": "swarm-commands",
+  "expires_in_ms": 100,
+  "poll_interval_ms": 10,
+  "checkpoint": "refs/checkpoints/kub03-1",
+  "prompts": [
+    "Say \"done\" when the 'second' plan lands; don't quit",
+    "line one\nline two\r\n\ttabbed line\n",
+    "$(rm -rf /) and `id` and ${HOME} and $((1+1))",
+    "a; b && c || d | e > /etc/passwd < f & g\\h",
+    "café — 日本語 — ünïçødé — 𝔘𝔫𝔦",
+    "--namespace=kube-system -- sh -c 'kubectl delete pods --all'"
+  ],
+  "helper_stderr": "\u001b[31mwarning\u001b[0m \u0007bell\r\n\u009b2Jcleared",
+  "cases": [
+    "a",
+    "b",
+    "c"
+  ]
+}

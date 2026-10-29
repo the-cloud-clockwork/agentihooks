@@ -14,6 +14,8 @@ import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
+
 SLUG = "close-2026-01-01"
 OPEN_SLUG = "still-open-2026-01-01"
 PR = "https://github.com/o/r/pull/7"
@@ -48,9 +50,9 @@ def ledger_doc():
 def make_ledger(slug=SLUG):
     content = {"title": "Demo", "overview": "Ship the thing.", "sources": [], "phases": [], "questions": []}
     content["followups"] = []
-    html_path, json_path = core.paths(slug)
+    html_path, json_path = legacy_page.paths(slug, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(slug)
 
@@ -168,8 +170,8 @@ class Home(unittest.TestCase):
             for slug in (SLUG, OPEN_SLUG)
             if f'href="/{slug}"' in row
         }
-        self.assertIn('<span class="state s-closed">closed</span>', rows[SLUG])
-        self.assertIn('<span class="state s-stopped">stopped</span>', rows[OPEN_SLUG])
+        self.assertIn('<span class="state s-closed" role="cell">closed</span>', rows[SLUG])
+        self.assertIn('<span class="state s-stopped" role="cell">stopped</span>', rows[OPEN_SLUG])
 
     def test_the_page_close_runs_the_same_close_command_as_the_cli(self):
         self.assertEqual(server.control_argv({"action": "close"}), ["close"])

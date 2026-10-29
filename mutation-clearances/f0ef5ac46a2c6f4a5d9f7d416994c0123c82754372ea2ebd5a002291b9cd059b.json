@@ -1,0 +1,6 @@
+{
+  "hooks/context/scheduled_broadcasts.py:hooks.context.scheduled_broadcasts.x_merge__mutmut_21:f0367670b14d09dabaeb7efbdc965baa3e39ccdf63e567ef0b75ab96afc4ab4b": {
+    "reader": "Standards",
+    "reason": "Only ASCII identifier capitalization changes. SQLite resolves ENTRY, EMISSIONS and ROWID identically, preserving the selected rows and their order."
+  }
+}

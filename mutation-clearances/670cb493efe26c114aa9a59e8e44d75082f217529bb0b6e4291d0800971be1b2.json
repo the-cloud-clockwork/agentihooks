@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_swarm.py:scripts.swarm.metrics_swarm.x_pull_targets__mutmut_31:1dfb0e96be0820cf42759373d4effd3ac6ce9ee4064c9154a15b88676115faf3": {
+    "reader": "Standards",
+    "reason": "Acceptable for the complete current call graph: task.get(None) changes only the unused returned classification. The filtering predicate retains the actual pr_url key, and both callers discard tuple element2, so inclusion, URL lookup and metric generation remain unchanged."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x__selector__mutmut_13:b0989dc5f8ded91ddcd0b90410039e353052612f3c9b8252b611f4ba561fd2d4": {
+    "reader": "standards_reader",
+    "reason": "Equivalent for the enforced policy domain: check validates policy before invoking _selector, and validate_actors requires policy actors to be a flat list of strings. JSON object key/value colon separators are never used for such a list. Changing only the colon separator leaves members, both membership predicates and the exact protected runner selector comparison byte-identical."
+  }
+}

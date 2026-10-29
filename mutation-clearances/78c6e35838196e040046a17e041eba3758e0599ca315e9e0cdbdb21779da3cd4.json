@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x_render_codex__mutmut_4:625e03822abef88e515c722631f080c4d4f84062116234c312757b917598457c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The Standards reader cleared this mutant from Mutation preflight 38712668492: no consumer reads the isolate stamp key. Renaming its unique metadata key preserves the boolean value and whole-map cache comparison, so cache hits and both isolation transitions remain correct. Session links and sqlite_home are controlled by the unchanged isolate argument; an older differently named cache refreshes once."
+  }
+}

@@ -20,7 +20,7 @@ def test_shared_cache_refresh_and_feed_change(monkeypatch, tmp_path):
         assert fork.call_count == 1
         args = fork.call_args.args
     with patch(
-        "hooks.context.project_memory.VaultProjectSource.fetch",
+        "hooks.context.project_memory.KernelProjectSource.fetch",
         return_value=ProjectMemory("alpha", lessons=["alpha lesson"]),
     ) as fetch:
         refresh_project_cache(*args[1:])
@@ -47,16 +47,16 @@ def test_expired_cache_keeps_last_good_on_failure(monkeypatch, tmp_path):
         project_context("one")
     args = fork.call_args.args[1:]
     with patch(
-        "hooks.context.project_memory.VaultProjectSource.fetch", return_value=ProjectMemory("alpha", lessons=["kept"])
+        "hooks.context.project_memory.KernelProjectSource.fetch", return_value=ProjectMemory("alpha", lessons=["kept"])
     ):
         refresh_project_cache(*args)
     monkeypatch.setenv("BRAIN_PROJECT_MEMORY_TTL", "0")
     with patch("hooks._async.fork_and_call") as fork:
         assert "kept" in project_context("one")
         assert fork.call_count == 1
-    from hooks.context.brain_adapter import BrainSourceUnavailable
+    from hooks.context.project_memory import BrainSourceUnavailable
 
-    with patch("hooks.context.project_memory.VaultProjectSource.fetch", side_effect=BrainSourceUnavailable("down")):
+    with patch("hooks.context.project_memory.KernelProjectSource.fetch", side_effect=BrainSourceUnavailable("down")):
         refresh_project_cache(*args)
     with patch("hooks._async.fork_and_call"):
         assert "kept" in project_context("one")
@@ -100,7 +100,7 @@ def test_obsolete_worker_cannot_replace_new_feed_cache(monkeypatch, tmp_path):
         project_context("ordered")
         new_args = fork.call_args.args[1:]
     with patch(
-        "hooks.context.project_memory.VaultProjectSource.fetch",
+        "hooks.context.project_memory.KernelProjectSource.fetch",
         side_effect=[ProjectMemory("alpha", lessons=["new"]), ProjectMemory("alpha", lessons=["old"])],
     ) as fetch:
         refresh_project_cache(*new_args)
@@ -109,3 +109,28 @@ def test_obsolete_worker_cannot_replace_new_feed_cache(monkeypatch, tmp_path):
         assert "new" in project_context("ordered")
         fork.assert_not_called()
     assert fetch.call_count == 1
+
+
+def test_swarm_overview_reads_the_ledger_overview_from_the_ledger_folder(monkeypatch, tmp_path):
+    from hooks.context.project_cache import _swarm_overview
+    from tests.swarm_ledger import legacy_page
+
+    folder = tmp_path / "development-ledger"
+    folder.mkdir()
+    legacy_page.store(folder, "rig", {"title": "Rig", "overview": "Durable agent coordination."})
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+    monkeypatch.setenv("LEDGER_DIR", str(folder))
+    assert _swarm_overview() == "Durable agent coordination."
+    monkeypatch.delenv("LEDGER_DIR")
+    monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path))
+    assert _swarm_overview() == "Durable agent coordination."
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "other")
+    assert _swarm_overview() == ""
+
+
+def test_the_feed_file_is_the_feed_cache_of_this_installation_and_brain(monkeypatch, tmp_path):
+    from hooks.context import project_cache
+
+    monkeypatch.setattr(project_cache, "namespace", lambda: "scope")
+    monkeypatch.setattr(project_cache, "_feed_path", lambda scope: tmp_path / f"{scope}.json")
+    assert project_cache.feed_file() == tmp_path / "scope.json"

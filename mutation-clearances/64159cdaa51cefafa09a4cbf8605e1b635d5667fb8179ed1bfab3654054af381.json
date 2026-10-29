@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x\u01c1IntentGate\u01c1decide__mutmut_90:9d2e67fdc1d4e9669a7bb6a601937bdbfebb26a2532e69104cd86617ec434494": {
+    "reader": "Standards",
+    "reason": "Passing bound=None executes _other_half, but decide has isolated the supported command into single and selected the cached URL by the same pull identity rule. A named merge target therefore matches the selected record, and a target-free release command yields no merge target. _other_half is false on either reachable supported path, so the verdict, refusal and coaching behavior are unchanged."
+  }
+}

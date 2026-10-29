@@ -1,0 +1,6 @@
+{
+  "scripts/hive/daemon.py:scripts.hive.daemon.x__claude_snapshots__mutmut_35:d0521e9d0a85ad39b09c61702992804cbf50065beafb9837dbb89855a6227e2c": {
+    "reader": "standards_reader",
+    "reason": "Provider status is only checked for rejected; this variation does not reject and keeps the same quota and cap."
+  }
+}

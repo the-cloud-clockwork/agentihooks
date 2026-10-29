@@ -3,7 +3,7 @@ import urllib.request
 from unittest.mock import patch
 
 from scripts.swarm_ledger import ledger
-from tests.swarm_ledger.test_media import Endpoint, core, media, png
+from tests.swarm_ledger.test_media import Endpoint, core, media, png, server
 
 
 class AgentEndpoint(Endpoint):
@@ -41,11 +41,13 @@ class AgentEndpoint(Endpoint):
         }
         code, _, body = self.put([op])
         assert code == 200
-        comment = json.loads(body)["notes"][0]["comments"][-1]
+        state = server.repository.get_document("via-media")
+        comment = state["notes"][0]["comments"][-1]
         assert comment["by"] == "image-engineer"
         assert comment["attachments"] == [attachment]
         op.update(id="same-slide", text="The slide is ready to review.")
-        state = json.loads(self.put([op])[2])
+        self.put([op])
+        state = server.repository.get_document("via-media")
         assert len([c for c in state["notes"][0]["comments"] if c["by"] == "image-engineer"]) == 1
         assert state["notes"][0]["comments"][-1]["attachments"] == [attachment]
 
@@ -97,11 +99,9 @@ def test_upload_helper_sends_bytes_token_and_joined_agent(tmp_path):
     image.write_bytes(png())
     attachment = {"id": "a" * 64 + ".png"}
     with (
-        patch.object(ledger.core, "paths", return_value=(tmp_path / "page.html", None)),
-        patch.object(ledger.core, "read_token", return_value="test-token"),
+        patch.object(ledger.repository, "token", return_value="test-token"),
         patch.object(ledger.urllib.request, "urlopen") as opened,
     ):
-        (tmp_path / "page.html").write_text("page")
         opened.return_value.__enter__.return_value.read.return_value = json.dumps(attachment).encode()
         assert ledger.upload_image("shots", "image-engineer", str(image)) == attachment
     req = opened.call_args.args[0]

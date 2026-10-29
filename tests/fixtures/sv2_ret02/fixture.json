@@ -1,0 +1,15 @@
+{
+  "base": "swarm_v2/session-search.json",
+  "source": "lock",
+  "kept": "kernel",
+  "later_source": "symbol",
+  "clock": {"revoked": 3000.0, "propagated": 3002.5, "downtime_revoked": 3010.0, "restarted": 3070.0, "regranted": 3100.0},
+  "packs": {
+    "cited": {"pack_id": "pack-ingest-lock", "query": "recall"},
+    "kept": {"pack_id": "pack-kernel-feed", "session": "kernel"}
+  },
+  "lessons": [
+    {"lesson_id": "lesson-lock-only", "text": "Set a busy timeout before concurrent catalog writers start.", "support": ["lock"]},
+    {"lesson_id": "lesson-shared", "text": "Retry a locked catalog write instead of failing the ingest.", "support": ["lock", "kernel", "symbol"]}
+  ]
+}

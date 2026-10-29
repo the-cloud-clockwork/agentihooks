@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/stats_cache.py:scripts.ci_mutation.stats_cache.x_test_inputs__mutmut_8:7da87aac9019db4494ee937f5ae94b908d5b9e030c221998cce88d86a6d6c34f": {
+    "reader": "standards_reader",
+    "reason": "Appending None instead of the node changes list contents but not length; the sole consumer, any(records[name][2] ...), only checks whether the list is non-empty, and appending any value makes it non-empty. No code reads individual elements of unresolved, so the substitution is unobservable."
+  }
+}

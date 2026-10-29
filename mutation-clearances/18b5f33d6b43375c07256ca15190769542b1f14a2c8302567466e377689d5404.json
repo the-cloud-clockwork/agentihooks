@@ -1,0 +1,6 @@
+{
+  "scripts/ci_access_audit.py:scripts.ci_access_audit.x_main__mutmut_75:2a10d3d29f0cbf328dad52554a533484c176746b42fdadab44e7e00f56658278": {
+    "reader": "standards_reader",
+    "reason": "Presentation only: JSON indentation changes while the complete report keys, values, inventory, unapproved identities and exit status remain identical. The report remains valid JSON; notification reads the separate alert file."
+  }
+}

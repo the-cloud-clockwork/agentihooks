@@ -1,0 +1,6 @@
+{
+  "hooks/lifecycle/refresh.py:hooks.lifecycle.refresh.x__retain_exit__mutmut_17:99cedc870b7c2ab8427de6d36dcb9fe93517a4472725663b9b20a0a4f83377dd": {
+    "reader": "Standards /root/standards_reader round two",
+    "reason": "The record is produced by session_exit through AGENTIHOOKS_EXIT_RECORD. Its JSON writer uses ensure_ascii=True, so default ASCII-compatible locale decoding yields the identical JSON text and data. This ruling is limited to that producer contract."
+  }
+}

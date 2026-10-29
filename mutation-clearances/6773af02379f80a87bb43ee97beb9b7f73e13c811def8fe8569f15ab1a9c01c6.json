@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_27:7ce44a12bd721ada31808137c979825fd99fc3edda93bcb17b895f4051a45202": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Only the --seat help text has its first letter lowercased, shown only by --help and read by no program or test."
+  }
+}

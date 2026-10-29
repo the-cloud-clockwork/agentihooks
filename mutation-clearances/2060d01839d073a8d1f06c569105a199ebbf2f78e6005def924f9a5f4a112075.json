@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/code_reach.py:scripts.swarm.code_reach.x\u01c1Program\u01c1_receivers__mutmut_1:9bcb8377e4749a279a633e2d4406c71f67d980c62ad411a483f9930e9225ee1a": {
+    "reader": "Standards",
+    "reason": "The mutant is equivalent: _spread reads only self.clients, self.factories and per-unit state, so once a full pass adds nothing, every later pass sees the same inputs and adds nothing too. Running the extra passes only costs time and cannot change clients or factories."
+  }
+}

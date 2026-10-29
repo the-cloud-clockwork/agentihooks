@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker_home.py:scripts.swarm_v2.worker_home.x__write__mutmut_6:5b0035ca4c2cd3088063897481874802baac237265b80c2b92f4c459d451a05f": {
+    "reader": "Standards reader for SV2-IMG-02",
+    "reason": "Write helper with encoding UTF-8. Codec lookup normalises UTF-8 and utf-8 to the identical codec regardless of locale, so the read or write produces the same bytes."
+  }
+}

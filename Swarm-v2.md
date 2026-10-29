@@ -823,6 +823,7 @@ Maintain a manifest of supported image, controller, hook, and brain protocol com
 |---|---|---|
 | `POST /v2/executions/register` | Confirm launched worker identity | One-time launch grant |
 | `PUT /v2/executions/{id}/heartbeat` | Renew observed liveness and lease | Bound execution credential |
+| `POST /v2/executions/{id}/credential` | Renew worker execution credential | Bound execution credential |
 | `POST /v2/executions/{id}/outcomes` | Propose task outcome | Current generation only |
 | `POST /v2/executions/{id}/checkpoints` | Commit checkpoint manifest | Current generation only |
 | `GET /v2/executions/{id}/commands` | Receive bounded runtime commands | Bound execution credential |
@@ -2279,22 +2280,22 @@ Baseline references: [SRC-AH-LEDGER] [SRC-AH-STORE]
 - Integration gate: `G3`, subject to all earlier applicable acceptance gates.
 - Owned path candidates: `scripts/swarm_ledger/ledger_core.py; docs/swarm-v2/ledger-durability.md (new)`.
 - Required fixture: Two server processes sharing one test ledger directory.
-- Intended change: Keep file-based ledger persistence correct without pretending an in-process lock coordinates replicas.
+- Intended change: Keep SQLite ledger persistence correct with a lease excluding a second ledger server and serialized database transactions for command line clients.
 
 ##### Implementation sequence
 
 1. Document one active writer and its durable volume.
-2. Protect writes with process-safe ownership in the chosen deployment.
-3. Publish atomic snapshots and backups without copying partially written JSON.
+2. Hold a process-safe writer lease for the ledger server; command line tools remain database clients whose `BEGIN IMMEDIATE` transactions serialize with the server's writes.
+3. Publish atomic snapshots and verified backups through the SQLite backup API.
 4. Reject unsupported multi-replica write configuration at startup.
 
 ##### Boundary and interface obligations
 
 - Input preparation: construct the package fixture from two server processes sharing one test ledger directory.
-- Output contract: Two accidental writer instances cannot concurrently mutate the same ledger root.
-- Rejection contract: A chart setting requesting multiple active file writers fails validation or keeps extra replicas non-writing.
+- Output contract: The writer lease refuses a second ledger server on the same ledger root; command line clients remain serialized database writers.
+- Rejection contract: A chart setting requesting multiple ledger server replicas fails validation, and a second server is refused at startup by the lease.
 - Recovery contract: A writer restart loads the last complete revision and replays idempotent accepted operations.
-- Mutation scope: The existing ledger remains authoritative for operator work state; only one writer mutates its durable files.
+- Mutation scope: SQLite remains authoritative for operator work state; server and command line mutations are serialized database transactions.
 - Compatibility obligation: compare the affected public behavior with the preceding accepted protocol or explicitly local compatibility path.
 - Authority obligation: derive actor and scope from the fixture grant or operator role; never infer permission from a display label.
 - State obligation: distinguish observed, accepted, committed, and externally verified outcomes in the implementation report.
@@ -2312,7 +2313,7 @@ Baseline references: [SRC-AH-LEDGER] [SRC-AH-STORE]
 
 ##### Rollback and completion
 
-- Rollback action: Restore the preceding compatible writer binary against a verified backup copy before promotion.
+- Rollback action: Stop the ledger server, restore a verified database backup with the current image's `ledger_writer restore` tool while holding the writer lease, then deploy and start the preceding compatible image through GitOps.
 - Data safety: identify authoritative objects before rollback; do not delete them as if they were caches.
 - Rollout safety: disable only the affected new path when possible and retain the last qualified local execution behavior.
 - Completion evidence: record implemented interfaces, supported versions, test outputs, remaining limitations, and the rollback rehearsal.
@@ -4047,7 +4048,7 @@ Baseline references: [SRC-AH-SNAPSHOT] [SRC-K8S-LIFECYCLE]
 ##### Implementation sequence
 
 1. Discover the supported native conversation artifacts for the pinned target version.
-2. Quiesce writes or use a supported backup method for mutable databases.
+2. Read a mutable database in one read-only transaction that never waits on a writer's lock; a held lock reports `database_busy`, and the database itself is not carried because the CLI rebuilds it from its conversation files.
 3. Exclude account authentication state from the portable bundle.
 4. Run a fresh-container native-resume proof with the intended account and project.
 

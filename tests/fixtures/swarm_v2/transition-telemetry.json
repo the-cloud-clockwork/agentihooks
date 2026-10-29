@@ -1,0 +1,15 @@
+{
+  "package": "SV2-OBS-01",
+  "step_seconds": 0.02,
+  "fake_secret_parts": ["sk", "fixture-only-transition-value-0000"],
+  "fake_environment": {
+    "HOME": "/home/fixture-only",
+    "PATH": "/opt/fixture-only/bin",
+    "SHELL": "/bin/fixture-only-sh",
+    "AH_CC_TOKEN_FIXTURE": "{secret}"
+  },
+  "failure_messages": {
+    "environment": "worker apply failed with environ({environment})",
+    "token": "upstream refused Authorization: Bearer {secret} for the fixture"
+  }
+}

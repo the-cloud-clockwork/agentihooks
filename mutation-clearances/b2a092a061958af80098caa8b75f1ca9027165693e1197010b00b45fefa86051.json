@@ -1,0 +1,6 @@
+{
+  "hooks/tool_memory.py:hooks.tool_memory.x__is_error__mutmut_6:61b83a64c744665b8666a361f036d086188af53f880cf83a4dbf8a2b8b4c69f3": {
+    "reader": "standards_reader",
+    "reason": "Swaps the zero count replacement '' for 'XXXX'. The text is lowercased, so uppercase XXXX cannot form any lowercase ERROR_PATTERNS token, and the match is bounded by non-word characters on both sides, so removing it joins two non-word neighbours that cannot form one either; the set of matched patterns is identical for every input."
+  }
+}

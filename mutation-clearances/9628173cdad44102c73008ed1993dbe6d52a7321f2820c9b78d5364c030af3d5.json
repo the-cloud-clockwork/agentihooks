@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x_recorded__mutmut_5:08c5d04e16b8bf18712fb60ad6008f3b2eab1b8fc19b1e3d7e47b90c881ff151": {
+    "reader": "Standards",
+    "reason": "Only ASCII NAME and ENTRIES identifier casing changes; SQLite returns the same selected names from the same table."
+  }
+}

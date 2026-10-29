@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_cache.py:scripts.doctor.ci_cache.x__trim__mutmut_24:81bda06f3878c307885d9fd820e77da8049f85e177ba63c267c8dfb505352abd": {
+    "reader": "Standards",
+    "reason": "One STRLEN is queued per key. Successful execute returns exactly one reply per command; Redis errors raise instead of shortening replies. Zip cardinality therefore always matches, so disabling strict does not change output."
+  }
+}

@@ -36,3 +36,13 @@ def test_unreadable_or_missing_lease_is_none(tmp_path):
     (tmp_path / SCRATCH_LEASE).write_text("{not json")
     assert read_lease(tmp_path, "scratch") is None
     assert read_lease(tmp_path, "worktree") is None
+
+
+def test_lease_path_knows_only_the_three_lease_kinds(repo):
+    path = repo.worktree("kinds")
+    admin = admin_dir(path)
+    assert lease_path(path, "worktree") == admin / WORKTREE_LEASE
+    assert lease_path(path, "ephemeral") == admin / WORKTREE_LEASE
+    assert lease_path(path, "scratch") == path / SCRATCH_LEASE
+    assert lease_path(path, "worktrees") is None
+    assert read_lease(path, "unknown") is None

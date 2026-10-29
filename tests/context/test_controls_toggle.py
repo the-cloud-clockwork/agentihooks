@@ -18,6 +18,7 @@ def _no_redis():
 
 @pytest.fixture(autouse=True)
 def _isolated_flag(tmp_path, monkeypatch):
+    monkeypatch.setattr("hooks.context.branch_guard.AGENTIHOOKS_HOME", tmp_path)
     flag_dir = tmp_path / "controls_flags"
     monkeypatch.setattr("hooks.context.controls_toggle._FLAG_DIR", flag_dir)
     monkeypatch.setattr("hooks.context.controls_toggle._GLOBAL_FLAG", flag_dir / "active.flag")
@@ -109,6 +110,7 @@ class TestSetClear:
         assert not is_controls_disabled()
 
 
+@pytest.mark.usefixtures("outside_a_guarded_repository")
 class TestBranchGuardIntegration:
     def _check(self, command: str, sid: str = "ctl-test-branch-uniq"):
         from hooks.context.branch_guard import check_branch_guard
@@ -210,11 +212,13 @@ class TestProdLockdownIntegration:
         with pytest.raises(BlockAction):
             self._check("gh workflow run release.yml")
 
-    def test_release_workflow_allowed_with_bypass(self):
+    def test_release_workflow_blocked_with_bypass(self):
         from hooks.context.controls_toggle import set_controls_disabled
+        from hooks.hook_manager import BlockAction
 
         set_controls_disabled("test")
-        self._check("gh workflow run release.yml")
+        with pytest.raises(BlockAction):
+            self._check("gh workflow run release.yml")
 
     @pytest.mark.parametrize("base", ["main", "master", "v1"])
     def test_pr_merge_protected_blocked_under_bypass(self, base):

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/deployed.py:scripts.swarm_v2.deployed.x_tick_runtime__mutmut_20:f718cb1c297a8a3c05f673f991d45b3656152fdff9530ad17fcd096885f10806": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: QuotaObservations reads authorize only in _grant, which only publish calls, and AccountRoute never calls publish."
+  }
+}

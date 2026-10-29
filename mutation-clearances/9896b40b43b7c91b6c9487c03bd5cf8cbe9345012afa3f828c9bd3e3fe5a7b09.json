@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__comments__mutmut_7:f6bba4b967f4336ae253fdec7ffce2eb40c5df90000d823630970a16d5c47e74": {
+    "reader": "standards_reader",
+    "reason": "Only the case of the SQL keywords changes (and, in, order by), and SQLite keywords are case-insensitive; the 'comment'/'answer' literals are untouched."
+  }
+}

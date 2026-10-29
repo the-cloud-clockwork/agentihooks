@@ -1,0 +1,85 @@
+{
+  "case": "T-SV2-HDR-04-B",
+  "state": "passed",
+  "evidence_class": "mocked: a recording stand in for the Anton herdr client answers herdr machine commands with the 0.9.1 reply shapes of SV2-HDR-03 and serves agent get, agent prompt and pane send-text for Local and each saved machine from the fixture; no herdr process, SSH connection or cluster runs in these cases",
+  "input_sha256": {
+    "herdr-pane-routing.json": "36a84ba856cd6c2cdc3f57e7ca84227a9908e2de7046ea57056ca2329a8c730d",
+    "herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
+  },
+  "observed": {
+    "checks": {
+      "refused_by_reason": true,
+      "no_pane_mutated_before_refusal": true,
+      "every_refusal_counted": true,
+      "no_disclosure_of_the_manual_machine": true,
+      "a_corrected_input_needs_a_new_request": true,
+      "independent_repeat_identical": true
+    },
+    "first": {
+      "refusals": {
+        "bare_remote_pane": {
+          "reason": "bare_pane",
+          "message": "a remote pane operation needs a saved machine profile, a remote session and a server incarnation",
+          "unchanged": true
+        },
+        "pane_without_machine": {
+          "reason": "bare_pane",
+          "message": "a remote pane operation needs a saved machine profile, a remote session and a server incarnation",
+          "unchanged": true
+        },
+        "malformed_pane": {
+          "reason": "pane_id",
+          "message": "a herdr pane id reads w<id>:p<id>, each id digits and capital letters",
+          "unchanged": true
+        },
+        "manual_machine_label": {
+          "reason": "unregistered",
+          "message": "devbox is not one machine this controller registered",
+          "unchanged": true
+        },
+        "wrong_conversation": {
+          "reason": "conversation_mismatch",
+          "message": "w1:p1 holds another conversation",
+          "unchanged": true
+        },
+        "stale_incarnation": {
+          "reason": "stale_incarnation",
+          "message": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2 was replaced",
+          "unchanged": true
+        }
+      },
+      "mismatches": [
+        [
+          "bare_pane",
+          2
+        ],
+        [
+          "conversation_mismatch",
+          1
+        ],
+        [
+          "pane_id",
+          1
+        ],
+        [
+          "stale_incarnation",
+          1
+        ],
+        [
+          "unregistered",
+          1
+        ]
+      ],
+      "herdr_target_mismatch_total": 6,
+      "corrected_received": {
+        "local": [],
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+          "corrected"
+        ],
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": []
+      }
+    },
+    "second_identical": true
+  }
+}

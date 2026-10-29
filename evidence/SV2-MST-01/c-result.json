@@ -1,0 +1,33 @@
+{
+  "case": "T-SV2-MST-01-C",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-MST-01-C",
+    "evidence_class": "fakeredis swarm store and inbox; fixture ledger document; no live swarm",
+    "input_sha256": "442c3c3caf41df962800006dea2f299f7e410a3f7a0ceaafa626d89c09177ca7",
+    "observed": {
+      "moved": [
+        "p3"
+      ],
+      "owners_after_removing_seat_three": {
+        "p1": "master@fixture",
+        "p2": "master-2@fixture",
+        "p3": "master-2@fixture",
+        "p4": "master@fixture"
+      },
+      "owners_after_restart": {
+        "p1": "master@fixture",
+        "p2": "master-2@fixture",
+        "p3": "master-2@fixture",
+        "p4": "master@fixture"
+      },
+      "owners_with_three_seats": {
+        "p1": "master@fixture",
+        "p2": "master-2@fixture",
+        "p3": "master-3@fixture",
+        "p4": "master@fixture"
+      }
+    },
+    "state": "passed"
+  }
+}

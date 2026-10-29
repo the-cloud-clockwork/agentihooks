@@ -25,3 +25,14 @@ def ledger_dir(tmp_path_factory):
                 for name, value in values.items():
                     patch.setattr(sys.modules[module], name, value)
         yield path
+
+
+@pytest.fixture(autouse=True)
+def relay_journal():
+    from scripts.swarm_ledger import storage
+
+    journal = storage.default()
+    if journal.path.exists():
+        for kind, slugs in journal.held_revisions().items():
+            for slug in slugs:
+                journal.drop_revisions(kind, slug)

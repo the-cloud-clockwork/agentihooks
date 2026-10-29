@@ -1,0 +1,29 @@
+{
+  "before": {
+    "preToolUse": "trusted",
+    "permissionRequest": "trusted",
+    "postToolUse": "trusted",
+    "preCompact": "trusted",
+    "postCompact": "untrusted",
+    "sessionStart": "trusted",
+    "sessionEnd": "trusted",
+    "userPromptSubmit": "trusted",
+    "subagentStart": "trusted",
+    "subagentStop": "trusted",
+    "stop": "trusted"
+  },
+  "write_error": null,
+  "after": {
+    "preToolUse": "trusted",
+    "permissionRequest": "trusted",
+    "postToolUse": "trusted",
+    "preCompact": "trusted",
+    "postCompact": "trusted",
+    "sessionStart": "trusted",
+    "sessionEnd": "trusted",
+    "userPromptSubmit": "trusted",
+    "subagentStart": "trusted",
+    "subagentStop": "trusted",
+    "stop": "trusted"
+  }
+}

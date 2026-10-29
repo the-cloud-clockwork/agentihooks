@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker/completion.py:scripts.swarm_v2.worker.completion.x_report__mutmut_32:239767fa4dd14ad12b1375c3e1932737e1ef9991cdfe66cc79bbd482acafe015": {
+    "reader": "standards-reader",
+    "reason": "The lowercase and uppercase UTF8 encoding names resolve to the same Python codec and produce identical bytes."
+  }
+}

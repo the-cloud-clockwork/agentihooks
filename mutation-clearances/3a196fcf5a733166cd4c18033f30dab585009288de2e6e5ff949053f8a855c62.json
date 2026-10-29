@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_outbox.py:scripts.swarm.metrics_outbox.x\u01c1Outbox\u01c1_ship__mutmut_2:0d351110a036ba2d56eeb688891c2da7f37c680f8b5163402cf022670ef47248": {
+    "reader": "Standards",
+    "reason": "Acceptable boundary variation against the under thirty second contract: at exact equality with the five second deadline, one schema request may start instead of yielding. Its unchanged three second timeout preserves a delivery admission bound of at most eight seconds; pending rows and schema creation persistence remain unchanged. Later requests still stop once time exceeds the deadline."
+  }
+}

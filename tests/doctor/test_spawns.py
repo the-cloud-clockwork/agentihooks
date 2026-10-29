@@ -1,13 +1,10 @@
 import copy
+import json
 
 import pytest
 
 from scripts.doctor import spawns
 from tests.doctor.recorded import load
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 from tests.swarm.profile_fixture import validated
 
 
@@ -23,11 +20,112 @@ def test_recorded_spawns_and_planted_failed_spawn():
     assert record["actions"] == []
 
 
-def test_runtime_records_the_launcher_overflow_placement(tmp_path):
+@pytest.mark.parametrize("reopened", ["", ", task dt2 reopened"])
+def test_a_failure_reason_with_colons_keeps_its_subject_and_whole_text(reopened):
+    record = load("spawns")
+    reason = "hive launch failed: refused: agentihooks init-agent: canary timeout"
+    record["actions"] = [f"{record['slug']}: spawn failed for dt2{reopened}: {reason}"]
+    [found] = spawns.failed(record)
+    assert found.id == "failed-spawn/dt2"
+    assert found.evidence == (reason,)
+
+
+def test_reservation_refusals_require_recorded_free_sessions():
+    record = load("spawns")
+    slug = record["slug"]
+    refusal = f"{slug}: spawn failed for dt2: account reservation is full"
+    accounts = [
+        {"harness": "claude", "state": "OPEN", "sessions": 6, "cap": 6},
+        {"harness": "codex", "state": "OPEN", "sessions": 0, "cap": 8},
+    ]
+    capacity = {"harness": "claude", "accounts": accounts}
+    record["actions"] = [f"{slug}: spawn capacity for dt2: {json.dumps(capacity)}", refusal]
+    assert spawns.failed(record) == []
+    accounts[0]["sessions"] = 5
+    record["actions"] = [f"{slug}: spawn capacity for dt2: {json.dumps(capacity)}", refusal]
+    [found] = spawns.failed(record)
+    assert found.id == "failed-spawn/dt2"
+    assert found.measure == 1
+    assert found.evidence == ("account reservation is full",)
+
+
+@pytest.mark.parametrize(("sessions", "count"), [(6, 0), (7, 0), (5, 1)])
+def test_a_refusal_is_judged_by_the_session_count_taken_at_the_refusal(sessions, count):
+    record = load("spawns")
+    slug = record["slug"]
+    snapshot = {
+        "harness": "claude",
+        "accounts": [{"harness": "claude", "state": "OPEN", "sessions": 0, "cap": 6}],
+    }
+    record["actions"] = [
+        f"{slug}: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: account reservation is full: account=claude:a "
+        f"sessions={sessions} cap=6 five_left=80 week_left=40",
+    ]
+    assert [finding.subject for finding in spawns.failed(record)] == ["dt2"] * count
+
+
+@pytest.mark.parametrize(
+    ("harness", "state", "sessions", "cap", "count"),
+    [
+        ("claude", "OPEN", 5, 6, 1),
+        ("claude", "OPEN", 6, 6, 0),
+        ("claude", "OPEN", 7, 6, 0),
+        ("codex", "OPEN", 0, 6, 0),
+        ("claude", "DRAIN", 0, 6, 0),
+        ("claude", "UNKNOWN", 0, 6, 0),
+        ("claude", "OPEN", 0, None, 0),
+        ("claude", "OPEN", 0, 0, 0),
+    ],
+)
+def test_only_eligible_accounts_for_the_refused_harness_count(harness, state, sessions, cap, count):
+    record = load("spawns")
+    slug = record["slug"]
+    snapshot = {
+        "harness": "claude",
+        "accounts": [{"harness": harness, "state": state, "sessions": sessions, "cap": cap}],
+    }
+    record["actions"] = [
+        f"{slug}: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: account reservation is full",
+    ]
+    found = spawns.failed(record)
+    assert len(found) == count
+    if count:
+        assert found[0].measure == 1
+
+
+def test_capacity_evidence_is_consumed_by_one_failure_and_other_errors_remain():
+    record = load("spawns")
+    slug = record["slug"]
+    snapshot = {
+        "harness": "codex",
+        "accounts": [{"harness": "codex", "state": "OPEN", "sessions": 1, "cap": 2}],
+    }
+    record["actions"] = [
+        f"other: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: account reservation is full",
+        f"{slug}: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: account reservation is full",
+        f"{slug}: spawn failed for dt2: account reservation is full",
+        f"{slug}: spawn failed for dt2: init-agent timed out",
+        f"{slug}: master spawn failed: boom",
+    ]
+    found = {finding.subject: finding for finding in spawns.failed(record)}
+    assert found["dt2"].measure == 2
+    assert found["dt2"].evidence == ("account reservation is full", "init-agent timed out")
+    assert found["master"].evidence == ("boom",)
+
+
+def test_runtime_records_the_launcher_overflow_placement(tmp_path, monkeypatch):
+    import os
     import subprocess
+    from dataclasses import asdict
+    from pathlib import Path
 
     import fakeredis
 
+    from scripts.swarm import launch_job
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm.store import RedisStore, SwarmConfig
     from scripts.swarm.tick import tick
@@ -35,24 +133,36 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, state="running")
     store.create(config)
-    launched = []
+    launched, live = [], set()
 
     def run(argv, **kwargs):
+        from scripts.routing import native_login
+
+        if argv[1:] == list(native_login.COMMAND):
+            return subprocess.CompletedProcess(argv, 1, "", "")
         launched.append(argv)
+        live.add(argv[argv.index("--name") + 1])
         return subprocess.CompletedProcess(
             argv,
             0,
             validated(
                 argv,
                 "status=started\nroute_status=routed\nagent=codex\naccount=default\nplacement=overflow\npane_id=1\n",
-            ),
+            ).replace('"pid": 123', f'"pid": {os.getpid()}'),
             "",
         )
 
     runtime = HerdrRuntime(
         home=tmp_path, run=run, choose=lambda *args: ("codex", "fallthrough: claude is at its session cap")
     )
-    runtime.live_names = lambda: set()
+
+    def complete(job):
+        spec = json.loads(Path(job["request"]).read_text())
+        placed = runtime._launch(SwarmConfig(**spec["config"]), spec["lane"], name=spec["name"], **spec["launch"])
+        Path(job["path"]).write_text(json.dumps({"placed": asdict(placed)}))
+
+    monkeypatch.setattr(launch_job, "spawn", complete)
+    runtime.live_names = lambda: live
     runtime.conversations = lambda: {}
     runtime.has_capacity = lambda config: True
     runtime.quota_capacity = None
@@ -81,7 +191,13 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
         def notify(self, *args):
             pass
 
-    actions = tick("sw", store, Ledger(), runtime, 1000)
+        def comment(self, *args):
+            pass
+
+    ledger = Ledger()
+    actions = tick("sw", store, ledger, runtime, 1000)
+    assert any(action.startswith("launching engineer") for action in actions), actions
+    actions = tick("sw", store, ledger, runtime, 2000)
     agents = store.agents("sw")
     assert len(agents) == 2, actions
     assert all(a.placement == "overflow" for a in agents)
@@ -123,3 +239,90 @@ def test_recorded_agents_with_no_hook_event_one_tick_after_spawn_are_flagged():
     ]
     finished = [{**a, "state": "finished"} for a in agents]
     assert spawns.silent_starts(finished, {}, last + spawns.TICK_MS) == []
+
+
+ACKED = 50_000
+
+
+def _hive(name, **fields):
+    return {
+        "name": name,
+        "state": "working",
+        "started_at": 1_000,
+        "harness": "claude",
+        "pane_id": "w4:p1",
+        "hive": "h1",
+        "launched_at": ACKED - 5_000,
+        "launch_timings": {"returned_at": ACKED},
+        **fields,
+    }
+
+
+def test_a_running_hive_agent_is_judged_from_its_heartbeat():
+    agent = _hive("engineer@a-1")
+    later = ACKED + 10 * spawns.TICK_MS
+    assert spawns.silent_starts([agent], {}, later, beats={agent["name"]: ACKED + 1}) == []
+    assert spawns.silent_starts([agent], {}, later, beats={agent["name"]: 1_000}) == []
+    [stale] = spawns.silent_starts([agent], {}, later, beats={agent["name"]: 999})
+    assert stale.measure == 10
+
+
+def test_a_hive_agent_that_never_starts_is_raised_one_tick_after_its_acknowledgement():
+    agent = _hive("engineer@a-2")
+    assert spawns.silent_starts([agent], {}, ACKED + spawns.TICK_MS - 1) == []
+    [found] = spawns.silent_starts([agent], {}, ACKED + 2 * spawns.TICK_MS + 1, beats={"engineer@a-1": ACKED})
+    assert found.id == "no-hook-event/engineer@a-2"
+    assert found.measure == 2
+    assert found.evidence == (f"acknowledged at {ACKED}", "hive h1", "harness claude", "pane w4:p1")
+    assert found.threshold == "no heartbeat one tick after the hive acknowledgement"
+    assert found.summary == "hive agent has sent no heartbeat since its hive acknowledged the launch"
+    unreturned = {k: v for k, v in _hive("engineer@a-2", launch_timings={}).items() if k not in ("harness", "pane_id")}
+    [found] = spawns.silent_starts([unreturned], {}, ACKED - 5_000 + spawns.TICK_MS)
+    assert found.evidence == (f"acknowledged at {ACKED - 5_000}", "hive h1", "harness ", "pane ")
+
+
+def test_a_launch_still_waiting_for_its_hive_acknowledgement_is_not_raised():
+    starting = {"name": "engineer@a-3", "state": "starting", "started_at": 1_000}
+    later = 1_000 + 5 * spawns.TICK_MS
+    assert spawns.silent_starts([starting], {}, later, pending={"engineer@a-3"}) == []
+    assert [f.subject for f in spawns.silent_starts([starting], {}, later, pending={"other"})] == ["engineer@a-3"]
+
+
+def test_a_local_agent_keeps_the_first_event_rule():
+    agent = {
+        "name": "engineer@a-4",
+        "state": "working",
+        "started_at": 1_000,
+        "launched_at": 3_000,
+        "launch_timings": {"returned_at": 4_000},
+    }
+    [found] = spawns.silent_starts([agent], {}, 1_000 + spawns.TICK_MS, beats={agent["name"]: 2_000})
+    assert found.measure == 1
+    assert found.evidence == ("started at 1000", "harness ", "pane ")
+    assert found.threshold == "no hook event one tick after spawn"
+    assert spawns.silent_starts([agent], {agent["name"]: 2_000}, 1_000 + spawns.TICK_MS, beats={}) == []
+    late = {**agent, "started_at": 1_000_000}
+    [found] = spawns.silent_starts([late], {}, 1_000_000 + 2 * spawns.TICK_MS)
+    assert found.measure == 2
+
+
+def test_live_worker_hives_without_a_fresh_headroom_reading_are_flagged():
+    from scripts.hive import registry
+
+    now = 1_000_000
+    beat = now - 5_000
+    hives = [
+        {"id": "hh4", "name": "swarm-hive-002", "ui": "no", "heartbeat_at": beat, "version": "v1"},
+        {"id": "hh5", "name": "swarm-hive-003", "ui": "no", "heartbeat_at": beat, "version": "v1"},
+        {"id": "hh6", "name": "swarm-hive-004", "ui": "no", "heartbeat_at": beat},
+        {"id": "ws", "name": "swarm-master", "ui": "yes", "heartbeat_at": beat, "version": "v1"},
+        {"id": "old", "name": "gone", "ui": "no", "heartbeat_at": now - registry.LIVE_MS - 1, "version": "v1"},
+    ]
+    readings = {"hh5": {"measured_at": now}}
+    found, unversioned = spawns.missing_headroom(hives, readings, now)
+    assert found.id == "missing-headroom/hh4"
+    assert found.measure == 1
+    assert found.summary == "live hive has no fresh headroom reading, so the tick refuses its launches"
+    assert found.threshold == "a live worker hive with no fresh headroom reading"
+    assert found.evidence == ("hive swarm-hive-002", f"heartbeat at {beat}", "version v1")
+    assert unversioned.evidence == ("hive swarm-hive-004", f"heartbeat at {beat}", "version ")

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_swarm.py:scripts.swarm.metrics_swarm.x__checkpoint__mutmut_7:a96391e11138185cbf0eb6be4e7d73122ae04ce0814eff07d778c5e02fac6f16": {
+    "reader": "standards_reader",
+    "reason": "Only unquoted SQL identifier letter case changes. SQLite resolves the same table, columns and excluded alias; the UPSERT preserves identical inserted and updated cursor values."
+  }
+}

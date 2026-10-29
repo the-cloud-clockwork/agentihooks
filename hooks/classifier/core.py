@@ -11,7 +11,7 @@ from hooks.classifier.errors import BackendFailure, ClassifierRequestError, Clas
 from hooks.classifier.fallbacks import cli_backends
 from hooks.classifier.questions import validate
 from hooks.classifier.result import DecisionRequest, DecisionResult
-from hooks.classifier.settings import MODEL_CONTEXT_TOKENS, Settings, api_configured, load
+from hooks.classifier.settings import MODEL_CONTEXT_TOKENS, Settings, api_configured, budget, load
 
 
 class Backend(Protocol):
@@ -22,8 +22,9 @@ class Backend(Protocol):
 
 def api_backends(request: DecisionRequest, settings: Settings) -> list:
     needed = request.estimated_tokens()
+    timeout_s = budget(settings, needed)
     return [
-        DecisionsApiBackend(model, settings.url, settings.timeout_s)
+        DecisionsApiBackend(model, settings.url, timeout_s)
         for model in settings.models
         if MODEL_CONTEXT_TOKENS.get(model, needed) >= needed
     ]
@@ -47,11 +48,12 @@ def _ask_api(
         except BackendFailure as failure:
             failures.append(decision_log.failure_record(backend.name, failure))
             if failure.skip_api:
-                break
+                down_cache.mark_down(failures)
+                return None
         except ClassifierRequestError as failure:
             failures.append(decision_log.failure_record(backend.name, failure))
             raise
-    if backends:
+    if len(backends) == len(settings.models):
         down_cache.mark_down(failures)
     return None
 

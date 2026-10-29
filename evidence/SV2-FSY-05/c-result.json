@@ -1,0 +1,19 @@
+{
+  "tested_commit": "92907cf4a5cbf45ec902c8e4a89febd0b9968d8e",
+  "evidence_class": "mocked: rendered Pod manifests checked without a cluster, a cache store whose read only mount is simulated by the store's mount probe, and a local artifact directory replaced by a file to model lost shared storage; no NFS, no Pod and no live rollout proof",
+  "then": "loss of shared artifact storage degrades checkpoint publication without corrupting local worktrees",
+  "passed": true,
+  "dimensions": {
+    "fixture": "sv2-fsy-05"
+  },
+  "paused_reason": "artifact storage is unavailable (Not a directory), so publication is paused and the attempt keeps its files",
+  "run": {
+    "publication_paused_on_loss": true,
+    "worktree_intact_after_loss": true,
+    "published_after_restore": true,
+    "replay_is_the_same_reference": true,
+    "no_duplicate_objects": true,
+    "worktree_intact_after_replay": true
+  },
+  "shared_runtime_mount_rejections_total": {}
+}

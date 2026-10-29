@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/master_scale.py:scripts.swarm_v2.master_scale.x_set_rule__mutmut_3:5b5b016262eb11098e0dd3d38fbb036ce840f77806b98b16d8c470e6c47e3619": {
+    "reader": "standards_reader",
+    "reason": "MasterSeats.key returns the PREFIX slug masters string and never reads self.redis, so passing None as the Redis client gives the same key and every output is unchanged. Equivalent."
+  }
+}

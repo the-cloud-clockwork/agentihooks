@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x_validate_actors__mutmut_32:520b4200e649caa4f4741dc8d5c3c86dd4c2a12785a9a8ec06deb05bb93f636b": {
+    "reader": "standards_reader",
+    "reason": "Diagnostic only: an invalid or duplicate queue identity still raises ValueError before returning the approved list. Added XX decoration preserves the same queue validation failure and cannot change event scope or accepted identities."
+  }
+}

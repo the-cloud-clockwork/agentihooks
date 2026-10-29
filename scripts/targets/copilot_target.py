@@ -205,6 +205,12 @@ class CopilotAdapter:
     def home(self) -> Path:
         return copilot_home()
 
+    def summary_counts(self) -> dict[str, int]:
+        from scripts.init_reporter import installed_counts
+
+        config = self._load_json(self.home() / "mcp-config.json")
+        return installed_counts(config.get("mcpServers", {}), agents_skills_home(), {})
+
     @staticmethod
     def _managed_sidecar(home: Path) -> Path:
         return home / ".agentihooks-managed.json"
@@ -689,6 +695,7 @@ class CopilotAdapter:
         profile_dirs: list[tuple[str, Path]],
         profile_chain: list[str],
         bundle_dir: Path | None,
+        user_dir: Path | None = None,
     ) -> None:
         _i = _install_module()
         managed_text = build_persona(
@@ -698,6 +705,7 @@ class CopilotAdapter:
             self._pending_rules,
             _MANAGED_HEADER,
             _MANAGED_FOOTER,
+            user_dir,
         )
         dst = self.home() / "copilot-instructions.md"
         text = write_persona(dst, managed_text, _MANAGED_HEADER, _MANAGED_FOOTER)

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/lifecycle.py:scripts.swarm.lifecycle.x__conflict__mutmut_6:43e13262c1f2bb3bef51512c5358ce5dc56e4562902d8dc23e1a549e6540c9e7": {
+    "reader": "standards_reader",
+    "reason": "redis-py HashCommands.hincrby is (name, key, amount: int = 1), so the omitted argument increments by 1 as before."
+  }
+}

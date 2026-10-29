@@ -1,0 +1,6 @@
+{
+  "hooks/context/quota_usage.py:hooks.context.quota_usage.x_account_snapshot__mutmut_12:01e7cbc5564b8c31de892749c8caa3f743fcd7395e0d72b94178b17ee215f30f": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: record_rate_limits is the only writer of these files and writes ASCII, so decoding is identical on any ASCII-compatible default; the only difference is for non-ASCII bytes, which this code never writes. Case-only codec name change."
+  }
+}

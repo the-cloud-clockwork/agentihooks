@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/controller.py:scripts.swarm.controller.x_take_tick_lock__mutmut_12:040eb12c163f2816da626a2911bb0b2abbf9156de9c566bd8bafd4d1ee2d5139": {
+    "reader": "standards_reader",
+    "reason": "The UUID field renamed to XXtokenXX is opaque internal nonce data. Scoped searches across scripts, hooks, docs and tests found no field-name consumer. take_tick_lock parses only epoch; release_tick_lock compares the entire serialized token. Independent data probes for token, XXtokenXX and TOKEN confirmed same-epoch exclusion, higher-epoch takeover, mismatching-token preservation and successor release. UUID entropy, epoch and exact-token matching remain unchanged."
+  }
+}

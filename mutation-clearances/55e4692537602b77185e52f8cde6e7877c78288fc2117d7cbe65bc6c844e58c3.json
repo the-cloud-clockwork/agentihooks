@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_cache.py:scripts.doctor.ci_cache.x__trim__mutmut_14:b3e187aa66e3410421b9a9ab57a4ecd5014e3ed21e1866d1f150ec791f46eaee": {
+    "reader": "Standards",
+    "reason": "Redis Pipeline uses transaction as a truth value. None and False both disable transactions, leaving queued STRLEN commands, replies and ordering identical."
+  }
+}

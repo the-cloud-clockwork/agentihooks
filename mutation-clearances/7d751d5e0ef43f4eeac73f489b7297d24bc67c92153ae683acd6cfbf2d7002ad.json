@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x\u01c1InputFramer\u01c1_sequence__mutmut_23:ebf438b278223df087945a3a8b21937e8c192fe690aa3f85c1f1c1c99439e9ba": {
+    "reader": "standards-reader round three",
+    "reason": "both CSI prefix literals have identical bytes."
+  }
+}

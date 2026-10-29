@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x_matching__mutmut_25:1f10748a82146401530344fa1cfe9e0e1666d2434daa9d535b793bd81a251e52": {
+    "reader": "Standards",
+    "reason": "Only AND, IS, NULL, OR, ORDER BY, DESC and LIMIT keyword casing changes; SQLite keeps the same time predicate, descending id ordering and one-row limit."
+  }
+}

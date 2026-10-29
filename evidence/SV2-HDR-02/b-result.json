@@ -1,0 +1,153 @@
+{
+  "case": "T-SV2-HDR-02-B",
+  "evidence_class": "mocked: a recording runner stands in for ssh and herdr; it admits a connection only when the client's pinned known_hosts key matches the key the fixture server serves and the client certificate, verified against the fixture user CA, names the server's execution principal; herdr status and schema replies are the SV2-HDR-01 captures of the pinned 0.9.1 binary. No sshd, herdr process or cluster runs in these cases.",
+  "input_sha256": {
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940",
+    "herdr-terminal-objects.json": "14bedb92d7b8d06eec222780bd5ae9ae5e3f29b6c4e1286218801ca631b1f83f",
+    "herdr-terminal.json": "096cb6a1bc81149885ad765e80d3d42536bcd01982f41b2c21eea22b2fd4ecfe"
+  },
+  "observed": {
+    "certificate_for_another_execution": {
+      "client_files_after": [
+        ".ssh",
+        ".ssh/config",
+        ".ssh/swarm-terminals",
+        ".ssh/swarm-terminals/bin",
+        ".ssh/swarm-terminals/bin/ssh",
+        ".ssh/swarm-terminals/certificates",
+        ".ssh/swarm-terminals/certificates/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal-cert.pub",
+        ".ssh/swarm-terminals/endpoints",
+        ".ssh/swarm-terminals/endpoints/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.conf",
+        ".ssh/swarm-terminals/generations",
+        ".ssh/swarm-terminals/generations/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+        ".ssh/swarm-terminals/id_ed25519",
+        ".ssh/swarm-terminals/known_hosts",
+        ".ssh/swarm-terminals/known_hosts/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal"
+      ],
+      "client_files_before": [],
+      "commands": [
+        [
+          "/usr/bin/ssh",
+          "-F",
+          "<home>/.ssh/config",
+          "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local",
+          "true"
+        ]
+      ],
+      "machines": [],
+      "reason": "unauthorized",
+      "terminal_endpoint_auth_failures": {
+        "unauthorized": 1
+      },
+      "terminal_endpoint_refusals": {
+        "unauthorized": 1
+      }
+    },
+    "changed_host_key": {
+      "client_files_after": [
+        ".ssh",
+        ".ssh/config",
+        ".ssh/swarm-terminals",
+        ".ssh/swarm-terminals/bin",
+        ".ssh/swarm-terminals/bin/ssh",
+        ".ssh/swarm-terminals/certificates",
+        ".ssh/swarm-terminals/certificates/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal-cert.pub",
+        ".ssh/swarm-terminals/endpoints",
+        ".ssh/swarm-terminals/endpoints/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.conf",
+        ".ssh/swarm-terminals/generations",
+        ".ssh/swarm-terminals/generations/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+        ".ssh/swarm-terminals/id_ed25519",
+        ".ssh/swarm-terminals/known_hosts",
+        ".ssh/swarm-terminals/known_hosts/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal"
+      ],
+      "client_files_before": [],
+      "commands": [
+        [
+          "/usr/bin/ssh",
+          "-F",
+          "<home>/.ssh/config",
+          "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local",
+          "true"
+        ]
+      ],
+      "machines": [],
+      "reason": "host_key_changed",
+      "terminal_endpoint_auth_failures": {
+        "host_key_changed": 1
+      },
+      "terminal_endpoint_refusals": {
+        "host_key_changed": 1
+      }
+    },
+    "missing_cluster_dns_route": {
+      "client_files_after": [],
+      "client_files_before": [],
+      "commands": [],
+      "machines": [],
+      "reason": "no_route",
+      "terminal_endpoint_auth_failures": {},
+      "terminal_endpoint_refusals": {
+        "no_route": 1
+      }
+    },
+    "non_operator_role": "unauthorized",
+    "planted_public_exposure": {
+      "policy": [
+        "policy admits clients beyond the selected terminal clients"
+      ],
+      "service": [
+        "service type LoadBalancer is not ClusterIP",
+        "service sets externalIPs",
+        "service port 2222 is not the private terminal port"
+      ]
+    },
+    "public_route": {
+      "client_files_after": [],
+      "client_files_before": [],
+      "commands": [],
+      "machines": [],
+      "reason": "public_route",
+      "terminal_endpoint_auth_failures": {},
+      "terminal_endpoint_refusals": {
+        "public_route": 1
+      }
+    },
+    "unauthorized_client": {
+      "client_files_after": [
+        ".ssh",
+        ".ssh/config",
+        ".ssh/swarm-terminals",
+        ".ssh/swarm-terminals/bin",
+        ".ssh/swarm-terminals/bin/ssh",
+        ".ssh/swarm-terminals/certificates",
+        ".ssh/swarm-terminals/certificates/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal-cert.pub",
+        ".ssh/swarm-terminals/endpoints",
+        ".ssh/swarm-terminals/endpoints/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.conf",
+        ".ssh/swarm-terminals/generations",
+        ".ssh/swarm-terminals/generations/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+        ".ssh/swarm-terminals/id_ed25519",
+        ".ssh/swarm-terminals/known_hosts",
+        ".ssh/swarm-terminals/known_hosts/swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal"
+      ],
+      "client_files_before": [],
+      "commands": [
+        [
+          "/usr/bin/ssh",
+          "-F",
+          "<home>/.ssh/config",
+          "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local",
+          "true"
+        ]
+      ],
+      "machines": [],
+      "reason": "unauthorized",
+      "terminal_endpoint_auth_failures": {
+        "unauthorized": 1
+      },
+      "terminal_endpoint_refusals": {
+        "unauthorized": 1
+      }
+    }
+  },
+  "state": "passed"
+}

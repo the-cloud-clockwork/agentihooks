@@ -1,0 +1,20 @@
+{
+  "cases": [
+    "T-SV2-LDG-05-A",
+    "T-SV2-LDG-05-B",
+    "T-SV2-LDG-05-C"
+  ],
+  "evidence_class": "mocked Redis and server clock; fixture network; signed fixture grants",
+  "fixture": "Delayed command delivery, a duplicated poll response and a drain whose acknowledgement is dropped by the network, built on the SV2-LDG-02 heartbeat world; the worker state file lives in a pytest tmp_path folder",
+  "fixture_clock": "The fixture server clock starts at 1000 ms; command expiry 50 ms, delivery delay 30 ms, late delivery 60 ms, poll interval 10 ms",
+  "independent_runs": 2,
+  "cleanup": "Each run uses its own fakeredis instance and tmp_path folder; nothing outside them is written",
+  "mutation_scope": "Worker command records in the fixture swarm only; no ledger document is opened, so the ledger stays the single writer of operator work state",
+  "inputs": {
+    "tests/fixtures/swarm_v2/worker-commands.json": "8228171c01e6568f9185b5a77df62336814091f915daec25c7d6b26ba160c029"
+  },
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2423",
+  "package": "SV2-LDG-05",
+  "tested_commit": "83bad96f54bf",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063154992"
+}

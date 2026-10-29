@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/api/artifacts.py:scripts.swarm_v2.api.artifacts.x\u01c1ArtifactsAPI\u01c1_dispatch__mutmut_75:666af9be4c4117072b8515de918c97213fc34ae079faf0efcae1c2d355acfc8c": {
+    "reader": "standards_reader",
+    "reason": "False and None are consumed only through if not listing in the current _key implementation. For every target and scope, both execute identical task prefix, canonical component and minimum object path checks, returning the same key or refusal with identical side effects. Neither argument is exposed or type checked. This ruling covers only False to None at this call site."
+  }
+}

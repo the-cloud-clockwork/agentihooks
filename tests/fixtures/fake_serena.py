@@ -41,6 +41,8 @@ TOOLS = {
     "slow": (slow, {"started": "string", "release": "string"}, True),
     "mystery": (mystery, {}, None),
     "activate_project": (activate_project, {"project": "string"}, True),
+    "read_file": (find_symbol, {"relative_path": "string"}, True),
+    "search_for_pattern": (find_symbol, {"substring_pattern": "string"}, True),
 }
 
 

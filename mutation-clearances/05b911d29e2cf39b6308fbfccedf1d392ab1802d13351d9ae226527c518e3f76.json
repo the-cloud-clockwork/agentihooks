@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker_image.py:scripts.swarm_v2.worker_image.x_fetch__mutmut_2:82e8268dabcf4f051fa41e2179d9848ef4bfa9cca3fd37f2e773e4e1773a7b7e": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: success breaks; fifth transient failure raises at attempt==4; other exceptions propagate. Sixth iteration is unreachable."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/content_refusal.py:scripts.swarm.content_refusal.x_repeated__mutmut_27:adb33ab93ddeec2c64e5a74c5b7bb57e2a0533b411cc1a1db4e794674d1f65e3": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The independently reviewed candidate consistently renames an isolated private receipt bucket. The only consumer uses this same key for insertion and cardinality; slug, task and accepted turn identity remain unchanged. No other consumer reads the bucket. All observed refusal decisions, ownership, transfers and wake behavior are identical."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ready.py:scripts.swarm.ready.x_continuation__mutmut_26:15e8bff80e7a94b704706ff3543f8d16490db50b1d0e71364bcd7ca147b70816": {
+    "reader": "Standards /root/standards_clearance",
+    "reason": "Equivalent mutant under Development Manifesto section 6.1: when worktree is missing, both the empty default and XXXX are relative paths. Path(top).is_absolute() is false for both, so continuation returns the same empty worktree. A present field is unchanged."
+  }
+}

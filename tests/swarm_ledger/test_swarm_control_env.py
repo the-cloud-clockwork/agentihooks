@@ -9,9 +9,6 @@ from scripts.swarm_ledger import ledger_server
 EXE = "/opt/bin/agentihooks"
 
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 @pytest.fixture
 def calls(monkeypatch):
     import fakeredis

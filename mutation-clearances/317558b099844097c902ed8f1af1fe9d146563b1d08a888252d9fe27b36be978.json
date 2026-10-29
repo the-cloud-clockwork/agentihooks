@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__line_match__mutmut_9:4d729380ef1ea31763f0cd47fb8ddcc25ab5409af3fdbc59336dc0270f0d285d": {
+    "reader": "Standards",
+    "reason": "Only WHERE, AND, IS, NULL and OR keyword casing changes; identical bound name, hash and time predicates select the same rows."
+  }
+}

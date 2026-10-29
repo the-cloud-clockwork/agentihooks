@@ -1,0 +1,6 @@
+{
+  "scripts/ci_stats_minutes.py:scripts.ci_stats_minutes.x_main__mutmut_78:dd70c718bb858b4afc7b94691a06dca601c1aaeede1f0d5b72098bc25a097192": {
+    "reader": "standards-reader",
+    "reason": "Flush False changes buffering only. Normal CLI completion emits identical rows and summary; collection, artifact values, and mapping are unaffected. Immediate row delivery is outside the stated contract."
+  }
+}

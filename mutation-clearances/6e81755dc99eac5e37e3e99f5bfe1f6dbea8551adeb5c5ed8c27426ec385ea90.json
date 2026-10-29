@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x__update__mutmut_14:d5a2d66db815dda58894e04b3a5183bc2a751445635226d715dd30d9bb6ffbcf": {
+    "reader": "Standards",
+    "reason": "Same as x__update__mutmut_12: doc.get(\"tasks\", ) is doc.get(\"tasks\"), which returns None for a missing key. It raises TypeError at the same point as mutmut_12 and differs from base only for a document without tasks, which no accepted path produces (see mutmut_12)."
+  }
+}

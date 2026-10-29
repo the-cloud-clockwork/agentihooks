@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.x\u01c1NatsWorkQueue\u01c1__init____mutmut_44:b5d90b2d6b6aed0a3a7e6128e222116c03442f513e73483d3ef5223993039252": {
+    "reader": "standards-reader",
+    "reason": "The original subject is captured in self._subject before rebuilding QueueNames. Later provisioning reads only stream and filter, and consumer setup reads durable. The temporary subject field is never observed or escaped, so None changes no configuration, binding or publication."
+  }
+}

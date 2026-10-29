@@ -1,0 +1,56 @@
+{
+  "case": "T-SV2-UX-02-C",
+  "checks": {
+    "another_click_refused_until_reconciled": true,
+    "earlier_operation_kept_its_outcome": true,
+    "held_until_the_worker_reports": true,
+    "lost_acknowledgement_reconciled_by_operation_id": true,
+    "next_click_accepted_after_the_checkpoint": true,
+    "replay_created_no_second_command": true
+  },
+  "evidence_class": "mocked: a fake Redis swarm store holds two Kubernetes workers and one local agent; page clicks enter through the ledger server's lifecycle control with the incarnation, generation and task revision a page rendered; the hive command runner consumes the queue with its terminal commands stubbed; a worker's acknowledgement and checkpoint outcome are written through the worker command queue; no ledger HTTP server, browser, worker Pod or cluster runs",
+  "input_sha256": {
+    "ledger-lifecycle-controls.json": "7debe263338f18145353feee5368d88748f513d5110fb23c17885940574ed7f1"
+  },
+  "ledger_control_conflicts_total": 2,
+  "observed": {
+    "answers": [
+      [
+        200,
+        ""
+      ],
+      [
+        200,
+        ""
+      ],
+      [
+        409,
+        "an earlier control on this agent is still unresolved"
+      ],
+      [
+        409,
+        "an earlier control on this agent is still unresolved"
+      ],
+      [
+        200,
+        ""
+      ]
+    ],
+    "runner": [
+      "control lifecycle acknowledged"
+    ],
+    "states": {
+      "op-cancel-eng-2-after": "queued",
+      "op-drain-eng-2": "issued"
+    },
+    "worker": {
+      "outcome": {
+        "checkpoint": "ckpt-sv2-ux-02-eng-2",
+        "status": "checkpointed"
+      },
+      "state": "completed"
+    }
+  },
+  "package": "SV2-UX-02",
+  "state": "passed"
+}

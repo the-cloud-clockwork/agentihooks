@@ -1,0 +1,17 @@
+{
+  "package": "SV2-SES-05",
+  "cases": [
+    "T-SV2-SES-05-A",
+    "T-SV2-SES-05-B",
+    "T-SV2-SES-05-C"
+  ],
+  "evidence_class": "mocked: fixture transcript files in a temporary folder and SQLite catalog and import ledger files stand in for the operator's real Claude and Codex homes and the central database; no live provider home was read",
+  "inputs": {
+    "tests/fixtures/swarm_v2/session-import.json": "74cf01fbdee514d0c49a3d9db6eb37b261c43dc1717cf1c14fd753d0661901fb"
+  },
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40131665098",
+  "tested_commit": "2e383a033",
+  "green_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40133288836",
+  "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40134971509",
+  "records_note": "each record was printed by the committed evidence assertion failing on absent or stale records in Proofs runs 40132037808, 40132900446 and 40134254754; those runs are not cited as green"
+}

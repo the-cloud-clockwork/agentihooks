@@ -1,0 +1,6 @@
+{
+  "hooks/context/scheduled_broadcasts.py:hooks.context.scheduled_broadcasts.x_save__mutmut_10:aaa1ecbf38dc6805d7e16dbc782023796728256c72e1519586e62a4f846e5a1f": {
+    "reader": "Standards",
+    "reason": "Only ASCII identifier capitalization changes. SQLite resolves ID, ENTRY and EMISSIONS to the same columns and table, preserving the projection, predicate and returned rows."
+  }
+}

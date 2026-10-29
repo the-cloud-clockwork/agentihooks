@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x_forget__mutmut_7:9da12719ba0865cfba47dd9d0c3a7008db95a640941c9ea50cd25815b53bdcb0": {
+    "reader": "Standards",
+    "reason": "Only ASCII ENTRIES and SWARM identifier casing changes; SQLite deletes from the same table with the same bound swarm predicate and cascade."
+  }
+}

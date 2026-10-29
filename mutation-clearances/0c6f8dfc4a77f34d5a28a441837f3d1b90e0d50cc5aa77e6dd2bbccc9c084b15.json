@@ -1,0 +1,6 @@
+{
+  "scripts/scheduler/process_timer.py:scripts.scheduler.process_timer.x\u01c1Timer\u01c1__init____mutmut_1:067343c434fa531ac808145a10faaae527d59997f8bae698d6ee8b172d9e8120": {
+    "reader": "/root/standards_reader",
+    "reason": "closed uses truthiness."
+  }
+}

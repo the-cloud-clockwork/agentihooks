@@ -1,14 +1,20 @@
+import ast
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from scripts.ci_mutation.runner import run_gate
+
+
+def _no_pytest(self, params, **kwargs):
+    return 0
 
 
 @pytest.mark.parametrize("lines", [{1}, {2}, {2, 5}])
@@ -94,6 +100,7 @@ def test_gate_imports_store_from_scratch_directory(tmp_path, monkeypatch, child,
     (tmp_path / "tests/test_store.py").write_text(test)
     (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
     store = tmp_path / "scripts/swarm/store.py"
+    store.write_text(subprocess.check_output(["git", "show", "HEAD:scripts/swarm/store.py"], cwd=root, text=True))
 
     def git(*args):
         return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
@@ -126,12 +133,31 @@ def test_gate_imports_store_from_scratch_directory(tmp_path, monkeypatch, child,
         assert report["failed"] is False
 
 
+def _assert_units_run_their_own_tests(monkeypatch, selection, runner, test_calls):
+    unit = "scripts.s.x_f__mutmut_1"
+    units = []
+
+    def shard_tests(tests, name, index):
+        units.append((tests, name, index))
+        return [test for test in tests if test in {"h", "b"}]
+
+    with monkeypatch.context() as planned:
+        planned.setattr(selection, "shard_tests", shard_tests)
+        assert runner.PytestRunner().run_tests(mutant_name=unit, tests=["a"]) == 0
+        runner.PytestRunner().run_tests(mutant_name=unit, tests=("h", "a", "b"))
+        assert runner.PytestRunner().run_tests(mutant_name="unsplit", tests=[]) == 9
+    assert units == [(["a"], unit, 1), (["h", "a", "b"], unit, 1), ([], "unsplit", 1)]
+    assert test_calls[-2:] == [(unit, ["h", "b"]), ("unsplit", [])]
+    assert len(test_calls) == 6
+
+
 @pytest.mark.parametrize(
     "header", ["", '"""sample contract"""\n', '"""sample contract"""\nfrom __future__ import annotations\n']
 )
 def test_selection_passes_exact_lines_before_generation_and_reloads_source_packages(tmp_path, monkeypatch, header):
     from mutmut import configuration as engine_config
 
+    from scripts.ci_mutation import selection as selection_module
     from scripts.ci_mutation.selection import run_selected
 
     monkeypatch.setenv("CI", "true")
@@ -142,6 +168,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     (project / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["hooks/"]\n')
     monkeypatch.setattr("os.cpu_count", lambda: 6)
     monkeypatch.setattr("os.sched_getaffinity", lambda pid: set(range(6)) if pid == 0 else set())
+    monkeypatch.setattr("scripts.ci_mutation.selection.quota_cpus", lambda: None)
     selection = tmp_path / "lines.json"
     selection.write_text(
         json.dumps(
@@ -195,13 +222,17 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     test_calls = []
 
     class PytestRunner:
+        execute_pytest = _no_pytest
+
         def run_tests(self, *, mutant_name, tests):
             assert isinstance(self, PytestRunner)
             test_calls.append((mutant_name, tests))
             return 9
 
+    mutants = [(data, f"scripts.sample.x_f__mutmut_{n}", None) for n in range(1, 8)]
     runner = SimpleNamespace(
         collect_or_load_stats=None,
+        collect_source_file_mutation_data=lambda *, mutant_names: (mutants, mutant_names),
         SourceFileMutationData=mutation_data,
         Config=SimpleNamespace(get=lambda: config),
         PytestRunner=PytestRunner,
@@ -260,6 +291,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert runner.PytestRunner().run_tests(mutant_name=None, tests=[]) == 9
         assert runner.collect_or_load_stats(test_runner) is None
         assert collected == [True]
+        assert runner.collect_source_file_mutation_data(mutant_names=("m",)) == ([mutants[1], mutants[4]], ("m",))
         assert config.source_paths == [Path("hooks/")]
         assert engine.tests_by_mangled_function_name == {
             "scripts.sample.x_f": {"tests/test_sample.py::test_slow"},
@@ -285,6 +317,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
             (None, ["tests/test_x.py::t"]),
             ("m", ["tests/test_y.py::t"]),
         ]
+        _assert_units_run_their_own_tests(monkeypatch, selection_module, runner, test_calls)
         data.exit_code_by_key = {}
         with pytest.raises(SystemExit) as empty:
             runner.collect_or_load_stats(test_runner)
@@ -307,8 +340,111 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
         monkeypatch.setitem(sys.modules, name, sys.modules[name])
     with pytest.raises(SystemExit) as error:
-        run_selected(selection)
+        run_selected(selection, (1, 3))
     assert error.value.code == 7
+
+
+@pytest.mark.parametrize("mode", ["collect", "reuse", "empty"])
+def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, monkeypatch, mode):
+    from collections import defaultdict
+
+    from scripts.ci_mutation.selection import run_selected
+
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("os.sched_getaffinity", lambda pid: {0, 1})
+    selection = tmp_path / "lines.json"
+    selection.write_text(json.dumps({"scripts/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]}}))
+    data = SimpleNamespace(exit_code_by_key={} if mode == "empty" else {"m": None}, load=lambda: None)
+    config = SimpleNamespace(
+        source_paths=[Path("scripts/")],
+        pytest_add_cli_args_test_selection=["tests/test_c.py", "tests/test_a.py", "tests/test_b.py"],
+    )
+    engine = SimpleNamespace(tests_by_mangled_function_name=defaultdict(set), duration_by_test={}, stats_time=None)
+    result = {
+        "status": 0,
+        "tests": {"scripts.sample.x_f": ["tests/test_sample.py::t"], "scripts.other.x_g": ["tests/test_o.py::t"]},
+        "durations": {"tests/test_sample.py::t": 1},
+        "cpu": 2,
+    }
+    shared = tmp_path / "shared.json"
+    shared.write_text(json.dumps([result, {"status": 0, "tests": {}, "durations": {}, "cpu": 3}]))
+    part = tmp_path / "stats/part-1.json"
+    seen = []
+
+    test_runner = object()
+
+    def buckets(engine_runner, value, shards, work):
+        assert engine_runner is runner
+        assert value is test_runner
+        assert config.source_paths == [tmp_path / "mutants/scripts"]
+        seen.append((shards, work))
+        return [result]
+
+    def bucket_split(root, files, count):
+        assert (root, files, count) == (tmp_path, ["tests/test_b.py"], 2)
+        return [files]
+
+    class PytestRunner:
+        execute_pytest = _no_pytest
+
+        def run_tests(self, *, mutant_name, tests):
+            return 0
+
+    saved = []
+    runner = SimpleNamespace(
+        SourceFileMutationData=lambda *, path: data,
+        Config=SimpleNamespace(get=lambda: config),
+        PytestRunner=PytestRunner,
+        collect_source_file_mutation_data=lambda *, mutant_names: ([], {}),
+        mutmut=engine,
+        save_stats=lambda: saved.append(engine.stats_time),
+    )
+
+    def cli(args):
+        if mode == "reuse":
+            assert runner.collect_or_load_stats(test_runner) is None
+            assert seen == []
+            assert saved == [5]
+            assert engine.tests_by_mangled_function_name == {
+                "scripts.sample.x_f": {"tests/test_sample.py::t"},
+                "scripts.other.x_g": set(),
+            }
+            assert engine.duration_by_test == {"tests/test_sample.py::t": 1}
+            raise SystemExit(7)
+        with pytest.raises(SystemExit) as done:
+            runner.collect_or_load_stats(test_runner)
+        assert done.value.code == 0
+        assert config.source_paths == [Path("scripts/")]
+        assert seen == ([] if mode == "empty" else [([["tests/test_b.py"]], tmp_path)])
+        assert json.loads(part.read_text()) == {
+            "key": "key",
+            "part": 1,
+            "parts": 3,
+            "results": [] if mode == "empty" else [result],
+        }
+        assert saved == []
+        raise SystemExit(7)
+
+    runner.cli = cli
+    monkeypatch.setattr("scripts.ci_mutation.selection.collect_test_ids", lambda value, files: files)
+    monkeypatch.setattr("scripts.ci_mutation.selection.run_stats_buckets", buckets)
+    monkeypatch.setattr("scripts.ci_mutation.selection.stats_shards", bucket_split)
+    monkeypatch.setitem(sys.modules, "mutmut", SimpleNamespace(__main__=runner))
+    monkeypatch.setitem(sys.modules, "mutmut.__main__", runner)
+    for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
+        monkeypatch.setitem(sys.modules, name, sys.modules[name])
+    stats = ["reuse", str(shared)] if mode == "reuse" else ["collect", str(part), "key", "1", "3"]
+    with pytest.raises(SystemExit) as error:
+        run_selected(selection, (0, 1), *stats)
+    assert error.value.code == 7
+
+
+def test_selection_refuses_an_unknown_stats_mode_before_touching_mutmut():
+    from scripts.ci_mutation.selection import load_or_collect_stats
+
+    with pytest.raises(ValueError, match="^unknown mutation stats mode 'other'$"):
+        load_or_collect_stats(None, None, ["scripts/sample.py"], "other", ())
 
 
 def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_excluded(tmp_path, monkeypatch):
@@ -335,6 +471,247 @@ def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_
         selected_mutants("scripts/sample.py", "# pragma: no mutate end\n", {1})
 
 
+def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count_without_mutants(monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutants
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    source = (
+        "import dataclasses\n"
+        "import functools\n"
+        "\n"
+        "@dataclasses.dataclass(frozen=True)\n"
+        "class Launcher:\n"
+        "    count: int = 1\n"
+        "\n"
+        "    def launch(self):\n"
+        "        return self.count + 1\n"
+        "\n"
+        "@opaque\n"
+        "class Cached:\n"
+        "    def cached(value):\n"
+        "        return value - 1\n"
+        "@functools.total_ordering\n"
+        "class Ordered:\n"
+        "    def __lt__(self, other):\n"
+        "        return self.count < other.count\n"
+    )
+    generated, names = selected_mutants("scripts/sample.py", source, {9})
+    assert len(names) == 2
+    assert all(name.startswith("xǁLauncherǁlaunch__mutmut_") for name in names)
+    assert "self.count - 1" in generated
+    compile(generated, "scripts/sample.py", "exec")
+    assert mutation_counts("scripts/sample.py", source, {9}) == (2, [])
+    assert mutation_counts("scripts/sample.py", source, {6}) == (0, [])
+    assert mutation_counts("scripts/sample.py", source, {6, 9}) == (2, [])
+    assert selected_mutants("scripts/sample.py", source, {14, 18})[1] == []
+    assert mutation_counts("scripts/sample.py", source, {14}) == (0, ["cached"])
+    assert mutation_counts("scripts/sample.py", source, {18}) == (0, ["__lt__"])
+    assert mutation_counts("scripts/sample.py", source, {9, 14, 18}) == (2, ["cached", "__lt__"])
+    assert mutation_counts("scripts/sample.py", source, {4, 11}) == (0, [])
+    monkeypatch.setattr(
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[r"count \+ 1"], source_paths=[], max_stack_depth=-1),
+    )
+    assert mutation_counts("scripts/sample.py", source, {9, 14}) == (0, ["cached"])
+
+
+def test_property_cached_property_static_and_class_method_bodies_are_graded_and_their_mutants_run(monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutants
+
+    monkeypatch.setattr(
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1, use_setproctitle=False),
+    )
+    source = (
+        "import functools\n"
+        "from functools import cached_property\n"
+        "\n"
+        "class Shape:\n"
+        "    def __init__(self, side):\n"
+        "        self.side = side\n"
+        "\n"
+        "    @property\n"
+        "    def area(self):\n"
+        "        return self.side * self.side\n"
+        "\n"
+        "    @functools.cached_property\n"
+        "    def perimeter(self):\n"
+        "        return self.side * 4\n"
+        "\n"
+        "    @staticmethod\n"
+        "    def double(value):\n"
+        "        return value * 2\n"
+        "\n"
+        "    @classmethod\n"
+        "    def unit(cls):\n"
+        "        return cls(1 + 1)\n"
+        "\n"
+        "    @cached_property\n"
+        "    def twice(self):\n"
+        "        return self.side + self.side\n"
+    )
+    for line in (10, 14, 18, 22, 26):
+        found, ungraded = mutation_counts("scripts/sample.py", source, {line})
+        assert found > 0
+        assert ungraded == []
+    generated, names = selected_mutants("scripts/sample.py", source, {10, 14, 18, 22, 26})
+    assert {name.split("__mutmut_")[0] for name in names} == {
+        "xǁShapeǁarea",
+        "xǁShapeǁperimeter",
+        "xǁShapeǁdouble",
+        "xǁShapeǁunit",
+        "xǁShapeǁtwice",
+    }
+    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    namespace = {"__name__": "scripts.sample"}
+    exec(compile(generated, "<sample>", "exec"), namespace)
+    shape = namespace["Shape"]
+    copies = generated.split("def xǁShapeǁdouble__mutmut_")
+    assert len(copies) > 2
+    assert all(chunk.rstrip().endswith("@staticmethod") for chunk in copies[:-1])
+
+    def measure():
+        return shape(3).area, shape(3).perimeter, shape.double(3), shape.unit().side, shape(3).twice
+
+    assert measure() == (9, 12, 6, 2, 6)
+    outcomes = set()
+    for name in names:
+        monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
+        try:
+            outcomes.add(measure())
+        except TypeError:
+            outcomes.add(name)
+    assert (9, 12, 6, 2, 6) not in outcomes
+
+
+@pytest.mark.parametrize(
+    "decorator, expected",
+    [
+        ("@functools.lru_cache(maxsize=2)", 6),
+        ("@cache", 6),
+        ("@wrapped", 16),
+        ("@wrapped\n@functools.lru_cache(maxsize=None)", 16),
+    ],
+)
+@pytest.mark.parametrize("method", [False, True])
+def test_wrapped_function_bodies_are_planned_and_their_mutants_run(monkeypatch, decorator, expected, method):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutant_names, selected_mutants
+
+    monkeypatch.setattr(
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1, use_setproctitle=False),
+    )
+    prefix = (
+        "import functools\n"
+        "from functools import cache\n"
+        "decorations = []\n"
+        "def wrapped(function):\n"
+        "    decorations.append(function.__name__)\n"
+        "    def call(*args, **kwargs):\n"
+        "        return function(*args, **kwargs) + 10\n"
+        "    return call\n"
+    )
+    indent = "    " if method else ""
+    signature = "self, value" if method else "value"
+    source = prefix + ("class Box:\n" if method else "")
+    source += "\n".join(f"{indent}{line}" for line in decorator.splitlines()) + "\n"
+    source += f"{indent}def doubled({signature}):\n{indent}    return value * 2\n"
+    line = len(source.splitlines())
+    found, ungraded = mutation_counts("scripts/sample.py", source, {line})
+    assert found == 2
+    assert ungraded == []
+    generated, names = selected_mutants("scripts/sample.py", source, {line})
+    assert len(names) == found
+    assert selected_mutant_names("scripts/sample.py", source, {line}) == names
+
+    def measure():
+        namespace = {"__name__": "scripts.sample"}
+        exec(compile(generated, "<sample>", "exec"), namespace)
+        assert namespace["decorations"] == (["doubled"] if "@wrapped" in decorator else [])
+        function = namespace["Box"]().doubled if method else namespace["doubled"]
+        return function(3)
+
+    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    assert measure() == expected
+    for name in names:
+        monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
+        assert measure() != expected
+
+
+def test_cached_static_and_class_method_bodies_keep_their_binding_when_mutated(monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutants
+
+    monkeypatch.setattr(
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1, use_setproctitle=False),
+    )
+    source = (
+        "import functools\n"
+        "class Box:\n"
+        "    @staticmethod\n"
+        "    @functools.cache\n"
+        "    def doubled(value):\n"
+        "        return value * 2\n"
+        "    @classmethod\n"
+        "    @functools.lru_cache(maxsize=2)\n"
+        "    def tripled(cls, value):\n"
+        "        return value * 3\n"
+        "    @classmethod\n"
+        "    @functools.lru_cache(4)\n"
+        "    def quadrupled(cls, value):\n"
+        "        return value * 4\n"
+    )
+    for line in (6, 10):
+        found, ungraded = mutation_counts("scripts/sample.py", source, {line})
+        assert found > 0
+        assert ungraded == []
+    generated, names = selected_mutants("scripts/sample.py", source, {6, 10})
+    assert {name.split("__mutmut_")[0] for name in names} == {"xǁBoxǁdoubled", "xǁBoxǁtripled"}
+    assert generated.count("is_classmethod = True") == 1
+    for copy, binding in (("doubled", "@staticmethod"), ("tripled", "@classmethod")):
+        chunks = generated.split(f"def xǁBoxǁ{copy}__mutmut_")
+        assert len(chunks) > 2
+        assert all(chunk.rstrip().endswith(binding) for chunk in chunks[:-1])
+
+    def measure():
+        namespace = {"__name__": "scripts.sample"}
+        exec(compile(generated, "<sample>", "exec"), namespace)
+        box = namespace["Box"]
+        return box.doubled(3), box().doubled(3), box.tripled(3), box().tripled(3), box.quadrupled(3)
+
+    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    assert measure() == (6, 6, 9, 9, 12)
+    for name in names:
+        monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
+        assert measure() != (6, 6, 9, 9, 12)
+
+
+@pytest.mark.parametrize("total", [1, 2, 3, 7])
+def test_shards_split_every_mutant_name_exactly_once_and_evenly(total):
+    from scripts.ci_mutation.mutant_shards import shard_names
+
+    names = [f"scripts.sample.x_f{n % 3}__mutmut_{n}" for n in range(1, 21)]
+    shares = [shard_names(reversed(names), (index, total)) for index in range(total)]
+    assert set().union(*shares) == set(names)
+    assert sum(map(len, shares)) == len(names)
+    assert max(map(len, shares)) - min(map(len, shares)) <= 1
+    assert shares == [shard_names(names, (index, total)) for index in range(total)]
+
+
 def test_selection_never_imports_the_mutants_tree_another_worker_is_writing(tmp_path, monkeypatch):
     from mutmut.configuration import Config
 
@@ -356,7 +733,7 @@ def test_selection_never_imports_the_mutants_tree_another_worker_is_writing(tmp_
 
 
 def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_path):
-    from scripts.ci_mutation.selection import stats_shards
+    from scripts.ci_mutation.selection import IMPORT_GROUPS, stats_shards
 
     (tmp_path / "tests").mkdir()
     files = [f"tests/test_{name}.py" for name in "abcdef"]
@@ -385,12 +762,318 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
         (bridge / f"tests/test_{name}.py").write_text(text)
     bridged = [f"tests/test_{name}.py" for name in marks]
     assert stats_shards(bridge, bridged, 4) == [bridged[1:], bridged[:1]]
+    (group,) = IMPORT_GROUPS
+    imports = tmp_path / "imports"
+    (imports / "tests").mkdir(parents=True)
+    for name in "pqr":
+        (imports / f"tests/test_{name}.py").write_text(
+            f'import pytest\n\npytestmark = pytest.mark.xdist_group("{group}")\n'
+        )
+    imported = [f"tests/test_{name}.py" for name in "pqr"]
+    assert stats_shards(imports, imported, 3) == [[path] for path in imported]
     (tmp_path / ".test_durations").unlink()
     assert stats_shards(tmp_path, files, 3) == [
         ["tests/test_b.py", "tests/test_d.py"],
         ["tests/test_a.py", "tests/test_e.py"],
         ["tests/test_c.py", "tests/test_f.py"],
     ]
+
+
+def test_selected_test_ids_take_their_own_durations_share_their_file_shard_and_bound_kept_tests(tmp_path):
+    from scripts.ci_mutation.selection import file_seconds, keep_selected_tests, stats_shards
+
+    (tmp_path / "tests").mkdir()
+    for name in "abc":
+        (tmp_path / f"tests/test_{name}.py").write_text("def test_x():\n    pass\n")
+    (tmp_path / "tests/test_b.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("port")\n')
+    (tmp_path / "tests/test_d.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("port")\n')
+    durations = {"tests/test_c.py::t1": 2, "tests/test_c.py::t1[p]@port": 1, "tests/test_c.py::t1x": 4}
+    durations |= {"tests/test_c.py::t2": 8, "tests/test_a.py::TestK::test_x": 5, "tests/test_b.py::t": 6}
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+    entries = [
+        "tests/test_a.py",
+        "tests/test_b.py::t",
+        "tests/test_c.py::t1",
+        "tests/test_c.py::t1x",
+        "tests/test_d.py",
+    ]
+    seconds = file_seconds(tmp_path, entries)
+    assert seconds == pytest.approx(
+        {
+            "tests/test_a.py": 5.01,
+            "tests/test_b.py::t": 6.01,
+            "tests/test_c.py::t1": 3.01,
+            "tests/test_c.py::t1x": 4.01,
+            "tests/test_d.py": 0.01,
+        }
+    )
+    assert stats_shards(tmp_path, entries, 3) == [
+        ["tests/test_c.py::t1", "tests/test_c.py::t1x"],
+        ["tests/test_b.py::t", "tests/test_d.py"],
+        ["tests/test_a.py"],
+    ]
+    reached = {
+        "tests/test_c.py::t1[p]",
+        "tests/test_c.py::t1x",
+        "tests/test_c.py::t2",
+        "tests/test_a.py::TestK::test_x",
+        "tests/test_e.py::t",
+    }
+    stats = {"scripts.sample.x_f": set(reached), "scripts.other.x_g": set(reached)}
+    allowed = {"scripts.sample.": {"tests/test_c.py::t1", "tests/test_a.py"}}
+    assert keep_selected_tests(stats, allowed) == {"tests/test_c.py::t1[p]", "tests/test_a.py::TestK::test_x"}
+    assert stats == {
+        "scripts.sample.x_f": {"tests/test_c.py::t1[p]", "tests/test_a.py::TestK::test_x"},
+        "scripts.other.x_g": set(),
+    }
+
+
+@pytest.mark.parametrize("total", [1, 2, 3, 6])
+def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist_group(tmp_path, total):
+    from scripts.ci_mutation.selection import part_files
+
+    (tmp_path / "tests").mkdir()
+    files = [f"tests/test_{name}.py" for name in "abcdef"]
+    for path in files:
+        (tmp_path / path).write_text("import pytest\n\npytestmark = pytest.mark.xdist_group('shared-port')\n")
+    seconds = {"a": 1, "b": 2, "c": 3, "d": 5, "e": 7, "f": 9}
+    (tmp_path / ".test_durations").write_text(
+        json.dumps({f"tests/test_{name}.py::t": value for name, value in seconds.items()} | {"tests/x.py::t": 50})
+    )
+    parts = [part_files(tmp_path, list(reversed(files)), (index, total)) for index in range(total)]
+    assert sorted(path for part in parts for path in part) == files
+    assert all(part == sorted(part) for part in parts)
+    loads = [sum(seconds[path[11]] for path in part) for part in parts]
+    expected = {1: [27], 2: [14, 13], 3: [9, 9, 9], 6: [9, 7, 5, 3, 2, 1]}[total]
+    assert loads == expected
+    assert part_files(tmp_path, files[:1], (2, 3)) == []
+
+
+def test_statistics_split_reads_each_duration_a_bounded_number_of_times():
+    from scripts.ci_mutation.selection import split_parts
+
+    class Counted(dict):
+        reads = 0
+
+        def __getitem__(self, key):
+            self.reads += 1
+            return super().__getitem__(key)
+
+    seconds = Counted({f"tests/test_x.py::test_{index}": float(index % 7) for index in range(400)})
+    split_parts(list(seconds), seconds, (0, 4))
+    assert seconds.reads <= 2 * len(seconds)
+
+
+def test_statistics_split_places_equal_durations_by_name_into_the_first_lightest_part():
+    from scripts.ci_mutation.selection import partition
+
+    files = [f"tests/test_{name}.py" for name in "dcba"]
+    seconds = dict.fromkeys(files, 1.0)
+    assert partition(files, seconds, 2) == [
+        ["tests/test_a.py", "tests/test_c.py"],
+        ["tests/test_b.py", "tests/test_d.py"],
+    ]
+
+
+def test_statistics_parts_split_one_file_without_losing_new_parameter_cases(tmp_path, monkeypatch):
+    from scripts.ci_mutation.selection import load_or_collect_stats
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    (tmp_path / "tests").mkdir()
+    test = "tests/test_sample.py"
+    (tmp_path / test).write_text(
+        "import pytest\n"
+        "def test_slow(): pass\n"
+        "def test_middle(): pass\n"
+        "def test_short(): pass\n"
+        "@pytest.mark.parametrize('value', [1, 2])\n"
+        "def test_new(value): pass\n"
+    )
+    recorded = {f"{test}::test_{name}": seconds for name, seconds in [("slow", 100), ("middle", 60), ("short", 30)]}
+    (tmp_path / ".test_durations").write_text(json.dumps(recorded))
+    config = SimpleNamespace(source_paths=[Path("scripts")], pytest_add_cli_args_test_selection=[test])
+    runner = SimpleNamespace(
+        Config=SimpleNamespace(get=lambda: config),
+        SourceFileMutationData=lambda **kwargs: SimpleNamespace(load=lambda: None, exit_code_by_key={"m": None}),
+    )
+    parts = []
+
+    def collect(engine, test_runner, files, workers, work):
+        parts.append(files)
+        return [{"status": 0, "tests": {"sample": files}, "durations": {}, "cpu": 0}]
+
+    monkeypatch.setattr("scripts.ci_mutation.selection.collect_file_stats", collect)
+    for index in range(2):
+        output = tmp_path / f"part-{index}.json"
+        with pytest.raises(SystemExit) as done:
+            load_or_collect_stats(
+                runner,
+                SimpleNamespace(_pytest_add_cli_args=[]),
+                ["scripts/sample.py"],
+                "collect",
+                (str(output), "key", str(index), "2"),
+            )
+        assert done.value.code == 0
+        assert json.loads(output.read_text())["results"][0]["tests"]["sample"] == parts[index]
+        assert config.source_paths == [Path("scripts")]
+    assert parts == [
+        [f"{test}::test_slow"],
+        [f"{test}::test_middle", f"{test}::test_new[1]", f"{test}::test_new[2]", f"{test}::test_short"],
+    ]
+
+
+def test_statistics_collection_filters_wall_clock_and_rejects_collection_errors(tmp_path, monkeypatch):
+    from scripts.ci_mutation.selection import collect_test_ids
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    test = "test_sample.py"
+    (tmp_path / test).write_text("import pytest\n@pytest.mark.wall_clock\ndef test_bounded(): pass\n")
+    runner = SimpleNamespace(_pytest_add_cli_args=[])
+    assert collect_test_ids(runner, [test]) == []
+    with pytest.raises(SystemExit) as failed:
+        collect_test_ids(runner, [f"{test}::test_missing"])
+    assert failed.value.code == 1
+
+
+@pytest.mark.parametrize("override", [False, True])
+def test_statistics_timings_keep_maxima_and_normalize_groups_from_each_cache_location(tmp_path, monkeypatch, override):
+    from scripts.ci_mutation.selection import file_seconds, recorded_seconds, traced_records, unit_records
+
+    test = "tests/test_sample.py::test_value"
+    (tmp_path / ".test_durations").write_text(json.dumps({f"{test}@port": 0.75}))
+    cache = tmp_path / ("external" if override else ".mutation-stats-cache")
+    cache.mkdir()
+    if override:
+        monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
+    else:
+        monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    (cache / "success.json").write_text(
+        json.dumps({"status": 0, "durations": {test: 0.25, "tests/test_sample.py::test_cached": 0.5}})
+    )
+    (cache / "failed.json").write_text(json.dumps({"status": 1, "durations": {test: 20}}))
+    assert recorded_seconds([*unit_records(tmp_path), *traced_records(tmp_path)]) == {
+        test: 0.75,
+        "tests/test_sample.py::test_cached": 0.5,
+    }
+    assert file_seconds(tmp_path, [test, "tests/test_new.py"], split=True) == {
+        test: 0.76,
+        "tests/test_new.py": 0.01,
+    }
+
+
+def test_sizing_reads_only_the_newest_records_within_the_cache_cap(tmp_path, monkeypatch):
+    import os
+
+    from scripts.ci_mutation import stats_dependencies
+    from scripts.ci_mutation.selection import file_seconds
+
+    test = "tests/test_sample.py::test_value"
+    cache = tmp_path / ".mutation-stats-cache"
+    cache.mkdir()
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    for age, seconds in enumerate([2, 50]):
+        path = cache / f"{seconds}.json"
+        path.write_text(json.dumps({"status": 0, "durations": {test: seconds}}))
+        os.utime(path, (1000 - age, 1000 - age))
+    monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", (cache / "2.json").stat().st_size)
+    assert file_seconds(tmp_path, [test]) == {test: 2.01}
+
+
+@pytest.mark.wall_clock
+def test_sizing_against_a_stats_cache_of_the_observed_shape_finishes_in_seconds(tmp_path, monkeypatch):
+    import time
+
+    from scripts.ci_mutation import stats_dependencies
+    from scripts.ci_mutation.plan import stats_part_count
+
+    (tmp_path / "tests").mkdir()
+    files = [f"tests/test_{index}.py" for index in range(40)]
+    for path in files:
+        (tmp_path / path).write_text("def test_one():\n    pass\n")
+    cache = tmp_path / ".mutation-stats-cache"
+    cache.mkdir()
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    # Each stored record of 27 October held about 150 KB of input digests beside a few durations.
+    inputs = {f"scripts/module_{index}.py": "0" * 64 for index in range(1800)}
+    for index in range(200):
+        durations = {f"{files[index % 40]}::test_{case}": 0.5 for case in range(20)}
+        (cache / f"{index}.json").write_text(json.dumps({"status": 0, "durations": durations, "inputs": inputs}))
+    monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", 4 * 1024 * 1024)
+    started = time.monotonic()
+    parts, slowest = stats_part_count(tmp_path, files, 60, 10)
+    assert time.monotonic() - started < 20
+    assert 1 <= parts <= 10
+    assert slowest > 0
+
+
+def test_statistics_parts_partition_every_test_when_each_part_restores_a_different_cache(tmp_path, monkeypatch):
+    from scripts.ci_mutation.selection import part_files
+
+    tests = [f"tests/test_sample.py::test_{name}" for name in "abc"]
+    (tmp_path / ".test_durations").write_text(json.dumps(dict(zip(tests, [3, 2, 1]))))
+    caches = [tmp_path / "part-0", tmp_path / "part-1"]
+    for cache in caches:
+        cache.mkdir()
+    (caches[0] / "slow.json").write_text(json.dumps({"status": 0, "durations": {tests[2]: 10}}))
+    parts = []
+    for index, cache in enumerate(caches):
+        monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
+        parts.append(part_files(tmp_path, tests, (index, 2)))
+    assert parts == [[tests[0]], tests[1:]]
+
+
+def test_statistics_collection_sets_the_mutmut_mode_and_preserves_runner_options(tmp_path, monkeypatch):
+    from scripts.ci_mutation.selection import collect_test_ids
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    parent = os.environ.get("MUTANT_UNDER_TEST", "parent")
+    monkeypatch.setenv("MUTANT_UNDER_TEST", parent)
+    test = "test_mode.py"
+    (tmp_path / test).write_text(
+        "import os\nassert os.environ['MUTANT_UNDER_TEST'] == 'stats'\ndef test_keep(): pass\ndef test_omit(): pass\n"
+    )
+    runner = SimpleNamespace(_pytest_add_cli_args=["-k", "keep"])
+    assert collect_test_ids(runner, [test]) == [f"{test}::test_keep"]
+    assert os.environ["MUTANT_UNDER_TEST"] == parent
+
+
+def test_statistics_collection_exceptions_exit_the_fork_child_with_failure(tmp_path, monkeypatch):
+    from scripts.ci_mutation.selection import collect_test_ids
+
+    class Process:
+        def __init__(self, *, target):
+            self.target = target
+            self.exitcode = None
+
+        def start(self):
+            try:
+                self.target()
+            except SystemExit as error:
+                self.exitcode = error.code
+
+        def join(self):
+            pass
+
+    def context(method):
+        assert method == "fork"
+        return SimpleNamespace(Process=Process)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("collection failed")
+
+    def exit_child(code):
+        raise SystemExit(code)
+
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", "parent"))
+    monkeypatch.setattr("multiprocessing.get_context", context)
+    monkeypatch.setattr(pytest, "main", fail)
+    monkeypatch.setattr("os._exit", exit_child)
+    with pytest.raises(SystemExit) as failed:
+        collect_test_ids(SimpleNamespace(_pytest_add_cli_args=[]), ["test_mode.py"])
+    assert failed.value.code == 1
 
 
 def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everything(tmp_path, monkeypatch):
@@ -400,6 +1083,13 @@ def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everyt
 
     monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
     monkeypatch.setenv("PY_IGNORE_IMPORTMISMATCH", "0")
+    work, root = tmp_path / "work", tmp_path / "root"
+    (work / "mutants/scripts").mkdir(parents=True)
+    (root / "scripts").mkdir(parents=True)
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("MUTATION_STATS_ROOT", str(root))
+    monkeypatch.setitem(sys.modules, "fake_mutated", SimpleNamespace(__file__=str(work / "mutants/scripts/m.py")))
+    monkeypatch.setitem(sys.modules, "fake_rooted", SimpleNamespace(__file__=str(root / "scripts/r.py")))
     engine = SimpleNamespace(tests_by_mangled_function_name={"m.x_f": {"b::t", "a::t"}}, duration_by_test={"a::t": 2.5})
     calls = []
 
@@ -419,10 +1109,91 @@ def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everyt
 
     output = tmp_path / "out.json"
     collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), ["tests/test_a.py"], output, "/scratch/base")
-    assert calls == [(["tests/test_a.py"], ["-q", "--basetemp=/scratch/base"], "stats", "1")]
+    assert calls == [
+        (
+            ["tests/test_a.py"],
+            ["-q", "-p", "pytest_rerunfailures", "--reruns", "1", "-m", "not wall_clock", "--basetemp=/scratch/base"],
+            "stats",
+            "1",
+        )
+    ]
     result = json.loads(output.read_text())
     assert 0 <= result.pop("cpu") <= process_time()
-    assert result == {"status": 4, "tests": {"m.x_f": ["a::t", "b::t"]}, "durations": {"a::t": 2.5}}
+    modules = result.pop("modules")
+    assert modules == sorted(modules) and {"scripts/m.py", "scripts/r.py"} <= set(modules)
+    assert not any(name.startswith("mutants/") for name in modules)
+    assert result == {
+        "status": 4,
+        "tests": {"m.x_f": ["a::t", "b::t"]},
+        "durations": {"a::t": 2.5},
+        "files": ["tests/test_a.py"],
+    }
+
+
+WALL_CLOCK_SPLITS = {
+    "tests/swarm_ledger/test_hook.py": [("test_four_stops_answer_within_two_seconds", "test_block_budget_then_allow")],
+    "tests/test_hook_targets.py": [("test_deep_history_stays_fast", "test_deep_history_resolves_the_newest_rollout")],
+    "tests/swarm_ledger/test_hub.py": [
+        ("test_wait_wakes_at_once_on_a_publish", "test_wait_wakes_on_a_publish"),
+        ("test_wait_answers_at_once_when_events_are_already_kept", "test_wait_answers_when_events_are_already_kept"),
+    ],
+    "tests/gates/test_prompts.py": [
+        (
+            "test_inline_scripts_read_a_long_option_word_in_linear_time",
+            "test_inline_scripts_find_no_script_in_a_long_option_word",
+        )
+    ],
+    "tests/swarm/test_store.py": [
+        (
+            "test_an_unreachable_redis_is_refused_within_a_second",
+            "test_an_unreachable_redis_is_refused_with_a_clear_error",
+        ),
+        ("test_the_suite_swarm_redis_is_refused_at_once", "test_the_suite_swarm_redis_is_refused"),
+    ],
+    "tests/swarm_ledger/test_server_teardown.py": [
+        ("test_the_test_server_stops_without_waiting_half_a_second", "test_the_test_server_starts_and_stops")
+    ],
+    "tests/swarm_ledger/test_server_ensure.py": [
+        (
+            "test_occupied_unresponsive_port_times_out_without_starting",
+            "test_occupied_unresponsive_port_gives_up_without_starting",
+        )
+    ],
+    "tests/observability/test_trace_flush.py": [
+        ("test_an_attempt_is_killed_within_seconds_of_its_timeout", "test_an_attempt_is_killed_at_its_timeout"),
+        ("test_slow_endpoint_is_bounded_per_attempt", "test_slow_endpoint_is_retried_later"),
+    ],
+    "tests/hive/test_cli.py": [
+        ("test_a_stalled_tls_client_is_dropped_after_the_request_timeout", "test_a_stalled_tls_client_is_dropped")
+    ],
+    "tests/swarm/test_cli.py": [
+        (
+            "test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs",
+            "test_a_quick_swarm_keeps_ticking_while_a_slow_one_runs",
+        )
+    ],
+    "tests/gates/test_push_stop_executor.py": [
+        (
+            "test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_condition",
+            "test_a_pre_push_gate_that_overruns_is_stopped_inside_the_stop_condition",
+        )
+    ],
+}
+
+
+@pytest.mark.parametrize("path", sorted(WALL_CLOCK_SPLITS))
+def test_only_the_timing_half_of_each_budget_test_carries_the_wall_clock_marker(path):
+    root = Path(__file__).resolve().parents[1]
+    markers = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["pytest"]["ini_options"]["markers"]
+    assert any(marker.startswith("wall_clock:") for marker in markers)
+    decorators = {
+        node.name: {ast.unparse(decorator) for decorator in node.decorator_list}
+        for node in ast.walk(ast.parse((root / path).read_text()))
+        if isinstance(node, ast.FunctionDef)
+    }
+    for timed, functional in WALL_CLOCK_SPLITS[path]:
+        assert "pytest.mark.wall_clock" in decorators[timed], timed
+        assert "pytest.mark.wall_clock" not in decorators[functional], functional
 
 
 def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, capsys):
@@ -442,7 +1213,7 @@ def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, ca
 
         def run_stats(self, *, tests):
             assert os.environ["MUTANT_UNDER_TEST"] == "stats"
-            basetemp = Path(self._pytest_add_cli_args[1].removeprefix("--basetemp="))
+            basetemp = Path(self._pytest_add_cli_args[-1].removeprefix("--basetemp="))
             assert basetemp.is_dir()
             assert basetemp.name.startswith("mutation-stats-")
             for test in tests:
@@ -485,6 +1256,29 @@ def _gate_tree(tmp_path, monkeypatch):
     )
     (tmp_path / "tests").mkdir()
     (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+
+
+@pytest.mark.parametrize("failures", [1, 2])
+def test_statistics_retry_a_flake_once_and_reject_a_persistent_failure(tmp_path, monkeypatch, failures):
+    _gate_tree(tmp_path, monkeypatch)
+    attempts = tmp_path / "attempts"
+    (tmp_path / "scripts/sample.py").write_text("def covered(value):\n    return value + 1\n")
+    (tmp_path / "tests/test_sample.py").write_text(
+        "import os\nfrom pathlib import Path\nfrom scripts.sample import covered\n\n"
+        "def test_value():\n"
+        "    assert covered(1) == 2\n"
+        "    if os.environ.get('MUTANT_UNDER_TEST') == 'stats':\n"
+        f"        attempts = Path({str(attempts)!r})\n"
+        "        count = int(attempts.read_text()) + 1 if attempts.exists() else 1\n"
+        "        attempts.write_text(str(count))\n"
+        f"        assert count > {failures}\n"
+    )
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
+    assert attempts.read_text() == "2"
+    assert report["failed"] is (failures == 2)
+    if failures == 1:
+        assert report["not_mutated"] == []
+        assert report["files"][0]["counts"] == {"killed": 2}
 
 
 @pytest.mark.parametrize("source", ["hooks/__init__.py", "scripts/sample/__init__.py"])
@@ -538,6 +1332,81 @@ def test_gate_mutates_a_function_its_module_calls_at_import(tmp_path, monkeypatc
     assert report["files"][0]["counts"] == {"killed": 2}
 
 
+def test_a_subprocess_importing_a_mutated_module_skips_the_mutation_engine_and_still_kills(tmp_path, monkeypatch):
+    _gate_tree(tmp_path, monkeypatch)
+    (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n")
+    child = (
+        "import sys\n"
+        "from scripts.sample import value\n"
+        "print(value(1), 'libcst' in sys.modules)\n"
+        "print(callable(__import__('mutmut.__main__').__main__.walk_all_files))\n"
+    )
+    (tmp_path / "tests/test_sample.py").write_text(
+        "import os, subprocess, sys\n\n"
+        "from scripts.sample import value\n\n"
+        "def test_value():\n"
+        "    assert sys.modules['mutmut.__main__'].__file__.endswith('mutmut/__main__.py')\n"
+        "    value(1)\n"
+        "    env = {**os.environ, 'PYTHONPATH': os.getcwd()}\n"
+        f"    out = subprocess.run([sys.executable, '-c', {child!r}], env=env, capture_output=True, text=True, check=True)\n"
+        "    assert out.stdout.split() == ['2', 'False', 'True']\n"
+    )
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
+    logs = [Path(item["reason"].rpartition(" ")[2]) for item in report["not_mutated"]]
+    assert report["not_mutated"] == [], [log.read_text()[-4000:] for log in logs if log.is_file()]
+    assert report["failed"] is False
+    assert report["files"][0]["counts"] == {"killed": 2}
+
+
+def test_light_main_answers_the_trampoline_and_hands_every_other_name_to_the_real_module(monkeypatch):
+    from types import ModuleType
+
+    import mutmut.__main__ as real
+
+    from scripts.ci_mutation.selection import LIGHT_MAIN
+
+    light_main = ModuleType("mutmut.__main__")
+    exec(LIGHT_MAIN, light_main.__dict__)
+    assert issubclass(light_main.MutmutProgrammaticFailException, Exception)
+    assert light_main.mangled_name_from_mutant_name("scripts.a.x_f__mutmut_3") == "scripts.a.x_f"
+    with pytest.raises(AssertionError, match="^scripts.a.x_f$"):
+        light_main.mangled_name_from_mutant_name("scripts.a.x_f")
+    assert light_main.record_trampoline_hit("scripts.a.x_f") is None
+    with pytest.raises(AttributeError, match="^__path__$"):
+        light_main.__path__
+    monkeypatch.setattr(sys.modules["mutmut"], "__main__", real)
+    monkeypatch.setitem(sys.modules, "mutmut.__main__", light_main)
+    assert light_main.walk_all_files.__module__ == "mutmut.__main__"
+    loaded = sys.modules["mutmut.__main__"]
+    assert loaded is not light_main
+    assert loaded.__file__ == real.__file__
+    assert light_main.walk_all_files is loaded.walk_all_files
+    assert sys.modules["mutmut.__main__"] is loaded
+
+
+def test_the_mutation_runner_itself_never_takes_the_light_main(tmp_path):
+    from scripts.ci_mutation.selection import LIGHT_BOOTSTRAP
+
+    package = tmp_path / "scripts/ci_mutation"
+    package.mkdir(parents=True)
+    (tmp_path / "scripts/__init__.py").touch()
+    (package / "__init__.py").touch()
+    report = (
+        "import sys\n"
+        "main = sys.modules.get('mutmut.__main__')\n"
+        "print('absent' if main is None else getattr(main, '__file__', 'light'))\n"
+    )
+    for path in ("scripts/ci_mutation/selection.py", "scripts/other.py"):
+        (tmp_path / path).write_text(LIGHT_BOOTSTRAP + report)
+    env = {**os.environ, "PYTHONPATH": str(tmp_path)}
+
+    def loaded(*command):
+        return subprocess.run(command, cwd=tmp_path, env=env, capture_output=True, text=True, check=True).stdout
+
+    assert loaded(sys.executable, "-m", "scripts.ci_mutation.selection") == "absent\n"
+    assert loaded(sys.executable, "-c", "import scripts.other") == "light\n"
+
+
 def test_shared_run_grades_each_file_only_by_the_tests_selected_for_it(tmp_path, monkeypatch):
     _gate_tree(tmp_path, monkeypatch)
     (tmp_path / "scripts/first.py").write_text("def one(value):\n    return value + 1\n")
@@ -571,12 +1440,25 @@ def test_clean_and_fault_controls_skip_tests_that_reach_no_selected_mutant(tmp_p
 
 
 @pytest.mark.parametrize(
-    ("ci", "requested", "expected"),
-    [(None, 1, 1), (None, 2, 2), (None, 20, 2), ("", 20, 2), ("true", 1, 1), ("true", 2, 2), ("true", 20, 20)],
+    ("ci", "requested", "quota", "expected"),
+    [
+        (None, 1, None, 1),
+        (None, 2, None, 2),
+        (None, 20, None, 2),
+        ("", 20, None, 2),
+        ("true", 1, None, 1),
+        ("true", 2, None, 2),
+        ("true", 20, None, 20),
+        ("true", 16, 3.0, 3),
+        ("true", 16, 2.5, 2),
+        ("true", 2, 3.0, 2),
+        ("true", 16, 0.5, 1),
+    ],
 )
-def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, ci, requested, expected, capsys):
+def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, ci, requested, quota, expected, capsys):
     from scripts.ci_mutation.selection import run_selected
 
+    monkeypatch.setattr("scripts.ci_mutation.selection.quota_cpus", lambda: quota)
     if ci is None:
         monkeypatch.delenv("CI", raising=False)
     else:
@@ -590,9 +1472,10 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
     data = SimpleNamespace(exit_code_by_key={"selected": None}, load=lambda: None)
     engine = SimpleNamespace(tests_by_mangled_function_name={})
     runner = SimpleNamespace(
+        collect_source_file_mutation_data=None,
         SourceFileMutationData=lambda **kwargs: data,
         Config=SimpleNamespace(get=lambda: config),
-        PytestRunner=type("PytestRunner", (), {"run_tests": lambda *args, **kwargs: 0}),
+        PytestRunner=type("PytestRunner", (), {"run_tests": lambda *args, **kwargs: 0, "execute_pytest": _no_pytest}),
         mutmut=engine,
     )
 
@@ -602,6 +1485,7 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
 
     def cli(args):
         assert args == ["run", "--max-children", str(expected)]
+        assert (runner.os.pids, runner.os.environ) == (set(), os.environ)
         runner.collect_or_load_stats(object())
 
     runner.cli = cli
@@ -610,7 +1494,56 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
     monkeypatch.setitem(sys.modules, "mutmut", SimpleNamespace(__main__=runner))
     for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
         monkeypatch.setitem(sys.modules, name, sys.modules[name])
-    run_selected(selection)
+    run_selected(selection, (0, 1))
     assert counts == [expected]
     output = capsys.readouterr().out
     assert output == ("" if ci else "Local mutation worker cap: 2 (mutation and stats)\n")
+
+
+def test_mutmut_wait_skips_a_child_a_test_left_and_returns_the_forked_mutant(monkeypatch):
+    from scripts.ci_mutation import selection
+
+    forks = [12, 0]
+    exits = [(11, 0), (12, 7 << 8)]
+    real = SimpleNamespace(__name__="os", environ=os.environ, fork=forks.pop, wait=lambda: exits.pop(0))
+    monkeypatch.setattr(selection, "os", real)
+    children = selection.forked_children()
+    assert children.environ is os.environ
+    assert children.fork() == 0
+    assert children.pids == set()
+    assert children.fork() == 12
+    assert children.pids == {12}
+    assert children.wait() == (12, 7 << 8)
+    assert (children.pids, exits) == (set(), [])
+
+
+@pytest.mark.parametrize(
+    "version, preset, expected",
+    [
+        ((9, 2, 0), None, "tests/test_a.py::test_a"),
+        ((9, 1, 99), None, None),
+        ((10, 0, 0), "kept", "kept"),
+    ],
+)
+def test_node_ids_reach_mutmut_only_where_pytest_dropped_them(monkeypatch, version, preset, expected):
+    from scripts.ci_mutation import selection
+
+    class Item:
+        nodeid = "tests/test_a.py::test_a"
+
+    if preset:
+        Item._nodeid = preset
+    monkeypatch.setattr(selection.pytest, "version_tuple", version)
+    monkeypatch.setattr(selection.pytest, "Item", Item)
+    selection.keep_node_ids()
+    assert getattr(Item(), "_nodeid", None) == expected
+
+
+def test_mutation_worker_restores_node_ids_before_it_reads_the_selection(monkeypatch, tmp_path):
+    from scripts.ci_mutation import selection
+
+    calls = []
+    monkeypatch.setattr(selection, "keep_node_ids", lambda: calls.append(True))
+    with pytest.raises(FileNotFoundError):
+        selection.run_selected(tmp_path / "missing.json", (0, 1))
+    assert calls == [True]

@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x\u01c1InputFramer\u01c1__init____mutmut_5:e68bb6856e6ed0fc75253ee087f016a6c114815831b58f4120d2f5f220863e0b": {
+    "reader": "standards-reader round three",
+    "reason": "the initial escape timestamp is unread while pending is empty; every raw or Kitty Escape sets it before expiry can inspect it."
+  }
+}

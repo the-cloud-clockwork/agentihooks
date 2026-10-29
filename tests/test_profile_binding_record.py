@@ -48,6 +48,24 @@ def test_binding_command_prints_the_session_record_fields(tmp_path, home, monkey
     }
 
 
+def test_an_api_route_is_attributed_and_its_binding_accepted(tmp_path, home, monkeypatch, capsys):
+    from scripts import init_agent
+
+    sentinel = "sentinel-value-7f3a"
+    process = _session(tmp_path, home, ["AH_ROUTE_API=1", "ANTHROPIC_BASE_URL=" + sentinel])
+    assert process()[3] == "api"
+    monkeypatch.setattr(binding, "process", process)
+    assert binding.main(binding.inspect(home, "engineer", "claude")["canary"]) == 0
+    assert sentinel not in capsys.readouterr().out
+    report = tmp_path / "report.json"
+    lines = init_agent._binding_result({binding.REPORT: str(report)}, 1, {"account": "api"})
+    assert lines[0] == "profile_validation=validated"
+    assert json.loads(lines[1].removeprefix("profile_binding="))["account"] == "api"
+    assert sentinel not in "\n".join(lines)
+    with pytest.raises(ValueError, match="^live process account differs from requested route$"):
+        init_agent._binding_result({binding.REPORT: str(report)}, 1, {"account": "alpha"})
+
+
 def test_binding_command_reads_any_home_and_reports_a_stale_record(home, capsys):
     assert render.main(["binding", "--home", str(home)]) == 0
     shown = json.loads(capsys.readouterr().out)

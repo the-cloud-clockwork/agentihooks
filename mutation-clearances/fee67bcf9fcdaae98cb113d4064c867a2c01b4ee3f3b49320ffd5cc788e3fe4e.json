@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_cache.py:scripts.doctor.ci_cache.x__trim__mutmut_18:8389e0331d39242bd9946c7a258c8ffd7d7fd52d414f4a649240cea4eed0d20b": {
+    "reader": "Standards",
+    "reason": "Redis Pipeline uses transaction as a truth value. None and False both disable transactions, leaving queued UNLINK and EXPIRE commands identical."
+  }
+}

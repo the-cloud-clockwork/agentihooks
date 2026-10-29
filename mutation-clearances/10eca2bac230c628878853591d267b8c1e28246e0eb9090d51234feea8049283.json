@@ -1,0 +1,6 @@
+{
+  "scripts/events/memory.py:scripts.events.memory.x\u01c1MemoryBus\u01c1for_swarm__mutmut_19:38fc00926a33be8cfb50234a867f923178491308f14e5dfb0cb30d2b38454b33": {
+    "reader": "standards-reader",
+    "reason": "MemoryBus receives an existing shared runtime, so its clock argument is never read. Replacing that unused argument with None changes no behavior."
+  }
+}

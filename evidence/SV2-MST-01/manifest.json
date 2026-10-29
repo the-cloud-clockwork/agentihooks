@@ -1,0 +1,19 @@
+{
+  "cases": [
+    "T-SV2-MST-01-A",
+    "T-SV2-MST-01-B",
+    "T-SV2-MST-01-C"
+  ],
+  "evidence_class": "fakeredis swarm store and inbox; fixture ledger document; no live swarm",
+  "fixture": "A ledger with four phases, each holding one task, and a swarm with two master seats; case C raises the count to three and lowers it back to two",
+  "independent_runs": 2,
+  "cleanup": "Each run uses its own fakeredis server; nothing outside it is written",
+  "mutation_scope": "Master seat count and phase owners in the swarm's masters hash and inbox items only; the ledger document is never written",
+  "inputs": {
+    "tests/fixtures/swarm_v2/master-seats.json": "442c3c3caf41df962800006dea2f299f7e410a3f7a0ceaafa626d89c09177ca7"
+  },
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2426",
+  "package": "SV2-MST-01",
+  "tested_commit": "7fa7b333b3a4",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38071191398"
+}

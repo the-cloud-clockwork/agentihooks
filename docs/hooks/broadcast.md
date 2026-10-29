@@ -8,7 +8,7 @@ permalink: /docs/hooks/broadcast/
 # Broadcast System
 {: .no_toc }
 
-Send a message. Every active Claude Code session sees it — on the next hook event, before the next tool call. No servers, no daemons, no pub/sub infrastructure. Just a shared file and a hook.
+Broadcasts reach Claude Code and Codex sessions sharing the broadcast store. Delivery uses the available lifecycle hooks; Codex receives tool context after a call.
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -20,11 +20,11 @@ Send a message. Every active Claude Code session sees it — on the next hook ev
 
 ## Overview
 
-The Broadcast System is a real-time messaging layer that delivers operator messages to **all active Claude Code sessions simultaneously**. It exploits the fact that Claude Code hooks are stateless subprocesses — every session, on every event, spawns a fresh process that reads shared state. A shared broadcast file becomes a PA system for all running AI agents.
+The Broadcast System delivers operator messages to **Claude Code and Codex** sessions through lifecycle hooks. Sessions must share the broadcast store. Separate local files on different machines do not form a fleet-wide broadcast channel.
 
 ### The problem
 
-When you have multiple Claude Code sessions open (or thousands of agents in Kubernetes), there is no way to tell all of them something at once. If production goes down, if credentials are rotating, if a deploy freeze is in effect — each agent operates in isolation, unaware of what the operator needs them to know.
+When you have multiple Claude Code and Codex sessions open, there is no way to tell all of them something at once. If production goes down, if credentials are rotating, if a deploy freeze is in effect — each agent operates in isolation, unaware of what the operator needs them to know.
 
 ### The solution
 

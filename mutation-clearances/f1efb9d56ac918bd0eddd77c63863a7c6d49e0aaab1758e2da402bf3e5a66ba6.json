@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/proofs.py:scripts.swarm_ledger.api.proofs.x_require_controller__mutmut_6:5e3035f282d19efd5bd0ad4f594ac51d384859bf80d592c577a743028b346d78": {
+    "reader": "standards_reader",
+    "reason": "Production handler.headers is an http.client.HTTPMessage whose get() is case-insensitive, and require_controller is reached only through routes.global_resource then proofs.route with the real request handler (the controller_control dict-headers path never reaches it), so X-CONTROLLER-CREDENTIAL and X-Controller-Credential return the same value."
+  }
+}

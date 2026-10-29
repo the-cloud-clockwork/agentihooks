@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_file_bytes__mutmut_5:f4d477aeb91733332a2054afaeab960ca83353850ca525523fa3df1089ff2c93": {
+    "reader": "Standards",
+    "reason": "ValueError detail stays inside restore and file helpers, caught by the migration route fixed invalid envelope and unlogged APIError handler."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/exits.py:scripts.inbox.exits.x__taker__mutmut_2:1461d15ed791de40b64c3ab79dc248d0e7576c899fb9624862c71ec39868c1c3": {
+    "reader": "Standards reader of pull request 1826",
+    "reason": "The mutant changes the next() default in _taker from an empty string to None. Every caller treats both the same: _settle_taken_seat_mail compares the result with a non-empty agent name, and _settle_left_behind and _settle_peer_mail test it for falsiness before any other use. A pure Python probe of the three predicates over 6 history shapes and several name and active-set combinations ran 90 cases with 0 differences."
+  }
+}

@@ -1,2 +1,2 @@
 name: qa
-description: "Swarm qa reader: judges proofs against their contracts and runs the gates"
+description: "Swarm qa reader: judges proofs against their contracts and reads the gates' CI results"

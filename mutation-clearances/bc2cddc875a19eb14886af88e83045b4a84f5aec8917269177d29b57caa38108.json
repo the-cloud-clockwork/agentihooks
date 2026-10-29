@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x__set_slice__mutmut_21:22e70fc2934b6ac7c8632b05482b94defec58f9ef27114d4ecbf9284875a1607": {
+    "reader": "Standards",
+    "reason": "Accepted ledger documents contain tasks after repository normalization or ledger creation. Omitting the missing-key default cannot change the present task list. Verified against CI run 37861955536 at head 680e7e3c."
+  }
+}

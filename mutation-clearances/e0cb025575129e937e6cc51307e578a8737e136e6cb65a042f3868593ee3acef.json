@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/traces.py:scripts.doctor.traces.x_task_cost_candidates__mutmut_30:83f00bd7b0b75c36d3620d6a4aa512e0dde364cf04485ca8e815f88af30de743": {
+    "reader": "standards-reader",
+    "reason": "Standards reader ruled: changing the missing dictionary key fallback from False to None, explicitly or implicitly, preserves the result under not for every value. Present key behavior is unchanged."
+  }
+}

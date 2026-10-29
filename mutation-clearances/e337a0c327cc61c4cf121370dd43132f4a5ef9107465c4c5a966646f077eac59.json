@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/publish_gate.py:scripts.swarm.publish_gate.x_lint__mutmut_87:5d12ad158b460ac667698b7af7941e7c158bffa4f7816389f0bfb0c603306803": {
+    "reader": "standards_reader",
+    "reason": "Equivalent mutant: ruff format exit 2 only arises from syntax or config/read errors, and ruff check, run first in lint, already returns on those via invalid-syntax or its own exit 2, so the > 2 change is unobservable."
+  }
+}

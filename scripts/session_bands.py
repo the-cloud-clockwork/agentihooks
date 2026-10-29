@@ -1,24 +1,17 @@
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+
+from scripts.routing.slots import Slot
 
 FRESH_SECONDS = 15 * 60
 WEEK_FLOOR = 5.0
 FIVE_HOUR_BANDS = ((60.0, 6), (40.0, 4), (10.0, 3), (5.0, 2))
 TOP_BAND = FIVE_HOUR_BANDS[0][1]
 HANDOFF_FIVE = 5.0
+HIVE_CEILING = 12
+HIVE_CEILING_ENV = "AGENTIHOOKS_HIVE_SESSION_CEILING"
 
 
-@dataclass(frozen=True)
-class Seat:
-    harness: str
-    account: str
-    cap: int
-    sessions: int
-    spend_before: float | None = None
-
-    @property
-    def free(self) -> int:
-        return max(0, self.cap - self.sessions)
+Seat = Slot
 
 
 def left(used: float | None, resets_at: int | None, now: float) -> float | None:
@@ -46,6 +39,18 @@ def cap(five_left: float | None, week_left: float | None) -> int | None:
         return None
     week = week_cap(week_left)
     return None if week is None else min(week, five_hour_cap(five_left))
+
+
+def scaled_cap(five_left: float | None, week_left: float | None, ceiling: int) -> int | None:
+    banded = cap(five_left, week_left)
+    return banded and min(ceiling, max(banded, int(ceiling * min(five_left, week_left) / 100)))
+
+
+def hive_ceiling(environ: Mapping[str, str]) -> int:
+    try:
+        return max(0, int(environ.get(HIVE_CEILING_ENV) or HIVE_CEILING))
+    except ValueError:
+        return HIVE_CEILING
 
 
 def upcoming(resets_at: float | None, now: float) -> float | None:

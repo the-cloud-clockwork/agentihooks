@@ -267,9 +267,19 @@ def test_a_small_ledger_is_named_from_the_session(new_cli, capsys):
 
 
 def test_a_plan_ledger_is_named_from_the_plan_file_and_date(new_cli, capsys):
-    new_cli("--plan", "/plans/Mossy Rabin.md", "--date", "2026-10-06", "--size", "swarm", environ=SESSION)
+    new_cli("--plan", "/plans/Mossy Rabin.md", "--date", "2026-10-06", "--as", "w", environ=SESSION)
     slug = created_slug(capsys)
     assert slug == "mossy-rabin-2026-10-06" and matches("plan_slug", slug)
+
+
+def test_ledger_new_refuses_a_swarm_ledger_and_names_swarm_init(new_cli, capsys):
+    with pytest.raises(SystemExit) as refused:
+        new_cli("--plan", "/plans/Mossy Rabin.md", "--date", "2026-10-07", "--size", "swarm", environ=SESSION)
+    assert str(refused.value) == (
+        "a swarm ledger is created with its swarm by one command: "
+        "agentihooks swarm init <name> --plan <file> --repo <dir>"
+    )
+    assert not new_ledger.storage.default().exists("mossy-rabin-2026-10-07")
 
 
 def test_a_built_slug_is_still_accepted_by_name(new_cli, capsys):

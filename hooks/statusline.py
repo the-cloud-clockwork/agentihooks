@@ -152,7 +152,10 @@ def _rate_limit_str(rate_limits: dict) -> str:
 
 
 def _account_slug() -> str:
-    return os.environ.get("AGENTIHOOKS_ROUTE_ACCOUNT") or "default"
+    from hooks.context.account_sessions import UNROUTED, environment_account
+
+    found = environment_account()
+    return found if found != UNROUTED else os.environ.get("AGENTIHOOKS_ROUTE_ACCOUNT") or "default"
 
 
 # ---------------------------------------------------------------------------

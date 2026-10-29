@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/stats_cache.py:scripts.ci_mutation.stats_cache.x_loaded_inputs__mutmut_7:b5f45c25146473d7409d2d16b3dcedad23a26675bc706e1a7dcfd7a7e998c081": {
+    "reader": "standards-reader",
+    "reason": "dynamic_imports is used solely in a truth test; None and False both select empty dynamic_modules."
+  }
+}

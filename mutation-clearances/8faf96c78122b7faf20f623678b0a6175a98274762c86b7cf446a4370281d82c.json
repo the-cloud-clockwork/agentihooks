@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.xǁHerdrRuntimeǁhas_capacity__mutmut_3:822a49d9fbd00ef2e6f159730fdcdae967b6c60d222a7cba07ad800f3f95c6ba": {
+    "reader": "standards_reader",
+    "reason": "None and \"\" both fail lane == MASTER in _quota_open, so both take the raw quota account rows with the same quota_handoff.trigger filter; no other line reads lane, so has_capacity returns the same value."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "tested_commit": "9114a635124c7d5b29bca1c619833c2475a53875",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38142649773",
+  "evidence_class": "mocked: fakeredis execution registry, task claims and heartbeats behind a server that can be disconnected, a fake wall and Redis clock, signed fixture launch grants, a fixture operator page credential and an in process brain health server that answers 401 or 200; no Kubernetes API server, worker Pod, transcript exporter process or deployed brain was used",
+  "cases": [
+    "T-SV2-OBS-04-A",
+    "T-SV2-OBS-04-B",
+    "T-SV2-OBS-04-C"
+  ],
+  "inputs": {
+    "tests/fixtures/swarm_v2/health-diagnostics.json": "c9ee91f0cb3f4abf4bcd56ca2f7d534943bd0513fd03d529acbfa76fe2684139"
+  }
+}

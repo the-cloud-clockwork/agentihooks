@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 
@@ -56,7 +57,12 @@ def cli(monkeypatch, tmp_path):
     monkeypatch.setattr(ledger, "resource", lambda *a, **k: [])
     monkeypatch.setattr(ledger, "swarm_autonomy", lambda slug: "full")
     monkeypatch.setattr(ledger_relay, "verified", lambda name, quote: True)
-    monkeypatch.setattr(ledger.ledger_publish, "publish", lambda path, title, repo, artifact: ("https://x/1", "issue"))
+    monkeypatch.setattr(
+        ledger.ledger_publish,
+        "publish",
+        lambda path, title, repo, artifact, issue_title: (artifact(path, title) and "https://x/1", "issue"),
+    )
+    monkeypatch.setattr(ledger.ledger_publish, "close_issue", lambda url: None)
     monkeypatch.setattr(ledger_phase_cli, "append_phases", lambda plan, taken: [{"phase": "p9", "planning": "auto"}])
 
     def run(argv, reply):
@@ -66,7 +72,7 @@ def cli(monkeypatch, tmp_path):
             assert slug == "s"
             sent.extend(ops or [])
             ids = [op["id"] for op in ops or []]
-            return reply(ids)
+            return reply(ids) if ops else {**reply(ids), "phases": [{"id": "p1", "title": "Plan"}]}
 
         monkeypatch.setattr(ledger, "request", request)
         argv = [str(plan) if part == "PLAN" else part for part in argv]
@@ -141,7 +147,7 @@ def test_a_refused_artifact_without_a_reason_says_to_join_and_name_a_task(cli):
 @pytest.mark.parametrize(
     ("argv", "entry"),
     [
-        (["say", " Hi "], {"op": "add", "thread": "chat", "text": "Hi", "by": "eng-1"}),
+        (["say", " Hi "], {"op": "add", "thread": "chat", "text": "Hi", "by": "eng-1", "to": "operator"}),
         (["comment", "tasks/t1", "Hi"], {"op": "add", "thread": "tasks/t1/comments", "text": "Hi", "by": "eng-1"}),
         (["edit", "chat", "m1", "Hi"], {"op": "edit", "thread": "chat", "id": "m1", "text": "Hi", "by": "eng-1"}),
     ],
@@ -150,6 +156,11 @@ def test_text_commands_send_their_entry(cli, capsys, argv, entry):
     (sent,) = cli(argv, applied)
     assert {key: sent[key] for key in entry} == entry
     assert capsys.readouterr().out
+
+
+def test_say_names_its_line_with_ten_hex_digits(cli):
+    (sent,) = cli(["say", "Hi"], applied)
+    assert re.fullmatch(r"m-[0-9a-f]{10}", sent["id"])
 
 
 @pytest.mark.parametrize("argv", [["say", "Hi"], ["comment", "tasks/t1", "Hi"]], ids=" ".join)
@@ -171,6 +182,23 @@ def test_a_refusal_leaves_out_the_ledger_size_warnings():
     with pytest.raises(SystemExit) as stop:
         ledger.refused({"rejected": ["x"], "_meta": {"warnings": [*size, REASON]}})
     assert stop.value.code == REASON
+
+
+def test_a_phase_without_a_description_raises_no_size_warning():
+    from scripts.swarm_ledger import ledger_core
+
+    doc = {
+        "overview": "word " * 201,
+        "phases": [
+            {"id": "p1"},
+            {"id": "p2", "description": "word " * 101},
+            {"id": "p3", "description": "word " * 100},
+        ],
+    }
+    assert ledger_core.warnings(doc) == [
+        "overview has 201 words, limit 200",
+        "phase p2 description has 101 words, limit 100",
+    ]
 
 
 @pytest.mark.parametrize(

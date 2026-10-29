@@ -15,6 +15,7 @@ import new_ledger  # noqa: E402
 from scripts.swarm_ledger import watch_ledger  # noqa: E402
 from scripts.swarm_ledger.events import Expired, stream  # noqa: E402
 from scripts.swarm_ledger.events.patch import diff  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "watchevents-2026-01-01"
 MEMBERS = {"me": {"claims": ["phases/p1"]}, "boss": {"role": "orchestrator"}, "other": {}}
@@ -131,28 +132,28 @@ def test_stream_opens_the_request_with_the_read_timeout_and_parses_frames(monkey
     opened = []
     body = stream.frame("snapshot", {"é": 1}, "c0") + stream.frame("heartbeat", {})
 
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         opened.append((request.full_url, dict(request.header_items()), timeout))
         return io.BytesIO(body)
 
-    monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda: "http://h:1")
+    monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda: "https://h:1")
     monkeypatch.setattr(watch_ledger.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(watch_ledger, "credentials", lambda slug: {"X-Ledger-Token": f"for {slug}"})
     assert list(watch_ledger.stream(SLUG, "c1")) == [("snapshot", {"é": 1}, "c0"), ("heartbeat", {}, None)]
     assert list(watch_ledger.stream(SLUG, None, {"X-Ledger-Agent": "a"}))[0][2] == "c0"
     assert opened == [
         (
-            f"http://h:1/api/v1/ledgers/{SLUG}/events",
+            f"https://h:1/api/v1/ledgers/{SLUG}/events",
             {"X-ledger-token": f"for {SLUG}", "Accept": "text/event-stream", "Last-event-id": "c1"},
             watch_ledger.STREAM_TIMEOUT_S,
         ),
-        (f"http://h:1/api/v1/ledgers/{SLUG}/events", {"X-ledger-agent": "a", "Accept": "text/event-stream"}, 15.0),
+        (f"https://h:1/api/v1/ledgers/{SLUG}/events", {"X-ledger-agent": "a", "Accept": "text/event-stream"}, 15.0),
     ]
 
 
 @pytest.mark.parametrize(("code", "raised"), [(410, Expired), (403, urllib.error.HTTPError)])
 def test_stream_turns_only_a_410_into_expired(monkeypatch, code, raised):
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         raise urllib.error.HTTPError(request.full_url, code, "no", {}, None)
 
     monkeypatch.setattr(watch_ledger.urllib.request, "urlopen", urlopen)
@@ -175,8 +176,8 @@ def test_alive_creates_the_beat_folder_and_touches_the_file(tmp_path):
 @pytest.fixture
 def ledger_file():
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-    html_path, json_path = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path, json_path = legacy_page.paths(SLUG, core)
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
     return json_path
@@ -228,7 +229,7 @@ def test_main_resumes_from_the_last_cursor_and_refreshes_credentials_only_after_
     assert sleeps == [0.5, 0.5]
     out = capsys.readouterr().out.splitlines()
     assert out == [
-        f"WATCHING {ledger_file} rev 1",
+        f"WATCHING ledger {SLUG} rev 1",
         'OPERATOR rev=2 comment added on tasks/t1 [c-2]: "x"',
         "WARNING ledger stream: dropped",
     ]

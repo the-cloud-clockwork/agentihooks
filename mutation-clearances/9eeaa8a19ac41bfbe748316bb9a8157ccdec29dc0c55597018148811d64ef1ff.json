@@ -1,0 +1,6 @@
+{
+  "hooks/context/quota_policy.py:hooks.context.quota_policy.x__api_accounts__mutmut_25:1aa80427c09362a180583fb725adb1ed13a4c7683c12d68b62c8ea0faed2d170": {
+    "reader": "Standards",
+    "reason": "Equivalent: both concrete API sources ignore now; policy ignores it; Candidate.observed_at remains unchanged."
+  }
+}

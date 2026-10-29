@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/checkpoints/native.py:scripts.swarm_v2.checkpoints.native.x\u01c1Codex\u01c1_indexed__mutmut_19:e9dc64d5c1a55a6be0317de842be6a1804be2d0b82dad39392e08b3028f13d03": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: lowercasing the SQL keywords leaves the query unchanged because SQLite treats keywords and ASCII identifiers case-insensitively, and _indexed reads row[0] by position, so the returned rollout path is identical."
+  }
+}

@@ -1,13 +1,11 @@
-import json
 from types import SimpleNamespace
 
 import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
-from scripts.swarm import profile_choice, runtime, store, tick
+from scripts.swarm import dispatcher, profile_choice, runtime, store, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
+from tests.swarm_ledger import legacy_page
 
 REAL_INSTALLED = profile_choice.installed
 REMEDY = (
@@ -65,17 +63,28 @@ def asked(monkeypatch):
 
 @pytest.fixture
 def ledger_file(monkeypatch, tmp_path):
-    path = tmp_path / "sw.json"
     phases = [{"id": "p0"}, {"id": "p1", "title": "Ordering", "description": "Operator ranks the queue"}, {"id": "p2"}]
-    path.write_text(json.dumps({"overview": "Swarm Design System", "phases": phases}))
-    monkeypatch.setattr(profile_choice, "ledger_path", lambda slug: {"sw": path}[slug])
-    return path
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
+    legacy_page.store(tmp_path, "sw", {"overview": "Swarm Design System", "phases": phases})
+    return tmp_path
 
 
 def test_explicit_task_profile_wins_without_classifier(monkeypatch):
     monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("explicit profile asked classifier"))
     decision = profile_choice.choose("sw", "eng", {"profile": "engineer"}, {**TASK, "profile": "qa"}, {})
     assert decision == profile_choice.ProfileDecision("qa", "task", "explicit task profile")
+
+
+def test_the_decision_the_tick_recorded_is_reused_without_the_classifier(monkeypatch):
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("recorded decision asked classifier"))
+    saved = profile_choice.ProfileDecision(
+        "frontend", "classifier", "frontend", "m1", 0.8, True, ("task:t9", "phase:p1"), ("o1",), "rev1"
+    )
+    task = {**TASK, "profile_decision": saved.record()}
+    assert profile_choice.pick("sw", "eng", {}, task) == saved
+    assert profile_choice.pick("sw", "eng", {}, {**task, "profile": "qa"}) == profile_choice.ProfileDecision(
+        "qa", "task", "explicit task profile"
+    )
 
 
 @pytest.mark.parametrize(
@@ -92,6 +101,53 @@ def test_fixed_lane_responsibility_survives_without_classifier(monkeypatch, lane
     monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("fixed lane asked classifier"))
     decision = profile_choice.choose("sw", lane, lanes, {"id": "t9", "title": "Fix the page layout"}, {})
     assert decision == profile_choice.ProfileDecision(expected, "lane", f"{lane} lane")
+
+
+CONTRACT = {
+    "must": "Each alleged form is classified from CI evidence as actual runner execution or nonexecution",
+    "check": "Controlled CI invocation checks and guard results for the exact three reported forms",
+    "judge": "Independent Standards reader",
+}
+CI_PROOF_TASKS = [
+    {**TASK, "kind": "troubleshoot", "contract": {**CONTRACT, "push": "yes"}},
+    {**TASK, "kind": "ops", "contract": {"push": "yes"}},
+    {**TASK, "kind": "code", "contract": {"must": "m", "check": "c", "push": "yes"}},
+    {key: value for key, value in TASK.items() if key != "kind"} | {"contract": {"push": "yes"}},
+]
+
+
+@pytest.mark.parametrize("task", CI_PROOF_TASKS)
+def test_a_task_whose_proof_needs_a_pushed_ci_run_picks_engineer_without_a_model_call(monkeypatch, task):
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("CI proof task asked the classifier"))
+    decision = profile_choice.choose("sw", "eng", {"profile": "engineer"}, task, {})
+    assert decision == profile_choice.ProfileDecision(
+        "engineer",
+        "proof contract",
+        "proof needs a pushed CI run",
+        anchors=("task:t9", "phase:p1", "territory:scripts/swarm/tick.py", "territory:scripts/swarm_ledger/static"),
+    )
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        {**TASK, "kind": "troubleshoot", "contract": CONTRACT},
+        {**TASK, "kind": "troubleshoot", "contract": {**CONTRACT, "push": "no"}},
+        {**TASK, "kind": "troubleshoot", "contract": None},
+        {**TASK, "kind": "troubleshoot", "contract": {"push": "Yes"}},
+    ],
+)
+def test_a_task_without_the_push_field_still_asks_the_classifier(asked, ledger_file, task):
+    calls = asked("qa")
+    decision = profile_choice.choose("sw", "eng", {}, task, {})
+    assert (decision.profile, decision.source, len(calls)) == ("qa", "classifier", 1)
+
+
+def test_a_pinned_lane_or_task_profile_wins_over_a_ci_proof(monkeypatch):
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("pinned profile asked classifier"))
+    task = CI_PROOF_TASKS[0]
+    assert profile_choice.choose("sw", "eng", {}, {**task, "profile": "qa"}, {}).source == "task"
+    assert profile_choice.choose("sw", "eng", {"profile": "qa"}, task, {}).profile == "qa"
 
 
 def test_unpinned_engineering_task_asks_one_typed_choice_with_public_behaviour_and_intent(asked, ledger_file):
@@ -149,9 +205,8 @@ def test_bare_task_state_and_question_name_empty_fields(asked, ledger_file):
 def test_close_summary_is_not_parent_intent_and_missing_ledger_is_empty(monkeypatch, tmp_path):
     from scripts.swarm_ledger import ledger_close
 
-    path = tmp_path / "sw.json"
-    path.write_text(json.dumps({"overview": f"Intent {ledger_close.MARK} summary"}))
-    monkeypatch.setattr(profile_choice, "ledger_path", lambda slug: {"sw": path, "gone": tmp_path / "x.json"}[slug])
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
+    legacy_page.store(tmp_path, "sw", {"overview": f"Intent {ledger_close.MARK} summary"})
     assert profile_choice.state("sw", {})["project_intent"] == "Intent"
     assert profile_choice.state("gone", {})["project_intent"] == ""
 
@@ -210,6 +265,34 @@ def test_an_answer_without_confidence_takes_the_lane_default(asked):
     decision = profile_choice.choose("sw", "eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "0.001"})
     assert (decision.profile, decision.source, decision.confidence) == ("engineer", "lane default", None)
     assert decision.responsibility.endswith("answered frontend with confidence 0.00, below the floor 0.00")
+
+
+def test_a_legacy_floor_above_one_is_refused_with_its_remedy(monkeypatch, tmp_path, ledger_file):
+    from hooks import config
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("picked with a malformed floor"))
+    with pytest.raises(profile_choice.ProfileUnresolved) as refused:
+        profile_choice.choose("sw", "eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "1.5"})
+    assert str(refused.value) == (
+        "task t9 profile classification is unavailable (threshold confidence must be between zero and one): "
+        "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
+        "into one public responsibility each, then reopen it"
+    )
+
+
+def test_a_refused_definition_is_unresolved_with_its_remedy(monkeypatch, tmp_path, ledger_file):
+    from hooks import config
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("picked without a definition"))
+    with pytest.raises(profile_choice.ProfileUnresolved) as refused:
+        profile_choice.classify("sw", TASK, {"AGENTIHOOKS_CLASSIFIER_PROFILE_PICK_CONFIDENCE": "1.5"})
+    assert str(refused.value) == (
+        "task t9 profile classification is unavailable (threshold confidence must be between zero and one): "
+        "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
+        "into one public responsibility each, then reopen it"
+    )
 
 
 def test_pinned_task_profile_wins_over_a_low_confidence_answer(asked):
@@ -314,7 +397,8 @@ def test_tick_blocks_task_with_the_unresolved_reason(swarm):
     rt = FakeRuntime(crash=profile_choice.ProfileUnresolved("profile unresolved: set it"))
     actions = tick.tick("sw", swarm, ledger, rt, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "blocked" and swarm.claimant("sw", "t1") is None
-    assert ledger.comments == [("sw", "t1", "profile unresolved: set it", "swarm")]
+    comments = [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR]
+    assert comments == [("sw", "t1", "profile unresolved: set it", "swarm")]
     assert "blocked t1: profile unresolved: set it" in actions
 
 
@@ -331,3 +415,109 @@ def test_tick_still_reopens_on_an_ordinary_spawn_failure(swarm):
     ledger = tasks(("t1", "eng"))
     tick.tick("sw", swarm, ledger, FakeRuntime(fail=True), now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "open"
+
+
+class PlacingRuntime(FakeRuntime):
+    router = SimpleNamespace(placement=object())
+
+    def placement_refusal(self, lane, task):
+        profile_choice.pick("sw", lane, {}, task)
+        return ""
+
+
+def test_an_unresolved_task_is_skipped_and_the_ready_task_behind_it_launches(swarm, monkeypatch):
+    def classify(slug, task, environ):
+        if task["id"] == "t1":
+            raise profile_choice.ProfileUnresolved("t1 profile unresolved: set it")
+        return profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
+
+    monkeypatch.setattr(profile_choice, "classify", classify)
+    ledger = _commenting(tasks(("t1", "eng"), ("t2", "eng")))
+    rt = PlacingRuntime()
+    actions = tick.tick("sw", swarm, ledger, rt, now_ms=1_000)
+    assert [task_id for _, _, task_id in rt.spawned] == ["t2"]
+    assert ledger.rows["t1"]["state"] == "blocked" and swarm.claimant("sw", "t1") is None
+    comments = [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR]
+    assert comments == [("sw", "t1", "t1 profile unresolved: set it", "swarm")]
+    assert "blocked t1: t1 profile unresolved: set it" in actions
+
+
+class LaterUnresolvedRuntime(PlacingRuntime):
+    def __init__(self):
+        super().__init__()
+        self.checked = []
+
+    def placement_refusal(self, lane, task):
+        self.checked.append(task.get("id"))
+        if task.get("id") == "t1" and self.checked.count("t1") > 1:
+            raise profile_choice.ProfileUnresolved("t1 answered unresolved later")
+        return ""
+
+    def spawn(self, config, lane, name, task):
+        if task["id"] == "t1":
+            raise profile_choice.ProfileUnresolved("t1 answered unresolved later")
+        return super().spawn(config, lane, name, task)
+
+
+def test_a_later_unresolved_answer_blocks_its_task_and_the_rest_still_launch(monkeypatch):
+    import fakeredis
+
+    two = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    two.create(store.SwarmConfig("sw", "/repo", max_eng=2, max_ci=0))
+    decision = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
+    monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
+    ledger = _commenting(tasks(("t1", "eng"), ("t2", "eng")))
+    rt = LaterUnresolvedRuntime()
+    actions = tick.tick("sw", two, ledger, rt, now_ms=1_000)
+    assert [task_id for _, _, task_id in rt.spawned] == ["t2"]
+    assert ledger.rows["t1"]["state"] == "blocked" and two.claimant("sw", "t1") is None
+    comments = [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR]
+    assert comments == [("sw", "t1", "t1 answered unresolved later", "swarm")]
+    assert "blocked t1: t1 answered unresolved later" in actions
+
+
+def test_a_fresh_spawn_keeps_its_handoff_without_the_original_run_options():
+    complete = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high"}
+    lost = {"handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": {"profile": "engineer"}}}
+    with pytest.raises(tick.SpawnError) as error:
+        profile_choice.transfer(lost)
+    assert error.value.status == "unsupported"
+    assert profile_choice.transfer({**lost, profile_choice.FRESH: True}) == {}
+    assert profile_choice.transfer({**lost, "handoff_envelope": {"launch": complete}, profile_choice.FRESH: True}) == {}
+    assert profile_choice.transfer({**lost, "handoff_envelope": {"launch": complete}}) == complete
+
+
+def test_a_handoff_whose_launch_never_reported_options_keeps_its_identity():
+    unreported = {"profile": "cicd", "harness": "claude", "model": "", "effort": "", "account": "a1"}
+    task = {"handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": unreported}}
+    assert profile_choice.transfer(task) == unreported
+    half = {**unreported, "model": "opus"}
+    assert profile_choice.transfer({**task, "handoff_envelope": {"launch": half}}) == half
+
+
+class UnsupportedHandoffRuntime(LaterUnresolvedRuntime):
+    def placement_refusal(self, lane, task):
+        self.checked.append(task.get("id"))
+        if task.get("id") == "t1" and self.checked.count("t1") > 2:
+            profile_choice.transfer({"handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": {"profile": "x"}}})
+        return ""
+
+    def spawn(self, config, lane, name, task):
+        if task["id"] == "t1":
+            raise tick.SpawnError("unsupported handoff: original profile and run options are missing", "unsupported")
+        return super(LaterUnresolvedRuntime, self).spawn(config, lane, name, task)
+
+
+def test_a_failed_launch_whose_placement_check_raises_is_recorded_and_the_rest_still_launch(monkeypatch):
+    import fakeredis
+
+    two = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    two.create(store.SwarmConfig("sw", "/repo", max_eng=2, max_ci=0))
+    decision = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
+    monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
+    ledger = _commenting(tasks(("t1", "eng"), ("t2", "eng")))
+    rt = UnsupportedHandoffRuntime()
+    tick.tick("sw", two, ledger, rt, now_ms=1_000)
+    assert [task_id for _, _, task_id in rt.spawned] == ["t2"]
+    assert "run options are missing" in two.launch_failure("sw", "t1")
+    assert {row["state"] for row in two.launches("sw") if row["task"] == "t1"} == {"failed"}

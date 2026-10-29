@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/review_rounds.py:scripts.swarm.review_rounds.x__counter__mutmut_10:f2d4bbcde68edd0803a94ef5f18e2140a73155ecb91581d629713050ebe1306a": {
+    "reader": "Standards",
+    "reason": "The newly introduced private marker is consistently renamed for reads and writes; supported binding, legacy migration and refusal outputs are unchanged. No deployed marker compatibility is implied."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/scheduler/core.py:scripts.scheduler.core.x\u01c1Scheduler\u01c1run_due__mutmut_22:7c297362c599062896b084b388b899ef69f618a3d637f51c01676266834a8552": {
+    "reader": "Standards",
+    "reason": "Redis parses score bounds using strtod. POSIX specifies INF and INFINITY ignoring case; -inf and -INF both produce negative infinity, preserving the inclusive lower bound and selected entries."
+  }
+}

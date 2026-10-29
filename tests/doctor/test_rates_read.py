@@ -10,7 +10,6 @@ from scripts.doctor.rates import Pull, Window
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.store import RedisStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 MIN = 60_000
 URL = "https://github.com/o/r/pull/{}"
 RAW = {

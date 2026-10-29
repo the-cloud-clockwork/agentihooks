@@ -61,14 +61,20 @@ def test_a_task_cost_finding_says_it_counts_uncached_tokens():
     record = {
         "merged": ["a", "b", "c"],
         "traces": [
-            {"tags": [f"task:{t}"], "observations": [{"type": "GENERATION", "turn": None, "tokens": n}]}
+            {
+                "tags": [f"task:{t}"],
+                "observations": [
+                    {"type": "GENERATION", "turn": None, "tokens": n},
+                    {"type": "SPAN", "turn": 1},
+                ],
+            }
             for t, n in (("a", 100), ("b", 120), ("c", 1000))
         ],
     }
     [found] = traces.task_cost(record, traces.Limits(task_cost_ratio=3))
     assert found.summary == "1000 uncached tokens, over 3 times the other merged tasks"
     assert found.evidence == (
-        "turns 0",
+        "turns 1",
         "traced sessions 1",
         "uncached tokens 1000, median of the other merged tasks 110",
         "uncached tokens are input, cache writes and output; cache reads are left out",
@@ -93,6 +99,25 @@ def test_recorded_turns_follow_each_other_and_a_planted_long_gap_is_found():
     assert found.id == f"turn-gap/{ENG11}"
     assert found.measure >= 60
     assert any(line.startswith("turn 3 to turn 4: ") for line in found.evidence)
+
+
+PARTIAL = "observations read only up to where the read stopped"
+
+
+def test_findings_on_a_trace_read_in_part_say_so_and_whole_traces_do_not():
+    record = load("traces")
+    for o in _trace(record, ENG11)["observations"]:
+        if o["turn"] in (4, 5):
+            o["start"] += 3_600_000
+            o["end"] += 3_600_000
+    for tool in [o for o in _trace(record, ENG5)["observations"] if o["type"] == "TOOL"][:30]:
+        tool["error"] = True
+    [gap], [errors] = traces.turn_gaps(record, LIMITS), traces.tool_errors(record, LIMITS)
+    assert PARTIAL not in gap.evidence and PARTIAL not in errors.evidence
+    _trace(record, ENG11)["complete"] = False
+    _trace(record, ENG5)["complete"] = False
+    [gap], [errors] = traces.turn_gaps(record, LIMITS), traces.tool_errors(record, LIMITS)
+    assert PARTIAL in gap.evidence and PARTIAL in errors.evidence
 
 
 def test_recorded_untraced_sessions_are_named_and_a_planted_trace_clears_one():

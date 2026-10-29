@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/dispatch_seat.py:scripts.swarm.dispatch_seat.x_refusal__mutmut_5:86e955f49ea268664cf543044ce14cae9c0c15fd28da34edda1de19eb73bedb9": {
+    "reader": "standards_reader",
+    "reason": "Passes write=None instead of write=False to lifetime.sleeping, whose only use of write is the truthiness test `if write:`; None and False take the same branch and the value is never stored, returned or compared."
+  }
+}

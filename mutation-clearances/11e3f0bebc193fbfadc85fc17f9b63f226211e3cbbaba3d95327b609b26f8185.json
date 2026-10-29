@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/watch_ledger.py:scripts.swarm_ledger.watch_ledger.x_main__mutmut_1:890ff053263384b73eab814eb2ff0a605ab9722972ea215dc1e8bc65f071cf12": {
+    "reader": "Independent Standards /root/standards_reader",
+    "reason": "Equivalent: the local initial state is only truth tested; False and None are both false."
+  }
+}

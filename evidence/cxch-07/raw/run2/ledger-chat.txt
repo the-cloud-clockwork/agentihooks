@@ -1,0 +1,11 @@
+master@2572f1-0001 | Ledger page: http://127.0.0.1:8797/proof-323133-cxc8-1 (open it to follow and steer the work)
+master@3ddefe-0001 | Ledger page: http://127.0.0.1:8797/proof-323133-cxc8-1 (open it to follow and steer the work)
+operator | Proof chat one: reply on the ledger chat with the words chat one received, then stop.
+swarm | Received by the master inbox.
+operator | Proof chat two: reply on the ledger chat with the words chat two received, then stop.
+swarm | Received by the master inbox.
+master@3ddefe-0001 | chat one received
+master@3ddefe-0001 | chat two received
+operator | Proof chat three: reply on the ledger chat with the words chat three received, then stop.
+swarm | Received by the master inbox.
+master@3ddefe-0001 | chat three received

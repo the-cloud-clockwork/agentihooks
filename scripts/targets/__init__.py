@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Protocol, Sequence
 
 SUPPORTED_TARGETS = ("claude", "codex", "copilot")
+DEFAULT_TARGETS = ("claude", "codex")
 DEFAULT_TARGET = "claude"
 
 
@@ -92,6 +93,8 @@ class TargetAdapter(Protocol):
         """Config root this target reads (``~/.claude`` / ``~/.codex`` / ``~/.copilot``)."""
         ...
 
+    def summary_counts(self) -> dict[str, int]: ...
+
     def write_settings(self, native: dict) -> Path:
         """Persist the merged settings for this target; returns the file written.
 
@@ -113,7 +116,11 @@ class TargetAdapter(Protocol):
         ...
 
     def install_persona(
-        self, profile_dirs: list[tuple[str, Path]], profile_chain: list[str], bundle_dir: Path | None
+        self,
+        profile_dirs: list[tuple[str, Path]],
+        profile_chain: list[str],
+        bundle_dir: Path | None,
+        user_dir: Path | None = None,
     ) -> None:
         """Assemble and write the persona/system-prompt file for this target."""
         ...

@@ -1,0 +1,34 @@
+{
+  "case": "T-SV2-MST-03-B",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-MST-03-B",
+    "evidence_class": "fakeredis swarm store, inbox and masters channel; fake herdr runtime; fixture ledger document; no live swarm",
+    "input_sha256": "d215ed0eeff3f52750bd28c22232aeeec3011a04d37eabb8855a44d431e222ea",
+    "observed": {
+      "actions_after_hold": [
+        "asked to hand off retiring seat master-4@fixture",
+        "asked to hand off retiring seat master-3@fixture",
+        "asked to hand off retiring seat master-2@fixture"
+      ],
+      "actions_inside_hold": [],
+      "actions_with_live_extras": [],
+      "asks_per_seat": {
+        "master-2@fixture": [
+          "swarm"
+        ],
+        "master-3@fixture": [
+          "swarm"
+        ],
+        "master-4@fixture": [
+          "swarm"
+        ]
+      },
+      "count_inside_hold": 4,
+      "count_with_live_extras": 4,
+      "rule_kept": "5",
+      "unknown_rule": "master-per takes a whole number of agents per master, hive or off, not 'lots'"
+    },
+    "state": "passed"
+  }
+}

@@ -36,6 +36,13 @@ def test_comment_item_posts_on_the_item_thread(sent):
     ]
 
 
+def test_notice_posts_an_appended_swarm_comment_on_the_task(sent):
+    ledger_client.LedgerClient().notice("demo", "t1", "Queued again.")
+    assert without_id(sent) == [
+        ("demo", {"op": "add", "by": "swarm", "thread": "tasks/t1/comments", "text": "Queued again.", "notice": True})
+    ]
+
+
 def test_mark_done_sets_the_done_flag(sent):
     ledger_client.LedgerClient().mark_done("demo", "followups/f1")
     assert without_id(sent) == [("demo", {"op": "set", "by": "swarm", "path": "followups/f1/done", "value": True})]
@@ -44,3 +51,21 @@ def test_mark_done_sets_the_done_flag(sent):
 def test_answer_as_operator_carries_no_author(sent):
     ledger_client.LedgerClient().answer_as_operator("demo", "questions/q1", "Use the small one.")
     assert without_id(sent) == [("demo", {"op": "add", "thread": "questions/q1/answers", "text": "Use the small one."})]
+
+
+@pytest.mark.parametrize("flag", [{}, {"needs_operator": True}])
+def test_followup_flags_the_item_for_the_operator_only_when_asked(sent, flag):
+    ledger_client.LedgerClient().followup("demo", "Pick a port.", **flag)
+    [(slug, op)] = without_id(sent)
+    op.pop("text")
+    assert (slug, op) == ("demo", {"op": "add_item", "by": "swarm", "list": "followups", **flag})
+
+
+def test_an_agent_followup_is_written_as_that_agent(sent):
+    ledger_client.LedgerClient().followup("demo", "Cut from the plan: a generator", by="engineer@1-1")
+    assert without_id(sent) == [
+        (
+            "demo",
+            {"op": "add_item", "by": "engineer@1-1", "list": "followups", "text": "Cut from the plan: a generator"},
+        )
+    ]

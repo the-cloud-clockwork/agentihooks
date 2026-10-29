@@ -1,0 +1,12 @@
+{
+  "suite": "worker-resources",
+  "repeats": 3,
+  "interval": 0.1,
+  "workloads": [
+    {"name": "general", "class": "general", "version": "1", "children": [1, 2, 4], "command": ["{python}", "{workloads}/general.py", "--children", "{children}"]},
+    {"name": "compiler", "class": "compiler", "version": "2", "children": [1, 2, 4], "command": ["{python}", "{workloads}/compiler.py", "--children", "{children}"]},
+    {"name": "browser", "class": "browser", "version": "2", "children": [1, 2, 4], "command": ["{python}", "{workloads}/browser.py", "--children", "{children}"]},
+    {"name": "memory", "class": "memory", "version": "1", "children": [1, 2, 4], "command": ["{python}", "{workloads}/memory.py", "--children", "{children}", "--mib", "256", "--hold", "2"]},
+    {"name": "idle", "class": "idle", "version": "1", "children": [0], "command": ["{python}", "{workloads}/idle.py", "--hold", "3"]}
+  ]
+}

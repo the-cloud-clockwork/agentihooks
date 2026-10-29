@@ -1,0 +1,60 @@
+{
+  "package": "SV2-CTL-02",
+  "dependency": "SV2-CTL-01",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1951",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2024",
+  "tested_commit": "6980bcabd85bec9181a7fb8250e38717770b033b",
+  "status": "fixture-qualified-on-integrated-controller-awaiting-ci",
+  "evidence_class": "Mocked Redis server with an actual Lua interpreter and aligned server clock; transactional Redis client paths and signed fixture grants; no production rollout claimed.",
+  "interfaces": [
+    "TaskAuthority.admit, renew, release, complete, current, journal, replay and stale_generation_rejections_total",
+    "TaskClaim stores task holder, monotonic task generation, immutable execution identity and its separate execution generation, Redis server-time deadline, state and completion result",
+    "RedisStore local claim, refresh and release refuse distributed state or retained journal; claimant remains the preceding string projection",
+    "Redis Lua commit checks controller epoch, worker grant expiry and absolute server-time task deadlines before any claim or journal write; compatibility projection uses PXAT"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "grant": "LaunchAuthority Registration from signed version 2.0 fixture grants; trusted authorization callback validates every mutation",
+    "compatibility": "Existing local claims remain supported on tasks without distributed records; preceding claimant reader remains usable during rollback",
+    "redis": "Redis 7 protocol emulation in fakeredis with its Lua extra; Lua TIME and PXAT required on the concrete Redis service"
+  },
+  "authority": "The controller requires its scoped credential and renewable epoch at the watched write boundary. The worker authorization callback validates the credential on every request; actor and task derive from registered immutable execution scope. Display names confer no mutation authority.",
+  "states": {
+    "observed": "Positive negative and recovery cases each passed twice from independent fake Redis state. Focused integration and public boundary tests passed.",
+    "accepted": "Task authority transactions admit one live write owner and reject former generation operations with stale_generation.",
+    "committed": "The code and fixture inputs are at tested_commit. This evidence commit adds sanitized observed results.",
+    "externally_verified": "None: no concrete remote API or live G3 deployment was exercised."
+  },
+  "validation": {
+    "command": "python -m pytest tests/test_swarm_v2_authority.py tests/swarm/test_store.py tests/swarm/test_tick.py tests/test_swarm_v2_controller.py tests/swarm/test_execution_identity.py tests/test_swarm_redis_key_prefix.py tests/test_live_redis_guard.py -q --tb=short --cov=scripts.swarm_v2.authority --cov-report=term-missing tests/test_suite_speed.py",
+    "output": "365 passed in 35.86 seconds; authority 178 statements, zero missing, 100 percent coverage",
+    "lint": "ruff check passed on changed Python files",
+    "format": "ruff format check passed on changed Python files",
+    "limits": "84 units over limits, 84 base allowlist entries, zero errors against the stacked controller base",
+    "guard_fault": "Removing script refusal made the real client boundary test fail; restoring it made real refusal and fake evaluation tests pass. The real client dispatch stub was never invoked by valid code.",
+    "worker_expiry_control": "Four delayed admit renew release complete requests crossed signed worker token expiry; red before fix and green after; no task state journal or claimant changes.",
+    "store_mutation_followup": "CI run 37893903406: 99 store mutants killed, three equivalent NX mutants cleared, zero failures.",
+    "authority_mutation_followup": "CI run 37893903406: 559 killed, 48 authority survivors. Exact journals, fenced snapshots, later retired attempts, one millisecond leases, early task expiry precedence, real Redis TIME reads and ten isolated scope churn cases now exercise the reported variants. Standards cleared only the unused replay worker deadline default. Renewed CI must qualify the assertions."
+  },
+  "cases": {
+    "a": "evidence/SV2-CTL-02/a-result.json",
+    "b": "evidence/SV2-CTL-02/b-result.json",
+    "c": "evidence/SV2-CTL-02/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Disable controller admission, retain task authority and claim journals, continue the qualified local path for unrelated local tasks.",
+    "authoritative_objects": "Persistent task authority and append-only claim journal plus execution registry and controller epoch. The expiring string claimant is a compatibility projection.",
+    "proof": "Case C reconstructs the completed second generation twice, changes no journal entries, refuses new admission and accepts a local claim."
+  },
+  "remaining_limitations": [
+    "TaskAuthority is an injectable distributed service, like its Controller dependency. Production controller loop, remote heartbeat, outcome, checkpoint and merge receiver wiring must use this compare-and-update interface; unscoped existing local consumers remain the explicit compatibility path.",
+    "Full CI and mutation run on the integration pull request; results pending.",
+    "Replaying retained claim journal recovers coordination state. Loss of the authoritative journal is not reconstructed from a compatibility string claim."
+  ],
+  "reviews": {
+    "Standards": "Integrated base and scoped credential expiry plus fixture import changes closed at 9d7d986e; no open findings.",
+    "Spec": "Worker credential expiry finding resolved at 9d7d986e; independent eight focused checks passed; no open findings. Live G3 wiring remains unverified."
+  },
+  "dependency_pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1968"
+}

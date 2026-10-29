@@ -36,6 +36,20 @@ def test_no_free_seat_gives_claude_all_full(monkeypatch):
     assert agent_choice.choose("", {}) == ("claude", agent_choice.ALL_FULL)
 
 
+def test_the_rotation_pick_follows_the_api_split(monkeypatch):
+    from scripts.swarm import capacity
+
+    rows = [
+        capacity.Account("claude", "a", "OPEN", 1, 90, 90, 3),
+        capacity.Account("codex", "cx", "OPEN", 2, 90, 90, 3),
+        capacity.Account("codex", "api", "OPEN", 0, None, None, 10**6, kind="api", weight=0),
+    ]
+    monkeypatch.setattr(capacity, "accounts", lambda environ, now: rows)
+    assert agent_choice.choose("", {}) == ("claude", "rotation")
+    rows[2] = capacity.Account("codex", "api", "OPEN", 0, None, None, 10**6, kind="api", weight=100)
+    assert agent_choice.choose("", {}) == ("codex", "rotation")
+
+
 def test_init_agent_reports_the_chosen_agent(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         agent_choice, "choose", lambda requested, environ: ("codex", "fallthrough: claude has no quota")
@@ -68,8 +82,10 @@ def test_a_codex_launcher_runs_through_the_codex_router(monkeypatch, tmp_path):
     text = launcher.read_text()
     report = launcher.with_suffix(".route")
     assert (
-        f"/usr/bin/agentihooks codex --agentihooks-report {report} -c 'model_reasoning_effort=\"high\"' --model o3 "
-        f'"$(cat {prompt_file})"'
+        f'set --; [ -n "${{AGENTIHOOKS_PROMPT_AFTER_START:-}}" ] || set -- "$(cat {prompt_file})"; '
+        "unset AGENTIHOOKS_PROMPT_AFTER_START; "
+        f"/usr/bin/agentihooks codex --agentihooks-report {report} -c 'model_reasoning_effort=\"medium\"' --model o3 "
+        '"$@"'
     ) in text
     assert "status=direct" not in text and "agentihooks claude" not in text
 
@@ -105,11 +121,12 @@ def test_one_codex_account_quota_uses_its_week_band(monkeypatch):
 
     now = time.time()
     readings = {"seen": CodexQuota(observed_at=now, plan_type="pro", seven_day=QuotaWindow(used=95.1))}
+    monkeypatch.setattr(codex_router, "default_signed_in", lambda environ, run=None: True)
     monkeypatch.setattr("scripts.codex_quota.latest_codex_quota", lambda environ=None, keep=None: readings["seen"])
     assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is False
     readings["seen"] = CodexQuota(observed_at=now, plan_type="pro", seven_day=QuotaWindow(used=95.0))
     assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is True
-    readings["seen"] = CodexQuota(observed_at=now - 901, plan_type="pro", seven_day=QuotaWindow(used=50.0))
+    readings["seen"] = CodexQuota(observed_at=now - 6 * 3600 - 1, plan_type="pro", seven_day=QuotaWindow(used=50.0))
     assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is None
     assert agent_choice.account_has_quota("codex", "nobody", {}) is None
 

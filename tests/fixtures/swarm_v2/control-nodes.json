@@ -1,0 +1,111 @@
+{
+  "source": "kubectl get nodes -L anton.io/capacity-type on anton-prod and the antoncore ec2-arc-runners node_labels, 2026-10-10",
+  "placement": {
+    "affinity": {
+      "nodeAffinity": {
+        "requiredDuringSchedulingIgnoredDuringExecution": {
+          "nodeSelectorTerms": [
+            {
+              "matchExpressions": [
+                {
+                  "key": "anton.io/capacity-type",
+                  "operator": "DoesNotExist"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "tolerations": []
+  },
+  "durable": [
+    {
+      "name": "k8s-master",
+      "labels": {
+        "kubernetes.io/hostname": "k8s-master"
+      },
+      "taints": [],
+      "free_cpu_millicores": 2000
+    },
+    {
+      "name": "k8s-worker-1",
+      "labels": {
+        "kubernetes.io/hostname": "k8s-worker-1"
+      },
+      "taints": [],
+      "free_cpu_millicores": 1500
+    },
+    {
+      "name": "k8s-worker-2",
+      "labels": {
+        "kubernetes.io/hostname": "k8s-worker-2"
+      },
+      "taints": [],
+      "free_cpu_millicores": 1500
+    },
+    {
+      "name": "worker-001",
+      "labels": {
+        "kubernetes.io/hostname": "worker-001"
+      },
+      "taints": [],
+      "free_cpu_millicores": 3000
+    }
+  ],
+  "reclaimable": [
+    {
+      "name": "anton-ec2-on-demand-ci",
+      "labels": {
+        "anton.io/capacity-type": "on-demand",
+        "anton.io/workload": "ci"
+      },
+      "taints": [
+        {
+          "key": "anton.io/workload",
+          "value": "ci",
+          "effect": "NoSchedule"
+        }
+      ],
+      "free_cpu_millicores": 16000
+    },
+    {
+      "name": "anton-ec2-spot-ci",
+      "labels": {
+        "anton.io/capacity-type": "spot",
+        "anton.io/workload": "ci"
+      },
+      "taints": [
+        {
+          "key": "anton.io/workload",
+          "value": "ci",
+          "effect": "NoSchedule"
+        }
+      ],
+      "free_cpu_millicores": 16000
+    },
+    {
+      "name": "anton-ec2-spot-research",
+      "labels": {
+        "anton.io/capacity-type": "spot",
+        "anton.io/workload": "research"
+      },
+      "taints": [
+        {
+          "key": "anton.io/workload",
+          "value": "research",
+          "effect": "NoSchedule"
+        }
+      ],
+      "free_cpu_millicores": 8000
+    },
+    {
+      "name": "anton-ec2-spot-untainted",
+      "labels": {
+        "anton.io/capacity-type": "spot"
+      },
+      "taints": [],
+      "free_cpu_millicores": 32000
+    }
+  ]
+}

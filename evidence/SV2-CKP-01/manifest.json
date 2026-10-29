@@ -1,0 +1,17 @@
+{
+  "tested_commit": "ead685260c72146b4fd30dda03ed38d8edcef0bc",
+  "evidence_class": "mocked: a local durable directory backend behind a granted artifact store and fixture launch registrations; no object store, worker Pod or harness was used",
+  "inputs": {
+    "tests/fixtures/swarm_v2/checkpoints/native-resume.json": "c39dc9e0d89ee5d0f846ab5bca487ab16cc187c77077c6d9d1bde8e3723f2349",
+    "tests/fixtures/swarm_v2/checkpoints/context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda",
+    "tests/fixtures/swarm_v2/checkpoints/path-only-snapshot.json": "44c0b83757dc61441a2872c8e416393e12a6db4cd8b63befd97f2638ea331b39",
+    "tests/contracts/swarm_v2/fixtures/checkpoint/current.json": "feefba867cb3a1c8465034ab5eae0100b396befdeb3c4b04278d5d247898a799",
+    "tests/test_swarm_v2_checkpoints_cases.py": "d001e11067216aecf2aa651e836c0c98bc4e15371738d6ee2e033be686b8e451",
+    "tests/test_swarm_v2_checkpoints_model.py": "684520be2443db0f13810309d1e7b5c2fb2edea1953150915c26cc2a9913dbb5",
+    "scripts/swarm_v2/checkpoints/model.py": "760d5dfb8cc76722b87fc3315a9fd7a3fdc21e431e9581b6d0d3d62ff07cda39",
+    "scripts/swarm_v2/artifacts/base.py": "bcc39bf6c81f689e35ce11ceebe9c2994519522fd3e8e337538e4c82dc8b02ea",
+    "scripts/swarm_v2/artifacts/local.py": "57b3baf4a360307b1995f2068aee79370a03863c6902837fe2c0739a938c306d",
+    "docs/swarm-v2/schemas/checkpoint.json": "b503cb62a01eb2e873505c64b3bc7593f2e64cac4453761f3656f4108736e1b3",
+    "docs/swarm-v2/schemas/compatibility.json": "59b838d8c4649c88a136656ba667c33948c8c64b90835b443151aff82d4a725c"
+  }
+}

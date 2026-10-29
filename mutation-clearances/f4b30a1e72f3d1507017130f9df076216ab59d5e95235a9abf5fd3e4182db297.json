@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/master_fence.py:scripts.swarm_v2.master_fence.x_decision__mutmut_23:6a6549ca7a5403e973e5c6148d213163417c6d899013c7c550eb9e31402d6645": {
+    "reader": "standards_reader",
+    "reason": "Changes only the default for an add op with no thread key. Every replacement default (None, absent, XXXX) yields a last path part other than comments, so decision returns the empty string and the op reaches add validation unfenced exactly as before."
+  }
+}

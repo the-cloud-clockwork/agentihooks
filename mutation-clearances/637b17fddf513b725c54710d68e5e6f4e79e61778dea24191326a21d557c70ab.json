@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x\u01c1InputFramer\u01c1_sequence__mutmut_4:c336349fba22c558fbf3617e4231f22b85f9f461d3069b45ab018547d838565f": {
+    "reader": "standards-reader round three",
+    "reason": "both X10 prefix literals have identical bytes."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/activity.py:scripts.swarm.health.activity.x_record__mutmut_4:d4e9cc5f19e1df2e9c74e5e107e5cea96da0dd53397c40472fdebaedc96e0427": {
+    "reader": "standards-reader",
+    "reason": "Omitting encoding uses the supported runtime default UTF-8; integer ASCII bytes are unchanged."
+  }
+}

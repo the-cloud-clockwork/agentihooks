@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/bottleneck_remedy.py:scripts.swarm.bottleneck_remedy.x__placeable__mutmut_4:76a1b1012846500e36d975474c0f61d2b7323ad4978de73dc19698bae326510f": {
+    "reader": "standards_reader",
+    "reason": "Changing the held exclusion slug to None still excludes only an empty task identifier. Worker task identifiers are nonempty under ledger task validation, and local_slots excludes masters independently. Therefore the counted workers and pending reservations are unchanged for supported records. The Standards reader cleared this mutant as equivalent; task argument mutants are tested separately with valid task identifiers None and XXXX."
+  }
+}

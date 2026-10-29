@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_host.py:scripts.swarm.ledger_host.x_newest_on_dev__mutmut_27:cd98f2604d11cab735eedcb717dd085e574b6c1fcaade6e539e0d68a6eaaaae0": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: the selector is the reflog selector of refs/remotes/origin/dev, a refname followed by one @{stamp} suffix. Git refnames may not contain the sequence @{ (git check-ref-format rejects refs/remotes/origin/a@{b with exit 1), so the selector holds exactly one @{ and partition and rpartition split it identically."
+  }
+}

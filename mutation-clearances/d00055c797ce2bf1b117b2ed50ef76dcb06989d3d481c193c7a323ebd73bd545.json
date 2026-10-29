@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/image_tag.py:scripts.swarm_v2.image_tag.x__head__mutmut_14:7a77661e03e05550204306346749ef92ff5d3fe54eb93e3486271574845314a6": {
+    "reader": "standards_reader",
+    "reason": "Changes only the case of the header name passed to urllib.request.Request.add_header, which stores key.capitalize(), so the request carries the same header either way."
+  }
+}

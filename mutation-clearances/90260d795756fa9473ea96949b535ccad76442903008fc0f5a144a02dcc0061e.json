@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.xǁHerdrRuntimeǁhas_capacity__mutmut_4:9afded67503780bec585ed40f575195efbc08d019a95bed1a98c335a5ba436e9": {
+    "reader": "standards_reader",
+    "reason": "_quota_open reads lane only in lane == MASTER, where MASTER is \"master\"; \"XXXX\" and \"\" both fail it, so both take the raw quota account rows and the same quota_handoff.trigger filter, and no other line reads lane."
+  }
+}

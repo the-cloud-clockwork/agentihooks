@@ -31,8 +31,8 @@ export LEDGER_DIR=$HOME/scratchpad/agentihooks/ledger-design
 export LEDGER_PORT=8790
 export LEDGER_IMPECCABLE_LIVE=1
 mkdir -p "$LEDGER_DIR"
-cp ~/development-ledger/<slug>.json "$LEDGER_DIR/design-copy.json"
-cp ~/development-ledger/<slug>.html "$LEDGER_DIR/design-copy.html"
+LEDGER_DIR=$HOME/development-ledger agentihooks ledger storage export <slug> --out "$LEDGER_DIR/design-copy.json"
+agentihooks ledger storage import "$LEDGER_DIR/design-copy.json"
 ~/dev/tcc-ecosystem/.venv/bin/python scripts/swarm_ledger/ledger_server.py --serve
 ```
 

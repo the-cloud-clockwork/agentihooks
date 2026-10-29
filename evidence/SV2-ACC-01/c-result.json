@@ -1,0 +1,32 @@
+{
+  "package": "SV2-ACC-01",
+  "case": "T-SV2-ACC-01-C",
+  "tested_commit": "5c700c834a120384a7862b404f48ab8b779baeaf",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37937300304",
+  "fixture": "tests/fixtures/swarm_v2/fleet-registry.json: the worker session registers through alias fixture-eng-1 at generation 1, then a successor execution takes the seat at generation 2",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_registry.py::test_recovery_from_persisted_state_keeps_aliases_and_generations",
+      "job": 113843861394,
+      "output": "PASSED at 2026-10-09T13:40:28.2767728Z"
+    }
+  ],
+  "recovery_boundary": "store.export, flushall of the whole Redis (dependency loss), store.restore, then a new FleetRegistry over the restored store (owner restart)",
+  "survived": [
+    "the generation 2 session record, byte-equal",
+    "the seat owner eng-1@fixture at generation 2",
+    "the alias fixture-eng-1 resolving to the original canonical name"
+  ],
+  "replay_assertion": "re-registering the current generation returns the stored record and writes nothing",
+  "ownership_assertion": "the generation 1 attempt is refused without a grant (forbidden_scope) and with its superseded grant (launch grant is for a superseded execution); rows are unchanged",
+  "related_fencing_tests": [
+    "test_an_older_generation_cannot_take_a_seat_a_newer_one_holds",
+    "test_a_superseded_attempt_cannot_beat_its_successor_record",
+    "test_a_record_replaced_after_its_grant_check_is_not_beaten"
+  ],
+  "durability": "nothing was lost across export and restore; no missing source material",
+  "cleanup": "fakeredis per test; no live resource mutations",
+  "fleet_registry_stale_records": {"value": 0, "dimension": "fixture fleet-registry.json after restore"},
+  "passed": true
+}

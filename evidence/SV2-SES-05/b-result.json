@@ -1,0 +1,41 @@
+{
+  "case": "T-SV2-SES-05-B",
+  "evidence_class": "mocked: fixture transcript files in a temporary folder and SQLite catalog and import ledger files stand in for the operator's real Claude and Codex homes and the central database; no live provider home was read",
+  "input_sha256": {
+    "session-import.json": "74cf01fbdee514d0c49a3d9db6eb37b261c43dc1717cf1c14fd753d0661901fb"
+  },
+  "observed": {
+    "basename_alias": {
+      "error": {
+        "class": "invalid_plan",
+        "detail": "alias folders must be absolute paths"
+      },
+      "state": "rejected"
+    },
+    "corrected_outcomes": {
+      "-fixture-dev-agentihooks/0a1b2c3d-old.jsonl": "committed",
+      "-fixture-personal-agentihooks/5e6f-dup.jsonl": "committed",
+      "2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl": "committed"
+    },
+    "duplicate_basename_projects": [
+      "None"
+    ],
+    "imported_sessions": [
+      "swarm-fixture:claude:workstation-a:0a1b2c3d-old",
+      "swarm-fixture:claude:workstation-a:5e6f-dup",
+      "swarm-fixture:codex:workstation-a:0199aa00-codex"
+    ],
+    "metrics": {
+      "historical_import_unknown_attribution": 3
+    },
+    "personal_root": {
+      "error": {
+        "class": "forbidden_scope",
+        "detail": "root 2 is not approved for the granted corpus; nothing was imported"
+      },
+      "state": "rejected"
+    },
+    "protected_state_unchanged": true
+  },
+  "state": "passed"
+}

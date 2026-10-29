@@ -26,6 +26,15 @@ its work folder. Read `steering.md` there first; append a line to
   when it expires. Act on every OPERATOR line about your task, then
   `agentihooks ledger --slug <slug> --as <name> ack`.
 
+## Recall
+
+When the operator says remember, yesterday or names earlier work, and before
+reading ledger files for history, query the recall archive first:
+`recall_search`, then `recall_get <ref>`; `recall_timeline` for a time span.
+Recall holds swarm and ledger history; the brain holds fleet lessons. Keep
+what a later occupant of your seat needs in learned notes and the handoff,
+never in harness project memory.
+
 ## Inbox
 
 Items addressed to you or your seat arrive in the session at your next tool
@@ -59,7 +68,10 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
 
 ## Close with the proof
 
-Merge on green checks, remove the worktree, then
+Queue on green checks with `agentihooks swarm <slug> merge queue <url>`, which
+goes through the GitHub API and works with any gh; a base branch with a merge
+queue lands it when the queue run passes, and the prod lockdown guard refuses a
+direct merge there. Once it merges, remove the worktree, then
 `agentihooks ledger --slug <slug> --as <name> leave` and close:
 
 | Kind | Close |
@@ -75,6 +87,8 @@ The ledger refuses `done` without the proof its kind needs. Stop after `done`.
 A missing secret, a runner you cannot reach, a decision only the operator can
 make: push the branch, open a draft pull request, then
 `agentihooks swarm <slug> block "<plain words naming the blocker>"` and stop.
+When red dev Tests is the blocker, add `--dev-red`: the swarm reopens the task
+once a later dev Tests run passes.
 
 ## Handoff
 

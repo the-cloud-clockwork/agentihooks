@@ -1,0 +1,6 @@
+{
+  "scripts/master_claude_login.py:scripts.master_claude_login.x_slot__mutmut_11:d1d27c7cc0dce7af7b6ef7de95c86235b7c41cccacca30d27d4e55bd5ec5f7ea": {
+    "reader": "standards_reader",
+    "reason": "Raising the lower bound from 1 to 2 only changes the result for number 1, which then takes the else branch and still returns 1. Every other integer keeps its result, so slot() returns the same value for every input."
+  }
+}

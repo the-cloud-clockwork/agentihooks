@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1send_export__mutmut_25:7707bff4f29ed1901ab3cab06db822606d916afc41a8dc37418153bb626306f5": {
+    "reader": "standards_reader",
+    "reason": "Only lowercases the Cache-Control field name in send_export. HTTP field names are case-insensitive (RFC 9110 section 5.1), so the export response still carries Cache-Control no-store with the same Content-Type, Content-Length and body bytes. Handler.send_header only branches on keyword.lower() equal to content-type, which cache-control never matches, so no header is added or dropped. No ledger server, page or test code reads the raw case of the export response header names."
+  }
+}

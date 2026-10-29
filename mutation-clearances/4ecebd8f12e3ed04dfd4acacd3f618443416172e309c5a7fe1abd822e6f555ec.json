@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/autoscale.py:scripts.swarm.autoscale.x_calculate__mutmut_27:3225b9e502a32ec00266a81e2147c01897856527dd4f7a2438edaab2ea32550d": {
+    "reader": "standards-reader",
+    "reason": "Equivalent for valid inputs. Equality enters the branch, preserves current total, then clears pending; ceilings and reason match. Standards reader ruling on CI run 37860268880."
+  }
+}

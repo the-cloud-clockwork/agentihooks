@@ -1,0 +1,6 @@
+{
+  "scripts/init_reporter.py:scripts.init_reporter.x\u01c1InstallOutput\u01c1_emit_diagnostic__mutmut_20:219c59f7bf208a7a72822a74c648bb777af36b535d32256820b764787b85b6e2": {
+    "reader": "Standards",
+    "reason": "Independent ruling by master@323133-0163: diagnostic is read only through truthiness in the write guard, continuation bool and emit guard, is replaced by assignment before any concatenation, and nothing outside init_reporter reads the attribute. None and the empty string behave the same on every path."
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "late_resume_last_turn_status": "inProgress",
+  "request_method": "item/commandExecution/requestApproval",
+  "delivered_to_owner": true,
+  "late_reader_status": "inProgress",
+  "delivered_to_late_reader": false,
+  "late_resume": "ok",
+  "delivered_to_late_resumer": true,
+  "late_same_request_id": true,
+  "late_request_before_resume_reply": false,
+  "late_request_before_read_reply": true,
+  "late_reader_methods": [
+    "configWarning",
+    "deprecationNotice",
+    "remoteControl/status/changed",
+    "thread/goal/cleared",
+    "thread/status/changed"
+  ],
+  "resolved_seen_by_late_resumer": true,
+  "turn_status": "completed",
+  "file_created": false
+}

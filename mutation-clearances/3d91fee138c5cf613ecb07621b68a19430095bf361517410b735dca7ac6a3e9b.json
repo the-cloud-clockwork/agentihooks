@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/pool.py:scripts.inbox.pool.x\u01c1MasterPool\u01c1_reclaim__mutmut_1:76abb464f3f4e6d7393b13c071b990727abb9de67f4edbf7aa5713a0926e1bdf": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "False and None initialize the same false truth value; retry is subsequently only assigned True and checked by not retry, so no output changes."
+  }
+}

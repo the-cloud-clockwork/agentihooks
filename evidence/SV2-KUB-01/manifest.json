@@ -1,0 +1,39 @@
+{
+  "tested_commit": "e9f046bf450a353cca9f783b7771b1999cb7e3fd",
+  "evidence_class": "mocked in process rendering for the cases; Kubernetes schema validity observed by the kind job's strict server side dry run",
+  "inputs": {
+    "scripts/swarm_v2/kubernetes/spec.py": "d52edde01d9a0e0c95f2087296b25f76c8c3bea7cb0b2263f9193838946cc0cc",
+    "docs/swarm-v2/schemas/pod-policy.json": "ff1fe4d47a18047e7c7f404dbc88fd593917d4fa98b21a6490aac76b4702ec4c",
+    "tests/fixtures/swarm_v2/pod-policy.json": "cac05e3a549966cf63b9c00183883ec7087b814eb91fc785dad689df9e66723b",
+    "tests/fixtures/swarm_v2/pod-launch.json": "8d1964999c9d4fc4e3bfd4f8aea2938da30b825411e1e5a12f4ea7e432261908",
+    "tests/fixtures/swarm_v2/pod-rendered.json": "8dc5ffd81a7f1d5dd956a604a3ac4eb11acab0680deee20b1f97998a34330a35",
+    "tests/fixtures/swarm_v2/pod-rendered-wrong-probes.json": "c85a1a11dea0969dc2560337fa59e1c3749e100f51c78f809b135cd822c6daa0",
+    "tests/sv2_kub01_cases.py": "8c89c52887d57f03ca2839436923c45c09d8e1116cd0f86d1f173c547eb3ad17",
+    "tests/test_swarm_v2_kubernetes_spec.py": "861da6125ad5b75ebacc8fcb663feed043f9f533617581671b6b58668895a03d",
+    "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh": "b7910e334bc92b964de83824b11cdebf4c0046231ba3db6140a3d9018e7c72a8"
+  },
+  "kata_storage_amendment": {
+    "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/2678",
+    "tested_commit": "cf6c228461205cdfa610c84d4bfa22c18b3efcec",
+    "tests_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38170573664",
+    "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38170002058",
+    "checker_red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38170457118",
+    "observed": "316 tests passed in CI, including cases A B C; current case records and golden Pods now use writable container root storage for kata-fc. Historical evidence below describes its original renderer.",
+    "inputs": {
+      "scripts/swarm_v2/kubernetes/spec.py": "f5aee07f66e9420f3ebb3898d98efad6d5debe262abb33ab9152604920dc0a2b",
+      "docs/swarm-v2/schemas/pod-policy.json": "19abcf6715c8a6dd2c13f4eaa3715fe9918d26c163eb4bb397f922ef3702528b",
+      "tests/fixtures/swarm_v2/pod-policy.json": "25a857c36e7d1ea9c579b0a285cf746f9f965064a3dfb770a8ae25502605d610",
+      "tests/fixtures/swarm_v2/pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
+      "tests/fixtures/swarm_v2/pod-rendered.json": "ce52d75aaada25368c21fe6fd23ba9fc0092dcd3251d28929aad511c0952e6f7",
+      "tests/fixtures/swarm_v2/pod-rendered-wrong-probes.json": "5720a681392ae68d97579229037f4096f778a454982f4ee7f8ca91ef76fa7faa",
+      "tests/sv2_kub01_cases.py": "65bcf8181419ec6b5ebf00e446a956c93a23b757062c3412422917ffca1ecfa3",
+      "tests/test_swarm_v2_kubernetes_spec.py": "e2c70a6bdffe545bc2351b760dd1260e5c0fb670fa70fc8e493c578fa5de4069",
+      "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh": "88403ce972308f1d43605cfbdb1c0cdf4142dce5383c017ed01106a9b98c489f"
+    },
+    "case_records": {
+      "evidence/SV2-KUB-01/c-result.json": "9dd158dfcb8c75b32429d04afe3beec097cac95df39bc6cb554f21519959cbf3",
+      "evidence/SV2-KUB-01/a-result.json": "808ac75b5576ffc4303b68280bfaad15ac5774e62f603661010b2a36444ebb97",
+      "evidence/SV2-KUB-01/b-result.json": "314e0b5340d427231f637e92157758d9056f1848c4c58324847eb6091142e9f6"
+    }
+  }
+}

@@ -75,9 +75,10 @@ def test_task_root_symlink_never_opens_repository(task_home, prefix):
     assert reason(task_home, task_root(task_home) / "progress.md")
 
 
-def test_master_marker_does_not_open_a_task_folder(task_home, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "master")
-    assert reason(task_home, task_root(task_home).parent / "master" / "progress.md")
+@pytest.mark.parametrize("seat", ["master", "master-2"])
+def test_master_marker_does_not_open_a_task_folder(task_home, monkeypatch, seat):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", seat)
+    assert reason(task_home, task_root(task_home).parent / seat / "progress.md", "master")
 
 
 def patch_payload(home, headers, inputs=None):

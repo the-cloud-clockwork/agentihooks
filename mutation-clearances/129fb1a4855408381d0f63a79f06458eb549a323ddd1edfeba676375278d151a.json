@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker_home.py:scripts.swarm_v2.worker_home.x_materialize__mutmut_74:d36446e05369171fee431c146631c548edf36f68d47622145983f71cbf8e95ef": {
+    "reader": "Standards reader for SV2-IMG-02",
+    "reason": "materialize passes None to register_hooks_utils; the parser admits only claude and codex, and neither adapter reads the profile name: the claude adapter forwards it to install _install_user_mcp, whose body never uses it, and the codex adapter migrates by its own target name."
+  }
+}

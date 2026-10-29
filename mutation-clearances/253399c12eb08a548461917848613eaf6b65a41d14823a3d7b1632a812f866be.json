@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_swarm.py:scripts.swarm.metrics_swarm.x_pull_targets__mutmut_32:658389776bc579824d75e56acdd1480d4342c9f1451937f04b2b4fc397da67e0": {
+    "reader": "Standards",
+    "reason": "Acceptable for the complete current call graph: the XXpr_urlXX lookup changes only returned tuple element2. Both known consumers discard that element; the separate exclusion predicate still uses pr_url and target URLs are unchanged."
+  }
+}

@@ -18,6 +18,7 @@ GATES = {
     "pre-agent+task+sendmessage-subagent_budget.py",
     "pre-any-quiet_claim.sh",
     "pre-bash.agentihooks+bash.bash+bash.sh+bash.zsh+bash.eval-identity_pin.py",
+    "pre-bash.git+bash.gh-one_push.py",
     "pre-bash.gh+bash.agentihooks-intent_gate.py",
     "pre-bash.gh-rerun_budget.py",
     "pre-edit+write+multiedit+notebookedit+mcp__serena+bash.git-build_gate.py",
@@ -42,6 +43,28 @@ def test_role_renders_with_its_role_file_and_no_bundle(world, role):
     assert json.loads((out / render.STAMP).read_text())["chain"] == [role]
     assert "mcpServers" not in json.loads((out / "settings.json").read_text())
     assert not (ROLES / role / ".claude" / ".mcp.json").exists()
+
+
+QUESTIONS_RULE = (
+    "Never write to the operator first: answer only what he writes. Ask operator questions with the question tool "
+    "only after he typed operator on in your pane; when it is refused, hold them until he writes."
+)
+QUESTIONS_COMMAND = (
+    "- Operator questions: the question tool after his typed operator on, never chat text; refused, hold them until "
+    "he writes. The ledger refuses every agent chat line that does not answer his line by its id, and every agent "
+    "question, priority and needs operator follow up."
+)
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_only_the_rendered_master_home_carries_the_operator_questions_rule(world, role):
+    from scripts.profiles import render
+
+    world["install"]._save_state({})
+    persona = (render.render_claude(role) / "CLAUDE.md").read_text()
+
+    found = [line for line in persona.splitlines() if "typed operator on" in line]
+    assert found == ([f"- {QUESTIONS_RULE}", QUESTIONS_COMMAND] if role == "master" else [])
 
 
 @pytest.mark.parametrize("role", ALL_ROLES)

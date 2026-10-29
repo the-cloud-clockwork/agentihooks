@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/api/recovery.py:scripts.swarm_v2.api.recovery.xǁRecoveryAPIǁroute__mutmut_49:aceac2c3e070461118816152bd40895a777347c13089cc6afaddd99c6287a8ae": {
+    "reader": "standards-reader",
+    "reason": "Absent caller names represented as None or an empty string yield the same unauthenticated refusal; operator credential authentication ignores names."
+  }
+}

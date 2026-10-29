@@ -1,0 +1,19 @@
+{
+  "cases": [
+    "T-SV2-MST-03-A",
+    "T-SV2-MST-03-B",
+    "T-SV2-MST-03-C"
+  ],
+  "evidence_class": "fakeredis swarm store, inbox and masters channel; fake herdr runtime; fixture ledger document; no live swarm",
+  "fixture": "A swarm with sixteen phases and one master seat per five working agents, growing from five to twenty agents and back to five; case B holds the shrink inside the hold window and with live extra masters, case C lets each extra master hand off",
+  "independent_runs": 2,
+  "cleanup": "Each run uses its own fakeredis server and fake runtime; nothing outside them is written",
+  "mutation_scope": "Master seat count, scaling rule, retire state and phase owners in the swarm's masters hash, master agent records, inbox items and masters channel posts only; the ledger document is never written",
+  "inputs": {
+    "tests/fixtures/swarm_v2/master-scaling.json": "d215ed0eeff3f52750bd28c22232aeeec3011a04d37eabb8855a44d431e222ea"
+  },
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2455",
+  "package": "SV2-MST-03",
+  "tested_commit": "aa222468b4a2",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38140039236"
+}

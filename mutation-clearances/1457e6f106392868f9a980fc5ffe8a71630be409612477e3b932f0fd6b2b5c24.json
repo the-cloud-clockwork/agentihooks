@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_export_body__mutmut_10:f768c42fd3fdb02ae959d76910f9e35bdd066b2c3d13469f82a130970e9f830d": {
+    "reader": "Standards",
+    "reason": "json.dumps tests ensure_ascii only for truth, so None and False select the same non-ASCII encoder and write identical bytes."
+  }
+}

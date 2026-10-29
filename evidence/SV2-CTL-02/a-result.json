@@ -1,0 +1,56 @@
+{
+  "case": "T-SV2-CTL-02-A",
+  "tested_commit": "6980bcabd85bec9181a7fb8250e38717770b033b",
+  "runs": [
+    {
+      "case": "T-SV2-CTL-02-A",
+      "state": "passed",
+      "evidence_class": "mocked Redis and server clock; signed fixture grants; no external runtime",
+      "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
+      "observed": {
+        "task_id": "task",
+        "holder": "engineer@0c73f6-0002",
+        "generation": 2,
+        "execution_id": "exe-5f50a94bbc664d56b45c2e036d18da2f",
+        "execution_generation": 1,
+        "lease_deadline_ms": 1200,
+        "state": "active",
+        "result": {}
+      },
+      "rejection": "stale_generation",
+      "stale_generation_rejections_total": 1,
+      "journal_events": [
+        "admitted",
+        "fenced",
+        "admitted"
+      ],
+      "rollback": "not exercised",
+      "tested_commit": "6980bcabd85bec9181a7fb8250e38717770b033b"
+    },
+    {
+      "case": "T-SV2-CTL-02-A",
+      "state": "passed",
+      "evidence_class": "mocked Redis and server clock; signed fixture grants; no external runtime",
+      "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
+      "observed": {
+        "task_id": "task",
+        "holder": "engineer@a06538-0002",
+        "generation": 2,
+        "execution_id": "exe-dce7a6990b68430e83ebb7b4b40030b9",
+        "execution_generation": 1,
+        "lease_deadline_ms": 1200,
+        "state": "active",
+        "result": {}
+      },
+      "rejection": "stale_generation",
+      "stale_generation_rejections_total": 1,
+      "journal_events": [
+        "admitted",
+        "fenced",
+        "admitted"
+      ],
+      "rollback": "not exercised",
+      "tested_commit": "6980bcabd85bec9181a7fb8250e38717770b033b"
+    }
+  ]
+}

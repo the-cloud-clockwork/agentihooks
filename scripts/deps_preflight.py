@@ -1,7 +1,8 @@
 """`agentihooks deps check|ensure` — the bundle's dev-environment dependencies, checked and installed before launch.
 
-The manifest is ``<bundle>/deps.json``. Each entry declares how to check itself and,
-unless its kind is ``system``, how to install itself. System dependencies need the
+The manifest is ``<bundle>/deps.json``, read from the root bundle and then the user bundle; an
+entry of the user bundle replaces the root entry with the same id. Each entry declares how to check
+itself and, unless its kind is ``system``, how to install itself. System dependencies need the
 operator (sudo, a package manager), so they are only reported.
 """
 
@@ -17,7 +18,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts import mcp_daemon
+from scripts import mcp_daemon, tool_deps
 
 try:
     import fcntl
@@ -73,11 +74,28 @@ def manifest_path() -> Path | None:
     return path if path and path.is_file() else None
 
 
-def fleet_plugins(bundle: Path | None) -> list[str]:
-    path = bundle / "deps.json" if bundle else None
-    if path is None or not path.is_file():
-        return []
-    return [dep.id for dep in parse(json.loads(path.read_text())) if dep.kind == "claude-plugin" and dep.present]
+def user_manifest_path() -> Path | None:
+    from scripts.install import _get_user_bundle_path
+
+    user = _get_user_bundle_path()
+    path = user / "deps.json" if user else None
+    return path if path and path.is_file() else None
+
+
+def manifest_paths() -> list[Path]:
+    return [path for path in (manifest_path(), user_manifest_path()) if path]
+
+
+def declared(paths: list[Path] | None = None) -> list[Dep]:
+    merged: dict[str, Dep] = {}
+    for path in manifest_paths() if paths is None else paths:
+        merged.update({dep.id: dep for dep in parse(json.loads(path.read_text()))})
+    return list(merged.values())
+
+
+def fleet_plugins(bundle: Path | None, user: Path | None = None) -> list[str]:
+    paths = [root / "deps.json" for root in (bundle, user) if root is not None and (root / "deps.json").is_file()]
+    return [dep.id for dep in declared(paths) if dep.kind == "claude-plugin" and dep.present]
 
 
 def _stamp() -> Path:
@@ -88,16 +106,17 @@ def installs_log() -> Path:
     return mcp_daemon.state_dir() / "deps-installs.jsonl"
 
 
-def _sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _sha(*paths: Path) -> str:
+    digests = [hashlib.sha256(path.read_bytes()).hexdigest() for path in paths]
+    return digests[0] if len(digests) == 1 else hashlib.sha256("".join(digests).encode()).hexdigest()
 
 
-def stamp_fresh(path: Path) -> bool:
+def stamp_fresh(*paths: Path) -> bool:
     try:
         stamp = json.loads(_stamp().read_text())
     except (OSError, ValueError):
         return False
-    return stamp.get("manifest_sha") == _sha(path) and time.time() - stamp.get("ok_at", 0) < STAMP_TTL_SECONDS
+    return stamp.get("manifest_sha") == _sha(*paths) and time.time() - stamp.get("ok_at", 0) < STAMP_TTL_SECONDS
 
 
 def _run(argv: tuple[str, ...], timeout: float) -> bool:
@@ -134,18 +153,44 @@ def _lock():
         yield
 
 
+def refresh_codex_wrapper(caller: str) -> None:
+    from scripts.targets import codex_target
+
+    try:
+        codex_target.refresh_wrapper()
+    except Exception as exc:  # noqa: BLE001 - a broken bundle must not stop installs or a launch
+        print(f"[agentihooks {caller}] hook wrapper refresh skipped: {exc}", file=sys.stderr)
+
+
+def install_declared(*, quiet: bool) -> None:
+    specs = tool_deps.missing_here()
+    if not specs:
+        return
+    if not quiet:
+        print(
+            f"[agentihooks] deps: installing {', '.join(specs)} into the agentihooks tool environment", file=sys.stderr
+        )
+    try:
+        tool_deps.install(specs, tool_deps.call, sys.executable)
+    except RuntimeError as exc:
+        if not quiet:
+            print(f"[agentihooks] deps: {exc}", file=sys.stderr)
+
+
 def ensure(*, quiet: bool = False) -> int:
     from scripts.skill_links import repair
 
     repair()
-    path = manifest_path()
-    if path is None or stamp_fresh(path):
+    refresh_codex_wrapper("deps")
+    paths = manifest_paths()
+    if not paths or stamp_fresh(*paths):
         return 0
     with _lock():
-        if stamp_fresh(path):
+        if stamp_fresh(*paths):
             return 0
+        install_declared(quiet=quiet)
         missing_system = []
-        for dep in parse(json.loads(path.read_text())):
+        for dep in declared(paths):
             if satisfied(dep):
                 continue
             if dep.kind == "system":
@@ -161,7 +206,7 @@ def ensure(*, quiet: bool = False) -> int:
             print(f"[agentihooks] deps: {dep.id} is missing and needs the operator: {dep.hint}", file=sys.stderr)
         if missing_system:
             return EXIT_MISSING_SYSTEM
-        _stamp().write_text(json.dumps({"manifest_sha": _sha(path), "ok_at": time.time()}))
+        _stamp().write_text(json.dumps({"manifest_sha": _sha(*paths), "ok_at": time.time()}))
         return 0
 
 
@@ -171,20 +216,48 @@ def unsatisfied() -> list[Dep]:
     missing = [
         Dep(id=f"skill:{link.name}", kind="skill", check=(), hint=f"dangling link: {link}") for link in dangling()
     ]
-    path = manifest_path()
-    if path is not None:
-        missing.extend(dep for dep in parse(json.loads(path.read_text())) if not satisfied(dep))
+    missing.extend(
+        Dep(
+            id=spec,
+            kind="python",
+            check=(),
+            hint="declared in pyproject.toml but missing from the agentihooks tool environment; install it with "
+            f"uv pip install --python {sys.executable} '{spec}'",
+        )
+        for spec in tool_deps.missing_here()
+    )
+    missing.extend(dep for dep in declared() if not satisfied(dep))
     return missing
+
+
+def sync() -> int:
+    repo = str(tool_deps.SOURCE)
+    try:
+        branch = tool_deps.call(["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"])
+        if branch != "dev":
+            print(f"deps sync: {repo} is on {branch}, not dev", file=sys.stderr)
+            return 1
+        installed = tool_deps.pull(repo, tool_deps.call, sys.executable)
+    except RuntimeError as exc:
+        print(f"deps sync: {exc}", file=sys.stderr)
+        return 1
+    if installed:
+        print(f"deps sync: installed {', '.join(installed)} into the agentihooks tool environment")
+    else:
+        print("deps sync: pulled dev; declared dependencies unchanged")
+    return 0
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks deps")
-    parser.add_argument("action", choices=["check", "ensure", "mark-changed"])
+    parser.add_argument("action", choices=["check", "ensure", "mark-changed", "sync"])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--reason", default="manual", help="mark-changed: what changed (recorded in the install log)")
     args = parser.parse_args(argv)
     if args.action == "ensure":
         return ensure(quiet=args.quiet)
+    if args.action == "sync":
+        return sync()
     if args.action == "mark-changed":
         _record(Dep(id=args.reason, kind="system", check=(), affects_sessions=True), ok=True)
         return 0

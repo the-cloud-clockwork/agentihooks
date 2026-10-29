@@ -1,0 +1,6 @@
+{
+  "scripts/openbao_step.py:scripts.openbao_step.x_target__mutmut_12:75aab43475d48edfe353acf546f3cbc9bd9ed09c257dfaef14bd2422ba41eb29": {
+    "reader": "standards_reader",
+    "reason": "The default-no answer becomes None. The prompt still renders '[y/N]' because only a truthy default shows '[Y/n]', and an empty answer returns None, which the caller only reads under `not`, so it is falsy like False. Cleared by the Standards reader on PR 2578 round 2 as equivalent."
+  }
+}

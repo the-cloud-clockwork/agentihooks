@@ -1,0 +1,6 @@
+{
+  "hooks/context/branch_guard.py:hooks.context.branch_guard.x__check_pr_creation__mutmut_46:341bf5d1bb691dd371df1794d268d1af92feb3a84e40b150805544bdbd36a2c6": {
+    "reader": "standards_reader",
+    "reason": "equivalent. The exception fallback changes False to None; the value is subsequently consumed only through boolean tests. Both select identical branches, counter behavior, logs and errors."
+  }
+}

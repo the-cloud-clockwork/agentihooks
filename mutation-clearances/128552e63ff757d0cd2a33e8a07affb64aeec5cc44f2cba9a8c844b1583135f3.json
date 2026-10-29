@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_main__mutmut_53:3aa1acad170062e366772914172871a559a05c4e3698bf240f80e1759006e8ac": {
+    "reader": "Standards",
+    "reason": "ledger_server.core aliases the flat ledger_core module; the default domain imports that same already loaded module and preserves lock, settings and object identity."
+  }
+}

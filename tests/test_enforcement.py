@@ -225,6 +225,35 @@ class TestSessionStartEntry:
         assert "second rule" in context
         assert increment_and_get_count("session-start") == 2
 
+    def test_session_start_renders_one_compact_digest(self):
+        from hooks.context.enforcement import add_enforcement, get_session_start_enforcements
+
+        first = add_enforcement("first rule", 3, "doctrine")
+        second = add_enforcement("second rule", 7)
+        context = get_session_start_enforcements("session-start")
+        assert context.count("=== ENFORCEMENT") == 1
+        assert context.splitlines()[0] == "=== ENFORCEMENTS [IMPORTANT] ==="
+        assert "Cadence:" not in context
+        assert f"{first}: first rule" in context.splitlines()
+        assert f"{second}: second rule" in context.splitlines()
+
+    def test_session_start_digest_names_a_rule_file_above_its_body(self, tmp_path):
+        from hooks.context.enforcement import add_enforcement, get_session_start_enforcements
+
+        rule = tmp_path / "rule.md"
+        rule.write_text("# Rule\n\nFirst version.\n")
+        enforcement_id = add_enforcement("", 4, enforcement_type="rule", path=rule)
+        context = get_session_start_enforcements("session-start")
+        assert f"{enforcement_id} (rule {rule.resolve()}):\n# Rule\n\nFirst version.\n" in context
+
+    def test_drumbeat_banner_still_names_a_rule_file(self, tmp_path):
+        from hooks.context.enforcement import add_enforcement, format_enforcement_banner, list_enforcements
+
+        rule = tmp_path / "rule.md"
+        rule.write_text("# Rule\n")
+        add_enforcement("", 4, enforcement_type="rule", path=rule)
+        assert f"Type: rule\nPath: {rule.resolve()}\n" in format_enforcement_banner(list_enforcements()[0])
+
     def test_disabled_returns_none(self):
         from hooks.context.enforcement import add_enforcement, get_session_start_enforcements
 

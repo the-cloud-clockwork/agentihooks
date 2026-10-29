@@ -1,0 +1,202 @@
+{
+  "case": "T-SV2-PRF-01-A",
+  "state": "passed",
+  "evidence_class": "measured: the workloads ran on a GitHub hosted Ubuntu runner in the Worker resources workflow named in measurements.json, repeat.json and update.json, and node capacity was read from the Anton cluster with kubectl as named in nodes.json; derivation, coexistence, promotion and rollback are functions over those committed records run on a temporary accepted file; no worker Pod ran the workloads and no profile was applied to a deployed Pod policy",
+  "input_sha256": {
+    "measurements.json": "a32d3d92a843b1860aeeb20584a3c74ed7f1ab27dcfa4794f2550a92cf834406",
+    "repeat.json": "ede1a4cd1cc69e9351f2001954f5832441aee3d95184c3af05e5a705c4ea7500",
+    "update.json": "73352ce1ac1a4ff3ac10761d296d29fabfdadfa3ce3dc5ec2e961648095791ec",
+    "nodes.json": "74b07c4f56bb476f57707b29aca310d35a40f2841a6bfa685811cd613feb1e7a",
+    "disclosure.json": "5619b504a31319971f751190ca09241f1e9ac8bef2c9454d660f46662d65041c"
+  },
+  "observed": {
+    "generation": 110,
+    "profiles": {
+      "browser": {
+        "memory_mib": 4864,
+        "cpu_millis": 4250,
+        "ephemeral_mib": 3072
+      },
+      "compiler": {
+        "memory_mib": 1792,
+        "cpu_millis": 4750,
+        "ephemeral_mib": 3072
+      },
+      "general": {
+        "memory_mib": 1792,
+        "cpu_millis": 5000,
+        "ephemeral_mib": 3072
+      },
+      "memory": {
+        "memory_mib": 2816,
+        "cpu_millis": 500,
+        "ephemeral_mib": 3072
+      }
+    },
+    "samples": {
+      "browser": 9,
+      "compiler": 9,
+      "general": 9,
+      "memory": 9
+    },
+    "refused": {
+      "idle": "an idle sample cannot size a worker"
+    },
+    "fits": {
+      "anton-ec2-0396dfd54e94477e5": {
+        "browser": 1,
+        "compiler": 1,
+        "general": 1,
+        "memory": 5
+      },
+      "anton-ec2-0447e2769b1a3084a": {
+        "browser": 0,
+        "compiler": 0,
+        "general": 0,
+        "memory": 1
+      },
+      "anton-ec2-0af3a8fe7769581ef": {
+        "browser": 0,
+        "compiler": 0,
+        "general": 0,
+        "memory": 1
+      },
+      "anton-ec2-0c9b3493a0ef846f4": {
+        "browser": 0,
+        "compiler": 0,
+        "general": 0,
+        "memory": 1
+      },
+      "k8s-master": {
+        "browser": 1,
+        "compiler": 1,
+        "general": 1,
+        "memory": 2
+      },
+      "k8s-worker-1": {
+        "browser": 0,
+        "compiler": 0,
+        "general": 0,
+        "memory": 2
+      },
+      "k8s-worker-2": {
+        "browser": 0,
+        "compiler": 0,
+        "general": 0,
+        "memory": 3
+      },
+      "worker-001": {
+        "browser": 0,
+        "compiler": 1,
+        "general": 1,
+        "memory": 1
+      }
+    },
+    "worker_process_tree_peak_memory": {
+      "browser": 2663.61,
+      "compiler": 236.2,
+      "general": 258.68,
+      "idle": 13.0,
+      "memory": 1091.25
+    },
+    "deterministic_rederivation": true,
+    "independent_repeat": {
+      "generation": 111,
+      "profiles": {
+        "browser": {
+          "memory_mib": 4864,
+          "cpu_millis": 4250,
+          "ephemeral_mib": 3072
+        },
+        "compiler": {
+          "memory_mib": 1792,
+          "cpu_millis": 4750,
+          "ephemeral_mib": 3072
+        },
+        "general": {
+          "memory_mib": 1792,
+          "cpu_millis": 5000,
+          "ephemeral_mib": 3072
+        },
+        "memory": {
+          "memory_mib": 2816,
+          "cpu_millis": 500,
+          "ephemeral_mib": 3072
+        }
+      },
+      "samples": {
+        "browser": 9,
+        "compiler": 9,
+        "general": 9,
+        "memory": 9
+      },
+      "refused": {
+        "idle": "an idle sample cannot size a worker"
+      },
+      "fits": {
+        "anton-ec2-0396dfd54e94477e5": {
+          "browser": 1,
+          "compiler": 1,
+          "general": 1,
+          "memory": 5
+        },
+        "anton-ec2-0447e2769b1a3084a": {
+          "browser": 0,
+          "compiler": 0,
+          "general": 0,
+          "memory": 1
+        },
+        "anton-ec2-0af3a8fe7769581ef": {
+          "browser": 0,
+          "compiler": 0,
+          "general": 0,
+          "memory": 1
+        },
+        "anton-ec2-0c9b3493a0ef846f4": {
+          "browser": 0,
+          "compiler": 0,
+          "general": 0,
+          "memory": 1
+        },
+        "k8s-master": {
+          "browser": 1,
+          "compiler": 1,
+          "general": 1,
+          "memory": 2
+        },
+        "k8s-worker-1": {
+          "browser": 0,
+          "compiler": 0,
+          "general": 0,
+          "memory": 2
+        },
+        "k8s-worker-2": {
+          "browser": 0,
+          "compiler": 0,
+          "general": 0,
+          "memory": 3
+        },
+        "worker-001": {
+          "browser": 0,
+          "compiler": 1,
+          "general": 1,
+          "memory": 1
+        }
+      },
+      "worker_process_tree_peak_memory": {
+        "browser": 2670.15,
+        "compiler": 241.12,
+        "general": 258.26,
+        "idle": 12.64,
+        "memory": 1091.44
+      }
+    },
+    "repeat_changes": {
+      "material": [],
+      "missing": [],
+      "tools_changed": {}
+    },
+    "accepted": "promoted",
+    "accepted_file_matches": true
+  }
+}

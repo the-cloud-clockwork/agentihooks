@@ -23,11 +23,12 @@ def _overlay_files() -> list[Path]:
 
     state = profile_chain.read_state()
     bundle = profile_chain.bundle_path(state)
-    files = [bundle / "lifecycle.json"] if bundle else []
+    user = profile_chain.user_bundle_path(state)
+    files = [root / "lifecycle.json" for _kind, root in profile_chain.bundle_roots(state)]
     profile = profile_chain.active_profile(state)
     if profile:
         linked = profile_chain.linked_profiles(state)
-        files += [d / "lifecycle.json" for _name, d in profile_chain.profile_dirs(bundle, profile, linked)]
+        files += [d / "lifecycle.json" for _name, d in profile_chain.profile_dirs(bundle, profile, linked, user)]
     return files + [AGENTIHOOKS_HOME / "lifecycle.json"]
 
 

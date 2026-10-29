@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/kubernetes/completion.py:scripts.swarm_v2.kubernetes.completion.x\u01c1Completion\u01c1_finalize__mutmut_55:16d38ed6070b1071d8035e0b71d67c225ed9361d17270153d38fb430350754fa": {
+    "reader": "standards-reader",
+    "reason": "Both default strings are invalid JSON. The decoder returns an empty mapping and completion preserves the Pod in either case."
+  }
+}

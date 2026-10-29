@@ -1,0 +1,19 @@
+{
+  "cases": [
+    "T-SV2-MST-04-A",
+    "T-SV2-MST-04-B",
+    "T-SV2-MST-04-C"
+  ],
+  "evidence_class": "fakeredis swarm store, seats and masters channel; a temporary ledger folder written through the ledger write path with the master fence; no live swarm or ledger server",
+  "fixture": "Two master seats on a ledger with two phases, one task in each, one follow up and one question; case A has master two write the lead's follow up, question and task and its own task, case B has a former master write the lead's items, case C takes the lead down, seats its successor over master two's decision, takes master two down and rereads the record from a new Redis client",
+  "independent_runs": 2,
+  "cleanup": "Each run uses its own fakeredis server and a temporary ledger folder removed when the run ends; nothing outside them is written",
+  "mutation_scope": "The fixture ledger's follow up, question and tasks, the master decision and cross write records in its meta, the swarm masters hash refusal counter and masters channel posts only",
+  "inputs": {
+    "tests/fixtures/swarm_v2/master-race.json": "a11c82985cdf497aa9f0644d8381ed5e34b2cf4f3c2145206aa6e262ba70ad96"
+  },
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/5607",
+  "package": "SV2-MST-04",
+  "tested_commit": "c8a8706bd2e7",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39667532598"
+}

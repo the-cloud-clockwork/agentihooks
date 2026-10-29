@@ -1,13 +1,14 @@
+import json
 from dataclasses import replace
 
 import pytest
 
 from scripts.handoff import transfers
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm.tick import tick
+from scripts.swarm.tick import SpawnError, tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 DOC = "# Handoff v2\n## Next\nCheck the saved proof and verify it passed.\n## Read first\nNone\n"
 
 
@@ -66,6 +67,90 @@ def test_a_failed_launch_stamps_its_absent_binding_when_it_fails(setup, monkeypa
     assert result["binding"] == {"state": "absent", "at": 101, "session": "sw-eng-2", "reason": "Launch failed"}
     retry = next(r for r in transfers.list_transfers(store, "sw") if r.get("retry_of") == transfer["id"])
     assert retry["at"] == 101
+
+
+@pytest.mark.parametrize("state", ["starting", "launching"])
+@pytest.mark.parametrize("lane", ["eng", "ci", "master"])
+def test_a_successor_whose_launch_is_unrecorded_keeps_a_pending_binding(setup, state, lane):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2", lane=lane, state=state)
+    store.put_agent("sw", new)
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    runtime = FakeRuntime()
+    transfers.observe(store, "sw", runtime.live_names())
+    assert transfers.get(store, "sw", transfer["id"])["binding"] == {"state": "pending"}
+    store.put_agent("sw", replace(new, state="working", launched_at=40))
+    runtime.live.add(new.name)
+    transfers.observe(store, "sw", runtime.live_names())
+    assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "live"
+
+
+def test_a_launched_successor_missing_from_the_live_names_is_absent(setup):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2", state="working", launched_at=40)
+    store.put_agent("sw", new)
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    transfers.observe(store, "sw", set())
+    assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "absent"
+
+
+def test_a_live_binding_is_kept_when_the_successor_later_leaves_the_live_names(setup):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2", state="working", launched_at=40)
+    store.put_agent("sw", new)
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    runtime = FakeRuntime()
+    runtime.live.add(new.name)
+    transfers.observe(store, "sw", runtime.live_names())
+    bound = transfers.get(store, "sw", transfer["id"])["binding"]
+    runtime.live.discard(new.name)
+    transfers.observe(store, "sw", runtime.live_names())
+    assert transfers.get(store, "sw", transfer["id"])["binding"] == bound
+    assert bound["state"] == "live"
+
+
+def test_detach_frees_only_the_waiting_spawns_unbound_transfers(setup):
+    store, old = setup
+    other = transfers.record(store, "sw", old, "recycle", DOC, 10)
+    live = transfers.record(store, "sw", old, "recycle", DOC, 20)
+    waiting = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    rows = {
+        other["id"]: {**other, "successor": "sw-eng-9"},
+        live["id"]: {**live, "successor": "sw-eng-2", "binding": {"state": "live"}},
+        waiting["id"]: {**waiting, "successor": "sw-eng-2"},
+    }
+    for row in rows.values():
+        store.redis.hset(store.key("sw", "transfers"), row["id"], json.dumps(row))
+    transfers.detach(store, "sw", replace(old, name="sw-eng-2"))
+    assert transfers.list_transfers(store, "sw") == [
+        rows[other["id"]],
+        rows[live["id"]],
+        {**rows[waiting["id"]], "successor": ""},
+    ]
+
+
+def test_a_spawn_waiting_on_a_full_account_leaves_its_task_and_transfer_for_the_next_spawn(setup):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    store.put_handoff("sw", "t1", DOC, seat=old.seat)
+    ledger = FakeLedger([{"id": "t1"}])
+    full = SpawnError("no approved account has quota and a free launch slot", "unavailable")
+    tick("sw", store, ledger, FakeRuntime(crash=full), 10)
+    [row] = transfers.list_transfers(store, "sw")
+    assert (row["id"], row["successor"], row["binding"]) == (transfer["id"], "", {"state": "pending"})
+    assert ledger.rows["t1"]["state"] == "open"
+    assert store.claims("sw", "t1") == 0
+    assert store.launch_failure("sw", "t1") == ""
+    assert [row["state"] for row in store.launches("sw")] == ["waiting"]
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, 20)
+    assert transfers.get(store, "sw", transfer["id"])["successor"] == runtime.spawned[0][1]
 
 
 def test_now_ms_reads_the_wall_clock_in_milliseconds(monkeypatch):

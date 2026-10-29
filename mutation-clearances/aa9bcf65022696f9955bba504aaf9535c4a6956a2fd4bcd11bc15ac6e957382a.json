@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x\u01c1IntentGate\u01c1decide__mutmut_97:06de5411126bc58842beb838b99bb84fdacbbcf14b9750ca279a71fe6c42efa3": {
+    "reader": "Standards",
+    "reason": "Changing bound=True to False adds only a redundant _other_half check. For a supported named merge, _same_pull has already required the selected cached URL to match that single command; for a target-free release, there is no merge target. The check is false and all subsequent decision and coaching behavior remains unchanged."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x__image_stages__mutmut_69:f2ded07f65f203e5266bec0c33cb351ecb667cde88a0dc9203e21f1d0f8eb3ce": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "With ready None the bootstrap is _gap(None, started), which is None under either comparison, so output differs only when Pod Ready is exactly Unix ms 0 and Started is exactly ms 1, which no cluster records."
+  }
+}

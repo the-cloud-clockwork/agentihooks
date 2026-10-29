@@ -1,0 +1,56 @@
+{
+  "thread": "01a11cc1-69b8-7540-8f6a-c5aadcd5717e",
+  "first_turn": {
+    "turn": "01a11cc1-6a2d-7a90-b8b9-4845c36288b0",
+    "completed": true,
+    "status": "completed",
+    "agent_text": [
+      "ALPHA"
+    ],
+    "methods": [
+      "account/rateLimits/updated",
+      "account/updated",
+      "configWarning",
+      "hook/completed",
+      "hook/started",
+      "item/agentMessage/delta",
+      "item/completed",
+      "item/started",
+      "mcpServer/startupStatus/updated",
+      "remoteControl/status/changed",
+      "thread/started",
+      "thread/status/changed",
+      "thread/tokenUsage/updated",
+      "turn/completed",
+      "turn/started"
+    ]
+  },
+  "idle_turn_start": {
+    "turn": "01a11cc1-77f6-7e41-82f1-38f274067945",
+    "completed": true,
+    "status": "completed",
+    "agent_text": [
+      "BRAVO"
+    ],
+    "methods": [
+      "account/rateLimits/updated",
+      "hook/completed",
+      "hook/started",
+      "item/agentMessage/delta",
+      "item/completed",
+      "item/started",
+      "thread/status/changed",
+      "thread/tokenUsage/updated",
+      "turn/completed",
+      "turn/started"
+    ]
+  },
+  "thread_read": {
+    "turn_count": 2,
+    "turn_ids_match": true,
+    "user_texts": [
+      "Fixture one. Reply with exactly the word ALPHA and nothing else.",
+      "Fixture two. The thread is idle now. Reply with exactly the word BRAVO."
+    ]
+  }
+}

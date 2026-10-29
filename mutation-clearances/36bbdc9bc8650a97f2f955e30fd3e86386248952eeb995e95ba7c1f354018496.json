@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_core.py:scripts.swarm_ledger.ledger_core.x_pretty__mutmut_7:5a99750bd0d6a11f2eac0f1a543fc77ae48bc060bec696bb87b63d783e9a7e26": {
+    "reader": "Standards reader of pull request 1767",
+    "reason": "EQUIVALENT. The mutant changes the stdlib fallback ensure_ascii=False to ensure_ascii=None in ledger_core.pretty. json.dumps tests the flag only for truthiness and None is falsy like False. Probe: a fallback document with non-ASCII text and an int above 64 bits gave identical output under False and None."
+  }
+}

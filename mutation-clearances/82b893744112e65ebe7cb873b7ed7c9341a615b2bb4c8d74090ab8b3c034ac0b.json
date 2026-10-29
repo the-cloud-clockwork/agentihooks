@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x__change_unrelayed__mutmut_8:20e9a36a9c6846b7d0068aa3179e360d6255921435e93b1ddd36fbb432106038": {
+    "reader": "standards_reader",
+    "reason": "The staged suffix is only a temporary name in the same directory before os.replace; nothing else references it."
+  }
+}

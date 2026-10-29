@@ -1,0 +1,33 @@
+{
+  "tested_commit": "c0a74a1de7172251a866b23b484ea94307d767eb",
+  "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI, the init-agent launch and the process reaper behind HerdrRuntime, and the remote backend is an in-memory fake; not live rollout proof",
+  "then": "the existing local swarm completes its original spawn, observe and retire tests through the new interface",
+  "runs": [
+    {
+      "spawn_pane": "w1:p1",
+      "observe": "working",
+      "retired": true,
+      "pane_closed": true,
+      "routed_backend": "local",
+      "runtime_capability_failures_total": 0
+    },
+    {
+      "spawn_pane": "w1:p1",
+      "observe": "working",
+      "retired": true,
+      "pane_closed": true,
+      "routed_backend": "local",
+      "runtime_capability_failures_total": 0
+    }
+  ],
+  "remote_routing": {
+    "spawned_on": "kubernetes",
+    "observe": "ok",
+    "drain": "ok",
+    "terminate": "ok",
+    "local_calls": 0,
+    "remote_object_removed": true,
+    "runtime_capability_failures_total": 0
+  },
+  "passed": true
+}

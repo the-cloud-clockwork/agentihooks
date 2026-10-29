@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__migrate__mutmut_61:35fe8ce1ad4a2fb52b1dcdef128a74920e6358d5bdd3f47acc273c48d4992d69": {
+    "reader": "Standards",
+    "reason": "Only INSERT OR IGNORE and VALUES keyword casing changes; the same unchanged empty-string completion marker is inserted or ignored."
+  }
+}

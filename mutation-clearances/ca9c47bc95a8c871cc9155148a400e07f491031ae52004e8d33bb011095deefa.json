@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_swarm.py:scripts.swarm.metrics_swarm.x_delivery_rows__mutmut_71:ca97a03375f136653cb9484ce683ba98d8e7c52589ef50e11b8815c04d8f7230": {
+    "reader": "standards_reader",
+    "reason": "For an existing by field, dict.get returns the same value under both defaults. When by is absent, empty string and None both fail the initial name truthiness condition in _owner, yielding identical temporal candidates and chosen agent. The default name does not enter row fields or event identity; source and every other argument remain unchanged."
+  }
+}

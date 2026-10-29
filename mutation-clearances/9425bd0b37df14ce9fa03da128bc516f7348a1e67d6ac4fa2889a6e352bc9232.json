@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/image_tag.py:scripts.swarm_v2.image_tag.x_resolve__mutmut_22:90a14fe783fd827160ea73d7788bb0d8aa65abdef62c6a3e9fc953bf8ba32775": {
+    "reader": "standards_reader",
+    "reason": "A missing challenge header becomes XXXX instead of an empty string; both fail the Bearer prefix check and raise the same credentials refusal."
+  }
+}

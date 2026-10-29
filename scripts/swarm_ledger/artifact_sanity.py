@@ -11,6 +11,11 @@ from urllib.parse import urlsplit
 SHELL = Path(__file__).resolve().parent / "shell.html"
 PAGE_URL = "http://127.0.0.1:9/artifact-sanity"
 VIEWPORT = {"width": 1920, "height": 1080}
+FIRST_STATE = """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          await (await import(new URL("sync.js", main))).loaded;
+          return true;
+        }"""
 BASELINE_CH = 90
 WIDTH_FACTOR = 2
 TOKEN_MAX = 40
@@ -39,7 +44,7 @@ MEASURE = """
     page_overflow: document.documentElement.scrollWidth > window.innerWidth,
     body_overflow: body.scrollWidth > body.clientWidth + 1,
     close_visible: close.width > 0 && close.left >= 0 && close.right <= window.innerWidth && close.top >= 0,
-    json_folds: body.querySelectorAll(".json-tree details").length,
+    json_nodes: body.querySelectorAll(".json-tree .json-node").length,
   };
   const img = body.querySelector("img");
   if (img) out.image = { loaded: img.complete && img.naturalWidth > 0, inside: inside(img) };
@@ -136,8 +141,8 @@ def check(measure: dict, expected: Counter | None = None) -> list[str]:
     kind = measure["kind"]
     if kind == "markdown":
         failures += _markdown(measure, expected or Counter())
-    elif kind == "json" and not measure["json_folds"]:
-        failures.append("the JSON viewer shows no folds")
+    elif kind == "json" and not measure["json_nodes"]:
+        failures.append("the JSON viewer shows no nested blocks")
     elif kind == "image" and not (measure["image"]["loaded"] and measure["image"]["inside"]):
         failures.append("the image did not load inside the viewer")
     elif kind == "none":
@@ -221,7 +226,7 @@ def run(browser, files: list[Path]) -> dict[str, list[str]]:
         tab.route("**/static/*/**", lambda route: _asset(route, served))
         tab.route("**/api/v1/ledgers/*/events", lambda route: _events(route, doc))
         tab.goto(PAGE_URL)
-        tab.wait_for_function("() => document.getElementById('status').textContent !== 'loading'")
+        tab.wait_for_function(FIRST_STATE)
         return {path.name: _view(tab, path) for path in files}
     finally:
         tab.close()

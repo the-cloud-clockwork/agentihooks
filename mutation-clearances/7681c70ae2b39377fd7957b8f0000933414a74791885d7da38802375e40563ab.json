@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_cache.py:scripts.doctor.ci_cache.x__trim__mutmut_7:4779c97e877f6a3a8d54d2adb7c07cd8359c73d4681efa66a1454de04e9fe4b0": {
+    "reader": "Standards",
+    "reason": "zip reads strict by truthiness, so None behaves as False. One STRLEN is queued per key and execute returns that many results or raises, so no length mismatch can occur."
+  }
+}

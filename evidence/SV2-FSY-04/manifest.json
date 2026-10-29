@@ -1,0 +1,16 @@
+{
+  "package": "SV2-FSY-04",
+  "tested_commit": "11d056e7ad80ae0bc50c683bfae65f9dc79c517c",
+  "evidence_class": "mocked object store fake and local durable directory in CI; not live rollout proof",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38071102980",
+  "fixture": "tests/test_swarm_v2_artifacts.py World(kind, root): a LocalBackend over a temporary durable directory or an ObjectStoreBackend over an in memory S3 shaped fake, with injected truncated uploads, same length corruption and interrupted record writes; tests/sv2_fsy04_cases.py case_a, case_b and case_c",
+  "cleanup": "pytest tmp_path and tempfile folders per test, each fake store discarded with its test; no live resource mutations",
+  "inputs": {
+    "scripts/swarm_v2/artifacts/base.py": "b576a1d1ba99d504d28a9273c4c0a2138d71cdcd2004ed590ad7d5b9bb4a925c",
+    "scripts/swarm_v2/artifacts/local.py": "57b3baf4a360307b1995f2068aee79370a03863c6902837fe2c0739a938c306d",
+    "scripts/swarm_v2/artifacts/object_store.py": "dd2d71ca46362d5b4071faf69a2770014708c6ce4003cd80a53e207d7ada76a7",
+    "tests/test_swarm_v2_artifacts.py": "b0dc581bbec37ed7e363c92faf689d5315c6ff56ce8709bf1e930cdd8b8f2b53",
+    "tests/sv2_fsy04_cases.py": "2a0d4c32467368fba33d66e60911ec7acc77048f278852e0329bd741d1576d85",
+    "evidence/SV2-FSY-04/generate_case_results.py": "5f423320526b42a6483453e867d03b56182dea5b9a527b34c97b0e171bfd8f82"
+  }
+}

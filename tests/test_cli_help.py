@@ -52,7 +52,7 @@ def test_routed_agent_flags_are_passed_through(monkeypatch, command):
     received = []
     monkeypatch.setattr("sys.argv", ["agentihooks", command, "--zzzzz", "value"])
     monkeypatch.setattr(install, "cmd_claude", received.append)
-    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda **kwargs: None)
     monkeypatch.setattr(codex_router, "main", lambda args: received.append(args) or 0)
     if command == "codex":
         with pytest.raises(SystemExit) as exc:

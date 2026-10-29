@@ -2,6 +2,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import ledger_phases, ledger_priorities
+from tests.swarm_ledger.plan_slices import anchored
 from tests.swarm_ledger.test_phases import SLUG, make_ledger
 
 
@@ -18,11 +19,13 @@ def sync(*ops):
 
 def task_add(task, lane="eng", kind="code"):
     return {"op": "task_add", "id": f"add-{task}", "by": "planner", "task": task, "title": f"Task {task}",
-            "lane": lane, "kind": kind, "phase": "p1", "plan_url": "https://github.com/acme/app/issues/1"}  # fmt: skip
+            "lane": lane, "kind": kind, "phase": "p1", "plan_url": "https://github.com/acme/app/issues/1",
+            **({"plan_slice": task} if kind == "code" else {})}  # fmt: skip
 
 
 def planned():
     make_ledger()
+    anchored(SLUG, "t1")
     done = {"state": "done", "claimed_by": "planner", "proof": {"slice": "t1"}}
     update = {"op": "task_update", "id": "plan-done", "by": "planner", "item": "tasks/plan-p1", "fields": done}
     state, rejected = sync(task_add("t1"), task_add("plan-p1", "plan", "plan"), update)
