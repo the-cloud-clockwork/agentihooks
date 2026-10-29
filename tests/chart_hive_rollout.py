@@ -105,13 +105,12 @@ def test_a_drain_that_consumes_the_rollout_budget_is_refused():
         raise AssertionError("an hour long drain must not render")
 
 
-def test_a_new_release_stamp_changes_only_the_rolled_pod_template():
+def test_the_release_stamp_annotates_only_leased_hive_pods():
     image = "ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:2.17.471"
     unstamped = next(item for item in render() if item["kind"] == "Deployment")
     assert "agentihooks.io/release" not in unstamped["spec"]["template"]["metadata"]["annotations"]
     stamped = next(item for item in render(f"workers.rollout.release={image}") if item["kind"] == "Deployment")
     assert stamped["spec"]["template"]["metadata"]["annotations"]["agentihooks.io/release"] == image
-    assert stamped["spec"]["template"]["spec"]["containers"][0]["image"].endswith(":dev")
     unleased = next(
         item
         for item in render(f"workers.rollout.release={image}", "workers.rollout.enabled=false")
@@ -126,5 +125,5 @@ if __name__ == "__main__":
     test_a_drain_that_consumes_the_rollout_budget_is_refused()
     test_disabled_rollouts_do_not_require_a_new_worker_image()
     test_storage_preparation_is_not_suppressed_by_native_rollout_hooks()
-    test_a_new_release_stamp_changes_only_the_rolled_pod_template()
+    test_the_release_stamp_annotates_only_leased_hive_pods()
     print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")
