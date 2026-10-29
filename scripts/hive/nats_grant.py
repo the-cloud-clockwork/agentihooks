@@ -92,6 +92,19 @@ CONTROLLER_PUBLISH = (
     *(f"$KV.{bucket}.>" for bucket in CONTROLLER_BUCKETS),
     "_INBOX.>",
 )
+LEDGER_BUCKETS = ("inbox",)
+LEDGER_PUBLISH = (
+    f"{subjects.PREFIX}.>",
+    f"legacy.{subjects.PREFIX}.>",
+    "dead.>",
+    "$JS.API.INFO",
+    "$JS.API.STREAM.INFO.>",
+    "$JS.API.STREAM.MSG.GET.*",
+    *(f"$JS.API.STREAM.PURGE.KV_{bucket}" for bucket in LEDGER_BUCKETS),
+    "$JS.API.CONSUMER.>",
+    "$JS.ACK.>",
+    *(f"$KV.{bucket}.>" for bucket in LEDGER_BUCKETS),
+)
 
 
 @dataclass(frozen=True)
@@ -224,6 +237,14 @@ def controller_claims() -> dict:
         **user_claims(),
         "pub": {"allow": list(CONTROLLER_PUBLISH)},
         "sub": {"allow": ["_INBOX.>", "swarm.*.slots", f"{subjects.SLOTS}.*.*"]},
+    }
+
+
+def ledger_claims() -> dict:
+    return {
+        **user_claims(),
+        "pub": {"allow": list(LEDGER_PUBLISH)},
+        "sub": {"allow": [f"{subjects.PREFIX}.>", "_INBOX.>"]},
     }
 
 
