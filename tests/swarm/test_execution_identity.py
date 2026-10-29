@@ -367,87 +367,105 @@ def test_updates_preserve_status_timestamp_until_status_changes(store, agent, mo
     assert store.execution("fixture", current.execution_id) == changed
 
 
-@pytest.mark.parametrize("operation", ["start", "update", "legacy", "pane"])
-@pytest.mark.parametrize("failures", [1, 5])
-def test_transaction_contention_is_bounded_and_never_partially_commits(store, agent, monkeypatch, operation, failures):
+def _legacy_contention(store, monkeypatch, attempts, trips):
     from redis.exceptions import WatchError
 
+    original = store.redis.pipeline
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def contested():
+            attempts.append(True)
+            if len(attempts) <= trips:
+                raise WatchError("synthetic competing controller")
+            return execute()
+
+        monkeypatch.setattr(pipe, "execute", contested)
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+
+
+def _document_contention(store, monkeypatch, attempts, trips):
     from scripts.events.bus import StateConflict
 
+    real = fencing.state.for_store(store, fencing.BUCKET)
+
+    class racing:
+        get = staticmethod(real.get)
+        create = staticmethod(real.create)
+
+        @staticmethod
+        def update(key, value, revision):
+            attempts.append(True)
+            if len(attempts) <= trips:
+                raise StateConflict("synthetic competing controller")
+            return real.update(key, value, revision)
+
+    monkeypatch.setattr(fencing.state, "for_store", lambda *a, **k: racing)
+
+
+def _contended_write(store, agent, operation, current, legacy):
+    writes = {
+        "start": lambda: store.start_execution("fixture", agent, current.execution_id),
+        "update": lambda: store.put_agent("fixture", replace(current, idle_ticks=2)),
+        "pane": lambda: store.execution_registry.set_pane("fixture", current.execution_id, "w2:p7"),
+        "legacy": lambda: store.put_agent("fixture", legacy),
+    }
+    return writes[operation]()
+
+
+def _contend(store, monkeypatch, operation, attempts, trips):
+    if operation == "legacy":
+        _legacy_contention(store, monkeypatch, attempts, trips)
+    else:
+        _document_contention(store, monkeypatch, attempts, trips)
+
+
+EXHAUSTED = {
+    "start": fencing.CONTENTION,
+    "update": fencing.CONTENTION,
+    "pane": fencing.CONTENTION,
+    "legacy": "agent registry kept changing; the agent was not shown",
+}
+
+
+@pytest.mark.parametrize("operation", ["start", "update", "legacy", "pane"])
+def test_transaction_contention_is_bounded_and_never_partially_commits(store, agent, monkeypatch, operation):
     current = store.start_execution("fixture", agent)
     legacy = replace(agent, name=store.next_name("fixture", "eng"))
     before = protected(store)
     attempts = []
-    exhausted = failures == 5
+    tries = 5 if operation == "legacy" else fencing.ATTEMPTS
+    _contend(store, monkeypatch, operation, attempts, tries)
+    with pytest.raises(SwarmError) as error:
+        _contended_write(store, agent, operation, current, legacy)
+    assert str(error.value) == EXHAUSTED[operation]
+    assert protected(store) == before
+    assert len(attempts) == tries
 
-    if operation == "legacy":
-        original = store.redis.pipeline
 
-        def pipeline(*args, **kwargs):
-            pipe = original(*args, **kwargs)
-            execute = pipe.execute
+def _recovered(store, operation, result, current, legacy, agent):
+    if operation == "start":
+        return result.generation == 2 and len(store.executions("fixture", agent.seat)) == 2
+    if operation == "update":
+        return store.execution("fixture", current.execution_id).idle_ticks == 2
+    if operation == "pane":
+        return store.execution("fixture", current.execution_id) == replace(current, pane_id="w2:p7")
+    return store.redis.hexists(store.key("fixture", "agents"), legacy.name)
 
-            def contested():
-                attempts.append(True)
-                if len(attempts) <= failures:
-                    raise WatchError("synthetic competing controller")
-                return execute()
 
-            monkeypatch.setattr(pipe, "execute", contested)
-            return pipe
-
-        monkeypatch.setattr(store.redis, "pipeline", pipeline)
-    else:
-        real = fencing.state.for_store(store, fencing.BUCKET)
-        trips = fencing.ATTEMPTS if exhausted else failures
-
-        class racing:
-            get = staticmethod(real.get)
-            create = staticmethod(real.create)
-
-            @staticmethod
-            def update(key, value, revision):
-                attempts.append(True)
-                if len(attempts) <= trips:
-                    raise StateConflict("synthetic competing controller")
-                return real.update(key, value, revision)
-
-        monkeypatch.setattr(fencing.state, "for_store", lambda *a, **k: racing)
-
-    if exhausted:
-        with pytest.raises(SwarmError) as error:
-            if operation == "start":
-                store.start_execution("fixture", agent, current.execution_id)
-            elif operation == "update":
-                store.put_agent("fixture", replace(current, idle_ticks=2))
-            elif operation == "pane":
-                store.execution_registry.set_pane("fixture", current.execution_id, "w2:p7")
-            else:
-                store.put_agent("fixture", legacy)
-        messages = {
-            "start": fencing.CONTENTION,
-            "update": fencing.CONTENTION,
-            "legacy": "agent registry kept changing; the agent was not shown",
-            "pane": fencing.CONTENTION,
-        }
-        assert str(error.value) == messages[operation]
-        assert protected(store) == before
-        assert len(attempts) == (5 if operation == "legacy" else fencing.ATTEMPTS)
-    else:
-        if operation == "start":
-            result = store.start_execution("fixture", agent, current.execution_id)
-            assert result.generation == 2
-            assert len(store.executions("fixture", agent.seat)) == 2
-        elif operation == "update":
-            store.put_agent("fixture", replace(current, idle_ticks=2))
-            assert store.execution("fixture", current.execution_id).idle_ticks == 2
-        elif operation == "pane":
-            store.execution_registry.set_pane("fixture", current.execution_id, "w2:p7")
-            assert store.execution("fixture", current.execution_id) == replace(current, pane_id="w2:p7")
-        else:
-            store.put_agent("fixture", legacy)
-            assert store.redis.hexists(store.key("fixture", "agents"), legacy.name)
-        assert len(attempts) == 2
+@pytest.mark.parametrize("operation", ["start", "update", "legacy", "pane"])
+def test_one_contended_transaction_retries_and_commits(store, agent, monkeypatch, operation):
+    current = store.start_execution("fixture", agent)
+    legacy = replace(agent, name=store.next_name("fixture", "eng"))
+    attempts = []
+    _contend(store, monkeypatch, operation, attempts, 1)
+    result = _contended_write(store, agent, operation, current, legacy)
+    assert _recovered(store, operation, result, current, legacy, agent)
+    assert len(attempts) == 2
 
 
 def test_a_pane_write_keeps_every_other_field_and_updates_the_projection(store, agent):
