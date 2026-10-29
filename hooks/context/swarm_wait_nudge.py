@@ -7,6 +7,7 @@ from hooks.context import worker_mode
 WORKERS = frozenset({"eng", "ci"})
 WAIT_TOOLS = frozenset({"Bash", "Monitor"})
 NATIVE_WAITS = frozenset({"sleep", "wait"})
+NARROW_VIEWS = frozenset({"--json", "--log", "--log-failed", "--job", "-j", "--web", "-w"})
 SHELL_WAIT_RE = re.compile(
     r"(?:^|[;&|({\n])\s*(?:(?:do|then|else|nohup|timeout\s+\S+)\s+)*(?:sleep\s+\S|(?:until|while)\s[^;\n]*[;\n]\s*do\b"
     r"|gh\s+run\s+watch\b|gh\s+pr\s+checks\b[^;&|\n]*--watch)"
@@ -68,19 +69,37 @@ def _github_watch(tokens: list[str]) -> bool:
     )
 
 
+def _full_run_view(tokens: list[str]) -> bool:
+    from pathlib import Path
+
+    if not tokens or Path(tokens[0]).name != "gh":
+        return False
+    args = tokens[1:]
+    while args and args[0].startswith("-"):
+        args = args[2:] if args[0] in ("-R", "--repo", "--hostname") else args[1:]
+    return args[:2] == ["run", "view"] and not any(arg.split("=")[0] in NARROW_VIEWS for arg in args[2:])
+
+
 def check_github_watch(payload: dict) -> None:
     from hooks.context.shell_commands import commands
     from hooks.hook_manager import BlockAction
     from scripts.swarm.naming import lane_of
 
     slug, name = (os.environ.get(key) for key in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"))
-    if not slug or not name or lane_of(name) not in WORKERS or payload.get("tool_name") not in WAIT_TOOLS:
+    if not slug or not name or payload.get("tool_name") not in WAIT_TOOLS:
         return
     tool_input = payload.get("tool_input") or {}
     command = tool_input.get("command") or tool_input.get("cmd")
-    if command and any(_github_watch(tokens) for tokens in commands(command)):
+    found = commands(command) if command else []
+    if lane_of(name) in WORKERS and any(_github_watch(tokens) for tokens in found):
         raise BlockAction(
             "Independent GitHub watches spend the shared GitHub hourly quota. "
             f"Use agentihooks swarm {slug} wait --on checks <pr url>, "
             "or wait --on mutation <run url> for Mutation preflight. The swarm tick resolves these waits centrally."
+        )
+    if any(_full_run_view(tokens) for tokens in found):
+        raise BlockAction(
+            "gh run view without --json, --log, --log-failed or --job reads the annotations of every job, "
+            "one REST call per job, about sixty on a Tests run, from the shared GitHub hourly quota. "
+            "Ask for what you need: gh run view <id> --json status,conclusion,jobs, --log-failed, or --job <job id>."
         )
