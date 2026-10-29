@@ -223,7 +223,12 @@ def test_a_kept_split_wider_than_the_shard_limit_is_cut_again(tmp_path):
     split = measured.measured_splits(
         [f"{function}__mutmut_1"], [{"tests": {function: nodes}, "durations": durations}], 2, memory
     )
-    assert len(split[function]["slices"]) == 2
+    assert split[function]["slices"] == [["a", "c"], ["b"]]
+    memory.keep_splits({function: {"head": ["fast"], "slices": [["a"], ["b", "c"]], "costs": [1.0] * 2}})
+    split = measured.measured_splits(
+        [f"{function}__mutmut_1"], [{"tests": {function: nodes}, "durations": durations}], 2, memory
+    )
+    assert split[function]["slices"] == [["a"], ["b", "c"]]
 
 
 def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_its_traced_sum(tmp_path):

@@ -200,6 +200,7 @@ def test_kept_splits_survive_a_cache_reload_and_answer_only_for_the_same_tests(t
     split = {"head": ["fast"], "slices": [["b", "a"], ["c"]], "costs": [9.0, 9.0]}
     memory.keep_splits({"scripts.a.x_f": split})
     restored = killers.KillMemory(memory.folder)
+    assert len(list(memory.folder.glob("*.split"))) == 1
     assert restored.split("scripts.a.x_f", ["c", "a", "fast", "b"]) == {"head": ["fast"], "slices": [["a", "b"], ["c"]]}
     assert restored.split("scripts.a.x_f", ["a", "b", "c"]) is None
     assert restored.split("scripts.a.x_f", ["a", "b", "c", "fast", "d"]) is None
