@@ -131,6 +131,8 @@ def test_a_stop_on_red_checks_preserves_an_open_dependency_wait(rig, kind):
         rig.ledger.rows["repair"]["state"] = "done"
     else:
         rig.pulls[target] = MERGED
+    assert rig.stop().allowed
+    rig.clock[0] += 60_000
     assert not rig.stop().allowed
 
 
@@ -144,15 +146,15 @@ def test_a_stop_on_red_checks_preserves_an_open_dependency_wait(rig, kind):
         ({"kind": "task", "target": "repair"}, True),
     ],
 )
-def test_red_checks_still_refuse_a_wait_that_is_not_a_live_dependency(rig, on, expired):
+def test_red_checks_pass_a_live_wait_and_refuse_an_expired_wait(rig, on, expired):
     rig.task["pr_url"], rig.pulls[URL] = URL, RED
     rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
     until = rig.clock[0] - 1 if expired else rig.clock[0] + 60_000
     idle.declare_wait(rig.store.redis, SLUG, ME, until, "repair", rig.clock[0] - 120_000, on=on)
-    assert not rig.stop().allowed
+    assert rig.stop().allowed is not expired
 
 
-def test_a_merged_task_still_owes_closure_while_a_dependency_is_open(rig):
+def test_a_merged_task_stops_while_a_dependency_wait_is_live(rig):
     rig.task["pr_url"], rig.pulls[URL] = URL, MERGED
     rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
     idle.declare_wait(
@@ -164,7 +166,7 @@ def test_a_merged_task_still_owes_closure_while_a_dependency_is_open(rig):
         rig.clock[0],
         on={"kind": "task", "target": "repair"},
     )
-    assert not rig.stop().allowed
+    assert rig.stop().allowed
 
 
 @pytest.mark.parametrize("queued", [False, True])
@@ -185,6 +187,8 @@ def test_a_stop_with_the_required_gate_green_and_another_job_red_passes_on_its_w
     idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"merge of {URL}", rig.clock[0], on=on)
     assert rig.stop().allowed
     rig.pulls[URL] = PullRequest("OPEN", None, 1, True, True, ("Gate — Required",), queued=queued)
+    assert rig.stop().allowed
+    rig.clock[0] += 60_000
     decision = rig.stop()
     assert not decision.allowed
     assert decision.reason.startswith(f"checks failed on {URL}: Gate — Required. Fix")
@@ -257,6 +261,45 @@ def test_a_stop_after_the_merge_is_blocked(rig):
     rig.pulls[URL] = MERGED
     decision = rig.stop()
     assert not decision.allowed and "merged: close the task now" in decision.reason
+
+
+@pytest.mark.parametrize("on", [None, {"kind": "checks", "target": URL}])
+def test_a_merged_task_stops_on_a_live_wait_until_it_expires(rig, on):
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL] = MERGED
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "ledger recovery", rig.clock[0], on=on)
+    assert rig.stop().allowed
+    rig.clock[0] += 60_000
+    assert not rig.stop().allowed
+
+
+def test_a_recorded_ledger_outage_passes_until_recovery(rig):
+    from unittest.mock import patch
+
+    from scripts.swarm import outage
+
+    assert not rig.stop().allowed
+    assert not rig.stop().allowed
+    outage.observe(SLUG, "ledger", ["ledger HTTP 502"], rig.clock[0])
+    with patch.object(rig.gate, "_ledger", side_effect=AssertionError("ledger read during outage")):
+        assert rig.stop().allowed
+    outage.observe(SLUG, "ledger", [], rig.clock[0] + 1)
+    assert not rig.stop().allowed
+    assert not rig.stop().allowed
+
+
+def test_another_swarms_ledger_outage_does_not_release_the_claim(rig):
+    from scripts.swarm import outage
+
+    outage.observe("other-swarm", "ledger", ["ledger HTTP 502"], rig.clock[0])
+    assert not rig.stop().allowed
+
+
+def test_a_nonledger_outage_does_not_release_the_claim(rig):
+    from scripts.swarm import outage
+
+    outage.observe(SLUG, "provider", ["provider unavailable"], rig.clock[0])
+    assert not rig.stop().allowed
 
 
 @pytest.mark.parametrize("generation", [None, 4])
@@ -409,6 +452,8 @@ def test_the_second_half_stops_on_its_own_pull_request_and_its_merge_owes_done(r
     rig.pulls[URL], rig.pulls[second] = MERGED, PENDING
     assert rig.stop().allowed
     rig.pulls[second] = MERGED
+    assert rig.stop().allowed
+    rig.clock[0] += CHECKS_WAIT_MS
     decision = rig.stop()
     assert not decision.allowed and f"{second} merged: close the task now" in decision.reason
     assert rig.ledger.updates == []
@@ -425,11 +470,13 @@ def test_a_tune_task_with_a_merged_fix_stops_on_its_measurement_wait_until_the_w
     assert decision.reason.startswith(f"your pull request {URL} merged, and tune task t1 closes on its proof contract")
 
 
-def test_a_tune_task_cannot_stop_on_the_checks_wait_of_its_merged_pull_request(rig):
+def test_a_tune_task_stops_on_live_checks_wait_and_owes_contract_after_expiry(rig):
     rig.task.update(state="pr", pr_url=URL, kind="tune")
     rig.pulls[URL] = PENDING
     assert rig.stop().allowed
     rig.pulls[URL] = MERGED
+    assert rig.stop().allowed
+    rig.clock[0] += CHECKS_WAIT_MS
     for _ in range(STREAK - 1):
         assert not rig.stop().allowed
     assert rig.stop().allowed
@@ -744,7 +791,7 @@ def test_the_gate_entry_runs_it_by_name():
     assert isinstance(GATES["claim-stop"], ClaimStop)
 
 
-def test_a_live_checks_wait_on_another_pull_request_grades_that_pull_request_only(rig):
+def test_a_live_checks_wait_on_another_pull_request_passes_until_expiry(rig):
     other = URL + "1"
     rig.task.update(state="pr", pr_url=URL)
     rig.pulls[URL], rig.pulls[other] = RED, PENDING
@@ -755,11 +802,12 @@ def test_a_live_checks_wait_on_another_pull_request_grades_that_pull_request_onl
     rig.pulls[other] = GREEN
     assert rig.stop().allowed
     rig.pulls[other] = RED
-    decision = rig.stop()
-    assert decision.reason.startswith(f"checks failed on {other}: tests (1), lint. Fix")
-    rig.pulls[URL], rig.pulls[other] = PENDING, MERGED
+    assert rig.stop().allowed
+    rig.pulls[other] = MERGED
     assert rig.stop().allowed
     assert idle.wait(rig.store.redis, SLUG, ME)["on"] == on
+    rig.clock[0] += 60_000
+    assert rig.stop().reason.startswith(f"checks failed on {URL}: tests (1), lint. Fix")
 
 
 def test_a_live_checks_wait_on_a_run_lets_a_red_pull_request_stop(rig):
@@ -774,7 +822,7 @@ def test_a_live_checks_wait_on_a_run_lets_a_red_pull_request_stop(rig):
     assert rig.task["state"] == "pr"
 
 
-def test_a_checks_wait_on_the_task_pull_request_keeps_grading_it(rig):
+def test_a_checks_wait_on_the_task_pull_request_passes_until_it_expires(rig):
     rig.task.update(state="pr", pr_url=URL)
     rig.pulls[URL] = PENDING
     on = {"kind": "checks", "target": URL}
@@ -782,13 +830,15 @@ def test_a_checks_wait_on_the_task_pull_request_keeps_grading_it(rig):
     assert rig.stop().allowed
     assert idle.wait(rig.store.redis, SLUG, ME)["until"] == rig.clock[0] + CHECKS_WAIT_MS
     rig.pulls[URL] = RED
+    assert rig.stop().allowed
+    rig.clock[0] += CHECKS_WAIT_MS
     assert rig.stop().reason.startswith(f"checks failed on {URL}: tests (1), lint. Fix")
 
 
-def test_a_merged_task_pull_request_still_owes_done_while_a_checks_wait_names_another(rig):
+def test_a_merged_task_stops_while_a_live_checks_wait_names_another_pull_request(rig):
     other = URL + "1"
     rig.task.update(state="pr", pr_url=URL)
     rig.pulls[URL], rig.pulls[other] = MERGED, PENDING
     on = {"kind": "checks", "target": other}
     idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"checks on {other}", rig.clock[0], on=on)
-    assert rig.stop().reason.startswith(f"your pull request {URL} merged: close the task now")
+    assert rig.stop().allowed

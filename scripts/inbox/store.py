@@ -395,9 +395,9 @@ class InboxStore:
         for _ in range(MOVE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(self.names.key("alias", original))
+                    pipe.watch(*self.names.watched("alias", original))
                     me = self.names.resolve(original, pipe)
-                    pipe.watch(self.names.key("aliases-of", me))
+                    pipe.watch(*self.names.watched("aliases-of", me))
                     addresses = [me, *self.names.aliases(me, pipe)]
                     seat = self.seats.seat_of(me, pipe)
                     pipe.multi()
