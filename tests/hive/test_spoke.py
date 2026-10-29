@@ -220,6 +220,42 @@ def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, fai
     assert rig.runtime.spawn.call_count == (1 if failure == "request" else 2)
 
 
+@pytest.mark.parametrize("status", ["REFUSED", "AMBIGUOUS", "UNSUPPORTED"])
+def test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness(rig, status):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    failed = Outcome("spawn", Status[status], "local", {"harness": "codex"}, detail="launch failed")
+    rig.runtime.spawn.side_effect = [failed, rig.runtime.spawn.return_value]
+
+    assert rig.spoke.poll() == "retry"
+
+    rig.tasks.failed.assert_called_once_with(rig.event, "codex", "launch failed")
+    rig.tasks.reopen.assert_not_called()
+    rig.clock.now = 10
+    assert rig.spoke.poll() == "started"
+    rig.tasks.failed.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "status, value",
+    [("UNAVAILABLE", {"harness": "codex"}), ("REFUSED", None), ("REFUSED", {"pane_id": "w1:p1"})],
+)
+def test_a_launch_failure_naming_no_harness_or_waiting_for_room_steers_nothing(rig, status, value):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.runtime.spawn.return_value = Outcome("spawn", Status[status], "local", value, detail="no room")
+
+    assert rig.spoke.poll() == "retry"
+
+    rig.tasks.failed.assert_not_called()
+
+
+def test_a_master_spoke_takes_a_failure_report_without_acting_on_it():
+    from scripts.hive.workstation import MasterTasks
+
+    assert MasterTasks(Mock()).failed(Mock(), "codex", "launch failed") is None
+
+
 def test_a_publication_retry_reuses_the_started_execution_after_a_spoke_restart(rig):
     from scripts.hive.spoke import Spoke
 
