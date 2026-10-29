@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.488 · 2026-10-29
+
+### 2026-10-29 · 09120043fa79 · #8796 · @nestorcolt
+
+**Delete the coverage baseline's dead dependency manifest cache steps**
+
+This change removes three now-dead steps in the coverage-baseline job that downloaded the `dep-manifest` artifact and saved it as a cache keyed by commit SHA, but only when a job it doesn't depend on succeeded — a condition that was never true on dev pushes, so the steps were always skipped and nothing ever restored that cache. Deleting them simplifies the workflow with no behavior change, and a test now pins that coverage-baseline carries no manifest step going forward.
+
 ## v2.17.487 · 2026-10-29
 
 ### 2026-10-29 · 1e512ef06b7b · #8790 · @nestorcolt
