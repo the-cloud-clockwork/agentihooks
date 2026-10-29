@@ -359,6 +359,20 @@ class TestMore:
         result = world.decide(file_path=str(world.repo / "doghouse/frame/a.py"), task=task)
         assert result.allowed, result.reason
 
+    def test_the_plan_parses_with_the_swarm_task_ids(self, world):
+        other = "fx-8be892c4-code"
+        doc = {"tasks": [{"id": TASK}, {"id": other}]}
+        legacy_page.store(world.repo.parent / "ledgers", SLUG, doc)
+        world.plan()
+        text = f"- walls once {other} lands | doghouse/frame | the house needs a shell\n"
+        (world.folder / trace_plan.PLAN).write_text(text)
+        pieces = trace_plan.parse(text, TASK, (TASK, other))
+        record = trace_plan.load(world.folder)
+        record["plan_hash"] = trace_plan.plan_hash(pieces, trace_plan.intent(doc, TASK))
+        trace_plan.save(world.folder, record)
+        result = edit(world, "doghouse/frame/a.py")
+        assert result.allowed, result.reason
+
     def test_the_unchecked_count_names_the_tool_and_the_paths(self, world):
         world.plan(verdict="unchecked", kept=(True, True, True))
         patch = "*** Begin Patch\n*** Add File: a.py\n+x\n*** Add File: b.py\n+x\n*** End Patch\n"

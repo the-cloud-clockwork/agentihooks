@@ -82,7 +82,7 @@ def parse(text, task_id, task_ids=()):
     return pieces
 
 
-def plan_hash(pieces, state):
+def plan_hash(pieces: list[Piece], state: dict) -> str:
     inputs = [state.get("task", ""), state.get("task intent", ""), [piece.key for piece in pieces]]
     return hashlib.sha256(json.dumps(inputs).encode()).hexdigest()
 

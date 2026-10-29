@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path, PurePosixPath
 
 from scripts.gates import log
-from scripts.gates.base import Decision
+from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.swarm import naming, trace_plan
 from scripts.swarm_ledger import ledger_workspace
@@ -110,7 +110,7 @@ def _patch_targets(call, key):
     return [target.strip() for target in found] or [call.tool_input.get(key)]
 
 
-def plan_areas(folder, who, registered, intent):
+def plan_areas(folder: Path, who: Who, registered: tuple[str, ...], intent: dict) -> tuple[str, str | list[str]]:
     """(pass, the kept pieces' areas), (unchecked, []) or (fail, the refusal)."""
     trace = f"agentihooks swarm {who.swarm} trace-plan"
     try:
