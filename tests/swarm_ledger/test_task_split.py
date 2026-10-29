@@ -191,7 +191,9 @@ def test_task_set_preserves_bracketed_territory_as_a_comma_list(monkeypatch):
 def test_task_set_stores_parked_on_as_a_list(monkeypatch):
     from scripts.swarm_ledger import ledger
 
-    core.sync(SLUG, ops=[{"op": "task_add", "id": "seed-2", "by": "swarm", "task": "t2", "title": "two", "lane": "eng"}])
+    core.sync(
+        SLUG, ops=[{"op": "task_add", "id": "seed-2", "by": "swarm", "task": "t2", "title": "two", "lane": "eng"}]
+    )
 
     def send(args, kind, **fields):
         operation = ledger.op(kind, args, **fields)
