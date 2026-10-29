@@ -40,10 +40,10 @@ class Preemption:
         for slug in self._source.slugs():
             if not guard():
                 return
-            self.preempt(slug, now)
+            self._preempt(slug, now)
         self._due = now + INTERVAL_MS
 
-    def preempt(self, slug: str, now: int) -> None:
+    def _preempt(self, slug: str, now: int) -> None:
         from scripts.swarm import tick
 
         config = self._store.config(slug)

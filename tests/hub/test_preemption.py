@@ -89,11 +89,13 @@ def test_a_swarm_not_running_on_the_events_engine_asks_nobody(rig, fields):
     assert asks(rig.store, "e1") == asks(rig.store, "e2") == []
 
 
-def test_a_lost_lease_stops_the_pass(rig):
-    rig.reactor.poll(lambda: False)
-    rig.now.ms += preemption.INTERVAL_MS
-    rig.reactor.poll(lambda: False)
-    assert rig.store.redis.smembers(rig.store.key(SLUG, preempt.WAITING)) == set()
+def test_a_pass_stopped_by_a_lost_lease_runs_on_the_next_poll(rig):
+    for at in (1_000, 1_000 + preemption.INTERVAL_MS):
+        rig.now.ms = at
+        rig.reactor.poll(lambda: False)
+    assert asks(rig.store, "e2") == []
+    poll_at(rig, 1_000 + preemption.INTERVAL_MS, 1_000 + 2 * preemption.INTERVAL_MS)
+    assert len(asks(rig.store, "e2")) == 1
 
 
 def test_the_memory_bus_without_a_store_runs_nothing(monkeypatch):
