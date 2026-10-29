@@ -57,6 +57,7 @@ def test_managed_reads_the_archive_inside_redis(store, monkeypatch):
     first, second, third, other = history(store)
     registry = store.execution_registry
     registry.archive("fixture")
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
     archive = store.key("fixture", ARCHIVE)
     hvals = store.redis.hvals
 
@@ -68,6 +69,26 @@ def test_managed_reads_the_archive_inside_redis(store, monkeypatch):
     assert registry.managed("fixture", first.name) is True
     assert registry.managed("fixture", third.name) is True
     assert registry.managed("fixture", first.name[:-1]) is False
+    assert registry.managed("fixture", "nobody@fixture") is False
+
+
+def test_a_hive_member_reads_the_archive_it_may_only_read(store, monkeypatch):
+    first, second, third, other = history(store)
+    registry = store.execution_registry
+    registry.archive("fixture")
+    for variable in ("AGENTIHOOKS_HIVE_REDIS_URL", "AGENTIHOOKS_SWARM_REDIS_URL"):
+        monkeypatch.setenv(variable, "redis://hive.example:6380/0")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
+    archive = store.key("fixture", ARCHIVE)
+    script = store.redis.eval
+
+    def refusing(source, keys, *args):
+        assert args[0] != archive, "the archive key was declared to a script"
+        return script(source, keys, *args)
+
+    monkeypatch.setattr(store.redis, "eval", refusing)
+    assert registry.managed("fixture", first.name) is True
+    assert registry.managed("fixture", third.name) is True
     assert registry.managed("fixture", "nobody@fixture") is False
 
 

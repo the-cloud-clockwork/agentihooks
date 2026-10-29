@@ -169,11 +169,15 @@ class ExecutionRegistry:
         return {agent.seat: agent for agent in agents}
 
     def managed(self, slug: str, name: str, reader: Redis | Pipeline | None = None) -> bool:
+        from scripts.hive import scope
+
         source = reader if reader is not None else self.redis
-        return any(
-            source.eval(_MANAGED, 1, self.store.key(slug, kind), name, json.dumps(name))
-            for kind in ("executions", ARCHIVE)
-        )
+        if source.eval(_MANAGED, 1, self.store.key(slug, "executions"), name, json.dumps(name)):
+            return True
+        archive = self.store.key(slug, ARCHIVE)
+        if scope.member():
+            return any(json.loads(raw)["name"] == name for raw in source.hvals(archive))
+        return bool(source.eval(_MANAGED, 1, archive, name, json.dumps(name)))
 
     def archive(self, slug: str) -> int:
         keys = (self.store.key(slug, "executions"), self.store.key(slug, "agents"), self.store.key(slug, ARCHIVE))
