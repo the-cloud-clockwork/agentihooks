@@ -508,20 +508,24 @@ def test_a_dead_owner_whose_handoff_lost_its_run_options_restarts_fresh_on_its_s
     assert recovery_state(store, dead.name) == "done"
 
 
-def test_a_restart_refused_for_another_reason_is_reported(store, tmp_path, monkeypatch):
+def test_a_restart_that_fails_twice_retries_on_another_route_then_reopens_the_task(store, tmp_path, monkeypatch):
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
     dead = agents[2]
     runtime.live.remove(dead.name)
-    refused = []
+    attempts = []
 
     def spawn(config, lane, name, task):
-        refused.append(task)
+        attempts.append(task.get("workstation"))
         raise SpawnError("no seat", "unavailable")
 
     monkeypatch.setattr(runtime, "spawn", spawn)
     actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
-    assert f"outage resume for {dead.name} refused: no seat" in actions
-    assert len(refused) == 1
+    assert f"outage resume for {dead.name} refused: no seat, task {dead.task} reopened" in actions
+    assert len(attempts) == 2
+    assert attempts[0] != attempts[1]
+    assert store.claimant("sw", dead.task) is None
+    assert ledger.rows[dead.task]["claimed_by"] == ""
+    assert ledger.rows[dead.task]["state"] == "open"
 
 
 @pytest.mark.parametrize("moment", ["before resume", "during resume", "before respawn"])
