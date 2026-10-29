@@ -94,6 +94,16 @@ def test_an_open_index_rebuild_skips_and_drops_an_id_whose_record_is_gone(store,
     ]
 
 
+def test_a_pending_back_fill_skips_and_drops_an_id_whose_record_is_gone(store, capsys):
+    gone = dangle(store, "bob")
+    kept = store.send("carol", "bob", "here")
+    store.redis.srem(store.key("indexed"), "bob")
+    store.redis.delete(store.key("pending", "bob"))
+    assert [item.id for item in store.pending_items("bob")] == [kept.id]
+    assert_dropped(store, "bob", [kept.id], capsys, gone)
+    assert store.redis.get(store.key("open-size", "bob")) == "1"
+
+
 def test_a_single_item_read_still_raises_for_a_missing_record(store):
     gone = dangle(store, "bob")
     with pytest.raises(InboxError, match=f"^no message {gone}$"):
