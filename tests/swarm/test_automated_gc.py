@@ -551,3 +551,16 @@ def test_a_question_whose_answer_is_gone_is_asked_again(world):
     assert record["request"] == question(world).id
     assert record["request"] != first
     assert record["last_probe"] == at
+
+
+@pytest.mark.parametrize("gone", ["request", "answer"])
+def test_a_gone_request_or_answer_leaves_an_empty_request(world, gone):
+    from scripts.swarm import automated_gc
+
+    _, inbox, agent, _, _ = world
+    asked = inbox.send("swarm", agent.name, "still there?")
+    reply = inbox.reply(asked.id, agent.name, "working")
+    inbox.redis.delete(inbox.key("item", asked.id if gone == "request" else reply.id))
+    record = {"request": asked.id, "answers": [], "idle_answers": 0}
+    assert automated_gc._answer(inbox, agent, record, START) is False
+    assert record == {"request": "", "answers": [], "idle_answers": 0}
