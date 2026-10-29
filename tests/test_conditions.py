@@ -776,10 +776,12 @@ def test_a_host_without_git_reads_the_origin_owner_from_the_repo_config(tmp_path
     subprocess.run(["git", "remote", "add", "origin", "https://github.com/Stranger/x.git"], cwd=repo, check=True)
     subprocess.run(["git", "remote", "add", "later", "git@github.com:later/x.git"], cwd=repo, check=True)
     with_git = conditions._remote_owner(repo)
+    subprocess.run(["git", "config", "--add", "remote.origin.url", "git@github.com:Last/x.git"], cwd=repo, check=True)
+    last_with_git = conditions._remote_owner(repo)
     _without_git(monkeypatch)
-    assert (with_git, conditions._remote_owner(repo)) == ("stranger", "stranger")
-    monkeypatch.setattr("hooks.config.CONDITIONS_TRUSTED_OWNERS", "stranger")
-    assert conditions.directory_trust(repo, {}) == (True, "stranger")
+    assert (with_git, last_with_git, conditions._remote_owner(repo)) == ("stranger", "last", "last")
+    monkeypatch.setattr("hooks.config.CONDITIONS_TRUSTED_OWNERS", "last")
+    assert conditions.directory_trust(repo, {}) == (True, "last")
 
 
 def test_a_host_without_git_follows_a_worktree_to_its_common_config(tmp_path, monkeypatch):
@@ -813,6 +815,7 @@ def test_a_host_without_git_reads_no_remote_as_no_remote(tmp_path, monkeypatch):
 def test_a_host_without_git_and_an_unreadable_config_is_unknown(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
+    monkeypatch.setattr("hooks.config.CONDITIONS_TRUSTED_OWNERS", "")
     _without_git(monkeypatch)
     assert conditions._remote_owner(repo) is None
     assert conditions.directory_trust(repo, {}) == (False, "unknown")

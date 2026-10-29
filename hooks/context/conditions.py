@@ -165,13 +165,13 @@ def _config_origin(repo: Path) -> str | None:
         lines = (gitdir / "config").read_text().splitlines()
     except OSError:
         return None
-    section = ""
+    section = url = ""
     for line in map(str.strip, lines):
         if line.startswith("["):
             section = line
         elif section == '[remote "origin"]' and line.partition("=")[0].strip() == "url":
-            return line.partition("=")[2].strip()
-    return ""
+            url = line.partition("=")[2].strip()
+    return url
 
 
 def directory_trust(repo: Path, state: dict) -> tuple[bool, str]:
