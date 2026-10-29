@@ -303,6 +303,20 @@ def test_a_refused_first_ranked_hive_takes_no_further_launch_in_the_pass(setup, 
     assert launcher.select(setup.config, "eng", {"id": "next"}).hive == "spare"
 
 
+def test_the_hive_listing_counts_pending_launches_against_the_first_room(setup):  # noqa: F811
+    from scripts.hive import launch, placement
+
+    write_hive(setup, prefer={"eng": 1})
+    _load(setup, "remote", available_mb=20_000 + admission.AGENT_MB)
+    assert admission.reserve(setup.store.redis, "remote", "fixture/other", 1) == (True, 0)
+    listed = next(hive for hive in launch.loaded_hives(setup.store) if hive["id"] == "remote")
+    assert (listed[placement.FIRST_ROOM], listed[placement.FIRST_REFUSAL]) == (
+        0,
+        "ram: 20700 of 100000 MB available, 80 percent used, 700 MB per agent with 1 pending launches, "
+        "fits 0 more under the 80 percent line",
+    )
+
+
 def test_a_local_slot_cap_limits_the_first_room_and_keeps_first_mode():
     from scripts.hive import launch, placement
 
