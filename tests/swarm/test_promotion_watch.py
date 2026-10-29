@@ -414,7 +414,7 @@ def test_a_job_newly_failing_on_a_run_whose_alert_was_closed_raises_an_alert_nam
     ledger = Ledger([{"id": "promo-800-0", "title": "Promotion red: helm-kind", "state": "open"}], [alert])
     store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-800-0", "helm-kind")
     refresh(store, ledger, gh([RED], JOBS))
-    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0"]
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-1"]
     assert len(ledger.raised) == 1 and "unit (3.11, 1)" in ledger.raised[0][2]
 
 
@@ -427,10 +427,10 @@ def test_a_closed_alert_naming_only_the_new_job_still_holds_the_run_beside_a_hel
     }
     tasks = [
         {"id": "promo-800-0", "title": "Promotion red: helm-kind", "state": "open"},
-        {"id": "promo-900-0", "title": "Promotion red: unit", "state": "open"},
+        {"id": "promo-900-1", "title": "Promotion red: unit", "state": "open"},
     ]
     ledger = Ledger(tasks, [alert])
-    store.redis.hset(promotion_watch.key(SLUG, "jobs"), mapping={"promo-800-0": "helm-kind", "promo-900-0": "unit"})
+    store.redis.hset(promotion_watch.key(SLUG, "jobs"), mapping={"promo-800-0": "helm-kind", "promo-900-1": "unit"})
     assert refresh(store, ledger, gh([RED], JOBS)) == []
     assert ledger.raised == []
 
