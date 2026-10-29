@@ -1899,7 +1899,7 @@ jobs:
 
       # Sonar takes a leg's branch coverage in its place, so a same-repo leg uploads its database once.
       - name: Upload coverage
-        if: matrix.python-version == '3.12' && steps.upload-branch-coverage.outcome != 'success'
+        if: matrix.python-version == '3.12' && (steps.upload-branch-coverage.outcome != 'success' || hashFiles('.coverage') == '')
         uses: ./.github/actions/retry-upload
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.leg }}
@@ -2196,9 +2196,10 @@ jobs:
       # A leg's newest attempt holds the coverage of the run that passed it.
       - name: Take each selected leg's branch coverage as its shard coverage
         if: *selected-branch-coverage
+        shell: bash
         run: |
-          mkdir -p .coverage-shards "$RUNNER_TEMP/branch-shards"
-          shards=$PWD/.coverage-shards
+          shards=$GITHUB_WORKSPACE/.coverage-shards
+          mkdir -p "$shards" "$RUNNER_TEMP/branch-shards"
           cd "$RUNNER_TEMP/branch-shards"
           while IFS= read -r name; do
             rest=${name#branch-coverage-3.12-}

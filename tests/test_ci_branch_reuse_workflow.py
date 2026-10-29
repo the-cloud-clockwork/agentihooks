@@ -537,16 +537,18 @@ def test_sonar_carries_the_branch_coverage_only_on_same_repo_pull_requests(value
 
 
 @pytest.mark.parametrize(
-    ("values", "uploaded"),
+    ("values", "database", "uploaded"),
     [
-        ({"steps.upload-branch-coverage.outcome": "success"}, False),
-        ({"steps.upload-branch-coverage.outcome": ""}, True),
+        ({"steps.upload-branch-coverage.outcome": "success"}, "a1", False),
+        ({"steps.upload-branch-coverage.outcome": "success"}, "", True),
+        ({"steps.upload-branch-coverage.outcome": ""}, "a1", True),
     ],
 )
-def test_a_selected_leg_uploads_its_coverage_once(values, uploaded):
+def test_a_selected_leg_uploads_its_coverage_once(values, database, uploaded):
     upload = _step("unit-selected", "Upload coverage")
     assert _step("unit-selected", "Upload this leg's branch coverage")["id"] == "upload-branch-coverage"
-    assert _evaluate(upload["if"], {"matrix.python-version": "3.12", **values}) is uploaded
+    condition = upload["if"].replace("hashFiles('.coverage')", repr(database))
+    assert _evaluate(condition, {"matrix.python-version": "3.12", **values}) is uploaded
 
 
 @pytest.mark.parametrize(
@@ -574,7 +576,10 @@ def test_sonar_takes_each_selected_legs_newest_branch_coverage_as_its_shard(tmp_
     (tmp_path / ".coverage-shards/coverage-3.12-3").mkdir(parents=True)
     (tmp_path / ".coverage-shards/coverage-3.12-3/.coverage").write_text("uploaded")
     result = subprocess.run(
-        ["bash", "-c", take["run"]], cwd=tmp_path, env={**os.environ, "RUNNER_TEMP": str(temp)}, capture_output=True
+        ["bash", "-c", take["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "RUNNER_TEMP": str(temp), "GITHUB_WORKSPACE": str(tmp_path)},
+        capture_output=True,
     )
     assert result.returncode == 0, result.stderr
     found = {path.parent.name: path.read_text() for path in (tmp_path / ".coverage-shards").glob("*/.coverage")}
