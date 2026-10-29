@@ -23,6 +23,7 @@ ORDER = [
     "stall",
     "lane-split",
     "nightwatch",
+    "reset",
     "talk",
 ]
 

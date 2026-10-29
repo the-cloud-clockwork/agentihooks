@@ -74,6 +74,7 @@ class Lifecycle:
         if (value["execution"], value["generation"]) != (event.key, event.version):
             return
         if not value["returned"]:
+            self._refund(event.swarm, agent)
             if not self.store.drop_agent(
                 event.swarm, agent.name, expected=agent, before=lambda pipe: self._return(pipe, event, agent)
             ):
@@ -82,6 +83,13 @@ class Lifecycle:
             revision = claims.update(key, json.dumps(value).encode(), revision)
         self._settle(event, agent)
         claims.update(key, json.dumps({**value, "state": "exited"}).encode(), revision)
+
+    def _refund(self, slug: str, agent: AgentRecord) -> None:
+        from scripts.swarm import tick
+
+        row = self.ledger.task(slug, agent.task) or {}
+        rows = {dep: self.ledger.task(slug, dep) or {} for dep in row.get("parked_on") or []}
+        tick._refund_parked(slug, self.store, {**rows, agent.task: row}, agent)
 
     def _return(self, pipe, event: Envelope, agent: AgentRecord) -> None:
         store = copy(self.store)

@@ -52,29 +52,34 @@ def _strings(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def _valid_test(record: object, unit_count: int) -> bool:
+def _valid_test(record: object, unit_count: int, checked: set[int]) -> bool:
     if not isinstance(record, dict):
         return False
-    units = record.get("units")
+    files, units = record.get("files"), record.get("units")
+    # An unpacked manifest shares one files list across many tests; each list is checked once.
+    if id(files) not in checked:
+        if not _strings(files):
+            return False
+        checked.add(id(files))
     return (
-        _strings(record.get("files"))
-        and isinstance(record.get("escapes"), bool)
+        isinstance(record.get("escapes"), bool)
         and isinstance(units, list)
-        and all(type(unit) is int and 0 <= unit < unit_count for unit in units)
+        and set(map(type, units)) <= {int}
+        and (not units or (min(units) >= 0 and max(units) < unit_count))
     )
 
 
 def _valid_manifest(manifest: object) -> bool:
     if not isinstance(manifest, dict):
         return False
-    tests = manifest.get("tests")
+    tests, checked = manifest.get("tests"), set()
     return (
         isinstance(manifest.get("commit"), str)
         and bool(manifest["commit"])
         and _strings(manifest.get("units"))
         and isinstance(tests, dict)
         and bool(tests)
-        and all(_valid_test(record, len(manifest["units"])) for record in tests.values())
+        and all(_valid_test(record, len(manifest["units"]), checked) for record in tests.values())
     )
 
 

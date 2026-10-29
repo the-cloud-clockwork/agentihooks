@@ -22,7 +22,9 @@ def test_main_image_is_built_once_before_every_compatible_smoke():
     build = builds[0]
     step = steps[build]
     if "run" in step:
-        assert step["run"] in {
+        assert step["run"].replace(
+            ' \\\n  ${LAYERS_FROM:+--cache-from "$LAYERS_FROM"} ${LAYERS_TO:+--cache-to "$LAYERS_TO"}', ""
+        ) in {
             f"docker build -t {IMAGE} .",
             f"docker build -t {IMAGE} --output type=image,compression=uncompressed .",
             """docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &

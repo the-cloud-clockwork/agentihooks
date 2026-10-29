@@ -119,6 +119,18 @@ def test_a_stale_agent_gets_one_inbox_item_per_window_of_silence(inbox):
     assert len(nudges(inbox)) == 2
 
 
+def test_each_sent_nudge_is_remembered_as_the_last_one(inbox):
+    assert stale_nudge.last(inbox.redis, "sw", NAME) is None
+    assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + LIMIT) == []
+    assert stale_nudge.last(inbox.redis, "sw", NAME) is None
+    stale_nudge.nudge(inbox, "sw", agent(), "", BASE + LIMIT + 1)
+    assert stale_nudge.last(inbox.redis, "sw", NAME) == BASE + LIMIT + 1
+    stale_nudge.nudge(inbox, "sw", agent(), "", BASE + LIMIT + 7)
+    assert stale_nudge.last(inbox.redis, "sw", NAME) == BASE + LIMIT + 1
+    assert stale_nudge.last(inbox.redis, "other", NAME) is None
+    assert 0 < inbox.redis.ttl(idle.key("sw", stale_nudge.LAST, NAME)) <= idle.BEAT_TTL_S
+
+
 def test_new_activity_starts_a_new_series(inbox):
     first = BASE + LIMIT + 1
     assert stale_nudge.nudge(inbox, "sw", agent(), "", first) != []

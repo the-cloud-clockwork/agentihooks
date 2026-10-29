@@ -28,6 +28,8 @@ def pool(label):
 
 
 MOVED = {
+    ("changelog.yml", "changelog"): LIGHT,
+    ("changelog-seed.yml", "seed"): LIGHT,
     ("chaos.yml", "chaos"): STANDARD,
     ("chart-release.yml", "publish"): LIGHT,
     ("mutation-line-selection-proof.yml", "compare"): BATCH,
@@ -52,7 +54,7 @@ MOVED = {
     ("ledger-row-memory.yml", "replay"): BATCH,
     ("mutation-preflight.yml", "mutation"): LIGHT,
     ("mutation-preflight.yml", "mutation-shard"): BATCH,
-    ("mutation-preflight.yml", "plan"): LIGHT,
+    ("mutation-preflight.yml", "plan"): STANDARD,
     ("mutation-preflight.yml", "refine"): LIGHT,
     ("mutation-replay.yml", "plan"): LIGHT,
     ("mutation-replay.yml", "grade"): BATCH,
@@ -64,6 +66,7 @@ MOVED = {
     ("proofs.yml", "tests"): STANDARD,
     ("semgrep.yml", "charts"): LIGHT,
     ("semgrep.yml", "feature-tests"): LIGHT,
+    ("semgrep.yml", "scan"): LIGHT,
     ("startup-stages.yml", "measure"): STANDARD,
     ("swarm-image.yml", "publish"): STANDARD,
     ("swarm-node-base.yml", "copy"): STANDARD,
@@ -129,6 +132,7 @@ CLASSED = {
     ("ci-templates.yml", "actionlint"),
     ("pages.yml", "build"),
     ("promote.yml", "promote"),
+    ("test.yml", "promotion-ready"),
     ("publish-pypi.yml", "verify"),
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),

@@ -426,7 +426,7 @@ def test_a_merge_group_records_its_head_count_for_the_next_group_after_its_early
     assert '--collected "$RUNNER_TEMP/collected.json"' in record["run"]
     assert upload["with"]["name"] == recorded["with"]["name"]
     assert upload["with"]["if-no-files-found"] == "ignore"
-    assert upload["with"]["overwrite"] is True
+    assert upload["uses"] == recorded["uses"] == "./.github/actions/retry-upload"
 
 
 def test_every_dev_head_records_its_count_outside_the_promotion_queue():
@@ -899,7 +899,7 @@ def test_chart_proof_input_key_covers_every_file_the_swarm_image_copies():
     for line in (_ROOT / "Dockerfile").read_text().splitlines():
         words = line.split()
         if words[:1] == ["COPY"] and not any(w.startswith("--from") for w in words):
-            sources += words[1:-1]
+            sources += [w for w in words[1:-1] if not w.startswith("--")]
     assert sources
     assert all(any(s.rstrip("/") == p or s.startswith(f"{p}/") for p in listed) for s in sources), sources
     assert {"Dockerfile", ".dockerignore", "deploy/helm/agentihooks-swarm", ".github/workflows/helm-kind.yml"} <= set(

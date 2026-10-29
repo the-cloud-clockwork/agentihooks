@@ -1,0 +1,6 @@
+{
+  "hooks/memory/catalog.py:hooks.memory.catalog.xǁCatalogǁ__init____mutmut_13:2db4323a04bd76f486fa951c7ccace52d1e6d3d4c54f51f3ce37f7853bc5b8a1": {
+    "reader": "standards_reader",
+    "reason": "CPython 3.12 sqlite3.connect parses check_same_thread through the Argument Clinic bool converter, which applies PyObject_IsTrue, so None and False both evaluate to false. A probe on 3.12.12 showed True refusing a cross thread query while False and None both allowed it. The mutant changes no observable behaviour."
+  }
+}

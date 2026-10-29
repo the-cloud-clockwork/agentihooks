@@ -39,7 +39,8 @@ fi
 tar -xzf "$archive" -C "$pulled"
 printf 'pulled %s version %s\n' "$chart" "$version"
 
-kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
+node="$(bash "$(dirname "$0")/pull-kind-node.sh")"
+kind create cluster --name "$cluster" --image "$node" &
 cluster_setup=$!
 deadline=$((SECONDS + ${IMAGE_WAIT_SECONDS:-1200}))
 until docker pull -q "$image"; do

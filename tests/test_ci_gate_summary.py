@@ -100,7 +100,7 @@ def test_selected_tests_publish_the_existing_duration_and_flake_formats():
     steps = workflow["jobs"]["unit-selected"]["steps"]
     run = next(step for step in steps if step.get("name") == "Run the selected tests")
     assert "--store-durations --durations-path durations.json" in run["run"]
-    uploads = [step for step in steps if step.get("uses", "").startswith("actions/upload-artifact@")]
+    uploads = [step for step in steps if step.get("uses", "").endswith("/.github/actions/retry-upload")]
     for prefix, filename in (("durations", "durations.json"), ("flakes", "flakes.jsonl")):
         upload = next(step for step in uploads if step["with"]["name"].startswith(prefix + "-"))
         assert filename in upload["with"]["path"]

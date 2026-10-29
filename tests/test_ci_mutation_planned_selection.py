@@ -107,6 +107,7 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
     monkeypatch.setattr("sys.argv", ["plan", "--repository", "owner/repo"])
     monkeypatch.setattr("mutmut.configuration._config", None)
     monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "touches_code", lambda *args: True)
     monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/core.py": {3}})
     monkeypatch.setattr(plan, "find_record", record)
     try:
@@ -163,6 +164,7 @@ def test_plan_retries_an_unreadable_record_once_then_selects_every_test(tmp_path
     monkeypatch.setattr("sys.argv", ["plan", "--repository", "owner/repo"])
     monkeypatch.setattr("mutmut.configuration._config", None)
     monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "touches_code", lambda *args: True)
     monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/core.py": {2}})
     monkeypatch.setattr(plan, "find_record", record)
     monkeypatch.setattr(plan.time, "sleep", pauses.append)
@@ -767,6 +769,7 @@ def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monke
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
     monkeypatch.setattr("sys.argv", ["plan", "--repository", "owner/repo"])
     monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "touches_code", lambda *args: True)
     monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/core.py": {6}})
     monkeypatch.setattr(plan, "find_record", lambda *args: ({"id": 7}, manifest))
     assert plan.main() == 0

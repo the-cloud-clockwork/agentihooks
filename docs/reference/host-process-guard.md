@@ -167,9 +167,11 @@ guard that is already installed:
 | Drift, and both home files are links, the home has a live guard entry, or an enabled old systemd timer was removed | The `install` lines above | Relinks and schedules |
 | Drift otherwise, for example hand copies with no schedule and no enabled timer | `[--] Host guard linked in <home> from <repo>; agentihooks host-guard install schedules it` | Relinks only |
 
-`init` never schedules a guard the operator turned off. A disabled systemd
-timer, or hand copies with no entry, end up linked but unscheduled until
-`agentihooks host-guard install` runs.
+A disabled systemd timer, or hand copies with no entry, end up linked but
+unscheduled after that `init`. Since [#6311](https://github.com/the-cloud-clockwork/agentihooks/pull/6311)
+the next `init` finds both files are links and schedules the guard. To keep a
+guard off, remove both home files. With only one removed, `init` relinks it
+and the `init` after that schedules the guard.
 
 ### Example
 
@@ -191,6 +193,97 @@ $ tail -1 ~/guard-daemon.log
 `agentihooks host-guard install` schedules it again. A later `check` prints
 `[OK] Host guard in sync with <repo>`, and a `TICK_COMPLETE` line reaches the
 log on each 60 second pass.
+
+### After the swarm Redis moves
+
+The guard entry lives on the Redis the scheduler used when the guard was
+installed. That Redis is the first of these that applies:
+
+1. `AGENTIHOOKS_HIVE_REDIS_URL`, outside ledger local mode
+2. `AGENTIHOOKS_SWARM_REDIS_URL`
+3. `redis://127.0.0.1:6379/0`, when neither is set
+
+`init` and `install` start the scheduler runner only for the
+current endpoint. When the swarm Redis moves, for example from the local Redis
+to a remote swarm Redis, the old entry stays `active` on the local Redis. A
+runner still alive there from before the move keeps delivering it; after a
+reboot no runner serves the local Redis, so nothing delivers it and the guard
+stops. `check` reads only the current endpoint, so it reports the home as not
+scheduled even though both links are in place.
+
+Symptoms:
+
+- `agentihooks host-guard check` prints
+  `<home>/guard-daemon.sh is not scheduled every 60s on the agentihooks scheduler`
+  and exits 1.
+- `ls -l ~/guard-daemon.sh ~/guard-config.json` shows both links.
+- No new `TICK_COMPLETE` line reaches `~/guard-daemon.log`.
+
+Count the minutes since the last guard pass. The log times are local time:
+
+```bash
+last=$(grep TICK_COMPLETE ~/guard-daemon.log | tail -1 | cut -c1-19)
+if [[ -n "$last" ]]; then
+  echo $(( ($(date +%s) - $(date -d "$last" +%s)) / 60 ))
+else
+  echo "no guard pass in the log"
+fi
+```
+
+On a scheduled guard this prints `0` or `1`. On this workstation it was 3122
+on 23 October, with the entry stranded on the local Redis since the move on
+21 October ([#6296](https://github.com/the-cloud-clockwork/agentihooks/issues/6296)).
+
+Fix it with either command, from the checkout the guard should follow:
+
+```bash
+agentihooks init                 # reconcile schedules a home whose two files are links
+agentihooks host-guard install   # link and schedule, whatever the home holds
+```
+
+`agentihooks init` refuses to run in a rendered profile home or with
+`AGENTIHOOKS_SWARM` or `AGENTIHOOKS_PROFILE` set, so an agent session cannot
+run it. The operator runs it once from a plain shell. `install` always runs
+these steps. `init` runs them only when the home has drift and has both links,
+a live guard entry or an enabled old systemd timer:
+
+1. Cancel every live guard entry on `redis://127.0.0.1:6379/0` whose payload
+   names this home's `guard-daemon.sh`. Entries for other homes stay.
+2. Add the 60 second entry on the current scheduler and cancel this home's
+   older entries there.
+3. Start the scheduler runner when it is not running.
+
+The local Redis is checked only when the current endpoint URL differs from
+the exact text `redis://127.0.0.1:6379/0`; another spelling of the same Redis,
+such as `localhost`, is also checked, and step 2 already covers its entries.
+When the current endpoint is that exact URL, step 1 is skipped.
+
+A guard already in sync is not scheduled again, and that reconcile does not
+read the local Redis. A stranded local entry beside an in-sync guard stays
+until `agentihooks host-guard install` runs, and a local runner still alive
+can run the guard a second time until then.
+
+When the local Redis does not answer, the guard is still
+scheduled on the current endpoint and the `[OK]` line ends with
+`; a guard entry on the local Redis could not be checked or retired`, the
+second row of the `install` table above. Run
+`agentihooks host-guard install` again once the local Redis answers, so an old
+entry there cannot run the guard a second time if that Redis gets a runner
+again.
+
+A home with only one of the two links, or with hand copies, with no live entry
+and no enabled old timer, is relinked but not scheduled by the first `init`, as the table above shows.
+The next `init` sees both links and schedules it, and
+`agentihooks host-guard install` schedules it at once.
+
+Confirm the fix:
+
+```console
+$ agentihooks host-guard check
+[OK] Host guard in sync with <repo>
+$ tail -1 ~/guard-daemon.log
+<time within the last minute> TICK_COMPLETE flagged=0 kills=0 errors=0
+```
 
 ### Evidence
 
@@ -253,7 +346,9 @@ done
    `excludeCommands` pattern. Add it in a pull request with a test.
 4. `TICK_COMPLETE` lines that stop appearing mean the guard is no longer
    running. Run `agentihooks host-guard check` and apply the fix for each
-   drift line it prints.
+   drift line it prints. A home that has both links but no schedule usually
+   follows a swarm Redis move; see
+   [After the swarm Redis moves](#after-the-swarm-redis-moves).
 
 ## Evidence for pull request 5006
 

@@ -10,7 +10,7 @@ from scripts.swarm import code_reach, redis_commands
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.redis_wire import lua, wire
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("redis-commands-map")]
 
 APP = """
 from scripts.lease import acquire

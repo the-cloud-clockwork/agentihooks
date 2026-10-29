@@ -41,3 +41,6 @@ observe green. Record both run ids in the pull request. Also break the rule's
 match once and confirm test mode fails, then restore it. The initial
 `feature-semgrep-feature-tests` rule protects the feature fixture invocation in
 the local rules workflow itself, ordered on 2026-10-25.
+
+A feature can also carry a live check that the Doctor runs against the running
+swarms; see [Feature live checks](feature-live-checks.md).

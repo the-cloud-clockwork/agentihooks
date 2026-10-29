@@ -163,6 +163,7 @@ def test_completed_mutant_cost_survives_a_kill_and_cache_reload(tmp_path, monkey
 
     assert memory.wrap(execute)(object(), TESTS) == 1
     restored = killers.KillMemory(memory.folder)
+    assert len(list(memory.folder.glob("*.cost"))) == 1
     assert restored.cost(mutant, reversed(TESTS)) == 3.5
     assert restored.killer(mutant) == TESTS[0]
     assert restored.cost(mutant, TESTS[:1]) is None

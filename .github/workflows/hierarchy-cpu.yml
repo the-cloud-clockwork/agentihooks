@@ -73,7 +73,7 @@ jobs:
           exit 1
       - name: Install dependencies shared by both revisions
         working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Prepare identical hierarchy probes for base and head
         run: |
           mkdir hierarchy-evidence
@@ -107,8 +107,9 @@ jobs:
         run: redis-cli -p 6379 shutdown nosave || true
       - name: Preserve the pair's hierarchy profiles and exact response bodies
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./head/.github/actions/retry-upload
         with:
+          after-cancel: true
           name: hierarchy-pair-${{ matrix.pair }}
           path: hierarchy-evidence/*.json
           if-no-files-found: error
@@ -153,7 +154,7 @@ jobs:
           exit 1
       - name: Install dependencies shared by both revisions
         working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Prepare the same load harness for base and head
         run: |
           mkdir load-evidence
@@ -193,8 +194,9 @@ jobs:
         run: redis-cli -p 6379 shutdown nosave || true
       - name: Preserve the pair's load measurements and server logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./head/.github/actions/retry-upload
         with:
+          after-cancel: true
           name: load-pair-${{ matrix.pair }}
           path: |
             load-evidence/*.log
