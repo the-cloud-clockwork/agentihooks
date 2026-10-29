@@ -20,10 +20,11 @@ def key(slug, kind, name, prefix=PREFIX):
 
 def _resolved(redis, slug, name):
     from scripts.hive import scope
+    from scripts.swarm import timing
     from scripts.swarm.naming import NameRegistry
 
-    name = NameRegistry(redis).resolve(name)
-    return name, scope.readings(redis, slug, name)
+    name = timing.timed(NameRegistry(redis).resolve, name)
+    return name, timing.timed(scope.readings, redis, slug, name)
 
 
 def beat(redis, slug, name, state, at):
