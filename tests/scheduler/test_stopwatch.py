@@ -1,5 +1,7 @@
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
+
 pytestmark = pytest.mark.unit
 
 
@@ -11,14 +13,14 @@ def test_stopwatch_elapsed_and_limit_survive_restart():
     from scripts.scheduler.slots import InboxSlot
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    scheduler = Scheduler(redis, machine="proof")
+    scheduler = Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
     watch = scheduler.stopwatch(owner="operator", limit=10, payload="limit crossed", now=100)
     watch.limit_reached.connect(InboxSlot("session-proof"))
     watch.start(now=100)
     assert watch.elapsed(now=104) == 4
     assert watch.limit_reached.name == "limit_reached"
     assert scheduler.run_due(now=109) == 0
-    restarted = Scheduler(redis, machine="proof")
+    restarted = Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
     assert restarted.get(watch.id).elapsed(now=109) == 9
     assert restarted.run_due(now=110) == 1
     assert restarted.run_due(now=120) == 0
@@ -34,7 +36,7 @@ def test_stopped_stopwatch_records_elapsed_without_firing():
     from scripts.scheduler.slots import InboxSlot
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    scheduler = Scheduler(redis, machine="proof")
+    scheduler = Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
     watch = scheduler.stopwatch(owner="operator", limit=10, payload="limit crossed", now=100)
     watch.limit_reached.connect(InboxSlot("session-proof"))
     watch.start(now=100)
