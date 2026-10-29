@@ -398,7 +398,7 @@ def test_a_run_read_again_after_the_master_closed_its_alert_raises_no_fresh_aler
 
 
 def test_a_closed_alert_for_another_run_does_not_hold_a_run_whose_number_extends_it(store):
-    alert = {"id": "al-0", "source": "promotion", "state": "done", "text": "Dev promotion is red: push run 90 at x"}
+    alert = {"id": "al-0", "source": "promotion", "state": "done", "text": "Dev promotion is red: push run 9000 at x"}
     ledger = Ledger(alerts=[alert])
     refresh(store, ledger, gh([RED], [{"name": "lint", "conclusion": "cancelled"}]))
     assert len(ledger.raised) == 1
