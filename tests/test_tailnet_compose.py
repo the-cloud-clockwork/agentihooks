@@ -81,7 +81,7 @@ def test_the_hive_front_reads_the_nats_signer_from_the_workstation_environment(t
     stack, binary = tailnet
     environment = _hive_environment(stack, binary, SIGNER_SETTINGS)
     assert {key: environment[key] for key in SIGNER_SETTINGS} == SIGNER_SETTINGS
-    text = (ASSETS / "tailnet.yaml").read_text()
+    text = (stack / "deploy/compose/tailnet.yaml").read_text()
     for value in SIGNER_SETTINGS.values():
         assert value not in text
 
