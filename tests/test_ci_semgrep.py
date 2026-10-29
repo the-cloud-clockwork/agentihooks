@@ -185,14 +185,18 @@ def test_feature_tests_and_charts_have_runner_classes():
     }
 
 
-def test_exactly_one_step_ratchets_the_guard_rules_against_the_base_floors():
+def test_exactly_one_step_per_ratchet_grades_against_the_base():
     ratchets = [
-        (job, step["name"])
+        (job, step)
         for job, body in _jobs().items()
         for step in body.get("steps", [])
-        if "check --base FETCH_HEAD" in step.get("run", "")
+        if "check --base FETCH_HEAD" in step.get("run", "") or "--baseline-commit" in step.get("run", "")
     ]
-    assert ratchets == [("charts", "Guard rules hold on their fixtures and at their computed floors")]
+    assert [(job, step["name"]) for job, step in ratchets] == [
+        ("scan", "Fail on findings new against the base"),
+        ("charts", "Guard rules hold on their fixtures and at their computed floors"),
+    ]
+    assert all(not {"if", "continue-on-error"} & set(step) for _, step in ratchets)
 
 
 def test_wrapper_is_triggered_only_by_workflow_call():
