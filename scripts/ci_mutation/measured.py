@@ -77,12 +77,22 @@ def split_tests(nodes: set[str], seconds: dict[str, float], limit: int) -> dict 
     }
 
 
-def measured_splits(names: list[str], results: list[dict], limit: int = 10) -> dict[str, dict]:
+def measured_splits(
+    names: list[str], results: list[dict], limit: int = 10, memory: KillMemory | None = None
+) -> dict[str, dict]:
     tests, durations, missing = function_tests(results)
     splits = {}
     for function in sorted({function_name(name) for name in names} & tests.keys()):
         seconds = {node: durations.get(node, missing) for node in tests[function]}
-        if split := split_tests(tests[function], seconds, limit):
+        # Reusing the last run's slices keeps each unit's selection, so its recorded cost still matches.
+        kept = memory.split(function, tests[function]) if memory is not None else None
+        if kept and 2 <= len(kept["slices"]) <= limit:
+            spent = sum(seconds[node] for node in kept["head"])
+            costs = [
+                MUTANT_SECONDS + 1.25 * (spent + sum(seconds[node] for node in chosen)) for chosen in kept["slices"]
+            ]
+            splits[function] = {**kept, "costs": costs}
+        elif split := split_tests(tests[function], seconds, limit):
             splits[function] = split
     return splits
 
@@ -136,7 +146,7 @@ def measured_plan(
     costs, splits, unit_costs = {}, {}, {}
     for names, results in groups:
         costs.update(measured_costs(names, results, memory))
-        group_splits = measured_splits(names, results, limit)
+        group_splits = measured_splits(names, results, limit, memory)
         splits.update(group_splits)
         for name in names:
             if (function := function_name(name)) not in group_splits:

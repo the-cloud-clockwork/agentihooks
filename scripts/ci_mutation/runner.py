@@ -12,6 +12,7 @@ from pathlib import Path
 import tomlkit
 
 from scripts.ci_mutation.clearances import load_clearances
+from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import holds, split_names, unit_cost
 from scripts.ci_mutation.report import evaluate, survivor_text
 from scripts.ci_mutation.scope import select_tests
@@ -311,6 +312,9 @@ def seed_measured_shard(stats: SharedStats, key: str, work: Path) -> str:
         shutil.copy(plan_path, work / "shard-plan.json")
     if (killers := stats.folder.parent / "killers").is_dir():
         shutil.copytree(killers, work / "killers")
+    if plan_path.is_file():
+        # Kept beside the killers, the slices reach the next run's plan through the cache.
+        KillMemory(work / "killers").keep_splits(plan.get("splits", {}))
     return ""
 
 

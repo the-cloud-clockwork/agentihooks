@@ -34,6 +34,26 @@ class KillMemory:
         record = json.loads(path.read_text())
         return record["seconds"] if record["tests"] == sorted(tests) else None
 
+    def _split_path(self, function: str) -> Path:
+        return self.folder / (hashlib.sha256(function.encode()).hexdigest() + ".split")
+
+    def keep_splits(self, splits: dict[str, dict]) -> None:
+        self.folder.mkdir(parents=True, exist_ok=True)
+        for function, split in splits.items():
+            path = self._split_path(function)
+            partial = path.with_name(f"{path.name}.{os.getpid()}")
+            slices = [sorted(chosen) for chosen in split["slices"]]
+            partial.write_text(json.dumps({"head": sorted(split["head"]), "slices": slices}))
+            partial.replace(path)
+
+    def split(self, function: str, tests: Iterable[str]) -> dict | None:
+        path = self._split_path(function)
+        if not path.is_file():
+            return None
+        record = json.loads(path.read_text())
+        kept = sorted([*record["head"], *(test for chosen in record["slices"] for test in chosen)])
+        return record if kept == sorted(set(tests)) else None
+
     def order(self, mutant: str, tests: Iterable[str]) -> list[str]:
         killer = self.killer(mutant)
         return sorted(tests, key=lambda test: test != killer)
