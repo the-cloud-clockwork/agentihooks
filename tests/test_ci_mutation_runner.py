@@ -2,6 +2,8 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -68,6 +70,44 @@ def test_process_writes_no_bytecode(tmp_path, monkeypatch):
     code = "import os, sys; print(sys.dont_write_bytecode, os.environ['PYTHONDONTWRITEBYTECODE'])"
     assert run_process([sys.executable, "-c", code], tmp_path, 10, log) == 0
     assert log.read_text() == "True 1\n"
+
+
+def test_process_temporary_folder_is_in_shared_memory_and_removed(tmp_path, monkeypatch):
+    memory = tmp_path / "shm"
+    memory.mkdir()
+    monkeypatch.setattr(runner, "SHARED_MEMORY", memory)
+    log = tmp_path / "process.log"
+    assert run_process([sys.executable, "-c", "import tempfile; print(tempfile.gettempdir())"], tmp_path, 10, log) == 0
+    folder = Path(log.read_text().strip())
+    assert folder.parent == memory
+    assert not folder.exists()
+
+
+def test_process_without_shared_memory_keeps_the_default_temporary_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "SHARED_MEMORY", tmp_path / "missing")
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    log = tmp_path / "process.log"
+    assert run_process([sys.executable, "-c", "import tempfile; print(tempfile.gettempdir())"], tmp_path, 10, log) == 0
+    assert log.read_text().strip() == str(tmp_path)
+
+
+def test_process_fails_closed_when_shared_memory_runs_low(tmp_path, monkeypatch):
+    memory = tmp_path / "shm"
+    memory.mkdir()
+    monkeypatch.setattr(runner, "SHARED_MEMORY", memory)
+    calls = []
+
+    def usage(path):
+        calls.append(path)
+        return SimpleNamespace(free=4 * runner.MEMORY_FLOOR if len(calls) == 1 else 0)
+
+    monkeypatch.setattr(runner.shutil, "disk_usage", usage)
+    log = tmp_path / "process.log"
+    (memory / "browser").mkdir()
+    (memory / "browser" / "segment").write_bytes(b"x" * 5000)
+    assert run_process([sys.executable, "-c", "import time; time.sleep(0.5)"], tmp_path, 10, log) == 1
+    assert "fell below" in log.read_text()
+    assert f"5000 {memory / 'browser'}\n" in log.read_text()
 
 
 def _two_groups(tmp_path):
@@ -252,6 +292,8 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "-x",
         "-o",
         "addopts=",
+        "-o",
+        "tmp_path_retention_policy=failed",
         "-p",
         "pytest_asyncio.plugin",
         "-p",
@@ -832,7 +874,16 @@ def test_workspace_mutating_the_identity_plugin_does_not_load_its_mutated_copy(t
     assert not (work / ".test_durations").exists()
     assert not (work / "Swarm-v2.md").exists()
     args = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]["pytest_add_cli_args"]
-    assert args == ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
+    assert args == [
+        "-q",
+        "-x",
+        "-o",
+        "addopts=",
+        "-o",
+        "tmp_path_retention_policy=failed",
+        "-p",
+        "pytest_asyncio.plugin",
+    ]
 
 
 @pytest.mark.parametrize(
