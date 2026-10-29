@@ -574,6 +574,9 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
     namespace = {"__name__": "scripts.sample"}
     exec(compile(generated, "<sample>", "exec"), namespace)
     shape = namespace["Shape"]
+    copies = generated.split("def xǁShapeǁdouble__mutmut_")
+    assert len(copies) > 2
+    assert all(chunk.rstrip().endswith("@staticmethod") for chunk in copies[:-1])
 
     def measure():
         return shape(3).area, shape(3).perimeter, shape.double(3), shape.unit().side, shape(3).twice
@@ -587,6 +590,114 @@ def test_property_cached_property_static_and_class_method_bodies_are_graded_and_
         except TypeError:
             outcomes.add(name)
     assert (9, 12, 6, 2, 6) not in outcomes
+
+
+@pytest.mark.parametrize(
+    "decorator, expected",
+    [
+        ("@functools.lru_cache(maxsize=2)", 6),
+        ("@cache", 6),
+        ("@wrapped", 16),
+        ("@wrapped\n@functools.lru_cache(maxsize=None)", 16),
+    ],
+)
+@pytest.mark.parametrize("method", [False, True])
+def test_wrapped_function_bodies_are_planned_and_their_mutants_run(monkeypatch, decorator, expected, method):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutant_names, selected_mutants
+
+    monkeypatch.setattr(
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1, use_setproctitle=False),
+    )
+    prefix = (
+        "import functools\n"
+        "from functools import cache\n"
+        "decorations = []\n"
+        "def wrapped(function):\n"
+        "    decorations.append(function.__name__)\n"
+        "    def call(*args, **kwargs):\n"
+        "        return function(*args, **kwargs) + 10\n"
+        "    return call\n"
+    )
+    indent = "    " if method else ""
+    signature = "self, value" if method else "value"
+    source = prefix + ("class Box:\n" if method else "")
+    source += "\n".join(f"{indent}{line}" for line in decorator.splitlines()) + "\n"
+    source += f"{indent}def doubled({signature}):\n{indent}    return value * 2\n"
+    line = len(source.splitlines())
+    found, ungraded = mutation_counts("scripts/sample.py", source, {line})
+    assert found == 2
+    assert ungraded == []
+    generated, names = selected_mutants("scripts/sample.py", source, {line})
+    assert len(names) == found
+    assert selected_mutant_names("scripts/sample.py", source, {line}) == names
+
+    def measure():
+        namespace = {"__name__": "scripts.sample"}
+        exec(compile(generated, "<sample>", "exec"), namespace)
+        assert namespace["decorations"] == (["doubled"] if "@wrapped" in decorator else [])
+        function = namespace["Box"]().doubled if method else namespace["doubled"]
+        return function(3)
+
+    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    assert measure() == expected
+    for name in names:
+        monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
+        assert measure() != expected
+
+
+def test_cached_static_and_class_method_bodies_keep_their_binding_when_mutated(monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import mutation_counts, selected_mutants
+
+    monkeypatch.setattr(
+        Config,
+        "get",
+        lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1, use_setproctitle=False),
+    )
+    source = (
+        "import functools\n"
+        "class Box:\n"
+        "    @staticmethod\n"
+        "    @functools.cache\n"
+        "    def doubled(value):\n"
+        "        return value * 2\n"
+        "    @classmethod\n"
+        "    @functools.lru_cache(maxsize=2)\n"
+        "    def tripled(cls, value):\n"
+        "        return value * 3\n"
+        "    @classmethod\n"
+        "    @functools.lru_cache(4)\n"
+        "    def quadrupled(cls, value):\n"
+        "        return value * 4\n"
+    )
+    for line in (6, 10):
+        found, ungraded = mutation_counts("scripts/sample.py", source, {line})
+        assert found > 0
+        assert ungraded == []
+    generated, names = selected_mutants("scripts/sample.py", source, {6, 10})
+    assert {name.split("__mutmut_")[0] for name in names} == {"xǁBoxǁdoubled", "xǁBoxǁtripled"}
+    assert generated.count("is_classmethod = True") == 1
+    for copy, binding in (("doubled", "@staticmethod"), ("tripled", "@classmethod")):
+        chunks = generated.split(f"def xǁBoxǁ{copy}__mutmut_")
+        assert len(chunks) > 2
+        assert all(chunk.rstrip().endswith(binding) for chunk in chunks[:-1])
+
+    def measure():
+        namespace = {"__name__": "scripts.sample"}
+        exec(compile(generated, "<sample>", "exec"), namespace)
+        box = namespace["Box"]
+        return box.doubled(3), box().doubled(3), box.tripled(3), box().tripled(3), box.quadrupled(3)
+
+    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    assert measure() == (6, 6, 9, 9, 12)
+    for name in names:
+        monkeypatch.setenv("MUTANT_UNDER_TEST", f"scripts.sample.{name}")
+        assert measure() != (6, 6, 9, 9, 12)
 
 
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
