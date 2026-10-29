@@ -3524,6 +3524,13 @@ jobs:
 
       - name: Compute the coverage baseline
         run: |
+          previous="$HOME/coverage-baseline/baseline.json"
+          if [[ -f "$previous" ]]; then
+            commit=$(jq -r '.commit // empty' "$previous")
+            if [[ -z "$commit" ]] || ! git merge-base --is-ancestor "$commit" HEAD; then
+              rm "$previous"
+            fi
+          fi
           python -m tests.coverage_baseline --shards 20 \
             --head-shards baseline-coverage \
             --out "$HOME/coverage-baseline/baseline.json" \
