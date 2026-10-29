@@ -59,6 +59,7 @@ def estimate(
     selection: dict[str, list[str]] | None = None,
     manifest: dict | None = None,
     everything: bool = False,
+    direct: dict[str, list[str]] | None = None,
 ) -> tuple[float, int, list[str]]:
     mutants, tests = 0, set()
     drift = record_drift(root, manifest) if manifest is not None else None
@@ -67,6 +68,8 @@ def estimate(
         units, unrecorded = changed_recorded_units(root, manifest, changes)
         if "lines" in manifest:
             covering = line_covering_tests(root, manifest, changes, paths)
+            if direct is not None:
+                direct.update(direct_tests(root, manifest, changes))
         else:
             covering = covering_tests(manifest, units | drifted, paths)
         recorded = {}
@@ -539,6 +542,20 @@ def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]]
     }
 
 
+def direct_tests(root: Path, manifest: dict, changes: dict[str, set[int]]) -> dict[str, list[str]]:
+    lines, _, _ = recorded_lines(root, manifest, changes)
+    return {
+        path: sorted(
+            {
+                node(test).partition("[")[0]
+                for test, covered in manifest["lines"].items()
+                if lines.get(path, set()).intersection(covered.get(path, ()))
+            }
+        )
+        for path in changes
+    }
+
+
 @cache
 def file_text(path: Path) -> str:
     return path.read_text() if path.is_file() else ""
@@ -638,11 +655,12 @@ def main() -> int:
             else:
                 run, manifest = found
                 print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
-    selection = {}
-    seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure))
+    selection, direct = {}, {}
+    seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure), direct)
     validate_tests(root, tests)
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
+    (root / ".mutation-direct.json").write_text(json.dumps(direct) + "\n")
     count = shard_count(seconds, mutants, args.target, args.limit)
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
     print(

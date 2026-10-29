@@ -9,8 +9,9 @@ import pytest
 
 
 class KillMemory:
-    def __init__(self, folder: Path) -> None:
+    def __init__(self, folder: Path, direct: Iterable[str] = ()) -> None:
         self.folder = folder
+        self.direct = set(direct)
         self.mutant: str | None = None
         self.rank: dict[str, int] = {}
 
@@ -62,7 +63,7 @@ class KillMemory:
 
     def order(self, mutant: str, tests: Iterable[str]) -> list[str]:
         killer = self.killer(mutant)
-        return sorted(tests, key=lambda test: test != killer)
+        return sorted(tests, key=lambda test: (test != killer, test.partition("[")[0] not in self.direct))
 
     def prepare(self, mutant: str | None, tests: Iterable[str]) -> Iterable[str]:
         self.mutant = mutant
