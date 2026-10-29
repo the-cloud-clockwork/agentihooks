@@ -345,6 +345,7 @@ class InboxStore:
             return
         for kind in ("address", "open", "pending"):
             pipe.zrem(self.key(kind, address), *gone)
+        pipe.decrby(self.key("open-size", address), len(gone))
 
     def _report_gone(self, address, gone):
         _report_gone(self.key("address", address), gone)
@@ -821,8 +822,11 @@ class InboxStore:
         for item_id in self.redis.zrangebyscore(self.key("delivered"), "-inf", before - 1):
             if self.names.resolve(self._delivered_to(item_id)) != receiver:
                 continue
+            listed = self.listed_in(self.key("delivered"), [item_id])
+            if not listed:
+                continue
             try:
-                if self.get(item_id).delivery_session != self.session_id:
+                if listed[0].delivery_session != self.session_id:
                     self.requeue(item_id, receiver, "receiving session changed", before=before - 1)
                     continue
                 item = self.confirm(item_id, receiver)
@@ -1091,7 +1095,6 @@ def _report_gone(index, gone):
 
 
 def _present(item_ids, rows):
-    """The items whose record exists, and the ids whose record is gone."""
     items = [_item(raw, item_id) for item_id, raw in zip(item_ids, rows) if raw]
     return items, [item_id for item_id, raw in zip(item_ids, rows) if not raw]
 

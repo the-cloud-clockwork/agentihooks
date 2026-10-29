@@ -38,22 +38,42 @@ def assert_dropped(store, address, kept, capsys, gone):
 
 
 @pytest.mark.parametrize(
-    ("listing", "found"),
+    "listing",
     [
-        (lambda s, a: s.inbox(a), True),
-        (lambda s, a: s.open_items(a), True),
-        (lambda s, a: s.pending_items(a), True),
-        (lambda s, a: s.pending(), True),
-        (lambda s, a: s.unsettled(a, 10**15), False),
+        lambda s, a: s.inbox(a),
+        lambda s, a: s.open_items(a),
+        lambda s, a: s.pending_items(a),
+        lambda s, a: s.pending(),
     ],
 )
-def test_a_listing_skips_logs_and_drops_an_id_whose_record_is_gone(store, capsys, listing, found):
+def test_a_listing_skips_logs_and_drops_an_id_whose_record_is_gone(store, capsys, listing):
     gone = dangle(store, "bob")
     kept = store.send("carol", "bob", "here")
-    assert [item.id for item in listing(store, "bob")] == ([kept.id] if found else [])
+    assert [item.id for item in listing(store, "bob")] == [kept.id]
     assert_dropped(store, "bob", [kept.id], capsys, gone)
-    assert [item.id for item in listing(store, "bob")] == ([kept.id] if found else [])
+    assert [item.id for item in listing(store, "bob")] == [kept.id]
     assert capsys.readouterr().err == ""
+
+
+def test_the_unsettled_listing_skips_logs_and_drops_an_id_whose_record_is_gone(store, capsys):
+    gone = dangle(store, "bob")
+    kept = store.send("carol", "bob", "here")
+    store.read(kept.id, "bob")
+    assert [item.id for item in store.unsettled("bob", 10**15)] == [kept.id]
+    assert store.redis.zrange(store.key("address", "bob"), 0, -1) == [kept.id]
+    assert store.redis.zrange(store.key("open", "bob"), 0, -1) == [kept.id]
+    assert capsys.readouterr().err.splitlines() == [
+        f"agentihooks inbox: {store.key('address', 'bob')} lists message {gone} whose record is gone; dropped it"
+    ]
+
+
+def test_a_drop_keeps_the_open_index_current(store):
+    kept = store.send("carol", "bob", "here")
+    assert [item.id for item in store.open_items("bob")] == [kept.id]
+    dangle(store, "bob")
+    assert [item.id for item in store.inbox("bob")] == [kept.id]
+    assert store.redis.get(store.key("open-size", "bob")) == "1"
+    assert store.redis.sismember(store.key("open-indexed"), "bob")
 
 
 def test_an_open_index_rebuild_skips_and_drops_an_id_whose_record_is_gone(store, capsys):
@@ -116,6 +136,19 @@ def test_the_pool_routes_skip_and_drop_an_id_whose_record_is_gone(store, capsys,
 def test_a_requeue_drops_and_logs_a_delivered_id_whose_record_is_gone(store, capsys):
     store.redis.zadd(store.key("delivered"), {"gone1": 1})
     assert store.requeue("gone1", "inbox", "redelivered") is None
+    assert store.redis.zrange(store.key("delivered"), 0, -1) == []
+    assert capsys.readouterr().err.splitlines() == [
+        f"agentihooks inbox: {store.key('delivered')} lists message gone1 whose record is gone; dropped it"
+    ]
+
+
+def test_a_shown_confirm_drops_and_logs_a_delivered_id_whose_record_is_gone(redis, capsys):
+    import json
+
+    store = InboxStore(redis, session_id="s1")
+    store.redis.zadd(store.key("delivered"), {"gone1": 1})
+    store.redis.rpush(store.key("history", "gone1"), json.dumps({"state": "delivered", "by": "bob", "at": 1}))
+    assert store.confirm_shown("bob", 10) == []
     assert store.redis.zrange(store.key("delivered"), 0, -1) == []
     assert capsys.readouterr().err.splitlines() == [
         f"agentihooks inbox: {store.key('delivered')} lists message gone1 whose record is gone; dropped it"
