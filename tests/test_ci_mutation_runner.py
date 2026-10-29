@@ -103,8 +103,11 @@ def test_process_fails_closed_when_shared_memory_runs_low(tmp_path, monkeypatch)
 
     monkeypatch.setattr(runner.shutil, "disk_usage", usage)
     log = tmp_path / "process.log"
+    (memory / "browser").mkdir()
+    (memory / "browser" / "segment").write_bytes(b"x" * 5000)
     assert run_process([sys.executable, "-c", "import time; time.sleep(0.5)"], tmp_path, 10, log) == 1
     assert "fell below" in log.read_text()
+    assert f"5000 {memory / 'browser'}\n" in log.read_text()
 
 
 def _two_groups(tmp_path):

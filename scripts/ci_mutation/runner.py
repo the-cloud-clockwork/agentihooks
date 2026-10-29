@@ -25,6 +25,23 @@ SHARED_MEMORY = Path("/dev/shm")
 MEMORY_FLOOR = 8 << 20
 
 
+def memory_usage(root: Path, depth: int = 3, top: int = 12) -> str:
+    sizes: dict[Path, int] = {}
+    for folder, _, files in os.walk(root):
+        for name in files:
+            path = Path(folder, name)
+            try:
+                size = path.lstat().st_size
+            except OSError:
+                continue
+            parts = path.relative_to(root).parts
+            for count in range(1, min(depth, len(parts)) + 1):
+                key = root.joinpath(*parts[:count])
+                sizes[key] = sizes.get(key, 0) + size
+    largest = sorted(sizes.items(), key=lambda item: -item[1])[:top]
+    return "\n".join(f"{size} {path}" for path, size in largest)
+
+
 @contextmanager
 def memory_temp():
     # SQLite fsyncs on every commit and schema step, which dominates ledger test time on runner disks.
@@ -36,7 +53,8 @@ def memory_temp():
 
     def watch():
         while not done.wait(0.1):
-            if shutil.disk_usage(folder).free < MEMORY_FLOOR:
+            if not low.is_set() and shutil.disk_usage(folder).free < MEMORY_FLOOR:
+                low.usage = memory_usage(SHARED_MEMORY)
                 low.set()
 
     watcher = threading.Thread(target=watch, daemon=True)
@@ -66,7 +84,7 @@ def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int
             process.wait()
             return None
         if temp and temp[1].is_set():
-            stream.write(f"temporary folder {temp[0]} fell below {MEMORY_FLOOR} free bytes\n")
+            stream.write(f"temporary folder {temp[0]} fell below {MEMORY_FLOOR} free bytes\n{temp[1].usage}\n")
             return status or 1
         return status
 
