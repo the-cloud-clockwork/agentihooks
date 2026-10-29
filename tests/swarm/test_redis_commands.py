@@ -635,9 +635,140 @@ def test_the_map_lists_each_consumer_role_commands_senders_and_keys(monkeypatch,
                     "ZADD": ["scripts.store:Store.drain"],
                 },
                 "keys": redis_commands.scheduler_keys("distributed"),
+                "stores": {},
             }
         },
     }
+
+
+STORE_COMMANDS = ["HGET", "HSET", "INCRBY", "LRANGE", "LTRIM", "RPUSH", "WATCH"]
+
+
+def test_a_pipeline_watch_is_published_as_watch(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/__init__.py").write_text("")
+    (tmp_path / "scripts/guard.py").write_text(
+        "def hold(redis: 'Redis'):\n    with redis.pipeline() as pipe:\n        pipe.watch('k')\n"
+    )
+    program = code_reach.Program(code_reach.parse(tmp_path))
+    assert program.commands(program.reach(("scripts.guard:hold",))) == {"WATCH": {"scripts.guard:hold"}}
+
+
+@pytest.mark.parametrize("consumer", ["controller", "tick", "hub", "ledger server"])
+def test_the_hive_credentials_store_keys_and_commands_are_published_for_each_service(published, consumer):
+    from scripts.hive import auth
+
+    store = published[consumer]["stores"]["hive credentials"]
+    base = f"{auth.PREFIX}:state:credentials"
+    assert store["keys"] == [f"{base}:current", f"{base}:revision", f"{base}:history:probe"]
+    assert sorted(store["commands"]) == STORE_COMMANDS
+    assert "scripts.events.redis_state:RedisStateStore._write" in store["commands"]["HSET"]
+
+
+def test_the_hive_registry_store_keys_are_published_where_hive_records_are_opened(published):
+    base = f"{ROOT}:swarm:state:hive-probe"
+    for consumer in ("controller", "tick", "hub", "ledger server", "hooks"):
+        store = published[consumer]["stores"]["hive registry"]
+        assert store["keys"] == [f"{base}:current", f"{base}:revision", f"{base}:history:probe"]
+        assert sorted(store["commands"]) == STORE_COMMANDS
+
+
+def test_worker_role_consumers_publish_no_hive_credentials_store(published):
+    assert "hive credentials" not in published["hooks"]["stores"]
+    assert published["worker"]["stores"] == {}
+
+
+def test_a_moved_credentials_store_moves_its_published_keys(monkeypatch):
+    from scripts.hive import auth
+
+    monkeypatch.setattr(auth, "PREFIX", "moved-hive")
+    keys = redis_commands.store_keys(redis_commands.STORES["hive credentials"])
+    assert keys == [
+        "moved-hive:state:credentials:current",
+        "moved-hive:state:credentials:revision",
+        "moved-hive:state:credentials:history:probe",
+    ]
+
+
+def test_the_hive_registry_store_keys_name_the_probe_hive():
+    base = f"{ROOT}:swarm:state:hive-probe"
+    keys = redis_commands.store_keys(redis_commands.STORES["hive registry"])
+    assert keys == [f"{base}:current", f"{base}:revision", f"{base}:history:probe"]
+
+
+def test_the_hive_stores_are_opened_where_auth_and_the_registry_open_them():
+    credentials, registry = redis_commands.STORES["hive credentials"], redis_commands.STORES["hive registry"]
+    assert (credentials.opener, credentials.skipped) == ("scripts.hive.auth:_store", ("hooks",))
+    assert (registry.opener, registry.skipped) == ("scripts.hive.hive_state:records", ())
+
+
+def test_store_keys_open_each_store_as_redis_backed():
+    from types import SimpleNamespace
+
+    from scripts.hive import hive_state
+
+    store = redis_commands.Store(
+        "x", lambda: SimpleNamespace(_current=hive_state.on_redis(), _revision="r", _history="h:")
+    )
+    assert redis_commands.store_keys(store)[0] is True
+
+
+STATE_FILES = {
+    "scripts/events/__init__.py": "",
+    "scripts/events/bus.py": "class StateStore:\n    def get(self, key): ...\n\n    def watch(self, key): ...\n",
+    "scripts/events/redis_state.py": """
+class RedisStateStore:
+    def __init__(self, redis: "Redis"):
+        self.redis = redis
+
+    def get(self, key):
+        return self.redis.hget("current", key)
+
+    def watch(self, key):
+        with self.redis.pipeline() as pipe:
+            pipe.watch("current")
+            pipe.multi()
+            pipe.rpush("history", key)
+            pipe.execute()
+
+    def get_many(self, keys):
+        return self.redis.hmget("current", keys)
+""",
+}
+
+
+def test_a_store_publishes_its_keys_and_protocol_commands_where_its_opener_is_reached(monkeypatch, tree):
+    from types import SimpleNamespace
+
+    (tree / "scripts/events").mkdir()
+    for name, text in STATE_FILES.items():
+        (tree / name).write_text(text)
+    opened = SimpleNamespace(_current="s:current", _revision="s:revision", _history="s:history:")
+    monkeypatch.setattr(
+        redis_commands,
+        "CONSUMERS",
+        {
+            "app": redis_commands.Consumer("worker", ("scripts.app:later",)),
+            "skipper": redis_commands.Consumer("worker", ("scripts.app:later",)),
+        },
+    )
+    monkeypatch.setattr(
+        redis_commands,
+        "STORES",
+        {
+            "kept": redis_commands.Store("scripts.app:later", lambda: opened, ("skipper",)),
+            "unopened": redis_commands.Store("scripts.pkg.deep.leaf:main", lambda: opened),
+        },
+    )
+    consumers = redis_commands.consumer_map("distributed", tree)["consumers"]
+    sender = "scripts.events.redis_state:RedisStateStore."
+    assert consumers["app"]["stores"] == {
+        "kept": {
+            "keys": ["s:current", "s:revision", "s:history:probe"],
+            "commands": {"HGET": [f"{sender}get"], "RPUSH": [f"{sender}watch"], "WATCH": [f"{sender}watch"]},
+        }
+    }
+    assert consumers["skipper"]["stores"] == {}
 
 
 def test_every_consumer_but_the_worker_reaches_redis(published):
