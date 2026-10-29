@@ -30,18 +30,28 @@ def _save(store, slug, agent, record):
     store.redis.set(_key(store, slug, agent), json.dumps(record))
 
 
+def _held(inbox, item_id):
+    for world in inbox.worlds():
+        if world.redis.exists(world.key("item", item_id)):
+            return world, world.get(item_id)
+    return None, inbox.find(item_id, "automated-gc")
+
+
 def _answer(inbox, agent, record, now_ms):
-    request = inbox.find(record["request"], "automated-gc")
-    if not request or not request.reason.startswith(REPLY_PREFIX):
+    _, request = _held(inbox, record["request"])
+    if request is None:
+        record["request"] = ""
         return False
-    answer = inbox.find(request.reason.removeprefix(REPLY_PREFIX), "automated-gc")
-    if not answer or answer.ref != request.id or not inbox.acts_for(answer.sender, agent.name):
+    if not request.reason.startswith(REPLY_PREFIX):
+        return False
+    world, answer = _held(inbox, request.reason.removeprefix(REPLY_PREFIX))
+    if answer is None or answer.ref != request.id or not inbox.acts_for(answer.sender, agent.name):
         return False
     record["answers"].append({"id": answer.id, "text": answer.text, "at": now_ms})
     record["answers"] = record["answers"][-3:]
     record["idle_answers"] = record["idle_answers"] + 1 if answer.text == IDLE_ANSWER else 0
     record["request"] = ""
-    inbox.close(answer.id, "swarm", "done", "activity answer recorded")
+    world.close(answer.id, "swarm", "done", "activity answer recorded")
     return True
 
 
