@@ -300,6 +300,14 @@ def test_handoff_consumed_after_key_scan_is_not_reported_as_unattributed(redis, 
     ]
 
 
+def test_present_handoff_without_seat_or_sender_remains_unattributed(redis, tmp_path):
+    store, box = RedisStore(redis), InboxStore(redis)
+    store.put_handoff(SLUG, "unattributed", "# unattributed")
+    [record] = read.handoffs(store, box, tmp_path, SLUG, items=[])
+    assert (record["seat"], record["from"], record["document"]) == ("", "", "# unattributed")
+    assert [finding.id for finding in handoffs.findings([record])] == ["unattributed-handoff/unattributed"]
+
+
 def test_a_waiting_handoff_is_authored_by_its_envelope_agent_not_the_next_seat_holder(redis, tmp_path):
     store, box = RedisStore(redis), InboxStore(redis)
     seat = f"eng-2@{SLUG}"
