@@ -63,6 +63,34 @@ def test_the_job_runs_every_refresh_with_its_own_arguments(store, called):
     assert not store.redis.exists(refresh_job.lock_key(store, "sw"))
 
 
+def test_doctor_detection_runs_in_the_background_job(store, called, monkeypatch):
+    import json
+
+    from scripts.doctor import cli as doctor
+    from scripts.doctor import detect
+    from scripts.swarm import timing
+
+    store.update("sw", template="doctor")
+    seen, events = [], []
+
+    def timer(*args):
+        seen.append(args)
+        assert detect.collect({"health": lambda: []}) == ([], [])
+        return ["detected"]
+
+    monkeypatch.setattr(doctor, "timer", timer)
+    monkeypatch.setattr(timing, "emit", lambda stream, line: events.append(json.loads(line)))
+    assert refresh_job.run(store, "sw", Ledger(), 5) == ["detected", "applied", "updated", "filed", "fired"]
+    assert seen == [(store, "sw", 5, True)]
+    assert len(called) == 6
+    assert [(row["slug"], row["phase"]) for row in events if row["step"] == "doctor.health"] == [
+        ("sw", "started"),
+        ("sw", "finished"),
+    ]
+    assert events[-1]["outcome"] == "success"
+    assert timing.SWARM.get() is None
+
+
 def test_a_failing_refresh_ends_the_job_and_frees_its_lock(store, called, monkeypatch):
     def broken(*args):
         raise RuntimeError("gh is gone")

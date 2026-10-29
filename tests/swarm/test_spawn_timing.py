@@ -92,3 +92,53 @@ def test_the_spawn_order_follows_the_dispatched_key_over_the_ledger_rank(store, 
         "sw", store.config("sw"), store, [], ledger.rows, ledger.state("sw"), FakeRuntime()
     )
     assert [task["id"] for _, task in order] == ["t2", "t1"]
+
+
+def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
+    from scripts.hub.reconciler import legacy_agents
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    capsys.readouterr()
+    with timing.tick("sw"):
+        tick("sw", store, ledger, runtime, now_ms=2_000)
+    rows = finished(capsys)
+    reap = next(row for row in rows if row["step"] == timing.named(tick_module._reap))
+    inside = [row for row in rows if reap["started"] <= row["started"] and row is not reap]
+    inside = [row for row in inside if row["started"] + row["wall_s"] <= reap["started"] + reap["wall_s"]]
+    pass_wide = [timing.named(tick_module._live_names), timing.named(legacy_agents)]
+    per_agent = [
+        timing.named(tick_module._acknowledging),
+        timing.named(tick_module._remote_gone_reason),
+        timing.named(tick_module._restore_owner),
+        timing.named(tick_module._observe),
+        timing.named(tick_module._watch_agent),
+    ]
+    agent = "engineer@a1b2c3-0001"
+    named = {row["step"] for row in inside if row["step"] in pass_wide + per_agent and row.get("agent") == agent}
+    assert sorted(named) == sorted(per_agent)
+    assert [sorted(row) for row in inside if row["step"] in pass_wide] == [sorted(reap)] * 2
+    assert "agent" not in reap
+
+
+def test_a_reap_pass_goes_on_to_the_next_agent_after_a_skipped_one(store, capsys, monkeypatch):
+    from dataclasses import replace
+
+    from scripts.hub import reconciler
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    live = store.agents("sw")
+    skipped = replace(live[0], name="engineer@a1b2c3-0009", state="awaiting-decision")
+    rows = {t["id"]: t for t in ledger.rows.values()}
+
+    def watched(agents):
+        monkeypatch.setattr(reconciler, "legacy_agents", lambda *_: agents)
+        capsys.readouterr()
+        with timing.tick("sw"):
+            tick_module._reap("sw", store, ledger, runtime, rows, 2_000)
+        return [row.get("agent") for row in finished(capsys) if row["step"] == timing.named(tick_module._watch_agent)]
+
+    alone = watched(live)
+    assert alone != []
+    assert watched([skipped, *live]) == alone
