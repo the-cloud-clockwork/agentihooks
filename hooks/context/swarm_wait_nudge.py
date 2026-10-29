@@ -56,28 +56,29 @@ def nudge(payload: dict, environ: Mapping[str, str] | None = None) -> str:
     )
 
 
-def _github_watch(tokens: list[str]) -> bool:
+def _gh_args(tokens: list[str]) -> list[str]:
     from pathlib import Path
 
     if not tokens or Path(tokens[0]).name != "gh":
-        return False
+        return []
     args = tokens[1:]
     while args and args[0].startswith("-"):
         args = args[2:] if args[0] in ("-R", "--repo", "--hostname") else args[1:]
+    return args
+
+
+def _github_watch(tokens: list[str]) -> bool:
+    args = _gh_args(tokens)
     return args[:2] == ["run", "watch"] or (
         args[:2] == ["pr", "checks"] and any(flag in ("--watch", "--watch=true") for flag in args[2:])
     )
 
 
 def _full_run_view(tokens: list[str]) -> bool:
-    from pathlib import Path
-
-    if not tokens or Path(tokens[0]).name != "gh":
-        return False
-    args = tokens[1:]
-    while args and args[0].startswith("-"):
-        args = args[2:] if args[0] in ("-R", "--repo", "--hostname") else args[1:]
-    return args[:2] == ["run", "view"] and not any(arg.split("=")[0] in NARROW_VIEWS for arg in args[2:])
+    args = _gh_args(tokens)
+    return args[:2] == ["run", "view"] and not any(
+        arg.split("=")[0] in NARROW_VIEWS or arg[:2] in ("-j", "-w") for arg in args[2:]
+    )
 
 
 def check_github_watch(payload: dict) -> None:
@@ -100,6 +101,6 @@ def check_github_watch(payload: dict) -> None:
     if any(_full_run_view(tokens) for tokens in found):
         raise BlockAction(
             "gh run view without --json, --log, --log-failed or --job reads the annotations of every job, "
-            "one REST call per job, about sixty on a Tests run, from the shared GitHub hourly quota. "
+            "one REST call per job, from the shared GitHub hourly quota. "
             "Ask for what you need: gh run view <id> --json status,conclusion,jobs, --log-failed, or --job <job id>."
         )

@@ -295,6 +295,7 @@ def test_empty_monitor_commands_are_allowed(worker, tool_input):
         "gh run view 123",
         "gh run view 123 -R owner/repo --exit-status",
         "gh -R owner/repo run view 123 --verbose",
+        "gh --repo=owner/repo run view 123",
         "cd repo && /usr/bin/gh run view 123 | tail -n 5",
     ],
 )
@@ -316,6 +317,7 @@ def test_a_full_run_view_is_refused_to_every_swarm_agent(worker, monkeypatch, ca
         "gh run view 123 --job 456",
         "gh run view --job=456",
         "gh run view 123 -j 456",
+        "gh run view 123 -j456",
         "gh run view 123 --web",
         "gh run list -L 5",
         "echo gh run view 123",
