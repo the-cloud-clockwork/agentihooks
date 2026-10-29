@@ -255,6 +255,14 @@ def test_a_front_door_joining_a_live_home_passes_the_overlay_check_on_its_own_re
         assert launch_check._overlays(facts, ["brain", "swarm-brain"]) == missed
 
 
+def test_a_rebuilt_login_home_drops_the_earlier_holders_render_records(ah, rendered):
+    _stamp(rendered, ["brain", "swarm-brain"])
+    login.root().mkdir(parents=True)
+    login._write(login.root() / login.RENDERS, {"master@doctor-1": ["brain"]})
+    home = login.build(rendered)
+    assert login.rendered_overlays(home, "master@doctor-1") == ["brain", "swarm-brain"]
+
+
 def _spawn(tmp_path, lane, seat, kind="interactive"):
     seen = []
 

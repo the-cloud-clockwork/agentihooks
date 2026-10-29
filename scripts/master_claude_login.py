@@ -264,6 +264,7 @@ def _rebuild(folder: Path, rendered: Path, linked: tuple[str, ...] = (), config:
             shutil.copyfile(rendered.parent / name, folder / name)
     shutil.rmtree(target, ignore_errors=True)
     staging.rename(target)
+    (folder / RENDERS).unlink(missing_ok=True)
     return target
 
 
