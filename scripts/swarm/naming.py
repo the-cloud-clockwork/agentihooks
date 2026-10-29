@@ -465,3 +465,10 @@ class NameRegistry:
             if row.get("type") == parsed.kind and not row.get("retired_at"):
                 return other
         return ""
+
+
+def registry():
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    return NameRegistry(redis) if redis is not None else None

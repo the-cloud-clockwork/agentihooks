@@ -262,30 +262,26 @@ def recycle():
 
 
 def _proven():
-    from redis.exceptions import RedisError
-
     from scripts.scheduler import service
-    from scripts.scheduler.core import Scheduler
+    from scripts.scheduler.core import open_scheduler
     from scripts.swarm import scheduled_tick
-    from scripts.swarm.store import redis_client
+    from scripts.swarm.store import store_errors
 
     started = (service.holder(_scheduler_env()) or {}).get("started")
     try:
-        return started is not None and scheduled_tick.delivered_at(Scheduler(redis_client())) >= started
-    except RedisError:
+        return started is not None and scheduled_tick.delivered_at(open_scheduler()) >= started
+    except store_errors():
         return False
 
 
 def schedule():
-    from redis.exceptions import RedisError
-
-    from scripts.scheduler.core import Scheduler
+    from scripts.scheduler.core import open_scheduler
     from scripts.swarm import scheduled_tick
-    from scripts.swarm.store import redis_client
+    from scripts.swarm.store import store_errors
 
     try:
-        scheduled_tick.ensure(Scheduler(redis_client()))
-    except RedisError as exc:
+        scheduled_tick.ensure(open_scheduler())
+    except store_errors() as exc:
         print(f"the scheduled swarm tick could not be registered: {type(exc).__name__}: {exc}", file=sys.stderr)
         return False
     supervise()
@@ -293,32 +289,29 @@ def schedule():
 
 
 def unschedule():
-    from redis.exceptions import RedisError
-
-    from scripts.scheduler.core import Scheduler
+    from scripts.scheduler.core import open_scheduler
     from scripts.swarm import scheduled_tick
-    from scripts.swarm.store import redis_client
+    from scripts.swarm.store import store_errors
 
     try:
-        scheduled_tick.cancel(Scheduler(redis_client()))
-    except RedisError as exc:
+        scheduled_tick.cancel(open_scheduler())
+    except store_errors() as exc:
         print(f"the scheduled swarm tick could not be cancelled: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def undelivered():
-    from scripts.scheduler.core import Scheduler
+    from scripts.scheduler.core import open_scheduler
     from scripts.swarm import scheduled_tick
-    from scripts.swarm.store import redis_client
 
-    return scheduled_tick.undelivered(Scheduler(redis_client()), _roots()[1], time.time())
+    return scheduled_tick.undelivered(open_scheduler(), _roots()[1], time.time())
 
 
 def _kept():
-    from redis.exceptions import RedisError
+    from scripts.swarm.store import store_errors
 
     try:
         return undelivered()
-    except RedisError as exc:
+    except store_errors() as exc:
         return f"the swarm tick delivery could not be read: {type(exc).__name__}: {exc}"
 
 
