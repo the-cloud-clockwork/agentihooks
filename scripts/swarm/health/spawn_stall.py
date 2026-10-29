@@ -160,8 +160,8 @@ def deliver(store, slug: str, ledger, at: int) -> None:
         item = inbox.send("swarm", seat_address(slug, "master"), text, ref=f"{REF}{slug}:{state['since']}")
         state.update(message=item.id, sent_at=at)
         save(store, slug, state)
-    item = inbox.get(state["message"])
-    if item.state not in CLOSED and at - state["sent_at"] >= STALL_MS and not state.get("notified"):
+    item = inbox.find(state["message"], REF)
+    if item and item.state not in CLOSED and at - state["sent_at"] >= STALL_MS and not state.get("notified"):
         ledger.notify(slug, text)
         state["notified"] = True
         save(store, slug, state)

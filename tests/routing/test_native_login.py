@@ -67,12 +67,32 @@ def test_a_login_the_provider_revokes_or_rejects_reads_as_rejected(monkeypatch, 
     )
 
 
+def test_a_login_whose_oauth_session_cannot_be_refreshed_reads_as_rejected():
+    stream = "\n".join(
+        json.dumps(event)
+        for event in (
+            {"type": "system", "subtype": "init"},
+            {"type": "assistant", "error": "authentication_failed"},
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": True,
+                "result": "Failed to authenticate: OAuth session expired and could not be refreshed",
+            },
+        )
+    )
+    run = Mock(return_value=SimpleNamespace(returncode=1, stdout="Login expired\n" + stream))
+    assert REJECTED({}, "master", run) is True
+
+
 @pytest.mark.parametrize(
     "probe",
     [
         OSError("missing"),
         subprocess.TimeoutExpired("claude", 60),
         SimpleNamespace(returncode=1, stdout=json.dumps({"api_error_status": 529})),
+        SimpleNamespace(returncode=1, stdout=json.dumps({"type": "assistant", "error": "rate_limit"})),
+        SimpleNamespace(returncode=1, stdout='["authentication_failed"]'),
         SimpleNamespace(returncode=0, stdout="OK"),
     ],
 )

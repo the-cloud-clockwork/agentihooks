@@ -776,7 +776,7 @@ def _state(store, args, state):
             "run agentihooks swarm tick yourself",
             file=sys.stderr,
         )
-    for action in run_tick(store, args.slug):
+    for action in getattr(args, "tick", run_tick)(store, args.slug):
         print(action)
     print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state}))
 

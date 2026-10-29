@@ -126,6 +126,16 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
     return result, log.read_text() if log.exists() else "", home, tmp_path / "repos/checkout"
 
 
+def test_a_container_restart_clears_the_previous_readiness_marker(tmp_path, monkeypatch):
+    marker = tmp_path / "ready"
+    marker.touch()
+    monkeypatch.setenv("HIVE_READY_FILE", str(marker))
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "hive run" in commands
+    assert not marker.exists()
+
+
 RUN = [
     "bundle unlink",
     "init",

@@ -96,7 +96,7 @@ def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], repo
         child, found, number = (_front if front else prepare)(environ, Path.cwd())
     except login.LoginRefused as exc:
         if front and str(exc) == native_login.EXPIRED:
-            print(f"[agenti] claude ai login refused: {exc}", file=sys.stderr, flush=True)
+            print(f"[agenti] claude ai login refused: {exc}", file=sys.stderr)
             return login.launch_token(binary, args, environ, report)
         raise RoutingError(str(exc)) from exc
     _write_route_report(report, status="routed", account=found, placement="forced")
