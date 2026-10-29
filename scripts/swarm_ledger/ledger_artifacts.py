@@ -279,7 +279,8 @@ def in_use(doc):
 def sweep(slug, doc, ctx):
     from scripts.swarm_ledger.storage_migration.hosted import media_mutation
 
-    stale = media.sweep(slug, in_use(doc), ctx.at)
+    used = in_use(doc)
+    stale = media.sweep(slug, used, ctx.at)
     with media_mutation(media.core.LEDGER_DIR, slug) as writable:
         if not writable:
             return
@@ -288,8 +289,8 @@ def sweep(slug, doc, ctx):
         if expired:
             doc[TRASH] = [row for row in trash if row not in expired]
             ctx.dirty = True
+            used = in_use(doc)
         dropped = {row["file"]["id"] for row in expired} | set(ctx.dropped)
-        used = in_use(doc)
         for file_id in dropped - used:
             (media.folder(slug) / file_id).unlink(missing_ok=True)
         ctx.unstored = (dropped - used) | stale

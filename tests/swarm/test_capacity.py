@@ -149,6 +149,16 @@ def test_a_stale_claude_reading_gets_no_seat(monkeypatch):
     assert seen == [capacity.Account("claude", "a", "UNKNOWN", 0, 90, 100, None)]
 
 
+def test_a_revoked_claude_account_is_closed_with_no_seat(monkeypatch):
+    result = balancer.revoked_result("a", 100)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, result)])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {"a": 4})
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
+    (row,) = capacity.accounts({"AH_CC_TOKEN_a": "fake"}, 100)
+    assert (row.state, row.cap, row.sessions) == ("CLOSED", 0, 4)
+    assert capacity.free_seats(row) == 0
+
+
 def test_a_fresh_codex_reading_with_only_the_week_gets_the_top_band(monkeypatch):
     from scripts.codex_quota import CodexQuota
 
