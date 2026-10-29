@@ -43,7 +43,14 @@ def inbox_items(inbox, slug):
     listed = _batched(redis, keys, lambda pipe, key: pipe.zrange(key, 0, -1))
     ids = [item_id for group in listed for item_id in group]
     raws = dict(zip(ids, _batched(redis, ids, lambda pipe, item_id: pipe.hgetall(inbox.key("item", item_id)))))
-    grouped = [sorted((_item(raws[item_id], item_id) for item_id in group), key=_order) for group in listed]
+    prefix = inbox.key("address", "")
+    for key, group in zip(keys, listed):
+        gone = [item_id for item_id in group if not raws[item_id]]
+        if gone:
+            inbox.drop_gone(key[len(prefix) :], gone)
+    grouped = [
+        sorted((_item(raws[item_id], item_id) for item_id in group if raws[item_id]), key=_order) for group in listed
+    ]
     named = sorted({name for group in grouped for item in group for name in (item.address, item.sender)})
     slugs = NameRegistry(redis).slugs_of(named)
     names = SimpleNamespace(slug_of=lambda name: slugs[name])

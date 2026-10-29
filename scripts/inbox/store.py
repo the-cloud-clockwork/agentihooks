@@ -311,21 +311,34 @@ class InboxStore:
         dropped from every index of that address."""
         if not owners:
             return []
-        with self.redis.pipeline(transaction=False) as pipe:
-            for item_id in owners:
-                pipe.hgetall(self.key("item", item_id))
-            items, gone = _present(list(owners), pipe.execute())
-        if gone:
-            dangling = {}
-            for item_id in gone:
-                dangling.setdefault(owners[item_id], []).append(item_id)
-            with self.redis.pipeline(transaction=False) as pipe:
-                for address, ids in dangling.items():
-                    self._stage_drop(pipe, address, ids)
-                pipe.execute()
-            for address, ids in dangling.items():
-                self._report_gone(address, ids)
+        items, gone = _present(list(owners), self._rows(owners))
+        dangling = {}
+        for item_id in gone:
+            dangling.setdefault(owners[item_id], []).append(item_id)
+        for address, ids in dangling.items():
+            self.drop_gone(address, ids)
         return items
+
+    def listed_in(self, index, item_ids):
+        """The items an index outside the address indexes lists; an id whose record is gone is dropped from it."""
+        items, gone = _present(item_ids, self._rows(item_ids))
+        if gone:
+            self.redis.zrem(index, *gone)
+        _report_gone(index, gone)
+        return items
+
+    def drop_gone(self, address, gone):
+        """Drop ids whose record is gone from every index of address."""
+        with self.redis.pipeline(transaction=False) as pipe:
+            self._stage_drop(pipe, address, gone)
+            pipe.execute()
+        self._report_gone(address, gone)
+
+    def _rows(self, item_ids):
+        with self.redis.pipeline(transaction=False) as pipe:
+            for item_id in item_ids:
+                pipe.hgetall(self.key("item", item_id))
+            return pipe.execute()
 
     def _stage_drop(self, pipe, address, gone):
         if not gone:
@@ -334,12 +347,7 @@ class InboxStore:
             pipe.zrem(self.key(kind, address), *gone)
 
     def _report_gone(self, address, gone):
-        for item_id in gone:
-            print(
-                f"agentihooks inbox: {self.key('address', address)} lists message {item_id} whose record is gone; "
-                "dropped it",
-                file=sys.stderr,
-            )
+        _report_gone(self.key("address", address), gone)
 
     def mailbox(self, me):
         return self._with_seat(me, self.inbox)
@@ -872,6 +880,8 @@ class InboxStore:
             pipe.zrem(self.key("delivered"), item_id)
             if not raw or raw["state"] != "delivered":
                 pipe.execute()
+                if not raw:
+                    _report_gone(self.key("delivered"), [item_id])
                 return None
             item = _item(raw, item_id)
             moved = replace(item, state="pending", updated_at=now_ms(), reason=reason)
@@ -1073,6 +1083,11 @@ def _fields(item):
 
 def _order(item: Item) -> tuple[int, int, str]:
     return item.created_at, item.sequence, item.id
+
+
+def _report_gone(index, gone):
+    for item_id in gone:
+        print(f"agentihooks inbox: {index} lists message {item_id} whose record is gone; dropped it", file=sys.stderr)
 
 
 def _present(item_ids, rows):
