@@ -398,6 +398,20 @@ def test_master_placement_skips_a_private_login_rejected_by_the_probe(setup, mon
         assert (selected.hive, selected.account.name, selected.route_kind) == ("fallback", "account", "subscription")
 
 
+def test_master_waits_when_its_only_private_login_probe_is_revoked(setup, monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+    from scripts.hive import placement
+
+    task = {**master(setup), "seat": "master@fixture"}
+    master_login_hive(setup)
+    write_hive(setup, excluded=[], ui="yes", master_login={"claude": "work-login"})
+    result = balancer.revoked_result("work_login", 100)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **_: [(100, result)])
+    assert setup.launcher.select(setup.config, "master", task) == placement.Wait(
+        "no hive for master advertises a claude slot"
+    )
+
+
 def test_a_master_login_without_a_hive_slot_holds_no_account_cap(setup):
     from scripts.swarm.capacity import Account
 

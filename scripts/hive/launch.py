@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from scripts import claude_quota_balancer as balancer
 from scripts.hive import admission, headroom, orders, placement, placement_waits, registry
 from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
@@ -107,6 +108,17 @@ def loaded_hives(store: RedisStore) -> list[dict]:
 def _key(account: str) -> str:
     """A hive names an account by its AH_CC_TOKEN_ slug, a hosted controller by its Secret key; only _ and - differ."""
     return account.replace("_", "-")
+
+
+def _master_logins(hives: list[dict], front: bool) -> list[dict]:
+    if not front:
+        return hives
+    rejected = {
+        _key(result.account)
+        for _, result in balancer.cached_observations()
+        if result.provider_status in ("revoked", "rejected")
+    }
+    return [hive for hive in hives if _key(hive["master_login"].get("claude", "")) not in rejected]
 
 
 def _open_rows(rows: list, harness: str = "claude") -> list:
@@ -333,7 +345,8 @@ class HiveLaunch:
     def _master_selection(self, config, decision, hives, now, rows, front):
         accounts = {_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
         available = [
-            {**hive, "slots": [slot for slot in hive["slots"] if _key(slot["account"]) in accounts]} for hive in hives
+            {**hive, "slots": [slot for slot in hive["slots"] if _key(slot["account"]) in accounts]}
+            for hive in _master_logins(hives, front)
         ]
         selected = placement.place_master("claude", "", config.repo, available, now, front)
         if isinstance(selected, placement.Wait):
