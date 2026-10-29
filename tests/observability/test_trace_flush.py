@@ -1233,10 +1233,17 @@ def test_default_supervisor_scheduler_failure_names_its_session(home, tmp_path, 
     clock.hooks.append((1, lambda: owner.update(alive=False)))
     monkeypatch.setattr(trace_flush, "timer_wait", Mock(side_effect=StateConflict("changed")))
     monkeypatch.setattr(trace_flush.time, "sleep", clock.sleep)
-    assert trace_flush.supervise(
-        "export-session", trace_flush.Budget(15, 5, 3), lambda *args: True, clock, clock.sleep,
-        lambda record: owner["alive"],
-    ) == "owner exited"
+    assert (
+        trace_flush.supervise(
+            "export-session",
+            trace_flush.Budget(15, 5, 3),
+            lambda *args: True,
+            clock,
+            clock.sleep,
+            lambda record: owner["alive"],
+        )
+        == "owner exited"
+    )
     assert capsys.readouterr().err == "trace_flush export-session: scheduler fallback: StateConflict: changed\n"
 
 
