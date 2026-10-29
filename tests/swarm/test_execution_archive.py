@@ -109,7 +109,7 @@ def test_a_legacy_agent_write_times_its_managed_check_and_commit(store, capsys):
     steps = timed_steps(capsys, lambda: store.put_agent("fixture", legacy))
     with store.redis.pipeline() as pipe:
         execute = timing.named(pipe.execute)
-    parts = [timing.named(ExecutionRegistry._put), timing.named(ExecutionRegistry.managed), execute]
+    parts = [timing.named(ExecutionRegistry._put), execute]
     assert [part for part in parts if part not in steps] == []
 
 
@@ -123,8 +123,6 @@ def test_an_identified_agent_write_times_its_update_reads_and_commit(store, caps
     parts = [
         timing.named(ExecutionRegistry._put),
         timing.named(ExecutionRegistry._update),
-        timing.named(ExecutionRegistry.occupants),
-        timing.named(ExecutionRegistry.check_uid),
         execute,
     ]
     assert [part for part in parts if part not in steps] == []

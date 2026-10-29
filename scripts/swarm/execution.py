@@ -228,7 +228,7 @@ class ExecutionRegistry:
             with self.redis.pipeline() as pipe:
                 try:
                     pipe.watch(self.store.key(slug, "executions"), self.store.key(slug, "agents"))
-                    if _has_identity(agent) or timing.timed(self.managed, slug, agent.name, pipe):
+                    if _has_identity(agent) or self.managed(slug, agent.name, pipe):
                         pipe.unwatch()
                         self.update(slug, agent)
                         return
@@ -373,7 +373,7 @@ class ExecutionRegistry:
             with self.redis.pipeline() as pipe:
                 try:
                     pipe.watch(key)
-                    current = timing.timed(self.occupants, slug, pipe).get(agent.seat)
+                    current = self.occupants(slug, pipe).get(agent.seat)
                     if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                         self.conflict(slug, "stale or changed execution identity")
                     if _read_before_ack(agent.runtime_target, current.runtime_target):
@@ -381,7 +381,7 @@ class ExecutionRegistry:
                     _check_binding(
                         current.runtime_target, agent.runtime_target, lambda message: self.conflict(slug, message)
                     )
-                    timing.timed(self.check_uid, slug, agent, pipe)
+                    self.check_uid(slug, agent, pipe)
                     if agent == current:
                         pipe.unwatch()
                         return
