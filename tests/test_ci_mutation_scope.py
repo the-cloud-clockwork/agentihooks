@@ -292,6 +292,25 @@ def test_a_line_left_as_the_given_base_had_it_is_never_graded(tmp_path):
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}}
 
 
+@pytest.mark.parametrize(
+    ("head", "expected"),
+    [
+        ("def f(a):\n    return a + 1\n", {}),
+        ("def f(a: int) -> int:\n    return a + 1  # one\n", {}),
+        ('def f(a):\n    """Add one."""\n    return a + 1  # one\n', {}),
+        ("def f(a):\n    return a + 2\n", {"hooks/own.py": {2}}),
+        ("def f(a: int) -> int:\n    return a - 1  # one\n", {"hooks/own.py": {1, 2}}),
+    ],
+)
+def test_a_change_leaving_the_bare_syntax_tree_unchanged_selects_no_line(tmp_path, head, expected):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    base = commit("own.py", "def f(a):\n    return a + 1  # one\n")
+    commit("own.py", head)
+    assert discover_changes(tmp_path, base, "HEAD") == expected
+
+
 def test_a_branch_that_merged_dev_and_edited_a_test_grades_only_its_own_lines_from_current_dev(tmp_path):
     import yaml
 
