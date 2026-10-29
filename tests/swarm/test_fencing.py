@@ -199,3 +199,21 @@ def test_a_refusal_count_that_keeps_conflicting_is_refused(store, monkeypatch):
     monkeypatch.setattr(state, "for_store", lambda *args: counters)
     with pytest.raises(SwarmError, match="kept changing"):
         fencing.bump(store, "sw", fencing.STALE_REJECTIONS)
+
+
+def test_a_stale_lease_holder_cannot_write_executions(store, monkeypatch):
+    from scripts.swarm.execution import ExecutionRegistry
+
+    at = [1000]
+    monkeypatch.setattr(lease, "now_ms", lambda saved: at[0])
+    first = lease.acquire(store, "sw", "home")
+    at[0] = first.expires_at
+    second = lease.acquire(store, "sw", "other")
+    registry = ExecutionRegistry(store)
+    with lease.fencing(first.epoch):
+        with pytest.raises(SwarmError, match="the controller lease is stale"):
+            registry.archive("sw")
+        with pytest.raises(SwarmError, match="the controller lease is stale"):
+            registry.set_pane("sw", "missing", "%1")
+    with lease.fencing(second.epoch):
+        assert registry.archive("sw") == 0

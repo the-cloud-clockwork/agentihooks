@@ -59,6 +59,11 @@ class ExecutionRegistry:
         fencing.bump(self.store, slug, fencing.IDENTITY_CONFLICTS)
         raise SwarmError(message)
 
+    def _fenced(self, slug: str, change):
+        from scripts.swarm import lease
+
+        return lease.fenced(self.store, slug, lease.EPOCH.get(), change)
+
     def _doc(self, slug: str, doc: dict | None) -> dict:
         return doc if doc is not None else fencing.read(self.store, slug)
 
@@ -93,7 +98,7 @@ class ExecutionRegistry:
                 doc["archive"][key] = doc["executions"].pop(key)
             return len(old)
 
-        return fencing.write(self.store, slug, move)
+        return self._fenced(slug, move)
 
     def hive(self, slug: str, name: str) -> str:
         if name not in self.store.listed(slug):
@@ -208,7 +213,7 @@ class ExecutionRegistry:
                 doc["executions"][agent.execution_id] = asdict(agent)
             return current
 
-        current = fencing.write(self.store, slug, change)
+        current = self._fenced(slug, change)
         if agent != current:
             self.store.project_agent(slug, agent, current)
 
@@ -229,7 +234,7 @@ class ExecutionRegistry:
             doc["executions"][execution_id] = asdict(updated)
             return (updated, current) if execution_id in heads and current.name in listed else None
 
-        shown = fencing.write(self.store, slug, change)
+        shown = self._fenced(slug, change)
         if shown is not None:
             self.store.project_agent(slug, *shown, listed_only=True)
 
@@ -259,7 +264,7 @@ class ExecutionRegistry:
             if doc["executions"].get(agent.execution_id) == ended:
                 doc["executions"][agent.execution_id] = asdict(agent)
 
-        if not fencing.write(self.store, slug, end):
+        if not self._fenced(slug, end):
             return False
         if agent.name not in self.store.listed(slug):
             return True
