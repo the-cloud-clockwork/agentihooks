@@ -211,3 +211,15 @@ def test_a_token_request_while_every_hive_permit_is_held_answers_busy(live, hive
         status, reply = mint(live, grant, WORKER)
     assert status == 503
     assert reply == {"error": {"code": "busy", "message": "The ledger is busy with other hive credential requests"}}
+
+
+def test_a_page_route_with_a_hive_token_while_every_hive_permit_is_held_answers_busy(live, monkeypatch):
+    from scripts.swarm_ledger import hive_work
+    from tests.swarm_ledger.test_hive_work import every_permit_held
+
+    monkeypatch.setattr(hive_work, "WAIT_S", 0.05)
+    with every_permit_held():
+        status, body, kind = send(
+            live, "GET", f"/api/swarm/{SLUG}", **{"X-Ledger-Token": "hive.m.t", "X-Ledger-Agent": WORKER}
+        )
+    assert (status, body, kind) == (503, b"The ledger is busy with other hive credential requests", "text/plain")
