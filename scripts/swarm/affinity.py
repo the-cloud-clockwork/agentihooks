@@ -70,7 +70,7 @@ def failed(store, slug, reason):
 def handed_off(store, slug):
     """Close the order once its master left, so the successor never receives a stale handoff order."""
     found, inbox = pending(store, slug), InboxStore(store.redis)
-    item = inbox.get(found["item"]) if found else None
+    item = inbox.find(found["item"], "master-affinity") if found else None
     if item and item.state not in CLOSED:
         inbox.close(item.id, item.address, "done", "the master handed off its seat")
 

@@ -469,3 +469,35 @@ def test_conversations_copied_into_an_older_route_home_move_to_the_default_folde
     assert not (shared / "outside.jsonl").exists()
     assert (shared / "kept-link.jsonl").read_text() == "operator\n"
     assert (operator / ".claude" / "sessions" / "1.json").read_text() == "{}"
+
+
+def _front_door(rendered):
+    return _environ(rendered, AGENTIHOOKS_PROFILE="master")
+
+
+def test_an_expired_front_door_login_falls_back_to_a_quota_token_route(rendered, monkeypatch, executed, capsys):
+    def expired(environ, cwd):
+        raise login.LoginRefused(native_login.EXPIRED)
+
+    tokens = []
+    monkeypatch.setattr(claude_ai, "_front", expired)
+    monkeypatch.setattr(login, "launch_token", lambda *args: tokens.append(args))
+    environ = _front_door(rendered)
+    args = ["--name", "master 1 · rig", "--remote-control", "master 1 · rig"]
+    claude_ai.launch_claude("/opt/claude", args, environ, "/run/route")
+    assert tokens == [("/opt/claude", args, environ, "/run/route")]
+    assert executed == []
+    assert capsys.readouterr() == ("", f"[agenti] claude ai login refused: {native_login.EXPIRED}\n")
+
+
+def test_a_refused_login_outside_the_front_door_still_fails_the_route(rendered, monkeypatch):
+    from scripts.claude_quota_balancer import RoutingError
+
+    def expired(environ, cwd):
+        raise login.LoginRefused(native_login.EXPIRED)
+
+    monkeypatch.setattr(claude_ai, "prepare", expired)
+    monkeypatch.setattr(login, "launch_token", lambda *args: pytest.fail("token fallback outside the front door"))
+    with pytest.raises(RoutingError) as raised:
+        claude_ai.launch_claude("/opt/claude", ["--name", "master 2 · rig"], _front_door(rendered), "")
+    assert str(raised.value) == native_login.EXPIRED

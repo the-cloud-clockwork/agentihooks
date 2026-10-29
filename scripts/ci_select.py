@@ -93,7 +93,7 @@ def selected_tests(root: Path, changed: list[str], tree_reshaped: bool, manifest
     needles = set()
     for path in changed:
         needles.add(path)
-        if Path(path).suffix == ".py" and Path(path).parts[0] in (*SOURCES, TESTS):
+        if Path(path).suffix == ".js" or Path(path).suffix == ".py" and Path(path).parts[0] in (*SOURCES, TESTS):
             tests.update(select_tests(root, Path(path)))
         else:
             needles.add(Path(path).name)

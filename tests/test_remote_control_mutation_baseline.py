@@ -1,8 +1,11 @@
 import faulthandler
+import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager, suppress
 from pathlib import Path
@@ -10,6 +13,7 @@ from pathlib import Path
 import pytest
 from _pytest.faulthandler import fault_handler_stderr_fd_key
 
+from scripts.ci_mutation import runner
 from scripts.ci_mutation.runner import mutate_files
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats import SharedStats
@@ -58,6 +62,26 @@ def clean_mutation_children(monkeypatch):
         yield
 
 
+@pytest.fixture(autouse=True)
+def workspace_copy_in_child(monkeypatch):
+    # The suite's coverage tracer and input audit hook fire on every file of the in-process checkout copy, which took
+    # ten to twenty five seconds in CI against under one in a plain child.
+    def prepare(root, work, paths, tests):
+        env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE", "COVERAGE"))}
+        code = (
+            "import json, sys; from pathlib import Path; from scripts.ci_mutation.runner import prepare_workspace; "
+            "prepare_workspace(Path(sys.argv[1]), Path(sys.argv[2]), *json.loads(sys.argv[3]))"
+        )
+        subprocess.run(
+            [sys.executable, "-c", code, str(root), str(work), json.dumps([paths, tests])],
+            cwd=ROOT,
+            env=env,
+            check=True,
+        )
+
+    monkeypatch.setattr(runner, "prepare_workspace", prepare)
+
+
 def test_mutation_children_exit_when_the_watchdog_interrupts(monkeypatch):
     child = None
     try:
@@ -77,8 +101,17 @@ def baseline_cache():
     return []
 
 
+@pytest.fixture(scope="module")
+def checkout_scratch():
+    # Hard links copy the checkout into a workspace; on another device, as the runner's temp folder is, every file is
+    # copied, which took up to twenty seconds more per workspace in CI.
+    folder = Path(tempfile.mkdtemp(prefix="remote-control-mutation-", dir=ROOT.parent))
+    yield folder
+    shutil.rmtree(folder, ignore_errors=True)
+
+
 @pytest.fixture
-def baseline(baseline_cache, tmp_path_factory, monkeypatch):
+def baseline(baseline_cache, checkout_scratch, monkeypatch):
     # A cached pass that recorded an error is rebuilt, so a rerun or the next test retries a load-bound overrun.
     if not baseline_cache or baseline_cache[0][4]:
         baseline_cache.clear()
@@ -88,7 +121,7 @@ def baseline(baseline_cache, tmp_path_factory, monkeypatch):
             if "order = store.redis.lrange" in text
         )
         selected = {SOURCE: ({line}, ["tests/swarm_ledger/test_remote_control_process.py"])}
-        folder = tmp_path_factory.mktemp("remote-control")
+        folder = Path(tempfile.mkdtemp(prefix="baseline-", dir=checkout_scratch))
         stats = SharedStats(folder / "stats", "remote-control", (0, 1))
         stats.folder.mkdir()
         work = folder / "baseline"
@@ -105,11 +138,11 @@ def test_remote_control_statistics_baseline_collects_without_grading(baseline):
     assert results == {SOURCE: []}
 
 
-def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, tmp_path, monkeypatch):
+def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, checkout_scratch, monkeypatch):
     selected, stats, work, _, error = baseline
     assert error == "", (work / "run.log").read_text()
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
-    grading = tmp_path / "grading"
+    grading = Path(tempfile.mkdtemp(prefix="grading-", dir=checkout_scratch)) / "grading"
     grading.mkdir()
     mutants = selected_mutant_names(SOURCE, (ROOT / SOURCE).read_text(), selected[SOURCE][0])
     results, error = mutate_files(

@@ -13,3 +13,47 @@ The preexisting local writer remains available for AgentRecord rows with default
 Rollback: stop distributed launches before reverting the writer. Keep executions and seat memory as authoritative data. Old local readers can project the preceding AgentRecord fields; current readers also accept records that lack the added fields. The isolated rollback rehearsal checks this projection and verifies export/restore preserves all three attempts. Revert code through Git; do not delete attempt records to simulate rollback.
 
 The agents hash remains a projection with the preceding record shape. New readers obtain additive identity from the executions hash in a consistent read transaction. This preserves the preceding strict dataclass decoder without requiring an old binary to understand the four added fields. Local writes watch both projection and execution history, so concurrent admission cannot be overwritten by an unadmitted legacy write.
+
+## Parallel launches in one process
+
+The swarm tick launches the seats of a pass in batches sized by the runtime's launch room, one thread per launch in a batch. Each launch admits its execution through `RedisStore.start_execution`, then binds its pane and updates its record. Each of these writes watches the swarm's `executions` hash and retries when another writer changes it first. A write gives up after five watched attempts (`WRITE_ATTEMPTS`).
+
+Without the lock, the threads of one batch raced each other on the same hash. In a batch of several launches, a launch could lose all five attempts to its siblings. Its spawn then failed, the tick reopened the task when it still held it, and the Doctor reported a `failed-spawn/<task>` finding.
+
+`ExecutionRegistry` holds one lock per swarm for these four writes:
+
+| Method | Entry point | Error when five attempts are lost |
+|---|---|---|
+| `start` | `RedisStore.start_execution` | `execution history kept changing; admission was not committed` |
+| `update` | `RedisStore.put_agent` for an admitted record | `execution history kept changing; update was not committed` |
+| `set_pane` | `ExecutionRegistry.set_pane` | `execution history kept changing; pane was not committed` |
+| `put` | `RedisStore.put_agent` | `agent registry kept changing; update was not committed` |
+
+- Writes for the same swarm in one process run one at a time. A sibling launch waits for an admission in flight instead of spending its attempts against it.
+- Writes for different swarms do not wait for each other. The lock is keyed by the swarm slug.
+- The lock is reentrant. `put` on an admitted record calls `update` while it holds the lock.
+- The lock lives in process memory. A writer in another process, such as a second tick or an `agentihooks swarm` command, still meets the watched transaction and its five attempts. The error can still appear when another process writes the same swarm's history that often.
+
+Nothing is configured: the lock applies to every swarm and every launch path that writes through these four methods. `ExecutionRegistry.archive` and `ExecutionRegistry.end_orphan` also write the history without the lock; the tick runs them one at a time, outside the parallel launch batch.
+
+### Reading a failed spawn
+
+A launch that still runs out of attempts appears in the tick output as:
+
+```text
+<slug>: spawn failed for <task id>, task <task id> reopened: execution history kept changing; admission was not committed
+```
+
+The `, task <task id> reopened` part appears only when the tick still held the task and reopened it.
+
+When the scheduled tick runs under `systemd-cat -t agentihooks-swarm`, its output is in the user journal:
+
+```bash
+# Spawn failures from execution history contention in the last day
+journalctl --user -t agentihooks-swarm --since "1 day ago" \
+  | grep "spawn failed for" | grep "execution history kept changing"
+```
+
+A line like this means a writer that does not take the lock changed the history during the launch: another process, or the archive and orphan cleanup writes. Look for such a writer before the failure time; the tick's own parallel launches no longer cause it. A reopened task launches again on a later pass. Never edit the `executions` hash by hand to clear a failure.
+
+The tests in `tests/swarm/test_execution_concurrency.py` cover this behavior. They check that a sibling admission, update and pane write wait for an admission in flight, that another swarm writes during it, and that each of the four writes holds the lock of its own swarm.

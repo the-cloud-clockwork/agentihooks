@@ -1,0 +1,19 @@
+{
+  "case_runs": [
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40669012713"
+  ],
+  "cases": [
+    "T-SV2-UX-05-A",
+    "T-SV2-UX-05-B",
+    "T-SV2-UX-05-C"
+  ],
+  "evidence_class": "mocked: a fake Redis swarm store is the authoritative state; the tick, the worker Pod's heartbeat and the hub's terminal checks are writes to it; real Chromium pages at 1920 by 1080 and at a 390 by 844 touch viewport render the ledger page from the swarm view the ledger server projects from that store, and their control writes enter the ledger server's lifecycle control; the hive command runner consumes the queue with its terminal commands stubbed; no ledger HTTP server, worker Pod, herdr server or cluster runs",
+  "inputs": {
+    "tests/fixtures/swarm_v2/context-evidence.json": "94f47557b84005cbf5bc5b98019dba4cc7467464b76b4de955a738eebf134a45",
+    "tests/fixtures/swarm_v2/operator-workflow.json": "4022ebc6f0df88be4d96e8dcbe9e84279757f53096e894f8d955c1c8dc97388a"
+  },
+  "red_runs": [
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40659191699"
+  ],
+  "tested_commit": "17aa9b7da"
+}

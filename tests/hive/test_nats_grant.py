@@ -608,7 +608,7 @@ def test_hive_revoke_revokes_the_bus_credential_then_the_member(admin, wired, ca
     assert cli.main(["revoke", member["id"]]) == 0
     assert capsys.readouterr().out == f"bus\nrevoked {member['id']}\n"
     assert revoked == [(admin, signed, member["id"])]
-    assert not admin.exists(remove.member_key(member["id"]))
+    assert auth.member(admin, member["id"]) is None
 
 
 def test_hive_remove_and_serve_carry_the_signer(admin, wired, monkeypatch):

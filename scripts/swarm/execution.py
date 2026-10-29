@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING
@@ -13,6 +14,11 @@ WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
 PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control", "desired_route_kind")
 ARCHIVE = "executions-archive"
+WRITES: dict[str, threading.RLock] = {}
+
+
+def _writes(slug: str) -> threading.RLock:
+    return WRITES.setdefault(slug, threading.RLock())
 
 
 if TYPE_CHECKING:
@@ -192,6 +198,10 @@ class ExecutionRegistry:
         return result
 
     def put(self, slug: str, agent: AgentRecord) -> None:
+        with _writes(slug):
+            self._put(slug, agent)
+
+    def _put(self, slug: str, agent: AgentRecord) -> None:
         from redis.exceptions import WatchError
 
         from scripts.swarm.store import SwarmError
@@ -239,6 +249,10 @@ class ExecutionRegistry:
         _validate_target(agent.runtime_backend, agent.runtime_target, lambda message: self.conflict(slug, message))
 
     def start(self, slug: str, agent: AgentRecord, previous_execution_id: str) -> AgentRecord:
+        with _writes(slug):
+            return self._start(slug, agent, previous_execution_id)
+
+    def _start(self, slug: str, agent: AgentRecord, previous_execution_id: str) -> AgentRecord:
         from redis.exceptions import WatchError
 
         from scripts.swarm.store import SwarmError
@@ -327,6 +341,10 @@ class ExecutionRegistry:
             self.conflict(slug, "Pod UID already belongs to another execution")
 
     def update(self, slug: str, agent: AgentRecord) -> None:
+        with _writes(slug):
+            self._update(slug, agent)
+
+    def _update(self, slug: str, agent: AgentRecord) -> None:
         from redis.exceptions import WatchError
 
         from scripts.swarm.store import SwarmError
@@ -356,6 +374,10 @@ class ExecutionRegistry:
         raise SwarmError("execution history kept changing; update was not committed")
 
     def set_pane(self, slug: str, execution_id: str, pane_id: str) -> None:
+        with _writes(slug):
+            self._set_pane(slug, execution_id, pane_id)
+
+    def _set_pane(self, slug: str, execution_id: str, pane_id: str) -> None:
         from redis.exceptions import WatchError
 
         from scripts.swarm.store import AgentRecord, SwarmError

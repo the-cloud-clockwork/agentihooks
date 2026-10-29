@@ -478,6 +478,9 @@ def _agent_command(
         *_model_args("claude", agent_args, environ),
         *agent_args,
     ]
+    from scripts import front_door_route
+
+    command = [*command[:2], *front_door_route.check(spec.profile, spec.title or name, command[2:])]
     # A server on MCP revision 2026-07-28 never registers as a channel.
     before = "export MCP_PROTOCOL_NEGOTIATION=legacy\n" if spec.channel else ""
     return _profile_command(command, spec), before
@@ -535,7 +538,7 @@ def _write_launcher(
         )
         held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
         command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} -- {prompt_arg}"
-    cleanup = [str(launcher), *([] if app_server else inputs)]
+    cleanup = [str(launcher), *([] if app_server or prompt_file is None else [str(prompt_file)])]
     shell = environ.get("SHELL") or "/bin/bash"
     launcher.write_text(
         "#!/usr/bin/env bash\n"
