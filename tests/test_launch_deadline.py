@@ -104,6 +104,26 @@ def test_a_wait_failing_inside_its_own_limit_raises_its_own_error(monkeypatch):
     assert deadline.spent == {"canary": 0.0}
 
 
+@pytest.mark.parametrize(
+    ("limit", "spent", "message"),
+    [
+        (float("inf"), 99.0, "^refused early$"),
+        (float("inf"), 100.0, "^the 100s launch deadline ran out in the canary wait after canary 100s: refused early$"),
+        (100.0, 100.0, "^refused early$"),
+    ],
+)
+def test_a_cut_wait_names_the_deadline_only_once_the_deadline_ran_out(monkeypatch, limit, spent, message):
+    now = _clock(monkeypatch)
+    deadline = init_agent.LaunchDeadline(100.0)
+
+    def fail(granted):
+        now[0] += spent
+        raise ValueError("refused early")
+
+    with pytest.raises(ValueError, match=message):
+        deadline.run("canary", limit, fail)
+
+
 def test_a_wait_repeated_by_name_adds_up_its_time(monkeypatch):
     now = _clock(monkeypatch)
     deadline = init_agent.LaunchDeadline(10.0)

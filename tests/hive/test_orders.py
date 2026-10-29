@@ -456,6 +456,98 @@ def test_launch_that_crosses_expiry_is_terminated(setup, monkeypatch):
     setup.runtime.terminate.assert_called_once()
 
 
+def test_queued_orders_with_full_length_launches_all_acknowledge_live_inside_their_lifetime(setup, monkeypatch):
+    from scripts import init_agent
+    from scripts.hive import launch, orders
+    from scripts.hive.orders import LaunchOrder, carried
+    from scripts.swarm import lease
+    from scripts.swarm.store import AgentRecord
+
+    monkeypatch.setattr(lease, "ttl_ms", lambda: 3_600_000)
+    lease.renew(setup.store, "fixture", setup.held)
+    sent = lease.now_ms(setup.store)
+    now = [sent]
+    monkeypatch.setattr(lease, "now_ms", lambda store: now[0])
+    monkeypatch.setattr(orders, "time", SimpleNamespace(time=lambda: now[0] / 1000), raising=False)
+    original = setup.runtime.spawn.return_value
+
+    def full_length_launch(request):
+        until = request.task.get("launch_until_ms")
+        granted = (
+            init_agent.LAUNCH_DEADLINE_S
+            if until is None
+            else min(init_agent.LAUNCH_DEADLINE_S, (until - now[0]) / 1000)
+        )
+        now[0] += int(granted * 1000)
+        return original
+
+    setup.runtime.spawn.side_effect = full_length_launch
+    queued = []
+    for index in range(4):
+        agent = setup.store.start_execution(
+            "fixture",
+            AgentRecord(
+                setup.store.next_name("fixture", "eng"),
+                "eng",
+                f"task-{index}",
+                seat=f"eng-{index + 2}@fixture",
+                state="launching",
+                harness="codex",
+                profile="engineer",
+                account="account",
+                hive="host",
+                runtime_target={"host_id": "host"},
+            ),
+        )
+        setup.redis.set(f"prompt-{index}", json.dumps(carried("fixture", {"id": f"task-{index}"}, "opening")))
+        order = LaunchOrder(
+            "fixture",
+            agent.execution_id,
+            agent.generation,
+            "engineer",
+            "eng",
+            f"task-{index}",
+            "account",
+            "codex",
+            "subscription",
+            f"prompt-{index}",
+            setup.held.epoch,
+            sent + launch.TTL_MS,
+            "host",
+        )
+        queued.append((setup.orders.send("host", order), order))
+    for (item, order), started in zip(queued, (0, 15000, 40000, 90000)):
+        now[0] = sent + started
+        setup.consumer.consume(item, {"order": json.dumps(asdict(order))})
+    acks = [setup.orders.ack(order) for _, order in queued]
+    assert [(ack.status, ack.failure) for ack in acks] == [("live", "")] * 4
+    setup.runtime.terminate.assert_not_called()
+
+
+def test_the_launch_ends_on_the_hive_clock_an_acknowledgement_margin_before_the_order_expires(setup, monkeypatch):
+    from scripts.hive import orders
+    from scripts.swarm import lease
+
+    monkeypatch.setattr(lease, "now_ms", lambda store: 1_000_000)
+    monkeypatch.setattr(orders, "time", SimpleNamespace(time=lambda: 5_000.0))
+    order = replace(setup.order, expires_at=1_300_000)
+    setup.orders.send("host", order)
+    setup.consumer.poll()
+    assert setup.runtime.spawn.call_args.args[0].task["launch_until_ms"] == 5_270_000
+    assert orders.ACK_MARGIN_MS == 30000
+
+
+@pytest.mark.parametrize(("left", "status"), [(30000, "failed"), (30001, "live")])
+def test_an_order_without_room_for_its_acknowledgement_expires_before_spawn(setup, monkeypatch, left, status):
+    from scripts.swarm import lease
+
+    monkeypatch.setattr(lease, "now_ms", lambda store: 1_000_000)
+    order = replace(setup.order, expires_at=1_000_000 + left)
+    ack = setup.consumer.apply(order)
+    assert (ack.status, ack.failure) == (status, "expired" if status == "failed" else "")
+    assert setup.runtime.spawn.called is (status == "live")
+
+
 def test_epoch_takeover_during_launch_refuses_live_admission(setup, monkeypatch):
     from scripts.swarm import lease
     from scripts.swarm.store import SwarmError
