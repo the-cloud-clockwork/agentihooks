@@ -92,7 +92,7 @@ def _done_urls(events, tasks, span):
     return [tasks[tid]["pr_url"] for tid in done if tasks.get(tid, {}).get("pr_url")]
 
 
-def doctor_findings(store, slug):
+def _doctor_findings(store, slug):
     from scripts.doctor.priming import doctor_slug
 
     doctor = doctor_slug(slug)
@@ -116,5 +116,5 @@ def load(store, ledger, slug, span, run=subprocess.run, home=SWARM_HOME):
         corrections=_timed(injection_trace.corrections()),
         pulls=pulls(store.redis, slug, _done_urls(events, tasks, span), run),
         inbox=read.inbox_items(InboxStore(store.redis), slug),
-        doctor_findings=doctor_findings(store, slug),
+        doctor_findings=_doctor_findings(store, slug),
     )
