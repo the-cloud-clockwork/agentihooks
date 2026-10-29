@@ -362,10 +362,11 @@ server names its thread before the first turn; only its canary wait takes from
 the deadline.
 
 Time spent outside these waits still runs the deadline down: rendering the
-profile home, starting the pane and waiting for the route report
-(`--route-timeout`, cut short when the deadline ends first). The deadline is fixed when `init-agent` starts, so these
-steps and the Codex session rename between the two ready waits shorten what
-the later waits are granted.
+profile home, starting the pane (`--start-timeout`), waiting for the route
+report (`--route-timeout`) and answering the Claude channel warning. Those
+three waits also end when the deadline ends. The deadline is fixed when
+`init-agent` starts, so these steps and the Codex session rename between the
+two ready waits shorten what the later waits are granted.
 
 The deadline bounds only the waits. The herdr commands around them, such as
 the pane rename before the first ready wait, the session rename, which

@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 import platform
 import shlex
@@ -127,6 +128,9 @@ class LaunchDeadline:
             raise
         self.spent[wait] = self.spent.get(wait, 0.0) + time.monotonic() - began
         return result
+
+    def left(self, limit: float) -> float:
+        return max(0.0, min(limit, self.ends - time.monotonic()))
 
     def _overrun(self) -> str:
         spent = ", ".join(f"{wait} {seconds:.0f}s" for wait, seconds in self.spent.items())
@@ -676,7 +680,7 @@ def _binding_deferred(environ: dict[str, str]) -> list[str]:
 def _profile_canary(args, environ: dict[str, str], launch, route: dict) -> list[str]:
     if args.defer_canary and (deferred := _binding_deferred(environ)):
         return deferred
-    canary = float("inf") if args.canary_timeout is None else args.canary_timeout
+    canary = math.inf if args.canary_timeout is None else args.canary_timeout
     return launch.run("profile canary", canary, lambda seconds: _binding_result(environ, seconds, route))
 
 
@@ -961,10 +965,11 @@ def _inbox_channel_args(environ: dict[str, str]) -> list[str]:
     return channel.launch_args()
 
 
-def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
+def _answer_channel_warning(pane: str, environ: dict[str, str], launch: LaunchDeadline) -> str:
     from scripts.inbox import channel
 
-    return "answered" if herdr_host.answer(pane, channel.WARNING, environ, CHANNEL_WARNING_MS) else "unseen"
+    answered = herdr_host.answer(pane, channel.WARNING, environ, int(launch.left(CHANNEL_WARNING_MS / 1000) * 1000))
+    return "answered" if answered else "unseen"
 
 
 def _name_in_herdr(
@@ -1190,7 +1195,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         discard()
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)
         return 2
-    deadline = time.monotonic() + args.start_timeout
+    deadline = time.monotonic() + launch.left(args.start_timeout)
     while not marker.exists():
         if time.monotonic() >= deadline:
             discard()
@@ -1210,7 +1215,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         return 0
 
     route_path = _route_report(launcher)
-    deadline = time.monotonic() + min(args.route_timeout, max(0.0, launch.ends - time.monotonic()))
+    deadline = time.monotonic() + launch.left(args.route_timeout)
     while not route_path.exists() and time.monotonic() < deadline:
         if _selection_refused(active_env):
             break
@@ -1237,7 +1242,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             served=_served(args),
         )
         if channel:
-            report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
+            report.append(f"channel_warning={_answer_channel_warning(pane, active_env, launch)}")
     if args.handoff and route.get("status") != "routed":
         print("\n".join([*report, "handoff=failed"]))
         print(
