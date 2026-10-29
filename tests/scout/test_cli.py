@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 
@@ -36,6 +37,7 @@ class FakeRunner:
                 "schema": schema,
                 "clamp": clamp,
                 "tier": tier,
+                "effort": effort,
                 "harness": harness,
             }
         )
@@ -197,6 +199,78 @@ def test_a_round_cap_below_one_is_refused(wired):
 
     with pytest.raises(SystemExit):
         cli.main([QUESTION, "--rounds", "0"])
+
+
+def test_each_round_sends_the_exact_round_request_and_until_question(wired, capsys):
+    runner = FakeRunner([PEP])
+    classifier = FakeClassifier(0.5)
+    wired(runner, classifier)
+
+    assert cli.main([QUESTION, "--until", UNTIL, "--rounds", "1"]) == 0
+
+    out = capsys.readouterr().out
+    evidence = json.loads(out)
+    assert out == json.dumps(evidence, indent=2) + "\n"
+    call = runner.calls[0]
+    assert call["user_input"] == {"question": QUESTION, "until": UNTIL, "rounds": 1, "known": []}
+    assert call["effort"] == "low"
+    assert call["schema"]["properties"]["items"]["items"]["required"] == ["claim", "source", "excerpt", "retrieved_at"]
+    asked = classifier.calls[0]
+    assert asked["questions"]["met"].criteria() == {
+        "true": "The evidence set meets the condition",
+        "false": "The evidence set does not meet the condition yet",
+    }
+    assert asked["state"] == {"question": QUESTION, "until": UNTIL, "evidence": evidence}
+    assert asked["harness"] == "claude"
+
+
+def test_a_classifier_answer_at_the_threshold_ends_the_run(wired, capsys):
+    runner = FakeRunner([PEP], [WHATSNEW])
+    wired(runner, FakeClassifier(loop.MET))
+
+    assert cli.main([QUESTION, "--until", UNTIL, "--rounds", "2"]) == 0
+
+    assert len(runner.calls) == 1
+
+
+def test_the_scouter_prompt_is_the_body_after_the_frontmatter(monkeypatch, tmp_path):
+    agent = tmp_path / "scouter.md"
+    agent.write_text("---\nname: scouter\n---\n\nFind sources.\n\n---\n\nQuote them exactly.\n")
+    monkeypatch.setattr(loop, "SCOUTER", agent)
+
+    assert loop.scouter_prompt() == "Find sources.\n\n---\n\nQuote them exactly."
+
+
+def test_one_round_is_the_smallest_cap(wired, capsys):
+    runner = FakeRunner([PEP])
+    wired(runner, FakeClassifier(0.0))
+
+    assert cli.main([QUESTION, "--rounds", "1"]) == 0
+
+    assert len(runner.calls) == 1
+
+
+def test_a_round_cap_below_one_names_the_limit(capsys):
+    with pytest.raises(SystemExit):
+        cli.main([QUESTION, "--rounds", "0"])
+
+    assert "argument --rounds: rounds must be at least 1\n" in capsys.readouterr().err
+
+
+def test_help_names_the_command_its_flags_and_choices(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+
+    text = " ".join(capsys.readouterr().out.split())
+    for expected in (
+        "usage: agentihooks scout",
+        "Answer a question with an evidence set",
+        "condition the evidence set must meet",
+        "file the evidence set is written to",
+        "--tier {low,high}",
+        "--harness {auto,claude,codex}",
+    ):
+        assert re.search(rf"(?<![A-Za-z]){re.escape(expected)}(?![A-Za-z])", text), expected
 
 
 def test_scout_is_a_delegated_subcommand():
