@@ -91,7 +91,11 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "served_version", lambda: "hierarchy-proof")
     monkeypatch.setattr(server, "repository", Publishing(repo, server.publish_snapshot))
     samples = queue.Queue()
-    monkeypatch.setattr(request_metrics, "record", lambda method, route, wall, cpu, lock: samples.put(cpu))
+    monkeypatch.setattr(
+        request_metrics,
+        "record",
+        lambda method, route, wall, cpu, lock_wait, client_wait=0.0, postgres_wait=0.0: samples.put(cpu),
+    )
     profiles = []
     profiling = threading.Event()
 
