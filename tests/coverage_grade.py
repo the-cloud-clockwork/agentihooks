@@ -54,8 +54,22 @@ def line_map(old: str, new: str) -> dict[int, int]:
     old_lines, new_lines = old.splitlines(), new.splitlines()
     if old_lines == new_lines:
         return {n: n for n in range(1, len(old_lines) + 1)}
-    matcher = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
-    return {a + k + 1: b + k + 1 for a, b, size in matcher.get_matching_blocks() for k in range(size)}
+    limit = min(len(old_lines), len(new_lines))
+    head = 0
+    while head < limit and old_lines[head] == new_lines[head]:
+        head += 1
+    tail = 0
+    while tail < limit - head and old_lines[-1 - tail] == new_lines[-1 - tail]:
+        tail += 1
+    matcher = difflib.SequenceMatcher(
+        None, old_lines[head : len(old_lines) - tail], new_lines[head : len(new_lines) - tail], autojunk=False
+    )
+    mapped = {n: n for n in range(1, head + 1)}
+    mapped.update(
+        {head + a + k + 1: head + b + k + 1 for a, b, size in matcher.get_matching_blocks() for k in range(size)}
+    )
+    mapped.update({len(old_lines) - k: len(new_lines) - k for k in range(tail)})
+    return mapped
 
 
 def _defined(source: str) -> set[str]:

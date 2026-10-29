@@ -1,6 +1,7 @@
 import atexit
 import json
 import os
+from collections.abc import Mapping
 from functools import lru_cache
 from threading import Lock
 
@@ -8,6 +9,7 @@ from . import state
 from .bus import StateConflict, StateEntry, StateStore
 from .config import BusConfig
 
+BACKEND_ENV = "AGENTIHOOKS_SCHEDULER_STATE_BACKEND"
 _lock = Lock()
 
 
@@ -20,15 +22,24 @@ def _bus(config: BusConfig):
     return bus
 
 
+def backend(environ: Mapping[str, str] = os.environ) -> str:
+    chosen = environ.get(BACKEND_ENV)
+    return state.backend({state.BACKEND_ENV: chosen} if chosen else environ)
+
+
 def open_scheduler_state(bucket: str) -> StateStore:
-    if state.backend() == "bus":
+    if backend() == "bus":
         with _lock:
             config = BusConfig.from_environ()
             bus = _bus(config)
             if config.scoped:
                 bus = bus.for_swarm(os.environ["AGENTIHOOKS_SWARM"])
             return bus.state(bucket)
-    return state.open_state(bucket)
+    from scripts.swarm.store import redis_client
+
+    from .redis_state import RedisStateStore
+
+    return RedisStateStore(redis_client(), bucket)
 
 
 def read(state: StateStore, key: str, legacy_key: str) -> StateEntry | None:
