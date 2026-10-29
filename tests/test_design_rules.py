@@ -10,6 +10,7 @@ pytestmark = pytest.mark.unit
 TYPED = "def load(path: str, count: int = 1) -> str:\n    return path * count\n"
 UNTYPED = "def load(path, count: int = 1):\n    return path * count\n"
 CONCRETE = "class Store:\n    def put(self, key: str) -> None:\n        pass\n"
+KEEP = {"scripts/keep.py": "X = 1\n"}
 
 
 def _tree(root: Path, files: dict[str, str]) -> Path:
@@ -28,7 +29,14 @@ def _grade(tmp_path: Path, base: dict[str, str], head: dict[str, str]) -> tuple[
 
 
 def _errors(tmp_path: Path, head: dict[str, str], base: dict[str, str] | None = None) -> list[str]:
-    return _grade(tmp_path, base or {"scripts/keep.py": "X = 1\n"}, head)[1]
+    return _grade(tmp_path, base or KEEP, head)[1]
+
+
+def _inherits(key: str, target: str) -> str:
+    return (
+        f"inheritance: {key} inherits the concrete project class {target}; "
+        "inherit an abstract base or Protocol and compose the shared behaviour"
+    )
 
 
 def test_a_new_public_function_without_hints_is_red_naming_each_missing_hint(tmp_path):
@@ -38,7 +46,7 @@ def test_a_new_public_function_without_hints_is_red_naming_each_missing_hint(tmp
 
 
 def test_a_fully_typed_public_function_is_green(tmp_path):
-    assert _grade(tmp_path, {"scripts/keep.py": "X = 1\n"}, {"scripts/job.py": TYPED}) == (1, [])
+    assert _grade(tmp_path, KEEP, {"scripts/job.py": TYPED}) == (1, [])
 
 
 def test_an_unchanged_untyped_function_is_not_graded(tmp_path):
@@ -58,21 +66,48 @@ def test_a_changed_signature_is_graded(tmp_path):
     )
 
 
+def test_a_redefined_function_is_graded_under_its_own_numbered_key(tmp_path):
+    head = {"scripts/job.py": TYPED + "\n\n" + UNTYPED}
+    assert _grade(tmp_path, {"scripts/job.py": TYPED}, head) == (
+        1,
+        ["untyped: public scripts/job.py::load#2 lacks type hints on path, return"],
+    )
+
+
 def test_private_and_nested_functions_are_not_graded_for_hints(tmp_path):
-    source = "def _load(path):\n    def inner(x):\n        return x\n    return inner(path)\n"
-    assert _grade(tmp_path, {"scripts/keep.py": "X = 1\n"}, {"scripts/job.py": source}) == (2, [])
+    source = (
+        "def _load(path):\n    def inner(x):\n        return x\n    return inner(path)\n\n\n"
+        "def load(path: str) -> str:\n    def inner(x):\n        return x\n    return inner(path)\n"
+    )
+    assert _grade(tmp_path, KEEP, {"scripts/job.py": source}) == (4, [])
 
 
-def test_methods_skip_self_and_cls_but_not_a_static_first_parameter(tmp_path):
+def test_functions_under_a_statement_block_keep_their_scope(tmp_path):
+    source = (
+        "import sys\n\n"
+        "if sys:\n    def load(path):\n        return path\n\n\n"
+        "class Job(object):\n"
+        "    if sys:\n        def run(self, n: int) -> int:\n            return n\n\n"
+        "        def stop(self, n):\n            return n\n"
+    )
+    assert _errors(tmp_path, {"scripts/job.py": source}) == [
+        "untyped: public scripts/job.py::load lacks type hints on path, return",
+        "untyped: public scripts/job.py::Job.stop lacks type hints on n, return",
+    ]
+
+
+def test_methods_skip_the_receiver_but_grade_every_other_parameter(tmp_path):
     source = (
         "class Job:\n"
         "    def run(self, n: int) -> int:\n        return n\n"
         "    @classmethod\n    def make(cls) -> 'Job':\n        return cls()\n"
         "    @staticmethod\n    def parse(text) -> int:\n        return 1\n"
+        "    def stop(self, n, m: int) -> None:\n        pass\n"
         "    def __init__(self, n):\n        self.n = n\n"
     )
     assert _errors(tmp_path, {"scripts/job.py": source}) == [
-        "untyped: public scripts/job.py::Job.parse lacks type hints on text"
+        "untyped: public scripts/job.py::Job.parse lacks type hints on text",
+        "untyped: public scripts/job.py::Job.stop lacks type hints on n",
     ]
 
 
@@ -95,6 +130,13 @@ def test_a_keyword_bag_is_red_on_the_config_rule(tmp_path):
     ]
 
 
+def test_every_plain_configuration_of_one_function_is_named(tmp_path):
+    source = "def run(config: dict, **options: object) -> None:\n    pass\n"
+    assert _errors(tmp_path, {"scripts/job.py": source}) == [
+        "config: public scripts/job.py::run takes config, **options as a plain dict; take a typed configuration object"
+    ]
+
+
 @pytest.mark.parametrize("annotation", ["dict", "dict[str, int]", "typing.Dict[str, int]", "Mapping[str, int]"])
 @pytest.mark.parametrize("name", ["config", "settings", "job_options", "cfg", "params", "opts", "conf"])
 def test_a_configuration_parameter_typed_as_a_plain_dict_is_red(tmp_path, annotation, name):
@@ -105,7 +147,7 @@ def test_a_configuration_parameter_typed_as_a_plain_dict_is_red(tmp_path, annota
 
 
 @pytest.mark.parametrize(
-    "parameter", ["config: Settings", "rows: dict[str, int]", "configured: dict", "reconfig: dict"]
+    "parameter", ["config: Settings", "rows: dict[str, int]", "configured: dict", "reconfig: dict", "config: 'dict'"]
 )
 def test_a_typed_configuration_or_a_plain_data_dict_is_green(tmp_path, parameter):
     source = f"class Settings:\n    pass\n\ndef run({parameter}) -> None:\n    pass\n"
@@ -117,10 +159,10 @@ def test_a_private_function_may_take_a_keyword_bag(tmp_path):
 
 
 def test_a_class_inheriting_a_concrete_project_class_in_its_module_is_red(tmp_path):
-    source = CONCRETE + "\n\nclass Cache(Store):\n    pass\n"
+    source = CONCRETE + "\n\nclass Cache(Store):\n    pass\n\n\nclass Shelf(Store[int]):\n    pass\n"
     assert _errors(tmp_path, {"scripts/store.py": source}) == [
-        "inheritance: scripts/store.py::Cache inherits the concrete project class scripts.store.Store; "
-        "inherit an abstract base or Protocol and compose the shared behaviour"
+        _inherits("scripts/store.py::Cache", "scripts.store.Store"),
+        _inherits("scripts/store.py::Shelf", "scripts.store.Store"),
     ]
 
 
@@ -131,6 +173,7 @@ def test_a_class_inheriting_a_concrete_project_class_in_its_module_is_red(tmp_pa
         ("from scripts.store import Store as Base", "Base"),
         ("from .store import Store", "Store"),
         ("from scripts import store", "store.Store"),
+        ("from . import store", "store.Store"),
         ("import scripts.store as store", "store.Store"),
         ("from scripts.reexport import Store", "Store"),
     ],
@@ -143,10 +186,52 @@ def test_a_concrete_project_class_imported_from_another_module_is_red(tmp_path, 
         "scripts/cache.py": f"{imports}\n\n\nclass Cache({base}):\n    pass\n",
     }
     base_tree = {name: text for name, text in head.items() if name != "scripts/cache.py"}
+    assert _errors(tmp_path, head, base_tree) == [_inherits("scripts/cache.py::Cache", "scripts.store.Store")]
+
+
+def test_a_package_reexport_and_a_parent_relative_import_resolve(tmp_path):
+    head = {
+        "scripts/__init__.py": CONCRETE,
+        "scripts/pkg/__init__.py": "from .store import Store\n",
+        "scripts/pkg/store.py": CONCRETE,
+        "scripts/pkg/child.py": "from ..pkg.store import Store\n\nclass Child(Store):\n    pass\n",
+        "scripts/cache.py": (
+            "import scripts.store\nfrom scripts.pkg import Store\n\n"
+            "class Cache(Store):\n    pass\n\nclass Root(scripts.Store):\n    pass\n"
+        ),
+    }
+    base_tree = {name: text for name, text in head.items() if name not in ("scripts/cache.py", "scripts/pkg/child.py")}
     assert _errors(tmp_path, head, base_tree) == [
-        "inheritance: scripts/cache.py::Cache inherits the concrete project class scripts.store.Store; "
-        "inherit an abstract base or Protocol and compose the shared behaviour"
+        _inherits("scripts/cache.py::Cache", "scripts.pkg.store.Store"),
+        _inherits("scripts/cache.py::Root", "scripts.Store"),
+        _inherits("scripts/pkg/child.py::Child", "scripts.pkg.store.Store"),
     ]
+
+
+def test_a_dotted_attribute_base_is_not_resolved(tmp_path):
+    head = {
+        "scripts/store.py": CONCRETE,
+        "scripts/cache.py": "import scripts\n\nclass Cache(scripts.store.Store):\n    pass\n",
+    }
+    assert _errors(tmp_path, head, {"scripts/store.py": CONCRETE}) == []
+
+
+@pytest.mark.parametrize("hops, errors", [(5, 1), (6, 0)])
+def test_reexport_chains_resolve_up_to_five_hops(tmp_path, hops, errors):
+    head = {f"scripts/r{n}.py": f"from scripts.r{n + 1} import Store\n" for n in range(1, hops)}
+    head[f"scripts/r{hops}.py"] = CONCRETE
+    head["scripts/cache.py"] = "from scripts.r1 import Store\n\nclass Cache(Store):\n    pass\n"
+    base_tree = {name: text for name, text in head.items() if name != "scripts/cache.py"}
+    assert len(_errors(tmp_path, head, base_tree)) == errors
+
+
+def test_a_reexport_cycle_terminates_unresolved(tmp_path):
+    head = {
+        "scripts/a.py": "from scripts.b import Store\n",
+        "scripts/b.py": "from scripts.a import Store\n",
+        "scripts/cache.py": "from scripts.a import Store\n\nclass Cache(Store):\n    pass\n",
+    }
+    assert _errors(tmp_path, head, {"scripts/a.py": head["scripts/a.py"], "scripts/b.py": head["scripts/b.py"]}) == []
 
 
 @pytest.mark.parametrize(
@@ -174,6 +259,24 @@ def test_a_class_on_an_abstract_protocol_exception_enum_tuple_or_dataclass_base_
     assert _errors(tmp_path, head, {"scripts/base.py": parent}) == []
 
 
+@pytest.mark.parametrize(
+    "parent",
+    [
+        "class Base(metaclass=type):\n    pass\n",
+        "class Meta(type):\n    pass\n\nclass Base(object, metaclass=Meta):\n    def run(self) -> None:\n        pass\n",
+        "import functools\n\n@functools.total_ordering\nclass Base:\n    pass\n",
+    ],
+)
+def test_a_concrete_base_with_another_metaclass_or_decorator_is_red(tmp_path, parent):
+    head = {
+        "scripts/base.py": parent,
+        "scripts/child.py": "from scripts.base import Base\n\nclass Child(Base):\n    pass\n",
+    }
+    assert _errors(tmp_path, head, {"scripts/base.py": parent}) == [
+        _inherits("scripts/child.py::Child", "scripts.base.Base")
+    ]
+
+
 def test_a_class_on_a_third_party_or_builtin_base_is_green(tmp_path):
     source = "import argparse\n\nclass Action(argparse.Action):\n    pass\n\nclass Rows(dict):\n    pass\n"
     assert _errors(tmp_path, {"scripts/job.py": source}) == []
@@ -181,7 +284,10 @@ def test_a_class_on_a_third_party_or_builtin_base_is_green(tmp_path):
 
 def test_an_inheritance_cycle_is_red_and_terminates(tmp_path):
     source = "class A(B):\n    pass\n\nclass B(A):\n    pass\n"
-    assert len(_errors(tmp_path, {"scripts/job.py": source})) == 2
+    assert _errors(tmp_path, {"scripts/job.py": source}) == [
+        _inherits("scripts/job.py::A", "scripts.job.B"),
+        _inherits("scripts/job.py::B", "scripts.job.A"),
+    ]
 
 
 def test_an_existing_subclass_whose_body_changes_is_not_graded(tmp_path):
@@ -191,25 +297,27 @@ def test_an_existing_subclass_whose_body_changes_is_not_graded(tmp_path):
 
 
 def test_tests_and_semgrep_fixtures_are_not_graded(tmp_path):
-    head = {"tests/test_job.py": UNTYPED, ".semgrep/rule.test.py": UNTYPED, "scripts/keep.py": "X = 1\n"}
-    assert _grade(tmp_path, {"scripts/keep.py": "X = 1\n"}, head) == (0, [])
+    head = {"tests/test_job.py": UNTYPED, ".semgrep/rule.test.py": UNTYPED, **KEEP}
+    assert _grade(tmp_path, KEEP, head) == (0, [])
 
 
 def test_a_tracked_python_script_without_the_suffix_is_skipped(tmp_path):
-    head = {"scripts/tool": "#!/usr/bin/env python\ndef run(x):\n    return x\n", "scripts/keep.py": "X = 1\n"}
-    assert _grade(tmp_path, {"scripts/keep.py": "X = 1\n"}, head) == (0, [])
+    head = {"scripts/tool": "#!/usr/bin/env python\ndef run(x):\n    return x\n", **KEEP}
+    assert _grade(tmp_path, KEEP, head) == (0, [])
 
 
 def test_main_names_every_rule_and_exits_red(tmp_path, capsys):
-    base = _tree(tmp_path / "base", {"scripts/keep.py": "X = 1\n"})
+    base = _tree(tmp_path / "base", KEEP)
     source = CONCRETE + "\n\nclass Cache(Store):\n    pass\n\n\ndef run(path, **options) -> None:\n    pass\n"
-    head = _tree(tmp_path / "head", {"scripts/keep.py": "X = 1\n", "scripts/store.py": source})
+    head = _tree(tmp_path / "head", {**KEEP, "scripts/store.py": source})
     assert design_rules.main(["--base", str(base), "--head", str(head)]) == 1
-    out = capsys.readouterr().out
-    assert "4 new or changed units graded on the design rules, 3 errors\n" in out
-    assert "::error::inheritance: scripts/store.py::Cache inherits" in out
-    assert "::error::untyped: public scripts/store.py::run lacks type hints on path, options\n" in out
-    assert "::error::config: public scripts/store.py::run takes **options as a plain dict" in out
+    assert capsys.readouterr().out == (
+        "4 new or changed units graded on the design rules, 3 errors\n"
+        f"::error::{_inherits('scripts/store.py::Cache', 'scripts.store.Store')}\n"
+        "::error::untyped: public scripts/store.py::run lacks type hints on path, options\n"
+        "::error::config: public scripts/store.py::run takes **options as a plain dict; "
+        "take a typed configuration object\n"
+    )
 
 
 def test_main_is_green_on_an_unchanged_tree(tmp_path, capsys):
@@ -218,11 +326,31 @@ def test_main_is_green_on_an_unchanged_tree(tmp_path, capsys):
     assert capsys.readouterr().out == "0 new or changed units graded on the design rules, 0 errors\n"
 
 
-def test_main_reports_a_syntax_error_as_red(tmp_path, capsys):
-    base = _tree(tmp_path / "base", {"scripts/keep.py": "X = 1\n"})
-    head = _tree(tmp_path / "head", {"scripts/keep.py": "X = 1\n", "scripts/job.py": "def broken(:\n"})
+def test_main_grades_the_working_directory_by_default(tmp_path, capsys, monkeypatch):
+    base = _tree(tmp_path / "base", KEEP)
+    head = _tree(tmp_path / "head", {**KEEP, "scripts/job.py": UNTYPED})
+    monkeypatch.chdir(head)
+    assert design_rules.main(["--base", str(base)]) == 1
+    assert "::error::untyped: public scripts/job.py::load" in capsys.readouterr().out
+
+
+def test_main_requires_a_base(capsys):
+    with pytest.raises(SystemExit) as exited:
+        design_rules.main([])
+    assert exited.value.code == 2
+    assert "the following arguments are required: --base" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("side", ["base", "head"])
+def test_main_reports_a_syntax_error_naming_its_file(tmp_path, capsys, side):
+    broken = {**KEEP, "scripts/job.py": "def broken(:\n"}
+    fine = {**KEEP, "scripts/job.py": TYPED}
+    trees = {"base": broken if side == "base" else fine, "head": broken if side == "head" else fine}
+    base, head = _tree(tmp_path / "base", trees["base"]), _tree(tmp_path / "head", trees["head"])
     assert design_rules.main(["--base", str(base), "--head", str(head)]) == 1
-    assert capsys.readouterr().out.startswith("::error::")
+    out = capsys.readouterr().out
+    assert out.startswith("::error::")
+    assert "(job.py, line 1)" in out
 
 
 def test_the_lint_job_runs_the_gate_from_the_protected_grader():
