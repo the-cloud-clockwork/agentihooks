@@ -234,8 +234,10 @@ def test_a_remote_write_reports_its_gateway_failure_and_its_success_but_a_read_r
     monkeypatch.setattr(ledger, "request", refusing(502))
     with pytest.raises(SystemExit, match="server refused: 502"):
         ledger.remote_call("sw", [{"op": "comment"}], False)
+    assert reported == [502]
     monkeypatch.setattr(ledger, "request", lambda *_: {"ok": True})
     assert ledger.remote_call("sw", [{"op": "comment"}], False) == {"ok": True}
+    assert reported == [502, None]
     assert ledger.remote_call("sw", None, False) == {"ok": True}
     assert reported == [502, None]
 

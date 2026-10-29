@@ -60,15 +60,17 @@ def observe(store, slug, now_ms):
     from scripts.swarm import outage
 
     rows = {agent.name: read(store.redis, slug, agent.name) for agent in store.agents(slug)}
-    ok = max((row.get("ok_at", 0) for row in rows.values()), default=0)
+    ok = max((row["ok_at"] for row in rows.values() if "ok_at" in row), default=-1)
     failed = sorted((at, code, name) for name, row in rows.items() for at, code in row.get("failed", []) if at > ok)
     ongoing = any(record["kind"] == KIND for record in outage.open_records(slug))
     fresh = [row for row in failed if row[0] >= now_ms - WINDOW_MS]
-    evidence = []
-    if len(fresh) >= THRESHOLD or (ongoing and failed):
-        names = ", ".join(sorted({name for _, _, name in failed}))
-        evidence = [
-            f"Hive agent ledger writes failed {len(failed)} times with gateway errors since {failed[0][0]}, "
-            f"from {names}, last HTTP {failed[-1][1]}"
-        ]
-    outage.observe(slug, KIND, evidence, now_ms)
+    opened = len(fresh) >= THRESHOLD or (ongoing and failed)
+    outage.observe(slug, KIND, [_evidence(failed)] if opened else [], now_ms)
+
+
+def _evidence(failed):
+    names = ", ".join(sorted({name for _, _, name in failed}))
+    return (
+        f"Hive agent ledger writes failed {len(failed)} times with gateway errors since {failed[0][0]}, "
+        f"from {names}, last HTTP {failed[-1][1]}"
+    )

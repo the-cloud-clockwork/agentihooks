@@ -1,9 +1,8 @@
 import time
 
 import pytest
-from redis.exceptions import RedisError
 
-from scripts.hive import registry
+from scripts.hive import registry, scope
 from scripts.swarm import hive_ledger, outage
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
@@ -134,7 +133,50 @@ def test_a_report_outside_a_hive_swarm_agent_records_nothing(store, hive, monkey
     assert hive_ledger.read(store.redis, "sw", NAME) == {}
 
 
+def test_failures_from_the_first_instant_count_and_a_success_at_the_same_instant_hides_them(store):
+    for at in (0, 1, 2):
+        failed(store, NAME, at)
+    hive_ledger.observe(store, "sw", 3)
+    assert [record["kind"] for record in outage.open_records("sw")] == ["hive-ledger"]
+    hive_ledger.record(store.redis, "sw", OTHER, None, 2)
+    hive_ledger.observe(store, "sw", 4)
+    assert outage.open_records("sw") == []
+    for at in (5, 6):
+        failed(store, NAME, at)
+    hive_ledger.observe(store, "sw", 7)
+    assert outage.open_records("sw") == []
+
+
+def test_the_tick_reads_a_hive_agent_report_below_the_member_that_runs_it(store, hive, monkeypatch):
+    assert hive_ledger.report(502, redis=store.redis, now_ms=1_000) is True
+    hive_ledger.report(503, redis=store.redis, now_ms=2_000)
+    hive_ledger.report(504, redis=store.redis, now_ms=3_000)
+    for name in HIVE:
+        monkeypatch.delenv(name)
+    placed = {("sw", NAME): "h1"}
+    monkeypatch.setattr(scope, "host", lambda redis, slug, name: placed.get((slug, name), ""))
+    assert hive_ledger.read(store.redis, "sw", NAME) == {"failed": [[1_000, 502], [2_000, 503], [3_000, 504]]}
+    hive_ledger.observe(store, "sw", 3_500)
+    [record] = outage.open_records("sw")
+    assert record["evidence"] == [
+        f"Hive agent ledger writes failed 3 times with gateway errors since 1000, from {NAME}, last HTTP 504"
+    ]
+
+
+def test_a_report_reads_the_environment_it_is_given(store, monkeypatch):
+    from scripts.swarm import store as store_module
+
+    for name in HIVE:
+        monkeypatch.delenv(name, raising=False)
+    environ = dict(HIVE)
+    monkeypatch.setattr(store_module, "redis_client", lambda env: store.redis if env is environ else None)
+    assert hive_ledger.report(502, environ=environ, now_ms=1_000) is True
+    assert hive_ledger.read(store.redis, "sw", NAME) == {"failed": [[1_000, 502]]}
+
+
 def test_a_report_on_an_unreachable_redis_is_dropped(hive):
+    from redis.exceptions import RedisError
+
     class Down:
         def __getattr__(self, name):
             def fail(*args, **kwargs):
