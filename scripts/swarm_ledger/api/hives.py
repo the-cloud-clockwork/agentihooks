@@ -60,7 +60,7 @@ def view(store: object, now_ms: int) -> list[dict]:
     for hive in hives:
         sessions = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
         if hive["name"] == hive["id"]:
-            hive["name"] = store.redis.hget(f"{ports.hive().auth.PREFIX}:member:{hive['id']}", "name") or hive["id"]
+            hive["name"] = (ports.hive().auth.member(store.redis, hive["id"]) or {}).get("name") or hive["id"]
         hive["live"] = registry.live(hive, now_ms)
         hive["master"] = leads.get(hive["id"])
         hive["slots"] = [

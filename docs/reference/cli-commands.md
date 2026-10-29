@@ -63,6 +63,7 @@ downgrade cannot leave a process serving a port nothing points at. See
 | Flag | Description |
 |------|-------------|
 | `--bundle <path>` | Path to bundle directory. First-time: links the bundle and runs global install. |
+| `--user-bundle <path>` | Path to the personal user bundle. Linked beside the root bundle, which stays linked; kept by `--force`. `AGENTIHOOKS_USER_BUNDLE_PATH` names one when none is linked. |
 | `--target claude\|codex` | Install only the selected supported harness. |
 | `--verbose`, `-v` | Show all installer output, including linked skills and configuration details. |
 | `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,anton` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
@@ -432,7 +433,7 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 | `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |
 | `--profile <name>` | Render this role profile once, record its home in the launch report and mount that home in the launched session; see [Profile launch home](profile-launch-home.md) |
 | `--overlay <name>` | Overlay the profile wears; repeat for up to three |
-| `--bundle-revision <commit>` | Render the profile only from this bundle commit |
+| `--bundle-revision <commit>` | Render the profile only from this bundle commit. With a user bundle linked the value is `<root commit>:<user commit>`, which the swarm records at launch; a root-only value is refused then rather than rendering the mutable user tree |
 
 Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
 `failed`, `pending`), `account`, `placement`, and `handoff=done|failed` with
@@ -482,7 +483,7 @@ agentihooks select-profile engineer --home="$HOME/.agentihooks/profiles/.homes/e
 | `--agent claude\|codex\|copilot` | Harness (default `claude`); per-run profiles support `claude` and `codex` |
 | `--model`, `--effort minimal\|low\|medium\|high\|xhigh\|max` | Model and effort; otherwise the profile's `profile.yml` defaults, then the harness defaults |
 | `--overlay <name>` | Wear this overlay; repeat for up to three |
-| `--bundle-revision <commit>` | Render only from this bundle commit |
+| `--bundle-revision <commit>` | Render only from this bundle commit; `<root commit>:<user commit>` when a user bundle is linked |
 | `--home <dir>` | Mount this rendered home instead of rendering; refused unless its binding matches the profile and harness and its persona and sources are unchanged |
 | `--dry-run` | Print the selected environment and `argv=` line without starting the harness |
 

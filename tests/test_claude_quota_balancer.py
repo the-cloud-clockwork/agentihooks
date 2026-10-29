@@ -1037,10 +1037,10 @@ def test_the_master_overflow_still_fails_when_every_account_is_closed(monkeypatc
 
 
 def test_the_master_overflow_keeps_off_a_reserved_account_while_another_is_open(monkeypatch, tmp_path):
-    env = {**_three(monkeypatch), "AGENTIHOOKS_RESERVE_ACCOUNTS": "LOW, BEST"}
+    env = {**_three(monkeypatch), "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST, MID"}
     full = {"BEST": 6, "MID": 6, "LOW": 4}
     decision = balancer.select_master_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000)
-    assert (decision.account, decision.source) == ("MID", "master overflow")
+    assert (decision.account, decision.source) == ("LOW", "master overflow")
     reserved = {**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST,MID,LOW"}
     decision = balancer.select_master_credential(reserved, cache_file=tmp_path / "c.json", sessions=full, now=1000)
     assert (decision.account, decision.source) == ("BEST", "master overflow")
@@ -1068,4 +1068,19 @@ def test_the_master_overflow_honours_the_fable_week_when_asked(monkeypatch, tmp_
             env, cache_file=tmp_path / "c.json", sessions={"SPENT": 6, "OPEN": 6}, now=1000
         ).account
         == "SPENT"
+    )
+
+
+def test_the_master_overflow_ranks_by_the_fable_week_when_asked(monkeypatch, tmp_path):
+    first = balancer.parse_probe("A", _stream(0.10, 0.20, 0.50), 100)
+    second = balancer.parse_probe("B", _stream(0.10, 0.20, 0.10), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([first, second], "cached"))
+    env = {"AH_CC_TOKEN_A": "a", "AH_CC_TOKEN_B": "b"}
+    full = {"A": 6, "B": 6}
+    ranked = balancer.select_master_credential(
+        env, cache_file=tmp_path / "c.json", sessions=full, include_fable=True, now=1000
+    )
+    assert ranked.account == "B"
+    assert (
+        balancer.select_master_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000).account == "A"
     )

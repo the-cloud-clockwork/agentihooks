@@ -91,6 +91,8 @@ class ResourceClient:
             headers={"Content-Type": "application/json", **self.credentials},
             method="GET" if payload is None else "POST",
         )
+        for name, value in (writer_header() if path == "operations" else {}).items():
+            request.add_header(name, value)
         with ledger_link.urlopen(request, self.timeout) as response:
             return json.loads(response.read())
 
@@ -214,6 +216,13 @@ def failure(exc: urllib.error.HTTPError) -> tuple[urllib.error.HTTPError, dict]:
     except (ValueError, KeyError, TypeError):
         return replay, {}
     return replay, error if isinstance(error, dict) else {}
+
+
+def writer_header() -> dict:
+    try:
+        return {schemas.WORKTREE_HEADER: quote(os.getcwd())}
+    except FileNotFoundError:
+        return {}
 
 
 def retryable(replay: urllib.error.HTTPError, error: dict, fetched: set) -> bool:

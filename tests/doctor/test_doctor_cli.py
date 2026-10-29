@@ -76,6 +76,15 @@ def env(monkeypatch, memory_path):
     monkeypatch.setattr(doctor, "linked_bundle", lambda: memory_path / "bundle")
     monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {})
     monkeypatch.setattr(doctor.loop, "speed", lambda *args: [])
+    monkeypatch.setattr(
+        doctor.scheduled_tick,
+        "fire",
+        lambda *args: [
+            list(swarm_cli.run_tick(store, s))
+            for s in store.slugs()
+            if s.endswith(doctor.SUFFIX) and store.config(s).state == "running"
+        ],
+    )
     monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
     assert swarm_cli.main([WATCHED, "create", "--repo", "/repo"]) == 0
     return store, rt, memory_path
@@ -126,6 +135,26 @@ def test_a_proof_doctor_on_a_scratch_folder_needs_its_own_redis(env, monkeypatch
     assert capsys.readouterr().err.strip() == f"doctor: {ledger_creator.REDIS}"
     assert DOCTOR not in store.slugs()
     assert not (tmp / f"{DOCTOR}.json").exists()
+
+
+@pytest.mark.parametrize("closed", [False, True], ids=["new", "reopened"])
+def test_start_returns_before_any_tick_step_and_leaves_the_first_tick_to_a_detached_child(
+    env, monkeypatch, capsys, closed
+):
+    store, _, _ = env
+    if closed:
+        assert doctor.main([WATCHED, "start"]) == 0
+        assert doctor.main([WATCHED, "stop"]) == 0
+        capsys.readouterr()
+    ticks, detached = [], []
+    monkeypatch.setattr(swarm_cli, "run_tick", lambda *args, **kwargs: ticks.append(args) or [])
+    monkeypatch.setattr("scripts.swarm.scheduled_tick.fire", lambda *args: detached.append(args))
+    assert doctor.main([WATCHED, "start"]) == 0
+    assert ticks == [] and detached == [({}, "", store.redis)]
+    out = capsys.readouterr().out.splitlines()
+    assert ledger_link.page_line(DOCTOR) in out
+    assert json.dumps({"swarm": DOCTOR, "state": "running"}) in out
+    assert store.config(DOCTOR).state == "running" and store.agents(DOCTOR) == []
 
 
 def test_start_links_both_ledgers_starts_the_doctor_and_registers_peer_masters(env):

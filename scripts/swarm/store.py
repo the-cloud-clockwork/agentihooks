@@ -179,10 +179,13 @@ class RedisStore:
 
     def gate_lift(self, slug: str, scope: str, subject: str, gate: str) -> dict:
         raw = self.redis.hget(self.key(slug, "gate-lifts", scope, subject), gate)
-        return json.loads(raw) if raw else {}
+        record = json.loads(raw) if raw else {}
+        dropped = self.redis.hget(self.key(slug, "gate-lift-drops"), subject) if scope == "tasks" else None
+        return {} if dropped and record.get("at", 0) <= float(dropped) else record
 
     def drop_task_lifts(self, slug: str, task: str) -> None:
-        self.redis.delete(self.key(slug, "gate-lifts", "tasks", task))
+        seconds, micros = self.redis.time()
+        self.redis.hset(self.key(slug, "gate-lift-drops"), task, f"{seconds}.{micros:06d}")
 
     @property
     def operation_journal(self) -> "OperationJournal":
@@ -526,6 +529,7 @@ class RedisStore:
         return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
 
     def count_claim(self, slug, task):
+        self.redis.hdel(self.key(slug, "pending-lives"), task)
         self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
         return self.redis.hincrby(self.key(slug, "started-lives"), task)
 
@@ -533,11 +537,12 @@ class RedisStore:
         from redis.exceptions import WatchError
 
         key, lives = self.key(slug, "claim", task), self.key(slug, "started-lives")
+        pending = self.key(slug, "pending-lives")
         guards = self._claim_guards(slug, task)
         for _ in range(3):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(key, f"{key}:generation", f"{key}:refunded", lives, *guards)
+                    pipe.watch(key, f"{key}:generation", f"{key}:refunded", lives, pending, *guards)
                     if (
                         pipe.get(key) != agent
                         or int(pipe.get(f"{key}:generation") or 0) != generation
@@ -545,13 +550,17 @@ class RedisStore:
                         or any(pipe.exists(guard) for guard in guards)
                     ):
                         return False
+                    waiting = pipe.hget(pending, task)
                     started = self._started_lives(slug, task)
-                    if int(pipe.hget(lives, task) or started) <= 0:
+                    if not waiting and int(pipe.hget(lives, task) or started) <= 0:
                         return False
                     pipe.multi()
                     pipe.set(f"{key}:refunded", generation)
-                    pipe.hsetnx(lives, task, started)
-                    pipe.hincrby(lives, task, -1)
+                    if waiting:
+                        self._cancel_pending(pipe, slug, task, waiting)
+                    else:
+                        pipe.hsetnx(lives, task, started)
+                        pipe.hincrby(lives, task, -1)
                     pipe.execute()
                     return True
                 except WatchError:
@@ -565,9 +574,21 @@ class RedisStore:
         return self._started_lives(slug, task)
 
     def reset_claims(self, slug, task):
+        self.cancel_pending_life(slug, task)
         self.redis.hset(self.key(slug, "started-lives"), task, 0)
         self.redis.hdel(self.key(slug, "launch-failures"), task)
         self.clear_failed_harness(slug, task)
+
+    def pend_life(self, slug: str, task: str, execution: str) -> None:
+        self.redis.hset(self.key(slug, "pending-lives"), task, execution)
+
+    def cancel_pending_life(self, slug: str, task: str) -> None:
+        if waiting := self.redis.hget(self.key(slug, "pending-lives"), task):
+            self._cancel_pending(self.redis, slug, task, waiting)
+
+    def _cancel_pending(self, client, slug: str, task: str, execution: str) -> None:
+        client.hsetnx(self.key(slug, "counted-executions"), execution, task)
+        client.hdel(self.key(slug, "pending-lives"), task)
 
     def note_launch_failure(self, slug, task, reason, harness=""):
         self.redis.hset(self.key(slug, "launch-failures"), task, reason)
