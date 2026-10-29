@@ -1198,6 +1198,48 @@ def test_scheduler_failure_names_the_exporting_session(monkeypatch, capsys):
     assert capsys.readouterr().err == "trace_flush export-session: scheduler fallback: StateConflict: changed\n"
 
 
+def test_scheduler_deadline_restores_the_previous_alarm_after_interruption(monkeypatch):
+    import signal
+    from types import SimpleNamespace
+    from unittest.mock import Mock, call
+
+    previous = Mock()
+    handler = Mock(return_value=previous)
+    timer = Mock(return_value=(30.0, 2.0))
+    monkeypatch.setattr(trace_flush.signal, "signal", handler)
+    monkeypatch.setattr(trace_flush.signal, "setitimer", timer)
+    monkeypatch.setattr(trace_flush, "time", SimpleNamespace(monotonic=Mock(side_effect=[10.0, 12.0]), sleep=Mock()))
+    monkeypatch.setattr(trace_flush, "timer_wait", Mock(side_effect=KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    assert handler.call_args_list[-1] == call(signal.SIGALRM, previous)
+    assert timer.call_args_list == [
+        call(signal.ITIMER_REAL, trace_flush.POLL_LIMIT_SEC, trace_flush.POLL_LIMIT_SEC),
+        call(signal.ITIMER_REAL, 0),
+        call(signal.ITIMER_REAL, 28.0, 2.0),
+    ]
+    trace_flush.time.sleep.assert_not_called()
+
+
+def test_default_supervisor_scheduler_failure_names_its_session(home, tmp_path, monkeypatch, capsys):
+    from unittest.mock import Mock
+
+    from scripts.events.bus import StateConflict
+
+    transcript = tmp_path / "transcript.jsonl"
+    _grow(transcript)
+    _request("export-session", transcript)
+    clock, owner = Clock(), {"alive": True}
+    clock.hooks.append((1, lambda: owner.update(alive=False)))
+    monkeypatch.setattr(trace_flush, "timer_wait", Mock(side_effect=StateConflict("changed")))
+    monkeypatch.setattr(trace_flush.time, "sleep", clock.sleep)
+    assert trace_flush.supervise(
+        "export-session", trace_flush.Budget(15, 5, 3), lambda *args: True, clock, clock.sleep,
+        lambda record: owner["alive"],
+    ) == "owner exited"
+    assert capsys.readouterr().err == "trace_flush export-session: scheduler fallback: StateConflict: changed\n"
+
+
 def test_terminal_exporter_failure_names_the_session(monkeypatch, capsys):
     from unittest.mock import Mock
 

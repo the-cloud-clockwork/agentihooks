@@ -303,7 +303,7 @@ def scheduled_wait(delay: float, session_id: str = "unknown") -> None:
 
     previous = signal.signal(signal.SIGALRM, expired)
     started = time.monotonic()
-    remaining, interval = signal.setitimer(signal.ITIMER_REAL, POLL_LIMIT_SEC)
+    remaining, interval = signal.setitimer(signal.ITIMER_REAL, POLL_LIMIT_SEC, POLL_LIMIT_SEC)
     try:
         try:
             timer_wait(delay, timeout=POLL_LIMIT_SEC)
