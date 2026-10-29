@@ -280,21 +280,15 @@ def _held(raw: str) -> tuple[str, str] | None:
 
 def managed_held() -> set[tuple[str, str]]:
     """Transport records are written before the server starts; an unreadable record or store holds what it last held."""
-    from hooks._redis import get_redis
-
-    redis = get_redis()
-    if redis is None:
-        return set()
-    from redis.exceptions import RedisError
-
     from scripts.codex_session import binding
-    from scripts.swarm.store import RedisStore
+    from scripts.events import state
 
-    store = RedisStore(redis)
     try:
-        raws = [raw for slug in store.slugs() for raw in redis.hvals(store.key(slug, binding.RECORDS))]
-    except RedisError:
+        raws = binding.transport_records()
+    except state.unavailable():
         return set(_LAST_HELD)
+    if raws is None:
+        return set()
     _LAST_HELD.clear()
     _LAST_HELD.update(held for raw in raws if (held := _held(raw)))
     return set(_LAST_HELD)
@@ -338,21 +332,12 @@ def fleet_held(environ: Mapping[str, str] | None = None) -> dict[str, int]:
 
     if RuntimeRouter.from_environ((), os.environ if environ is None else environ).spawn_backend() == LOCAL:
         return {}
-    from hooks._redis import get_redis
-
-    redis = get_redis()
-    if redis is None:
-        return {}
-    from redis.exceptions import RedisError
-
-    from scripts.swarm import lease
-    from scripts.swarm.store import RedisStore
+    from scripts.events import state
     from scripts.swarm_v2 import accounts
 
-    store = RedisStore(redis)
     try:
-        return accounts.fleet_held(store, lease.now_ms(store))
-    except RedisError:
+        return accounts.fleet_held_now()
+    except state.unavailable():
         return {}
 
 
@@ -360,15 +345,13 @@ def hive_held(harness: str) -> dict[str, int]:
     """Other live hives' sessions and unreported launches per account, as the launch reservation counts them."""
     import time
 
-    from redis.exceptions import RedisError
-
+    from scripts.events import state
     from scripts.routing import aggregate
     from scripts.swarm.commands import hive_id
-    from scripts.swarm.store import redis_client
 
     try:
-        return aggregate.elsewhere(redis_client(), harness, time.time(), hive_id())
-    except RedisError:
+        return aggregate.held_elsewhere(harness, time.time(), hive_id())
+    except state.unavailable():
         return {}
 
 

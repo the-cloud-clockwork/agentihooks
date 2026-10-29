@@ -86,6 +86,16 @@ def fleet_held(store: RedisStore, now: int) -> dict[str, int]:
     return held
 
 
+def fleet_held_now() -> dict[str, int]:
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    if redis is None:
+        return {}
+    store = RedisStore(redis)
+    return fleet_held(store, lease.now_ms(store))
+
+
 class AccountCapacity:
     """The authorization callback must validate a scoped launch grant on every call; the account comes from it."""
 
