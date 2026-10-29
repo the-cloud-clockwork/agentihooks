@@ -72,13 +72,13 @@ from scripts.doctor import (
 from scripts.doctor.priming import SUFFIX, TEMPLATE, cancel_master_items, doctor_slug
 from scripts.gates import Who
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import clearance
+from scripts.swarm import clearance, scheduled_tick
 from scripts.swarm import cli as swarm
 from scripts.swarm.health.findings import MINUTE_MS, limits
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.ledger_client import LEDGER_DIR
 from scripts.swarm.store import SwarmError
-from scripts.swarm_ledger import ledger_creator, ledger_relay
+from scripts.swarm_ledger import ledger_creator, ledger_link, ledger_relay
 
 BY = "doctor"
 ROOT = Path(__file__).resolve().parents[2]
@@ -176,6 +176,10 @@ def _pair_of(store, slug):
     return slug, doctor
 
 
+def _no_tick(store, slug):
+    return []
+
+
 def cmd_start(store, args):
     bundle = linked_bundle()
     if bundle is None:
@@ -208,9 +212,11 @@ def cmd_start(store, args):
     _pair(store, slug, doctor)
     loop.reset(store, doctor)
     if ledger.closed(doctor):
-        swarm.cmd_reopen(store, Namespace(slug=doctor, name=_name()))
+        swarm.cmd_reopen(store, Namespace(slug=doctor, name=_name(), tick=_no_tick))
+        print(ledger_link.page_line(doctor))
     else:
-        swarm.cmd_start(store, Namespace(slug=doctor))
+        swarm.cmd_start(store, Namespace(slug=doctor, tick=_no_tick))
+    scheduled_tick.fire({}, "", store.redis)
     _relay(slug, doctor, relay)
 
 

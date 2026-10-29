@@ -960,6 +960,22 @@
    "ddd80769766b432d"
   ]
  },
+ "tests/test_credential_guard.py::test_gh_commands_that_print_a_token_are_refused": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 20,
+  "texts": [
+   "bb1fb39d73ec0449"
+  ]
+ },
+ "tests/test_credential_guard.py::test_gh_commands_that_print_no_token_pass": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 12,
+  "texts": [
+   "0c85cd31a58dff89"
+  ]
+ },
  "tests/test_credential_guard.py::test_guard_decision": {
   "assertions": 1,
   "calls": 1,

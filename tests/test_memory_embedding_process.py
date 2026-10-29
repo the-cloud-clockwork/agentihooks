@@ -1,0 +1,663 @@
+import json
+import os
+import subprocess
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+import pytest
+
+from hooks.memory import catalog
+
+pytestmark = pytest.mark.unit
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def prepared(tmp_path):
+    from tests import sv2_idx03_cases
+    from tests.sv2_idx03_cases import Index
+
+    inputs = json.loads(sv2_idx03_cases.FIXTURE.read_text())
+    index = Index(inputs, tmp_path)
+    index.session.append(inputs["turns"][:-1])
+    index.session.build()
+    index.session.validate()
+    index.session.activate("current", 0)
+    yield index
+    index.session.catalog.close()
+
+
+@pytest.fixture
+def provider():
+    requests = []
+    state = {"status": 200}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append((self.path, self.headers["Authorization"], payload))
+            data = [{"index": i, "embedding": [1.0, 0.0, 0.0, 0.0]} for i in range(len(payload["input"]))]
+            response = state.get("body", json.dumps({"model": payload["model"], "data": data}).encode())
+            self.send_response(state["status"])
+            self.send_header("Content-Length", str(len(response)))
+            if "location" in state:
+                self.send_header("Location", state["location"])
+            self.end_headers()
+            self.wfile.write(response)
+
+        def log_message(self, *_):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_port}/embeddings", requests, state
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=5)
+
+
+def environment(index, provider):
+    return {
+        **os.environ,
+        "AGENTIHOOKS_SESSION_CATALOG": str(index.session.path),
+        "AGENTIHOOKS_SESSION_EMBED_CORPUS": index.domain,
+        "AGENTIHOOKS_SESSION_EMBED_PROJECTS": json.dumps(index.inputs["grant"]["projects"]),
+        "AGENTIHOOKS_SESSION_EMBED_GENERATION": index.generation,
+        "AGENTIHOOKS_SESSION_EMBED_MODEL": "fixture-hash-embedder-4",
+        "AGENTIHOOKS_SESSION_EMBED_DIMENSION": "4",
+        "AGENTIHOOKS_SESSION_EMBED_URL": provider[0],
+        "AGENTIHOOKS_SESSION_EMBED_TOKEN": "fixture-provider-token",
+    }
+
+
+def run(env):
+    return subprocess.run(
+        [sys.executable, "-m", "hooks.memory.embedding_process"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_process_embeds_active_chunks_and_restart_is_idempotent(prepared, provider):
+    env = environment(prepared, provider)
+    result = run(env)
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["state"] == "drained"
+    assert report["embedded"]
+    assert report["pending"] == 0
+    prepared.worker.register(
+        prepared.domain, prepared.generation, prepared.worker.model(prepared.domain, prepared.generation)
+    )
+    vectors = prepared.vectors()
+    assert len(vectors) == len(report["embedded"])
+    assert all(vector["vector"] == [1.0, 0.0, 0.0, 0.0] for vector in vectors)
+    assert provider[1][0][0] == "/embeddings"
+    assert provider[1][0][1] == "Bearer fixture-provider-token"
+    assert provider[1][0][2]["model"] == "fixture-hash-embedder-4"
+    count = len(provider[1])
+    repeated = run(env)
+    assert repeated.returncode == 0, repeated.stderr
+    assert json.loads(repeated.stdout)["embedded"] == []
+    assert len(provider[1]) == count
+
+
+def test_process_preserves_pending_work_on_outage_and_resumes(prepared, provider):
+    provider[2]["status"] = 503
+    env = environment(prepared, provider)
+    failed = run(env)
+    assert failed.returncode == 0, failed.stderr
+    report = json.loads(failed.stdout)
+    assert report["state"] == "deferred"
+    assert report["pending"] > 0
+    assert report["embedded"] == []
+    provider[2]["status"] = 200
+    resumed = run(env)
+    assert resumed.returncode == 0, resumed.stderr
+    assert json.loads(resumed.stdout)["pending"] == 0
+    assert json.loads(resumed.stdout)["embedded"]
+
+
+def test_process_never_embeds_a_session_outside_its_project_grant(prepared, provider):
+    env = {**environment(prepared, provider), "AGENTIHOOKS_SESSION_EMBED_PROJECTS": '["other-project"]'}
+    result = run(env)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["embedded"] == []
+    assert not provider[1]
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [
+        "CATALOG",
+        "EMBED_CORPUS",
+        "EMBED_PROJECTS",
+        "EMBED_GENERATION",
+        "EMBED_MODEL",
+        "EMBED_DIMENSION",
+        "EMBED_URL",
+        "EMBED_TOKEN",
+    ],
+)
+def test_process_refuses_missing_configuration(prepared, provider, setting):
+    env = environment(prepared, provider)
+    env.pop(f"AGENTIHOOKS_SESSION_{setting}")
+    result = run(env)
+    assert result.returncode != 0
+    assert "required" in result.stderr
+    assert "fixture-provider-token" not in result.stderr
+    assert not provider[1]
+
+
+def test_main_runs_in_process_and_closes_its_catalog(prepared, provider, monkeypatch, capsys):
+    from hooks.memory import embedding_process
+
+    for key, value in environment(prepared, provider).items():
+        monkeypatch.setenv(key, value)
+    real_cycle, cursors = embedding_process.cycle, []
+
+    def cycle(worker, settings, after):
+        cursors.append(after)
+        assert len(cursors) == 1
+        return real_cycle(worker, settings, after)
+
+    monkeypatch.setattr(embedding_process, "cycle", cycle)
+    assert embedding_process.main([]) == 0
+    assert cursors == [""]
+    report = json.loads(capsys.readouterr().out)
+    assert report["state"] == "drained"
+    assert report["pending"] == 0
+    assert report["embedded"]
+    assert report["skipped"] == 0
+    assert report["after"] == ""
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [
+        "CATALOG",
+        "EMBED_CORPUS",
+        "EMBED_PROJECTS",
+        "EMBED_GENERATION",
+        "EMBED_MODEL",
+        "EMBED_DIMENSION",
+        "EMBED_URL",
+        "EMBED_TOKEN",
+    ],
+)
+def test_configure_requires_each_setting(prepared, provider, setting):
+    from hooks.memory.embedding_process import configure
+
+    env = environment(prepared, provider)
+    env.pop(f"AGENTIHOOKS_SESSION_{setting}")
+    with pytest.raises(SystemExit) as error:
+        configure(env)
+    assert str(error.value) == (
+        "session embedding configuration is required: CATALOG, EMBED_CORPUS, EMBED_PROJECTS, "
+        "EMBED_GENERATION, EMBED_MODEL, EMBED_DIMENSION, EMBED_URL, EMBED_TOKEN"
+    )
+
+
+@pytest.mark.parametrize("projects", ["{}", "[]", '[""]', "[null]", "[1]"])
+def test_configure_refuses_invalid_projects(prepared, provider, projects):
+    from hooks.memory.embedding_process import configure
+
+    env = environment(prepared, provider)
+    env["AGENTIHOOKS_SESSION_EMBED_PROJECTS"] = projects
+    with pytest.raises(ValueError) as error:
+        configure(env)
+    assert str(error.value) == "embedding projects must be a nonempty JSON array of project names"
+
+
+@pytest.mark.parametrize(
+    "url,message",
+    [
+        ("http://provider.example/embed", "embedding URL requires HTTPS or loopback HTTP"),
+        ("https:///embed", "embedding URL requires HTTPS or loopback HTTP"),
+        ("https://user@host/embed", "embedding URL must not carry credentials, query parameters or a fragment"),
+        (
+            "https://host/embed?token=fixture",
+            "embedding URL must not carry credentials, query parameters or a fragment",
+        ),
+        ("https://host/embed#fragment", "embedding URL must not carry credentials, query parameters or a fragment"),
+    ],
+)
+def test_configure_refuses_unsafe_provider_urls(prepared, provider, url, message):
+    from hooks.memory.embedding_process import configure
+
+    env = environment(prepared, provider)
+    env["AGENTIHOOKS_SESSION_EMBED_URL"] = url
+    with pytest.raises(ValueError) as error:
+        configure(env)
+    assert str(error.value) == message
+
+
+@pytest.mark.parametrize(
+    "setting,value",
+    [
+        ("EMBED_BATCH_SIZE", "0"),
+        ("EMBED_BATCH_CHARS", "-1"),
+        ("EMBED_MAX_BATCHES", "0"),
+        ("EMBED_SESSION_LIMIT", "0"),
+    ],
+)
+def test_configure_refuses_invalid_bounds(prepared, provider, setting, value):
+    from hooks.memory.embedding_process import configure
+
+    env = environment(prepared, provider)
+    env[f"AGENTIHOOKS_SESSION_{setting}"] = value
+    with pytest.raises(ValueError) as error:
+        configure(env)
+    assert str(error.value) == "embedding bounds must be positive"
+
+
+def test_configure_preserves_all_runtime_settings(prepared, provider):
+    from hooks.memory.embedding_process import configure
+
+    env = environment(prepared, provider)
+    settings = configure(env)
+    assert settings.catalog == str(prepared.session.path)
+    assert settings.grant.principal == "session-embedding-process"
+    assert settings.grant.corpus == prepared.domain
+    assert settings.grant.projects == frozenset(prepared.inputs["grant"]["projects"])
+    assert settings.generation == prepared.generation
+    assert settings.provider.url == provider[0]
+    assert settings.provider.model.model == "fixture-hash-embedder-4"
+    assert settings.provider.model.dimension == 4
+    assert settings.provider.token == "fixture-provider-token"
+    assert "fixture-provider-token" not in repr(settings)
+    assert (settings.limits.batch_size, settings.limits.batch_chars, settings.limits.max_batches) == (32, 64000, 8)
+    assert settings.session_limit == 100
+    changed = configure(
+        {
+            **env,
+            "AGENTIHOOKS_SESSION_EMBED_BATCH_SIZE": "1",
+            "AGENTIHOOKS_SESSION_EMBED_BATCH_CHARS": "2000",
+            "AGENTIHOOKS_SESSION_EMBED_MAX_BATCHES": "2",
+            "AGENTIHOOKS_SESSION_EMBED_SESSION_LIMIT": "3",
+        }
+    )
+    assert (changed.limits.batch_size, changed.limits.batch_chars, changed.limits.max_batches) == (1, 2000, 2)
+    assert changed.session_limit == 3
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_provider_defers_retryable_http_errors(prepared, provider, status):
+    from hooks.memory.embedding_process import configure
+    from hooks.memory.embeddings import TransientEmbeddingError
+
+    provider[2]["status"] = status
+    adapter = configure(environment(prepared, provider)).provider
+    with pytest.raises(TransientEmbeddingError) as error:
+        adapter.embed(["text"])
+    assert str(error.value) == "embedding provider unavailable"
+
+
+@pytest.mark.parametrize("status", [301, 400, 401, 403])
+def test_provider_refuses_permanent_http_errors(prepared, provider, status):
+    from hooks.memory.embedding_process import configure
+
+    provider[2]["status"] = status
+    adapter = configure(environment(prepared, provider)).provider
+    with pytest.raises(ValueError) as error:
+        adapter.embed(["text"])
+    assert str(error.value) == "embedding provider refused the request"
+
+
+def test_provider_posts_the_model_and_preserves_input_order(prepared, provider):
+    from hooks.memory.embedding_process import configure
+
+    adapter = configure(environment(prepared, provider)).provider
+    assert adapter.embed(["one", "two"]) == [[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]
+    assert provider[1] == [
+        (
+            "/embeddings",
+            "Bearer fixture-provider-token",
+            {
+                "model": "fixture-hash-embedder-4",
+                "input": ["one", "two"],
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "body,error",
+    [
+        (b'{"model":"other","data":[]}', ValueError),
+        (b'{"model":"fixture-hash-embedder-4","data":[{"index":2,"embedding":[1,0,0,0]}]}', ValueError),
+        (b'{"model":"fixture-hash-embedder-4","data":[{"index":0,"embedding":[1]}]}', catalog.Conflict),
+        (b"broken json", ValueError),
+        (b"x" * ((2 << 20) + 1), ValueError),
+    ],
+    ids=["other-model", "invalid-index", "wrong-dimension", "broken-json", "oversized"],
+)
+def test_provider_rejects_invalid_or_oversized_responses(prepared, provider, body, error):
+    from hooks.memory.embedding_process import configure
+
+    provider[2]["body"] = body
+    with pytest.raises(error):
+        configure(environment(prepared, provider)).provider.embed(["text"])
+
+
+def test_provider_reorders_vectors_by_response_index(prepared, provider):
+    from hooks.memory.embedding_process import configure
+
+    provider[2]["body"] = json.dumps(
+        {
+            "model": "fixture-hash-embedder-4",
+            "data": [
+                {"index": 1, "embedding": [0, 1, 0, 0]},
+                {"index": 0, "embedding": [1, 0, 0, 0]},
+            ],
+        }
+    ).encode()
+    assert configure(environment(prepared, provider)).provider.embed(["first", "second"]) == [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+    ]
+
+
+def test_provider_never_follows_a_redirect_with_its_bearer(prepared, provider):
+    from hooks.memory.embedding_process import configure
+
+    provider[2].update(status=302, location=provider[0] + "/redirect")
+    with pytest.raises(ValueError, match="refused"):
+        configure(environment(prepared, provider)).provider.embed(["text"])
+    assert len(provider[1]) == 1
+
+
+def test_cycle_wraps_its_bounded_scan_and_does_not_activate_an_index(prepared, provider):
+    from dataclasses import replace
+
+    from hooks.memory.embedding_process import configure, cycle
+
+    settings = replace(configure(environment(prepared, provider)), session_limit=1)
+    prepared.worker.register(prepared.domain, prepared.generation, settings.provider.model)
+    report = cycle(prepared.worker, settings, "")
+    assert report["after"] == prepared.inputs["session_uid"]
+    assert report["embedded"]
+    assert report["skipped"] == 0
+    wrapped = cycle(prepared.worker, settings, report["after"])
+    assert wrapped["after"] == ""
+    assert wrapped["embedded"] == []
+    assert prepared.worker.active(prepared.domain) == {"index_generation": None, "revision": 0}
+
+
+def test_cycle_skips_forbidden_sessions_but_refuses_forbidden_queued_work(prepared, provider):
+    from dataclasses import replace
+
+    from hooks.memory.api.ingest import Grant
+    from hooks.memory.archive import EvidenceRefused
+    from hooks.memory.embedding_process import configure, cycle
+    from tests.sv2_idx02_cases import grant
+
+    settings = configure(environment(prepared, provider))
+    prepared.worker.register(prepared.domain, prepared.generation, settings.provider.model)
+    narrow = replace(settings, grant=Grant("worker", prepared.domain, frozenset({"other"})))
+    report = cycle(prepared.worker, narrow, "")
+    assert report["skipped"] == 1
+    assert report["embedded"] == []
+    from tests.sv2_idx03_cases import target
+
+    prepared.worker.enqueue(grant(prepared.inputs), target(prepared.inputs, "index_generation"), 1.0)
+    before = prepared.work()
+    with pytest.raises(EvidenceRefused):
+        cycle(prepared.worker, narrow, "")
+    assert prepared.work() == before
+    assert provider[1] == []
+
+
+def test_cycle_defers_a_provider_outage_without_losing_work(prepared, provider):
+    from hooks.memory.embedding_process import configure, cycle
+
+    settings = configure(environment(prepared, provider))
+    prepared.worker.register(prepared.domain, prepared.generation, settings.provider.model)
+    provider[2]["status"] = 503
+    deferred = cycle(prepared.worker, settings, "")
+    assert deferred["state"] == "deferred"
+    assert deferred["failed"]
+    assert deferred["pending"] > 0
+    provider[2]["status"] = 200
+    resumed = cycle(prepared.worker, settings, "")
+    assert resumed["state"] == "drained"
+    assert resumed["embedded"]
+    assert resumed["pending"] == 0
+
+
+def test_main_pages_through_every_session_then_exits(prepared, provider, monkeypatch, capsys):
+    from hooks.memory import embedding_process
+
+    for key, value in environment(prepared, provider).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("AGENTIHOOKS_SESSION_EMBED_BATCH_SIZE", "1")
+    cursors, limits = [], []
+    pages = iter([{"after": "cursor", "pending": 1}, {"after": "", "pending": 0}])
+
+    def cycle(worker, settings, after):
+        cursors.append(after)
+        limits.append(worker.limits.batch_size)
+        return next(pages)
+
+    monkeypatch.setattr(embedding_process, "cycle", cycle)
+    assert embedding_process.main([]) == 0
+    assert cursors == ["", "cursor"]
+    assert limits == [1, 1]
+    assert capsys.readouterr().out == '{"after": "cursor", "pending": 1}\n{"after": "", "pending": 0}\n'
+
+
+def test_main_describes_its_single_bounded_pass(capsys):
+    from hooks.memory import embedding_process
+
+    with pytest.raises(SystemExit) as exit_info:
+        embedding_process.main(["--help"])
+    assert exit_info.value.code == 0
+    assert "Run one bounded session embedding pass." in capsys.readouterr().out.splitlines()
+
+
+def test_main_flushes_each_report_as_it_is_printed(prepared, provider, monkeypatch):
+    from hooks.memory import embedding_process
+
+    class Stream:
+        def __init__(self):
+            self.events = []
+
+        def write(self, text):
+            self.events.append(text)
+            return len(text)
+
+        def flush(self):
+            self.events.append(None)
+
+    for key, value in environment(prepared, provider).items():
+        monkeypatch.setenv(key, value)
+    pages = iter([{"after": ""}])
+    monkeypatch.setattr(embedding_process, "cycle", lambda worker, settings, after: next(pages))
+    stream = Stream()
+    monkeypatch.setattr(sys, "stdout", stream)
+    assert embedding_process.main([]) == 0
+    assert stream.events == ['{"after": ""}', "\n", None]
+
+
+def test_scope_checks_touch_only_the_selected_bounded_batch(prepared, provider, monkeypatch):
+    from dataclasses import replace
+
+    from hooks.memory import archive
+    from hooks.memory.embedding_process import ScopedProvider, configure
+    from hooks.memory.index_worker import IndexWorker, Limits
+
+    settings = configure(environment(prepared, provider))
+    settings = replace(settings, limits=Limits(1, 64000, 1))
+    prepared.worker.register(prepared.domain, prepared.generation, settings.provider.model)
+    prepared.enqueue(1.0)
+    before = len(prepared.work())
+    assert before > 1
+    worker = IndexWorker(prepared.session.catalog, settings.limits)
+    reads = []
+    original = worker.catalog.session
+
+    def counted(domain, uid):
+        reads.append((domain, uid))
+        return original(domain, uid)
+
+    def no_history(*_):
+        raise AssertionError("drain loaded session history")
+
+    monkeypatch.setattr(worker.catalog, "session", counted)
+    monkeypatch.setattr(archive, "_readable", no_history)
+    report = worker.drain(ScopedProvider(worker, settings), prepared.domain, prepared.generation, 2.0)
+    assert len(report["embedded"]) == 1
+    assert report["pending"] == before - 1
+    assert reads == [(prepared.domain, prepared.inputs["session_uid"])]
+    assert len(provider[1]) == 1
+    assert len(provider[1][0][2]["input"]) == 1
+
+
+def test_scoped_provider_refuses_a_changed_batch(prepared, provider, monkeypatch):
+    from hooks.memory.archive import EvidenceRefused
+    from hooks.memory.embedding_process import ScopedProvider, configure
+
+    settings = configure(environment(prepared, provider))
+    monkeypatch.setattr(prepared.worker, "_batch", lambda *_: [])
+    with pytest.raises(EvidenceRefused) as error:
+        ScopedProvider(prepared.worker, settings).embed(["not selected"])
+    assert str(error.value) == "embedding batch changed before authorization"
+    assert not provider[1]
+
+
+@pytest.mark.parametrize("change", ["missing", "restricted", "project", "corpus"])
+def test_scoped_provider_refuses_unavailable_or_unauthorized_chunks(prepared, provider, monkeypatch, change):
+    from hooks.memory.archive import EvidenceRefused
+    from hooks.memory.embedding_process import ScopedProvider, configure
+
+    settings = configure(environment(prepared, provider))
+    chunk = {
+        "preview": "private",
+        "session_uid": prepared.inputs["session_uid"],
+        "access_domain": prepared.domain,
+        "project_ids": list(settings.grant.projects),
+    }
+    if change == "missing":
+        chunk["session_uid"] = "missing"
+    elif change == "restricted":
+        revision = prepared.session.catalog.session(prepared.domain, chunk["session_uid"])["revision"]
+        prepared.session.catalog.set_state(prepared.domain, chunk["session_uid"], "restricted", revision)
+    elif change == "project":
+        chunk["project_ids"] = ["outside"]
+    else:
+        chunk["access_domain"] = "outside"
+    monkeypatch.setattr(prepared.worker, "_batch", lambda *_: [chunk])
+    with pytest.raises(EvidenceRefused) as error:
+        ScopedProvider(prepared.worker, settings).embed(["private"])
+    assert str(error.value) == "embedding batch is outside the grant or no longer retained"
+    assert not provider[1]
+
+
+@pytest.mark.parametrize("url", ["https://provider.example/embed", "http://localhost/embed", "http://[::1]/embed"])
+def test_configure_accepts_secure_or_loopback_provider_urls(prepared, provider, url):
+    from hooks.memory.embedding_process import configure
+
+    env = environment(prepared, provider)
+    env["AGENTIHOOKS_SESSION_EMBED_URL"] = url
+    assert configure(env).provider.url == url
+
+
+@pytest.mark.parametrize(
+    "body,message",
+    [
+        (b'{"model":"other","data":[]}', "embedding provider returned another model"),
+        (
+            b'{"model":"fixture-hash-embedder-4","data":[{"index":2,"embedding":[1,0,0,0]}]}',
+            "embedding provider returned invalid indices",
+        ),
+        (b"x" * ((2 << 20) + 1), "embedding response exceeds 2 MiB"),
+        (
+            b'{"model":"fixture-hash-embedder-4","data":[{"index":0,"embedding":[NaN,0,0,0]}]}',
+            "embedding provider returned a non finite value",
+        ),
+    ],
+    ids=["other-model", "invalid-index", "oversized", "non-finite"],
+)
+def test_provider_response_refusals_are_explicit(prepared, provider, body, message):
+    from hooks.memory.embedding_process import configure
+
+    provider[2]["body"] = body
+    with pytest.raises(ValueError) as error:
+        configure(environment(prepared, provider)).provider.embed(["text"])
+    assert str(error.value) == message
+
+
+def test_provider_bounds_its_response_read_and_network_timeout(monkeypatch):
+    import io
+    from types import SimpleNamespace
+
+    from hooks.memory import embedding_process
+    from hooks.memory.embeddings import EmbeddingModel
+
+    body = json.dumps({"model": "fixture-hash-embedder-4", "data": [{"index": 0, "embedding": [1, 0, 0, 0]}]}).encode()
+    reads, requests = [], []
+
+    class Response(io.BytesIO):
+        def read(self, size=-1):
+            reads.append(size)
+            return super().read(size)
+
+    def open_request(request, timeout=None):
+        requests.append((request.get_method(), request.get_header("Content-type"), timeout))
+        return Response(body + b" " * ((2 << 20) - len(body)))
+
+    monkeypatch.setattr(embedding_process, "no_redirect_opener", lambda: SimpleNamespace(open=open_request))
+    adapter = embedding_process.Provider(
+        EmbeddingModel("fixture-hash-embedder-4", 4), "https://provider.example", "fixture"
+    )
+    assert adapter.embed(["text"]) == [[1, 0, 0, 0]]
+    assert reads == [(2 << 20) + 1]
+    assert requests == [("POST", "application/json", 30)]
+
+
+@pytest.mark.parametrize("failure", ["url", "timeout", "reset", "incomplete"])
+def test_provider_connection_failures_defer_without_details(monkeypatch, failure):
+    from http.client import IncompleteRead
+    from types import SimpleNamespace
+    from urllib.error import URLError
+
+    from hooks.memory import embedding_process
+    from hooks.memory.embeddings import EmbeddingModel, TransientEmbeddingError
+
+    def open_request(*args, **kwargs):
+        raise {
+            "url": URLError("private detail"),
+            "timeout": TimeoutError("private detail"),
+            "reset": ConnectionResetError("private detail"),
+            "incomplete": IncompleteRead(b"private detail"),
+        }[failure]
+
+    monkeypatch.setattr(embedding_process, "no_redirect_opener", lambda: SimpleNamespace(open=open_request))
+    adapter = embedding_process.Provider(
+        EmbeddingModel("fixture-hash-embedder-4", 4), "https://provider.example", "fixture"
+    )
+    with pytest.raises(TransientEmbeddingError) as error:
+        adapter.embed(["text"])
+    assert str(error.value) == "embedding provider unavailable"
+
+
+def test_cycle_counts_every_skipped_session(prepared, provider, monkeypatch):
+    from types import SimpleNamespace
+
+    from hooks.memory.archive import EvidenceRefused
+    from hooks.memory.embedding_process import configure, cycle
+
+    settings = configure(environment(prepared, provider))
+
+    def refuse(*args):
+        raise EvidenceRefused("outside grant")
+
+    db = SimpleNamespace(execute=lambda *_: SimpleNamespace(fetchall=lambda: [("one", "v"), ("two", "v")]))
+    worker = SimpleNamespace(catalog=SimpleNamespace(db=db), enqueue=refuse, drain=lambda *_: {})
+    assert cycle(worker, settings, "") == {"skipped": 2, "after": ""}

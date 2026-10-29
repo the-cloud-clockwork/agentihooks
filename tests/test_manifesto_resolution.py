@@ -389,4 +389,4 @@ def test_claude_persona_appends_manifestos_for_the_bundle_and_chain(monkeypatch,
 
     install._install_claude_persona(dirs, ["package:cicd"], bundle)
 
-    assert calls == [(bundle, dirs)]
+    assert calls == [(bundle, dirs, None)]

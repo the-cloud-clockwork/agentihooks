@@ -62,6 +62,7 @@ def keep(source: Path, out: Path, tests: set[str], moved: dict[str, dict[int, in
                 if start is not None and end is not None
             ]
             db.executemany("insert or ignore into arc (file_id, context_id, fromno, tono) values (?, ?, ?, ?)", shifted)
+        db.execute("delete from file where id not in (select file_id from arc union select file_id from line_bits)")
     return len({node(context.rsplit("|", 1)[0]) for _, context in contexts if context} & tests)
 
 

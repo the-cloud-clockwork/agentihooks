@@ -1,6 +1,13 @@
 {{- define "swarm.workerHive" }}
 {{- $root := .root }}
-{{- $workers := .workers }}
+{{- $workers := deepCopy .workers }}
+{{- $drain := int $workers.drainSeconds }}
+{{- if $root.Values.workers.rollout.enabled }}
+{{- $drain = int $root.Values.workers.rollout.drainSeconds }}
+{{- if or (lt $drain 0) (gt $drain 300) }}
+{{- fail "workers.rollout.drainSeconds must be between 0 and 300" }}
+{{- end }}
+{{- end }}
 {{- range $swarm := ($workers.masterSwarms | default list) }}
 {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*$" (toString $swarm)) }}
 {{- fail "each workers.masterSwarms entry must be a swarm slug: letters, digits, dots, dashes or underscores" }}
@@ -31,6 +38,24 @@
 {{- if or (hasKey ($workers.resources.requests | default dict) "memory") (hasKey ($workers.resources.limits | default dict) "memory") }}
 {{- fail "set worker hive memory with workers.memoryPerAgentMi, not workers.resources" }}
 {{- end }}
+{{- $node := toString ($workers.node | default "") }}
+{{- $storage := dict }}
+{{- $tmpVolume := dict "emptyDir" (dict) }}
+{{- $folder := $root.Release.Name }}
+{{- if $suffix }}
+{{- $folder = printf "%s_%s" $folder (trimPrefix "-" $suffix) }}
+{{- end }}
+{{- if $node }}
+{{- $storage = dig "nodes" $node ($root.Values.hiveStorage.default | default dict) $root.Values.hiveStorage }}
+{{- if not $storage.homes }}
+{{- fail (printf "workers.node %s has no homes: set hiveStorage.nodes.%s.homes, or hiveStorage.default.homes when the node has no entry" $node $node) }}
+{{- end }}
+{{- $_ := set $workers "homeVolume" (dict "hostPath" (dict "path" (printf "%s/%s" $storage.homes $folder) "type" "Directory")) }}
+{{- if $storage.tmp }}
+{{- $tmpVolume = dict "hostPath" (dict "path" (printf "%s/%s" $storage.tmp $folder) "type" "Directory") }}
+{{- end }}
+{{- $_ := set $workers "nodeSelector" (merge (dict "kubernetes.io/hostname" $node) ($workers.nodeSelector | default dict)) }}
+{{- end }}
 {{- if ne (len $workers.homeVolume) 1 }}
 {{- fail "workers.homeVolume needs exactly one volume source; set emptyDir: null beside a hostPath or persistentVolumeClaim" }}
 {{- end }}
@@ -50,11 +75,16 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "swarm.fullname" $root }}-worker-hive{{ $suffix }}
+  {{- if $root.Values.workers.rollout.enabled }}
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ .wave | quote }}
+  {{- end }}
   labels:
     {{- include "swarm.labels" $root | nindent 4 }}
     app.kubernetes.io/component: worker-hive{{ $suffix }}
 spec:
   replicas: {{ $workers.replicas }}
+  progressDeadlineSeconds: 600
   {{- if not (hasKey $workers.homeVolume "emptyDir") }}
   strategy:
     type: Recreate
@@ -83,17 +113,28 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      terminationGracePeriodSeconds: {{ add $workers.drainSeconds 30 }}
+      terminationGracePeriodSeconds: {{ add $drain 30 }}
       containers:
         - name: worker-hive
           image: {{ include "swarm.image" (dict "Values" (dict "image" $workers.image)) }}
           imagePullPolicy: {{ $workers.image.pullPolicy }}
+          {{- if $root.Values.workers.rollout.enabled }}
+          readinessProbe:
+            exec:
+              command: ["python3", "-m", "scripts.hive.rollout", "ready"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+          {{- end }}
           lifecycle:
             preStop:
               exec:
-                command: ["sh", "-c", {{ printf "agentihooks hive drain --wait %d >>/proc/1/fd/1 2>&1" (int $workers.drainSeconds) | quote }}]
+                command: ["sh", "-c", {{ printf "agentihooks hive drain --wait %d >>/proc/1/fd/1 2>&1" $drain | quote }}]
           {{- include "swarm.containerSecurity" $root | nindent 10 }}
           env:
+            {{- if $root.Values.workers.rollout.enabled }}
+            - name: HIVE_READY_FILE
+              value: /tmp/hive-ready
+            {{- end }}
             {{- if $github.secretName }}
             - name: HIVE_GITHUB_AUTH_MODE
               value: {{ $github.mode | quote }}
@@ -115,6 +156,8 @@ spec:
                   fieldPath: metadata.name
             - name: AGENTIHOOKS_DEPLOYMENT
               value: {{ $root.Values.deployment | quote }}
+            - name: HIVE_NAME
+              value: {{ printf "%s%s" $root.Release.Name $suffix | quote }}
             - name: HIVE_EXCLUDED
               value: {{ join "," $workers.excluded | quote }}
             - name: HIVE_MASTER_SWARMS
@@ -187,7 +230,7 @@ spec:
         - name: home
           {{- toYaml $workers.homeVolume | nindent 10 }}
         - name: tmp
-          emptyDir: {}
+          {{- toYaml $tmpVolume | nindent 10 }}
         {{- if $workers.caSecret.name }}
         - name: ca
           secret:
@@ -196,6 +239,112 @@ spec:
               - key: {{ required "workers.caSecret.key is required" $workers.caSecret.key }}
                 path: ca.pem
         {{- end }}
+{{- if $node }}
+{{- $mount := $storage.mount | default dict }}
+{{- $roots := list $storage.homes }}
+{{- if $storage.tmp }}
+{{- $roots = append $roots $storage.tmp }}
+{{- end }}
+{{- $folders := list }}
+{{- if $mount.path }}
+{{- if not (and $mount.fsType $mount.marker) }}
+{{- fail (printf "hiveStorage for node %s names a mount without its fsType and marker" $node) }}
+{{- end }}
+{{- range $roots }}
+{{- if not (hasPrefix (printf "%s/" $mount.path) .) }}
+{{- fail (printf "hiveStorage folder %s for node %s is not under its mount %s" . $node $mount.path) }}
+{{- end }}
+{{- $folders = append $folders (printf "/storage%s/%s" (trimPrefix $mount.path .) $folder) }}
+{{- end }}
+{{- else }}
+{{- range $index, $_ := $roots }}
+{{- $folders = append $folders (printf "/storage/%d/%s" $index $folder) }}
+{{- end }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "swarm.fullname" $root }}-storage{{ $suffix }}
+  labels:
+    {{- include "swarm.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: worker-hive-storage{{ $suffix }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- if $root.Values.workers.rollout.enabled }}
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "-2"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    {{- end }}
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" $root | nindent 8 }}
+        app.kubernetes.io/component: worker-hive-storage{{ $suffix }}
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      nodeSelector:
+        kubernetes.io/hostname: {{ $node | quote }}
+      {{- with $workers.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: storage
+          image: {{ $root.Values.hiveStorage.image }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              {{- if $mount.path }}
+              awk '$2 == "/storage" && $3 == {{ $mount.fsType | quote }} { found = 1 } END { exit !found }' /proc/mounts && [ -e {{ printf "/storage/%s" $mount.marker | quote }} ] || { echo {{ printf "%s on %s is not the %s disk holding %s, so its data disk is not mounted" $mount.path $node $mount.fsType $mount.marker | quote }} >&2; exit 1; }
+              {{- end }}
+              for folder in{{ range $folders }} {{ . | quote }}{{ end }}; do
+                mkdir -p "$folder"
+                chown 10001:10001 "$folder"
+                chmod 0750 "$folder"
+              done
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN, FOWNER]
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            {{- if $mount.path }}
+            - name: storage
+              mountPath: /storage
+            {{- else }}
+            {{- range $index, $_ := $roots }}
+            - name: storage-{{ $index }}
+              mountPath: /storage/{{ $index }}
+            {{- end }}
+            {{- end }}
+      volumes:
+        {{- if $mount.path }}
+        - name: storage
+          hostPath:
+            path: {{ $mount.path | quote }}
+            type: Directory
+        {{- else }}
+        {{- range $index, $path := $roots }}
+        - name: storage-{{ $index }}
+          hostPath:
+            path: {{ $path | quote }}
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- end }}
+{{- end }}
 {{- end }}
 {{- $hives := list }}
 {{- if gt (int .Values.workers.replicas) 0 }}
@@ -241,7 +390,7 @@ spec:
 {{- $_ := set $homes $home true }}
 {{- $hives = append $hives (dict "suffix" (printf "-%s" $name) "workers" $hive) }}
 {{- end }}
-{{- range $hives }}
+{{- range $index, $hive := $hives }}
 ---
-{{- include "swarm.workerHive" (dict "root" $ "workers" .workers "suffix" .suffix) }}
+{{- include "swarm.workerHive" (dict "root" $ "workers" $hive.workers "suffix" $hive.suffix "wave" (add $index 1)) }}
 {{- end }}

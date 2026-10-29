@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 _TEXT_MAX = 300
-_ENFORCEMENT_LAYER = {"bundle": "bundle", "profile": "profile"}
+_ENFORCEMENT_LAYER = {"bundle": "bundle", "user_bundle": "bundle", "profile": "profile"}
 FILE_LAYERS = ("rule", "doctrine")
 
 

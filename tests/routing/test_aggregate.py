@@ -15,16 +15,15 @@ def redis():
 
 def report(redis, hive, counts, observed, used=20):
     registry.update(redis, hive, ["max-agents=8"])
-    redis.hset(
-        registry.key(hive),
-        mapping={
+    registry.beat(
+        redis,
+        hive,
+        {
             "heartbeat_at": 100000,
-            "slots": json.dumps(
-                [
-                    {"harness": "claude", "account": "one", "kind": "subscription", "cap": 6},
-                    {"harness": "codex", "account": "one", "kind": "subscription", "cap": 6},
-                ]
-            ),
+            "slots": [
+                {"harness": "claude", "account": "one", "kind": "subscription", "cap": 6},
+                {"harness": "codex", "account": "one", "kind": "subscription", "cap": 6},
+            ],
         },
     )
     redis.set(f"{registry.key(hive)}:sessions", json.dumps(counts), ex=45)
@@ -96,7 +95,7 @@ def test_local_backend_counts_other_hives_and_unreported_launches_like_the_reser
         ("gone", {"claude:one": 9}, now - registry.LIVE_MS - 1),
     ):
         registry.update(redis, hive, ["max-agents=8"])
-        redis.hset(registry.key(hive), "heartbeat_at", heartbeat)
+        registry.beat(redis, hive, {"heartbeat_at": heartbeat})
         if counts is not None:
             redis.set(f"{registry.key(hive)}:sessions", json.dumps(counts))
     slots = LaunchSlots(redis)
@@ -233,15 +232,15 @@ def test_global_capacity_preserves_api_policy_and_future_reset_fields(redis, mon
 
     environ = {"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}
     report(redis, "a", {"claude:one": 2, "codex:one": 1}, 90)
-    redis.hset(
-        registry.key("a"),
-        "slots",
-        json.dumps(
-            [
+    registry.beat(
+        redis,
+        "a",
+        {
+            "slots": [
                 {"harness": "claude", "account": "one", "kind": "subscription", "cap": 6},
                 {"harness": "codex", "account": "one", "kind": "api", "cap": 4},
             ]
-        ),
+        },
     )
     quota_key = f"{registry.key('a')}:quota"
     quota = json.loads(redis.get(quota_key))
@@ -279,11 +278,7 @@ def test_global_capacity_preserves_api_policy_and_future_reset_fields(redis, mon
         ),
         capacity.Account("codex", "one", "OPEN", 1, None, None, 4, kind="api", weight=3),
     ]
-    redis.hset(
-        registry.key("a"),
-        "slots",
-        json.dumps([{"harness": "claude", "account": "one", "kind": "subscription", "cap": 6}]),
-    )
+    registry.beat(redis, "a", {"slots": [{"harness": "claude", "account": "one", "kind": "subscription", "cap": 6}]})
     redis.set(
         f"{registry.key('a')}:quota",
         json.dumps(
@@ -305,7 +300,7 @@ def test_aggregate_keeps_reading_after_an_unavailable_hive(redis, missing):
     report(redis, "a", {"claude:one": 99}, 90)
     report(redis, "b", {"claude:one": 2}, 95)
     if missing == "stale":
-        redis.hset(registry.key("a"), "heartbeat_at", 1)
+        registry.beat(redis, "a", {"heartbeat_at": 1})
     else:
         redis.delete(f"{registry.key('a')}:sessions")
     assert aggregate.read(redis, 100)["claude:one"]["sessions"] == 2
@@ -320,9 +315,7 @@ def test_aggregate_uses_milliseconds_at_the_live_hive_boundary(redis):
 def test_aggregate_selects_slot_metadata_and_keeps_the_first_equal_observation(redis, first, second, cap):
     report(redis, "a", {"claude:one": 1}, first, used=20)
     report(redis, "b", {"claude:one": 2}, second, used=40)
-    redis.hset(
-        registry.key("b"), "slots", json.dumps([{"harness": "claude", "account": "one", "kind": "api", "cap": 4}])
-    )
+    registry.beat(redis, "b", {"slots": [{"harness": "claude", "account": "one", "kind": "api", "cap": 4}]})
     row = aggregate.read(redis, 100)["claude:one"]
     assert row["cap"] == cap
     assert row["kind"] == ("subscription" if cap == 6 else "api")

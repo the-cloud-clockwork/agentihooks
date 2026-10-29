@@ -205,7 +205,7 @@ def process(path: Path, now: float | None = None) -> None:
         _write(path, row)
         try:
             _finish(path, row)
-        except Exception as exc:
+        except (Exception, SystemExit) as exc:
             row.update(status="pending", error=type(exc).__name__, reason=type(exc).__name__)
             _write(path, row)
             log("documentation request retained", {"error": type(exc).__name__, "session": row["session"]})

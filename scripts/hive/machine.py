@@ -67,7 +67,7 @@ def name(redis: "Redis", machine: str, assign: bool = True, taken: Callable[[], 
 
 
 def held_names(redis: "Redis", run: Callable[..., subprocess.CompletedProcess]) -> set[str]:
-    members = {redis.hget(key, "name") for key in redis.scan_iter(match=f"{auth.PREFIX}:member:*")}
+    members = {found["name"] for found in auth.members(redis).values()}
     hives = {record["name"] for record in registry.hives(redis)}
     herdr = {saved.get("label") for saved in _listed(run)}
     return {label for label in members | hives | herdr if label}
@@ -123,10 +123,7 @@ def _one_per_machine(listed: list[dict], target: str, label: str) -> None:
 
 
 def named_member(redis: "Redis", label: str) -> str | None:
-    for key in redis.scan_iter(match=f"{auth.PREFIX}:member:*"):
-        if redis.hget(key, "name") == label:
-            return key.rsplit(":", 1)[1]
-    return None
+    return next((member_id for member_id, found in auth.members(redis).items() if found["name"] == label), None)
 
 
 def save(

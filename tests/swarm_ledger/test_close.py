@@ -170,8 +170,8 @@ class Home(unittest.TestCase):
             for slug in (SLUG, OPEN_SLUG)
             if f'href="/{slug}"' in row
         }
-        self.assertIn('<span class="state s-closed">closed</span>', rows[SLUG])
-        self.assertIn('<span class="state s-stopped">stopped</span>', rows[OPEN_SLUG])
+        self.assertIn('<span class="state s-closed" role="cell">closed</span>', rows[SLUG])
+        self.assertIn('<span class="state s-stopped" role="cell">stopped</span>', rows[OPEN_SLUG])
 
     def test_the_page_close_runs_the_same_close_command_as_the_cli(self):
         self.assertEqual(server.control_argv({"action": "close"}), ["close"])

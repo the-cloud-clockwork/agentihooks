@@ -17,12 +17,12 @@ def native_settings(
     rendered: dict = _i.substitute_paths(raw_settings)
     rendered = _i.substitute_paths(rendered, "__PYTHON__", str(_i._detect_venv() or sys.executable))
 
-    # --- 1a. Bundle-global native overrides ---
+    # --- 1a. Bundle-global native overrides: root, then user ---
     # Settings gain the bundle rung that MCP already had; without it a bundle
     # can only express fleet-wide settings by repeating them in every profile.
-    bundle_root = _i._get_bundle_path()
-    if bundle_root:
-        rendered = _apply_layer(rendered, install_target, bundle_root, "Applied bundle overrides: {path}", say)
+    for kind, bundle_root in _i._bundle_roots():
+        label = "Applied bundle overrides: {path}" if kind == "root" else "Applied user bundle overrides: {path}"
+        rendered = _apply_layer(rendered, install_target, bundle_root, label, say)
 
     # --- 1b. Apply per-profile overrides (chained: each profile merges on top) ---
     for _, pdir in profile_dirs:

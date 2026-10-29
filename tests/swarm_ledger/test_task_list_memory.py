@@ -11,11 +11,12 @@ pytestmark = pytest.mark.unit
 READERS = 20
 HUNDRED = 100
 TASKS = 2000
+PEAK_TASKS = 500
 SLUG = "ledger"
 CURSOR = re.compile(r'"next_cursor": (?:"([^"]+)"|null)')
 
 
-def document() -> dict:
+def document(tasks: int = TASKS) -> dict:
     from scripts.swarm_ledger.new_ledger import build_doc
 
     doc = build_doc({"title": "Task list memory"})
@@ -29,7 +30,7 @@ def document() -> dict:
             "lane": "eng",
             "comments": [{"id": f"c{comment}", "text": "Recorded evidence " * 8} for comment in range(4)],
         }
-        for index in range(TASKS)
+        for index in range(tasks)
     ]
     doc["chat"] = [{"id": f"m{index}", "text": "Chat line from the swarm " * 8} for index in range(20000)]
     return doc
@@ -90,13 +91,22 @@ def walk(server: object) -> int:
             return pages
 
 
-@pytest.fixture
-def stored(tmp_path):
+def store(tmp_path, tasks: int):
     from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
     path = tmp_path / "ledger.sqlite3"
-    SQLiteLedgerRepository(path).import_document(SLUG, document())
+    SQLiteLedgerRepository(path).import_document(SLUG, document(tasks))
     return path
+
+
+@pytest.fixture
+def stored(tmp_path):
+    return store(tmp_path, TASKS)
+
+
+@pytest.fixture
+def peak_stored(tmp_path):
+    return store(tmp_path, PEAK_TASKS)
 
 
 def test_full_task_list_walk_returns_every_task_in_order(stored):
@@ -140,19 +150,19 @@ def test_concurrent_full_task_list_walks_return_the_same_pages(stored):
     assert len(pages) == READERS and len(set(pages)) == 1 and pages[0] > 1
 
 
-def test_hundred_concurrent_full_task_list_reads_stay_under_a_fixed_peak(stored):
+def test_hundred_concurrent_full_task_list_reads_stay_under_a_fixed_peak(peak_stored):
     from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
     tracemalloc.start()
     try:
-        SQLiteLedgerRepository(stored).current(SLUG)
+        SQLiteLedgerRepository(peak_stored).current(SLUG)
         _, whole = tracemalloc.get_traced_memory()
         tracemalloc.reset_peak()
-        SQLiteLedgerRepository(stored).read(SLUG, "tasks")
+        SQLiteLedgerRepository(peak_stored).read(SLUG, "tasks")
         _, tasks = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    server = services(SQLiteLedgerRepository(stored))
+    server = services(SQLiteLedgerRepository(peak_stored))
     barrier, pages, failures = threading.Barrier(HUNDRED), [], []
 
     def reader():

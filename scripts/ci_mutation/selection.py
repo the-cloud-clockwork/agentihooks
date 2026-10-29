@@ -21,6 +21,7 @@ from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
 from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.scope import selects, test_file
 from scripts.ci_mutation.stats import write_part
+from scripts.ci_mutation.stats_dependencies import records_within
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 # This group only loads fakeredis once per xdist worker; it guards no shared resource.
@@ -74,7 +75,10 @@ def created_mutations(filename: str, source: str) -> tuple[object, list, list]:
 
     wrapper = MetadataWrapper(cst.parse_module(source))
     ignored = get_ignored_lines(filename, source, wrapper)
-    graded = Visitor(ignored, lambda node: isinstance(node, cst.ClassDef) and all(map(is_dataclass, node.decorators)))
+    graded = Visitor(
+        ignored,
+        lambda node: all(map(is_dataclass, node.decorators)) if isinstance(node, cst.ClassDef) else True,
+    )
     possible = Visitor(ignored, lambda node: True)
     module = wrapper.visit(graded)
     wrapper.visit(possible)
@@ -89,20 +93,67 @@ def is_dataclass(decorator) -> bool:
     return isinstance(name, cst.Name) and name.value == "dataclass"
 
 
-def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int, int]:
+def binding_decorators(node) -> list:
+    import libcst.matchers as m
+
+    return [
+        decorator
+        for decorator in node.decorators
+        if m.matches(decorator.decorator, m.Name("staticmethod") | m.Name("classmethod"))
+    ]
+
+
+def plain_copies(code: str) -> str:
+    import libcst as cst
+    import libcst.matchers as m
+
+    # Wrappers belong on the trampoline once; copied implementations retain only method binding.
+    def plain(node):
+        if isinstance(node, cst.FunctionDef) and "__mutmut_" in node.name.value:
+            return node.with_changes(decorators=binding_decorators(node))
+        if (
+            isinstance(node, cst.FunctionDef)
+            and node.decorators
+            and m.matches(node.decorators[-1].decorator, m.Call(func=m.Name("_mutmut_mutated"), args=[m.DoNotCare()]))
+            and any(m.matches(decorator.decorator, m.Name("classmethod")) for decorator in node.decorators)
+        ):
+            # mutmut flags a class method trampoline only when classmethod is its sole decorator.
+            *outer, trampoline = node.decorators
+            flag = cst.Arg(cst.Name("True"), keyword=cst.Name("is_classmethod"))
+            call = trampoline.decorator.with_changes(args=[*trampoline.decorator.args, flag])
+            return node.with_changes(decorators=[*outer, trampoline.with_changes(decorator=call)])
+        return node
+
+    module = cst.parse_module(code)
+    body = [
+        statement.with_changes(body=statement.body.with_changes(body=[plain(node) for node in statement.body.body]))
+        if isinstance(statement, cst.ClassDef)
+        else plain(statement)
+        for statement in module.body
+    ]
+    return module.with_changes(body=body).code
+
+
+def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int, list[str]]:
+    from libcst import FunctionDef
     from libcst.metadata import MetadataWrapper, PositionProvider
 
     module, graded, possible = created_mutations(filename, source)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(PositionProvider)
-    # mutmut emits only mutants inside a function or method.
-    found = sum(1 for mutation in on_changed_lines(module, graded, changed) if mutation.contained_by_top_level_function)
-    body = sum(
-        positions[mutation.original_node].start.line
-        >= positions[mutation.contained_by_top_level_function.body.body[0]].start.line
+    found = [
+        mutation.contained_by_top_level_function
+        for mutation in on_changed_lines(module, graded, changed)
+        if isinstance(mutation.contained_by_top_level_function, FunctionDef)
+    ]
+    in_body = {
+        mutation.contained_by_top_level_function
         for mutation in on_changed_lines(module, possible, changed)
-        if mutation.contained_by_top_level_function
-    )
-    return found, body
+        if isinstance(mutation.contained_by_top_level_function, FunctionDef)
+        and positions[mutation.original_node].start.line
+        >= positions[mutation.contained_by_top_level_function.body.body[0]].start.line
+    }
+    ungraded = sorted(in_body.difference(found), key=lambda function: positions[function].start.line)
+    return len(found), [function.name.value for function in ungraded]
 
 
 def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:
@@ -110,6 +161,11 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
 
     module, selected = changed_mutations(filename, source, changed)
     code, names = combine_mutations_to_source(module, selected)
+    if any(
+        mutation.contained_by_top_level_function and mutation.contained_by_top_level_function.decorators
+        for mutation in selected
+    ):
+        code = plain_copies(code)
     return code, list(names)
 
 
@@ -152,7 +208,7 @@ def unit_records(root: Path) -> list[dict[str, float]]:
 
 def traced_records(root: Path) -> list[dict[str, float]]:
     folder = Path(os.environ.get("MUTATION_STATS_CACHE", root / ".mutation-stats-cache"))
-    records = [json.loads(path.read_text()) for path in folder.glob("*.json")]
+    records = (json.loads(path.read_text()) for path in records_within(folder)[0])
     return [record["durations"] for record in records if record["status"] == 0]
 
 
@@ -504,12 +560,16 @@ LIGHT_BOOTSTRAP = (
 
 
 def run_unit(
-    run_tests, runner, mutant_name: str | None, tests: list[str], chosen: list[str], memory: KillMemory
+    run_tests, runner, mutant_name: str | None, tests: list[str], chosen: list[str], memory: KillMemory, engine
 ) -> int:
     if tests and not chosen:
         # Each unit runs the head and one slice and together they cover every test, so a unit with none votes survived.
         return 0
-    return run_tests(runner, mutant_name=mutant_name, tests=memory.prepare(mutant_name, chosen))
+    try:
+        return run_tests(runner, mutant_name=mutant_name, tests=memory.prepare(mutant_name, chosen))
+    except engine.BadTestExecutionCommandsException:
+        # The stats shards collected these node ids, so a usage error here means the mutant changed which tests exist.
+        return 1
 
 
 def forked_children():
@@ -540,9 +600,16 @@ def forked_children():
     return ForkedChildren()
 
 
+def keep_node_ids() -> None:
+    # mutmut's stats plugin reads Item._nodeid, which pytest 9.2 removed in favour of nodeid.
+    if pytest.version_tuple >= (9, 2, 0) and not hasattr(pytest.Item, "_nodeid"):
+        pytest.Item._nodeid = property(lambda item: item.nodeid)
+
+
 def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
     from mutmut import __main__ as runner
 
+    keep_node_ids()
     if not os.environ.get("CI"):
         print("Local mutation worker cap: 2 (mutation and stats)")
     changes = json.loads(selection.read_text())
@@ -607,7 +674,7 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
                 # The stats shards proved these node ids collect, so a usage error here is the forced failure at import.
                 return 1
         tests = list(tests)
-        return run_unit(run_tests, self, mutant_name, tests, shard_tests(tests, mutant_name, shard[0]), memory)
+        return run_unit(run_tests, self, mutant_name, tests, shard_tests(tests, mutant_name, shard[0]), memory, runner)
 
     memory = KillMemory(Path.cwd() / "killers")
 
