@@ -10,10 +10,10 @@ def test_report_counts_shared_bytes_once_and_preserves_every_file(tmp_path, caps
     values = {"inputs": "é", "dependencies": "abc", "orphan": "unused"}
     for name, value in values.items():
         (tmp_path / f"{name}{SHARED}").write_text(value)
-    for name in ("first", "second"):
-        (tmp_path / f"{name}.json").write_text(
-            json.dumps({"inputs": "inputs", "dependencies": {"test_one": "dependencies", "test_two": "inputs"}})
-        )
+    (tmp_path / "first.json").write_text(
+        json.dumps({"inputs": "inputs", "dependencies": {"test_one": "dependencies", "test_two": "dependencies"}})
+    )
+    (tmp_path / "second.json").write_text(json.dumps({"inputs": "inputs"}))
     (tmp_path / "unrelated.index").write_text("ignored")
     before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
 

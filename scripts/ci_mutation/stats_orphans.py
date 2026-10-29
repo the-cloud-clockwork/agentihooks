@@ -27,7 +27,6 @@ def main(argv: list[str] | None = None) -> None:
                 "orphan_files": len(orphans),
                 "orphan_bytes": sum(orphans.values()),
             },
-            sort_keys=True,
         )
     )
 
