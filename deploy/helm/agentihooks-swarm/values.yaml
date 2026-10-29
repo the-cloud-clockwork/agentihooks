@@ -117,6 +117,8 @@ controller:
               - key: anton.io/capacity-type
                 operator: DoesNotExist
   tolerations: []
+  # Scheduler lease and slot store: redis or bus, the controller's configured NATS bus; empty follows AGENTIHOOKS_STATE_BACKEND.
+  schedulerState: ""
   # Required with workers: the Kubernetes runtime creates worker Pods with this account's token.
   serviceAccountName: ""
   # Swarms in this Redis that their own host ticks; the controller never ticks them or probes their lease.
