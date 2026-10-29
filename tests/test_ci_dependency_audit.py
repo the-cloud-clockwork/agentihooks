@@ -179,6 +179,53 @@ def test_main_is_red_when_an_audit_produces_no_report(monkeypatch):
         audit.main(["--base", "base", "--head", "head"])
 
 
+def _audits(monkeypatch, *reports):
+    calls = []
+
+    def run(requirements):
+        calls.append(requirements)
+        return reports[len(calls) - 1]
+
+    monkeypatch.setattr(audit, "audit", run)
+    return calls
+
+
+def test_an_empty_report_is_audited_once_more_and_the_second_report_grades(monkeypatch, capsys):
+    calls = _audits(monkeypatch, "\n", _report(_dep("urllib3", "1.26.4", "PYSEC-1")))
+    assert audit.audited(Path("head")) == ({("urllib3", "1.26.4", "PYSEC-1")}, set())
+    assert calls == [Path("head"), Path("head")]
+    assert capsys.readouterr().out == "::warning::pip-audit produced an empty report; auditing head once more\n"
+
+
+def test_a_second_empty_report_is_an_error(monkeypatch):
+    calls = _audits(monkeypatch, "", "")
+    with pytest.raises(audit.AuditError, match=r"^pip-audit produced no report"):
+        audit.audited(Path("head"))
+    assert len(calls) == 2
+
+
+def test_a_report_that_is_not_empty_grades_without_a_second_audit(monkeypatch, capsys):
+    calls = _audits(monkeypatch, _report(_dep("urllib3", "1.26.4", "PYSEC-1")))
+    assert audit.audited(Path("head")) == ({("urllib3", "1.26.4", "PYSEC-1")}, set())
+    assert calls == [Path("head")]
+    assert capsys.readouterr().out == ""
+
+
+def test_a_malformed_report_is_an_error_without_a_second_audit(monkeypatch):
+    calls = _audits(monkeypatch, "Traceback", _report())
+    with pytest.raises(audit.AuditError):
+        audit.audited(Path("head"))
+    assert calls == [Path("head")]
+
+
+def test_main_grades_after_one_empty_report(monkeypatch, capsys):
+    reports = {"head": ["", _report(_dep("idna", "3.7", "PYSEC-3"))], "base": [_report()]}
+    monkeypatch.setattr(audit, "resolve", lambda root, out: out)
+    monkeypatch.setattr(audit, "audit", lambda requirements: reports[requirements.name].pop(0))
+    assert audit.main(["--base", "base", "--head", "head"]) == 1
+    assert "::error::idna 3.7 carries PYSEC-3" in capsys.readouterr().out
+
+
 def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 

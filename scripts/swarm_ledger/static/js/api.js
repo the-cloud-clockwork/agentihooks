@@ -63,6 +63,10 @@ export function writeRouting(changes) {
   return fetch(ROUTING_API, { method: "PATCH", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN, "X-Ledger-Slug": SLUG }, body: JSON.stringify(changes) });
 }
 
+export function readMonitor() {
+  return fetch(`${ROOT_API}/monitor`, { cache: "no-store" });
+}
+
 export function readHives() {
   return fetch(HIVES_API, { cache: "no-store" });
 }

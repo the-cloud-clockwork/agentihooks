@@ -1,0 +1,6 @@
+{
+  "scripts/hive/rollout.py:scripts.hive.rollout.x_release__mutmut_43:5eba21467fb543731e72d3a6dbc6a271069d19eba22bf816295ee87336b83ac2": {
+    "reader": "Independent Standards",
+    "reason": "Equivalent for every string: urllib.parse.quote always leaves ASCII letters unescaped, so adding X to safe changes no encoded character. The slash exclusion remains unchanged."
+  }
+}

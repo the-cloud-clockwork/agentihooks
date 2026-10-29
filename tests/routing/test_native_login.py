@@ -5,7 +5,9 @@ from unittest.mock import Mock
 
 import pytest
 
+from scripts import claude_quota_balancer as balancer
 from scripts.routing import envs, native_login
+from scripts.routing.native_login import rejected as REJECTED
 
 
 @pytest.mark.parametrize(
@@ -47,6 +49,56 @@ def test_status_is_redacted_and_uses_native_environment(monkeypatch, binary):
         text=True,
         timeout=30,
     )
+
+
+@pytest.mark.parametrize("binary", ["/opt/claude", None])
+def test_a_login_the_provider_revokes_or_rejects_reads_as_rejected(monkeypatch, binary):
+    monkeypatch.setattr(native_login.shutil, "which", Mock(side_effect={"claude": binary}.get))
+    source = {"HOME": "/native", "CLAUDE_CODE_OAUTH_TOKEN": "sentinel"}
+    answer = json.dumps({"type": "result", "is_error": True, "api_error_status": 401})
+    run = Mock(return_value=SimpleNamespace(returncode=1, stdout=answer))
+    assert REJECTED(source, "master", run) is True
+    run.assert_called_once_with(
+        balancer._probe_command("haiku", binary or "claude"),
+        env=envs.claude_interactive_child(source, "master"),
+        capture_output=True,
+        text=True,
+        timeout=native_login.PROBE_TIMEOUT_S,
+    )
+
+
+def test_a_login_whose_oauth_session_cannot_be_refreshed_reads_as_rejected():
+    stream = "\n".join(
+        json.dumps(event)
+        for event in (
+            {"type": "system", "subtype": "init"},
+            {"type": "assistant", "error": "authentication_failed"},
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": True,
+                "result": "Failed to authenticate: OAuth session expired and could not be refreshed",
+            },
+        )
+    )
+    run = Mock(return_value=SimpleNamespace(returncode=1, stdout="Login expired\n" + stream))
+    assert REJECTED({}, "master", run) is True
+
+
+@pytest.mark.parametrize(
+    "probe",
+    [
+        OSError("missing"),
+        subprocess.TimeoutExpired("claude", 60),
+        SimpleNamespace(returncode=1, stdout=json.dumps({"api_error_status": 529})),
+        SimpleNamespace(returncode=1, stdout=json.dumps({"type": "assistant", "error": "rate_limit"})),
+        SimpleNamespace(returncode=1, stdout='["authentication_failed"]'),
+        SimpleNamespace(returncode=0, stdout="OK"),
+    ],
+)
+def test_a_probe_without_a_rejection_reads_as_usable(probe):
+    run = Mock(side_effect=[probe])
+    assert REJECTED({}, "master", run) is False
 
 
 def test_first_successful_spawn_proof_is_kept(tmp_path):

@@ -49,6 +49,7 @@ def consume(store: RedisStore, slug: str) -> list[str]:
 
 
 def publish(store: RedisStore, slug: str, ledger: dict, view=None) -> None:
+    ledger_workspace.mirror(store, slug, ledger)
     commands.publish(
         store, slug, status_report(store, slug, ledger, None, view), ledger_workspace.published(store, slug, ledger)
     )

@@ -312,6 +312,8 @@ class TestCommand:
     @pytest.fixture(autouse=True)
     def read_heads(self, monkeypatch):
         read = []
+        store = saved()
+        monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
         ledger = SimpleNamespace(
             task=lambda slug, task: {"id": task, "pr_url": URL} if (slug, task) == (SLUG, TASK) else None
         )

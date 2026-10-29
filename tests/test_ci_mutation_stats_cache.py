@@ -1038,7 +1038,9 @@ def test_stored_statistics_validate_record_inputs_and_mutation_scope(tmp_path, c
     elif changed == "deleted":
         (root / "module.py").unlink()
     elif changed == "stale":
-        next(folder.glob("*.json")).write_text('{"key":"stale","status":0,"inputs":{},"scope":{},"measured":true}')
+        next(folder.glob("*.json")).write_text(
+            f'{{"key":"stale","status":0,"inputs":"{cache.share(inputs)}","scope":{{}},"measured":true}}'
+        )
     else:
         next(folder.glob("*.json")).write_text('{"key":"')
     assert cache.load("tests/test_module.py") is None
@@ -1062,6 +1064,35 @@ def test_stored_statistics_count_a_missing_pointer_and_a_failed_check(tmp_path):
     cache.save("tests/test_module.py", {"status": 0, "tests": {}, "durations": {}, "cpu": 1}, {}, False)
     assert cache.load("tests/test_module.py", lambda inputs, measured, discovery: False) is None
     assert cache.misses == {"no pointer": 1, "check": 1}
+
+
+def test_stored_statistics_keep_each_input_map_and_dependency_list_once(tmp_path):
+    import hashlib
+    import json
+
+    from scripts.ci_mutation.stats_dependencies import SHARED, StoredStats
+
+    root = tmp_path / "repo"
+    folder = tmp_path / "cache"
+    folder.mkdir()
+    _repository(root, {"module.py": "value = 1\n"})
+    inputs = {"module.py": hashlib.sha256((root / "module.py").read_bytes()).hexdigest()}
+    cache = StoredStats(root, folder, {"inventory": ["module.py"]}, {})
+    paths = [f"tests/test_{index}.py" for index in range(3)]
+    for path in paths:
+        result = {"status": 0, "tests": {}, "durations": {path: 1}, "cpu": 1, "dependencies": {path: ["module.py"]}}
+        cache.save(path, result, inputs, True)
+    stored = [json.loads(record.read_text()) for record in folder.glob("*.json")]
+    assert len(stored) == 3
+    assert sorted(path.read_text() for path in folder.glob(f"*{SHARED}")) == sorted(
+        [json.dumps(["module.py"]), json.dumps(inputs)]
+    )
+    assert all("module.py" not in json.dumps(record) for record in stored)
+    reader = StoredStats(root, folder, {"inventory": ["module.py"]}, {})
+    assert reader.load(paths[0])["dependencies"] == {paths[0]: ["module.py"]}
+    next(folder.glob(f"*{SHARED}")).unlink()
+    assert reader.load(paths[1]) is None
+    assert reader.misses == {"no inputs": 1}
 
 
 def test_cache_miss_report_names_only_the_five_most_changed_inputs(tmp_path, capsys):
@@ -1470,3 +1501,56 @@ def test_selected_test_ids_keep_durations_recorded_with_an_at_suffix():
     assert sliced["tests/test_a.py::test_y[1]"][0]["tests"] == {"m.x_f": ["tests/test_a.py::test_y[1]@2"]}
     assert sliced["tests/test_a.py"][0]["durations"] == fresh[0]["durations"]
     assert sliced["tests/test_a.py"][0]["dependencies"] == {"tests/test_a.py::test_x@1": ["m.py"]}
+
+
+def test_cap_keeps_the_newest_records_up_to_the_byte_limit_and_drops_the_rest(tmp_path, monkeypatch):
+    import os
+
+    from scripts.ci_mutation import stats_dependencies
+
+    monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", 30)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    for age, name in reversed(list(enumerate(["new", "middle", "old", "older"]))):
+        path = cache / f"{name}.json"
+        path.write_text("x" * 10)
+        os.utime(path, (1000 - age, 1000 - age))
+    (cache / "new.index").write_text("x" * 100)
+    assert stats_dependencies.cap(cache) == 1
+    assert sorted(path.name for path in cache.iterdir()) == ["middle.json", "new.index", "new.json", "old.json"]
+
+
+def test_prune_caps_the_cache_before_reading_its_records(tmp_path, monkeypatch):
+    import os
+
+    from scripts.ci_mutation import stats_dependencies
+
+    monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", 10)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    for age, name in enumerate(["new", "old"]):
+        path = cache / f"{name}.json"
+        path.write_text('{"a": 1}')
+        os.utime(path, (1000 - age, 1000 - age))
+    read = []
+    monkeypatch.setattr(stats_dependencies.StoredStats, "read", staticmethod(read.append))
+    stats_dependencies.StoredStats(cache, cache, {}, {}).prune()
+    assert read == [cache / "new.json"]
+    assert [path.name for path in cache.iterdir()] == ["new.json"]
+
+
+def test_collected_stats_are_capped_before_the_cache_is_saved(tmp_path, monkeypatch):
+    from scripts.ci_mutation import stats_dependencies
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    _repository(root, {"module.py": "value = 1\n", "tests/test_module.py": "def test_one():\n    pass\n"})
+
+    def collect(chosen):
+        return [{"status": 0, "tests": {}, "durations": {f"{path}::test_one": 1 for path in chosen}, "cpu": 1}]
+
+    monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", 1)
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, ["tests/test_module.py"], [], collect)
+    assert list(cache.glob("*.index"))
+    assert not list(cache.glob("*.json"))

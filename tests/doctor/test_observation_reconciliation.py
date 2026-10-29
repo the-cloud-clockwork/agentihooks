@@ -86,10 +86,14 @@ def test_remote_identity_pages_are_all_read(cursors):
 
 
 @pytest.mark.parametrize(
-    "total,rows",
-    [(101, [{"id": "one"}]), (201, [{"id": "one"}, {"id": "one"}]), (2, [{"id": "one"}, {"id": "one"}])],
+    "total,rows,expected,detail",
+    [
+        (101, [{"id": "one"}], [1, 2, 1, 2, 1, 2], "1 rows with 1 distinct ids against 101 reported"),
+        (201, [{"id": "one"}, {"id": "one"}], [1, 1, 1], "2 rows with 1 distinct ids against 201 reported"),
+        (2, [{"id": "one"}, {"id": "one"}], [1, 1, 1], "2 rows with 1 distinct ids against 2 reported"),
+    ],
 )
-def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows):
+def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows, expected, detail):
     from scripts.doctor import observation_reconciliation
 
     _session(cursors, "sid", [], 0, accepted={"one": "rev"})
@@ -98,17 +102,39 @@ def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows):
 
     def get(path, params):
         assert path == "observations"
-        assert params == {"traceId": "tr", "limit": 100, "page": 1}
+        assert params == {"traceId": "tr", "limit": 100, "page": expected[len(calls)]}
         calls.append(params["page"])
         return {"data": rows, "meta": {"totalItems": total}}
 
-    with pytest.raises(ValueError, match="^observation identity listing is incomplete$"):
+    with pytest.raises(ValueError, match=f"^observation identity listing of trace tr is incomplete: {detail}$"):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
-    assert calls == [1, 1, 1]
+    assert calls == expected
 
 
-@pytest.mark.parametrize("repeat_page", [1, 2])
-def test_repeated_remote_identities_are_unknown(cursors, repeat_page):
+@pytest.mark.parametrize("pages,total", [([100, 99], 201), ([42], 103), ([100, 100, 98], 301)])
+def test_short_page_before_an_overcounted_total_completes_listing_when_the_next_page_is_empty(cursors, pages, total):
+    from scripts.doctor import observation_reconciliation
+
+    rows = [[{"id": f"{page}-{i}"} for i in range(size)] for page, size in enumerate(pages, 1)] + [[]]
+    accepted = {row["id"]: "rev" for page in rows for row in page}
+    _session(cursors, "sid", [], 0, accepted={**accepted, "lost": "rev"})
+    calls = []
+
+    def get(path, params):
+        assert path == "observations" and params == {"traceId": "tr", "limit": 100, "page": len(calls) + 1}
+        calls.append(params["page"])
+        return {"data": rows[params["page"] - 1], "meta": {"totalItems": total}}
+
+    assert observation_reconciliation.reconcile(get, "sid", "claude", "tr") == {
+        "accepted": len(accepted) + 1,
+        "missing": ["lost"],
+        "drift": 0,
+    }
+    assert calls == list(range(1, len(pages) + 2))
+
+
+@pytest.mark.parametrize("repeat_page,detail", [(1, "100 rows with 99 distinct"), (2, "101 rows with 100 distinct")])
+def test_repeated_remote_identities_are_unknown(cursors, repeat_page, detail):
     from scripts.doctor import observation_reconciliation
 
     _session(cursors, "sid", [], 0, accepted={"one": "rev"})
@@ -118,7 +144,9 @@ def test_repeated_remote_identities_are_unknown(cursors, repeat_page):
     def get(path, params):
         return {"data": pages[params["page"] - 1], "meta": {"totalItems": 101}}
 
-    with pytest.raises(ValueError, match="^observation identity listing is incomplete$"):
+    with pytest.raises(
+        ValueError, match=f"^observation identity listing of trace tr is incomplete: {detail} ids against 101 reported$"
+    ):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
 
 
@@ -379,7 +407,8 @@ def test_registry_passes_the_joined_session_harness_trace_and_cancellation(curso
     backend = Langfuse([_trace("tr", "sid")], [], total=0)
     checks = []
 
-    def reconcile(get, session, harness, trace, cancelled):
+    def reconcile(get, session, harness, trace, cancelled, listed):
+        assert listed(lambda: {"missing"}) == {"missing"}
         assert get is backend
         assert session == "sid"
         assert harness == "codex"
@@ -395,3 +424,57 @@ def test_registry_passes_the_joined_session_harness_trace_and_cancellation(curso
     assert failures == []
     assert checks == ["sid"]
     assert binding["remote"]["reconciliation"] == {"accepted": 1, "missing": ["missing"], "drift": 0}
+
+
+def test_an_unchanged_trace_reuses_its_identity_listing_and_a_changed_one_lists_again(cursors):
+    transcript = _session(
+        cursors,
+        "sid",
+        ["2026-10-07T08:00:00Z", "2026-10-07T08:00:01Z"],
+        1,
+        paged={"spans": 9},
+        accepted_at="2026-10-07T08:00:10Z",
+    )
+    records = [json.loads(line) for line in transcript.read_text().splitlines()]
+    ids = sorted(f"{span.span_id:016x}" for span in agent_trace.session_spans(records[:1], agent_trace.Identity("sid")))
+    rows = [{"id": key, "startTime": "2026-10-07T08:00:00Z", "endTime": "2026-10-07T08:00:00Z"} for key in ids[1:]]
+    backend = Langfuse([_trace("tr", "sid")], rows, total=len(rows))
+    agent, state = {**AGENT, "conversation_id": "sid"}, {}
+
+    def listings():
+        return sum(1 for path, params in backend.calls if path == "observations" and params["limit"] == 100)
+
+    [first], _ = registry.read("s", [agent], backend, state, 15, 50)
+    assert listings() == 1
+    registry.save(cursors / "state.json", state)
+    state = registry.load(cursors / "state.json")
+    [again], failures = registry.read("s", [agent], backend, state, 15, 50)
+    assert failures == [] and listings() == 1
+    assert again["remote"]["reconciliation"] == first["remote"]["reconciliation"]
+    assert again["remote"]["reconciliation"]["missing"] == ids[:1]
+    backend.observations = [{"id": ids[0], "startTime": "2026-10-07T08:00:05Z", "endTime": None}, *rows]
+    backend.total = len(backend.observations)
+    [changed], _ = registry.read("s", [agent], backend, state, 15, 50)
+    assert listings() == 2
+    assert changed["remote"]["reconciliation"]["missing"] == []
+
+
+def test_a_trace_whose_count_moved_without_a_newer_event_lists_again(cursors):
+    _session(cursors, "sid", [], 0, accepted={"a": "rev"})
+    backend = Langfuse([_trace("tr", "sid")], [{"id": "a", "startTime": "2026-10-07T08:00:00Z"}], total=1)
+    agent, state = {**AGENT, "conversation_id": "sid"}, {}
+    registry.read("s", [agent], backend, state, 15, 50)
+    backend.total = 2
+    registry.read("s", [agent], backend, state, 15, 50)
+    assert sum(1 for path, params in backend.calls if params.get("limit") == 100) == 2
+
+
+def test_a_trace_with_a_newer_event_and_the_same_count_lists_again(cursors):
+    _session(cursors, "sid", [], 0, accepted={"a": "rev"})
+    row = {"id": "a", "startTime": "2026-10-07T08:00:00Z"}
+    backend = Langfuse([_trace("tr", "sid")], [row], total=1)
+    agent, state = {**AGENT, "conversation_id": "sid"}, {}
+    registry.read("s", [agent], backend, state, 15, 50)
+    backend.observations = [{**row, "endTime": "2026-10-07T08:00:05Z"}]
+    registry.read("s", [agent], backend, state, 15, 50)
+    assert sum(1 for path, params in backend.calls if params.get("limit") == 100) == 2

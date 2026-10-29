@@ -207,7 +207,7 @@ def launch_token(slug, name):
         )
     client = ResourceClient(base(slug), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
     try:
-        return client.request(slug, "agent-token", {})["data"]["token"]
+        return retried(lambda: client.request(slug, "agent-token", {}), REMOTE_READ_ATTEMPTS)["data"]["token"]
     except urllib.error.HTTPError as exc:
         if exc.code not in (401, 403):
             raise
@@ -301,6 +301,8 @@ def talk(ops):
 
 
 def queue(slug, ops, service):
+    if outbox.holds(ops[0]["id"]):
+        return {"queued": ops[0]["id"]}
     who = Who.from_env()
     try:
         outbox.append(outbox.ledger_record(slug, ops, who.name if who.pinned else "", service))
@@ -919,7 +921,16 @@ def _task_set_fields(values):
     fields = dict(value.split("=", 1) for value in values if "=" in value)
     if len(fields) != len(values):
         sys.exit("task set takes FIELD=VALUE pairs")
-    for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls", "needs", "doc_items"):
+    for key in (
+        "depends_on",
+        "parked_on",
+        "territory",
+        "overlays",
+        "repositories",
+        "split_pulls",
+        "needs",
+        "doc_items",
+    ):
         if key in fields:
             fields[key] = task_list(key, fields[key])
     for key in [key for key in ("artifact", "follow_up", "workstation") if key in fields]:

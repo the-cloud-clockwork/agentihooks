@@ -24,6 +24,12 @@ SHALLOW_PREFLIGHT_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
 EQUIVALENCE = ("equivalence.yml", "ledger-equivalence")
 EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh")
 EQUIVALENCE_TUNABLE = ("steps", "timeout-minutes")
+EQUIVALENCE_DEV_PARENT = {
+    "name": "Select the dev parent of the tested merge",
+    "id": "comparison-base",
+    "run": 'echo "sha=$(git -C head rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"',
+}
+EQUIVALENCE_DEV_PARENT_REF = "${{ steps.comparison-base.outputs.sha }}"
 UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
@@ -323,6 +329,20 @@ def _checkout_forms(preflight: dict) -> list[dict]:
     return forms
 
 
+def _dev_parent_form(steps: list[dict]) -> list[dict]:
+    form = deepcopy(steps)
+    if EQUIVALENCE_DEV_PARENT in form:
+        return form
+    for index, step in list(enumerate(form)):
+        settings = step.get("with") or {}
+        if settings.get("path") == "base":
+            settings["ref"] = EQUIVALENCE_DEV_PARENT_REF
+        if settings.get("path") == "head":
+            settings["fetch-depth"] = 2
+            form.insert(index + 1, EQUIVALENCE_DEV_PARENT)
+    return form
+
+
 def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
     file, job_id = EQUIVALENCE
     base, head = base_workflows.get(file) or {}, head_workflows.get(file) or {}
@@ -332,9 +352,11 @@ def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[
     if not graded:
         return []
     end = graded[-1] + 1
+    forms = [base_steps[:end], _dev_parent_form(base_steps[:end])]
+    accepted = next((form for form in forms if head_steps[: len(form)] == form), None)
     if (
-        head_steps[:end] != base_steps[:end]
-        or any(word in json.dumps(step) for step in head_steps[end:] for word in EQUIVALENCE_WORDS)
+        accepted is None
+        or any(word in json.dumps(step) for step in head_steps[len(accepted) :] for word in EQUIVALENCE_WORDS)
         or {key: value for key, value in head.items() if key != "jobs"}
         != {key: value for key, value in base.items() if key != "jobs"}
         or {key: value for key, value in head_job.items() if key not in EQUIVALENCE_TUNABLE}
