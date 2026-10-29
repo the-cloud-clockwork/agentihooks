@@ -27,6 +27,10 @@ services:
       HOME: /tmp
       AGENTIHOOKS_DEPLOYMENT: local
       AGENTIHOOKS_SWARM_REDIS_URL: ${SWARM_ADOPT_REDIS_URL}
+      AGENTIHOOKS_NATS_SIGNER: ${AGENTIHOOKS_NATS_SIGNER:-}
+      AGENTIHOOKS_NATS_TRUSTED_OPERATOR: ${AGENTIHOOKS_NATS_TRUSTED_OPERATOR:-}
+      OPENBAO_URL: ${OPENBAO_URL:-}
+      OPENBAO_TOKEN: ${OPENBAO_TOKEN:-}
     volumes:
       - ${SWARM_ADOPT_HOME}/.agentihooks/hive-tls/cert.pem:/tls/cert.pem:ro
       - ${SWARM_ADOPT_HOME}/.agentihooks/hive-tls/key.pem:/tls/key.pem:ro
