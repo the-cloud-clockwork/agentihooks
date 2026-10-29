@@ -3403,13 +3403,30 @@ jobs:
           python-version: "3.12"
 
       - name: Restore the flake history
+        id: restore-flake-history
         uses: actions/cache/restore@v4
-        env:
+        env: &flake-budget-restore-the-flake-history-env
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
-        with:
+        with: &flake-budget-restore-the-flake-history
           path: ~/flake-history
           key: flake-history-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: flake-history-
+          restore-keys: |
+            flake-history-
+            flake-seed-
+
+      - name: Restore the flake history, wait before attempt 2
+        if: steps.restore-flake-history.outputs.cache-matched-key == ''
+        shell: bash
+        run: |
+          echo "::warning::Restore the flake history matched no saved history, as a cache service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore the flake history, attempt 2
+        id: restore-flake-history-2
+        if: steps.restore-flake-history.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        env: *flake-budget-restore-the-flake-history-env
+        with: *flake-budget-restore-the-flake-history
 
       - name: Download this run's flake reports
         id: download-this-runs-flake-reports
@@ -3447,7 +3464,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/flake-history
-          key: flake-history-${{ github.run_id }}-${{ github.run_attempt }}
+          key: ${{ (steps.restore-flake-history.outputs.cache-matched-key || steps.restore-flake-history-2.outputs.cache-matched-key) && 'flake-history' || 'flake-seed' }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   coverage-baseline:
     needs: [unit, coverage-ratchet]
