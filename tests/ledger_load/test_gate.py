@@ -279,6 +279,51 @@ def test_a_run_returns_its_problems_and_its_measured_write_p95(monkeypatch, tmp_
     assert ledger_load.run(tmp_path) == ([], 0.7)
 
 
+def test_the_load_server_trusts_its_writer_but_refuses_an_unrelated_project(monkeypatch, tmp_path):
+    import os
+    import subprocess
+
+    stranger = tmp_path / "stranger"
+    stranger.mkdir()
+    subprocess.run(["git", "init", "-q", str(stranger)], check=True)
+    subprocess.run(
+        ["git", "-C", str(stranger), "remote", "add", "origin", "https://github.com/stranger/project.git"],
+        check=True,
+    )
+    (stranger / ".agentihooks" / "conditions").mkdir(parents=True)
+    checkout = Path(ledger_load.__file__).resolve().parents[2]
+    script = tmp_path / "trust_server.py"
+    script.write_text(
+        "import os, socket\n"
+        "from hooks import config\n"
+        "from hooks.context import profile_chain\n"
+        "from hooks.filters.check import trusted_folder\n"
+        "profile_chain.read_state = lambda: {}\n"
+        "assert config.CONDITIONS_ENABLED\n"
+        f"trusted_folder({str(checkout)!r})\n"
+        "try:\n"
+        f"    trusted_folder({str(stranger)!r})\n"
+        "except ValueError as exc:\n"
+        "    assert 'outside the operator' in str(exc)\n"
+        "else:\n"
+        "    raise AssertionError('unrelated writer was trusted')\n"
+        "listener = socket.socket()\n"
+        "listener.bind(('127.0.0.1', int(os.environ['LEDGER_PORT'])))\n"
+        "listener.listen()\n"
+        "while True:\n"
+        "    connection, _ = listener.accept()\n"
+        "    connection.close()\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(checkout))
+    monkeypatch.setenv("CONDITIONS_ENABLED", "true")
+    monkeypatch.setenv("CONDITIONS_TRUSTED_OWNERS", "")
+    monkeypatch.setattr(ledger_load, "ledger_server", SimpleNamespace(__file__=str(script)))
+    monkeypatch.setattr(ledger_load, "RELAYS", {})
+    with (tmp_path / "server.log").open("w") as log:
+        server = ledger_load.start_server(tmp_path, ledger_load.free_port(), log)
+        ledger_load.stop_server(server)
+    assert os.environ["CONDITIONS_TRUSTED_OWNERS"] == ""
+
 @pytest.mark.parametrize("unwritable_log", [False, True])
 def test_a_server_that_fails_at_startup_names_its_exit_status_and_stderr(monkeypatch, tmp_path, unwritable_log):
     script = tmp_path / "failing_server.py"
