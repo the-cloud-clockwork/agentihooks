@@ -145,6 +145,7 @@ def test_every_plain_configuration_of_one_function_is_named(tmp_path):
         "typing.Dict[str, int]",
         "Mapping[str, int]",
         "'dict'",
+        "'dict[str, int]'",
         "dict | None",
         "None | dict",
         "typing.Optional[dict]",
@@ -308,6 +309,7 @@ def test_a_class_on_an_abstract_protocol_exception_enum_tuple_or_dataclass_base_
     "parent",
     [
         "class Base(metaclass=type):\n    pass\n",
+        "import argparse\n\nclass Base(argparse.Action):\n    pass\n",
         "class Meta(type):\n    pass\n\nclass Base(object, metaclass=Meta):\n    def run(self) -> None:\n        pass\n",
         "import functools\n\n@functools.total_ordering\nclass Base:\n    pass\n",
     ],
