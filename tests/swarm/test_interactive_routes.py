@@ -63,7 +63,12 @@ def test_spawn_preserves_explicit_interactive_route_kind(tmp_path, harness):
         lanes={"master": {"agent": harness}},
         autonomy="delegate",
     )
-    placed = runtime.spawn(config, "master", "agent", {"id": "master", "title": "proof", "route_kind": "interactive"})
+    placed = runtime.spawn(
+        config,
+        "master",
+        "agent",
+        {"id": "master", "title": "proof", "seat": "master-2@proof", "route_kind": "interactive"},
+    )
     passed = _passed(seen[0])
     assert passed[passed.index("--route") + 1] == "interactive"
     assert placed.route_kind == "interactive"
@@ -84,7 +89,12 @@ def test_spawn_records_the_api_route_kind_from_the_launch_report(tmp_path, accou
         lanes={"master": {"agent": "claude"}},
         autonomy="delegate",
     )
-    placed = runtime.spawn(config, "master", "agent", {"id": "master", "title": "proof", "route_kind": "subscription"})
+    placed = runtime.spawn(
+        config,
+        "master",
+        "agent",
+        {"id": "master", "title": "proof", "seat": "master-2@proof", "route_kind": "subscription"},
+    )
     assert placed.account == account
     assert placed.route_kind == kind
 
@@ -111,7 +121,7 @@ def test_only_interactive_spawn_skips_subscription_quota(tmp_path, has_quota, ki
         lanes={"master": {"agent": "claude"}},
         autonomy="delegate",
     )
-    task = {"id": "master", "title": "proof", "route_kind": kind}
+    task = {"id": "master", "title": "proof", "seat": "master-2@proof", "route_kind": kind}
     if kind != "interactive":
         from scripts.swarm.tick import SpawnError
 
@@ -153,7 +163,7 @@ def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(
         lanes={"master": {"agent": "claude"}},
         autonomy="delegate",
     )
-    task = {"id": "master", "title": "proof"}
+    task = {"id": "master", "title": "proof", "seat": "master-2@proof"}
     if handoff:
         task["handoff"] = "Continue the master task after the quota handoff."
         task["handoff_envelope"] = {
@@ -205,8 +215,8 @@ def test_a_front_door_master_successor_leaves_the_closed_reserved_login_account_
         }
     placed = runtime.spawn(config, "master", "agent", task)
     passed = _passed(seen[0])
-    assert passed[passed.index("--route") + 1] == "open"
-    assert placed.route_kind == "subscription"
+    assert passed[passed.index("--route") + 1] == "claude-ai"
+    assert placed.route_kind == "interactive"
 
 
 @pytest.mark.parametrize(

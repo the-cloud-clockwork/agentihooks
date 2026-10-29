@@ -1,0 +1,32 @@
+{
+  "swarm": "sv2-ux-05",
+  "ledger": {
+    "title": "Operator workflow",
+    "overview": "One remote engineer works task pb10 on an Anton worker Pod.",
+    "phases": [{"id": "p1", "title": "Build", "description": "d", "done": false}],
+    "tasks": [{"id": "pb10", "title": "Queue on green checks", "state": "claimed", "phase": "p1"}]
+  },
+  "task_revisions": {"pb10": 4},
+  "worker": {
+    "seat": "eng-1",
+    "task": "pb10",
+    "profile": "standard",
+    "pod": "worker-pb10-a",
+    "successor_pod": "worker-pb10-b",
+    "machine": "anton-worker-a",
+    "pane_id": "p1"
+  },
+  "opened_ms": 1791300000000,
+  "reopened_ms": 1791300600000,
+  "heartbeat_before_ms": 10000,
+  "terminal_before_ms": 5000,
+  "fresh_terminal_before_ms": 1000,
+  "viewports": {
+    "desktop": {"width": 1920, "height": 1080},
+    "mobile": {"width": 390, "height": 844, "is_mobile": true, "has_touch": true}
+  },
+  "evidence_ref": "session:s-41",
+  "ops": {
+    "stale_cancel": "op-cancel-old-mobile-tab"
+  }
+}

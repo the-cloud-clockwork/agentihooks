@@ -97,33 +97,47 @@ def test_the_partial_read_counts_the_live_agents_left_unread():
     sample = {**record([]), "slug": "sw", "waits_unread": ["engineer", "ci", "dev"], "active": [{"agent": "ci"}]}
     sample["active"].append({"agent": "read"})
     [partial] = traces.wait_coverage(sample, traces.Limits())
-    assert partial.evidence[1] == "live agents unread: 1"
+    assert (partial.measure, partial.evidence[:2]) == (1, ("unread: ci", "retired agents unread: 2"))
+    assert partial.summary == "wait history of 1 live agent with turn gaps over 30 minutes not read in budget"
     sample["active"].append({"agent": "dev"})
-    assert traces.wait_coverage(sample, traces.Limits())[0].evidence[1] == "live agents unread: 2"
+    [both] = traces.wait_coverage(sample, traces.Limits())
+    assert (both.measure, both.evidence[:2]) == (2, ("unread: ci, dev", "retired agents unread: 1"))
 
 
-def test_an_agent_whose_wait_history_was_not_read_is_not_judged_and_the_read_is_partial():
-    sample = {**record([]), "slug": "sw", "waits": {}, "waits_unread": ["engineer"], "active": [{"agent": "ci"}]}
+def test_no_partial_read_when_every_unread_agent_is_retired():
+    sample = {**record([]), "slug": "sw", "waits_unread": list("abcde"), "active": [{"agent": "engineer"}]}
+    assert traces.wait_coverage(sample, traces.Limits()) == []
+    assert traces.wait_coverage({**sample, "active": []}, traces.Limits()) == []
+    assert traces.wait_coverage({k: v for k, v in sample.items() if k != "active"}, traces.Limits()) == []
+
+
+def test_an_agent_whose_wait_history_was_not_read_is_not_judged_and_the_read_is_partial(monkeypatch):
+    sample = {**record([]), "slug": "sw", "waits": {}, "waits_unread": ["engineer"], "active": [{"agent": "engineer"}]}
     assert traces.turn_gaps(sample, traces.Limits()) == []
     judged = {**record([])["traces"][0], "name": "ci", "tags": ["agent:ci"], "session_id": "ci-session"}
     after = traces.turn_gaps({**sample, "traces": [*sample["traces"], judged]}, traces.Limits())
     assert [f.subject for f in after] == ["ci-session"]
     [partial] = traces.wait_coverage(sample, traces.Limits())
     assert (partial.kind, partial.subject, partial.measure) == ("wait history partial", "sw", 1)
-    assert partial.summary == "wait history of 1 agent with turn gaps over 30 minutes not read in budget"
-    assert partial.threshold == "every agent with a turn gap over the limit has its wait history read"
-    two = traces.wait_coverage({**sample, "waits_unread": ["engineer", "ci"]}, traces.Limits())[0]
-    assert two.summary == "wait history of 2 agents with turn gaps over 30 minutes not read in budget"
+    assert partial.summary == "wait history of 1 live agent with turn gaps over 30 minutes not read in budget"
+    assert partial.threshold == "every live agent with a turn gap over the limit has its wait history read"
+    live = [{"agent": name} for name in "abcdef"]
+    two = traces.wait_coverage(
+        {**sample, "waits_unread": ["engineer", "ci"], "active": [*sample["active"], {"agent": "ci"}]},
+        traces.Limits(),
+    )[0]
+    assert two.summary == "wait history of 2 live agents with turn gaps over 30 minutes not read in budget"
     assert two.evidence[0] == "unread: engineer, ci"
-    six = traces.wait_coverage({**sample, "waits_unread": list("abcdef")}, traces.Limits())[0]
+    six = traces.wait_coverage({**sample, "waits_unread": list("abcdef"), "active": live}, traces.Limits())[0]
     assert (six.evidence[0], six.measure) == ("unread: a, b, c, d, e", 6)
     assert partial.evidence == (
         "unread: engineer",
-        "live agents unread: 0",
+        "retired agents unread: 0",
         "turn gap findings skip agents whose wait history was not read",
         "each Doctor scan reads the wait history again within its budget",
     )
-    whole = {**sample, "active": [], "sessions": [], "merged": [], "now_ms": 0}
+    monkeypatch.setattr(traces, "active", lambda record, limits: [])
+    whole = {**sample, "sessions": [], "merged": [], "now_ms": 0}
     assert partial in traces.findings(whole, traces.Limits())
 
 

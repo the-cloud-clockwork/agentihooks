@@ -39,7 +39,7 @@ def bin_action(handler: object, services: Services, payload: dict) -> dict:
             "additionalProperties": False,
             "properties": {
                 "action": {"enum": ["delete", "restore"]},
-                "slug": {"type": "string", "pattern": services.ledger.core.SLUG_RE.pattern},
+                "slug": {"type": "string", "pattern": services.ledger.core.SLUG_RE.pattern + r"\Z"},
             },
         },
         payload,

@@ -33,6 +33,12 @@ LOCK = "swarm-tick"
 HELD_FD = "AGENTIHOOKS_SWARM_TICK_LOCK_FD"
 
 
+def open_scheduler() -> Scheduler:
+    from scripts.swarm.store import redis_client
+
+    return Scheduler(redis_client())
+
+
 def ensure(scheduler: Scheduler) -> str:
     redis, key = scheduler.redis, scheduler.key("swarm-tick")
     with redis.lock(scheduler.key("swarm-tick-lock"), timeout=30, blocking_timeout=30):

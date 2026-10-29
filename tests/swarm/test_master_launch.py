@@ -586,7 +586,8 @@ def test_a_failed_launch_prints_the_reason_and_exits_non_zero(up, monkeypatch, c
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 1
     assert "the new master could not start: herdr down" in capsys.readouterr().err
-    assert masters(store) == [] and ledger.joined == []
+    assert masters(store) == []
+    assert ledger.joined == [("sw", "master@a1b2c3-0001", "orchestrator")]
 
 
 def test_a_stopped_swarm_is_paused_so_the_tick_keeps_the_master(up, monkeypatch):
@@ -949,7 +950,7 @@ def test_a_new_master_reads_quota_before_it_is_placed(up, monkeypatch):
     assert order == [("spent", 1), ("quota", "sw", AT / 1000), "spawn"]
 
 
-def quota_master(monkeypatch, tmp_path, observed):
+def quota_master(monkeypatch, tmp_path, observed, store):
     monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: observed)
     rt = runtime.HerdrRuntime(
         home=tmp_path / "home", choose=lambda requested, environ: (requested or "claude", "priority")
@@ -961,7 +962,10 @@ def quota_master(monkeypatch, tmp_path, observed):
             "master", "task", "explicit"
         ),
     )
-    monkeypatch.setattr(rt, "live_names", set)
+    live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
+    store.put_agent("sw", live)
+    counted(store, 2)
+    monkeypatch.setattr(rt, "live_names", lambda: {live.name})
     monkeypatch.setattr(rt, "reported", lambda agent: True)
     routes = []
 
@@ -971,15 +975,17 @@ def quota_master(monkeypatch, tmp_path, observed):
         return runtime.Placed("pane", argv[argv.index("--agent") + 1], route)
 
     monkeypatch.setattr(rt, "_launch", launch)
+    rt.quota_capacity(store.config("sw"), store.agents("sw"), AT / 1000)
     return rt, routes
 
 
 def test_a_new_master_leaves_a_warned_account_or_refuses_naming_it(up, monkeypatch, tmp_path):
     store, _, _ = up
-    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("ok")])
-    direct(store, rt, master_launch.NEW)
+    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("ok")], store)
+    launched, _ = direct(store, rt, master_launch.NEW)
     assert routes == ["ok"]
-    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5)])
+    store.drop_agent("sw", launched.master)
+    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5)], store)
     refusal = "no claude or codex account has placeable quota seats: claude w is at its week quota warning"
     with pytest.raises(SwarmError, match=f"^the new master could not start: {refusal}$"):
         direct(store, rt, master_launch.NEW)
@@ -988,7 +994,9 @@ def test_a_new_master_leaves_a_warned_account_or_refuses_naming_it(up, monkeypat
 
 def test_a_new_master_free_to_pick_its_harness_refuses_naming_every_warned_account(up, monkeypatch, tmp_path):
     store, _, _ = up
-    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("cw", harness="codex", left=5)])
+    rt, routes = quota_master(
+        monkeypatch, tmp_path, [account("w", left=5), account("cw", harness="codex", left=5)], store
+    )
     warned = "claude w is at its week quota warning; codex cw is at its week quota warning"
     with pytest.raises(
         SwarmError,

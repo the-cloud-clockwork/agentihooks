@@ -11,7 +11,7 @@ Every check in a repository's CI belongs to exactly one tier. A check runs where
 |---|---|---|---|
 | **Pull request** | each push to a pull request head | lint, format, size, static analysis, ratchets on changed lines, the tests the change touches | the pull request entering the queue |
 | **Queue** | the merge queue's merge group | the unit suite, once per group | the merge into the integration branch |
-| **Promotion** | each push to the integration branch; a running run finishes and the newest head replaces only the pending run | everything slow: coverage and mutation across whole modules, images and their smoke tests, cluster and load tests, time budget reports | promotion from the integration branch to the release branch |
+| **Promotion** | each push to the integration branch, each in its own run, so a red run never holds a newer green head | everything slow: coverage and mutation across whole modules, images and their smoke tests, cluster and load tests, time budget reports | promotion from the integration branch to the release branch |
 
 - **A red integration branch keeps merging; promotion does not advance.** A failed promotion run never closes the queue or holds other pull requests. The release branch stays on the last green promoted head until a later run passes.
 - **Promotion owns the slow checks.** A check whose run time does not fit the pull request or queue budget moves to promotion, never off the books. A pull request is never held for a check that only promotion runs.

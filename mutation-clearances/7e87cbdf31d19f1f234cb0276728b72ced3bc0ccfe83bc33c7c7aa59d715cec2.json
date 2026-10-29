@@ -1,0 +1,6 @@
+{
+  "scripts/routing/claude_ai.py:scripts.routing.claude_ai.x_launch_claude__mutmut_14:b5867e851100a5a5587c127eeb97380dcf3bd32f3a1b3048c24f2683767ba1d7": {
+    "reader": "standards-reader",
+    "reason": "Absent name defaults to XXXX instead of empty string. Neither string matches master 1 followed by the middle dot and a nonempty slug, so both select standalone prepare. A present title is unchanged. Independently ruled from complete CI report 40631995725 on e92ec9d83."
+  }
+}

@@ -37,6 +37,7 @@ NOTICE_COMMAND = "Start it here: agentihooks init-agent --profile documentation"
 NOTICE_SUBJECT_LENGTH = 160
 TASK_HASH_LENGTH = 16
 RETRY_LIMIT = 3
+RETRY_BUDGET_S = 90
 LOCK_SUFFIX = ".lock"
 WRITE_SUFFIX = ".next"
 
@@ -204,7 +205,7 @@ def process(path: Path, now: float | None = None) -> None:
         _write(path, row)
         try:
             _finish(path, row)
-        except Exception as exc:
+        except (Exception, SystemExit) as exc:
             row.update(status="pending", error=type(exc).__name__, reason=type(exc).__name__)
             _write(path, row)
             log("documentation request retained", {"error": type(exc).__name__, "session": row["session"]})
@@ -215,7 +216,9 @@ def process_pending(path: Path) -> None:
     retry_pending(json.loads(path.read_text())["swarm"], path)
 
 
-def retry_pending(swarm: str | None = None, skip: Path | None = None) -> None:
+def retry_pending(
+    swarm: str | None = None, skip: Path | None = None, limit: int | None = RETRY_LIMIT, until: float | None = None
+) -> None:
     now = time.time()
     retried = 0
     for pending in sorted(
@@ -225,10 +228,10 @@ def retry_pending(swarm: str | None = None, skip: Path | None = None) -> None:
             continue
         row = json.loads(pending.read_text())
         if row["status"] == "pending" and swarm in (None, row["swarm"]) and row.get("retry_at", 0) <= now:
+            if retried == limit or until is not None and time.time() >= until:
+                return
             process(pending, now)
             retried += 1
-            if retried == RETRY_LIMIT:
-                break
 
 
 def retry() -> None:
@@ -237,7 +240,7 @@ def retry() -> None:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return
-        retry_pending()
+        retry_pending(limit=None, until=time.time() + RETRY_BUDGET_S)
 
 
 def schedule_retry() -> None:

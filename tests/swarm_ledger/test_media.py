@@ -63,14 +63,14 @@ class Store(unittest.TestCase):
 
     def test_an_image_is_stored_once_by_content_hash_next_to_the_ledger(self):
         data = png(4, 4)
-        first = media.store("shots", data)
-        again = media.store("shots", data)
+        first = media.store("shots-once", data)
+        again = media.store("shots-once", data)
         self.assertEqual(first, again)
         self.assertEqual(set(first), {"id", "type", "size", "width", "height"})
         self.assertEqual(
             (first["type"], first["size"], first["width"], first["height"]), ("image/png", len(data), 4, 4)
         )
-        folder = core.LEDGER_DIR / "shots.media"
+        folder = core.LEDGER_DIR / "shots-once.media"
         self.assertEqual([p.name for p in folder.iterdir()], [first["id"]])
         self.assertEqual((folder / first["id"]).read_bytes(), data)
 

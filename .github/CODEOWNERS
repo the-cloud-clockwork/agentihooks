@@ -7,6 +7,8 @@
 /scripts/ci_*.py @nestorcolt
 /scripts/ci_reuse_job.yml @nestorcolt
 /scripts/ci_gate_summary_steps.yml @nestorcolt
+/scripts/release_changelog.py @nestorcolt
+/scripts/release_changelog_seed.py @nestorcolt
 /scripts/gates/ @nestorcolt
 /scripts/gate_* @nestorcolt
 /scripts/size_limits.py @nestorcolt
@@ -48,6 +50,7 @@
 /tests/test_codeowners.py @nestorcolt
 /tests/swarm_ledger/receipt_mutation_probe.py @nestorcolt
 /tests/swarm_ledger/receipt_stats_probe.py @nestorcolt
+/scripts/swarm_ledger/expected_page_change.json @nestorcolt
 /tests/ledger_load/gate.py @nestorcolt
 /tests/ledger_load/paired.py @nestorcolt
 /tests/ledger_load/memory.py @nestorcolt

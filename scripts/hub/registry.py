@@ -58,9 +58,11 @@ REACTORS = Registry()
 
 
 def configured(bus: Bus, clock: lease.Clock = lease.wall_ms) -> Registry:
+    from scripts.hub.claims import Claims
     from scripts.hub.hive_loss import HiveLoss
     from scripts.hub.inbox_wake import InboxWake
     from scripts.hub.lifecycle import Lifecycle
+    from scripts.hub.preemption import Preemption
     from scripts.hub.pulls import Pulls
     from scripts.hub.readiness import Readiness
     from scripts.hub.reconciler import Reconciler
@@ -73,10 +75,12 @@ def configured(bus: Bus, clock: lease.Clock = lease.wall_ms) -> Registry:
             Timers(bus, clock).reactor(),
             inbox.reactor(),
             inbox.expiry_reactor(),
+            Claims().reactor(),
             HiveLoss(bus, clock).reactor(),
             Lifecycle(bus).reactor(),
             Reconciler(bus, clock=clock).reactor(),
             Readiness(bus, clock=clock).reactor(),
+            Preemption(clock=clock).reactor(),
             Pulls(bus, clock=clock).reactor(),
         ]
     )

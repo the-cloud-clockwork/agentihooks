@@ -1,0 +1,83 @@
+{{- $storage := .Values.hiveStorage }}
+{{- $folders := $storage.homeFolders }}
+{{- if $folders.hives }}
+{{- $homes := dig "default" "homes" "" $storage }}
+{{- if not $homes }}
+{{- fail "hiveStorage.homeFolders.hives needs hiveStorage.default.homes" }}
+{{- end }}
+{{- range $folders.hives }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (toString .)) }}
+{{- fail (printf "hiveStorage.homeFolders.hives entry %q must be a folder name: lowercase letters, digits and dashes" (toString .)) }}
+{{- end }}
+{{- end }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "swarm.fullname" . }}-hive-home-folders
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hive-home-folders
+spec:
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "hive-home-folders") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: hive-home-folders
+    spec:
+      automountServiceAccountToken: false
+      {{- with $folders.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $storage.nodes }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      {{- toYaml (keys . | sortAlpha) | nindent 22 }}
+      {{- end }}
+      {{- with $folders.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: owner
+          image: {{ $storage.image }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              for hive in {{ join " " $folders.hives }}; do
+                mkdir -p "/homes/$hive"
+                chmod 0750 "/homes/$hive"
+                chown 10001:10001 "/homes/$hive"
+              done
+              exec sleep infinity
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN, FOWNER]
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: homes
+              mountPath: /homes
+      volumes:
+        - name: homes
+          hostPath:
+            path: {{ $homes | quote }}
+            type: DirectoryOrCreate
+{{- end }}

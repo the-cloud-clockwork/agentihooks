@@ -28,6 +28,10 @@ pytestmark = pytest.mark.unit
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
 BAO_URL = "https://bao.test"
 POLICY = {**json.loads((FIXTURES / "pod-policy.json").read_text()), "provider_accounts": []}
+MISSING_BAO = (
+    "it needs OPENBAO_URL and OPENBAO_TOKEN, set in the agentihooks env files: ~/.agentihooks/.env or a *.env "
+    "companion beside it, such as ~/.agentihooks/openbao.env"
+)
 
 
 def ssh_private(key) -> str:
@@ -278,7 +282,7 @@ def test_setup_command_defaults_antoncore_to_the_workbench_checkout(tmp_path, mo
 @pytest.mark.parametrize(
     "environ, who, message",
     [
-        ({}, Who(), "operator terminal setup refused: it needs OPENBAO_URL and OPENBAO_TOKEN\n"),
+        ({}, Who(), f"operator terminal setup refused: {MISSING_BAO}\n"),
         (
             {"OPENBAO_URL": BAO_URL, "OPENBAO_TOKEN": "t"},
             Who(name="engineer@abc-1"),
@@ -1044,7 +1048,7 @@ def test_a_refused_setup_raises_one_priority_on_each_synced_swarm(tmp_path, monk
     monkeypatch.setattr(publications, "connect", lambda environ: dialled.append(dict(environ)) or made)
     monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
     environ = {"AGENTIHOOKS_HIVE_REDIS_URL": "rediss://own.example:6379/0"}
-    message = f"operator terminal setup refused: it needs {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV}"
+    message = f"operator terminal setup refused: {MISSING_BAO}"
 
     assert run_main(["setup"], environ, Who(), tmp_path / "home") == (1, "", message + "\n")
     assert run_main(["setup"], environ, Who(), tmp_path / "home")[0] == 1
@@ -1295,3 +1299,114 @@ def test_install_command_passes_its_hive_redis_address(tmp_path, monkeypatch):
     assert run_main(["install", "--redis-address", "swarm.example:6379"], {}, Who(), tmp_path / "home")[0] == 0
     assert run_main(["install"], {}, Who(), tmp_path / "home")[0] == 0
     assert seen == [(tmp_path / "home", "swarm.example:6379"), (tmp_path / "home", "")]
+
+
+def test_the_scheduled_setup_never_takes_openbao_settings_from_the_runner_shell(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setenv("OPENBAO_URL", BAO_URL)
+    monkeypatch.setenv("OPENBAO_TOKEN", "shell-token")
+    monkeypatch.setenv("KEPT", "runner")
+    shell_files(monkeypatch, {})
+    monkeypatch.setattr(operator_setup, "setup", lambda root, environ: seen.append(environ) or 1)
+
+    operator_setup.refresh(event(tmp_path / "home"), "delivery", None)
+
+    assert [("OPENBAO_URL" in environ, "OPENBAO_TOKEN" in environ, environ["KEPT"]) for environ in seen] == [
+        (False, False, "runner")
+    ]
+
+
+def test_a_refused_setup_before_the_hive_transport_alerts_the_swarms_of_the_machine_redis(tmp_path, monkeypatch):
+    ledger, made = Ledger(), alarm_store(["hive-a", "hive-b"])
+    monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.redis)
+    message = f"operator terminal setup refused: {MISSING_BAO}"
+
+    assert run_main(["setup"], {}, Who(), tmp_path / "home") == (1, "", message + "\n")
+
+    assert ledger.alerts == [("hive-a", message, "setup"), ("hive-b", message, "setup")]
+    alarm = json.loads((tmp_path / "home" / "swarm-terminal" / "alarm").read_text())
+    assert alarm == {"message": message, "raised": ["hive-a", "hive-b"]}
+
+
+@pytest.mark.parametrize("kind", ["redis", "socket", "swarm"])
+def test_an_unreachable_machine_redis_leaves_a_refusal_in_the_journal_only(tmp_path, monkeypatch, kind):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    errors = {"redis": RedisConnectionError("gone"), "socket": OSError("no socket"), "swarm": SwarmError("refused")}
+
+    def unreachable():
+        raise errors[kind]
+
+    def refuse():
+        raise AssertionError("no ledger without a swarm to alert")
+
+    monkeypatch.setattr(operator_setup, "redis_client", unreachable)
+    monkeypatch.setattr(operator_setup, "LedgerClient", refuse)
+
+    assert run_main(["setup"], {}, Who(), tmp_path / "home")[0] == 1
+    assert not (tmp_path / "home" / "swarm-terminal" / "alarm").exists()
+
+
+@pytest.mark.parametrize("kind", ["socket", "redis"])
+def test_a_hive_transport_failing_at_the_socket_falls_back_to_the_machine_redis(tmp_path, monkeypatch, kind):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    from scripts.swarm_v2.herdr import publications
+
+    class Dropped:
+        def slugs(self):
+            raise RedisConnectionError("dropped")
+
+    def broken(environ):
+        if kind == "socket":
+            raise OSError("socket closed")
+        return Dropped()
+
+    ledger, made = Ledger(), alarm_store(["hive-a"])
+    monkeypatch.setattr(publications, "connect", broken)
+    monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(operator_setup, "redis_client", lambda: made.redis)
+
+    assert run_main(["setup"], {}, Who(), tmp_path / "home")[0] == 1
+    assert [slug for slug, _, _ in ledger.alerts] == ["hive-a"]
+
+
+def test_a_clean_home_install_schedules_both_jobs_and_the_setup_job_places_the_files(tmp_path, monkeypatch):
+    import time
+
+    home = tmp_path / "user"
+    state = home / ".agentihooks"
+    state.mkdir(parents=True)
+    (state / ".env").write_text(f"AGENTIHOOKS_ANTONCORE_DIR={antoncore(tmp_path)}\n")
+    (state / "openbao.env").write_text(f"OPENBAO_URL={BAO_URL}\nOPENBAO_TOKEN=configured-token\n")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(state))
+    monkeypatch.setenv("OPENBAO_URL", "https://shell.test")
+    monkeypatch.setenv("OPENBAO_TOKEN", "shell-token")
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_REDIS_ADDRESS", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_ANTONCORE_DIR", raising=False)
+    key = Ed25519PrivateKey.generate()
+    secret = ssh_private(key)
+    bao = Bao({"user_ca": secret})
+    monkeypatch.setattr(openbao_kv.urllib.request, "urlopen", bao)
+    synced = []
+    monkeypatch.setattr(operator_setup, "sync_once", lambda environ, root: synced.append(root) or 0)
+    machine, units = scheduler(), tmp_path / "units"
+
+    operator_setup.install(state, "", units, Systemctl(), machine, lambda: None)
+    assert operator_setup.installed(state, "", units, machine)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        assert machine.run_due(now=time.time() + operator_setup.REFRESH_SECONDS + 1) == 2
+
+    placement = operator_setup.Placement(state / operator_setup.FOLDER)
+    assert placement.ca_key.read_text() == secret
+    assert operator_setup.settings(state) == {
+        operator_setup.CA_KEY_ENV: str(placement.ca_key),
+        operator_setup.POLICY_ENV: str(placement.policy),
+    }
+    assert {(url.split("/v1/")[0], token) for url, token in bao.requests} == {(BAO_URL, "configured-token")}
+    assert json.loads(out.getvalue())["ca_fingerprint"] == fingerprint(key)
+    assert synced == [state]
+    assert operator_setup.installed(state, "", units, machine)

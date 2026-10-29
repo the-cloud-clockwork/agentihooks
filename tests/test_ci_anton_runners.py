@@ -28,6 +28,8 @@ def pool(label):
 
 
 MOVED = {
+    ("changelog.yml", "changelog"): LIGHT,
+    ("changelog-seed.yml", "seed"): LIGHT,
     ("chaos.yml", "chaos"): STANDARD,
     ("chart-release.yml", "publish"): LIGHT,
     ("mutation-line-selection-proof.yml", "compare"): BATCH,
@@ -52,7 +54,7 @@ MOVED = {
     ("ledger-row-memory.yml", "replay"): BATCH,
     ("mutation-preflight.yml", "mutation"): LIGHT,
     ("mutation-preflight.yml", "mutation-shard"): BATCH,
-    ("mutation-preflight.yml", "plan"): LIGHT,
+    ("mutation-preflight.yml", "plan"): STANDARD,
     ("mutation-preflight.yml", "refine"): LIGHT,
     ("mutation-replay.yml", "plan"): LIGHT,
     ("mutation-replay.yml", "grade"): BATCH,
@@ -130,6 +132,7 @@ CLASSED = {
     ("ci-templates.yml", "actionlint"),
     ("pages.yml", "build"),
     ("promote.yml", "promote"),
+    ("test.yml", "promotion-ready"),
     ("publish-pypi.yml", "verify"),
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),
@@ -150,6 +153,10 @@ CONSOLIDATED = {
 
 def workflows():
     return {path.name: yaml.safe_load(path.read_text()) for path in sorted(WORKFLOWS.glob("*.yml"))}
+
+
+if "install-smoke" in workflows()["test.yml"]["jobs"]:
+    MOVED[("test.yml", "install-smoke")] = LIGHT
 
 
 def runner_jobs():

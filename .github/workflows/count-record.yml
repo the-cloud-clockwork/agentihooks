@@ -55,7 +55,7 @@ jobs:
       with:
         path: ~/venv
         key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml',
-          '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}
+          '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}-${{ hashFiles('.github/test-requirements.lock') }}
     - name: Set up uv
       if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
       uses: astral-sh/setup-uv@v10.2.0
@@ -69,7 +69,7 @@ jobs:
         PYTHON_PATH: ${{ steps.python.outputs.python-path }}
       run: 'uv venv --python "$PYTHON_PATH" "$HOME/venv"
 
-        uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
+        uv pip install --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
         '
     - name: Save the test environment from dev

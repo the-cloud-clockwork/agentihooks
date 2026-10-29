@@ -367,7 +367,7 @@ class NatsStateStore:
             entry = self._loop.run(self._kv.get(key))
         except KeyNotFoundError:
             return None
-        value = self._loop.run(nats_payload.decode(self._read_chunk, entry.value))
+        value = self._loop.run(nats_payload.decode(self._read_chunk, entry.value or b""))
         return StateEntry(key=key, value=value, revision=entry.revision)
 
     def create(self, key: str, value: bytes) -> int:

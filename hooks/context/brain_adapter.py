@@ -501,7 +501,7 @@ def maybe_refresh_on_tool_call(
     from hooks.context.project_cache import project_context
     from hooks.context.task_context import offer
 
-    project = offer(session_id, "PreToolUse", project_context(session_id), claim_delivery)
+    project = offer(session_id, "PreToolUse", project_context(session_id), claim_delivery, "refresh")
     if not claim_delivery:
         return None
     fleet = get_broadcast_context(session_id, result["created_ids"]) if result else None

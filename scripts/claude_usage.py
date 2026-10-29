@@ -9,7 +9,7 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 
-from scripts.claude_quota_balancer import ProbeResult, QuotaWindow, _error_result, _state
+from scripts.claude_quota_balancer import AUTH_REJECTED, ProbeResult, QuotaWindow, _error_result, _state, revoked_result
 
 MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 TIMEOUT_S = 20
@@ -135,4 +135,6 @@ def probe(
     elapsed_ms = round((time.monotonic() - started) * 1000)
     if status == 200 or (status == 429 and headers.get(f"{HEADER}status")):
         return result(account, headers, _body(raw), elapsed_ms)
+    if status in AUTH_REJECTED:
+        return revoked_result(account, elapsed_ms)
     return _error_result(account, HTTP_ERROR.format(status=status), elapsed_ms)

@@ -271,9 +271,11 @@ def test_swarm_set_switches_hive_placement(store, capsys, value, stored):
     from scripts.swarm import cli
 
     store.update("sw", state="paused", hive_placement=not stored)
-    cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=[f"hive-placement={value}"]))
+    cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=[f"hive-placement={value}", "placement-nodes=3"]))
     assert store.config("sw").hive_placement is stored
-    assert json.loads(capsys.readouterr().out)["hive_placement"] is stored
+    assert store.config("sw").placement_nodes == 3
+    shown = json.loads(capsys.readouterr().out)
+    assert (shown["hive_placement"], shown["placement_mode"], shown["placement_nodes"]) == (stored, "anton-first", 3)
 
 
 def test_swarm_set_refuses_another_hive_placement_value(store):
@@ -286,6 +288,63 @@ def test_swarm_set_refuses_another_hive_placement_value(store):
     with pytest.raises(SwarmError, match="^hive-placement takes on or off$"):
         cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=["hive-placement=yes"]))
     assert store.config("sw").hive_placement is False
+
+
+def test_placement_mode_is_anton_first_with_no_node_limit_by_default(store):
+    config = store.config("sw")
+    assert (config.placement_mode, config.placement_nodes) == ("anton-first", 0)
+    store.update("sw", placement_mode="round-robin", placement_nodes=3)
+    config = store.config("sw")
+    assert (config.placement_mode, config.placement_nodes) == ("round-robin", 3)
+
+
+def test_a_swarm_saved_before_placement_modes_reads_anton_first_with_no_node_limit(store):
+    store.redis.hdel(store.key("sw", "config"), "placement_mode", "placement_nodes")
+    config = store.config("sw")
+    assert (config.placement_mode, config.placement_nodes) == ("anton-first", 0)
+
+
+@pytest.mark.parametrize("nodes", [-1, "2", 1.5])
+def test_swarm_config_refuses_a_node_limit_that_is_not_a_whole_number(nodes):
+    from scripts.swarm.store import SwarmConfig, SwarmError
+
+    with pytest.raises(SwarmError, match="^placement-nodes takes a whole number of hives, 0 for no limit$"):
+        SwarmConfig("sw", "agentihooks", 1, 1, placement_nodes=nodes)
+
+
+def test_swarm_set_selects_round_robin_placement_and_its_node_limit(store, capsys):
+    import argparse
+    import json
+
+    from scripts.swarm import cli
+
+    store.update("sw", state="paused")
+    cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=["placement-mode=round-robin", "placement-nodes=4"]))
+    config = store.config("sw")
+    assert (config.placement_mode, config.placement_nodes) == ("round-robin", 4)
+    shown = json.loads(capsys.readouterr().out)
+    assert (shown["placement_mode"], shown["placement_nodes"]) == ("round-robin", 4)
+
+
+@pytest.mark.parametrize(
+    ("pair", "refusal"),
+    [
+        ("placement-mode=spread", "^placement mode must be one of anton-first, round-robin$"),
+        ("placement-nodes=two", "^placement-nodes takes a whole number of hives, 0 for no limit$"),
+        ("placement-nodes=-1", "^placement-nodes takes a whole number of hives, 0 for no limit$"),
+    ],
+)
+def test_swarm_set_refuses_an_unknown_placement_mode_or_node_limit(store, pair, refusal):
+    import argparse
+
+    from scripts.swarm import cli
+    from scripts.swarm.store import SwarmError
+
+    store.update("sw", state="paused")
+    with pytest.raises(SwarmError, match=refusal):
+        cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=[pair]))
+    config = store.config("sw")
+    assert (config.placement_mode, config.placement_nodes) == ("anton-first", 0)
 
 
 def test_the_tick_of_a_local_machine_swarm_with_hive_placement_runs_hybrid(store, monkeypatch):

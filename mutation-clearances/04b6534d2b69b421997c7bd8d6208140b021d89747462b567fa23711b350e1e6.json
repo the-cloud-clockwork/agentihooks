@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_workspace.py:scripts.swarm_ledger.ledger_workspace.x_mirror__mutmut_36:0b98bb145519772f2c8410cf0be631a14c09fc864333fb11ca19a29f934f94ce": {
+    "reader": "Standards reader for t945",
+    "reason": "UTF-8 and utf-8 identify the same codec."
+  }
+}

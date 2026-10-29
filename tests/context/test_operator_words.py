@@ -1,5 +1,6 @@
 import json
 import time
+from contextlib import contextmanager
 
 import pytest
 
@@ -343,6 +344,15 @@ def test_question_answers_are_removed_with_their_swarm():
     assert operator_words.matching("master@a1-1", "Swarm answer", within=None) == ""
 
 
+def test_an_unavailable_shared_store_mirrors_nothing(monkeypatch):
+    class Down:
+        def get(self, key):
+            raise OSError("store down")
+
+    monkeypatch.setattr(operator_words, "_shared", lambda: Down())
+    assert operator_words._mirror("demo", "master@a1-1", 100, "ship it") is False
+
+
 def test_upgrade_continues_past_empty_and_unresolved_files(tmp_path, monkeypatch):
     import json
 
@@ -595,8 +605,10 @@ def test_a_newer_recorded_quote_wins_over_older_migrated_words(tmp_path, monkeyp
 def shared(monkeypatch):
     import fakeredis
 
+    from scripts.events.redis_state import RedisStateStore
+
     client = fakeredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr(operator_words, "_shared", lambda: client)
+    monkeypatch.setattr(operator_words, "_SHARED", [RedisStateStore(client, operator_words.BUCKET)])
     return client
 
 
@@ -608,10 +620,13 @@ def test_swarm_words_reach_a_server_without_the_local_store_and_unowned_words_st
     assert operator_words.record("master@a1-1", "Scale the hive  up", now=100, swarm="demo")
     assert operator_words.record("master@a1-1", "Hold the release", now=150, swarm="demo")
     assert operator_words.record("master@b2-1", "Local only words", now=150)
+    assert [row["words"] for row in operator_words._shared_rows("master@a1-1")] == [
+        "Hold the release",
+        "Scale the hive  up",
+    ]
     from scripts.swarm.store import PREFIX
 
-    assert shared.smembers(f"{PREFIX}:operator-words") == {"master@a1-1"}
-    assert shared.zcard(f"{PREFIX}:operator-words:master@a1-1:entries") == 2
+    assert not shared.exists(f"{PREFIX}:operator-words", f"{PREFIX}:operator-words:master@a1-1:entries")
     _hosted(tmp_path, monkeypatch)
     assert operator_words.matching("master@a1-1", "scale the hive up", now=200) == "Scale the hive  up"
     assert operator_words.matching("master@a1-1", "hold the", now=200) == "Hold the release"
@@ -674,12 +689,23 @@ def test_overlapping_history_publishers_keep_recording_available(shared, monkeyp
     monkeypatch.setattr(operator_words, "_mirror", overlapping)
     assert operator_words.matching("master@a1-1", "mark it urgent", within=None) == "Mark it urgent"
     with operator_words._store() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM published").fetchone() == (3,)
+        assert connection.execute("SELECT COUNT(*) FROM stored").fetchone() == (3,)
     assert operator_words._shared_rows("master@a1-1") == [
         {"swarm": "demo", "at": 110.0, "words": "Keep it high"},
         {"swarm": "demo", "at": 100.0, "words": "Mark it urgent"},
     ]
     assert operator_words.matching("master@a1-2", "keep recording words", within=None) == "Keep recording words"
+
+
+def test_words_once_published_to_redis_lists_republish_into_the_state_store(shared, monkeypatch):
+    with monkeypatch.context() as offline:
+        offline.setattr(operator_words, "_shared", lambda: None)
+        operator_words.record("master@a1-1", "Mark it urgent", now=100, swarm="demo")
+        with operator_words._store() as connection:
+            connection.execute("CREATE TABLE IF NOT EXISTS published (entry INTEGER PRIMARY KEY)")
+            connection.execute("INSERT INTO published VALUES (1)")
+    assert operator_words.recorded("master@*") == ["master@a1-1"]
+    assert operator_words._shared_rows("master@a1-1") == [{"swarm": "demo", "at": 100.0, "words": "Mark it urgent"}]
 
 
 def test_partial_history_publication_checkpoints_success_before_retry(shared, monkeypatch):
@@ -699,10 +725,10 @@ def test_partial_history_publication_checkpoints_success_before_retry(shared, mo
         pass
     assert calls == ["Mark it urgent", "Keep it high"]
     with operator_words._store() as connection:
-        assert connection.execute("SELECT entry FROM published").fetchall() == [(1,)]
+        assert connection.execute("SELECT entry FROM stored").fetchall() == [(1,)]
     assert calls == ["Mark it urgent", "Keep it high", "Keep it high"]
     with operator_words._store() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM published").fetchone() == (2,)
+        assert connection.execute("SELECT COUNT(*) FROM stored").fetchone() == (2,)
 
 
 def test_the_newest_shared_words_win_and_older_words_remain_available(shared, tmp_path, monkeypatch):
@@ -732,31 +758,25 @@ def test_older_shared_rows_match_and_forget_drops_every_copy(shared, tmp_path, m
     _hosted(tmp_path, monkeypatch)
     assert operator_words.matching("master@a1-1", "merge the demo work", within=None) == "merge the demo work"
     operator_words.forget("demo")
-    from scripts.swarm.store import PREFIX
-
-    assert shared.zrange(f"{PREFIX}:operator-words:master@a1-1:entries", 0, -1) == [
-        json.dumps({"swarm": "other", "at": 110.0, "words": "merge the other work"})
+    assert operator_words._shared_rows("master@a1-1") == [
+        {"swarm": "other", "at": 110.0, "words": "merge the other work"}
     ]
 
 
-@pytest.mark.parametrize("copies", [1, 3])
-def test_legacy_shared_lists_remain_readable_and_forgettable(shared, tmp_path, monkeypatch, copies):
+def test_pre_state_store_redis_rows_are_neither_read_nor_touched(shared, tmp_path, monkeypatch):
     from scripts.swarm.store import PREFIX
 
-    key = f"{PREFIX}:operator-words:master@a1-1"
-    shared.sadd(f"{PREFIX}:operator-words", "master@a1-1")
-    for at, words in ((100, "Mark it urgent"), (110, "Keep it high"), (120, "Keep it normal")):
-        row = json.dumps({"swarm": "demo", "at": at, "words": words})
-        shared.lpush(key, *([row] * copies))
-    operator_words.record("master@a1-1", "Mark it normal", now=90, swarm="demo")
+    key = f"{PREFIX}:operator-words:master@c3-1"
+    row = json.dumps({"swarm": "demo", "at": 100, "words": "Old sorted words"})
+    shared.sadd(f"{PREFIX}:operator-words", "master@c3-1")
+    shared.zadd(f"{key}:entries", {row: 100})
+    shared.rpush(key, row)
     _hosted(tmp_path, monkeypatch)
-    assert operator_words.matching("master@a1-1", "mark it", within=None) == "Mark it urgent"
-    assert operator_words.matching("master@a1-1", "keep it high", within=None) == "Keep it high"
-    assert operator_words.matching("master@a1-1", "keep it normal", within=None) == "Keep it normal"
+    assert operator_words.recorded("master@*") == []
+    assert operator_words.matching("master@c3-1", "old sorted", within=None) == ""
     operator_words.forget("demo")
-    assert operator_words.matching("master@a1-1", "mark it", within=None) == ""
-    assert shared.lrange(key, 0, -1) == []
-    assert shared.zrange(f"{key}:entries", 0, -1) == []
+    assert shared.zrange(f"{key}:entries", 0, -1) == [row]
+    assert shared.lrange(key, 0, -1) == [row]
 
 
 def test_an_unreachable_or_failing_shared_redis_keeps_the_local_words(tmp_path, monkeypatch):
@@ -799,6 +819,124 @@ def test_the_shared_client_connects_once_per_process_and_retries_after_a_refusal
     monkeypatch.setattr(operator_words, "_SHARED", [])
     monkeypatch.setattr(store, "redis_client", connect)
     assert operator_words._shared() is None
-    assert operator_words._shared() == "client"
-    assert operator_words._shared() == "client"
+    assert operator_words._shared().redis == "client"
+    assert operator_words._shared() is operator_words._shared()
     assert len(calls) == 2
+
+
+def test_an_unknown_state_backend_is_refused_rather_than_kept_local(monkeypatch):
+    monkeypatch.setattr(operator_words, "_SHARED", [])
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "disk")
+    with pytest.raises(ValueError, match="unknown state backend 'disk'; known: bus, redis"):
+        operator_words._shared()
+    assert operator_words._SHARED == []
+
+
+def test_swarm_rows_live_under_the_hashed_name_key(shared):
+    import hashlib
+
+    assert operator_words.record("master@a1-1", "Hashed key words", now=100, swarm="demo")
+    stored = operator_words._shared().get("name." + hashlib.sha256(b"master@a1-1").hexdigest())
+    assert json.loads(stored.value) == [{"swarm": "demo", "at": 100.0, "words": "Hashed key words"}]
+
+
+class _Conflicting:
+    def __init__(self, conflicts):
+        self.conflicts = conflicts
+        self.writes = []
+
+    def get(self, key):
+        return None
+
+    def create(self, key, value):
+        from scripts.events.bus import StateConflict
+
+        self.writes.append((key, value))
+        if len(self.writes) <= self.conflicts:
+            raise StateConflict("raced")
+        return len(self.writes)
+
+
+def test_amend_retries_a_conflicting_write_until_it_lands():
+    store = _Conflicting(conflicts=2)
+    assert operator_words._amend(store, "k", lambda rows: [*rows, 1]) is True
+    assert store.writes == [("k", b"[1]")] * 3
+
+
+def test_amend_gives_up_after_its_tries_and_names_the_key():
+    from scripts.events.bus import StateConflict
+
+    store = _Conflicting(conflicts=operator_words.AMEND_TRIES)
+    with pytest.raises(StateConflict) as changing:
+        operator_words._amend(store, "k", lambda rows: rows)
+    assert str(changing.value) == "state key 'k' kept changing"
+    assert str(changing.value.__cause__) == "raced"
+    assert len(store.writes) == operator_words.AMEND_TRIES
+
+
+@contextmanager
+def _memory_bus(tmp_path):
+    yield {"AGENTIHOOKS_BUS": "memory"}
+
+
+@contextmanager
+def _nats_bus(tmp_path):
+    from tests.events import nats_server
+
+    with nats_server.running(tmp_path / "jetstream") as url:
+        yield {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": url}
+
+
+@pytest.mark.parametrize("bus", [_memory_bus, _nats_bus], ids=["memory", "nats"])
+def test_swarm_words_reach_a_hosted_reader_through_the_bus(tmp_path, monkeypatch, bus):
+    import redis
+
+    from scripts.events import state
+    from scripts.swarm import store
+
+    def no_redis(environ=None):
+        raise redis.exceptions.ConnectionError("no Redis on the bus")
+
+    monkeypatch.setattr(store, "redis_client", no_redis)
+    with bus(tmp_path) as settings:
+        for name, value in {state.BACKEND_ENV: "bus", **settings}.items():
+            monkeypatch.setenv(name, value)
+        assert operator_words.record("master@a1-1", "Scale the hive  up", now=100, swarm="demo")
+        assert operator_words.record("master@a1-1", "Hold the release", now=110, swarm="other")
+        assert operator_words.record("planner@a1-1", "Slice the phase", now=120, swarm="demo")
+        assert operator_words.record("master@b2-1", "Local only words", now=130)
+        _hosted(tmp_path, monkeypatch)
+        assert operator_words.matching("master@a1-1", "scale the hive up", within=None) == "Scale the hive  up"
+        assert operator_words.matching("master@a1-1", "hold the", within=None) == "Hold the release"
+        assert operator_words.matching("master@b2-1", "local only words", within=None) == ""
+        assert operator_words.recorded("*@a1-1") == ["master@a1-1", "planner@a1-1"]
+        operator_words.forget("demo")
+        assert operator_words.matching("master@a1-1", "scale the hive up", within=None) == ""
+        assert operator_words.matching("planner@a1-1", "slice the phase", within=None) == ""
+        assert operator_words.matching("master@a1-1", "hold the", within=None) == "Hold the release"
+        operator_words._SHARED.clear()
+
+
+def test_a_failing_bus_keeps_the_local_words_and_publishes_them_later(tmp_path, monkeypatch):
+    from scripts.events import memory, state
+
+    monkeypatch.setenv(state.BACKEND_ENV, "bus")
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
+
+    class Closed:
+        def get(self, key):
+            raise RuntimeError("bus is closed")
+
+        create = update = get
+
+    monkeypatch.setattr(operator_words, "_SHARED", [Closed()])
+    assert operator_words.record("master@a1-1", "Keep the local words", now=100, swarm="demo")
+    assert operator_words.recorded("master@*") == ["master@a1-1"]
+    with operator_words._store() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM stored").fetchone() == (0,)
+    monkeypatch.setattr(operator_words, "_SHARED", [memory.open_bus(memory.BusConfig()).state(operator_words.BUCKET)])
+    assert operator_words.matching("master@a1-1", "keep the local words", within=None) == "Keep the local words"
+    with operator_words._store() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM stored").fetchone() == (1,)
+    _hosted(tmp_path, monkeypatch)
+    assert operator_words.matching("master@a1-1", "keep the local words", within=None) == "Keep the local words"
