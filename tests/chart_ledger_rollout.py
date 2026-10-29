@@ -90,10 +90,14 @@ def probe_problems(chart: str) -> list[str]:
     found = []
     for probe_name in ("readinessProbe", "livenessProbe"):
         probe = container[probe_name]
+        http_get = probe.get("httpGet", {})
+        headers = {h["name"]: h["value"] for h in http_get.get("httpHeaders", [])}
         if "exec" in probe:
             found.append(f"{probe_name} forks a client process instead of an httpGet check: {probe}")
-        elif probe.get("httpGet", {}).get("path") != "/healthz":
+        elif http_get.get("path") != "/healthz":
             found.append(f"{probe_name} does not httpGet /healthz: {probe}")
+        elif headers.get("Host") != "127.0.0.1:8765":
+            found.append(f"{probe_name} sends a Host header the ledger's allowed hosts refuse: {probe}")
     return found
 
 
