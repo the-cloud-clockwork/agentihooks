@@ -64,10 +64,18 @@ def _head(bundle) -> str:
 def revision() -> str:
     installer = _install()
     bundle, user = installer._get_bundle_path(), installer._get_user_bundle_path()
+    shared = installer._get_shared_bundle_path()
     if bundle is None:
         return ""
     root = _head(bundle)
-    if user is None or not root:
+    if not root:
         return root
-    mine = _head(user)
-    return f"{root}:{mine}" if mine else ""
+    team = _head(shared) if shared is not None else None
+    if shared is not None and not team:
+        return ""
+    mine = _head(user) if user is not None else ""
+    if user is not None and not mine:
+        return ""
+    if shared is not None:
+        return f"{root}:{team}:{mine}"
+    return f"{root}:{mine}" if user is not None else root
