@@ -90,10 +90,17 @@ def test_a_bounded_wait_with_no_ring_returns_at_its_deadline(monkeypatch):
     ensure = Mock()
     monkeypatch.setattr(process_timer.service, "ensure_running", ensure)
     timer = _bare_timer(_Entry(fired_after=10**9))
-    started = time.monotonic()
     assert timer.wait(timeout=0.1) is None
-    assert 0.1 <= time.monotonic() - started < process_timer.RECHECK_S
     ensure.assert_not_called()
+
+
+@pytest.mark.wall_clock
+def test_a_bounded_wait_with_no_ring_takes_its_deadline(monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", Mock())
+    timer = _bare_timer(_Entry(fired_after=10**9))
+    started = time.monotonic()
+    timer.wait(timeout=0.1)
+    assert 0.1 <= time.monotonic() - started < process_timer.RECHECK_S
 
 
 def test_a_removed_entry_ends_the_wait():
