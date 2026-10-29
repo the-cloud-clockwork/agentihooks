@@ -49,8 +49,8 @@ def main(argv: list[str]) -> int:
         print(json.dumps({"sent_back": True, "findings": outcome.reason.splitlines()}, indent=2))
         return SENT_BACK
     screened = outcome.tool_input if outcome.decision == "rewrite" else {"case": case, "evidence": evidence}
-    harness = runner.harness_for(args.harness, os.environ)
     try:
+        harness = runner.harness_for(args.harness, os.environ)
         verdict = runner.run(
             ROLE.read_text(),
             judge_input(screened["case"], screened["evidence"]),
@@ -61,7 +61,7 @@ def main(argv: list[str]) -> int:
             harness,
         )
         schema.validate("verdict", verdict)
-    except (HeadlessError, schema.SchemaError) as error:
+    except (ValueError, HeadlessError, schema.SchemaError) as error:
         print(f"judge: {error}", file=sys.stderr)
         return 1
     entry = record.build(case, evidence, verdict, harness, tiers.model(harness, args.tier, os.environ))

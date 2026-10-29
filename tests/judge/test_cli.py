@@ -231,6 +231,21 @@ def test_a_missing_case_file_exits_two(tmp_path, fake_runner, filters, capsys):
     assert capsys.readouterr().err.startswith("judge: ")
 
 
+def test_an_unknown_auto_harness_exits_one_without_calling_the_judge(files, fake_runner, filters, capsys, monkeypatch):
+    case_path, evidence_path = files()
+    fake = fake_runner()
+    filters(ALLOW)
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
+
+    code = cli.main(["--case", str(case_path), "--evidence", str(evidence_path)])
+
+    assert code == 1
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "judge: no headless adapter for copilot\n")
+    assert fake.calls == []
+    assert not case_path.with_suffix(".verdict.json").exists()
+
+
 class CueJudge:
     def __call__(self, state, questions, **kwargs):
         cue = state["filter"] == "pre-judge-blind.filter.yaml"
