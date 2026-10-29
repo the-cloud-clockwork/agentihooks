@@ -124,3 +124,51 @@ def test_a_write_to_one_ledger_runs_while_another_ledger_is_written(tmp_path):
         blocked, thread = runs(lambda: repo.apply_ops("timing"))
         assert not blocked
     thread.join(PATIENCE)
+
+
+def test_a_fresh_lock_reports_its_holds_exactly():
+    lock = LedgerLock()
+    assert lock.whole is False
+    assert runs(lambda: lock.ledger("one").acquire() is True or pytest.fail("ledger acquire answered falsy"))[0]
+    assert lock.held["one"] == 1
+    lock.ledger("one").release()
+    assert lock.acquire() is True
+    assert lock.whole is True
+    waiter, thread = runs(lock.acquire)
+    assert not waiter
+    assert lock.waiting == 1
+    lock.release()
+    thread.join(PATIENCE)
+    assert lock.waiting == 0
+    lock.release()
+    assert lock.whole is False
+    with pytest.raises(RuntimeError, match="^release unlocked lock$"):
+        lock.release()
+
+
+def test_a_write_waits_for_its_own_ledger_and_locks_the_store_by_slug(tmp_path, monkeypatch):
+    repo = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3", domain=server.core)
+    repo.import_document(
+        "timing",
+        server.core.normalize(
+            {
+                **new_ledger.build_doc({"title": "Timing"}),
+                "_meta": {"rev": 1, "stamps": {}, "events": [], "members": {}},
+            }
+        ),
+    )
+    begun, begin = [], request_metrics.begin_ledger
+    monkeypatch.setattr(
+        request_metrics,
+        "begin_ledger",
+        lambda connection, slug, statement: begun.append((slug, statement)) or begin(connection, slug, statement),
+    )
+    own = server.core.LOCK.ledger("timing")
+    own.acquire()
+    try:
+        blocked, thread = runs(lambda: repo.apply_ops("timing"))
+        assert not blocked
+    finally:
+        own.release()
+    thread.join(PATIENCE)
+    assert begun == [("timing", BEGIN_IMMEDIATE)]
