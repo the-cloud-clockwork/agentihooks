@@ -42,14 +42,17 @@ def _ranges(question: dict) -> list[tuple]:
     if not isinstance(expected, list) or not expected:
         raise ValueError(f"question {question.get('id')!r} names no expected source range")
     keys = ("session_uid", "source_generation", "first_sequence", "last_sequence")
-    return [tuple(item[key] for key in keys) for item in expected]
+    ranges = [tuple(item[key] for key in keys) for item in expected]
+    if not all(isinstance(first, int) and isinstance(last, int) and 1 <= first <= last for *_, first, last in ranges):
+        raise ValueError(f"question {question.get('id')!r} names a range that is not positive and ordered")
+    return ranges
 
 
 def _held(tools: records.SessionTools, grant: Grant, text: str, now: float) -> tuple[set, int, int]:
     request = {"schema_version": SCHEMA_VERSION, "access_domain": grant.corpus, "query": text, "limit": SEARCH_LIMIT}
     found = records.call(tools, "session_search", grant, request, now)
     if found["state"] != "answered":
-        return set(), 0, 0
+        return set(), 1, 0
     held, refused, foreign = set(), 0, 0
     for result in found["results"]:
         cited = result["citation"]

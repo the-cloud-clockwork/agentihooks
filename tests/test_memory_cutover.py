@@ -89,6 +89,14 @@ def test_empty_baseline_cannot_qualify(bank, asked):
         shadow(bank.tools, grant(bank.inputs), asked, 5000.0)
 
 
+@pytest.mark.parametrize("bounds", [(5, 4), (0, 2), ("1", 4)])
+def test_unordered_expected_range_cannot_qualify(bank, bounds):
+    asked = questions(bank)
+    asked[0]["expected"][0]["first_sequence"], asked[0]["expected"][0]["last_sequence"] = bounds
+    with pytest.raises(ValueError):
+        shadow(bank.tools, grant(bank.inputs), asked, 5000.0)
+
+
 def test_route_requires_bound_qualification_and_compare_and_set(bank, tmp_path):
     routes = ConsumerRoutes(tmp_path / "routes.sqlite3")
     allowed = grant(bank.inputs)
