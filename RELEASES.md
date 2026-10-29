@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.486 · 2026-10-29
+
+### 2026-10-29 · c0a1ee139fc7 · #8791 · @nestorcolt
+
+**Document plan invalidation after task text rewrites**
+
+This change updates the swarm guide to explain that rewriting a task's title or description invalidates any existing traced plan, forcing a fresh plan and a new intent plan judgment, while unchanged rewrites still reuse the prior verdict and incremental tracing continues to apply. It also documents gate configuration, upgrade recovery steps, and adds a home navigation link so operators can find this section quickly. Clarifying this behavior prevents confusion when task edits silently invalidate cached plans, and ensures operators know how to recover gracefully after upgrades without re-deriving context manually.
+
 ## v2.17.484 · 2026-10-29
 
 ### 2026-10-29 · b5afc17f17dd · #8764 · @agenticore-app
