@@ -29,7 +29,7 @@ collect_shard_stats(runner, test_runner, order, root / "stats.json", str(root / 
 stats = json.loads((root / "stats.json").read_text())
 assert stats["status"] == 0, stats
 credited = stats["tests"]["scripts.sample.x_value"]
-os.environ.pop("MUTANT_UNDER_TEST", None)
+os.environ["MUTANT_UNDER_TEST"] = mutant
 status = test_runner.run_tests(mutant_name=mutant, tests=credited)
 control = test_runner.run_tests(mutant_name=mutant, tests=["tests/test_sample.py::test_strong"])
 result = {
