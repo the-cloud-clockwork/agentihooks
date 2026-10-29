@@ -214,6 +214,47 @@ def test_a_failed_shared_login_check_cannot_overwrite_another_holders_refresh(ah
     assert checks == [str(home), str(home)]
 
 
+def _stamp(rendered, overlays):
+    (rendered / ".agentihooks-render.json").write_text(
+        json.dumps({"chain": ["master", *overlays], "overlays": overlays})
+    )
+
+
+def _process(proc, pid, home):
+    root = proc / str(pid)
+    root.mkdir(parents=True)
+    (root / "comm").write_text("claude")
+    (root / "cmdline").write_bytes(b"claude\0")
+    (root / "environ").write_bytes(f"CLAUDE_CONFIG_DIR={home}\0AGENTIHOOKS_PROFILE=master\0".encode())
+
+
+def test_a_front_door_joining_a_live_home_passes_the_overlay_check_on_its_own_render(ah, tmp_path, rendered):
+    import os
+    import shutil
+
+    from scripts.swarm import launch_check, live_binding
+    from scripts.swarm.store import AgentRecord
+
+    _render(rendered, "Rig master.\n")
+    _stamp(rendered, ["brain"])
+    home = login.build(rendered)
+    (home / login.CREDENTIALS).write_text(json.dumps({login.GRANT: {"refreshToken": "r"}}))
+    (home / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT}))
+    login.claim("master@rig-1", os.getppid())
+    doctor = tmp_path / "doctor" / "claude"
+    shutil.copytree(rendered, doctor)
+    shutil.copyfile(rendered.parent / "claude.sources.json", doctor.parent / "claude.sources.json")
+    _stamp(doctor, ["brain", "swarm-brain"])
+    assert login.prepare(_environ(doctor, "doctor"), tmp_path)[0] == home
+    proc = tmp_path / "proc"
+    _process(proc, 42, home)
+    _process(proc, 43, home)
+    rig_miss = {"overlay": {"expected": ["brain", "swarm-brain"], "actual": ["brain"]}}
+    for pid, name, missed in ((42, "master@doctor-1", {}), (43, "master@rig-1", rig_miss)):
+        facts = live_binding.read(AgentRecord(name, "master", "", harness="claude", profile="master"), pid, proc)
+        assert launch_check._overlays(facts, ["brain", "swarm-brain"]) == missed
+
+
 def _spawn(tmp_path, lane, seat, kind="interactive"):
     seen = []
 
