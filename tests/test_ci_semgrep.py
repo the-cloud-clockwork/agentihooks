@@ -179,3 +179,61 @@ def test_feature_tests_and_charts_have_runner_classes():
         "semgrep.yml/feature-tests",
         "semgrep.yml/scan",
     }
+
+
+def _workflow(name):
+    return yaml.safe_load((_ROOT / ".github/workflows" / name).read_text())
+
+
+def test_exactly_one_step_ratchets_the_guard_rules_against_the_base_floors():
+    ratchets = [
+        (job, step)
+        for job, body in _jobs().items()
+        for step in body.get("steps", [])
+        if "check --base FETCH_HEAD" in step.get("run", "")
+    ]
+    assert [(job, step["name"]) for job, step in ratchets] == [
+        ("charts", "Guard rules hold on their fixtures and at their computed floors")
+    ]
+    step = ratchets[0][1]
+    assert step["env"] == {"BASE": "${{ inputs.base }}"}
+    assert not {"if", "continue-on-error"} & set(step)
+
+
+def test_wrapper_runs_only_when_a_caller_passes_its_base():
+    triggers = _semgrep()[True]
+    assert set(triggers) == {"workflow_call"}
+    assert set(triggers["workflow_call"]["inputs"]) == {"base"}
+
+
+def test_tests_workflow_scans_pull_requests_into_dev_and_admitted_dispatches_only():
+    tests = _workflow("test.yml")
+    assert tests[True]["pull_request"] == {"branches": ["dev"]}
+    job = tests["jobs"]["semgrep"]
+    assert job["uses"] == "./.github/workflows/semgrep.yml"
+    assert job["if"] == (
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success')"
+        " && github.event_name != 'merge_group' && github.event_name != 'push' }}"
+    )
+
+
+def test_proofs_workflow_scans_only_on_the_semgrep_proof():
+    job = _workflow("proofs.yml")["jobs"]["semgrep"]
+    assert job["uses"] == "./.github/workflows/semgrep.yml"
+    assert job["if"] == "inputs.proof == 'semgrep'"
+
+
+def test_scan_holds_the_status_the_dev_rulesets_require():
+    gate = _workflow("test.yml")["jobs"]["gate-required"]
+    assert gate["name"] == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
+    assert "semgrep" in gate["needs"]
+    grader = next(step for step in gate["steps"] if step.get("name") == "Require every gate to succeed")
+    assert '["select", "test-count", "lint", "docs", "semgrep", "sonar", "writer-lock"]' in grader["run"]
+    for ruleset in ("dev-history.json", "dev-no-delete.json"):
+        rules = json.loads((_ROOT / ".github/rulesets" / ruleset).read_text())["rules"]
+        checks = next(rule for rule in rules if rule["type"] == "required_status_checks")
+        assert [check["context"] for check in checks["parameters"]["required_status_checks"]] == ["Gate — Required"]
+
+
+def test_wrapper_jobs_keep_their_job_id_check_names():
+    assert all("name" not in job for job in _jobs().values())
