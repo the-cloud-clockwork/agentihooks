@@ -179,3 +179,14 @@ def test_claiming_marks_only_active_entries_due_by_now(monkeypatch):
         "later": {"state": "active", "due": 6, "signal": "timeout", "slots": []},
         "ready": {"state": "ready", "due": 0, "signal": "timeout", "slots": []},
     }
+
+
+def test_finishing_a_nonpending_entry_leaves_it_unchanged():
+    from copy import deepcopy
+
+    from scripts.scheduler.core import Scheduler
+
+    entry = {"state": "active", "kind": "interval", "due": 12, "delay": 3}
+    before = deepcopy(entry)
+    Scheduler._finish(entry, 20)
+    assert entry == before
