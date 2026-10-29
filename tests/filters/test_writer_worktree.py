@@ -259,6 +259,48 @@ def test_the_trust_check_trusts_the_owner_of_the_operators_bundle(server_elsewhe
     assert filter_check.trusted_folder(stranger) == stranger
 
 
+@pytest.mark.parametrize(
+    ("recorded", "trusted"), [("stranger", True), ("Stranger", True), ("other", False), (None, False)]
+)
+def test_a_server_that_cannot_see_the_bundle_trusts_the_owner_recorded_with_its_link(
+    server_elsewhere, stranger, tmp_path, monkeypatch, recorded, trusted
+):
+    link = {"path": str(tmp_path / "bundle-on-the-writers-machine")}
+    if recorded:
+        link["owner"] = recorded
+    monkeypatch.setattr("hooks.context.profile_chain.read_state", lambda: {"bundle": link})
+    if trusted:
+        assert filter_check.trusted_folder(stranger) == stranger
+        assert ledger_core.check_op(_comment(stranger, "A plain line")) is None
+        return
+    with pytest.raises(ValueError) as refused:
+        ledger_core.check_op(_comment(stranger, "A plain line"))
+    assert str(refused.value) == UNTRUSTED
+
+
+def test_a_visible_bundle_decides_by_its_own_remote_over_the_recorded_owner(
+    server_elsewhere, stranger, tmp_path, monkeypatch
+):
+    bundle = tmp_path / "operator-bundle"
+    bundle.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=bundle, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "git@github.com:other/bundle.git"], cwd=bundle, check=True)
+    state = {"bundle": {"path": str(bundle), "owner": "stranger"}}
+    monkeypatch.setattr("hooks.context.profile_chain.read_state", lambda: state)
+    with pytest.raises(ValueError) as refused:
+        filter_check.trusted_folder(stranger)
+    assert str(refused.value) == UNTRUSTED
+
+
+def test_a_server_holding_no_profile_state_trusts_only_a_listed_owner(server_elsewhere, stranger, monkeypatch):
+    monkeypatch.setattr("hooks.context.profile_chain.read_state", lambda: {})
+    with pytest.raises(ValueError) as refused:
+        ledger_agent_ops.check(_followup(stranger, "A plain line"))
+    assert str(refused.value) == UNTRUSTED
+    monkeypatch.setattr("hooks.config.CONDITIONS_TRUSTED_OWNERS", "someone, stranger")
+    assert ledger_agent_ops.check(_followup(stranger, "A plain line")) is None
+
+
 def test_the_folder_check_validates_only_a_carried_folder():
     assert ledger_comments.worktree({}, True) is None
     assert ledger_comments.worktree({"worktree": 7}, False) is None

@@ -1,5 +1,6 @@
 import argparse
 import json
+import subprocess
 import sys
 
 import pytest
@@ -34,6 +35,18 @@ def test_linking_a_user_bundle_keeps_the_root_link(trees):
     assert state["bundle"]["path"] == str(root)
     assert state["user_bundle"]["path"] == str(user)
     assert profile_chain.bundle_roots(state) == [("root", root), ("user", user)]
+
+
+def test_a_link_records_the_owner_of_the_bundles_origin(trees):
+    _, root, user = trees
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "git@github.com:The-Owner/bundle.git"], cwd=root, check=True)
+    bundles.link(root)
+    bundles.link(user, user=True)
+
+    state = _state()
+    assert state["bundle"]["owner"] == "the-owner"
+    assert state["user_bundle"]["owner"] == ""
 
 
 def test_unlinking_the_user_bundle_keeps_the_root_and_its_files(trees):
