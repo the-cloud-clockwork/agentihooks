@@ -2,7 +2,7 @@ import argparse
 import ast
 import builtins
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.size_limits import GradeError, files
@@ -19,8 +19,8 @@ CONFIG_NAME = re.compile(r"(^|_)(config|conf|cfg|settings|options|opts|params)$"
 class Module:
     name: str
     package: str
-    classes: dict[str, ast.ClassDef] = field(default_factory=dict)
-    imports: dict[str, tuple[str, str | None]] = field(default_factory=dict)
+    classes: dict[str, ast.ClassDef]
+    imports: dict[str, tuple[str, str | None]]
 
 
 @dataclass(frozen=True)
@@ -72,7 +72,7 @@ class Index:
         if rel not in self.loaded:
             name, package = _module_name(rel)
             syntax = ast.parse((self.tree / rel).read_text(), filename=rel)
-            module = Module(name, package)
+            module = Module(name, package, {}, {})
             _index_module(module, syntax)
             self.loaded[rel] = (syntax, module)
         return self.loaded[rel]
