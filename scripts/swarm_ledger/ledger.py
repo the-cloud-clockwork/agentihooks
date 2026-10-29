@@ -540,7 +540,7 @@ def _repoint_plan(args, phases):
     if args.path:
         file = upload_artifact(args.slug, args.name, args.path, {"task": task, "title": plan["title"], "plan": True})
     else:
-        file_id = plan["artifact"].rsplit("/", 1)[-1]
+        file_id = plan["artifact"].rpartition("/")[2]
         file = next(
             (
                 row["file"]

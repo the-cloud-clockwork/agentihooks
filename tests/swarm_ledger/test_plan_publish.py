@@ -694,8 +694,12 @@ def test_repoint_published_plan_moves_all_phase_references_without_another_issue
     monkeypatch.setattr(
         ledger.ledger_publish, "publish", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("new publication"))
     )
+    uploads = []
+    monkeypatch.setattr(ledger, "upload_artifact", lambda *a: uploads.append(a[3]) or file)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "plan")
     path = [str(tmp_path / "plan.md")] if local_copy else []
     cli(monkeypatch, plan_ledger, "publish-plan", *path, "--phase", "p1", "--repoint")
+    assert uploads == ([{"task": "plan", "title": "Rollout", "plan": True}] if local_copy else [])
     state = core.sync(plan_ledger)[0]
     target = f"https://ledger.example/artifacts/{plan_ledger}/{file['id']}"
     assert state["plans"] == [{"id": plan_id, "title": "Rollout", "artifact": target, "url": PLAN}]
@@ -704,7 +708,11 @@ def test_repoint_published_plan_moves_all_phase_references_without_another_issue
     ]
     assert state["slices"] == before["slices"]
     assert state["tasks"] == before["tasks"]
-    assert json.loads(capsys.readouterr().out.splitlines()[-1])["phases"] == ["p1", "p2"]
+    assert json.loads(capsys.readouterr().out.splitlines()[-1]) == {
+        "plan_url": PLAN,
+        "artifact": target,
+        "phases": ["p1", "p2"],
+    }
 
 
 @pytest.mark.parametrize(
@@ -740,9 +748,19 @@ def test_repoint_refuses_invalid_inputs_before_updating_the_ledger(plan_ledger, 
     args = ledger.build_parser().parse_args(
         ["--slug", plan_ledger, "--as", "planner", "publish-plan", *path, "--phase", phase, "--repoint"]
     )
-    with pytest.raises(SystemExit, match=message):
+    with pytest.raises(SystemExit) as exit_info:
         ledger.cmd_publish_plan(args)
+    assert exit_info.value.code == message
     call.assert_called_once_with(plan_ledger)
+
+
+def test_repoint_flag_help_names_the_move():
+    publish = next(
+        action
+        for action in ledger.build_parser()._subparsers._group_actions[0].choices["publish-plan"]._actions
+        if "--repoint" in action.option_strings
+    )
+    assert publish.help == "move an existing plan and all its phases to this server"
 
 
 def test_publish_without_repoint_still_needs_a_local_path():
