@@ -653,6 +653,40 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
     return out
 
 
+def _warn(message: str) -> None:
+    print(f"WARNING: {message}", file=sys.stderr)
+
+
+def _shared_pin(shared: Path | None, revision: str | None, root_revision: str) -> tuple[Path | None, str]:
+    """The shared bundle to pin and the commit to pin it at, from the shared field of a recorded revision."""
+    if revision == bundle_copy.UNPINNED:
+        _warn("the launch recorded no commit for the shared bundle; rendering without it")
+        return None, ""
+    if shared is None:
+        if revision:
+            _warn(
+                f"the launch recorded shared bundle commit {revision}, but no shared bundle is linked on this host; "
+                "rendering without it"
+            )
+        return None, ""
+    if revision is None:
+        current = _commit(shared)
+        if not current:
+            _warn(f"the launch recorded no shared bundle commit and the shared bundle at {shared} has no commit")
+            return None, ""
+        _warn(
+            f"the launch recorded no shared bundle commit, but the shared bundle at {shared} is linked; "
+            f"rendering with its current commit {current}"
+        )
+        return shared, current
+    if not revision:
+        raise ValueError(
+            f"the launch recorded bundle commit {root_revision} and an empty shared bundle commit, but the "
+            f"shared bundle at {shared} is linked; launch again to record it"
+        )
+    return shared, revision
+
+
 def render(
     target: str,
     name: str,
@@ -668,26 +702,8 @@ def render(
     options = {"isolate": isolate, "push": push} if target == "codex" else {}
     if bundle_revision:
         root_revision, shared_revision, user_revision = bundle_copy.split_revision(bundle_revision)
-        shared, user = _shared(), _user()
-        if shared is None and shared_revision:
-            print(
-                f"WARNING: the launch recorded shared bundle commit {shared_revision}, but no shared bundle is "
-                "linked on this host; rendering without it",
-                file=sys.stderr,
-            )
-            shared_revision = ""
-        if shared is not None and shared_revision is None:
-            print(
-                f"WARNING: the launch recorded no shared bundle commit, but the shared bundle at {shared} is "
-                "linked; rendering without it",
-                file=sys.stderr,
-            )
-            shared = None
-        elif shared is not None and not shared_revision:
-            raise ValueError(
-                f"the launch recorded bundle commit {root_revision} and an empty shared bundle commit, but the "
-                f"shared bundle at {shared} is linked; launch again to record it"
-            )
+        shared, shared_revision = _shared_pin(_shared(), shared_revision, root_revision)
+        user = _user()
         if user is not None and not user_revision:
             raise ValueError(
                 f"the launch recorded bundle commit {root_revision} and no user bundle commit, but the user bundle "
@@ -700,7 +716,7 @@ def render(
             user,
             user_revision,
             shared=shared,
-            shared_revision=shared_revision or "",
+            shared_revision=shared_revision,
         ):
             return renderers[target](name, force=force, overlays=overlays, **options)
     return renderers[target](name, force=force, overlays=overlays, **options)

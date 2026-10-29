@@ -12,6 +12,7 @@ READ_SECONDS = 10
 COPY_SECONDS = 300
 ROOT_FOLDER = "bundle"
 SHARED_FOLDER = "shared-bundle"
+UNPINNED = "-"
 USER_FOLDER = "user-bundle"
 _ACTIVE: ContextVar[tuple[Path, Path, str] | None] = ContextVar("recorded_bundle", default=None)
 _ACTIVE_SHARED: ContextVar[tuple[Path, Path, str] | None] = ContextVar("recorded_shared_bundle", default=None)

@@ -6,6 +6,7 @@ import sys
 import yaml
 
 from hooks.context import profile_chain
+from scripts.profiles import bundle_copy
 
 ROLES = ("master", "engineer", "planner", "qa", "cicd", "documentation")
 KEY = "overlays-"
@@ -74,7 +75,7 @@ def revision() -> str:
     team = _head(shared) if shared is not None else ""
     if shared is not None and not team:
         print(f"WARNING: the shared bundle at {shared} has no commit to record; launching without it", file=sys.stderr)
-        shared = None
+        team = bundle_copy.UNPINNED
     mine = _head(user) if user is not None else ""
     if user is not None and not mine:
         return ""
