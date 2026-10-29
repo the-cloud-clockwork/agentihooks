@@ -4,7 +4,7 @@ import re
 import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
-from scripts import cli_delegates
+from scripts import cli_delegates, install
 from scripts.evidence import schema
 from scripts.headless.request import READ_ONLY, HeadlessError
 from scripts.scout import cli, loop
@@ -271,6 +271,17 @@ def test_help_names_the_command_its_flags_and_choices(capsys):
         "--harness {auto,claude,codex}",
     ):
         assert re.search(rf"(?<![A-Za-z]){re.escape(expected)}(?![A-Za-z])", text), expected
+
+
+def test_agentihooks_scout_runs_through_the_install_entry_point(wired, monkeypatch, capsys):
+    wired(FakeRunner([PEP]), FakeClassifier(1.0))
+    monkeypatch.setattr("sys.argv", ["agentihooks", "scout", QUESTION, "--until", UNTIL])
+
+    with pytest.raises(SystemExit) as exit_info:
+        install.main()
+
+    assert exit_info.value.code == 0
+    assert schema.validate("evidence", _printed(capsys))["items"][0]["source"] == PEP["source"]
 
 
 def test_scout_is_a_delegated_subcommand():
