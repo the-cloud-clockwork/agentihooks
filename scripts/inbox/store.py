@@ -6,6 +6,7 @@ History entries are state transitions (a `state` key) or wake and escalation ste
 import functools
 import json
 import os
+import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass, fields, replace
@@ -239,11 +240,10 @@ class InboxStore:
         return _item(self.redis.hgetall(self.key("item", item_id)), item_id)
 
     def inbox(self, address):
-        items = [self.get(item_id) for item_id in self.redis.zrange(self.key("address", address), 0, -1)]
-        return sorted(items, key=_order)
+        return sorted(self._listed(self.redis.zrange(self.key("address", address), 0, -1), address), key=_order)
 
     def open_items(self, address: str) -> list[Item]:
-        items = [self.get(item_id) for item_id in self._open_ids(address)]
+        items = self._listed(self._open_ids(address), address)
         closed = [item.id for item in items if item.state in CLOSED]
         if closed:
             self.redis.zrem(self.key("open", address), *closed)
@@ -290,16 +290,56 @@ class InboxStore:
             ids = pipe.zrange(self.key("address", address), 0, -1)
             if ids:
                 pipe.watch(*(self.key("item", item_id) for item_id in ids))
-            items = [_item(pipe.hgetall(self.key("item", item_id)), item_id) for item_id in ids]
+            items, gone = _present(ids, [pipe.hgetall(self.key("item", item_id)) for item_id in ids])
             opened = {item.id: item.created_at for item in items if item.state not in CLOSED}
             pipe.multi()
+            self._stage_drop(pipe, address, gone)
             pipe.delete(self.key("open", address))
             if opened:
                 pipe.zadd(self.key("open", address), opened)
             pipe.sadd(self.key("open-indexed"), address)
-            pipe.set(self.key("open-size", address), len(ids))
+            pipe.set(self.key("open-size", address), len(ids) - len(gone))
             pipe.execute()
+        self._report_gone(address, gone)
         return list(opened)
+
+    def _listed(self, item_ids, address):
+        return self._listed_at(dict.fromkeys(item_ids, address))
+
+    def _listed_at(self, owners):
+        """The items the indexes list, by id to the address whose index lists it; an id whose record is gone is
+        dropped from every index of that address."""
+        if not owners:
+            return []
+        with self.redis.pipeline(transaction=False) as pipe:
+            for item_id in owners:
+                pipe.hgetall(self.key("item", item_id))
+            items, gone = _present(list(owners), pipe.execute())
+        if gone:
+            dangling = {}
+            for item_id in gone:
+                dangling.setdefault(owners[item_id], []).append(item_id)
+            with self.redis.pipeline(transaction=False) as pipe:
+                for address, ids in dangling.items():
+                    self._stage_drop(pipe, address, ids)
+                pipe.execute()
+            for address, ids in dangling.items():
+                self._report_gone(address, ids)
+        return items
+
+    def _stage_drop(self, pipe, address, gone):
+        if not gone:
+            return
+        for kind in ("address", "open", "pending"):
+            pipe.zrem(self.key(kind, address), *gone)
+
+    def _report_gone(self, address, gone):
+        for item_id in gone:
+            print(
+                f"agentihooks inbox: {self.key('address', address)} lists message {item_id} whose record is gone; "
+                "dropped it",
+                file=sys.stderr,
+            )
 
     def mailbox(self, me):
         return self._with_seat(me, self.inbox)
@@ -321,7 +361,7 @@ class InboxStore:
         if not _index_current(indexed, size, total):
             self._index_open(address)
             ids = self.redis.zrangebyscore(self.key("open", address), "-inf", before)
-        return [self.get(item_id) for item_id in ids]
+        return self._listed(ids, address)
 
     def pending_mail(self, me):
         return self._with_seat(me, self.pending_items)
@@ -857,24 +897,14 @@ class InboxStore:
                 pipe.sismember(self.key("indexed"), address)
                 pipe.zrange(self.key("pending", address), 0, -1)
             rows = pipe.execute()
-        item_ids = dict.fromkeys(
-            item_id
-            for address, (indexed, pending) in zip(addresses, zip(*[iter(rows)] * 2))
-            for item_id in (pending if indexed else self._back_fill(address))
-        )
-        return sorted(self._items(list(item_ids)), key=_order)
+        owners = {}
+        for address, (indexed, pending) in zip(addresses, zip(*[iter(rows)] * 2)):
+            for item_id in pending if indexed else self._back_fill(address):
+                owners.setdefault(item_id, address)
+        return sorted(self._listed_at(owners), key=_order)
 
     def pending_items(self, address):
-        return sorted(self._items(self._pending_ids(address)), key=_order)
-
-    def _items(self, item_ids):
-        if not item_ids:
-            return []
-        with self.redis.pipeline(transaction=False) as pipe:
-            for item_id in item_ids:
-                pipe.hgetall(self.key("item", item_id))
-            rows = pipe.execute()
-        return [_item(raw, item_id) for item_id, raw in zip(item_ids, rows)]
+        return sorted(self._listed(self._pending_ids(address), address), key=_order)
 
     def _pending_ids(self, address):
         if self.redis.sismember(self.key("indexed"), address):
@@ -923,15 +953,17 @@ class InboxStore:
             ids = pipe.zrange(self.key("address", address), 0, -1)
             if ids:
                 pipe.watch(*(self.key("item", item_id) for item_id in ids))
-            items = [_item(pipe.hgetall(self.key("item", item_id)), item_id) for item_id in ids]
+            items, gone = _present(ids, [pipe.hgetall(self.key("item", item_id)) for item_id in ids])
             pooled = self.pool.waiting(pipe, address)
             pending = {item.id: item.created_at for item in items if item.state == "pending" and item.id not in pooled}
             pipe.multi()
+            self._stage_drop(pipe, address, gone)
             if pending:
                 pipe.zadd(self.key("pending", address), pending)
                 pipe.sadd(self.key("waiting"), address)
             pipe.sadd(self.key("indexed"), address)
             pipe.execute()
+        self._report_gone(address, gone)
         return list(pending)
 
     def note(self, item_id, event, by, detail, at, held=None):
@@ -1041,6 +1073,12 @@ def _fields(item):
 
 def _order(item: Item) -> tuple[int, int, str]:
     return item.created_at, item.sequence, item.id
+
+
+def _present(item_ids, rows):
+    """The items whose record exists, and the ids whose record is gone."""
+    items = [_item(raw, item_id) for item_id, raw in zip(item_ids, rows) if raw]
+    return items, [item_id for item_id, raw in zip(item_ids, rows) if not raw]
 
 
 def _item(raw, item_id):
