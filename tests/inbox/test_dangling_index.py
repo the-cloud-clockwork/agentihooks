@@ -72,8 +72,8 @@ def test_the_unsettled_listing_skips_logs_and_drops_an_id_whose_record_is_gone(s
 def test_a_drop_keeps_the_open_index_current(store):
     kept = store.send("carol", "bob", "here")
     assert [item.id for item in store.open_items("bob")] == [kept.id]
-    dangle(store, "bob")
-    dangle(store, "bob")
+    lost = [store.send("alice", "bob", "lost").id for _ in range(2)]
+    store.redis.delete(*(store.key("item", item_id) for item_id in lost))
     assert [item.id for item in store.inbox("bob")] == [kept.id]
     assert store.redis.get(store.key("open-size", "bob")) == "1"
     assert store.redis.sismember(store.key("open-indexed"), "bob")
