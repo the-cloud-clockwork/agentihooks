@@ -30,6 +30,13 @@ LANE = (
     "((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c')"
 )
 GROUP = "${{ " + LANE + " }}"
+TESTS_GROUPS = tuple(
+    "${{ github.event_name == 'workflow_dispatch' && "
+    + LANE
+    + promotion
+    + " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
+    for promotion in ("", " || github.event_name == 'push' && " + LANE.replace("hosted-lane", "promotion-dev"))
+)
 PATH_FILTERS = ("paths", "paths-ignore")
 
 
@@ -181,14 +188,15 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
         if (
             trusted.get("name") == "Tests"
             and name in (trusted.get("jobs") or {})
-            and block
-            == {
-                "group": "${{ github.event_name == 'workflow_dispatch' && "
-                + LANE
-                + " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}",
-                "queue": "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}",
-                "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
-            }
+            and any(
+                block
+                == {
+                    "group": group,
+                    "queue": "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}",
+                    "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+                }
+                for group in TESTS_GROUPS
+            )
         ):
             continue
         if trusted and (name in (trusted.get("jobs") or {}) or base_block is not None) and block == base_block:

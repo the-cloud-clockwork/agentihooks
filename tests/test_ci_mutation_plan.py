@@ -114,6 +114,129 @@ def test_measured_costs_merge_mappings_keep_slowest_durations_and_cover_missing_
     assert measured_costs([names[1]], []) == {names[1]: 80.6}
 
 
+def test_observed_mutant_execution_costs_drive_balanced_existing_workers(tmp_path, monkeypatch):
+    from scripts.ci_mutation import killers
+    from scripts.ci_mutation.measured import measured_costs, plan_shards
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
+    memory = killers.KillMemory(tmp_path)
+    names = [f"scripts.sample.x_f__mutmut_{index}" for index in range(8)]
+    observations = [20.0, 20.0, 20.0, 20.0, 1.0, 1.0, 1.0, 1.0]
+    ticks = iter(value for seconds in observations for value in [100.0, 100.0 + seconds])
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    for name in names:
+        memory.prepare(name, ["test"])
+        assert memory.wrap(lambda *args, **kwargs: 0)(object(), ["test"]) == 0
+    results = [{"tests": {"scripts.sample.x_f": ["test"]}, "durations": {"test": 100.0}}]
+    costs = measured_costs(names, results, memory)
+    assert costs == dict(zip(names, observations, strict=True))
+    plan = plan_shards(costs, target=1, limit=4)
+    assert plan["shards"] == 4
+    assert plan["shard_worker_seconds"] == [21.0] * 4
+    assert set(plan["assignments"]) == set(names)
+    assert plan == plan_shards(dict(reversed(list(costs.items()))), target=1, limit=4)
+    assert measured_costs(names[:1], results) == {names[0]: 130.6}
+    assert measured_costs(names[:1], [], memory) == {names[0]: 80.6}
+    changed = [{"tests": {"scripts.sample.x_f": ["different"]}, "durations": {"different": 2.0}}]
+    assert measured_costs(names[:1], changed, memory) == {names[0]: 8.1}
+
+
+def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_path, monkeypatch):
+    from scripts.ci_mutation import killers, measured
+    from scripts.ci_mutation.mutant_shards import unit_cost, unit_count
+
+    function = "scripts.sample.x_f"
+    names = [f"{function}__mutmut_{index}" for index in range(3)]
+    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0]}
+    memory = killers.KillMemory(tmp_path)
+    ticks = iter([0.0, 9.0, 20.0, 21.0, 30.0, 39.0, 40.0, 41.0])
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(measured, "measured_splits", lambda *args: {function: split})
+    for name in names[:2]:
+        for tests in [["fast", "left"], ["fast", "right"]]:
+            memory.prepare(name, tests)
+            assert memory.wrap(lambda *args, **kwargs: 0)(object(), tests) == 0
+        assert memory.cost(name, ["left", "fast"]) == 9.0
+        assert memory.cost(name, ["fast", "right"]) == 1.0
+    results = [
+        {"tests": {function: ["fast", "left", "right"]}, "durations": {"fast": 1.0, "left": 100.0, "right": 100.0}}
+    ]
+    plan = measured.measured_plan([(names, results)], memory, limit=2)
+    assert plan["shards"] == 2
+    assert unit_count(plan) == 6
+    assert plan["unit_costs"] == {names[0]: [9.0, 1.0], names[1]: [9.0, 1.0], names[2]: [100.0, 100.0]}
+    assert plan["shard_worker_seconds"] == [110.0, 110.0]
+    for name, assignment in plan["assignments"].items():
+        assert sorted(assignment) == [0, 1]
+        for position, index in enumerate(assignment):
+            assert unit_cost(plan, name, index) == plan["unit_costs"][name][position]
+    assert measured.measured_plan([(list(reversed(names)), results)], memory, limit=2) == plan
+    mixed = measured.measured_plan([(["scripts.sample.x_plain__mutmut_1", *names], results)], memory, limit=2)
+    assert mixed["unit_costs"] == plan["unit_costs"]
+    assert "scripts.sample.x_plain__mutmut_1" in mixed["assignments"]
+
+
+def test_a_kept_split_is_reused_so_its_unit_costs_stay_observed_when_durations_drift(tmp_path, monkeypatch):
+    from scripts.ci_mutation import killers, measured
+
+    function = "scripts.sample.x_f"
+    names = [f"{function}__mutmut_{index}" for index in range(3)]
+    nodes = ["fast", *(f"t{index}" for index in range(6))]
+    memory = killers.KillMemory(tmp_path)
+
+    def results(durations):
+        return [{"tests": {function: nodes}, "durations": {"fast": 1.0, **durations}}]
+
+    even = results({f"t{index}": 100.0 for index in range(6)})
+    drifted_durations = results({"t0": 250.0, **{f"t{index}": 50.0 for index in range(1, 6)}})
+    first = measured.measured_plan([(names, even)], memory, limit=3)
+    memory.keep_splits(first["splits"])
+    ticks = iter(float(value) for value in range(100))
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    for name in names:
+        for chosen in first["splits"][function]["slices"]:
+            tests = [*first["splits"][function]["head"], *chosen]
+            memory.prepare(name, tests)
+            assert memory.wrap(lambda *args, **kwargs: 0)(object(), tests) == 0
+    drifted = measured.measured_plan([(names, drifted_durations)], memory, limit=3)
+    assert drifted["splits"][function]["head"] == first["splits"][function]["head"]
+    assert drifted["splits"][function]["slices"] == first["splits"][function]["slices"]
+    assert drifted["unit_costs"] == {name: [1.0] * 3 for name in names}
+    slices = first["splits"][function]["slices"]
+    seconds = drifted_durations[0]["durations"]
+    expected = [plan.MUTANT_SECONDS + 1.25 * (1.0 + sum(seconds[node] for node in chosen)) for chosen in slices]
+    assert drifted["splits"][function]["costs"] == pytest.approx(expected)
+    fresh = measured.measured_plan([(names, drifted_durations)], killers.KillMemory(tmp_path / "empty"), limit=3)
+    assert fresh["splits"][function]["slices"] != first["splits"][function]["slices"]
+    changed = [{"tests": {function: [*nodes, "t6"]}, "durations": {**drifted_durations[0]["durations"], "t6": 50.0}}]
+    assert 1.0 not in measured.measured_plan([(names, changed)], memory, limit=3)["unit_costs"][names[0]]
+
+
+def test_a_kept_split_wider_than_the_shard_limit_is_cut_again(tmp_path):
+    from scripts.ci_mutation import killers, measured
+
+    function = "scripts.sample.x_f"
+    nodes = ["fast", "a", "b", "c"]
+    memory = killers.KillMemory(tmp_path)
+    memory.keep_splits({function: {"head": ["fast"], "slices": [["a"], ["b"], ["c"]], "costs": [1.0] * 3}})
+    durations = {"fast": 1.0, "a": 150.0, "b": 150.0, "c": 150.0}
+    split = measured.measured_splits(
+        [f"{function}__mutmut_1"], [{"tests": {function: nodes}, "durations": durations}], 2, memory
+    )
+    assert split[function]["slices"] == [["a", "c"], ["b"]]
+    memory.keep_splits({function: {"head": ["fast"], "slices": [["a"], ["b", "c"]], "costs": [1.0] * 2}})
+    split = measured.measured_splits(
+        [f"{function}__mutmut_1"], [{"tests": {function: nodes}, "durations": durations}], 2, memory
+    )
+    assert split[function]["slices"] == [["a"], ["b", "c"]]
+    assert split[function]["costs"] == pytest.approx(
+        [plan.MUTANT_SECONDS + 1.25 * (1.0 + 150.0), plan.MUTANT_SECONDS + 1.25 * (1.0 + 300.0)]
+    )
+    names = [f"{function}__mutmut_{index}" for index in (1, 2)]
+    planned = measured.measured_plan([(names, [{"tests": {function: nodes}, "durations": durations}])], memory, 2)
+    assert planned["splits"][function]["slices"] == [["a"], ["b", "c"]]
+
+
 def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_its_traced_sum(tmp_path):
     from types import SimpleNamespace
 

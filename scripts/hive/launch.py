@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from hooks.context import profile_chain
+from scripts import claude_quota_balancer as balancer
 from scripts.hive import admission, headroom, orders, placement, placement_waits, registry
 from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
@@ -37,6 +38,8 @@ class Selection:
     master_placement: placement.MasterPlacement | None = None
     fallback: str = ""
     origin: str = ""
+    first: bool = False
+    spill: placement.Spill | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,8 @@ class _Placing:
     rows: list[capacity.Account]
     hives: list[dict]
     now: int
+    listed: tuple[dict, ...] = ()
+    aliases: tuple[str, ...] = ()
 
 
 ROOM_DETAILS = {"reason": "", "detail": ""}
@@ -95,19 +100,31 @@ def loaded_hives(store: RedisStore) -> list[dict]:
             hive["agents"] = max(hive["agents"], running)
             used = max(hive["agents"], taken)
             held = max(held, used - hive["agents"])
-        found = admission.capped(
-            admission.room(headroom.read(store.redis, hive["id"], now), pending=held),
-            used,
-            hive["max_agents"],
-        )
+        reading = headroom.read(store.redis, hive["id"], now)
+        found = admission.capped(admission.room(reading, pending=held), used, hive["max_agents"])
         hive["room"] = found.room
         hive["refusal"] = admission.refusal(found)
+        if hive["prefer"]:
+            ranked = admission.capped(admission.room(reading, pending=held, first=True), used, hive["max_agents"])
+            hive[placement.FIRST_ROOM] = ranked.room
+            hive[placement.FIRST_REFUSAL] = admission.refusal(ranked)
     return hives
 
 
 def _key(account: str) -> str:
     """A hive names an account by its AH_CC_TOKEN_ slug, a hosted controller by its Secret key; only _ and - differ."""
     return account.replace("_", "-")
+
+
+def _master_logins(hives: list[dict], front: bool) -> list[dict]:
+    if not front:
+        return hives
+    rejected = {
+        _key(result.account)
+        for _, result in balancer.cached_observations()
+        if result.provider_status in ("revoked", "rejected")
+    }
+    return [hive for hive in hives if _key(hive["master_login"].get("claude", "")) not in rejected]
 
 
 def _open_rows(rows: list, harness: str = "claude") -> list:
@@ -168,6 +185,16 @@ def _matched_origin(hives: list[dict], hive: str, repo: str) -> str | placement.
     if found is None:
         return placement.Wait(f"hive {hive} is not in the hive listing for {origin(Path(repo)) or repo}")
     return found.get(orders.ORIGIN, "")
+
+
+def _local_capped(hive: dict, taken: int, bound: int) -> dict:
+    capped = dict(hive)
+    for room, refusal in (("room", "refusal"), (placement.FIRST_ROOM, placement.FIRST_REFUSAL)):
+        if room in hive:
+            limited = admission.capped(admission.Room(hive[room], **ROOM_DETAILS), taken, bound)
+            if limited.room < hive[room]:
+                capped.update({room: limited.room, refusal: admission.refusal(limited)})
+    return capped
 
 
 def _first_choice(
@@ -244,6 +271,12 @@ class HiveLaunch:
                 if hive["id"] == selected.hive:
                     hive["room"] -= 1
                     hive[placement.PLACED] = hive.get(placement.PLACED, 0) + 1
+                    if placement.FIRST_ROOM in hive:
+                        hive[placement.FIRST_ROOM] -= 1
+                        hive[placement.FIRST_REFUSAL] = (
+                            f"{admission.PLACEMENT}: {hive[placement.PLACED]} launches placed on it this pass "
+                            "took its room"
+                        )
         return selected
 
     def _withdraw(self, request: SpawnRequest, selected: Selection, refused: str) -> placement.Wait:
@@ -253,6 +286,7 @@ class HiveLaunch:
             for hive in self.hives():
                 if hive["id"] == selected.hive and placement.LOCAL_FULL not in refused:
                     hive["room"] = 0
+                    hive.pop(placement.FIRST_ROOM, None)
         return waited
 
     def _select(
@@ -267,6 +301,7 @@ class HiveLaunch:
         hives, refused = _pinned(_by_origin(hives, config.repo), task, role)
         if refused:
             return self._record_wait(lane, task, refused)
+        listed = tuple(hives)
         hives = [hive for hive in hives if placement.hosts(lane, hive, (decision.profile,))]
         harness = saved.get("harness") or chosen.get("agent") or "auto"
         auto = harness == "auto"
@@ -292,10 +327,8 @@ class HiveLaunch:
                 if hive["id"] == hive_id():
                     bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
                     taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
-                    limited = admission.capped(admission.Room(hive["room"], **ROOM_DETAILS), taken, bound)
-                    if limited.room < hive["room"]:
-                        hives[index] = {**hive, "room": limited.room, "refusal": admission.refusal(limited)}
-        placing = _Placing(config, task, saved, decision, role, rows, hives, now)
+                    hives[index] = _local_capped(hive, taken, bound)
+        placing = _Placing(config, task, saved, decision, role, rows, hives, now, listed, (lane, decision.profile))
         found = self._account_selection(placing, harness)
         if auto and harness == "codex" and isinstance(found, placement.Wait):
             claude = self._account_selection(placing, "claude")
@@ -329,12 +362,23 @@ class HiveLaunch:
         matched = _matched_origin(hives, choice.hive, repo)
         if isinstance(matched, placement.Wait):
             return replace(matched, role=role)
-        return Selection(placing.decision, choice.hive, row, route_kind, fallback=fallback, origin=matched)
+        ranked = any(placement.first(role, hive) for hive in hives if hive["id"] == choice.hive)
+        return Selection(
+            placing.decision,
+            choice.hive,
+            row,
+            route_kind,
+            fallback=fallback,
+            origin=matched,
+            first=ranked,
+            spill=choice.spill or placement.unhosted(role, list(placing.listed), placing.now, placing.aliases),
+        )
 
     def _master_selection(self, config, decision, hives, now, rows, front):
         accounts = {_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
         available = [
-            {**hive, "slots": [slot for slot in hive["slots"] if _key(slot["account"]) in accounts]} for hive in hives
+            {**hive, "slots": [slot for slot in hive["slots"] if _key(slot["account"]) in accounts]}
+            for hive in _master_logins(hives, front)
         ]
         selected = placement.place_master("claude", "", config.repo, available, now, front)
         if isinstance(selected, placement.Wait):
@@ -392,6 +436,7 @@ class HiveLaunch:
             refused = self.queue_refusal(request, selected, self.store.redis.xlen(self.orders.stream(selected.hive)))
             refused = refused or self.reserve_room(request, selected)
             if not refused:
+                self._journal_spill(request, selected)
                 return selected
             print(
                 json.dumps(
@@ -408,13 +453,34 @@ class HiveLaunch:
             )
             waited = self._withdraw(request, selected, refused)
             excluded.add(selected.hive)
+            previous = selected
             selected = self._select(request.config, request.lane, request.task, excluded)
             if isinstance(selected, placement.Wait):
                 return self._record_wait(request.lane, request.task, waited)
+            refusal = placement.Spill(previous.hive, refused) if previous.first else None
+            spill = previous.spill or refusal or selected.spill
+            selected = replace(selected, spill=None if spill and spill.preferred == selected.hive else spill)
             if self.placement_cache is not None:
                 selected = self._spend(selected)
                 self.placement_cache[(request.lane, request.task["id"])] = selected
         return selected
+
+    def _journal_spill(self, request: SpawnRequest, selected: Selection) -> None:
+        if selected.spill is None:
+            return
+        print(
+            json.dumps(
+                {
+                    "event": "hive_placement_spill",
+                    "slug": self.slug,
+                    "task": request.task["id"],
+                    "name": request.name,
+                    "hive": selected.hive,
+                    **selected.spill.record(),
+                }
+            ),
+            file=sys.stderr,
+        )
 
     def spawn(self, request: SpawnRequest) -> Outcome:
         lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
@@ -594,19 +660,20 @@ class HiveLaunch:
         reading = headroom.read(self.store.redis, selected.hive, lease.now_ms(self.store))
         member = f"{self.slug}/{request.name}"
         local = selected.hive == hive_id() and request.lane != placement.MASTER
+        limit = admission.room(reading, first=selected.first).room
         if local:
             running = local_slots.running(self.store, self.slug, request.task["id"])
-            bound = local_slots.maximum(self.store, self.slug, running + admission.room(reading).room)
+            bound = local_slots.maximum(self.store, self.slug, running + limit)
             taken = local_slots.claim(self.store, selected.hive, self.slug, request.task["id"], request.name, bound)
             if taken >= bound:
                 refused = f"no hive has room{placement.LOCAL_FULL}{taken} of its {bound} agents"
                 return refused  # nosemgrep: python.flask.security.audit.directly-returned-format-string.directly-returned-format-string
-        reserved, held = admission.reserve(self.store.redis, selected.hive, member, admission.room(reading).room)
+        reserved, held = admission.reserve(self.store.redis, selected.hive, member, limit)
         if reserved:
             return ""
         if local:
             local_slots.release(self.store, selected.hive, self.slug, request.name)
-        refused = admission.refusal(admission.room(reading, pending=held))
+        refused = admission.refusal(admission.room(reading, pending=held, first=selected.first))
         return f"no hive for {request.lane} {placement.HAS_ROOM}: {selected.hive} {refused}"
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
@@ -630,6 +697,7 @@ class HiveLaunch:
                     else {}
                 ),
                 **({"placement_fallback": selected.fallback} if selected.fallback else {}),
+                **({"placement_spill": selected.spill.record()} if selected.spill else {}),
             },
             harness=selected.account.harness,
             transport=codex.transport(request.config, selected.account.harness),
@@ -723,7 +791,7 @@ class HiveLaunch:
             _match("ack account", agent.account, account)
         kept = {
             key: agent.profile_decision[key]
-            for key in ("master_placement", "placement_fallback")
+            for key in ("master_placement", "placement_fallback", "placement_spill")
             if key in agent.profile_decision
         }
         live = replace(

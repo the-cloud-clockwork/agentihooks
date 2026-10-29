@@ -23,13 +23,17 @@ CLASSIFIER_SCHEMA = {
 
 
 def classify_with_headless(expression: str, outputs_text: str) -> bool:
-    reply = runner.run(
-        CLASSIFIER_PROFILE,
-        f"condition: {expression}\noutputs: {outputs_text}",
-        CLASSIFIER_SCHEMA,
-        "sealed",
-        CLASSIFIER_TIER,
-        CLASSIFIER_EFFORT,
+    _, reply = runner.on_claude_if_refused(
+        "auto",
+        lambda harness: runner.run(
+            CLASSIFIER_PROFILE,
+            f"condition: {expression}\noutputs: {outputs_text}",
+            CLASSIFIER_SCHEMA,
+            "sealed",
+            CLASSIFIER_TIER,
+            CLASSIFIER_EFFORT,
+            harness,
+        ),
     )
     return reply["satisfied"]
 

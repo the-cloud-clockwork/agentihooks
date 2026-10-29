@@ -6,11 +6,16 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
 
+from scripts.swarm_ledger import request_metrics
+
 from . import hierarchy, refresh
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, Snapshot, SQLiteLedgerRepository
 
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
 WRITER_LOCK = 0x4C454447
+LEDGER_LOCK = 0x4C454453
+LEDGER_WRITE = f"SELECT pg_advisory_xact_lock_shared({WRITER_LOCK})"
+LEDGER_ONLY = f"SELECT pg_advisory_xact_lock({LEDGER_LOCK}, hashtext(?))"
 KEPT = 8
 STREAM_ROWS = 2000
 STREAMS = itertools.count()
@@ -149,7 +154,8 @@ def mapped() -> Iterator[None]:
     """Raise Postgres failures as the sqlite3 errors every ledger caller already handles."""
     psycopg2 = errors()
     try:
-        yield
+        with request_metrics.postgres():
+            yield
     except psycopg2.IntegrityError as exc:
         raise sqlite3.IntegrityError(str(exc)) from exc
     except psycopg2.errors.UndefinedTable as exc:
@@ -224,10 +230,14 @@ class Connection:
         with mapped():
             cursor = self.raw.cursor(name=f"stream_{next(STREAMS)}")
             cursor.execute(translate(sql), parameters)
-            while batch := cursor.fetchmany(STREAM_ROWS):
-                yield from batch
+        while True:
+            with mapped():
+                batch = cursor.fetchmany(STREAM_ROWS)
+            if not batch:
+                return
+            yield from batch
 
-    def lock(self) -> object:
+    def lock(self, statements: tuple = ((BEGIN_IMMEDIATE, ()),)) -> object:
         """The writer lock, asked for again after each wait the server ends at its lock timeout."""
         psycopg2 = errors()
         lost = psycopg2.errors.LockNotAvailable
@@ -237,11 +247,16 @@ class Connection:
             for _ in range(LOCK_TRIES):
                 cursor = self.raw.cursor()
                 try:
-                    cursor.execute(translate(BEGIN_IMMEDIATE), ())
+                    for sql, parameters in statements:
+                        cursor.execute(translate(sql), parameters)
                     return cursor
                 except lost:
                     self.raw.rollback()
         raise sqlite3.OperationalError(LOCK_REFUSED)
+
+    def lock_ledger(self, slug: str) -> object:
+        """One ledger's writer lock, shared with other ledgers' writers and excluded by every whole store writer."""
+        return self.lock(((LEDGER_WRITE, ()), (LEDGER_ONLY, (slug,))))
 
     def executemany(self, sql: str, rows: Iterable) -> None:
         with mapped(), self.raw.cursor() as cursor:

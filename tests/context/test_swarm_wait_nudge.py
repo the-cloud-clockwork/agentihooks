@@ -287,3 +287,61 @@ def test_a_monitor_command_alias_cannot_start_an_independent_github_watch(worker
 @pytest.mark.parametrize("tool_input", [{}, {"command": ""}, {"command": None, "cmd": ""}])
 def test_empty_monitor_commands_are_allowed(worker, tool_input):
     assert nudge.check_github_watch({"tool_name": "Monitor", "tool_input": tool_input}) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh run view 123",
+        "gh run view 123 -R owner/repo --exit-status",
+        "gh -R owner/repo run view 123 --verbose",
+        "gh --repo=owner/repo run view 123",
+        "cd repo && /usr/bin/gh run view 123 | tail -n 5",
+        "bash -lc 'gh run view 123'",
+        "env X=1 gh run view 123",
+        "time gh run view 123",
+    ],
+)
+@pytest.mark.parametrize("name", [NAME, "ci@abc123-0001", "master@abc123-0001"])
+def test_a_full_run_view_is_refused_to_every_swarm_agent(worker, monkeypatch, capsys, command, name):
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    with pytest.raises(hook_manager.BlockAction, match="one REST call per job") as blocked:
+        _pre(capsys, _bash(command))
+    assert str(blocked.value) == (
+        "gh run view without --json, --log, --log-failed or --job reads the annotations of every job, "
+        "one REST call per job, from the shared GitHub hourly quota. "
+        "Ask for what you need: gh run view <id> --json status,conclusion,jobs, --log-failed, or --job <job id>."
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh run view 123 --json status,conclusion",
+        "gh run view 123 --json=jobs",
+        "gh run view 123 --log",
+        "gh run view 123 --log-failed",
+        "gh run view 123 --job 456",
+        "gh run view --job=456",
+        "gh run view 123 -j 456",
+        "gh run view 123 -j456",
+        "gh run view 123 --web",
+        "gh run view 123 -w",
+        "gh -R owner/repo run view 123 --json status",
+        "gh run list -L 5",
+        "echo gh run view 123",
+    ],
+)
+def test_a_narrow_run_view_is_allowed(worker, capsys, command):
+    _pre(capsys, _bash(command))
+
+
+@pytest.mark.parametrize("missing", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"])
+def test_a_full_run_view_outside_the_swarm_is_allowed(worker, monkeypatch, capsys, missing):
+    monkeypatch.delenv(missing)
+    _pre(capsys, _bash("gh run view 123"))
+
+
+def test_a_monitor_cannot_start_a_full_run_view(worker):
+    with pytest.raises(hook_manager.BlockAction, match="one REST call per job"):
+        nudge.check_github_watch({"tool_name": "Monitor", "tool_input": {"command": "gh run view 123"}})

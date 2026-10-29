@@ -27,7 +27,12 @@ def headless_critic(prompt: str) -> tuple[str, str]:
     from scripts.headless.request import READ_ONLY, HeadlessError
 
     try:
-        reply = runner.run(CRITIC_PROFILE, prompt, CRITIC_SCHEMA, READ_ONLY, CRITIC_TIER, CRITIC_EFFORT)
+        _, reply = runner.on_claude_if_refused(
+            "auto",
+            lambda harness: runner.run(
+                CRITIC_PROFILE, prompt, CRITIC_SCHEMA, READ_ONLY, CRITIC_TIER, CRITIC_EFFORT, harness
+            ),
+        )
     except (HeadlessError, ValueError) as exc:
         raise SwarmError(f"the blind critic did not answer: {exc}") from exc
     return f"headless {CRITIC_TIER} tier read only critic", reply["resolution"]

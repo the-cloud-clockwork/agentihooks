@@ -96,7 +96,8 @@ def declared(name: str) -> list[str]:
 def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
     if _resolve(name) is None:
         raise ValueError(f"Profile '{name}' not found")
-    always = [name, *declared(name)]
+    managed = brain_binding.current(os.environ) is not None
+    always = [name, *(o for o in declared(name) if managed or o != brain_binding.OVERLAY)]
     worn = profile_chain.worn(_resolve_chain(always), list(overlays), _resolve)
     dirs = _resolve_chain([*always, *worn])
     profile_chain.require_capabilities(dirs, profile_chain.hive_capabilities(os.environ))

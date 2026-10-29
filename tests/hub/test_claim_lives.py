@@ -46,6 +46,15 @@ def test_a_counted_start_reports_its_life_on_stderr(rig, capsys):
     assert capsys.readouterr() == ("", f"hub: claim life swarm={SLUG} task=t1 execution={execution} lives=1\n")
 
 
+def test_a_counted_start_clears_the_harness_its_earlier_launch_failed_on(rig):
+    admitted = rig.admitter.admit(SLUG, ask())
+    rig.store.note_launch_failure(SLUG, "t1", "launch failed", "codex")
+
+    claims.Claims(rig.store).handle(started(admitted))
+
+    assert rig.store.failed_harness(SLUG, "t1") == ""
+
+
 @pytest.mark.parametrize("state, lives", [("started", 1), ("failed", 1)])
 def test_a_start_the_legacy_tick_already_counted_spends_no_second_life(rig, state, lives):
     admitted = rig.admitter.admit(SLUG, ask())

@@ -155,17 +155,18 @@ def test_done_on_a_group_lead_closes_its_members_with_the_lead_pull_request(env,
     url = "https://github.com/o/r/pull/9"
     ledger.rows["t1"]["pr_url"] = url
     ledger.updates, slugs = [], []
-    original, listed = ledger.update_task, ledger.tasks
+    original, by_id = ledger.update_task, ledger.task
     ledger.update_task = lambda slug, task_id, fields, **kw: (
         ledger.updates.append((slug, task_id, kw["by"])) or original(slug, task_id, fields, **kw)
     )
-    ledger.tasks = lambda slug: slugs.append(slug) or listed(slug)
+    ledger.task = lambda slug, task_id: slugs.append((slug, task_id)) or by_id(slug, task_id)
+    ledger.tasks = lambda slug: pytest.fail("done read the whole tasks collection")
     assert run("sw", "done", "--finding", "one pull request") == 0
     assert (ledger.rows["t3"]["state"], ledger.rows["t3"]["pr_url"]) == ("done", url)
     assert ledger.rows["t3"]["proof"] == {"finding": "one pull request"}
     agent = "engineer@a1b2c3-0001"
     assert ledger.updates == [("sw", "t1", agent), ("sw", "t3", agent)]
-    assert set(slugs) == {"sw"}
+    assert {("sw", "t1"), ("sw", "t3"), ("sw", "t4")} <= set(slugs)
 
 
 def test_done_on_a_code_task_waits_for_its_pull_request_to_merge(env, monkeypatch, capsys):
@@ -1120,24 +1121,20 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     assert timer.ensure("/bin/agentihooks", tmp_path, run=run)
     calls.clear()
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    names = [
-        "agentihooks-inbox-waker.service",
-        "agentihooks-quota-prober.service",
-        "agentihooks-tick-watch.service",
-        "agentihooks-swarm-waits.timer",
-    ]
+    names = [f"agentihooks-{name}" for name in ("scheduler.service", "inbox-waker.service", "quota-prober.service")]
+    names += ["agentihooks-tick-watch.service", "agentihooks-swarm-waits.timer"]
     assert calls == [(["systemctl", "--user", "is-enabled", "--quiet", name], kw) for name in names]
 
     calls.clear()
     failing.add("is-enabled")
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable", "enable"]
+    assert [call[0][2] for call in calls] == ["is-enabled", *["enable"] * 5]
 
     calls.clear()
     failing.clear()
-    failing.add(names[1])
+    failing.add(names[2])
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run) is False
-    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", *["enable"] * 4]
+    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", "is-enabled", *["enable"] * 5]
     failing.clear()
 
     calls.clear()
@@ -1165,6 +1162,7 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     assert (tmp_path / "agentihooks-new-intake.service").read_text() == added
     assert calls == [
         (["systemctl", "--user", "daemon-reload"], {**kw, "check": False}),
+        enable("agentihooks-scheduler.service"),
         enable("agentihooks-inbox-waker.service"),
         enable("agentihooks-quota-prober.service"),
         enable("agentihooks-tick-watch.service"),

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, resume, snapshot
+from scripts.swarm import cli, name_state, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -44,6 +44,8 @@ def seed(store, slug):
 def everything(redis):
     out = {}
     for key in sorted(redis.scan_iter()):
+        if f":state:{name_state.BUCKET}:" in key:
+            continue
         kind = redis.type(key)
         read = {
             "string": redis.get,
@@ -54,6 +56,12 @@ def everything(redis):
         }[kind]
         out[key] = (kind, read(key))
     return out
+
+
+def registered_codes(store):
+    codes = {slug: store.names.code_of(slug) for slug in ("sw", "other")}
+    assert all(codes.values())
+    return {slug: (code, store.names.swarm(code)) for slug, code in codes.items()}
 
 
 def test_export_then_restore_after_losing_redis_gives_back_the_same_swarm_state(store):
@@ -67,10 +75,20 @@ def test_export_then_restore_after_losing_redis_gives_back_the_same_swarm_state(
     assert store.redis.pttl(store.key("sw", "claim", "t1")) > 0
 
 
+def test_a_snapshot_taken_before_names_were_exported_still_restores(store):
+    seed(store, "sw")
+    alone = everything(store.redis)
+    state = store.export("sw")
+    del state["names"]
+    store.redis.flushall()
+    store.restore("sw", json.loads(json.dumps(state)))
+    assert everything(store.redis) == alone
+
+
 def test_snapshot_remove_restore_gives_back_the_same_swarm_state(store):
     seed(store, "sw")
     seed(store, "other")
-    before = everything(store.redis)
+    before, codes = everything(store.redis), registered_codes(store)
     state = store.export("sw")
     for agent in store.agents("sw"):
         store.drop_agent("sw", agent.name)
@@ -78,6 +96,7 @@ def test_snapshot_remove_restore_gives_back_the_same_swarm_state(store):
     assert store.slugs() == ["other"]
     store.restore("sw", json.loads(json.dumps(state)))
     assert everything(store.redis) == before
+    assert registered_codes(store) == codes
 
 
 def test_export_leaves_out_another_swarms_seats_and_inbox(store):
