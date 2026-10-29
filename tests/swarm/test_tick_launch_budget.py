@@ -109,3 +109,19 @@ def test_a_pass_over_many_agents_with_failing_launches_ends_under_the_tick_deadl
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert runtime.tried == ["t1"]
     assert clock[0] < DEADLINE_S
+
+
+class PairedFailures(PooledFailures):
+    def launch_room(self, config):
+        return 2
+
+
+def test_a_forgiven_failed_pool_keeps_its_preparation_time_on_the_budget(store, monkeypatch):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), PairedFailures()
+    clock = _slow_launches(monkeypatch, runtime, 60)
+    _slow_preparation(monkeypatch, clock, 9)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.tried == ["t1", "t2"]
+    assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
+    assert ledger.rows["t3"]["state"] == "open"
