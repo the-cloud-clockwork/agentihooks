@@ -94,6 +94,7 @@ HELPERS = {
     "register_script": lambda: frozenset({"EVALSHA", "SCRIPT LOAD"}),
     "transaction": lambda: frozenset({"WATCH", "MULTI", "EXEC"}),
     "execute": lambda: frozenset({"MULTI", "EXEC"}),
+    "watch": lambda: frozenset({"WATCH"}),
 }
 
 
