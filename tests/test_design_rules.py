@@ -528,6 +528,31 @@ def test_a_concrete_inheritance_cycle_sharing_a_contract_terminates(tmp_path):
     ]
 
 
+PLANT = (
+    "class PlantedTools:\n"
+    "    @staticmethod\n    def parse(text: str) -> int:\n        return len(text)\n\n"
+    "    def run(self, n: int) -> int:\n        return n\n\n\n"
+    "class PlantedHttp:\n    def __init__(self) -> None:\n        self.n = 1\n\n"
+    "    def planted_fetch(self, key: str) -> str:\n        return key\n\n\n"
+    "class PlantedDisk:\n    def __init__(self) -> None:\n        self.n = 2\n\n"
+    "    def planted_fetch(self, key: str) -> str:\n        return key\n"
+)
+
+
+def test_main_names_both_planted_rules_red_and_is_green_without_them(tmp_path, capsys):
+    base = _tree(tmp_path / "base", KEEP)
+    planted = _tree(tmp_path / "planted", {**KEEP, "scripts/design_plant.py": PLANT})
+    assert design_rules.main(["--base", str(base), "--head", str(planted)]) == 1
+    assert capsys.readouterr().out == (
+        "9 new or changed units graded on the design rules, 2 errors\n"
+        f"::error::{_groups('scripts/design_plant.py::PlantedTools')}\n"
+        f"::error::{_seam('scripts/design_plant.py::PlantedHttp, scripts/design_plant.py::PlantedDisk', 'planted_fetch/1')}\n"
+    )
+    clean = _tree(tmp_path / "clean", {**KEEP})
+    assert design_rules.main(["--base", str(base), "--head", str(clean)]) == 0
+    assert capsys.readouterr().out == "0 new or changed units graded on the design rules, 0 errors\n"
+
+
 def test_main_names_every_rule_and_exits_red(tmp_path, capsys):
     base = _tree(tmp_path / "base", KEEP)
     source = CONCRETE + "\n\nclass Cache(Store):\n    pass\n\n\ndef run(path, **options) -> None:\n    pass\n"
