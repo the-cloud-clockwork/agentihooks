@@ -74,6 +74,36 @@ def test_a_launch_until_bounds_the_canary_wait_by_the_order_lifetime(tmp_path, m
     assert _launch(tmp_path, monkeypatch, "claude", ["--launch-until", until]) == [seconds]
 
 
+def test_the_route_wait_ends_with_the_launch_deadline(tmp_path, monkeypatch):
+    from scripts import select_profile
+
+    home = tmp_path / "engineer" / "claude"
+    home.mkdir(parents=True)
+    monkeypatch.setattr(
+        select_profile,
+        "prepare",
+        lambda *a: ({"AGENTIHOOKS_PROFILE": "engineer", binding.HOMES["claude"]: str(home)}, a[4]),
+    )
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: ("claude", "explicit"))
+    monkeypatch.setattr(init_agent.claude_trust, "ensure_trusted", lambda *a: ("trusted", ""))
+    request = binding.request
+    monkeypatch.setattr(binding, "request", lambda report, profile, agent, home: request(report, profile, agent))
+    now = [0.0]
+    monkeypatch.setattr(init_agent.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(init_agent.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(init_agent.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+
+    def start(launcher, *args):
+        init_agent._started_marker(launcher).touch()
+        return []
+
+    monkeypatch.setattr(init_agent, "_start_herdr", start)
+    argv = ["--host", "herdr", "--agent", "claude", "--profile", "engineer", "--dir", str(tmp_path)]
+    argv += ["--route-timeout", "90", "--launch-until", "1005000"]
+    assert init_agent.main(argv, {"XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 3
+    assert now[0] == 5.0
+
+
 def test_the_launch_until_help_names_its_unit():
     (action,) = [a for a in init_agent._parser()._actions if "--launch-until" in a.option_strings]
     assert action.help == "Epoch milliseconds by which the launch must return; bounds the launch deadline"

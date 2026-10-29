@@ -74,7 +74,7 @@ ORIGIN = "hive_origin"
 RESTARTED = "restarted"
 POD = uuid.uuid4().hex
 POD_SECONDS = 45
-ACK_MARGIN_MS = 15000
+ACK_MARGIN_MS = 30000
 
 
 def build_opening(request: SpawnRequest) -> str:
@@ -295,7 +295,7 @@ class Consumer:
             pipe.hsetnx(self.orders.receipt(order), "pod", self.pod)
             if not pipe.execute()[0]:
                 return None
-        if order.expires_at <= now:
+        if order.expires_at - ACK_MARGIN_MS <= now:
             return Ack("failed", {}, "expired")
         try:
             lease.require_epoch(self.store, order.slug, order.epoch)

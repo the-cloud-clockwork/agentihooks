@@ -363,7 +363,7 @@ the deadline.
 
 Time spent outside these waits still runs the deadline down: rendering the
 profile home, starting the pane and waiting for the route report
-(`--route-timeout`). The deadline is fixed when `init-agent` starts, so these
+(`--route-timeout`, cut short when the deadline ends first). The deadline is fixed when `init-agent` starts, so these
 steps and the Codex session rename between the two ready waits shorten what
 the later waits are granted.
 

@@ -1210,7 +1210,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         return 0
 
     route_path = _route_report(launcher)
-    deadline = time.monotonic() + args.route_timeout
+    deadline = time.monotonic() + min(args.route_timeout, max(0.0, launch.ends - time.monotonic()))
     while not route_path.exists() and time.monotonic() < deadline:
         if _selection_refused(active_env):
             break

@@ -76,9 +76,12 @@ waits each run their full 120 seconds leaves the canary 30 seconds.
 
 `--launch-until <epoch milliseconds>` shortens the deadline so the launch
 returns by that wall clock time. A hive passes its launch order's expiry less
-15 seconds (`ACK_MARGIN_MS`), counted on its own clock, so a launch that started
+30 seconds (`ACK_MARGIN_MS`), counted on its own clock, so a launch that started
 late in the order's 300 second lifetime still acknowledges before the order
-expires instead of being stopped as `expired`.
+expires instead of being stopped as `expired`. The margin holds the herdr
+commands that run outside the deadline and the hive's own acknowledgement. An
+order with no more than the margin left fails `expired` before any pane opens.
+The route report wait also ends with the launch deadline.
 
 ### Timeout output
 

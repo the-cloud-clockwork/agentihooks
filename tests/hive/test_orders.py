@@ -533,8 +533,19 @@ def test_the_launch_ends_on_the_hive_clock_an_acknowledgement_margin_before_the_
     order = replace(setup.order, expires_at=1_300_000)
     setup.orders.send("host", order)
     setup.consumer.poll()
-    assert setup.runtime.spawn.call_args.args[0].task["launch_until_ms"] == 5_285_000
-    assert orders.ACK_MARGIN_MS == 15000
+    assert setup.runtime.spawn.call_args.args[0].task["launch_until_ms"] == 5_270_000
+    assert orders.ACK_MARGIN_MS == 30000
+
+
+@pytest.mark.parametrize(("left", "status"), [(30000, "failed"), (30001, "live")])
+def test_an_order_without_room_for_its_acknowledgement_expires_before_spawn(setup, monkeypatch, left, status):
+    from scripts.swarm import lease
+
+    monkeypatch.setattr(lease, "now_ms", lambda store: 1_000_000)
+    order = replace(setup.order, expires_at=1_000_000 + left)
+    ack = setup.consumer.apply(order)
+    assert (ack.status, ack.failure) == (status, "expired" if status == "failed" else "")
+    assert setup.runtime.spawn.called is (status == "live")
 
 
 def test_epoch_takeover_during_launch_refuses_live_admission(setup, monkeypatch):
