@@ -82,8 +82,9 @@ def parse(text, task_id, task_ids=()):
     return pieces
 
 
-def plan_hash(pieces):
-    return hashlib.sha256("\n".join(piece.key for piece in pieces).encode()).hexdigest()
+def plan_hash(pieces, state):
+    inputs = [state.get("task", ""), state.get("task intent", ""), [piece.key for piece in pieces]]
+    return hashlib.sha256(json.dumps(inputs).encode()).hexdigest()
 
 
 def intent(doc, task_id):
@@ -143,11 +144,13 @@ def _row_key(row):
     return Piece(row["what"], tuple(row["areas"]), row["why"]).key
 
 
-def _known(previous, pieces, ids):
+def _known(previous, pieces, ids, state):
     rows = previous.get("pieces") or []
     if previous.get("verdict") != PASS or len(rows) >= len(pieces) or previous.get("authorizations", []) != ids:
         return []
     if [_row_key(row) for row in rows] != [piece.key for piece in pieces[: len(rows)]]:
+        return []
+    if previous.get("plan_hash") != plan_hash(pieces[: len(rows)], state):
         return []
     return list(rows)
 
@@ -226,14 +229,14 @@ def _source_areas(areas: tuple) -> list[str]:
 
 def trace(pieces, state, previous, now_ms=None):
     previous, ids = previous or {}, _ids(state)
-    known = _known(previous, pieces, ids)
+    known = _known(previous, pieces, ids, state)
     start, fresh = len(known), pieces[len(known) :]
     wire = [
         {"piece": start + i + 1, "what": p.what, "areas": _source_areas(p.areas), "why": p.why}
         for i, p in enumerate(fresh)
     ]
     base = {
-        "plan_hash": plan_hash(pieces),
+        "plan_hash": plan_hash(pieces, state),
         "failures": previous.get("failures", 0),
         "filed": list(previous.get("filed", [])),
         "accepted": list(previous.get("accepted", [])),
@@ -344,7 +347,7 @@ def run(folder, state, ledger, who, mode, home=None, now_ms=None):
             gate_log.append(who.swarm, gate_log.Row.of(GATE.name, FAIL_KINDS[mode], who, reason=str(exc)), home)
         raise
     record, block = load(folder), False
-    if record.get("plan_hash") != plan_hash(pieces) or record.get("authorizations", []) != _ids(state):
+    if record.get("plan_hash") != plan_hash(pieces, state) or record.get("authorizations", []) != _ids(state):
         record = trace(pieces, state, record, now_ms)
         _log(record, who, mode, home)
         save(folder, record)

@@ -39,7 +39,7 @@ def world(tmp_path):
             {"what": p.what, "areas": list(p.areas), "why": p.why, "probability": None, "kept": k}
             for p, k in zip(pieces, kept, strict=False)
         ]
-        digest = "stale" if stale else trace_plan.plan_hash(pieces)
+        digest = "stale" if stale else trace_plan.plan_hash(pieces, {})
         record = {"verdict": verdict, "plan_hash": digest, "pieces": rows, "reasons": list(reasons)}
         (folder / trace_plan.VERDICT).write_text(json.dumps(record))
 
@@ -73,6 +73,27 @@ def world(tmp_path):
 
 def edit(world, rel, **extra):
     return world.decide(file_path=str(world.repo / rel), **extra)
+
+
+@pytest.mark.parametrize("field", ["title", "description"])
+def test_task_text_rewrite_requires_a_fresh_trace(world, tmp_path, field):
+    task = {"id": TASK, "title": "Build the doghouse", "description": "Keep the dog warm"}
+    doc = {"tasks": [task]}
+    legacy_page.store(tmp_path / "ledgers", SLUG, doc)
+    world.plan()
+    pieces = trace_plan.parse(DOGHOUSE, TASK)
+    record = trace_plan.load(world.folder)
+    record["plan_hash"] = trace_plan.plan_hash(pieces, trace_plan.intent(doc, TASK))
+    trace_plan.save(world.folder, record)
+    assert edit(world, "doghouse/light/lamp.py").allowed
+    task[field] += " rewritten"
+    legacy_page.store(tmp_path / "ledgers", SLUG, doc)
+    decision = edit(world, "doghouse/light/lamp.py")
+    assert not decision.allowed
+    assert "no verdict for its current text" in decision.reason
+    record["plan_hash"] = trace_plan.plan_hash(pieces, trace_plan.intent(doc, TASK))
+    trace_plan.save(world.folder, record)
+    assert edit(world, "doghouse/light/lamp.py").allowed
 
 
 class TestMatches:

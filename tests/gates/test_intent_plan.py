@@ -94,6 +94,7 @@ def test_a_fitting_plan_passes_and_records_its_stage_criterion_and_model(tmp_pat
         "at": NOW,
         "phase": "p1",
         "planned": "h1",
+        "inputs": intent._fingerprint(DOC, DOC["tasks"][0]),
         "stage": "plan",
         "criterion": None,
         "model": "liquid-d1",

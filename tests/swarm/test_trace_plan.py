@@ -140,12 +140,12 @@ def test_followup_text_keeps_the_piece_without_the_task_identifier(task_id):
 
 def test_plan_hash_changes_with_any_field_and_ignores_nothing():
     base = [piece("a", "x", why="w")]
-    digest = trace_plan.plan_hash(base)
-    assert digest == hashlib.sha256(b"a | x | w").hexdigest()
-    pair = trace_plan.plan_hash([piece("a", "x", why="w"), piece("b", "y", "z", why="v")])
-    assert pair == hashlib.sha256(b"a | x | w\nb | y, z | v").hexdigest()
+    digest = trace_plan.plan_hash(base, {})
+    assert digest == hashlib.sha256(b'["", "", ["a | x | w"]]').hexdigest()
+    pair = trace_plan.plan_hash([piece("a", "x", why="w"), piece("b", "y", "z", why="v")], {})
+    assert pair == hashlib.sha256(b'["", "", ["a | x | w", "b | y, z | v"]]').hexdigest()
     for other in ([piece("b", "x", why="w")], [piece("a", "y", why="w")], [piece("a", "x", why="v")], base * 2):
-        assert trace_plan.plan_hash(other) != digest
+        assert trace_plan.plan_hash(other, {}) != digest
 
 
 def test_intent_reads_project_phase_and_task():
@@ -322,7 +322,7 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
     assert questions["size"].levels == ["trivial", "one pull request", "several pull requests", "a whole phase"]
     assert record == {
         "verdict": "pass",
-        "plan_hash": trace_plan.plan_hash(pieces),
+        "plan_hash": trace_plan.plan_hash(pieces, {}),
         "pieces": [
             {
                 "what": "walls and roof",
@@ -570,7 +570,7 @@ def test_no_classifier_answer_is_unchecked_with_every_piece_kept(ask):
     record = trace_plan.trace([piece("a"), piece("b")], INTENT, previous, now_ms=7)
     assert record == {
         "verdict": "unchecked",
-        "plan_hash": trace_plan.plan_hash([piece("a"), piece("b")]),
+        "plan_hash": trace_plan.plan_hash([piece("a"), piece("b")], {}),
         "pieces": [
             {"what": "a", "areas": ["src"], "why": "the task needs it", "probability": None, "kept": True},
             {"what": "b", "areas": ["src"], "why": "the task needs it", "probability": None, "kept": True},
@@ -615,7 +615,7 @@ def test_a_piece_appended_to_a_passing_plan_is_traced_alone(ask):
     }
     assert (later["verdict"], later["size"], later["reasons"], later["filed"]) == ("pass", passed["size"], [], ["k"])
     assert later["accepted"] == ["j"]
-    assert later["plan_hash"] == trace_plan.plan_hash([*first, piece("a generator")])
+    assert later["plan_hash"] == trace_plan.plan_hash([*first, piece("a generator")], {})
 
 
 def test_an_appended_piece_with_no_answer_leaves_the_plan_unchecked(ask):

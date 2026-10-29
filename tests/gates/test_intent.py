@@ -1047,6 +1047,7 @@ class TestPlanCheck:
             "at": NOW,
             "phase": "p8",
             "planned": "h1",
+            "inputs": intent._fingerprint(UNOPENED, UNOPENED["tasks"][0]),
             "stage": "plan",
             "criterion": None,
             "model": None,

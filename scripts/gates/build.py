@@ -110,7 +110,7 @@ def _patch_targets(call, key):
     return [target.strip() for target in found] or [call.tool_input.get(key)]
 
 
-def plan_areas(folder, who, registered=()):
+def plan_areas(folder, who, registered, intent):
     """(pass, the kept pieces' areas), (unchecked, []) or (fail, the refusal)."""
     trace = f"agentihooks swarm {who.swarm} trace-plan"
     try:
@@ -123,7 +123,7 @@ def plan_areas(folder, who, registered=()):
     except ValueError as exc:
         return trace_plan.FAIL, f"build gate: {exc}, then run {trace}"
     record = trace_plan.load(folder)
-    if record.get("plan_hash") != trace_plan.plan_hash(pieces):
+    if record.get("plan_hash") != trace_plan.plan_hash(pieces, intent):
         return trace_plan.FAIL, f"build gate: plan.md has no verdict for its current text. Run {trace}"
     if record["verdict"] == trace_plan.UNCHECKED:
         return trace_plan.UNCHECKED, []
@@ -182,7 +182,10 @@ class BuildGate:
         if not paths:
             return Decision()
         ledger_dir = Path(self.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
-        status, value = plan_areas(folder, who, task_ids(ledger_dir, who.swarm))
+        from scripts.swarm_ledger.storage import read_ledger
+
+        doc = read_ledger(ledger_dir, who.swarm, f"tasks/{who.task}") or {}
+        status, value = plan_areas(folder, who, task_ids(ledger_dir, who.swarm), trace_plan.intent(doc, who.task))
         if status == trace_plan.UNCHECKED:
             reason = f"unchecked plan, edit allowed: {', '.join(paths[:SHOWN])}"
             log.append(state.slug, log.Row.of(self.name, "count", who, call.tool, reason), state.home)
