@@ -83,7 +83,7 @@ async def test_runner_survives_a_redis_that_does_not_answer_yet(monkeypatch, tmp
 
     await service.run(SimpleNamespace(run_due=drain), stop)
     assert passes == [1, 1]
-    assert capsys.readouterr().err == "scheduler pass skipped: Redis did not answer\n"
+    assert capsys.readouterr().err == "scheduler pass skipped: the state store did not answer\n"
 
 
 async def test_runner_still_stops_on_any_other_error(monkeypatch, tmp_path):
@@ -186,7 +186,7 @@ def test_service_entrypoint_runs_the_configured_redis_scheduler(monkeypatch):
     monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
 
     async def run(scheduler):
-        received.append(scheduler.redis)
+        received.append(scheduler.state.redis)
 
     monkeypatch.setattr(service, "run", run)
     monkeypatch.setattr(service, "supervise", Mock(side_effect=AssertionError("unexpected supervisor")))
@@ -576,3 +576,148 @@ def test_a_tied_supervisor_ends_between_runners_once_its_starter_is_gone(monkeyp
     assert spawn.call_count == 2
     child.terminate.assert_not_called()
     assert stop.wait.call_count == 2
+
+
+def _unit_home(monkeypatch, tmp_path, service, *, marked, installed, returncode=0):
+    monkeypatch.setattr(service.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(service, "installed", lambda: True)
+    environ = {"AGENTIHOOKS_SWARM_REDIS_URL": "redis://unit.invalid:6379/0"}
+    directory = service.runtime_dir(environ)
+    directory.mkdir(parents=True)
+    if marked:
+        (directory / "agentihooks-scheduler.service").write_text("agentihooks-scheduler.service")
+    if installed:
+        units = tmp_path / ".config" / "systemd" / "user"
+        units.mkdir(parents=True)
+        (units / "agentihooks-scheduler.service").write_text("[Service]\n")
+    spawn, run = Mock(), Mock(return_value=subprocess.CompletedProcess([], returncode))
+    monkeypatch.setattr(
+        service,
+        "subprocess",
+        SimpleNamespace(
+            Popen=spawn,
+            run=run,
+            DEVNULL=subprocess.DEVNULL,
+            SubprocessError=subprocess.SubprocessError,
+        ),
+    )
+    return environ, spawn, run
+
+
+def test_a_runtime_folder_its_unit_owns_starts_the_scheduler_unit_instead_of_a_child(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    environ, spawn, run = _unit_home(monkeypatch, tmp_path, service, marked=True, installed=True)
+    assert service.ensure_running(environ) is True
+    spawn.assert_not_called()
+    run.assert_called_once_with(
+        ["systemctl", "--user", "start", "--no-block", "agentihooks-scheduler.service"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    with service.machine_lock("supervisor", environ=environ):
+        assert service.ensure_running(environ) is False
+    run.assert_called_once()
+
+
+def test_a_scheduler_unit_that_will_not_start_falls_back_to_a_child(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    environ, spawn, run = _unit_home(monkeypatch, tmp_path, service, marked=True, installed=True, returncode=1)
+    assert service.ensure_running(environ) is True
+    run.assert_called_once()
+    assert spawn.call_args.args[0] == [sys.executable, "-m", "scripts.scheduler.service", "supervise"]
+
+
+@pytest.mark.parametrize("failure", [OSError("no systemctl"), subprocess.TimeoutExpired("systemctl", 30)])
+def test_a_scheduler_unit_start_that_raises_falls_back_to_a_child(monkeypatch, tmp_path, failure):
+    from scripts.scheduler import service
+
+    environ, spawn, run = _unit_home(monkeypatch, tmp_path, service, marked=True, installed=True)
+    run.side_effect = failure
+    assert service.ensure_running(environ) is True
+    assert spawn.call_count == 1
+
+
+@pytest.mark.parametrize(("marked", "installed"), [(True, False), (False, True), (False, False)])
+def test_a_runtime_folder_without_the_unit_mark_and_its_unit_file_spawns_a_child(
+    monkeypatch, tmp_path, marked, installed
+):
+    from scripts.scheduler import service
+
+    environ, spawn, run = _unit_home(monkeypatch, tmp_path, service, marked=marked, installed=installed)
+    assert service.ensure_running(environ) is True
+    run.assert_not_called()
+    assert spawn.call_args.args[0] == [sys.executable, "-m", "scripts.scheduler.service", "supervise"]
+
+
+def test_a_supervisor_started_by_its_unit_marks_its_runtime_folder_before_it_locks(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path / "scheduler")
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    monkeypatch.setenv("AGENTIHOOKS_SCHEDULER_UNIT", "1")
+    stopped = Event()
+    stopped.set()
+    (tmp_path / "scheduler").mkdir()
+    with service.machine_lock("supervisor"):
+        with pytest.raises(service.AlreadyRunning):
+            service.supervise(stopped)
+    assert (tmp_path / "scheduler" / "agentihooks-scheduler.service").read_text() == "agentihooks-scheduler.service"
+
+
+def test_a_supervisor_started_by_its_unit_creates_and_marks_a_new_runtime_folder(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    folder = tmp_path / "cache" / "scheduler"
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: folder)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    monkeypatch.setenv("AGENTIHOOKS_SCHEDULER_UNIT", "1")
+    stopped = Event()
+    stopped.set()
+    service.supervise(stopped)
+    assert (folder / "agentihooks-scheduler.service").read_text() == "agentihooks-scheduler.service"
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_a_supervisor_started_outside_its_unit_leaves_no_mark(monkeypatch, tmp_path, value):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    if value is None:
+        monkeypatch.delenv("AGENTIHOOKS_SCHEDULER_UNIT", raising=False)
+    else:
+        monkeypatch.setenv("AGENTIHOOKS_SCHEDULER_UNIT", value)
+    stopped = Event()
+    stopped.set()
+    service.supervise(stopped)
+    assert not (tmp_path / "agentihooks-scheduler.service").exists()
+
+
+@pytest.mark.parametrize(
+    ("environ", "identity"),
+    [
+        ({}, ["memory", "", "", "", None]),
+        (
+            {
+                "AGENTIHOOKS_BUS": "nats",
+                "AGENTIHOOKS_BUS_URL": "nats://bus:4222",
+                "AGENTIHOOKS_DEPLOYMENT": "distributed",
+                "AGENTIHOOKS_HIVE_ID": "h1",
+            },
+            ["nats", "nats://bus:4222", "distributed", "h1", None],
+        ),
+    ],
+    ids=["defaults", "named"],
+)
+def test_a_bus_runtime_folder_is_named_by_its_bus_identity(environ, identity):
+    import hashlib
+
+    from scripts.scheduler import service
+
+    folder = service.runtime_dir({"AGENTIHOOKS_STATE_BACKEND": "bus", **environ})
+    digest = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+    assert folder == Path.home() / ".cache" / "agentihooks" / "scheduler" / digest

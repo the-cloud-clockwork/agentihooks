@@ -1,6 +1,6 @@
 import json
 
-from scripts.inbox.store import CLOSED, InboxStore
+from scripts.inbox.store import InboxStore
 from scripts.swarm import idle, outage
 
 LIMIT_MS = 30 * 60 * 1000
@@ -54,8 +54,7 @@ def _answer(inbox, agent, record, now_ms):
     record["answers"] = record["answers"][-3:]
     record["idle_answers"] = record["idle_answers"] + 1 if answer.text == IDLE_ANSWER else 0
     record["request"] = ""
-    if answer.state not in CLOSED:
-        world.close(answer.id, "swarm", "done", "activity answer recorded")
+    world.settle(answer.id, "swarm", "done", "activity answer recorded")
     return True
 
 

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/measured.py:scripts.ci_mutation.measured.x_measured_plan__mutmut_20:d848421bb48dc9cf473f6cfa8b7934a89570ccfed0ce6e31213bc8f8ffe790c9": {
+    "reader": "Standards",
+    "reason": "split_tests constructs slices and loads with the same count and returns one cost per load; measured_splits passes those arrays directly to measured_plan, so the zipped sequences always have equal lengths and disabling strict changes no reachable behavior."
+  }
+}

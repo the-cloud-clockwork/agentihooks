@@ -166,7 +166,15 @@ def _set_user(client, member_id: str, password: str) -> None:
 def _acl_keys(member_id: str) -> tuple[str, ...]:
     own = f"{ROOT}:hive:{member_id}"
     record = f"{ROOT}:swarm:state:hive-{member_id}:*"
-    return (f"%R~{ROOT}:*", f"~{own}", f"~{own}:*", f"~{record}", *(f"~{ROOT}:{key}" for key in WORKER_KEYS))
+    scheduler = f"~{ROOT}:swarm:state:scheduler-{member_id}:*"
+    return (
+        f"%R~{ROOT}:*",
+        f"~{own}",
+        f"~{own}:*",
+        f"~{record}",
+        scheduler,
+        *(f"~{ROOT}:{key}" for key in WORKER_KEYS),
+    )
 
 
 def regrant(redis) -> None:
@@ -276,9 +284,28 @@ def write_env(home: Path | str, url: str, grant: dict) -> Path:
     creds = Path(home) / NATS_CREDS_FILE
     if grant.get("nats_credentials"):
         grant = {**grant, "bus_credentials": str(_write_private(creds, grant["nats_credentials"]))}
+    elif (kept := kept_bus(home, grant["id"])) is not None:
+        grant = {**grant, **kept}
     else:
         creds.unlink(missing_ok=True)
     return _write_private(Path(home) / ENV_FILE, env_text(url, grant))
+
+
+def kept_bus(home: Path | str, member_id: str) -> dict | None:
+    from dotenv import dotenv_values
+
+    creds, saved = Path(home) / NATS_CREDS_FILE, Path(home) / ENV_FILE
+    if not creds.is_file():
+        return None
+    values = dotenv_values(saved, interpolate=False)
+    if values.get("AGENTIHOOKS_HIVE_ID") != member_id:
+        return None
+    swarms = values.get("AGENTIHOOKS_BUS_SWARMS")
+    return {
+        "bus_credentials": str(creds),
+        "bus_scoped": values.get("AGENTIHOOKS_BUS_SCOPED") == "1",
+        "bus_swarms": swarms.split(",") if swarms else [],
+    }
 
 
 def env_text(url: str, grant: dict) -> str:

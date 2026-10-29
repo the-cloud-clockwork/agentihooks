@@ -1754,6 +1754,7 @@ def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
     _, download = _unit_step_index(lambda s: s.get("name") == "Download the durations this run splits on")
     assert download["with"] == {
         "name": upload["with"]["name"],
+        "verify": '[[ "$(sha256sum .test_durations | cut -d \' \' -f 1)" == "$(< durations.sha256)" ]]',
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
     }
@@ -2047,8 +2048,14 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
             (*downloads, "Cap the merged test stats", "Check for merged test stats")
         )
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
+        and step.get("name") != "Restore latest dev durations"
     ]
-    stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
+    stats_steps = [
+        step
+        for step in stats["steps"]
+        if step.get("with", {}).get("path") != ".mutation-stats-cache"
+        and step.get("name") != "Restore latest dev durations"
+    ]
     assert stats_steps[: len(setup)] == setup
     collect = stats_steps[len(setup)]
     cache_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") == ".mutation-stats-cache"]
@@ -2311,6 +2318,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         "failure() && steps.browser.outcome == 'failure'",
         "failure()",
         f"github.event_name == 'pull_request' && {skipped}",
+        f"github.event_name == 'pull_request' && {skipped} && needs.mutation-plan.outputs.durations != ''",
         f"github.event_name == 'workflow_dispatch' && {skipped}",
         f"always() && {skipped}",
         f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",

@@ -4,7 +4,7 @@ import pytest
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, naming
+from scripts.swarm import cli, name_state, naming
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 
@@ -169,7 +169,7 @@ def test_a_name_cannot_create_a_swarm(env, capsys):  # noqa: F811
 
 def test_a_swarm_registry_emptied_by_a_restore_is_adopted_with_its_name(store):
     config = store.config("sw")
-    store.redis.delete(naming.NameRegistry.key("codes"), naming.NameRegistry.key("code-of"))
+    store.redis.delete(*store.redis.scan_iter(match=f"*:state:{name_state.BUCKET}:*"))
     assert store.names.swarm_slug(naming.swarm_name(config.code)) == naming.swarm_name(config.code)
     store.ensure_code("sw")
     assert store.names.swarm(config.code) == {

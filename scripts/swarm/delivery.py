@@ -174,8 +174,8 @@ def post(inbox, item, write):
     if refused:
         if not may_cancel(inbox, item, refused):
             return False
-        inbox.close(item.id, item.address, "cancel", f"refused by the ledger page: {refused}")
-        if item.sender != BY and not moved_on(inbox, item.sender):
+        closed = inbox.settle(item.id, item.address, "cancel", f"refused by the ledger page: {refused}")
+        if closed and item.sender != BY and not moved_on(inbox, item.sender):
             inbox.send(BY, item.sender, REFUSED.format(id=item.id, reason=refused))
         return False
     return True

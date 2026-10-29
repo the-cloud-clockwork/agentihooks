@@ -15,6 +15,7 @@ PLAIN_DICTS = frozenset({"dict", "Dict", "Mapping", "MutableMapping"})
 UNIONS = frozenset({"Optional", "Union"})
 CONFIG_NAME = re.compile(r"(^|_)(config|conf|cfg|settings|options|opts|params)(_|$)")
 RECEIVERS = frozenset({"self", "cls"})
+STATELESS = frozenset({"staticmethod", "classmethod"})
 
 
 @dataclass
@@ -212,6 +213,85 @@ def plain_configs(unit: Unit) -> list[str]:
     return found + ([f"**{args.kwarg.arg}"] if args.kwarg else [])
 
 
+def _methods(node: ast.ClassDef) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    return [child for child in node.body if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+
+def _receiverless(method: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    params = [*method.args.posonlyargs, *method.args.args]
+    if {_terminal(decorator) for decorator in method.decorator_list} & STATELESS or not params:
+        return True
+    receiver = params[0].arg
+    names = (node for statement in method.body for node in ast.walk(statement))
+    return not any(isinstance(node, ast.Name) and node.id == receiver for node in names)
+
+
+def groups_functions(node: ast.ClassDef) -> bool:
+    methods = _methods(node)
+    if not methods or node.keywords or _declared_free(node) or any(_terminal(base) != "object" for base in node.bases):
+        return False
+    return all(map(_receiverless, methods))
+
+
+def contract(node: ast.ClassDef) -> frozenset[tuple[str, int]]:
+    found = set()
+    for method in _methods(node):
+        if method.name.startswith("_"):
+            continue
+        args = method.args
+        count = len(args.posonlyargs) + len(args.args) + len(args.kwonlyargs)
+        static = "staticmethod" in {_terminal(decorator) for decorator in method.decorator_list}
+        found.add((method.name, count if static else count - 1))
+    return frozenset(found)
+
+
+def _concrete(node: ast.ClassDef) -> bool:
+    if _declared_free(node):
+        return False
+    return not any(_terminal(base) in ROOTS or _builtin_exception(_terminal(base)) for base in node.bases)
+
+
+def _ancestors(index: Index, module: str, node: ast.ClassDef, seen: frozenset = frozenset()) -> set:
+    found = set()
+    for base in node.bases:
+        project = resolve(index, module, base)
+        name = ast.unparse(base) if project is None else project
+        found.add(name)
+        if project is not None and name not in seen:
+            parent = index.get(project[0]).classes[project[1]]
+            found |= _ancestors(index, project[0], parent, seen | {name})
+    return found - {"object"}
+
+
+def _protocols(index: Index) -> list[frozenset[tuple[str, int]]]:
+    found = []
+    for rel in filter(_graded, index.paths.values()):
+        for node in ast.walk(index.load(rel)[0]):
+            if isinstance(node, ast.ClassDef) and any(_terminal(base) == "Protocol" for base in node.bases):
+                found.append(contract(node))
+    return found
+
+
+def seams(index: Index, classes: list[tuple[str, str, ast.ClassDef]]) -> list[str]:
+    shared: dict[frozenset[tuple[str, int]], list[tuple[str, str, ast.ClassDef]]] = {}
+    for module, key, node in classes:
+        calls = contract(node)
+        if calls and _concrete(node):
+            shared.setdefault(calls, []).append((module, key, node))
+    errors = []
+    for calls, group in shared.items():
+        if len(group) < 2 or set.intersection(*(_ancestors(index, module, node) for module, _, node in group)):
+            continue
+        if not any(protocol and protocol <= calls for protocol in _protocols(index)):
+            keys = ", ".join(key for _, key, _ in group)
+            methods = ", ".join(f"{name}/{arity}" for name, arity in sorted(calls))
+            errors.append(
+                f"protocol: {keys} share the call contract {methods} with no common Protocol or abstract base; "
+                "type the seam with one"
+            )
+    return errors
+
+
 def violations(index: Index, module: str, key: str, unit: Unit) -> list[str]:
     if isinstance(unit.node, ast.ClassDef):
         errors = []
@@ -239,7 +319,19 @@ def _graded(rel: str) -> bool:
     return not rel.startswith(UNGRADED)
 
 
-def _file_errors(index: Index, rel: str, old: str | None) -> tuple[int, list[str]]:
+def _shape(node: ast.ClassDef) -> list[tuple[str, ...]]:
+    return [(method.name, *_signature(method)) for method in _methods(node)]
+
+
+def _reshaped(previous: Unit | None, unit: Unit) -> bool:
+    if previous is None or previous.signature != unit.signature:
+        return True
+    return _shape(previous.node) != _shape(unit.node)
+
+
+def _file_errors(
+    index: Index, rel: str, old: str | None, classes: list[tuple[str, str, ast.ClassDef]]
+) -> tuple[int, list[str]]:
     syntax, module = index.load(rel)
     before = {} if old is None else units(ast.parse(old, filename=rel), rel)
     changed, errors = 0, []
@@ -248,6 +340,12 @@ def _file_errors(index: Index, rel: str, old: str | None) -> tuple[int, list[str
         if previous is None or previous.signature != unit.signature:
             changed += 1
             errors += violations(index, module.name, key, unit)
+        if isinstance(unit.node, ast.ClassDef) and _reshaped(previous, unit):
+            classes.append((module.name, key, unit.node))
+            if groups_functions(unit.node):
+                errors.append(
+                    f"functions: {key} only groups functions and holds no instance state; make them module functions"
+                )
     return changed, errors
 
 
@@ -255,15 +353,15 @@ def grade(base: Path, head: Path) -> tuple[int, list[str]]:
     base, head = base.resolve(), head.resolve()
     rels = [path.relative_to(head).as_posix() for path in files(head) if path.suffix == ".py"]
     index = Index(head, rels)
-    changed, errors = 0, []
+    changed, errors, classes = 0, [], []
     for rel in filter(_graded, rels):
         previous = base / rel
         old = previous.read_text() if previous.is_file() else None
         if old == (head / rel).read_text():
             continue
-        count, found = _file_errors(index, rel, old)
+        count, found = _file_errors(index, rel, old, classes)
         changed, errors = changed + count, errors + found
-    return changed, errors
+    return changed, errors + seams(index, classes)
 
 
 def main(argv: list[str] | None = None) -> int:

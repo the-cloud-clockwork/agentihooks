@@ -220,6 +220,7 @@ def test_daemon_consumes_orders_after_its_heartbeat(setup, monkeypatch):
     monkeypatch.setattr(daemon, "execution_report", lambda *args: {"names": [], "panes": {}, "executions": {}})
     local = Mock(return_value=setup.consumer)
     monkeypatch.setattr(Consumer, "local", local)
+    monkeypatch.setattr(daemon.dispatch, "poll", lambda consumer: consumer.poll())
     setup.orders.send("host", setup.order)
     daemon.beat(setup.redis, "host")
     local.assert_called_once_with(setup.redis, "host")

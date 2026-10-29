@@ -43,6 +43,7 @@ class Claims:
             self.store.claims(event.swarm, task),
         )
         if lives:
+            self.store.clear_failed_harness(event.swarm, task)
             print(
                 f"hub: claim life swarm={event.swarm} task={task} execution={event.key} lives={lives}",
                 file=sys.stderr,

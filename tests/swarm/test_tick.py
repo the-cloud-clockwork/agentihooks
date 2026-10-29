@@ -6,6 +6,7 @@ import pytest
 from scripts.swarm import stack
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
+from tests.swarm.ledger_items import LedgerItems
 
 
 def check_update_guards(if_state, if_match):
@@ -23,7 +24,7 @@ def check_update_guards(if_state, if_match):
         ledger_tasks.check_guards(guard)
 
 
-class FakeLedger:
+class FakeLedger(LedgerItems):
     def __init__(self, tasks):
         self.rows = {
             t["id"]: {"state": "open", "claimed_by": "", "out_of_scope": False, "lane": "eng", **t} for t in tasks

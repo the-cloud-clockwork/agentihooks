@@ -21,6 +21,8 @@ ROOT = Path(__file__).resolve().parents[2]
 RECORD = "supervisor.json"
 DRAIN_S = 30
 STARTER = "AGENTIHOOKS_SCHEDULER_STARTER"
+UNIT = "agentihooks-scheduler.service"
+UNIT_ENV = "AGENTIHOOKS_SCHEDULER_UNIT"
 
 
 class AlreadyRunning(RuntimeError):
@@ -28,15 +30,26 @@ class AlreadyRunning(RuntimeError):
 
 
 def runtime_dir(environ: Mapping[str, str] | None = None) -> Path:
+    from scripts.events.state import backend
     from scripts.swarm.keyspace import ROOT
     from scripts.swarm.store import redis_url
     from scripts.swarm_ledger import ledger_link
 
     env = os.environ if environ is None else environ
+    directory = Path.home() / ".cache" / "agentihooks" / "scheduler"
+    if backend(env) == "bus":
+        scoped = env.get("AGENTIHOOKS_BUS_SCOPED") == "1"
+        identity = (
+            env.get("AGENTIHOOKS_BUS") or "memory",
+            env.get("AGENTIHOOKS_BUS_URL") or "",
+            env.get("AGENTIHOOKS_DEPLOYMENT") or "",
+            env.get("AGENTIHOOKS_HIVE_ID") or "",
+            env.get("AGENTIHOOKS_SWARM") if scoped else None,
+        )
+        return directory / hashlib.sha256(json.dumps(identity).encode()).hexdigest()
     url = urlsplit(redis_url(env))
     endpoint = (url.scheme, url.hostname, url.port or 6379, url.path or "/0")
     member = "" if ledger_link.local_mode(env) else env.get("AGENTIHOOKS_HIVE_ID")
-    directory = Path.home() / ".cache" / "agentihooks" / "scheduler"
     if endpoint == ("redis", "127.0.0.1", 6379, "/0") and not member:
         return directory
     namespace = f"{ROOT}:hive:{member}" if member else ""
@@ -64,17 +77,16 @@ def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iter
 
 
 async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
-    from redis.exceptions import ConnectionError as RedisConnectionError
-    from redis.exceptions import TimeoutError as RedisTimeoutError
+    from scripts.events import state
 
-    transient = (RedisConnectionError, RedisTimeoutError)
+    transient = state.unavailable()
     stopped = stop if stop is not None else _on_signals()
     with machine_lock("runner"):
         while not stopped.is_set():
             try:
                 await asyncio.to_thread(scheduler.run_due)
             except transient:
-                print("scheduler pass skipped: Redis did not answer", file=sys.stderr)
+                print("scheduler pass skipped: the state store did not answer", file=sys.stderr)
             try:
                 await asyncio.wait_for(stopped.wait(), timeout=1)
             except TimeoutError:
@@ -97,6 +109,7 @@ def supervise(stop: Event | None = None) -> None:
     stopped = stop if stop is not None else Event()
     loaded = revision(ROOT)
     starter = int(os.environ.get(STARTER) or 0)
+    _mark_unit()
     with machine_lock("supervisor"):
         _identify(loaded)
         while not stopped.is_set():
@@ -108,6 +121,29 @@ def supervise(stop: Event | None = None) -> None:
                     return
             if stopped.wait(1) or _abandoned(starter):
                 return
+
+
+def _mark_unit() -> None:
+    if not os.environ.get(UNIT_ENV):
+        return
+    import hooks.config  # noqa: F401  the folder must match callers that load ~/.agentihooks/*.env
+
+    directory = runtime_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / UNIT).write_text(UNIT)
+
+
+def _unit_owns(directory: Path) -> bool:
+    return (directory / UNIT).is_file() and (Path.home() / ".config" / "systemd" / "user" / UNIT).is_file()
+
+
+def _start_unit() -> bool:
+    start = ["systemctl", "--user", "start", "--no-block", UNIT]
+    try:
+        started = subprocess.run(start, stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return started.returncode == 0
 
 
 def _abandoned(starter: int) -> bool:
@@ -176,8 +212,10 @@ def _spawn_env(active: Mapping[str, str]) -> dict[str, str]:
 
 
 def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
+    from scripts.events.state import backend
+
     active = dict(os.environ if environ is None else environ)
-    if not (
+    if backend(active) != "bus" and not (
         active.get("REDIS_URL") or active.get("AGENTIHOOKS_HIVE_REDIS_URL") or active.get("AGENTIHOOKS_SWARM_REDIS_URL")
     ):
         return False
@@ -185,6 +223,8 @@ def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
         with machine_lock("startup", environ=active):
             with machine_lock("supervisor", environ=active):
                 pass
+            if _unit_owns(runtime_dir(active)) and _start_unit():
+                return True
             with (runtime_dir(active) / "scheduler.log").open("ab") as log:
                 subprocess.Popen(
                     _command("supervise"),
@@ -218,9 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.mode == "run":
-            from scripts.swarm.store import redis_client
-
-            asyncio.run(run(Scheduler(redis_client())))
+            asyncio.run(run(Scheduler()))
         else:
             _supervised()
     except AlreadyRunning as exc:

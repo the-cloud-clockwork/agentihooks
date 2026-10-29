@@ -21,7 +21,7 @@ from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
 from scripts.ci_mutation.probe import SHARD_PLAN, read_probe_results, reuse_kills
 from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.scope import selects, test_file
-from scripts.ci_mutation.stats import write_part
+from scripts.ci_mutation.stats import split_key, write_part
 from scripts.ci_mutation.stats_dependencies import records_within
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
@@ -162,10 +162,7 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
 
     module, selected = changed_mutations(filename, source, changed)
     code, names = combine_mutations_to_source(module, selected)
-    if any(
-        mutation.contained_by_top_level_function and mutation.contained_by_top_level_function.decorators
-        for mutation in selected
-    ):
+    if any(getattr(mutation.contained_by_top_level_function, "decorators", None) for mutation in selected):
         code = plain_copies(code)
     return code, list(names)
 
@@ -281,18 +278,13 @@ def collect_test_ids(test_runner, files: list[str]) -> list[str]:
         output.unlink()
 
 
-def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
+def split_files(root: Path, files: list[str], total: int) -> list[list[str]]:
     # Every part must split identically, and each restores its own traced cache.
-    return split_parts(files, entry_seconds(recorded_seconds(unit_records(root)), files), part)
-
-
-def split_parts(files: list[str], seconds: dict[str, float], part: tuple[int, int]) -> list[str]:
-    # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
-    index, total = part
-    return partition(files, seconds, total)[index]
+    return partition(files, entry_seconds(recorded_seconds(unit_records(root)), files), total)
 
 
 def partition(files: list[str], seconds: dict[str, float], total: int) -> list[list[str]]:
+    # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
     parts = [[] for _ in range(total)]
     loads = Counter()
     for path in sorted(files, key=lambda path: (-seconds[path], path)):
@@ -510,8 +502,9 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
             files = config.pytest_add_cli_args_test_selection
             if total > 1:
                 files = collect_test_ids(test_runner, files)
-            files = part_files(Path.cwd(), files, (index, total))
-            write_part(output, key, (index, total), collect_file_stats(runner, test_runner, files, workers, Path.cwd()))
+            split = split_files(Path.cwd(), files, total)
+            results = collect_file_stats(runner, test_runner, split[index], workers, Path.cwd())
+            write_part(output, key, (index, total), results, split_key(split))
             raise SystemExit(0)
         shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)
         collect_parallel_stats(runner, test_runner, shards, Path.cwd())

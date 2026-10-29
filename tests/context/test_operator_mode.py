@@ -6,6 +6,7 @@ import pytest
 from hooks import hook_manager
 from hooks.context import operator_mode
 from hooks.context.swarm_heartbeat import is_operator_prompt
+from scripts.events.redis_state import RedisStateStore
 from scripts.inbox.wake import WAKE_TEXT
 from scripts.swarm import delivery
 from scripts.swarm.runtime import HerdrRuntime
@@ -99,7 +100,7 @@ def test_idle_scheduler_does_not_end_explicit_presence():
 
     redis = redis_client()
     operator_mode.observe("pane", "operator on", True, now=100)
-    Scheduler(redis).run_due(now=100000)
+    Scheduler(RedisStateStore(redis, "scheduler")).run_due(now=100000)
     assert operator_mode._heard("pane")
     assert operator_mode.question_block("AskUserQuestion", "pane") == ""
     assert InboxStore(redis).inbox("pane") == []

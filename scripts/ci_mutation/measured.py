@@ -51,7 +51,8 @@ def measured_costs(names: list[str], results: list[dict], memory: KillMemory | N
         seconds = (
             durations.get(killer, missing) if killer in tests.get(function, ()) else functions.get(function, fallback)
         )
-        costs[name] = MUTANT_SECONDS + 1.25 * seconds
+        observed = memory.cost(name, tests.get(function, ())) if memory is not None else None
+        costs[name] = observed if observed is not None else MUTANT_SECONDS + 1.25 * seconds
     return costs
 
 
@@ -76,19 +77,39 @@ def split_tests(nodes: set[str], seconds: dict[str, float], limit: int) -> dict 
     }
 
 
-def measured_splits(names: list[str], results: list[dict], limit: int = 10) -> dict[str, dict]:
+def measured_splits(
+    names: list[str], results: list[dict], limit: int = 10, memory: KillMemory | None = None
+) -> dict[str, dict]:
     tests, durations, missing = function_tests(results)
     splits = {}
     for function in sorted({function_name(name) for name in names} & tests.keys()):
         seconds = {node: durations.get(node, missing) for node in tests[function]}
-        if split := split_tests(tests[function], seconds, limit):
+        # Reusing the last run's slices keeps each unit's selection, so its recorded cost still matches.
+        kept = memory.split(function, tests[function]) if memory is not None else None
+        if kept and 2 <= len(kept["slices"]) <= limit:
+            spent = sum(seconds[node] for node in kept["head"])
+            costs = [
+                MUTANT_SECONDS + 1.25 * (spent + sum(seconds[node] for node in chosen)) for chosen in kept["slices"]
+            ]
+            splits[function] = {**kept, "costs": costs}
+        elif split := split_tests(tests[function], seconds, limit):
             splits[function] = split
     return splits
 
 
-def plan_shards(costs: dict[str, float], target: float = 240, limit: int = 10, splits: dict | None = None) -> dict:
+def plan_shards(
+    costs: dict[str, float],
+    target: float = 240,
+    limit: int = 10,
+    splits: dict | None = None,
+    unit_costs: dict | None = None,
+) -> dict:
     splits = splits or {}
-    units = {name: splits[function]["costs"] for name in costs if (function := function_name(name)) in splits}
+    units = {
+        name: (unit_costs or {}).get(name, splits[function]["costs"])
+        for name in costs
+        if (function := function_name(name)) in splits
+    }
     costs = {name: sum(units[name]) if name in units else cost for name, cost in costs.items()}
     items = [(cost, name, None) for name, cost in costs.items() if name not in units]
     items += [(cost, name, position) for name, unit in units.items() for position, cost in enumerate(unit)]
@@ -110,6 +131,7 @@ def plan_shards(costs: dict[str, float], target: float = 240, limit: int = 10, s
         "assignments": assignments,
         "costs": costs,
         "units": "worker seconds",
+        **({"unit_costs": units} if units else {}),
         "estimated_worker_seconds": seconds,
         "shard_worker_seconds": loads,
         "workers": shard_workers(),
@@ -121,11 +143,20 @@ def measured_plan(
     groups: list[tuple[list[str], list[dict]]], memory: KillMemory | None = None, limit: int = 10
 ) -> dict:
     limit = min(limit, sum(len(names) for names, _ in groups))
-    costs, splits = {}, {}
+    costs, splits, unit_costs = {}, {}, {}
     for names, results in groups:
         costs.update(measured_costs(names, results, memory))
-        splits.update(measured_splits(names, results, limit))
-    return plan_shards(costs, limit=limit, splits=splits)
+        group_splits = measured_splits(names, results, limit, memory)
+        splits.update(group_splits)
+        for name in names:
+            if (function := function_name(name)) not in group_splits:
+                continue
+            split = group_splits[function]
+            unit_costs[name] = []
+            for tests, fallback in zip(split["slices"], split["costs"], strict=True):
+                observed = memory.cost(name, {*split["head"], *tests}) if memory is not None else None
+                unit_costs[name].append(observed if observed is not None else fallback)
+    return plan_shards(costs, limit=limit, splits=splits, unit_costs=unit_costs)
 
 
 def refine_plan(root: Path, selected: dict, stats: SharedStats) -> dict:
