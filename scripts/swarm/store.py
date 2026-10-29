@@ -510,17 +510,15 @@ class RedisStore:
                     pipe.hdel(self.key(slug, "desired-routes"), name)
                     pipe.hdel(self.key(slug, "state-since"), name)
                     pipe.hdel(self.key(slug, "retire-failures"), name)
-                    self._retire_name(pipe, name, ended)
                     pipe.execute()
+                    self._retire_name(name, ended)
                     return True
                 except WatchError:
                     continue
         raise SwarmError("agent registry kept changing; retirement was not committed")
 
-    def _retire_name(self, pipe, name, ended):
-        row = self.names.entry(name)
-        if row and not row["retired_at"]:
-            pipe.hset(self.names.key("name", name), "retired_at", ended)
+    def _retire_name(self, name, ended):
+        self.names.retire(name, ended)
 
     def count_spawn(self, slug, harness):
         self.redis.hincrby(self.key(slug, "spawns"), harness or "unknown", 1)
@@ -693,7 +691,11 @@ class RedisStore:
         keys = (
             sorted(own) + self.seats.swarm_keys(slug) + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
         )
-        return {"keys": _dump(self.redis, keys), "members": {f"{PREFIX}:index": [slug], **members}}
+        return {
+            "keys": _dump(self.redis, keys),
+            "members": {f"{PREFIX}:index": [slug], **members},
+            "names": self.names.export(slug),
+        }
 
     def restore(self, slug, state):
         """Replace the swarm's own keys with the exported ones and write back its seats and inbox."""
@@ -706,6 +708,7 @@ class RedisStore:
             for key, found in state["members"].items():
                 pipe.sadd(key, *found)
             pipe.execute()
+        self.names.restore(state.get("names", {}))
         self.ensure_code(slug)
 
 

@@ -5,8 +5,9 @@ import pytest
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
+from scripts.swarm import naming
 from scripts.swarm.naming import NamingError
-from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import APP_SERVER_TRANSPORT, PREFIX, AgentRecord, RedisStore, SwarmConfig
 from scripts.terminate_agent import Session, resolve
 
 pytestmark = pytest.mark.unit
@@ -230,7 +231,11 @@ def test_alias_survives_snapshot_restore_without_affecting_another_swarm(store):
     store.names.alias(old, new)
     store.names.alias("other-eng-1", other)
     snapshot = store.export("sw")
-    store.redis.delete(store.names.key("alias", old), store.names.key("aliases-of", new))
+    store.redis.hdel(
+        f"{PREFIX}:state:{naming.BUCKET}:current",
+        naming.state_key("alias", old),
+        naming.state_key("aliases-of", new),
+    )
     store.restore("sw", snapshot)
     assert store.names.resolve(old) == new
     assert store.names.resolve("other-eng-1") == other

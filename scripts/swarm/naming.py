@@ -5,6 +5,7 @@ counts each type on its own within the swarm and is never reused. Names the swar
 `<slug>-<lane>-<n>`, are still recognised so live agents keep working until they retire.
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -13,9 +14,17 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts.events import state
+from scripts.events.bus import StateConflict
 from scripts.swarm.keyspace import ROOT
 
 PREFIX = f"{ROOT}:names"
+BUCKET = "names"
+WRITE_TRIES = 16
+WHOLE = ("number", "spawned_at", "retired_at")
+MISSING = object()
+KEEP = object()
+_OPENED = {}
 TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner", "dispatch": "dispatcher"}
 LANES = {kind: lane for lane, kind in TYPES.items()}
 OPERATOR = "operator"
@@ -243,61 +252,166 @@ def _mint():
 
 
 def _record(slug, code, ledger, repo):
-    return json.dumps({"swarm": slug, "name": swarm_name(code), "ledger": ledger, "repo": repo})
+    return {"swarm": slug, "name": swarm_name(code), "ledger": ledger, "repo": repo}
+
+
+def state_key(kind, part):
+    return f"{kind}.{hashlib.sha256(part.encode()).hexdigest()}"
+
+
+def _shared(client):
+    if state.backend() == "redis":
+        from scripts.events.redis_state import RedisStateStore
+
+        return RedisStateStore(client, BUCKET)
+    if BUCKET not in _OPENED:
+        _OPENED[BUCKET] = state.open_state(BUCKET)
+    return _OPENED[BUCKET]
+
+
+def _value(entry):
+    if entry is None:
+        return MISSING
+    return json.loads(entry.value) if entry.value else None
+
+
+def _read_many(store, keys):
+    many = getattr(store, "get_many", None)
+    return many(keys) if many is not None else [store.get(key) for key in keys]
+
+
+def _row(raw):
+    return {k: int(v) if k in WHOLE else v for k, v in raw.items()} if raw else None
+
+
+def _default_registry():
+    if state.backend() != "redis":
+        return NameRegistry(None)
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    return NameRegistry(redis) if redis is not None else None
 
 
 def resolve_name(name):
-    from hooks._redis import get_redis
-
-    redis = get_redis()
-    return NameRegistry(redis).resolve(name) if redis is not None else name
+    names = _default_registry()
+    return names.resolve(name) if names is not None else name
 
 
 def resolve_names(names):
-    from hooks._redis import get_redis
-
-    redis = get_redis()
-    return NameRegistry(redis).resolve_many(names) if redis is not None else {name: name for name in names}
+    registry = _default_registry()
+    return registry.resolve_many(names) if registry is not None else {name: name for name in names}
 
 
 def addresses(name):
-    from hooks._redis import get_redis
-
-    redis = get_redis()
-    if redis is None:
+    names = _default_registry()
+    if names is None:
         return [name]
-    names = NameRegistry(redis)
     return [names.resolve(name), *names.aliases(name)]
 
 
 class NameRegistry:
     """Global: each swarm code with its swarm, ledger and repo, and each name with its type, number, session and
-    spawn and retire times."""
+    spawn and retire times, in the names state store. On Redis the keys written before that store still read until
+    their first write moves them."""
 
-    def __init__(self, redis, mint=None):
+    def __init__(self, redis, mint=None, shared=None):
         self.redis, self.mint = redis, mint or (lambda: _mint())
+        self.shared = shared if shared is not None else _shared(redis)
+        self.legacy = redis if state.backend() == "redis" else None
 
     @staticmethod
     def key(*parts):
         return ":".join((PREFIX, *parts))
 
-    def resolve(self, name, reader=None):
-        from redis.exceptions import RedisError
+    def _views(self, reader):
+        if reader is None or self.legacy is None:
+            return self.shared, self.legacy
+        from scripts.events.redis_state import RedisStateStore
 
+        return RedisStateStore(reader, BUCKET), reader
+
+    def _get(self, kind, part, legacy, reader=None):
+        shared, client = self._views(reader)
+        value = _value(shared.get(state_key(kind, part)))
+        if value is MISSING:
+            return legacy(client) if client is not None else None
+        return value
+
+    def _get_many(self, kind, parts, legacy):
+        values = [_value(entry) for entry in _read_many(self.shared, [state_key(kind, part) for part in parts])]
+        missing = list(dict.fromkeys(part for part, value in zip(parts, values) if value is MISSING))
+        found = dict(zip(missing, legacy(self.legacy, missing))) if missing and self.legacy is not None else {}
+        return [found.get(part) if value is MISSING else value for part, value in zip(parts, values)]
+
+    def _amend(self, kind, part, change, legacy):
+        return self._write(state_key(kind, part), change, legacy)
+
+    def _write(self, key, change, legacy):
+        """Writes change(current) at the revision it read, retrying on a race; KEEP writes nothing, None removes."""
+        for _ in range(WRITE_TRIES):
+            entry = self.shared.get(key)
+            current = _value(entry)
+            if current is MISSING:
+                current = legacy(self.legacy) if self.legacy is not None else None
+            changed = change(current)
+            if changed is KEEP:
+                return current
+            if changed is None and current is None:
+                return None
+            value = b"" if changed is None else json.dumps(changed).encode()
+            try:
+                if entry is None:
+                    self.shared.create(key, value)
+                else:
+                    self.shared.update(key, value, entry.revision)
+                return changed
+            except StateConflict:
+                continue
+        raise NamingError(f"name registry key {key} kept changing")
+
+    def _legacy_alias(self, name):
+        return lambda client: client.get(self.key("alias", name))
+
+    def _legacy_aliases_of(self, name):
+        return lambda client: sorted(client.smembers(self.key("aliases-of", name)))
+
+    def _legacy_code_of(self, slug):
+        return lambda client: client.hget(self.key("code-of"), slug)
+
+    def _legacy_codes(self, code):
+        return lambda client: json.loads(client.hget(self.key("codes"), code) or "null")
+
+    def _legacy_seq(self, code):
+        return lambda client: {kind: int(n) for kind, n in client.hgetall(self.key("seq", code)).items()} or None
+
+    def _legacy_name(self, name):
+        return lambda client: _row(client.hgetall(self.key("name", name)))
+
+    def _legacy_names(self, client, names):
+        rows = []
+        for start in range(0, len(names), NAMES_PAGE):
+            with client.pipeline(transaction=False) as pipe:
+                for name in names[start : start + NAMES_PAGE]:
+                    pipe.hgetall(self.key("name", name))
+                rows += [_row(raw) for raw in pipe.execute()]
+        return rows
+
+    def resolve(self, name, reader=None):
         try:
-            return (reader if reader is not None else self.redis).get(self.key("alias", name)) or name
-        except RedisError as exc:
+            return self._get("alias", name, self._legacy_alias(name), reader) or name
+        except state.unavailable() as exc:
             logging.getLogger(__name__).warning("alias lookup failed for %s: %s", name, exc)
             return name
 
     def resolve_many(self, names):
-        from redis.exceptions import RedisError
-
         if not names:
             return {}
         try:
-            found = self.redis.mget([self.key("alias", name) for name in names])
-        except RedisError as exc:
+            found = self._get_many(
+                "alias", names, lambda client, missing: client.mget([self.key("alias", name) for name in missing])
+            )
+        except state.unavailable() as exc:
             logging.getLogger(__name__).warning("alias lookup failed for %d names: %s", len(names), exc)
             return {name: name for name in names}
         return {name: alias or name for name, alias in zip(names, found)}
@@ -306,46 +420,47 @@ class NameRegistry:
         resolved = self.resolve_many(names)
         parsed = {name: parse(current) for name, current in resolved.items()}
         codes = sorted({found.code for found in parsed.values() if found})
-        rows = self.redis.hmget(self.key("codes"), codes) if codes else []
-        swarms = {code: json.loads(row or "{}").get("swarm", "") for code, row in zip(codes, rows)}
+        rows = self._get_many(
+            "codes",
+            codes,
+            lambda client, missing: [
+                json.loads(row) if row else None for row in client.hmget(self.key("codes"), missing)
+            ],
+        )
+        swarms = {code: (row or {}).get("swarm", "") for code, row in zip(codes, rows)}
         return {name: swarms[found.code] if found else legacy_slug(resolved[name]) for name, found in parsed.items()}
 
     def alias(self, old, new):
-        from redis.exceptions import WatchError
-
         new = self.resolve(new)
         if old == new:
             return
         if not self.entry(new):
             raise NamingError(f"no registered agent {new}")
-        key = self.key("alias", old)
-        for _ in range(4):
-            with self.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(key)
-                    held = pipe.get(key)
-                    if held and held != new:
-                        raise NamingError(f"alias {old} already belongs to {held}")
-                    if pipe.exists(self.key("name", old)):
-                        raise NamingError(f"registered name {old} cannot be an alias")
-                    pipe.multi()
-                    pipe.set(key, new)
-                    pipe.sadd(self.key("aliases-of", new), old)
-                    pipe.execute()
-                    return
-                except WatchError:
-                    continue
-        raise NamingError(f"alias {old} changed meanwhile")
+        if self._get("name", old, self._legacy_name(old)) is not None:
+            raise NamingError(f"registered name {old} cannot be an alias")
+
+        def point(held):
+            if held and held != new:
+                raise NamingError(f"alias {old} already belongs to {held}")
+            return KEEP if held == new else new
+
+        self._amend("alias", old, point, self._legacy_alias(old))
+        self._amend(
+            "aliases-of",
+            new,
+            lambda held: KEEP if old in (held or []) else sorted({*(held or []), old}),
+            self._legacy_aliases_of(new),
+        )
 
     def aliases(self, name, reader=None):
-        reader = reader if reader is not None else self.redis
-        return sorted(reader.smembers(self.key("aliases-of", self.resolve(name, reader))))
+        name = self.resolve(name, reader)
+        return sorted(self._get("aliases-of", name, self._legacy_aliases_of(name), reader) or [])
 
     def code_of(self, slug):
-        return self.redis.hget(self.key("code-of"), slug) or ""
+        return self._get("code-of", slug, self._legacy_code_of(slug)) or ""
 
     def swarm(self, code):
-        return json.loads(self.redis.hget(self.key("codes"), code) or "{}")
+        return self._get("codes", code, self._legacy_codes(code)) or {}
 
     def mint_code(self, slug, ledger, repo):
         """The swarm's code, minted and registered the first time; a code another swarm holds is minted again."""
@@ -354,72 +469,100 @@ class NameRegistry:
             return held
         for _ in range(MINT_ATTEMPTS):
             code = self.mint()
-            if not self.redis.hsetnx(self.key("codes"), code, _record(slug, code, ledger, repo)):
+            record = _record(slug, code, ledger, repo)
+            if (
+                self._amend("codes", code, lambda found: KEEP if found else record, self._legacy_codes(code))
+                is not record
+            ):
                 continue
-            if self.redis.hsetnx(self.key("code-of"), slug, code):
+            owner = self._amend("code-of", slug, lambda found: KEEP if found else code, self._legacy_code_of(slug))
+            if owner == code:
                 return code
-            self.redis.hdel(self.key("codes"), code)
-            return self.code_of(slug)
+            self._amend("codes", code, lambda _: None, self._legacy_codes(code))
+            return owner
         raise NamingError(f"no free swarm code after {MINT_ATTEMPTS} tries")
 
     def adopt(self, slug, code, ledger, repo):
         """Register a code the swarm record already carries, as after a restore into an emptied Redis."""
-        self.redis.hsetnx(self.key("codes"), code, _record(slug, code, ledger, repo))
-        self.redis.hsetnx(self.key("code-of"), slug, code)
+        record = _record(slug, code, ledger, repo)
+        self._amend("codes", code, lambda found: KEEP if found else record, self._legacy_codes(code))
+        self._amend("code-of", slug, lambda found: KEEP if found else code, self._legacy_code_of(slug))
 
     def swarm_slug(self, ref):
         """The ledger slug a swarm name `swarm@<code>` stands for while that swarm holds the code; ref otherwise."""
-        from redis.exceptions import RedisError
-
         try:
             code = swarm_code(ref)
             slug = self.swarm(code).get("swarm")
             return slug if slug and self.code_of(slug) == code else ref
-        except RedisError as exc:
+        except state.unavailable() as exc:
             logging.getLogger(__name__).warning("swarm alias lookup failed for %s: %s", ref, exc)
             return ref
 
     def release(self, slug):
         """Forget which code a removed swarm held; the code itself stays taken, so its names stay unique."""
-        self.redis.hdel(self.key("code-of"), slug)
+        self._amend("code-of", slug, lambda _: None, self._legacy_code_of(slug))
 
     def swarm_keys(self, slug):
-        """The swarm's counters, its name list and each name's record, for a snapshot."""
+        """The swarm's Redis keys written before the names state store, for a snapshot."""
         code = self.code_of(slug)
-        if not code:
+        if not code or self.legacy is None:
             return []
-        listed = self.redis.lrange(self.key("names", code), 0, -1)
+        listed = self.legacy.lrange(self.key("names", code), 0, -1)
         keys = [self.key("seq", code), self.key("names", code)]
         for name in listed:
             keys += [self.key("name", name), self.key("aliases-of", name)]
-            keys += [self.key("alias", old) for old in self.aliases(name)]
+            keys += [self.key("alias", old) for old in self.legacy.smembers(self.key("aliases-of", name))]
         return keys
+
+    def export(self, slug):
+        """The swarm's names state, each state key with its value, for a snapshot."""
+        code = self.code_of(slug)
+        if not code:
+            return {}
+        rows = {
+            state_key("codes", code): self.swarm(code),
+            state_key("code-of", slug): code,
+            state_key("seq", code): self._seq(code),
+        }
+        for row in self.names(slug):
+            if not row:
+                continue
+            name = row["name"]
+            rows[state_key("name", name)] = {k: v for k, v in row.items() if k != "name"}
+            olds = self.aliases(name)
+            rows[state_key("aliases-of", name)] = olds
+            rows.update({state_key("alias", old): name for old in olds})
+        return rows
+
+    def restore(self, rows):
+        for key, value in rows.items():
+            self._write(key, lambda _, value=value: value, lambda _: None)
+
+    def _seq(self, code):
+        return self._get("seq", code, self._legacy_seq(code)) or {}
 
     def next(self, slug, lane, at=0):
         code = self.code_of(slug)
         if not code:
             raise NamingError(f"swarm {slug} has no code yet")
         kind = TYPES[lane]
-        name = build(kind, code, self.redis.hincrby(self.key("seq", code), kind, 1))
-        fields = {"type": kind, "number": parse(name).number, "code": code, "swarm": slug}
-        with self.redis.pipeline() as pipe:
-            pipe.hset(self.key("name", name), mapping={**fields, "session_id": "", "spawned_at": at, "retired_at": 0})
-            pipe.rpush(self.key("names", code), name)
-            pipe.execute()
+        counted = self._amend(
+            "seq", code, lambda seq: {**(seq or {}), kind: (seq or {}).get(kind, 0) + 1}, self._legacy_seq(code)
+        )
+        name = build(kind, code, counted[kind])
+        fields = {"type": kind, "number": counted[kind], "code": code, "swarm": slug}
+        record = {**fields, "session_id": "", "spawned_at": at, "retired_at": 0}
+        self._amend("name", name, lambda _: record, self._legacy_name(name))
         return name
 
     def entry(self, name):
         name = self.resolve(name)
-        raw = self.redis.hgetall(self.key("name", name))
-        if not raw:
-            return {}
-        whole = ("number", "spawned_at", "retired_at")
-        return {"name": name, **{k: int(v) if k in whole else v for k, v in raw.items()}}
+        row = self._get("name", name, self._legacy_name(name))
+        return {"name": name, **row} if row else {}
 
     def note(self, name, **fields):
         name = self.resolve(name)
-        if self.redis.exists(self.key("name", name)):
-            self.redis.hset(self.key("name", name), mapping=fields)
+        self._amend("name", name, lambda row: KEEP if row is None else {**row, **fields}, self._legacy_name(name))
 
     def retire(self, name, at):
         row = self.entry(name)
@@ -428,21 +571,19 @@ class NameRegistry:
 
     def names(self, slug):
         code = self.code_of(slug)
-        names = self.redis.lrange(self.key("names", code), 0, -1) if code else []
-        if not names:
+        if not code:
             return []
-        resolved = self.resolve_many(names)
-        rows = []
-        for start in range(0, len(names), NAMES_PAGE):
-            with self.redis.pipeline(transaction=False) as pipe:
-                for name in names[start : start + NAMES_PAGE]:
-                    pipe.hgetall(self.key("name", resolved[name]))
-                rows += pipe.execute()
-        whole = ("number", "spawned_at", "retired_at")
-        return [
-            {"name": resolved[name], **{k: int(v) if k in whole else v for k, v in raw.items()}} if raw else {}
-            for name, raw in zip(names, rows)
-        ]
+        listed = self.legacy.lrange(self.key("names", code), 0, -1) if self.legacy is not None else []
+        counted = [build(kind, code, n) for kind, top in self._seq(code).items() for n in range(1, top + 1)]
+        known = set(listed)
+        later = [name for name in counted if name not in known]
+        if not listed and not later:
+            return []
+        resolved = self.resolve_many([*listed, *later])
+        rows = self._get_many("name", [resolved[name] for name in [*listed, *later]], self._legacy_names)
+        found = [{"name": resolved[name], **row} if row else {} for name, row in zip([*listed, *later], rows)]
+        spawned = sorted((row for row in found[len(listed) :] if row), key=lambda row: row["spawned_at"])
+        return [*found[: len(listed)], *spawned]
 
     def slug_of(self, name):
         """The swarm an agent name belongs to, '' for anything else."""
@@ -457,10 +598,10 @@ class NameRegistry:
         retired, '' when there is none yet."""
         name = self.resolve(name)
         parsed = parse(name)
-        if not parsed:
+        if not parsed or not self.entry(name):
             return ""
-        later = self.redis.lrange(self.key("names", parsed.code), 0, -1)
-        for other in later[later.index(name) + 1 :] if name in later else []:
+        for number in range(parsed.number + 1, self._seq(parsed.code).get(parsed.kind, 0) + 1):
+            other = build(parsed.kind, parsed.code, number)
             row = self.entry(other)
             if row.get("type") == parsed.kind and not row.get("retired_at"):
                 return other
