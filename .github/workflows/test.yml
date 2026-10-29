@@ -752,7 +752,7 @@ jobs:
 
       - &venv
         name: Restore the test environment
-        if: env.UNIT_SOURCE == '' && env.UNIT_WHEELHOUSE != '1'
+        if: env.UNIT_SOURCE == '' && (env.UNIT_WHEELHOUSE != '1' || runner.environment != 'self-hosted')
         id: venv
         uses: actions/cache/restore@v4
         env:
@@ -1675,7 +1675,7 @@ jobs:
       CODEX_RELEASE: rust-v0.160.0
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
       UNIT_SOURCE: ""
-      UNIT_WHEELHOUSE: ${{ runner.environment == 'self-hosted' && '1' || '' }}
+      UNIT_WHEELHOUSE: "1"
       LEG: ${{ matrix.leg }}
     strategy:
       fail-fast: false
