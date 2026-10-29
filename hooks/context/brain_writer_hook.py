@@ -132,6 +132,20 @@ def _scoped_outbox(outbox: Path, destination: dict | None) -> Path:
     return outbox if destination is None else outbox / f"{destination['audience']}-{destination['brain']}"
 
 
+def _drain_folders(outbox: Path, destination: dict) -> list[Path]:
+    from hooks.context.brain_adapter import brain_id
+
+    if destination["brain"] != brain_id():
+        return []
+    folders = [_scoped_outbox(outbox, destination)]
+    if destination["audience"] == "personal":
+        # Unbound legacy markers belong to the personal path only; a swarm brain never adopts them.
+        # Backlog first: months older than the live outbox, and append-only vault
+        # targets keep arrival order — oldest-first stays chronological.
+        folders = [outbox.with_name(outbox.name + "-backlog"), outbox, *folders]
+    return folders
+
+
 def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> int:
     """Write markers as individual JSON files to the outbox directory."""
     destination = _destination()
@@ -264,13 +278,7 @@ def _drain_outbox(outbox_dir: str) -> int:
         return 0
     outbox = Path(outbox_dir)
     destination = _destination()
-    folders = [_scoped_outbox(outbox, destination)]
-    if destination["audience"] == "personal":
-        # Unbound legacy markers belong to the personal path only; a swarm brain never adopts them.
-        # Backlog first: months older than the live outbox, and append-only vault
-        # targets keep arrival order — oldest-first stays chronological.
-        folders = [outbox.with_name(outbox.name + "-backlog"), outbox, *folders]
-    files = [f for d in folders if d.is_dir() for f in sorted(d.glob("*.json"))]
+    files = [f for d in _drain_folders(outbox, destination) if d.is_dir() for f in sorted(d.glob("*.json"))]
 
     drained = 0
     for f in files:

@@ -293,3 +293,16 @@ def test_a_refused_binding_never_lands_markers_on_the_personal_path(brains, monk
     client(monkeypatch, PERSONAL)
     assert writer._drain_outbox(str(brains.outbox)) == 0
     assert brains.received[PERSONAL] == []
+
+
+def test_a_swarm_drain_holds_while_the_ambient_brain_differs_from_the_binding(brains, monkeypatch):
+    client(monkeypatch, SWARM, swarm=True)
+    brains.down.add(SWARM)
+    writer._write_to_outbox([MARKER], "swarm-session", str(brains.outbox))
+    brains.down.clear()
+
+    monkeypatch.setattr("hooks.config.BRAIN_URL", f"{SWARM}/other")
+    assert writer._drain_outbox(str(brains.outbox)) == 0
+    monkeypatch.setattr("hooks.config.BRAIN_URL", SWARM)
+    assert writer._drain_outbox(str(brains.outbox)) == 1
+    assert [content for content, _ in brains.received[SWARM]] == [LESSON]
