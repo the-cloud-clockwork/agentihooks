@@ -128,9 +128,10 @@ class Admission:
             return False
         task_id, harness, reason = request["task"], request["harness"], request["reason"]
         self.store.note_launch_failure(slug, task_id, reason, harness)
-        admitted["task"]["avoid_harness"] = harness
-        self.store.redis.set(key, json.dumps(admitted), keepttl=True)
-        print(f"hub: events steering swarm={slug} task={task_id} avoid={harness}: {reason}", file=sys.stderr)
+        if harness:
+            admitted["task"]["avoid_harness"] = harness
+            self.store.redis.set(key, json.dumps(admitted), keepttl=True)
+            print(f"hub: events steering swarm={slug} task={task_id} avoid={harness}: {reason}", file=sys.stderr)
         return True
 
 

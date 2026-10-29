@@ -240,8 +240,8 @@ class Spoke:
         outcome = self.runtime.spawn(request)
         if not outcome.ok:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
-            harness = outcome.value.get("harness", "") if isinstance(outcome.value, dict) else ""
-            if harness and outcome.status is not Status.UNAVAILABLE:
+            if outcome.status is not Status.UNAVAILABLE:
+                harness = outcome.value.get("harness", "") if isinstance(outcome.value, dict) else ""
                 self.tasks.failed(event, harness, outcome.detail)
             raise RuntimeError(f"spawn {outcome.status}: {outcome.detail}")
         placed = outcome.value

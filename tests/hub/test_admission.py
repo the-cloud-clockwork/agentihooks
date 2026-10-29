@@ -250,6 +250,18 @@ def test_a_failed_launch_records_its_harness_and_steers_the_redelivered_offer(ri
     assert capsys.readouterr() == ("", f"hub: events steering swarm={SLUG} task=t1 avoid=codex: launch failed\n")
 
 
+def test_a_failed_launch_naming_no_harness_records_the_failure_and_steers_nothing(rig, capsys):
+    first = rig.admitter.admit(SLUG, ask())
+    capsys.readouterr()
+
+    assert rig.admitter.failed(SLUG, ask(harness="", reason="launch failed")) is True
+
+    assert rig.store.launch_failure(SLUG, "t1") == "launch failed"
+    assert rig.store.failed_harness(SLUG, "t1") == ""
+    assert rig.admitter.admit(SLUG, ask()) == first
+    assert capsys.readouterr() == ("", "")
+
+
 @pytest.mark.parametrize("fields", [{"hive": "hive-b"}, {"generation": 1}])
 def test_a_failure_report_without_its_admission_records_nothing(rig, fields):
     first = rig.admitter.admit(SLUG, ask())

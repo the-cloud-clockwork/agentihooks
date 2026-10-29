@@ -236,18 +236,25 @@ def test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness(rig, stat
     rig.tasks.failed.assert_called_once()
 
 
-@pytest.mark.parametrize(
-    "status, value",
-    [("UNAVAILABLE", {"harness": "codex"}), ("REFUSED", None), ("REFUSED", {"pane_id": "w1:p1"})],
-)
-def test_a_launch_failure_naming_no_harness_or_waiting_for_room_steers_nothing(rig, status, value):
+def test_a_launch_waiting_for_room_reports_no_failure(rig):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
-    rig.runtime.spawn.return_value = Outcome("spawn", Status[status], "local", value, detail="no room")
+    rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", {"harness": "codex"}, "no room")
 
     assert rig.spoke.poll() == "retry"
 
     rig.tasks.failed.assert_not_called()
+
+
+@pytest.mark.parametrize("value", [None, {"pane_id": "w1:p1"}])
+def test_a_launch_failure_naming_no_harness_is_reported_without_one(rig, value):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.runtime.spawn.return_value = Outcome("spawn", Status.REFUSED, "local", value, detail="launch failed")
+
+    assert rig.spoke.poll() == "retry"
+
+    rig.tasks.failed.assert_called_once_with(rig.event, "", "launch failed")
 
 
 def test_a_master_spoke_takes_a_failure_report_without_acting_on_it():
