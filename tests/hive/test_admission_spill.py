@@ -218,7 +218,7 @@ def test_a_second_launch_in_one_pass_spills_with_the_placed_count(setup):  # noq
     assert second.hive == "spare"
     assert second.spill.record() == {
         "preferred": "remote",
-        "refusal": "placement: 1 launches placed on it this pass took its last room",
+        "refusal": "placement: 1 launches placed on it this pass took its room",
     }
 
 
@@ -237,6 +237,52 @@ def test_a_launch_past_an_unhosted_first_ranked_hive_records_why(setup, fields, 
     selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
     assert selected.hive == "spare"
     assert selected.spill.record() == {"preferred": "remote", "refusal": refusal}
+
+
+def test_a_reservation_refused_on_the_first_ranked_hive_names_its_memory_line(setup):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1})
+    write_hive(setup, id="spare")
+    _load(setup, "remote", cpus=1, load5=2.0, available_mb=20_000 + admission.AGENT_MB)
+    request = request_for(setup)
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    assert (selected.hive, selected.first) == ("remote", True)
+    assert admission.reserve(setup.store.redis, "remote", "fixture/other", 1) == (True, 0)
+    assert setup.launcher.reserve_room(request, selected) == (
+        "no hive for eng has room: remote ram: 20700 of 100000 MB available, 80 percent used, "
+        "700 MB per agent with 1 pending launches, fits 0 more under the 80 percent line"
+    )
+
+
+def test_an_acknowledged_execution_keeps_its_placement_spill(setup):  # noqa: F811
+    from dataclasses import replace
+
+    from scripts.hive import orders, placement
+    from scripts.swarm import lease
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    task = {"id": "task", "seat": "eng@fixture", "controller_epoch": setup.held.epoch}
+    request = SpawnRequest(setup.config, "eng", setup.store.next_name(setup.config.slug, "eng"), task)
+    spill = placement.Spill("worker", "it is draining")
+    selected = replace(setup.launcher.select(setup.config, "eng", task), spill=spill)
+    admitted = setup.launcher.admit(request, selected)
+    order = orders.LaunchOrder(
+        setup.config.slug,
+        admitted.execution_id,
+        admitted.generation,
+        "engineer",
+        "eng",
+        "task",
+        "account",
+        "claude",
+        "subscription",
+        "prompt",
+        setup.held.epoch,
+        lease.now_ms(setup.store) + 60000,
+        hive="remote",
+    )
+    ack = orders.Ack("live", {"host_id": "remote"}, execution={"profile_decision": {"validation": {"pid": 12}}})
+    acked = setup.launcher.record(admitted, order, ack)
+    assert acked.profile_decision == {"validation": {"pid": 12}, "placement_spill": spill.record()}
 
 
 def test_a_local_slot_cap_limits_the_first_room_and_keeps_first_mode():

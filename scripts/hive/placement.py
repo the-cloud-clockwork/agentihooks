@@ -93,15 +93,15 @@ def first(role: str, hive: dict) -> bool:
     return SPREAD not in hive and role in hive.get("prefer", {}) and FIRST_ROOM in hive
 
 
-def _room(hive: dict, role: str = "") -> int:
+def _room(hive: dict, role: str) -> int:
     return hive[FIRST_ROOM] if first(role, hive) else hive["room"]
 
 
-def refusal(hive: dict, role: str = "") -> str:
-    return hive.get(FIRST_REFUSAL, "") if first(role, hive) else hive.get("refusal", "")
+def refusal(hive: dict, role: str) -> str | None:
+    return hive[FIRST_REFUSAL] if first(role, hive) else hive.get("refusal")
 
 
-def _refused(reason: str, hives: list[dict], role: str = "") -> str:
+def _refused(reason: str, hives: list[dict], role: str) -> str:
     held = "; ".join(f"{hive['id']} {refusal(hive, role)}" for hive in hives if refusal(hive, role))
     return f"{reason}: {held}" if held else reason
 
@@ -141,20 +141,19 @@ def _pick(
 ) -> Choice | Wait:
     ranked = [hive for hive in candidates if SPREAD not in hive and role in hive["prefer"]]
     preferred = min(ranked, key=_order(role)) if ranked else None
-    skipped = ""
+    spill = None
     for index, (check, reason) in enumerate(_checks(role, harness, slot, route_kind, repo, kind)):
         kept = [hive for hive in candidates if check(hive)]
         if not kept:
             return Wait(_refused(reason, candidates, role) if index == 0 else reason)
-        if preferred is not None and not skipped and not check(preferred):
-            skipped = (refusal(preferred, role) or reason) if index == 0 else reason
+        if preferred is not None and spill is None and not check(preferred):
+            spill = Spill(preferred["id"], (refusal(preferred, role) or reason) if index == 0 else reason)
         candidates = kept
-    chosen = min(candidates, key=_order(role))["id"]
-    return Choice(chosen, spill=Spill(preferred["id"], skipped) if skipped else None)
+    return Choice(min(candidates, key=_order(role))["id"], spill=spill)
 
 
 def unhosted(role: str, hives: list[dict], now: int, aliases: tuple[str, ...] = ()) -> Spill | None:
-    ranked = [hive for hive in hives if SPREAD not in hive and role in hive.get("prefer", {})]
+    ranked = [hive for hive in hives if SPREAD not in hive and role in hive["prefer"]]
     if not ranked:
         return None
     preferred = min(ranked, key=_order(role))

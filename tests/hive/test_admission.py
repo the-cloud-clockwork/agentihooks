@@ -543,3 +543,13 @@ def test_a_first_ranked_hive_without_a_memory_reading_is_refused_as_missing_tele
 def test_a_first_ranked_hive_still_refuses_below_the_disk_floor_and_without_a_reading():
     assert admission.room(reading(disk_free_gb=1, disk_floor_gb=50), first=True).reason == admission.DISK
     assert admission.room(None, first=True).reason == admission.MISSING
+
+
+def test_a_first_ranked_hive_reads_pod_memory_alone_when_the_host_reading_is_partial():
+    measured = {"cpus": 4, "load5": 8.0, "available_mb": 5000, "pod_available_mb": 9000, "pod_total_mb": 19600}
+    found = admission.room(measured, first=True)
+    assert found == admission.Room(
+        7,
+        admission.RAM,
+        "pod 9000 of 19600 MB available, 55 percent used, 700 MB per agent, fits 7 more under the 80 percent line",
+    )

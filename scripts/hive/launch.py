@@ -178,11 +178,10 @@ def _matched_origin(hives: list[dict], hive: str, repo: str) -> str | placement.
 def _local_capped(hive: dict, taken: int, bound: int) -> dict:
     capped = dict(hive)
     for room, refusal in (("room", "refusal"), (placement.FIRST_ROOM, placement.FIRST_REFUSAL)):
-        if room not in hive:
-            continue
-        limited = admission.capped(admission.Room(hive[room], **ROOM_DETAILS), taken, bound)
-        if limited.room < hive[room]:
-            capped.update({room: limited.room, refusal: admission.refusal(limited)})
+        if room in hive:
+            limited = admission.capped(admission.Room(hive[room], **ROOM_DETAILS), taken, bound)
+            if limited.room < hive[room]:
+                capped.update({room: limited.room, refusal: admission.refusal(limited)})
     return capped
 
 
@@ -262,11 +261,10 @@ class HiveLaunch:
                     hive[placement.PLACED] = hive.get(placement.PLACED, 0) + 1
                     if placement.FIRST_ROOM in hive:
                         hive[placement.FIRST_ROOM] -= 1
-                        if hive[placement.FIRST_ROOM] <= 0:
-                            hive[placement.FIRST_REFUSAL] = (
-                                f"{admission.PLACEMENT}: {hive[placement.PLACED]} launches placed on it this pass "
-                                "took its last room"
-                            )
+                        hive[placement.FIRST_REFUSAL] = (
+                            f"{admission.PLACEMENT}: {hive[placement.PLACED]} launches placed on it this pass "
+                            "took its room"
+                        )
         return selected
 
     def _withdraw(self, request: SpawnRequest, selected: Selection, refused: str) -> placement.Wait:
@@ -649,16 +647,14 @@ class HiveLaunch:
         reading = headroom.read(self.store.redis, selected.hive, lease.now_ms(self.store))
         member = f"{self.slug}/{request.name}"
         local = selected.hive == hive_id() and request.lane != placement.MASTER
+        limit = admission.room(reading, first=selected.first).room
         if local:
             running = local_slots.running(self.store, self.slug, request.task["id"])
-            bound = local_slots.maximum(
-                self.store, self.slug, running + admission.room(reading, first=selected.first).room
-            )
+            bound = local_slots.maximum(self.store, self.slug, running + limit)
             taken = local_slots.claim(self.store, selected.hive, self.slug, request.task["id"], request.name, bound)
             if taken >= bound:
                 refused = f"no hive has room{placement.LOCAL_FULL}{taken} of its {bound} agents"
                 return refused  # nosemgrep: python.flask.security.audit.directly-returned-format-string.directly-returned-format-string
-        limit = admission.room(reading, first=selected.first).room
         reserved, held = admission.reserve(self.store.redis, selected.hive, member, limit)
         if reserved:
             return ""

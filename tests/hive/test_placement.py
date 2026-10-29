@@ -345,3 +345,33 @@ def test_an_excluding_first_ranked_hive_names_the_excluded_role():
     hives = [ranked("worker", 4, excluded=["master", "eng"]), hive("spare", ui="no", excluded=["master"])]
     found = choose("eng", "claude", "acct", "subscription", REPO, hives, NOW)
     assert found.spill.record() == {"preferred": "worker", "refusal": "it excludes eng"}
+
+
+def test_a_full_fleet_waits_naming_the_first_room_refusal_of_the_ranked_hive():
+    from scripts.hive.placement import Wait, choose
+
+    hives = [
+        ranked("worker", 0, "ram: memory at the line", room=4),
+        hive("spare", ui="no", excluded=["master"], room=0, refusal="cpu: load"),
+    ]
+    assert choose("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Wait(
+        "no hive for eng has room: worker ram: memory at the line; spare cpu: load"
+    )
+
+
+def test_the_spill_names_the_best_ranked_hive_even_when_it_is_the_busiest():
+    from scripts.hive.placement import choose
+
+    hives = [
+        ranked("worker", 0, "ram: memory at the line", agents=3, prefer={"eng": 1}),
+        ranked("second", 4, agents=0, prefer={"eng": 2}),
+        hive("spare", ui="no", excluded=["master"]),
+    ]
+    found = choose("eng", "claude", "acct", "subscription", REPO, hives, NOW)
+    assert (found.hive, found.spill.record()) == (
+        "second",
+        {"preferred": "worker", "refusal": "ram: memory at the line"},
+    )
+    hives[0] = ranked("worker", 4, agents=3, prefer={"eng": 1}, draining="yes")
+    found = choose("eng", "claude", "acct", "subscription", REPO, hives, NOW)
+    assert (found.hive, found.spill.record()) == ("second", {"preferred": "worker", "refusal": "it is draining"})

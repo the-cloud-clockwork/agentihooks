@@ -136,16 +136,15 @@ def _first(measured: dict, pending: int) -> list[tuple[int, str, str]]:
     held = _held(pending)
     limits = []
     for free, size, prefix in (("available_mb", "total_mb", ""), ("pod_available_mb", "pod_total_mb", "pod ")):
-        if free not in measured or size not in measured:
-            continue
-        available, total = measured[free], measured[size]
-        used = 100 - available * 100 // total
-        shown = f"{prefix}{available} of {total} MB available, {used} percent used"
-        if available * 100 <= (100 - HOST_PERCENT) * total:
-            limits.append((0, RAM, f"{shown}, at or above the {HOST_PERCENT} percent line"))
-        else:
-            fits = max(1, _ram_room(available, total, 0)) - pending
-            limits.append((fits, RAM, f"{shown}, {AGENT_MB} MB per agent{held}, fits {{}} more {LINE}"))
+        if all(name in measured for name in (free, size)):
+            available, total = measured[free], measured[size]
+            used = 100 - available * 100 // total
+            shown = f"{prefix}{available} of {total} MB available, {used} percent used"
+            if available * 100 <= (100 - HOST_PERCENT) * total:
+                limits.append((0, RAM, f"{shown}, at or above the {HOST_PERCENT} percent line"))
+            else:
+                fits = max(1, _ram_room(available, total, 0)) - pending
+                limits.append((fits, RAM, f"{shown}, {AGENT_MB} MB per agent{held}, fits {{}} more {LINE}"))
     return limits or [(0, MISSING, "no memory reading")]
 
 
