@@ -2,9 +2,9 @@
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from scripts.hive.registry import MASTER_NAME, UI_ROLES, live
+from scripts.hive.registry import LIVE_MS, MASTER_NAME, UI_ROLES, live
 from scripts.master_claude_login import ROUTE as MASTER_LOGIN
 
 MASTER = "master"
@@ -40,9 +40,19 @@ class MasterPlacement:
 
 
 @dataclass(frozen=True)
+class Spill:
+    preferred: str
+    refusal: str
+
+    def record(self) -> dict:
+        return {"preferred": self.preferred, "refusal": self.refusal}
+
+
+@dataclass(frozen=True)
 class Choice:
     hive: str
     fallback: str = ""
+    spill: Spill | None = None
 
 
 def hosts(role: str, hive: dict, aliases: tuple[str, ...] = ()) -> bool:
@@ -76,12 +86,23 @@ def round_robin(hives: list[dict], nodes: int, repo: str, now: int) -> list[dict
     return [{**hive, SPREAD: hive["agents"] + hive.get(PLACED, 0)} for hive in chosen[: nodes or None]]
 
 
-def _room(hive: dict) -> int:
-    return hive["room"]
+FIRST_ROOM, FIRST_REFUSAL = "first_room", "first_refusal"
 
 
-def _refused(reason: str, hives: list[dict]) -> str:
-    held = "; ".join(f"{hive['id']} {hive['refusal']}" for hive in hives if hive.get("refusal"))
+def first(role: str, hive: dict) -> bool:
+    return SPREAD not in hive and role in hive.get("prefer", {}) and FIRST_ROOM in hive
+
+
+def _room(hive: dict, role: str) -> int:
+    return hive[FIRST_ROOM] if first(role, hive) else hive["room"]
+
+
+def refusal(hive: dict, role: str) -> str | None:
+    return hive[FIRST_REFUSAL] if first(role, hive) else hive.get("refusal")
+
+
+def _refused(reason: str, hives: list[dict], role: str) -> str:
+    held = "; ".join(f"{hive['id']} {refusal(hive, role)}" for hive in hives if refusal(hive, role))
     return f"{reason}: {held}" if held else reason
 
 
@@ -89,7 +110,7 @@ def _checks(
     role: str, harness: str, slot: str, route_kind: str, repo: str, kind: str = HIVE
 ) -> list[tuple[Callable[[dict], bool], str]]:
     return [
-        (lambda hive: role == MASTER or _room(hive) > 0, f"no {kind} for {role} {HAS_ROOM}"),
+        (lambda hive: role == MASTER or _room(hive, role) > 0, f"no {kind} for {role} {HAS_ROOM}"),
         (
             lambda hive: any(item["harness"] == harness and item["account"] == slot for item in hive["slots"]),
             f"no {kind} for {role} advertises the {harness} slot {slot}",
@@ -118,15 +139,43 @@ def _order(role: str) -> Callable[[dict], tuple]:
 def _pick(
     role: str, harness: str, slot: str, route_kind: str, repo: str, candidates: list[dict], kind: str = HIVE
 ) -> Choice | Wait:
+    ranked = [hive for hive in candidates if SPREAD not in hive and role in hive["prefer"]]
+    preferred = min(ranked, key=_order(role)) if ranked else None
+    spill = None
     for index, (check, reason) in enumerate(_checks(role, harness, slot, route_kind, repo, kind)):
         kept = [hive for hive in candidates if check(hive)]
         if not kept:
-            return Wait(_refused(reason, candidates) if index == 0 else reason)
+            return Wait(_refused(reason, candidates, role) if index == 0 else reason)
+        if preferred is not None and spill is None and not check(preferred):
+            spill = Spill(preferred["id"], (refusal(preferred, role) or reason) if index == 0 else reason)
         candidates = kept
-    return Choice(min(candidates, key=_order(role))["id"])
+    return Choice(min(candidates, key=_order(role))["id"], spill=spill)
+
+
+def unhosted(role: str, hives: list[dict], now: int, aliases: tuple[str, ...] = ()) -> Spill | None:
+    ranked = [hive for hive in hives if SPREAD not in hive and role in hive["prefer"]]
+    if not ranked:
+        return None
+    preferred = min(ranked, key=_order(role))
+    if not live(preferred, now):
+        return Spill(preferred["id"], f"its heartbeat is older than {LIVE_MS // 1000} seconds")
+    if preferred.get("draining") == YES:
+        return Spill(preferred["id"], "it is draining")
+    if not hosts(role, preferred, aliases):
+        return Spill(preferred["id"], f"it excludes {role}")
+    return None
 
 
 def choose(
+    role: str, harness: str, slot: str, route_kind: str, repo: str, hives: list[dict], now: int
+) -> Choice | Wait:
+    picked = _choose(role, harness, slot, route_kind, repo, hives, now)
+    if isinstance(picked, Choice) and picked.spill is None:
+        return replace(picked, spill=unhosted(role, hives, now))
+    return picked
+
+
+def _choose(
     role: str, harness: str, slot: str, route_kind: str, repo: str, hives: list[dict], now: int
 ) -> Choice | Wait:
     candidates = [hive for hive in hives if live(hive, now) and hosts(role, hive)]

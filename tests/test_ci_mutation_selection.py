@@ -534,6 +534,32 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
     assert mutation_counts("scripts/sample.py", source, {9, 14}) == (0, ["cached"])
 
 
+def test_changed_module_constants_and_dataclass_fields_beside_a_decorated_class_select_without_error(monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import selected_mutants
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    source = (
+        "import dataclasses\n"
+        "\n"
+        'FIRST, LAST = "first", "last"\n'
+        "\n"
+        "@dataclasses.dataclass(frozen=True)\n"
+        "class Spill:\n"
+        "    hive: str\n"
+        "    room: int = 1\n"
+        "\n"
+        "    def record(self):\n"
+        "        return self.room + 1\n"
+    )
+    generated, names = selected_mutants("scripts/sample.py", source, {3, 8, 11})
+    compile(generated, "scripts/sample.py", "exec")
+    assert names and all(name.startswith("xǁSpillǁrecord__mutmut_") for name in names)
+
+
 def test_property_cached_property_static_and_class_method_bodies_are_graded_and_their_mutants_run(monkeypatch):
     from mutmut.configuration import Config
 

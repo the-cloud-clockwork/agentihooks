@@ -162,10 +162,7 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
 
     module, selected = changed_mutations(filename, source, changed)
     code, names = combine_mutations_to_source(module, selected)
-    if any(
-        mutation.contained_by_top_level_function and mutation.contained_by_top_level_function.decorators
-        for mutation in selected
-    ):
+    if any(getattr(mutation.contained_by_top_level_function, "decorators", None) for mutation in selected):
         code = plain_copies(code)
     return code, list(names)
 
