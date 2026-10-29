@@ -186,7 +186,11 @@ def write_entry(change: Change, ask: Callable[[Change], str]) -> str:
     failures: list[Exception] = []
     for attempt in range(ATTEMPTS):
         try:
-            return check_words(ask(change))
+            text = ask(change)
+            text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+            text = re.sub(r"(?m)^\s*#+\s*", "", text)
+            text = re.sub(r"<([^<>]+)>", r"\1", text)
+            return check_words(text.replace("`", ""))
         except (EntryError, ModelError) as error:
             failures.append(error)
             print(f"#{change.number} attempt {attempt + 1}: {error}", file=sys.stderr)
