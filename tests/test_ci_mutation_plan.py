@@ -202,6 +202,10 @@ def test_a_kept_split_is_reused_so_its_unit_costs_stay_observed_when_durations_d
     assert drifted["splits"][function]["head"] == first["splits"][function]["head"]
     assert drifted["splits"][function]["slices"] == first["splits"][function]["slices"]
     assert drifted["unit_costs"] == {name: [1.0] * 3 for name in names}
+    slices = first["splits"][function]["slices"]
+    seconds = drifted_durations[0]["durations"]
+    expected = [plan.MUTANT_SECONDS + 1.25 * (1.0 + sum(seconds[node] for node in chosen)) for chosen in slices]
+    assert drifted["splits"][function]["costs"] == pytest.approx(expected)
     fresh = measured.measured_plan([(names, drifted_durations)], killers.KillMemory(tmp_path / "empty"), limit=3)
     assert fresh["splits"][function]["slices"] != first["splits"][function]["slices"]
     changed = [{"tests": {function: [*nodes, "t6"]}, "durations": {**drifted_durations[0]["durations"], "t6": 50.0}}]

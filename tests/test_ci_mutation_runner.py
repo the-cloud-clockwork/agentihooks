@@ -1111,6 +1111,7 @@ def test_a_shard_mutates_with_every_matching_stats_part(tmp_path, monkeypatch):
     assert commands[1][3:6] == [str(tmp_path / "work/results.json"), "2", "4"]
 
 
+@pytest.mark.parametrize("stale", ["", "head", "selection"])
 def test_shards_reuse_exact_measured_plan_and_refuse_independently_stale_inputs(tmp_path, monkeypatch, stale):
     import json
 

@@ -312,9 +312,9 @@ def seed_measured_shard(stats: SharedStats, key: str, work: Path) -> str:
         shutil.copy(plan_path, work / "shard-plan.json")
     if (killers := stats.folder.parent / "killers").is_dir():
         shutil.copytree(killers, work / "killers")
-    if plan_path.is_file():
+    if plan_path.is_file() and plan.get("splits"):
         # Kept beside the killers, the slices reach the next run's plan through the cache.
-        KillMemory(work / "killers").keep_splits(plan.get("splits", {}))
+        KillMemory(work / "killers").keep_splits(plan["splits"])
     return ""
 
 
