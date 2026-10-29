@@ -1089,7 +1089,9 @@ def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tm
 
     scheduler.timer.side_effect = timer
     monkeypatch.setattr(process_timer, "Scheduler", Mock(return_value=scheduler))
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    starts = Mock()
+    starts.side_effect = lambda: starts.call_count > 1000 and pytest.fail("restarted the scheduler 1000 times")
+    monkeypatch.setattr(process_timer.service, "ensure_running", starts)
 
     def send(session, path, timeout, trigger):
         assert session == "session"

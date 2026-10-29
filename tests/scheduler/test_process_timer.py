@@ -41,8 +41,14 @@ def quick_polls(monkeypatch):
     monkeypatch.setattr(process_timer, "Event", BoundedEvent)
 
 
+def _starts():
+    started = Mock()
+    started.side_effect = lambda: started.call_count > MAX_POLLS and pytest.fail(f"restarted {MAX_POLLS} times")
+    return started
+
+
 def test_wait_is_released_by_the_scheduler_signal(state, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", Mock())
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     with process_timer.Timer(2, state=state) as timer:
         entry = timer.entry
         assert entry.record["delay"] == 2
@@ -96,7 +102,7 @@ def test_a_bounded_wait_with_no_ring_returns_at_its_deadline(monkeypatch):
 
 @pytest.mark.wall_clock
 def test_a_bounded_wait_with_no_ring_takes_its_deadline(monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", Mock())
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     timer = _bare_timer(_Entry(fired_after=10**9))
     started = time.monotonic()
     timer.wait(timeout=0.1)
@@ -162,21 +168,21 @@ def test_a_bounded_wait_reaches_its_deadline_on_one_clock_reading(monkeypatch):
 
 
 def test_a_timer_entry_carries_its_delay(state, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     with process_timer.Timer(2, state=state) as timer:
         assert timer.entry.record["payload"] == '{"delay": 2}'
 
 
 def test_wait_passes_its_bound_to_the_timer(state, monkeypatch):
     bounds = []
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     monkeypatch.setattr(process_timer.Timer, "wait", lambda timer, timeout=None: bounds.append(timeout))
     process_timer.wait(2, state=state, timeout=3)
     assert bounds == [3]
 
 
 def test_interruption_cancels_the_timer(state, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     with pytest.raises(KeyboardInterrupt), process_timer.Timer(3, state=state) as timer:
         raise KeyboardInterrupt
     assert timer.entry.state == "cancelled"
@@ -188,7 +194,7 @@ def test_a_timer_without_a_store_opens_the_scheduler_bucket(state, monkeypatch):
 
     opened = []
     monkeypatch.setattr(states, "open_state", lambda bucket: opened.append(bucket) or state)
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     with process_timer.Timer(0) as timer:
         Scheduler(state).run_due(now=timer.entry.record["due"])
         timer.wait()
@@ -208,7 +214,7 @@ async def test_async_wait_cancels_its_timer_and_unblocks_its_worker(state, monke
         started.set()
         return result
 
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     monkeypatch.setattr(process_timer, "Timer", timer)
     task = asyncio.create_task(process_timer.async_wait(60))
     await asyncio.wait_for(started.wait(), timeout=1)
@@ -228,7 +234,7 @@ def test_member_timer_writes_only_its_writable_subtree(redis, monkeypatch, deplo
 
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", deployment)
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     assert bucket() == ("scheduler-member" if deployment != "local" else "scheduler")
     state = RedisStateStore(redis, bucket())
     with process_timer.Timer(15, state=state) as timer:
@@ -264,7 +270,7 @@ async def test_wait_helpers_consume_and_close_a_fired_timer(state, monkeypatch, 
         Scheduler(state).run_due(now=result.entry.record["due"])
         return result
 
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     monkeypatch.setattr(process_timer, "Timer", timer)
     if asynchronous:
         await process_timer.async_wait(2)
@@ -284,7 +290,7 @@ def test_wait_on_a_given_store_opens_none(state, monkeypatch):
         Scheduler(state).run_due(now=timer.entry.record["due"])
         original(timer, timeout)
 
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     monkeypatch.setattr(states, "open_state", Mock(side_effect=AssertionError("opened its own store")))
     monkeypatch.setattr(process_timer.Timer, "wait", fired)
     process_timer.wait(2, state=state)
@@ -316,7 +322,7 @@ def test_member_identity_does_not_change_host_keys_in_local_or_default_mode(monk
 
 
 def test_simultaneous_process_timers_ring_independently(state, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     with process_timer.Timer(0, state=state) as first, process_timer.Timer(60, state=state) as second:
         assert first.entry.id != second.entry.id
         Scheduler(state).run_due(now=first.entry.record["due"])
@@ -326,7 +332,7 @@ def test_simultaneous_process_timers_ring_independently(state, monkeypatch):
 
 
 def test_process_timer_records_are_bounded_across_repeated_waits(state, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     scheduler = Scheduler(state)
     for _ in range(20):
         with process_timer.Timer(0, state=state) as timer:
@@ -351,7 +357,7 @@ def test_a_scheduler_that_cannot_start_leaves_no_timer_behind(state, monkeypatch
 
 
 def test_a_fired_timer_survives_a_paused_consumer(state, monkeypatch):
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     with process_timer.Timer(0, state=state) as timer:
         Scheduler(state).run_due(now=timer.entry.record["due"])
         now = time.time()
@@ -383,7 +389,7 @@ def test_member_schedules_and_consumes_while_shared_writes_are_refused(monkeypat
     shared = RedisStateStore(admin, "scheduler")
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "cloud")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
-    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     with process_timer.Timer(0, state=RedisStateStore(member, bucket())) as timer:
         assert Scheduler(RedisStateStore(admin, bucket())).run_due(now=timer.entry.record["due"]) == 1
         timer.wait()
