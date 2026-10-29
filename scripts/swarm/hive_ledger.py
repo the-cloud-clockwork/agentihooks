@@ -27,8 +27,8 @@ def record(redis, slug, name, code, now_ms):
     if code is None:
         result = {"ok_at": now_ms}
     else:
-        earlier = read(redis, slug, name).get("failed", [])
-        result = {"failed": [*earlier, [now_ms, code]][-KEPT:]}
+        earlier = read(redis, slug, name)
+        result = {**earlier, "failed": [*earlier.get("failed", []), [now_ms, code]][-KEPT:]}
     redis.set(_key(redis, slug, name), json.dumps(result), ex=idle.BEAT_TTL_S)
 
 

@@ -76,6 +76,15 @@ def test_the_first_successful_hive_write_ends_the_outage_and_earlier_failures_st
     assert outage.open_records("sw") == []
 
 
+def test_a_failure_after_an_agent_success_keeps_that_success_for_the_swarm(store):
+    three_failures(store)
+    hive_ledger.record(store.redis, "sw", OTHER, None, 4_000)
+    failed(store, OTHER, 4_600)
+    assert hive_ledger.read(store.redis, "sw", OTHER) == {"ok_at": 4_000, "failed": [[4_600, 502]]}
+    hive_ledger.observe(store, "sw", 4_700)
+    assert outage.open_records("sw") == []
+
+
 def test_a_workstation_success_leaves_the_hive_outage_open(store, monkeypatch):
     three_failures(store)
     for name in HIVE:
