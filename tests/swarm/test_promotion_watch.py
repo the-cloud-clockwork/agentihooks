@@ -411,12 +411,35 @@ def test_a_job_newly_failing_on_a_run_whose_alert_was_closed_raises_an_alert_nam
         "state": "done",
         "text": f"Dev promotion is red: push run 900 at commit {SHA} failed in helm-kind. url",
     }
-    ledger = Ledger([{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open"}], [alert])
-    store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-900-0", "helm-kind")
-    store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-900-1", "unit (3.11, 1)")
-    ledger.tasks.append({"id": "promo-900-1", "title": "Promotion red: unit", "state": "open"})
+    ledger = Ledger([{"id": "promo-800-0", "title": "Promotion red: helm-kind", "state": "open"}], [alert])
+    store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-800-0", "helm-kind")
     refresh(store, ledger, gh([RED], JOBS))
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0"]
     assert len(ledger.raised) == 1 and "unit (3.11, 1)" in ledger.raised[0][2]
+
+
+def test_a_closed_alert_naming_only_the_new_job_still_holds_the_run_beside_a_held_job(store):
+    alert = {
+        "id": "al-0",
+        "source": "promotion",
+        "state": "done",
+        "text": f"Dev promotion is red: push run 900 at commit {SHA} failed in unit (3.11, 1). url",
+    }
+    tasks = [
+        {"id": "promo-800-0", "title": "Promotion red: helm-kind", "state": "open"},
+        {"id": "promo-900-0", "title": "Promotion red: unit", "state": "open"},
+    ]
+    ledger = Ledger(tasks, [alert])
+    store.redis.hset(promotion_watch.key(SLUG, "jobs"), mapping={"promo-800-0": "helm-kind", "promo-900-0": "unit"})
+    assert refresh(store, ledger, gh([RED], JOBS)) == []
+    assert ledger.raised == []
+
+
+def test_an_alert_from_another_source_naming_the_run_does_not_hold_it(store):
+    alert = {"id": "al-0", "source": "release", "state": "done", "text": "Release: push run 900 at x"}
+    ledger = Ledger(alerts=[alert])
+    refresh(store, ledger, gh([RED], [{"name": "lint", "conclusion": "cancelled"}]))
+    assert len(ledger.raised) == 1
 
 
 def test_a_former_owner_closed_alert_for_the_run_holds_it_too(store, monkeypatch):
