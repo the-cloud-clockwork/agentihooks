@@ -470,7 +470,7 @@ def test_measured_cli_refines_complete_statistics_and_rejects_another_head(tmp_p
         assert all(name.startswith("scripts.sample.x_f__mutmut_") for name in result["assignments"])
         assert set(result["costs"].values()) == {55.6}
         assert result["units"] == "worker seconds"
-        assert output.read_text() == "shards=[0]\n"
+        assert output.read_text() == "shards=[0]\nprobe=false\n"
         text = capsys.readouterr().out
         assert "Measured mutation worker seconds:" in text
         assert f"Measured mutation shards: 1; assigned mutants: {len(result['assignments'])}" in text

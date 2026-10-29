@@ -18,6 +18,7 @@ from scripts.ci_cpu_quota import quota_cpus
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
+from scripts.ci_mutation.probe import read_probe_results, reuse_kills
 from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.scope import selects, test_file
 from scripts.ci_mutation.stats import write_part
@@ -598,6 +599,7 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     changes = json.loads(selection.read_text())
     tests_by_prefix = {get_mutant_name(Path(path), ""): set(change["tests"]) for path, change in changes.items()}
     related = set()
+    early, _ = read_probe_results(Path("shard-plan.json"))
 
     def write_selected(*, out, source, filename):
         code, names = selected_mutants(str(filename), source, set(changes[str(filename)]["lines"]))
@@ -665,7 +667,7 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     # Every shard generates the same mutants, so names and clearance keys match an unsharded run; each runs its share.
     runner.collect_source_file_mutation_data = shard_collector(runner.collect_source_file_mutation_data, shard)
     # The forced fail control passes no tests and would otherwise rerun every selected module.
-    runner.PytestRunner.run_tests = run_related_tests
+    runner.PytestRunner.run_tests = reuse_kills(run_related_tests, early)
     # A function's mutants usually die on one test, so later ones run the recorded killer first.
     runner.PytestRunner.execute_pytest = memory.wrap(runner.PytestRunner.execute_pytest)
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
