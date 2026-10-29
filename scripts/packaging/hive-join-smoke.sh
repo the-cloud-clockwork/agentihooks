@@ -127,8 +127,10 @@ assert daemon.hive_id() == member
 class NoOrders:
     runtime = SimpleNamespace(herdr=None)
 
-    def __init__(self, hive):
+    def __init__(self, redis, hive):
         self.hive = hive
+        self.store = SimpleNamespace(redis=redis)
+        self.orders = orders.Orders(redis)
 
     def poll(self):
         return 0
@@ -140,7 +142,7 @@ class NoOrders:
         return None
 
 
-orders.Consumer.local = classmethod(lambda cls, redis, hive: NoOrders(hive))
+orders.Consumer.local = classmethod(lambda cls, redis, hive: NoOrders(redis, hive))
 daemon.execution_report = lambda redis, local_id, herdr: {"names": [], "panes": {}, "executions": {}}
 daemon.beat(client, member)
 assert registry.live(registry.show(client, member), int(time.time() * 1000))
@@ -163,7 +165,7 @@ from scripts.swarm.store import redis_client
 
 client = redis_client()
 member = os.environ["MEMBER_ID"]
-assert auth.member(client, member) is not None
+assert auth.member(client, member)["name"] == "member"
 [sent] = InboxStore(client, world=member).pending_items("master@proof")
 assert relay.relay(client) == []
 assert InboxStore(client, world=member).get(sent.id).reason == relay.FOREIGN_SENDER
@@ -171,7 +173,28 @@ assert InboxStore(client).open_items("master@proof") == []
 print("controller relay: a member send whose sender the member does not host is refused")
 PY
 
-docker exec "$run-hive" "${hive[@]}" revoke "$member_id"
+docker exec -i -e MEMBER_ID="$member_id" "$run-hive" python - <<'PY'
+import os
+import subprocess
+
+from scripts.hive import auth, hive_state
+from scripts.swarm.store import redis_client
+
+client = redis_client()
+member = os.environ["MEMBER_ID"]
+found = auth.member(client, member)
+credentials = hive_state.credentials(client, auth.PREFIX)
+assert hive_state.read(credentials, f"ledger.{found['ledger']}") == member
+subprocess.run(
+    ["python", "-c", "import sys; from scripts.hive.cli import main; sys.exit(main(sys.argv[1:]))", "revoke", member],
+    check=True,
+)
+assert auth.member(client, member) is None
+assert auth.members(client) == {}
+assert hive_state.read(credentials, f"ledger.{found['ledger']}") is None
+assert f"hive-{member}" not in client.acl_users()
+print("after revoke: ledger credential and ACL user gone")
+PY
 docker exec -i "$run-member" python - <<'PY'
 import redis
 
@@ -183,17 +206,5 @@ except redis.exceptions.AuthenticationError as refused:
     print(f"after revoke: Redis refused ({refused})")
 else:
     raise SystemExit("the revoked Redis user still connects")
-PY
-docker exec -i -e MEMBER_ID="$member_id" "$run-hive" python - <<'PY'
-import os
-
-from scripts.hive import auth
-from scripts.swarm.store import redis_client
-
-client = redis_client()
-assert client.keys(f"{auth.PREFIX}:member:*") == []
-assert client.keys(f"{auth.PREFIX}:ledger:*") == []
-assert f"hive-{os.environ['MEMBER_ID']}" not in client.acl_users()
-print("after revoke: ledger credential and ACL user gone")
 PY
 printf 'Hive two-container join smoke passed\n'

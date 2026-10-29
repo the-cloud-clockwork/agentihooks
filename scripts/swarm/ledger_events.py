@@ -655,10 +655,11 @@ def _settle_red_notices(mail, github):
         if not how:
             continue
         try:
-            mail.inbox.close(item_id, SENDER, "done", f"pull request {url} {how}")
+            closed = mail.inbox.settle(item_id, SENDER, "done", f"pull request {url} {how}")
         except InboxError:
             continue
-        settled.append(f"closed the red notice {item_id}: {url} {how}")
+        if closed:
+            settled.append(f"closed the red notice {item_id}: {url} {how}")
         mail.store.redis.hdel(index, item_id)
     return settled
 

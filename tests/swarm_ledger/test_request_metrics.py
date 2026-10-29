@@ -36,6 +36,9 @@ class DelayedLock:
     def release(self):
         pass
 
+    def ledger(self, slug):
+        return self
+
     def __enter__(self):
         self.acquire()
 

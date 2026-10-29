@@ -142,11 +142,19 @@ def test_a_dev_push_keeps_the_flake_history_and_publishes_the_budget():
     assert ci_budget.BUDGETS["flake-budget"] == 120
     steps = {step.get("name", step.get("uses")): step for step in job["steps"]}
     key = "flake-history-${{ github.run_id }}-${{ github.run_attempt }}"
-    assert steps["Restore the flake history"]["uses"] == "actions/cache/restore@v4"
-    assert steps["Restore the flake history"]["with"] == {
+    restore = steps["Restore the flake history"]
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["with"] == {
         "path": "~/flake-history",
         "key": key,
-        "restore-keys": "flake-history-",
+        "restore-keys": "flake-history-\nflake-seed-\n",
+    }
+    unmatched = "steps.restore-flake-history.outputs.cache-matched-key == ''"
+    assert steps["Restore the flake history, wait before attempt 2"]["if"] == unmatched
+    second = steps["Restore the flake history, attempt 2"]
+    assert second["if"] == unmatched
+    assert {name: second[name] for name in ("uses", "env", "with")} == {
+        name: restore[name] for name in ("uses", "env", "with")
     }
     assert steps["Download this run's flake reports"]["with"] == {"pattern": "flakes-3.*", "path": "~/flake-reports"}
     assert steps["Count flaky tests over seven days"]["run"].startswith(
@@ -154,13 +162,20 @@ def test_a_dev_push_keeps_the_flake_history_and_publishes_the_budget():
         " --out flake-budget.json"
     )
     assert steps["Count flaky tests over seven days"]["shell"] == "bash"
+    matched = "steps.restore-flake-history.outputs.cache-matched-key || steps.restore-flake-history-2.outputs.cache-matched-key"
     assert steps["Publish the flake budget"]["with"]["name"] == "flake-budget"
     assert steps["Publish the flake budget"]["with"]["path"] == "flake-budget.json"
     assert steps["Publish the flake budget"]["with"]["if-no-files-found"] == "error"
     assert steps["Save the flake history"]["uses"] == "actions/cache/save@v4"
-    assert steps["Save the flake history"]["with"] == {"path": "~/flake-history", "key": key}
+    assert steps["Publish the flake budget"]["if"] == matched
+    assert steps["Save the flake history"]["with"] == {
+        "path": "~/flake-history",
+        "key": f"${{{{ ({matched}) && 'flake-history' || 'flake-seed' }}}}-${{{{ github.run_id }}}}-${{{{ github.run_attempt }}}}",
+    }
     order = [
         "Restore the flake history",
+        "Restore the flake history, wait before attempt 2",
+        "Restore the flake history, attempt 2",
         "Download this run's flake reports",
         "Count flaky tests over seven days",
         "Publish the flake budget",
@@ -168,3 +183,12 @@ def test_a_dev_push_keeps_the_flake_history_and_publishes_the_budget():
     ]
     names = list(steps)
     assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
+
+
+def test_a_restore_that_matched_nothing_saves_a_seed_the_history_prefix_never_restores():
+    workflow = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())
+    steps = {step.get("name"): step for step in workflow["jobs"]["flake-budget"]["steps"]}
+    prefixes = steps["Restore the flake history"]["with"]["restore-keys"].split()
+    assert prefixes == ["flake-history-", "flake-seed-"]
+    save = steps["Save the flake history"]["with"]["key"]
+    assert "|| 'flake-seed' }}-" in save

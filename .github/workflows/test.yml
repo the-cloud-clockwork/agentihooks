@@ -24,7 +24,7 @@ on:
         default: origin/dev
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || github.event_name == 'push' && format('promotion-dev-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}
   queue: ${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -616,11 +616,13 @@ jobs:
           ls -A ~/dev-durations
           echo "queued=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      # The head reuses the protected checkout's full history instead of cloning it again.
+      - name: Check out the head from the protected checkout
         if: github.event_name == 'pull_request'
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
+        run: |
+          mv "$GITHUB_WORKSPACE/provenance-grader" "$RUNNER_TEMP/repository"
+          git -C "$RUNNER_TEMP/repository" fetch --no-tags origin "$GITHUB_SHA"
+          git -C "$RUNNER_TEMP/repository" worktree add --detach "$GITHUB_WORKSPACE" "$GITHUB_SHA"
 
       # The protected copy selects, so a pull request cannot widen what it may skip.
       - name: Check out the protected grader
@@ -3403,13 +3405,30 @@ jobs:
           python-version: "3.12"
 
       - name: Restore the flake history
+        id: restore-flake-history
         uses: actions/cache/restore@v4
-        env:
+        env: &flake-budget-restore-the-flake-history-env
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
-        with:
+        with: &flake-budget-restore-the-flake-history
           path: ~/flake-history
           key: flake-history-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: flake-history-
+          restore-keys: |
+            flake-history-
+            flake-seed-
+
+      - name: Restore the flake history, wait before attempt 2
+        if: steps.restore-flake-history.outputs.cache-matched-key == ''
+        shell: bash
+        run: |
+          echo "::warning::Restore the flake history matched no saved history, as a cache service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore the flake history, attempt 2
+        id: restore-flake-history-2
+        if: steps.restore-flake-history.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        env: *flake-budget-restore-the-flake-history-env
+        with: *flake-budget-restore-the-flake-history
 
       - name: Download this run's flake reports
         id: download-this-runs-flake-reports
@@ -3436,6 +3455,7 @@ jobs:
         run: python -m tests.flake_budget --history ~/flake-history/history.jsonl --reports ~/flake-reports --out flake-budget.json | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Publish the flake budget
+        if: steps.restore-flake-history.outputs.cache-matched-key || steps.restore-flake-history-2.outputs.cache-matched-key
         uses: ./.github/actions/retry-upload
         with:
           name: flake-budget
@@ -3447,7 +3467,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/flake-history
-          key: flake-history-${{ github.run_id }}-${{ github.run_attempt }}
+          key: ${{ (steps.restore-flake-history.outputs.cache-matched-key || steps.restore-flake-history-2.outputs.cache-matched-key) && 'flake-history' || 'flake-seed' }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   coverage-baseline:
     needs: [unit, coverage-ratchet]
@@ -3506,6 +3526,13 @@ jobs:
 
       - name: Compute the coverage baseline
         run: |
+          previous="$HOME/coverage-baseline/baseline.json"
+          if [[ -f "$previous" ]]; then
+            commit=$(jq -r '.commit // empty' "$previous")
+            if [[ -z "$commit" ]] || ! git merge-base --is-ancestor "$commit" HEAD; then
+              rm "$previous"
+            fi
+          fi
           python -m tests.coverage_baseline --shards 20 \
             --head-shards baseline-coverage \
             --out "$HOME/coverage-baseline/baseline.json" \

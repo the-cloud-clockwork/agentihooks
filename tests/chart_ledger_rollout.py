@@ -82,6 +82,25 @@ def host_problems(chart: str) -> list[str]:
     return []
 
 
+def probe_problems(chart: str) -> list[str]:
+    result = render(chart)
+    if result.returncode:
+        return [f"the default chart fails to render: {result.stderr.strip()}"]
+    container = ledger_docs(result.stdout)["StatefulSet"]["spec"]["template"]["spec"]["containers"][0]
+    found = []
+    for probe_name in ("readinessProbe", "livenessProbe"):
+        probe = container[probe_name]
+        http_get = probe.get("httpGet", {})
+        headers = {h["name"]: h["value"] for h in http_get.get("httpHeaders", [])}
+        if "exec" in probe:
+            found.append(f"{probe_name} forks a client process instead of an httpGet check: {probe}")
+        elif http_get.get("path") != "/healthz":
+            found.append(f"{probe_name} does not httpGet /healthz: {probe}")
+        elif headers.get("Host") != "127.0.0.1:8765":
+            found.append(f"{probe_name} sends a Host header the ledger's allowed hosts refuse: {probe}")
+    return found
+
+
 def problems(chart: str) -> list[str]:
     found = [
         *refused(chart, "two folder ledgers", REFUSAL, "--set", "ledger.replicas=2"),
@@ -90,6 +109,7 @@ def problems(chart: str) -> list[str]:
         *surge_problems(chart, "a ledger on the shared database env", *SHARED_ENV),
         *refused(chart, "an empty shared database env", REFUSAL, "--set", "ledger.replicas=2", *EMPTY_ENV),
         *host_problems(chart),
+        *probe_problems(chart),
     ]
     single = render(chart, *SHARED)
     if single.returncode:

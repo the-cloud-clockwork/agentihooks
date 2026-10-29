@@ -149,6 +149,8 @@ bash "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/swarm-stack/deploy/compose/start-t
 
 Every invocation reads `tailscale ip -4`, refuses a missing or invalid tailnet address and recreates only the three fronts. It overrides any old `SWARM_TAILNET_IP` value without rewriting the private settings. The nginx listener, hive listener and advertised Redis address all use that address. Run this command after reconnecting the workstation to the tailnet; `docker restart` alone retains the container's previous address. `SWARM_STACK_HOME` selects another stack folder and `SWARM_COMPOSE_PROJECT` selects another project. Arguments such as `config --format json` replace the default startup action.
 
+The hive front mints bus credentials only with the NATS signer. It reads `AGENTIHOOKS_NATS_SIGNER` (the OpenBao record under `agentihooks/hub/`), `AGENTIHOOKS_NATS_TRUSTED_OPERATOR`, `OPENBAO_URL` and `OPENBAO_TOKEN` from the environment that runs the script, or from the stack `.env`. Without them it grants no bus credential, and a member refreshing through it keeps the bus credential it already saved.
+
 ## Diagnose or stop the stack
 
 ```bash

@@ -126,6 +126,38 @@ def test_a_task_returns_to_the_seat_its_handoff_names(rig):
     assert rig.admitter.admit(SLUG, ask())["task"]["seat"] == "eng-3@sw"
 
 
+def test_a_task_whose_dependencies_are_done_is_admitted_with_an_empty_stack_base(rig):
+    assert rig.admitter.admit(SLUG, ask())["task"]["stack_base"] == []
+
+
+@pytest.mark.parametrize(
+    "branch_repo, stacked",
+    [
+        ("https://github.com/acme/app.git", {"task": "t2", "branch": "feat-two"}),
+        (
+            "https://github.com/acme/other",
+            {"task": "t2", "branch": "feat-two", "repo": "https://github.com/acme/other"},
+        ),
+    ],
+)
+def test_a_task_on_an_open_dependency_stacks_on_its_branch_by_the_stored_origin(rig, branch_repo, stacked):
+    rig.store.update(SLUG, repo_origin="github.com/acme/app")
+    rig.rows["t2"].update(state="pr", branch="feat-two", branch_repo=branch_repo)
+    rig.rows["t1"]["depends_on"] = ["t2"]
+
+    assert rig.admitter.admit(SLUG, ask())["task"]["stack_base"] == [stacked]
+
+
+def test_a_swarm_without_a_stored_origin_compares_with_its_checkout_origin(rig, monkeypatch):
+    from scripts.swarm import stack
+
+    monkeypatch.setattr(stack, "origin_key", lambda repo: {"/repo": "github.com/acme/app"}.get(repo, ""))
+    rig.rows["t2"].update(state="pr", branch="feat-two", branch_repo="git@github.com:acme/app.git")
+    rig.rows["t1"]["depends_on"] = ["t2"]
+
+    assert rig.admitter.admit(SLUG, ask())["task"]["stack_base"] == [{"task": "t2", "branch": "feat-two"}]
+
+
 def test_the_claim_is_guarded_on_the_claimant_the_offer_saw(rig):
     rig.rows["t1"]["claimed_by"] = "earlier"
     name = rig.admitter.admit(SLUG, ask())["name"]
