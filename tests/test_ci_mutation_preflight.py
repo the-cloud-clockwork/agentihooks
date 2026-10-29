@@ -220,7 +220,8 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     assert jobs["mutation-shard"]["if"] == (
         "${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0'"
         " && needs.stats.result == 'success' && (needs.refine.result == 'success'"
-        " || needs.refine.result == 'skipped' && needs.plan.outputs.stats_parts == '[0]') }}"
+        " || needs.refine.result == 'skipped' && needs.plan.outputs.stats_parts == '[0]')"
+        " && (needs.probe.result == 'success' || needs.probe.result == 'skipped') }}"
     )
 
 
