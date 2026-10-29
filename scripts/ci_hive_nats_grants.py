@@ -19,7 +19,6 @@ def _render(call: str) -> str:
 
 RENDER_MEMBER = _render(f"nats_grant.member_claims({MEMBER_KEY!r})")
 RENDER_CONTROLLER = _render("nats_grant.controller_claims()")
-RENDER_LEDGER = _render("nats_grant.ledger_claims()")
 # The shared swarm-hive password user cannot carry a per member reply prefix, so its _INBOX.> stands for this one.
 MEMBER_INBOX = f"_INBOX.{MEMBER_KEY}.>"
 SHARED_INBOX = "_INBOX.>"
@@ -29,6 +28,22 @@ ACCOUNT = "SWARM"
 HIVE_USER = "swarm-hive"
 CONTROLLER_USER = "swarm-controller"
 LEDGER_USER = "swarm-ledger"
+LEDGER_SOURCE = "scripts/ci_hive_nats_grants.py"
+# The ledger signs in with the antoncore users file credential, so its grant lives here rather than in nats_grant.
+LEDGER_BUCKETS = ("inbox",)
+LEDGER_PUBLISH = (
+    "swarm.>",
+    "legacy.swarm.>",
+    "dead.>",
+    "$JS.API.INFO",
+    "$JS.API.STREAM.INFO.>",
+    "$JS.API.STREAM.MSG.GET.*",
+    *(f"$JS.API.STREAM.PURGE.KV_{bucket}" for bucket in LEDGER_BUCKETS),
+    "$JS.API.CONSUMER.>",
+    "$JS.ACK.>",
+    *(f"$KV.{bucket}.>" for bucket in LEDGER_BUCKETS),
+)
+LEDGER_SUBSCRIBE = ("swarm.>", "_INBOX.>")
 EVERYTHING = frozenset({">"})
 
 
@@ -68,8 +83,8 @@ def controller_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
     return _rendered(agentihooks, RENDER_CONTROLLER, "controller_claims")
 
 
-def ledger_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
-    return _rendered(agentihooks, RENDER_LEDGER, "ledger_claims")
+def ledger_grants() -> dict[str, dict[str, frozenset[str]]]:
+    return {"publish": _direction(list(LEDGER_PUBLISH)), "subscribe": _direction(list(LEDGER_SUBSCRIBE))}
 
 
 def user_grants(antoncore: Path, name: str) -> dict[str, dict[str, frozenset[str]]] | None:
@@ -97,8 +112,7 @@ def differences(ours: dict, theirs: dict, credential: str, user: str) -> list[st
         for rule in ("allow", "deny"):
             mine, other = ours[direction][rule], theirs[direction][rule]
             lines += [
-                f"{direction} {rule} {subject} is granted only by the agentihooks {credential} credential"
-                f" ({MEMBER_SOURCE})."
+                f"{direction} {rule} {subject} is granted only by the agentihooks {credential}."
                 for subject in sorted(mine - other)
             ]
             lines += [
@@ -117,9 +131,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         checks = (
-            ("hive member", "member", HIVE_USER, member_grants(args.agentihooks)),
-            ("controller", "controller", CONTROLLER_USER, controller_grants(args.agentihooks)),
-            ("ledger", "ledger", LEDGER_USER, ledger_grants(args.agentihooks)),
+            ("hive member", f"member credential ({MEMBER_SOURCE})", HIVE_USER, member_grants(args.agentihooks)),
+            (
+                "controller",
+                f"controller credential ({MEMBER_SOURCE})",
+                CONTROLLER_USER,
+                controller_grants(args.agentihooks),
+            ),
+            ("ledger", f"ledger grant ({LEDGER_SOURCE})", LEDGER_USER, ledger_grants()),
         )
         compared = [(*check, user_grants(args.antoncore, check[2])) for check in checks]
     except (

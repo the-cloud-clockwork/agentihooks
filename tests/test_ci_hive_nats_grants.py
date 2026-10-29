@@ -15,30 +15,20 @@ PUBLISH = ["swarm.*.execution.>", "$JS.ACK.>"]
 SUBSCRIBE = ["_INBOX.>"]
 CONTROLLER_PUBLISH = ["swarm.>", "$KV.hub-leases.>"]
 CONTROLLER = {"publish": {"allow": CONTROLLER_PUBLISH}, "subscribe": {"allow": SUBSCRIBE}}
-LEDGER_PUBLISH = ["swarm.>", "$KV.inbox.>"]
-LEDGER = {"publish": {"allow": LEDGER_PUBLISH}, "subscribe": {"allow": SUBSCRIBE}}
+LEDGER = {"publish": {"allow": list(grants.LEDGER_PUBLISH)}, "subscribe": {"allow": list(grants.LEDGER_SUBSCRIBE)}}
 
 
-def _agentihooks(
-    tmp_path: Path,
-    pub: dict,
-    sub: dict,
-    body: str | None = None,
-    controller: dict | None = None,
-    ledger: dict | None = None,
-) -> Path:
+def _agentihooks(tmp_path: Path, pub: dict, sub: dict, body: str | None = None, controller: dict | None = None) -> Path:
     root = tmp_path / "agentihooks"
     source = root / grants.MEMBER_SOURCE
     source.parent.mkdir(parents=True)
     for package in (root / "scripts", source.parent):
         (package / "__init__.py").write_text("")
     controller = controller or {"pub": {"allow": CONTROLLER_PUBLISH}, "sub": {"allow": SUBSCRIBE}}
-    ledger = ledger or {"pub": {"allow": LEDGER_PUBLISH}, "sub": {"allow": SUBSCRIBE}}
     source.write_text(
         body
         or f"def member_claims(user):\n    return {{'pub': {pub!r}, 'sub': {sub!r}}}\n\n\n"
-        f"def controller_claims():\n    return {controller!r}\n\n\n"
-        f"def ledger_claims():\n    return {ledger!r}\n"
+        f"def controller_claims():\n    return {controller!r}\n"
     )
     return root
 
@@ -71,7 +61,7 @@ def _antoncore(
 MATCH = [
     "The hive member NATS grants match antoncore: 2 publish and 1 subscribe subjects.",
     "The controller NATS grants match antoncore: 2 publish and 1 subscribe subjects.",
-    "The ledger NATS grants match antoncore: 2 publish and 1 subscribe subjects.",
+    "The ledger NATS grants match antoncore: 10 publish and 2 subscribe subjects.",
 ]
 
 
@@ -461,15 +451,17 @@ def test_lint_checks_out_the_antoncore_service_users():
     assert grants.SERVICE_USERS in checkout["env"]["SELECTED_PATHS"].split()
 
 
-def test_a_ledger_subject_only_agentihooks_grants_fails(tmp_path, capsys):
-    _, antoncore = _matching(tmp_path)
-    ledger = {"pub": {"allow": [*LEDGER_PUBLISH, "$KV.inbox-wake.>"]}, "sub": {"allow": SUBSCRIBE}}
-    agentihooks = _agentihooks(tmp_path / "extra", {"allow": PUBLISH}, {"allow": SUBSCRIBE}, ledger=ledger)
-    status, lines = _run(capsys, agentihooks, antoncore)
+def test_a_ledger_subject_only_antoncore_grants_fails(tmp_path, capsys):
+    agentihooks, _ = _matching(tmp_path)
+    root = _operator_antoncore(tmp_path, {"publish": {"allow": PUBLISH}, "subscribe": {"allow": SUBSCRIBE}})
+    users = yaml.safe_load((root / grants.SERVICE_USERS).read_text())["users"]
+    users[2]["permissions"]["publish"]["allow"].append("$KV.inbox-wake.>")
+    (root / grants.SERVICE_USERS).write_text(yaml.safe_dump({"users": users}))
+    status, lines = _run(capsys, agentihooks, root)
     assert status == 1
     assert lines == [
-        "::error::publish allow $KV.inbox-wake.> is granted only by the agentihooks ledger credential"
-        " (scripts/hive/nats_grant.py)."
+        f"::error::publish allow $KV.inbox-wake.> is granted only by the antoncore swarm-ledger user"
+        f" ({grants.HIVE_VALUES})."
     ]
 
 
@@ -485,10 +477,20 @@ def test_a_missing_ledger_user_is_red(tmp_path, capsys):
     ]
 
 
-def test_the_ledger_grants_render_the_ledger_claims():
-    assert nats_grant.ledger_claims()["type"] == "user"
-    assert grants.ledger_grants(str(ROOT)) == {
-        "publish": {"allow": frozenset(nats_grant.LEDGER_PUBLISH), "deny": frozenset()},
+def test_a_ledger_subject_the_antoncore_user_lacks_names_the_grader_as_its_source(tmp_path, capsys):
+    agentihooks, _ = _matching(tmp_path)
+    root = _operator_antoncore(tmp_path, {"publish": {"allow": PUBLISH}, "subscribe": {"allow": SUBSCRIBE}})
+    users = yaml.safe_load((root / grants.SERVICE_USERS).read_text())["users"]
+    users[2]["permissions"]["publish"]["allow"].remove("$KV.inbox.>")
+    (root / grants.SERVICE_USERS).write_text(yaml.safe_dump({"users": users}))
+    status, lines = _run(capsys, agentihooks, root)
+    assert status == 1
+    assert lines == [
+        "::error::publish allow $KV.inbox.> is granted only by the agentihooks ledger grant"
+        " (scripts/ci_hive_nats_grants.py)."
+    ]
+    assert grants.ledger_grants() == {
+        "publish": {"allow": frozenset(grants.LEDGER_PUBLISH), "deny": frozenset()},
         "subscribe": {"allow": frozenset({"swarm.>", "_INBOX.>"}), "deny": frozenset()},
     }
 
@@ -503,8 +505,8 @@ def test_the_ledger_grant_covers_the_inbox_bucket_the_seat_inbox_writes_and_purg
             opened.append(bucket)
 
     SeatInbox(Bus(), "rig")
-    assert opened == list(nats_grant.LEDGER_BUCKETS)
-    publish = set(nats_grant.LEDGER_PUBLISH)
+    assert opened == list(grants.LEDGER_BUCKETS)
+    publish = set(grants.LEDGER_PUBLISH)
     assert {f"$KV.{bucket}.>" for bucket in opened} <= publish
     assert {f"$JS.API.STREAM.PURGE.KV_{bucket}" for bucket in opened} <= publish
     assert not {">", "$JS.API.>", "$KV.>", "$JS.API.STREAM.PURGE.*"} & publish
