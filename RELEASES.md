@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.484 · 2026-10-29
+
+### 2026-10-29 · b5afc17f17dd · #8764 · @agenticore-app
+
+**Fail the ledger load gate at setup when a write preflight is refused**
+
+This change adds a one-time write preflight check to the ledger load gate before it starts its timed measurement window. If that preflight request is refused, the gate stops immediately and reports the HTTP status and reason rather than proceeding into an invalid run. When the preflight succeeds, the timed window and its grading behave exactly as before, and the preflight write itself is excluded from the count. This closes a gap where the gate could start timing a load test even when writes were already being rejected, which would have produced misleading results.
+
 ## v2.17.483 · 2026-10-29
 
 ### 2026-10-29 · 8fe6ea0b6ec5 · #8775 · @nestorcolt
