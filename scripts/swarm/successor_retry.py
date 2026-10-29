@@ -27,8 +27,7 @@ def steered(primed: dict, harness: str) -> dict:
 
 def note(slug: str, store, runtime, record, error, now_ms: int) -> str:
     failed_panes.hold(store, slug, replace(record, pane_id=error.pane_id), now_ms)
-    if reap := getattr(runtime, "reap_name", None):
-        reap(record.name)
+    runtime.reap_name(record.name)
     store.note_launch_failure(slug, record.task, str(error), error.harness)
     return f"retrying {record.name} for {record.task} away from {error.harness} after: {error}"
 
@@ -49,10 +48,12 @@ def relaunch(run, agent, saved: dict, error) -> tuple[str, Exception | None]:
         placed = run.runtime.spawn(run.config, agent.lane, agent.name, retried)
         if not placed.launch_job:
             raise SpawnError("a retried successor launch ran outside a workstation job", harness=placed.harness)
-        kept = replace(placed, launch_job={**placed.launch_job, "started_at": picked["started_at"]})
-        entry = {"task": saved["task"], "primed": retried, "placed": asdict(kept)}
+        job = {**placed.launch_job, "started_at": picked["started_at"]}
+        request = Path(job["request"])
+        request.write_text(json.dumps({**json.loads(request.read_text()), "job": job}))
+        entry = {"task": saved["task"], "primed": retried, "placed": asdict(replace(placed, launch_job=job))}
         run.store.redis.hset(run.store.key(run.slug, launch_job.KEY), agent.name, json.dumps(entry))
-        launch_job.spawn(placed.launch_job)
+        launch_job.spawn(job)
     except Exception as exc:
         return "", exc if isinstance(exc, SpawnError) else SpawnError(str(exc))
     return said, None

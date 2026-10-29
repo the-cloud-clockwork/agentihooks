@@ -166,7 +166,8 @@ def collect(run) -> tuple[list[str], set[str]]:
                 placed = codex.complete(run.config, name, placed, run.runtime.reap_name)
                 launched = codex.admit_legacy(run.store, run.slug, engine.placed_record(agent, placed), run.runtime)
         except Exception as exc:
-            said, error = successor_retry.relaunch(run, agent, saved, _failure(exc, picked, name))
+            error = _failure(exc, picked, name)
+            said, error = successor_retry.relaunch(run, agent, saved, error) if exc is error else ("", error)
             if said:
                 actions.append(said)
                 waiting.add(name)

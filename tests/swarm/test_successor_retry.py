@@ -85,7 +85,9 @@ class RoutedJobs(DetachedRuntime):
         if lane == MASTER:
             return placed
         self.asked.append((name, task.get("avoid_harness", "")))
-        return Placed("", placed.harness, launch_job={**placed.launch_job, "started_at": self.at})
+        job = {**placed.launch_job, "started_at": self.at, "request": str(self.home / f"{name}.request.json")}
+        (self.home / f"{name}.request.json").write_text(json.dumps({"name": name, "job": job}))
+        return Placed("", placed.harness, launch_job=job)
 
 
 def _refused(tmp_path, name, message, harness):
@@ -118,6 +120,8 @@ def test_a_workstation_successor_job_retries_then_reopens_after_two_refused_rout
     assert not (tmp_path / f"{name}.json").exists()
     saved = json.loads(store.redis.hget(store.key("sw", launch_job.KEY), name))
     assert saved["placed"]["launch_job"]["started_at"] == 1000
+    request = json.loads((tmp_path / f"{name}.request.json").read_text())
+    assert request == {"name": name, "job": saved["placed"]["launch_job"]}
     _refused(tmp_path, name, "second route refused", "codex")
     actions = tick("sw", store, ledger, runtime, now_ms=3000)
     assert len(runtime.asked) == 2
@@ -137,6 +141,25 @@ def test_a_retried_workstation_successor_reopens_at_the_end_of_its_first_launch_
     tick("sw", store, ledger, runtime, now_ms=301_000)
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
     assert store.launch_failure("sw", "t1") == "workstation launch job timed out"
+
+
+def test_a_workstation_successor_failing_after_its_pane_opened_reopens_without_a_retry(
+    store, tmp_path, jobs, monkeypatch
+):
+    from scripts.swarm_v2.runtime import codex
+
+    ledger, runtime = jobs
+    name = runtime.jobs[0]
+    (tmp_path / f"{name}.json").write_text(json.dumps({"placed": {"pane_id": "w:p1", "harness": "claude"}}))
+
+    def complete(config, name, placed, reap):
+        raise RuntimeError("canary failed")
+
+    monkeypatch.setattr(codex, "complete", complete)
+    actions = tick("sw", store, ledger, runtime, now_ms=2000)
+    assert len(runtime.asked) == 1
+    assert not any(action.startswith("retrying") for action in actions)
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
 
 
 def test_steered_moves_both_avoid_fields_to_the_failed_harness_and_marks_the_retry():
@@ -175,13 +198,14 @@ def test_due_names_the_harness_only_for_a_first_refused_successor_spawn(task, pr
     assert due(task, primed, error) == harness
 
 
-def test_note_holds_the_failed_pane_and_records_the_failure_without_a_reaper(store):
+def test_note_reaps_holds_the_failed_pane_and_records_the_failure(store):
     from scripts.swarm import failed_panes
     from scripts.swarm.store import AgentRecord
     from scripts.swarm.successor_retry import note
 
-    record = AgentRecord("engineer@x-1", "eng", "t1")
-    said = note("sw", store, object(), record, SpawnError("route refused", pane_id="w:p4", harness="codex"), 9)
+    record, runtime = AgentRecord("engineer@x-1", "eng", "t1"), FakeRuntime()
+    said = note("sw", store, runtime, record, SpawnError("route refused", pane_id="w:p4", harness="codex"), 9)
+    assert runtime.reaped == ["engineer@x-1"]
     assert said == "retrying engineer@x-1 for t1 away from codex after: route refused"
     held = {"w:p4": {"agent": "engineer@x-1", "task": "t1", "failed_at": 9, "reason": ""}}
     assert failed_panes.held(store, "sw") == held
