@@ -353,8 +353,9 @@ def test_a_refresh_that_loses_its_member_midway_leaves_it_unindexed(on_redis, cl
     assert grant["id"] not in hive_state.index(client)
 
 
-def test_agent_tokens_accumulate_on_a_member_record_without_agents(bus, client):
+def test_agent_tokens_accumulate_on_a_member_record_without_agents(bus, client, monkeypatch):
     hive_state.amend(auth._store(client), "member.m1", lambda _: {"name": "n", "ledger": "d"})
+    monkeypatch.setattr(auth.time, "time", lambda: 1000.5)
 
     first = auth.issue_agent(client, "m1", "alpha", "engineer@1")
     second = auth.issue_agent(client, "m1", "alpha", "engineer@2")
@@ -362,5 +363,33 @@ def test_agent_tokens_accumulate_on_a_member_record_without_agents(bus, client):
     assert auth.member(client, "m1") == {
         "name": "n",
         "ledger": "d",
-        "agents": {auth._digest(first): ["alpha", "engineer@1"], auth._digest(second): ["alpha", "engineer@2"]},
+        "agents": {
+            auth._digest(first): ["alpha", "engineer@1", 1000],
+            auth._digest(second): ["alpha", "engineer@2", 1000],
+        },
     }
+
+
+def test_an_issue_drops_expired_and_untimed_agent_tokens_and_keeps_live_ones(bus, client, monkeypatch):
+    now = 50_000
+    agents = {
+        "untimed": ["alpha", "engineer@1"],
+        "expired": ["alpha", "engineer@1", now - auth.AGENT_TOKEN_TTL_S],
+        "live": ["alpha", "engineer@2", now - auth.AGENT_TOKEN_TTL_S + 1],
+    }
+    hive_state.amend(auth._store(client), "member.m1", lambda _: {"name": "n", "ledger": "d", "agents": agents})
+    monkeypatch.setattr(auth.time, "time", lambda: now)
+
+    token = auth.issue_agent(client, "m1", "alpha", "engineer@3")
+
+    assert auth.member(client, "m1")["agents"] == {
+        "live": ["alpha", "engineer@2", now - auth.AGENT_TOKEN_TTL_S + 1],
+        auth._digest(token): ["alpha", "engineer@3", now],
+    }
+    assert auth.agent_member(client, token, "alpha", "engineer@3") == "m1"
+    assert auth.agent_member(client, token, "beta", "engineer@3") is None
+    assert auth.agent_member(client, "hive.m1.unknown", "alpha", "engineer@3") is None
+
+
+def test_an_agent_token_ttl_is_one_hour():
+    assert auth.AGENT_TOKEN_TTL_S == 3600
