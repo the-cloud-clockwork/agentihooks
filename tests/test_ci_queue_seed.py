@@ -145,6 +145,8 @@ def test_every_unit_shard_downloads_the_one_republished_dev_durations():
     assert download["with"] == {
         "name": "dev-durations",
         "path": "~/dev-durations",
+        "verify": "python3 -c 'import json, sys; [json.loads(open(path).read()) for path in sys.argv[1:]]'"
+        " ~/dev-durations/.test_durations*",
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
     }
