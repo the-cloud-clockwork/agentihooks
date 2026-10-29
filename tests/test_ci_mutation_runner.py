@@ -580,10 +580,11 @@ def test_workspace_does_not_enumerate_fixture_directories_outside_the_repository
         assert not Path(path).resolve().is_relative_to(outside)
         return scandir(path)
 
-    monkeypatch.setattr(os, "scandir", scan)
     work = tmp_path / "work"
     work.mkdir()
-    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "scandir", scan)
+        prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
     assert not (work / "linked").exists()
 
 
