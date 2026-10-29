@@ -10,6 +10,7 @@ The minute tick calls it; CI runners cannot reach the ledger, so the fixer tasks
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import subprocess
@@ -95,10 +96,10 @@ def key(slug: str, part: str) -> str:
     return ":".join((PREFIX, slug, SOURCE, part))
 
 
-def _read(repo_dir: str, endpoint: str, jq: str, run: Callable) -> list[dict]:
+def _read(repo_dir: str, endpoint: str, jq: str, run: Callable, paginate: bool = True) -> list[dict]:
     output = github_reads.rest(
         "swarm.promotion_watch",
-        ["api", endpoint, "--paginate", "--jq", jq],
+        ["api", endpoint, *(["--paginate"] if paginate else []), "--jq", jq],
         run,
         cwd=repo_dir,
         capture_output=True,
@@ -122,30 +123,17 @@ def superseded(repo_dir: str, job: dict, run: Callable = subprocess.run) -> bool
     return SUPERSEDED in messages and messages <= {SUPERSEDED, STEP_EXIT}
 
 
-def _list(repo_dir: str, endpoint: str, jq: str, run: Callable) -> list[dict]:
-    output = github_reads.rest(
-        "swarm.promotion_watch",
-        ["api", endpoint, "--jq", jq],
-        run,
-        cwd=repo_dir,
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=60,
-    ).stdout
-    return [json.loads(line) for line in output.splitlines() if line]
-
-
 def repaired(repo_dir: str, last: dict, failed: list[str], run: Callable = subprocess.run) -> set[str]:
     passed: set[str] = set()
-    for newer in _list(repo_dir, NEWER_RUNS, NEWER_JQ, run):
-        if newer["id"] <= last["id"] or set(failed) <= passed:
-            continue
-        if newer["head_sha"] != last["head_sha"]:
-            compare = f"repos/{{owner}}/{{repo}}/compare/{last['head_sha']}...{newer['head_sha']}"
-            if _list(repo_dir, compare, "{status} | @json", run)[0]["status"] not in CONTAINS:
+    with contextlib.suppress(*dev_red.READ_ERRORS):
+        for newer in _read(repo_dir, NEWER_RUNS, NEWER_JQ, run, paginate=False):
+            if newer["id"] <= last["id"] or set(failed) <= passed:
                 continue
-        passed |= {j["name"] for j in jobs(repo_dir, newer["id"], run) if j["conclusion"] == "success"}
+            if newer["head_sha"] != last["head_sha"]:
+                compare = f"repos/{{owner}}/{{repo}}/compare/{last['head_sha']}...{newer['head_sha']}"
+                if _read(repo_dir, compare, "{status} | @json", run, paginate=False)[0]["status"] not in CONTAINS:
+                    continue
+            passed |= {j["name"] for j in jobs(repo_dir, newer["id"], run) if j["conclusion"] == "success"}
     return passed & set(failed)
 
 
