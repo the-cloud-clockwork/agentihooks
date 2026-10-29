@@ -678,6 +678,8 @@ def test_a_script_that_launches_gh_and_names_a_runner_in_data_passes(tmp_path, m
     check_local_tests(
         {"tool_name": "Bash", "tool_input": {"command": f"cat > m.py <<'EOF'\n{GH_JOB_READER}EOF\npython3 m.py"}}
     )
+    (tmp_path / "noted.py").write_text(f"{GH_JOB_READER}subprocess.run(['ls'])  # filters pytest jobs\n")
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": "python3 noted.py"}, "cwd": str(tmp_path)})
 
 
 @pytest.mark.parametrize(
@@ -694,6 +696,8 @@ def test_a_script_that_launches_gh_and_names_a_runner_in_data_passes(tmp_path, m
         "subprocess.run(f'{sys.executable} -m pytest', shell=True)",
         "subprocess.run('{} -m pytest'.format(sys.executable), shell=True)",
         "subprocess.run(['python', '-mpytest', 'tests'])",
+        "os.system('%s -m pytest' % sys.executable)",
+        "os.system('$PY -m pytest')",
     ],
 )
 def test_a_gh_reader_that_also_launches_a_runner_is_blocked(launch, tmp_path, monkeypatch):
