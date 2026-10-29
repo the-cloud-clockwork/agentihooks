@@ -1,6 +1,7 @@
 """Operator priority preemption for swarms on the events engine, which the legacy tick skips."""
 
 import sys
+import traceback
 from collections.abc import Callable
 
 from scripts.events.config import BusConfig
@@ -40,7 +41,11 @@ class Preemption:
         for slug in self._source.slugs():
             if not guard():
                 return
-            self._preempt(slug, now)
+            try:
+                self._preempt(slug, now)
+            except Exception:
+                print(f"hub: preemption swarm={slug} failed", file=sys.stderr)
+                traceback.print_exc()
         self._due = now + INTERVAL_MS
 
     def _preempt(self, slug: str, now: int) -> None:

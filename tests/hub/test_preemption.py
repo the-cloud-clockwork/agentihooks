@@ -129,6 +129,21 @@ def test_a_refused_ledger_write_skips_the_swarm_and_keeps_the_interval(rig, monk
     ]
 
 
+def test_a_failing_swarm_leaves_the_next_swarm_preempted(rig, monkeypatch, capsys):
+    rig.store.create(SwarmConfig("broken", "/repo", max_eng=1, max_ci=1, engine="events"))
+    real = rig.reactor._preempt
+
+    def preempting(slug, now):
+        if slug == "broken":
+            raise RuntimeError("broken swarm")
+        real(slug, now)
+
+    monkeypatch.setattr(rig.reactor, "_preempt", preempting)
+    poll_at(rig, 1_000, 1_000 + preemption.INTERVAL_MS)
+    assert len(asks(rig.store, "e2")) == 1
+    assert "hub: preemption swarm=broken failed" in capsys.readouterr().err.splitlines()
+
+
 def test_the_memory_bus_without_a_store_runs_nothing(monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_BUS", raising=False)
     reactor = preemption.Preemption(clock=lambda: 1_000)
