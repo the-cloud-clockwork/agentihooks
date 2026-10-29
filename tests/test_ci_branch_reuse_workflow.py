@@ -560,3 +560,63 @@ def test_combine_adds_every_carried_branch_database_that_holds_data(tmp_path):
         ".coverage-shards/branch-5/1-2/.coverage.host.pid7.a",
         ".coverage-shards/coverage-3.12-1/.coverage",
     ]
+
+
+@pytest.mark.parametrize(
+    ("values", "recorded", "measured", "uploaded"),
+    [
+        ({}, True, True, False),
+        ({}, False, True, True),
+        ({}, True, False, True),
+        ({"github.base_ref": "main"}, True, True, True),
+        ({"github.event.pull_request.head.repo.full_name": "fork/r"}, True, True, True),
+    ],
+)
+def test_a_selected_leg_uploads_its_coverage_once_when_its_branch_coverage_carries_it(
+    values, recorded, measured, uploaded
+):
+    step = _step("unit-selected", "Upload coverage")
+    condition = (
+        step["if"]
+        .replace("hashFiles('branch-record/record.json')", repr("abc" if recorded else ""))
+        .replace("hashFiles('.coverage')", repr("def" if measured else ""))
+    )
+    assert _evaluate(condition, {**SAME_REPO, "matrix.python-version": "3.12", **values}) is uploaded
+    assert not _evaluate(condition, {**SAME_REPO, "matrix.python-version": "3.13", **values})
+
+
+def test_sonar_downloads_the_branch_coverage_only_for_a_selected_scope():
+    download = _step("sonar", "Download shard coverage")
+    assert download["with"]["pattern"] == (
+        "${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}"
+    )
+    take = _step("sonar", "Take each selected leg's latest branch coverage")
+    assert take["if"] == "needs.select.outputs.scope == 'selected'"
+    names = [step.get("name") for step in _jobs()["sonar"]["steps"]]
+    assert (
+        names.index("Download shard coverage, attempt 2")
+        < names.index(take["name"])
+        < names.index("Merge shard coverage")
+    )
+
+
+def test_sonar_takes_each_legs_latest_branch_coverage_and_keeps_an_uploaded_one(tmp_path):
+    shards = tmp_path / ".coverage-shards"
+    for folder, text in (
+        ("branch-coverage-3.12-1-1", "old"),
+        ("branch-coverage-3.12-1-2", "new"),
+        ("branch-coverage-3.12-2-1", "branch"),
+        ("coverage-3.12-2", "uploaded"),
+        ("branch-coverage-3.12-12-1", "twelve"),
+    ):
+        (shards / folder / "js-coverage").mkdir(parents=True)
+        (shards / folder / ".coverage").write_text(text)
+    run = _step("sonar", "Take each selected leg's latest branch coverage")["run"]
+    subprocess.run(["bash", "-e", "-c", run], cwd=tmp_path, check=True)
+    assert sorted(path.name for path in shards.iterdir()) == ["coverage-3.12-1", "coverage-3.12-12", "coverage-3.12-2"]
+    assert [(shards / f"coverage-3.12-{leg}/.coverage").read_text() for leg in (1, 2, 12)] == [
+        "new",
+        "uploaded",
+        "twelve",
+    ]
+    assert (shards / "coverage-3.12-1/js-coverage").is_dir()
