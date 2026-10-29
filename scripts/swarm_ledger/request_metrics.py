@@ -394,6 +394,12 @@ def begin(connection: sqlite3.Connection, statement: str) -> None:
         connection.execute(statement)
 
 
+def begin_ledger(connection, slug: str, statement: str) -> None:
+    with waiting():
+        lock = getattr(connection, "lock_ledger", None)
+        lock(slug) if lock is not None else connection.execute(statement)
+
+
 def snapshot(start: float, end: float) -> tuple[list, dict]:
     with GUARD:
         rows = [row for row in SAMPLES if start <= row[0] <= end]
