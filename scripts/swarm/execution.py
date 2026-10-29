@@ -118,10 +118,10 @@ class ExecutionRegistry:
 
     def put(self, slug: str, agent: AgentRecord) -> None:
         with _writes(slug):
-            if _has_identity(agent) or self.managed(slug, agent.name):
+            if _has_identity(agent) or not self.store.project_legacy(
+                slug, agent, lambda: self.managed(slug, agent.name)
+            ):
                 self._update(slug, agent)
-                return
-            self.store.project_agent(slug, agent, self.store.projected(slug, agent.name))
 
     def get(self, slug: str, execution_id: str) -> AgentRecord:
         doc = fencing.read(self.store, slug)
@@ -245,15 +245,25 @@ class ExecutionRegistry:
 
     def end_orphan(self, slug: str, agent: AgentRecord, now_ms: int) -> bool:
         listed = self.store.listed(slug)
+        ended = asdict(replace(agent, state="ended"))
 
         def end(doc):
             current = self.occupants(slug, doc).get(agent.seat)
             if current != agent or not _orphan_state(agent, now_ms) or agent.name in listed:
                 return False
-            doc["executions"][agent.execution_id] = asdict(replace(agent, state="ended"))
+            doc["executions"][agent.execution_id] = ended
             return True
 
-        return fencing.write(self.store, slug, end)
+        def undo(doc):
+            if doc["executions"].get(agent.execution_id) == ended:
+                doc["executions"][agent.execution_id] = asdict(agent)
+
+        if not fencing.write(self.store, slug, end):
+            return False
+        if agent.name not in self.store.listed(slug):
+            return True
+        fencing.write(self.store, slug, undo)
+        return False
 
 
 def _validate_target(backend, target, refuse):

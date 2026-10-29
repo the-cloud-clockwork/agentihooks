@@ -136,3 +136,14 @@ def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
 def authority_held(store: Any, slug: str, task: str) -> bool:
     doc = read(store, slug)
     return task in doc["claims"] or task in doc["journals"]
+
+
+def replace(store: Any, slug: str, saved: dict | None) -> None:
+    """Puts back a saved document; a snapshot taken before the document existed is imported from its keys."""
+    restored = _legacy(store, slug) if saved is None else {**copy.deepcopy(EMPTY), **saved}
+
+    def change(doc):
+        doc.clear()
+        doc.update(restored)
+
+    write(store, slug, change)

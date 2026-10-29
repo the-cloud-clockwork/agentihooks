@@ -3,6 +3,7 @@
 import json
 import os
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING
 
@@ -480,10 +481,6 @@ class RedisStore:
             rows, desired = pipe.execute()
         return {name: json.loads(raw) for name, raw in rows.items()}, desired
 
-    def projected(self, slug: str, name: str) -> AgentRecord | None:
-        raw = self.redis.hget(self.key(slug, "agents"), name)
-        return AgentRecord(**json.loads(raw)) if raw else None
-
     def project_agent(
         self,
         slug: str,
@@ -520,6 +517,36 @@ class RedisStore:
                 except WatchError:
                     continue
         raise SwarmError("agent registry kept changing; the agent was not shown")
+
+    def project_legacy(self, slug: str, agent: AgentRecord, managed: Callable[[], bool]) -> bool:
+        from redis.exceptions import WatchError
+
+        from scripts.swarm.execution import PROJECTION_OMITTED
+        from scripts.swarm.tick import agent_status
+
+        row = {field: value for field, value in asdict(agent).items() if field not in PROJECTION_OMITTED}
+        key = self.key(slug, "agents")
+        for _ in range(5):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(key)
+                    if managed():
+                        return False
+                    raw = pipe.hget(key, agent.name)
+                    previous = AgentRecord(**json.loads(raw)) if raw else None
+                    pipe.multi()
+                    pipe.hset(key, agent.name, json.dumps(row))
+                    if agent.desired_route_kind:
+                        pipe.hset(self.key(slug, "desired-routes"), agent.name, agent.desired_route_kind)
+                    else:
+                        pipe.hdel(self.key(slug, "desired-routes"), agent.name)
+                    if previous is None or agent_status(previous) != agent_status(agent):
+                        pipe.hset(self.key(slug, "state-since"), agent.name, int(time.time() * 1000))
+                    pipe.execute()
+                    return True
+                except WatchError:
+                    continue
+        raise SwarmError("agent registry kept changing; update was not committed")
 
     def publication(self, slug: str, seat: str) -> str:
         from scripts.codex_session.binding import PUBLISHING
@@ -582,11 +609,12 @@ class RedisStore:
                     continue
         else:
             raise SwarmError("agent registry kept changing; retirement was not committed")
-        live = {agent.execution_id for agent in executions if agent.state != "finished"}
+        live = {agent.execution_id for agent in executions}
 
         def end(doc):
             for execution_id in live & set(doc["executions"]):
-                doc["executions"][execution_id] = {**doc["executions"][execution_id], "state": "ended"}
+                if doc["executions"][execution_id]["state"] != "finished":
+                    doc["executions"][execution_id] = {**doc["executions"][execution_id], "state": "ended"}
 
         fencing.write(self, slug, end)
         return True
@@ -759,17 +787,25 @@ class RedisStore:
         self.names.release(slug)
 
     def export(self, slug):
-        """Everything the swarm holds in Redis: its own keys, its seats and their memory, its inbox addresses."""
+        """Everything the swarm holds: its own keys, its fencing document, its seats and memory, its inbox addresses."""
+        from scripts.swarm import fencing
+
         self.config(slug)
         own = [key for key in self.redis.scan_iter(match=self.key(slug, "*")) if key != self.key(slug, "tick-lock")]
         inbox, members = InboxStore(self.redis).keys_for(lambda address: of_swarm(address, slug, self.names))
         keys = (
             sorted(own) + self.seats.swarm_keys(slug) + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
         )
-        return {"keys": _dump(self.redis, keys), "members": {f"{PREFIX}:index": [slug], **members}}
+        return {
+            "keys": _dump(self.redis, keys),
+            "members": {f"{PREFIX}:index": [slug], **members},
+            "fencing": fencing.read(self, slug),
+        }
 
     def restore(self, slug, state):
-        """Replace the swarm's own keys with the exported ones and write back its seats and inbox."""
+        """Replace the swarm's own keys and fencing document with the exported ones and write back seats and inbox."""
+        from scripts.swarm import fencing
+
         with self.redis.pipeline() as pipe:
             pipe.delete(*self.redis.scan_iter(match=self.key(slug, "*")), *state["keys"])
             for key, entry in state["keys"].items():
@@ -779,6 +815,7 @@ class RedisStore:
             for key, found in state["members"].items():
                 pipe.sadd(key, *found)
             pipe.execute()
+        fencing.replace(self, slug, state.get("fencing"))
         self.ensure_code(slug)
 
 

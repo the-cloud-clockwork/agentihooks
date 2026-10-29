@@ -428,7 +428,7 @@ EXHAUSTED = {
     "start": fencing.CONTENTION,
     "update": fencing.CONTENTION,
     "pane": fencing.CONTENTION,
-    "legacy": "agent registry kept changing; the agent was not shown",
+    "legacy": "agent registry kept changing; update was not committed",
 }
 
 
