@@ -1,8 +1,9 @@
 name: Helm chart release
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: [Swarm worker image]
+    types: [completed]
 
 concurrency:
   group: ${{ format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
@@ -15,6 +16,7 @@ permissions:
 jobs:
   publish:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    if: github.event.workflow_run.event == 'release' && github.event.workflow_run.conclusion == 'success'
     timeout-minutes: 5
     permissions:
       contents: read
@@ -22,12 +24,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Require a release tag on main
-        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: git merge-base --is-ancestor "$RELEASE_SHA" origin/main
 
       - uses: azure/setup-helm@v4
         with:
@@ -36,7 +40,7 @@ jobs:
       - name: Package and publish the release chart
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE: ${{ github.event.release.tag_name }}
+          RELEASE: ${{ github.event.workflow_run.head_branch }}
         run: |
           version="${RELEASE#v}"
           printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
@@ -48,4 +52,4 @@ jobs:
     needs: publish
     uses: ./.github/workflows/helm-kind-published.yml
     with:
-      version: ${{ github.event.release.tag_name }}
+      version: ${{ github.event.workflow_run.head_branch }}
