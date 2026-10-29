@@ -111,12 +111,29 @@ def test_a_hive_successor_is_live_from_seat_occupancy_without_a_workstation_sess
     assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "live"
 
 
-def test_a_finished_hive_successor_is_not_treated_as_live_by_seat_occupancy_alone(setup):
+@pytest.mark.parametrize("state", ["finished", "ended"])
+def test_a_finished_or_ended_hive_successor_is_not_treated_as_live_by_seat_occupancy_alone(setup, state):
     store, old = setup
     transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
     name = store.next_name("sw", "eng")
     new = store.start_execution(
-        "sw", AgentRecord(name, "eng", "t1", seat=old.seat, hive="hive-1", state="finished", launched_at=40), ""
+        "sw", AgentRecord(name, "eng", "t1", seat=old.seat, hive="hive-1", state=state, launched_at=40), ""
+    )
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    transfers.observe(store, "sw", set())
+    assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "absent"
+
+
+def test_a_local_hive_successor_is_not_treated_as_live_by_seat_occupancy_alone(setup, monkeypatch):
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "local-hive")
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    name = store.next_name("sw", "eng")
+    new = store.start_execution(
+        "sw", AgentRecord(name, "eng", "t1", seat=old.seat, hive="local-hive", state="working", launched_at=40), ""
     )
     store.seats.occupy(new.seat, new.name, 3)
     transfers.attach(store, "sw", new)

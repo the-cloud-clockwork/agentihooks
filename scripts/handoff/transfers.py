@@ -126,9 +126,16 @@ def detach(store, slug: str, agent) -> None:
 
 
 def observe(store, slug: str, live: set[str]) -> None:
+    from scripts.swarm.commands import hive_id
+
     agents = store.agents(slug)
     unlaunched = {agent.name for agent in agents if agent.state in ("starting", "launching")}
-    hived = {agent.name for agent in agents if agent.hive and agent.state != "finished"}
+    remote = hive_id()
+    hived = {
+        agent.name
+        for agent in agents
+        if agent.hive and agent.hive != remote and agent.state not in ("finished", "ended")
+    }
     for row in list_transfers(store, slug):
         if not row["successor"] or row["binding"]["state"] == "live" or row["successor"] in unlaunched:
             continue
