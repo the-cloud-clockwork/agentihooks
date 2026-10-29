@@ -536,6 +536,51 @@ def test_sonar_carries_the_branch_coverage_only_on_same_repo_pull_requests(value
     assert '--out "$GITHUB_WORKSPACE/.coverage-shards"' in carry["run"]
 
 
+@pytest.mark.parametrize(
+    ("values", "uploaded"),
+    [
+        ({"steps.upload-branch-coverage.outcome": "success"}, False),
+        ({"steps.upload-branch-coverage.outcome": ""}, True),
+    ],
+)
+def test_a_selected_leg_uploads_its_coverage_once(values, uploaded):
+    upload = _step("unit-selected", "Upload coverage")
+    assert _step("unit-selected", "Upload this leg's branch coverage")["id"] == "upload-branch-coverage"
+    assert _evaluate(upload["if"], {"matrix.python-version": "3.12", **values}) is uploaded
+
+
+@pytest.mark.parametrize(
+    ("values", "taken"),
+    [
+        ({}, True),
+        ({"needs.unit-selected.result": "failure"}, False),
+        ({"needs.select.outputs.scope": "full"}, False),
+        ({"github.event.pull_request.head.repo.full_name": "fork/r"}, False),
+    ],
+)
+def test_sonar_takes_each_selected_legs_newest_branch_coverage_as_its_shard(tmp_path, values, taken):
+    base = {**SAME_REPO, "needs.select.outputs.scope": "selected", "needs.unit-selected.result": "success"}
+    names = [step.get("name") for step in _jobs()["sonar"]["steps"]]
+    download = _step("sonar", "Download the selected legs' branch coverage")
+    take = _step("sonar", "Take each selected leg's branch coverage as its shard coverage")
+    assert download["if"] == take["if"]
+    assert _evaluate(take["if"], {**base, **values}) is taken
+    assert download["with"]["pattern"] == "branch-coverage-3.12-*"
+    assert names.index("Download shard coverage") < names.index(take["name"]) < names.index("Merge shard coverage")
+    temp = tmp_path / "temp"
+    for name, text in (("1-1", "old"), ("1-2", "new"), ("12-1", "twelve"), ("3-1", "branch")):
+        (temp / "branch-shards" / f"branch-coverage-3.12-{name}").mkdir(parents=True)
+        (temp / "branch-shards" / f"branch-coverage-3.12-{name}" / ".coverage").write_text(text)
+    (tmp_path / ".coverage-shards/coverage-3.12-3").mkdir(parents=True)
+    (tmp_path / ".coverage-shards/coverage-3.12-3/.coverage").write_text("uploaded")
+    result = subprocess.run(
+        ["bash", "-c", take["run"]], cwd=tmp_path, env={**os.environ, "RUNNER_TEMP": str(temp)}, capture_output=True
+    )
+    assert result.returncode == 0, result.stderr
+    found = {path.parent.name: path.read_text() for path in (tmp_path / ".coverage-shards").glob("*/.coverage")}
+    assert found == {"coverage-3.12-1": "new", "coverage-3.12-12": "twelve", "coverage-3.12-3": "uploaded"}
+
+
 def test_combine_adds_every_carried_branch_database_that_holds_data(tmp_path):
     shards = tmp_path / ".coverage-shards"
     (shards / "coverage-3.12-1").mkdir(parents=True)
