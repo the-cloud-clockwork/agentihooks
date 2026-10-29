@@ -278,14 +278,20 @@ def _held(raw: str) -> tuple[str, str] | None:
     return execution_key(record.endpoint_ref) or record.execution_id, record.account or CODEX_DEFAULT
 
 
+def _unavailable() -> tuple[type[BaseException], ...]:
+    from scripts.events import state
+
+    # The families still read Redis whatever the configured backend, until their own slices move them.
+    return (*state.unavailable({}), *state.unavailable())
+
+
 def managed_held() -> set[tuple[str, str]]:
     """Transport records are written before the server starts; an unreadable record or store holds what it last held."""
     from scripts.codex_session import binding
-    from scripts.events import state
 
     try:
         raws = binding.transport_records()
-    except state.unavailable():
+    except _unavailable():
         return set(_LAST_HELD)
     if raws is None:
         return set()
@@ -332,12 +338,11 @@ def fleet_held(environ: Mapping[str, str] | None = None) -> dict[str, int]:
 
     if RuntimeRouter.from_environ((), os.environ if environ is None else environ).spawn_backend() == LOCAL:
         return {}
-    from scripts.events import state
     from scripts.swarm_v2 import accounts
 
     try:
         return accounts.fleet_held_now()
-    except state.unavailable():
+    except _unavailable():
         return {}
 
 
@@ -345,13 +350,12 @@ def hive_held(harness: str) -> dict[str, int]:
     """Other live hives' sessions and unreported launches per account, as the launch reservation counts them."""
     import time
 
-    from scripts.events import state
     from scripts.routing import aggregate
     from scripts.swarm.commands import hive_id
 
     try:
         return aggregate.held_elsewhere(harness, time.time(), hive_id())
-    except state.unavailable():
+    except _unavailable():
         return {}
 
 
