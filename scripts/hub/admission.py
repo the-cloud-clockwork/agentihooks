@@ -123,11 +123,11 @@ class Admission:
     def failed(self, slug: str, request: dict) -> bool:
         key = self._key(slug, request)
         held = self.store.redis.get(key)
-        if not held or json.loads(held)["hive"] != request["hive"]:
+        admitted = json.loads(held) if held else None
+        if not admitted or admitted["hive"] != request["hive"]:
             return False
         task_id, harness, reason = request["task"], request["harness"], request["reason"]
         self.store.note_launch_failure(slug, task_id, reason, harness)
-        admitted = json.loads(held)
         admitted["task"]["avoid_harness"] = harness
         self.store.redis.set(key, json.dumps(admitted), keepttl=True)
         print(f"hub: events steering swarm={slug} task={task_id} avoid={harness}: {reason}", file=sys.stderr)
