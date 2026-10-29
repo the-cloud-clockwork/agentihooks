@@ -3,7 +3,7 @@
 import json
 
 from scripts import agent_choice
-from scripts.inbox.store import CLOSED, InboxStore
+from scripts.inbox.store import InboxStore
 from scripts.swarm.store import MASTER
 from scripts.swarm_v2 import masters
 
@@ -71,8 +71,8 @@ def handed_off(store, slug):
     """Close the order once its master left, so the successor never receives a stale handoff order."""
     found, inbox = pending(store, slug), InboxStore(store.redis)
     item = inbox.find(found["item"], "master-affinity") if found else None
-    if item and item.state not in CLOSED:
-        inbox.close(item.id, item.address, "done", "the master handed off its seat")
+    if item:
+        inbox.settle(item.id, item.address, "done", "the master handed off its seat")
 
 
 def placed(store, slug, harness):
