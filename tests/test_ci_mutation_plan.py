@@ -368,6 +368,27 @@ def test_measured_cli_requires_bases_and_statistics(monkeypatch, args):
     assert error.value.code == 2
 
 
+@pytest.mark.parametrize(("splits", "flag"), [({}, "false"), ({"scripts.sample.x_f": {"head": ["early"]}}, "true")])
+def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path, monkeypatch, splits, flag):
+    from scripts.ci_mutation import measured
+
+    monkeypatch.chdir(tmp_path)
+    folder = tmp_path / "stats"
+    folder.mkdir()
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(measured, "discover_changes", lambda *args: {})
+    monkeypatch.setattr(measured.subprocess, "check_output", lambda *args, **kwargs: "revision\n")
+    monkeypatch.setattr(
+        measured,
+        "refine_plan",
+        lambda *args: {"estimated_worker_seconds": 1.0, "shards": 2, "assignments": {}, "splits": splits},
+    )
+    monkeypatch.setattr("sys.argv", ["measured", "--bases", "base", "--stats", str(folder)])
+    assert measured.main() == 0
+    assert output.read_text() == f"shards=[0, 1]\nprobe={flag}\n"
+
+
 @pytest.mark.parametrize("identity_only", [False, True])
 def test_refinement_preserves_identity_groups_and_skips_plain_modules(tmp_path, monkeypatch, identity_only):
     from scripts.ci_mutation import measured
@@ -470,7 +491,7 @@ def test_measured_cli_refines_complete_statistics_and_rejects_another_head(tmp_p
         assert all(name.startswith("scripts.sample.x_f__mutmut_") for name in result["assignments"])
         assert set(result["costs"].values()) == {55.6}
         assert result["units"] == "worker seconds"
-        assert output.read_text() == "shards=[0]\n"
+        assert output.read_text() == "shards=[0]\nprobe=false\n"
         text = capsys.readouterr().out
         assert "Measured mutation worker seconds:" in text
         assert f"Measured mutation shards: 1; assigned mutants: {len(result['assignments'])}" in text

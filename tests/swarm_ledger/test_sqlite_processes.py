@@ -1,5 +1,6 @@
 import multiprocessing
 import os
+import threading
 
 from scripts.swarm_ledger.repository import sqlite
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
@@ -24,16 +25,37 @@ def crash(path):
     )
 
 
+def write_until(path, stop):
+    repo = SQLiteLedgerRepository(path)
+    repo.create("other", CONTENT)
+    turn = 0
+    while not stop.is_set():
+        turn += 1
+        repo.apply_ops("other", ops=[{"op": "add", "id": f"o{turn}", "thread": "chat", "text": "busy"}])
+
+
 def test_concurrent_agent_processes_each_land_every_write(tmp_path):
     path = tmp_path / "ledgers" / sqlite.DATABASE
     SQLiteLedgerRepository(path).create("processes", CONTENT)
-    context = multiprocessing.get_context("fork")
+    context = multiprocessing.get_context("spawn")
     workers = [context.Process(target=join, args=(path, index)) for index in range(4)]
-    for worker in workers:
-        worker.start()
-    for worker in workers:
-        worker.join(30)
-        assert worker.exitcode == 0
+    stop = threading.Event()
+    busy = threading.Thread(target=write_until, args=(tmp_path / "other" / sqlite.DATABASE, stop))
+    busy.start()
+    try:
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(30)
+    finally:
+        stop.set()
+        busy.join(30)
+        for worker in workers:
+            if worker.pid is not None:
+                worker.kill()
+                worker.join()
+    assert SQLiteLedgerRepository(tmp_path / "other" / sqlite.DATABASE).get_document("other")["chat"]
+    assert [worker.exitcode for worker in workers] == [0] * 4
     state = SQLiteLedgerRepository(path).get_document("processes")
     assert {f"eng{index}" for index in range(4)} <= set(state["_meta"]["members"])
     assert sorted(m["id"] for m in state["chat"]) == sorted(f"m{i}-{t}" for i in range(4) for t in range(3))
@@ -44,7 +66,7 @@ def test_a_process_that_dies_mid_write_leaves_the_last_committed_state(tmp_path)
     repo = SQLiteLedgerRepository(path)
     repo.create("processes", CONTENT)
     before = repo.get_document("processes")
-    worker = multiprocessing.get_context("fork").Process(target=crash, args=(path,))
+    worker = multiprocessing.get_context("spawn").Process(target=crash, args=(path,))
     worker.start()
     worker.join(30)
     assert worker.exitcode == 7

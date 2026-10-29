@@ -42,6 +42,8 @@ LOG_FORMAT = "--format=%H%x1f%cs%x1f%an%x1f%s"
 MARKUP = re.compile(r"(?:^#)|<(?=/?[A-Za-z!])|\]\(|```")
 CONTENT_TYPE = "Content-Type"
 AUTHORIZATION = "Authorization"
+USER_AGENT = "User-Agent"
+CHANGELOG_AGENT = "agentihooks-changelog"
 JSON = "application/json"
 
 
@@ -163,7 +165,7 @@ def gateway_headers(env: dict[str, str]) -> dict[str, str]:
 
 def ask_model(change: Change, url: str, access: dict[str, str], model: str, opener: Callable = urlopen) -> str:
     body = json.dumps({"model": model, "messages": prompt(change), "max_tokens": 400}).encode()
-    headers = {CONTENT_TYPE: JSON, **access}
+    headers = {CONTENT_TYPE: JSON, USER_AGENT: CHANGELOG_AGENT, **access}
     try:
         with opener(
             Request(url.removesuffix("/") + "/v1/chat/completions", data=body, headers=headers), timeout=TIMEOUT_S

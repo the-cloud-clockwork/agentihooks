@@ -232,6 +232,7 @@ def test_ask_model_posts_chat_completion_with_the_key_reference():
             auth=request.get_header("Authorization"),
             access=request.get_header("Cf-access-client-id"),
             type=request.get_header("Content-type"),
+            agent=request.get_header("User-agent"),
             body=json.loads(request.data),
             timeout=timeout,
         )
@@ -242,6 +243,7 @@ def test_ask_model_posts_chat_completion_with_the_key_reference():
     assert seen["auth"] == "Bearer k1"
     assert seen["access"] == "a1"
     assert seen["type"] == "application/json"
+    assert seen["agent"] == "agentihooks-changelog"
     assert seen["timeout"] == rc.TIMEOUT_S
     assert seen["body"] == {"model": "sonnet", "messages": rc.prompt(_change()), "max_tokens": 400}
 
