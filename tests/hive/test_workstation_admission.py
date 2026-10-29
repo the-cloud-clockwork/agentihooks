@@ -25,7 +25,7 @@ def test_preselected_root_requests_share_the_last_configured_slot(setup, monkeyp
     write_hive(setup, id="workstation", ui="yes", max_agents=8)
     setup.store.update(setup.config.slug, local_max_agents=2)
     local_agents(setup, 1)
-    selected = SimpleNamespace(hive="workstation", master_placement=None)
+    selected = SimpleNamespace(hive="workstation", master_placement=None, first=False)
     first = SimpleNamespace(name="first", lane="eng", task={"id": "first"})
     second = SimpleNamespace(name="second", lane="eng", task={"id": "second"})
     assert setup.launcher.reserve_room(first, selected) == ""
@@ -37,7 +37,7 @@ def test_a_root_reservation_consumes_the_same_slot_as_overflow(setup, monkeypatc
     fill_anton(setup)
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
     write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=1)
-    selected = SimpleNamespace(hive="workstation", master_placement=None)
+    selected = SimpleNamespace(hive="workstation", master_placement=None, first=False)
     request = SimpleNamespace(name="first", lane="eng", task={"id": "first"})
     assert setup.launcher.reserve_room(request, selected) == ""
     setup.herdr._quota_accounts = []
@@ -149,7 +149,7 @@ def test_a_root_resource_refusal_releases_only_its_local_claim(setup, monkeypatc
     publish_room(setup.store, "workstation", 1)
     admission.reserve(setup.store.redis, "workstation", "other/pending", 1)
     request = request_for(setup)
-    selected = SimpleNamespace(hive="workstation", master_placement=None)
+    selected = SimpleNamespace(hive="workstation", master_placement=None, first=False)
     assert "ram:" in setup.launcher.reserve_room(request, selected)
     assert setup.store.redis.hgetall(local_slots.key("workstation")) == {}
     assert admission.pending(setup.store.redis, "workstation") == 1
@@ -165,7 +165,7 @@ def test_an_existing_task_cannot_inflate_resource_room_during_a_pending_launch(s
     publish_room(setup.store, "workstation", 1)
     setup.store.put_agent(setup.config.slug, AgentRecord("self", "eng", "task"))
     local_slots.claim(setup.store, "workstation", setup.config.slug, "other", "pending", 8)
-    selected = SimpleNamespace(hive="workstation", master_placement=None)
+    selected = SimpleNamespace(hive="workstation", master_placement=None, first=False)
     request = SimpleNamespace(name="self", lane="eng", task={"id": "task"})
     assert "1 of its 1" in setup.launcher.reserve_room(request, selected)
 
@@ -306,7 +306,7 @@ def test_a_mixed_batch_counts_launched_agents_still_starting_after_their_claim_w
     monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
     write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=6)
     local_agents(setup, 3, state="starting", pane_id="w:p")
-    selected = SimpleNamespace(hive="workstation", master_placement=None)
+    selected = SimpleNamespace(hive="workstation", master_placement=None, first=False)
     for name in ("root-1", "root-2"):
         assert setup.launcher.reserve_room(SimpleNamespace(name=name, lane="eng", task={"id": name}), selected) == ""
     setup.herdr._quota_accounts = []
