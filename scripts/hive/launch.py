@@ -52,6 +52,7 @@ class _Placing:
     hives: list[dict]
     now: int
     listed: tuple[dict, ...] = ()
+    aliases: tuple[str, ...] = ()
 
 
 ROOM_DETAILS = {"reason": "", "detail": ""}
@@ -317,7 +318,7 @@ class HiveLaunch:
                     bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
                     taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
                     hives[index] = _local_capped(hive, taken, bound)
-        placing = _Placing(config, task, saved, decision, role, rows, hives, now, listed)
+        placing = _Placing(config, task, saved, decision, role, rows, hives, now, listed, (lane, decision.profile))
         found = self._account_selection(placing, harness)
         if auto and harness == "codex" and isinstance(found, placement.Wait):
             claude = self._account_selection(placing, "claude")
@@ -360,8 +361,7 @@ class HiveLaunch:
             fallback=fallback,
             origin=matched,
             first=ranked,
-            spill=choice.spill
-            or placement.unhosted(role, list(placing.listed), placing.now, (placing.decision.profile,)),
+            spill=choice.spill or placement.unhosted(role, list(placing.listed), placing.now, placing.aliases),
         )
 
     def _master_selection(self, config, decision, hives, now, rows, front):

@@ -224,8 +224,12 @@ def test_a_second_launch_in_one_pass_spills_with_the_placed_count(setup):  # noq
 
 @pytest.mark.parametrize(
     ("fields", "refusal"),
-    [({"draining": "yes"}, "it is draining"), ({"excluded": ["master", "engineer"]}, "it excludes eng")],
-    ids=["draining", "excluding"],
+    [
+        ({"draining": "yes"}, "it is draining"),
+        ({"excluded": ["master", "engineer"]}, "it excludes eng"),
+        ({"excluded": ["master", "eng"]}, "it excludes eng"),
+    ],
+    ids=["draining", "excluding profile", "excluding lane"],
 )
 def test_a_launch_past_an_unhosted_first_ranked_hive_records_why(setup, fields, refusal):  # noqa: F811
     write_hive(setup, prefer={"eng": 1}, **fields)
