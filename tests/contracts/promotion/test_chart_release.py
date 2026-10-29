@@ -18,24 +18,32 @@ def _workflow():
     return yaml.safe_load(path.read_text())
 
 
-def test_the_promotion_release_event_publishes_the_chart_independently_of_images():
+def test_the_chart_publishes_only_after_the_release_hive_image_moved_release():
     workflow = _workflow()
-    assert workflow.get("on", workflow.get(True)) == {"release": {"types": ["published"]}}
+    assert workflow.get("on", workflow.get(True)) == {
+        "workflow_run": {"workflows": ["Swarm worker image"], "types": ["completed"]}
+    }
+    image = yaml.safe_load((ROOT / ".github/workflows/swarm-node-image.yml").read_text())
+    assert image["name"] == "Swarm worker image"
+    assert image["jobs"]["hive"]["needs"] == "image"
     assert workflow["permissions"] == {"contents": "read"}
     job = workflow["jobs"]["publish"]
     assert not job.get("needs")
+    assert job["if"] == (
+        "github.event.workflow_run.event == 'release' && github.event.workflow_run.conclusion == 'success'"
+    )
     assert job["permissions"] == {"contents": "read", "packages": "write"}
     assert not job.get("continue-on-error")
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
     assert checkout["with"] == {
-        "ref": "${{ github.event.release.tag_name }}",
+        "ref": "${{ github.event.workflow_run.head_branch }}",
         "fetch-depth": 0,
         "persist-credentials": False,
     }
     assert any(step.get("uses", "").startswith("azure/setup-helm@") for step in steps)
     publish = next(step for step in steps if "helm push" in step.get("run", ""))
-    assert publish["env"]["RELEASE"] == "${{ github.event.release.tag_name }}"
+    assert publish["env"]["RELEASE"] == "${{ github.event.workflow_run.head_branch }}"
     assert publish["env"]["GHCR_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
     assert all(not step.get("continue-on-error") and "if" not in step for step in steps)
     promote = yaml.safe_load((ROOT / ".github/workflows/promote.yml").read_text())
@@ -47,7 +55,7 @@ def test_the_chart_just_published_installs_on_kind_after_publication():
     job = _workflow()["jobs"]["kind"]
     assert job["needs"] == "publish"
     assert job["uses"] == "./.github/workflows/helm-kind-published.yml"
-    assert job["with"] == {"version": "${{ github.event.release.tag_name }}"}
+    assert job["with"] == {"version": "${{ github.event.workflow_run.head_branch }}"}
     assert not job.get("if") and not job.get("continue-on-error")
     called = yaml.safe_load((ROOT / ".github/workflows/helm-kind-published.yml").read_text())
     assert called[True]["workflow_call"] == {"inputs": {"version": {"type": "string", "required": True}}}
@@ -164,7 +172,8 @@ def _publish(tmp_path, version, fail=""):
         "CALLS": str(calls),
         "FAIL_COMMAND": fail,
         "RELEASE": f"v{version}",
-        "GITHUB_SHA": "promoted-release-commit",
+        "GITHUB_SHA": "default-branch-head",
+        "RELEASE_SHA": "promoted-release-commit",
         "GITHUB_REPOSITORY_OWNER": "The-Cloud-Clockwork",
         "GITHUB_ACTOR": "release-bot",
         "GHCR_TOKEN": "fixture",
