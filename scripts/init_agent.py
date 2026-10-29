@@ -675,7 +675,7 @@ def _binding_deferred(environ: dict[str, str]) -> list[str]:
 def _profile_canary(args, agent: str, environ: dict[str, str], launch, route: dict) -> list[str]:
     if args.defer_canary and (deferred := _binding_deferred(environ)):
         return deferred
-    canary = CANARY_TIMEOUT_S[agent] if args.canary_timeout is None else args.canary_timeout
+    canary = float("inf") if args.canary_timeout is None else args.canary_timeout
     return launch.run("profile canary", canary, lambda seconds: _binding_result(environ, seconds, route))
 
 
@@ -841,7 +841,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--canary-timeout",
         type=float,
-        help="Seconds to wait for the new session to run its profile canary; default 120 for Claude, 90 for Codex",
+        help="Seconds to wait for the new session to run its profile canary; default the rest of the launch deadline",
+    )
+    parser.add_argument(
+        "--launch-until",
+        type=int,
+        help="Epoch milliseconds by which the launch must return; bounds the launch deadline",
     )
     parser.add_argument(
         "--defer-canary",
@@ -1043,10 +1048,13 @@ def _codex_named(environ: dict[str, str], name: str, since: float) -> Callable[[
 def _launch_seconds(args) -> float:
     from scripts.master_login_chain import BUDGET
 
+    seconds = LAUNCH_DEADLINE_S
     if args.agent in ("", "claude") and _flag_value(args.claude_args, ("--route",)) == "master-login":
         args.route_timeout = max(args.route_timeout, BUDGET.route)
-        return BUDGET.launch
-    return LAUNCH_DEADLINE_S
+        seconds = BUDGET.launch
+    if args.launch_until is None:
+        return seconds
+    return max(0.0, min(seconds, args.launch_until / 1000 - time.time()))
 
 
 def _auth_request(args: argparse.Namespace, environ: dict[str, str]) -> None:

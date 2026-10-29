@@ -354,7 +354,7 @@ whichever is less:
 |---|---|---|---|
 | `Codex ready` | A Codex agent in a herdr pane, not `app_server`, whose pane herdr detected or that has an opening prompt | 120 seconds | The session rename is skipped (`session_name_error=not-ready`) and the opening prompt is held (`opening_prompt=held:not-ready`); the launch goes on |
 | `Codex ready for the opening prompt` | The same agent, when it has an opening prompt and the first ready wait passed; it follows the session rename when one ran | 120 seconds | `opening_prompt=held:not-ready`; the launch goes on |
-| `profile canary` | Every profiled launch, both harnesses and both transports | 90 seconds for Codex, 120 for Claude; `--canary-timeout` overrides it | The launch fails: `profile_validation=failed`, exit 3. The opening prompt was already sent or held before this wait began |
+| `profile canary` | Every profiled launch, both harnesses and both transports | None by default, so it gets the rest of the deadline; `--canary-timeout` sets one | The launch fails: `profile_validation=failed`, exit 3. The opening prompt was already sent or held before this wait began |
 
 A ready wait passes once the pane reads idle or done on two polls in a row,
 1.5 seconds apart. An `app_server` launch has no ready waits, because its
@@ -397,7 +397,7 @@ uses whole seconds; a live launch prints the fractional grant, such as
 agentihooks init-agent: the 270s launch deadline ran out in the profile canary wait after Codex ready 120s, Codex ready for the opening prompt 120s, profile canary 30s: the codex agent reported no canary within 30s
 ```
 
-A canary wait that runs out inside its own full limit keeps its plain reason,
+A canary wait capped by `--canary-timeout` that runs out inside that limit keeps its plain reason,
 `mounted profile canary did not validate before timeout: the codex agent
 reported no canary within 90s`; see [Profile launch home](profile-launch-home.md).
 In a swarm either reason is written to the swarm timer journal as

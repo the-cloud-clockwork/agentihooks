@@ -131,7 +131,7 @@ def test_launch_budget_changes_only_for_a_native_claude_master(agent, route):
 
     from scripts import master_login_chain as chain
 
-    args = SimpleNamespace(agent=agent, claude_args=["--route", route], route_timeout=10)
+    args = SimpleNamespace(agent=agent, claude_args=["--route", route], route_timeout=10, launch_until=None)
     native = agent in ("", "claude") and route == "master-login"
     assert init_agent._launch_seconds(args) == (chain.BUDGET.launch if native else init_agent.LAUNCH_DEADLINE_S)
     assert args.route_timeout == (chain.BUDGET.route if native else 10)

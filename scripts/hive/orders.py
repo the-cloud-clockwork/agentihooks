@@ -1,5 +1,6 @@
 import hashlib
 import json
+import time
 import uuid
 from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING
@@ -73,6 +74,7 @@ ORIGIN = "hive_origin"
 RESTARTED = "restarted"
 POD = uuid.uuid4().hex
 POD_SECONDS = 45
+ACK_MARGIN_MS = 15000
 
 
 def build_opening(request: SpawnRequest) -> str:
@@ -375,6 +377,7 @@ class Consumer:
             "route_kind": order.route_kind,
             "controller_epoch": order.epoch,
             "admitted_execution_id": agent.execution_id,
+            "launch_until_ms": int(time.time() * 1000) + order.expires_at - ACK_MARGIN_MS - lease.now_ms(self.store),
         }
         task["launch_assignment"] = {
             "profile": order.profile,
