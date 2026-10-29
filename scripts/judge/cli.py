@@ -50,15 +50,17 @@ def main(argv: list[str]) -> int:
         return SENT_BACK
     screened = outcome.tool_input if outcome.decision == "rewrite" else {"case": case, "evidence": evidence}
     try:
-        harness = runner.harness_for(args.harness, os.environ)
-        verdict = runner.run(
-            ROLE.read_text(),
-            judge_input(screened["case"], screened["evidence"]),
-            reply_schema(),
-            SEALED,
-            args.tier,
-            EFFORT,
-            harness,
+        harness, verdict = runner.on_claude_if_refused(
+            runner.harness_for(args.harness, os.environ),
+            lambda harness: runner.run(
+                ROLE.read_text(),
+                judge_input(screened["case"], screened["evidence"]),
+                reply_schema(),
+                SEALED,
+                args.tier,
+                EFFORT,
+                harness,
+            ),
         )
         schema.validate("verdict", verdict)
     except (ValueError, HeadlessError, schema.SchemaError) as error:
