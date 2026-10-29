@@ -146,10 +146,7 @@ def test_a_failed_diff_cannot_publish_a_test_only_decision(tmp_path):
     "name",
     [
         "Install coverage",
-        "Build the test dependency manifest",
         "Start Cloudflare Access proxy",
-        "Wait for the test dependency manifest",
-        "Upload the test dependency manifest",
     ],
 )
 def test_test_only_changes_do_not_start_analysis_work(name):

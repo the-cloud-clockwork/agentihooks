@@ -271,40 +271,43 @@ def test_the_coverage_shards_record_per_test_contexts_and_inputs():
     assert "dep-inputs/" in _step("unit", "Upload coverage")["with"]["path"]
 
 
-def test_sonar_builds_and_uploads_the_manifest_that_nothing_caches():
-    steps = [step.get("name") for step in _job("sonar")["steps"]]
+def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_it():
+    job = _job("dep-manifest")
+    assert set(job["needs"]) == {"unit", "select", "reuse", "admission"}
+    assert "sonar" not in job["needs"]
+    assert "(github.event_name == 'push' || github.event_name == 'workflow_dispatch')" in job["if"]
+    steps = [step.get("name") for step in job["steps"]]
     assert (
-        steps.index("Merge shard coverage")
+        steps.index("Install coverage")
+        < steps.index("Download shard coverage")
         < steps.index("Build the test dependency manifest")
-        < steps.index("Start Cloudflare Access proxy")
+        < steps.index("Upload the test dependency manifest")
     )
-    build = _step("sonar", "Build the test dependency manifest")
+    assert _step("dep-manifest", "Download shard coverage")["with"]["pattern"] == "coverage-3.12-*"
+    build = _step("dep-manifest", "Build the test dependency manifest")
     assert "python -m tests.dep_manifest build" in build["run"]
-    assert "< /dev/null" in build["run"] and 'echo "pid=$!"' in build["run"]
     assert '--out "$RUNNER_TEMP/dep-manifest/manifest.json"' in build["run"]
     contexts = '--data-file="$RUNNER_TEMP/dep-manifest/.coverage"'
     assert f"python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep {contexts}" in build["run"]
     assert '--coverage "$RUNNER_TEMP/dep-manifest/.coverage"' in build["run"]
     assert build["run"].index(contexts) < build["run"].index("python -m tests.dep_manifest build")
-    assert (
-        steps.index("Build the test dependency manifest")
-        < steps.index("Wait for the test dependency manifest")
-        < steps.index("SonarQube Scan")
-        < steps.index("Upload the test dependency manifest")
-    )
-    wait = _step("sonar", "Wait for the test dependency manifest")
-    assert wait["env"]["MANIFEST_PID"] == "${{ steps.manifest.outputs.pid }}"
-    assert 'exit "$(< "$RUNNER_TEMP/manifest.status")"' in wait["run"]
-    upload = _step("sonar", "Upload the test dependency manifest")
+    upload = _step("dep-manifest", "Upload the test dependency manifest")
     assert upload["with"]["name"] == "dep-manifest"
     assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/manifest.json"
-    assert not any("cache/save" in step.get("uses", "") for step in _job("sonar")["steps"])
+    sonar = [step.get("name") for step in _job("sonar")["steps"]]
+    assert not any("dependency manifest" in (name or "") for name in sonar)
+    assert not any("cache/save" in step.get("uses", "") for step in job["steps"] + _job("sonar")["steps"])
 
 
 def test_the_coverage_baseline_carries_no_dependency_manifest_step():
     baseline = _job("coverage-baseline")["steps"]
     assert not any("dependency manifest" in step.get("name", "") for step in baseline)
     assert not any("dep-manifest" in str(step.get("with", {})) for step in baseline)
+
+
+def test_the_gate_and_stage_budget_wait_for_the_manifest_job():
+    for name in ("gate-required", "stage-budget"):
+        assert "dep-manifest" in _job(name)["needs"]
 
 
 def test_the_plan_reuses_every_test_the_change_left_valid_without_its_group_suffix():
@@ -561,7 +564,7 @@ def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_firs
     assert calls == {
         ("test-count", "Plan the tests whose inputs did not change"),
         ("test-count", "Deselect the reused tests"),
-        ("sonar", "Build the test dependency manifest"),
+        ("dep-manifest", "Build the test dependency manifest"),
     }
 
 
@@ -659,10 +662,10 @@ def test_the_build_writes_the_packed_manifest_only_when_asked_and_the_workflow_u
     assert dep_manifest.main([*argv, "--out", str(out), "--packed", str(packed)]) == 0
     assert json.loads(out.read_text()) == built
     assert dep_manifest.unpack(json.loads(packed.read_text())) == built
-    build = _step("sonar", "Build the test dependency manifest")
+    build = _step("dep-manifest", "Build the test dependency manifest")
     assert '--packed "$RUNNER_TEMP/dep-manifest/packed.json"' in build["run"]
-    upload = _step("sonar", "Upload the packed test dependency manifest")
-    assert upload["if"] == _step("sonar", "Upload the test dependency manifest")["if"]
+    upload = _step("dep-manifest", "Upload the packed test dependency manifest")
+    assert upload.get("if") == _step("dep-manifest", "Upload the test dependency manifest").get("if")
     assert upload["with"]["name"] == "dep-manifest-packed"
     assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/packed.json"
     assert upload["with"]["if-no-files-found"] == "error"
