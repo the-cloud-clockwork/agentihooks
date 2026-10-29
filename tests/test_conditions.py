@@ -784,6 +784,14 @@ def test_a_host_without_git_reads_the_origin_owner_from_the_repo_config(tmp_path
     assert conditions.directory_trust(repo, {}) == (True, "last")
 
 
+def test_a_host_without_git_keeps_an_equals_sign_inside_the_origin_url(tmp_path, monkeypatch):
+    repo = _origin(tmp_path / "repo", "https://github.com/Stranger/x.git?ref=a")
+    with_git = conditions._remote_owner(repo)
+    _without_git(monkeypatch)
+    assert (with_git, conditions._config_origin(repo)) == ("stranger", "https://github.com/Stranger/x.git?ref=a")
+    assert conditions._remote_owner(repo) == "stranger"
+
+
 def test_a_host_without_git_follows_a_worktree_to_its_common_config(tmp_path, monkeypatch):
     repo = _origin(tmp_path / "repo", "git@github.com:stranger/x.git")
     subprocess.run(
