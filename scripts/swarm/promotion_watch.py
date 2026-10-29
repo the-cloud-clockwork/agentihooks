@@ -277,9 +277,10 @@ def _red(slug, store, ledger, doc, last, causes, repo):
         alerted = alerted or _alerted(state, run_id)
     lane, actions, new = "", [], []
     outage = [(OUTAGE, why) for job, why in causes if job == OUTAGE]
+    covered = [job != OUTAGE and (normal(job, why) in held or job in held) for job, why in causes]
     for n, (job, why) in enumerate(causes):
         task_id = f"{TASK_PREFIX}{run_id}-{n}"
-        if job == OUTAGE or normal(job, why) in held or job in held or task_id in present:
+        if job == OUTAGE or covered[n] or task_id in present:
             continue
         detail = why.removeprefix(job).removeprefix(": ").removesuffix(".")
         description = (
@@ -293,7 +294,7 @@ def _red(slug, store, ledger, doc, last, causes, repo):
         ledger.add_task(slug, {**fields, "description": description, "not_duplicate": NOT_DUPLICATE}, SENDER)
         actions.append(f"filed {task_id} for the failed dev job {job}")
         new.append((task_id, why))
-    if new or not alerted:
+    if new or not (alerted or (covered and all(covered))):
         named = [why.removesuffix(": ").removesuffix(".") for _, why in outage + new] or [job for job, _ in causes]
         actions += _alert(slug, ledger, doc, last, named)
     if new:
