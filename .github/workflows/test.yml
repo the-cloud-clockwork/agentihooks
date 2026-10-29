@@ -3730,7 +3730,9 @@ jobs:
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-selection
-          path: .mutation-selection.json
+          path: |
+            .mutation-selection.json
+            .mutation-direct.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1

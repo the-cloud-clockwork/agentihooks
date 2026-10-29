@@ -871,6 +871,7 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
     monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", prepare)
     monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
     monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 10)
+    (tmp_path / ".mutation-direct.json").write_text(json.dumps({"hooks/sample.py": ["tests/test_sample.py::test_f"]}))
     rows, error = mutate_files(tmp_path, tmp_path / "work", selected, 20, (1, 4), None)
     expected = reason
     if reason.startswith("mutmut failed"):
@@ -888,8 +889,12 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
         "4",
     ]
     assert json.loads((tmp_path / "work/changed-lines.json").read_text()) == {
-        "hooks/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]},
-        "scripts/other.py": {"lines": [3, 4], "tests": ["tests/test_o.py"]},
+        "hooks/sample.py": {
+            "lines": [2],
+            "tests": ["tests/test_sample.py"],
+            "direct": ["tests/test_sample.py::test_f"],
+        },
+        "scripts/other.py": {"lines": [3, 4], "tests": ["tests/test_o.py"], "direct": []},
     }
     if len(commands) == 2:
         assert commands[1] == [
