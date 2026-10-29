@@ -1,5 +1,6 @@
 import builtins
 import json
+import os
 import time
 
 import pytest
@@ -1017,3 +1018,18 @@ def test_master_up_on_the_ledger_host_writes_through_the_local_ledger(monkeypatc
     environ = {hosted_probe.HOSTED_ENV: "https://hosted.example"}
     cli.on_ledger_host("s1", environ)
     assert (hosted_probe.HOSTED_ENV in environ) is kept
+
+
+def test_master_up_without_a_hosted_address_leaves_the_environment_alone(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm import cli
+    from scripts.swarm_ledger import hosted_probe, storage
+
+    monkeypatch.setattr(storage, "default", lambda: SimpleNamespace(token=lambda slug: "operator-token"))
+    environ = {"OTHER": "kept"}
+    cli.on_ledger_host("s1", environ)
+    assert environ == {"OTHER": "kept"}
+    monkeypatch.setenv(hosted_probe.HOSTED_ENV, "https://hosted.example")
+    cli.on_ledger_host("s1")
+    assert hosted_probe.HOSTED_ENV not in os.environ
