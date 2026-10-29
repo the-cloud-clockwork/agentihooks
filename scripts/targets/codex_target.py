@@ -536,6 +536,7 @@ class CodexAdapter:
         profile_chain: list[str],
         bundle_dir: Path | None,
         user_dir: Path | None = None,
+        shared_dir: Path | None = None,
     ) -> None:
         _i = _install_module()
         managed_text = build_persona(
@@ -546,6 +547,7 @@ class CodexAdapter:
             _MANAGED_HEADER,
             _MANAGED_FOOTER,
             user_dir,
+            shared_dir,
         )
         dst = self.home() / "AGENTS.md"
         text = write_persona(dst, managed_text, _MANAGED_HEADER, _MANAGED_FOOTER)

@@ -103,6 +103,7 @@ STATE_JSON = AGENTIHOOKS_STATE_DIR / "state.json"
 # Repeated path fragment constants (avoids S1192 duplicate-literal warnings)
 _CLAUDE_SUBDIR = ".claude"
 _USER_BUNDLE_ENV = "AGENTIHOOKS_USER_BUNDLE_PATH"
+_SHARED_BUNDLE_ENV = "AGENTIHOOKS_SHARED_BUNDLE_PATH"
 _CLAUDE_MD_NAME = "CLAUDE.md"
 _MCP_JSON_NAME = ".mcp.json"
 
@@ -551,6 +552,12 @@ def _managed_roots() -> list[Path]:
     env_bundle = os.environ.get("AGENTIHOOKS_BUNDLE_PATH", "")
     if env_bundle:
         roots.append(Path(env_bundle).expanduser())
+    shared_bundle = state.get("shared_bundle")
+    if isinstance(shared_bundle, dict) and shared_bundle.get("path"):
+        roots.append(Path(shared_bundle["path"]))
+    env_shared_bundle = os.environ.get(_SHARED_BUNDLE_ENV, "")
+    if env_shared_bundle:
+        roots.append(Path(env_shared_bundle).expanduser())
     user_bundle = state.get("user_bundle")
     if isinstance(user_bundle, dict) and user_bundle.get("path"):
         roots.append(Path(user_bundle["path"]))
@@ -817,16 +824,38 @@ def _get_user_bundle_path() -> Path | None:
     return None
 
 
+def _get_shared_bundle_path() -> Path | None:
+    """Return the linked shared bundle path from state.json, or AGENTIHOOKS_SHARED_BUNDLE_PATH."""
+    from hooks.context.profile_chain import shared_bundle_path
+
+    linked = shared_bundle_path(_load_state())
+    if linked:
+        return linked
+    env_path = os.environ.get(_SHARED_BUNDLE_ENV, "")
+    if env_path:
+        p = Path(env_path).expanduser().resolve()
+        if p.is_dir():
+            return p
+    return None
+
+
 def _bundle_roots() -> list[tuple[str, Path]]:
     from hooks.context.profile_chain import bundle_roots
 
-    found = (("bundle", _get_bundle_path()), ("user_bundle", _get_user_bundle_path()))
+    found = (
+        ("bundle", _get_bundle_path()),
+        ("shared_bundle", _get_shared_bundle_path()),
+        ("user_bundle", _get_user_bundle_path()),
+    )
     return bundle_roots({key: {"path": str(path)} for key, path in found if path})
+
+
+_BUNDLE_LABELS = {"root": "bundle", "shared": "shared bundle", "user": "user bundle"}
 
 
 def _bundle_feature_layers(subdir: str, label: str) -> list[tuple[str, Path]]:
     return [
-        (f"{'bundle' if kind == 'root' else 'user bundle'} {label}", root / _CLAUDE_SUBDIR / subdir)
+        (f"{_BUNDLE_LABELS[kind]} {label}", root / _CLAUDE_SUBDIR / subdir)
         for kind, root in _bundle_roots()
         if (root / _CLAUDE_SUBDIR / subdir).is_dir()
     ]
@@ -892,7 +921,7 @@ def _profile_source_label(profile_name: str) -> str:
         return "built-in"
     for kind, root in _bundle_roots():
         if (root / "profiles" / profile_name).is_dir():
-            return "bundle" if kind == "root" else "user bundle"
+            return _BUNDLE_LABELS[kind]
     if _resolve_linked_profile_dir(profile_name) is not None:
         return "linked"
     if _package_role_dir(profile_name) is not None:
@@ -1941,7 +1970,9 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         _kept_state = _load_state()
         _clean_state_dir()
         _identity = {
-            k: _kept_state[k] for k in ("bundle", "user_bundle", "linked_profiles", "herdr") if _kept_state.get(k)
+            k: _kept_state[k]
+            for k in ("bundle", "shared_bundle", "user_bundle", "linked_profiles", "herdr")
+            if _kept_state.get(k)
         }
         if _identity:
             _save_state(_identity)
@@ -2858,6 +2889,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     # --- 4. Symlink skills/agents/commands/rules (layers: agentihooks → bundle → user bundle → each profile in chain) ---
     bundle_dir = _get_bundle_path()
     user_dir = _get_user_bundle_path()
+    shared_dir = _get_shared_bundle_path()
 
     for subdir, label, filter_fn in [
         ("skills", "skill", _skill_dir_filter()),
@@ -2881,7 +2913,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         adapter.install_features(subdir, layers, filter_fn)
 
     # --- 5 + 5a + 5b. Persona install (target-specific writer) ---
-    adapter.install_persona(profile_dirs, profile_chain, bundle_dir, user_dir)
+    adapter.install_persona(profile_dirs, profile_chain, bundle_dir, user_dir, shared_dir)
 
     # --- 6. Install MCP servers (target-specific registration) ---
     # Layer 1: the agentihooks MCP server
@@ -2930,7 +2962,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
 
     # Layer 2: bundle — always installed; profile MCPs layer on top (override per-name)
     for kind, root in _bundle_roots():
-        _register_mcp_layer(root, "Bundle" if kind == "root" else "User bundle")
+        _register_mcp_layer(root, _BUNDLE_LABELS[kind].capitalize())
 
     # Layer 3+: each profile (chained)
     for pname, pdir in profile_dirs:
@@ -3004,6 +3036,7 @@ def _install_claude_persona(
     profile_chain: list[str],
     bundle_dir: Path | None,
     user_dir: Path | None = None,
+    shared_dir: Path | None = None,
 ) -> None:
     """Steps 5/5a/5b of the Claude install: CLAUDE.md (single or chained),
     bundle shared prepend, CI-manifesto append. Bodies moved verbatim from
@@ -3071,10 +3104,10 @@ def _install_claude_persona(
     # --- 5a. Prepend bundle shared CLAUDE.md (cross-profile directives) ---
     # Runs once, outside the single-profile/chain branch, so a chained install gets
     # the shared block exactly once at the top rather than once per profile.
-    _prepend_bundle_claude_md(bundle_dir, user_dir)
+    _prepend_bundle_claude_md(bundle_dir, user_dir, shared_dir)
 
     # --- 5b. Append CI manifesto to ~/.claude/CLAUDE.md (memory channel) ---
-    _append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs, user_dir)
+    _append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs, user_dir, shared_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -4104,6 +4137,7 @@ def _append_ci_manifesto_to_claude_md(
     bundle_dir: Path | None = None,
     profile_dirs: list[tuple[str, Path]] | None = None,
     user_dir: Path | None = None,
+    shared_dir: Path | None = None,
 ) -> None:
     """Append every enabled bundle manifesto to ~/.claude/CLAUDE.md as a fenced block.
 
@@ -4125,7 +4159,7 @@ def _append_ci_manifesto_to_claude_md(
         return
     from scripts.profiles import manifestos
 
-    manifesto_paths = manifestos.paths(bundle_dir, profile_dirs or [], user_dir)
+    manifesto_paths = manifestos.paths(bundle_dir, profile_dirs or [], user_dir, shared_dir)
     if not manifesto_paths:
         _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
         return
@@ -4351,7 +4385,9 @@ def _same_content(a: str, b: str) -> bool:
     return norm(a) == norm(b)
 
 
-def _prepend_bundle_claude_md(bundle_dir: Path | None, user_dir: Path | None = None) -> None:
+def _prepend_bundle_claude_md(
+    bundle_dir: Path | None, user_dir: Path | None = None, shared_dir: Path | None = None
+) -> None:
     """Prepend the bundle's optional ``<bundle>/.claude/CLAUDE.md`` to ~/.claude/CLAUDE.md.
 
     Lets an operator write cross-profile directives once in the bundle instead of
@@ -4379,7 +4415,7 @@ def _prepend_bundle_claude_md(bundle_dir: Path | None, user_dir: Path | None = N
     had_block = _BUNDLE_CLAUDE_MD_BEGIN in current and _BUNDLE_CLAUDE_MD_END in current
 
     sections = []
-    for directory in (bundle_dir, user_dir):
+    for directory in (bundle_dir, shared_dir, user_dir):
         bundle_md = (directory / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME) if directory else None
         if bundle_md and bundle_md.exists() and (text := bundle_md.read_text().strip()):
             sections.append((bundle_md, text))
@@ -6646,7 +6682,7 @@ notes:
     elif args.command == "uninstall":
         uninstall_global(args)
     elif args.command == "bundle":
-        bundles.cmd_bundle(args.action, path=args.bundle_path, rebase=args.rebase, user=args.user)
+        bundles.cmd_bundle(args.action, path=args.bundle_path, rebase=args.rebase, user=args.user, shared=args.shared)
     elif args.command == "link-profile":
         if args.action == "link":
             cmd_link_profile(

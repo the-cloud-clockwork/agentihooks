@@ -337,14 +337,17 @@ def linked_profile_names() -> set[str]:
 
 
 def read_manifestos(
-    bundle_dir: Path | None = None, profile_dirs: list[tuple[str, Path]] | None = None, user_dir: Path | None = None
+    bundle_dir: Path | None = None,
+    profile_dirs: list[tuple[str, Path]] | None = None,
+    user_dir: Path | None = None,
+    shared_dir: Path | None = None,
 ) -> str:
     try:
         from hooks.config import manifesto_body
         from scripts.profiles import manifestos
 
         parts = []
-        for path in manifestos.paths(bundle_dir, profile_dirs or [], user_dir):
+        for path in manifestos.paths(bundle_dir, profile_dirs or [], user_dir, shared_dir):
             if path.is_file():
                 parts.append(f"<!-- manifesto: {path.name} -->\n{manifesto_body(path).strip()}")
         return "\n\n---\n\n".join(parts)
@@ -463,6 +466,7 @@ def build_persona(
     managed_header: str,
     managed_footer: str,
     user_dir: Path | None = None,
+    shared_dir: Path | None = None,
 ) -> str:
     """Assemble the managed region of a compiled instruction file."""
     from hooks.context.profile_chain import inherited
@@ -470,7 +474,7 @@ def build_persona(
     parents = inherited(profile_dirs)
     parts: list[str] = [managed_header, identity_preamble([name for name in profile_chain if name not in parents])]
 
-    for label, directory in (("bundle", bundle_dir), ("user bundle", user_dir)):
+    for label, directory in (("bundle", bundle_dir), ("shared bundle", shared_dir), ("user bundle", user_dir)):
         if content := shared_directive(directory):
             parts.append(f"<!-- {label} shared directives -->\n{content}")
 
@@ -485,7 +489,7 @@ def build_persona(
         rule_parts = [f"<!-- rule: {name} ({label}) -->\n{text.strip()}" for label, name, text in pending_rules]
         parts.append("# Rules\n\n" + "\n\n---\n\n".join(rule_parts))
 
-    manifesto_text = read_manifestos(bundle_dir, profile_dirs, user_dir)
+    manifesto_text = read_manifestos(bundle_dir, profile_dirs, user_dir, shared_dir)
     if manifesto_text:
         parts.append(f"<!-- ci-manifesto -->\n{manifesto_text.strip()}")
 

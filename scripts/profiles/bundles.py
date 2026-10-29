@@ -9,17 +9,36 @@ from pathlib import Path
 from hooks.context import conditions, profile_chain
 from scripts.targets._common import _install_module
 
+_SLOTS = {
+    "root": ("bundle", "bundle"),
+    "shared": ("shared_bundle", "shared bundle"),
+    "user": ("user_bundle", "user bundle"),
+}
+_WINNERS = {"root": "the root's", "shared": "the shared bundle's"}
 
-def _names(user: bool) -> tuple[str, str]:
-    return ("user_bundle", "user bundle") if user else ("bundle", "bundle")
+
+def _slot(user: bool = False, shared: bool = False) -> str:
+    return "user" if user else "shared" if shared else "root"
+
+
+def _names(user: bool, shared: bool = False) -> tuple[str, str]:
+    return _SLOTS[_slot(user, shared)]
+
+
+def _holders(kinds: list[str]) -> str:
+    named = [f"the {kind}" for kind in kinds]
+    return f"{', '.join(named[:-1])} and {named[-1]}" if len(named) > 2 else " and ".join(named)
 
 
 def warn_unavailable() -> None:
     _i = _install_module()
     for kind, path in profile_chain.missing_bundle_roots(_i._load_state()):
         _i._cprint(f"  [WARN] Configured {kind} bundle {path} is missing - not applied.")
-    for name in profile_chain.profile_collisions(_i._get_bundle_path(), _i._get_user_bundle_path()):
-        _i._cprint(f"  [WARN] Profile '{name}' exists in the root and the user bundle - the root's is used.")
+    holders = profile_chain.profile_holders(
+        _i._get_bundle_path(), _i._get_user_bundle_path(), _i._get_shared_bundle_path()
+    )
+    for name, kinds in sorted(holders.items()):
+        _i._cprint(f"  [WARN] Profile '{name}' exists in {_holders(kinds)} bundle - {_WINNERS[kinds[0]]} is used.")
 
 
 def link_user_arg(path: str | None) -> None:
@@ -33,26 +52,34 @@ def link_user_arg(path: str | None) -> None:
     print()
 
 
-def cmd_bundle(action: str, path: str | None = None, rebase: bool = False, user: bool = False) -> None:
+def cmd_bundle(
+    action: str, path: str | None = None, rebase: bool = False, user: bool = False, shared: bool = False
+) -> None:
     """Handle 'agentihooks bundle' subcommands."""
     if action == "link":
-        link(Path(path).expanduser().resolve() if path else None, user=user)
+        link(Path(path).expanduser().resolve() if path else None, user=user, shared=shared)
     elif action == "unlink":
-        unlink(user=user)
+        unlink(user=user, shared=shared)
     elif action == "list":
-        list_bundle(user=user)
+        list_bundle(user=user, shared=shared)
     elif action == "pull":
-        pull(rebase=rebase, user=user)
+        pull(rebase=rebase, user=user, shared=shared)
     else:
         print(f"Unknown bundle action: {action}", file=sys.stderr)
         sys.exit(1)
 
 
-def pull(rebase: bool = False, user: bool = False) -> None:
+def _linked(user: bool = False, shared: bool = False) -> Path | None:
+    _i = _install_module()
+    getters = {"root": _i._get_bundle_path, "shared": _i._get_shared_bundle_path, "user": _i._get_user_bundle_path}
+    return getters[_slot(user, shared)]()
+
+
+def pull(rebase: bool = False, user: bool = False, shared: bool = False) -> None:
     """Git pull the linked bundle directory."""
     _i = _install_module()
-    label = _names(user)[1]
-    bundle_dir = _i._get_user_bundle_path() if user else _i._get_bundle_path()
+    label = _names(user, shared)[1]
+    bundle_dir = _linked(user, shared)
     if not bundle_dir:
         print(f"No {label} linked.", file=sys.stderr)
         sys.exit(1)
@@ -81,8 +108,8 @@ def pull(rebase: bool = False, user: bool = False) -> None:
     _i._cprint("[OK] Bundle updated.")
 
 
-def link(bundle_dir: Path | None, user: bool = False) -> None:
-    """Link a bundle directory as the root bundle, or as the user bundle beside it."""
+def link(bundle_dir: Path | None, user: bool = False, shared: bool = False) -> None:
+    """Link a bundle directory as the root bundle, or as the shared or user bundle beside it."""
     _i = _install_module()
     if bundle_dir is None:
         print("ERROR: Provide the path to a bundle directory.", file=sys.stderr)
@@ -92,12 +119,13 @@ def link(bundle_dir: Path | None, user: bool = False) -> None:
         print(f"ERROR: {bundle_dir} is not a directory.", file=sys.stderr)
         sys.exit(1)
 
-    key, label = _names(user)
+    key, label = _names(user, shared)
     state = _i._load_state()
-    other = (state.get("bundle" if user else "user_bundle") or {}).get("path")
-    if other and Path(other).expanduser().resolve() == bundle_dir.resolve():
-        print(f"ERROR: {bundle_dir} is already linked as the {'root' if user else 'user'} bundle.", file=sys.stderr)
-        sys.exit(1)
+    for held, (other_key, _) in _SLOTS.items():
+        other = (state.get(other_key) or {}).get("path") if other_key != key else None
+        if other and Path(other).expanduser().resolve() == bundle_dir.resolve():
+            print(f"ERROR: {bundle_dir} is already linked as the {held} bundle.", file=sys.stderr)
+            sys.exit(1)
     old_bundle = state.get(key)
     if old_bundle:
         print(f"Replacing existing {label}: {old_bundle['path']}")
@@ -106,7 +134,7 @@ def link(bundle_dir: Path | None, user: bool = False) -> None:
         "path": str(bundle_dir),
         "linked_at": datetime.now(timezone.utc).isoformat(),
     }
-    if not user:
+    if not user and not shared:
         state[key]["owner"] = conditions._remote_owner(bundle_dir)
 
     _i._save_state(state)
@@ -130,7 +158,7 @@ def _generated(path: Path, entry: dict) -> bool:
     return entry.get("kind") == "rules" and path.is_file()
 
 
-def _sweep_generated(root: Path) -> None:
+def _sweep_generated(root: Path, label: str = "user bundle") -> None:
     _i = _install_module()
     swept = []
     for link, entry in _i._state_links().items():
@@ -138,14 +166,14 @@ def _sweep_generated(root: Path) -> None:
         if _generated(path, entry) and Path(entry.get("target", "")).is_relative_to(root):
             path.unlink()
             swept.append(path)
-            _i._cprint(f"  [RM] Removed user bundle link: {path}")
+            _i._cprint(f"  [RM] Removed {label} link: {path}")
     _i._state_forget_links(swept)
 
 
-def unlink(user: bool = False) -> None:
-    """Unlink the root bundle, or only the user bundle."""
+def unlink(user: bool = False, shared: bool = False) -> None:
+    """Unlink the root bundle, or only the shared or user bundle."""
     _i = _install_module()
-    key, label = _names(user)
+    key, label = _names(user, shared)
     state = _i._load_state()
     bundle = state.get(key)
     if not bundle:
@@ -155,30 +183,31 @@ def unlink(user: bool = False) -> None:
     bundle_path = bundle["path"]
 
     connectors = state.get("connectors", {})
-    to_remove = [] if user else [name for name, info in connectors.items() if info.get("source") == "bundle"]
+    to_remove = [] if user or shared else [name for name, info in connectors.items() if info.get("source") == "bundle"]
     for name in to_remove:
         del connectors[name]
         _i._cprint(f"  [OK] Removed bundle connector: {name}")
 
     del state[key]
     _i._save_state(state)
-    if user:
-        _sweep_generated(Path(bundle_path))
+    if user or shared:
+        _sweep_generated(Path(bundle_path), label)
     _i._cprint(f"[OK] Unlinked {label}: {bundle_path}")
     print()
     print("Run 'agentihooks init' to remove bundle settings.")
 
 
-def list_bundle(user: bool = False) -> None:
+def list_bundle(user: bool = False, shared: bool = False) -> None:
     """Show the linked bundle and its contents."""
     _i = _install_module()
-    key, label = _names(user)
-    bundle = _i._get_user_bundle_path() if user else _i._get_bundle_path()
+    key, label = _names(user, shared)
+    bundle = _linked(user, shared)
     if not bundle:
         print(f"No {label} linked.")
         print()
         print("Link one with:")
-        print(f"  agentihooks bundle link {'--user ' if user else ''}/path/to/.agentihooks")
+        flag = "--user " if user else "--shared " if shared else ""
+        print(f"  agentihooks bundle link {flag}/path/to/.agentihooks")
         return
 
     linked_at = _i._load_state().get(key, {}).get("linked_at", "?")
@@ -207,9 +236,10 @@ def list_bundle(user: bool = False) -> None:
 
 
 def user_last(argv: list[str]) -> list[str]:
-    if argv[:1] != ["bundle"] or "--user" not in argv:
+    flags = [flag for flag in ("--shared", "--user") if flag in argv]
+    if argv[:1] != ["bundle"] or not flags:
         return argv
-    return [arg for arg in argv if arg != "--user"] + ["--user"]
+    return [arg for arg in argv if arg not in flags] + flags
 
 
 def add_parser(sub) -> None:
@@ -221,4 +251,8 @@ def add_parser(sub) -> None:
     )
     bundle_p.add_argument("bundle_path", nargs="?", default=None, help="Bundle directory path (for link)")
     bundle_p.add_argument("--rebase", action="store_true", help="Use --rebase when pulling")
-    bundle_p.add_argument("--user", action="store_true", help="Act on the personal user bundle, not the root bundle")
+    scope = bundle_p.add_mutually_exclusive_group()
+    scope.add_argument("--user", action="store_true", help="Act on the personal user bundle, not the root bundle")
+    scope.add_argument(
+        "--shared", action="store_true", help="Act on the shared bundle between the root and the user bundle"
+    )

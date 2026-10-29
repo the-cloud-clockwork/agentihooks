@@ -82,8 +82,16 @@ def user_manifest_path() -> Path | None:
     return path if path and path.is_file() else None
 
 
+def shared_manifest_path() -> Path | None:
+    from scripts.install import _get_shared_bundle_path
+
+    shared = _get_shared_bundle_path()
+    path = shared / "deps.json" if shared else None
+    return path if path and path.is_file() else None
+
+
 def manifest_paths() -> list[Path]:
-    return [path for path in (manifest_path(), user_manifest_path()) if path]
+    return [path for path in (manifest_path(), shared_manifest_path(), user_manifest_path()) if path]
 
 
 def declared(paths: list[Path] | None = None) -> list[Dep]:
@@ -93,8 +101,10 @@ def declared(paths: list[Path] | None = None) -> list[Dep]:
     return list(merged.values())
 
 
-def fleet_plugins(bundle: Path | None, user: Path | None = None) -> list[str]:
-    paths = [root / "deps.json" for root in (bundle, user) if root is not None and (root / "deps.json").is_file()]
+def fleet_plugins(bundle: Path | None, user: Path | None = None, shared: Path | None = None) -> list[str]:
+    paths = [
+        root / "deps.json" for root in (bundle, shared, user) if root is not None and (root / "deps.json").is_file()
+    ]
     return [dep.id for dep in declared(paths) if dep.kind == "claude-plugin" and dep.present]
 
 
