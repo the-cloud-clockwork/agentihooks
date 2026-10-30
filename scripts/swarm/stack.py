@@ -339,6 +339,14 @@ def _restack_base(row, context):
     raise SwarmError("the stacked base is not in this branch; use a worktree cut from the parked branch")
 
 
+def _completed(base: str) -> str:
+    """Return the dev commit a manually rebased branch already sits on, else the stacked base."""
+    landed = _out(["git", "merge-base", "HEAD", "origin/dev"], "the task shares no history with dev")
+    if shell(["git", "merge-base", "--is-ancestor", base, landed]).returncode == 0:
+        return landed
+    return base
+
+
 def _rebase(base: str) -> None:
     done = shell(["git", "rebase", "--onto", "origin/dev", base])
     if done.returncode != 0:
@@ -359,7 +367,7 @@ def restack(slug: str, agent, ledger) -> dict:
     branch = _restack_branch()
     _fetch_origin(["git"], "", "cannot fetch origin")
     base, path = _restack_base(row, [slug, agent.task, branch, row["stacked_base"]])
-    _rebase(base)
+    _rebase(_completed(base))
     shell(["git", "branch", "--unset-upstream"])
     from . import publish
 
