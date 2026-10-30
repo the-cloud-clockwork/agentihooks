@@ -2,7 +2,7 @@ import json
 import sys
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
@@ -468,7 +468,9 @@ def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = Non
     return scaled, {**decision, "host": host}
 
 
-def ready_work(slug: str, store, doc: dict) -> tuple[dict, dict]:
+def ready_work(
+    slug: str, store: RedisStore, doc: dict[str, Any]
+) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
     from scripts.swarm import dispatcher
     from scripts.swarm.tick import ready_in_order
 
@@ -626,7 +628,9 @@ def _prepared(store, slug: str, task: dict) -> dict:
     }
 
 
-def _placement_ready(store, slug: str, ready: dict, now_ms: int) -> tuple[dict, list[str]]:
+def placement_ready(
+    store: RedisStore, slug: str, ready: dict[str, list[dict[str, Any]]], now_ms: int
+) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
     from scripts.hive import placement_waits
 
     refused = placement_waits.read(store, slug)
@@ -650,7 +654,7 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     from scripts.swarm.tick import _ended
 
     rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
-    ready, skipped = _placement_ready(store, slug, ready, now_ms)
+    ready, skipped = placement_ready(store, slug, ready, now_ms)
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     requirements = None
     if hasattr(runtime, "quota_requirements"):
