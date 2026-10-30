@@ -138,6 +138,7 @@ def test_a_dev_push_keeps_the_flake_history_and_publishes_the_budget():
     assert job["needs"] == ["unit"]
     assert job["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
     assert job["permissions"] == {"contents": "read"}
+    assert job["concurrency"] == {"group": "flake-history", "queue": "max", "cancel-in-progress": False}
     assert "flake-budget" not in workflow["jobs"]["gate-required"]["needs"]
     assert ci_budget.BUDGETS["flake-budget"] == 120
     steps = {step.get("name", step.get("uses")): step for step in job["steps"]}
