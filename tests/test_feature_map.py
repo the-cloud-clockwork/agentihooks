@@ -490,6 +490,28 @@ def test_the_repository_feature_map_is_valid():
     assert feature_map.validate(root, root / "feature-map.json") >= 1
 
 
+def test_the_repository_unmapped_rule_list_only_shrinks():
+    root = Path(__file__).resolve().parents[1]
+    unmapped = json.loads((root / "feature-map.json").read_text()).get("unmapped_rules", [])
+    assert set(unmapped) <= {
+        "feature-front-door-no-token",
+        "feature-front-door-route-check",
+        "feature-front-door-runtime-check",
+        "feature-stale-nudge-in-tick",
+        "feature-stale-nudge-recorded",
+    }
+
+
+def test_every_feature_marker_on_a_test_needs_a_literal_id(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/test_login.py").write_text(
+        'import pytest\nLOGIN = "login"\n@pytest.mark.feature("login")\n@pytest.mark.feature(LOGIN)\n'
+        "def test_shared():\n    pass\n"
+    )
+    with pytest.raises(ValueError, match="^tests/test_login.py::test_shared: feature marker requires an id$"):
+        feature_map.validate(root, path)
+
+
 @pytest.mark.parametrize("ordered_at", ["20261025", "2026-10-25x", " 2026-10-25"])
 def test_ordered_at_takes_only_the_dashed_date_form(mapped_repo, ordered_at):
     root, path, entry = mapped_repo

@@ -76,7 +76,8 @@ suite source without importing it or running it, and fails when:
 Every rule in `.semgrep/features/` must be named by an entry's `semgrep_rule`
 or listed in the map's top level `unmapped_rules`. That list holds the rules not
 yet mapped and may only shrink: a listed rule that an entry names, or that no
-longer exists, fails the map until it is removed from the list.
+longer exists, fails the map until it is removed from the list. A test pins the list
+to the rules it held when the map landed, so a grown list fails CI.
 
 ## Operator entries
 
