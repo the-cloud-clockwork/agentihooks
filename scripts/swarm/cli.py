@@ -177,7 +177,7 @@ from scripts.swarm.store import (
     Unreachable,
     connect,
 )
-from scripts.swarm.tick import agent_status, primed, ready_in_order, skip_refused, spawn_holds, tick
+from scripts.swarm.tick import agent_status, primed, skip_refused, spawn_holds, tick
 from scripts.swarm_ledger import (
     ledger_creator,
     ledger_kinds,
@@ -431,7 +431,7 @@ def run_tick(
                     view,
                     frozenset(live),
                     lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
-                    lambda lane: ready_in_order(slug, store, rows, doc, lane),
+                    stall_watch.ready_lanes(slug, store, ledger, doc, now_ms()),
                     now_ms(),
                     released=release_wait.checker(config.repo),
                     reread=ledger_events.view,
