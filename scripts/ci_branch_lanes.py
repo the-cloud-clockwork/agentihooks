@@ -153,7 +153,6 @@ def dedicated_chart_group(name: str, block: object, job: dict, trusted: dict) ->
 
 
 def flake_history_group(name: str, block: object, job: dict, trusted: dict) -> bool:
-    """Accept the one queue the Tests flake budget job takes so overlapping dev runs keep each other's flakes."""
     baseline = (trusted.get("jobs") or {}).get(name)
     return (
         trusted.get("name") == "Tests"

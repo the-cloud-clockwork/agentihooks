@@ -929,7 +929,7 @@ def test_only_the_trusted_chart_release_may_leave_the_shared_proof_lane(change):
 @pytest.mark.parametrize(
     "change", [None, "group", "queue", "cancel", "other-job", "job", "untrusted", "trusted-name", "new-job"]
 )
-def test_only_the_trusted_tests_flake_budget_may_queue_on_the_flake_history_group(change):
+def test_only_the_trusted_tests_flake_budget_may_queue_on_the_flake_history_group(change: str | None) -> None:
     import copy
 
     baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "test.yml").read_text())
