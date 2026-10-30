@@ -59,7 +59,7 @@
       "id": "swarm-claim-dependencies",
       "origin": "inventory",
       "behaviour": "A task stacked on a live dependency is claimable while work parked on it waits.",
-      "seam": "The tick claim pass",
+      "seam": "The tick claim pass and scripts.swarm.health.urgent_hold",
       "tests": [
         "tests/swarm/test_urgent_hold.py::test_stacking_on_a_live_dependency_is_claimable_but_parked_work_waits"
       ]
@@ -139,7 +139,8 @@
       "seam": "The spawn prompt built from the swarm culture",
       "tests": [
         "tests/swarm/test_seat_priming.py::test_the_tick_primes_every_lane_and_the_master_with_the_swarm_culture",
-        "tests/swarm/test_seat_priming.py::test_culture_set_and_show_survive_swarm_remove"
+        "tests/swarm/test_seat_priming.py::test_culture_set_and_show_survive_swarm_remove",
+        "tests/swarm/test_seat_priming.py::test_the_culture_sits_ahead_of_the_seat_recap_for_every_lane_and_the_master"
       ]
     },
     {
@@ -155,7 +156,7 @@
     {
       "id": "swarm-handoff",
       "origin": "inventory",
-      "behaviour": "A Handoff v2 document is checked for its headings and their order before it is stored, and the seat recap is derived from it.",
+      "behaviour": "The Handoff v2 checker refuses a document missing a heading or with headings out of order, and the seat recap is derived from the document.",
       "seam": "scripts.handoff.check and agentihooks swarm handoff",
       "tests": [
         "tests/swarm/test_handoff_v2_priming.py::test_handoff_derives_the_seat_recap_without_another_file",

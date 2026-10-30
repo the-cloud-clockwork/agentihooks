@@ -172,6 +172,7 @@ def test_a_seat_with_only_data_says_so_and_counts_it():
 
 
 @pytest.mark.parametrize("lane", ["eng", "ci", MASTER])
+@pytest.mark.feature("swarm-culture")
 def test_the_culture_sits_ahead_of_the_seat_recap_for_every_lane_and_the_master(lane):
     task = {"id": "t1", "title": "x", "seat": f"{lane}-1@sw", "culture": "culture text", "recaps": RECAPS}
     text = prompt.build("sw", "/repo", lane, f"sw-{lane}-1", task)
