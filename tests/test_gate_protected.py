@@ -998,6 +998,100 @@ def test_a_head_switching_to_either_canonical_aggregation_is_green(selected):
 
 
 @pytest.mark.parametrize("docs", [False, True])
+@pytest.mark.parametrize("form", ["canonical", "unchanged", "weakened", "unwired"])
+def test_typing_admission_requires_the_exact_reviewed_aggregation(docs: bool, form: str) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=docs)
+    head["jobs"]["gate-required"]["steps"] = copy.deepcopy(base["jobs"]["gate-required"]["steps"])
+    for workflow in (base, head):
+        if docs:
+            workflow["jobs"]["docs"] = {"runs-on": "ubuntu-latest"}
+            workflow["jobs"]["gate-required"]["needs"].append("docs")
+    head["jobs"]["type-gate"] = {"if": "github.event_name == 'pull_request'", "runs-on": "ubuntu-latest"}
+    if form != "unwired":
+        head["jobs"]["gate-required"]["needs"].append("type-gate")
+    if form != "unchanged":
+        head["jobs"]["gate-required"]["steps"] = ci_reuse.typing_required(head["jobs"]["gate-required"]["steps"])
+    if form == "weakened":
+        step = head["jobs"]["gate-required"]["steps"][0]
+        step["run"] = step["run"].replace('"type-gate", ', "")
+    problems = _grade({"test.yml": head}, base={"test.yml": base})
+    assert bool(problems) == (form != "canonical"), problems
+
+
+@pytest.mark.parametrize("status", ["success", "failure", "cancelled", "skipped", "missing"])
+@pytest.mark.parametrize("scope", ["full", "selected", "none"])
+def test_typing_aggregation_requires_success_on_every_pull_request_scope(status: str, scope: str) -> None:
+    from scripts import ci_reuse
+
+    [step] = ci_reuse.typing_required(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
+    required = ["select", "test-count", "lint", "semgrep", "sonar"]
+    required += (
+        ["split", "unit", "shard-check"] if scope == "full" else ["unit-selected"] if scope == "selected" else []
+    )
+    needs = {name: {"result": "success"} for name in required}
+    needs["select"]["outputs"] = {"scope": scope}
+    if status != "missing":
+        needs["type-gate"] = {"result": status}
+    env = dict(
+        os.environ, EVENT="pull_request", NEEDS=json.dumps(needs), MUTATION="false", REUSED="false", KIND="false"
+    )
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == (status == "success"), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "event,status,expected",
+    [
+        ("push", "skipped", True),
+        ("push", "failure", False),
+        ("merge_group", "skipped", True),
+        ("merge_group", "success", False),
+    ],
+)
+def test_typing_aggregation_keeps_typing_off_the_queue_and_promotion(event: str, status: str, expected: bool) -> None:
+    from scripts import ci_reuse
+
+    [step] = ci_reuse.typing_required(ci_reuse.gate_steps(queue_tier=True, consolidated=True, promotion=True))
+    required = ["select", "split", "shard-check", "test-count"] if event == "merge_group" else ["select"]
+    needs = {name: {"result": "success"} for name in required}
+    needs["select"]["outputs"] = {"scope": "full"}
+    if event == "merge_group":
+        needs.update(
+            {
+                "unit": {"result": "success"},
+                "unit-lost": {"result": "skipped"},
+                "unit-rerun": {"result": "skipped"},
+                "queue-fail-fast": {"result": "success"},
+            }
+        )
+        step = ci_reuse.lost_rerun([step])[0]
+    needs["type-gate"] = {"result": status}
+    env = dict(os.environ, EVENT=event, NEEDS=json.dumps(needs), MUTATION="false", REUSED="false", KIND="false")
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == expected, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("missing", [None, "promotion-ready", "promote"])
+def test_feature_suite_requires_both_promotion_dependencies(missing: str | None) -> None:
+    from scripts import ci_wiring
+
+    workflow = _workflow()
+    jobs = workflow["jobs"]
+    jobs["feature-suite"] = {"if": "github.event_name == 'push'", "runs-on": "ubuntu-latest"}
+    for job_id in ("promotion-ready", "promote"):
+        jobs[job_id] = {
+            "if": "github.event_name == 'push'",
+            "runs-on": "ubuntu-latest",
+            "needs": [] if job_id == missing else ["feature-suite"],
+        }
+    problems = ci_wiring.check({"test.yml": workflow}, {}, _TODAY)
+    assert problems == ([] if missing is None else [f"test.yml/feature-suite is not a need of {missing}."])
+
+
+@pytest.mark.parametrize("docs", [False, True])
 def test_documentation_aggregation_accepts_only_the_canonical_transition(docs):
     from scripts import ci_reuse
 

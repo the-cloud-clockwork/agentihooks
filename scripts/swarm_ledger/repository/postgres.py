@@ -9,7 +9,7 @@ from types import ModuleType, SimpleNamespace
 from scripts.swarm_ledger import request_metrics
 
 from . import hierarchy, refresh
-from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, Snapshot, SQLiteLedgerRepository
+from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, TOKEN, Snapshot, SQLiteLedgerRepository
 
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
 WRITER_LOCK = 0x4C454447
@@ -330,6 +330,13 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
 
     def _reader(self):
         return self.connect()
+
+    def token(self, slug: str) -> str | None:
+        with Database(self.address).read_only() as connection:
+            if connection.execute("SELECT to_regclass('ledgers')").fetchone()[0] is None:
+                return None
+            row = connection.execute(TOKEN, (slug,)).fetchone()
+        return None if row is None else row[0]
 
     def _set_up(self, connection, address) -> None:
         with self._guard:
