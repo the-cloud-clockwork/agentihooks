@@ -341,15 +341,40 @@ def _restack_base(row: dict, context: list[str]) -> tuple[str, Path]:
     raise SwarmError("the stacked base is not in this branch; use a worktree cut from the parked branch")
 
 
+def _contains(candidate: str, base: str) -> bool:
+    merged = shell(["git", "merge-tree", "--write-tree", candidate, base])
+    return merged.returncode == 0 and merged.stdout.strip() == _out(
+        ["git", "rev-parse", f"{candidate}^{{tree}}"], "cannot resolve the completed rebase tree"
+    )
+
+
 def _completed(base: str) -> str:
     """Return the dev commit containing completed dependency work after a manual rebase."""
     landed = _out(["git", "merge-base", "HEAD", "origin/dev"], "the task shares no history with dev")
     if shell(["git", "merge-base", "--is-ancestor", base, landed]).returncode == 0:
         return landed
-    if shell(["git", "merge-base", "--is-ancestor", base, "HEAD"]).returncode != 0:
-        merged = shell(["git", "merge-tree", "--write-tree", landed, base])
-        tree = _out(["git", "rev-parse", f"{landed}^{{tree}}"], "cannot resolve the completed rebase tree")
-        if merged.returncode == 0 and merged.stdout.strip() == tree:
+    if shell(["git", "merge-base", "--is-ancestor", base, "HEAD"]).returncode == 0:
+        return base
+    if _contains(landed, base):
+        return landed
+    fork = _out(["git", "merge-base", base, landed], "the stacked base shares no history with dev")
+    changed = shell(["git", "diff", "--name-only", "-z", fork, base])
+    if changed.returncode != 0:
+        raise SwarmError(f"cannot list dependency files: {changed.stderr.strip()}")
+    history = _out(
+        [
+            "git",
+            "--literal-pathspecs",
+            "log",
+            "--format=%H",
+            f"{fork}..{landed}",
+            "--",
+            *changed.stdout.split("\0")[:-1],
+        ],
+        "cannot read completed dependency history",
+    )
+    for candidate in history.splitlines():
+        if _contains(candidate, base):
             return landed
     return base
 
