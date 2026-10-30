@@ -370,7 +370,7 @@ def _green(slug: str, ledger: LedgerClient, doc: dict, last: dict, repo: str, ru
     known = {t["id"]: t for t in doc.get("tasks", [])}
     for task in [t for t in _promotion_tasks(doc) if t.get("state") in CLOSABLE]:
         pin = known.get(PIN_PREFIX + task["id"], {})
-        proven = pin.get("state") == "done" or pinned(repo, task.get("pr_url") or "", run)
+        proven = pin.get("state") == "done" or pinned(repo, task.get("pr_url"), run)
         if proven is None:
             continue
         if not proven:
@@ -386,9 +386,9 @@ def _green(slug: str, ledger: LedgerClient, doc: dict, last: dict, repo: str, ru
     return actions
 
 
-def pinned(repo_dir: str, url: str, run: Callable = subprocess.run) -> bool | None:
+def pinned(repo_dir: str, url: str | None, run: Callable = subprocess.run) -> bool | None:
     """Whether the merged pull request at url added or changed a test file feature-map.json maps; None when unread."""
-    number = PULL.search(url)
+    number = PULL.search(url) if url else None
     if number is None:
         return False
     pulls = f"repos/{{owner}}/{{repo}}/pulls/{number.group(1)}"
