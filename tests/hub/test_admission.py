@@ -89,7 +89,7 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
     [agent] = rig.store.agents(SLUG)
     assert (agent.name, agent.lane, agent.task, agent.seat, agent.hive) == (name, "eng", "t1", "eng-1@sw", "hive-a")
     assert (agent.state, agent.started_at) == ("starting", 7_000)
-    assert rig.store.redis.hget(rig.store.names.key("name", name), "spawned_at") == "7000"
+    assert rig.store.names.entry(name)["spawned_at"] == 7_000
     [occupied] = rig.store.redis.lrange(f"{rig.store.seats.key('eng-1@sw')}:history", -1, -1)
     assert json.loads(occupied)["at"] == 7_000
     from scripts.swarm import tick

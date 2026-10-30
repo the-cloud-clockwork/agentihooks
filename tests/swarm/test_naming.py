@@ -303,34 +303,16 @@ def test_resolve_many_reads_the_store_once_then_the_legacy_keys_it_lacks_once(st
     assert reads == expected
 
 
-def test_names_batches_alias_and_record_reads_without_changing_rows(store, redis, monkeypatch):
-    from unittest.mock import Mock
-
-    names = [store.next_name("sw", lane, at=at) for lane, at in (("eng", 17), ("ci", 23))]
-    store.names.note(names[1], session_id="session")
-    store.names.retire(names[1], 31)
+def test_names_reads_the_store_once_and_legacy_records_one_page_per_pipeline(store, redis, monkeypatch):
     code = store.names.code_of("sw")
-    redis.rpush(store.names.key("names", code), "old-agent", "missing", names[0])
-    store.names.alias("old-agent", names[1])
-    expected = [store.names.entry(name) for name in [*names, "old-agent", "missing", names[0]]]
-    direct = Mock(wraps=redis.hgetall)
-    aliases = Mock(wraps=redis.mget)
-    pipeline = Mock(wraps=redis.pipeline)
-    monkeypatch.setattr(redis, "hgetall", direct)
-    monkeypatch.setattr(redis, "mget", aliases)
-    monkeypatch.setattr(redis, "pipeline", pipeline)
-
-    assert store.names.names("sw") == expected
-    direct.assert_not_called()
-    aliases.assert_called_once_with([store.names.key("alias", name) for name in [*names, "missing"]])
-    pipeline.assert_called_once_with(transaction=False)
-
-
-def test_names_reads_records_one_page_per_pipeline_and_keeps_the_rows(store, redis, monkeypatch):
-    names = [store.next_name("sw", "eng", at=at) for at in range(5)]
+    legacy = [f"engineer@{code}-{n:04d}" for n in range(1, 6)]
+    for number, name in enumerate(legacy, 1):
+        redis.hset(store.names.key("name", name), mapping={"type": "engineer", "number": number, "spawned_at": 0})
+    redis.rpush(store.names.key("names", code), *legacy, "missing")
+    late = store.next_name("sw", "ci", at=3)
     expected = store.names.names("sw")
-    sizes = []
-    pipeline = redis.pipeline
+    sizes, reads = [], []
+    pipeline, hmget = redis.pipeline, redis.hmget
 
     def counted(**kwargs):
         pipe = pipeline(**kwargs)
@@ -345,10 +327,22 @@ def test_names_reads_records_one_page_per_pipeline_and_keeps_the_rows(store, red
 
     monkeypatch.setattr(naming, "NAMES_PAGE", 2, raising=False)
     monkeypatch.setattr(redis, "pipeline", counted)
+    monkeypatch.setattr(redis, "hmget", lambda key, fields: reads.append(len(fields)) or hmget(key, fields))
 
     assert store.names.names("sw") == expected
-    assert [row["name"] for row in expected] == names
-    assert sizes == [2, 2, 1]
+    assert [row.get("name") for row in expected] == [*legacy, None, late]
+    assert expected[0]["number"] == 1
+    assert sizes == [2, 2, 2]
+    assert reads == [len(legacy) + 2, len(legacy) + 2]
+
+
+def test_names_lists_legacy_names_first_then_new_ones_in_spawn_order(store, redis):
+    code = store.names.code_of("sw")
+    redis.hset(store.names.key("name", "old-agent"), mapping={"type": "engineer", "spawned_at": 1})
+    redis.rpush(store.names.key("names", code), "old-agent")
+    late = store.next_name("sw", "eng", at=9)
+    early = store.next_name("sw", "ci", at=4)
+    assert store.names.names("sw") == [store.names.entry(name) for name in ("old-agent", early, late)]
 
 
 def test_names_without_a_code_reads_no_records(store, redis, monkeypatch):
