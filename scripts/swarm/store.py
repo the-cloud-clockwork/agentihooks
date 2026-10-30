@@ -5,12 +5,12 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
 from scripts.swarm import default_models, effort_range, timing
-from scripts.swarm.execution import ExecutionRegistry, occupants_of, records_of
+from scripts.swarm.execution import ExecutionRegistry, _finished_life, occupants_of, records_of
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
 
@@ -507,12 +507,14 @@ class RedisStore:
         self._projection(slug, write, PROJECTION_CONTENTION)
 
     def project_legacy(self, slug: str, agent: AgentRecord, managed: Callable[[], bool]) -> bool:
-        def write(pipe):
+        def write(pipe: Any) -> bool:
             if managed():
                 return False
             raw = pipe.hget(self.key(slug, "agents"), agent.name)
+            row = json.loads(raw) if raw else None
+            written = replace(agent, state="finished") if row and _finished_life(row, agent) else agent
             pipe.multi()
-            self._project_row(pipe, slug, agent, AgentRecord(**json.loads(raw)) if raw else None)
+            self._project_row(pipe, slug, written, AgentRecord(**row) if row else None)
             timing.timed(pipe.execute)
             return True
 
