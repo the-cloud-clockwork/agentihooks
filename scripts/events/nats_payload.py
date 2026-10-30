@@ -1,4 +1,5 @@
 import datetime
+import functools
 import hashlib
 import json
 import re
@@ -93,6 +94,20 @@ async def reclaim(
     for names in stale.values():
         for name in names:
             await js.purge_stream(stream, subject=name)
+
+
+async def reclaim_all(js: JetStreamContext, stream: str, prefix: str) -> None:
+    info = await js.stream_info(stream, subjects_filter=f"{prefix}>")
+    for name in info.state.subjects or {}:
+        key = name[len(prefix) :]
+        if STAGED.fullmatch(key):
+            continue
+        last = await js.get_last_msg(stream, name)
+        await reclaim(js, stream, prefix, key, functools.partial(_single, last.data or b""), last.seq)
+
+
+async def _single(value: bytes) -> list[bytes]:
+    return [value]
 
 
 def due(last: datetime.datetime | None, now: datetime.datetime) -> datetime.datetime | None:

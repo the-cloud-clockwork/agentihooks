@@ -306,7 +306,10 @@ async def provision_state(js: JetStreamContext, bucket: str) -> KeyValue:
     except APIError as exc:
         if exc.err_code != 10058 or bucket not in STATE_LIMITS:
             raise
-    info = await js.stream_info(f"KV_{bucket}")
+    stream = f"KV_{bucket}"
+    info = await js.stream_info(stream)
+    await js.update_stream(config=replace(info.config, max_msgs_per_subject=limits["history"]))
+    await nats_payload.reclaim_all(js, stream, f"$KV.{bucket}.")
     bounded = replace(info.config, max_msgs_per_subject=limits["history"], max_bytes=limits["max_bytes"])
     await js.update_stream(config=bounded)
     return await js.key_value(bucket)
