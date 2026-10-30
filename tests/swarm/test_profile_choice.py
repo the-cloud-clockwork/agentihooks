@@ -1,4 +1,4 @@
-from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -480,9 +480,7 @@ def test_a_later_unresolved_answer_blocks_its_task_and_the_rest_still_launch(mon
 def test_a_fresh_spawn_keeps_its_handoff_without_the_original_run_options():
     complete = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high"}
     lost = {"handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": {"profile": "engineer"}}}
-    with pytest.raises(tick.SpawnError) as error:
-        profile_choice.transfer(lost)
-    assert error.value.status == "unsupported"
+    assert profile_choice.transfer(lost) == {}
     assert profile_choice.transfer({**lost, profile_choice.FRESH: True}) == {}
     assert profile_choice.transfer({**lost, "handoff_envelope": {"launch": complete}, profile_choice.FRESH: True}) == {}
     assert profile_choice.transfer({**lost, "handoff_envelope": {"launch": complete}}) == complete
@@ -507,55 +505,36 @@ def test_a_handoff_whose_launch_never_reported_options_keeps_its_identity():
     ],
     ids=["no-envelope", "no-launch", "empty-identity", "no-harness", "no-profile"],
 )
-def test_a_handoff_without_a_complete_launch_identity_spawns_fresh_with_its_text(envelope):
+def test_a_handoff_without_a_complete_launch_identity_spawns_fresh(envelope):
     task = {"id": "t962", "handoff": "## Next\nGo on\n", "handoff_envelope": envelope}
-    fresh = profile_choice.fresh_when_incomplete(task)
-    assert fresh == {**task, profile_choice.FRESH: True}
-    assert profile_choice.transfer(fresh) == {}
+    assert profile_choice.transfer(task) == {}
 
 
-def test_an_incomplete_saved_launch_without_handoff_text_also_spawns_fresh():
-    task = {"id": "t962", "handoff_envelope": {"launch": {"profile": "", "harness": "", "model": "m"}}}
-    assert profile_choice.fresh_when_incomplete(task) == {**task, profile_choice.FRESH: True}
+def test_runtime_spawns_a_handoff_with_an_empty_launch_identity_fresh_with_its_text(tmp_path, asked, ledger_file):
+    asked("frontend")
+    calls = []
 
+    def launch(argv, **kwargs):
+        calls.append(argv)
+        out = "status=started\nroute_status=direct\npane_id=w:p1\nagent=claude\nprofile=frontend\nmodel=m\neffort=low\n"
+        return SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr="")
 
-@pytest.mark.parametrize(
-    "task",
-    [
-        {"id": "t1"},
-        {"id": "t1", "handoff_envelope": {"launch": {}}},
-        {"id": "t1", "handoff": "doc", "handoff_envelope": {"launch": {"profile": "engineer", "harness": "codex"}}},
-    ],
-    ids=["no-handoff", "no-handoff-empty-launch", "complete-launch"],
-)
-def test_a_task_with_no_handoff_or_a_complete_launch_is_returned_unchanged(task):
-    assert profile_choice.fresh_when_incomplete(task) is task
-
-
-def test_the_tick_respawns_a_handoff_with_an_empty_launch_identity_fresh_with_its_doc(monkeypatch):
-    import fakeredis
-
-    two = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    two.create(store.SwarmConfig("sw", "/repo", max_eng=2, max_ci=0))
-    monkeypatch.setattr(tick, "reclaim", lambda repo, lives, recorded, **_: {"continue_from": "fresh"})
-    ledger, rt = tasks(("t1", "eng")), FakeRuntime()
-    tick.tick("sw", two, ledger, rt, now_ms=1_000)
-    first = next(a for a in two.agents("sw") if a.lane == "eng")
+    config = store.SwarmConfig("sw", str(tmp_path), 1, 0, code="a1b2c3")
+    rt = runtime.HerdrRuntime(home=tmp_path, run=launch, choose=lambda *_: ("claude", "open"))
     empty = {"profile": "", "harness": "", "model": "claude-opus-5-5", "effort": "medium"}
-    two.put_handoff("sw", "t1", "seam 1 green", envelope={"launch": empty})
-    two.put_agent("sw", replace(first, state="finished"))
-    tick.tick("sw", two, ledger, rt, now_ms=2_000)
-    assert [task_id for _, _, task_id in rt.spawned] == ["t1", "t1"]
-    assert rt.tasks[-1]["handoff"] == "seam 1 green"
-    assert rt.tasks[-1][profile_choice.FRESH] is True
-    assert profile_choice.transfer(rt.tasks[-1]) == {}
+    task = {**TASK, "handoff": "## Next\nGo on from seam two\n", "handoff_envelope": {"launch": empty}}
+    placed = rt.spawn(config, "eng", "a", task)
+    argv = calls[0]
+    assert argv[argv.index("--profile") + 1] == "frontend"
+    assert placed.profile_decision["source"] == "classifier"
+    assert "Go on from seam two" in Path(argv[argv.index("--prompt-file") + 1]).read_text()
 
 
 class UnsupportedHandoffRuntime(LaterUnresolvedRuntime):
     def placement_refusal(self, lane, task):
         self.checked.append(task.get("id"))
         if task.get("id") == "t1" and self.checked.count("t1") > 2:
-            profile_choice.transfer({"handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": {"profile": "x"}}})
+            profile_choice.transfer({"handoff_envelope": {"launch": {"profile": "x", "harness": "gemini"}}})
         return ""
 
     def spawn(self, config, lane, name, task):
