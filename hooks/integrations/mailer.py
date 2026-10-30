@@ -68,7 +68,12 @@ class EmailResult:
 
 
 class EmailClient:
-    """SMTP email client with HTML and markdown support."""
+    """SMTP email client with HTML and markdown support.
+
+    SMTP_USER and SMTP_PASS are set together or not at all; a half-set pair is
+    reported as incomplete_auth_config. Authenticated connections default to the
+    STARTTLS port 587.
+    """
 
     _instance: Optional["EmailClient"] = None
 
@@ -507,7 +512,10 @@ class EmailRecipientCategories:
 
 @dataclass
 class EmailConfig:
-    """Email configuration from JSON file (V2 format)."""
+    """Email configuration from JSON file (V2 format).
+
+    recipients are the fallback recipients; defaults holds subject and content.
+    """
 
     version: str
     categories: EmailRecipientCategories
@@ -638,7 +646,8 @@ def load_html_template(template_path: Path) -> Optional[str]:
 def inject_template_variables(template: str, context: dict) -> str:
     """Inject variables into HTML template.
 
-    Replaces placeholders like {{variable}} with values from context.
+    Replaces placeholders like {{variable}} with values from context; placeholders
+    left unreplaced are logged.
 
     Args:
         template: HTML template with {{variable}} placeholders

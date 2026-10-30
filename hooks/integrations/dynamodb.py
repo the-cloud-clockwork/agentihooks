@@ -82,6 +82,8 @@ class DynamoDBResult:
 def load_state(session_id: str, state_file: Optional[Path] = None) -> Dict[str, Any]:
     """Load state data for a session from conversation_map.json.
 
+    A legacy state stored as a plain string is converted to a dict.
+
     Uses correlation ID (external UUID) for lookup since the API stores state
     under the external UUID, which may differ from Claude's session ID.
 
@@ -608,7 +610,11 @@ def get_last_assistant_response(transcript_path: str) -> Optional[str]:
 
 
 def main():
-    """CLI entry point for DynamoDB operations."""
+    """CLI entry point for DynamoDB operations.
+
+    Hook mode prints a missing configuration warning to stdout, where Claude Code
+    shows it, and exits 0 on any failure, so a hook never breaks Claude Code.
+    """
     if len(sys.argv) < 2:
         print("Usage: /app/hooks/integrations/dynamodb.py <command> [args]")
         print("")

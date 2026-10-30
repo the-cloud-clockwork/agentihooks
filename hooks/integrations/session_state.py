@@ -3,7 +3,7 @@
 
 Provides atomic read/merge/write operations on the shared session map file
 (~/conversation_map.json). Any agent or hook can enrich session data which
-the API layer reads after session completion.
+the API layer reads from the same file after session completion.
 
 The session map is keyed by session_id (UUID) and stores arbitrary data,
 such as wait, platform, signed_urls added by hooks and custom fields added

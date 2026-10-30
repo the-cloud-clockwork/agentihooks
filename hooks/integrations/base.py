@@ -272,7 +272,11 @@ class IntegrationBase(ABC):
 
 
 class IntegrationRegistry:
-    """Registry of all available integrations for status checking."""
+    """Registry of all available integrations for status checking.
+
+    Importing an integration module registers it, so callers import every
+    integration before reading the registry.
+    """
 
     _integrations: Dict[str, type] = {}
 
