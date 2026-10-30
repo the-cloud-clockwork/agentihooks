@@ -10,6 +10,8 @@ from pathlib import Path
 
 import yaml
 
+from scripts import locked_tests
+
 ORIGINS = ("operator", "regression", "inventory")
 LEDGER_ITEM = r"ledger:[\w-]+/(tasks|phases|comments|chat)/[\w-]+"
 
@@ -161,7 +163,43 @@ def _rule_coverage(rules: set[str], owned: set[str], unmapped: object) -> None:
         raise ValueError(f"unmapped rule: {missing}")
 
 
-def validate(root: Path, map_path: Path) -> int:
+def _disabled(root: Path, nodes: set[str]) -> None:
+    modules = tuple(sorted({node.split("::")[0] for node in nodes}))
+    measured = locked_tests.measure(root, modules)
+    if disabled := sorted(node for node in nodes if measured.get(node, {}).get("disabled")):
+        raise ValueError(f"mapped test is skipped, xfailed or returns early: {disabled}")
+
+
+def _retired(data: dict, ids: set[str]) -> set[str]:
+    records = data.get("retired", [])
+    if not isinstance(records, list) or not all(isinstance(record, dict) for record in records):
+        raise ValueError("retired must be a list of records")
+    retired = set()
+    for record in records:
+        name = _require(record, "id")
+        _require(record, "reason")
+        if not re.fullmatch(LEDGER_ITEM, _require(record, "ledger_item")):
+            raise ValueError(f"{name}: invalid retired ledger_item")
+        if name in retired:
+            raise ValueError(f"duplicate retired feature {name}")
+        retired.add(name)
+    if reused := sorted(retired & ids):
+        raise ValueError(f"retired feature id reused: {reused}")
+    return retired
+
+
+def _against_base(base: Path, ids: set[str], retired: set[str]) -> None:
+    if not base.is_file():
+        return
+    data = json.loads(base.read_text())
+    base_ids = {entry["id"] for entry in data["features"]}
+    if removed := sorted(base_ids - ids - retired):
+        raise ValueError(f"removed feature needs a retired record: {removed}")
+    if dropped := sorted({record["id"] for record in data.get("retired", [])} - retired):
+        raise ValueError(f"retired record removed: {dropped}")
+
+
+def validate(root: Path, map_path: Path, base: Path | None = None) -> int:
     data = json.loads(map_path.read_text())
     entries = data["features"]
     if not isinstance(entries, list) or not entries:
@@ -178,14 +216,20 @@ def validate(root: Path, map_path: Path) -> int:
     )
     if missing := {node_id for node_id, feature in tests.items() if feature is not None} - owned_tests:
         raise ValueError(f"unmapped feature test: {sorted(missing)}")
+    _disabled(root, owned_tests)
+    retired = _retired(data, ids)
+    if base is not None:
+        _against_base(base, ids, retired)
     return len(entries)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser.add_argument("--base", type=Path)
     args = parser.parse_args()
-    count = validate(args.root, args.root / "feature-map.json")
+    base = args.base / "feature-map.json" if args.base else None
+    count = validate(args.root, args.root / "feature-map.json", base)
     print(f"Feature map: {count} features, all rule, test and live check links exist")
 
 
