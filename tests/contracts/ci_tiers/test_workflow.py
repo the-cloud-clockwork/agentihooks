@@ -174,10 +174,10 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     assert not any("queue-baseline" in job.get("needs", []) for job in jobs.values())
     options = {"consolidated": True} if DURATION_JOB == "select" else {}
     steps = jobs["gate-required"]["steps"]
-    typing = ci_reuse.typing_required if "type-gate" in jobs else list
+    assert "type-gate" in jobs["gate-required"]["needs"]
     steps[0]["run"] = steps[0]["run"].replace('"docs", "semgrep"', '"semgrep"')
     assert steps in [
-        typing(
+        ci_reuse.typing_required(
             ci_reuse.test_only_sonar(
                 ci_reuse.selection_diagnostic(
                     forward(

@@ -279,9 +279,9 @@ def _held(raw: str) -> tuple[str, str] | None:
 
 
 def _unavailable() -> tuple[type[BaseException], ...]:
+    """Return the store outage errors; store families may read Redis whatever the configured backend."""
     from scripts.events import state
 
-    # Store families may read Redis whatever the configured backend, known or not.
     try:
         configured = state.unavailable()
     except ValueError:

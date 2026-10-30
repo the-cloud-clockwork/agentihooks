@@ -120,9 +120,6 @@ _SECTION_RE = re.compile(
     r"\*\*(Release-gate signals|Hotfix signals)\*\*.*?```(.*?)```",
     re.DOTALL | re.IGNORECASE,
 )
-# Branch Discipline and PR Discipline sections — both share the
-# "Unlock (per-turn operator signal)" fenced-block convention. We match
-# by section title (section numbering changes when new sections land).
 _BRANCH_SECTION_RE = re.compile(
     r"##\s*\d+\.\s*Branch\s+Discipline.*?###\s*Unlock\s*\([^)]*operator signal\).*?```(.*?)```",
     re.DOTALL | re.IGNORECASE,
@@ -211,7 +208,6 @@ def _signal_match(text: str, signals: list[str]) -> bool:
         idx = low.find(phrase)
         if idx == -1:
             continue
-        # Check for negation in the 20 chars before the match
         prefix = low[max(0, idx - 20) : idx].strip()
         if any(prefix.endswith(neg.strip()) for neg in _NEGATION_PREFIXES):
             continue
@@ -235,18 +231,6 @@ def contains_pr_signal(text: str) -> bool:
     return _signal_match(text, get_pr_signals())
 
 
-# Claude Code injects hook stdout and additionalContext into the model's
-# context with a documented 10,000-char hard cap (over → harness silently
-# writes to a temp file and the model gets a filepath, not the body).
-#
-# We do NOT enforce a default cap on the manifesto inject — operators who
-# want full doctrine in context should keep the env var unset and accept
-# the upstream tradeoff. Set CI_MANIFESTO_MAX_BYTES=N to opt in to
-# truncation when you have multiple things competing for SessionStart
-# budget.
-#
-# CI_MANIFESTO_MAX_BYTES=0 (default) → unbounded; emit full manifesto.
-# CI_MANIFESTO_MAX_BYTES=7500          → cap to ~7.5 KB with trailer.
 _INJECTION_TRAILER_TEMPLATE = (
     "\n[TRUNCATED — the full doctrine is at: {path}]\n"
     "Read that path with the Read tool when you need section details.\n"
@@ -276,7 +260,6 @@ def _build_injection() -> str:
     budget = _injection_budget_bytes()
     if budget <= 0 or len(full_payload.encode("utf-8")) <= budget:
         return full_payload
-    # Need to truncate. Compute room left for content after header + trailer.
     trailer = _INJECTION_TRAILER_TEMPLATE.format(path=path_str)
     overhead = len((header + trailer).encode("utf-8"))
     body_budget = max(0, budget - overhead)
@@ -291,7 +274,8 @@ def inject_on_session_start() -> None:
     Default OFF — the manifesto is now appended to ~/.claude/CLAUDE.md by
     agentihooks init (memory channel, no 2KB hook cap, zero per-session
     cost). Set CI_MANIFESTO_RUNTIME_INJECT=true to restore legacy runtime
-    injection.
+    injection. Codex and Copilot parse hook stdout as one JSON object, so their payload
+    is queued for the single end-of-process flush.
     """
     try:
         from hooks.config import CI_MANIFESTO_ENABLED, CI_MANIFESTO_RUNTIME_INJECT
@@ -306,8 +290,6 @@ def inject_on_session_start() -> None:
         from hooks.targets import buffers_single_envelope, emitter
 
         if buffers_single_envelope() or emitter.forced():
-            # Codex and Copilot parse hook stdout as ONE JSON object — queue
-            # for the single end-of-process flush instead of printing our own.
             emitter.buffer_context(payload)
             return
 
@@ -321,7 +303,8 @@ def maybe_refresh(session_id: str) -> None:
 
     Like inject_on_session_start, this is gated by CI_MANIFESTO_RUNTIME_INJECT.
     With manifesto in CLAUDE.md, periodic re-injection is unnecessary —
-    CLAUDE.md content stays in context for the whole session.
+    CLAUDE.md content stays in context for the whole session. Codex and Copilot output
+    is queued for the single end-of-process flush.
     """
     try:
         from hooks.config import (
@@ -344,8 +327,6 @@ def maybe_refresh(session_id: str) -> None:
         from hooks.targets import buffers_single_envelope, emitter
 
         if buffers_single_envelope() or emitter.forced():
-            # Codex and Copilot parse hook stdout as ONE JSON object — queue
-            # for the single end-of-process flush instead of printing our own.
             emitter.buffer_context(payload)
             return
 
