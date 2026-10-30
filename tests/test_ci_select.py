@@ -567,6 +567,17 @@ def test_a_reshaped_doc_selects_the_whole_tree_checks(tree):
     )
 
 
+@pytest.mark.parametrize("changed", [["tests/test_secrets.py"], ["tests/LOCKED_MANIFEST.json"]])
+def test_a_changed_locked_test_or_manifest_selects_the_manifest_check(repo, changed):
+    write(repo, {"tests/test_secrets.py": "import os\n", "tests/test_locked_tests.py": "import os\n"})
+    assert ci_select.LOCKED_CHECK in set().union(*map(set, decide(repo, changed)[1]))
+
+
+def test_an_unlocked_test_leaves_the_manifest_check_out(repo):
+    write(repo, {"tests/test_locked_tests.py": "import os\n"})
+    assert decide(repo, ["tests/test_other.py"]) == ("selected", [["tests/test_other.py"]])
+
+
 def test_an_edited_file_leaves_the_whole_tree_checks_out(tree):
     assert decide(tree, ["hooks/sample.py"]) == ("selected", [["tests/test_sample.py"]])
 
