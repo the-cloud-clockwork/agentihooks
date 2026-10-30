@@ -34,6 +34,7 @@ import time
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
@@ -1434,8 +1435,8 @@ def watch_ledgers(
     started = LOADED_STAMP
     reloads = reloading()
     for passes in itertools.count():
-        if reloads and server is not None:
-            next_started = hand_over(started, server)
+        if reloads:
+            next_started = hand_over(started, cast(ThreadingHTTPServer, server))
             if next_started is None:
                 return
             started = next_started

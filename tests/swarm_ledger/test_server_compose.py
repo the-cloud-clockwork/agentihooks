@@ -393,12 +393,14 @@ def test_the_server_exits_when_it_cannot_start_a_request_thread(monkeypatch):
     assert issubclass(server.ThreadingHTTPServer, http.server.ThreadingHTTPServer)
 
 
-def test_a_request_thread_that_starts_keeps_the_server_running(monkeypatch):
+def test_a_request_thread_that_starts_keeps_the_server_running(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(server.os, "_exit", lambda code: pytest.fail("the server exits only when no thread starts"))
-    started = []
+    started, joined = [], []
     monkeypatch.setattr(server.threading.Thread, "start", lambda self: started.append(self))
+    monkeypatch.setattr(server.threading.Thread, "join", lambda self: joined.append(self))
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler, bind_and_activate=False)
     request = object()
     httpd.process_request(request, ("127.0.0.1", 1))
     httpd.server_close()
     assert [thread._args for thread in started] == [(request, ("127.0.0.1", 1))]
+    assert joined == started
