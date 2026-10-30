@@ -562,7 +562,7 @@ def upload_path(
 def main():
     """CLI entry point for S3 storage operations.
 
-    Hook mode reports an error as JSON and exits 0, so a failed upload never breaks Claude Code.
+    Hook mode prints to stdout, where Claude Code shows it, and exits 0 so a failed upload never breaks Claude Code.
     """
     if len(sys.argv) < 2:
         print("Usage: /app/hooks/integrations/storage.py <command> [args]")

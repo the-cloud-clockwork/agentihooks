@@ -248,9 +248,9 @@ class PostgresClient:
         """Insert a row into PostgreSQL table as JSONB.
 
         The table should have a column named 'data' of type JSONB.
-        Optionally can have 'session_id' and 'created_at' columns. The table
-        should have id SERIAL, session_id TEXT, data JSONB and created_at
-        TIMESTAMPTZ; the parameterized insert uses ON CONFLICT DO NOTHING.
+        The parameterized insert writes session_id, data and created_at, so the
+        table should have id SERIAL, session_id TEXT, data JSONB and created_at
+        TIMESTAMPTZ.
 
         State fields fill gaps in the payload and payload keys win. A state with
         wait true skips the write, because the caller takes a synchronous
