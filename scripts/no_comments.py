@@ -103,7 +103,7 @@ def _changed(base: Path, head: Path) -> set[int]:
         capture_output=True,
         text=True,
     )
-    if result.returncode not in (0, 1):
+    if result.returncode not in (0, 1) or result.stderr:
         raise ValueError(f"git diff failed for {head.name}: {result.stderr.strip()}")
     lines = set()
     for match in _HUNK.finditer(result.stdout):
