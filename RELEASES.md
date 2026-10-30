@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.513 · 2026-10-30
+
+### 2026-10-30 · 1a9b9eb12705 · #8948 · @agenticore-app
+
+**Publish the release chart only after kind installs the packaged archive**
+
+This change fixes a release ordering bug where the chart was pushed to GHCR before its kind install was verified. The workflow now runs package, then kind (installing the exact packaged archive via a new chart-artifact input and CHART_DIR mode), then publish, which depends on kind and has no bypass condition. A contract test locks in these dependencies and artifact wiring so the bug can't silently return. This matters because it guarantees users only receive chart releases that have actually been proven to install successfully in kind, preventing broken charts from reaching production.
+
 ## v2.17.511 · 2026-10-30
 
 ### 2026-10-30 · 3fc9e4cd061c · #8937 · @agenticore-app
