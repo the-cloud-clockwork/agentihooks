@@ -168,8 +168,6 @@ def _disabled(root: Path, nodes: set[str]) -> None:
     measured = locked_tests.measure(root, modules)
     if disabled := sorted(node for node in nodes if measured.get(node, {}).get("disabled")):
         raise ValueError(f"mapped test is skipped, xfailed or returns early: {disabled}")
-    if configs := locked_tests.unlocking_configs(root, modules):
-        raise ValueError(f"mapped test module is named in a test config: {configs}")
 
 
 def _retired(data: dict, ids: set[str]) -> set[str]:

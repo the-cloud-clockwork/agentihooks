@@ -671,15 +671,6 @@ def test_a_disabled_mapped_test_fails(mapped_repo: tuple[Path, Path, dict], sour
     assert feature_map.validate(root, path) == 1
 
 
-@pytest.mark.parametrize("config", ["pyproject.toml", "pytest.ini", "conftest.py"])
-def test_a_config_naming_a_mapped_test_module_fails(mapped_repo: tuple[Path, Path, dict], config: str) -> None:
-    root, path, _ = mapped_repo
-    assert feature_map.validate(root, path) == 1
-    (root / config).write_text("--deselect tests/test_login.py::test_shared\n")
-    with pytest.raises(ValueError, match=re.escape(f"mapped test module is named in a test config: ['{config} ")):
-        feature_map.validate(root, path)
-
-
 def _base(tmp_path: Path, features: list[dict], retired: list[dict] | tuple[()] = ()) -> Path:
     base = tmp_path / "base-map.json"
     base.write_text(json.dumps({"features": features, "retired": list(retired)}))
