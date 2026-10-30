@@ -25,21 +25,28 @@ def test_routing_and_roster_reads_do_not_transfer_the_execution_archive(
     fencing.write(store, "sw", lambda doc: doc.update(executions={"active": asdict(agent)}, archive=archive))
     monkeypatch.setattr(scope, "joined", lambda redis: ["hive-a"])
     monkeypatch.setattr(scope, "member", lambda: "")
-    original = store.redis.execute_command
+    connection_type = store.redis.connection_pool.connection_class
+    original = connection_type.read_response
     transferred = []
 
-    def traced(*args: Any, **kwargs: Any) -> Any:
-        result = original(*args, **kwargs)
-        if isinstance(result, (str, bytes)):
-            transferred.append(len(result))
+    def reply_bytes(value: Any) -> int:
+        if isinstance(value, (str, bytes)):
+            return len(value)
+        if isinstance(value, (list, tuple)):
+            return sum(reply_bytes(part) for part in value)
+        return 0
+
+    def traced(connection: Any, *args: Any, **kwargs: Any) -> Any:
+        result = original(connection, *args, **kwargs)
+        transferred.append(reply_bytes(result))
         return result
 
-    monkeypatch.setattr(store.redis, "execute_command", traced)
+    monkeypatch.setattr(connection_type, "read_response", traced)
     assert scope.readings(store.redis, "sw", agent.name).endswith(":hive:hive-a:swarm")
     assert store.agents("sw")[0].hive == "hive-a"
     assert store.execution_occupants("sw") == {"": agent}
     assert max(transferred) < 10000
-    monkeypatch.setattr(store.redis, "execute_command", original)
+    monkeypatch.setattr(connection_type, "read_response", original)
     assert fencing.read(store, "sw")["archive"] == archive
 
 
