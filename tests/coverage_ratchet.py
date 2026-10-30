@@ -77,7 +77,7 @@ def _usage(stat: Path = Path("/sys/fs/cgroup/cpu.stat")) -> tuple[float, float]:
 
 
 def _grade(
-    args: argparse.Namespace, head_files: list[Path], scratch: Path, workers: int
+    args: argparse.Namespace, head_files: list[Path], scratch: Path, workers: int = 1
 ) -> tuple[dict, Measurement, Result]:
     missing = [str(f) for f in head_files if not f.is_file()]
     if missing:
