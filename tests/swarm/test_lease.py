@@ -420,3 +420,44 @@ def test_the_controller_ticks_every_swarm_while_no_host_ticked_list_is_set(store
     monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
 
     assert controller.run_once(store) == {"XXXX": ["XXXX"]}
+
+
+def test_the_host_tick_leaves_a_swarm_the_controller_ticks_so_the_controller_takes_its_lease(store, monkeypatch):
+    from scripts.swarm import cli, commands, controller
+    from scripts.swarm.store import SwarmConfig
+
+    for slug in ("proof", "workstation"):
+        store.create(SwarmConfig(slug, "agentihooks", 2, 0))
+    monkeypatch.setenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", "workstation")
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller-hive")
+    monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: [slug])
+    controller.run_once(store)
+    ticks = []
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation-hive")
+    monkeypatch.setattr(cli, "_tickable", lambda slug: True)
+    monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: ticks.append(slug) or [])
+
+    cli._tick_one(store, "proof")
+    cli._tick_one(store, "workstation")
+
+    assert ticks == ["workstation"]
+    assert lease.current(store, "proof") is None
+
+
+def test_the_controller_keeps_ticking_the_swarms_it_marks_as_its_own(store, monkeypatch):
+    from scripts.swarm import cli, commands, controller
+    from scripts.swarm.store import SwarmConfig
+
+    store.create(SwarmConfig("proof", "agentihooks", 2, 0))
+    monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller-hive")
+    monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: [slug])
+    controller.run_once(store)
+    ticks = []
+    monkeypatch.setattr(cli, "_tickable", lambda slug: True)
+    monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: ticks.append(slug) or [])
+
+    cli._tick_one(store, "proof")
+
+    assert ticks == ["proof"]
+    assert 0 < store.redis.pttl(store.key("proof", controller.HOST_MARK)) <= lease.ttl_ms()
