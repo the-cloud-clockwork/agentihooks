@@ -15,6 +15,7 @@
 {{- end }}
 {{- $suffix := .suffix }}
 {{- $github := $workers.githubAuth }}
+{{- $brain := $workers.brainBinding | default dict }}
 {{- if not (has $github.mode (list "token" "app")) }}
 {{- fail "workers.githubAuth.mode must be token or app" }}
 {{- end }}
@@ -134,6 +135,20 @@ spec:
                 command: ["sh", "-c", {{ printf "agentihooks hive drain --wait %d >>/proc/1/fd/1 2>&1" $drain | quote }}]
           {{- include "swarm.containerSecurity" $root | nindent 10 }}
           env:
+            {{- if $brain.secretName }}
+            - name: HIVE_BRAIN_BINDING_FILE
+              value: /run/swarm-brain/binding.json
+            {{- range $name, $reference := $brain.credentials }}
+            {{- if not (regexMatch "^SWARM_BRAIN_[A-Z0-9_]+$" $name) }}
+            {{- fail "workers.brainBinding.credentials must name SWARM_BRAIN_ environment variables" }}
+            {{- end }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "each workers.brainBinding credential secretName is required" $reference.secretName }}
+                  key: {{ required "each workers.brainBinding credential key is required" $reference.key }}
+            {{- end }}
+            {{- end }}
             {{- if $root.Values.workers.rollout.enabled }}
             - name: HIVE_READY_FILE
               value: /tmp/hive-ready
@@ -202,6 +217,11 @@ spec:
                 name: {{ . }}
             {{- end }}
           volumeMounts:
+            {{- if $brain.secretName }}
+            - name: swarm-brain
+              mountPath: /run/swarm-brain
+              readOnly: true
+            {{- end }}
             - name: join
               mountPath: /run/hive-join
               readOnly: true
@@ -217,6 +237,15 @@ spec:
           resources:
             {{- toYaml (mergeOverwrite (deepCopy $workers.resources) $memory) | nindent 12 }}
       volumes:
+        {{- if $brain.secretName }}
+        - name: swarm-brain
+          secret:
+            secretName: {{ $brain.secretName }}
+            defaultMode: 0440
+            items:
+              - key: {{ required "workers.brainBinding.key is required" $brain.key }}
+                path: binding.json
+        {{- end }}
         - name: join
           secret:
             secretName: {{ $credential.name }}

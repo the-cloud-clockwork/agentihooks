@@ -300,6 +300,10 @@ workers:
     name: ""
     key: ""
   envFromSecrets: []
+  brainBinding:
+    secretName: ""
+    key: binding.json
+    credentials: {}
   githubAuth:
     mode: token
     secretName: ""
