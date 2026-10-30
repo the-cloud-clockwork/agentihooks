@@ -60,6 +60,7 @@ The inventory below was mapped from `dev` at `65249ec02` by reading the code nam
   (`check_body`, `check_op` without the text filter) and row changes. The commit writes rows, events and the outbox
   in one transaction, as `sqlite._write` does today.
 - Callers: the app server with a service token for every write; the frontend with the operator's token for reads.
+  A page write therefore reaches the API only through the app server, which runs the rules first.
   Agents never call the API directly once the WebSocket step lands.
 - Import boundary: the API package imports no module from the rule chain, `scripts.gates`, `scripts.swarm` or
   `scripts.hub`. Task da2 pins this with an import graph test.
@@ -76,7 +77,8 @@ The inventory below was mapped from `dev` at `65249ec02` by reading the code nam
   `Last-Event-ID` and a cursor from another replica answers `410 cursor_expired`, as it does today across restarts.
 - Swarm controls: `swarm/controls`, `swarm/actions`, `lifecycle/actions`, `controller-lease`, proof ledgers, routing
   settings, hives, monitor.
-- Consumes outbox events for every side effect (task da3), idempotent by event id.
+- Consumes outbox events for every side effect (task da3), idempotent by event id. The API relays the outbox table to
+  the bus, as `outbox_host.running` does today; the app server subscribes on the bus and never reads the table.
 
 ### Auth service
 
