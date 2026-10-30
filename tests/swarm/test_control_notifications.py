@@ -76,7 +76,7 @@ def test_the_masters_own_pause_sends_it_nothing(controls, monkeypatch, explicit)
 
 
 def test_a_master_without_a_seat_receives_the_notification_by_name(
-    controls: tuple[RedisStore, FakeLedger, AgentRecord]
+    controls: tuple[RedisStore, FakeLedger, AgentRecord],
 ) -> None:
     store, ledger, master = controls
     store.put_agent("demo", replace(master, seat=""))
