@@ -1,5 +1,6 @@
 """Failure and fallback paths of the hook integrations: hook mode exits 0, clients log and return."""
 
+import importlib
 import io
 import sys
 from pathlib import Path
@@ -9,7 +10,9 @@ from unittest.mock import patch
 
 import pytest
 
-from hooks.integrations import dynamodb, lambda_invoke, mailer, postgres, session_state, storage
+from hooks.integrations import dynamodb, mailer, postgres, session_state, storage
+
+lambda_invoke = importlib.import_module("hooks.integrations.lambda_invoke")
 
 pytestmark = pytest.mark.unit
 
@@ -146,12 +149,13 @@ def test_session_state_falls_back_to_file_when_redis_fails(tmp_path: Path, monke
 
 def test_storage_directory_upload_keys_under_base_prefix(tmp_path: Path) -> None:
     """A directory upload keys each file under the base prefix and the artifacts folder."""
-    (tmp_path / "nested").mkdir()
-    (tmp_path / "nested" / "s1-out.txt").write_text("x")
+    root = tmp_path / "upload"
+    (root / "nested").mkdir(parents=True)
+    (root / "nested" / "s1-out.txt").write_text("x")
     client = storage.S3StorageClient(storage_url="s3://bucket/base/", skip_evaluation=False)
     s3 = _S3Client()
     client._s3_client = s3
-    result = client.upload_path("s1", str(tmp_path))
+    result = client.upload_path("s1", str(root))
     assert result.files_uploaded == 1
     assert s3.keys == ["base/artifacts/nested/s1-out.txt"]
 
