@@ -472,11 +472,9 @@ def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_m
 
 def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runtimes: dict | None = None) -> dict:
     from scripts.swarm.cli import run_tick
-    from scripts.swarm.commands import hive_id
 
     runtimes = runtimes or {}
     slugs = ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, ""))
-    host = hive_id()
     return {
         slug: run_tick(store, slug, ledger, runtimes.get(slug, runtime), messenger, scheduled=True) for slug in slugs
     }
