@@ -51,6 +51,7 @@ def test_a_finding_id_comes_from_its_kind_and_subject():
     assert watching(40).id == watching(33).id
 
 
+@pytest.mark.feature("swarm-health-verdicts")
 def test_a_verdicted_finding_stays_hidden_through_the_cooldown(board):
     _, store = board
     assert shown(store, [watching(33)], T0) == ["over-monitoring/sw-master-1"]
@@ -59,6 +60,7 @@ def test_a_verdicted_finding_stays_hidden_through_the_cooldown(board):
         assert shown(store, [watching(90)], later) == []
 
 
+@pytest.mark.feature("swarm-health-verdicts")
 def test_after_the_cooldown_it_returns_only_if_its_evidence_grew(board):
     _, store = board
     store.visible([watching(33)], T0, HOUR)
@@ -122,6 +124,7 @@ def test_with_new_evidence_required_a_new_identity_still_needs_a_grown_measure(b
     assert store.visible([stretch(20, 7)], T0 + 2 * HOUR, HOUR, new_evidence=True) == []
 
 
+@pytest.mark.feature("swarm-health-verdicts")
 def test_it_returns_at_most_once_and_carries_its_earlier_verdict(board):
     _, store = board
     store.visible([watching(33)], T0, HOUR)
@@ -159,6 +162,7 @@ def test_a_verdict_is_kept_with_the_swarm_keys_and_names_who_gave_it(board):
     }
 
 
+@pytest.mark.feature("swarm-health-verdicts")
 def test_a_verdict_must_be_one_of_the_five_and_name_a_known_finding(board):
     _, store = board
     store.visible([watching(33)], T0, HOUR)

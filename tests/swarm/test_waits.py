@@ -41,6 +41,7 @@ def held(store):
     return idle.wait(store.redis, "sw", ME)
 
 
+@pytest.mark.feature("swarm-checked-waits")
 def test_a_wait_on_checks_lasts_until_the_tick_ends_it(started, capsys):
     store, _ = started
     assert run("sw", "--as", ME, "wait", "--on", "checks", URL, "--reason", "tests") == 0
@@ -119,6 +120,7 @@ def test_checked_wait_targets_are_checked(started, capsys):
     assert "wait on one of: checks, merge, reply, task" in capsys.readouterr().err
 
 
+@pytest.mark.feature("swarm-checked-waits")
 def test_a_bare_wait_is_capped_at_sixty_minutes(started, capsys):
     store, _ = started
     assert run("sw", "--as", ME, "wait", "1") == 0
@@ -200,6 +202,7 @@ def tick():
         (PullRequest("CLOSED", None, 1, False, False), f"pull request {URL}, now closed"),
     ],
 )
+@pytest.mark.feature("swarm-checked-waits")
 def test_the_tick_ends_a_checks_wait_once_and_tells_the_agent(tick, pull, outcome):
     tick.hold("checks", URL)
     tick.pulls[URL] = pull
@@ -232,6 +235,7 @@ def test_a_checks_wait_stays_while_checks_run_or_github_cannot_answer(tick, pull
         ("CLOSED", "now closed unmerged; reopen it or record why it was closed"),
     ],
 )
+@pytest.mark.feature("swarm-merge-wait")
 def test_a_merge_wait_reports_when_the_queued_pull_request_drops_out(tick, state, outcome):
     tick.hold("merge", URL)
     tick.pulls[URL] = PullRequest("OPEN", None, 1, False, resolved=True, queued=True)
@@ -245,6 +249,7 @@ def test_a_merge_wait_reports_when_the_queued_pull_request_drops_out(tick, state
     assert tick.end() == []
 
 
+@pytest.mark.feature("swarm-merge-wait")
 def test_the_tick_accepts_a_merge_wait_only_after_the_pull_request_lands(tick):
     tick.hold("merge", URL)
     tick.pulls[URL] = PullRequest("OPEN", None, 1, False, resolved=True, queued=True)
@@ -1863,6 +1868,7 @@ def test_a_dead_gate_keeps_waiting_while_its_workflow_run_is_active(tick, rollup
 OTHER = "https://github.com/o/r/pull/8"
 
 
+@pytest.mark.feature("swarm-intent-wait")
 def test_a_wait_on_intent_names_its_own_tasks_pull_request(started, capsys):
     store, ledger = started
     ledger.rows["t1"]["pr_url"] = URL
@@ -1891,6 +1897,7 @@ def test_a_checked_wait_reads_only_the_task_it_names(started):
     assert read == [("sw", "t2"), ("sw", "t1"), ("sw", "t9")]
 
 
+@pytest.mark.feature("swarm-intent-wait")
 def test_target_problem_takes_intent_only_on_the_own_tasks_pull_request():
     rows = {"t1": {"id": "t1", "pr_url": URL}, "t2": {"id": "t2", "pr_url": OTHER}}
     assert waits.target_problem("intent", URL, "t1", rows, None) == ""

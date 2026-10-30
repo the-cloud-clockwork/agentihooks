@@ -63,11 +63,13 @@ def misses(store, agent, facts, doc, bundled=True, declared=()):
     return launch_check.misses(store, "sw", agent, facts, doc, bundled, list(declared))
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_a_clean_launch_passes(store, launched):
     agent, facts, doc = launched
     assert misses(store, agent, facts, doc) == {}
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_not_joined_is_named(store, launched):
     agent, facts, _ = launched
     assert list(misses(store, agent, facts, {"_meta": {"members": {}}})) == ["joined"]
@@ -95,12 +97,14 @@ def test_a_harness_start_before_the_launch_is_ignored(store, launched):
     assert launch_check.session_started_at(agent) == LAUNCH
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_seat_held_by_another_is_named(store, launched):
     agent, facts, doc = launched
     store.seats.occupy(agent.seat, "someone-else", LAUNCH + 1)
     assert list(misses(store, agent, facts, doc)) == ["joined"]
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_wrong_profile_variable_is_named(store, launched):
     agent, facts, doc = launched
     found = misses(store, agent, {**facts, "profile": "anton"}, doc)
@@ -108,6 +112,7 @@ def test_wrong_profile_variable_is_named(store, launched):
 
 
 @pytest.mark.parametrize("field,value", [("hooks", False), ("model", "sonnet"), ("effort", "low")])
+@pytest.mark.feature("swarm-launch-check")
 def test_missing_hooks_or_wrong_model_or_effort_is_named_settings(store, launched, field, value):
     agent, facts, doc = launched
     found = misses(store, agent, {**facts, field: value}, doc)
@@ -175,6 +180,7 @@ def test_a_launch_with_every_declared_overlay_passes(store, launched):
     "rendered,declared",
     [([], ["brain"]), (["router"], ["brain", "router"]), (None, ["brain"])],
 )
+@pytest.mark.feature("swarm-launch-check")
 def test_a_launch_missing_a_declared_overlay_fails_the_check(store, launched, rendered, declared):
     agent, facts, doc = launched
     chain = ["base", "package:engineer", "engineer", *(rendered or [])]
@@ -197,6 +203,7 @@ def test_declared_adds_the_overlays_the_agent_wears(monkeypatch):
     assert launch_check.declared("engineer", ["brain"]) == ["brain"]
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_a_launch_missing_a_worn_overlay_fails_the_check(store, launched):
     agent, facts, doc = launched
     chain = ["base", "package:engineer", "engineer", "brain"]
@@ -441,6 +448,7 @@ def test_a_failed_launch_names_every_miss_and_times_from_the_launch(store, monke
     assert launch_check.report(store, "sw", "t1")["elapsed_ms"] == launch_check.DEADLINE_MS
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     tick("sw", store, ledger, runtime, LAUNCH)
@@ -454,6 +462,7 @@ def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     }
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch, scratch):
     homes = scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
@@ -481,6 +490,7 @@ def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch, sc
     assert [f.evidence[0] for f in launch_check.findings(store, "sw")] == [f"agents {second}"]
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_master_failure_is_posted_to_the_operator_chat_and_relaunched(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     store.update("sw", state="running")

@@ -23,6 +23,7 @@ def hold_tick(store, held, sender):
     sender.recv()
 
 
+@pytest.mark.feature("swarm-tick-lock")
 def test_a_killed_tick_holder_is_replaced_without_waiting_for_expiry(locked_store):
     store, held = locked_store
     receiver, sender = multiprocessing.Pipe()
@@ -51,6 +52,7 @@ def test_a_killed_tick_holder_is_replaced_without_waiting_for_expiry(locked_stor
         sender.close()
 
 
+@pytest.mark.feature("swarm-tick-lock")
 def test_a_live_tick_holder_keeps_its_lock(locked_store):
     store, held = locked_store
     original = controller.take_tick_lock(store, "sw", held, 600_000)

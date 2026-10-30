@@ -29,6 +29,7 @@ def test_scheduler_batch_keeps_five_focused_slots_and_never_claims_frozen_work()
     assert ids == [task["id"] for task in hot[:5] + plain[:5]]
 
 
+@pytest.mark.feature("swarm-focus")
 def test_ten_lane_slots_allocate_five_focused_and_five_normal_tasks():
     from scripts.swarm import focus_budget
 

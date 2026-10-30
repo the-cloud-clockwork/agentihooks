@@ -43,6 +43,7 @@ def waiting(env, monkeypatch):  # noqa: F811
     return store, ledger, state
 
 
+@pytest.mark.feature("swarm-prerequisite-wait")
 def test_a_long_prerequisite_wait_directs_stacking_or_blocking_without_idling(waiting, capsys):
     store, _, _ = waiting
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
@@ -73,6 +74,7 @@ def test_the_tasks_final_deliverable_can_wait_at_any_queue_position(waiting):
     assert idle.wait(store.redis, "sw", ME)["on"]["target"] == URL
 
 
+@pytest.mark.feature("swarm-prerequisite-wait")
 def test_block_retains_the_stack_and_tick_reopens_only_after_prerequisite_merge(waiting, env, monkeypatch):  # noqa: F811
     store, ledger, _ = waiting
     note = f"Stack published on continuation branch; next step restack after prerequisite {URL} merges"
