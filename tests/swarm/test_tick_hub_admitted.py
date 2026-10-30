@@ -1,6 +1,5 @@
 from dataclasses import replace
 
-import fakeredis
 import pytest
 
 from scripts.swarm import commands
@@ -11,6 +10,8 @@ from tests.swarm.test_tick import FakeRuntime, tasks, workers
 
 @pytest.fixture
 def store() -> RedisStore:
+    import fakeredis
+
     s = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     s.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
     return s
