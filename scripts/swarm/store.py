@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
-from scripts.swarm import default_models, effort_range
+from scripts.swarm import default_models, effort_range, timing
 from scripts.swarm.execution import ExecutionRegistry, occupants_of, records_of
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
@@ -502,7 +502,7 @@ class RedisStore:
             self._project_row(pipe, slug, agent, previous)
             if removed:
                 pipe.hdel(self.key(slug, "agents"), removed)
-            pipe.execute()
+            timing.timed(pipe.execute)
 
         self._projection(slug, write, PROJECTION_CONTENTION)
 
@@ -513,7 +513,7 @@ class RedisStore:
             raw = pipe.hget(self.key(slug, "agents"), agent.name)
             pipe.multi()
             self._project_row(pipe, slug, agent, AgentRecord(**json.loads(raw)) if raw else None)
-            pipe.execute()
+            timing.timed(pipe.execute)
             return True
 
         return self._projection(slug, write, LEGACY_PROJECTION_CONTENTION)

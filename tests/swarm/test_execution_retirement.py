@@ -26,6 +26,26 @@ def started(store):
     )
 
 
+def test_stale_retirement_preserves_the_agent_projection_and_history(store, monkeypatch):
+    from scripts.swarm import lease
+    from scripts.swarm.store import SwarmError
+
+    at = [1000]
+    monkeypatch.setattr(lease, "now_ms", lambda saved: at[0])
+    first = lease.acquire(store, "fixture", "home")
+    agent = started(store)
+    before = store.redis.hgetall(store.key("fixture", "agents"))
+    at[0] = first.expires_at
+    lease.acquire(store, "fixture", "other")
+    with lease.fencing(first.epoch):
+        with pytest.raises(SwarmError, match="the controller lease is stale"):
+            store.drop_agent("fixture", agent.name)
+    assert store.redis.hgetall(store.key("fixture", "agents")) == before
+    assert store.redis.lrange(store.key("fixture", "history"), 0, -1) == []
+    assert not store.names.entry(agent.name).get("retired_at")
+    assert store.execution("fixture", agent.execution_id) == agent
+
+
 def test_drop_ends_execution_in_the_transaction_that_removes_its_agent(store):
     agent = started(store)
     pipe_type = type(store.redis.pipeline())

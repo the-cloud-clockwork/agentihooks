@@ -286,3 +286,13 @@ def test_a_stale_lease_holder_cannot_write_executions(store, monkeypatch):
     assert fencing.read(store, "sw")["executions"] == {}
     with lease.fencing(second.epoch):
         assert registry.archive("sw") == 0
+
+
+def test_latest_seat_keeps_a_newer_generation_and_uses_the_last_equal_generation():
+    from scripts.swarm.execution import latest
+
+    newer = {"seat": "eng-1@sw", "generation": 2, "name": "new"}
+    older = {"seat": "eng-1@sw", "generation": 1, "name": "old"}
+    tied = {**newer, "name": "tie"}
+    assert latest([newer, older], "seat") == {"eng-1@sw": newer}
+    assert latest([newer, tied], "seat") == {"eng-1@sw": tied}

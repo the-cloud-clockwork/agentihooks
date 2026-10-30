@@ -64,7 +64,7 @@ def test_managed_reads_the_archive_inside_redis(store, monkeypatch):
     registry = store.execution_registry
     registry.archive("fixture")
     monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
-    archive = store.key("fixture", ARCHIVE)
+    archive = store.key("fixture", "executions-archive")
     hvals = store.redis.hvals
 
     def refusing(key):
@@ -85,7 +85,7 @@ def test_a_hive_member_reads_the_archive_it_may_only_read(store, monkeypatch):
     for variable in ("AGENTIHOOKS_HIVE_REDIS_URL", "AGENTIHOOKS_SWARM_REDIS_URL"):
         monkeypatch.setenv(variable, "redis://hive.example:6380/0")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
-    archive = store.key("fixture", ARCHIVE)
+    archive = store.key("fixture", "executions-archive")
     script = store.redis.eval
 
     def refusing(source, keys, *args):

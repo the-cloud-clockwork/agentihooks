@@ -148,7 +148,7 @@ class ExecutionRegistry:
 
     def _put(self, slug: str, agent: AgentRecord) -> None:
         if _has_identity(agent) or not self.store.project_legacy(slug, agent, lambda: self.managed(slug, agent.name)):
-            self._update(slug, agent)
+            self.update(slug, agent)
 
     def get(self, slug: str, execution_id: str) -> AgentRecord:
         doc = fencing.read(self.store, slug)
