@@ -248,7 +248,9 @@ def _publish(tmp_path: Path, version: str, fail: str = "") -> tuple[subprocess.C
 
 
 @pytest.mark.parametrize("version", ["2.9.0", "2.10.1"])
-def test_the_published_chart_uses_the_release_version_and_a_separate_oci_namespace(tmp_path, version):
+def test_the_published_chart_uses_the_release_version_and_a_separate_oci_namespace(
+    tmp_path: Path, version: str
+) -> None:
     result, calls = _publish(tmp_path, version)
     assert result.returncode == 0, result.stderr
     assert calls == [
