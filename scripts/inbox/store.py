@@ -18,6 +18,8 @@ from scripts.swarm.naming import NameRegistry
 PREFIX = f"{ROOT}:inbox"
 NOTIFY = f"{PREFIX}:notify"
 MOVE_ATTEMPTS = 3
+# The swarm Redis over TLS closes connections mid pipeline on reads of a thousand item rows or more.
+ROW_BATCH = 500
 STATES = ("pending", "delivered", "confirmed", "read", "done", "blocked", "handed_off", "cancelled")
 REDELIVER_ENV = "AGENTIHOOKS_INBOX_REDELIVER_S"
 DEFAULT_REDELIVER_S = 300
@@ -348,6 +350,22 @@ class InboxStore:
         self._report_gone(address, gone)
 
     def _rows(self, item_ids):
+        item_ids = list(item_ids)
+        return [
+            row
+            for start in range(0, len(item_ids), ROW_BATCH)
+            for row in self._batch(item_ids[start : start + ROW_BATCH])
+        ]
+
+    def _batch(self, item_ids):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        try:
+            return self._read_batch(item_ids)
+        except RedisConnectionError:
+            return self._read_batch(item_ids)
+
+    def _read_batch(self, item_ids):
         with self.redis.pipeline(transaction=False) as pipe:
             for item_id in item_ids:
                 pipe.hgetall(self.key("item", item_id))
