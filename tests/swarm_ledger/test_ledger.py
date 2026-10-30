@@ -91,6 +91,47 @@ def applied(ids):
     return {"applied": ids, "rejected": [], "_meta": {"rev": 2, "warnings": []}, "tasks": []}
 
 
+@pytest.mark.parametrize("queued_slug", ["s", "another-ledger"])
+def test_join_lands_past_pending_talk(
+    cli, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], queued_slug: str
+) -> None:
+    from scripts.inbox import outbox
+
+    entry = outbox.ledger_record(
+        queued_slug, [{"op": "add", "id": "waiting", "by": "master", "thread": "chat", "text": "wait"}], "", False
+    )
+    outbox.append(entry)
+    monkeypatch.setattr(outbox, "flush", lambda store: None)
+    before = outbox.path().read_text()
+    sent = cli(["join"], applied)
+    assert len(sent) == 1
+    assert sent[0]["op"] == "join"
+    assert sent[0]["by"] == "eng-1"
+    assert json.loads(capsys.readouterr().out) == {"joined": "eng-1", "slug": "s", "role": "member"}
+    assert outbox.path().read_text() == before
+
+
+@pytest.mark.parametrize(
+    "ops",
+    [
+        [],
+        [{"op": "leave", "id": "leave", "by": "eng-1"}],
+        [{"op": "join", "id": "join", "by": "eng-1"}, {"op": "leave", "id": "leave", "by": "eng-1"}],
+    ],
+)
+def test_pending_talk_still_holds_other_writes(monkeypatch: pytest.MonkeyPatch, ops: list[dict]) -> None:
+    from scripts.inbox import outbox
+
+    monkeypatch.setattr(outbox, "waiting", lambda lane: lane == "ledger")
+    monkeypatch.setattr(outbox, "flush", lambda store: None)
+    if ops:
+        with pytest.raises(SystemExit, match="still waits in"):
+            ledger.call("s", ops)
+    else:
+        monkeypatch.setattr(ledger, "request", lambda slug, ops, service: {"read": slug})
+        assert ledger.call("s", ops) == {"read": "s"}
+
+
 @pytest.mark.parametrize("argv", WRITES, ids=" ".join)
 def test_every_write_command_exits_non_zero_naming_the_refusal_reason(cli, capsys, argv):
     with pytest.raises(SystemExit) as stop:

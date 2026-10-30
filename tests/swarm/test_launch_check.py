@@ -454,6 +454,43 @@ def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     }
 
 
+@pytest.mark.parametrize("delay", [launch_check.DEADLINE_MS, launch_check.DEADLINE_MS + 1, None])
+def test_launch_judgment_refreshes_a_join_after_the_snapshot(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, delay: int | None
+) -> None:
+    import copy
+
+    ledger, runtime = checked(store, monkeypatch)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    name = runtime.spawned[0][1]
+    read = ledger.state
+    observations = []
+
+    def snapshot(slug: str) -> dict:
+        doc = copy.deepcopy(read(slug))
+        observations.append(doc)
+        return doc
+
+    bindings = runtime.bindings
+
+    def joining(agents: list[AgentRecord]) -> dict:
+        if delay is not None:
+            joined(ledger, runtime, LAUNCH + delay)
+        return bindings(agents)
+
+    monkeypatch.setattr(ledger, "state", snapshot)
+    monkeypatch.setattr(runtime, "bindings", joining)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS + 2)
+    report = launch_check.report(store, "sw", "t1")
+    if delay == launch_check.DEADLINE_MS:
+        assert f"{name} passed its launch check in {delay // 1000} seconds" in actions
+        assert report["misses"] == {}
+        assert len(observations) >= 2
+    else:
+        assert report["misses"].keys() == ({"joined"} if delay is None else {"late"})
+    assert name not in launch_check.pending(store, "sw")
+
+
 def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch, scratch):
     homes = scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
