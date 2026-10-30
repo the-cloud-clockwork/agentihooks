@@ -236,6 +236,25 @@ hub:
       memory: 512Mi
       ephemeral-storage: 256Mi
 
+# Auth service: issues signed tokens other services verify with AGENTIHOOKS_AUTH_KEY, given through secretEnv.
+auth:
+  enabled: false
+  replicas: 2
+  port: 8768
+  legacy: "on"
+  affinity: {}
+  tolerations: []
+  env: {}
+  secretEnv: []
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 256Mi
+      ephemeral-storage: 256Mi
+
 # secretName must hold AGENTIHOOKS_GITHUB_WEBHOOK_SECRET and the receiver's own AGENTIHOOKS_BUS_URL.
 githubWebhook:
   enabled: false
