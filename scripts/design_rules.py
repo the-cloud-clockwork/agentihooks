@@ -1,6 +1,7 @@
 import argparse
 import ast
 import builtins
+import copy
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,7 @@ class Module:
 @dataclass(frozen=True)
 class Unit:
     signature: tuple[str, ...]
+    bare: tuple[str, ...]
     node: ast.AST
     public: bool
 
@@ -150,11 +152,20 @@ def shareable(index: Index, target: tuple[str, str], seen: frozenset = frozenset
     return False
 
 
-def _signature(node: ast.AST) -> tuple[str, ...]:
+def _bare(args: ast.arguments) -> ast.arguments:
+    stripped = copy.deepcopy(args)
+    for node in ast.walk(stripped):
+        if isinstance(node, ast.arg):
+            node.annotation = None
+    return stripped
+
+
+def _signature(node: ast.AST, typed: bool = True) -> tuple[str, ...]:
     if isinstance(node, ast.ClassDef):
         parts = [*node.decorator_list, *node.bases, *node.keywords]
     else:
-        parts = [*node.decorator_list, node.args, *([node.returns] if node.returns else [])]
+        args = node.args if typed else _bare(node.args)
+        parts = [*node.decorator_list, args, *([node.returns] if node.returns and typed else [])]
     return (type(node).__name__, *(ast.dump(part) for part in parts))
 
 
@@ -173,7 +184,7 @@ def units(syntax: ast.Module, rel: str) -> dict[str, Unit]:
             if seen[name] > 1:
                 name = f"{name}#{seen[name]}"
             visible = public and not child.name.startswith("_")
-            found[f"{rel}::{name}"] = Unit(_signature(child), child, visible)
+            found[f"{rel}::{name}"] = Unit(_signature(child), _signature(child, typed=False), child, visible)
             walk(child, f"{name}.", visible and isinstance(child, ast.ClassDef))
 
     walk(syntax, "", True)
@@ -292,9 +303,13 @@ def seams(index: Index, classes: list[tuple[str, str, ast.ClassDef]]) -> list[st
     return errors
 
 
-def violations(index: Index, module: str, key: str, unit: Unit) -> list[str]:
+def violations(index: Index, module: str, key: str, unit: Unit, previous: Unit | None) -> list[str]:
+    errors = []
+    if not isinstance(unit.node, ast.ClassDef) and (missing := untyped(unit)):
+        errors.append(f"untyped: {key} lacks type hints on {', '.join(missing)}")
+    if previous is not None and previous.bare == unit.bare:
+        return errors
     if isinstance(unit.node, ast.ClassDef):
-        errors = []
         for base in unit.node.bases:
             project = resolve(index, module, base)
             if project is not None and not shareable(index, project):
@@ -302,13 +317,7 @@ def violations(index: Index, module: str, key: str, unit: Unit) -> list[str]:
                     f"inheritance: {key} inherits the concrete project class {'.'.join(project)}; "
                     "inherit an abstract base or Protocol and compose the shared behaviour"
                 )
-        return errors
-    if not unit.public:
-        return []
-    errors = []
-    if missing := untyped(unit):
-        errors.append(f"untyped: public {key} lacks type hints on {', '.join(missing)}")
-    if bags := plain_configs(unit):
+    elif unit.public and (bags := plain_configs(unit)):
         errors.append(
             f"config: public {key} takes {', '.join(bags)} as a plain dict; take a typed configuration object"
         )
@@ -320,11 +329,11 @@ def _graded(rel: str) -> bool:
 
 
 def _shape(node: ast.ClassDef) -> list[tuple[str, ...]]:
-    return [(method.name, *_signature(method)) for method in _methods(node)]
+    return [(method.name, *_signature(method, typed=False)) for method in _methods(node)]
 
 
 def _reshaped(previous: Unit | None, unit: Unit) -> bool:
-    if previous is None or previous.signature != unit.signature:
+    if previous is None or previous.bare != unit.bare:
         return True
     return _shape(previous.node) != _shape(unit.node)
 
@@ -339,7 +348,7 @@ def _file_errors(
         previous = before.get(key)
         if previous is None or previous.signature != unit.signature:
             changed += 1
-            errors += violations(index, module.name, key, unit)
+            errors += violations(index, module.name, key, unit, previous)
         if isinstance(unit.node, ast.ClassDef) and _reshaped(previous, unit):
             classes.append((module.name, key, unit.node))
             if groups_functions(unit.node):
