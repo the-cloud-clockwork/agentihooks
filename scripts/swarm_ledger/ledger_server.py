@@ -839,7 +839,9 @@ class Handshake(Exception):
     pass
 
 
-class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    daemon_threads = socketserver.ThreadingMixIn.daemon_threads
+
     def __init__(self, *args, **kwargs):
         self.active = 0
         self.idle = threading.Condition()
