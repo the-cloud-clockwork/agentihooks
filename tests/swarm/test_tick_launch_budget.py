@@ -155,6 +155,16 @@ def test_a_filling_pool_is_priced_at_its_mean_preparation_time(store, monkeypatc
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
 
 
+def test_preparations_whose_mean_fits_the_rest_of_the_budget_fill_the_pool(store, monkeypatch):
+    store.update("sw", max_eng=4)
+    ledger, runtime = tasks(*((f"t{n}", "eng") for n in range(1, 5))), PooledLaunches()
+    clock = _slow_launches(monkeypatch, runtime, 0)
+    _slow_preparation(monkeypatch, clock, 3)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert sorted(task for _, _, task in runtime.spawned) == ["t1", "t2", "t3", "t4"]
+    assert not any("launch budget" in action for action in actions)
+
+
 class PairedLaunches(PooledLaunches):
     def launch_room(self, config):
         return 2
