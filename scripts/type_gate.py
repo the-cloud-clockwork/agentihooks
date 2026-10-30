@@ -84,13 +84,19 @@ def grade(base: dict[str, int], head: dict[str, int], recorded: dict[str, int] |
     return errors
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Grade the head against the base, or record the head's baseline with --write."""
+def build_parser() -> argparse.ArgumentParser:
+    """Return the command line parser for the gate."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", type=Path)
     parser.add_argument("--head", type=Path, default=Path.cwd())
     parser.add_argument("--measured", type=Path)
     parser.add_argument("--write", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Grade the head against the base, or record the head's baseline with --write."""
+    parser = build_parser()
     args = parser.parse_args(argv)
     if not (args.write or args.base):
         parser.error("grading needs --base")

@@ -1,4 +1,5 @@
 import json
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -92,9 +93,11 @@ def test_an_unchanged_error_on_the_baseline_is_green(tmp_path: Path, capsys: pyt
     base = _tree(tmp_path / "base", {}, {"hooks/planted.py": 1})
     head = _tree(tmp_path / "head", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 1})
     code, out = _grade(base, head, capsys)
-    measured = tmp_path / "out" / "TYPE_BASELINE.json"
-    assert type_gate.main(["--base", str(base), "--head", str(head), "--measured", str(measured)]) == 0
-    assert json.loads(measured.read_text()) == {"hooks/planted.py": 1}
+    measured = tmp_path / "out" / "deep" / "TYPE_BASELINE.json"
+    for _ in range(2):
+        assert type_gate.main(["--base", str(base), "--head", str(head), "--measured", str(measured)]) == 0
+        assert measured.read_text() == '{\n  "hooks/planted.py": 1\n}\n'
+    capsys.readouterr()
     assert (code, out) == (0, "1 type errors in 1 files, 1 allowed, 0 errors\n")
 
 
@@ -155,7 +158,7 @@ def test_grading_needs_a_base(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exited:
         type_gate.main([])
     assert exited.value.code == 2
-    assert "grading needs --base" in capsys.readouterr().err
+    assert capsys.readouterr().err.endswith(" error: grading needs --base\n")
 
 
 def test_grade_reports_growth_and_drift_per_file() -> None:
@@ -169,3 +172,51 @@ def test_grade_reports_growth_and_drift_per_file() -> None:
         "a.py has 3 type errors, more than the 2 the base allows",
         f"{type_gate.BASELINE} records 0 type errors in a.py, the head has 3; run python -m scripts.type_gate --write",
     ]
+
+
+def test_grade_treats_a_zero_record_as_no_errors() -> None:
+    assert type_gate.grade({}, {}, {"a.py": 0}) == []
+    assert type_gate.grade({"a.py": 0}, {"a.py": 0}, {}) == []
+
+
+def test_a_pyproject_without_a_tool_table_is_red(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("")
+    assert type_gate.config_errors(tmp_path) == [
+        f"pyproject.toml [tool.basedpyright] is None; the type gate grades only with {type_gate.CONFIG!r}"
+    ]
+
+
+def test_measure_counts_every_error_in_a_file(tmp_path: Path) -> None:
+    head = _tree(tmp_path, {"hooks/planted.py": ILL_TYPED + ILL_TYPED.replace("planted", "other")})
+    assert type_gate.measure(head) == {"hooks/planted.py": 2}
+
+
+def test_write_records_an_indented_baseline(tmp_path: Path) -> None:
+    head = _tree(tmp_path, {"hooks/planted.py": ILL_TYPED}, {})
+    assert type_gate.main(["--write", "--head", str(head)]) == 0
+    assert (head / type_gate.BASELINE).read_text() == '{\n  "hooks/planted.py": 1\n}\n'
+
+
+def test_a_checker_failure_names_its_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {}, {})
+    calls: list[dict[str, object]] = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(kwargs)
+        if "--version" in command:
+            return subprocess.CompletedProcess(command, 0, f"basedpyright {type_gate.BASEDPYRIGHT_VERSION}\n", "")
+        return subprocess.CompletedProcess(command, 2, "", "boom\n")
+
+    monkeypatch.setattr(type_gate.subprocess, "run", run)
+    assert _grade(head, head, capsys) == (1, "::error::basedpyright exited 2: boom\n")
+    assert calls[-1] == {"cwd": head, "capture_output": True, "text": True}
+
+
+def test_the_parser_reads_paths_and_defaults_the_head_to_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    args = type_gate.build_parser().parse_args(["--base", "b"])
+    assert (args.base, args.head) == (Path("b"), Path.cwd())
