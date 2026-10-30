@@ -352,15 +352,19 @@ def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_s
 
     monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
     costs = {f"scripts.sample.x__mutmut_{index}": 160.0 for index in range(240)}
-    plan = plan_shards(costs, limit=10, budget=1080)
-    assert plan["shards"] == 12
-    assert max(plan["shard_worker_seconds"]) <= 3 * 1080
+    planned = plan_shards(costs, limit=10, budget=1080)
+    assert planned["shards"] == 12
+    assert max(planned["shard_worker_seconds"]) <= 3 * 1080
     assert plan_shards({str(index): 5000 for index in range(60)}, budget=1080)["shards"] == BATCH_RUNNERS == 40
     assert plan_shards({"a": 5000, "b": 5000}, budget=1080)["shards"] == 2
     assert plan.shard_count(3 * 1080 * 15, 500, 120, 10) == 15
     assert plan.shard_count(3 * 1080 * 15, 12, 120, 10) == 12
     assert plan.shard_count(3 * 1080 * 100, 500, 120, 10) == BATCH_RUNNERS
     assert plan.shard_count(3 * 120 * 4, 500, 120, 10) == 4
+    assert plan_shards({"a": 3241, "b": 1}, target=10**6, limit=1)["shards"] == 2
+    assert plan_shards({"a": 3240, "b": 1, "c": 1}, target=10**6, limit=1)["shards"] == 2
+    uneven = plan_shards({"a": 2000, "b": 2000, "c": 2000, "d": 1500}, target=10**6, limit=1)
+    assert uneven["shards"] == 4 and max(uneven["shard_worker_seconds"]) == 2000
 
 
 def test_a_mutant_whose_tests_outlast_one_slice_runs_the_fast_head_with_each_slice_on_its_own_shard():

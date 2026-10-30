@@ -101,16 +101,17 @@ def assign_units(
     items: list[tuple[float, str, int | None]], units: dict[str, list[float]], count: int
 ) -> tuple[dict[str, int | list[int]], list[float]]:
     loads = [0.0] * count
-    split = {name: [-1] * len(unit) for name, unit in units.items()}
+    placed: dict[str, dict[int, int]] = {name: {} for name in units}
     whole: dict[str, int] = {}
     for cost, name, position in sorted(items, key=lambda item: (-item[0], item[1])):
-        taken = split[name] if position is not None else []
+        taken = placed[name].values() if position is not None else ()
         index = min((index for index in range(count) if index not in taken), key=lambda index: (loads[index], index))
         if position is None:
             whole[name] = index
         else:
-            split[name][position] = index
+            placed[name][position] = index
         loads[index] += cost
+    split = {name: [shards[position] for position in range(len(units[name]))] for name, shards in placed.items()}
     return {**split, **whole}, loads
 
 
