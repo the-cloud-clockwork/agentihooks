@@ -136,7 +136,7 @@ def ledger(tmp_path: Path) -> Iterator[Ledger]:
     slug = f"feature-{uuid.uuid4().hex[:10]}"
     folder = tmp_path / "ledger"
     folder.mkdir()
-    assert storage.build().create(slug, CONTENT)
+    assert storage.default().create(slug, CONTENT)
     port = free_port()
     env = _environment(folder, port)
     with (tmp_path / "ledger-server.log").open("w") as log:
