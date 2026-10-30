@@ -2,12 +2,23 @@ import json
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
+
 from hooks.context.brain_writer_hook import _drain_outbox, _marker_request, _write_to_outbox
 from hooks.context.project_identity import ProjectIdentity
 from hooks.context.project_sessions import record_session
+from scripts.swarm import brain_binding
 
 
-def test_direct_and_outbox_keep_session_identity(monkeypatch, tmp_path):
+@pytest.fixture(params=["clean", "leaked"])
+def worker_history(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Leave the brain settings an earlier test on the same worker can leave behind, such as a reloaded config."""
+    if request.param == "leaked":
+        monkeypatch.setattr("hooks.config.BRAIN_URL", "http://127.0.0.1:8103")
+        monkeypatch.setenv(brain_binding.VARIABLE, json.dumps({"status": "refused", "reason": "leaked"}))
+
+
+def test_direct_and_outbox_keep_session_identity(worker_history, monkeypatch, tmp_path):
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path / "state")
     identity = ProjectIdentity("alpha", "org/alpha", "fix", "/work/alpha/fix")
     record_session("sid", identity)
