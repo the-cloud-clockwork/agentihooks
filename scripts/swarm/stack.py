@@ -365,11 +365,10 @@ def _completed(base: str) -> str:
         [
             "git",
             "--literal-pathspecs",
-            "log",
-            "--format=%H",
+            "rev-list",
             f"{fork}..{landed}",
             "--",
-            *changed.stdout.split("\0")[:-1],
+            *changed.stdout.removesuffix("\0").split("\0"),
         ],
         "cannot read completed dependency history",
     )

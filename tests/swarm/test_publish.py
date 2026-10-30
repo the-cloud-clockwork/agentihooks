@@ -1894,11 +1894,22 @@ def test_parked_successor_restacks_and_publishes_with_predecessor_checkout_prese
 
 
 @pytest.mark.parametrize(
-    ("stacked", "replayed"),
-    [("rebased", "2"), ("dependency", "1"), ("dependency-rebased", "1"), ("dependency-modified", "1")],
+    ("stacked", "replayed", "failure"),
+    [
+        ("rebased", "2", ""),
+        ("dependency", "1", ""),
+        ("dependency-rebased", "1", ""),
+        ("dependency-modified", "1", ""),
+        ("dependency-spaced", "1", ""),
+        ("dependency-modified", "1", "the task shares no history with dev"),
+        ("dependency-modified", "1", "cannot resolve the completed rebase tree"),
+        ("dependency-modified", "1", "the stacked base shares no history with dev"),
+        ("dependency-modified", "1", "cannot list dependency files"),
+        ("dependency-modified", "1", "cannot read completed dependency history"),
+    ],
 )
 def test_a_restack_after_a_manual_rebase_replays_only_the_task_commits(
-    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, stacked: str, replayed: str
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, stacked: str, replayed: str, failure: str
 ) -> None:
     from scripts.swarm import stack
 
@@ -1906,17 +1917,18 @@ def test_a_restack_after_a_manual_rebase_replays_only_the_task_commits(
     root, repository = p.root, p.repo
     (root / "chosen.txt").write_text("before")
     base = git(repository, "rev-parse", "dev")
+    dependency_file = "dependency work\nfile.txt" if stacked == "dependency-spaced" else "blocker.txt"
     if stacked.startswith("dependency"):
-        (root / "blocker.txt").write_text("dependency")
-        git(root, "add", "blocker.txt")
+        (root / dependency_file).write_text("dependency")
+        git(root, "add", dependency_file)
         git(root, "commit", "-qm", "Dependency work")
-        (root / "blocker.txt").write_text("completed dependency")
+        (root / dependency_file).write_text("completed dependency")
         git(root, "commit", "-qam", "Finish dependency")
         base = git(root, "rev-parse", "HEAD")
         git(repository, "merge", "--squash", base)
         git(repository, "commit", "-qm", "Squash dependency")
-        if stacked == "dependency-modified":
-            (repository / "blocker.txt").write_text("newer dependency")
+        if stacked in {"dependency-modified", "dependency-spaced"}:
+            (repository / dependency_file).write_text("newer dependency")
             git(repository, "commit", "-qam", "Advance dependency after squash")
     (root / "task.txt").write_text("parked work")
     git(root, "add", "task.txt")
@@ -1943,8 +1955,31 @@ def test_a_restack_after_a_manual_rebase_replays_only_the_task_commits(
         counted.append(git(root, "rev-list", "--count", f"{start}..HEAD"))
         native(start)
 
+    native_shell = stack.shell
+
+    def shell(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        failures = {
+            "the task shares no history with dev": argv[1:] == ["merge-base", "HEAD", "origin/dev"],
+            "cannot resolve the completed rebase tree": argv[1:2] == ["rev-parse"] and argv[-1].endswith("^{tree}"),
+            "the stacked base shares no history with dev": argv[1:3] == ["merge-base", base],
+            "cannot list dependency files": argv[1:3] == ["diff", "--name-only"],
+            "cannot read completed dependency history": argv[1:3] == ["--literal-pathspecs", "rev-list"],
+        }
+        if failures.get(failure):
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="deliberate failure")
+        return native_shell(argv)
+
     monkeypatch.setattr(stack, "_rebase", rebase)
+    monkeypatch.setattr(stack, "shell", shell)
     monkeypatch.chdir(root)
+
+    if failure:
+        with pytest.raises(stack.SwarmError) as caught:
+            stack.restack("swarm", p.agent, p.ledger)
+        assert str(caught.value) == f"{failure}: deliberate failure"
+        assert p.task["parked_on"] == ["dependency"]
+        assert counted == []
+        return
 
     stack.restack("swarm", p.agent, p.ledger)
 
