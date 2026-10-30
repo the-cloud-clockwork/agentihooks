@@ -155,6 +155,7 @@ def test_a_critic_that_does_not_answer_is_a_swarm_error(monkeypatch):
     with pytest.raises(SwarmError, match="^the blind critic did not answer: claude exited 1$"):
         resolve.headless_critic("p")
 
+
 @pytest.mark.parametrize(
     "reason",
     [
