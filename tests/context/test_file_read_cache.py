@@ -376,3 +376,26 @@ def test_range_revision_threshold_invalidates_cached_lines(
     file_read_cache.mark_read_result(partial_read)
     monkeypatch.setattr(file_read_cache, "_get_mtime", lambda _: delta)
     assert not file_read_cache.was_file_read(partial_read["session_id"], partial_read["tool_input"]["file_path"], 1, 1)
+
+
+@pytest.mark.parametrize("missing_mtime", ["stored", "current"])
+def test_unavailable_revision_is_a_cache_miss_without_redis_error(
+    partial_read: dict[str, Any], monkeypatch: pytest.MonkeyPatch, missing_mtime: str
+) -> None:
+    from hooks._redis import redis_key
+    from hooks.context import file_read_cache
+
+    redis = file_read_cache.get_redis()
+    if redis is None:
+        return
+    file_read_cache.mark_read_result(partial_read)
+    session_id = partial_read["session_id"]
+    path = partial_read["tool_input"]["file_path"]
+    if missing_mtime == "stored":
+        redis.hdel(redis_key("file_mtime", session_id), path)
+    else:
+        monkeypatch.setattr(file_read_cache, "_get_mtime", lambda _: None)
+    messages: list[str] = []
+    monkeypatch.setattr(file_read_cache, "log", lambda message, details: messages.append(message))
+    assert not file_read_cache.was_file_read(session_id, path, 1, 1)
+    assert messages == []
