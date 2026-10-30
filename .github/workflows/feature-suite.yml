@@ -52,9 +52,12 @@ jobs:
         run: |
           python -m pytest tests/features --confcutdir=tests/features -m feature -n 0 -v -rs --tb=long --basetemp="$RUNNER_TEMP/feature-suite" --junitxml="$RUNNER_TEMP/feature-suite.xml"
 
-      - name: Print the ledger server and scripted agent logs
+      - name: Print the service, ledger server and scripted agent logs
         if: failure()
-        run: find "$RUNNER_TEMP/feature-suite" -name '*.log' -print -exec tail -n 200 {} \;
+        run: |
+          docker logs --tail 100 "feature-postgres-$GITHUB_RUN_ID" || true
+          docker logs --tail 50 "feature-redis-$GITHUB_RUN_ID" || true
+          find "$RUNNER_TEMP/feature-suite" -name '*.log' -print -exec tail -n 200 {} \;
 
       - name: Stop the services
         if: always()
