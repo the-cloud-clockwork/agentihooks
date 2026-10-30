@@ -494,10 +494,8 @@ def cmd_list(store, args):
 
 @ledger_route.tick
 def _tick_one(store, slug):
-    from scripts.swarm import controller
-
     try:
-        if controller.hosted_elsewhere(store, slug) or not _tickable(slug):
+        if not _tickable(slug):
             return
         for action in run_tick(store, slug, scheduled=True):
             timing.emit(sys.stdout, f"{slug}: {action}")
