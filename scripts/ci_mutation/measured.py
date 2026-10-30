@@ -100,18 +100,19 @@ def measured_splits(
 
 def assign_units(
     items: list[tuple[float, str, int | None]], units: dict[str, list[float]], count: int
-) -> tuple[dict, list[float]]:
+) -> tuple[dict[str, int | list[int]], list[float]]:
     loads = [0.0] * count
-    assignments = {name: [None] * len(unit) for name, unit in units.items()}
+    split = {name: [-1] * len(unit) for name, unit in units.items()}
+    whole: dict[str, int] = {}
     for cost, name, position in sorted(items, key=lambda item: (-item[0], item[1])):
-        taken = assignments[name] if position is not None else []
+        taken = split[name] if position is not None else []
         index = min((index for index in range(count) if index not in taken), key=lambda index: (loads[index], index))
         if position is None:
-            assignments[name] = index
+            whole[name] = index
         else:
-            assignments[name][position] = index
+            split[name][position] = index
         loads[index] += cost
-    return assignments, loads
+    return {**split, **whole}, loads
 
 
 def plan_shards(
@@ -129,7 +130,9 @@ def plan_shards(
         if (function := function_name(name)) in splits
     }
     costs = {name: sum(units[name]) if name in units else cost for name, cost in costs.items()}
-    items = [(cost, name, None) for name, cost in costs.items() if name not in units]
+    items: list[tuple[float, str, int | None]] = [
+        (cost, name, None) for name, cost in costs.items() if name not in units
+    ]
     items += [(cost, name, position) for name, unit in units.items() for position, cost in enumerate(unit)]
     seconds = sum(costs[name] for name in sorted(costs))
     widest = max(map(len, units.values()), default=1)

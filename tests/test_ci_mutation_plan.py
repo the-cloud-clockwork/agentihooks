@@ -410,6 +410,7 @@ def test_splits_cover_untimed_tests_cap_at_ten_slices_and_reach_the_refined_plan
     from scripts.ci_mutation import measured
     from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
 
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "4")
     nodes = [f"tests/test_sample.py::t{i:02}" for i in range(13)]
     results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": dict.fromkeys(nodes[:12], 130.0)}]
     names = ["scripts.sample.x_f__mutmut_1"]
@@ -425,7 +426,8 @@ def test_splits_cover_untimed_tests_cap_at_ten_slices_and_reach_the_refined_plan
     write_part(stats.group(0).folder / "part-0.json", stats_key("head", selected), (0, 1), results)
     refined = measured.refine_plan(tmp_path, selected, stats)
     assert list(refined["splits"]) == ["scripts.sample.x_f"]
-    assert len(refined["assignments"]) >= 10 and refined["shards"] == 10
+    assert len(refined["assignments"]) >= 10 and refined["shards"] > 10
+    assert max(refined["shard_worker_seconds"]) <= 4 * 1080
     assert all(len(shards) == 10 for shards in refined["assignments"].values())
 
 
