@@ -11,7 +11,7 @@ import re
 import secrets
 import subprocess
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cached_property, partial
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,9 @@ CODE_RE = re.compile(r"[0-9a-f]{6}")
 SWARM_RE = re.compile(r"swarm@([0-9a-f]{6})")
 MINT_ATTEMPTS = 20
 NAMES_PAGE = 500
+SPAWN_FIELDS = ("type", "number", "code", "swarm", "session_id", "spawned_at", "retired_at")
+UNBOUND_SESSION = ""
+NOT_RETIRED = 0
 _BASE = rf"(?:(?:{_KINDS})-[0-9a-f]{{6}}-\d{{4}}|session-[0-9a-f]{{8}})"
 _REPO = r"[a-z0-9][a-z0-9._-]*"
 PROOF_RE = re.compile(r"proof-[0-9a-f]{6}-[a-z0-9]+-\d+")
@@ -373,8 +376,8 @@ class NameRegistry:
     def _legacy_codes(self, code):
         return lambda client: json.loads(client.hget(self.key("codes"), code) or "null")
 
-    def _legacy_seq(self, code):
-        return lambda client: {kind: int(n) for kind, n in client.hgetall(self.key("seq", code)).items()} or None
+    def _legacy_seq(self, code: str, client: Any) -> dict[str, int] | None:
+        return {kind: int(n) for kind, n in client.hgetall(self.key("seq", code)).items()} or None
 
     def _legacy_name(self, name):
         return lambda client: row(client.hgetall(self.key("name", name)))
@@ -469,20 +472,22 @@ class NameRegistry:
             rows.update({state_key("alias", old): name for old in olds})
         return rows
 
-    def _seq(self, code):
-        return self.names_state.get("seq", code, self._legacy_seq(code)) or {}
+    def _seq(self, code: str) -> dict[str, int]:
+        return self.names_state.get("seq", code, partial(self._legacy_seq, code)) or {}
 
-    def next(self, slug, lane, at=0):
+    def next(self, slug: str, lane: str, at: int = 0) -> str:
         code = self.code_of(slug)
         if not code:
             raise NamingError(f"swarm {slug} has no code yet")
         kind = TYPES[lane]
         counted = self.names_state.amend(
-            "seq", code, lambda seq: {**(seq or {}), kind: (seq or {}).get(kind, 0) + 1}, self._legacy_seq(code)
+            "seq",
+            code,
+            lambda seq: {**(seq or {}), kind: (seq or {}).get(kind, 0) + 1},
+            partial(self._legacy_seq, code),
         )
         name = build(kind, code, counted[kind])
-        record = {"type": kind, "number": counted[kind], "code": code, "swarm": slug}
-        record.update(session_id="", spawned_at=at, retired_at=0)
+        record = dict(zip(SPAWN_FIELDS, (kind, counted[kind], code, slug, UNBOUND_SESSION, at, NOT_RETIRED)))
         self.names_state.amend("name", name, lambda _: record, self._legacy_name(name))
         return name
 
