@@ -1,6 +1,6 @@
 import threading
+from typing import TYPE_CHECKING
 
-import fakeredis
 import pytest
 
 from scripts.inbox import exits
@@ -11,6 +11,9 @@ SLUG = "sw"
 HARNESSES = ["claude", "codex"]
 pytestmark = pytest.mark.unit
 
+
+if TYPE_CHECKING:
+    import fakeredis
 
 @pytest.fixture
 def server():
@@ -54,7 +57,7 @@ ROWS = {"tA": {"claimed_by": "", "state": "done"}, "tB": {"claimed_by": "", "sta
 @pytest.mark.parametrize("harness", HARNESSES)
 @pytest.mark.parametrize("order", ["reply-before-exit", "reply-after-exit"])
 def test_a_reply_to_an_agent_that_finished_its_task_never_reaches_another_tasks_agent(
-    server: fakeredis.FakeServer, harness: str, order: str
+    server: "fakeredis.FakeServer", harness: str, order: str
 ) -> None:
     store, inbox, master, a, b = crew(client(server), harness)
     ROWS["tB"]["claimed_by"] = b
