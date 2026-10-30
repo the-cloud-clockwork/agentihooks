@@ -29,6 +29,7 @@ python3 tests/chart_hive_home.py "$chart"
 python3 tests/chart_hive_rollout.py
 python3 tests/chart_hive_only.py "$chart"
 python3 tests/chart_hub.py "$chart"
+python3 tests/chart_api.py "$chart"
 python3 tests/chart_ledger_rollout.py "$chart"
 python3 tests/chart_scheduler_state.py "$chart"
 python3 tests/chart_nats.py "$chart"
@@ -504,11 +505,12 @@ import json
 import os
 import uuid
 
+from scripts.swarm import fencing
 from scripts.swarm.store import connect
 
 store = connect()
 slug = os.environ["SLUG"]
-epoch = int(store.redis.get(store.key(slug, "control-epoch")))
+epoch = fencing.read(store, slug)["epoch"]
 token = json.dumps({"epoch": epoch, "token": uuid.uuid4().hex, **json.loads(os.environ["HOLDER"])})
 store.redis.set(store.key(slug, "tick-lock"), token, px=600_000, nx=True)
 print(store.redis.get(store.key(slug, "tick-lock")))

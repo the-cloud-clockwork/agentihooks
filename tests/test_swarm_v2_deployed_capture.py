@@ -43,7 +43,7 @@ def test_production_remote_capture_completes_within_its_pod_grace(tmp_path, monk
     assert supervision.budgets.checkpoint == 40
     assert supervision.budgets.quiesce + supervision.budgets.kill * 2 + supervision.budgets.checkpoint < 60
 
-    with contextmanager(artifact_endpoint.__wrapped__)(tmp_path) as (endpoint, _, _, authority):
+    with contextmanager(artifact_endpoint.__wrapped__)(tmp_path, monkeypatch) as (endpoint, _, _, authority):
         spec = json.loads(supervision.record(registration, "engineer"))
         spec.update(control_url=endpoint["control_url"], image_digest=original["image_digest"])
         authority.authorize.return_value = registration

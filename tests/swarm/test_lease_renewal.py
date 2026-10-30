@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.events.redis_state import RedisStateStore
-from scripts.swarm import cli, controller, lease, timing
+from scripts.swarm import cli, controller, fencing, lease, timing
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
@@ -31,7 +31,7 @@ def test_renew_extends_the_live_lease_and_keeps_its_epoch(store, clock):
     clock[0] = 150000
     assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 330000)
     assert lease.current(store, "sw") == lease.Lease("home", 1, 330000)
-    assert store.redis.pttl(store.key("sw", "control-owner")) > 179000
+    assert fencing.read(store, "sw")["lease"]["expires_at"] - clock[0] > 179000
 
 
 def test_renew_refuses_a_lease_taken_by_another_owner(store, clock):
@@ -63,24 +63,38 @@ def test_renew_refuses_an_expired_lease(store, clock):
 
 def test_renew_retries_a_conflicting_transaction(store, clock, monkeypatch):
     held = lease.acquire(store, "sw", "home")
-    pipeline, conflicts = store.redis.pipeline, [1]
+    real, conflicts = fencing.state.for_store(store, fencing.BUCKET), [1]
 
-    def interleaved():
-        pipe = pipeline()
-        execute = pipe.execute
+    class Racing:
+        def get(self, key):
+            return real.get(key)
 
-        def commit():
+        def create(self, key, value):
+            return real.create(key, value)
+
+        def update(self, key, value, revision):
             if conflicts:
                 conflicts.pop()
-                store.redis.pexpire(store.key("sw", "control-owner"), lease.ttl_ms())
-            return execute()
+                entry = real.get(key)
+                doc = fencing._decode(entry.value)
+                doc["orphans"]["race"] = doc["orphans"].get("race", 0) + 1
+                real.update(key, fencing._encode(doc), entry.revision)
+            return real.update(key, value, revision)
 
-        pipe.execute = commit
-        return pipe
+    monkeypatch.setattr(fencing.state, "for_store", lambda *args, **kwargs: Racing())
+    clock[0] = 70000
+    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 250000)
+    assert conflicts == []
 
-    monkeypatch.setattr(store.redis, "pipeline", interleaved)
-    clock[0] = 2000
-    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 182000)
+
+def test_a_renewal_within_one_tick_of_the_last_writes_nothing(store, clock):
+    held = lease.acquire(store, "sw", "home")
+    before = fencing.state.for_store(store, fencing.BUCKET).get("sw").revision
+    clock[0] = 61000
+    assert lease.renew(store, "sw", held) == held
+    assert fencing.state.for_store(store, fencing.BUCKET).get("sw").revision == before
+    clock[0] = 61001
+    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 241001)
 
 
 def test_a_tick_slower_than_the_lease_keeps_writing(store, clock):
@@ -289,7 +303,7 @@ def test_default_tick_gives_a_three_minute_lease(store, clock, monkeypatch):
     assert (lease.tick_ms(), lease.ttl_ms()) == (60000, 180000)
     held = lease.acquire(store, "sw", "home")
     assert held == lease.Lease("home", 1, 181000)
-    assert 179000 < store.redis.pttl(store.key("sw", "control-owner")) <= 180000
+    assert 179000 < fencing.read(store, "sw")["lease"]["expires_at"] - clock[0] <= 180000
 
 
 def test_a_shorter_tick_shortens_the_lease_life_to_three_of_its_ticks(store, clock, monkeypatch):
@@ -297,10 +311,10 @@ def test_a_shorter_tick_shortens_the_lease_life_to_three_of_its_ticks(store, clo
     assert (lease.tick_ms(), lease.ttl_ms()) == (2500, 7500)
     held = lease.acquire(store, "sw", "home")
     assert held == lease.Lease("home", 1, 8500)
-    assert 7000 < store.redis.pttl(store.key("sw", "control-owner")) <= 7500
+    assert 7000 < fencing.read(store, "sw")["lease"]["expires_at"] - clock[0] <= 7500
     clock[0] = 5000
     assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 12500)
-    assert 7000 < store.redis.pttl(store.key("sw", "control-owner")) <= 7500
+    assert 7000 < fencing.read(store, "sw")["lease"]["expires_at"] - clock[0] <= 7500
 
 
 @pytest.mark.parametrize("seconds", ["abc", "0", "-5", "0.999", "nan", "inf"])

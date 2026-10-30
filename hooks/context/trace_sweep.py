@@ -224,12 +224,13 @@ def _priming_texts(correction: dict) -> list[str]:
 
 
 def _priming_hits(correction: dict) -> list[Hit]:
+    """Return priming hits; an unreadable store keeps the correction open rather than closing it unseen."""
     if correction.get("layer") not in PRIMING_LAYERS:
         return []
     hit = Hit(correction["source"], correction["layer"], correction["source"], correction["source"], "held")
     try:
         texts = _priming_texts(correction)
-    except Exception:  # an unreadable store keeps the correction open rather than closing it unseen
+    except Exception:
         return [hit]
     needle, whole = quarantine.needle(correction), _norm(correction["text"])
     found = any((needle and needle in _norm(text)) or _norm(text) == whole for text in texts)

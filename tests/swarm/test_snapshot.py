@@ -65,7 +65,10 @@ def registered_codes(store):
 
 
 def test_export_then_restore_after_losing_redis_gives_back_the_same_swarm_state(store):
+    from scripts.swarm import fencing
+
     seed(store, "sw")
+    fencing.read(store, "sw")
     alone, names = everything(store.redis), store.names.export("sw")
     seed(store, "other")
     state = store.export("sw")
@@ -77,7 +80,10 @@ def test_export_then_restore_after_losing_redis_gives_back_the_same_swarm_state(
 
 
 def test_a_snapshot_taken_before_names_were_exported_still_restores(store):
+    from scripts.swarm import fencing
+
     seed(store, "sw")
+    fencing.read(store, "sw")
     alone = everything(store.redis)
     state = store.export("sw")
     del state["names"]

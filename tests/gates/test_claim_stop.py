@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -732,6 +733,59 @@ def test_a_working_successor_on_a_parked_task_owes_its_stop(rig):
 def test_a_handed_off_claimant_with_nothing_parked_owes_its_stop(rig):
     _finish(rig)
     assert not rig.stop().allowed
+
+
+@pytest.mark.parametrize("successor_claimed", [False, True])
+def test_an_accepted_handoff_releases_only_its_predecessors_stop(rig: Any, successor_claimed: bool) -> None:
+    from scripts.gates.claim_stop import Streak
+    from scripts.handoff import transfers
+
+    assert not rig.stop().allowed
+    assert not rig.stop().allowed
+    predecessor = next(agent for agent in rig.store.agents(SLUG) if agent.name == ME)
+    transfer = transfers.record(rig.store, SLUG, predecessor, "context", "Accepted handoff", rig.clock[0])
+    _finish(rig)
+    successor = AgentRecord(name="engineer@100001-0002", lane="eng", task="t1", state="working")
+    rig.store.put_agent(SLUG, successor)
+    rig.store.clear_handoff(SLUG, "t1")
+    if successor_claimed:
+        rig.task["claimed_by"] = successor.name
+        rig.store.release(SLUG, "t1", ME)
+        rig.store.claim(SLUG, "t1", successor.name, 600_000)
+    before = dict(rig.task)
+    owner = rig.store.claimant(SLUG, "t1")
+
+    for _ in range(3):
+        assert rig.stop() == Decision()
+        assert rig.task == before
+        assert rig.store.claimant(SLUG, "t1") == owner
+        assert rig.store.redis.get(Streak(rig.store, SLUG, ME).key) is None
+        assert transfers.get(rig.store, SLUG, transfer["id"]) == transfer
+        assert successor in rig.store.agents(SLUG)
+    assert rig.ledger.updates == []
+    assert rig.ledger.comments == []
+    assert rig.rows() == []
+    if successor_claimed:
+        assert not rig.stop(Who(name=successor.name, swarm=SLUG, lane="eng", task="t1")).allowed
+
+
+@pytest.mark.parametrize("mismatch", ["predecessor", "task", "handoff", "working"])
+def test_an_unaccepted_or_unrelated_transfer_does_not_release_stop(rig: Any, mismatch: str) -> None:
+    from dataclasses import replace
+
+    from scripts.handoff import transfers
+
+    predecessor = next(agent for agent in rig.store.agents(SLUG) if agent.name == ME)
+    if mismatch == "predecessor":
+        predecessor = replace(predecessor, name="engineer@100001-0002")
+    if mismatch == "task":
+        predecessor = replace(predecessor, task="t2")
+    text = "" if mismatch == "handoff" else "Accepted handoff"
+    transfers.record(rig.store, SLUG, predecessor, "context", text, rig.clock[0])
+    if mismatch != "working":
+        _finish(rig)
+    assert not rig.stop().allowed
+    assert rig.task["state"] == "claimed"
 
 
 def test_only_the_stopping_agents_own_record_releases_a_parked_task(rig):

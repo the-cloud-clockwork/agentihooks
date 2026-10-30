@@ -8,7 +8,7 @@ from scripts.gates import intent
 from scripts.gates import log as gate_log
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, commands, dispatcher, lease, publish, runtime, timer
+from scripts.swarm import cli, commands, dispatcher, fencing, lease, publish, runtime, timer
 from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
@@ -137,7 +137,7 @@ def test_done_refuses_distributed_task_before_proof_or_ledger_mutations(env, mon
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
-    store.redis.set(store.key("sw", "task-authority", "t1"), "{}")
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({"t1": {}}))
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("provider read"))
     assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 1
     assert ledger.rows["t1"]["state"] == "claimed"

@@ -307,8 +307,10 @@ def test_ready_refuses_a_task_gone_from_the_ledger(released, capsys):
 
 
 def test_ready_refuses_a_task_under_the_controller_outcome_path(released, capsys):
+    from scripts.swarm import fencing
+
     store, ledger, _, doc = released
-    store.redis.set(store.key("sw", "task-authority", "t1"), 1)
+    fencing.write(store, "sw", lambda d: d["claims"].update({"t1": 1}))
     assert release(doc) == 1
     assert capsys.readouterr().err == "swarm: distributed final mutations require the controller outcome path\n"
     assert ready.record(store, "sw", "t1") is None and working(store)

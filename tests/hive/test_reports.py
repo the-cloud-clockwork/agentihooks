@@ -957,9 +957,13 @@ def test_finished_removed_hive_workers_settle_after_an_absence_lease(remote, han
 
 
 @pytest.mark.parametrize("protection", ["indexed", "heartbeat", "report", "working", "local", "unreadable"])
-def test_removed_hive_retirement_requires_expired_host_evidence(remote, protection, monkeypatch):
+def test_removed_hive_retirement_requires_expired_host_evidence(
+    remote: SimpleNamespace, protection: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import asdict
+
     from scripts.hive import registry
-    from scripts.swarm import tick
+    from scripts.swarm import fencing, tick
 
     remote.agent = replace(remote.agent, state="finished")
     remote.store.put_agent("fixture", remote.agent)
@@ -975,9 +979,10 @@ def test_removed_hive_retirement_requires_expired_host_evidence(remote, protecti
         _publish(remote)
     elif protection == "working":
         working = replace(remote.agent, state="working")
-        pipe = remote.redis.pipeline()
-        remote.store.execution_registry.write(pipe, "fixture", working, remote.agent)
-        pipe.execute()
+        fencing.write(
+            remote.store, "fixture", lambda doc: doc["executions"].update({working.execution_id: asdict(working)})
+        )
+        remote.store.project_agent("fixture", working, remote.agent)
         remote.agent = working
         rows["task"] = {"state": "claimed", "claimed_by": remote.agent.name}
     elif protection == "local":

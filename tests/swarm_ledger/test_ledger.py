@@ -95,6 +95,7 @@ def applied(ids):
 
 
 @pytest.mark.parametrize("queued_slug", ["s", "another-ledger"])
+@pytest.mark.feature("ledger-join-past-talk")
 def test_join_lands_past_pending_talk(
     cli: Callable[[list[str], Callable[[list[str]], dict]], list[dict]],
     monkeypatch: pytest.MonkeyPatch,
@@ -125,6 +126,7 @@ def test_join_lands_past_pending_talk(
         [{"op": "join", "id": "join", "by": "eng-1"}, {"op": "leave", "id": "leave", "by": "eng-1"}],
     ],
 )
+@pytest.mark.feature("ledger-join-past-talk")
 def test_pending_talk_still_holds_other_writes(monkeypatch: pytest.MonkeyPatch, ops: list[dict]) -> None:
     from scripts.inbox import outbox
 
@@ -139,6 +141,7 @@ def test_pending_talk_still_holds_other_writes(monkeypatch: pytest.MonkeyPatch, 
 
 
 @pytest.mark.parametrize("argv", WRITES, ids=" ".join)
+@pytest.mark.feature("ledger-write-results")
 def test_every_write_command_exits_non_zero_naming_the_refusal_reason(cli, capsys, argv):
     with pytest.raises(SystemExit) as stop:
         cli(argv, refused)
@@ -147,6 +150,7 @@ def test_every_write_command_exits_non_zero_naming_the_refusal_reason(cli, capsy
 
 
 @pytest.mark.parametrize("argv", WRITES, ids=" ".join)
+@pytest.mark.feature("ledger-write-results")
 def test_every_write_command_prints_an_applied_write_and_exits_zero(cli, capsys, argv, monkeypatch):
     purged = [{"id": "p0", "kind": "artifacts purged", "count": 0}]
     monkeypatch.setattr(ledger, "resource", lambda s, p, **k: {"artifacts": 0} if p == "counts" else purged)

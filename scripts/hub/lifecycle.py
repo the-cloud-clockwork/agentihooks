@@ -10,7 +10,7 @@ from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
 
 _RELEASE_CLAIM = """
-if redis.call("exists", KEYS[2], KEYS[3]) == 0 and redis.call("get", KEYS[1]) == ARGV[1] then
+if redis.call("get", KEYS[1]) == ARGV[1] then
     return redis.call("del", KEYS[1])
 end
 return 0
@@ -95,14 +95,8 @@ class Lifecycle:
         store = copy(self.store)
         store.redis = pipe
         self.release(store, event.swarm, agent)
-        pipe.eval(
-            _RELEASE_CLAIM,
-            3,
-            store.key(event.swarm, "claim", agent.task),
-            store.key(event.swarm, "task-authority", agent.task),
-            store.key(event.swarm, "claim-journal", agent.task),
-            agent.name,
-        )
+        if not self.store.authority_held(event.swarm, agent.task):
+            pipe.eval(_RELEASE_CLAIM, 1, store.key(event.swarm, "claim", agent.task), agent.name)
 
     def _settle(self, event: Envelope, agent: AgentRecord) -> None:
         row = self.ledger.task(event.swarm, agent.task)

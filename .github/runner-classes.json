@@ -92,6 +92,7 @@
   "test.yml/stage-budget": "light",
   "test.yml/test-count": "standard",
   "test.yml/test-summary": "light",
+  "test.yml/type-gate": "batch",
   "test.yml/unit": "standard",
   "test.yml/unit-lost": "light",
   "test.yml/unit-rerun": "standard",
