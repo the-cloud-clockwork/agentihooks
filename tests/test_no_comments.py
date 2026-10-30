@@ -177,14 +177,19 @@ def test_clean_registry_growth_is_green(tmp_path: Path) -> None:
     assert no_comments.grade(base, head, False) == []
 
 
-@pytest.mark.parametrize("value", [{}, ["../subject.py"], ["/subject.py"], ["subject.txt"], [1]])
+@pytest.mark.parametrize("value", [{}, ["../subject.py"], ["/subject.py"], [1]])
 def test_invalid_registry_is_red(tmp_path: Path, value: object, capsys: pytest.CaptureFixture[str]) -> None:
     root = _tree(tmp_path / "head", {"subject.py": "pass\n", "tests/COMMENT_FREE_PATHS.json": json.dumps(value)})
     assert no_comments.main(["--head", str(root), "--all"]) == 1
-    reason = (
-        "must be a list of paths" if value == {} or value == [1] else "must contain repository relative Python paths"
-    )
-    assert capsys.readouterr().out == f"::error::cannot grade Python comments: tests/COMMENT_FREE_PATHS.json {reason}\n"
+    reason = "must be a list of paths" if value == {} or value == [1] else "must contain repository relative paths"
+    assert capsys.readouterr().out == f"::error::cannot grade comments: tests/COMMENT_FREE_PATHS.json {reason}\n"
+
+
+def test_ungraded_registration_is_red(tmp_path: Path) -> None:
+    root = _tree(tmp_path / "head", {"subject.txt": "data\n", "tests/COMMENT_FREE_PATHS.json": '["subject.txt"]'})
+    assert no_comments.grade(None, root, True) == [
+        "tests/COMMENT_FREE_PATHS.json: comment free path is not a graded file: subject.txt"
+    ]
 
 
 def test_untracked_registration_is_red(tmp_path: Path) -> None:
@@ -256,7 +261,7 @@ def test_cli_help_and_required_base(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as help_exit:
         no_comments.main(["--help"])
     assert help_exit.value.code == 0
-    assert "Reject new Python comments and preserve comment free files." in capsys.readouterr().out.splitlines()
+    assert "Reject new comments and preserve comment free files." in capsys.readouterr().out.splitlines()
     with pytest.raises(SystemExit) as missing_exit:
         no_comments.main([])
     assert missing_exit.value.code == 2
@@ -379,3 +384,118 @@ def test_whole_tree_includes_unchanged_base_files(tmp_path: Path) -> None:
     base = _tree(tmp_path / "base", files)
     head = _tree(tmp_path / "head", files)
     assert no_comments.grade(base, head, True) == ["subject.py:1: forbidden comment"]
+
+
+SCRIPT = "scripts/subject.sh"
+SCRIPT_JS = "scripts/swarm_ledger/static/js/subject.js"
+SHEET = "scripts/swarm_ledger/static/css/subject.css"
+HEADER = "".join(f"# header line {index}\n" for index in range(20))
+
+
+@pytest.mark.parametrize(
+    ("name", "before", "after", "line"),
+    [
+        (SCRIPT, "#!/usr/bin/env bash\necho a\n", "#!/usr/bin/env bash\necho a\n# planted\n", 3),
+        (SCRIPT, "#!/usr/bin/env bash\necho a\n", "#!/usr/bin/env bash\necho a  # planted\n", 2),
+        ("scripts/runner", "#!/bin/bash\necho a\n", "#!/bin/bash\necho a\n# planted\n", 3),
+        (SCRIPT, "echo a\n", "echo a\n# shellcheck disable=SC2034 because unused\nx=1\n", 2),
+        (SCRIPT_JS, "f();\n", "f();\n// planted\n", 2),
+        (SCRIPT_JS, "f();\n", "f(); /* planted */\n", 1),
+        (SCRIPT_JS, "f();\n", "f();\n/** planted */\n\nfunction g() {}\n", 2),
+        (SCRIPT_JS, "f();\n", "f();\n/** planted */\nconst x = 1;\n", 2),
+        (SCRIPT_JS, "f();\n", "f();\n/* planted */\nfunction g() {}\n", 2),
+        (SCRIPT_JS, "f();\n", "try { f(); } catch (e) { /* storage blocked */ }\n", 1),
+        (SCRIPT_JS, "f();\n", "f();\n// eslint-disable-next-line no-undef -- reason\ng();\n", 2),
+        (SHEET, "a { color: red; }\n", "a { color: red; /* planted */ }\n", 1),
+        (SHEET, "a { color: red; }\n", "/* header */\n\n/* second block */\na { color: red; }\n", 3),
+    ],
+)
+def test_planted_tree_comment_is_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], name: str, before: str, after: str, line: int
+) -> None:
+    assert _grade(tmp_path, before, after, name) == 1
+    assert capsys.readouterr().out == f"::error::{name}:{line}: forbidden comment\n"
+
+
+@pytest.mark.parametrize(
+    ("name", "after"),
+    [
+        (SCRIPT, '#!/usr/bin/env bash\nx=${y#z}\necho "$#" "a # b" \'c # d\' ${x##*/} ${x%#}\n'),
+        (SCRIPT, "#!/usr/bin/env bash\ncat <<EOF\n# not a comment\nEOF\n"),
+        (SCRIPT, "#!/usr/bin/env bash\n" + HEADER + "set -euo pipefail\n"),
+        (SCRIPT, "#!/usr/bin/env bash\n\n# header\necho a\n# shellcheck disable=SC2034,SC2154\nx=1\n"),
+        (SCRIPT, "#!/usr/bin/env bash\necho a\n# shellcheck source=/dev/null\n. ./env\n"),
+        ("scripts/runner.py", "value = 1\n"),
+        ("scripts/notes.txt", "# not graded\n"),
+        ("scripts/runner", "#!/bin/sh\n# sh is not graded\n"),
+        (".semgrep/fixture.sh", "#!/usr/bin/env bash\n# ruleid: example.rule\nsleep 60\n"),
+        (SCRIPT_JS, 'const s = "a // b", t = `x // ${s} /* y */`, r = /\\/\\/ x/;\n'),
+        (SCRIPT_JS, "// header\n// second header line\nimport { a } from './a.js';\n"),
+        (SCRIPT_JS, "f();\n/** Run g. */\nfunction g() {}\n"),
+        (SCRIPT_JS, "f();\n/**\n * Run g.\n */\nexport function g() {}\n"),
+        (SCRIPT_JS, "f();\n/** Run g. */\nexport const g = () => 1;\n"),
+        (SCRIPT_JS, "f();\n/** A. */\nclass A {\n  /** Run m. */\n  m() {}\n}\n"),
+        (SCRIPT_JS, "// eslint-disable-next-line no-undef\nf(); // eslint-disable-line no-undef\n/* @ts-nocheck */\n"),
+        (SCRIPT_JS, "function g() { try { f(); return true; } catch (e) { return false; } }\n"),
+        ("scripts/other/subject.js", "f(); // outside the ledger front end\n"),
+        (SHEET, '/* header\n   second line */\na { content: "/* not */"; }\n'),
+    ],
+)
+def test_tree_comment_allowance_is_green(tmp_path: Path, name: str, after: str) -> None:
+    assert _grade(tmp_path, "", after, name) == 0
+
+
+@pytest.mark.parametrize(
+    ("name", "header"),
+    [
+        (SCRIPT, "#!/usr/bin/env bash\n" + HEADER + "# header line 21\necho a\n"),
+        (SCRIPT_JS, "/*\n" + "".join(f" * line {index}\n" for index in range(19)) + " */\nf();\n"),
+        (SHEET, "".join(f"/* line {index} */\n" for index in range(21)) + "a { color: red; }\n"),
+    ],
+)
+def test_long_header_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str], name: str, header: str) -> None:
+    assert _grade(tmp_path, "", header, name) == 1
+    start = 2 if name == SCRIPT else 1
+    assert capsys.readouterr().out == f"::error::{name}:{start}: file header exceeds 20 lines\n"
+
+
+def test_unchanged_tree_comment_is_green(tmp_path: Path) -> None:
+    source = "f();\n// kept\n"
+    assert _grade(tmp_path, source, source + "g();\n", SCRIPT_JS) == 0
+
+
+def test_listed_script_with_comment_is_red(tmp_path: Path) -> None:
+    registry = {"tests/COMMENT_FREE_PATHS.json": json.dumps([SCRIPT])}
+    base = _tree(tmp_path / "base", {SCRIPT: "echo a\n# old\n", **registry})
+    head = _tree(tmp_path / "head", {SCRIPT: "echo a\n# old\necho b\n", **registry})
+    assert no_comments.grade(base, head, False) == [f"{SCRIPT}:2: forbidden comment"]
+
+
+def test_unparsable_script_is_red(tmp_path: Path) -> None:
+    head = _tree(tmp_path / "head", {SCRIPT_JS: "function (\n"})
+    assert no_comments.grade(None, head, True) == [f"{SCRIPT_JS}:1: javascript source does not parse"]
+
+
+def test_missing_grammar_is_red(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    head = _tree(tmp_path / "head", {SHEET: "a { color: red; }\n"})
+    no_comments._parser.cache_clear()
+    monkeypatch.setitem(no_comments._GRAMMARS, "css", "tree_sitter_absent_grammar")
+    try:
+        assert no_comments.main(["--head", str(head), "--all"]) == 1
+    finally:
+        no_comments._parser.cache_clear()
+    assert capsys.readouterr().out.startswith("::error::cannot grade comments: No module named")
+
+
+def test_ledger_front_end_is_comment_free() -> None:
+    root = Path(__file__).resolve().parents[1]
+    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z", no_comments.STATIC], capture_output=True)
+    found = [
+        (name, start, reason)
+        for name in tracked.stdout.decode().split("\0")
+        if (kind := no_comments.language(root, name)) in ("javascript", "css")
+        for start, _, reason in no_comments.tree_violations((root / name).read_bytes(), kind, name)
+    ]
+    assert found == []
