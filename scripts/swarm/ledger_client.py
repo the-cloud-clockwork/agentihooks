@@ -4,7 +4,7 @@ import sys
 import urllib.error
 import uuid
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from scripts.swarm import notice_text
 from scripts.swarm.store import SwarmError
@@ -83,6 +83,19 @@ class LedgerClient:
 
     def tasks(self, slug):
         return self._resource(slug, "tasks", collection=True)
+
+    def tasks_targeting(self, slug: str, url: str) -> list[dict]:
+        """The tasks naming this pull request, read by a scoped query instead of the whole tasks collection."""
+        try:
+            return self._resource(slug, f"tasks?{urlencode({'targets': url})}")
+        except urllib.error.HTTPError as exc:
+            from scripts.swarm_ledger.api.client import failure
+            from scripts.swarm_ledger.api.task_list import pull_links
+
+            replay, error = failure(exc)
+            if exc.code != 400 or error.get("code") != "schema_invalid":
+                raise replay from None
+            return [row for row in self.tasks(slug) if url in pull_links(row)]
 
     def task(self, slug, task_id):
         """One task without its threads, or None when the ledger holds no such task."""

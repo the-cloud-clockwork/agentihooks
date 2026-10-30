@@ -1814,7 +1814,10 @@ def cmd_merge(store, args):
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
-            done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
+            ledger = LedgerClient()
+            own = [row for row in [ledger.task(args.slug, agent.task)] if row]
+            targeting = ledger.tasks_targeting(args.slug, args.url)
+            done_gate.require_target(store, args.slug, agent.task, args.url, own + targeting)
         if args.action == "queue":
             result = merge_queue.operate(
                 args.action,

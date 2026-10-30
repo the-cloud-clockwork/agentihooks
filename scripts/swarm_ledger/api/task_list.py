@@ -54,7 +54,7 @@ HELD: dict = {}
 GUARD = threading.Lock()
 
 
-def read(repository: object, slug: str, query: dict) -> Page:
+def read(repository: object, slug: str, query: dict) -> Page | dict:
     with GUARD:
         held = HELD.pop(slug, None)
         if held is None or held.repository is not repository:
@@ -64,4 +64,17 @@ def read(repository: object, slug: str, query: dict) -> Page:
             HELD.pop(next(iter(HELD)))
     with held.lock:
         held.refresh(slug)
+        if "targets" in query:
+            return targeting(held.stored[2], query["targets"])
         return held.page(query)
+
+
+def targeting(rows: list, url: str) -> dict:
+    """The tasks whose pull request, split halves or pull scopes name this pull request URL."""
+    found = [row for row in rows if isinstance(row, dict) and url in pull_links(row)]
+    return resources.page(found, resources.revision(found), {"limit": 100})
+
+
+def pull_links(row: dict) -> set:
+    """Every pull request URL a task row names."""
+    return {row.get("pr_url"), *(row.get("split_pulls") or []), *(row.get("pull_scopes") or {})}
