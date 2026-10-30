@@ -10,8 +10,8 @@ import re
 import time
 from pathlib import Path
 
-OPEN = re.compile(r"(?<![\w-])allow-master-coding(?![\w-])")
-CLOSE = re.compile(r"(?<![\w-])(?:deny|disallow)-master-coding(?![\w-])")
+OPEN = re.compile(r"(?<![\w-])allow-master-coding(?![\w-])", re.IGNORECASE)
+CLOSE = re.compile(r"(?<![\w-])(?:deny|disallow)-master-coding(?![\w-])", re.IGNORECASE)
 PERMISSION_TOOLS = ("AskUserQuestion", "ExitPlanMode")
 MASTER_TASK = re.compile(r"master(?:-\d+)?")
 PROTECTION = re.compile(r"\bgh\s+(?:ruleset\b|api\b[^\n;&|]*(?:/rulesets\b|/branches/[^\s/]+/protection\b))")

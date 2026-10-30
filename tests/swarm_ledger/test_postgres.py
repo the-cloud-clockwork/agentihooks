@@ -1,5 +1,6 @@
 import sqlite3
 from contextlib import contextmanager
+from unittest.mock import MagicMock, call
 
 import psycopg2
 import psycopg2.errors
@@ -416,6 +417,33 @@ def test_sqlite_read_helpers_open_an_object_that_carries_its_own_reader():
     with sqlite.read_only(Folder()) as connection:
         assert connection == "connection"
     assert opened == [True]
+
+
+@pytest.mark.parametrize(
+    ("relation", "row", "expected"),
+    [(None, None, None), ("ledgers", None, None), ("ledgers", ("stored-credential",), "stored-credential")],
+)
+def test_credentials_read_without_initializing_the_writer(
+    monkeypatch: pytest.MonkeyPatch, relation: str | None, row: tuple[str] | None, expected: str | None
+) -> None:
+    database = MagicMock()
+    connection = database.return_value.read_only.return_value.__enter__.return_value
+    connection.execute.return_value.fetchone.side_effect = [(relation,), row]
+    monkeypatch.setattr(postgres, "Database", database)
+    repository = postgres.PostgresLedgerRepository(ADDRESS)
+    writer = MagicMock(side_effect=AssertionError("credential reads must not open a writer"))
+    monkeypatch.setattr(repository, "connect", writer)
+
+    assert repository.token("requested-ledger") == expected
+
+    database.assert_called_once_with(ADDRESS)
+    database.return_value.read_only.assert_called_once_with()
+    queries = [call("SELECT to_regclass('ledgers')")]
+    if relation is not None:
+        queries.append(call(sqlite.TOKEN, ("requested-ledger",)))
+    assert connection.execute.call_args_list == queries
+    database.return_value.read_only.return_value.__exit__.assert_called_once_with(None, None, None)
+    writer.assert_not_called()
 
 
 def test_the_repository_sets_its_schema_up_once_under_the_writer_lock(opened):
