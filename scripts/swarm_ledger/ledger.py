@@ -262,13 +262,13 @@ def ledger_remote_auth_failures_total() -> int:
     return sum(AUTH_FAILURES.values())
 
 
-def call(slug, ops=None, service=False):
+def call(slug: str, ops: list[dict] | None = None, service: bool = False) -> dict:
     if ledger_link.remote(slug=slug):
         return remote_call(slug, ops, service)
     talking = talk(ops)
     if outbox.waiting("ledger"):
         outbox.flush(None)
-    if ops and outbox.waiting("ledger"):
+    if ops and not (len(ops) == 1 and ops[0]["op"] == "join") and outbox.waiting("ledger"):
         if not talking:
             sys.exit(
                 f"ledger talk queued while the server was down still waits in {outbox.path()}; retry once it lands"
