@@ -1,14 +1,15 @@
 from unittest.mock import patch
 
-import fakeredis
 import pytest
-from redis.exceptions import ConnectionError as RedisConnectionError
 
 from scripts.inbox.store import InboxStore, Item, _fields
 
 
 @pytest.mark.parametrize("count", [0, 1, 500, 501, 2001])
 def test_seat_mailbox_listing_bounds_index_reads(count: int) -> None:
+    import fakeredis
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
     store = InboxStore(fakeredis.FakeRedis(decode_responses=True))
     address = "eng-6@crew"
     expected = [f"message-{index:05}" for index in range(count)]
