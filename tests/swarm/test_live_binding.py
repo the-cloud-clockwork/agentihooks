@@ -1364,9 +1364,7 @@ def _hosted(store, agent, monkeypatch, tmp_path, report=True):
         agent,
         profile="engineer",
         harness="claude",
-        execution_id="exe-hosted",
         hive="stable",
-        runtime_backend="local",
         runtime_target={"host_id": "stable"},
         profile_decision={},
     )
