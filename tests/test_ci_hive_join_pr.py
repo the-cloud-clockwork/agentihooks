@@ -60,20 +60,29 @@ def test_hive_join_is_required_only_for_selected_pull_requests() -> None:
     assert caller["needs"] == ["inputs"]
     assert "github.event_name == 'pull_request'" in caller["if"]
     assert "needs.inputs.outputs.hive_join == 'true'" in caller["if"]
-    assert caller["uses"] == "./.github/workflows/swarm-smoke.yml"
-    assert caller["with"]["hive-join-only"] is True
+    assert caller["uses"] == "./.github/workflows/hive-join.yml"
     assert smoke_jobs["inputs"]["outputs"]["hive_join"] == "${{ steps.hive-join.outputs.due }}"
     assert "hive-join" not in smoke_jobs["scenario"]["needs"]
 
 
 def test_hive_join_mode_preserves_promotion_scenarios() -> None:
-    smoke = workflow("swarm-smoke")
-    inputs = smoke.get("on", smoke.get(True))["workflow_call"]["inputs"]
-    assert inputs["hive-join-only"] == {"type": "boolean", "default": False}
-    steps = smoke["jobs"]["smoke"]["steps"]
-    focused = next(step for step in steps if step.get("name") == "Run the hive join scenario")
-    assert "inputs.hive-join-only" in focused["if"]
-    assert focused["run"] == "bash scripts/packaging/hive-join-smoke.sh"
-    full = next(step for step in steps if "scenarios in parallel" in step.get("name", ""))
-    assert "!inputs.hive-join-only" in full["if"]
+    focused = workflow("hive-join")["jobs"]["smoke"]
+    steps = focused["steps"]
+    scenario = next(step for step in steps if step.get("name") == "Run the hive join scenario")
+    assert scenario["run"] == "bash scripts/packaging/hive-join-smoke.sh"
+    assert "if" not in scenario
+    assert focused["env"]["SWARM_SMOKE_RUNTIME_IMAGES_READY"] == "true"
+    restore = next(step for step in steps if step.get("id") == "layers")
+    full_steps = workflow("swarm-smoke")["jobs"]["smoke"]["steps"]
+    shared_restore = next(step for step in full_steps if step.get("id") == "layers")
+    assert restore["with"] == shared_restore["with"]
+    build = next(step["run"] for step in steps if "docker build" in step.get("run", ""))
+    assert '--cache-from "$LAYERS_FROM"' in build
+    assert 'wait "$build" || status=$?' in build
+    assert "redis:7-alpine" in build
+    assert "nats:" not in build
+    full = next(step for step in full_steps if "scenarios in parallel" in step.get("name", ""))
     assert "scripts/packaging/hive-join-smoke.sh" in full["run"]
+    caller = workflow("test")["jobs"]["swarm-image"]
+    assert caller["uses"] == "./.github/workflows/swarm-smoke.yml"
+    assert "github.event_name == 'push'" in caller["if"]

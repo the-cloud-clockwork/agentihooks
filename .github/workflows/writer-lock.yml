@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
       - name: Select hive join smoke inputs
         id: hive-join
         if: github.event_name == 'pull_request'
@@ -37,7 +37,7 @@ jobs:
           due=false
           while IFS= read -r -d '' path; do
             case "$path" in
-              scripts/hive/daemon.py|scripts/hive/dispatch.py|scripts/hive/orders.py|scripts/packaging/hive-join-smoke.sh|.github/workflows/writer-lock.yml|.github/workflows/swarm-smoke.yml|.github/workflows/test.yml) due=true ;;
+              scripts/hive/daemon.py|scripts/hive/dispatch.py|scripts/hive/orders.py|scripts/packaging/hive-join-smoke.sh|.github/workflows/writer-lock.yml|.github/workflows/swarm-smoke.yml|.github/workflows/hive-join.yml|.github/workflows/test.yml) due=true ;;
             esac
           done < "$RUNNER_TEMP/hive-join-changed"
           echo "due=$due" >> "$GITHUB_OUTPUT"
@@ -50,9 +50,7 @@ jobs:
   hive-join:
     needs: [inputs]
     if: github.event_name == 'pull_request' && needs.inputs.outputs.hive_join == 'true'
-    uses: ./.github/workflows/swarm-smoke.yml
-    with:
-      hive-join-only: true
+    uses: ./.github/workflows/hive-join.yml
 
   scenario:
     needs: [inputs]
