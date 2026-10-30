@@ -199,7 +199,9 @@ def test_the_check_requires_both_trees():
 
 def test_an_unchanged_repository_is_green(committed, capsys):
     assert threshold_pins.main(["--base", str(committed), "--head", str(committed)]) == 0
-    pins, allowlists = len(threshold_pins.PINS), len(threshold_pins.SHRINK_ONLY)
+    graded = {path for path, _ in threshold_pins.GRADED_BY}
+    pins = len(threshold_pins.PINS)
+    allowlists = len([path for path in threshold_pins.SHRINK_ONLY if path not in graded])
     assert f"{pins} thresholds compared, {allowlists} allowlists compared, 0 errors" in capsys.readouterr().out
 
 
