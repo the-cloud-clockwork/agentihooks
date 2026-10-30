@@ -28,6 +28,7 @@ def test_a_stored_lane_shift_never_moves_the_autoscale_ceilings(shift):
 
 
 @pytest.mark.parametrize("shift", [2, 16, -16])
+@pytest.mark.feature("swarm-manual-caps")
 def test_manual_caps_ignore_a_stored_lane_shift(shift):
     inputs = capacity.ScaleInputs([account(cap=6)], [], DEMAND, lambda: None, PREVIOUS)
     config = SwarmConfig(SLUG, "/repo", max_eng=6, max_ci=1, max_plan=0, scaling=MANUAL_SCALING, lane_shift=shift)
