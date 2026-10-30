@@ -14,7 +14,17 @@ drain=120
 owner="default/$release"
 lease=agentihooks-hive-rollout
 logs="$(mktemp -d)"
-trap 'rm -rf "$logs"' EXIT
+follow=""
+rolled=""
+cleanup() {
+  for job in "$follow" "$rolled"; do
+    if [[ -n $job ]]; then
+      kill "$job" 2>/dev/null || true
+    fi
+  done
+  rm -rf "$logs"
+}
+trap cleanup EXIT
 values=(
   --set workers.replicas=1 --set workers.maxAgents=1
   --set workers.memoryPerAgentMi.request=128 --set workers.memoryPerAgentMi.limit=512
@@ -88,8 +98,8 @@ apply_hive first
 old=""
 agent=""
 for _ in $(seq 60); do
-  old="$(redis GET "kind-drain:$slug:agent-hive")"
-  agent="$(redis GET "kind-drain:$slug:agent")"
+  old="$(redis GET "kind-drain:$slug:agent-hive" || true)"
+  agent="$(redis GET "kind-drain:$slug:agent" || true)"
   [[ -n $old && -n $agent ]] && break
   sleep 1
 done
@@ -128,8 +138,13 @@ if kubectl get pod "$old" >/dev/null 2>&1; then
   printf 'hive %s never stopped\n' "$old" >&2
   exit 1
 fi
-wait "$rolled"
+if ! wait "$rolled"; then
+  printf 'the replacement hive rollout did not finish\n' >&2
+  exit 1
+fi
+rolled=""
 wait "$follow" || true
+follow=""
 cat "$logs/old.log"
 
 facts="$(kubectl exec "$ledger_pod" -- env AGENTIHOOKS_DEPLOYMENT=local AGENTIHOOKS_SWARM_REDIS_URL="$redis_url" python -c "
