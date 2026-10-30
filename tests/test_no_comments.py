@@ -329,7 +329,7 @@ def test_prepush_bootstraps_head_and_is_wired_into_plan(tmp_path: Path) -> None:
     ]
 
 
-def test_prepush_rejects_a_failed_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prepush_rejects_a_failed_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts import ci_prepush
 
     root = _tree(tmp_path / "repo", {"scripts/no_comments.py": "pass\n"})
@@ -339,7 +339,9 @@ def test_prepush_rejects_a_failed_archive(tmp_path: Path, monkeypatch: pytest.Mo
     )
     wrapper = tmp_path / "bin/git"
     wrapper.parent.mkdir()
-    wrapper.write_text('#!/usr/bin/env bash\n/usr/bin/git "$@"\nif [[ " $* " == *" archive "* ]]; then exit 23; fi\n')
+    wrapper.write_text(
+        '#!/usr/bin/env bash\n/usr/bin/git "$@"\nif [[ " $* " == *" checkout-index "* ]]; then exit 23; fi\n'
+    )
     wrapper.chmod(0o755)
     monkeypatch.setenv("PATH", f"{wrapper.parent}:{ci_prepush.os.environ['PATH']}")
     grade = tmp_path / "grade"
@@ -349,22 +351,26 @@ def test_prepush_rejects_a_failed_archive(tmp_path: Path, monkeypatch: pytest.Mo
     assert failure.value.returncode == 23
 
 
-def test_prepush_refuses_an_archive_link_outside_the_snapshot(tmp_path: Path) -> None:
-    import tarfile
-
+def test_prepush_snapshot_holds_the_base_and_keeps_the_index(tmp_path: Path) -> None:
     from scripts import ci_prepush
 
-    root = _tree(tmp_path / "repo", {"scripts/no_comments.py": "pass\n"})
-    (root / "outside").symlink_to("/outside")
-    subprocess.run(["git", "-C", str(root), "add", "outside"], check=True)
+    root = _tree(tmp_path / "repo", {"scripts/no_comments.py": "pass\n", "subject.py": "base = 1\n"})
     subprocess.run(
         ["git", "-C", str(root), "-c", "user.name=CI", "-c", "user.email=ci@example.invalid", "commit", "-qm", "base"],
         check=True,
     )
+    (root / "subject.py").write_text("head = 1\n")
+    subprocess.run(["git", "-C", str(root), "add", "subject.py"], check=True)
     grade = tmp_path / "grade"
     grade.mkdir()
-    with pytest.raises(tarfile.AbsoluteLinkError):
-        ci_prepush._comment_step(root, "HEAD", grade)
+    ci_prepush._comment_step(root, "HEAD", grade)
+    assert (grade / "comments-base/subject.py").read_text() == "base = 1\n"
+    assert (grade / "comments-base/scripts/no_comments.py").read_text() == "pass\n"
+    staged = subprocess.run(
+        ["git", "-C", str(root), "diff", "--cached", "--name-only"], check=True, capture_output=True, text=True
+    )
+    assert staged.stdout == "subject.py\n"
+    assert (root / "subject.py").read_text() == "head = 1\n"
 
 
 def test_whole_tree_includes_unchanged_base_files(tmp_path: Path) -> None:

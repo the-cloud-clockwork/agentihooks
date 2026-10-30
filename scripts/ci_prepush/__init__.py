@@ -53,17 +53,13 @@ def tests_for(root: Path, names: list[str]) -> list[str]:
 
 
 def _comment_step(root: Path, revision: str, grade: Path) -> list[tuple[str, list[str]]]:
-    import io
-    import tarfile
-
     protected = _git(root, "ls-tree", revision, "scripts/no_comments.py")
     if not protected and not (root / "scripts/no_comments.py").is_file():
         return []
     snapshot = grade / "comments-base"
-    snapshot.mkdir()
-    archive = subprocess.run(["git", "-C", str(root), "archive", revision], check=True, capture_output=True)
-    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as contents:
-        contents.extractall(snapshot, filter="data")
+    index = {**os.environ, "GIT_INDEX_FILE": str(grade / "comments-base.index")}
+    for command in (["read-tree", revision], ["checkout-index", "--all", f"--prefix={snapshot}/"]):
+        subprocess.run(["git", "-C", str(root), *command], check=True, env=index)
     grader = snapshot / "scripts/no_comments.py"
     if not grader.is_file():
         grader = root / "scripts/no_comments.py"
