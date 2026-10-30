@@ -109,6 +109,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm_ledger import ledger_route
 
@@ -262,7 +263,7 @@ def ledger_remote_auth_failures_total() -> int:
     return sum(AUTH_FAILURES.values())
 
 
-def call(slug: str, ops: list[dict] | None = None, service: bool = False) -> dict:
+def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict:
     if ledger_link.remote(slug=slug):
         return remote_call(slug, ops, service)
     talking = talk(ops)
@@ -296,7 +297,7 @@ def call(slug: str, ops: list[dict] | None = None, service: bool = False) -> dic
         sys.exit(f"ledger server not answering on {base()}: {exc}")
 
 
-def talk(ops):
+def talk(ops: list[dict[str, Any]] | None) -> bool:
     return bool(ops) and all(
         o["op"] in TALK_OPS or (o["op"] == "add" and "by" in o and not o.get("attachments")) for o in ops
     )
