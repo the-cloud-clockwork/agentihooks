@@ -193,6 +193,7 @@ def test_an_unknown_origin_fails(mapped_repo, origin):
 
 def test_an_inventory_entry_needs_only_its_behaviour_seam_and_tests(mapped_repo):
     root, path, _ = mapped_repo
+    (root / ".semgrep/features/login.yml").unlink()
     entry = _outside_operator("inventory")
     del entry["ledger_item"]
     _rewrite(path, entry)
@@ -201,6 +202,7 @@ def test_an_inventory_entry_needs_only_its_behaviour_seam_and_tests(mapped_repo)
 
 def test_a_regression_with_its_incident_passes_without_rule_or_live_check(mapped_repo):
     root, path, _ = mapped_repo
+    (root / ".semgrep/features/login.yml").unlink()
     _rewrite(path, _outside_operator("regression"))
     assert feature_map.validate(root, path) == 1
 
@@ -522,6 +524,7 @@ def test_ordered_at_takes_only_the_dashed_date_form(mapped_repo, ordered_at):
 
 def test_an_order_date_outside_operator_needs_its_ledger_item(mapped_repo):
     root, path, _ = mapped_repo
+    (root / ".semgrep/features/login.yml").unlink()
     entry = _outside_operator("inventory", ordered_at="2026-10-25")
     del entry["ledger_item"]
     _rewrite(path, entry)
