@@ -378,15 +378,16 @@ def test_post_routes_pick_the_probe_media_and_artifact_writers():
     assert handler.post_route("/healthz/") is None
 
 
-def test_the_server_exits_when_it_cannot_start_a_request_thread(monkeypatch):
+def test_the_server_exits_when_it_cannot_start_a_request_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     exits = []
     monkeypatch.setattr(server.os, "_exit", exits.append)
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler, bind_and_activate=False)
 
-    def refused(self):
+    def refused(self) -> None:
         raise RuntimeError("can't start new thread")
 
     monkeypatch.setattr(server.threading.Thread, "start", refused)
+    monkeypatch.setattr(server.threading.Thread, "join", lambda self: None)
     httpd.process_request(None, ("127.0.0.1", 1))
     httpd.server_close()
     assert exits == [server.THREADS_EXHAUSTED] == [75]
