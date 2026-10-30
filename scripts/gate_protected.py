@@ -101,18 +101,20 @@ def _aggregator_problems(
             and base_id == "gate-required"
             and head_job.get("steps")
             in [
-                sonar(
-                    diagnostic(
-                        forward(
-                            finish(
-                                rerun(
-                                    shape(
-                                        required(
-                                            ci_reuse.gate_steps(
-                                                **form,
-                                                summary=summary,
-                                                docs="docs" in ci_wiring.needs_of(head_job),
-                                                watcher_loss=watcher_loss,
+                typing(
+                    sonar(
+                        diagnostic(
+                            forward(
+                                finish(
+                                    rerun(
+                                        shape(
+                                            required(
+                                                ci_reuse.gate_steps(
+                                                    **form,
+                                                    summary=summary,
+                                                    docs="docs" in ci_wiring.needs_of(head_job),
+                                                    watcher_loss=watcher_loss,
+                                                )
                                             )
                                         )
                                     )
@@ -121,6 +123,7 @@ def _aggregator_problems(
                         )
                     )
                 )
+                for typing in ((ci_reuse.typing_required,) if "type-gate" in ci_wiring.needs_of(head_job) else (list,))
                 for sonar in (list, ci_reuse.test_only_sonar)
                 for diagnostic, forward in (
                     (list, list),
