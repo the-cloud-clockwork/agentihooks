@@ -5,7 +5,7 @@ import importlib.abc
 import importlib.machinery
 import json
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import CodeType, ModuleType
 
@@ -158,7 +158,7 @@ class LoadedCode(importlib.abc.MetaPathFinder):
         sys.meta_path.insert(0, self)
 
     def find_spec(
-        self, fullname: str, path: list[str] | None = None, target: ModuleType | None = None
+        self, fullname: str, path: Sequence[str] | None = None, target: ModuleType | None = None
     ) -> importlib.machinery.ModuleSpec | None:
         spec = importlib.machinery.PathFinder.find_spec(fullname, path, target)
         if spec is None or not isinstance(spec.loader, importlib.machinery.SourceFileLoader):
