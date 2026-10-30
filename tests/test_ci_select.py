@@ -478,6 +478,72 @@ def test_the_legs_balance_on_stored_time(heavy):
     )
 
 
+def test_a_file_over_its_leg_share_splits_its_tests_across_legs(heavy):
+    write(
+        heavy,
+        {"tests/test_heavy1.py": "def test_a(): pass\ndef test_b(): pass\nclass TestC:\n    def test_d(self): pass\n"},
+    )
+    durations = {
+        "tests/test_heavy1.py::test_a[one]": 150.0,
+        "tests/test_heavy1.py::test_a[two]": 50.0,
+        "tests/test_heavy1.py::test_b": 180.0,
+        "tests/test_heavy1.py::TestC::test_d": 170.0,
+        **seconds(test_sample=10.0, test_heavy2=10.0, test_heavy3=10.0),
+    }
+    _, legs = decide(heavy, ["hooks/sample.py"], durations, limit=4)
+    assert sorted(unit for leg in legs for unit in leg) == [
+        "tests/test_heavy1.py::TestC",
+        "tests/test_heavy1.py::test_a",
+        "tests/test_heavy1.py::test_b",
+        "tests/test_heavy2.py",
+        "tests/test_heavy3.py",
+        "tests/test_sample.py",
+    ]
+    assert len(legs) == 4
+    assert all(sum(unit.startswith("tests/test_heavy1.py") for unit in leg) == 1 for leg in legs[:3])
+
+
+def test_a_file_over_its_leg_share_with_an_imported_test_stays_whole(heavy):
+    write(
+        heavy, {"tests/test_heavy1.py": "from tests.shared import test_made\ndef test_a(): pass\ndef test_b(): pass\n"}
+    )
+    durations = {f"tests/test_heavy1.py::{name}": 150.0 for name in ("test_a", "test_b", "test_made")}
+    _, legs = decide(heavy, ["hooks/sample.py"], durations)
+    assert ["tests/test_heavy1.py"] in legs
+
+
+def test_a_split_file_keeps_its_new_tests(heavy):
+    write(heavy, {"tests/test_heavy1.py": "def test_a(): pass\ndef test_b(): pass\ndef test_new(): pass\n"})
+    durations = {"tests/test_heavy1.py::test_a": 200.0, "tests/test_heavy1.py::test_b": 200.0}
+    _, legs = decide(heavy, ["hooks/sample.py"], durations)
+    units = {unit for leg in legs for unit in leg}
+    assert "tests/test_heavy1.py::test_new" in units
+    assert "tests/test_heavy1.py" not in units
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "class TestNew:\n    def test_c(self): pass\n",
+        "@pytest.fixture\ndef test_value(): return 1\n",
+    ],
+)
+def test_a_file_over_its_leg_share_with_an_unstored_test_pytest_may_skip_stays_whole(heavy, source):
+    write(heavy, {"tests/test_heavy1.py": "import pytest\ndef test_a(): pass\ndef test_b(): pass\n" + source})
+    durations = {"tests/test_heavy1.py::test_a": 200.0, "tests/test_heavy1.py::test_b": 200.0}
+    _, legs = decide(heavy, ["hooks/sample.py"], durations)
+    assert ["tests/test_heavy1.py"] in legs
+
+
+def test_a_split_file_ignores_stored_tests_its_source_no_longer_has(heavy):
+    write(heavy, {"tests/test_heavy1.py": "def test_a(): pass\ndef test_b(): pass\n"})
+    durations = {f"tests/test_heavy1.py::{name}": 200.0 for name in ("test_a", "test_b", "test_gone")}
+    _, legs = decide(heavy, ["hooks/sample.py"], durations)
+    units = {unit for leg in legs for unit in leg}
+    assert {"tests/test_heavy1.py::test_a", "tests/test_heavy1.py::test_b"} <= units
+    assert not any("test_gone" in unit or unit == "tests/test_heavy1.py" for unit in units)
+
+
 def test_the_live_codex_file_runs_on_the_first_leg(repo):
     write(
         repo,
