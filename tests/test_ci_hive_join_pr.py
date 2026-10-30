@@ -27,7 +27,8 @@ def workflow(name: str) -> dict:
 )
 def test_hive_join_selection(path: str, expected: str, tmp_path: Path) -> None:
     steps = workflow("writer-lock")["jobs"]["inputs"]["steps"]
-    run = next(step["run"] for step in steps if step.get("id") == "hive-join")
+    step = next(step for step in steps if step.get("id") == "hive-join")
+    run = step["run"]
     paths = tmp_path / "hive-join-paths"
     paths.write_bytes(path.encode() + b"\0")
     output = tmp_path / "output"
@@ -45,6 +46,7 @@ def test_hive_join_selection(path: str, expected: str, tmp_path: Path) -> None:
             "GITHUB_OUTPUT": str(output),
             "PR_BASE": "base",
             "PR_HEAD": "head",
+            "HIVE_JOIN_INPUTS": step["env"]["HIVE_JOIN_INPUTS"],
         },
         check=True,
     )
