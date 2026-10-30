@@ -539,7 +539,7 @@ class UnsupportedHandoffRuntime(LaterUnresolvedRuntime):
 
     def spawn(self, config, lane, name, task):
         if task["id"] == "t1":
-            raise tick.SpawnError("unsupported handoff: original profile and run options are missing", "unsupported")
+            raise tick.SpawnError("unsupported handoff harness: gemini", "unsupported")
         return super(LaterUnresolvedRuntime, self).spawn(config, lane, name, task)
 
 
@@ -554,5 +554,5 @@ def test_a_failed_launch_whose_placement_check_raises_is_recorded_and_the_rest_s
     rt = UnsupportedHandoffRuntime()
     tick.tick("sw", two, ledger, rt, now_ms=1_000)
     assert [task_id for _, _, task_id in rt.spawned] == ["t2"]
-    assert "run options are missing" in two.launch_failure("sw", "t1")
+    assert "harness: gemini" in two.launch_failure("sw", "t1")
     assert {row["state"] for row in two.launches("sw") if row["task"] == "t1"} == {"failed"}
