@@ -17,6 +17,7 @@
 !docs/swarm-v2/architecture.json
 !docs/swarm-v2/schemas/
 !docs/swarm-v2/schemas/*.json
+!deploy/worker/gh
 **/__pycache__
 **/*.pyc
 **/.env
