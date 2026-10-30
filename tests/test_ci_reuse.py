@@ -266,15 +266,18 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         if "durations" in workflow["jobs"]
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
+    typing = ci_reuse.typing_required if "type-gate" in workflow["jobs"]["gate-required"]["needs"] else list
     assert steps in [
-        ci_reuse.test_only_sonar(
-            diagnostic(
-                forward(
-                    finish(
-                        rerun(
-                            ci_reuse.inline_mutation(
-                                ci_reuse.postgres_required(
-                                    ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+        typing(
+            ci_reuse.test_only_sonar(
+                diagnostic(
+                    forward(
+                        finish(
+                            rerun(
+                                ci_reuse.inline_mutation(
+                                    ci_reuse.postgres_required(
+                                        ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+                                    )
                                 )
                             )
                         )

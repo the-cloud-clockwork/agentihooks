@@ -98,6 +98,7 @@ MOVED = {
     ("test.yml", "refresh-durations"): QUEUED,
     ("count-record.yml" if (WORKFLOWS / "count-record.yml").exists() else "test.yml", "count-record"): QUEUED,
     ("test.yml", "reuse"): LIGHT,
+    ("test.yml", "type-gate"): QUEUED,
     ("test.yml", "select"): LIGHT,
     ("test.yml", "shard-check"): LIGHT,
     ("test.yml", "sonar"): QUEUED,
