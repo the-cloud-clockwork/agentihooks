@@ -177,6 +177,34 @@ def test_grade_reports_growth_and_drift_per_file() -> None:
     ]
 
 
+def test_grade_holds_drift_only_on_touched_files_and_edited_entries() -> None:
+    drift = (
+        f"{type_gate.BASELINE} records 2 type errors in a.py, the head has 1; run python -m scripts.type_gate --write"
+    )
+    assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 2}, set()) == []
+    assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 2}, {"a.py"}) == [drift]
+    assert type_gate.grade({"a.py": 3}, {"a.py": 1}, {"a.py": 2}, set()) == [drift]
+    assert type_gate.grade({"a.py": 1}, {"a.py": 1}, {}, set()) == [
+        f"{type_gate.BASELINE} records 0 type errors in a.py, the head has 1; run python -m scripts.type_gate --write"
+    ]
+    assert type_gate.grade({"a.py": 2}, {"a.py": 3}, {"a.py": 2}, set()) == [
+        "a.py has 3 type errors, more than the 2 the base allows"
+    ]
+
+
+def test_changed_names_files_whose_contents_differ(tmp_path: Path) -> None:
+    base = _tree(tmp_path / "base", {"hooks/same.py": "x = 1\n", "hooks/edited.py": "x = 1\n"})
+    head = _tree(tmp_path / "head", {"hooks/same.py": "x = 1\n", "hooks/edited.py": "x = 2\n", "hooks/new.py": ""})
+    paths = {"hooks/same.py", "hooks/edited.py", "hooks/new.py", "hooks/gone.py"}
+    assert type_gate.changed(base, head, paths) == {"hooks/edited.py", "hooks/new.py"}
+
+
+def test_drift_on_an_untouched_file_stays_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _tree(tmp_path / "base", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 2})
+    head = _tree(tmp_path / "head", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 2})
+    assert _grade(base, head, capsys) == (0, "1 type errors in 1 files, 2 allowed, 0 errors\n")
+
+
 def test_grade_treats_a_zero_record_as_no_errors() -> None:
     assert type_gate.grade({}, {}, {"a.py": 0}) == []
     assert type_gate.grade({"a.py": 0}, {"a.py": 0}, {}) == []

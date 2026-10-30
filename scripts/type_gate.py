@@ -68,13 +68,29 @@ def load(tree: Path) -> dict[str, int] | None:
     return json.loads(path.read_text()) if path.is_file() else None
 
 
+def changed(base: Path, head: Path, paths: set[str]) -> set[str]:
+    """Return the paths whose contents differ between the base and head trees."""
+    return {path for path in paths if _contents(base / path) != _contents(head / path)}
+
+
+def _contents(path: Path) -> bytes | None:
+    """Return a file's bytes, or None when it does not exist."""
+    return path.read_bytes() if path.is_file() else None
+
+
 def write(head: Path) -> None:
     """Record the head's measurement as its baseline."""
     (head / BASELINE).write_text(json.dumps(measure(head), indent=2) + "\n")
 
 
-def grade(base: dict[str, int], head: dict[str, int], recorded: dict[str, int] | None) -> list[str]:
-    """Return every file whose errors grew against the base, and any drift between the head and its baseline."""
+def grade(
+    base: dict[str, int], head: dict[str, int], recorded: dict[str, int] | None, touched: set[str] | None = None
+) -> list[str]:
+    """Return every file whose errors grew against the base, and drift between the head and its baseline.
+
+    Drift is graded on files the head changes and on baseline entries it edits; with ``touched`` None, on every file.
+    A stale entry for an untouched file stays as the base recorded it until a change to that file rewrites it.
+    """
     errors = [
         f"{path} has {count} type errors, more than the {base.get(path, 0)} the base allows"
         for path, count in head.items()
@@ -86,6 +102,7 @@ def grade(base: dict[str, int], head: dict[str, int], recorded: dict[str, int] |
         "run python -m scripts.type_gate --write"
         for path in sorted(set(recorded) | set(head))
         if recorded.get(path, 0) != head.get(path, 0)
+        and (touched is None or path in touched or recorded.get(path, 0) != base.get(path, 0))
     ]
     return errors
 
@@ -125,10 +142,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.measured:
         args.measured.parent.mkdir(parents=True, exist_ok=True)
         args.measured.write_text(json.dumps(head, indent=2) + "\n")
+    touched = None
     if base is None:
         print(f"::notice::The base carries no {BASELINE}; this head introduces it.")
         base = recorded or {}
-    errors = grade(base, head, recorded)
+    else:
+        touched = changed(args.base, args.head, set(head) | set(recorded or {}) | set(base))
+    errors = grade(base, head, recorded, touched)
     print(f"{sum(head.values())} type errors in {len(head)} files, {sum(base.values())} allowed, {len(errors)} errors")
     for error in errors:
         print(f"::error::{error}")
