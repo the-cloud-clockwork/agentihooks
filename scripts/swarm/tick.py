@@ -685,6 +685,13 @@ def _observe(runtime, agent):
     return runtime.observe(agent)
 
 
+def _elsewhere(agent: AgentRecord) -> bool:
+    """A hub admitted agent names its hive before that hive records a host target."""
+    from scripts.swarm.commands import hive_id
+
+    return not agent.runtime_target and bool(agent.hive) and agent.hive != hive_id()
+
+
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     from scripts.hub.reconciler import legacy_agents
 
@@ -705,7 +712,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
                 continue
             if ended:
                 actions += timing.timed(_retire_ended, slug, store, ledger, runtime, rows, agent, now_ms)
-            elif agent.runtime_backend != "local" or reports.host(agent):
+            elif agent.runtime_backend != "local" or reports.host(agent) or _elsewhere(agent):
                 actions += timing.timed(_watch_remote, slug, store, ledger, runtime, rows, agent, now_ms)
             elif agent.name in live and agent.lane == MASTER:
                 runtime.name_pane(agent)

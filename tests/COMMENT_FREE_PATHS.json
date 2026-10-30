@@ -2,10 +2,20 @@
   "hooks/__init__.py",
   "hooks/__main__.py",
   "hooks/_async.py",
+  "hooks/integrations/__init__.py",
+  "hooks/integrations/aws.py",
+  "hooks/integrations/base.py",
+  "hooks/integrations/dynamodb.py",
+  "hooks/integrations/lambda_invoke.py",
+  "hooks/integrations/mailer.py",
+  "hooks/integrations/postgres.py",
+  "hooks/integrations/session_state.py",
+  "hooks/integrations/storage.py",
   "hooks/logfile.py",
   "hooks/proc.py",
   "hooks/prompt_budget.py",
   "hooks/quota.py",
   "hooks/secrets.py",
-  "hooks/telemetry.py"
+  "hooks/telemetry.py",
+  "tests/test_integrations_failure_paths.py"
 ]

@@ -55,6 +55,7 @@ def stored(item_id):
     return next((f for f in core.sync(SLUG)[0].get("followups", []) if f["id"] == item_id), None)
 
 
+@pytest.mark.feature("ledger-followup-duplicates")
 def test_a_repeated_follow_up_is_refused_naming_it(live, monkeypatch):
     judge = judged(monkeypatch, Judge(yes={"f1"}))
     status, reply = operations(live, followup("f9", AGAIN))
@@ -64,6 +65,7 @@ def test_a_repeated_follow_up_is_refused_naming_it(live, monkeypatch):
     assert judge.asked == ["ledger-duplicate"] and judge.lock_free == [True]
 
 
+@pytest.mark.feature("ledger-followup-duplicates")
 def test_a_follow_up_repeating_an_open_task_is_refused_naming_the_task(live, monkeypatch):
     judged(monkeypatch, Judge(yes={"t1"}))
     status, reply = operations(live, followup("f9", REPEAT))
@@ -87,6 +89,7 @@ def test_done_follow_ups_and_done_tasks_are_not_compared(live, monkeypatch):
     assert stored("f9")["text"] == "Fold the chat panel and retry the ledger watch on a timeout"
 
 
+@pytest.mark.feature("ledger-followup-duplicates")
 def test_the_not_duplicate_reason_skips_the_check_and_is_stored(live, monkeypatch):
     judge = judged(monkeypatch, Judge(yes={"f1"}))
     reason = "this one covers the inbox watch and that one the ledger watch"

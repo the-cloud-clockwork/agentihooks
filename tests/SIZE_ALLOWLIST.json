@@ -65,8 +65,7 @@
  },
  "hooks/integrations/dynamodb.py::main": {
   "C901": 35,
-  "PLR0912": 39,
-  "function-lines": 311
+  "PLR0912": 39
  },
  "hooks/integrations/lambda_invoke.py::main": {
   "C901": 14,
