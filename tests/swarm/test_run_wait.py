@@ -378,14 +378,14 @@ def test_the_wait_command_refuses_a_run_outside_the_install(monkeypatch):
 def test_the_wait_pass_rechecks_ownership_after_reading_github(tick, monkeypatch):  # noqa: F811
     from types import SimpleNamespace
 
-    from scripts.swarm import lease
+    from scripts.swarm import fencing, lease
     from scripts.swarm.store import SwarmError
 
     hold_run(tick)
     before = idle.wait(tick.store.redis, "sw", ME)
 
     def changed_owner(*args):
-        tick.store.redis.delete(tick.store.key("sw", "control-owner"))
+        fencing.write(tick.store, "sw", lambda doc: doc.update(lease=None))
         lease.acquire(tick.store, "sw", "another-controller")
         return lambda url: None
 

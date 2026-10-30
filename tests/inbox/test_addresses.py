@@ -23,6 +23,7 @@ def inbox(monkeypatch):
     return store
 
 
+@pytest.mark.feature("inbox-addresses")
 def test_unknown_destination_is_refused_with_sender_swarm_addresses_and_nothing_stored(inbox, capsys):
     before = sorted(inbox.redis.keys())
     assert cli.main(["send", "swarm", "status"]) == 1
@@ -46,6 +47,7 @@ def test_reply_to_unknown_sender_is_refused_without_closing_or_storing(inbox, ca
 @pytest.mark.parametrize(
     "address", ["master@123456-0001", "master@crew", "eng-2@crew", "operator", "bob", "session-bob", "old-master"]
 )
+@pytest.mark.feature("inbox-addresses")
 def test_real_names_seats_operator_and_session_ids_still_accept_messages(inbox, monkeypatch, capsys, address):
     from scripts.inbox import addresses
 

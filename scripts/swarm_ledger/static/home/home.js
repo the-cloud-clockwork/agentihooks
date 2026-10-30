@@ -172,7 +172,7 @@ let reorder = () => {};
 function sorting() {
   if (view !== "home") return;
   const read = (k, f) => { try { return JSON.parse(localStorage.getItem(k) || "null") || f; } catch (e) { return f; } };
-  const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage blocked: the choice lasts until reload */ } };
+  const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } };
   const rows = () => [...list.querySelectorAll("li.row")];
   let sort = read(SORT_KEY, {});
   if (!Object.hasOwn(FIRST, sort.key) || ![1, -1].includes(sort.dir)) sort = { key: "at", dir: -1 };

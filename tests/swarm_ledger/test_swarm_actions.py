@@ -65,6 +65,7 @@ def test_row_actions_stay_visible_on_a_touch_screen(open_page):
     assert acts_opacity(page, "eng-58") == "1"
 
 
+@pytest.mark.feature("ledger-agent-row-actions")
 def test_message_opens_the_chat_addressed_to_the_row(open_page):
     page = open_page(with_profiles())
     row(page, "eng-58").hover()
@@ -77,6 +78,7 @@ def test_message_opens_the_chat_addressed_to_the_row(open_page):
     assert page.puts == []
 
 
+@pytest.mark.feature("ledger-agent-row-actions")
 def test_terminate_asks_then_sends_only_once_confirmed(open_page):
     page = open_page(with_profiles())
     button = row(page, "eng-58").get_by_role("button", name="terminate")
@@ -95,6 +97,7 @@ def test_terminate_asks_then_sends_only_once_confirmed(open_page):
 @pytest.mark.parametrize(
     ("label", "action", "consequence"), [("stop now", "stop_now", STOP_NOW), ("close ledger", "close", CLOSE)]
 )
+@pytest.mark.feature("ledger-agent-row-actions")
 def test_header_stop_now_and_close_ledger_ask_then_send(open_page, label, action, consequence):
     page = open_page()
     button = page.tab.locator("#swarm-ctl").get_by_role("button", name=label)

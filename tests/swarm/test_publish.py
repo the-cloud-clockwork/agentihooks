@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -1699,6 +1700,89 @@ def test_hive_successor_publishes_its_own_branch_over_the_predecessor_hive_key(p
     assert result["branch"] == p.task["branch"] == "engineer-test"
     assert p.task["repository_branches"] == {str(p.repo): "engineer-test", "/hive/bundle": "kept"}
     assert git(p.root, "rev-parse", "--abbrev-ref", "HEAD") == "engineer-test"
+
+
+@pytest.mark.parametrize("command", ["mapped", "scoped", "prepare", "publish"])
+@pytest.mark.parametrize("local_stale", [True, False])
+def test_conflicting_host_branches_keep_the_open_pull_delivery(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, command: str, local_stale: bool
+) -> None:
+    from scripts.swarm import publish
+
+    p = publication
+    git(p.root, "push", "origin", "HEAD:pull-head")
+    git(p.root, "push", "origin", "HEAD:stale-branch")
+    foreign = f"/workstation/dev/{p.repo.name}"
+    stale_key = str(p.repo) if local_stale else f"/hive/previous/{p.repo.name}"
+    p.task.update(
+        branch="pull-head",
+        repository_branches={stale_key: "stale-branch", foreign: "pull-head", "/hive/bundle": "kept"},
+        pr_url="https://github.com/example/repo/pull/7",
+    )
+
+    def open_head(remote: str, url: str) -> str:
+        assert remote == str(p.repo.parent / "remote.git")
+        assert url == p.task["pr_url"]
+        return "pull-head"
+
+    monkeypatch.setattr(publish.publish_queue, "open_head", open_head)
+    monkeypatch.chdir(p.root)
+    if command == "mapped":
+        assert publish.mapped_branch(p.repo, p.task) == "pull-head"
+    elif command == "scoped":
+        assert publish.repository_task(p.repo, p.task)["branch"] == "pull-head"
+    else:
+        if command == "prepare":
+            result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
+        else:
+            result = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue delivery", ["chosen.txt"])
+            assert git(p.repo, "ls-remote", "origin", "refs/heads/pull-head").split()[0] == result["head"]
+            assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+        assert result["branch"] == p.task["branch"] == "pull-head"
+        assert p.task["repository_branches"] == {str(p.repo): "pull-head", "/hive/bundle": "kept"}
+
+
+@pytest.mark.parametrize(
+    ("branches", "url", "head", "expected", "queries"),
+    [
+        ({"repo": "local", "foreign/repo": "other"}, "pull", "", "local", 1),
+        ({"foreign/repo": "first", "elsewhere/repo": "second"}, "pull", "", "first", 1),
+        ({"repo": "local", "foreign/repo": "other"}, "", "unexpected", "local", 0),
+        ({"repo": "same", "foreign/repo": "same"}, "pull", "unexpected", "same", 0),
+        ({"repo": "local", "foreign/other": "other"}, "pull", "unexpected", "local", 0),
+        ({"foreign/repo": "first"}, "pull", "unexpected", "first", 0),
+        ({}, "pull", "unexpected", None, 0),
+        ({"repo": "local", "foreign/repo": "other"}, "pull", "new-head", "new-head", 1),
+    ],
+)
+def test_branch_mapping_only_queries_conflicting_delivery_records(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    branches: dict[str, str],
+    url: str,
+    head: str,
+    expected: str | None,
+    queries: int,
+) -> None:
+    from scripts.swarm import publish
+
+    repo = tmp_path / "repo"
+    calls = []
+
+    def git_call(root: Path, *args: str) -> str:
+        assert root == repo
+        assert args == ("remote", "get-url", "origin")
+        return "git@github.com:example/repo.git"
+
+    def open_head(remote: str, pull: str) -> str:
+        calls.append((remote, pull))
+        return head
+
+    monkeypatch.setattr(publish, "git", git_call)
+    monkeypatch.setattr(publish.publish_queue, "open_head", open_head)
+    mapping = {str(tmp_path / key): value for key, value in branches.items()}
+    assert publish.mapped_branch(repo, {"repository_branches": mapping, "pr_url": url}) == expected
+    assert calls == [("git@github.com:example/repo.git", url)] * queries
 
 
 @pytest.mark.parametrize("state", ["OPEN", "CLOSED", "MERGED"])

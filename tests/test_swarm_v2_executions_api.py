@@ -501,6 +501,8 @@ def test_a_heartbeat_commit_that_keeps_conflicting_writes_nothing(world, worker,
 
 
 def test_the_command_watermark_counts_this_execution_commands(world, worker):
+    from scripts.swarm import fencing
+
     agent, token = worker
     rows = {
         "op-1": {"execution_id": agent.execution_id, "action": "spawn"},
@@ -508,8 +510,8 @@ def test_the_command_watermark_counts_this_execution_commands(world, worker):
         "op-3": {"execution_id": agent.execution_id, "action": "drain"},
         "op-4": {"execution_id": "exe-other", "action": "command"},
     }
-    for operation_id, row in rows.items():
-        operation = {
+    operations = {
+        operation_id: {
             "operation_id": operation_id,
             "generation": 1,
             "backend": "local",
@@ -518,7 +520,9 @@ def test_the_command_watermark_counts_this_execution_commands(world, worker):
             "phase": "applied",
             **row,
         }
-        world.store.redis.hset(world.store.key("fixture", "runtime-operations"), operation_id, json.dumps(operation))
+        for operation_id, row in rows.items()
+    }
+    fencing.write(world.store, "fixture", lambda doc: doc["operations"].update(operations))
     _, ack = world.put(agent.execution_id, token, world.beat(agent, 1))
     assert ack["command_watermark"] == 2
 
@@ -611,6 +615,8 @@ def renew(api, execution_id, token):
 
 
 def test_a_renewed_credential_keeps_heartbeats_and_task_writes_past_the_launch_grant(world, long_lived):
+    from scripts.swarm import fencing
+
     api, agent, token = long_lived
     advance(world, 150_000)
     status, renewal = renew(api, agent.execution_id, token)
@@ -639,7 +645,7 @@ def test_a_renewed_credential_keeps_heartbeats_and_task_writes_past_the_launch_g
     advance(world, 600_000)
     claim = world.tasks.complete(again["credential"], 1, {"outcome": "merged"})
     assert (claim.state, claim.result) == ("completed", {"outcome": "merged"})
-    audit = json.loads(world.store.redis.hget(world.store.key("fixture", "launch-grants"), renewal["grant_id"]))
+    audit = fencing.read(world.store, "fixture")["grants"][renewal["grant_id"]]
     assert (audit["renewals"], audit["expires_at"]) == (2, "1970-01-01T00:11:40Z")
 
 
@@ -852,7 +858,9 @@ def test_server_deadlines_render_as_utc_on_a_host_in_another_timezone(monkeypatc
 
 
 def fence_of(world, fence):
-    return json.loads(world.store.redis.get(fence))
+    from scripts.swarm import fencing
+
+    return fencing.read(world.store, "fixture")["fences"][fence]
 
 
 def test_a_fenced_renewal_refuses_an_older_or_altered_sequence_and_admits_its_own_retry(world, worker):

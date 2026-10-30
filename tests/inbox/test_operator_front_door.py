@@ -34,6 +34,7 @@ def run_as(monkeypatch, agent, *argv):
     return cli.main(list(argv))
 
 
+@pytest.mark.feature("inbox-operator-front-door")
 def test_a_lane_agent_send_to_the_operator_goes_to_its_front_door(inbox, monkeypatch):
     assert run_as(monkeypatch, ENG, "send", "operator", "the pull request is in the merge queue") == 0
     assert inbox.inbox("operator") == []
@@ -47,11 +48,13 @@ def test_a_second_master_send_to_the_operator_goes_to_the_front_door(inbox, monk
     assert [item.sender for item in inbox.open_mail(DOOR)] == [SPARE.name]
 
 
+@pytest.mark.feature("inbox-operator-front-door")
 def test_the_front_door_never_writes_to_the_operator_first(inbox, monkeypatch, capsys):
     assert run_as(monkeypatch, BOSS, "send", "operator", "the phase is planned") == 1
     assert "first" in capsys.readouterr().err and inbox.inbox("operator") == []
 
 
+@pytest.mark.feature("inbox-operator-front-door")
 def test_a_session_outside_any_swarm_never_writes_to_the_operator_first(inbox, monkeypatch, capsys):
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "alice")
     assert cli.main(["send", "operator", "the build is green"]) == 1

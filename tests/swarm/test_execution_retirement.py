@@ -1,9 +1,11 @@
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
 
+from scripts.swarm import fencing
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.master_start import DEADLINE_MS
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
@@ -23,6 +25,49 @@ def started(store):
     return store.start_execution(
         "fixture", AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-1@fixture")
     )
+
+
+def test_stale_retirement_preserves_the_agent_projection_and_history(store, monkeypatch):
+    from scripts.swarm import lease
+    from scripts.swarm.store import SwarmError
+
+    at = [1000]
+    monkeypatch.setattr(lease, "now_ms", lambda saved: at[0])
+    first = lease.acquire(store, "fixture", "home")
+    agent = started(store)
+    before = store.redis.hgetall(store.key("fixture", "agents"))
+    at[0] = first.expires_at
+    lease.acquire(store, "fixture", "other")
+    with lease.fencing(first.epoch):
+        with pytest.raises(SwarmError, match="the controller lease is stale"):
+            store.drop_agent("fixture", agent.name)
+    assert store.redis.hgetall(store.key("fixture", "agents")) == before
+    assert store.redis.lrange(store.key("fixture", "history"), 0, -1) == []
+    assert not store.names.entry(agent.name).get("retired_at")
+    assert store.execution("fixture", agent.execution_id) == agent
+
+
+def test_retirement_cannot_remove_a_replacement_with_a_delayed_projection(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent = started(store)
+    before = store.redis.hgetall(store.key("fixture", "agents"))
+    write = fencing.write
+    replacements = []
+
+    def replace_first(saved: RedisStore, slug: str, change: Callable[[dict], object]) -> object:
+        if not replacements:
+            replacements.append(None)
+            monkeypatch.setattr(store, "project_agent", lambda *args, **kwargs: None)
+            fresh = replace(agent, execution_id="", generation=0)
+            replacements[0] = store.start_execution("fixture", fresh, agent.execution_id)
+        return write(saved, slug, change)
+
+    monkeypatch.setattr(fencing, "write", replace_first)
+    assert store.drop_agent("fixture", agent.name, expected=agent) is False
+    assert store.redis.hgetall(store.key("fixture", "agents")) == before
+    assert store.execution("fixture", replacements[0].execution_id) == replacements[0]
+    assert not store.names.entry(agent.name).get("retired_at")
 
 
 def test_drop_ends_execution_in_the_transaction_that_removes_its_agent(store):
@@ -102,7 +147,7 @@ def test_drop_retries_a_changed_projection_without_partial_history(store):
 
     with patch.object(pipe_type, "execute", commit):
         store.drop_agent("fixture", agent.name, at=10)
-    assert len(calls) == 3
+    assert len(calls) == 4
     assert store.execution("fixture", agent.execution_id).state == "ended"
     history = store.redis.lrange(store.key("fixture", "history"), 0, -1)
     assert len(history) == 1
@@ -116,12 +161,22 @@ def test_drop_refuses_persistent_contention_without_partial_changes(store):
 
     agent = started(store)
     before = store.redis.hgetall(store.key("fixture", "agents"))
-    with patch.object(type(store.redis.pipeline()), "execute", side_effect=WatchError) as commit:
+    pipe_type = type(store.redis.pipeline())
+    execute = pipe_type.execute
+    calls = []
+
+    def commit(pipe, *args, **kwargs):
+        if any(command[0][0] == "HDEL" for command in pipe.command_stack):
+            calls.append(True)
+            raise WatchError
+        return execute(pipe, *args, **kwargs)
+
+    with patch.object(pipe_type, "execute", commit):
         with pytest.raises(SwarmError, match="^agent registry kept changing; retirement was not committed$"):
             store.drop_agent("fixture", agent.name, at=20)
-    assert commit.call_count == 5
+    assert len(calls) == 5
     assert store.redis.hgetall(store.key("fixture", "agents")) == before
-    assert store.execution("fixture", agent.execution_id) == agent
+    assert store.execution("fixture", agent.execution_id) == replace(agent, state="ended")
     assert store.redis.lrange(store.key("fixture", "history"), 0, -1) == []
     assert not store.names.entry(agent.name).get("retired_at")
 
@@ -276,12 +331,14 @@ def test_drop_retries_when_its_execution_becomes_terminal_before_commit(store):
     def commit(pipe, *args, **kwargs):
         calls.append(True)
         if len(calls) == 1:
-            store.redis.hset(store.key("fixture", "executions"), agent.execution_id, json.dumps(asdict(terminal)))
+            fencing.write(
+                store, "fixture", lambda doc: doc["executions"].update({agent.execution_id: asdict(terminal)})
+            )
         return execute(pipe, *args, **kwargs)
 
     with patch.object(pipe_type, "execute", commit):
         store.drop_agent("fixture", agent.name, at=40)
-    assert len(calls) == 3
+    assert len(calls) == 4
     assert store.execution("fixture", agent.execution_id) == terminal
     assert store.agents("fixture") == []
     assert store.redis.llen(store.key("fixture", "history")) == 1
@@ -295,9 +352,12 @@ def test_orphan_ending_keeps_a_concurrent_execution_update(store):
     store.redis.hdel(store.key("fixture", "agents"), agent.name)
     pipe_type = type(store.redis.pipeline())
     execute = pipe_type.execute
+    raced = []
 
     def commit(pipe, *args, **kwargs):
-        store.redis.hset(store.key("fixture", "executions"), agent.execution_id, json.dumps(asdict(changed)))
+        if not raced:
+            raced.append(True)
+            fencing.write(store, "fixture", lambda doc: doc["executions"].update({agent.execution_id: asdict(changed)}))
         return execute(pipe, *args, **kwargs)
 
     with patch.object(pipe_type, "execute", commit):

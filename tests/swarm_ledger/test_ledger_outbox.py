@@ -80,6 +80,7 @@ def chat(state):
     return [entry["text"] for entry in state["chat"] if entry["by"] == ENG]
 
 
+@pytest.mark.feature("ledger-outbox")
 def test_talk_sent_while_the_server_is_stopped_queues_and_lands_once_in_order_when_it_returns(server, capsys):
     phase = f"phases/{stored()['phases'][0]['id']}"
     server.stop()
@@ -114,6 +115,7 @@ def test_talk_sent_while_the_server_is_stopped_queues_and_lands_once_in_order_wh
     assert not outbox.path().exists()
 
 
+@pytest.mark.feature("ledger-outbox")
 def test_a_replayed_record_lands_once_even_when_it_is_replayed_again(server, capsys):
     phase = f"phases/{stored()['phases'][0]['id']}"
     server.stop()
@@ -169,6 +171,7 @@ def test_a_record_the_server_refuses_on_replay_is_set_aside_and_reported(server,
     assert "refused on replay" in capsys.readouterr().err
 
 
+@pytest.mark.feature("ledger-outbox")
 def test_reads_and_untalkative_writes_still_fail_while_the_server_is_stopped(server):
     server.stop()
     with pytest.raises(SystemExit, match="ledger server not answering"):
@@ -178,13 +181,35 @@ def test_reads_and_untalkative_writes_still_fail_while_the_server_is_stopped(ser
     assert queued() == []
 
 
-def test_an_untalkative_write_is_refused_while_queued_talk_still_waits_so_it_never_overtakes_it(server, capsys):
+@pytest.mark.feature("ledger-outbox")
+def test_an_untalkative_write_is_refused_while_queued_talk_still_waits_so_it_never_overtakes_it(
+    server: Server, capsys: pytest.CaptureFixture[str]
+) -> None:
     server.stop()
     run(capsys, ENG, "say", "Queued first", "--reply-to", OPERATOR_LINE)
     held = outbox.path().read_text()
     with pytest.raises(SystemExit, match="still waits in"):
-        ledger.call(SLUG, [{"op": "join", "id": "join-eng", "by": ENG, "role": "member"}])
+        ledger.call(SLUG, [{"op": "leave", "id": "leave-eng", "by": ENG}])
     assert outbox.path().read_text() == held
+
+
+def test_join_reaches_the_server_past_unrelated_talk_and_keeps_deduplication(
+    server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry = outbox.ledger_record(
+        "unrelated-ledger", [{"op": "add", "id": "held-talk", "by": BOSS, "thread": "chat", "text": "held"}], "", False
+    )
+    outbox.append(entry)
+    monkeypatch.setattr(outbox, "flush", lambda store: None)
+    before = outbox.path().read_text()
+    op = {"op": "join", "id": "join-through-talk", "by": ENG, "role": "member"}
+    first = ledger.call(SLUG, [op])
+    assert first["applied"] == [op["id"]]
+    joined = stored()
+    assert joined["_meta"]["members"][ENG]["role"] == "member"
+    assert ledger.call(SLUG, [op])["applied"] == [op["id"]]
+    assert stored() == joined
+    assert outbox.path().read_text() == before
 
 
 def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay(server, monkeypatch, capsys):
@@ -252,6 +277,7 @@ def test_a_record_the_server_keeps_answering_busy_is_set_aside_once_it_is_older_
     assert json.loads(outbox.skipped_path().read_text().splitlines()[-1])["reason"] == reason
 
 
+@pytest.mark.feature("ledger-outbox-expiry")
 def test_a_stopped_server_never_expires_held_talk(server, capsys):
     server.stop()
     run(capsys, ENG, "say", "Held through a long outage", "--reply-to", OPERATOR_LINE)
@@ -260,6 +286,7 @@ def test_a_stopped_server_never_expires_held_talk(server, capsys):
     assert (report.left, report.rejected) == (1, [])
 
 
+@pytest.mark.feature("ledger-outbox-expiry")
 def test_the_busy_age_limit_reads_its_setting_and_defaults_to_an_hour():
     assert outbox.busy_age({}) == 3600
     assert outbox.busy_age({outbox.BUSY_AGE_ENV: "90"}) == 90
@@ -306,6 +333,7 @@ def test_a_flush_without_a_store_keeps_inbox_records_untried(server, capsys):
     assert "outbox replay stopped" not in capsys.readouterr().err
 
 
+@pytest.mark.feature("ledger-outbox-expiry")
 def test_an_expired_record_is_set_aside_as_it_was_written(server, monkeypatch, capsys):
     server.stop()
     run(capsys, ENG, "say", "Expired verbatim", "--reply-to", OPERATOR_LINE)

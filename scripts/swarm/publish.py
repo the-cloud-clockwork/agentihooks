@@ -109,6 +109,13 @@ def local_repository(value: str, repo: str) -> Path:
 
 def mapped_branch(repo: Path, task: dict) -> str | None:
     branches = task.get("repository_branches", {})
+    if (
+        task.get("pr_url")
+        and len({value for key, value in branches.items() if repository_name(key) == repository_name(str(repo))}) > 1
+    ):
+        head = publish_queue.open_head(git(repo, "remote", "get-url", "origin"), task["pr_url"])
+        if head:
+            return head
     branch = branches.get(str(repo))
     if branch is None:
         branch = next(
