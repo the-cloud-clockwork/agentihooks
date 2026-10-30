@@ -315,9 +315,14 @@ def _lane_tasks(watch, rows, lane):
     return [task for task in tasks if task.get("state", "open") == "open" and not task.get("claimed_by")]
 
 
-def ready_lanes(slug: str, store: object, ledger: object, doc: dict) -> Callable[[str], list]:
-    """Each lane's ready tasks as autoscale reads its demand, so a watched focus holds the same tasks from the alert."""
-    lanes = functools.cache(lambda: capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, doc))[1])
+def ready_lanes(slug: str, store: object, ledger: object, doc: dict, now_ms: int) -> Callable[[str], list]:
+    """Each lane's ready tasks as the capacity decision counts its demand: a watched focus and a fresh placement
+    refusal hold the same tasks from the alert."""
+    lanes = functools.cache(
+        lambda: capacity._placement_ready(
+            store, slug, capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, doc))[1], now_ms
+        )[0]
+    )
     return lambda lane: lanes()[lane]
 
 

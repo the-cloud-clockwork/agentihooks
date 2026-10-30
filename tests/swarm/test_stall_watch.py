@@ -1438,21 +1438,34 @@ def _doctor_store() -> RedisStore:
     return store
 
 
-def test_a_task_the_watched_focus_keeps_from_claims_is_not_ready_and_the_count_matches_autoscale(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_a_task_the_watched_focus_keeps_from_claims_is_not_ready_and_the_count_matches_autoscale() -> None:
     from scripts.swarm import capacity
+    from tests.swarm.test_freeze import record
+    from tests.swarm.test_freeze_doctor import DemandRuntime, doctor
+
+    store = _doctor_store()
+    ledger, runtime = doctor(store, [record("plans/a", "focus")]), DemandRuntime()
+    ready_tasks = stall_watch.ready_lanes(SLUG, store, ledger, ledger.state(SLUG), 1_000)
+    assert [task["id"] for task in ready_tasks("eng")] == ["fix"]
+    assert ready_tasks("ci") == []
+    assert ledger.read.count("watched") == 1
+    capacity.apply(SLUG, store.config(SLUG), store, ledger, runtime, 1_000)
+    counted = {lane: len(ready_tasks(lane)) for lane in capacity.LANES}
+    assert runtime.demand == [counted] == [{"eng": 1, "ci": 0, "plan": 0}]
+
+
+def test_a_task_a_fresh_placement_refusal_holds_is_ready_again_once_the_refusal_expires() -> None:
+    from scripts.hive import placement_waits
     from tests.swarm.test_freeze import record
     from tests.swarm.test_freeze_doctor import doctor
 
     store = _doctor_store()
     ledger = doctor(store, [record("plans/a", "focus")])
-    ready_tasks = stall_watch.ready_lanes(SLUG, store, ledger, ledger.state(SLUG))
-    assert [task["id"] for task in ready_tasks("eng")] == ["fix"]
-    assert ready_tasks("ci") == []
-    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [])
-    demand = capacity.live_inputs(SLUG, store, ledger, {}, 5_000).demand
-    assert {lane: len(ready_tasks(lane)) for lane in demand} == demand == {"eng": 1, "ci": 0, "plan": 0}
+    placement_waits.observe(store, SLUG, "eng", "fix", "no hive for eng has room", 0)
+    doc = ledger.state(SLUG)
+    assert stall_watch.ready_lanes(SLUG, store, ledger, doc, placement_waits.FRESH_MS - 1)("eng") == []
+    expired = stall_watch.ready_lanes(SLUG, store, ledger, doc, placement_waits.FRESH_MS)("eng")
+    assert [task["id"] for task in expired] == ["fix"]
 
 
 def test_a_full_lane_whose_only_open_task_the_watched_focus_holds_raises_no_unclaimed_alert() -> None:
@@ -1465,7 +1478,7 @@ def test_a_full_lane_whose_only_open_task_the_watched_focus_holds_raises_no_uncl
     decision = {"configured": {"eng": 2, "ci": 1, "plan": 0}, "placeable": {"claude": 1, "codex": 0}}
     swarm.store.redis.set(swarm.store.key(SLUG, "quota-capacity"), json.dumps(decision))
     doc = ledger.state(SLUG)
-    ready_tasks = stall_watch.ready_lanes(SLUG, swarm.store, ledger, doc)
+    ready_tasks = stall_watch.ready_lanes(SLUG, swarm.store, ledger, doc, START)
     swarm.ready = {"eng": ready_tasks("eng"), "ci": ready_tasks("ci")}
     swarm.tick(START, doc)
     assert swarm.tick(START + 30 * MINUTE, doc) == [] and swarm.inbox() == []
@@ -1476,4 +1489,4 @@ def test_the_tick_reads_stall_readiness_through_the_watched_focus() -> None:
 
     from scripts.swarm import cli
 
-    assert "stall_watch.ready_lanes(slug, store, ledger, doc)" in inspect.getsource(cli.run_tick)
+    assert "stall_watch.ready_lanes(slug, store, ledger, doc, now_ms())" in inspect.getsource(cli.run_tick)

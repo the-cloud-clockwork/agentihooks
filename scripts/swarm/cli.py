@@ -431,7 +431,7 @@ def run_tick(
                     view,
                     frozenset(live),
                     lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
-                    stall_watch.ready_lanes(slug, store, ledger, doc),
+                    stall_watch.ready_lanes(slug, store, ledger, doc, now_ms()),
                     now_ms(),
                     released=release_wait.checker(config.repo),
                     reread=ledger_events.view,
