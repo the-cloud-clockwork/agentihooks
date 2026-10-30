@@ -750,13 +750,9 @@ jobs:
         name: Stamp the day
         if: env.UNIT_SOURCE == ''
         id: day
-        env:
-          KEY_PREFIX: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}
-          KEY_INPUTS: ${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}-${{ hashFiles('.github/test-requirements.lock') }}
-        run: |
-          date=$(date -u +%F)
-          echo "date=$date" >> "$GITHUB_OUTPUT"
-          echo "key=$KEY_PREFIX-$date-$KEY_INPUTS" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/test-env-key
+        with:
+          python-version: ${{ steps.python.outputs.python-version }}
 
       - &venv
         name: Restore the test environment
