@@ -69,6 +69,7 @@ def test_the_chart_publishes_only_after_kind_installs_the_packaged_archive() -> 
     job = jobs["kind"]
     assert job["needs"] == "package"
     assert jobs["publish"]["needs"] == "kind"
+    assert not jobs["publish"].get("if")
     assert job["uses"] == "./.github/workflows/helm-kind-published.yml"
     assert job["with"] == {
         "version": "${{ github.event.workflow_run.head_branch }}",
