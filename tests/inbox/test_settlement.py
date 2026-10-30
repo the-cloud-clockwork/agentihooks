@@ -13,6 +13,7 @@ def store():
 
 
 @pytest.mark.parametrize("receipt", ["read", "confirm"])
+@pytest.mark.feature("inbox-settlement")
 def test_information_closes_on_receipt_and_work_needs_explicit_settlement(store, receipt):
     information = store.send("alice", "bob", "The branch merged", fyi=True)
     work = store.send("alice", "bob", "Verify the deployed proof")
@@ -34,6 +35,7 @@ def test_pending_information_is_not_closed_by_confirmation(store):
     assert store.get(item.id).state == "pending"
 
 
+@pytest.mark.feature("inbox-settlement")
 def test_confirmed_work_reminds_its_receiver_until_explicit_settlement(store, monkeypatch):
     from hooks.context import inbox_delivery as delivery
 
