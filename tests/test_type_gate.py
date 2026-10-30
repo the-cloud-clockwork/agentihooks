@@ -144,6 +144,7 @@ def test_a_failed_checker_run_is_red(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     head = _tree(tmp_path, {}, {})
+    monkeypatch.setattr(type_gate, "_basedpyright_version", lambda: type_gate.BASEDPYRIGHT_VERSION)
     monkeypatch.setattr(type_gate, "_BASEDPYRIGHT", (*type_gate._BASEDPYRIGHT, "--no-such-flag"))
     code, out = _grade(head, head, capsys)
     assert code == 1
