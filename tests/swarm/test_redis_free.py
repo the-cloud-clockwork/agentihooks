@@ -16,6 +16,7 @@ MOVED = (
     "scripts.swarm_v2.controller",
     "scripts.swarm_v2.runtime.operations",
     "scripts.swarm.name_state",
+    "scripts.swarm.naming",
 )
 
 
