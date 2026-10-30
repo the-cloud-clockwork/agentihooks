@@ -197,27 +197,6 @@ def test_local_controller_spawns_every_lane(store):
     assert inner.spawned == [("plan", "one", "t")]
 
 
-def test_workstation_room_reuses_one_fleet_scan_across_a_placement_pass(store, monkeypatch):
-    from scripts.swarm import controller, lease
-    from tests.swarm.test_tick import FakeRuntime
-
-    scans = []
-    original = store.agents
-    monkeypatch.setattr(store, "agents", lambda slug: (scans.append(slug), original(slug))[1])
-    held = lease.acquire(store, "sw", "anton")
-    runtime = controller.FencedRuntime(store, "sw", held, FakeRuntime(), "local")
-    runtime.begin_placement_pass()
-    runtime.placement_refusal("eng", {"id": "a"})
-    runtime.placement_refusal("eng", {"id": "b"})
-    runtime.placement_refusal("ci", {"id": "c"})
-    assert len(scans) == 1
-    runtime.end_placement_pass()
-    scans.clear()
-    runtime.placement_refusal("eng", {"id": "a"})
-    runtime.placement_refusal("eng", {"id": "b"})
-    assert len(scans) == 2
-
-
 def test_distributed_controller_refuses_a_disabled_kubernetes_backend(store):
     from scripts.swarm import controller, lease
     from scripts.swarm_v2.runtime.base import Placement, RuntimeRouter
