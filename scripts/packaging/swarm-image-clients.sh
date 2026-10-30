@@ -28,3 +28,8 @@ version="$(docker run --rm --entrypoint /usr/bin/ssh "$image" -V 2>&1)" || {
   exit 1
 }
 printf 'swarm image ssh client: openssh-client %s, the version the worker lock pins (%s)\n' "$observed" "$version"
+auth="$(docker run --rm --entrypoint /opt/venv/bin/python3 "$image" -P -c 'import scripts.github_app_cli' 2>&1)" || {
+  printf 'the swarm image GitHub client wrapper cannot import its GitHub App token module: %s\n' "$auth" >&2
+  exit 1
+}
+printf 'swarm image GitHub client wrapper imports its GitHub App token module\n'

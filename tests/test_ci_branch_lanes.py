@@ -926,6 +926,59 @@ def test_only_the_trusted_chart_release_may_leave_the_shared_proof_lane(change):
     assert bool(found) == (change is not None)
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        None,
+        "moved",
+        "group",
+        "queue",
+        "cancel",
+        "other-job",
+        "job",
+        "untrusted",
+        "trusted-name",
+        "new-job",
+        "name",
+        "events",
+    ],
+)
+def test_only_the_trusted_tests_flake_budget_may_queue_on_the_flake_history_group(change: str | None) -> None:
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "test.yml").read_text())
+    baseline["jobs"]["flake-budget"].pop("concurrency", None)
+    updated = copy.deepcopy(baseline)
+    if change == "moved":
+        baseline["jobs"]["flake-budget"]["concurrency"] = {"group": "flake-history-old"}
+    name = "test-summary" if change == "other-job" else "flake-budget"
+    if change == "new-job":
+        name = "flake-history"
+        baseline["jobs"].pop(name, None)
+        updated["jobs"][name] = copy.deepcopy(baseline["jobs"]["flake-budget"])
+    updated["jobs"][name]["concurrency"] = {"group": "flake-history", "queue": "max", "cancel-in-progress": False}
+    if change == "group":
+        updated["jobs"][name]["concurrency"]["group"] = "flake-history-other"
+    elif change == "queue":
+        updated["jobs"][name]["concurrency"]["queue"] = "single"
+    elif change == "cancel":
+        updated["jobs"][name]["concurrency"]["cancel-in-progress"] = True
+    elif change == "job":
+        updated["jobs"][name]["timeout-minutes"] = 30
+    elif change == "untrusted":
+        baseline = None
+    elif change == "trusted-name":
+        baseline["name"] = updated["name"] = "Other tests"
+    elif change == "name":
+        updated["name"] = "Other tests"
+    elif change == "events":
+        updated[True] = {"workflow_dispatch": None}
+    found = lanes.problems(updated, baseline)
+    assert bool(found) == (change not in (None, "moved"))
+    if found:
+        assert any(problem.startswith(f"job {name} ") for problem in found)
+
+
 SUPERSEDED_LANE = (
     "format('mutation-lane-{0}', "
     "((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || "

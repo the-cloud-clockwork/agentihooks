@@ -64,3 +64,14 @@ def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
     assert '["debian_snapshot"]' in dockerfile
     keyed = json.loads((root / ".github/input-keys.json").read_text())["helm-kind"]["paths"]
     assert "docker/swarm-node" in keyed
+
+
+def test_the_swarm_image_carries_gh_behind_the_app_token_wrapper_for_hub_pull_polls():
+    root = Path(__file__).parents[1]
+    dockerfile = (root / "Dockerfile").read_text()
+    assert "apt-get install -y --no-install-recommends gh\n" in dockerfile.split("AS gh")[1]
+    assert "COPY --link=true --from=gh /usr/bin/gh /usr/bin/gh" in dockerfile
+    assert "COPY --link=true --chmod=0755 deploy/worker/gh /usr/local/bin/gh" in dockerfile
+    assert "!deploy/worker/gh" in (root / ".dockerignore").read_text().splitlines()
+    wrapper = (root / "deploy/worker/gh").read_text()
+    assert "scripts.github_app_cli exec /usr/bin/gh" in wrapper
