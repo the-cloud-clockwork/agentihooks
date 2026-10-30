@@ -6,6 +6,7 @@
   "changelog-seed.yml/seed": "light",
   "changelog.yml/changelog": "light",
   "chaos.yml/chaos": "standard",
+  "chart-release.yml/package": "light",
   "chart-release.yml/publish": "light",
   "ci-minutes.yml/measure": "light",
   "ci-templates.yml/actionlint": "hosted",
