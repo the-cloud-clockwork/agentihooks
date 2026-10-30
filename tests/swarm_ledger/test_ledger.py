@@ -1,5 +1,6 @@
 import json
 import re
+from collections.abc import Callable
 
 import pytest
 
@@ -93,7 +94,10 @@ def applied(ids):
 
 @pytest.mark.parametrize("queued_slug", ["s", "another-ledger"])
 def test_join_lands_past_pending_talk(
-    cli, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], queued_slug: str
+    cli: Callable[[list[str], Callable[[list[str]], dict]], list[dict]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    queued_slug: str,
 ) -> None:
     from scripts.inbox import outbox
 
