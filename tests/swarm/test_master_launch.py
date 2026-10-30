@@ -1,5 +1,6 @@
 import builtins
 import json
+import os
 import time
 
 import pytest
@@ -1004,3 +1005,45 @@ def test_a_new_master_free_to_pick_its_harness_refuses_naming_every_warned_accou
     ):
         direct(store, rt, master_launch.NEW)
     assert routes == []
+
+
+@pytest.mark.parametrize(("token", "kept"), [("operator-token", False), (None, True)])
+def test_master_up_on_the_ledger_host_writes_through_the_local_ledger(monkeypatch, token, kept):
+    from types import SimpleNamespace
+
+    from scripts.swarm import cli
+    from scripts.swarm_ledger import hosted_probe, storage
+
+    monkeypatch.setattr(storage, "default", lambda: SimpleNamespace(token={"s1": token}.get))
+    environ = {hosted_probe.HOSTED_ENV: "https://hosted.example"}
+    cli.on_ledger_host("s1", environ)
+    assert (hosted_probe.HOSTED_ENV in environ) is kept
+
+
+def test_master_up_without_a_hosted_address_leaves_the_environment_alone(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm import cli
+    from scripts.swarm_ledger import hosted_probe, storage
+
+    monkeypatch.setattr(storage, "default", lambda: SimpleNamespace(token={"s1": "operator-token"}.get))
+    environ = {"OTHER": "kept"}
+    cli.on_ledger_host("s1", environ)
+    assert environ == {"OTHER": "kept"}
+    monkeypatch.setenv(hosted_probe.HOSTED_ENV, "https://hosted.example")
+    cli.on_ledger_host("s1")
+    assert hosted_probe.HOSTED_ENV not in os.environ
+
+
+def test_master_up_checks_the_ledger_host_for_its_own_swarm(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm import cli
+
+    seen = []
+    monkeypatch.setattr(cli, "on_ledger_host", seen.append)
+    monkeypatch.setattr(cli, "HerdrRuntime", object)
+    monkeypatch.setattr(cli, "routed", lambda **_: (_ for _ in ()).throw(RuntimeError("stop")))
+    with pytest.raises(RuntimeError, match="stop"):
+        cli.cmd_master(None, SimpleNamespace(action="up", slug="s1"))
+    assert seen == ["s1"]

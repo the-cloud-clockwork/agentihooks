@@ -59,6 +59,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import asdict, replace
@@ -933,10 +934,18 @@ def cmd_take_master(store, args):
     store.clear_handoff(args.slug, MASTER)
 
 
+def on_ledger_host(slug: str, environ: MutableMapping[str, str] = os.environ) -> None:
+    from scripts.swarm_ledger import hosted_probe, storage
+
+    if environ.get(hosted_probe.HOSTED_ENV) and storage.default().token(slug):
+        environ.pop(hosted_probe.HOSTED_ENV)
+
+
 def cmd_master(store, args):
     if args.action == "move":
         print(json.dumps(master_move.order(store, args.slug, args.to, now_ms())))
         return
+    on_ledger_host(args.slug)
     runtime = routed(herdr=HerdrRuntime())
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
