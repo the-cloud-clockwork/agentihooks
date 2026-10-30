@@ -1,6 +1,8 @@
 """Tests for hooks.context.file_read_cache."""
 
 import os
+from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -135,3 +137,75 @@ class TestFileReadCache:
         with patch("hooks.context.file_read_cache.get_redis", return_value=None):
             # Should not raise
             check_and_block_redundant_read(payload)
+
+
+@pytest.fixture
+def partial_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    from hooks import config, hook_manager
+    from hooks.context import file_read_cache
+
+    file_read_cache._memory_cache.clear()
+    monkeypatch.setattr(file_read_cache, "get_redis", lambda: None)
+    monkeypatch.setattr(config, "FILE_READ_CACHE_ENABLED", True)
+    monkeypatch.setattr(config, "SECRETS_MODE", "off")
+    for flag in (
+        "QUOTA_POLICY_ENABLED",
+        "QUOTA_USAGE_INJECTION_ENABLED",
+        "BRAIN_ENABLED",
+        "BROADCAST_ENABLED",
+        "ENFORCEMENT_INJECTION_ENABLED",
+        "RETRY_BREAKER_ENABLED",
+        "CONTEXT_AUDIT_ENABLED",
+    ):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr(hook_manager, "_operator_question", lambda _: None)
+    monkeypatch.setattr(hook_manager, "_operator_reminder", lambda _: None)
+    monkeypatch.setattr(hook_manager, "_swarm_after_tool", lambda _: None)
+    monkeypatch.setattr(hook_manager, "_swarm_heartbeat", lambda *args, **kwargs: None)
+    monkeypatch.setattr(hook_manager, "_credential_guard", lambda *args: None)
+    monkeypatch.setattr(hook_manager, "_plan_read_guard", lambda *args: None)
+    monkeypatch.setattr("hooks.context.swarm_gates.pretool", lambda *args: None)
+    monkeypatch.setattr("hooks.lifecycle.guard.pretool", lambda _: None)
+    monkeypatch.setattr("hooks.context.conditions.pre_effect", lambda _: None)
+    monkeypatch.setattr("hooks.context.conditions.post_effect", lambda _: None)
+    monkeypatch.setattr("hooks.context.conditions.write_guard", lambda *args: None)
+    monkeypatch.setattr("hooks.targets.capabilities.can_inject_context", lambda _: True)
+    monkeypatch.setattr("hooks.tool_memory.inject_memory", lambda **kwargs: None)
+    monkeypatch.setattr("hooks.tool_memory.record_error", lambda _: None)
+    path = tmp_path / "opening.md"
+    path.write_text("opening line\n" * 1545)
+    return {
+        "session_id": "partial-opening",
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(path)},
+        "tool_response": {
+            "type": "text",
+            "file": {"startLine": 1, "numLines": 402, "totalLines": 1545, "content": "opening line\n" * 402},
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"offset": 403},
+        {"offset": 403, "limit": 400},
+        {"offset": 403, "allow_large": True},
+        {"offset": 400, "limit": 10},
+        {},
+    ],
+)
+def test_partial_read_allows_unread_lines(partial_read: dict[str, Any], extra: dict[str, Any]) -> None:
+    from hooks.hook_manager import on_post_tool_use, on_pre_tool_use
+
+    on_post_tool_use(partial_read)
+    on_pre_tool_use({**partial_read, "tool_input": {**partial_read["tool_input"], **extra}})
+
+
+@pytest.mark.parametrize("extra", [{"offset": 1, "limit": 402}, {"offset": 200, "limit": 100}])
+def test_partial_read_still_refuses_delivered_lines(partial_read: dict[str, Any], extra: dict[str, Any]) -> None:
+    from hooks.hook_manager import BlockAction, on_post_tool_use, on_pre_tool_use
+
+    on_post_tool_use(partial_read)
+    with pytest.raises(BlockAction, match="already in context"):
+        on_pre_tool_use({**partial_read, "tool_input": {**partial_read["tool_input"], **extra}})
