@@ -12,9 +12,7 @@ from tests.test_swarm_brain_binding import _document
 pytestmark = pytest.mark.unit
 
 
-def test_projected_binding_is_installed_as_an_owned_document(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_projected_binding_is_installed_as_an_owned_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     projected = tmp_path / "projected.json"
     projected.write_text(json.dumps(_document()))
     projected.chmod(0o440)
@@ -39,9 +37,7 @@ def test_projected_binding_is_installed_as_an_owned_document(
     assert "fixture-brain-mcp" not in installed.read_text()
 
 
-def test_missing_projected_binding_refuses_worker_start(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_missing_projected_binding_refuses_worker_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HIVE_BRAIN_BINDING_FILE", str(tmp_path / "missing.json"))
     result, commands, _, _ = startup(tmp_path)
     assert result.returncode != 0
@@ -49,9 +45,7 @@ def test_missing_projected_binding_refuses_worker_start(
     assert "init" not in commands
 
 
-def test_unconfigured_worker_keeps_missing_binding_refusal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_unconfigured_worker_keeps_missing_binding_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HIVE_BRAIN_BINDING_FILE", raising=False)
     result, _, home, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
