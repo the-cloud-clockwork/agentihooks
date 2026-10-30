@@ -152,3 +152,10 @@ def test_prepush_keeps_the_protected_grader_when_head_deletes_it(tmp_path: Path)
         )
     ]
     assert (grade / "comments-base/scripts/no_comments.py").read_text() == "pass\n"
+
+
+@pytest.mark.parametrize(
+    "source", ["  # coding: utf-8\nvalue = 1\n", "\n\t# coding: utf-8\nvalue = 1\n", "\f# coding: utf-8\nvalue = 1\n"]
+)
+def test_indented_encoding_cookies_are_green(tmp_path: Path, source: str) -> None:
+    assert _grade(tmp_path, "", source) == 0

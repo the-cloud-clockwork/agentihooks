@@ -41,7 +41,7 @@ def _directive(token: tokenize.TokenInfo, name: str) -> bool:
     text = token.string[1:].strip()
     if token.start == (1, 0) and text.startswith("!"):
         return True
-    if token.start[0] <= 2 and token.start[1] == 0 and _COOKIE.fullmatch(text):
+    if token.start[0] <= 2 and not token.line[: token.start[1]].strip() and _COOKIE.fullmatch(text):
         return True
     if any(part.startswith(".semgrep") for part in Path(name).parts[:-1]):
         if re.fullmatch(rf"(?:ruleid|ok|todoruleid|todook):\s*{_NAMES}", text):
