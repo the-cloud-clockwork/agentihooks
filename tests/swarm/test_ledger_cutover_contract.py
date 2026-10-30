@@ -8,8 +8,9 @@ from types import SimpleNamespace
 import pytest
 
 from scripts import swarm
+from scripts.events import state as event_state
 from scripts.gates import Who
-from scripts.swarm import lease, ledger_client, ledger_cutover
+from scripts.swarm import fencing, lease, ledger_client, ledger_cutover
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_route
 from scripts.swarm_ledger.api import client as api_client
@@ -117,16 +118,20 @@ def receipts(store):
 
 
 def execution(store, agent, **changes):
-    key = store.key(SLUG, "executions")
-    row = json.loads(store.redis.hget(key, agent.execution_id))
-    store.redis.hset(key, agent.execution_id, json.dumps({**row, **changes}))
+    fencing.write(
+        store,
+        SLUG,
+        lambda doc: doc["executions"].update(
+            {agent.execution_id: {**doc["executions"][agent.execution_id], **changes}}
+        ),
+    )
 
 
 def test_a_ready_successor_authenticates_once_and_records_its_receipt(store, worker, probe, monkeypatch):
     watched = spy(store, monkeypatch)
     assert ledger_cutover.acknowledge(store, SLUG, who(worker), TOKEN) is True
     assert probe.calls == [(DEST, {"X-Ledger-Token": "token-1", "X-Ledger-Agent": worker.name}, SLUG, "metadata")]
-    assert watched[-1] == (store.key(SLUG, "config"), store.key(SLUG, "executions"))
+    assert watched[-1] == (store.key(SLUG, "config"),)
     stamp = {"url": DEST, "staged_at": NOW, "execution_id": worker.execution_id, "generation": worker.generation}
     assert {name: json.loads(value) for name, value in receipts(store).items()} == {worker.name: stamp}
     probe.error = AssertionError("authenticated twice")
@@ -178,7 +183,7 @@ def test_an_unreachable_destination_records_no_receipt(store, worker, probe):
     [
         lambda store, agent: execution(store, agent, state="finished"),
         lambda store, agent: execution(store, agent, generation=agent.generation + 1),
-        lambda store, agent: store.redis.hdel(store.key(SLUG, "executions"), agent.execution_id),
+        lambda store, agent: fencing.write(store, SLUG, lambda doc: doc["executions"].pop(agent.execution_id, None)),
         lambda store, agent: store.redis.hset(store.key(SLUG, "config"), "ledger_staged_at", NOW + 5),
         lambda store, agent: store.redis.hset(store.key(SLUG, "config"), "pending_api_url", "https://other.example"),
     ],
@@ -239,13 +244,10 @@ def test_activation_watches_every_cohort_and_lease_key(store):
     assert ledger_cutover._activation_keys(store, SLUG) == {
         store.key(SLUG, "config"): "hgetall",
         store.key(SLUG, "agents"): "hgetall",
-        store.key(SLUG, "executions"): "hgetall",
         store.key(SLUG, "desired-routes"): "hgetall",
         store.key(SLUG, "ledger-ready"): "hgetall",
         masters.MasterSeats(store.redis).key(SLUG): "hgetall",
         store.key(SLUG, "tick-lock"): "get",
-        store.key(SLUG, "control-owner"): "get",
-        store.key(SLUG, "control-epoch"): "get",
     }
 
 
@@ -288,9 +290,9 @@ def test_activation_names_each_refusal_before_it_moves_the_lease(controller, mon
     assert refusal(store) == "the swarm tick is still running"
     store.redis.delete(store.key(SLUG, "tick-lock"))
     other = {"owner": f"{commands.hive_id()}-other", "epoch": 3, "expires_at": 10**15}
-    store.redis.set(store.key(SLUG, "control-owner"), json.dumps(other))
+    fencing.write(store, SLUG, lambda doc: doc.update(lease=other))
     assert refusal(store) == "the source controller ownership changed"
-    store.redis.set(store.key(SLUG, "control-owner"), "legacy-owner")
+    fencing.write(store, SLUG, lambda doc: doc.update(lease=None, legacy_owner="legacy-owner"))
     assert refusal(store) == "the source controller ownership changed"
 
 
@@ -299,6 +301,7 @@ def test_an_activation_interrupted_before_it_moves_the_lease_releases_nothing(co
         raise AssertionError("released a lease that was never moved")
 
     monkeypatch.setattr(lease, "release", release)
+    fencing.read(controller, SLUG)
     spy(controller, monkeypatch, fail_watch=True)
     assert refusal(controller) == "the ledger activation changed before commit"
 
@@ -415,13 +418,13 @@ def test_a_first_transfer_starts_at_epoch_one_with_an_expiring_lease(store, monk
     watched = spy(store, monkeypatch)
     moved = lease.transfer(store, SLUG, "hive", 0, 0)
     assert moved == lease.Lease("hive", 1, NOW + lease.ttl_ms())
-    assert json.loads(store.redis.get(store.key(SLUG, "control-owner"))) == {
+    assert fencing.read(store, SLUG)["lease"] == {
         "owner": "hive",
         "epoch": 1,
         "expires_at": NOW + lease.ttl_ms(),
     }
-    assert 0 < store.redis.pttl(store.key(SLUG, "control-owner")) <= lease.ttl_ms()
-    assert watched == [(store.key(SLUG, "control-owner"), store.key(SLUG, "control-epoch"))]
+    current_key = event_state.for_store(store, "fencing")._current
+    assert watched == [(current_key,), (current_key,)]
 
 
 def test_a_transfer_moves_a_live_lease_held_by_its_owner_to_a_higher_epoch(store):
@@ -464,9 +467,10 @@ def test_a_transfer_refuses_a_lease_it_does_not_hold(store, raw, expected, messa
 
 
 def test_a_transfer_that_keeps_losing_its_watch_is_not_committed(store, monkeypatch):
+    fencing.read(store, SLUG)
     watched = spy(store, monkeypatch, fail=True)
     with pytest.raises(SwarmError) as refused:
         lease.transfer(store, SLUG, "hive", 0, 0)
-    assert str(refused.value) == "the controller lease kept changing; transfer was not committed"
-    assert len(watched) == 5
-    assert store.redis.get(store.key(SLUG, "control-owner")) is None
+    assert str(refused.value) == fencing.CONTENTION
+    assert len(watched) == fencing.ATTEMPTS * 16
+    assert fencing.read(store, SLUG)["lease"] is None

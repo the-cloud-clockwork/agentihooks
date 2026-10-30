@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.swarm import fencing
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.auth_context import (
     MAX_TTL_SECONDS,
@@ -97,10 +98,15 @@ def body(execution, **changes):
     }
 
 
-def protected(store):
-    return {
-        key: store.redis.dump(key) for key in store.redis.scan_iter() if not key.endswith("launch-grant-rejections")
+def protected(store, slug="fixture"):
+    raw = {
+        key: store.redis.dump(key)
+        for key in store.redis.scan_iter()
+        if not key.endswith("launch-grant-rejections")
+        and ":state:fencing:" not in key
+        and ":state:counters:" not in key
     }
+    return raw, fencing.read(store, slug)
 
 
 def claims_of(token):
@@ -172,10 +178,10 @@ def test_the_grant_subject_comes_from_admitted_state(store, authority, execution
 
 def test_issued_grants_are_audited_without_secret_material(store, authority, execution):
     token = issue(authority, execution)
-    rows = store.redis.hgetall(store.key("fixture", "launch-grants"))
+    rows = fencing.read(store, "fixture")["grants"]
     grant_id = claims_of(token)["grant_id"]
     assert list(rows) == [grant_id]
-    assert json.loads(rows[grant_id]) == {
+    assert rows[grant_id] == {
         "grant_id": grant_id,
         "issuer": "controller@fixture",
         "audience": "registry@fixture",
@@ -191,7 +197,7 @@ def test_issued_grants_are_audited_without_secret_material(store, authority, exe
         assert part not in dumped
     assert KEY.secret.hex() not in dumped
     authority.register("fixture", token, body(execution))
-    assert json.loads(store.redis.hget(store.key("fixture", "launch-grants"), grant_id))["state"] == "registered"
+    assert fencing.read(store, "fixture")["grants"][grant_id]["state"] == "registered"
 
 
 def test_a_replaced_execution_cannot_be_issued_a_grant(store, authority, execution):
@@ -223,7 +229,7 @@ def other_swarm(ctx):
 
 
 def disabled_after_issue(ctx):
-    ctx.store.redis.set(ctx.store.key("fixture", "launch-grants-disabled"), ISSUED_AT)
+    fencing.write(ctx.store, "fixture", lambda doc: doc.update(grants_disabled=ISSUED_AT))
 
 
 def claim(**changes):
@@ -398,7 +404,7 @@ def test_a_bad_grant_or_body_fails_before_any_registry_write(store, authority, c
     assert launch_grant_rejections_total(store, ctx.slug) == 1
     for part in (ctx.token or "").split("."):
         assert len(part) < 3 or part not in json.dumps(error.value.detail())
-    assert not store.redis.hgetall(store.key("fixture", "launch-registrations"))
+    assert not fencing.read(store, "fixture")["registrations"]
 
 
 def test_a_refusal_carries_the_request_operation_id_and_retry_class(store, authority, execution):
@@ -555,14 +561,14 @@ def test_an_interrupted_registration_recovers_on_retry(store, authority, clock, 
     with pytest.raises(TransportLost):
         authority.register("fixture", token, body(execution))
     monkeypatch.setattr(store.redis, "pipeline", real)
-    survived = store.redis.hgetall(store.key("fixture", "launch-registrations"))
+    survived = fencing.read(store, "fixture")["registrations"]
     assert (protected(store) == before) is (when == "before")
     assert len(survived) == (0 if when == "before" else 1)
     clock.now += 30
     restarted = LaunchAuthority(store, KEY, FIXTURE["issuer"], FIXTURE["audience"], clock, FIXTURE["ttl"])
     registration = restarted.register("fixture", token, body(execution))
     assert registration.registered_at == ("2026-10-08T09:00:30Z" if when == "before" else ISSUED_AT)
-    assert len(store.redis.hgetall(store.key("fixture", "launch-registrations"))) == 1
+    assert len(fencing.read(store, "fixture")["registrations"]) == 1
     assert len(store.executions("fixture", FIXTURE["seat"])) == 1
 
 
@@ -600,7 +606,7 @@ def test_disabling_revokes_outstanding_grants_and_keeps_history_readable(store, 
     outstanding = issue(authority, other)
     history = store.executions("fixture", FIXTURE["seat"])
     assert authority.disable("fixture") == [claims_of(outstanding)["grant_id"]]
-    assert store.redis.get(store.key("fixture", "launch-grants-disabled")) == ISSUED_AT
+    assert fencing.read(store, "fixture")["grants_disabled"] == ISSUED_AT
     assert authority.disable("fixture") == []
     with pytest.raises(GrantRefused) as error:
         authority.register("fixture", outstanding, body(other))
@@ -728,6 +734,10 @@ def test_a_minimal_body_registers_and_a_partial_body_is_still_checked(store, aut
 
 @pytest.mark.parametrize("operation", ["register", "disable", "issue"])
 def test_writes_retry_a_concurrent_change_then_give_up(store, authority, execution, monkeypatch, operation):
+    from redis.exceptions import WatchError
+
+    from scripts.events.redis_state import WRITE_TRIES
+
     token = issue(authority, execution)
 
     def run():
@@ -743,7 +753,11 @@ def test_writes_retry_a_concurrent_change_then_give_up(store, authority, executi
     authority.enable("fixture")
     execution = admit(store, "eng-2@fixture")
     token = issue(authority, execution)
-    _real, calls = hook_pipelines(store, monkeypatch, conflicting(5))
+
+    def always_raced(pipe):
+        raise WatchError("fixture conflict")
+
+    _real, calls = hook_pipelines(store, monkeypatch, always_raced)
     with pytest.raises(GrantRefused) as error:
         run()
     assert (
@@ -756,15 +770,37 @@ def test_writes_retry_a_concurrent_change_then_give_up(store, authority, executi
     )
     assert (error.value.error_class, error.value.retry) == ("dependency_unavailable", "same_request")
     assert launch_grant_rejections(store, "fixture") == {"dependency_unavailable": 1}
-    assert len(calls) == 5
+    assert len(calls) == fencing.ATTEMPTS * WRITE_TRIES
+
+
+def test_enabling_clears_the_disabled_mark_or_names_its_contention(store, authority, monkeypatch):
+    from redis.exceptions import WatchError
+
+    authority.disable("fixture")
+    authority.enable("fixture")
+    assert fencing.read(store, "fixture")["grants_disabled"] == ""
+
+    authority.disable("fixture")
+
+    def always_raced(pipe):
+        raise WatchError("fixture conflict")
+
+    hook_pipelines(store, monkeypatch, always_raced)
+    with pytest.raises(GrantRefused) as error:
+        authority.enable("fixture")
+    assert (error.value.error_class, str(error.value)) == (
+        "dependency_unavailable",
+        "launch grants kept changing; nothing was enabled",
+    )
 
 
 def test_a_grant_issued_while_disabling_is_refused(store, authority, execution, monkeypatch):
-    disabled = store.key("fixture", "launch-grants-disabled")
+    disabled = []
 
     def disable_first(pipe):
-        if not store.redis.exists(disabled):
-            store.redis.set(disabled, ISSUED_AT)
+        if not disabled:
+            disabled.append(True)
+            fencing.write(store, "fixture", lambda doc: doc.update(grants_disabled=ISSUED_AT))
         return pipe.execute()
 
     hook_pipelines(store, monkeypatch, disable_first)
@@ -774,7 +810,7 @@ def test_a_grant_issued_while_disabling_is_refused(store, authority, execution, 
         "forbidden_scope",
         "launch grants are disabled for this swarm",
     )
-    assert not store.redis.hgetall(store.key("fixture", "launch-grants"))
+    assert not fencing.read(store, "fixture")["grants"]
 
 
 def test_a_grant_issued_while_its_execution_is_replaced_is_refused(store, authority, execution, monkeypatch):
@@ -790,7 +826,7 @@ def test_a_grant_issued_while_its_execution_is_replaced_is_refused(store, author
     with pytest.raises(GrantRefused) as error:
         issue(authority, execution)
     assert error.value.error_class == "stale_generation"
-    assert not store.redis.hgetall(store.key("fixture", "launch-grants"))
+    assert not fencing.read(store, "fixture")["grants"]
 
 
 def race_replace(ctx):
@@ -798,19 +834,24 @@ def race_replace(ctx):
 
 
 def race_register(ctx):
-    other = {**json.loads(ctx.store.redis.hget(ctx.grants, ctx.grant_id)), "grant_id": f"lgr-{'1' * 32}"}
-    row = {**body(ctx.execution), "grant_id": other["grant_id"], "issuer": "controller@fixture"}
+    row = {**body(ctx.execution), "grant_id": f"lgr-{'1' * 32}", "issuer": "controller@fixture"}
     row.update(audience="registry@fixture", key_id="fixture-key-1", registered_at=ISSUED_AT)
-    ctx.store.redis.hset(ctx.store.key("fixture", "launch-registrations"), ctx.execution.execution_id, json.dumps(row))
+
+    def change(doc):
+        doc["registrations"][ctx.execution.execution_id] = row
+
+    fencing.write(ctx.store, "fixture", change)
 
 
 def race_revoke(ctx):
-    audit = json.loads(ctx.store.redis.hget(ctx.grants, ctx.grant_id))
-    ctx.store.redis.hset(ctx.grants, ctx.grant_id, json.dumps({**audit, "state": "revoked"}))
+    def change(doc):
+        doc["grants"][ctx.grant_id] = {**doc["grants"][ctx.grant_id], "state": "revoked"}
+
+    fencing.write(ctx.store, "fixture", change)
 
 
 def race_disable(ctx):
-    ctx.store.redis.set(ctx.store.key("fixture", "launch-grants-disabled"), ISSUED_AT)
+    fencing.write(ctx.store, "fixture", lambda doc: doc.update(grants_disabled=ISSUED_AT))
 
 
 RACES = {
@@ -827,7 +868,6 @@ def test_a_registration_retries_when_a_watched_key_changes_first(store, authorit
     ctx = SimpleNamespace(
         store=store,
         execution=execution,
-        grants=store.key("fixture", "launch-grants"),
         grant_id=claims_of(token)["grant_id"],
     )
     write, message = RACES[race]
@@ -849,8 +889,8 @@ def test_disabling_lists_every_outstanding_grant_in_order(store, authority, exec
     other = admit(store, "eng-2@fixture")
     grants = sorted(claims_of(issue(authority, agent))["grant_id"] for agent in (execution, other, execution))
     assert authority.disable("fixture") == grants
-    rows = store.redis.hgetall(store.key("fixture", "launch-grants"))
-    assert {json.loads(row)["state"] for row in rows.values()} == {"revoked"}
+    rows = fencing.read(store, "fixture")["grants"]
+    assert {row["state"] for row in rows.values()} == {"revoked"}
 
 
 def registered(authority, execution):
@@ -860,7 +900,7 @@ def registered(authority, execution):
 
 
 def audit_of(store, token):
-    return json.loads(store.redis.hget(store.key("fixture", "launch-grants"), claims_of(token)["grant_id"]))
+    return fencing.read(store, "fixture")["grants"][claims_of(token)["grant_id"]]
 
 
 def refusal(action, *args):
@@ -882,7 +922,7 @@ def test_a_registered_credential_renews_bound_to_its_registration(store, authori
     assert (audit["state"], audit["expires_at"], audit["renewals"]) == ("registered", expires_at, 1)
     again, _ = authority.renew("fixture", renewed)
     assert audit_of(store, again)["renewals"] == 2
-    assert renewed.split(".")[1] not in json.dumps(store.redis.hgetall(store.key("fixture", "launch-grants")))
+    assert renewed.split(".")[1] not in json.dumps(fencing.read(store, "fixture")["grants"])
 
 
 def test_only_a_live_registered_credential_renews(store, authority, clock, execution):
@@ -934,6 +974,8 @@ def test_a_renewal_raced_by_revocation_is_refused(store, authority, execution, m
 def test_a_grant_rewrite_that_keeps_racing_is_unavailable(store, authority, execution, monkeypatch):
     from redis.exceptions import WatchError
 
+    from scripts.events.redis_state import WRITE_TRIES
+
     token = registered(authority, execution)
     before = audit_of(store, token)
 
@@ -945,12 +987,12 @@ def test_a_grant_rewrite_that_keeps_racing_is_unavailable(store, authority, exec
         "dependency_unavailable",
         "launch grants kept changing; the credential was not renewed",
     )
-    assert len(calls) == WRITE_ATTEMPTS
+    assert len(calls) == fencing.ATTEMPTS * WRITE_TRIES
     assert refusal(authority.revoke, execution.execution_id) == (
         "dependency_unavailable",
         "launch grants kept changing; the registration was not revoked",
     )
-    assert len(calls) == 2 * WRITE_ATTEMPTS
+    assert len(calls) == 2 * fencing.ATTEMPTS * WRITE_TRIES
     assert audit_of(store, token) == before
 
 

@@ -13,7 +13,8 @@ from tests.test_swarm_v2_artifacts_remote import Objects
 
 
 @pytest.fixture
-def storage():
+def storage(monkeypatch):
+    monkeypatch.setattr("time.time", lambda: 0.1)
     registration = Registration(
         "grant", "swarm", "execution", 2, "seat", "task", "account", "brain", [], "issuer", "audience", "key", "now"
     )

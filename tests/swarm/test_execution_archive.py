@@ -4,7 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from scripts.swarm.execution import ARCHIVE, ExecutionRegistry
+from scripts.events import state
+from scripts.swarm import fencing
+from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 
@@ -34,6 +36,10 @@ def history(store):
     return first, second, third, other
 
 
+def section(store, name):
+    return fencing.read(store, "fixture")[name]
+
+
 def test_archive_moves_only_rows_no_live_reader_returns(store):
     first, second, third, other = history(store)
     registry = store.execution_registry
@@ -42,8 +48,8 @@ def test_archive_moves_only_rows_no_live_reader_returns(store):
 
     assert registry.archive("fixture") == 2
 
-    assert set(store.redis.hkeys(store.key("fixture", "executions"))) == {third.execution_id, other.execution_id}
-    assert set(store.redis.hkeys(store.key("fixture", ARCHIVE))) == {first.execution_id, second.execution_id}
+    assert set(section(store, "executions")) == {third.execution_id, other.execution_id}
+    assert set(section(store, "archive")) == {first.execution_id, second.execution_id}
     assert registry.agents("fixture") == agents
     assert registry.occupants("fixture") == occupants
     assert sorted(registry.records("fixture"), key=lambda a: a.execution_id) == records
@@ -58,7 +64,7 @@ def test_managed_reads_the_archive_inside_redis(store, monkeypatch):
     registry = store.execution_registry
     registry.archive("fixture")
     monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
-    archive = store.key("fixture", ARCHIVE)
+    archive = store.key("fixture", "executions-archive")
     hvals = store.redis.hvals
 
     def refusing(key):
@@ -79,7 +85,7 @@ def test_a_hive_member_reads_the_archive_it_may_only_read(store, monkeypatch):
     for variable in ("AGENTIHOOKS_HIVE_REDIS_URL", "AGENTIHOOKS_SWARM_REDIS_URL"):
         monkeypatch.setenv(variable, "redis://hive.example:6380/0")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
-    archive = store.key("fixture", ARCHIVE)
+    archive = store.key("fixture", "executions-archive")
     script = store.redis.eval
 
     def refusing(source, keys, *args):
@@ -136,7 +142,7 @@ def test_set_pane_still_finds_an_archived_attempt(store):
     store.execution_registry.set_pane("fixture", first.execution_id, "pane-9")
 
     assert store.execution("fixture", first.execution_id).pane_id == "pane-9"
-    assert not store.redis.hexists(store.key("fixture", ARCHIVE), first.execution_id)
+    assert first.execution_id not in section(store, "archive")
 
 
 @pytest.mark.parametrize("archived", [False, True])
@@ -153,60 +159,49 @@ def test_set_pane_on_a_replaced_run_keeps_its_dropped_agent_out_of_the_live_list
     assert [agent.name for agent in store.agents("fixture")] == [third.name]
 
 
-def test_set_pane_retries_when_its_agent_is_dropped_during_the_write(store, monkeypatch):
+def test_set_pane_never_shows_an_agent_dropped_during_the_write(store, monkeypatch):
     current = started(store, "eng-1@fixture")
-    original = store.redis.pipeline
-    reads = []
+    project = store.project_agent
 
-    def pipeline(*args, **kwargs):
-        pipe = original(*args, **kwargs)
-        hexists = pipe.hexists
+    def dropped_first(slug, *args, **kwargs):
+        store.redis.hdel(store.key(slug, "agents"), current.name)
+        return project(slug, *args, **kwargs)
 
-        def racing(name, key):
-            found = hexists(name, key)
-            reads.append(found)
-            if len(reads) == 1:
-                store.redis.hdel(name, key)
-            return found
-
-        monkeypatch.setattr(pipe, "hexists", racing)
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    monkeypatch.setattr(store, "project_agent", dropped_first)
 
     store.execution_registry.set_pane("fixture", current.execution_id, "pane-9")
 
-    assert reads == [True, False]
     assert store.execution("fixture", current.execution_id).pane_id == "pane-9"
     assert not store.redis.hexists(store.key("fixture", "agents"), current.name)
 
 
 def test_set_pane_retries_when_its_run_record_changes_during_the_write(store, monkeypatch):
     current = started(store, "eng-1@fixture")
-    original = store.redis.pipeline
-    reads = []
-    key = store.key("fixture", "executions")
+    states = state.for_store(store, fencing.BUCKET)
+    raced = []
 
-    def pipeline(*args, **kwargs):
-        pipe = original(*args, **kwargs)
-        hexists = pipe.hexists
+    class Racing:
+        def get(self, key):
+            return states.get(key)
 
-        def racing(name, field):
-            found = hexists(name, field)
-            reads.append(found)
-            if len(reads) == 1:
-                raced = replace(store.execution("fixture", current.execution_id), pane_id="pane-race")
-                store.redis.hset(key, current.execution_id, json.dumps(asdict(raced)))
-            return found
+        def create(self, key, value):
+            return states.create(key, value)
 
-        monkeypatch.setattr(pipe, "hexists", racing)
-        return pipe
+        def update(self, key, value, revision):
+            if not raced:
+                raced.append(True)
+                entry = states.get(key)
+                doc = json.loads(entry.value)
+                row = doc["executions"][current.execution_id]
+                doc["executions"][current.execution_id] = {**row, "pane_id": "pane-race"}
+                states.update(key, json.dumps(doc).encode(), entry.revision)
+            return states.update(key, value, revision)
 
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    monkeypatch.setattr(fencing.state, "for_store", lambda *args, **kwargs: Racing())
 
     store.execution_registry.set_pane("fixture", current.execution_id, "pane-9")
 
-    assert reads == [True, True]
+    assert raced == [True]
     assert store.execution("fixture", current.execution_id).pane_id == "pane-9"
 
 
@@ -227,35 +222,27 @@ def test_archive_keeps_every_row_of_a_live_name_and_seat_head_ties(store):
     one = store.start_execution("fixture", agent)
     two = store.start_execution("fixture", agent, one.execution_id)
     three = store.start_execution("fixture", agent, two.execution_id)
-    tie = {**json.loads(store.redis.hget(store.key("fixture", "executions"), three.execution_id))}
-    tie.update(name="gone@fixture", execution_id="exe-tie")
-    store.redis.hset(store.key("fixture", "executions"), "exe-tie", json.dumps(tie))
+    tie = {**section(store, "executions")[three.execution_id], "name": "gone@fixture", "execution_id": "exe-tie"}
+    fencing.write(store, "fixture", lambda doc: doc["executions"].update({"exe-tie": tie}))
     registry = store.execution_registry
     agents, occupants = registry.agents("fixture"), registry.occupants("fixture")
     assert [a.name for a in agents] == [agent.name]
 
     assert registry.archive("fixture") == 0
 
-    assert set(store.redis.hkeys(store.key("fixture", "executions"))) == {
-        one.execution_id,
-        two.execution_id,
-        three.execution_id,
-        "exe-tie",
-    }
+    assert set(section(store, "executions")) == {one.execution_id, two.execution_id, three.execution_id, "exe-tie"}
     assert registry.agents("fixture") == agents
     assert registry.occupants("fixture") == occupants
 
 
 def test_archive_keeps_rows_without_a_seat_or_generation(store):
     history(store)
-    key = store.key("fixture", "executions")
-    store.redis.hset(key, "legacy", json.dumps({"name": "old@fixture"}))
-    store.redis.hset(key, "nameless", json.dumps({"seat": "eng-1@fixture", "generation": 0}))
+    rows = {"legacy": {"name": "old@fixture"}, "nameless": {"seat": "eng-1@fixture", "generation": 0}}
+    fencing.write(store, "fixture", lambda doc: doc["executions"].update(rows))
 
     store.execution_registry.archive("fixture")
 
-    assert store.redis.hexists(key, "legacy")
-    assert store.redis.hexists(key, "nameless")
+    assert {"legacy", "nameless"} <= set(section(store, "executions"))
 
 
 def test_reconcile_archives_dead_rows(store):
@@ -265,4 +252,13 @@ def test_reconcile_archives_dead_rows(store):
 
     ExecutionRegistry(store).reconcile("fixture", runtime, 0)
 
-    assert set(store.redis.hkeys(store.key("fixture", ARCHIVE))) == {first.execution_id, second.execution_id}
+    assert set(section(store, "archive")) == {first.execution_id, second.execution_id}
+
+
+def test_a_first_read_imports_the_legacy_execution_hashes(store):
+    agent = AgentRecord("old@fixture", "eng", "task", seat="eng-1@fixture", execution_id="exe-old", generation=1)
+    store.redis.hset(store.key("other", "executions"), "exe-old", json.dumps(asdict(agent)))
+    store.redis.hset(store.key("other", "executions-archive"), "exe-older", json.dumps(asdict(agent)))
+    doc = fencing.read(store, "other")
+    assert set(doc["executions"]) == {"exe-old"}
+    assert set(doc["archive"]) == {"exe-older"}

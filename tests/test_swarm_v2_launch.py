@@ -334,8 +334,10 @@ def test_an_exit_must_match_both_the_execution_and_the_generation(world, change)
 
 
 def test_verify_refuses_a_grant_this_controller_never_issued(world):
+    from scripts.swarm import fencing
+
     launch = world.launch(FIRST)
-    world.store.redis.delete(world.store.key(SLUG, "launch-grants"))
+    fencing.write(world.store, SLUG, lambda doc: doc["grants"].clear())
 
     with pytest.raises(GrantRefused) as refused:
         world.grants.verify(SLUG, launch.grant)

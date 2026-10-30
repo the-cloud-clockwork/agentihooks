@@ -350,11 +350,13 @@ def test_the_service_shares_the_lease_with_the_hive_tick(tmp_path):
 
 
 def test_a_tick_takes_the_controller_again_after_its_lease_lapsed(tmp_path):
+    from scripts.swarm import fencing
+
     store = _store()
     service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
     assert service.start()
     epoch = service.controller.held.epoch
-    store.redis.delete(store.key(SLUG, "control-owner"))
+    fencing.write(store, SLUG, lambda doc: doc.update(lease=None))
 
     assert service.tick() is True
     assert (service.controller.held.epoch, service.controller.ready) == (epoch + 1, True)
