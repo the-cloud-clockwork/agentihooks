@@ -1,5 +1,5 @@
 from hooks.context.broadcast import get_active_sessions
-from scripts.inbox.seats import is_seat, of_swarm
+from scripts.inbox.seats import is_seat
 from scripts.inbox.store import InboxError, InboxStore
 
 
@@ -15,19 +15,15 @@ def check_address(inbox: InboxStore, sender: str, address: str) -> None:
         return
     seat = sender if is_seat(sender) else inbox.seats.seat_of(sender)
     slug = seat.split("@", 1)[1] if seat else inbox.names.slug_of(sender)
-    valid = {"operator"}
-    if slug:
-        valid.update(row["name"] for row in inbox.names.names(slug))
-        valid.update(name for name in live if of_swarm(name, slug, inbox.names))
-        prefix = inbox.seats.key("")
-        valid.update(
-            key[len(prefix) :]
-            for key in inbox.redis.scan_iter(match=f"{prefix}*@{slug}")
-            if inbox.redis.type(key) == "hash"
-        )
-    else:
-        valid.update(live)
-    raise InboxError(f"unknown inbox address {address}; valid addresses: {', '.join(sorted(valid))}")
+    valid = {
+        seat
+        for name in live
+        if (seat := inbox.seats.seat_of(name))
+        and (not slug or seat.endswith(f"@{slug}"))
+        and inbox.seats.occupant(seat).occupant == name
+    }
+    suggestions = ", ".join(sorted(valid)[:8]) or "none"
+    raise InboxError(f"unknown inbox address {address}; live seats: {suggestions}")
 
 
 def dispatcher_status(inbox: InboxStore, address: str) -> dict:

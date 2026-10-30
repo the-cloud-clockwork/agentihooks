@@ -97,8 +97,15 @@ def test_unknown_address_refusal_is_bounded_and_lists_only_live_seats(
     inbox: InboxStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], command: str
 ) -> None:
     historical = [inbox.names.next("crew", "eng") for _ in range(2000)]
-    inbox.seats.occupy("eng-2@crew", historical[-1], 1)
-    active = {"master-session": {"name": "master@123456-0001"}}
+    inbox.seats.occupy("eng-2@crew", historical[-2], 1)
+    inbox.seats.occupy("eng-2@crew", historical[-1], 2)
+    active = {
+        "master-session": {"name": "master@123456-0001"},
+        "old-session": {"name": historical[-2]},
+        "unseated-session": {"name": "unseated-agent"},
+    }
+    inbox.seats.occupy("master@other", "outsider", 1)
+    active["outsider-session"] = {"name": "outsider"}
     for index in range(20):
         name = inbox.names.next("crew", "ci")
         inbox.seats.occupy(f"ci-{index + 1}@crew", name, 1)
@@ -113,7 +120,7 @@ def test_unknown_address_refusal_is_bounded_and_lists_only_live_seats(
     assert "unknown inbox address absent-recipient" in error
     assert len(error) < 500
     suggestions = error.strip().split("live seats: ", 1)[1].split(", ")
-    assert 1 <= len(suggestions) <= 8
+    assert suggestions == sorted([f"ci-{index + 1}@crew" for index in range(20)] + ["master@crew"])[:8]
     assert all(seat.startswith("ci-") and seat.endswith("@crew") or seat == "master@crew" for seat in suggestions)
     assert "eng-2@crew" not in error
     assert not any(name in error for name in historical)
@@ -124,4 +131,21 @@ def test_unknown_address_without_live_seats_has_no_historical_suggestions(
 ) -> None:
     monkeypatch.setattr("scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {})
     assert cli.main(["send", "absent-recipient", "hello"]) == 1
-    assert capsys.readouterr().err.strip() == "unknown inbox address absent-recipient; live seats: none"
+    assert (
+        capsys.readouterr().err.strip() == "agentihooks msg: unknown inbox address absent-recipient; live seats: none"
+    )
+
+
+def test_unseated_sender_gets_live_seats_across_swarms(
+    inbox: InboxStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "standalone")
+    inbox.seats.occupy("master@other", "outsider", 1)
+    monkeypatch.setattr(
+        "scripts.inbox.addresses.get_active_sessions",
+        lambda **kwargs: {"one": {"name": "master@123456-0001"}, "two": {"name": "outsider"}, "empty": {}},
+    )
+    assert cli.main(["send", "absent-recipient", "hello"]) == 1
+    assert capsys.readouterr().err.strip() == (
+        "agentihooks msg: unknown inbox address absent-recipient; live seats: master@crew, master@other"
+    )
