@@ -479,6 +479,51 @@ def test_an_independent_token_cannot_use_another_members_ledger_mapping(backend,
     assert auth.agent_member(client, token, "alpha", "engineer@1") is None
 
 
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
+def test_repeated_issuance_loads_the_member_record_once(backend, request, client, monkeypatch):
+    request.getfixturevalue(backend)
+    store = auth._store(client)
+    hive_state.amend(store, "member.m-once", lambda _: {"name": "n", "ledger": "d-once", "agents": {}})
+    hive_state.amend(store, "ledger.d-once", lambda _: "m-once")
+    loads = []
+    load = auth.member
+
+    def counted(*args):
+        loads.append(args[1])
+        return load(*args)
+
+    monkeypatch.setattr(auth, "member", counted)
+    tokens = [auth.issue_agent(client, "m-once", "alpha", f"engineer@{n}") for n in range(3)]
+
+    assert len(set(tokens)) == 3
+    assert loads.count("m-once") <= 1
+    for n, token in enumerate(tokens):
+        assert auth.agent_member(client, token, "alpha", f"engineer@{n}") == "m-once"
+
+
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
+def test_issuance_after_a_cached_lookup_refuses_a_revoked_or_remapped_member(backend, request, client):
+    request.getfixturevalue(backend)
+    store = auth._store(client)
+    hive_state.amend(store, "member.m-gone", lambda _: {"name": "n", "ledger": "d-gone", "agents": {}})
+    hive_state.amend(store, "ledger.d-gone", lambda _: "m-gone")
+    auth.issue_agent(client, "m-gone", "alpha", "engineer@1")
+
+    hive_state.amend(store, "ledger.d-gone", lambda _: None)
+    with pytest.raises(auth.HiveError, match="^Hive membership was revoked$"):
+        auth.issue_agent(client, "m-gone", "alpha", "engineer@2")
+
+    hive_state.amend(store, "member.m-gone", lambda _: {"name": "n", "ledger": "d-new", "agents": {}})
+    hive_state.amend(store, "ledger.d-new", lambda _: "m-gone")
+    token = auth.issue_agent(client, "m-gone", "alpha", "engineer@3")
+    assert auth.agent_member(client, token, "alpha", "engineer@3") == "m-gone"
+
+    hive_state.amend(store, "member.m-gone", lambda _: None)
+    hive_state.amend(store, "ledger.d-new", lambda _: None)
+    with pytest.raises(auth.HiveError, match="^Hive membership was revoked$"):
+        auth.issue_agent(client, "m-gone", "alpha", "engineer@4")
+
+
 def test_an_independent_token_reads_a_legacy_redis_ledger_mapping(on_redis, client):
     token = "hive.m1.independent"
     client.set(f"{auth.PREFIX}:ledger:d", "m1")
