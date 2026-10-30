@@ -1818,6 +1818,7 @@
   "tests/test_init_agent_prompt_size.py": 2,
   "tests/test_install.py": 3,
   "tests/test_install_validation.py": 2,
+  "tests/test_integrations_failure_paths.py": 1,
   "tests/test_js_coverage.py": 1,
   "tests/test_judge_role.py": 3,
   "tests/test_kubectl_mutation_guard.py": 9,
