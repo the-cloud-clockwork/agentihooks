@@ -76,11 +76,13 @@ def _usage(stat: Path = Path("/sys/fs/cgroup/cpu.stat")) -> tuple[float, float]:
     return cpu, int(fields.get("throttled_usec", 0)) / 1e6
 
 
-def _grade(args: argparse.Namespace, head_files: list[Path], scratch: Path) -> tuple[dict, Measurement, Result]:
+def _grade(
+    args: argparse.Namespace, head_files: list[Path], scratch: Path, workers: int
+) -> tuple[dict, Measurement, Result]:
     missing = [str(f) for f in head_files if not f.is_file()]
     if missing:
         raise Unmeasured(f"head shard coverage missing: {', '.join(missing)}")
-    head = executed(head_files, getattr(args, "workers", 1))
+    head = executed(head_files, workers)
     wanted = git("rev-parse", args.base, cwd=args.head).strip()
     if getattr(args, "base_baseline", None):
         runs = _cached_runs(args.head, wanted, args.base_baseline)
@@ -131,11 +133,11 @@ def main(argv: list[str] | None = None) -> int:
     head_files = [args.head_shards / f"coverage-3.12-{n}" / ".coverage" for n in range(1, args.shards + 1)]
     head_files += sorted(args.head_shards.glob("coverage-3.12-*/reused-coverage/.coverage"))
     args.out.mkdir(parents=True, exist_ok=True)
-    args.workers = _cpus()
+    workers = _cpus()
     started, (cpu, throttled) = time.monotonic(), _usage()
     with tempfile.TemporaryDirectory() as scratch:
         try:
-            head, base, result = _grade(args, head_files, Path(scratch))
+            head, base, result = _grade(args, head_files, Path(scratch), workers)
             if os.environ.get("GITHUB_EVENT_NAME") == "merge_group":
                 changed = set(git("diff", "--name-only", "--no-renames", "HEAD^", "HEAD", cwd=args.head).splitlines())
                 result.lost = {path: lines for path, lines in result.lost.items() if path in changed}
@@ -144,14 +146,14 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     text = report(
         result,
-        _missed(args.head, head, args.out, args.workers),
+        _missed(args.head, head, args.out, workers),
         {path: len(lines) for path, lines in head.items()},
         {path: len(lines) for path, lines in base.executed.items()},
     )
     spent, held = _usage()
     print(
         f"Coverage grade took {time.monotonic() - started:.1f} s wall and {spent - cpu:.1f} CPU seconds"
-        f" on {args.workers} CPUs, throttled {held - throttled:.1f} s."
+        f" across its process tree on {workers} CPUs; the runner cgroup was throttled {held - throttled:.1f} s."
     )
     (args.out / "report.txt").write_text(text)
     print(text)

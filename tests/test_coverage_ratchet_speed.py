@@ -73,7 +73,7 @@ def _write_shards(tmp_path: Path, count: int) -> list[Path]:
     for index in range(count):
         shard = tmp_path / f"parallel-shard-{index}"
         data = CoverageData(basename=str(shard))
-        data.add_lines({f"hooks/m{module}.py": [1, 2 + (index + module) % 3] for module in range(4)})
+        data.add_lines({f"hooks/m{module}.py": [1, 2 + (index + module) % 2] for module in range(4)})
         data.write()
         shards.append(shard)
     return shards
@@ -83,7 +83,7 @@ def test_parallel_shard_reads_equal_the_serial_read(tmp_path: Path) -> None:
     shards = _write_shards(tmp_path, 6)
     serial = ratchet.executed(shards, workers=1)
     assert ratchet.executed(shards, workers=2) == serial
-    assert serial["hooks/m0.py"] == {1, 2, 3, 4}
+    assert serial["hooks/m0.py"] == {1, 2, 3}
 
 
 def test_parallel_shard_read_still_refuses_an_unmeasured_shard(tmp_path: Path) -> None:
@@ -109,7 +109,7 @@ def test_parallel_missed_report_equals_the_serial_report(tmp_path: Path) -> None
     assert parallel == serial
     assert list(parallel) == sorted(parallel)
     assert serial["scripts/untested.py"] == [1]
-    assert serial["hooks/m4.py"] == [1, 2, 3, 4]
+    assert serial["hooks/m3.py"] == [4]
 
 
 @pytest.mark.parametrize(
