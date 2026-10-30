@@ -2704,6 +2704,14 @@ jobs:
 
       # dev's copy grades the head's new and changed units, so a pull request cannot loosen its own design rules.
       # Until dev carries the grader, the head's copy grades.
+      - name: Reject new Python comments and preserve comment free files
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/no_comments.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.no_comments --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
       - name: Hold the design rules on new and changed units
         if: ${{ !cancelled() }}
         run: |

@@ -52,6 +52,23 @@ def tests_for(root: Path, names: list[str]) -> list[str]:
     return sorted(selected, key=lambda name: (Path(name).parent.as_posix(), name))
 
 
+def _comment_step(root: Path, revision: str, grade: Path) -> list[tuple[str, list[str]]]:
+    import io
+    import tarfile
+
+    if not (root / "scripts/no_comments.py").is_file():
+        return []
+    snapshot = grade / "comments-base"
+    snapshot.mkdir()
+    archive = subprocess.run(["git", "-C", str(root), "archive", revision], check=True, capture_output=True)
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as contents:
+        contents.extractall(snapshot, filter="data")
+    grader = snapshot / "scripts/no_comments.py"
+    if not grader.is_file():
+        grader = root / "scripts/no_comments.py"
+    return [("Python comments", [sys.executable, "-I", str(grader), "--base", str(snapshot), "--head", str(root)])]
+
+
 def plan(root: Path, base: str, grade: Path) -> list[tuple[str, list[str]]]:
     merge_base = _git(root, "merge-base", base, "HEAD")
     for name in (ALLOWLIST, GRADER):
@@ -64,6 +81,7 @@ def plan(root: Path, base: str, grade: Path) -> list[tuple[str, list[str]]]:
         ("ruff format", [python, "-m", "ruff", "format", "--check", *LINTED]),
         ("size limits", [python, "-I", str(grade / GRADER), "--base", str(grade), "--head", str(root)]),
     ]
+    steps.extend(_comment_step(root, merge_base, grade))
     from hooks.context.local_test_guard import local_tests_allowed
 
     if local_tests_allowed() and (tests := tests_for(root, changed(root, base))):
