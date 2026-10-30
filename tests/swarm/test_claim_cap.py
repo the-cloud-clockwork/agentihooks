@@ -37,6 +37,7 @@ def lives(store, n, task="t1"):  # noqa: F811
         store.count_claim("sw", task)
 
 
+@pytest.mark.feature("swarm-claim-lives")
 def test_every_claim_the_tick_makes_counts_one_agent_life(store):  # noqa: F811
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -72,6 +73,7 @@ def test_a_third_life_is_allowed(store):  # noqa: F811
     assert gate_rows() == []
 
 
+@pytest.mark.feature("swarm-claim-lives")
 def test_a_fourth_claim_is_refused_and_the_task_blocked_for_the_master(store):  # noqa: F811
     ledger, runtime = CommentingLedger([{"id": "t1"}, {"id": "t2"}]), FakeRuntime()
     lives(store, 3)

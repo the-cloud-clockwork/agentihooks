@@ -76,7 +76,7 @@ def _resolve(name: str) -> Path | None:
     local = _i.PROFILES_DIR / name
     if local.is_dir():
         return local
-    for pinned in (copy, bundle_copy.current_user()):
+    for pinned in (copy, bundle_copy.current_shared(), bundle_copy.current_user()):
         if pinned is not None and (pinned / "profiles" / name).is_dir():
             return pinned / "profiles" / name
     return _i._resolve_linked_profile_dir(name) or _i._package_role_dir(name)
@@ -128,6 +128,20 @@ def _user() -> Path | None:
     return user
 
 
+def _shared() -> Path | None:
+    if bundle_copy.is_pinned():
+        return bundle_copy.current_shared()
+    _i = _install_module()
+    shared = _i._get_shared_bundle_path()
+    linked = (_i._load_state().get("shared_bundle") or {}).get("path")
+    if shared is None and linked:
+        raise ValueError(
+            f"linked shared bundle {linked} is missing; relink it with agentihooks bundle link --shared <path> "
+            "before rendering"
+        )
+    return shared
+
+
 def _base_digest() -> str:
     _i = _install_module()
     digest = hashlib.sha256()
@@ -160,9 +174,11 @@ def _commit(root: Path | None) -> str:
 def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     commit = _commit(bundle)
     user = _user()
+    shared = _shared()
     chain = [n for n, _ in dirs]
     return {
         "bundle_commit": commit,
+        **({"shared_bundle_commit": _commit(shared)} if shared is not None else {}),
         **({"user_bundle_commit": _commit(user)} if user is not None else {}),
         "base": _base_digest(),
         "profiles": _profiles_digest(dirs),
@@ -183,8 +199,13 @@ def stamp(name: str) -> dict:
 
 
 def _roots(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
-    user = _user()
-    return ([bundle] if bundle is not None else []) + ([user] if user is not None else []) + [d for _, d in dirs]
+    shared, user = _shared(), _user()
+    return (
+        ([bundle] if bundle is not None else [])
+        + ([shared] if shared is not None else [])
+        + ([user] if user is not None else [])
+        + [d for _, d in dirs]
+    )
 
 
 def _features(subdir: str, keep, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Path]:
@@ -349,10 +370,11 @@ def _link_commands(skills: Path, commands: Path) -> None:
 
 def _persona(root: Path, target: str, bundle: Path | None, dirs: list[tuple[str, Path]], chain: list[str]) -> str:
     items = _features("rules", _is_doc, bundle, dirs)
-    user = _user()
-    sources.write(sources.path(root.name, target, root.parent), sources.rows(bundle, dirs, items, user))
+    user, shared = _user(), _shared()
+    sources.write(sources.path(root.name, target, root.parent), sources.rows(bundle, dirs, items, user, shared))
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
-    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER, user))
+    later = {"shared bundle": shared, "user bundle": user}
+    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER, later))
     ending = f"\n\n{FOOTER}\n"
     text = binding.persona(text.removesuffix(ending)) + ending
     if len(text) > 150_000:
@@ -631,6 +653,39 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
     return out
 
 
+def _warn(message: str) -> None:
+    print(f"WARNING: {message}", file=sys.stderr)
+
+
+def _shared_pin(shared: Path | None, revision: str | None, root_revision: str) -> tuple[Path | None, str]:
+    if revision == bundle_copy.UNPINNED:
+        _warn("the launch recorded no commit for the shared bundle; rendering without it")
+        return None, ""
+    if shared is None:
+        if revision:
+            _warn(
+                f"the launch recorded shared bundle commit {revision}, but no shared bundle is linked on this host; "
+                "rendering without it"
+            )
+        return None, ""
+    if revision is None:
+        current = _commit(shared)
+        if not current:
+            _warn(f"the launch recorded no shared bundle commit and the shared bundle at {shared} has no commit")
+            return None, ""
+        _warn(
+            f"the launch recorded no shared bundle commit, but the shared bundle at {shared} is linked; "
+            f"rendering with its current commit {current}"
+        )
+        return shared, current
+    if not revision:
+        raise ValueError(
+            f"the launch recorded bundle commit {root_revision} and an empty shared bundle commit, but the "
+            f"shared bundle at {shared} is linked; launch again to record it"
+        )
+    return shared, revision
+
+
 def render(
     target: str,
     name: str,
@@ -645,14 +700,23 @@ def render(
         raise ValueError(f"{target} per-run profiles are not supported")
     options = {"isolate": isolate, "push": push} if target == "codex" else {}
     if bundle_revision:
-        root_revision, _, user_revision = bundle_revision.partition(":")
+        root_revision, shared_revision, user_revision = bundle_copy.split_revision(bundle_revision)
+        shared, shared_revision = _shared_pin(_shared(), shared_revision, root_revision)
         user = _user()
         if user is not None and not user_revision:
             raise ValueError(
                 f"the launch recorded bundle commit {root_revision} and no user bundle commit, but the user bundle "
                 f"at {user} is linked; launch again to record both"
             )
-        with bundle_copy.recorded(_bundle(), root_revision, rendered_root(), user, user_revision):
+        with bundle_copy.recorded(
+            _bundle(),
+            root_revision,
+            rendered_root(),
+            user,
+            user_revision,
+            shared=shared,
+            shared_revision=shared_revision,
+        ):
             return renderers[target](name, force=force, overlays=overlays, **options)
     return renderers[target](name, force=force, overlays=overlays, **options)
 
@@ -696,9 +760,12 @@ def _render_scratch(args: argparse.Namespace) -> int:
     bundle = args.bundle or _bundle()
     _seed_linked_profiles(args.out)
     user = args.user_bundle or _user()
+    shared = getattr(args, "shared_bundle", None) or _shared()
     env = {**os.environ, "AGENTIHOOKS_HOME": str(args.out.resolve())}
     if bundle is not None:
         env["AGENTIHOOKS_BUNDLE_PATH"] = str(bundle.resolve())
+    if shared is not None:
+        env["AGENTIHOOKS_SHARED_BUNDLE_PATH"] = str(shared.resolve())
     if user is not None:
         env["AGENTIHOOKS_USER_BUNDLE_PATH"] = str(user.resolve())
     argv = [sys.executable, "-m", "scripts.profiles.render", "render", args.name, "--target", args.target]
@@ -719,6 +786,9 @@ def main(argv: list[str] | None = None) -> int:
     render_cmd.add_argument("--out", type=Path, help="Render into this scratch agentihooks home, not the live one")
     render_cmd.add_argument("--bundle", type=Path, help="Bundle for --out (default: the linked bundle)")
     render_cmd.add_argument("--user-bundle", type=Path, help="User bundle for --out (default: the linked user bundle)")
+    render_cmd.add_argument(
+        "--shared-bundle", type=Path, help="Shared bundle for --out (default: the linked shared bundle)"
+    )
     from scripts.profiles import measure
 
     measure.add_arguments(commands.add_parser("measure", help="Print a profile's first turn input tokens"))
@@ -739,7 +809,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "measure":
         return measure.main(args)
     if args.out is None:
-        for flag, value in (("--bundle", args.bundle), ("--user-bundle", args.user_bundle)):
+        for flag, value in (
+            ("--bundle", args.bundle),
+            ("--shared-bundle", args.shared_bundle),
+            ("--user-bundle", args.user_bundle),
+        ):
             if value is not None:
                 render_cmd.error(f"{flag} needs --out")
     try:

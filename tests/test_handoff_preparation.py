@@ -16,6 +16,7 @@ def context(monkeypatch, tmp_path):
     return {"AGENTIHOOKS_AGENT_NAME": "sw-eng-1"}
 
 
+@pytest.mark.feature("swarm-handoff-preparation")
 def test_preparation_starts_at_the_limit_with_deadline(context):
     now = datetime(2026, 10, 6, 12, tzinfo=timezone.utc)
     directive = recycle.directive("preparing", context, now=now)
@@ -32,6 +33,7 @@ def test_no_preparation_below_the_limit(context, monkeypatch):
     assert recycle.directive("early", context) is None
 
 
+@pytest.mark.feature("swarm-handoff-preparation")
 def test_hard_gate_sits_fifty_thousand_above_the_limit(context, monkeypatch):
     monkeypatch.setattr(recycle, "_used", lambda _: 649_999)
     assert "PREPARATION" in recycle.directive("growing", context)
@@ -72,5 +74,6 @@ def test_default_margin_is_fifty_thousand():
     assert config.HANDOFF_MARGIN == 50
 
 
+@pytest.mark.feature("swarm-handoff-preparation")
 def test_preparation_never_reaches_unbound_sessions(context):
     assert recycle.directive("other", {}) is None
