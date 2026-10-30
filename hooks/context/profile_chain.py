@@ -191,6 +191,15 @@ def rendered_overlays(home: Path) -> list[str]:
         return []
 
 
+def rendered_chain(home: Path) -> list[str]:
+    try:
+        stamp = json.loads((Path(home) / RENDER_STAMP).read_text())
+        rendered = stamp["render"] if "render" in stamp else stamp
+        return [str(name) for name in rendered["chain"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
 def inherited(profile_dirs: list[tuple[str, Path]]) -> set[str]:
     return {parent for _, path in profile_dirs for parent in parents(path)}
 
