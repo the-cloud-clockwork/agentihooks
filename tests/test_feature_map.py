@@ -653,7 +653,8 @@ def test_live_check_requires_the_deployed_feature_job_and_step(tmp_path, jobs, s
         'pytestmark = pytest.mark.skip\n@pytest.mark.feature("login")\ndef test_shared():\n    assert True\n',
         'class TestLogin:\n    @pytest.mark.feature("login")\n    def test_shared(self):\n        self.skipTest("x")\n',
         '@pytest.mark.feature("login")\ndef test_shared():\n    return\n    assert True\n',
-        '@pytest.mark.feature("login")\n@pytest.mark.parametrize("case", [])\ndef test_shared(case):\n    assert case\n',
+        '@pytest.mark.feature("login")\n@pytest.mark.parametrize("case", [])\n'
+        "def test_shared(case):\n    assert case\n",
     ],
 )
 def test_a_disabled_mapped_test_fails(mapped_repo: tuple[Path, Path, dict], source: str) -> None:
@@ -679,7 +680,7 @@ def test_a_config_naming_a_mapped_test_module_fails(mapped_repo: tuple[Path, Pat
         feature_map.validate(root, path)
 
 
-def _base(tmp_path: Path, features: list[dict], retired: tuple[dict, ...] = ()) -> Path:
+def _base(tmp_path: Path, features: list[dict], retired: list[dict] | tuple[()] = ()) -> Path:
     base = tmp_path / "base-map.json"
     base.write_text(json.dumps({"features": features, "retired": list(retired)}))
     return base
