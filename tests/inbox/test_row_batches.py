@@ -1,3 +1,6 @@
+import socket
+import threading
+
 import pytest
 
 from scripts.inbox.store import InboxStore
@@ -68,9 +71,6 @@ def test_an_empty_read_opens_no_pipeline(store, monkeypatch):
 
 class ClosingServer:
     def __init__(self):
-        import socket
-        import threading
-
         self.listener = socket.create_server(("127.0.0.1", 0))
         self.listener.settimeout(5)
         self.port = self.listener.getsockname()[1]
