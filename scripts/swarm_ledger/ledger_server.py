@@ -1396,10 +1396,10 @@ def hand_over(started: int, server: ThreadingHTTPServer, force: bool = False) ->
     with HANDING:
         if HANDED.is_set():
             return None
-        started = reload_if_changed(started, server, force=force, loaded=LOADED_DIGEST)
-        if started is None:
+        next_started = reload_if_changed(started, server, force=force, loaded=LOADED_DIGEST)
+        if next_started is None:
             HANDED.set()
-        return started
+        return next_started
 
 
 def answer_reloads(server: ThreadingHTTPServer, requested: threading.Event = RELOAD) -> None:
@@ -1434,10 +1434,11 @@ def watch_ledgers(
     started = LOADED_STAMP
     reloads = reloading()
     for passes in itertools.count():
-        if reloads:
-            started = hand_over(started, server)
-            if started is None:
+        if reloads and server is not None:
+            next_started = hand_over(started, server)
+            if next_started is None:
                 return
+            started = next_started
         with WATCH_PASS:
             if stopping.is_set():
                 return
