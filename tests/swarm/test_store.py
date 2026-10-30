@@ -191,6 +191,40 @@ def test_a_projection_retries_when_the_agent_list_changes_under_it(store, monkey
     assert store.redis.hexists(store.key("smoke", "agents"), "owner")
 
 
+def test_listed_names_every_projected_agent(store):
+    store.redis.hset(store.key("smoke", "agents"), "owner", "{}")
+
+    assert store.listed("smoke") == {"owner"}
+
+
+def test_a_projection_that_never_settles_retries_every_attempt_and_names_its_contention(store):
+    from redis.exceptions import WatchError
+
+    from scripts.swarm.store import PROJECTION_ATTEMPTS
+
+    attempts = []
+
+    def contended(pipe):
+        attempts.append(pipe)
+        raise WatchError("moved")
+
+    with pytest.raises(SwarmError) as refused:
+        store._projection("smoke", contended, "the agent list kept moving")
+
+    assert len(attempts) == PROJECTION_ATTEMPTS == 5
+    assert str(refused.value) == "the agent list kept moving"
+
+
+def test_a_new_row_stamps_its_state_since_in_milliseconds(store, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("scripts.swarm.store.time", SimpleNamespace(time=lambda: 1234.5))
+
+    store.project_agent("smoke", AgentRecord("owner", "eng", "t1", started_at=1_000))
+
+    assert store.redis.hget(store.key("smoke", "state-since"), "owner") == "1234500"
+
+
 def test_an_update_that_keeps_the_status_keeps_its_state_since(store):
     from dataclasses import replace
 

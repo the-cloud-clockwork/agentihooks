@@ -74,3 +74,15 @@ def test_latest_keeps_the_highest_generation_and_lets_a_later_seat_row_break_a_t
 
     assert latest(rows, "seat") == {"s": rows[2]}
     assert latest(rows, "name") == {"a": rows[0]}
+
+
+def test_latest_never_lets_an_older_generation_replace_a_seat_head():
+    from scripts.swarm.execution import latest
+
+    rows = [
+        {"seat": "s", "name": "a", "generation": 2, "row": 1},
+        {"seat": "s", "name": "a", "generation": 1, "row": 2},
+    ]
+
+    assert latest(rows, "seat") == {"s": rows[0]}
+    assert latest(rows, "name") == {"a": rows[0]}
