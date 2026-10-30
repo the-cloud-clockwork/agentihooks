@@ -1410,6 +1410,20 @@ def test_hosted_agent_takes_the_home_its_hive_join_report_names(
     assert (report["state"], report["differences"]) == ("matching", {})
 
 
+def test_hosted_home_keeps_a_validated_home_and_other_validation_fields(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    hosted = _hosted(store, next(a for a in store.agents("sw") if a.lane == "eng"), monkeypatch, tmp_path)
+    validated = replace(hosted, profile_decision={"validation": {"home": "/validated/claude", "pid": 7}})
+    assert live_binding.hosted_home(store, validated) == validated
+    partial = replace(hosted, profile_decision={"validation": {"pid": 7}})
+    assert live_binding.hosted_home(store, partial).profile_decision == {"validation": {"pid": 7, "home": HIVE_HOME}}
+
+
 def test_hosted_agent_without_a_join_report_is_never_retired_on_its_home(
     ticking: tuple, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
