@@ -1794,6 +1794,12 @@ def _queue_intent(store, args, agent, head):
         raise SwarmError(decision.reason)
 
 
+def _hotfix_master(store, args) -> bool:
+    from hooks.context import master_coding
+
+    return _me(store, args).lane == MASTER and master_coding.is_open(os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
+
+
 def cmd_merge(store, args):
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
@@ -1802,7 +1808,8 @@ def cmd_merge(store, args):
             raise SwarmError("only the operator lifts a running merge group priority hold")
         result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)
     else:
-        agent = _worker(store, args) if args.action != "state" else None
+        hotfix = args.action == "queue" and _hotfix_master(store, args)
+        agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
             done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
@@ -1810,7 +1817,9 @@ def cmd_merge(store, args):
             result = merge_queue.operate(
                 args.action,
                 args.url,
-                admit=lambda head: _queue_intent(store, args, agent, head) or queue_exit.require_fresh(args.url, head),
+                admit=lambda head: (
+                    (not hotfix and _queue_intent(store, args, agent, head)) or queue_exit.require_fresh(args.url, head)
+                ),
                 journal=queue_record.Journal(args.url),
                 attempts=merge_queue.ATTEMPTS,
             )

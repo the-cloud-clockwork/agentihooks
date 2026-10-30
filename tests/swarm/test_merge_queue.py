@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 from scripts.swarm import cli, ledger_events, merge_queue, queue_exit, waits
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import MASTER, SwarmError
 
 URL = "https://github.com/o/r/pull/7"
 OPEN = {
@@ -872,6 +872,23 @@ def test_cli_refuses_another_distributed_tasks_pull_request(monkeypatch, same_li
     monkeypatch.setattr(merge_queue, "operate", lambda *args: pytest.fail("foreign provider mutation"))
     state.redis.set(state.key("sw", "task-authority", "t2"), "{}")
     assert cli.main(["sw", "merge", "queue", URL]) == 1
+
+
+def test_cli_lets_the_master_queue_while_its_coding_window_is_open(monkeypatch, tmp_path):
+    from hooks.context import master_coding
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "master")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "master-session")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of(MASTER))
+    seen = []
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: seen.append(verb) or {"queued": True})
+    assert cli.main(["sw", "merge", "queue", URL]) == 1
+    assert master_coding.observe("master-session", "allow-master-coding", typed=True) == "open"
+    assert cli.main(["sw", "merge", "queue", URL]) == 0
+    assert seen == ["queue"]
 
 
 @pytest.mark.parametrize("action", ["queue", "dequeue"])
