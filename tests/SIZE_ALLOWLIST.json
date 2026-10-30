@@ -40,13 +40,12 @@
  },
  "hooks/hook_manager.py::on_post_tool_use": {
   "C901": 56,
-  "PLR0912": 56,
-  "function-lines": 304
+  "PLR0912": 56
  },
  "hooks/hook_manager.py::on_pre_tool_use": {
   "C901": 77,
   "PLR0912": 82,
-  "function-lines": 507
+  "function-lines": 481
  },
  "hooks/hook_manager.py::on_session_end": {
   "C901": 19,
