@@ -529,13 +529,49 @@ def test_a_registry_commit_answers_ok_and_a_conflict_names_the_registries_that_m
     assert conflict.value.names == ["bin"]
 
 
-def test_a_registry_session_takes_only_transaction_openers() -> None:
+def test_a_registry_session_takes_only_transaction_openers_and_file_statements() -> None:
     session = remote.Session(remote.Client("http://unused"))
 
-    session.execute(sqlite.BEGIN)
+    opened = session.execute(sqlite.BEGIN)
+    assert (opened.fetchone(), opened.fetchall()) == (None, [])
     with pytest.raises(remote.Unavailable) as refused:
         session.execute("SELECT 1")
     assert str(refused.value) == "SELECT 1"
+
+
+def test_a_session_sends_each_file_statement_to_its_table_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = remote.Session(remote.Client("http://unused"))
+    sent = []
+
+    def answer(method: str, path: str, query: dict | None = None, body: object = None) -> tuple[int, object]:
+        sent.append((method, path, body))
+        return 200, {"data": "aGk="} if method == "GET" and path.count("/") == 4 else {"m1": 7}
+
+    monkeypatch.setattr(session.client, "call", answer)
+
+    assert session.execute(artifact_files.SAVE, ("split", "a1", "aGk=")).fetchall() == []
+    assert session.execute(media_files.SAVE, ("split", "m1", "aGk=", 7)).fetchall() == []
+    assert session.execute(media_files.LOAD, ("split", "m1")).fetchone() == ("aGk=",)
+    assert session.execute(artifact_files.IDS, ("split",)).fetchall() == [("m1", 7)]
+    assert session.execute(media_files.AGES, ("split",)).fetchall() == [("m1", 7)]
+    assert session.execute(artifact_files.DROP, ("split", "a1")).fetchall() == []
+    assert sent == [
+        ("PUT", "/files/artifact_files/split/a1", {"data": "aGk=", "at": None}),
+        ("PUT", "/files/media_files/split/m1", {"data": "aGk=", "at": 7}),
+        ("GET", "/files/media_files/split/m1", None),
+        ("GET", "/files/artifact_files/split", None),
+        ("GET", "/files/media_files/split", None),
+        ("DELETE", "/files/artifact_files/split/a1", None),
+    ]
+
+
+def test_a_file_load_the_store_fails_raises_unavailable_with_its_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = remote.Session(remote.Client("http://unused"))
+    monkeypatch.setattr(session.client, "call", lambda *given, **named: (500, {"code": "store_failed"}))
+
+    with pytest.raises(remote.Unavailable) as failed:
+        session.execute(artifact_files.LOAD, ("split", "a1"))
+    assert str(failed.value) == "500 {'code': 'store_failed'}"
 
 
 def test_a_purge_in_a_registry_session_removes_the_ledger_and_its_cached_copy(api: tuple) -> None:

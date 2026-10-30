@@ -562,8 +562,6 @@ class SQLiteLedgerRepository:
                 self._remember(slug, Entry(generation, None, fragments.value, fragments))
 
     def _adopt(self, slug: str | None = None) -> None:
-        if not self.adopts:
-            return
         from . import legacy
 
         legacy.adopt(self, slug)
@@ -727,13 +725,7 @@ class SQLiteLedgerRepository:
         refresh.record(connection, slug, generation, paths, CHANGES_KEPT)
         connection.execute(
             UPDATE,
-            (
-                state["_meta"]["rev"],
-                generation,
-                encode(summarize(slug, state) if summary is None else summary),
-                self.domain.now_ms(),
-                slug,
-            ),
+            (state["_meta"]["rev"], generation, encode(summary or summarize(slug, state)), self.domain.now_ms(), slug),
         )
         return Entry(generation, None, state, fragments, writer)
 

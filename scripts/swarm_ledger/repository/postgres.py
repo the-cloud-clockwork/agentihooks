@@ -315,6 +315,9 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
         twin._cache, twin._loads, twin._ready, twin._guard = self._cache, self._loads, self._ready, self._guard
         return twin
 
+    def _adopt(self, slug: str | None = None) -> None:
+        """The shared database never imports legacy ledger files."""
+
     def _key(self, slug):
         return self.address, slug
 

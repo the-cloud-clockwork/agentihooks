@@ -12,6 +12,7 @@ from pathlib import Path
 from types import ModuleType
 from urllib.parse import quote, urlencode
 
+from . import artifact_files, media_files
 from .entry import Entry
 from .fragments import document
 from .sqlite import BEGIN, SUMMARY_KEYS, TASK_REVISION_FIELDS, Conflict, Missing, summarize
@@ -83,6 +84,19 @@ def changes(before: dict, after: dict) -> tuple[dict, list]:
     return changed, [key for key in before if key not in after]
 
 
+class Rows:
+    """The rows the API answered for one statement, read the way a sqlite cursor is read."""
+
+    def __init__(self, rows: list) -> None:
+        self.rows = rows
+
+    def fetchone(self) -> tuple | None:
+        return self.rows[0] if self.rows else None
+
+    def fetchall(self) -> list:
+        return self.rows
+
+
 class Session:
     """A registry write against the API: reads remember what they saw, saves and purges commit together on a clean
     exit, refused with Conflict when another writer changed a registry this session read."""
@@ -93,9 +107,32 @@ class Session:
         self.saved: dict[str, dict] = {}
         self.purged: list[str] = []
 
-    def execute(self, statement: str, parameters: tuple = ()) -> None:
-        if not statement.startswith(BEGIN):
+    def execute(self, statement: str, parameters: tuple = ()) -> Rows:
+        if statement.startswith(BEGIN):
+            return Rows([])
+        if statement not in FILE_STATEMENTS:
             raise Unavailable(statement)
+        answer, table = FILE_STATEMENTS[statement]
+        return answer(self, table, *parameters)
+
+    def file_save(self, table: str, slug: str, item: str, data: str, at: int | None = None) -> Rows:
+        self.client.expect("PUT", stored_file(table, slug, item), body=dict(data=data, at=at))
+        return Rows([])
+
+    def file_load(self, table: str, slug: str, item: str) -> Rows:
+        status, body = self.client.call("GET", stored_file(table, slug, item))
+        if status == 404:
+            return Rows([])
+        if status != 200:
+            raise Unavailable(f"{status} {body}")
+        return Rows([(body["data"],)])
+
+    def file_list(self, table: str, slug: str) -> Rows:
+        return Rows(list(self.client.expect("GET", stored_file(table, slug)).items()))
+
+    def file_drop(self, table: str, slug: str, item: str) -> Rows:
+        self.client.expect("DELETE", stored_file(table, slug, item))
+        return Rows([])
 
     def registry(self, name: str) -> dict:
         if name not in self.seen:
@@ -121,6 +158,18 @@ class Session:
         if kind is None:
             self.commit()
         return False
+
+
+FILE_STATEMENTS = {
+    artifact_files.SAVE: (Session.file_save, artifact_files.TABLE),
+    artifact_files.LOAD: (Session.file_load, artifact_files.TABLE),
+    artifact_files.IDS: (Session.file_list, artifact_files.TABLE),
+    artifact_files.DROP: (Session.file_drop, artifact_files.TABLE),
+    media_files.SAVE: (Session.file_save, media_files.TABLE),
+    media_files.LOAD: (Session.file_load, media_files.TABLE),
+    media_files.AGES: (Session.file_list, media_files.TABLE),
+    media_files.DROP: (Session.file_drop, media_files.TABLE),
+}
 
 
 class RemoteLedgerRepository:
@@ -257,7 +306,7 @@ class RemoteLedgerRepository:
     def _ruled(
         self, slug: str, changes: list | None, ops: list | None, gate: object, copy_state: bool
     ) -> tuple[dict, list]:
-        from . import artifact_files, media_files, mutation
+        from . import mutation
 
         entry = self.current(slug)
         state = entry.mutable()
@@ -312,21 +361,3 @@ class RemoteLedgerRepository:
         connection.purged.append(slug)
         with self._guard:
             self._cache.pop(slug, None)
-
-    def file_list(self, table: str, slug: str) -> dict:
-        return self.client.expect("GET", stored_file(table, slug))
-
-    def file_load(self, table: str, slug: str, item: str) -> str | None:
-        status, body = self.client.call("GET", stored_file(table, slug, item))
-        if status == 404:
-            return None
-        if status != 200:
-            raise Unavailable(f"{status} {body}")
-        return body["data"]
-
-    def file_save(self, table: str, slug: str, item: str, data: str, at: int | None = None) -> None:
-        self.client.expect("PUT", stored_file(table, slug, item), body=dict(data=data, at=at))
-
-    def file_drop(self, table: str, slug: str, items: set[str]) -> None:
-        for item in sorted(items):
-            self.client.expect("DELETE", stored_file(table, slug, item))
