@@ -12,6 +12,9 @@
 /scripts/gates/ @nestorcolt
 /scripts/gate_* @nestorcolt
 /scripts/size_limits.py @nestorcolt
+/scripts/no_comments.py @nestorcolt
+/tests/COMMENT_FREE_PATHS.json @nestorcolt
+/tests/test_no_comments.py @nestorcolt
 /scripts/dead_code.py @nestorcolt
 /scripts/swallowed_exceptions.py @nestorcolt
 /scripts/locked_tests.py @nestorcolt
