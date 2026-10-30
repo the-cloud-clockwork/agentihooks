@@ -178,4 +178,3 @@ class Swarm:
         from scripts.swarm import ledger_cutover
 
         return ledger_cutover
-
