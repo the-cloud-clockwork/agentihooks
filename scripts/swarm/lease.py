@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from scripts.swarm import fencing as document
 from scripts.swarm.store import RedisStore, SwarmError
@@ -111,7 +111,7 @@ def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
         return None
     hostname = socket.gethostname() if owner == hive_id() else owner
 
-    def take(doc):
+    def take(doc: dict[str, Any]) -> Any:
         at, held, legacy = now_ms(store), _recorded(doc), doc["legacy_owner"]
         if held and held.expires_at > at:
             if held.owner not in (owner, hostname):
@@ -135,7 +135,7 @@ def transfer(store: RedisStore, slug: str, owner: str, source_epoch: int, expect
             )
         )
 
-    def move(doc):
+    def move(doc: dict[str, Any]) -> Any:
         at = now_ms(store)
         if doc["legacy_owner"]:
             raise SwarmError("the controller lease belongs to an incompatible owner")
@@ -165,7 +165,7 @@ def fenced(store: RedisStore, slug: str, held: Lease | int | None, change: Calla
         _check({"lease": _remote(slug, "current")}, now_ms(store), held)
         return document.write(store, slug, change)
 
-    def guarded(doc):
+    def guarded(doc: dict[str, Any]) -> Any:
         _check(doc, now_ms(store), held)
         return change(doc)
 
@@ -182,7 +182,7 @@ def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
     if _address(slug):
         return Lease(**_remote(slug, "renew", {"owner": held.owner, "epoch": held.epoch}))
 
-    def extend(doc):
+    def extend(doc: dict[str, Any]) -> Any:
         at = now_ms(store)
         _check(doc, at, held)
         live = _recorded(doc)
@@ -239,7 +239,7 @@ def release(store: RedisStore, slug: str, held: Lease) -> bool:
     if _address(slug):
         return _remote(slug, "release", {"owner": held.owner, "epoch": held.epoch})
 
-    def drop(doc):
+    def drop(doc: dict[str, Any]) -> Any:
         _check(doc, now_ms(store), held)
         doc["lease"] = None
         return True

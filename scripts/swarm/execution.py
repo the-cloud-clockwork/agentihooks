@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from scripts.inbox.seats import is_seat
@@ -84,7 +84,7 @@ class ExecutionRegistry:
         fencing.bump(self.store, slug, fencing.IDENTITY_CONFLICTS)
         raise SwarmError(message)
 
-    def _fenced(self, slug: str, change):
+    def _fenced(self, slug: str, change: Callable[[dict[str, Any]], Any]) -> Any:
         from scripts.swarm import lease
 
         return lease.fenced(self.store, slug, lease.EPOCH.get(), change)
@@ -102,7 +102,7 @@ class ExecutionRegistry:
     def archive(self, slug: str) -> int:
         listed = self.store.listed(slug)
 
-        def move(doc):
+        def move(doc: dict[str, Any]) -> Any:
             rows = {key: row for key, row in doc["executions"].items() if _archivable(row)}
             heads = latest(rows.values(), "seat")
             old = [
@@ -182,7 +182,7 @@ class ExecutionRegistry:
             raise SwarmError("current execution publication is in flight; retry after it finishes")
         epoch = lease.EPOCH.get()
 
-        def admit(doc):
+        def admit(doc: dict[str, Any]) -> Any:
             previous = occupants_of(doc).get(agent.seat)
             if (previous.execution_id if previous else "") != previous_execution_id:
                 self.conflict(slug, "replacement does not match the current execution")
@@ -250,7 +250,7 @@ class ExecutionRegistry:
     def _set_pane(self, slug: str, execution_id: str, pane_id: str) -> None:
         listed = self.store.listed(slug)
 
-        def change(doc):
+        def change(doc: dict[str, Any]) -> Any:
             raw = doc["executions"].get(execution_id) or doc["archive"].pop(execution_id, None)
             if not raw:
                 self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
@@ -279,14 +279,14 @@ class ExecutionRegistry:
         listed = self.store.listed(slug)
         ended = asdict(replace(agent, state="ended"))
 
-        def end(doc):
+        def end(doc: dict[str, Any]) -> Any:
             current = occupants_of(doc).get(agent.seat)
             if current != agent or not _orphan_state(agent, now_ms) or agent.name in listed:
                 return False
             doc["executions"][agent.execution_id] = ended
             return True
 
-        def undo(doc):
+        def undo(doc: dict[str, Any]) -> Any:
             if doc["executions"].get(agent.execution_id) == ended:
                 doc["executions"][agent.execution_id] = asdict(agent)
 

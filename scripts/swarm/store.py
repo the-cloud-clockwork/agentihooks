@@ -387,7 +387,7 @@ class RedisStore:
             (slug, task),
         )
 
-    def _if_holder(self, key, agent, action, task):
+    def _if_holder(self, key: str, agent: str, action: str, task: str) -> Any:
         from redis.exceptions import WatchError
 
         with self.redis.pipeline() as pipe:
@@ -496,7 +496,7 @@ class RedisStore:
         removed: str | None = None,
         listed_only: bool = False,
     ) -> None:
-        def write(pipe):
+        def write(pipe: Any) -> Any:
             if listed_only and not pipe.hexists(self.key(slug, "agents"), agent.name):
                 return
             pipe.multi()
@@ -521,7 +521,7 @@ class RedisStore:
 
         return self._projection(slug, write, LEGACY_PROJECTION_CONTENTION)
 
-    def _projection(self, slug: str, write: Callable, contention: str):
+    def _projection(self, slug: str, write: Callable, contention: str) -> Any:
         from redis.exceptions import WatchError
 
         for _ in range(PROJECTION_ATTEMPTS):
@@ -533,7 +533,7 @@ class RedisStore:
                     continue
         raise SwarmError(contention)
 
-    def _project_row(self, pipe, slug: str, agent: AgentRecord, previous: AgentRecord | None) -> None:
+    def _project_row(self, pipe: Any, slug: str, agent: AgentRecord, previous: AgentRecord | None) -> None:
         from scripts.swarm.execution import PROJECTION_OMITTED
         from scripts.swarm.tick import agent_status
 
@@ -569,7 +569,7 @@ class RedisStore:
 
         ended = int(time.time() * 1000) if at is None else at
 
-        def end(doc):
+        def end(doc: dict[str, Any]) -> Any:
             current = {a.execution_id for a in occupants_of(doc).values() if a.name == name}
             if current != live or (expected is not None and expected.execution_id not in current):
                 return False

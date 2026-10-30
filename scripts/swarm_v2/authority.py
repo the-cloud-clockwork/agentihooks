@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
+from typing import Any
 
 from scripts.swarm import fencing, lease
 from scripts.swarm.execution import occupants_of
@@ -53,7 +54,7 @@ class TaskAuthority:
         return list(fencing.read(self.store, self.slug)["journals"].get(task, []))
 
     def replay(self, task: str) -> TaskClaim | None:
-        def change(doc):
+        def change(doc: dict[str, Any]) -> Any:
             self.controller.require()
             recovered = self._reconstruct(doc["journals"].get(task, []))
             current = _claim(doc, task)
@@ -109,7 +110,7 @@ class TaskAuthority:
     def admit(self, token: str, lease_ms: int) -> TaskClaim:
         self._duration(lease_ms)
 
-        def create(doc, scope, previous, projected):
+        def create(doc: dict[str, Any], scope: Any, previous: Any, projected: Any) -> Any:
             now = lease.now_ms(self.store)
             if previous and previous.state == "active" and previous.lease_deadline_ms > now:
                 if previous.execution_id == scope.execution_id:
@@ -139,21 +140,21 @@ class TaskAuthority:
     def renew(self, token: str, generation: int, lease_ms: int, fence: RenewalFence | None = None) -> TaskClaim:
         self._duration(lease_ms)
 
-        def update(doc, scope, previous, projected):
+        def update(doc: dict[str, Any], scope: Any, previous: Any, projected: Any) -> Any:
             self._holder(scope, generation, previous)
             return replace(previous, lease_deadline_ms=lease.now_ms(self.store) + lease_ms)
 
         return self._write(token, "renewed", update, fence)
 
     def release(self, token: str, generation: int) -> TaskClaim:
-        def update(doc, scope, previous, projected):
+        def update(doc: dict[str, Any], scope: Any, previous: Any, projected: Any) -> Any:
             self._holder(scope, generation, previous)
             return replace(previous, state="released")
 
         return self._write(token, "released", update)
 
     def complete(self, token: str, generation: int, result: dict) -> TaskClaim:
-        def update(doc, scope, previous, projected):
+        def update(doc: dict[str, Any], scope: Any, previous: Any, projected: Any) -> Any:
             if previous and previous.state == "completed":
                 self._identity(scope, generation, previous)
                 if previous.result != result:
@@ -190,7 +191,7 @@ class TaskAuthority:
         if previous.state != "active" or previous.lease_deadline_ms <= lease.now_ms(self.store):
             self._stale()
 
-    def _fenced(self, change: Callable[[dict], object]):
+    def _fenced(self, change: Callable[[dict], object]) -> Any:
         try:
             return lease.fenced(self.store, self.slug, self.controller.held, change)
         except SwarmError as error:
@@ -204,7 +205,7 @@ class TaskAuthority:
         scope = self.scoped(token)
         projected = self.store.claimant(self.slug, scope.task_id)
 
-        def change(doc):
+        def change(doc: dict[str, Any]) -> Any:
             self.controller.require()
             if self._scope(token, doc) != scope:
                 raise SwarmError("forbidden_scope")

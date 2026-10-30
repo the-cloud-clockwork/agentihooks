@@ -61,7 +61,7 @@ def now_ms() -> int:
     return round(time.time() * 1000)
 
 
-def _states(store: Any):
+def _states(store: Any) -> Any:
     return state.for_store(store, BUCKET)
 
 
@@ -69,17 +69,17 @@ def _task(key: str) -> str:
     return key.rsplit(":", 1)[1]
 
 
-def _scan(store: Any, slug: str, part: str):
+def _scan(store: Any, slug: str, part: str) -> Any:
     return store.redis.scan_iter(match=store.key(slug, part, "*"))
 
 
-def _values(store: Any, slug: str, part: str):
+def _values(store: Any, slug: str, part: str) -> Any:
     for key in _scan(store, slug, part):
         if found := store.redis.get(key):
             yield key, found
 
 
-def _lists(store: Any, slug: str, part: str):
+def _lists(store: Any, slug: str, part: str) -> Any:
     for key in _scan(store, slug, part):
         if found := store.redis.lrange(key, 0, -1):
             yield key, found
@@ -110,7 +110,7 @@ def _encode(doc: dict) -> bytes:
     return json.dumps(doc, separators=(",", ":")).encode()
 
 
-def _entry(states: Any, store: Any, slug: str):
+def _entry(states: Any, store: Any, slug: str) -> Any:
     entry = states.get(slug)
     if entry is not None:
         return entry
@@ -187,7 +187,7 @@ def replace(store: Any, slug: str, saved: dict | None) -> None:
     """Puts back a saved document; a snapshot taken before the document existed is imported from its keys."""
     restored = _legacy(store, slug) if saved is None else {**EMPTY, **saved}
 
-    def change(doc):
+    def change(doc: dict[str, Any]) -> Any:
         doc.clear()
         doc.update(restored)
 

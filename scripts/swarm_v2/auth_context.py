@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 from uuid import uuid4
 
 from hooks.context.project_sessions import SessionGrant
@@ -158,7 +158,7 @@ class LaunchAuthority:
         return self.sign(claims)
 
     def record(self, slug: str, execution: AgentRecord, audit: dict) -> None:
-        def change(doc):
+        def change(doc: dict[str, Any]) -> Any:
             if doc["grants_disabled"]:
                 self.refuse(slug, "forbidden_scope", "launch grants are disabled for this swarm")
             occupants = occupants_of(doc).values()
@@ -168,7 +168,7 @@ class LaunchAuthority:
 
         self._write(slug, change, "launch grants kept changing; the grant was not issued")
 
-    def _write(self, slug: str, change: Callable[[dict], object], contention: str):
+    def _write(self, slug: str, change: Callable[[dict], object], contention: str) -> Any:
         from scripts.swarm import fencing
 
         try:
@@ -324,7 +324,7 @@ class LaunchAuthority:
         return self._rewrite(slug, claims["grant_id"], _revoked, "the grant was not withdrawn") is not None
 
     def _rewrite(self, slug: str, grant_id: str, change: Callable[[dict], dict | None], failure: str) -> dict | None:
-        def rewrite(doc):
+        def rewrite(doc: dict[str, Any]) -> Any:
             audit = change(doc["grants"][grant_id])
             if audit is not None:
                 doc["grants"][grant_id] = audit
@@ -333,7 +333,7 @@ class LaunchAuthority:
         return self._write(slug, rewrite, f"launch grants kept changing; {failure}")
 
     def disable(self, slug: str) -> list[str]:
-        def change(doc):
+        def change(doc: dict[str, Any]) -> Any:
             revoked = sorted(grant_id for grant_id, audit in doc["grants"].items() if audit["state"] == "issued")
             doc["grants_disabled"] = _timestamp(int(self.clock()))
             for grant_id in revoked:

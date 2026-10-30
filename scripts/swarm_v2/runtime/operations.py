@@ -120,7 +120,7 @@ class OperationJournal:
         operation_id = f"op-{uuid5(NAMESPACE_URL, json.dumps([slug, request.execution_id, key])).hex}"
         payload_digest = digest({"action": request.action, "payload": request.payload})
 
-        def create(doc):
+        def create(doc: dict[str, Any]) -> Any:
             from scripts.swarm import lease
 
             agent = self._current(request.execution_id, request.generation, doc)
@@ -150,7 +150,7 @@ class OperationJournal:
         return self._write(slug, create)
 
     def settle(self, slug: str, operation: Operation, observation: Observation, attempted: bool = False) -> Operation:
-        def update(doc):
+        def update(doc: dict[str, Any]) -> Any:
             agent = self._current(operation.execution_id, operation.generation, doc)
             if agent.runtime_backend != operation.backend or agent.runtime_target != operation.target:
                 raise OperationConflict(_ERRORS["target"])
@@ -172,7 +172,7 @@ class OperationJournal:
         return self._write(slug, update)
 
     def supersede_legacy_spawn(self, slug: str, operation: Operation) -> Operation:
-        def update(doc):
+        def update(doc: dict[str, Any]) -> Any:
             self._current(operation.execution_id, operation.generation, doc)
             raw = doc["operations"].get(operation.operation_id)
             if not raw or _decode(raw) != operation:
@@ -203,7 +203,7 @@ class OperationJournal:
         from scripts.swarm import fencing, lease
         from scripts.swarm.store import SwarmError
 
-        def commit(doc):
+        def commit(doc: dict[str, Any]) -> Any:
             operation = change(doc)
             doc["operations"][operation.operation_id] = asdict(operation)
             return operation

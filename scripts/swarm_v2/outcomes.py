@@ -1,6 +1,6 @@
 import re
 from dataclasses import asdict, dataclass, replace
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from scripts.swarm.store import SwarmError
@@ -87,7 +87,7 @@ class Outcomes:
     def propose(self, token: str, proposal: Proposal) -> dict:
         pull = self.provider.read(proposal.pr_url)
 
-        def accept(doc, scope, previous, projected):
+        def accept(doc: dict[str, Any], scope: Any, previous: Any, projected: Any) -> Any:
             if scope.task_id != proposal.task_id:
                 raise SwarmError("forbidden_scope")
             self.authority._holder(scope, proposal.generation, previous)
@@ -194,7 +194,7 @@ class Outcomes:
         return {**outcome, "ledger_revision": state["_meta"]["rev"]}
 
     def _receipt(self, token: str, generation: int, outcome: dict) -> TaskClaim:
-        def check(doc, scope, previous, projected):
+        def check(doc: dict[str, Any], scope: Any, previous: Any, projected: Any) -> Any:
             proof = outcome["proposal"]["proof"]
             if self.verify_proof(proof) is not True:
                 raise SwarmError("required proof artifacts are absent or unverified")
@@ -231,7 +231,7 @@ class Outcomes:
         return self._update(token, generation, pull, settle)
 
     def _update(self, token: str, generation: int, pull: PullRequest, change: Callable[[dict], dict]) -> dict:
-        def update(doc, scope, previous, projected):
+        def update(doc: dict[str, Any], scope: Any, previous: Any, projected: Any) -> Any:
             self.authority._identity(scope, generation, previous)
             if previous.state != "completed":
                 self.authority._holder(scope, generation, previous)
