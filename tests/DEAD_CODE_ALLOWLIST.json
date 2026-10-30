@@ -69,7 +69,7 @@
  "scripts/routing/place.py": 1,
  "scripts/routing/slots.py": 1,
  "scripts/swarm/autoscale.py": 1,
- "scripts/swarm/cli.py": 59,
+ "scripts/swarm/cli.py": 58,
  "scripts/swarm/difficulty.py": 1,
  "scripts/swarm/grouping.py": 1,
  "scripts/swarm/ledger_client.py": 1,

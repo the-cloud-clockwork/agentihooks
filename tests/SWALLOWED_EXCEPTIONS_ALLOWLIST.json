@@ -23,9 +23,6 @@
  "hooks/context/auto_dev_switch.py": {
   "BLE001": 2
  },
- "hooks/context/blocker_window.py": {
-  "BLE001": 2
- },
  "hooks/context/brain_adapter.py": {
   "BLE001": 8,
   "S110": 5

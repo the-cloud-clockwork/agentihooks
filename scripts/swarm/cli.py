@@ -2447,6 +2447,7 @@ def build_parser():
     blockers_cmd = sub.add_parser("blockers")
     blockers_cmd.add_argument("action", nargs="?", default="list", choices=("list", "clear"))
     blockers_cmd.add_argument("category", nargs="?", default="")
+    blockers_cmd.set_defaults(handler=cmd_blockers)
     sub.add_parser("prepare")
     publish = sub.add_parser("publish")
     publish.add_argument("--message", "-m", required=True)

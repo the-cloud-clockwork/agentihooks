@@ -39,11 +39,13 @@ def _store() -> "RedisStore | None":
 
 
 def _sustained(store: "RedisStore", slug: str, now_ms: int) -> dict:
+    from redis.exceptions import RedisError
+
     from scripts.swarm import blockers
 
     try:
         return blockers.sustained(store, slug, now_ms)
-    except Exception:
+    except RedisError:
         return {}
 
 
@@ -120,18 +122,12 @@ def pretool(tool_name: str, tool_input: dict, session_id: str, cwd: str = "") ->
 
 
 def checked(payload: dict) -> str | None:
-    try:
-        notice, block = pretool(
-            str(payload.get("tool_name") or ""),
-            payload.get("tool_input") or {},
-            payload.get("session_id", ""),
-            payload.get("cwd", ""),
-        )
-    except Exception as e:
-        from hooks.common import log
-
-        log("blocker window check failed", {"error": str(e)})
-        return None
+    notice, block = pretool(
+        str(payload.get("tool_name") or ""),
+        payload.get("tool_input") or {},
+        payload.get("session_id", ""),
+        payload.get("cwd", ""),
+    )
     if notice:
         from hooks.common import inject_context
 
