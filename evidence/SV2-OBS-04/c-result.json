@@ -66,9 +66,7 @@
       },
       "worker": 503
     },
-    "execution_state_changed": [
-      "control-owner"
-    ],
+    "execution_state_changed": [],
     "leaked": [],
     "replay": [
       200,

@@ -176,10 +176,15 @@ def test_members_of_an_empty_index_opens_no_pipeline(redis, monkeypatch):
 
 
 def relaunch(redis, store, name, hive, generation):
-    key = store.key("fixture", "executions")
-    row = next(json.loads(raw) for raw in redis.hvals(key) if json.loads(raw)["name"] == name)
-    row.update(execution_id=f"exe-{hive}-{generation}", generation=generation, hive=hive)
-    redis.hset(key, row["execution_id"], json.dumps(row))
+    from scripts.swarm import fencing
+
+    def change(doc):
+        execution_id, row = next((eid, row) for eid, row in doc["executions"].items() if row["name"] == name)
+        updated = {**row, "execution_id": f"exe-{hive}-{generation}", "generation": generation, "hive": hive}
+        del doc["executions"][execution_id]
+        doc["executions"][updated["execution_id"]] = updated
+
+    fencing.write(store, "fixture", change)
 
 
 def test_host_reads_one_agents_latest_placement_without_the_agent_list(redis, swarm, monkeypatch):

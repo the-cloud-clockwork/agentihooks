@@ -117,7 +117,9 @@ def test_a_hive_without_the_swarm_lease_runs_nothing(store, called, monkeypatch)
 
 
 def test_a_swarm_with_no_lease_runs_nothing(store, called):
-    store.redis.delete(store.key("sw", "control-owner"))
+    from scripts.swarm import fencing
+
+    fencing.write(store, "sw", lambda doc: doc.update(lease=None))
     assert refresh_job.run(store, "sw", Ledger(), 5) is None
     assert called == []
 

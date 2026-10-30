@@ -97,9 +97,12 @@ class World(kub04.World):
         return self.store.execution_occupants(SLUG)[f"{seat}@{SLUG}"]
 
     def protected(self) -> dict:
-        hashes = ("executions", "attempt-fences", "attempt-recoveries")
+        from scripts.swarm import fencing
+
+        hashes = ("attempt-fences", "attempt-recoveries")
         return {
             "hashes": {name: self.store.redis.hgetall(self.store.key(SLUG, name)) for name in hashes},
+            "executions": fencing.read(self.store, SLUG)["executions"],
             "pods": copy.deepcopy(self.api.objects),
             "slots": self.slots(),
             "grants": sorted(self.grants),
