@@ -147,6 +147,27 @@ def test_publish_offers_each_ready_task_to_its_lane_queue_once_per_generation(bu
     assert queued(bus, "ci", view) == ["b"]
 
 
+def test_publish_opens_every_lane_queue_even_with_no_offer_so_the_plan_stream_exists(bus):
+    opened = []
+    real = bus.queue
+
+    def queue(name, policy):
+        opened.append((name, policy))
+        return real(name, policy)
+
+    bus.queue = queue
+    policy = QueuePolicy(max_deliver=3)
+    assert readiness.publish(bus, snapshot(doc([])), NOW, policy) == []
+    assert opened == [(readiness.queue_name(SLUG, lane), policy) for lane in ("eng", "ci", "plan")]
+
+
+def test_publish_offers_a_plan_task_to_the_plan_queue_it_opened(bus):
+    found = doc([task("p", lane="plan")])
+    assert readiness.publish(bus, snapshot(found), NOW) == ["ready:sw:p:0"]
+    assert queued(bus, "plan", snapshot(found)) == ["p"]
+    assert queued(bus, "eng", snapshot(found)) == []
+
+
 def test_a_new_claim_generation_is_offered_again(bus):
     readiness.publish(bus, snapshot(doc([task("a")])), NOW)
     reopened = snapshot(doc([task("a", claim_generation=1)]))
