@@ -13,7 +13,7 @@ from scripts.swarm import brain_binding
 
 @pytest.fixture(params=["clean", "leaked"])
 def worker_history(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Leave the brain settings an earlier test on the same worker can leave behind, such as a reloaded config."""
+    """Seed the brain settings an earlier test on the same worker can leave behind, such as a reloaded config."""
     if request.param == "leaked":
         monkeypatch.setattr("hooks.config.BRAIN_URL", "http://127.0.0.1:8103")
         monkeypatch.setenv(brain_binding.VARIABLE, json.dumps({"status": "refused", "reason": "leaked"}))
