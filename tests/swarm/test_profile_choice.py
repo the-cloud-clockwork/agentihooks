@@ -531,6 +531,25 @@ def test_a_task_with_no_handoff_or_a_complete_launch_keeps_its_transfer(task):
     assert profile_choice.fresh_when_incomplete(task) is task
 
 
+def test_the_tick_respawns_a_handoff_with_an_empty_launch_identity_fresh_with_its_doc(monkeypatch):
+    import fakeredis
+
+    two = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    two.create(store.SwarmConfig("sw", "/repo", max_eng=2, max_ci=0))
+    monkeypatch.setattr(tick, "reclaim", lambda repo, lives, recorded, **_: {"continue_from": "fresh"})
+    ledger, rt = tasks(("t1", "eng")), FakeRuntime()
+    tick.tick("sw", two, ledger, rt, now_ms=1_000)
+    first = next(a for a in two.agents("sw") if a.lane == "eng")
+    empty = {"profile": "", "harness": "", "model": "claude-opus-5-5", "effort": "medium"}
+    two.put_handoff("sw", "t1", "seam 1 green", envelope={"launch": empty})
+    two.put_agent("sw", store.AgentRecord(**{**first.__dict__, "state": "finished"}))
+    tick.tick("sw", two, ledger, rt, now_ms=2_000)
+    assert [task_id for _, _, task_id in rt.spawned] == ["t1", "t1"]
+    assert rt.tasks[-1]["handoff"] == "seam 1 green"
+    assert rt.tasks[-1][profile_choice.FRESH] is True
+    assert profile_choice.transfer(rt.tasks[-1]) == {}
+
+
 class UnsupportedHandoffRuntime(LaterUnresolvedRuntime):
     def placement_refusal(self, lane, task):
         self.checked.append(task.get("id"))
