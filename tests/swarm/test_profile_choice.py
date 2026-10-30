@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -527,7 +528,7 @@ def test_an_incomplete_saved_launch_without_handoff_text_also_spawns_fresh():
     ],
     ids=["no-handoff", "no-handoff-empty-launch", "complete-launch"],
 )
-def test_a_task_with_no_handoff_or_a_complete_launch_keeps_its_transfer(task):
+def test_a_task_with_no_handoff_or_a_complete_launch_is_returned_unchanged(task):
     assert profile_choice.fresh_when_incomplete(task) is task
 
 
@@ -542,7 +543,7 @@ def test_the_tick_respawns_a_handoff_with_an_empty_launch_identity_fresh_with_it
     first = next(a for a in two.agents("sw") if a.lane == "eng")
     empty = {"profile": "", "harness": "", "model": "claude-opus-5-5", "effort": "medium"}
     two.put_handoff("sw", "t1", "seam 1 green", envelope={"launch": empty})
-    two.put_agent("sw", store.AgentRecord(**{**first.__dict__, "state": "finished"}))
+    two.put_agent("sw", replace(first, state="finished"))
     tick.tick("sw", two, ledger, rt, now_ms=2_000)
     assert [task_id for _, _, task_id in rt.spawned] == ["t1", "t1"]
     assert rt.tasks[-1]["handoff"] == "seam 1 green"

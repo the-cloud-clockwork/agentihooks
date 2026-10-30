@@ -58,9 +58,9 @@ def build(store, slug, agent, reason, rows, at, run=subprocess.run):
 
 
 def _launch(store, slug, agent):
-    launch = {key: getattr(agent, key) for key in LAUNCH}
     if agent.lane != MASTER and not (agent.profile and agent.harness):
         return {}
+    launch = {key: getattr(agent, key) for key in LAUNCH}
     if agent.lane == MASTER and agent.harness in effort_range.EFFORTS:
         launch["effort"] = effort_range.clamp(
             agent.harness, agent.effort, effort_range.bounds(store.config(slug), MASTER)
