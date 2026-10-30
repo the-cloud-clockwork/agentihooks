@@ -2,7 +2,9 @@ import json
 
 import pytest
 
-from scripts.swarm import lease
+from scripts.events import state
+from scripts.events.bus import StateConflict
+from scripts.swarm import fencing, lease
 from scripts.swarm.store import RedisStore, SwarmError
 
 pytestmark = pytest.mark.unit
@@ -15,12 +17,53 @@ def store():
     return RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
 
+def _seed(store, **fields):
+    fencing.write(store, "sw", lambda doc: doc.update(fields))
+
+
+class _Racing:
+    def __init__(self, inner, competitors):
+        self.inner, self.competitors, self.updates = inner, competitors, 0
+
+    def get(self, key):
+        return self.inner.get(key)
+
+    def create(self, key, value):
+        return self.inner.create(key, value)
+
+    def update(self, key, value, revision):
+        self.updates += 1
+        if self.competitors:
+            self.competitors.pop(0)(key)
+        return self.inner.update(key, value, revision)
+
+
+def _racing(store, monkeypatch, *competitors):
+    racing = _Racing(state.for_store(store, fencing.BUCKET), list(competitors))
+    monkeypatch.setattr(fencing.state, "for_store", lambda *args, **kwargs: racing)
+    return racing
+
+
+def _race(store, monkeypatch, **fields):
+    states = state.for_store(store, fencing.BUCKET)
+
+    def compete(key):
+        entry = states.get(key)
+        states.update(key, json.dumps({**json.loads(entry.value), **fields}).encode(), entry.revision)
+
+    return _racing(store, monkeypatch, compete)
+
+
+def _conflict(key):
+    raise StateConflict("raced")
+
+
 def test_renewal_and_expiry_takeover(store, monkeypatch):
     clock = [1000]
     monkeypatch.setattr(lease, "now_ms", lambda saved: clock[0])
     first = lease.acquire(store, "sw", "home")
     assert first == lease.Lease("home", 1, 181000)
-    assert store.redis.pttl(store.key("sw", "control-owner")) > 179000
+    assert fencing.read(store, "sw")["lease"] == {"owner": "home", "epoch": 1, "expires_at": 181000}
     assert lease.acquire(store, "sw", "other") is None
     clock[0] = 2000
     renewed = lease.acquire(store, "sw", "home")
@@ -45,17 +88,43 @@ def test_release_preserves_epoch_and_refuses_old_owner(store, monkeypatch):
     assert lease.release(store, "sw", first) is False
 
 
+def test_renewal_and_release_read_the_clock_of_their_own_store(store, monkeypatch):
+    monkeypatch.setattr(lease, "now_ms", lambda given: 1000 if given is store else 10**12)
+    held = lease.acquire(store, "sw", "home")
+
+    assert held == lease.Lease("home", 1, 1000 + lease.ttl_ms())
+    assert lease.renew(store, "sw", held) == held
+    assert lease.release(store, "sw", held) is True
+    assert fencing.read(store, "sw")["lease"] is None
+
+
+def test_a_hosted_fenced_write_checks_the_hosted_lease(store, monkeypatch):
+    from dataclasses import asdict
+
+    held = lease.Lease("home", 1, 10**13)
+    monkeypatch.setattr(lease, "_address", lambda slug: "https://ledger.example" if slug == "sw" else "")
+    monkeypatch.setattr(
+        lease,
+        "_remote",
+        lambda slug, action, fields=None: asdict(held) if (slug, action, fields) == ("sw", "current", None) else None,
+    )
+    monkeypatch.setattr(lease, "now_ms", lambda given: 1000 if given is store else 10**14)
+
+    assert lease.fenced(store, "sw", held, lambda doc: doc.update(epoch=7) or "done") == "done"
+    assert fencing.read(store, "sw")["epoch"] == 7
+
+
 def test_legacy_owner_keeps_ownership_until_expiry(store, monkeypatch):
     monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
     store.redis.set(store.key("sw", "control-owner"), "legacy")
     assert lease.acquire(store, "sw", "other") is None
     assert lease.current(store, "sw") == lease.Lease("legacy", 1, 181000)
-    assert store.redis.pttl(store.key("sw", "control-owner")) > 179000
-    assert json.loads(store.redis.get(store.key("sw", "control-owner"))) == {
+    assert fencing.read(store, "sw")["lease"] == {
         "owner": "legacy",
         "epoch": 1,
         "expires_at": 181000,
     }
+    assert fencing.read(store, "sw")["legacy_owner"] == ""
 
 
 @pytest.mark.parametrize("legacy", [False, True])
@@ -71,7 +140,7 @@ def test_seeded_hive_adopts_its_hostname_lease(store, monkeypatch, legacy):
     held = lease.acquire(store, "sw", commands.hive_id())
     assert held == lease.Lease("this-machine", 1, 181000)
     if legacy:
-        store.redis.set(store.key("sw", "control-owner"), "this-machine")
+        _seed(store, lease=None, legacy_owner="this-machine")
     monkeypatch.setattr(commands.registry, "seeded_id", lambda: "seeded-hive")
     migrated = lease.acquire(store, "sw", commands.hive_id())
     assert migrated == lease.Lease("seeded-hive", 1 if not legacy else 2, 181000)
@@ -96,7 +165,7 @@ def test_seeded_hive_never_adopts_another_machine_lease(store, monkeypatch, lega
     monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
     held = lease.acquire(store, "sw", holder)
     if legacy:
-        store.redis.set(store.key("sw", "control-owner"), holder)
+        _seed(store, lease=None, legacy_owner=holder)
     assert lease.acquire(store, "sw", requested) is None
     assert lease.current(store, "sw") == lease.Lease(holder, 2 if legacy else held.epoch, 181000)
 
@@ -111,27 +180,7 @@ def test_hostname_migration_rechecks_a_competing_owner(store, monkeypatch):
     monkeypatch.delenv("SWARM_HIVE_ID", raising=False)
     monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
     lease.acquire(store, "sw", "this-machine")
-    pipeline = store.redis.pipeline
-    competed = []
-
-    def competing_pipeline():
-        pipe = pipeline()
-        execute = pipe.execute
-
-        def commit():
-            if not competed:
-                competed.append(True)
-                store.redis.set(
-                    store.key("sw", "control-owner"),
-                    json.dumps({"owner": "other-machine", "epoch": 2, "expires_at": 181000}),
-                )
-                store.redis.set(store.key("sw", "control-epoch"), 2)
-            return execute()
-
-        pipe.execute = commit
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", competing_pipeline)
+    _race(store, monkeypatch, lease={"owner": "other-machine", "epoch": 2, "expires_at": 181000}, epoch=2)
     assert lease.acquire(store, "sw", commands.hive_id()) is None
     assert lease.current(store, "sw") == lease.Lease("other-machine", 2, 181000)
 
@@ -184,25 +233,29 @@ def test_controller_entrypoint_runs_once_and_reports_actions(store, monkeypatch,
     assert capsys.readouterr().out == "sw: worked\n"
 
 
-def test_clock_skew_does_not_expire_the_redis_lease(store, monkeypatch):
+def test_the_lease_expires_on_the_host_wall_clock(store, monkeypatch):
     import time
 
     held = lease.acquire(store, "sw", "home")
-    monkeypatch.setattr(time, "time_ns", lambda: (held.expires_at + 1) * 1_000_000)
+    monkeypatch.setattr(time, "time", lambda: (held.expires_at - 1) / 1000)
     assert lease.current(store, "sw") == held
-    assert lease.acquire(store, "sw", "other") is None
+    monkeypatch.setattr(time, "time", lambda: held.expires_at / 1000)
+    assert lease.current(store, "sw") is None
+    assert lease.acquire(store, "sw", "other") == lease.Lease("other", 2, held.expires_at + lease.ttl_ms())
 
 
-@pytest.mark.parametrize("microseconds", [234567, 234000])
-def test_redis_time_is_converted_to_milliseconds(store, monkeypatch, microseconds):
-    monkeypatch.setattr(store.redis, "time", lambda: (2, microseconds))
+@pytest.mark.parametrize("seconds", [2.2341, 2.2339, 2.234])
+def test_the_host_clock_is_converted_to_milliseconds(store, monkeypatch, seconds):
+    import time
+
+    monkeypatch.setattr(time, "time", lambda: seconds)
     assert lease.now_ms(store) == 2234
 
 
 def test_current_absent_and_legacy_owner_and_wrong_identity(store, monkeypatch):
     monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
     assert lease.current(store, "sw") is None
-    store.redis.set(store.key("sw", "control-owner"), "legacy")
+    _seed(store, legacy_owner="legacy")
     assert lease.current(store, "sw") is None
     held = lease.acquire(store, "sw", "legacy")
     for wrong in (lease.Lease("other", 1, 181000), lease.Lease("legacy", 2, 181000)):
@@ -213,43 +266,16 @@ def test_current_absent_and_legacy_owner_and_wrong_identity(store, monkeypatch):
 
 
 def test_acquisition_retries_a_conflicting_transaction(store, monkeypatch):
-    from redis.exceptions import WatchError
-
-    pipeline = store.redis.pipeline
-    attempts = []
-
-    def conflicting_pipeline():
-        pipe = pipeline()
-        execute = pipe.execute
-
-        def commit():
-            attempts.append(1)
-            if len(attempts) == 1:
-                raise WatchError("conflict")
-            return execute()
-
-        pipe.execute = commit
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", conflicting_pipeline)
+    racing = _racing(store, monkeypatch, _conflict)
     held = lease.acquire(store, "sw", "home")
     assert held.epoch == 1
-    assert len(attempts) == 2
+    assert racing.updates == 2
     assert lease.current(store, "sw") == held
 
 
 def test_release_conflict_does_not_remove_the_lease(store, monkeypatch):
-    from redis.exceptions import WatchError
-
     held = lease.acquire(store, "sw", "home")
-    pipeline = store.redis.pipeline
-
-    def conflicting_pipeline():
-        pipe = pipeline()
-        pipe.execute = lambda: (_ for _ in ()).throw(WatchError("conflict"))
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", conflicting_pipeline)
+    _racing(store, monkeypatch, *[_conflict] * fencing.ATTEMPTS)
     assert lease.release(store, "sw", held) is False
     assert lease.current(store, "sw") == held
 
@@ -301,11 +327,11 @@ def test_epoch_scope_resets_after_failure():
     assert lease.EPOCH.get() is None
 
 
-def test_epoch_counter_uses_the_existing_swarm_key(store):
+def test_epoch_counter_continues_from_the_imported_swarm_key(store):
     store.redis.set(store.key("sw", "control-epoch"), 7)
     held = lease.acquire(store, "sw", "home")
     assert held.epoch == 8
-    assert store.redis.get(store.key("sw", "control-epoch")) == "8"
+    assert fencing.read(store, "sw")["epoch"] == 8
     other = lease.acquire(store, "other", "home")
     assert other.epoch == 1
 
@@ -318,32 +344,17 @@ def test_require_epoch_accepts_current_and_refuses_absent(store):
     assert str(error.value) == "the controller lease is stale"
 
 
-@pytest.mark.parametrize("operand", ["control-owner", "control-epoch"])
-def test_takeover_transaction_watches_both_lease_keys(store, monkeypatch, operand):
-    pipeline = store.redis.pipeline
-    raced = []
-
-    def interleaved_pipeline():
-        pipe = pipeline()
-        execute = pipe.execute
-
-        def commit():
-            if not raced:
-                raced.append(True)
-                value = (
-                    7
-                    if operand == "control-epoch"
-                    else json.dumps({"owner": "other", "epoch": 7, "expires_at": lease.now_ms(store) + 180000})
-                )
-                store.redis.set(store.key("sw", operand), value, px=180000)
-            return execute()
-
-        pipe.execute = commit
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", interleaved_pipeline)
+@pytest.mark.parametrize("operand", ["lease", "epoch"])
+def test_takeover_rereads_a_competing_lease_or_epoch(store, monkeypatch, operand):
+    fencing.read(store, "sw")
+    competing = (
+        {"epoch": 7}
+        if operand == "epoch"
+        else {"lease": {"owner": "other", "epoch": 7, "expires_at": lease.now_ms(store) + 180000}, "epoch": 7}
+    )
+    _race(store, monkeypatch, **competing)
     held = lease.acquire(store, "sw", "home")
-    if operand == "control-epoch":
+    if operand == "epoch":
         assert held.epoch == 8
     else:
         assert held is None

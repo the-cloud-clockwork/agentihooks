@@ -105,6 +105,7 @@ def test_home_spans_the_full_window_width():
     assert "max-width" not in rule("ul")
 
 
+@pytest.mark.feature("ledger-home")
 def test_each_row_carries_title_kind_counts_swarm_state_and_last_activity(browser, updated_at):
     found = row(home(browser, now=updated_at + 5 * MINUTE), SLUG)
     assert (
@@ -145,6 +146,7 @@ def test_a_ledger_without_a_swarm_says_so_in_its_row(browser, updated_at):
     assert '<span class="state s-none" role="cell">no swarm</span>' in found
 
 
+@pytest.mark.feature("ledger-home")
 def test_a_closed_ledger_shows_closed_and_a_reopen_button(browser, updated_at):
     make("closed-row")
     storage.apply_ops("closed-row", ops=[{"op": "close", "id": "c1", "by": "swarm"}])
@@ -195,6 +197,7 @@ def test_the_header_brands_home_without_a_ledger_count_and_names_each_column(bro
     assert '</li><li class="row" role="row" data-slug=' in page
 
 
+@pytest.mark.feature("ledger-home")
 def test_the_bin_lists_days_left_and_a_restore_button(browser, updated_at):
     ledger_bin.delete(SLUG, now=updated_at)
     assert f'href="/{SLUG}"' not in home(browser)

@@ -51,8 +51,11 @@ def test_local_and_remote_agents_read_from_the_same_view():
 
 
 def test_a_stale_terminal_view_never_overwrites_the_fresher_heartbeat_state():
+    from scripts.swarm import fencing
+
     slug = "sv2-ux-01-b"
     store = seeded(slug)
+    fencing.read(store, slug)
     before = snapshot(store)
     card = read(store, slug)["executions"]["eng-2"]
     assert (card["observed"], card["terminal_behind"], card["seen_at"]) == ("working", True, 1791299880000)

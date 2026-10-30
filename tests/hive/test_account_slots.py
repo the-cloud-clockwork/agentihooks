@@ -296,7 +296,7 @@ def test_local_reading_correlates_the_same_process_sample_to_its_own_hive(monkey
     connection = object()
     monkeypatch.setattr(account_sessions, "local_processes", lambda: processes)
     monkeypatch.setattr(daemon, "observe", lambda **kwargs: (seen.append(kwargs), report)[1])
-    monkeypatch.setattr(store, "connect", lambda: connection)
+    monkeypatch.setattr(store, "connect", lambda: store.RedisStore(connection))
 
     def executions(redis, hive, sample):
         assert redis is connection

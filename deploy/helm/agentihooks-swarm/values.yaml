@@ -65,6 +65,8 @@ ledger:
   env: {}
   # Secret env only the ledger container reads, such as the shared database URL workers must never hold.
   secretEnv: []
+  # direct: the ledger server opens the database itself. api: it reads and writes through the api service.
+  backend: direct
   resources:
     requests:
       cpu: 50m
@@ -72,6 +74,34 @@ ledger:
       ephemeral-storage: 64Mi
     limits:
       memory: 2Gi
+      ephemeral-storage: 256Mi
+
+api:
+  enabled: false
+  replicas: 2
+  port: 8766
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
+  env: {}
+  # The only place AGENTIHOOKS_SWARM_DATABASE_URL lives once ledger.backend is api: [{name, secretName, key}].
+  secretEnv: []
+  # Secret key holding the token the ledger server sends and the api checks; required once api.enabled is on.
+  token:
+    secretName: ""
+    key: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 1Gi
       ephemeral-storage: 256Mi
 
 redis:
@@ -236,6 +266,26 @@ hub:
       memory: 512Mi
       ephemeral-storage: 256Mi
 
+# Auth service: issues signed tokens other services verify with AGENTIHOOKS_AUTH_KEY, a secret of at least 32 bytes
+# given through secretEnv. legacy "off" makes services accept only signed tokens.
+auth:
+  enabled: false
+  replicas: 2
+  port: 8768
+  legacy: "on"
+  affinity: {}
+  tolerations: []
+  env: {}
+  secretEnv: []
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 256Mi
+      ephemeral-storage: 256Mi
+
 # secretName must hold AGENTIHOOKS_GITHUB_WEBHOOK_SECRET and the receiver's own AGENTIHOOKS_BUS_URL.
 githubWebhook:
   enabled: false
@@ -300,6 +350,10 @@ workers:
     name: ""
     key: ""
   envFromSecrets: []
+  brainBinding:
+    secretName: ""
+    key: binding.json
+    credentials: {}
   githubAuth:
     mode: token
     secretName: ""

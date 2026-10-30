@@ -1,6 +1,7 @@
 import base64
 import json
 from collections.abc import Iterator
+from typing import Any
 
 from .bus import StateConflict, StateEntry
 
@@ -32,6 +33,9 @@ class RedisStateStore:
     @property
     def watch_key(self) -> str:
         return self._current
+
+    def guard(self, pipe: Any) -> None:
+        pipe.watch(self._current)
 
     def get(self, key: str) -> StateEntry | None:
         return _entry(key, self.redis.hget(self._current, key))

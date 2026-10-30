@@ -49,6 +49,7 @@ def test_only_the_addressee_reads(store):
 
 
 @pytest.mark.parametrize("kind", ["", "unknown"])
+@pytest.mark.feature("inbox-close-outcomes")
 def test_closing_without_a_reason_is_refused(store, kind):
     item = store.send("alice", "bob", "hi")
     with pytest.raises(InboxError):
@@ -57,6 +58,7 @@ def test_closing_without_a_reason_is_refused(store, kind):
 
 
 @pytest.mark.parametrize("kind", ["handoff", "blocked"])
+@pytest.mark.feature("inbox-close-outcomes")
 def test_handoff_and_blocked_need_their_detail(store, kind):
     item = store.send("alice", "bob", "hi")
     with pytest.raises(InboxError):
@@ -110,6 +112,7 @@ def test_a_closed_item_stays_closed(store):
         store.read(item.id, "bob")
 
 
+@pytest.mark.feature("inbox-close-outcomes")
 def test_history_keeps_every_transition_in_order(store):
     item = store.send("alice", "bob", "hi")
     store.read(item.id, "bob")
@@ -185,6 +188,7 @@ def test_two_racing_deliveries_have_one_winner(server, monkeypatch):
     assert [e["state"] for e in first.history(item.id)] == ["pending", "delivered"]
 
 
+@pytest.mark.feature("inbox-close-outcomes")
 def test_reply_goes_to_the_sender_and_closes_the_original_done(store):
     item = store.send("operator", "master", "how far along are we")
     answer = store.reply(item.id, "master", "two tasks left")

@@ -28,6 +28,7 @@ CODE_DIRS = (
             "events",
             "hub",
             "workflows",
+            "auth",
         )
     ),
     ROOT / "hooks",

@@ -10,6 +10,7 @@ pytestmark = pytest.mark.unit
 _fixture = store
 
 
+@pytest.mark.feature("swarm-restore-decision")
 def test_failed_resume_stays_awaiting_decision_even_after_a_tick(store, tmp_path):
     saved(store, tmp_path)
     runtime = ResumingRuntime(fail="cannot reopen conversation")
@@ -27,6 +28,7 @@ def test_failed_resume_stays_awaiting_decision_even_after_a_tick(store, tmp_path
     assert {r["binding"]["state"] for r in transfers.list_transfers(store, "sw")} == {"absent"}
 
 
+@pytest.mark.feature("swarm-restore-decision")
 def test_retry_resume_and_explicit_fresh_are_separate_choices(store, tmp_path):
     saved(store, tmp_path)
     restore(store, ResumingRuntime(fail="unavailable"))

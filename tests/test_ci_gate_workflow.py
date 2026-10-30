@@ -99,7 +99,7 @@ def test_full_tests_dispatch_requires_explicit_gate_plant_intent(gate_plant, all
     assert result.stderr == ""
 
 
-def test_required_gate_runs_after_parallel_unit_and_lint():
+def test_required_gate_runs_after_parallel_unit_and_lint() -> None:
     jobs = _workflow()["jobs"]
     gate = jobs["gate-required"]
     required = {"unit", "lint", "sonar", "mutation", "test-count", "coverage-ratchet", "semgrep"}
@@ -134,6 +134,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "select",
             "unit-selected",
             "docs",
+            "type-gate",
         }
     )
     assert gate["if"] == "${{ always() }}"

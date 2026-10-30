@@ -1,29 +1,16 @@
 """Brain adapter — pluggable source-to-channel bridge for brain content injection.
 
-Reads brain content from a configurable source (file/API), publishes to a
-broadcast channel. The broadcast system handles per-turn delivery to
-subscribed sessions.
+Reads brain content from a configurable source and publishes it to a broadcast channel,
+which handles per-turn delivery to subscribed sessions.
 
 Source types:
     file — reads markdown files from a directory (NFS mount, vault path, etc.)
     http — reads the kernel brain-api feed
 
-Brain files use YAML frontmatter:
-    ---
-    id: hot-arcs-2026-04-10
-    title: Active Hot Arcs
-    priority: 10
-    ttl: 3600
-    severity: info
-    ---
-    Content here...
+Brain files carry YAML frontmatter with id, title, priority, ttl and severity.
 
-Config (env vars via hooks.config):
-    BRAIN_ENABLED (bool, default False)
-    BRAIN_SOURCE_TYPE (str, default "file")
-    BRAIN_SOURCE_PATH (str, default ~/.agentihooks/brain)
-    BRAIN_CHANNEL (str, default "brain")
-    BRAIN_REFRESH_TOOL_CALLS (int, default 20 tool calls)
+Config (env vars via hooks.config): BRAIN_ENABLED, BRAIN_SOURCE_TYPE, BRAIN_SOURCE_PATH,
+BRAIN_CHANNEL, BRAIN_REFRESH_TOOL_CALLS.
 
 Public API:
     maybe_refresh_on_tool_call(session_id, tool_call_count) — called from PreToolUse
@@ -67,7 +54,6 @@ def _scrub_halt_phrases(text: str) -> str:
         return text
     out = text
     for needle, replacement in _HALT_PHRASE_REWRITES:
-        # Case-insensitive replace preserving original casing of the rest.
         i = 0
         while True:
             lower = out.lower()
@@ -156,11 +142,6 @@ class BrainEntry:
     file: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Source interface + implementations
-# ---------------------------------------------------------------------------
-
-
 class BrainSource:
     """Abstract interface for brain content sources."""
 
@@ -204,7 +185,6 @@ class FileBrainSource(BrainSource):
             except Exception as e:
                 log("brain_adapter: failed to read file", {"file": str(md_file), "error": str(e)})
 
-        # Sort by priority descending (higher priority first)
         entries.sort(key=lambda e: e.priority, reverse=True)
         return entries
 
@@ -291,11 +271,6 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     return fm, body
 
 
-# ---------------------------------------------------------------------------
-# Source factory
-# ---------------------------------------------------------------------------
-
-
 def _get_source() -> BrainSource | None:
     """Create the configured brain source.
 
@@ -333,11 +308,6 @@ def feed_channel() -> str:
     from hooks.config import BRAIN_CHANNEL
 
     return f"{BRAIN_CHANNEL}@{brain_id()}"
-
-
-# ---------------------------------------------------------------------------
-# Publish to channel
-# ---------------------------------------------------------------------------
 
 
 def _trim_hot_arcs_table(content: str, top_n: int) -> str:
@@ -386,7 +356,11 @@ def _shrink_entry(entry: BrainEntry, top_n: int, max_bytes: int) -> BrainEntry:
 
 
 def _publish_entries(entries: list[BrainEntry]) -> dict:
-    """Publish brain entries to the broadcast channel."""
+    """Publish brain entries to the broadcast channel.
+
+    Entries whose content hash survives into the new batch are kept rather than cleared,
+    so their ids and delivery state stay stable across ticks and dedup still applies.
+    """
     try:
         from hooks.config import (
             BRAIN_CHANNEL,
@@ -410,11 +384,6 @@ def _publish_entries(entries: list[BrainEntry]) -> dict:
             "total_bytes": total_bytes,
         },
     ) as span:
-        # Diff-based clear: keep entries on this channel whose content_hash
-        # also exists in the new batch (stable UUIDs across ticks → delivery
-        # state finally matches; resolves "same content, fresh id" feedback
-        # loop where dedup never hit because every republish minted a new
-        # uuid).
         new_hashes: dict[str, BrainEntry] = {}
         for entry in entries:
             entry.content = _scrub_halt_phrases(entry.content)
@@ -480,18 +449,8 @@ def _compute_hash(entries: list[BrainEntry]) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-# ---------------------------------------------------------------------------
-# Tool-call refresh
-# ---------------------------------------------------------------------------
-
-
 def clear_session_state(session_id: str) -> None:
     return None
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 def maybe_refresh_on_tool_call(
@@ -521,15 +480,14 @@ def maybe_refresh_on_tool_call(
 
 
 def _refresh() -> dict | None:
+    """Re-read the brain env and source, then publish; a long-lived caller must not republish from a repointed source."""
     global _content_hash
 
-    # Same reason as get_status: a long-lived caller must not republish from a
-    # source the operator repointed away from.
     try:
         from hooks.config import reload_brain_env
 
         reload_brain_env()
-    except Exception:  # noqa: BLE001 - a reload hiccup must not block a refresh
+    except Exception:  # noqa: BLE001
         pass
 
     source = _get_source()
@@ -602,12 +560,16 @@ def get_status() -> dict:
     difference between reporting the live configuration and reporting whatever
     was true when the server started, which is how a repointed brain goes
     unnoticed.
+
+    The reported source class is the one actually in use, since source_type and
+    source_path describe only the file fallback. A resolved source with a disabled
+    adapter reads healthy while nothing is ever injected.
     """
     try:
         from hooks.config import reload_brain_env
 
         reload_brain_env()
-    except Exception:  # noqa: BLE001 - status must never fail on a reload hiccup
+    except Exception:  # noqa: BLE001
         pass
 
     try:
@@ -633,11 +595,6 @@ def get_status() -> dict:
         except Exception as exc:
             source_error = str(exc)
 
-    # source_type/source_path describe the file fallback; when BRAIN_URL is set
-    # the adapter is on HTTP and those two are not what it reads. Report the
-    # class actually in use so the two can never silently disagree.
-    # A resolved source and a disabled adapter is the failure that looks like
-    # health: every field below reads correct while nothing is ever injected.
     warnings: list[str] = []
     if source and not BRAIN_ENABLED:
         warnings.append(

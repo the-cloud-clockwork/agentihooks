@@ -4,6 +4,8 @@ TABLE = "artifact_files"
 
 SAVE = "INSERT OR IGNORE INTO artifact_files VALUES (?, ?, ?)"
 LOAD = "SELECT data FROM artifact_files WHERE slug=? AND id=?"
+IDS = "SELECT id FROM artifact_files WHERE slug=?"
+LIST = "SELECT id, 0 FROM artifact_files WHERE slug=?"
 DROP = "DELETE FROM artifact_files WHERE slug=? AND id=?"
 
 

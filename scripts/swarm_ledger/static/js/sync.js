@@ -257,8 +257,10 @@ function staleAndIdle(version) {
   try {
     if (sessionStorage.getItem("ledger-reloaded") === version) return false;
     sessionStorage.setItem("ledger-reloaded", version);
-  } catch (e) { /* storage blocked: reload once per load below */ }
-  return true;
+    return true;
+  } catch (e) {
+    return true;
+  }
 }
 
 export function resume() {

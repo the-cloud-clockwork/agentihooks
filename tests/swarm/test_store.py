@@ -4,6 +4,7 @@ import time
 
 import pytest
 
+from scripts.swarm import fencing
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
 
@@ -113,6 +114,131 @@ def test_ready_cleanup_compares_the_record_even_when_the_lease_did_not_change(st
     assert store.redis.hget(ready_key, "t1") is None
 
 
+def test_claim_repair_and_ready_cleanup_leave_a_task_under_scoped_authority_alone(store):
+    store.create(config())
+    owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
+    store.put_agent("smoke", owner)
+    store.redis.hset(store.key("smoke", "ready"), "t1", "ready")
+    fencing.write(store, "smoke", lambda doc: doc["claims"].update(t1={"holder": "scoped"}))
+
+    assert not store.ensure_claim("smoke", owner, 60_000)
+    assert not store.release_ready("smoke", "t1", "owner", 0, "ready")
+    assert store.redis.get(store.key("smoke", "claim", "t1")) is None
+    assert store.redis.hget(store.key("smoke", "ready"), "t1") == "ready"
+
+
+def _raced_pipelines(store, monkeypatch, times):
+    from redis.exceptions import WatchError
+
+    original, raced = store.redis.pipeline, []
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def run(*args, **kwargs):
+            if len(raced) < times:
+                raced.append(True)
+                raise WatchError("raced")
+            return execute(*args, **kwargs)
+
+        pipe.execute = run
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    return raced
+
+
+def test_a_projection_retries_a_raced_commit_and_records_the_desired_route(store, monkeypatch):
+    from dataclasses import replace
+
+    store.create(config())
+    owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
+    store.put_agent("smoke", owner)
+    raced = _raced_pipelines(store, monkeypatch, 1)
+
+    store.project_agent("smoke", replace(owner, desired_route_kind="codex"))
+
+    assert raced == [True]
+    assert store.redis.hget(store.key("smoke", "desired-routes"), "owner") == "codex"
+
+
+def test_a_projection_that_keeps_racing_is_refused_after_five_attempts(store, monkeypatch):
+    store.create(config())
+    owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
+    raced = _raced_pipelines(store, monkeypatch, 10)
+
+    with pytest.raises(SwarmError, match="^agent registry kept changing; the agent was not shown$"):
+        store.project_agent("smoke", owner)
+    assert len(raced) == 5
+
+
+def test_a_projection_retries_when_the_agent_list_changes_under_it(store, monkeypatch):
+    store.create(config())
+    owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
+    original, calls = store._project_row, []
+
+    def racing(pipe, slug, agent, previous):
+        calls.append(agent.name)
+        if len(calls) == 1:
+            store.redis.hset(store.key(slug, "agents"), "other", "{}")
+        original(pipe, slug, agent, previous)
+
+    monkeypatch.setattr(store, "_project_row", racing)
+    store.project_agent("smoke", owner)
+
+    assert calls == ["owner", "owner"]
+    assert store.redis.hexists(store.key("smoke", "agents"), "owner")
+
+
+def test_listed_names_every_projected_agent(store):
+    store.redis.hset(store.key("smoke", "agents"), "owner", "{}")
+
+    assert store.listed("smoke") == {"owner"}
+
+
+def test_a_projection_that_never_settles_retries_every_attempt_and_names_its_contention(store):
+    from redis.exceptions import WatchError
+
+    from scripts.swarm.store import PROJECTION_ATTEMPTS
+
+    attempts = []
+
+    def contended(pipe):
+        attempts.append(pipe)
+        raise WatchError("moved")
+
+    with pytest.raises(SwarmError) as refused:
+        store._projection("smoke", contended, "the agent list kept moving")
+
+    assert len(attempts) == PROJECTION_ATTEMPTS == 5
+    assert str(refused.value) == "the agent list kept moving"
+
+
+def test_a_new_row_stamps_its_state_since_in_milliseconds(store, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("scripts.swarm.store.time", SimpleNamespace(time=lambda: 1234.5))
+
+    store.project_agent("smoke", AgentRecord("owner", "eng", "t1", started_at=1_000))
+
+    assert store.redis.hget(store.key("smoke", "state-since"), "owner") == "1234500"
+
+
+def test_an_update_that_keeps_the_status_keeps_its_state_since(store):
+    from dataclasses import replace
+
+    store.create(config())
+    current = store.start_execution(
+        "smoke", AgentRecord(store.next_name("smoke", "eng"), "eng", "t1", seat="eng-1@smoke", started_at=1_000)
+    )
+    store.redis.hset(store.key("smoke", "state-since"), current.name, 1)
+
+    store.execution_registry.update("smoke", replace(current, model="opus"))
+
+    assert store.redis.hget(store.key("smoke", "state-since"), current.name) == "1"
+
+
 def race_at_multi(store, monkeypatch, change):
     original = store.redis.pipeline
 
@@ -130,7 +256,7 @@ def race_at_multi(store, monkeypatch, change):
     monkeypatch.setattr(store.redis, "pipeline", pipeline)
 
 
-@pytest.mark.parametrize("kind", ["lease", "agents", "executions", "task-authority", "claim-journal"])
+@pytest.mark.parametrize("kind", ["lease", "agents", "executions"])
 def test_lease_repair_rejects_a_concurrent_ownership_change(store, monkeypatch, kind):
     import json
     from dataclasses import asdict, replace
@@ -140,22 +266,27 @@ def test_lease_repair_rejects_a_concurrent_ownership_change(store, monkeypatch, 
     store.create(config())
     owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
     store.put_agent("smoke", owner)
-    row = asdict(replace(owner, started_at=2_000, execution_id="new-execution", generation=2))
+    fired = []
+
+    def admit_concurrently():
+        if not fired:
+            fired.append(True)
+            row = {**asdict(owner), "execution_id": "exe-race", "generation": 1, "seat": "eng-1@smoke"}
+            fencing.write(store, "smoke", lambda doc: doc["executions"].update({"exe-race": row}))
+
     changes = {
         "lease": lambda: store.redis.set(store.key("smoke", "claim", "t1"), "successor"),
         "agents": lambda: store.redis.hset(
             store.key("smoke", "agents"), owner.name, json.dumps(asdict(replace(owner, started_at=2_000)))
         ),
-        "executions": lambda: store.redis.hset(store.key("smoke", "executions"), "new-execution", json.dumps(row)),
-        "task-authority": lambda: store.redis.set(store.key("smoke", "task-authority", "t1"), "new-authority"),
-        "claim-journal": lambda: store.redis.set(store.key("smoke", "claim-journal", "t1"), "new-journal"),
+        "executions": admit_concurrently,
     }
     race_at_multi(store, monkeypatch, changes[kind])
     assert not store.ensure_claim("smoke", owner, 60_000)
     assert store.claimant("smoke", "t1") == ("successor" if kind == "lease" else None)
 
 
-@pytest.mark.parametrize("kind", ["lease", "generation", "ready", "task-authority", "claim-journal"])
+@pytest.mark.parametrize("kind", ["lease", "generation", "ready"])
 def test_ready_cleanup_rejects_a_concurrent_ownership_change(store, monkeypatch, kind):
     store.create(config())
     store.claim("smoke", "t1", "owner", 60_000)
@@ -166,8 +297,6 @@ def test_ready_cleanup_rejects_a_concurrent_ownership_change(store, monkeypatch,
         "lease": lambda: store.redis.set(key, "successor"),
         "generation": lambda: store.redis.incr(f"{key}:generation"),
         "ready": lambda: store.redis.hset(ready_key, "t1", "successor-ready"),
-        "task-authority": lambda: store.redis.set(store.key("smoke", "task-authority", "t1"), "new-authority"),
-        "claim-journal": lambda: store.redis.set(store.key("smoke", "claim-journal", "t1"), "new-journal"),
     }
     race_at_multi(store, monkeypatch, changes[kind])
     assert not store.release_ready("smoke", "t1", "owner", generation, "old-ready")
@@ -323,8 +452,6 @@ def test_a_held_claim_refund_refuses_a_second_refund_for_the_same_claimant_and_g
         ("claim", lambda redis, key: redis.incr(f"{key}:generation"), 1),
         ("claim", lambda redis, key: redis.set(f"{key}:refunded", redis.get(f"{key}:generation")), 1),
         ("started-lives", lambda redis, key: redis.hset(key, "t1", 5), 5),
-        ("task-authority", lambda redis, key: redis.set(key, "hub"), 1),
-        ("claim-journal", lambda redis, key: redis.set(key, "hub"), 1),
     ],
 )
 def test_a_held_claim_refund_refuses_when_a_watched_key_moves_during_the_watch(
@@ -346,12 +473,15 @@ def test_a_held_claim_refund_refuses_when_a_watched_key_moves_during_the_watch(
     assert store.claims("smoke", "t1") == lives
 
 
-@pytest.mark.parametrize("guard", ["task-authority", "claim-journal"])
+@pytest.mark.parametrize("guard", ["claims", "journals"])
 def test_a_held_claim_refund_refuses_while_a_claim_guard_is_set(store, guard):
+    from scripts.swarm import fencing
+
     store.count_claim("smoke", "t1")
     store.claim("smoke", "t1", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
-    store.redis.set(store.key("smoke", guard, "t1"), "hub")
+    seed = {} if guard == "claims" else []
+    fencing.write(store, "smoke", lambda doc: doc[guard].update({"t1": seed}))
 
     assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
     assert store.claims("smoke", "t1") == 1
@@ -473,6 +603,8 @@ def test_agent_registry_and_sequence(store):
 def test_history_rows_carry_the_execution_placement_of_the_ended_life(store):
     from dataclasses import asdict, replace
 
+    from scripts.swarm import fencing
+
     store.create(config())
     remote = AgentRecord("ci@remote", "ci", "t1", pane_id="w2:pD", seat="ci-1@smoke", started_at=5)
     local = AgentRecord("ci@local", "ci", "t2", pane_id="w2:pE", started_at=6)
@@ -481,8 +613,13 @@ def test_history_rows_carry_the_execution_placement_of_the_ended_life(store):
     run = replace(remote, execution_id="exe-1", generation=1, hive="h6", runtime_backend="kubernetes")
     earlier = replace(run, execution_id="exe-0", started_at=2, hive="h8")
     successor = replace(run, name="ci@next", execution_id="exe-2", generation=2, started_at=8, hive="h9")
-    for key, life in (("executions", run), ("executions-archive", earlier), ("executions", successor)):
-        store.redis.hset(store.key("smoke", key), life.execution_id, json.dumps(asdict(life)))
+
+    def seed(doc):
+        doc["executions"][run.execution_id] = asdict(run)
+        doc["executions"][successor.execution_id] = asdict(successor)
+        doc["archive"][earlier.execution_id] = asdict(earlier)
+
+    fencing.write(store, "smoke", seed)
     store.drop_agent("smoke", remote.name, at=9)
     store.drop_agent("smoke", local.name, at=10)
     rows = {row["name"]: row for row in map(json.loads, store.redis.lrange(store.key("smoke", "history"), 0, -1))}

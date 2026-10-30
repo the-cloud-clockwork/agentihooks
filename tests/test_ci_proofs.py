@@ -283,6 +283,23 @@ def test_selected_queue_proof_names_every_missing_path_before_setup(tmp_path):
     assert "Selected test path tests/other.py does not exist." in result.stdout
 
 
+def test_selected_paths_accept_a_test_node_of_an_existing_file(tmp_path):
+    jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    step = next(s for s in jobs["unit-selected"]["steps"] if s.get("name") == "Require selected test paths")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/existing.py").touch()
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env={**os.environ, "FILES": "tests/existing.py::test_a tests/missing.py::TestB", "LEG": "1"},
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "tests/existing.py::test_a does not exist" not in result.stdout
+    assert "Selected test path tests/missing.py::TestB does not exist." in result.stdout
+
+
 def test_proofs_reuse_selected_mutation_and_smoke_execution():
     workflow = _workflow()
     jobs = workflow["jobs"]

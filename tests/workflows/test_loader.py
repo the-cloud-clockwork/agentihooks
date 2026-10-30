@@ -89,7 +89,7 @@ def test_layer_dirs_list_package_bundle_profiles_then_project_in_order(tmp_path,
     (repo / "sub").mkdir()
     calls = []
 
-    def profile_dirs(bundle_arg, profile_csv, linked):
+    def profile_dirs(bundle_arg, profile_csv, linked, user=None, shared=None):
         calls.append((bundle_arg, profile_csv, linked))
         return [("engineer", role)]
 
@@ -116,7 +116,7 @@ def test_layer_dirs_without_bundle_or_repo_hold_the_package_and_profiles(tmp_pat
     monkeypatch.setattr(loader.profile_chain, "bundle_path", lambda state: None)
     monkeypatch.setattr(loader.profile_chain, "active_profile", lambda state: None)
     monkeypatch.setattr(loader.profile_chain, "linked_profiles", lambda state: {})
-    monkeypatch.setattr(loader.profile_chain, "profile_dirs", lambda bundle, csv, linked: [])
+    monkeypatch.setattr(loader.profile_chain, "profile_dirs", lambda bundle, csv, linked, user=None, shared=None: [])
 
     assert loader.layer_dirs({}, tmp_path) == [("package", PACKAGE_DIR)]
     assert loader.layer_dirs({}, None) == [("package", PACKAGE_DIR)]

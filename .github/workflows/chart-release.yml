@@ -14,13 +14,12 @@ permissions:
   contents: read
 
 jobs:
-  publish:
+  package:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     if: github.event.workflow_run.event == 'release' && github.event.workflow_run.conclusion == 'success'
     timeout-minutes: 5
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,19 +36,51 @@ jobs:
         with:
           version: v3.18.6
 
-      - name: Package and publish the release chart
+      - name: Package the release chart
+        env:
+          RELEASE: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          version="${RELEASE#v}"
+          sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
+          helm package deploy/helm/agentihooks-swarm --version "$version" --app-version "$version" --destination "$RUNNER_TEMP/chart"
+
+      - name: Upload the packaged chart
+        uses: ./.github/actions/retry-upload
+        with:
+          name: release-chart
+          path: ${{ runner.temp }}/chart/
+          if-no-files-found: error
+          retention-days: 1
+
+  kind:
+    needs: package
+    uses: ./.github/workflows/helm-kind-published.yml
+    with:
+      version: ${{ github.event.workflow_run.head_branch }}
+      chart-artifact: release-chart
+
+  publish:
+    needs: kind
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.18.6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-chart
+          path: ${{ runner.temp }}/chart
+
+      - name: Publish the release chart that kind installed
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE: ${{ github.event.workflow_run.head_branch }}
         run: |
           version="${RELEASE#v}"
           printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
-          helm package deploy/helm/agentihooks-swarm --version "$version" --app-version "$version" --destination "$RUNNER_TEMP/chart"
           helm push "$RUNNER_TEMP/chart/agentihooks-swarm-$version.tgz" "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
-
-  kind:
-    needs: publish
-    uses: ./.github/workflows/helm-kind-published.yml
-    with:
-      version: ${{ github.event.workflow_run.head_branch }}

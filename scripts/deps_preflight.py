@@ -1,7 +1,7 @@
 """`agentihooks deps check|ensure` — the bundle's dev-environment dependencies, checked and installed before launch.
 
-The manifest is ``<bundle>/deps.json``, read from the root bundle and then the user bundle; an
-entry of the user bundle replaces the root entry with the same id. Each entry declares how to check
+The manifest is ``<bundle>/deps.json``, read from the root bundle, then the shared bundle, then the user
+bundle; a later entry replaces an earlier one with the same id. Each entry declares how to check
 itself and, unless its kind is ``system``, how to install itself. System dependencies need the
 operator (sudo, a package manager), so they are only reported.
 """
@@ -82,8 +82,16 @@ def user_manifest_path() -> Path | None:
     return path if path and path.is_file() else None
 
 
+def shared_manifest_path() -> Path | None:
+    from scripts.install import _get_shared_bundle_path
+
+    shared = _get_shared_bundle_path()
+    path = shared / "deps.json" if shared else None
+    return path if path and path.is_file() else None
+
+
 def manifest_paths() -> list[Path]:
-    return [path for path in (manifest_path(), user_manifest_path()) if path]
+    return [path for path in (manifest_path(), shared_manifest_path(), user_manifest_path()) if path]
 
 
 def declared(paths: list[Path] | None = None) -> list[Dep]:
@@ -93,8 +101,10 @@ def declared(paths: list[Path] | None = None) -> list[Dep]:
     return list(merged.values())
 
 
-def fleet_plugins(bundle: Path | None, user: Path | None = None) -> list[str]:
-    paths = [root / "deps.json" for root in (bundle, user) if root is not None and (root / "deps.json").is_file()]
+def fleet_plugins(bundle: Path | None, user: Path | None = None, shared: Path | None = None) -> list[str]:
+    paths = [
+        root / "deps.json" for root in (bundle, shared, user) if root is not None and (root / "deps.json").is_file()
+    ]
     return [dep.id for dep in declared(paths) if dep.kind == "claude-plugin" and dep.present]
 
 

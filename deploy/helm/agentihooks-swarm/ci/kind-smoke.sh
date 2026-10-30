@@ -15,6 +15,7 @@ ca_dir=""
 prep=""
 route=""
 terminal=""
+drain_proof=""
 
 if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
   mkdir -p "$KIND_LAYER_CACHE"
@@ -28,6 +29,7 @@ python3 tests/chart_hive_home.py "$chart"
 python3 tests/chart_hive_rollout.py
 python3 tests/chart_hive_only.py "$chart"
 python3 tests/chart_hub.py "$chart"
+python3 tests/chart_api.py "$chart"
 python3 tests/chart_ledger_rollout.py "$chart"
 python3 tests/chart_scheduler_state.py "$chart"
 python3 tests/chart_nats.py "$chart"
@@ -46,6 +48,9 @@ finish() {
   rm -f "$load_lock" "${ledger_values:-}"
   if [[ -n $route ]]; then
     wait "$route" || true
+  fi
+  if [[ -n $drain_proof ]]; then
+    wait "$drain_proof" || true
   fi
   if [[ -n $ca_dir ]]; then
     rm -rf "$ca_dir"
@@ -436,6 +441,8 @@ ca_dir="$(mktemp -d)"
 prep=$!
 
 kubectl exec "$ledger_pod" -- env AGENTIHOOKS_DEPLOYMENT=local python -c "from scripts.swarm.store import SwarmConfig, connect; from scripts.swarm_ledger.new_ledger import create; create('$slug', {'title': 'Kind proof', 'phases': [{'title': 'Prove the Helm chart'}]}, 'swarm'); connect().create(SwarmConfig('$slug', '/data', 0, 0, state='paused', load_high=10.0, memory_per_agent_mb=1)); print('ledger and swarm $slug registered, no lease bound')"
+bash "$chart/ci/hive-drain-proof.sh" "$image" "$release" &
+drain_proof=$!
 kubectl rollout restart deployment "$release-controller"
 kubectl rollout status deployment "$release-controller" --timeout 2m
 hive="$(kubectl get deployment "$release-controller" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SWARM_HIVE_ID")].value}')"
@@ -498,11 +505,12 @@ import json
 import os
 import uuid
 
+from scripts.swarm import fencing
 from scripts.swarm.store import connect
 
 store = connect()
 slug = os.environ["SLUG"]
-epoch = int(store.redis.get(store.key(slug, "control-epoch")))
+epoch = fencing.read(store, slug)["epoch"]
 token = json.dumps({"epoch": epoch, "token": uuid.uuid4().hex, **json.loads(os.environ["HOLDER"])})
 store.redis.set(store.key(slug, "tick-lock"), token, px=600_000, nx=True)
 print(store.redis.get(store.key(slug, "tick-lock")))
@@ -552,6 +560,10 @@ printf 'controller restarted by its liveness probe and holds the lease again: %s
 
 if ! wait "$prep"; then
   printf 'the controller setup objects for the control API were not created\n' >&2
+  exit 1
+fi
+if ! wait "$drain_proof"; then
+  printf 'a rolled hive did not wait for its agent to hand off under the roll lease\n' >&2
   exit 1
 fi
 helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \

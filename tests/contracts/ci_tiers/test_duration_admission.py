@@ -11,9 +11,11 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def legacy(workflows):
+def legacy(workflows: dict[str, dict]) -> dict[str, dict]:
     base = ci_gate_queue.normalize(workflows)
     jobs = base["test.yml"]["jobs"]
+    jobs.pop("type-gate", None)
+    jobs["gate-required"]["needs"] = [name for name in jobs["gate-required"]["needs"] if name != "type-gate"]
     if "durations" in jobs:
         return base
     selection = jobs["select"]
