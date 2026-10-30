@@ -96,3 +96,11 @@ def test_a_cold_command_reads_credentials_while_the_writer_lock_is_held(monkeypa
         holder.execute("SET LOCAL idle_in_transaction_session_timeout = 0")
         assert ledger.local_credentials(slug, "", True) == {"X-Ledger-Token": token}
         assert ledger.local_credentials(f"{slug}-missing", "", True) == {"X-Ledger-Token": ""}
+
+
+def test_an_uninitialized_database_has_no_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        postgres, "SESSION", {**postgres.SESSION, "options": f"{postgres.SESSION['options']} -c search_path=pg_temp"}
+    )
+    address = psycopg2.extensions.make_dsn(URL, application_name=f"empty-{uuid.uuid4().hex[:12]}")
+    assert postgres.PostgresLedgerRepository(address).token("missing") is None

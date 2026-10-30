@@ -333,6 +333,8 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
 
     def token(self, slug: str) -> str | None:
         with Database(self.address).read_only() as connection:
+            if connection.execute("SELECT to_regclass('ledgers')").fetchone()[0] is None:
+                return None
             row = connection.execute(TOKEN, (slug,)).fetchone()
         return None if row is None else row[0]
 
