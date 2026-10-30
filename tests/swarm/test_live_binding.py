@@ -1349,3 +1349,87 @@ def test_a_kept_master_does_not_skip_later_agents(ticking):
     }
     tick("sw", store, ledger, runtime, 200)
     assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), later.name))["at"] == 200
+
+
+HIVE_HOME = "/home/worker/.agentihooks/profiles/.homes/engineer/abc/claude"
+
+
+def _hosted(store, agent, monkeypatch, tmp_path, report=True):
+    from scripts.hive import join_report
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    hosted = replace(
+        agent,
+        profile="engineer",
+        harness="claude",
+        execution_id="exe-hosted",
+        hive="stable",
+        runtime_backend="local",
+        runtime_target={"host_id": "stable"},
+        profile_decision={},
+    )
+    store.put_agent("sw", hosted)
+    if report:
+        checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
+        context = {"home": HIVE_HOME, "profile": "engineer", "harness": "claude"}
+        join_report.start(store.redis, "sw", hosted, "session", checks, context, 150)
+    return hosted
+
+
+def _hive_facts(agent):
+    return {**live_binding.assignment(agent), "home": HIVE_HOME, "hooks": True}
+
+
+def test_hosted_agent_takes_the_home_its_hive_join_report_names(ticking, monkeypatch, tmp_path):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    hosted = _hosted(store, old, monkeypatch, tmp_path)
+    assert live_binding.assignment(hosted)["home"] == str(
+        tmp_path / ".agentihooks" / "profiles" / "engineer" / "claude"
+    )
+    filled = live_binding.hosted_home(store, hosted)
+    assert filled.profile_decision == {"validation": {"home": HIVE_HOME}}
+    assert live_binding.assignment(filled)["home"] == HIVE_HOME
+    assert live_binding.hosted_home(store, filled) == filled
+    runtime.bindings = lambda agents: {a.name: _hive_facts(a) for a in agents}
+    tick("sw", store, ledger, runtime, 200)
+    assert hosted.name not in runtime.killed
+    kept = next(a for a in store.agents("sw") if a.name == hosted.name)
+    assert kept.profile_decision["validation"]["home"] == HIVE_HOME
+    report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), hosted.name))
+    assert (report["state"], report["differences"]) == ("matching", {})
+
+
+def test_hosted_agent_without_a_join_report_has_an_unknown_home_that_never_retires(ticking, monkeypatch, tmp_path):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    hosted = _hosted(store, old, monkeypatch, tmp_path, report=False)
+    assert live_binding.hosted_home(store, hosted) == hosted
+    assert live_binding.compare(hosted, _hive_facts(hosted)) == {}
+    assert live_binding.unknown(hosted, _hive_facts(hosted)) == ["home"]
+    runtime.bindings = lambda agents: {a.name: _hive_facts(a) for a in agents}
+    tick("sw", store, ledger, runtime, 200)
+    assert hosted.name not in runtime.killed
+    report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), hosted.name))
+    assert (report["state"], report["unknown"]) == ("matching", ["home"])
+
+
+def test_local_agent_without_validation_still_expects_the_profile_home(monkeypatch, tmp_path):
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    agent = AgentRecord("old", "eng", "one", harness="claude", profile="engineer", runtime_backend="local")
+    facts = {**live_binding.assignment(agent), "home": HIVE_HOME, "hooks": True}
+    assert live_binding.compare(agent, facts) == {
+        "home": {"expected": str(tmp_path / ".agentihooks" / "profiles" / "engineer" / "claude"), "actual": HIVE_HOME}
+    }
+    assert live_binding.unknown(agent, facts) == []
