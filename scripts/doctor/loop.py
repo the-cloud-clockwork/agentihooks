@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from scripts.doctor import ci_speed, ci_speed_read, github_status
@@ -311,7 +312,7 @@ def _free_stem(finding, base, tasks):
         earlier = held
 
 
-def fix_tasks(watched, finding, verdict, fix, tasks):
+def fix_tasks(watched: str, finding: dict, verdict: dict | None, fix: str, tasks: Sequence[dict]) -> list[dict]:
     """A troubleshoot task, then a code or tune task naming the number to move and the command that measures it."""
     if not verdict or verdict.get("value") not in JUDGED_REAL:
         value = verdict.get("value") if verdict else "no verdict"
@@ -336,6 +337,7 @@ def fix_tasks(watched, finding, verdict, fix, tasks):
             "must": f"the root cause of {finding['summary']} is shown by evidence",
             "check": "the evidence in the task proof",
             "judge": "the Standards reader",
+            "feature": "yes",
         },
     }
     fixed = {
@@ -351,6 +353,7 @@ def fix_tasks(watched, finding, verdict, fix, tasks):
             "must": f"{number} falls, measured the same way before and after",
             "check": f"{measure}, run before and after the fix",
             "judge": "the Doctor master",
+            "feature": "yes",
         },
     }
     if kind in WORKSTATION_KINDS:

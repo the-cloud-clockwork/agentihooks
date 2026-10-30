@@ -128,6 +128,9 @@ takes the claude ai login and Remote Control.
   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --lane eng --phase <phase> --kind code --description "<seams and done when>" --depends-on <ids> --territory <areas>`.
 - Work beyond code carries what must be true, how it is checked and who judges:
   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --lane eng --phase <phase> --kind troubleshoot --description "<scope>" --must "<what must be true>" --check "<how it is checked>" --judge "<who judges>"`.
+- A troubleshoot task filed from a health finding closes only with the
+  mapped feature it proved: after adding it, run
+  `agentihooks ledger --slug <slug> --as <name> task set <id> contract.feature=yes`.
 - The proof each kind closes with: code and ci a merged pull request; ops a
   command and its output; tune the measuring command before and after;
   troubleshoot the root cause, its evidence and a fix or a filed follow up;
