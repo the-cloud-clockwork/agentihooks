@@ -34,10 +34,8 @@
  "hooks/mcp/conditions.py": 4,
  "hooks/mcp/enforcement.py": 3,
  "hooks/mcp/recall.py": 4,
- "hooks/memory/archive.py": 1,
  "hooks/memory/catalog.py": 2,
  "hooks/memory/chunking.py": 1,
- "hooks/memory/collector.py": 1,
  "hooks/memory/cursors.py": 1,
  "hooks/memory/importer.py": 1,
  "hooks/memory/index_worker.py": 1,
@@ -61,7 +59,6 @@
  "scripts/ci_touched_tests.py": 1,
  "scripts/codex_quota.py": 2,
  "scripts/codex_session/binding.py": 6,
- "scripts/evidence/schema.py": 3,
  "scripts/gates/identity.py": 2,
  "scripts/hive/nats_grant.py": 1,
  "scripts/hive/server.py": 3,
@@ -94,7 +91,7 @@
  "scripts/swarm_ledger/models.py": 6,
  "scripts/swarm_ledger/page_assets.py": 1,
  "scripts/swarm_ledger/repository/__init__.py": 1,
- "scripts/swarm_ledger/repository/sqlite.py": 1,
+ "scripts/swarm_ledger/repository/sqlite.py": 2,
  "scripts/swarm_ledger/storage_migration/hosted.py": 2,
  "scripts/swarm_v2/accounts.py": 2,
  "scripts/swarm_v2/admission.py": 1,
@@ -137,5 +134,5 @@
  "scripts/swarm_v2/worker/control.py": 2,
  "scripts/swarm_v2/worker_health.py": 1,
  "scripts/swarm_v2/workspaces.py": 1,
- "scripts/workflows/schema.py": 3
+ "scripts/workflows/schema.py": 1
 }

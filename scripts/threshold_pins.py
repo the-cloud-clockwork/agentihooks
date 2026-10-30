@@ -172,6 +172,7 @@ def registry_errors(
     head: Path, allowlists: tuple[str, ...] = SHRINK_ONLY, graded: tuple[tuple[str, str], ...] = GRADED_BY
 ) -> list[str]:
     known = set(allowlists) | {path for path, _ in graded}
+    known.update(constant(head, "scripts/threshold_pins.py", "SHRINK_ONLY") or ())
     found = [
         name
         for name in tracked(head)

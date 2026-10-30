@@ -224,13 +224,15 @@ class ExecutionRegistry:
     def _update(self, slug: str, agent: AgentRecord) -> None:
         self.validate(slug, agent)
 
-        def change(doc):
+        def change(doc: dict) -> tuple[AgentRecord, AgentRecord]:
             current = occupants_of(doc).get(agent.seat)
             if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                 self.conflict(slug, "stale or changed execution identity")
             written = agent
-            if _read_before_ack(agent.runtime_target, current.runtime_target):
-                written = replace(agent, **{field: getattr(current, field) for field in LAUNCH_BINDING})
+            if current.state == "finished" and written.state != "ended":
+                written = replace(written, state="finished")
+            if _read_before_ack(written.runtime_target, current.runtime_target):
+                written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
             _check_binding(current.runtime_target, written.runtime_target, lambda message: self.conflict(slug, message))
             self.check_uid(slug, written, doc)
             if written != current:
@@ -334,6 +336,10 @@ def _check_binding(previous, current, refuse):
 
 def _read_before_ack(written, stored):
     return set(written) == {"host_id"} and stored != written and stored.get("host_id") == written["host_id"]
+
+
+def _finished_life(row, agent):
+    return row["state"] == "finished" and row["pane_id"] == agent.pane_id and agent.state != "ended"
 
 
 def _has_identity(agent):
