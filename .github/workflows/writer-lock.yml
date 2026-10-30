@@ -25,6 +25,11 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+      - name: Key the declared inputs
+        id: key
+        uses: ./.github/actions/input-key
+        with:
+          job: writer-lock
       - name: Select hive join smoke inputs
         id: hive-join
         if: github.event_name == 'pull_request'
@@ -46,11 +51,6 @@ jobs:
             done
           done < "$RUNNER_TEMP/hive-join-changed"
           echo "due=$due" >> "$GITHUB_OUTPUT"
-      - name: Key the declared inputs
-        id: key
-        uses: ./.github/actions/input-key
-        with:
-          job: writer-lock
 
   hive-join:
     needs: [inputs]
