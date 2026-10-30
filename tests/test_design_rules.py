@@ -1,3 +1,4 @@
+import ast
 import subprocess
 from pathlib import Path
 
@@ -93,6 +94,13 @@ def test_a_new_private_function_without_hints_is_red_on_star_parameters_and_retu
     assert _errors(tmp_path, {"scripts/job.py": "def _run(*items, **options):\n    pass\n"}) == [
         "untyped: scripts/job.py::_run lacks type hints on items, options, return"
     ]
+
+
+def test_a_bare_signature_is_the_signature_with_every_annotation_removed():
+    typed = "@staticmethod\ndef f(a: int, /, b: str, *c: str, d: int = 1, **e: bytes) -> int:\n    pass\n"
+    plain = "@staticmethod\ndef f(a, /, b, *c, d=1, **e):\n    pass\n"
+    bare = design_rules._bare_signature(ast.parse(typed).body[0])
+    assert bare == design_rules._signature(ast.parse(plain).body[0])
 
 
 def test_a_fully_typed_private_function_is_green(tmp_path):
@@ -383,6 +391,15 @@ def test_an_inheritance_cycle_is_red_and_terminates(tmp_path):
         _inherits("scripts/job.py::A", "scripts.job.B"),
         _inherits("scripts/job.py::B", "scripts.job.A"),
     ]
+
+
+def test_an_existing_class_that_gains_a_concrete_base_is_graded(tmp_path):
+    before = CONCRETE + "\n\nclass Cache:\n    pass\n"
+    after = CONCRETE + "\n\nclass Cache(Store):\n    pass\n"
+    assert _grade(tmp_path, {"scripts/store.py": before}, {"scripts/store.py": after}) == (
+        1,
+        [_inherits("scripts/store.py::Cache", "scripts.store.Store")],
+    )
 
 
 def test_an_existing_subclass_whose_body_changes_is_not_graded(tmp_path):

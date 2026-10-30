@@ -152,20 +152,21 @@ def shareable(index: Index, target: tuple[str, str], seen: frozenset = frozenset
     return False
 
 
-def _bare(args: ast.arguments) -> ast.arguments:
-    stripped = copy.deepcopy(args)
-    for node in ast.walk(stripped):
-        if isinstance(node, ast.arg):
-            node.annotation = None
-    return stripped
+def _bare_signature(node: ast.AST) -> tuple[str, ...]:
+    if isinstance(node, ast.ClassDef):
+        return _signature(node)
+    args = copy.deepcopy(node.args)
+    for arg in ast.walk(args):
+        if isinstance(arg, ast.arg):
+            arg.annotation = None
+    return (type(node).__name__, *(ast.dump(part) for part in [*node.decorator_list, args]))
 
 
-def _signature(node: ast.AST, typed: bool = True) -> tuple[str, ...]:
+def _signature(node: ast.AST) -> tuple[str, ...]:
     if isinstance(node, ast.ClassDef):
         parts = [*node.decorator_list, *node.bases, *node.keywords]
     else:
-        args = node.args if typed else _bare(node.args)
-        parts = [*node.decorator_list, args, *([node.returns] if node.returns and typed else [])]
+        parts = [*node.decorator_list, node.args, *([node.returns] if node.returns else [])]
     return (type(node).__name__, *(ast.dump(part) for part in parts))
 
 
@@ -184,7 +185,7 @@ def units(syntax: ast.Module, rel: str) -> dict[str, Unit]:
             if seen[name] > 1:
                 name = f"{name}#{seen[name]}"
             visible = public and not child.name.startswith("_")
-            found[f"{rel}::{name}"] = Unit(_signature(child), _signature(child, typed=False), child, visible)
+            found[f"{rel}::{name}"] = Unit(_signature(child), _bare_signature(child), child, visible)
             walk(child, f"{name}.", visible and isinstance(child, ast.ClassDef))
 
     walk(syntax, "", True)
@@ -329,7 +330,7 @@ def _graded(rel: str) -> bool:
 
 
 def _shape(node: ast.ClassDef) -> list[tuple[str, ...]]:
-    return [(method.name, *_signature(method, typed=False)) for method in _methods(node)]
+    return [(method.name, *_bare_signature(method)) for method in _methods(node)]
 
 
 def _reshaped(previous: Unit | None, unit: Unit) -> bool:
