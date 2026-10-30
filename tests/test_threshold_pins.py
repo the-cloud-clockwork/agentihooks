@@ -279,9 +279,28 @@ def test_a_registered_allowlist_still_cannot_grow(tmp_path):
     assert errors == [f"{path}: new is new; the base does not allow it; allowlists only shrink"]
 
 
+def test_an_allowlist_its_own_gate_grades_may_rise(tmp_path):
+    base = _tree(tmp_path / "base", {ALLOWLIST: json.dumps({"a.py": 0})})
+    head = _tree(tmp_path / "head", {ALLOWLIST: json.dumps({"a.py": 169, "b.py": 202})})
+    assert threshold_pins.allowlist_errors(base, head, (ALLOWLIST,), ((ALLOWLIST, "scripts.gate"),)) == ([], 0)
+
+
+def test_a_type_baseline_refresh_passes_the_check(committed, tmp_path, capsys):
+    path = "tests/TYPE_BASELINE.json"
+    head = tmp_path / "head"
+    subprocess.run(["cp", "-a", str(committed), str(head)], check=True)
+    raised = json.loads((head / path).read_text())
+    raised["scripts/swarm_ledger/api/store.py"] = raised.get("scripts/swarm_ledger/api/store.py", 0) + 169
+    (head / path).write_text(json.dumps(raised, indent=2) + "\n")
+    assert threshold_pins.main(["--base", str(committed), "--head", str(head)]) == 0
+    assert "TYPE_BASELINE" not in capsys.readouterr().out
+
+
 def test_every_pin_and_allowlist_names_a_real_literal_in_this_repository(committed):
     assert threshold_pins.pin_errors(committed, committed) == ([], len(threshold_pins.PINS))
-    assert threshold_pins.allowlist_errors(committed, committed) == ([], len(threshold_pins.SHRINK_ONLY))
+    graded = {path for path, _ in threshold_pins.GRADED_BY}
+    shrink_only = [path for path in threshold_pins.SHRINK_ONLY if path not in graded]
+    assert threshold_pins.allowlist_errors(committed, committed) == ([], len(shrink_only))
     assert threshold_pins.registry_errors(committed) == []
     for path in threshold_pins.SHRINK_ONLY:
         assert (committed / path).is_file(), path
