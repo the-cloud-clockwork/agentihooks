@@ -29,9 +29,15 @@ def master(tmp_path, monkeypatch):
     return tmp_path
 
 
+def _now_ms(store):
+    seconds, microseconds = store.redis.time()
+    return seconds * 1000 + microseconds // 1000
+
+
 def _sustain(store):
-    blockers.record(store, SLUG, "cat", "boom", 0)
-    blockers.record(store, SLUG, "cat", "boom", HOUR)
+    now = _now_ms(store)
+    blockers.record(store, SLUG, "cat", "boom", now - HOUR)
+    blockers.record(store, SLUG, "cat", "boom", now)
 
 
 def test_a_non_master_session_is_never_touched(store, master):

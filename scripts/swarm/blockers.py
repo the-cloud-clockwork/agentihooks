@@ -7,6 +7,8 @@ still recurring in the last RECENT_MS, blocks other work until it is cleared.
 import json
 from dataclasses import dataclass
 
+from scripts.swarm.store import RedisStore
+
 TTL_MS = 24 * 60 * 60 * 1000
 SUSTAINED_MS = 60 * 60 * 1000
 RECENT_MS = 15 * 60 * 1000
@@ -24,11 +26,11 @@ class Blocker:
     detail: str
 
 
-def _key(store, slug):
+def _key(store: RedisStore, slug: str) -> str:
     return store.key(slug, KEY)
 
 
-def record(store, slug, category, detail, now_ms):
+def record(store: RedisStore, slug: str, category: str, detail: str, now_ms: int) -> None:
     key = _key(store, slug)
     raw = store.redis.hget(key, category)
     previous = json.loads(raw) if raw else None
@@ -42,11 +44,11 @@ def record(store, slug, category, detail, now_ms):
     store.redis.pexpire(key, TTL_MS)
 
 
-def clear(store, slug, category):
+def clear(store: RedisStore, slug: str, category: str) -> None:
     store.redis.hdel(_key(store, slug), category)
 
 
-def active(store, slug, now_ms):
+def active(store: RedisStore, slug: str, now_ms: int) -> dict[str, Blocker]:
     key = _key(store, slug)
     found = {}
     for category, raw in store.redis.hgetall(key).items():
@@ -58,7 +60,7 @@ def active(store, slug, now_ms):
     return found
 
 
-def sustained(store, slug, now_ms):
+def sustained(store: RedisStore, slug: str, now_ms: int) -> dict[str, Blocker]:
     return {
         category: blocker
         for category, blocker in active(store, slug, now_ms).items()
@@ -66,7 +68,7 @@ def sustained(store, slug, now_ms):
     }
 
 
-def due_notice(store, slug, now_ms):
+def due_notice(store: RedisStore, slug: str, now_ms: int) -> bool:
     key = store.key(slug, NOTICE_KEY)
     last = store.redis.get(key)
     if last is not None and now_ms - int(last) < NOTICE_MS:

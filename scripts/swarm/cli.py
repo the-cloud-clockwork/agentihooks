@@ -1512,7 +1512,7 @@ def cmd_verdict(store, args):
     print(json.dumps({"finding": args.finding, "verdict": verdict["value"], "hidden_minutes": minutes}))
 
 
-def cmd_blockers(store, args):
+def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
     if args.action == "clear":
         if not args.category:
             raise SwarmError("blockers clear needs a category")

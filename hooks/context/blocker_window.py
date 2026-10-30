@@ -3,8 +3,12 @@ window automatically, injects a once-a-minute notice naming each sustained categ
 is not part of the fix. Never fires for a non-master session; fails open on a store error."""
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hooks.context import master_coding
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import RedisStore
 
 NOTICE = (
     "BLOCKER QUEUE on swarm {slug}: {categories} sustained for an hour or more. Fix this now: the master coding "
@@ -25,7 +29,7 @@ def _slug(session_id: str) -> str:
     return master_coding.seat(session_id).get("slug", "")
 
 
-def _store():
+def _store() -> "RedisStore | None":
     from scripts.swarm.store import SwarmError, Unreachable, connect
 
     try:
@@ -34,7 +38,7 @@ def _store():
         return None
 
 
-def _sustained(store, slug: str, now_ms: int) -> dict:
+def _sustained(store: "RedisStore", slug: str, now_ms: int) -> dict:
     from scripts.swarm import blockers
 
     try:
