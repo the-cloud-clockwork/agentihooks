@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import warnings
+from pathlib import Path
 
 import pytest
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
@@ -1057,6 +1058,57 @@ def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypa
         == "owner exited"
     )
     timer.assert_called_once_with(trace_flush.POLL_SEC, state=None)
+
+
+@pytest.mark.parametrize("interval", [0.25, 2.5, 15.0])
+def test_unanswered_scheduler_does_not_delay_source_acceptance(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interval: float
+) -> None:
+    from unittest.mock import Mock
+
+    transcript = tmp_path / "cadence.jsonl"
+    _grow(transcript)
+    _request("cadence-session", transcript)
+    state = {"now": 0.0, "alive": True}
+    accepted: list[tuple[float, int]] = []
+    waits: list[float] = []
+
+    def clock() -> float:
+        return state["now"]
+
+    def local_wait(delay: float) -> None:
+        waits.append(delay)
+        state["now"] += delay
+
+    def unanswered_scheduler(delay: float, **kwargs: object) -> None:
+        state["now"] += 200.0
+
+    def send(session: str, path: str, timeout: float, trigger: str) -> bool:
+        accepted.append((clock(), Path(path).stat().st_size))
+        if len(accepted) == 1:
+            _grow(transcript)
+        else:
+            state["alive"] = False
+        return True
+
+    scheduler = Mock(side_effect=unanswered_scheduler)
+    monkeypatch.setattr(trace_flush, "timer_wait", scheduler)
+    assert (
+        trace_flush.supervise(
+            "cadence-session",
+            trace_flush.Budget(interval, 5, 3),
+            send,
+            clock,
+            local_wait,
+            lambda owner: state["alive"],
+        )
+        == "owner exited"
+    )
+    assert accepted == [(0.0, accepted[0][1]), (interval, transcript.stat().st_size)]
+    assert accepted[0][1] < accepted[1][1]
+    assert sum(waits) == interval
+    assert max(waits) <= min(trace_flush.POLL_SEC, interval)
+    scheduler.assert_not_called()
 
 
 @pytest.mark.parametrize("failure", ["timeout", "connection", "conflict"])
