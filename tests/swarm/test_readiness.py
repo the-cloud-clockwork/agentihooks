@@ -1,6 +1,7 @@
 import pytest
 
 from scripts.events import memory
+from scripts.events.bus import Bus, WorkQueue
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.swarm import readiness
 from scripts.swarm_ledger.repository import hierarchy
@@ -147,11 +148,11 @@ def test_publish_offers_each_ready_task_to_its_lane_queue_once_per_generation(bu
     assert queued(bus, "ci", view) == ["b"]
 
 
-def test_publish_opens_every_lane_queue_even_with_no_offer_so_the_plan_stream_exists(bus):
+def test_publish_opens_every_lane_queue_even_with_no_offer_so_the_plan_stream_exists(bus: Bus) -> None:
     opened = []
     real = bus.queue
 
-    def queue(name, policy):
+    def queue(name: str, policy: QueuePolicy) -> WorkQueue:
         opened.append((name, policy))
         return real(name, policy)
 
@@ -161,7 +162,7 @@ def test_publish_opens_every_lane_queue_even_with_no_offer_so_the_plan_stream_ex
     assert opened == [(readiness.queue_name(SLUG, lane), policy) for lane in ("eng", "ci", "plan")]
 
 
-def test_publish_offers_a_plan_task_to_the_plan_queue_it_opened(bus):
+def test_publish_offers_a_plan_task_to_the_plan_queue_it_opened(bus: Bus) -> None:
     found = doc([task("p", lane="plan")])
     assert readiness.publish(bus, snapshot(found), NOW) == ["ready:sw:p:0"]
     assert queued(bus, "plan", snapshot(found)) == ["p"]
