@@ -664,10 +664,10 @@ def test_held_revisions_are_held_released_and_dropped_through_the_api(api: tuple
     repository.hold_revision("relay", "split", 1)
 
     repository.release_revisions("inbox", "split", 2, 3)
-    held = repository.held_revisions()
+    held = (repository.held_revisions(), stored.held_revisions())
     repository.drop_revisions("relay", "split")
 
-    assert held == stored.held_revisions() == {"inbox": {"split": [1]}, "relay": {"split": [1]}}
+    assert held == ({"inbox": {"split": [1]}, "relay": {"split": [1]}},) * 2
     assert repository.held_revisions() == {"inbox": {"split": [1]}}
     drop = dict(action="drop", kind="inbox", slug="split")
     assert remote.Client(base, "secret").call("POST", "/held", body=drop) == (200, {"ok": True})
