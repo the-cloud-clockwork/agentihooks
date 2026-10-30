@@ -40,7 +40,7 @@ SKIPPED = {
 }
 
 # A promotion gate the protected grader accepts before the pull request that adds it lands.
-ANNOUNCED = {"install-smoke", "dep-manifest"}
+ANNOUNCED = {"install-smoke", "dep-manifest", "type-gate"}
 
 
 def inventory(jobs: list[dict], expected: set[str]) -> dict[str, dict]:
