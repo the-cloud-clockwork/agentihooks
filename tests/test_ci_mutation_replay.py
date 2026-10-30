@@ -11,7 +11,13 @@ from scripts.ci_mutation import replay
 def test_replay_preserves_sources_tests_and_selected_mutants(tmp_path, monkeypatch, capsys, changed_scope):
     archive = tmp_path / "input.zip"
     name = "scripts.sample.x_f__mutmut_1"
-    scope = {"scripts/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]}}
+    scope = {
+        "scripts/sample.py": {
+            "lines": [2],
+            "tests": ["tests/test_sample.py"],
+            "direct": ["tests/test_sample.py::test_f"],
+        }
+    }
     stats = [
         {
             "tests": {"scripts.sample.x_f": ["tests/test_sample.py::test_f"]},
@@ -55,6 +61,9 @@ def test_replay_preserves_sources_tests_and_selected_mutants(tmp_path, monkeypat
         assert str(error.value) == "replay plan changed the retained mutant scope"
     else:
         plan = replay.prepare("second", folder)
+        assert json.loads((folder / "source/.mutation-direct.json").read_text()) == {
+            "scripts/sample.py": ["tests/test_sample.py::test_f"]
+        }
         assert plan["assignments"] == {name: 0}
         assert plan["head"] == "retained"
         assert plan["costs"][name] >= 100

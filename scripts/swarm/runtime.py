@@ -788,6 +788,7 @@ class HerdrRuntime:
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
         argv += ["--claim-fence", json.dumps(task["claim_fence"])] if task.get("claim_fence") else []
         argv += ["--defer-canary"] if lane == MASTER and self.defer_master_canary and agent != "codex" else []
+        argv += ["--launch-until", str(task["launch_until_ms"])] if task.get("launch_until_ms") is not None else []
         argv += title
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)

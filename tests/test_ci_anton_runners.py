@@ -101,6 +101,7 @@ MOVED = {
     ("test.yml", "select"): LIGHT,
     ("test.yml", "shard-check"): LIGHT,
     ("test.yml", "sonar"): QUEUED,
+    ("test.yml", "dep-manifest"): QUEUED,
     ("test.yml", "split"): QUEUED,
     ("test.yml", "stage-budget"): LIGHT,
     ("test.yml", "test-count"): QUEUED,

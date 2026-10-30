@@ -331,8 +331,15 @@ def mutate_files(
     tests = sorted({test for _, chosen in selected.values() for test in chosen})
     prepare_workspace(root, work, list(selected), tests)
     selection = work / "changed-lines.json"
+    direct_path = root / ".mutation-direct.json"
+    direct = json.loads(direct_path.read_text()) if direct_path.is_file() else {}
     selection.write_text(
-        json.dumps({path: {"lines": sorted(lines), "tests": chosen} for path, (lines, chosen) in selected.items()})
+        json.dumps(
+            {
+                path: {"lines": sorted(lines), "tests": chosen, "direct": direct.get(path, [])}
+                for path, (lines, chosen) in selected.items()
+            }
+        )
     )
     log = work / "run.log"
     shard_args = [str(part) for part in shard]
