@@ -344,7 +344,19 @@ def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preser
         "splits": {},
     }
     assert plan_shards({"a": 480, "b": 481})["shards"] == 2
-    assert plan_shards({str(i): 10000 for i in range(11)})["shards"] == 10
+    assert plan_shards({str(i): 1000 for i in range(11)})["shards"] == 10
+
+
+def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_shards(monkeypatch):
+    from scripts.ci_mutation.measured import BATCH_RUNNERS, plan_shards
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
+    costs = {f"scripts.sample.x__mutmut_{index}": 160.0 for index in range(240)}
+    plan = plan_shards(costs, limit=10, budget=1080)
+    assert plan["shards"] == 12
+    assert max(plan["shard_worker_seconds"]) <= 3 * 1080
+    assert plan_shards({str(index): 5000 for index in range(60)}, budget=1080)["shards"] == BATCH_RUNNERS == 40
+    assert plan_shards({"a": 5000, "b": 5000}, budget=1080)["shards"] == 2
 
 
 def test_a_mutant_whose_tests_outlast_one_slice_runs_the_fast_head_with_each_slice_on_its_own_shard():
