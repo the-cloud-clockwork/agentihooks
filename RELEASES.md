@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.518 · 2026-10-30
+
+### 2026-10-30 · 03e07b5c3dca · #8990 · @agenticore-app
+
+**Clear comments in the hook integrations**
+
+This change strips all non-directive comments from the nine hooks/integrations modules, trimming module docstrings and folding constraint notes that were previously left as comments directly into docstrings for the affected classes and functions, including a stale, inaccurate comment about Postgres insert behavior that was simply dropped rather than preserved. It adds these modules to the comment-free allowlist and shrinks the size allowlist now that dynamodb.main fits the standard limit, and adds targeted tests covering lines whose comments were removed so coverage doesn't regress, with no behavioral or logic changes verified by AST comparison against the prior version.
+
 ## v2.17.517 · 2026-10-30
 
 ### 2026-10-30 · ae3aafaf487e · #8976 · @agenticore-app
