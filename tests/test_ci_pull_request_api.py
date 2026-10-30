@@ -189,6 +189,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_stats_seed.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
+        "scripts/feature_map.py",
         "scripts/hive/nats_grant.py",
         "scripts/packaging/compose-hive-smoke.sh",
         "scripts/packaging/compose-recovery-drill.sh",

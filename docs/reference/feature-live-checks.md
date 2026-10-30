@@ -6,12 +6,12 @@ nav_order: 61
 
 # Feature live checks
 
-An operator ordered feature can carry a live check: a command that judges the
-feature against the running swarms, not against the code. The Doctor runs every
-live check in the feature map on its timer and raises one `feature regressed`
-finding for each check that does not exit zero. The finding carries the
-operator's own words, so whoever judges it reads what was ordered, not a
-paraphrase. [Semgrep feature tests](semgrep-features.md) guard the same features
+A feature map entry can carry a live check: a command that judges the
+feature against the running swarms, not against the code. The Doctor runs the
+live check of every entry that has one on its timer and raises one `feature regressed`
+finding for each check that does not exit zero. An operator entry's finding
+carries the operator's own words, so whoever judges it reads what was ordered,
+not a paraphrase. [Semgrep feature tests](semgrep-features.md) guard the same features
 statically in CI; a live check catches a regression that only shows at run time.
 
 ## The feature map
@@ -19,25 +19,28 @@ statically in CI; a live check catches a regression that only shows at run time.
 The map is `feature-map.json` at the root of the agentihooks checkout the
 Doctor runs from: the detector reads the file beside the `scripts` folder of its
 own code, not the watched swarm's repository. With no file there the detector
-reports nothing. The map arrives with the feature map validation pull request
-([issue 7271](https://github.com/the-cloud-clockwork/agentihooks/issues/7271));
-until that file is on `dev`, every pass of the `feature` detector is empty.
+reports nothing. The [feature map](feature-map.md) page describes every key
+and origin and the CI validation that keeps the map consistent.
 
-The file holds one object with a `features` list. No map entry runs the
-front door login check yet; it is added by its own task. An entry that wires it
-looks like this:
+The file holds one object with a `features` list. Only entries with a
+`live_check` run; `regression` and `inventory` entries may leave it out, and an
+`operator` entry always has one. No map entry runs the front door login check
+yet; it is added by its own task, which also removes its rule from the map's
+`unmapped_rules`. An entry that wires it looks like this:
 
 ```json
 {
   "features": [
     {
       "id": "front-door-login",
+      "origin": "operator",
+      "seam": "The front door route of each running swarm's master",
       "operator_words": "All the main masters from all the swarms should run in the same tier unless the tier is exhausted.",
       "ordered_at": "2026-10-25",
       "ledger_item": "ledger:rig-grade-swarm-doctor/tasks/t853",
       "behaviour": "Every front door master runs on the preferred stored claude ai login.",
-      "semgrep_rule": "feature-front-door-login",
-      "behaviour_test": "tests/test_front_door_login_check.py::test_a_front_door_on_a_token_while_the_stored_login_has_room_fails",
+      "semgrep_rule": "feature-front-door-route-check",
+      "tests": ["tests/test_front_door_login_check.py::test_a_front_door_on_a_token_while_the_stored_login_has_room_fails"],
       "live_check": ["python", "-m", "scripts.feature_checks.front_door_login"]
     }
   ]
@@ -47,20 +50,19 @@ looks like this:
 | Field | Used by the detector | Meaning |
 |---|---|---|
 | `id` | Yes | The finding subject: the finding id is `feature-regressed/<id>` |
-| `operator_words` | Yes | The operator's words as he ordered the feature, quoted in the evidence |
-| `ordered_at` | Yes | The order date, `YYYY-MM-DD` |
-| `ledger_item` | Yes | The ledger item that holds the order |
 | `behaviour` | Yes | One sentence naming the behaviour the check protects, used in the summary |
-| `live_check` | Yes | The command as an argument list, run without a shell |
-| `semgrep_rule`, `behaviour_test` | No | The feature's Semgrep rule and behaviour test, read by the map's CI validation |
+| `live_check` | Yes | The command as an argument list, run without a shell; an entry without one is skipped |
+| `operator_words` | When present | The operator's words as he ordered the feature, quoted in the evidence |
+| `ordered_at`, `ledger_item` | When present | The order date and the ledger item that holds the order or the incident |
+| `origin`, `seam`, `tests`, `behaviour_test`, `semgrep_rule` | No | Read by the map's CI validation |
 
-The map on the validation branch holds one entry, `semgrep-feature-tests`, whose
-live check is `["bash", "scripts/feature_checks/semgrep-feature-tests.sh"]`.
+The map on `dev` holds one entry, `semgrep-feature-tests`, whose live check is
+`["bash", "scripts/feature_checks/semgrep-feature-tests.sh"]`.
 
-Every field the detector uses is required. A file that is not valid JSON or has
-no `features` key, or an entry without `live_check`, fails the whole detector
-for that pass. An entry missing another field fails it only when its check
-fails, because the finding is built from those fields. See
+A file that is not valid JSON or has no `features` key fails the whole detector
+for that pass. An entry without `id` or `behaviour` fails it only when its check
+fails, because the finding is built from those fields. The CI validation refuses
+both before they reach `dev`. See
 [Troubleshooting](#troubleshooting).
 
 ## How the Doctor runs a check
@@ -91,9 +93,8 @@ output bounds below are fixed in `scripts.doctor.features`.
 |---|---|
 | id | `feature-regressed/<id>`, for example `feature-regressed/front-door-login` |
 | summary | `feature <id> regressed: <behaviour>` |
-| evidence, first line | `operator words: <operator_words>` |
-| evidence, second line | `ordered <ordered_at> in <ledger_item>` |
-| evidence, third line | `live check <command> <how it ended>`: `exited <code>`, `timed out after 120 seconds`, or `could not run: <error type>: <message>` |
+| evidence, provenance | `operator words: <operator_words>` when the entry has them, then `ordered <ordered_at> in <ledger_item>` when it has an order date, else `from <ledger_item>` when it has a ledger item |
+| evidence, check line | `live check <command> <how it ended>`: `exited <code>`, `timed out after 120 seconds`, or `could not run: <error type>: <message>` |
 | evidence, remaining lines | `output: <line>`: the last six non-empty lines the check printed, standard output then standard error. None for a timeout or a check that could not start |
 | threshold | `a feature map live check that does not exit zero` |
 | number | `1` |
@@ -189,7 +190,7 @@ it exits 0. Through the Doctor, the last six of these lines become the finding's
 | Symptom | Cause | Action |
 |---|---|---|
 | No `feature regressed` finding ever appears | No `feature-map.json` at the root of the Doctor's checkout | Check with `ls ~/dev/tcc-ecosystem/agentihooks/feature-map.json`. The detector is silent without the map |
-| The Doctor tick prints `the feature detector failed: JSONDecodeError: ...` or `KeyError: ...` | The map is not valid JSON, has no `features` key, or an entry lacks a field the detector uses | Fix the map by pull request. No finding is raised for that pass, not only for the broken entry |
+| The Doctor tick prints `the feature detector failed: JSONDecodeError: ...` or `KeyError: ...` | The map is not valid JSON, has no `features` key, or a failing entry lacks `id` or `behaviour` | Fix the map by pull request. No finding is raised for that pass, not only for the broken entry |
 | `could not run: FileNotFoundError: ...` | The first argument is not on `PATH` and is not `python` or `python3`, or a script path is wrong relative to the map's folder | Paths resolve against the map's folder; run the command by hand from there |
 | `timed out after 120 seconds` | The check waited on something slow, such as an unreachable Redis | Run it by hand and time it. A check that reads live state should fail fast on an unreachable service |
 | The login check reports a master as a token front door though it runs on a login | The master's name is missing from every slot's `owner.json` holders | Read the slots with `agentihooks claude login --master --list`; the holder list is what the check trusts |
