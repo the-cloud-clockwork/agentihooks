@@ -236,7 +236,8 @@ hub:
       memory: 512Mi
       ephemeral-storage: 256Mi
 
-# Auth service: issues signed tokens other services verify with AGENTIHOOKS_AUTH_KEY, given through secretEnv.
+# Auth service: issues signed tokens other services verify with AGENTIHOOKS_AUTH_KEY, a secret of at least 32 bytes
+# given through secretEnv. legacy "off" makes services accept only signed tokens.
 auth:
   enabled: false
   replicas: 2

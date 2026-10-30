@@ -1,4 +1,4 @@
-"""Short lived signed tokens: the auth service signs them and every other service verifies them locally with one shared key."""
+"""Short lived signed tokens: the auth service signs them and other services verify them locally with a shared key."""
 
 import time
 from collections.abc import Mapping

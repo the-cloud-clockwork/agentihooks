@@ -210,7 +210,7 @@ def ledger_member(redis, credential: str) -> str | None:
     )
 
 
-def issue_agent(redis, member_id: str, slug: str, name: str) -> str:
+def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
     """A hive agent token scoped to one ledger and agent, recorded on its own without reading the member map."""
     store = _store(redis)
     digest = hive_state.read(store, f"holder.{member_id}") or (member(redis, member_id) or {}).get("ledger")
@@ -228,7 +228,7 @@ def issue_agent(redis, member_id: str, slug: str, name: str) -> str:
     return token
 
 
-def agent_member(redis, token: str, slug: str, name: str) -> str | None:
+def agent_member(redis: object, token: str, slug: str, name: str) -> str | None:
     member_id = token.removeprefix("hive.").partition(".")[0]
     store = _store(redis)
     scoped = hive_state.read(store, f"agent.{member_id}.{_digest(token)}")

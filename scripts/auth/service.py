@@ -26,7 +26,11 @@ def signed(principal: str, slug: str) -> str:
 
 
 def exchange(headers: Mapping[str, str], slug: str) -> dict:
-    """Verify an operator, agent, tick or controller credential and answer with a signed token for its principal."""
+    """Verify an operator, agent, tick or controller credential and answer with a signed token for its principal.
+
+    The issuer keeps verifying today's credentials whatever AGENTIHOOKS_AUTH_LEGACY says: that switch governs the
+    services that verify signed tokens, and this exchange is how a legacy holder obtains one.
+    """
     principal = authority.credential_caller(headers, "", slug)
     if principal is None and authority.controller_credential(headers.get("X-Controller-Credential")):
         principal = ""
@@ -62,7 +66,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, APIError(404, "not_found", "No such route").envelope())
 
     def do_POST(self) -> None:
-        self.rfile.read(int(self.headers.get("Content-Length") or 0))
         match = ROUTE.fullmatch(urlsplit(self.path).path)
         try:
             if match is None:
