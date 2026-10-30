@@ -46,6 +46,7 @@ def plan_file(tmp_path, phases):
     return str(path)
 
 
+@pytest.mark.feature("plan-phases-append")
 def test_a_plan_phase_is_appended_auto_unless_it_names_manual_and_only_manual_waits_in_review():
     make_ledger()
     state, rejected = append(
@@ -91,6 +92,7 @@ def test_an_appended_phase_records_its_author_for_task_adds():
     assert added["added_by"] == "planner@abcdef-0001"
 
 
+@pytest.mark.feature("plan-phases-append")
 def test_a_taken_phase_id_refuses_the_whole_plan_and_changes_nothing():
     before = make_ledger()
     state, rejected = append([{"phase": "p9", "title": "Fresh"}, {"phase": "p1", "title": "Taken"}])
@@ -184,6 +186,7 @@ def test_plan_file_shape_is_refused_with_its_reason(plan, message):
     assert refused.value.code == message
 
 
+@pytest.mark.feature("plan-phases-append")
 def test_plan_phases_command_appends_a_two_phase_plan_in_review(tmp_path, monkeypatch, capsys):
     make_ledger()
     path = plan_file(tmp_path, [{"title": "Second", "planning": "manual"}, {"title": "Third", "depends_on": [1]}])

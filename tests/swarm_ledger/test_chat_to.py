@@ -41,6 +41,7 @@ def run_page(script, expression):
     return json.loads(result.stdout)
 
 
+@pytest.mark.feature("ledger-chat-recipient")
 def test_the_composer_states_its_recipient_master_by_default(page):
     compose = page.split('<div class="chat-compose">', 1)[1]
     assert re.search(r'<span id="chat-to-label">To</span><input type="hidden" id="chat-to" value="">', compose)
@@ -48,6 +49,7 @@ def test_the_composer_states_its_recipient_master_by_default(page):
     assert re.search(r'<div class="chat-to-menu" id="chat-to-menu" role="listbox"[^>]*hidden>', compose)
 
 
+@pytest.mark.feature("ledger-chat-recipient")
 def test_the_picker_offers_master_the_whole_swarm_and_each_live_agent(page_script):
     result = run_page(
         page_script,
@@ -89,6 +91,7 @@ def test_the_picked_swarm_survives_a_rerender(page_script):
     assert result == ["swarm", "swarm"]
 
 
+@pytest.mark.feature("ledger-chat-recipient")
 def test_a_picked_agent_that_finished_falls_back_to_master(page_script):
     result = run_page(
         page_script,

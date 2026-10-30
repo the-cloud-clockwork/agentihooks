@@ -57,6 +57,7 @@ def tab(browser):
     context.close()
 
 
+@pytest.mark.feature("ledger-tabs")
 def test_tabs_keep_the_shell_fixed_and_scroll_only_the_active_body(tab):
     assert tab.get_by_role("tab", name="Ledger").count() == 1
     assert tab.get_by_role("tab", name="Swarm").count() == 1
@@ -71,6 +72,7 @@ def test_tabs_keep_the_shell_fixed_and_scroll_only_the_active_body(tab):
     }).map(el => el.id)""") == ["outline", "main-content"]
 
 
+@pytest.mark.feature("ledger-tabs")
 def test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches(tab):
     tab.get_by_role("tab", name="Swarm").click()
     assert tab.locator("#swarm").is_visible()

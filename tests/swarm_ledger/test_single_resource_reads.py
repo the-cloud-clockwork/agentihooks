@@ -53,6 +53,7 @@ def whole_loads(monkeypatch):
     return loads
 
 
+@pytest.mark.feature("ledger-single-resource-reads")
 def test_a_single_resource_read_loads_no_whole_ledger(live, whole_loads):
     paths = seed()
     whole_loads.clear()
@@ -85,6 +86,7 @@ def test_a_thread_read_pages_with_its_query_from_the_partial_read(live, whole_lo
     assert reply["next_cursor"] == f"{reply['revision']}:1"
 
 
+@pytest.mark.feature("ledger-single-resource-reads")
 def test_a_single_resource_read_answers_what_the_whole_ledger_read_answers(live):
     paths = seed()
     state = repository.get_document(SLUG)
@@ -93,6 +95,7 @@ def test_a_single_resource_read_answers_what_the_whole_ledger_read_answers(live)
 
 
 @pytest.mark.parametrize("path", ["tasks/missing", "followups/missing/comments", "tasks/t1/answers"])
+@pytest.mark.feature("ledger-single-resource-reads")
 def test_a_single_resource_read_of_a_missing_item_answers_not_found(live, path):
     seed()
     assert request(live, "GET", path) == (404, {"error": {"code": "resource_missing", "message": "No such resource"}})
