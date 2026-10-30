@@ -3,7 +3,11 @@ and the pull requests of tasks done in the span, cached in Redis."""
 
 import json
 import subprocess
+from collections.abc import Callable, Iterable
 from pathlib import Path
+
+from redis import Redis
+from redis.exceptions import NoPermissionError
 
 from hooks import config
 from hooks.context import injection_trace
@@ -68,7 +72,12 @@ def fetch(url, run=subprocess.run):
         return None
 
 
-def pulls(redis, slug, urls, run=subprocess.run):
+def pulls(
+    redis: Redis,
+    slug: str,
+    urls: Iterable[str],
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict[str, Pull]:
     found = {}
     for url in sorted(set(urls)):
         key = ":".join((PREFIX, slug, "rates-pull", url))
@@ -78,7 +87,10 @@ def pulls(redis, slug, urls, run=subprocess.run):
             if not isinstance(fetched, dict) or "state" not in fetched:
                 continue
             raw = json.dumps(fetched)
-            redis.set(key, raw, ex=OPEN_TTL_S if fetched["state"] == "OPEN" else SETTLED_TTL_S)
+            try:
+                redis.set(key, raw, ex=OPEN_TTL_S if fetched["state"] == "OPEN" else SETTLED_TTL_S)
+            except NoPermissionError:
+                pass
         found[url] = pull(json.loads(raw))
     return found
 
