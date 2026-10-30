@@ -1017,6 +1017,59 @@
         "tests/swarm_ledger/test_handoff_outcomes.py::test_bad_restore_choices_are_refused",
         "tests/swarm_ledger/test_recovery_page.py::test_a_choice_is_sent_as_a_restore_decision_and_the_handoff_row_points_to_recovery"
       ]
+    },
+    {
+      "id": "ledger-item-reads",
+      "origin": "inventory",
+      "behaviour": "agentihooks ledger get prints one task, phase, follow up or priority read through the ledger API and refuses other items; ledger tasks lists open tasks one line each.",
+      "seam": "agentihooks ledger get and ledger tasks",
+      "tests": [
+        "tests/swarm_ledger/test_item_reads.py::test_get_prints_one_item_read_through_the_ledger_api",
+        "tests/swarm_ledger/test_item_reads.py::test_get_refuses_an_item_outside_tasks_phases_followups_and_priorities",
+        "tests/swarm_ledger/test_item_reads.py::test_tasks_lists_open_tasks_one_line_each_from_the_tasks_collection"
+      ]
+    },
+    {
+      "id": "ledger-single-resource-reads",
+      "origin": "inventory",
+      "behaviour": "A single item read on the ledger server loads no whole ledger, answers what the whole ledger read answers, and answers not found for a missing item.",
+      "seam": "The single resource read routes of the ledger server",
+      "tests": [
+        "tests/swarm_ledger/test_single_resource_reads.py::test_a_single_resource_read_loads_no_whole_ledger",
+        "tests/swarm_ledger/test_single_resource_reads.py::test_a_single_resource_read_answers_what_the_whole_ledger_read_answers",
+        "tests/swarm_ledger/test_single_resource_reads.py::test_a_single_resource_read_of_a_missing_item_answers_not_found"
+      ]
+    },
+    {
+      "id": "ledger-overview",
+      "origin": "inventory",
+      "behaviour": "The Overview shows the first two hundred words of a long overview with an ellipsis, and its pen edits and saves the overview.",
+      "seam": "The Overview section of the ledger page",
+      "tests": [
+        "tests/swarm_ledger/test_overview_page.py::test_a_long_overview_shows_its_first_two_hundred_words_and_an_ellipsis",
+        "tests/swarm_ledger/test_overview_page.py::test_the_pen_edits_the_overview_and_saves_it_with_ctrl_enter"
+      ]
+    },
+    {
+      "id": "ledger-quota-panel",
+      "origin": "inventory",
+      "behaviour": "The Quota panel shows each account's balance, state and routing left, and a dash for an unknown routing reading.",
+      "seam": "The Quota panel of the Swarm tab",
+      "tests": [
+        "tests/swarm_ledger/test_quota_capacity_panel.py::test_each_quota_row_shows_the_balance_state_and_routing_left_even_when_the_tick_decided_otherwise",
+        "tests/swarm_ledger/test_quota_capacity_panel.py::test_an_unknown_routing_reading_shows_a_dash"
+      ]
+    },
+    {
+      "id": "ledger-freeze-controls",
+      "origin": "inventory",
+      "behaviour": "Every plan, phase, slice and task row carries a freeze button that sends the freeze and disables its rows, and unfreeze sends the clear and restores them.",
+      "seam": "The freeze buttons of the ledger page",
+      "tests": [
+        "tests/swarm_ledger/test_freeze_page.py::test_every_plan_phase_slice_and_task_row_carries_a_freeze_button",
+        "tests/swarm_ledger/test_freeze_page.py::test_freezing_a_plan_from_its_row_sends_the_freeze_and_disables_its_rows",
+        "tests/swarm_ledger/test_freeze_page.py::test_unfreeze_sends_the_clear_and_restores_the_rows"
+      ]
     }
   ],
   "unmapped_rules": [
