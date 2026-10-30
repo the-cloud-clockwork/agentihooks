@@ -338,6 +338,26 @@ def test_the_notice_pass_declares_a_hold_listed_after_a_task_that_is_not_held(st
     assert actions == [f"task red held unclaimed, {MINE} is red only from Tests"]
 
 
+def test_the_notice_pass_reads_claims_and_clears_hold_marks_in_one_call_each_however_many_tasks(store, monkeypatch):
+    rows = {
+        t["id"]: t
+        for t in [task(f"open{n}", pr_url=MINE) for n in range(4)] + [task(f"done{n}", state="done") for n in range(4)]
+    }
+    for task_id in rows:
+        store.redis.set(store.key("sw", f"fleet-red:{task_id}"), MINE)
+    store.redis.set(store.key("sw", "claim", "open0"), "engineer@b")
+    calls = []
+    for name in ("get", "mget", "delete", "set"):
+        real = getattr(store.redis, name)
+        monkeypatch.setattr(
+            store.redis, name, lambda *a, _real=real, _name=name, **k: calls.append(_name) or _real(*a, **k)
+        )
+    green = fleet([run("Tests", "FAILURE")], *[[run("Tests", "SUCCESS")]] * 3)
+    assert fleet_red.notice_pass("sw", store, Ledger(), rows, NOW_MS, lambda repo: green) == []
+    assert calls == ["mget", "delete"]
+    assert [key for key in store.redis.scan_iter(store.key("sw", "fleet-red:*"))] == []
+
+
 def test_the_claim_view_lists_open_pull_requests_in_the_task_pull_request_repo(store, monkeypatch):
     reads = []
     monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or [])

@@ -2180,9 +2180,10 @@ def test_a_base_without_a_registry_freezes_nothing(repo, capsys):
     assert _frozen_grade(repo, head, capsys)[0] == 0
 
 
-def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_current_content():
+def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_current_content() -> None:
     registry = json.loads((_ROOT / gate_protected.FROZEN).read_text())
     rulesets = {str(path.relative_to(_ROOT)) for path in (_ROOT / ".github/rulesets").glob("*.json")}
-    assert set(registry) == {"scripts/gate_protected.py", ".github/workflows/gate-protected.yml", *rulesets}
+    expected = {"scripts/gate_protected.py", ".github/workflows/gate-protected.yml", *rulesets}
+    assert set(registry) in (expected, expected | {"scripts/ci_reuse.py"})
     for path, accepted in registry.items():
         assert _git(_ROOT, "rev-parse", f"HEAD:{path}") in accepted, path

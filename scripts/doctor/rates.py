@@ -53,6 +53,7 @@ class Records:
     corrections: list
     pulls: dict
     inbox: list = field(default_factory=list)
+    doctor_findings: dict | None = None
 
 
 def ratio(part, whole):
@@ -248,6 +249,16 @@ def inbox_no_outcome(records: Records, window: Window) -> dict:
     }
 
 
+def telemetry_stale(records: Records, window: Window) -> dict:
+    if records.doctor_findings is None:
+        return {"findings": None, "per hour": None}
+    count = sum(
+        finding_id.startswith("telemetry-stale/") and window.holds(record["seen_at"])
+        for finding_id, record in records.doctor_findings.items()
+    )
+    return {"findings": count, "per hour": ratio(count, (window.end - window.start) / HOUR_MS)}
+
+
 FAILURES = {
     "ceremony": ceremony,
     "scope inflation": scope_inflation,
@@ -259,6 +270,7 @@ FAILURES = {
     "stale claim": stale,
     "premature completion": premature,
     "inbox no outcome": inbox_no_outcome,
+    "telemetry stale": telemetry_stale,
 }
 
 
