@@ -122,6 +122,29 @@ def test_the_rendered_profile_chain_is_read_from_the_home(mounted, harness):
     assert facts["overlays"] == ["brain"]
 
 
+@pytest.mark.parametrize("folder", ["master-login", "master-login-2", "elsewhere"])
+def test_a_login_home_master_is_judged_on_the_overlays_its_launch_rendered(mounted, folder):
+    from scripts.swarm import launch_check
+
+    agent, proc, rendered = mounted
+    login_home = rendered.parent.parent / folder / "claude"
+    login_home.mkdir(parents=True)
+    worn = ["brain", "swarm-brain"]
+    shared = {"chain": ["anton-base", "package:master", "master", "brain"], "overlays": ["brain"]}
+    launched = {"chain": ["anton-base", "package:master", "master", *worn], "overlays": worn}
+    (login_home / ".agentihooks-render.json").write_text(json.dumps(shared))
+    (rendered / ".agentihooks-render.json").write_text(json.dumps(launched))
+    (proc / "42" / "environ").write_bytes(
+        f"CLAUDE_CONFIG_DIR={login_home}\0AGENTIHOOKS_RENDERED_HOME={rendered}\0AGENTIHOOKS_PROFILE=master\0".encode()
+    )
+    facts = live_binding.read(agent, 42, proc)
+    on_login = folder != "elsewhere"
+    assert facts["home"] == str(login_home.resolve())
+    assert facts["chain"] == (launched if on_login else shared)["chain"]
+    assert facts["overlays"] == (worn if on_login else ["brain"])
+    assert (launch_check._overlays(facts, worn) == {}) is on_login
+
+
 def test_original_launch_model_remains_expected_after_telemetry_switch(mounted):
     agent, proc, _ = mounted
     switched = replace(agent, model="sonnet", effort="low")

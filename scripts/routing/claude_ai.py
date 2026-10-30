@@ -73,7 +73,7 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[dict[str, str], str,
 
 def _front(environ: Mapping[str, str], cwd: Path) -> tuple[dict[str, str], str, int]:
     target, found = login.prepare(environ, cwd)
-    child = login.child(environ, target, found)
+    child = {**login.child(environ, target, found), login.RENDERED: str(claude_home(environ))}
     try:
         native_login.check(child, found)
         if native_login.rejected(child, found):

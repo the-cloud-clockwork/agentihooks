@@ -37,6 +37,7 @@ MAX_SLOTS = int(os.environ.get("AGENTIHOOKS_MASTER_LOGIN_SLOTS", "5"))
 SLOT_RANGE = "master login slot {number} is outside 1 to {cap}"
 MANAGED = Path("/etc/claude-code/managed-settings.json")
 SELECTORS = ("CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR")
+RENDERED = "AGENTIHOOKS_RENDERED_HOME"
 REINTRODUCED = (
     "CLAUDE_CODE_OAUTH_",
     "ANTHROPIC_API_KEY",
@@ -148,6 +149,12 @@ def root(number: int | None = None) -> Path:
 
 def home(number: int | None = None) -> Path:
     return root(number) / "claude"
+
+
+def launch_home(environ: Mapping[str, str]) -> str:
+    found = environ.get(SELECTORS[0], "")
+    on_login = bool(found) and Path(found).parent.name.startswith(root(1).name)
+    return environ.get(RENDERED) or found if on_login else found
 
 
 def numbers() -> range:

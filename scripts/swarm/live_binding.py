@@ -78,6 +78,7 @@ def hooks(home: Path, harness: str) -> bool:
 
 def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
     from hooks.context import profile_chain
+    from scripts import master_claude_login
     from scripts.profiles import binding
     from scripts.select_profile import _native_options
     from scripts.swarm import launch_check, launch_model
@@ -87,6 +88,7 @@ def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
         argv = (proc / str(found) / "cmdline").read_bytes().decode(errors="replace").split("\0")
         model, effort, _ = _native_options(harness, argv[1:])
         home = env.get(binding.HOMES[harness])
+        rendered = master_claude_login.launch_home(env) if harness == "claude" else home
         config = launch_model.configured(harness, Path(home)) if home else {}
         override = launch_model.overridden(argv[1:]) if harness == "codex" else {}
         model = model or override.get("model") or config.get("model", "")
@@ -99,8 +101,8 @@ def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
             "effort": effort,
             "account": account,
             "hooks": bool(home) and hooks(Path(home), harness),
-            "chain": launch_check.chain(home) if home else [],
-            "overlays": profile_chain.rendered_overlays(home) if home else [],
+            "chain": launch_check.chain(rendered) if rendered else [],
+            "overlays": profile_chain.rendered_overlays(rendered) if rendered else [],
         }
     except (OSError, ValueError, StopIteration):
         return {"process": False}

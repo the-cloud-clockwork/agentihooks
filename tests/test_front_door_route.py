@@ -137,11 +137,13 @@ def test_launch_check_removes_a_trailing_route_flag():
 def test_front_login_checks_the_claim_and_releases_it_on_auth_failure(tmp_path, monkeypatch, expired):
     from unittest.mock import Mock
 
-    environ = {"AGENTIHOOKS_AGENT_NAME": "master@next"}
+    rendered = tmp_path / "rendered" / "claude"
+    environ = {"AGENTIHOOKS_AGENT_NAME": "master@next", "CLAUDE_CONFIG_DIR": str(rendered)}
     target = tmp_path / "two"
-    child = {"CLAUDE_CONFIG_DIR": str(target), "AH_ROUTE_INTERACTIVE_two": "1"}
+    built = {"CLAUDE_CONFIG_DIR": str(target), "AH_ROUTE_INTERACTIVE_two": "1"}
+    child = {**built, "AGENTIHOOKS_RENDERED_HOME": str(rendered)}
     prepare = Mock(return_value=(target, "two"))
-    build = Mock(return_value=child)
+    build = Mock(return_value=built)
     authenticate = Mock(side_effect=native_login.LoginError("expired login") if expired else None)
     release = Mock()
     monkeypatch.setattr(login, "prepare", prepare)
@@ -167,9 +169,9 @@ def test_front_login_checks_the_claim_and_releases_it_on_auth_failure(tmp_path, 
 def test_front_login_refuses_a_revoked_login_that_passes_the_local_status(tmp_path, monkeypatch):
     from unittest.mock import Mock
 
-    environ = {"AGENTIHOOKS_AGENT_NAME": "master@next"}
+    environ = {"AGENTIHOOKS_AGENT_NAME": "master@next", "CLAUDE_CONFIG_DIR": str(tmp_path / "rendered")}
     target = tmp_path / "two"
-    child = {"CLAUDE_CONFIG_DIR": str(target)}
+    child = {"CLAUDE_CONFIG_DIR": str(target), "AGENTIHOOKS_RENDERED_HOME": str(tmp_path / "rendered")}
     probed = Mock(return_value=True)
     release = Mock()
     monkeypatch.setattr(login, "prepare", lambda *_: (target, "two"))
