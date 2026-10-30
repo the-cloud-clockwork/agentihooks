@@ -26,6 +26,7 @@ import os
 import re
 import signal
 import socket
+import socketserver
 import ssl
 import subprocess
 import sys
@@ -838,9 +839,7 @@ class Handshake(Exception):
     pass
 
 
-class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
-    daemon_threads = False
-
+class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     def __init__(self, *args, **kwargs):
         self.active = 0
         self.idle = threading.Condition()
@@ -1583,6 +1582,12 @@ def finish_reload() -> None:
         os.execv(sys.executable, argv)
 
 
+def close_server(server: ThreadingHTTPServer, drained: bool) -> None:
+    if not drained and not HANDOFF:
+        os._exit(0)
+    server.server_close()
+
+
 def serve() -> None:
     predecessor = os.getppid()
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
@@ -1630,7 +1635,7 @@ def serve() -> None:
                 HUB.drain()
                 drained = server.drained(DRAIN_S)
     finally:
-        server.server_close()
+        close_server(server, drained)
         with WATCH_PASS:
             watching.set()
         metrics_journal(request_metrics.stop)

@@ -313,3 +313,25 @@ def test_finder_preserves_reload_target_for_cached_path_importers(
     imported = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(imported)
     assert imported.value == 2
+
+
+@pytest.mark.parametrize("drained", [False, True])
+@pytest.mark.parametrize("handoff", [{}, {"since": {}}, {"exec": ["server"]}])
+def test_server_close_preserves_reload_drain_and_bounds_ended_runs(
+    drained: bool, handoff: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import Mock
+
+    httpd = Mock()
+    exiting = Mock(side_effect=SystemExit)
+    monkeypatch.setattr(ledger_server, "HANDOFF", handoff)
+    monkeypatch.setattr(ledger_server.os, "_exit", exiting)
+    if not drained and not handoff:
+        with pytest.raises(SystemExit):
+            ledger_server.close_server(httpd, drained)
+        exiting.assert_called_once_with(0)
+        httpd.server_close.assert_not_called()
+    else:
+        ledger_server.close_server(httpd, drained)
+        exiting.assert_not_called()
+        httpd.server_close.assert_called_once_with()
