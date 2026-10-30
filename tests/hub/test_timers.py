@@ -484,7 +484,7 @@ def test_hub_versions_refuse_an_old_deadline_after_its_tombstone_left_the_index(
     clock.now = 1000 + timers.KEEP_MS
     other = deadlines.schedule(source(key="execution-other"), "idle", 10**9)
     bus.events.publish(deadlines.subject(other), other)
-    assert hub.run_once(timeout_ms=0) == {"timers": ["handled"]}
+    assert hub.run_once(timeout_ms=0) == {"timers": ["skipped", "handled"]}
     replay = replace(request, id="replayed")
     bus.events.publish(deadlines.subject(replay), replay)
     assert hub.run_once(timeout_ms=0) == {"timers": ["skipped"]}
