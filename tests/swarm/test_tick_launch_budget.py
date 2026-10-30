@@ -85,6 +85,7 @@ def _slow_preparation(monkeypatch, clock, seconds):
     monkeypatch.setattr(tick_module, "_prepare", slow)
 
 
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_a_slow_preparation_stops_the_pass_at_the_launch_budget(store, monkeypatch):
     ids = [f"t{n}" for n in range(1, 9)]
     store.update("sw", max_eng=len(ids))

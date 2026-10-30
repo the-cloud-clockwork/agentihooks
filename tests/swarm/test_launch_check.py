@@ -63,6 +63,7 @@ def misses(store, agent, facts, doc, bundled=True, declared=()):
     return launch_check.misses(store, "sw", agent, facts, doc, bundled, list(declared))
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_a_clean_launch_passes(store, launched):
     agent, facts, doc = launched
     assert misses(store, agent, facts, doc) == {}
@@ -454,6 +455,7 @@ def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     }
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch, scratch):
     homes = scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
@@ -481,6 +483,7 @@ def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch, sc
     assert [f.evidence[0] for f in launch_check.findings(store, "sw")] == [f"agents {second}"]
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_master_failure_is_posted_to_the_operator_chat_and_relaunched(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     store.update("sw", state="running")

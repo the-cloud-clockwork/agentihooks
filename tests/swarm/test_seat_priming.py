@@ -20,6 +20,7 @@ def _eng(**task):
     return prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0005", {"id": "t1", "title": "x", "phase": "p1", **task})
 
 
+@pytest.mark.feature("swarm-seat-priming")
 def test_the_successor_prompt_carries_the_chain_in_order(monkeypatch):
     monkeypatch.delenv("LEDGER_DIR")
     text = _eng(seat="eng-1@sw", handoff="handoff doc text", recaps=RECAPS, learned=LEARNED)
@@ -29,6 +30,7 @@ def test_the_successor_prompt_carries_the_chain_in_order(monkeypatch):
     assert text.index("older recap text") < text.index("Read your task through the ledger API")
 
 
+@pytest.mark.feature("swarm-seat-priming")
 def test_a_missing_recap_is_named_in_the_prompt():
     text = _eng(seat="eng-1@sw", handoff="handoff doc text", learned=LEARNED)
     assert "Latest recap: missing" in text
@@ -109,6 +111,7 @@ def test_learned_appends_a_note_to_the_callers_seat(env):  # noqa: F811
     assert [n["maturity"] for n in swarm.memory.learned("eng-1@sw")] == ["note"]
 
 
+@pytest.mark.feature("swarm-seat-priming")
 def test_the_tick_primes_a_successor_from_its_seat(store):  # noqa: F811
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -184,6 +187,7 @@ def test_a_swarm_without_culture_names_it_missing():
     assert "Swarm culture: none" in _eng(seat="eng-1@sw", recaps=RECAPS)
 
 
+@pytest.mark.feature("swarm-culture")
 def test_the_tick_primes_every_lane_and_the_master_with_the_swarm_culture(store):  # noqa: F811
     store.culture.set("sw", "say it plainly")
     runtime = FakeRuntime()
@@ -192,6 +196,7 @@ def test_the_tick_primes_every_lane_and_the_master_with_the_swarm_culture(store)
     assert runtime.masters[-1][1]["culture"] == "say it plainly"
 
 
+@pytest.mark.feature("swarm-learned-notes")
 def test_learned_takes_a_maturity_and_only_the_master_writes_canon(env):  # noqa: F811
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
@@ -320,6 +325,7 @@ def test_a_retired_note_no_longer_reaches_the_next_master(store):  # noqa: F811
     assert "enable voice" not in text
 
 
+@pytest.mark.feature("swarm-culture")
 def test_culture_set_and_show_survive_swarm_remove(env, tmp_path, capsys):  # noqa: F811
     run("sw", "create", "--repo", "/repo")
     culture = tmp_path / "culture.md"
