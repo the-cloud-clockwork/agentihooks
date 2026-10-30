@@ -424,13 +424,14 @@ def test_tombstones_past_the_keep_window_leave_the_index_on_the_next_write():
     timer.handle(deadlines.schedule(source(key="execution-old"), "idle", 1000))
     timer.fire()
     cancelled = deadlines.cancel(source(2, key="execution-cancelled"), "idle")
+    clock.now = 1100
     timer.handle(cancelled)
     clock.now = 1000 + timers.KEEP_MS
     fresh = deadlines.schedule(source(key="execution-fresh"), "idle", 10**9)
     timer.handle(fresh)
     rows = json.loads(bus.state(timers.BUCKET).get(timers.INDEX).value)
     assert set(rows) == {fresh.key, cancelled.key}
-    clock.now = 1001 + timers.KEEP_MS
+    clock.now = 1100 + timers.KEEP_MS
     timer.handle(deadlines.schedule(source(2, key="execution-fresh"), "idle", 10**9))
     rows = json.loads(bus.state(timers.BUCKET).get(timers.INDEX).value)
     assert set(rows) == {fresh.key}
