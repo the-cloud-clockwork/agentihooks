@@ -225,6 +225,11 @@ def test_next_writes_the_whole_spawn_record_before_any_note(client, names):
     assert names.entry(name) == _entry(name, "engineer", 1, 4)
 
 
+def test_next_without_a_spawn_time_records_it_as_zero(client, names):
+    name = names.next("sw", "eng")
+    assert _shared(client, "name", name) == _record("engineer", 1, 0)
+
+
 def test_names_lists_every_legacy_listed_name_the_counters_never_counted(client, names):
     olds = [f"engineer@abcdef-000{n}" for n in (1, 2, 3)]
     for n, old in enumerate(olds, 1):
