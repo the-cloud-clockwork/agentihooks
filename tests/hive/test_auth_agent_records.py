@@ -69,11 +69,14 @@ def test_an_unknown_member_is_refused_issue(client):
 
 
 def test_a_failed_mint_forgets_the_holder_record(client):
-    with patch.object(auth, "_set_user", side_effect=auth.redis_acl.Refused("refused")):
+    with (
+        patch.object(auth.secrets, "token_hex", return_value="0123456789abcdef"),
+        patch.object(auth, "_set_user", side_effect=auth.redis_acl.Refused("refused")),
+    ):
         with pytest.raises(auth.HiveError):
             auth.mint(client, "laptop", "redis://hive.example:6380/2")
 
-    assert not [key for key in client.keys("*") if "holder" in key]
+    assert auth.hive_state.read(auth._store(client), "holder.0123456789abcdef") is None
 
 
 def test_a_token_missing_its_record_reads_the_member_map_only_with_legacy_credentials_on(client, monkeypatch):
