@@ -102,7 +102,7 @@ def test_drop_retries_a_changed_projection_without_partial_history(store):
 
     with patch.object(pipe_type, "execute", commit):
         store.drop_agent("fixture", agent.name, at=10)
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert store.execution("fixture", agent.execution_id).state == "ended"
     history = store.redis.lrange(store.key("fixture", "history"), 0, -1)
     assert len(history) == 1
@@ -281,7 +281,7 @@ def test_drop_retries_when_its_execution_becomes_terminal_before_commit(store):
 
     with patch.object(pipe_type, "execute", commit):
         store.drop_agent("fixture", agent.name, at=40)
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert store.execution("fixture", agent.execution_id) == terminal
     assert store.agents("fixture") == []
     assert store.redis.llen(store.key("fixture", "history")) == 1

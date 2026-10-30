@@ -66,12 +66,13 @@ def registered_codes(store):
 
 def test_export_then_restore_after_losing_redis_gives_back_the_same_swarm_state(store):
     seed(store, "sw")
-    alone = everything(store.redis)
+    alone, names = everything(store.redis), store.names.export("sw")
     seed(store, "other")
     state = store.export("sw")
     store.redis.flushall()
     store.restore("sw", json.loads(json.dumps(state)))
     assert everything(store.redis) == alone
+    assert store.names.export("sw") == names
     assert store.redis.pttl(store.key("sw", "claim", "t1")) > 0
 
 
@@ -89,6 +90,7 @@ def test_snapshot_remove_restore_gives_back_the_same_swarm_state(store):
     seed(store, "sw")
     seed(store, "other")
     before, codes = everything(store.redis), registered_codes(store)
+    names = {slug: store.names.export(slug) for slug in ("sw", "other")}
     state = store.export("sw")
     for agent in store.agents("sw"):
         store.drop_agent("sw", agent.name)
@@ -97,6 +99,7 @@ def test_snapshot_remove_restore_gives_back_the_same_swarm_state(store):
     store.restore("sw", json.loads(json.dumps(state)))
     assert everything(store.redis) == before
     assert registered_codes(store) == codes
+    assert {slug: store.names.export(slug) for slug in ("sw", "other")} == names
 
 
 def test_export_leaves_out_another_swarms_seats_and_inbox(store):
