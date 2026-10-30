@@ -65,7 +65,7 @@ def test_drop_ends_execution_in_the_transaction_that_removes_its_agent(store):
 
     assert store.execution("fixture", agent.execution_id) == replace(agent, state="ended")
     assert store.agents("fixture") == []
-    assert observed == ["working"]
+    assert observed == ["ended"]
     history = [json.loads(raw) for raw in store.redis.lrange(store.key("fixture", "history"), 0, -1)]
     assert len(history) == 1
     assert history[0]["ended_at"] == 789
@@ -137,12 +137,22 @@ def test_drop_refuses_persistent_contention_without_partial_changes(store):
 
     agent = started(store)
     before = store.redis.hgetall(store.key("fixture", "agents"))
-    with patch.object(type(store.redis.pipeline()), "execute", side_effect=WatchError) as commit:
+    pipe_type = type(store.redis.pipeline())
+    execute = pipe_type.execute
+    calls = []
+
+    def commit(pipe, *args, **kwargs):
+        if any(command[0][0] == "HDEL" for command in pipe.command_stack):
+            calls.append(True)
+            raise WatchError
+        return execute(pipe, *args, **kwargs)
+
+    with patch.object(pipe_type, "execute", commit):
         with pytest.raises(SwarmError, match="^agent registry kept changing; retirement was not committed$"):
             store.drop_agent("fixture", agent.name, at=20)
-    assert commit.call_count == 5
+    assert len(calls) == 5
     assert store.redis.hgetall(store.key("fixture", "agents")) == before
-    assert store.execution("fixture", agent.execution_id) == agent
+    assert store.execution("fixture", agent.execution_id) == replace(agent, state="ended")
     assert store.redis.lrange(store.key("fixture", "history"), 0, -1) == []
     assert not store.names.entry(agent.name).get("retired_at")
 
@@ -304,7 +314,7 @@ def test_drop_retries_when_its_execution_becomes_terminal_before_commit(store):
 
     with patch.object(pipe_type, "execute", commit):
         store.drop_agent("fixture", agent.name, at=40)
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert store.execution("fixture", agent.execution_id) == terminal
     assert store.agents("fixture") == []
     assert store.redis.llen(store.key("fixture", "history")) == 1

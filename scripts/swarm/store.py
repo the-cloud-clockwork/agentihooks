@@ -565,6 +565,12 @@ class RedisStore:
         from scripts.swarm import fencing, lease
 
         ended = int(time.time() * 1000) if at is None else at
+
+        def end(doc):
+            for execution_id in live & set(doc["executions"]):
+                if doc["executions"][execution_id]["state"] != "finished":
+                    doc["executions"][execution_id] = {**doc["executions"][execution_id], "state": "ended"}
+
         for _ in range(5):
             with self.redis.pipeline() as pipe:
                 try:
@@ -575,6 +581,8 @@ class RedisStore:
                     if expected is not None and expected.execution_id not in {a.execution_id for a in executions}:
                         return False
                     lives = records_of(doc) if previous else []
+                    live = {agent.execution_id for agent in executions}
+                    lease.fenced(self, slug, lease.EPOCH.get(), end)
                     pipe.multi()
                     if before is not None:
                         before(pipe)
@@ -604,14 +612,6 @@ class RedisStore:
                     continue
         else:
             raise SwarmError("agent registry kept changing; retirement was not committed")
-        live = {agent.execution_id for agent in executions}
-
-        def end(doc):
-            for execution_id in live & set(doc["executions"]):
-                if doc["executions"][execution_id]["state"] != "finished":
-                    doc["executions"][execution_id] = {**doc["executions"][execution_id], "state": "ended"}
-
-        lease.fenced(self, slug, lease.EPOCH.get(), end)
         return True
 
     def _retire_name(self, pipe, name, ended):
