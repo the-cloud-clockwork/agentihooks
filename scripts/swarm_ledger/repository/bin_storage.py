@@ -30,7 +30,11 @@ def _transaction():
 def _registry(name):
     from scripts.swarm_ledger import storage
 
-    return storage.read_registry(_repository().directory, name)
+    repository = _repository()
+    if getattr(repository, "remote", False):
+        with repository.connect() as connection:
+            return repository.registry(name, connection)
+    return storage.read_registry(repository.directory, name)
 
 
 def restored():

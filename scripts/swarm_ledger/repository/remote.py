@@ -1,0 +1,309 @@
+import copy
+import json
+import mimetypes
+import threading
+import urllib.error
+import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from urllib.parse import quote, urlencode
+
+from .entry import Entry
+from .fragments import document
+from .sqlite import BEGIN, SUMMARY_KEYS, TASK_REVISION_FIELDS, Conflict, Missing, summarize
+
+URL_ENV = "AGENTIHOOKS_SWARM_API_URL"
+TOKEN_ENV = "AGENTIHOOKS_SWARM_API_TOKEN"
+PREFIX = "/api/v1/store"
+JSON = mimetypes.types_map[".json"]
+ATTEMPTS = 3
+TIMEOUT_S = 30.0
+
+
+class Unavailable(OSError):
+    pass
+
+
+class Client:
+    def __init__(self, base: str, token: str = "") -> None:
+        self.base, self.token = base.rstrip("/") + PREFIX, token
+
+    def call(self, method: str, path: str, query: dict | None = None, body: object = None) -> tuple[int, object]:
+        address = self.base + path + (f"?{urlencode(query, doseq=True)}" if query else "")
+        data = None if body is None else json.dumps(body, separators=(",", ":")).encode()
+        request = urllib.request.Request(address, data=data, method=method)
+        request.add_header("Content-Type", JSON)
+        if self.token:
+            request.add_header("Authorization", f"Bearer {self.token}")
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+                raw = response.read()
+                return response.status, json.loads(raw) if raw else None
+        except urllib.error.HTTPError as answer:
+            raw = answer.read()
+            return answer.code, json.loads(raw) if raw else None
+        except (urllib.error.URLError, TimeoutError) as failure:
+            raise Unavailable(str(failure)) from failure
+
+    def expect(self, method: str, path: str, query: dict | None = None, body: object = None) -> object:
+        status, answer = self.call(method, path, query, body)
+        if status != 200:
+            raise Unavailable(f"{status} {answer}")
+        return answer
+
+    def get(self, slug: str, path: str, query: dict | None = None) -> object:
+        status, body = self.call("GET", path, query)
+        if status == 404:
+            raise Missing(slug)
+        if status != 200:
+            raise Unavailable(f"{status} {body}")
+        return body
+
+
+def ledger(slug: str, part: str = "") -> str:
+    return f"/ledgers/{quote(slug, safe='')}" + (f"/{part}" if part else "")
+
+
+def stored_file(table: str, slug: str, item: str = "") -> str:
+    return f"/files/{table}/{quote(slug, safe='')}" + (f"/{quote(item, safe='')}" if item else "")
+
+
+def changes(before: dict, after: dict) -> tuple[dict, list]:
+    changed = {key: value for key, value in after.items() if key not in before or before[key] != value}
+    return changed, [key for key in before if key not in after]
+
+
+class Session:
+    """A registry write against the API: reads remember what they saw, saves and purges commit together on a clean
+    exit, refused with Conflict when another writer changed a registry this session read."""
+
+    def __init__(self, client: Client) -> None:
+        self.client = client
+        self.seen: dict[str, dict] = {}
+        self.saved: dict[str, dict] = {}
+        self.purged: list[str] = []
+
+    def execute(self, statement: str, parameters: tuple = ()) -> None:
+        if not statement.startswith(BEGIN):
+            raise Unavailable(statement)
+
+    def registry(self, name: str) -> dict:
+        if name not in self.seen:
+            self.seen[name] = self.client.expect("GET", f"/registries/{quote(name, safe='')}")
+        return copy.deepcopy(self.seen[name])
+
+    def commit(self) -> None:
+        if not self.saved and not self.purged:
+            return
+        body = dict(expected=self.seen, set=self.saved, purge=self.purged)
+        status, answer = self.client.call("POST", "/registries", body=body)
+        if status == 409:
+            raise Conflict(",".join(answer.get("registries", [])), -1)
+        if status != 200:
+            raise Unavailable(f"{status} {answer}")
+
+    def __enter__(self) -> "Session":
+        return self
+
+    def __exit__(self, kind: type | None, value: BaseException | None, traceback: object) -> bool:
+        if kind is None:
+            self.commit()
+        return False
+
+
+class RemoteLedgerRepository:
+    adopts = False
+    remote = True
+
+    def __init__(self, client: Client, domain=None) -> None:
+        self.client = client
+        self._domain = domain
+        self._cache: dict[str, Entry] = {}
+        self._guard = threading.Lock()
+
+    @property
+    def domain(self):
+        if self._domain is None:
+            import ledger_core
+
+            self._domain = ledger_core
+        return self._domain
+
+    @property
+    def directory(self) -> Path:
+        return self.domain.LEDGER_DIR
+
+    def bound(self, domain) -> "RemoteLedgerRepository":
+        if domain is self.domain:
+            return self
+        twin = RemoteLedgerRepository(self.client, domain)
+        twin._cache, twin._guard = self._cache, self._guard
+        return twin
+
+    def _remember(self, slug: str, entry: Entry) -> Entry:
+        with self._guard:
+            held = self._cache.get(slug)
+            if held is None or held.generation < entry.generation:
+                self._cache[slug] = entry
+            return self._cache[slug]
+
+    def current(self, slug: str) -> Entry:
+        with self._guard:
+            held = self._cache.get(slug)
+        query = None if held is None else {"read": held.generation}
+        status, body = self.client.call("GET", ledger(slug), query)
+        if status == 304 and held is not None:
+            return held
+        if status == 404:
+            with self._guard:
+                self._cache.pop(slug, None)
+            raise Missing(slug)
+        if status != 200:
+            raise Unavailable(f"{status} {body}")
+        fragments = document(body["state"])
+        return self._remember(slug, Entry(body["generation"], None, fragments.value, fragments))
+
+    def get_document(self, slug: str) -> dict:
+        return self.current(slug).mutable()
+
+    def read(self, slug: str, *keys: str) -> dict:
+        return self.client.get(slug, ledger(slug, "read"), {"read": list(keys)})
+
+    def exists(self, slug: str) -> bool:
+        try:
+            self.token(slug)
+        except Missing:
+            return False
+        return True
+
+    def token(self, slug: str) -> str | None:
+        return self.client.get(slug, ledger(slug, "token"))["token"]
+
+    def events_since(self, slug: str, revision: int) -> list:
+        return self.client.get(slug, ledger(slug, "events"), {"events": revision})
+
+    def nodes(self, slug: str, read: str, node: str | None = None) -> list:
+        query = {"read": read} if node is None else {"read": read, "nodes": node}
+        return self.client.get(slug, ledger(slug, "nodes"), query)
+
+    def summaries(self, connection: Session | None = None) -> list:
+        return self.client.expect("GET", "/ledgers")
+
+    def list_summaries(self) -> list:
+        return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]
+
+    def encoded_view(self, slug: str, view) -> str | bytes:
+        entry = self.current(slug)
+        if view not in entry.views:
+            entry.views[view] = view(entry.state)
+        return entry.views[view]
+
+    def export_since(self, slug: str, since: int, view, changes) -> tuple[int, str | bytes]:
+        entry = self.current(slug)
+        if view not in entry.views:
+            entry.views[view] = view(entry.fragments)
+        return entry.generation, entry.views[view]
+
+    def task_rows(self, slug: str, since: tuple | None = None) -> tuple:
+        entry = self.current(slug)
+        if since is not None and since[0] == entry.generation:
+            return since
+        meta = {name: entry.state["_meta"][name] for name in TASK_REVISION_FIELDS if name in entry.state["_meta"]}
+        return entry.generation, meta, entry.state.get("tasks") or []
+
+    def commit(self, slug: str, revision: int, before: dict, state: dict, events: list) -> Entry:
+        changed, dropped = changes(before, state)
+        body = dict(revision=revision, changed=changed, dropped=dropped, events=events, summary=summarize(slug, state))
+        status, answer = self.client.call("POST", ledger(slug, "commit"), body=body)
+        if status == 409:
+            raise Conflict(slug, answer["revision"])
+        if status == 404:
+            raise Missing(slug)
+        if status != 200:
+            raise Unavailable(f"{status} {answer}")
+        fragments = document(state)
+        return self._remember(slug, Entry(answer["generation"], None, fragments.value, fragments))
+
+    def apply_ops(
+        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
+    ) -> tuple[dict, list]:
+        from . import artifact_files, media_files, mutation
+
+        for attempt in range(1, ATTEMPTS + 1):
+            entry = self.current(slug)
+            state = entry.mutable()
+            revision = state["_meta"]["rev"]
+            rejected, ctx = mutation.apply(slug, state, self.domain, copy.deepcopy(changes), copy.deepcopy(ops), gate)
+            try:
+                written = self.commit(slug, revision, entry.state, state, ctx.events if ctx.changed else [])
+            except Conflict:
+                if attempt == ATTEMPTS:
+                    raise
+                continue
+            artifact_files.drop(slug, ctx.unstored)
+            media_files.drop(slug, ctx.unstored)
+            return (written.mutable() if copy_state else written.state), rejected
+        raise Conflict(slug, -1)
+
+    def generations(self) -> dict:
+        with self._guard:
+            return {slug: entry.generation for slug, entry in self._cache.items()}
+
+    def carry(self, since: dict) -> dict:
+        with self._guard:
+            held = dict(self._cache)
+        return {
+            slug: [entry.generation, entry.text] for slug, entry in held.items() if since.get(slug) != entry.generation
+        }
+
+    def adopt_carried(self, carried: dict) -> None:
+        for slug, (generation, text) in carried.items():
+            fragments = document(json.loads(text))
+            self._remember(slug, Entry(generation, None, fragments.value, fragments))
+
+    def held_revisions(self) -> dict:
+        return self.client.expect("GET", "/held")
+
+    def hold_revision(self, kind: str, slug: str, revision: int) -> None:
+        self.client.expect("POST", "/held", body=dict(action="hold", kind=kind, slug=slug, revision=revision))
+
+    def release_revisions(self, kind: str, slug: str, since: int, revision: int) -> None:
+        body = dict(action="release", kind=kind, slug=slug, start=since, revision=revision)
+        self.client.expect("POST", "/held", body=body)
+
+    def drop_revisions(self, kind: str, slug: str) -> None:
+        self.client.expect("POST", "/held", body=dict(action="drop", kind=kind, slug=slug))
+
+    @contextmanager
+    def connect(self) -> Iterator[Session]:
+        yield Session(self.client)
+
+    def registry(self, name: str, connection: Session) -> dict:
+        return connection.registry(name)
+
+    def save_registry(self, connection: Session, name: str, entries: dict) -> None:
+        connection.saved[name] = entries
+
+    def purge(self, slug: str, connection: Session) -> None:
+        connection.purged.append(slug)
+        with self._guard:
+            self._cache.pop(slug, None)
+
+    def file_list(self, table: str, slug: str) -> dict:
+        return self.client.expect("GET", stored_file(table, slug))
+
+    def file_load(self, table: str, slug: str, item: str) -> str | None:
+        status, body = self.client.call("GET", stored_file(table, slug, item))
+        if status == 404:
+            return None
+        if status != 200:
+            raise Unavailable(f"{status} {body}")
+        return body["data"]
+
+    def file_save(self, table: str, slug: str, item: str, data: str, at: int | None = None) -> None:
+        self.client.expect("PUT", stored_file(table, slug, item), body=dict(data=data, at=at))
+
+    def file_drop(self, table: str, slug: str, items: set[str]) -> None:
+        for item in sorted(items):
+            self.client.expect("DELETE", stored_file(table, slug, item))

@@ -3,7 +3,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from scripts.swarm_ledger.repository import LedgerRepository, postgres, sqlite
+from scripts.swarm_ledger.repository import LedgerRepository, postgres, remote, sqlite
 
 DATABASE = sqlite.DATABASE
 Error = sqlite3.Error
@@ -52,8 +52,14 @@ def read_slugs(directory) -> list:
     return sqlite.read_slugs(store(directory))
 
 
+def api() -> str | None:
+    return os.environ.get(remote.URL_ENV) or None
+
+
 def build(path: Path | None = None, domain: object | None = None) -> LedgerRepository:
-    address = shared()
+    address, service = shared(), api()
+    if path is None and service and not address:
+        return remote.RemoteLedgerRepository(remote.Client(service, os.environ.get(remote.TOKEN_ENV, "")), domain)
     if path is None and address:
         return postgres.PostgresLedgerRepository(address, domain)
     return sqlite.SQLiteLedgerRepository(path, domain)
