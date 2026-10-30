@@ -155,6 +155,101 @@ def test_a_critic_that_does_not_answer_is_a_swarm_error(monkeypatch):
     with pytest.raises(SwarmError, match="^the blind critic did not answer: claude exited 1$"):
         resolve.headless_critic("p")
 
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "no Claude account has a free session under its quota band",
+        "no Claude account has a free session under its quota band outside the excluded account",
+    ],
+)
+def test_capacity_refusal_records_why_the_critic_cannot_launch(
+    world: tuple[SimpleNamespace, Ledger],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    reason: str,
+) -> None:
+    store, ledger = world
+    resolve.run(store, tried(1), "eng", ledger)
+    resolve.run(store, tried(2), "eng", ledger)
+    prompt = ledger_blockers.blind_prompt(
+        ITEM, "Deploy the hive", "full", ledger.doc["tasks"][0]["blocker"]["attempts"]
+    )
+    calls = []
+
+    def full(*args: object) -> dict:
+        calls.append(args)
+        raise runner.RouteRefused("claude", reason)
+
+    monkeypatch.setattr(runner, "run", full)
+    resolve.run(store, args("critic"), "eng", ledger)
+    assert len(calls) == 1
+    assert ledger.writes[-1] == {
+        "op": "blocker_critic",
+        "id": "blocker_critic-2",
+        "by": "eng",
+        "item": ITEM,
+        "run": "critic unavailable: account session capacity",
+        "digest": ledger_blockers.digest(prompt),
+        "resolution": f"claude refused to route: {reason}",
+    }
+    assert last(capsys)["next"] == ledger_blockers.ESCALATE
+
+
+def test_recorded_critic_capacity_refusal_allows_escalation_and_block(
+    world: tuple[SimpleNamespace, Ledger],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store, ledger = world
+    resolve.run(store, tried(1), "eng", ledger)
+    resolve.run(store, tried(2), "eng", ledger)
+    resolve.run(
+        store,
+        args("critic"),
+        "eng",
+        ledger,
+        critic=lambda prompt: (
+            "critic unavailable: account session capacity",
+            "claude refused to route: no Claude account has a free session under its quota band",
+        ),
+    )
+    assert last(capsys)["next"] == ledger_blockers.ESCALATE
+    resolve.run(
+        store,
+        args("escalate", reason="The required key is unavailable.", evidence="key lookup: absent"),
+        "eng",
+        ledger,
+    )
+    assert last(capsys)["next"] == ledger_blockers.ESCALATED
+    assert resolve.block_refusal("full", "sw", ledger.doc["tasks"][0]) == ""
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        runner.RouteRefused("claude", "all Claude accounts are closed"),
+        runner.RouteRefused("codex", "no Claude account has a free session under its quota band"),
+        HeadlessError("no Claude account has a free session under its quota band"),
+    ],
+)
+def test_other_critic_failures_keep_the_blocker_gate(
+    world: tuple[SimpleNamespace, Ledger],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: HeadlessError,
+) -> None:
+    store, ledger = world
+    resolve.run(store, tried(1), "eng", ledger)
+    resolve.run(store, tried(2), "eng", ledger)
+
+    def refused(*args: object) -> dict:
+        raise failure
+
+    monkeypatch.setattr(runner, "run", refused)
+    with pytest.raises(SwarmError, match="the blind critic did not answer"):
+        resolve.run(store, args("critic"), "eng", ledger)
+    assert len(ledger.writes) == 2
+    assert ledger_blockers.record(ledger.doc["tasks"][0])["critic"] is None
+    assert resolve.block_refusal("full", "sw", ledger.doc["tasks"][0])
+
 
 def test_a_critic_refused_a_codex_route_answers_on_claude(monkeypatch):
     asked = []
