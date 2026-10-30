@@ -1919,7 +1919,7 @@ def _feature_gate(
         task["proof"].get("feature", ""),
         lambda: [feature_gate.read_map(ref) for ref in feature_gate.refs(head)],
     )
-    who = Who(name=agent.name, swarm=slug, lane=agent.lane, task=agent.task)
+    who = Who(name=agent.name, swarm=slug, task=agent.task)
     if refused and feature_gate.GATE.allows(store, who, "done", refused, now_ms()):
         raise SwarmError(refused)
 

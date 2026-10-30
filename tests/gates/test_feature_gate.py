@@ -208,6 +208,13 @@ def test_an_observed_gate_logs_the_refusal_and_closes_the_task(ops):
     ]
 
 
+def test_a_gate_row_carries_the_swarm_clock(ops: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, _, tmp_path = ops
+    monkeypatch.setattr(cli, "now_ms", lambda: 4242)
+    assert run("sw", "done", *PROOF) == 0
+    assert [row["at"] for row in gate_log.recent("sw", None, tmp_path)] == [4242]
+
+
 def test_a_skipped_gate_neither_logs_nor_refuses(ops):
     store, ledger, read, tmp_path = ops
     store.update("sw", gates={"feature": "off"})
