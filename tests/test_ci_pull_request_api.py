@@ -211,7 +211,6 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/threshold_pins.py",
         "scripts/swarm_ledger/artifact_sanity.py",
         "scripts/swarm_ledger/ledger_server.py",
-        "tests/chart_api.py",
         "tests/chart_examples.py",
         "tests/chart_github_auth.py",
         "tests/chart_hive_home.py",
