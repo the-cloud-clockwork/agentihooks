@@ -17,14 +17,14 @@ SSH_UNVERIFIED = ("Host key verification failed", "Permission denied (publickey"
 WT_SCRIPT = Path(__file__).resolve().parents[2] / "profiles" / "package" / "skills" / "worktree" / "scripts" / "wt.sh"
 
 
-def shell(argv: list[str]) -> subprocess.CompletedProcess:
+def shell(argv: list[str]) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(argv, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError) as exc:
         raise SwarmError(f"{' '.join(argv[:2])} could not run: {exc}") from exc
 
 
-def _out(argv, refused):
+def _out(argv: list[str], refused: str) -> str:
     done = shell(argv)
     if done.returncode != 0:
         raise SwarmError(f"{refused}: {done.stderr.strip()}")
