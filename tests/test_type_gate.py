@@ -192,6 +192,35 @@ def test_grade_holds_drift_only_on_touched_files_and_edited_entries() -> None:
     ]
 
 
+def test_grade_reports_only_growth_for_a_new_file_absent_from_both_baselines() -> None:
+    assert type_gate.grade({}, {"a.py": 1}, {}, set()) == ["a.py has 1 type errors, more than the 0 the base allows"]
+
+
+def test_a_base_without_a_baseline_grades_drift_on_every_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _tree(tmp_path / "base", {"hooks/planted.py": ILL_TYPED})
+    head = _tree(tmp_path / "head", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 2})
+    assert _grade(base, head, capsys) == (
+        1,
+        f"::notice::The base carries no {type_gate.BASELINE}; this head introduces it.\n"
+        "1 type errors in 1 files, 2 allowed, 1 errors\n"
+        f"::error::{type_gate.BASELINE} records 2 type errors in hooks/planted.py, the head has 1; "
+        "run python -m scripts.type_gate --write\n",
+    )
+
+
+def test_a_head_that_drops_the_baseline_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _tree(tmp_path / "base", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 1})
+    head = _tree(tmp_path / "head", {"hooks/planted.py": ILL_TYPED})
+    assert _grade(base, head, capsys) == (
+        1,
+        "1 type errors in 1 files, 1 allowed, 1 errors\n"
+        f"::error::{type_gate.BASELINE} records 0 type errors in hooks/planted.py, the head has 1; "
+        "run python -m scripts.type_gate --write\n",
+    )
+
+
 def test_changed_names_files_whose_contents_differ(tmp_path: Path) -> None:
     base = _tree(tmp_path / "base", {"hooks/same.py": "x = 1\n", "hooks/edited.py": "x = 1\n"})
     head = _tree(tmp_path / "head", {"hooks/same.py": "x = 1\n", "hooks/edited.py": "x = 2\n", "hooks/new.py": ""})

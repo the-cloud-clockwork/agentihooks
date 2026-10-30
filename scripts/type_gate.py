@@ -147,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::notice::The base carries no {BASELINE}; this head introduces it.")
         base = recorded or {}
     else:
-        touched = changed(args.base, args.head, set(head) | set(recorded or {}) | set(base))
+        touched = changed(args.base, args.head, set(head) | set(recorded or {}))
     errors = grade(base, head, recorded, touched)
     print(f"{sum(head.values())} type errors in {len(head)} files, {sum(base.values())} allowed, {len(errors)} errors")
     for error in errors:
