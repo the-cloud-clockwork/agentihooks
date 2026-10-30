@@ -16,6 +16,7 @@ MAPPED = {"features": [{"id": "f1", "tests": ["tests/test_a.py::test_a"]}, {"id"
 MISSING = "this task is done only with the feature it proved: give --feature <id in feature-map.json>"
 UNKNOWN = "feature nope is not in feature-map.json on dev or the merged pull request head; map it there first"
 UNTESTED = "feature bare lists no test in feature-map.json; map its tests first"
+UNREAD = "could not read feature-map.json from GitHub; run swarm done again when it answers"
 
 
 def test_feature_is_a_proof_key_and_a_contract_flag_but_never_a_need():
@@ -72,6 +73,12 @@ def test_an_unknown_feature_id_is_refused():
     assert feature.refusal({"kind": "ops"}, "nope", maps(MAPPED, {})) == UNKNOWN
 
 
+def test_an_unread_map_is_refused_as_a_read_failure_never_as_an_unknown_id():
+    assert feature.refusal({"kind": "ops"}, "nope", maps(MAPPED, None)) == UNREAD
+    assert feature.refusal({"kind": "ops"}, "bare", maps(None, MAPPED)) == UNREAD
+    assert feature.refusal({"kind": "ops"}, "f1", maps(None, MAPPED)) == ""
+
+
 def test_an_entry_without_tests_is_refused():
     assert feature.refusal({"kind": "ops"}, "bare", maps(MAPPED)) == UNTESTED
     assert feature.refusal({"kind": "ops"}, "bare", maps({"features": [{"id": "bare"}]})) == UNTESTED
@@ -118,15 +125,15 @@ def test_read_map_asks_github_for_the_raw_map_at_a_ref():
         subprocess.CompletedProcess([], 0, "[1]", ""),
     ],
 )
-def test_an_unreadable_map_reads_as_empty(done):
-    assert feature.read_map("dev", run=lambda argv, **kwargs: done) == {}
+def test_an_unreadable_map_reads_as_none(done):
+    assert feature.read_map("dev", run=lambda argv, **kwargs: done) is None
 
 
-def test_a_failed_github_call_reads_as_empty():
+def test_a_failed_github_call_reads_as_none():
     def boom(argv, **kwargs):
         raise subprocess.TimeoutExpired(argv, 20)
 
-    assert feature.read_map("dev", run=boom) == {}
+    assert feature.read_map("dev", run=boom) is None
 
 
 def test_the_feature_gate_is_a_swarm_gate_that_defaults_to_log_only():
@@ -161,10 +168,11 @@ def enforce(store):
 def test_an_enforced_gate_refuses_done_without_a_mapped_tested_feature(ops, capsys, given, refused):
     store, ledger, _, tmp_path = ops
     enforce(store)
+    before = dict(ledger.rows["t1"])
     capsys.readouterr()
     assert run("sw", "done", *PROOF, *given) == 1
     assert capsys.readouterr().err == f"swarm: {refused}\n"
-    assert ledger.rows["t1"]["state"] != "done"
+    assert ledger.rows["t1"] == before
     rows = gate_log.recent("sw", None, tmp_path)
     assert [(row["gate"], row["kind"], row["agent"], row["tool"], row["reason"]) for row in rows] == [
         ("feature", "deny", NAME, "done", refused)
@@ -204,5 +212,6 @@ def test_a_skipped_gate_neither_logs_nor_refuses(ops):
     store, ledger, read, tmp_path = ops
     store.update("sw", gates={"feature": "off"})
     assert run("sw", "done", *PROOF) == 0
+    assert read == []
     assert ledger.rows["t1"]["state"] == "done"
     assert gate_log.recent("sw", None, tmp_path) == []

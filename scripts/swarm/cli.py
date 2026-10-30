@@ -1911,6 +1911,8 @@ def _feature_gate(
     store: RedisStore, slug: str, agent: AgentRecord, task: dict, pull: ledger_events.PullRequest | None
 ) -> None:
     """Refuse swarm done when the feature gate enforces and the task names no mapped, tested feature."""
+    if modes.configured(feature_gate.GATE, store.config(slug).gates) == "off":
+        return
     head = pull.head if pull is not None else ""
     refused = feature_gate.refusal(
         task,

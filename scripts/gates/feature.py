@@ -24,19 +24,22 @@ def required(task: dict) -> bool:
     return flagged or ledger_kinds.after(task) or ledger_kinds.kind(task) in LIVE_KINDS
 
 
-def refusal(task: dict, feature: str, maps: Callable[[], list[dict]]) -> str:
-    """Why swarm done must refuse this task's feature, or '' when it may close."""
+def refusal(task: dict, feature: str, maps: Callable[[], list[dict | None]]) -> str:
+    """Why swarm done must refuse this task's feature, or '' when it may close; an unread map is never an unmapped id."""
     if not required(task):
         return ""
     wanted = feature.strip()
     if not wanted:
         return MISSING
-    entries = [entry for found in maps() for entry in _features(found) if entry.get("id") == wanted]
+    found = maps()
+    entries = [entry for read in found if read is not None for entry in _features(read) if entry.get("id") == wanted]
+    if any(entry.get("tests") for entry in entries):
+        return ""
+    if None in found:
+        return f"could not read {MAP} from GitHub; run swarm done again when it answers"
     if not entries:
         return f"feature {wanted} is not in {MAP} on {BASE} or the merged pull request head; map it there first"
-    if not any(entry.get("tests") for entry in entries):
-        return f"feature {wanted} lists no test in {MAP}; map its tests first"
-    return ""
+    return f"feature {wanted} lists no test in {MAP}; map its tests first"
 
 
 def refs(head: str) -> list[str]:
@@ -44,8 +47,8 @@ def refs(head: str) -> list[str]:
     return [BASE, *([head] if head else [])]
 
 
-def read_map(ref: str, run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> dict:
-    """The feature map at a revision on GitHub, or an empty map when it cannot be read."""
+def read_map(ref: str, run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> dict | None:
+    """The feature map at a revision on GitHub, or None when it cannot be read."""
     try:
         done = run(
             ["gh", "api", "-H", "Accept: application/vnd.github.raw", f"repos/{REPO}/contents/{MAP}?ref={ref}"],
@@ -54,14 +57,14 @@ def read_map(ref: str, run: Callable[..., subprocess.CompletedProcess] = subproc
             timeout=20,
         )
     except (OSError, subprocess.SubprocessError):
-        return {}
+        return None
     if done.returncode != 0:
-        return {}
+        return None
     try:
         found = json.loads(done.stdout)
     except ValueError:
-        return {}
-    return found if isinstance(found, dict) else {}
+        return None
+    return found if isinstance(found, dict) else None
 
 
 def _features(found: dict) -> list[dict]:
