@@ -568,12 +568,17 @@ def test_a_split_file_ignores_stored_tests_its_source_no_longer_has(heavy):
     assert not any("test_gone" in unit or unit == "tests/test_heavy1.py" for unit in units)
 
 
-def test_a_file_over_its_leg_share_with_a_stored_class_pytest_refuses_stays_whole(heavy):
+@pytest.mark.parametrize(
+    "header",
+    ["class TestInit:\n    def __init__(self): pass\n", "class TestInit(metaclass=type):\n"],
+)
+def test_a_file_over_its_leg_share_with_a_stored_class_pytest_may_refuse_stays_whole(heavy, header):
     write(
         heavy,
         {
             "tests/test_heavy1.py": "from hooks import sample\ndef test_a(): pass\n"
-            "class TestInit:\n    def __init__(self): pass\n    def test_b(self): pass\n"
+            + header
+            + "    def test_b(self): pass\n"
         },
     )
     durations = {"tests/test_heavy1.py::test_a": 200.0, "tests/test_heavy1.py::TestInit::test_b": 200.0}

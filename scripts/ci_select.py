@@ -146,6 +146,7 @@ def defined_tests(source: str) -> tuple[set[str], set[str], set[str]] | None:
     for statement in ast.parse(source).body:
         if isinstance(statement, ast.ClassDef) and (
             statement.bases
+            or statement.keywords
             or any(isinstance(node, ast.FunctionDef) and node.name == "__init__" for node in statement.body)
         ):
             return None
