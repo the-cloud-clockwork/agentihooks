@@ -130,6 +130,12 @@ def check(workflows: dict[str, dict], config: dict, today: date) -> list[str]:
     jobs = workflows[gate_file]["jobs"]
     problems += _gate_problems(gate_file, workflows[gate_file])
     problems += _job_problems(gate_file, gate_id, jobs, not_gates)
+    if "feature-suite" in jobs:
+        problems += [
+            f"{gate_file}/feature-suite is not a need of {job_id}."
+            for job_id in ("promotion-ready", "promote")
+            if "feature-suite" not in needs_of(jobs.get(job_id, {}))
+        ]
     problems += _outside_problems(workflows, gate_file, outside)
     return problems
 
