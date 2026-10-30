@@ -57,34 +57,39 @@ def agent_token(headers: Mapping[str, str], slug: str) -> dict:
     return {"agent": agent, "token": token, "auth": signed(agent, slug), "expires_in": tokens.TTL_S}
 
 
-class Handler(BaseHTTPRequestHandler):
-    """Routes token exchange, agent token issue and the health check."""
+def send(request: BaseHTTPRequestHandler, status: int, body: dict) -> None:
+    """Write the JSON body with its status on the request."""
+    payload = json.dumps(body).encode()
+    request.send_response(status)
+    request.send_header("Content-Type", "application/json")
+    request.send_header("Content-Length", str(len(payload)))
+    request.end_headers()
+    request.wfile.write(payload)
 
-    def do_GET(self) -> None:
-        if self.path == "/healthz":
-            self.send(200, {"ok": True})
-            return
-        self.send(NOT_FOUND.status, NOT_FOUND.envelope())
 
-    def do_POST(self) -> None:
-        match = ROUTE.fullmatch(urlsplit(self.path).path)
-        try:
-            if match is None:
-                raise NOT_FOUND
-            slug, kind = match.groups()
-            data = exchange(self.headers, slug) if kind == "token" else agent_token(self.headers, slug)
-        except APIError as refused:
-            self.send(refused.status, refused.envelope())
-            return
-        self.send(200, {"data": data})
+def get(request: BaseHTTPRequestHandler) -> None:
+    """Answer the health check; every other GET is not found."""
+    if request.path == "/healthz":
+        send(request, 200, {"ok": True})
+        return
+    send(request, NOT_FOUND.status, NOT_FOUND.envelope())
 
-    def send(self, status: int, body: dict) -> None:
-        payload = json.dumps(body).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
+
+def post(request: BaseHTTPRequestHandler) -> None:
+    """Route token exchange and agent token issue."""
+    match = ROUTE.fullmatch(urlsplit(request.path).path)
+    try:
+        if match is None:
+            raise NOT_FOUND
+        slug, kind = match.groups()
+        data = exchange(request.headers, slug) if kind == "token" else agent_token(request.headers, slug)
+    except APIError as refused:
+        send(request, refused.status, refused.envelope())
+        return
+    send(request, 200, {"data": data})
+
+
+Handler = type("Handler", (BaseHTTPRequestHandler,), {"do_GET": get, "do_POST": post, "send": send})
 
 
 def server(address: tuple[str, int]) -> ThreadingHTTPServer:
