@@ -61,6 +61,7 @@ def test_two_masters_exchange_an_inbox_item_that_keeps_the_text_in_the_channel(c
     assert [p.text for p in channel.unread(SLUG, "sw-master-1")] == ["who holds the deploy phase", "I hold it"]
 
 
+@pytest.mark.feature("masters-channel")
 def test_two_masters_post_and_read_each_others_posts(channel):
     channel.post(SLUG, "sw-master-1", "I take the deploy phase", 10)
     channel.post(SLUG, "sw-master-2", "agreed", 11)
@@ -76,6 +77,7 @@ def test_two_masters_post_and_read_each_others_posts(channel):
 
 
 @pytest.mark.parametrize("name", list(HELD))
+@pytest.mark.feature("masters-channel")
 def test_an_engineer_ci_planner_or_unseated_session_can_neither_post_nor_read(channel, name):
     channel.post(SLUG, "sw-master-1", "private", 10)
     refusal = f"only master seats of {SLUG} read and write its masters channel; {name} holds {HELD[name]}"
@@ -111,6 +113,7 @@ def test_a_master_of_another_swarm_is_refused(channel):
         channel.post("other", "sw-master-1", "hello", 10)
 
 
+@pytest.mark.feature("masters-channel")
 def test_posts_are_durable_with_no_expiry(channel):
     channel.post(SLUG, "sw-master-1", "kept", 10)
 
@@ -140,6 +143,7 @@ def test_an_empty_post_is_refused(channel):
     assert channel.read(SLUG, "sw-master-1") == []
 
 
+@pytest.mark.feature("masters-channel")
 def test_channel_publish_refuses_a_masters_channel(monkeypatch):
     from hooks.mcp import channels
 
@@ -199,6 +203,7 @@ def test_every_broadcast_publish_refuses_a_masters_channel(monkeypatch, capsys):
     assert [m["channel"] for m in saved[-1]] == ["ops-masters.sw"]
 
 
+@pytest.mark.feature("masters-channel")
 def test_swarm_masters_channel_command_lets_masters_talk_and_refuses_the_engineer(monkeypatch, capsys):
     import fakeredis
 

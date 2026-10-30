@@ -66,6 +66,7 @@ def pending(inbox, address):
     return [(i.sender, i.text, i.ref) for i in inbox.pending_items(address)]
 
 
+@pytest.mark.feature("inbox-operator-writes")
 def test_an_operator_reply_on_a_claimed_tasks_comment_is_one_item_for_that_tasks_agent(swarm):
     _, inbox = swarm
     reply = write(5, "tasks/t1/comments/c-1", kind="reply added", text="yes, ship it")
@@ -75,6 +76,7 @@ def test_an_operator_reply_on_a_claimed_tasks_comment_is_one_item_for_that_tasks
     assert pending(inbox, MASTER_SEAT) == [] and pending(inbox, CI.seat) == []
 
 
+@pytest.mark.feature("inbox-operator-writes")
 def test_a_reply_on_a_phase_goes_to_the_master(swarm):
     _, inbox = swarm
     relay(swarm, write(5, "phases/p1/comments/c-1", kind="reply added"))
@@ -98,6 +100,7 @@ def test_answers_notes_and_checks_go_to_the_master(swarm, event):
     assert len(pending(inbox, MASTER_SEAT)) == 1
 
 
+@pytest.mark.feature("inbox-operator-writes")
 def test_a_sync_order_is_one_item_for_every_live_agent(swarm):
     store, inbox = swarm
     store.put_agent(SLUG, AgentRecord("sw-eng-2", "eng", "t3", state="finished", seat=f"eng-2@{SLUG}"))
@@ -112,6 +115,7 @@ def test_a_check_on_a_task_goes_to_its_agent(swarm):
     assert len(pending(inbox, ENG.seat)) == 1
 
 
+@pytest.mark.feature("inbox-operator-writes")
 def test_a_chat_line_goes_to_its_addressee_and_an_unaddressed_one_to_the_master(swarm):
     _, inbox = swarm
     sent = relay(
@@ -221,6 +225,7 @@ def test_a_ledger_without_a_swarm_sends_nothing(swarm):
     assert inbox.pending() == []
 
 
+@pytest.mark.feature("inbox-operator-writes")
 def test_the_same_write_relayed_twice_is_one_item_and_two_writes_are_two(swarm):
     _, inbox = swarm
     relay(swarm, write(5, "tasks/t1"))

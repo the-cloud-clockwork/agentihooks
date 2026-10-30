@@ -109,6 +109,7 @@ def save(page, hive_id, field, value, shown):
     )
 
 
+@pytest.mark.feature("ledger-hives-panel")
 def test_each_hive_shows_only_the_requested_columns(hives_page):
     page = hives_page()
     rows = page.table("swarm-hives")
@@ -153,6 +154,7 @@ def test_the_quota_header_has_only_its_title_and_refresh_control(hives_page):
     assert header.locator(".sw-count").count() == 0
 
 
+@pytest.mark.feature("ledger-hives-panel")
 def test_editing_max_agents_writes_it_as_the_operator(hives_page):
     page = hives_page()
     box = page.tab.locator('#hive-pod [data-hive-field="max_agents"]')
@@ -173,6 +175,7 @@ def test_excluded_and_flags_are_sent_in_their_api_shape(hives_page):
     ]
 
 
+@pytest.mark.feature("ledger-hives-panel")
 def test_a_refused_write_names_the_reason_and_keeps_the_stored_value(hives_page):
     page = hives_page(refusal="excluded takes lane roles or profiles, not 'a b'")
     excluded = page.tab.locator('#hive-pod [data-hive-field="excluded"]')

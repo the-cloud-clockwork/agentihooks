@@ -1,4 +1,5 @@
 import argparse
+import ast
 import json
 import math
 import os
@@ -10,7 +11,7 @@ from pathlib import Path
 from scripts import locked_tests
 from scripts.ci_mutation.scope import select_tests
 from scripts.ci_test_plan import find_record
-from tests.shards import FIRST_SHARD_FILES, assign_files, source_sizes
+from tests.shards import FIRST_SHARD_FILES, SECONDS_PER_SOURCE_BYTE, _assign_work, source_sizes
 
 PULL_REQUEST = "pull_request"
 FULL = "full"
@@ -134,11 +135,78 @@ def file_seconds(durations: dict[str, float], files: set[str]) -> dict[str, floa
     return {path: total if total else UNKNOWN_SECONDS for path, total in seconds.items()}
 
 
+def defined_tests(source: str) -> tuple[set[str], set[str], set[str]] | None:
+    """Top level test definitions, those with only mark decorators, and every other name the module binds; None when
+    pytest might collect a test those names miss or refuse a class node, or the file shares xdist group state."""
+    if "xdist_group" in source:
+        return None
+    plain = set()
+    defined = set()
+    others = set()
+    for statement in ast.parse(source).body:
+        if isinstance(statement, ast.ClassDef) and (
+            statement.bases
+            or statement.keywords
+            or any(isinstance(node, ast.FunctionDef) and node.name == "__init__" for node in statement.body)
+        ):
+            return None
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            others.add(statement.name)
+            if statement.name.startswith("Test" if isinstance(statement, ast.ClassDef) else "test"):
+                defined.add(statement.name)
+            if all(ast.unparse(decorator).startswith("pytest.mark.") for decorator in statement.decorator_list):
+                plain.add(statement.name)
+            continue
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                others.add(node.id)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                others.add(node.name)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                others.update(alias.asname or alias.name for alias in node.names)
+    return defined, plain - {name for name in defined if name.startswith("Test")}, others - defined
+
+
+def file_units(root: Path, path: str, durations: dict[str, float]) -> dict[str, float]:
+    """Seconds per top level test definition of a file, empty unless those definitions are every test name the module
+    binds and each unstored one is a plain function pytest surely collects."""
+    names = defined_tests((root / path).read_text())
+    if names is None:
+        return {}
+    defined, plain, others = names
+    if "*" in others or any(name.startswith(("test", "Test")) for name in others):
+        return {}
+    units = dict.fromkeys(defined, 0.0)
+    stored = set()
+    for node, duration in durations.items():
+        file, _, rest = node.partition("::")
+        name = rest.partition("::")[0].partition("[")[0]
+        if file == path and name in units:
+            units[name] += duration
+            stored.add(name)
+    if len(units) < 2 or defined - stored - plain or not all(SAFE.fullmatch(name) for name in units):
+        return {}
+    return {f"{path}::{name}": seconds for name, seconds in units.items()}
+
+
 def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: int) -> list[list[str]]:
-    total = sum(file_seconds(durations, tests).values())
+    seconds = file_seconds(durations, tests)
+    total = sum(seconds.values())
     count = min(limit, max(1, math.ceil(total / LEG_SECONDS)))
     files = sorted(tests - FIRST_SHARD_FILES)
-    legs = assign_files(durations, files, count, source_sizes(root, files))
+    sizes = source_sizes(root, files)
+    work = dict.fromkeys(files, 0.0)
+    for node, duration in durations.items():
+        if (path := node.partition("::")[0]) in work:
+            work[path] += duration
+    for path in files:
+        if seconds[path] > total / count and (units := file_units(root, path, durations)):
+            del work[path]
+            work.update(units)
+            sizes.update(dict.fromkeys(units, sizes.pop(path)))
+    collection = {unit: sizes[unit] * SECONDS_PER_SOURCE_BYTE for unit in work}
+    files_of = {unit: unit.partition("::")[0] for unit in work}
+    legs = _assign_work(work, work, collection, count, 1, None, files_of)
     legs[0] = sorted(tests & FIRST_SHARD_FILES) + legs[0]
     return [sorted(leg) for leg in legs if leg]
 
