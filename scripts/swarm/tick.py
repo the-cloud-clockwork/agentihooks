@@ -201,7 +201,7 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
-def tick(slug, store, ledger, runtime, now_ms):
+def tick(slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, now_ms: int) -> list[str]:
     from scripts.swarm import automated_gc
 
     config = store.ensure_code(slug)

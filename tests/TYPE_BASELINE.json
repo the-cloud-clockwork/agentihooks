@@ -732,7 +732,7 @@
   "scripts/swarm/swarm_init.py": 58,
   "scripts/swarm/take_master.py": 219,
   "scripts/swarm/templates.py": 104,
-  "scripts/swarm/tick.py": 3899,
+  "scripts/swarm/tick.py": 3667,
   "scripts/swarm/tick_activity.py": 7,
   "scripts/swarm/tick_heartbeat.py": 61,
   "scripts/swarm/tick_master.py": 447,
