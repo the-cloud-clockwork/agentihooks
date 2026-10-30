@@ -1,4 +1,5 @@
 import copy
+from pathlib import Path
 
 import pytest
 
@@ -28,7 +29,7 @@ def test_unversioned_event_records_are_refused(tmp_path):
         repo.export_document("events")
 
 
-def test_stored_unversioned_event_is_readable(tmp_path):
+def test_stored_unversioned_event_is_readable(tmp_path: Path) -> None:
     from scripts.swarm_ledger.repository.events import read_events
 
     repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")

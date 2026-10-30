@@ -1,5 +1,6 @@
 import sqlite3
 from contextlib import contextmanager
+from typing import Any
 from unittest.mock import MagicMock, call
 
 import psycopg2
@@ -513,7 +514,7 @@ def test_a_snapshot_reads_one_repeatable_read_transaction(opened):
     assert opened.raws[0].commits == 1
 
 
-def test_relay_holds_take_the_writer_lock(opened):
+def test_relay_holds_take_the_writer_lock(opened: Any) -> None:
     repository = postgres.PostgresLedgerRepository(ADDRESS)
     repository._ready.add(ADDRESS)
     repository.hold_revision("inbox", "s", 4)
