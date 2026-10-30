@@ -208,29 +208,25 @@ def ledger_member(redis, credential: str) -> str | None:
     )
 
 
-def _member_ledger(redis: object, member_id: str, fresh: bool) -> str | None:
-    """The member's ledger digest, kept per process because the member record carries every legacy agent token."""
-    if not fresh:
-        return _LEDGER_OF[member_id]
-    found = member(redis, member_id)
-    if found is None:
-        return None
-    _LEDGER_OF[member_id] = found["ledger"]
-    return found["ledger"]
+def _mapped(redis: object, store: object, digest: str | None, member_id: str) -> bool:
+    """True when the ledger credential with this digest belongs to member_id."""
+    if digest is None:
+        return False
+    return (
+        hive_state.read(store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}")))
+        == member_id
+    )
 
 
 def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
     store = _store(redis)
-    for fresh in (member_id not in _LEDGER_OF, True):
-        digest = _member_ledger(redis, member_id, fresh)
-        if digest is None:
+    digest = _LEDGER_OF.get(member_id)
+    if not _mapped(redis, store, digest, member_id):
+        found = member(redis, member_id)
+        if found is None:
             raise HiveError("Hive membership was revoked")
-        current = hive_state.read(
-            store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
-        )
-        if current == member_id:
-            break
-        if fresh:
+        digest = _LEDGER_OF[member_id] = found["ledger"]
+        if not _mapped(redis, store, digest, member_id):
             raise HiveError("Hive membership was revoked")
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"
     key = f"agent.{member_id}.{_digest(token)}"
