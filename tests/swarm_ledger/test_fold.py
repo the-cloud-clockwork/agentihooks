@@ -164,9 +164,10 @@ class OnlyLedgerSectionsFold(unittest.TestCase):
 
 def run_builder(saved, script):
     harness = f"""
-const store = {{ "plan-ledger:demo:fold": {json.dumps(json.dumps(saved))} }};
-const localStorage = {{ getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => {{ store[k] = String(v); }} }};
+const memory = {{ "plan-ledger:demo:fold": {json.dumps(json.dumps(saved))} }};
+const localStorage = {{ getItem: (k) => (k in memory ? memory[k] : null), setItem: (k, v) => {{ memory[k] = String(v); }} }};
 const FOLD_KEY = "plan-ledger:demo:fold";
+function store(key, value) {{ localStorage.setItem(key, JSON.stringify(value)); return true; }}
 function fakeBox(id, open) {{
   const on = {{}};
   const summary = {{ on: {{}}, addEventListener(ev, fn) {{ this.on[ev] = fn; }} }};
@@ -202,16 +203,16 @@ return [a.open, b.open, c.open, d.open];""",
             """const a = fakeBox("a", true);
 collapsible(a);
 a.open = false; a.on.toggle();
-const closed = JSON.parse(store[FOLD_KEY]);
+const closed = JSON.parse(memory[FOLD_KEY]);
 a.open = true; a.on.toggle();
-return [closed, JSON.parse(store[FOLD_KEY])];""",
+return [closed, JSON.parse(memory[FOLD_KEY])];""",
         )
         self.assertEqual(out, [{"other": True, "a": False}, {"other": True, "a": True}])
 
     def test_unreadable_storage_falls_back_to_the_page_defaults(self):
         out = run_builder(
             {},
-            """store[FOLD_KEY] = "{broken";
+            """memory[FOLD_KEY] = "{broken";
 const a = fakeBox("a", true);
 collapsible(a);
 return [a.open, foldSaved()];""",

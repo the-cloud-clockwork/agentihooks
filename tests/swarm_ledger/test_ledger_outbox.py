@@ -178,13 +178,34 @@ def test_reads_and_untalkative_writes_still_fail_while_the_server_is_stopped(ser
     assert queued() == []
 
 
-def test_an_untalkative_write_is_refused_while_queued_talk_still_waits_so_it_never_overtakes_it(server, capsys):
+def test_an_untalkative_write_is_refused_while_queued_talk_still_waits_so_it_never_overtakes_it(
+    server: Server, capsys: pytest.CaptureFixture[str]
+) -> None:
     server.stop()
     run(capsys, ENG, "say", "Queued first", "--reply-to", OPERATOR_LINE)
     held = outbox.path().read_text()
     with pytest.raises(SystemExit, match="still waits in"):
-        ledger.call(SLUG, [{"op": "join", "id": "join-eng", "by": ENG, "role": "member"}])
+        ledger.call(SLUG, [{"op": "leave", "id": "leave-eng", "by": ENG}])
     assert outbox.path().read_text() == held
+
+
+def test_join_reaches_the_server_past_unrelated_talk_and_keeps_deduplication(
+    server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry = outbox.ledger_record(
+        "unrelated-ledger", [{"op": "add", "id": "held-talk", "by": BOSS, "thread": "chat", "text": "held"}], "", False
+    )
+    outbox.append(entry)
+    monkeypatch.setattr(outbox, "flush", lambda store: None)
+    before = outbox.path().read_text()
+    op = {"op": "join", "id": "join-through-talk", "by": ENG, "role": "member"}
+    first = ledger.call(SLUG, [op])
+    assert first["applied"] == [op["id"]]
+    joined = stored()
+    assert joined["_meta"]["members"][ENG]["role"] == "member"
+    assert ledger.call(SLUG, [op])["applied"] == [op["id"]]
+    assert stored() == joined
+    assert outbox.path().read_text() == before
 
 
 def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay(server, monkeypatch, capsys):

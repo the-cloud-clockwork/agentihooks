@@ -54,7 +54,7 @@ export function collapsible(box) {
     if ("fresh" in box.dataset) return void delete box.dataset.fresh;
     const state = foldSaved();
     state[box.id] = box.open;
-    try { localStorage.setItem(FOLD_KEY, JSON.stringify(state)); } catch (e) { /* storage blocked: defaults return on reload */ }
+    store(FOLD_KEY, state);
   });
 }
 
