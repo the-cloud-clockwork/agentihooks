@@ -95,10 +95,8 @@ def _ruff(paths: list[Path]) -> list[dict]:
     return json.loads(result.stdout)
 
 
-def _ruff_hits(
-    tree: Path, defs: dict[Path, dict[int, tuple[str, int]]], measured: dict, hits: list[dict] | None = None
-) -> None:
-    for hit in _ruff(list(defs)) if hits is None else hits:
+def _ruff_hits(tree: Path, defs: dict[Path, dict[int, tuple[str, int]]], measured: dict, hits: list[dict]) -> None:
+    for hit in hits:
         path, row, message = Path(hit["filename"]), hit["location"]["row"], hit["message"]
         value = _MEASURED.search(message)
         if hit["code"] not in RULES or value is None or row not in defs.get(path, {}):
@@ -114,7 +112,7 @@ def measure(tree: Path) -> dict[str, dict[str, int]]:
     reported = {Path(hit["filename"]) for hit in hits}
     needed = [path for path, text in sources.items() if path in reported or len(text.splitlines()) > FUNCTION_LINES]
     with ProcessPoolExecutor() as pool:
-        parsed = dict(zip(needed, pool.map(functions, [sources[path] for path in needed], chunksize=16)))
+        parsed = dict(zip(needed, pool.map(functions, [sources[path] for path in needed])))
     defs = {path: parsed.get(path, {}) for path in sources}
     measured = {}
     _lengths(tree, defs, measured)

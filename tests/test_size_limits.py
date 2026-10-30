@@ -217,7 +217,9 @@ def test_a_short_file_is_not_parsed_unless_ruff_reports_it(tmp_path: Path, monke
     monkeypatch.setattr(size_limits, "ProcessPoolExecutor", _SerialPool)
     monkeypatch.setattr(size_limits, "functions", lambda source: parsed.append(source) or real(source))
     long = _function("method", size_limits.FUNCTION_LINES + 1)
-    tree = _tree(tmp_path, {"short.py": SEVEN_PARAMETERS, "hit.py": EIGHT_PARAMETERS, "long.py": long})
+    fits = _function("method", size_limits.FUNCTION_LINES)
+    files = {"short.py": SEVEN_PARAMETERS, "fits.py": fits, "hit.py": EIGHT_PARAMETERS, "long.py": long}
+    tree = _tree(tmp_path, files)
     assert size_limits.measure(tree) == {
         "hit.py::planted": {"PLR0913": 8},
         "long.py::method": {"function-lines": size_limits.FUNCTION_LINES + 1},
@@ -232,7 +234,7 @@ class _SerialPool:
     def __exit__(self, *exc: object) -> None:
         return None
 
-    def map(self, fn: Callable[[str], dict], items: list[str], chunksize: int = 1) -> Iterator[dict]:
+    def map(self, fn: Callable[[str], dict], items: list[str]) -> Iterator[dict]:
         return map(fn, items)
 
 
