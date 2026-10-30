@@ -112,6 +112,7 @@ MOVED = {
     ("test.yml", "unit-selected"): STANDARD,
     ("writer-lock.yml", "inputs"): LIGHT,
     ("writer-lock.yml", "scenario"): QUEUED,
+    ("feature-suite.yml", "features"): QUEUED,
     ("worker-resources.yml", "measure"): BATCH,
 }
 if (WORKFLOWS / "actions-storage.yml").exists():
