@@ -1893,15 +1893,17 @@ def test_parked_successor_restacks_and_publishes_with_predecessor_checkout_prese
     assert (root / "task.txt").read_text() == "parked work"
 
 
-@pytest.mark.parametrize(("stacked", "replayed"), [("rebased", "2"), ("dependency", "1")])
-def test_a_restack_after_a_manual_rebase_replays_only_the_task_commits(publication, monkeypatch, stacked, replayed):
+@pytest.mark.parametrize(("stacked", "replayed"), [("rebased", "2"), ("dependency", "1"), ("dependency-rebased", "1")])
+def test_a_restack_after_a_manual_rebase_replays_only_the_task_commits(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, stacked: str, replayed: str
+) -> None:
     from scripts.swarm import stack
 
     p = publication
     root, repository = p.root, p.repo
     (root / "chosen.txt").write_text("before")
     base = git(repository, "rev-parse", "dev")
-    if stacked == "dependency":
+    if stacked.startswith("dependency"):
         (root / "blocker.txt").write_text("dependency")
         git(root, "add", "blocker.txt")
         git(root, "commit", "-qm", "Dependency work")
@@ -1917,9 +1919,13 @@ def test_a_restack_after_a_manual_rebase_replays_only_the_task_commits(publicati
         git(repository, "add", f"upstream{number}.txt")
         git(repository, "commit", "-qm", f"Upstream {number}")
     git(repository, "push", "origin", "dev")
-    if stacked == "rebased":
+    if stacked != "dependency":
         git(root, "fetch", "origin")
-        git(root, "rebase", "origin/dev")
+        git(root, "rebase", "--onto", "origin/dev", base)
+        (repository / "later.txt").write_text("after manual rebase")
+        git(repository, "add", "later.txt")
+        git(repository, "commit", "-qm", "Advance dev after manual rebase")
+        git(repository, "push", "origin", "dev")
     git(root, "push", "origin", "HEAD:engineer-test")
     p.task.update(parked_on=["dependency"], stacked_base=base)
     p.ledger.state = lambda slug: {"tasks": [p.task, {"id": "dependency", "state": "done"}]}
