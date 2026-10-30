@@ -1393,6 +1393,9 @@ def _check_shell_guards(payload: dict) -> None:
 
     check_local_tests(payload)
     check_github_watch(payload)
+    _blocker_block = _blocker_window_check(payload, payload.get("tool_name", "unknown"), payload.get("tool_input", {}))
+    if _blocker_block:
+        raise BlockAction(_blocker_block)
     if payload.get("tool_name") != "Bash":
         return
     try:
@@ -1489,10 +1492,6 @@ def on_pre_tool_use(payload: dict) -> None:
     _swarm_block = _swarm_gates(tool_name, tool_input, payload.get("session_id", ""))
     if _swarm_block:
         raise BlockAction(_swarm_block)
-
-    _blocker_block = _blocker_window_check(payload, tool_name, tool_input)
-    if _blocker_block:
-        raise BlockAction(_blocker_block)
 
     from hooks.lifecycle.guard import pretool as _lifecycle_pretool
 
