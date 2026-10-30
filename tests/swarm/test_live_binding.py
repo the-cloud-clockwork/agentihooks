@@ -1360,15 +1360,18 @@ def _hosted(store, agent, monkeypatch, tmp_path, report=True):
 
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    hosted = replace(
-        agent,
-        profile="engineer",
-        harness="claude",
-        hive="stable",
-        runtime_target={"host_id": "stable"},
-        profile_decision={},
+    hosted = store.start_execution(
+        "sw",
+        replace(
+            agent,
+            profile="engineer",
+            harness="claude",
+            hive="stable",
+            runtime_target={"host_id": "stable"},
+            profile_decision={},
+        ),
+        "",
     )
-    store.put_agent("sw", hosted)
     if report:
         checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
         context = {"home": HIVE_HOME, "profile": "engineer", "harness": "claude"}
