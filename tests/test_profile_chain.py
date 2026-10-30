@@ -340,6 +340,28 @@ def test_rendered_overlays_read_the_home_stamp(tmp_path, wrapped):
     assert profile_chain.rendered_overlays(tmp_path) == []
 
 
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_rendered_chain_read_the_home_stamp(tmp_path, wrapped):
+    stamp = tmp_path / profile_chain.RENDER_STAMP
+    assert profile_chain.rendered_chain(tmp_path) == []
+    data = {"chain": ["a", 2, "brain"]}
+    stamp.write_text(json.dumps({"render": data, "chain": ["other"]} if wrapped else data))
+    assert profile_chain.rendered_chain(tmp_path) == ["a", "2", "brain"]
+    for data in (
+        {},
+        {"chain": None},
+        [],
+        None,
+        {"render": {}},
+        {"render": None},
+        {"render": []},
+    ):
+        stamp.write_text(json.dumps(data))
+        assert profile_chain.rendered_chain(tmp_path) == []
+    stamp.write_text("{")
+    assert profile_chain.rendered_chain(tmp_path) == []
+
+
 def test_rendered_dirs_adds_the_overlays_the_chain_declares(tmp_path, monkeypatch):
     monkeypatch.setattr(profile_chain, "BUILT_IN_PROFILES", tmp_path / "builtin")
     monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", tmp_path / "roles")
