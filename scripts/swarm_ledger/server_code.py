@@ -1,11 +1,13 @@
 """The ledger server's code folders and the code stamp it loaded."""
 
 import hashlib
+import importlib.abc
+import importlib.machinery
 import json
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from types import ModuleType
+from types import CodeType, ModuleType
 
 CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
@@ -103,11 +105,33 @@ def file_digest(path: Path) -> str | None:
         return None
 
 
-class LoadedCode:
+def source_identity(path: Path, executing: CodeType) -> str:
+    source = path.read_bytes()
+    compiled = compile(source, executing.co_filename, "exec", dont_inherit=True)
+    return hashlib.sha256(source).hexdigest() if compiled == executing else ""
+
+
+class Source(importlib.abc.SourceLoader):
+    def __init__(self, loader: importlib.machinery.SourceFileLoader, files: dict[str, str]) -> None:
+        self.loader = loader
+        self.files = files
+
+    def get_filename(self, fullname: str) -> str:
+        return self.loader.get_filename(fullname)
+
+    def get_data(self, path: str) -> bytes:
+        source = self.loader.get_data(path)
+        if Path(path).suffix == ".py":
+            self.files[str(Path(path).resolve())] = hashlib.sha256(source).hexdigest()
+        return source
+
+
+class LoadedCode(importlib.abc.MetaPathFinder):
     def __init__(self, root: Path = ROOT, modules: Mapping[str, ModuleType | None] = sys.modules) -> None:
         self.root = root.resolve()
         self.modules = modules
         self.files: dict[str, str] = {}
+        self.sources: dict[str, str] = {}
         self.capture()
 
     def capture(self) -> None:
@@ -118,10 +142,31 @@ class LoadedCode:
             path = Path(name).resolve()
             if path.suffix != ".py" or not path.is_relative_to(self.root) or str(path) in self.files:
                 continue
-            digest = file_digest(path)
+            digest = self.sources.get(str(path), file_digest(path))
             if digest is not None:
                 self.files[str(path)] = digest
 
     def changed(self) -> bool:
         self.capture()
         return any(file_digest(Path(path)) != digest for path, digest in self.files.items())
+
+    def install(self, executing: CodeType | None = None) -> None:
+        if executing is not None:
+            path = Path(executing.co_filename).resolve()
+            self.files[str(path)] = source_identity(path, executing)
+            self.files[str(Path(__file__).resolve())] = SELF_DIGEST
+        sys.meta_path.insert(0, self)
+
+    def find_spec(
+        self, fullname: str, path: list[str] | None = None, target: ModuleType | None = None
+    ) -> importlib.machinery.ModuleSpec | None:
+        spec = importlib.machinery.PathFinder.find_spec(fullname, path, target)
+        if spec is None or not isinstance(spec.loader, importlib.machinery.SourceFileLoader):
+            return None
+        if not Path(spec.loader.path).resolve().is_relative_to(self.root):
+            return None
+        spec.loader = Source(spec.loader, self.sources)
+        return spec
+
+
+SELF_DIGEST = source_identity(Path(__file__), sys._getframe().f_code)

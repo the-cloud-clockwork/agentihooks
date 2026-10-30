@@ -1,6 +1,8 @@
+import importlib
 import json
 import os
 import socket
+import sys
 import threading
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -50,6 +52,33 @@ def test_lazy_modules_join_the_loaded_content_record(tmp_path: Path) -> None:
     lazy.unlink()
     assert code.changed()
     assert server_code.stale(tmp_path, 42)
+
+
+def test_source_changed_after_import_before_capture_is_stale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "loaded_before_merge.py"
+    path.write_text("value = 1\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    code = server_code.LoadedCode(tmp_path)
+    code.install()
+    try:
+        imported = importlib.import_module(path.stem)
+        assert imported.value == 1
+        path.write_text("value = 2\n")
+        assert code.changed()
+        server_code.record(tmp_path, 42, 0, (), files=code.files)
+        assert server_code.stale(tmp_path, 42)
+    finally:
+        sys.meta_path.remove(code)
+        sys.modules.pop(path.stem, None)
+
+
+def test_startup_source_identity_matches_the_executing_code(tmp_path: Path) -> None:
+    path = tmp_path / "start.py"
+    path.write_text("value = 1\n")
+    executing = compile(path.read_bytes(), str(path), "exec", dont_inherit=True)
+    assert server_code.source_identity(path, executing) == server_code.file_digest(path)
+    path.write_text("value = 2\n")
+    assert server_code.source_identity(path, executing) == ""
 
 
 def test_foreign_and_unlocated_modules_are_not_server_code(tmp_path: Path) -> None:

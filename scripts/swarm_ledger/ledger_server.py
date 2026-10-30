@@ -37,6 +37,12 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
+from scripts.swarm_ledger import server_code  # noqa: E402
+
+LOADED_CODE = server_code.LoadedCode()
+if __name__ == "__main__":
+    LOADED_CODE.install(sys._getframe().f_code)
+
 import ledger_alerts  # noqa: E402
 import ledger_artifacts  # noqa: E402
 import ledger_authority as authority  # noqa: E402
@@ -57,7 +63,6 @@ from scripts.swarm_ledger import (  # noqa: E402
     ports,
     request_body,
     request_metrics,
-    server_code,
     server_compose,
     server_handoff,
     server_lifetime,
@@ -110,7 +115,6 @@ FOLLOW_S = 0.25
 SCHEDULER_UNAVAILABLE = threading.Event()
 LOADED_STAMP = code_stamp()
 LOADED_DIGEST = code_digest()
-LOADED_CODE = server_code.LoadedCode()
 
 
 @functools.cache
