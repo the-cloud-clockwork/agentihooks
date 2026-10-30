@@ -65,7 +65,7 @@ class FencedLedger:
 class FencedRuntime:
     def __init__(self, store: RedisStore, slug: str, held: lease.Lease, runtime, deployment: str):
         self.store, self.slug, self.held = store, slug, held
-        self._local_slots_cache: dict | None = None
+        self._local_slots_cache: local_slots.PassCache | None = None
         self.kubernetes_proof = (
             slug.startswith("proof-") and os.environ.get("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF") == slug
         )
@@ -109,7 +109,7 @@ class FencedRuntime:
         if launch := getattr(self.runtime, "hive_launch", None):
             launch.placement_cache = {}
             launch.herdr.pass_memo = {}
-        self._local_slots_cache = {}
+        self._local_slots_cache = local_slots.PassCache()
 
     def end_placement_pass(self) -> None:
         if launch := getattr(self.runtime, "hive_launch", None):
