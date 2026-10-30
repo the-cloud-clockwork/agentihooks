@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from unittest.mock import patch
 
@@ -46,13 +47,15 @@ def test_stale_retirement_preserves_the_agent_projection_and_history(store, monk
     assert store.execution("fixture", agent.execution_id) == agent
 
 
-def test_retirement_cannot_remove_a_replacement_with_a_delayed_projection(store, monkeypatch):
+def test_retirement_cannot_remove_a_replacement_with_a_delayed_projection(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     agent = started(store)
     before = store.redis.hgetall(store.key("fixture", "agents"))
     write = fencing.write
     replacements = []
 
-    def replace_first(saved, slug, change):
+    def replace_first(saved: RedisStore, slug: str, change: Callable[[dict], object]) -> object:
         if not replacements:
             replacements.append(None)
             monkeypatch.setattr(store, "project_agent", lambda *args, **kwargs: None)
