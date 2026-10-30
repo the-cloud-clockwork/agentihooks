@@ -477,6 +477,8 @@ def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runti
     runtimes = runtimes or {}
     slugs = ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, ""))
     host = hive_id()
+    for slug in slugs:
+        store.redis.set(store.key(slug, HOST_MARK), host, px=lease.ttl_ms())
     return {
         slug: run_tick(store, slug, ledger, runtimes.get(slug, runtime), messenger, scheduled=True) for slug in slugs
     }
