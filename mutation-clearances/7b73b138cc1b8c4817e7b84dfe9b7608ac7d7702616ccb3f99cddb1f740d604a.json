@@ -1,0 +1,6 @@
+{
+  "hooks/context/file_read_cache.py:hooks.context.file_read_cache.x_mark_read_result:535af0f6d5352cc29fb69c4ab6a51eeccf335ec03cecb337bf25a45edc2216a5": {
+    "reader": "standards-reader",
+    "reason": "Missing identity defaults to an empty string or None; both return through the same truthiness guard before cache access. Present identity is unchanged. Independently reviewed against preflight 41031740335."
+  }
+}
