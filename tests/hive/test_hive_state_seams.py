@@ -479,6 +479,7 @@ def test_an_independent_token_cannot_use_another_members_ledger_mapping(backend,
     assert auth.agent_member(client, token, "alpha", "engineer@1") is None
 
 
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
 def test_repeated_issuance_loads_the_member_record_once(backend, request, client, monkeypatch):
     request.getfixturevalue(backend)
     monkeypatch.setattr(auth, "_LEDGER_OF", {})
@@ -501,6 +502,7 @@ def test_repeated_issuance_loads_the_member_record_once(backend, request, client
         assert auth.agent_member(client, token, "alpha", f"engineer@{n}") == "m-once"
 
 
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
 def test_issuance_after_a_cached_lookup_refuses_a_revoked_or_remapped_member(backend, request, client, monkeypatch):
     request.getfixturevalue(backend)
     monkeypatch.setattr(auth, "_LEDGER_OF", {})
