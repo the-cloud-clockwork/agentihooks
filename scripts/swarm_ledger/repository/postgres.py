@@ -354,15 +354,7 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
                 connection.execute(GUARD_TRIGGER)
             self._ready.add(address)
 
-    def _write(
-        self,
-        connection: sqlite3.Connection,
-        slug: str,
-        entry: Entry,
-        state: dict,
-        events: list,
-        summary: dict | None = None,
-    ) -> Entry:
+    def _write(self, connection: sqlite3.Connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
         stored = connection.execute(FLOOR).fetchone()
         required = REQUIRED if stored is None else stored[0]
         if required > VERSION:
@@ -377,7 +369,7 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
             for address, version, floor in refused:
                 text = f"The ledger writer at {address} was refused: {refusal(version, floor)}"
                 ledger_alerts.raise_warning(state, raised, (ledger_alerts.WRITER, text), before)
-        return super()._write(connection, slug, entry, state, events, summary)
+        return super()._write(connection, slug, entry, state, events)
 
     @contextmanager
     def snapshot(self) -> Iterator[Snapshot]:
