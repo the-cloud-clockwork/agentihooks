@@ -59,7 +59,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import asdict, replace
@@ -175,7 +175,7 @@ from scripts.swarm.store import (
     Unreachable,
     connect,
 )
-from scripts.swarm.tick import agent_status, primed, ready_in_order, skip_refused, spawn_holds, tick
+from scripts.swarm.tick import agent_status, claim_view, primed, ready_in_order, skip_refused, spawn_holds, tick
 from scripts.swarm_ledger import (
     ledger_creator,
     ledger_kinds,
@@ -321,6 +321,17 @@ def _intent_pass(inbox, store, slug, doc, ledger, config):
     return view, skip_refused(check.run, doc)
 
 
+def lane_ready(slug: str, store: RedisStore, rows: dict, doc: dict) -> Callable[[str], list[dict]]:
+    claims = []
+
+    def ready(lane: str) -> list[dict]:
+        if not claims:
+            claims.append(claim_view(slug, store, rows, doc))
+        return ready_in_order(slug, store, rows, doc, lane, claims=claims[0])
+
+    return ready
+
+
 @timing.instrument_tick
 @scope.one_pass()
 @outage.guard_tick
@@ -429,7 +440,7 @@ def run_tick(
                     view,
                     frozenset(live),
                     lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
-                    lambda lane: ready_in_order(slug, store, rows, doc, lane),
+                    lane_ready(slug, store, rows, doc),
                     now_ms(),
                     released=release_wait.checker(config.repo),
                     reread=ledger_events.view,
