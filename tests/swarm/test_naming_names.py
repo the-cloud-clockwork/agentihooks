@@ -156,3 +156,64 @@ def test_the_module_level_lookups_read_the_bus_with_no_redis(bus, monkeypatch):
     assert naming.resolve_names(["sw-eng-1", "x"]) == {"sw-eng-1": new, "x": "x"}
     assert naming.addresses("sw-eng-1") == [new, "sw-eng-1"]
     assert naming.registered_slug("sw-eng-1") == "sw"
+
+
+def _seed_legacy(client, seq, records):
+    client.hset(_legacy("seq", "abcdef"), mapping=seq)
+    for name, record in records.items():
+        client.hset(_legacy("name", name), mapping=record)
+        client.rpush(_legacy("names", "abcdef"), name)
+
+
+def test_swarm_keys_lists_every_legacy_name_and_each_alias_it_carries(client, names):
+    olds = [f"engineer@abcdef-000{n}" for n in (1, 2, 3)]
+    _seed_legacy(client, {"engineer": 3}, {old: _record("engineer", n, n) for n, old in enumerate(olds, 1)})
+    client.sadd(_legacy("aliases-of", olds[2]), "sw-eng-3")
+    assert names.swarm_keys("sw") == [
+        _legacy("seq", "abcdef"),
+        _legacy("names", "abcdef"),
+        *[key for old in olds for key in (_legacy("name", old), _legacy("aliases-of", old))],
+        _legacy("alias", "sw-eng-3"),
+    ]
+
+
+def test_legacy_name_records_are_read_in_plain_pipelines(client, names, monkeypatch):
+    _seed_legacy(client, {"engineer": 1}, {"engineer@abcdef-0001": _record("engineer", 1, 1)})
+    opened = []
+    real = client.pipeline
+    monkeypatch.setattr(client, "pipeline", lambda **kwargs: opened.append(kwargs) or real(**kwargs))
+    assert [row["name"] for row in names.names("sw")] == ["engineer@abcdef-0001"]
+    assert opened.count({"transaction": False}) == 1
+
+
+def test_successor_skips_missing_and_retired_names_and_stops_at_the_last_spawned(client, names):
+    live = _record("engineer", 4, 4)
+    _seed_legacy(
+        client,
+        {"engineer": 4, "ci": 1},
+        {
+            "engineer@abcdef-0001": _record("engineer", 1, 1),
+            "engineer@abcdef-0003": _record("engineer", 3, 3, retired=5),
+            "engineer@abcdef-0004": live,
+            "engineer@abcdef-0005": _record("engineer", 5, 5),
+        },
+    )
+    assert names.successor("engineer@abcdef-0001") == "engineer@abcdef-0004"
+    assert names.successor("engineer@abcdef-0004") == ""
+
+
+def test_successor_of_a_kind_the_sequence_never_counted_is_empty(client, names):
+    _seed_legacy(
+        client,
+        {"ci": 1},
+        {"engineer@abcdef-0000": _record("engineer", 0, 1), "engineer@abcdef-0001": _record("engineer", 1, 2)},
+    )
+    assert names.successor("engineer@abcdef-0000") == ""
+
+
+def test_export_skips_a_listed_name_without_a_record_and_keeps_the_rest(client, names):
+    client.rpush(_legacy("names", "abcdef"), "engineer@abcdef-0001")
+    _seed_legacy(client, {"engineer": 2}, {"engineer@abcdef-0002": _record("engineer", 2, 2)})
+    rows = names.export("sw")
+    assert name_state.state_key("name", "engineer@abcdef-0001") not in rows
+    assert rows[name_state.state_key("name", "engineer@abcdef-0002")] == _record("engineer", 2, 2)
