@@ -129,21 +129,22 @@ def test_a_stale_tick_joins_evidence_with_a_semicolon(store):
 
 
 def test_cmd_blockers_lists_active_categories(store, capsys):
-    blockers.record(store, SLUG, "cat", "boom", 0)
+    now = cli.now_ms()
+    blockers.record(store, SLUG, "cat", "boom", now)
     args = cli.build_parser().parse_args([SLUG, "blockers"])
     assert args.action == "list"
     assert args.category == ""
     args.handler(store, args)
     out = json.loads(capsys.readouterr().out)
-    assert out == [{"category": "cat", "first_seen": 0, "last_seen": 0, "count": 1, "detail": "boom"}]
+    assert out == [{"category": "cat", "first_seen": now, "last_seen": now, "count": 1, "detail": "boom"}]
 
 
 def test_cmd_blockers_clears_a_category(store, capsys):
-    blockers.record(store, SLUG, "cat", "boom", 0)
+    blockers.record(store, SLUG, "cat", "boom", cli.now_ms())
     args = cli.build_parser().parse_args([SLUG, "blockers", "clear", "cat"])
     args.handler(store, args)
     assert json.loads(capsys.readouterr().out) == {"cleared": "cat"}
-    assert blockers.active(store, SLUG, 0) == {}
+    assert blockers.active(store, SLUG, cli.now_ms()) == {}
 
 
 def test_cmd_blockers_clear_without_a_category_refuses(store):
@@ -153,8 +154,9 @@ def test_cmd_blockers_clear_without_a_category_refuses(store):
 
 
 def test_cmd_blockers_lists_categories_sorted_by_name(store, capsys):
-    blockers.record(store, SLUG, "zeta", "z", 0)
-    blockers.record(store, SLUG, "alpha", "a", 0)
+    now = cli.now_ms()
+    blockers.record(store, SLUG, "zeta", "z", now)
+    blockers.record(store, SLUG, "alpha", "a", now)
     args = cli.build_parser().parse_args([SLUG, "blockers"])
     args.handler(store, args)
     out = json.loads(capsys.readouterr().out)
