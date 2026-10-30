@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts import feature_map
 
@@ -614,3 +615,126 @@ def test_live_check_requires_the_deployed_feature_job_and_step(tmp_path, jobs, s
     )
     result = _live(tmp_path, "123")
     assert (result.returncode == 0) is success, result.stderr
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        '@pytest.mark.feature("login")\n@pytest.mark.skip(reason="later")\ndef test_shared():\n    assert True\n',
+        '@pytest.mark.feature("login")\n@pytest.mark.skipif(True, reason="x")\ndef test_shared():\n    assert True\n',
+        '@pytest.mark.feature("login")\n@pytest.mark.xfail\ndef test_shared():\n    assert True\n',
+        '@pytest.mark.feature("login")\ndef test_shared():\n    pytest.importorskip("missing")\n    assert True\n',
+        '@pytest.mark.feature("login")\ndef test_shared():\n    pytest.skip("later")\n',
+        'pytestmark = pytest.mark.skip\n@pytest.mark.feature("login")\ndef test_shared():\n    assert True\n',
+        'class TestLogin:\n    @pytest.mark.feature("login")\n    def test_shared(self):\n        self.skipTest("x")\n',
+    ],
+)
+def test_a_disabled_mapped_test_fails(mapped_repo, source):
+    root, path, entry = mapped_repo
+    node = "tests/test_login.py::" + ("TestLogin::test_shared" if "class" in source else "test_shared")
+    _rewrite(path, {**entry, "behaviour_test": node})
+    (root / "tests/test_login.py").write_text("import pytest\n" + source)
+    with pytest.raises(ValueError, match=re.escape(f"mapped test is skipped, xfailed or returns early: ['{node}']")):
+        feature_map.validate(root, path)
+    (root / "tests/test_login.py").write_text(
+        "import pytest\n" + re.sub(r"pytest\.(mark\.)?(skipif|skip|xfail|importorskip)|self\.skipTest", "str", source)
+    )
+    assert feature_map.validate(root, path) == 1
+
+
+def _base(tmp_path, features, retired=()):
+    base = tmp_path / "base-map.json"
+    base.write_text(json.dumps({"features": features, "retired": list(retired)}))
+    return base
+
+
+RETIRED = {"id": "logout", "reason": "Merged into login", "ledger_item": "ledger:rig/tasks/t2"}
+
+
+def test_removing_a_feature_needs_a_retired_record(mapped_repo):
+    root, path, entry = mapped_repo
+    base = _base(root, [entry, {**entry, "id": "logout"}])
+    with pytest.raises(ValueError, match=re.escape("removed feature needs a retired record: ['logout']")):
+        feature_map.validate(root, path, base)
+    path.write_text(json.dumps({"features": [entry], "retired": [RETIRED]}))
+    assert feature_map.validate(root, path, base) == 1
+
+
+@pytest.mark.parametrize("field", ["id", "reason", "ledger_item"])
+def test_a_retired_record_needs_its_id_reason_and_ledger_item(mapped_repo, field):
+    root, path, entry = mapped_repo
+    path.write_text(json.dumps({"features": [entry], "retired": [{**RETIRED, field: ""}]}))
+    with pytest.raises(ValueError, match=f"requires {field}$"):
+        feature_map.validate(root, path)
+
+
+def test_a_retired_record_takes_a_whole_ledger_item(mapped_repo):
+    root, path, entry = mapped_repo
+    path.write_text(json.dumps({"features": [entry], "retired": [{**RETIRED, "ledger_item": "t2"}]}))
+    with pytest.raises(ValueError, match="^logout: invalid retired ledger_item$"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("retired", [{"id": "x"}, [RETIRED, RETIRED], ["logout"]])
+def test_retired_must_be_a_list_of_distinct_records(mapped_repo, retired):
+    root, path, entry = mapped_repo
+    path.write_text(json.dumps({"features": [entry], "retired": retired}))
+    with pytest.raises(ValueError, match="retired"):
+        feature_map.validate(root, path)
+
+
+def test_a_retired_id_is_never_reused(mapped_repo):
+    root, path, entry = mapped_repo
+    path.write_text(json.dumps({"features": [entry], "retired": [{**RETIRED, "id": "login"}]}))
+    with pytest.raises(ValueError, match=re.escape("retired feature id reused: ['login']")):
+        feature_map.validate(root, path)
+
+
+def test_a_retired_record_cannot_be_dropped(mapped_repo):
+    root, path, entry = mapped_repo
+    base = _base(root, [entry], [RETIRED])
+    with pytest.raises(ValueError, match=re.escape("retired record removed: ['logout']")):
+        feature_map.validate(root, path, base)
+    path.write_text(json.dumps({"features": [entry], "retired": [RETIRED]}))
+    assert feature_map.validate(root, path, base) == 1
+
+
+def test_removing_a_mapped_test_without_changing_its_entry_fails(mapped_repo):
+    root, path, entry = mapped_repo
+    base = _base(root, [entry])
+    assert feature_map.validate(root, path, base) == 1
+    (root / "tests/test_login.py").write_text("import pytest\n")
+    with pytest.raises(ValueError, match="^login: missing behaviour test tests/test_login.py::test_shared$"):
+        feature_map.validate(root, path, base)
+
+
+def test_a_base_without_a_map_grades_the_head_alone(mapped_repo):
+    root, path, _ = mapped_repo
+    assert feature_map.validate(root, path, root / "absent.json") == 1
+
+
+def test_cli_grades_against_the_base_map(mapped_repo, monkeypatch, capsys):
+    root, path, entry = mapped_repo
+    base = root / "base"
+    base.mkdir()
+    (base / "feature-map.json").write_text(json.dumps({"features": [entry, {**entry, "id": "logout"}]}))
+    monkeypatch.setattr(sys, "argv", ["feature_map", "--root", str(root), "--base", str(base)])
+    with pytest.raises(ValueError, match="logout"):
+        feature_map.main()
+    path.write_text(json.dumps({"features": [entry], "retired": [RETIRED]}))
+    feature_map.main()
+    assert "1 features" in capsys.readouterr().out
+
+
+def test_lint_grades_the_feature_map_from_the_protected_grader_against_the_base():
+    workflow = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())
+    step = next(
+        step for step in workflow["jobs"]["lint"]["steps"] if step.get("name") == "Hold the mapped feature tests"
+    )
+    assert step["if"] == "${{ !cancelled() }}"
+    assert 'cd "$RUNNER_TEMP/grader"' in step["run"]
+    assert (
+        step["run"]
+        .strip()
+        .endswith('python -m scripts.feature_map --root "$GITHUB_WORKSPACE" --base "$RUNNER_TEMP/base"')
+    )
