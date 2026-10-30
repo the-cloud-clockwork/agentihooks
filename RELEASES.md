@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.500 · 2026-10-30
+
+### 2026-10-30 · 8c756e0ae2d4 · #8847 · @agenticore-app
+
+**Launch an admitted order on its admitted account without rereading the hive seat view**
+
+This change fixes a routing bug where an admitted order could be bounced back for readmission if the hive's local seat view was stale, full, draining, or missing the account. Now `HerdrRuntime._route_account` sends an admitted order directly to its admitted account instead of rereading the hive's own quota view, so a stale local view can no longer override a controller decision. The controller remains the single source of truth for seat assignment, aggregating live hive reports and only placing work on hives that advertise the needed slot, which eliminates the readmission loop that was failing all ten cases in `test_admitted_quota_launch.py`.
+
+### 2026-10-30 · 384eb72ebca1 · #8839 · @agenticore-app
+
+**Reset request metrics journal state between swarm ledger tests**
+
+This change fixes test isolation for request metrics by adding an autouse fixture in the swarm ledger conftest that resets journal state (path, held since, lost spans, pending rows, samples, evicted through) before each test, since the ledger server serve tests previously left this global state dirty for subsequent tests on the same worker. The ledger writer's serving fixture now stubs metrics_journal to match other serve tests, and a new ordered test pair verifies the fix, preventing flaky failures caused by leaked journal state between tests.
+
 ## v2.17.499 · 2026-10-30
 
 ### 2026-10-30 · 63db7370f00f · #8825 · @nestorcolt
