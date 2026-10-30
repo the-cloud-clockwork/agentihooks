@@ -97,6 +97,12 @@ class SeatRegistry:
         occupant = _occupancy(reader.hgetall(self.key(address))) if address else None
         return address if occupant and occupant.occupant == name else ""
 
+    def recipient(self, address: str) -> str:
+        address = naming.NameRegistry(self.redis).resolve(address)
+        if naming.lane_of(address) == "master":
+            return self.seat_of(address) or address
+        return address
+
     def known_seat(self, name: str) -> str:
         return self.redis.get(f"{PREFIX}-of:{name}") or ""
 

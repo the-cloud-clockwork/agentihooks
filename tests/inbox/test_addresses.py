@@ -54,7 +54,7 @@ def test_real_names_seats_operator_and_session_ids_still_accept_messages(inbox, 
     monkeypatch.setattr(addresses, "get_active_sessions", lambda **kwargs: {"session-bob": {"name": "bob"}})
     assert cli.main(["send", address, "hello"]) == 0
     result = json.loads(capsys.readouterr().out)
-    routed = {"old-master": "master@123456-0001", "operator": "master@crew"}
+    routed = {"old-master": "master@crew", "master@123456-0001": "master@crew", "operator": "master@crew"}
     assert result["to"] == routed.get(address, address)
     assert inbox.get(result["id"]).state == "pending"
 
@@ -82,7 +82,7 @@ def test_reply_to_a_registered_sender_still_closes_the_original(inbox, capsys):
     item = inbox.send("master@123456-0001", "engineer@123456-0001", "question")
     assert cli.main(["reply", item.id, "answer"]) == 0
     result = json.loads(capsys.readouterr().out)
-    assert result["to"] == "master@123456-0001"
+    assert result["to"] == "master@crew"
     assert inbox.get(item.id).state == "done"
 
 
