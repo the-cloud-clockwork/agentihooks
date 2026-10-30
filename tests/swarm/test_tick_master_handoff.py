@@ -1,5 +1,7 @@
 from dataclasses import replace
 
+import pytest
+
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.store import MASTER, AgentRecord
 from scripts.swarm.tick import tick
@@ -22,6 +24,7 @@ class HandoffMidPass(FakeRuntime):
         return super().observe(agent)
 
 
+@pytest.mark.feature("swarm-master-handoff")
 def test_a_master_handoff_landing_mid_tick_still_launches_the_successor_with_the_doc(store):
     runtime = HandoffMidPass(store)
     tick("sw", store, tasks(), runtime, 1)

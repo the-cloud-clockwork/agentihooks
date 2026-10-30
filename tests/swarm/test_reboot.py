@@ -176,6 +176,7 @@ def rebooted(store, swarm, monkeypatch):
     return ledger, runtime
 
 
+@pytest.mark.feature("swarm-reboot-recovery")
 def test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_account(store, rebooted):
     ledger, runtime = rebooted
     before = _local(store)
@@ -198,6 +199,7 @@ def test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_ac
     assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-2"
 
 
+@pytest.mark.feature("swarm-reboot-recovery")
 def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, rebooted):
     ledger, runtime = rebooted
     eng = next(a for a in _local(store).values() if a.lane == "eng")
