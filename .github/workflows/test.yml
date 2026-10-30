@@ -2915,6 +2915,58 @@ jobs:
           done
           exit "$failed"
 
+  type-gate:
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && github.event_name != 'push' }}
+    needs: [reuse, admission]
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - *python
+      - *day
+      - *venv
+      - *uv
+      - *install
+      - *use-venv
+      - name: Check out the base revision
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+        run: git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"
+      - name: Check out the protected grader
+        env:
+          GRADER: ${{ github.event.pull_request.base.sha || needs.reuse.outputs.grader }}
+        run: |
+          git fetch --no-tags origin "$GRADER"
+          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+      - name: Hold the strict type checker's errors per file to the base baseline
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/type_gate.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.type_gate --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" --measured "$RUNNER_TEMP/type-baseline/TYPE_BASELINE.json"
+      - name: Upload the head's type error measurement
+        if: ${{ !cancelled() && hashFiles(format('{0}/type-baseline/TYPE_BASELINE.json', runner.temp)) != '' }}
+        uses: ./.github/actions/retry-upload
+        with:
+          if-no-files-found: error
+          name: type-baseline
+          path: ${{ runner.temp }}/type-baseline/TYPE_BASELINE.json
+          retention-days: 7
+
   coverage-ratchet:
     needs: [select, unit, reuse]
     if: ${{ !cancelled() && needs.unit.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
@@ -3190,7 +3242,7 @@ jobs:
 
   gate-required:
     name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}
-    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
+    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
     if: ${{ always() }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
@@ -3216,7 +3268,7 @@ jobs:
               | (if $event == "merge_group" then
                 ["select", "split", "shard-check", "test-count"]
               else
-                ["select", "test-count", "lint", "docs", "semgrep", "sonar", "writer-lock"]
+                ["select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock"]
                 - (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)
                 + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
                 + (if $mutation == "true" then ["mutation-plan", "mutation-stats"] + (if $inline == "true" then [] else ["mutation"] end) else [] end)
@@ -3239,7 +3291,7 @@ jobs:
             echo "::error::A push or dispatch run never reuses a queue result."
             exit 1
           fi
-          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" --arg kind "${KIND:-}" '(.select.outputs.scope // "") as $scope | ($event != "pull_request" or $scope != "selected" or ."unit-selected".result == "success") and all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "mutation" and .value.result == "skipped" and $inline == "true") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or ((.key == "unit-lost" or .key == "unit-rerun") and .value.result == "skipped" and $event != "merge_group") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group") or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push") or ((.key == "split" or .key == "unit" or .key == "shard-check" or .key == "coverage-ratchet") and .value.result == "skipped" and $event == "pull_request" and ($scope == "selected" or $scope == "none")) or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none")))' <<< "$NEEDS"; then
+          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" --arg kind "${KIND:-}" '(.select.outputs.scope // "") as $scope | ($event != "pull_request" or $scope != "selected" or ."unit-selected".result == "success") and all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "mutation" and .value.result == "skipped" and $inline == "true") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or ((.key == "unit-lost" or .key == "unit-rerun") and .value.result == "skipped" and $event != "merge_group") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group") or ((.key == "type-gate" or .key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push") or ((.key == "split" or .key == "unit" or .key == "shard-check" or .key == "coverage-ratchet") and .value.result == "skipped" and $event == "pull_request" and ($scope == "selected" or $scope == "none")) or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none")))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi
