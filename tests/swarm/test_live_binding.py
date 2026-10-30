@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from scripts.swarm import live_binding
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, RedisStore
 
 EVENTS = (
     "SessionStart",
@@ -1354,7 +1354,9 @@ def test_a_kept_master_does_not_skip_later_agents(ticking):
 HIVE_HOME = "/home/worker/.agentihooks/profiles/.homes/engineer/abc/claude"
 
 
-def _hosted(store, agent, monkeypatch, tmp_path, report=True):
+def _hosted(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, report: bool = True
+) -> AgentRecord:
     from scripts.hive import join_report
     from scripts.swarm import commands
 
@@ -1379,11 +1381,13 @@ def _hosted(store, agent, monkeypatch, tmp_path, report=True):
     return hosted
 
 
-def _hive_facts(agent):
+def _hive_facts(agent: AgentRecord) -> dict:
     return {**live_binding.assignment(agent), "home": HIVE_HOME, "hooks": True}
 
 
-def test_hosted_agent_takes_the_home_its_hive_join_report_names(ticking, monkeypatch, tmp_path):
+def test_hosted_agent_takes_the_home_its_hive_join_report_names(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from scripts.swarm.tick import tick
 
     store, runtime, ledger = ticking
@@ -1406,7 +1410,9 @@ def test_hosted_agent_takes_the_home_its_hive_join_report_names(ticking, monkeyp
     assert (report["state"], report["differences"]) == ("matching", {})
 
 
-def test_hosted_agent_without_a_join_report_is_never_retired_on_its_home(ticking, monkeypatch, tmp_path):
+def test_hosted_agent_without_a_join_report_is_never_retired_on_its_home(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from scripts.swarm.tick import tick
 
     store, runtime, ledger = ticking
@@ -1422,7 +1428,9 @@ def test_hosted_agent_without_a_join_report_is_never_retired_on_its_home(ticking
     assert (report["state"], report["differences"]) == ("matching", {})
 
 
-def test_local_agent_without_validation_still_expects_the_profile_home(monkeypatch, tmp_path):
+def test_local_agent_without_validation_still_expects_the_profile_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from scripts.swarm import commands
 
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
