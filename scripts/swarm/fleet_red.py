@@ -89,18 +89,17 @@ def checker(reader: Callable | None = None, clock: Callable = time.time) -> Call
 
 
 def notice_pass(slug, store, ledger, rows, now_ms, reader: Callable | None = None) -> list[str]:
-    waiting = []
-    for task in rows.values():
-        key = store.key(slug, f"fleet-red:{task['id']}")
-        claimed = task.get("claimed_by") or store.claimant(slug, task["id"])
-        if task.get("state") == "open" and task.get("pr_url") and not claimed:
-            waiting.append((task, key))
-        else:
-            store.redis.delete(key)
+    unclaimed = [
+        task["id"]
+        for task in rows.values()
+        if task.get("state") == "open" and task.get("pr_url") and not task.get("claimed_by")
+    ]
+    waiting = set(unclaimed) - store.claimed(slug, unclaimed)
+    cleared = [store.key(slug, f"fleet-red:{task['id']}") for task in rows.values() if task["id"] not in waiting]
     listings: dict[str, list[dict] | None] = {}
     actions = []
-    for task, key in waiting:
-        task_id, url = task["id"], task["pr_url"]
+    for task_id in [task_id for task_id in unclaimed if task_id in waiting]:
+        url, key = rows[task_id]["pr_url"], store.key(slug, f"fleet-red:{task_id}")
         repo = repository(url)
         if repo not in listings:
             try:
@@ -111,10 +110,12 @@ def notice_pass(slug, store, ledger, rows, now_ms, reader: Callable | None = Non
         if pulls is None:
             continue
         if not held(pulls, url, now_ms):
-            store.redis.delete(key)
+            cleared.append(key)
             continue
         if store.redis.set(key, url, nx=True):
             checks = ", ".join(sorted(own(pulls, url)))
             ledger.notice(slug, task_id, NOTICE.format(url=url, checks=checks))
             actions.append(f"task {task_id} held unclaimed, {url} is red only from {checks}")
+    if cleared:
+        store.redis.delete(*cleared)
     return actions
