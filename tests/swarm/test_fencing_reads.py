@@ -62,6 +62,7 @@ def test_a_legacy_writer_cannot_leave_stale_routing_rows(monkeypatch: pytest.Mon
     assert store.agents("sw")[0].hive == "hive-a"
     states = state.for_store(store, fencing.BUCKET)
     entry = states.get("sw")
+    assert entry is not None
     doc = json.loads(entry.value)
     doc["executions"]["active"]["hive"] = "hive-b"
     states.update("sw", json.dumps(doc).encode(), entry.revision)

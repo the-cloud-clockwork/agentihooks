@@ -8,6 +8,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 from unittest import mock
 
 from scripts.swarm.code_reach import Program, parse
@@ -74,7 +75,7 @@ def store_keys(store: Store) -> list[str]:
     from scripts.hive import hive_state
 
     with mock.patch.object(hive_state, "on_redis", lambda: True):
-        opened = store.open()
+        opened = cast(Any, store.open())
     return [opened._current, opened._revision, f"{opened._history}probe", opened._projected, opened._published]
 
 
