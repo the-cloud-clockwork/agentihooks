@@ -438,4 +438,6 @@ def test_report_rebuilds_the_graded_module_when_a_test_overwrote_the_mutants_tre
     [row] = collect_results(Path("hooks/sample.py"))
     assert row["status"] == "survived"
     assert row["lines"] == [2]
-    assert row["diff"] == "--- hooks/sample.py\n+++ mutant\n@@ -1,2 +1,2 @@\n def value():\n-    return 7\n+    return 8"
+    assert (
+        row["diff"] == "--- hooks/sample.py\n+++ mutant\n@@ -1,2 +1,2 @@\n def value():\n-    return 7\n+    return 8"
+    )
