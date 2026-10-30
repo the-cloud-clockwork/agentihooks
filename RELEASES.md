@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.495 · 2026-10-30
+
+### 2026-10-29 · 65249ec02f45 · #8816 · @nestorcolt
+
+**Publish the hive worker once per release version**
+
+This change fixes the hive worker release script so each version is published exactly once instead of being rebuilt and repushed on every rerun. If the version tag already exists in GHCR, the script now exits cleanly without pushing; if a prior run partially published (e.g. release tagged but not version), it retags from the already-built commit image instead of rebuilding. Any registry error other than "not found" still fails the run. This closes a gap where reruns or partial failures could cause wasted builds or inconsistent `:release`/version tags.
+
 ## v2.17.494 · 2026-10-29
 
 ### 2026-10-29 · 82bf4260e98f · #8810 · @nestorcolt
