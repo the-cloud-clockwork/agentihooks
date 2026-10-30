@@ -1893,6 +1893,53 @@ def test_parked_successor_restacks_and_publishes_with_predecessor_checkout_prese
     assert (root / "task.txt").read_text() == "parked work"
 
 
+@pytest.mark.parametrize(("stacked", "replayed"), [("rebased", "2"), ("dependency", "1")])
+def test_a_restack_after_a_manual_rebase_replays_only_the_task_commits(publication, monkeypatch, stacked, replayed):
+    from scripts.swarm import stack
+
+    p = publication
+    root, repository = p.root, p.repo
+    (root / "chosen.txt").write_text("before")
+    base = git(repository, "rev-parse", "dev")
+    if stacked == "dependency":
+        (root / "blocker.txt").write_text("dependency")
+        git(root, "add", "blocker.txt")
+        git(root, "commit", "-qm", "Dependency work")
+        base = git(root, "rev-parse", "HEAD")
+        (repository / "blocker.txt").write_text("dependency")
+        git(repository, "add", "blocker.txt")
+        git(repository, "commit", "-qm", "Squash dependency")
+    (root / "task.txt").write_text("parked work")
+    git(root, "add", "task.txt")
+    git(root, "commit", "-qm", "Parked task work")
+    for number in range(21):
+        (repository / f"upstream{number}.txt").write_text(str(number))
+        git(repository, "add", f"upstream{number}.txt")
+        git(repository, "commit", "-qm", f"Upstream {number}")
+    git(repository, "push", "origin", "dev")
+    if stacked == "rebased":
+        git(root, "fetch", "origin")
+        git(root, "rebase", "origin/dev")
+    git(root, "push", "origin", "HEAD:engineer-test")
+    p.task.update(parked_on=["dependency"], stacked_base=base)
+    p.ledger.state = lambda slug: {"tasks": [p.task, {"id": "dependency", "state": "done"}]}
+    counted = []
+    native = stack._rebase
+
+    def rebase(start: str) -> None:
+        counted.append(git(root, "rev-list", "--count", f"{start}..HEAD"))
+        native(start)
+
+    monkeypatch.setattr(stack, "_rebase", rebase)
+    monkeypatch.chdir(root)
+
+    stack.restack("swarm", p.agent, p.ledger)
+
+    assert counted == [replayed]
+    assert git(root, "rev-list", "--count", "origin/dev..HEAD") == replayed
+    assert (root / "task.txt").read_text() == "parked work"
+
+
 @pytest.mark.parametrize("fields", [{"claimed_by": "another"}, {"state": "done"}])
 def test_only_the_task_owner_can_publish(publication, fields):
     from scripts.swarm import publish
