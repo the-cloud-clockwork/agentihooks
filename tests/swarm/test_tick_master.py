@@ -74,6 +74,7 @@ def test_the_startup_retry_stays_bounded_inside_the_down_window(store):  # noqa:
     assert runtime.master_spawns == 2
 
 
+@pytest.mark.feature("swarm-master-seat")
 def test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promoted(store):  # noqa: F811
     runtime, ledger = outage(store, startup=False)
     runtime.broken = False
@@ -87,6 +88,7 @@ def test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promote
     assert mail(store, ENGINEER) == [("swarm", NOTICE), ("swarm", master_alarm.BACK.format(slug="sw"))]
 
 
+@pytest.mark.feature("swarm-master-seat")
 def test_a_failed_forced_launch_promotes_one_live_engineer(store):  # noqa: F811
     runtime, ledger = outage(store, startup=False)
     actions = tick("sw", store, ledger, runtime, 1 + DOWN)

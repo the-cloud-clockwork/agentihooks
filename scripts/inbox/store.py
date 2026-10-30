@@ -254,8 +254,14 @@ class InboxStore:
             return None
         return _parsed(raw)
 
-    def inbox(self, address):
-        return sorted(self._listed(self.redis.zrange(self.key("address", address), 0, -1), address), key=_order)
+    def inbox(self, address: str) -> list[Item]:
+        item_ids = []
+        while True:
+            start = len(item_ids)
+            page = self.redis.zrange(self.key("address", address), start, start + ROW_BATCH - 1)
+            item_ids.extend(page)
+            if len(page) < ROW_BATCH:
+                return sorted(self._listed(item_ids, address), key=_order)
 
     def open_items(self, address: str) -> list[Item]:
         items = self._listed(self._open_ids(address), address)

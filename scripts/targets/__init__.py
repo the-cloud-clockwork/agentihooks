@@ -121,6 +121,7 @@ class TargetAdapter(Protocol):
         profile_chain: list[str],
         bundle_dir: Path | None,
         user_dir: Path | None = None,
+        shared_dir: Path | None = None,
     ) -> None:
         """Assemble and write the persona/system-prompt file for this target."""
         ...
