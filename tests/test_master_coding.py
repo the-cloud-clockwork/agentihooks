@@ -68,6 +68,13 @@ def test_an_unseated_session_stays_refused_even_with_an_open_window(unseated):
     assert not master_coding.is_open(SID)
 
 
+def test_the_typed_phrases_match_in_any_case(master):
+    assert master_coding.observe(SID, "Allow-Master-Coding", typed=True, now=1000) == "open"
+    assert master_coding.is_open(SID)
+    assert master_coding.observe(SID, "DENY-master-coding", typed=True) == "closed"
+    assert not master_coding.is_open(SID)
+
+
 def test_only_the_typed_phrase_in_the_master_pane_opens_the_window(master):
     assert master_coding.observe(SID, "allow-master-coding", typed=False) == ""
     assert not master_coding.is_open(SID)
