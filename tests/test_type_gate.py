@@ -274,6 +274,47 @@ def test_a_checker_failure_names_its_output(
     assert calls[-1] == {"cwd": head, "capture_output": True, "text": True}
 
 
+def test_sources_lists_checked_files_in_sorted_order(tmp_path: Path) -> None:
+    files = {
+        "scripts/z.py": "",
+        "scripts/a/b.pyi": "",
+        "tests/m.py": "",
+        "hooks/notes.pyc": "",
+        "hooks/__pycache__/c.py": "",
+        "hooks/.hidden/d.py": "",
+        "docs/e.py": "",
+    }
+    head = _tree(tmp_path, files)
+    assert type_gate.sources(head) == ["hooks/__init__.py", "scripts/a/b.pyi", "scripts/z.py", "tests/m.py"]
+
+
+def test_measure_checks_the_sorted_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    head = _tree(tmp_path, {"scripts/b.py": "", "scripts/a.py": ""})
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(
+            command, 0, '{"generalDiagnostics": [], "summary": {"filesAnalyzed": 3}}', ""
+        )
+
+    monkeypatch.setattr(type_gate.subprocess, "run", run)
+    assert type_gate.measure(head) == {}
+    assert commands == [
+        [
+            *type_gate._BASEDPYRIGHT,
+            "--outputjson",
+            "--project",
+            str(head / "pyproject.toml"),
+            "--pythonpath",
+            type_gate.sys.executable,
+            "hooks/__init__.py",
+            "scripts/a.py",
+            "scripts/b.py",
+        ]
+    ]
+
+
 @pytest.mark.parametrize(
     "returncode,stdout,message",
     [

@@ -37,10 +37,33 @@ def config_errors(head: Path) -> list[str]:
     return [f"pyproject.toml [tool.basedpyright] is {settings!r}; the type gate grades only with {CONFIG!r}"]
 
 
+def sources(head: Path) -> list[str]:
+    """Return every checked source under the included folders, sorted so each run checks them in one order.
+
+    basedpyright infers some types differently depending on which file it checks first, and the order it lists a
+    folder in follows the filesystem, so an unsorted run can count other errors on another runner.
+    """
+    return sorted(
+        path.relative_to(head).as_posix()
+        for folder in CONFIG["include"]
+        for path in (head / folder).rglob("*.py*")
+        if path.suffix in (".py", ".pyi")
+        and not any(part.startswith(".") or part == "__pycache__" for part in path.relative_to(head).parts)
+    )
+
+
 def measure(head: Path) -> dict[str, int]:
-    """Run basedpyright over the head and count its errors per file."""
+    """Run basedpyright over the head's sources in sorted order and count its errors per file."""
     result = subprocess.run(
-        [*_BASEDPYRIGHT, "--outputjson", "--project", str(head / "pyproject.toml"), "--pythonpath", sys.executable],
+        [
+            *_BASEDPYRIGHT,
+            "--outputjson",
+            "--project",
+            str(head / "pyproject.toml"),
+            "--pythonpath",
+            sys.executable,
+            *sources(head),
+        ],
         cwd=head,
         capture_output=True,
         text=True,
