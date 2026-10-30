@@ -43,6 +43,20 @@ CODEX_TRANSPORTS = ("legacy", "app_server")
 LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
 PLACEMENT_MODES = ("anton-first", "round-robin")
 ANTON_FIRST, ROUND_ROBIN = PLACEMENT_MODES
+_VALIDATED = """
+local out = {}
+for _, raw in ipairs(redis.call('LRANGE', KEYS[1], 0, -1)) do
+    if string.find(raw, '"validated"', 1, true) then
+        local row = cjson.decode(raw)
+        local decision = row.profile_decision
+        local validation = type(decision) == 'table' and decision.validation
+        if type(validation) == 'table' and validation.state == 'validated' then
+            out[#out + 1] = cjson.encode({row.name, row.task, row.started_at})
+        end
+    end
+end
+return out
+"""
 
 
 class SwarmError(RuntimeError):
@@ -741,20 +755,19 @@ class RedisStore:
 
     def launches(self, slug: str) -> list[dict]:
         rows = {name: json.loads(raw) for name, raw in self.redis.hgetall(self.key(slug, "launches")).items()}
-        history = [json.loads(raw) for raw in self.redis.lrange(self.key(slug, "history"), 0, -1)]
-        for agent in [*history, *(asdict(a) for a in self.agents(slug))]:
-            if agent.get("profile_decision", {}).get("validation", {}).get("state") == "validated":
-                rows.setdefault(
-                    agent["name"],
-                    {
-                        "agent": agent["name"],
-                        "task": agent["task"],
-                        "at": agent["started_at"],
-                        "state": "started",
-                        "error": "",
-                    },
-                )
+        current = [(a.name, a.task, a.started_at) for a in self.agents(slug) if _validated(asdict(a))]
+        for name, task, at in [*self._validated_history(slug), *current]:
+            rows.setdefault(name, {"agent": name, "task": task, "at": at, "state": "started", "error": ""})
         return list(rows.values())
+
+    def _validated_history(self, slug: str) -> list[tuple]:
+        from scripts.hive import scope
+
+        key = self.key(slug, "history")
+        if scope.member():
+            history = (json.loads(raw) for raw in self.redis.lrange(key, 0, -1))
+            return [(row["name"], row["task"], row["started_at"]) for row in history if _validated(row)]
+        return [tuple(json.loads(raw)) for raw in self.redis.eval(_VALIDATED, 1, key)]
 
     def _started_lives(self, slug, task):
         return sum(row["task"] == task and row["state"] == "started" for row in self.launches(slug))
@@ -833,6 +846,10 @@ def _fields(config):
 
 def _whole(raw):
     return int(raw) if raw else None
+
+
+def _validated(row: dict) -> bool:
+    return row.get("profile_decision", {}).get("validation", {}).get("state") == "validated"
 
 
 _READ = {

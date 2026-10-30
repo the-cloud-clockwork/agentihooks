@@ -470,11 +470,12 @@ def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = Non
 
 def ready_work(slug: str, store, doc: dict) -> tuple[dict, dict]:
     from scripts.swarm import dispatcher
-    from scripts.swarm.tick import ready_in_order
+    from scripts.swarm.tick import claim_view, ready_in_order
 
     rows = {task["id"]: task for task in doc["tasks"]}
     dispatched = dispatcher.claim_key(store.config(slug), doc)
-    return rows, {lane: ready_in_order(slug, store, rows, doc, lane, dispatched) for lane in LANES}
+    claims = claim_view(slug, store, rows, doc, dispatched)
+    return rows, {lane: ready_in_order(slug, store, None, None, lane, dispatched, claims) for lane in LANES}
 
 
 def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleInputs:
