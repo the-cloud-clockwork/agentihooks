@@ -1,5 +1,6 @@
 import threading
 
+import fakeredis
 import pytest
 
 from scripts.inbox import exits
@@ -52,7 +53,9 @@ ROWS = {"tA": {"claimed_by": "", "state": "done"}, "tB": {"claimed_by": "", "sta
 
 @pytest.mark.parametrize("harness", HARNESSES)
 @pytest.mark.parametrize("order", ["reply-before-exit", "reply-after-exit"])
-def test_a_reply_to_an_agent_that_finished_its_task_never_reaches_another_tasks_agent(server, harness, order):
+def test_a_reply_to_an_agent_that_finished_its_task_never_reaches_another_tasks_agent(
+    server: fakeredis.FakeServer, harness: str, order: str
+) -> None:
     store, inbox, master, a, b = crew(client(server), harness)
     ROWS["tB"]["claimed_by"] = b
     question = inbox.send(a, master, "is the gate red on dev?")
@@ -68,7 +71,7 @@ def test_a_reply_to_an_agent_that_finished_its_task_never_reaches_another_tasks_
     landed = inbox.get(answer.id)
     assert landed.address != b, f"reply for {a} (task tA) landed at {b} (task tB): {landed.reason}"
     assert (landed.address, landed.state) == (a, "cancelled")
-    assert any(answer.id in item.text for item in inbox.pending_items(master))
+    assert any(answer.id in item.text for item in inbox.pending_items("master@sw"))
 
 
 @pytest.mark.parametrize("harness", HARNESSES)
