@@ -299,8 +299,8 @@ def tick(slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, now_ms:
                 actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
                 with _placement_pass(runtime):
                     actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+                store.redis.delete(due)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
-    store.redis.delete(due)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
     actions += skip_refused(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
     actions += skip_refused(_conversations, slug, store, runtime) or []

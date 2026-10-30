@@ -43,6 +43,14 @@ def test_a_pass_after_a_completed_one_spawns_after_reap_and_clears_its_due_mark(
     assert not store.redis.exists(store.key("sw", tick_module.SPAWN_DUE))
 
 
+def test_a_paused_pass_keeps_the_due_mark_for_the_next_running_pass(store, monkeypatch):
+    store.redis.set(store.key("sw", tick_module.SPAWN_DUE), 500)
+    store.update("sw", state="paused")
+    order, runtime = _ordered(store, monkeypatch)
+    assert "spawn" not in order
+    assert store.redis.get(store.key("sw", tick_module.SPAWN_DUE)) == "500"
+
+
 def test_a_pass_stopped_before_its_spawn_leaves_the_next_pass_due(store, monkeypatch):
     def stopped(*a, **k):
         raise SystemExit("stopped by the service")
