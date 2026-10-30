@@ -10,7 +10,7 @@ from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import function_name
-from scripts.ci_mutation.plan import MUTANT_SECONDS, shard_count, shard_workers
+from scripts.ci_mutation.plan import BATCH_RUNNERS, MUTANT_SECONDS, shard_count, shard_workers
 from scripts.ci_mutation.scope import discover_changes, select_tests
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
@@ -18,7 +18,6 @@ from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 # Traced test seconds: every unit of a split mutant reruns the fastest tests, where most mutants die, then one slice.
 HEAD_SECONDS = 20.0
 SLICE_SECONDS = 120.0
-BATCH_RUNNERS = 40
 
 
 def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, float], float]:
@@ -136,7 +135,7 @@ def plan_shards(
     items += [(cost, name, position) for name, unit in units.items() for position, cost in enumerate(unit)]
     seconds = sum(costs[name] for name in sorted(costs))
     widest = max(map(len, units.values()), default=1)
-    count = max(min(limit, widest), shard_count(seconds, len(items), target, limit))
+    count = max(min(limit, widest), shard_count(seconds, len(items), target, limit, budget))
     assignments, loads = assign_units(items, units, count)
     ceiling = max(count, min(BATCH_RUNNERS, len(items)))
     while max(loads) > shard_workers() * budget and count < ceiling:

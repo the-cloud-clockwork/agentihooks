@@ -357,6 +357,10 @@ def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_s
     assert max(plan["shard_worker_seconds"]) <= 3 * 1080
     assert plan_shards({str(index): 5000 for index in range(60)}, budget=1080)["shards"] == BATCH_RUNNERS == 40
     assert plan_shards({"a": 5000, "b": 5000}, budget=1080)["shards"] == 2
+    assert plan.shard_count(3 * 1080 * 15, 500, 120, 10) == 15
+    assert plan.shard_count(3 * 1080 * 15, 12, 120, 10) == 12
+    assert plan.shard_count(3 * 1080 * 100, 500, 120, 10) == BATCH_RUNNERS
+    assert plan.shard_count(3 * 120 * 4, 500, 120, 10) == 4
 
 
 def test_a_mutant_whose_tests_outlast_one_slice_runs_the_fast_head_with_each_slice_on_its_own_shard():
@@ -721,10 +725,14 @@ def test_a_shard_grades_its_whole_mutants_and_hands_split_units_to_the_merge(tmp
         (961, 500, 2),
         (4800, 500, 5),
         (4800, 3, 3),
-        (10**6, 10**4, 10),
+        (43200, 10**4, 10),
+        (43201, 10**4, 11),
+        (10**6, 10**4, 40),
     ],
 )
-def test_shard_count_fills_each_shard_to_its_target_and_stays_within_the_limit(seconds, mutants, expected):
+def test_shard_count_fills_each_shard_to_its_target_within_the_limit_unless_the_budget_needs_more(
+    seconds, mutants, expected
+):
     assert plan.shard_count(seconds, mutants, 240, 10) == expected
 
 
