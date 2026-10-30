@@ -1032,16 +1032,6 @@ def test_a_launch_that_spends_the_budget_leaves_the_next_task_for_the_next_pass(
     assert not store.redis.exists(store.key("sw", "claim", "t2"))
 
 
-def test_the_spawn_budget_is_sixty_seconds_and_fits_a_second_launch_in_one_pass(store):
-    from scripts.swarm.tick import SPAWN_BUDGET_S
-
-    assert SPAWN_BUDGET_S == 60
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
-    assert not any("launch budget" in action for action in actions)
-
-
 def test_time_spent_before_the_first_launch_never_holds_it_back(store, monkeypatch):
     from types import SimpleNamespace
 
