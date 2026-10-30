@@ -161,16 +161,11 @@ async function searchRemote() {
   }
   if (filter.text && ["", "done"].includes(filter.state)) {
     for (const list of SEARCHED.filter((name) => closedLeft(name))) {
-      try {
-        const resp = await searchClosed(list, filter.text);
-        if (turn !== searchTurn) return;
-        if (resp.ok) {
-          const { data, total } = await resp.json();
-          remote[list] = data;
-          remoteTotal[list] = total;
-        }
-      } catch (e) {
-        break;
+      const page = await searchClosed(list, filter.text).then((resp) => (resp.ok ? resp.json() : null)).catch(() => null);
+      if (turn !== searchTurn) return;
+      if (page) {
+        remote[list] = page.data;
+        remoteTotal[list] = page.total;
       }
     }
   }

@@ -491,7 +491,9 @@ def test_missing_grammar_is_red(
 
 def test_ledger_front_end_is_comment_free() -> None:
     root = Path(__file__).resolve().parents[1]
-    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z", no_comments.STATIC], capture_output=True)
+    tracked = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", no_comments.STATIC], capture_output=True, check=True
+    )
     found = [
         (name, start, reason)
         for name in tracked.stdout.decode().split("\0")

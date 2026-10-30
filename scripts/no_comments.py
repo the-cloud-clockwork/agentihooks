@@ -146,7 +146,8 @@ def _documents(node: Any, source: bytes) -> bool:
     if following.start_point[0] != node.end_point[0] + 1:
         return False
     if following.type == "export_statement":
-        following = following.child_by_field_name("declaration") or following
+        declaration = following.child_by_field_name("declaration")
+        following = following if declaration is None else declaration
     if following.type in ("lexical_declaration", "variable_declaration"):
         values = [declarator.child_by_field_name("value") for declarator in following.named_children]
         return bool(values) and all(value is not None and value.type in _FUNCTIONS for value in values)
