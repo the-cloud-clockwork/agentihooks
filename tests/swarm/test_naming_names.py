@@ -217,3 +217,17 @@ def test_export_skips_a_listed_name_without_a_record_and_keeps_the_rest(client, 
     rows = names.export("sw")
     assert name_state.state_key("name", "engineer@abcdef-0001") not in rows
     assert rows[name_state.state_key("name", "engineer@abcdef-0002")] == _record("engineer", 2, 2)
+
+
+def test_next_writes_the_whole_spawn_record_before_any_note(client, names):
+    name = names.next("sw", "eng", at=4)
+    assert _shared(client, "name", name) == _record("engineer", 1, 4)
+    assert names.entry(name) == _entry(name, "engineer", 1, 4)
+
+
+def test_names_lists_every_legacy_listed_name_the_counters_never_counted(client, names):
+    olds = [f"engineer@abcdef-000{n}" for n in (1, 2, 3)]
+    for n, old in enumerate(olds, 1):
+        client.hset(_legacy("name", old), mapping=_record("engineer", n, n))
+        client.rpush(_legacy("names", "abcdef"), old)
+    assert [row["name"] for row in names.names("sw")] == olds
