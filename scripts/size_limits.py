@@ -17,6 +17,7 @@ _SETTINGS = (
     f"lint.pylint.max-branches={RULES['PLR0912']}",
     f"lint.pylint.max-args={RULES['PLR0913']}",
     f"lint.pylint.max-statements={RULES['PLR0915']}",
+    f"target-version='py{sys.version_info.major}{sys.version_info.minor}'",
 )
 _MEASURED = re.compile(r"\((\d+) > \d+\)")
 # -I keeps a ruff module in the graded tree from shadowing the real one.

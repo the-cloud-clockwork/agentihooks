@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import sys
 import tomllib
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -207,6 +208,13 @@ def test_function_and_file_lengths_over_the_limit_are_measured(tmp_path):
 
 def test_a_short_file_that_does_not_parse_cannot_grade(tmp_path: Path) -> None:
     tree = _tree(tmp_path, {"mod.py": "def broken(:\n"})
+    with pytest.raises(SyntaxError):
+        size_limits.measure(tree)
+
+
+@pytest.mark.skipif(sys.version_info >= (3, 14), reason="unparenthesized except groups parse from Python 3.14")
+def test_a_short_file_newer_than_the_interpreter_cannot_grade(tmp_path: Path) -> None:
+    tree = _tree(tmp_path, {"mod.py": "try:\n    pass\nexcept ValueError, TypeError:\n    pass\n"})
     with pytest.raises(SyntaxError):
         size_limits.measure(tree)
 
