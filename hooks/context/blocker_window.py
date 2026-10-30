@@ -93,6 +93,11 @@ def _allowed(tool_name: str, tool_input: dict, cwd: str, slug: str) -> bool:
     return False
 
 
+def _now_ms(store: "RedisStore") -> int:
+    seconds, microseconds = store.redis.time()
+    return seconds * 1000 + microseconds // 1000
+
+
 def pretool(tool_name: str, tool_input: dict, session_id: str, cwd: str = "") -> tuple[str | None, str | None]:
     """Returns (notice, block): the notice to inject and the reason to deny this call, either may be None."""
     if not (session_id and master_coding.is_master(session_id)):
@@ -105,8 +110,7 @@ def pretool(tool_name: str, tool_input: dict, session_id: str, cwd: str = "") ->
         return None, None
     from scripts.swarm import blockers
 
-    now_ms = store.redis.time()
-    now_ms = now_ms[0] * 1000 + now_ms[1] // 1000
+    now_ms = _now_ms(store)
     found = _sustained(store, slug, now_ms)
     if not found:
         if master_coding.opened_for_blockers(session_id):
