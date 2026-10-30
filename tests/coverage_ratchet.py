@@ -1,8 +1,11 @@
 import argparse
 import os
+import resource
 import subprocess
 import sys
 import tempfile
+import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from coverage import Coverage, CoverageData
@@ -31,27 +34,53 @@ def report(result: Result, missed: dict[str, list[int]], covered: dict[str, int]
     return "\n".join(out) + "\n"
 
 
-def _missed(head: Path, lines: dict[str, set[int]], out: Path) -> dict[str, list[int]]:
+def _missed(head: Path, lines: dict[str, set[int]], out: Path, workers: int = 1) -> dict[str, list[int]]:
     combined = CoverageData(basename=str(out.resolve() / ".coverage"))
     combined.add_lines(lines)
     combined.write()
-    coverage = Coverage(data_file=combined.base_filename(), config_file=False)
+    modules = sorted(str(path.relative_to(head)) for root in GRADED for path in (head / root).rglob("*.py"))
+    chunks = [modules[index::workers] for index in range(workers)]
+    if workers > 1:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            parts = list(pool.map(_analysed, [combined.base_filename()] * workers, [head] * workers, chunks))
+    else:
+        parts = [_analysed(combined.base_filename(), head, modules)]
+    found = {path: missed for part in parts for path, missed in part.items()}
+    return {path: found[path] for path in modules}
+
+
+def _analysed(data_file: str, head: Path, modules: list[str]) -> dict[str, list[int]]:
+    coverage = Coverage(data_file=data_file, config_file=False)
     coverage.set_option("run:relative_files", True)
     coverage.load()
     cwd = Path.cwd()
     os.chdir(head)
     try:
-        modules = sorted(str(path) for root in GRADED for path in Path(root).rglob("*.py"))
         return {path: sorted(coverage.analysis2(path)[3]) for path in modules}
     finally:
         os.chdir(cwd)
+
+
+def _cpus(limit: Path = Path("/sys/fs/cgroup/cpu.max")) -> int:
+    """CPUs this process may use: its affinity, capped by the cgroup CPU quota."""
+    cpus = len(os.sched_getaffinity(0))
+    quota, _, period = limit.read_text().partition(" ") if limit.is_file() else ("max", "", "")
+    return cpus if quota == "max" else max(1, min(cpus, -(-int(quota) // int(period))))
+
+
+def _usage(stat: Path = Path("/sys/fs/cgroup/cpu.stat")) -> tuple[float, float]:
+    """CPU seconds of this process and its reaped children, and the cgroup's throttled seconds."""
+    own, children = resource.getrusage(resource.RUSAGE_SELF), resource.getrusage(resource.RUSAGE_CHILDREN)
+    cpu = own.ru_utime + own.ru_stime + children.ru_utime + children.ru_stime
+    fields = dict(line.split() for line in stat.read_text().splitlines()) if stat.is_file() else {}
+    return cpu, int(fields.get("throttled_usec", 0)) / 1e6
 
 
 def _grade(args: argparse.Namespace, head_files: list[Path], scratch: Path) -> tuple[dict, Measurement, Result]:
     missing = [str(f) for f in head_files if not f.is_file()]
     if missing:
         raise Unmeasured(f"head shard coverage missing: {', '.join(missing)}")
-    head = executed(head_files)
+    head = executed(head_files, getattr(args, "workers", 1))
     wanted = git("rev-parse", args.base, cwd=args.head).strip()
     if getattr(args, "base_baseline", None):
         runs = _cached_runs(args.head, wanted, args.base_baseline)
@@ -102,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
     head_files = [args.head_shards / f"coverage-3.12-{n}" / ".coverage" for n in range(1, args.shards + 1)]
     head_files += sorted(args.head_shards.glob("coverage-3.12-*/reused-coverage/.coverage"))
     args.out.mkdir(parents=True, exist_ok=True)
+    args.workers = _cpus()
+    started, (cpu, throttled) = time.monotonic(), _usage()
     with tempfile.TemporaryDirectory() as scratch:
         try:
             head, base, result = _grade(args, head_files, Path(scratch))
@@ -113,9 +144,14 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     text = report(
         result,
-        _missed(args.head, head, args.out),
+        _missed(args.head, head, args.out, args.workers),
         {path: len(lines) for path, lines in head.items()},
         {path: len(lines) for path, lines in base.executed.items()},
+    )
+    spent, held = _usage()
+    print(
+        f"Coverage grade took {time.monotonic() - started:.1f} s wall and {spent - cpu:.1f} CPU seconds"
+        f" on {args.workers} CPUs, throttled {held - throttled:.1f} s."
     )
     (args.out / "report.txt").write_text(text)
     print(text)
