@@ -421,7 +421,9 @@ def test_report_maps_overloaded_implementations_instead_of_stubs(tmp_path, monke
     assert evaluate("hooks/sample.py", rows, {6}, {})["failures"] == rows
 
 
-def test_report_rebuilds_the_graded_module_when_a_test_overwrote_the_mutants_tree(tmp_path, monkeypatch):
+def test_report_rebuilds_the_graded_module_when_a_test_overwrote_the_mutants_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import json
 
     from scripts.ci_mutation.report import collect_results
