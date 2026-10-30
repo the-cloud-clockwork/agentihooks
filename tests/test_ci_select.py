@@ -536,6 +536,9 @@ def test_a_split_file_keeps_its_new_tests(heavy):
     [
         "class TestNew:\n    def test_c(self): pass\n",
         "@pytest.fixture\ndef test_value(): return 1\n",
+        "from tests.shared import test_shared\n",
+        "test_made = pytest.mark.unit(lambda: None)\n",
+        "if True:\n    def test_nested(): pass\n",
     ],
 )
 def test_a_file_over_its_leg_share_with_an_unstored_test_pytest_may_skip_stays_whole(heavy, source):

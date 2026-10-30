@@ -135,39 +135,44 @@ def file_seconds(durations: dict[str, float], files: set[str]) -> dict[str, floa
     return {path: total if total else UNKNOWN_SECONDS for path, total in seconds.items()}
 
 
-def file_units(root: Path, path: str, durations: dict[str, float]) -> dict[str, float]:
-    """Seconds per top level test definition of a file, empty unless pytest surely collects every definition and no
-    stored test comes from an import or assignment the definitions miss."""
-    tree = ast.parse((root / path).read_text())
+def defined_tests(source: str) -> tuple[set[str], set[str], set[str]]:
+    """Top level test definitions, those with only mark decorators, and every other name the module binds."""
     plain = set()
     defined = set()
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
-            defined.add(node.name)
-            if all(ast.unparse(decorator).startswith("pytest.mark.") for decorator in node.decorator_list):
-                plain.add(node.name)
-        elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
-            defined.add(node.name)
-    bound = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)}
-    bound.update(
-        alias.asname or alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom)
-        for alias in node.names
-    )
+    others = set()
+    for statement in ast.parse(source).body:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            others.add(statement.name)
+            if statement.name.startswith("Test" if isinstance(statement, ast.ClassDef) else "test"):
+                defined.add(statement.name)
+            if all(ast.unparse(decorator).startswith("pytest.mark.") for decorator in statement.decorator_list):
+                plain.add(statement.name)
+            continue
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                others.add(node.id)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                others.add(node.name)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                others.update((alias.asname or alias.name).partition(".")[0] for alias in node.names)
+    return defined, plain - {name for name in defined if name.startswith("Test")}, others - defined
+
+
+def file_units(root: Path, path: str, durations: dict[str, float]) -> dict[str, float]:
+    """Seconds per top level test definition of a file, empty unless those definitions are every test name the module
+    binds and each unstored one is a plain function pytest surely collects."""
+    defined, plain, others = defined_tests((root / path).read_text())
+    if any(name.startswith(("test", "Test")) for name in others):
+        return {}
     units = dict.fromkeys(defined, 0.0)
     stored = set()
     for node, duration in durations.items():
         file, _, rest = node.partition("::")
         name = rest.split("::", 1)[0].partition("[")[0]
-        if file != path:
-            continue
-        if name in bound - defined:
-            return {}
-        if name in units:
+        if file == path and name in units:
             units[name] += duration
             stored.add(name)
-    if len(units) < 2 or not defined - stored <= plain or not all(SAFE.fullmatch(name) for name in units):
+    if len(units) < 2 or defined - stored - plain or not all(SAFE.fullmatch(name) for name in units):
         return {}
     return {f"{path}::{name}": seconds for name, seconds in units.items()}
 
@@ -185,7 +190,8 @@ def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: in
             work.update(units)
             sizes.update(dict.fromkeys(units, sizes.pop(path)))
     collection = {unit: sizes[unit] * SECONDS_PER_SOURCE_BYTE for unit in work}
-    legs = _assign_work(work, dict.fromkeys(work, 0.0), collection, count, 1)
+    files_of = {unit: unit.partition("::")[0] for unit in work}
+    legs = _assign_work(work, dict.fromkeys(work, 0.0), collection, count, 1, None, files_of)
     legs[0] = sorted(tests & FIRST_SHARD_FILES) + legs[0]
     return [sorted(leg) for leg in legs if leg]
 
