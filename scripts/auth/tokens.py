@@ -6,7 +6,6 @@ from collections.abc import Mapping
 import jwt
 
 KEY_ENV = "AGENTIHOOKS_AUTH_KEY"
-LEGACY_ENV = "AGENTIHOOKS_AUTH_LEGACY"
 TTL_S = 900
 ALGORITHM = "HS256"
 
@@ -14,11 +13,6 @@ ALGORITHM = "HS256"
 def key(environ: Mapping[str, str]) -> str:
     """The shared signing key, empty when the deployment has none."""
     return environ.get(KEY_ENV, "")
-
-
-def legacy(environ: Mapping[str, str]) -> bool:
-    """Whether services still accept today's credentials beside signed tokens."""
-    return environ.get(LEGACY_ENV) != "off"
 
 
 def sign(secret: str, principal: str, slug: str, now: float | None = None) -> str:

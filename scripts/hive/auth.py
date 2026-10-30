@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from scripts.auth import tokens
+from scripts.auth import switch
 from scripts.events import state
 from scripts.hive import hive_state, redis_acl
 from scripts.swarm.keyspace import ROOT
@@ -214,7 +214,7 @@ def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
     """A hive agent token scoped to one ledger and agent, recorded on its own without reading the member map."""
     store = _store(redis)
     digest = hive_state.read(store, f"holder.{member_id}")
-    if digest is None and tokens.legacy(os.environ):
+    if digest is None and switch.legacy(os.environ):
         digest = (member(redis, member_id) or {}).get("ledger")
     current = digest and hive_state.read(
         store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
@@ -242,7 +242,7 @@ def agent_member(redis: object, token: str, slug: str, name: str) -> str | None:
             store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
         )
         return member_id if current == member_id else None
-    if not tokens.legacy(os.environ):
+    if not switch.legacy(os.environ):
         return None
     scope = (member(redis, member_id) or {}).get("agents", {}).get(_digest(token))
     return member_id if scope == [slug, name] else None

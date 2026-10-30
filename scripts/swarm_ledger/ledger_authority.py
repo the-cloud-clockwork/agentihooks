@@ -13,7 +13,7 @@ from os import environ
 
 import jwt
 
-from scripts.auth import tokens
+from scripts.auth import switch, tokens
 from scripts.swarm_ledger import hive_work, ports
 from scripts.swarm_ledger.ledger_link import remote
 
@@ -79,7 +79,7 @@ def caller(headers: Mapping[str, str], admin: str, slug: str) -> str | None:
     bearer = headers.get("Authorization")
     if bearer and bearer.startswith("Bearer "):
         return tokens.verify(tokens.key(environ), bearer.removeprefix("Bearer "), slug)
-    return credential_caller(headers, admin, slug) if tokens.legacy(environ) else None
+    return credential_caller(headers, admin, slug) if switch.legacy(environ) else None
 
 
 def credential_caller(headers: Mapping[str, str], admin: str, slug: str) -> str | None:
@@ -150,7 +150,7 @@ def hive_agent_token(member: str, slug: str, name: str) -> str:
 
 def controller(credential: str | None) -> bool:
     """Whether a controller or service credential checks, only while legacy credentials are on."""
-    return tokens.legacy(environ) and controller_credential(credential)
+    return switch.legacy(environ) and controller_credential(credential)
 
 
 def controller_credential(credential: str | None) -> bool:

@@ -66,9 +66,6 @@ def test_a_token_is_signed_with_hs256():
     assert jwt.get_unverified_header(tokens.sign(KEY, AGENT, SLUG))["alg"] == "HS256"
 
 
-def test_the_key_and_the_legacy_switch_come_from_the_environment():
+def test_the_key_comes_from_the_environment():
     assert tokens.key({"AGENTIHOOKS_AUTH_KEY": KEY}) == KEY
     assert tokens.key({}) == ""
-    assert tokens.legacy({}) is True
-    assert tokens.legacy({"AGENTIHOOKS_AUTH_LEGACY": "on"}) is True
-    assert tokens.legacy({"AGENTIHOOKS_AUTH_LEGACY": "off"}) is False

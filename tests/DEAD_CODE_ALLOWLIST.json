@@ -52,6 +52,7 @@
  "hooks/serena_router/server.py": 2,
  "hooks/targets/emitter.py": 1,
  "scripts/agents_quota.py": 1,
+ "scripts/auth/service.py": 2,
  "scripts/ci_mutation/identity.py": 3,
  "scripts/ci_mutation/killers.py": 2,
  "scripts/ci_mutation/selection.py": 3,
