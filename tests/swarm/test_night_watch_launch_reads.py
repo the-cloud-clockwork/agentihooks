@@ -90,3 +90,17 @@ def test_ready_work_lists_pull_requests_once_for_every_lane(store, monkeypatch):
     _, ready = capacity.ready_work("sw", store, ledger.state("sw"))
     assert {lane: [t["id"] for t in tasks] for lane, tasks in ready.items()} == {"eng": ["e"], "ci": ["c"], "plan": []}
     assert listed == ["acme/app"]
+
+
+def test_stall_pass_lanes_list_pull_requests_once(store, monkeypatch):
+    from scripts.swarm import cli
+
+    store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=1))
+    pull = "https://github.com/acme/app/pull/{}"
+    ledger = FakeLedger([{"id": "e", "pr_url": pull.format(1)}, {"id": "c", "lane": "ci", "pr_url": pull.format(2)}])
+    doc = ledger.state("sw")
+    listed = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: listed.append(repo) or [])
+    ready = cli.lane_ready("sw", store, {t["id"]: t for t in doc["tasks"]}, doc)
+    assert [[t["id"] for t in ready(lane)] for lane in ("eng", "ci", "plan")] == [["e"], ["c"], []]
+    assert listed == ["acme/app"]
