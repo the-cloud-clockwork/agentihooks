@@ -1430,7 +1430,7 @@ def test_a_new_owner_inside_its_limit_costs_no_github_reread():
     assert reads == []
 
 
-def _doctor_store():
+def _doctor_store() -> RedisStore:
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -1438,7 +1438,9 @@ def _doctor_store():
     return store
 
 
-def test_a_task_the_watched_focus_keeps_from_claims_is_not_ready_and_the_count_matches_autoscale(monkeypatch):
+def test_a_task_the_watched_focus_keeps_from_claims_is_not_ready_and_the_count_matches_autoscale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from scripts.swarm import capacity
     from tests.swarm.test_freeze import record
     from tests.swarm.test_freeze_doctor import doctor
@@ -1453,7 +1455,7 @@ def test_a_task_the_watched_focus_keeps_from_claims_is_not_ready_and_the_count_m
     assert {lane: len(ready_tasks(lane)) for lane in demand} == demand == {"eng": 1, "ci": 0, "plan": 0}
 
 
-def test_a_full_lane_whose_only_open_task_the_watched_focus_holds_raises_no_unclaimed_alert():
+def test_a_full_lane_whose_only_open_task_the_watched_focus_holds_raises_no_unclaimed_alert() -> None:
     from tests.swarm.test_freeze import record
     from tests.swarm.test_freeze_doctor import doctor
 
@@ -1469,7 +1471,7 @@ def test_a_full_lane_whose_only_open_task_the_watched_focus_holds_raises_no_uncl
     assert swarm.tick(START + 30 * MINUTE, doc) == [] and swarm.inbox() == []
 
 
-def test_the_tick_reads_stall_readiness_through_the_watched_focus():
+def test_the_tick_reads_stall_readiness_through_the_watched_focus() -> None:
     import inspect
 
     from scripts.swarm import cli
