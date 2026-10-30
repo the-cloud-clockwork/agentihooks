@@ -263,10 +263,13 @@ def test_cli_help_and_required_base(capsys: pytest.CaptureFixture[str]) -> None:
     assert capsys.readouterr().err.splitlines()[-1].endswith("error: --base is required unless --all is set")
 
 
-def test_cli_defaults_to_current_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_defaults_to_current_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = _tree(tmp_path / "head", {"subject.py": "# plant\n"})
     monkeypatch.chdir(root)
     assert no_comments.main(["--all"]) == 1
+    assert capsys.readouterr().out == "::error::subject.py:1: forbidden comment\n"
 
 
 def test_cookie_after_the_second_line_is_red(tmp_path: Path) -> None:
@@ -280,6 +283,16 @@ def test_numeric_expression_is_not_a_comment(tmp_path: Path) -> None:
 def test_module_docstring_diagnostic() -> None:
     source = '"""\n' + "header\n" * 19 + '"""\n'
     assert no_comments.violations(source, "subject.py") == [(1, 21, "module docstring exceeds 20 lines")]
+
+
+def test_string_statement_diagnostic() -> None:
+    assert no_comments.violations('value = 1\n"prose"\n', "subject.py") == [(2, 2, "forbidden string statement")]
+
+
+def test_syntax_error_names_the_file() -> None:
+    with pytest.raises(SyntaxError) as error:
+        no_comments.violations("def\n", "subject.py")
+    assert error.value.filename == "subject.py"
 
 
 def test_nested_semgrep_fixture_directive_is_green(tmp_path: Path) -> None:
