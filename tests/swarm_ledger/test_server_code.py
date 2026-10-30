@@ -134,7 +134,11 @@ def test_a_server_is_current_only_while_its_own_record_matches_the_code_on_disk(
 
 
 def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from unittest.mock import ANY, Mock
+
     recorded = []
+    closing = Mock(wraps=ledger_server.close_server)
+    monkeypatch.setattr(ledger_server, "close_server", closing)
 
     class Server:
         def __init__(self, *args, **kwargs):
@@ -166,6 +170,7 @@ def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch: pytes
         lambda *args, **kwargs: recorded.append((*args, kwargs, (tmp_path / ".server.pid").exists())),
     )
     ledger_server.serve()
+    closing.assert_called_once_with(ANY, True)
     assert recorded == [
         (
             tmp_path,
