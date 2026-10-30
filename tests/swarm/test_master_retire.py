@@ -363,7 +363,9 @@ def test_a_master_on_a_joined_hive_is_retired_and_its_ask_closed_in_the_hive_inb
     swarm: tuple[RedisStore, FakeRuntime, FakeLedger, AgentRecord], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store, _, _, master = swarm
-    monkeypatch.setattr(InboxStore, "home", lambda self, address: "hive-a" if address == master.name else "")
+    monkeypatch.setattr(
+        InboxStore, "home", lambda self, address: "hive-a" if address in {master.name, master.seat} else ""
+    )
     assert master_retire.hold(store, "sw", master, "test", True, 200).startswith("asked")
     hive = InboxStore(store.redis, world="hive-a")
     (ask,) = [i for i in hive.inbox(master.seat) if i.ref == master_retire.REF]

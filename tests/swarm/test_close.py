@@ -79,7 +79,7 @@ def test_close_hands_itself_to_a_live_master_and_changes_nothing_else(
     assert run("sw", "close") == 0
     out = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert out == {"swarm": "sw", "asked": "master@a1b2c3-0001"}
-    items = [i for i in InboxStore(store.redis).inbox("master@sw") if i.sender == "operator"]
+    items = [i for i in InboxStore(store.redis).inbox("master@sw") if i.sender == "operator" and not i.fyi]
     assert len(items) == 1 and "agentihooks swarm sw close --note" in items[0].text
     assert ledger.calls == [] and rt.killed == []
     assert not (tmp_path / "sw" / "snapshot.json").exists()

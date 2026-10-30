@@ -245,7 +245,7 @@ class EntryLedger(PageLedger):
         self.commented.append((entry, text, by))
 
 
-def test_a_refused_answer_on_an_entry_keeps_the_operator_item_open_for_a_resend(store):
+def test_a_refused_answer_on_an_entry_keeps_the_operator_item_open_for_a_resend(store: RedisStore) -> None:
     store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="pm", seat="master@sw"))
     store.seats.occupy("master@sw", "sw-master-1", 1)
     box = InboxStore(store.redis)
@@ -256,7 +256,7 @@ def test_a_refused_answer_on_an_entry_keeps_the_operator_item_open_for_a_resend(
     assert delivery.relay_to_page(box, "sw", store.agents("sw"), EntryLedger(refuse=True)) == 0
     assert box.get(first.id).state == "cancelled"
     reopened = box.get(asked.id)
-    assert reopened.state == "read" and asked.id in [item.id for item in box.open_items("sw-master-1")]
+    assert reopened.state == "read" and asked.id in [item.id for item in box.open_items("master@sw")]
     reason = (
         "reopened: the answer was refused by the ledger page: ledger sw refused: comment refused: clock time '18:45'"
     )
