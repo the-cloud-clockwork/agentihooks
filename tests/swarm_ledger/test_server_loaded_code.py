@@ -229,6 +229,8 @@ def test_refresh_persists_new_loaded_modules_and_leaves_unchanged_record_alone(
     monkeypatch.setattr(ledger_server, "LOADED_CODE", code)
     monkeypatch.setattr(ledger_server, "PIDFILE", tmp_path / "server.pid")
     monkeypatch.setattr(ledger_server, "LOADED_STAMP", 17)
+    monkeypatch.setattr(ledger_server, "LOADED_DIGEST", "running-content")
+    monkeypatch.setattr(server_code, "code_digest", Mock(side_effect=AssertionError("unexpected repository scan")))
     record = Mock(wraps=server_code.record)
     monkeypatch.setattr(server_code, "record", record)
     ledger_server.refresh_loaded_code()
@@ -285,3 +287,29 @@ def test_shared_successor_drains_the_original_parent_before_starting(
     with pytest.raises(SystemExit):
         ledger_server.serve()
     wait.assert_called_once_with(424242)
+
+
+def test_finder_preserves_reload_target_for_cached_path_importers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import importlib.machinery
+
+    original = tmp_path / "original.py"
+    replacement = tmp_path / "replacement.py"
+    original.write_text("value = 1\n")
+    replacement.write_text("value = 2\n")
+    target = ModuleType("reloadable")
+
+    class Finder:
+        def find_spec(self, fullname: str, target: ModuleType | None = None) -> importlib.machinery.ModuleSpec | None:
+            selected = replacement if target is not None else original
+            return importlib.util.spec_from_file_location(fullname, selected)
+
+    monkeypatch.setitem(sys.path_importer_cache, str(tmp_path), Finder())
+    code = server_code.LoadedCode(tmp_path, {})
+    spec = code.find_spec("reloadable", [str(tmp_path)], target)
+    assert spec is not None
+    assert isinstance(spec.loader, server_code.Source)
+    imported = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(imported)
+    assert imported.value == 2
