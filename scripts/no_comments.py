@@ -54,9 +54,7 @@ def violations(source: str, name: str) -> list[tuple[int, int, str]]:
     allowed = set()
     found = []
     for owner in ast.walk(tree):
-        if not isinstance(owner, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        if not owner.body:
+        if not isinstance(owner, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) or not owner.body:
             continue
         first = owner.body[0]
         if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
