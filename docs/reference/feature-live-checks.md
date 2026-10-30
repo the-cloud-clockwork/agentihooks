@@ -25,7 +25,8 @@ and origin and the CI validation that keeps the map consistent.
 The file holds one object with a `features` list. Only entries with a
 `live_check` run; `regression` and `inventory` entries may leave it out, and an
 `operator` entry always has one. No map entry runs the front door login check
-yet; it is added by its own task. An entry that wires it looks like this:
+yet; it is added by its own task, which also removes its rule from the map's
+`unmapped_rules`. An entry that wires it looks like this:
 
 ```json
 {
@@ -38,7 +39,7 @@ yet; it is added by its own task. An entry that wires it looks like this:
       "ordered_at": "2026-10-25",
       "ledger_item": "ledger:rig-grade-swarm-doctor/tasks/t853",
       "behaviour": "Every front door master runs on the preferred stored claude ai login.",
-      "semgrep_rule": "feature-front-door-login",
+      "semgrep_rule": "feature-front-door-route-check",
       "tests": ["tests/test_front_door_login_check.py::test_a_front_door_on_a_token_while_the_stored_login_has_room_fails"],
       "live_check": ["python", "-m", "scripts.feature_checks.front_door_login"]
     }

@@ -25,10 +25,11 @@ def _tests(root: Path) -> dict[str, str | None]:
         for test_id, node in nodes.items():
             marked[test_id] = None
             for decorator in filter(_is_feature, node.decorator_list):
-                if decorator.args and isinstance(decorator.args[0], ast.Constant):
-                    marked[test_id] = decorator.args[0].value
-                if not isinstance(marked[test_id], str) or not marked[test_id].strip():
+                literal = decorator.args and isinstance(decorator.args[0], ast.Constant)
+                value = decorator.args[0].value if literal else None
+                if not isinstance(value, str) or not value.strip():
                     raise ValueError(f"{test_id}: feature marker requires an id")
+                marked[test_id] = value
     return marked
 
 
@@ -156,7 +157,7 @@ def _entry(entry: dict, root: Path, rules: set[str], tests: dict[str, str | None
 def _rule_coverage(rules: set[str], owned: set[str], unmapped: object) -> None:
     if not isinstance(unmapped, list) or not all(isinstance(rule, str) for rule in unmapped):
         raise ValueError("unmapped_rules must be a list of rule ids")
-    if stale := sorted(set(unmapped) & owned | set(unmapped) - rules):
+    if stale := sorted((set(unmapped) & owned) | (set(unmapped) - rules)):
         raise ValueError(f"remove mapped or deleted rules from unmapped_rules: {stale}")
     if missing := sorted(rules - owned - set(unmapped)):
         raise ValueError(f"unmapped rule: {missing}")
