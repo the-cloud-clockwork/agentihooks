@@ -187,7 +187,6 @@ def test_adopt_forwards_self_and_slug_to_legacy_adopt(tmp_path, monkeypatch):
         lambda r: r.get_document("ledger"),
         lambda r: r.read("ledger", "title"),
         lambda r: r.token("ledger"),
-        lambda r: r.events_since("ledger", 0),
         lambda r: r.export_document("ledger"),
     ],
 )
@@ -316,7 +315,7 @@ def test_write_advances_the_generation_updates_the_row_and_appends_events(tmp_pa
             "SELECT revision, generation, touched_at FROM ledgers WHERE slug=?", ("ledger",)
         ).fetchone()
     assert row == (new_state["_meta"]["rev"], entry.generation + 1, 777777)
-    assert r.events_since("ledger", -1) == [{"id": "e1", "rev": 1}]
+    assert r.export_document("ledger")["_meta"]["events"] == [{"id": "e1", "rev": 1}]
     assert r.get_document("ledger")["title"] == "Renamed"
 
 
@@ -333,7 +332,7 @@ def test_insert_writes_the_row_seeds_and_events_then_overwrites_and_drops_the_ca
             "SELECT revision, generation, token, touched_at FROM ledgers WHERE slug=?", ("ledger",)
         ).fetchone()
     assert row == (state["_meta"]["rev"], 123456 << 20, "token-a", 123456)
-    assert r.events_since("ledger", -1) == state["_meta"]["events"]
+    assert r.export_document("ledger")["_meta"]["events"] == state["_meta"]["events"]
     assert r.export_document("ledger")["_meta"]["seeds"] == seeds
 
     r._cache[r._key("ledger")] = Entry(999999, "stale", {})
@@ -444,10 +443,10 @@ def test_token_returns_none_before_creation_and_the_stored_value_after(tmp_path)
     assert r.token("ledger") == "abc123"
 
 
-def test_events_since_raises_missing_for_an_unknown_slug(tmp_path):
+def test_export_document_raises_missing_for_an_unknown_slug(tmp_path):
     r = store(tmp_path)
     with pytest.raises(sqlite.Missing):
-        r.events_since("missing", 0)
+        r.export_document("missing")
 
 
 def test_summaries_lists_newest_first_with_exact_summary_fields(tmp_path):

@@ -8,17 +8,10 @@
 {{- $secretNames = append $secretNames .name }}
 {{- end }}
 {{- $shared := or (not (empty (get (.Values.ledger.env | default dict) "AGENTIHOOKS_SWARM_DATABASE_URL"))) (has "AGENTIHOOKS_SWARM_DATABASE_URL" $secretNames) }}
-{{- $viaApi := eq (.Values.ledger.backend | default "direct") "api" }}
 {{- if lt $replicas 1 }}
 {{- fail "ledger.replicas must be at least 1" }}
 {{- end }}
-{{- if and $viaApi (not .Values.api.enabled) }}
-{{- fail "ledger.backend api needs api.enabled" }}
-{{- end }}
-{{- if and $viaApi $shared }}
-{{- fail "ledger.backend api keeps AGENTIHOOKS_SWARM_DATABASE_URL off the ledger: set it in api.secretEnv only" }}
-{{- end }}
-{{- if and (gt $replicas 1) (not (or $shared $viaApi)) }}
+{{- if and (gt $replicas 1) (not $shared) }}
 {{- fail "ledger.replicas above 1 needs the shared database: set AGENTIHOOKS_SWARM_DATABASE_URL in ledger.secretEnv, since a ledger folder has one active writer" }}
 {{- end }}
 {{- if gt $replicas 1 }}
@@ -112,17 +105,6 @@ spec:
               value: /run/ledger-tls/tls.crt
             - name: LEDGER_TLS_KEY
               value: /run/ledger-tls/tls.key
-            {{- end }}
-            {{- if $viaApi }}
-            - name: AGENTIHOOKS_SWARM_API_URL
-              value: {{ printf "http://%s-api:%v" $fullname .Values.api.port | quote }}
-            {{- with .Values.api.token.secretName }}
-            - name: AGENTIHOOKS_SWARM_API_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ . }}
-                  key: {{ $.Values.api.token.key }}
-            {{- end }}
             {{- end }}
             - name: SWARM_RELOAD
               value: "0"
