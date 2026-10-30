@@ -7,7 +7,8 @@ from pathlib import Path
 from scripts.handoff import check as handoff_check
 from scripts.handoff.resolve import Resolver
 from scripts.swarm import apply_wait
-from scripts.swarm.store import SwarmError
+from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
 WORK_KINDS = ("ops", "tune", "troubleshoot", "research")
@@ -312,7 +313,7 @@ def _restack_branch() -> str:
     return branch
 
 
-def _restack_base(row, context):
+def _restack_base(row: dict, context: list[str]) -> tuple[str, Path]:
     ref = f"refs/remotes/origin/{row.get('branch', '')}"
     if shell(["git", "show-ref", "--verify", "--quiet", ref]).returncode != 0:
         ref = f"refs/heads/{row.get('branch', '')}"
@@ -320,6 +321,7 @@ def _restack_base(row, context):
         ["git", "rev-parse", "--verify", "--end-of-options", f"{row['stacked_base']}^{{commit}}"],
         "cannot resolve the stacked base",
     )
+    base = _completed(base)
     path = Path(_out(["git", "rev-parse", "--git-path", "agentihooks-restack.json"], "cannot locate restack state"))
     if (
         shell(["git", "merge-base", "--is-ancestor", base, "HEAD"]).returncode == 0
@@ -340,10 +342,15 @@ def _restack_base(row, context):
 
 
 def _completed(base: str) -> str:
-    """Return the dev commit a manually rebased branch already sits on, else the stacked base."""
+    """Return the dev commit containing completed dependency work after a manual rebase."""
     landed = _out(["git", "merge-base", "HEAD", "origin/dev"], "the task shares no history with dev")
     if shell(["git", "merge-base", "--is-ancestor", base, landed]).returncode == 0:
         return landed
+    if shell(["git", "merge-base", "--is-ancestor", base, "HEAD"]).returncode != 0:
+        merged = shell(["git", "merge-tree", "--write-tree", landed, base])
+        tree = _out(["git", "rev-parse", f"{landed}^{{tree}}"], "cannot resolve the completed rebase tree")
+        if merged.returncode == 0 and merged.stdout.strip() == tree:
+            return landed
     return base
 
 
@@ -357,7 +364,7 @@ def _rebase(base: str) -> None:
         )
 
 
-def restack(slug: str, agent, ledger) -> dict:
+def restack(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
     rows = {t["id"]: t for t in ledger.state(slug)["tasks"]}
     row = rows.get(agent.task) or {}
     if not row.get("parked_on") or not row.get("stacked_base"):
@@ -367,7 +374,7 @@ def restack(slug: str, agent, ledger) -> dict:
     branch = _restack_branch()
     _fetch_origin(["git"], "", "cannot fetch origin")
     base, path = _restack_base(row, [slug, agent.task, branch, row["stacked_base"]])
-    _rebase(_completed(base))
+    _rebase(base)
     shell(["git", "branch", "--unset-upstream"])
     from . import publish
 
