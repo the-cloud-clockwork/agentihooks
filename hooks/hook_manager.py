@@ -1343,6 +1343,8 @@ def on_pre_tool_use(payload: dict) -> None:
     Broadcast and enforcement context merge into one hookSpecificOutput object, because Claude Code drops
     a second JSON line. Codex PreToolUse has no context channel, so enforcement is recovered on
     PostToolUse and broadcasts use their UserPromptSubmit path.
+    The critical on PreToolUse broadcast opt in is owned by the broadcast module; this handler checks only
+    BROADCAST_ENABLED.
     """
     from hooks.config import SECRETS_MODE
 

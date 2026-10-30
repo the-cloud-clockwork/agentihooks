@@ -10,6 +10,9 @@ Settings rules that hold across the module:
   - The kubectl mutation guard is disabled only by the operator setting its env var explicitly, never by a
     signal or bypass mode.
   - An explicit BRAIN_ENABLED wins over brain auto detection; AGENTIHOOKS_BASE_CHANNELS has no code default.
+    Channel layering, lowest first: profile env, repo settings, repo local settings, container env.
+  - With MASTER_CLAUDE_LOGIN set, the front door master of every swarm launches on the one claude ai master
+    login.
   - The broadcast per injection byte caps stay below Claude Code's 10,000 character additionalContext limit
     with envelope headroom.
   - Manifestos load in deterministic filename order.
