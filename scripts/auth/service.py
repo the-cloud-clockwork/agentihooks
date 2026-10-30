@@ -15,6 +15,7 @@ from scripts.swarm_ledger.api.errors import APIError
 
 PORT = 8768
 ROUTE = re.compile(r"/v1/ledgers/([a-z0-9][a-z0-9-]*)/(token|agent-token)")
+NOT_FOUND = APIError(404, "not_found", "No such route")
 
 
 def signed(principal: str, slug: str) -> str:
@@ -63,13 +64,13 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/healthz":
             self.send(200, {"ok": True})
             return
-        self.send(404, APIError(404, "not_found", "No such route").envelope())
+        self.send(NOT_FOUND.status, NOT_FOUND.envelope())
 
     def do_POST(self) -> None:
         match = ROUTE.fullmatch(urlsplit(self.path).path)
         try:
             if match is None:
-                raise APIError(404, "not_found", "No such route")
+                raise NOT_FOUND
             slug, kind = match.groups()
             data = exchange(self.headers, slug) if kind == "token" else agent_token(self.headers, slug)
         except APIError as refused:
