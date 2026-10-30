@@ -783,6 +783,7 @@ class ConditionError(ValueError):
 
 
 def contains_condition_signal(prompt: str) -> bool:
+    """Return True when the operator asks for a condition; only his prompt, ledger comment or the master's relay opens the gate."""
     from hooks.context.ci_manifesto import _NEGATION_PREFIXES
 
     for match in _SIGNAL.finditer(prompt or ""):

@@ -518,6 +518,7 @@ def _warning_text(account: str, window: str, used: float, reset: float | None, h
 
 
 def early_warning(session_id: str) -> str | None:
+    """Warn a Codex session outside a swarm once per account, window and reset."""
     from hooks.context.account_sessions import API_ACCOUNT, agent_pid, session_account
 
     if os.environ.get("AGENTIHOOKS_TARGET") != "codex" or os.environ.get("AGENTIHOOKS_SWARM"):
