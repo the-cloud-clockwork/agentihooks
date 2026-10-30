@@ -3,8 +3,10 @@
 import json
 import os
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
-from typing import TYPE_CHECKING
+from functools import lru_cache
+from typing import TYPE_CHECKING, Any
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
@@ -814,8 +816,13 @@ def _hive_recovered(redis, environ, refused):
     return _pinged(redis, environ["AGENTIHOOKS_HIVE_REDIS_URL"])
 
 
+@lru_cache(maxsize=8)
+def _pooled_client(factory: Callable[..., Any], url: str, _pid: int) -> Any:
+    return factory(url, decode_responses=True, socket_connect_timeout=3, socket_timeout=10)
+
+
 def _pinged(redis, url):
-    client = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=3, socket_timeout=10)
+    client = _pooled_client(redis.Redis.from_url, url, os.getpid())
     client.ping()
     return client
 
