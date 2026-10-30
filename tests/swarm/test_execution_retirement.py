@@ -46,6 +46,26 @@ def test_stale_retirement_preserves_the_agent_projection_and_history(store, monk
     assert store.execution("fixture", agent.execution_id) == agent
 
 
+def test_retirement_cannot_remove_a_replacement_with_a_delayed_projection(store, monkeypatch):
+    agent = started(store)
+    before = store.redis.hgetall(store.key("fixture", "agents"))
+    write = fencing.write
+    replacements = []
+
+    def replace_first(saved, slug, change):
+        if not replacements:
+            replacements.append(None)
+            monkeypatch.setattr(store, "project_agent", lambda *args, **kwargs: None)
+            replacements[0] = store.start_execution("fixture", agent, agent.execution_id)
+        return write(saved, slug, change)
+
+    monkeypatch.setattr(fencing, "write", replace_first)
+    assert store.drop_agent("fixture", agent.name, expected=agent) is False
+    assert store.redis.hgetall(store.key("fixture", "agents")) == before
+    assert store.execution("fixture", replacements[0].execution_id) == replacements[0]
+    assert not store.names.entry(agent.name).get("retired_at")
+
+
 def test_drop_ends_execution_in_the_transaction_that_removes_its_agent(store):
     agent = started(store)
     pipe_type = type(store.redis.pipeline())

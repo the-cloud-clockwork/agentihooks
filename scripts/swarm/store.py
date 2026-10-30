@@ -567,9 +567,13 @@ class RedisStore:
         ended = int(time.time() * 1000) if at is None else at
 
         def end(doc):
+            current = {a.execution_id for a in occupants_of(doc).values() if a.name == name}
+            if current != live:
+                return False
             for execution_id in live & set(doc["executions"]):
                 if doc["executions"][execution_id]["state"] != "finished":
                     doc["executions"][execution_id] = {**doc["executions"][execution_id], "state": "ended"}
+            return True
 
         for _ in range(5):
             with self.redis.pipeline() as pipe:
@@ -582,7 +586,12 @@ class RedisStore:
                         return False
                     lives = records_of(doc) if previous else []
                     live = {agent.execution_id for agent in executions}
-                    lease.fenced(self, slug, lease.EPOCH.get(), end)
+                    if not lease.fenced(self, slug, lease.EPOCH.get(), end):
+                        return False
+                    fencing.watch(self, pipe)
+                    observed = occupants_of(fencing.read(self, slug)).values()
+                    if {a.execution_id for a in observed if a.name == name} != live:
+                        return False
                     pipe.multi()
                     if before is not None:
                         before(pipe)
@@ -775,6 +784,9 @@ class RedisStore:
         self.config(slug)
         if self.agents(slug):
             raise SwarmError(f"swarm {slug} still has agents; stop it with stop --now first")
+        from scripts.swarm import fencing
+
+        fencing.write(self, slug, lambda doc: doc.update({**fencing.EMPTY, "epoch": doc["epoch"]}))
         keys = list(self.redis.scan_iter(match=self.key(slug, "*")))
         if keys:
             self.redis.delete(*keys)

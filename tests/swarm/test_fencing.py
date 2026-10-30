@@ -298,9 +298,12 @@ def test_latest_seat_keeps_a_newer_generation_and_uses_the_last_equal_generation
     assert latest([newer, tied], "seat") == {"eng-1@sw": tied}
 
 
-def test_removing_a_swarm_clears_its_fencing_domain_and_preserves_the_epoch(store):
+@pytest.mark.parametrize("use_bus", [False, True])
+def test_removing_a_swarm_clears_its_fencing_domain_and_preserves_the_epoch(store, request, use_bus):
     from scripts.swarm.store import SwarmConfig
 
+    if use_bus:
+        request.getfixturevalue("bus")
     config = SwarmConfig("sw", "/repo", 1, 1)
     store.create(config)
     held = lease.acquire(store, "sw", "home")
