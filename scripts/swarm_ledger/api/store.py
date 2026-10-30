@@ -8,7 +8,7 @@ from contextlib import nullcontext
 from enum import StrEnum, auto
 from http import HTTPMethod
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from scripts.swarm_ledger import request_metrics
 from scripts.swarm_ledger.repository import artifact_files, media_files, plain, postgres
@@ -18,6 +18,7 @@ PREFIX = "/api/v1/store"
 TOKEN_ENV = "AGENTIHOOKS_SWARM_API_TOKEN"
 PORT_ENV = "AGENTIHOOKS_SWARM_API_PORT"
 DEFAULT_PORT = 8766
+MAX_BODY = 64 << 20
 FILES = {artifact_files.TABLE: artifact_files, media_files.TABLE: media_files}
 WITH_BODY = {HTTPMethod.POST, HTTPMethod.PUT}
 
@@ -29,6 +30,7 @@ class Code(StrEnum):
     UNKNOWN_ACTION = auto()
     UNAUTHORIZED = auto()
     BAD_REQUEST = auto()
+    STORE_FAILED = auto()
 
 
 class Part(StrEnum):
@@ -170,6 +172,9 @@ def registry_read(stored: SQLiteLedgerRepository, name: str) -> dict:
 
 
 def registry_commit(stored: SQLiteLedgerRepository, body: dict) -> dict:
+    unread = sorted(set(body["set"]) - set(body["expected"]))
+    if unread:
+        raise refused(400, Code.BAD_REQUEST, registries=unread)
     with request_metrics.locked(stored.domain.LOCK), stored.connect() as connection, connection:
         request_metrics.begin(connection, BEGIN_IMMEDIATE)
         moved = [name for name, held in body["expected"].items() if stored.registry(name, connection) != held]
@@ -183,7 +188,7 @@ def registry_commit(stored: SQLiteLedgerRepository, body: dict) -> dict:
 
 
 def route(stored: SQLiteLedgerRepository, method: str, path: str, query: dict, body: dict | None) -> object:
-    parts = [part for part in path.split("/") if part]
+    parts = [unquote(part) for part in path.split("/") if part]
     head, rest = (parts[0], parts[1:]) if parts else ("", [])
     if head == Part.REGISTRIES and len(rest) == 1 and method == HTTPMethod.GET:
         return registry_read(stored, rest[0])
@@ -237,6 +242,10 @@ class Handler(BaseHTTPRequestHandler):
             answer = refused(404, Code.LEDGER_NOT_FOUND)
         except (KeyError, TypeError, ValueError) as failure:
             answer = refused(400, Code.BAD_REQUEST, detail=str(failure))
+        except Exception as failure:  # noqa: BLE001
+            answer = refused(500, Code.STORE_FAILED, detail=type(failure).__name__)
+        if answer.status >= 400:
+            self.close_connection = True
         self.send(answer)
 
     def allowed(self) -> bool:
@@ -247,6 +256,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
+        if not 0 <= length <= MAX_BODY:
+            raise ValueError(length)
         value = json.loads(self.rfile.read(length) or b"{}")
         if not isinstance(value, dict):
             raise TypeError(type(value).__name__)
@@ -281,9 +292,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=int(os.environ.get(PORT_ENV, DEFAULT_PORT)))
     parser.add_argument("--no-relay", action="store_true")
+    parser.add_argument("--open", action="store_true")
     options = parser.parse_args(argv)
+    token = os.environ.get(TOKEN_ENV, "")
+    if not token and not options.open:
+        parser.error(f"{TOKEN_ENV} is unset; pass --open to serve without a token")
     stored = repository()
-    listening = server(stored, options.host, options.port, os.environ.get(TOKEN_ENV, ""))
+    listening = server(stored, options.host, options.port, token)
     print(f"swarm api on {options.host}:{listening.server_address[1]}", flush=True)
     with relaying(stored, not options.no_relay):
         try:

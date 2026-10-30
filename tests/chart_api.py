@@ -83,7 +83,8 @@ def split_problems(chart: str) -> list[str]:
 
 def refusal_problems(chart: str) -> list[str]:
     cases = {
-        "an api without the database URL": ["--set", "api.enabled=true"],
+        "an api without the database URL": ["--set", "api.enabled=true", *TOKEN],
+        "an api without a token": ["--set", "api.enabled=true", *API_DATABASE],
         "an api backend without the api": ["--set", "ledger.backend=api"],
         "a database URL on a ledger that uses the api": [*SPLIT, *LEDGER_DATABASE],
     }

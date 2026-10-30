@@ -7,6 +7,9 @@
 {{- range $api.secretEnv }}
 {{- $secretNames = append $secretNames .name }}
 {{- end }}
+{{- if not (and $api.token.secretName $api.token.key) }}
+{{- fail "api.enabled needs api.token.secretName and api.token.key: the api answers only callers holding its token" }}
+{{- end }}
 {{- if not (has "AGENTIHOOKS_SWARM_DATABASE_URL" $secretNames) }}
 {{- fail "api.enabled needs AGENTIHOOKS_SWARM_DATABASE_URL in api.secretEnv: every API replica writes the one shared database" }}
 {{- end }}

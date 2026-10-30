@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from scripts.swarm_ledger.api import store
-from scripts.swarm_ledger.repository import remote, sqlite
+from scripts.swarm_ledger.repository import plain, remote, sqlite
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -221,3 +221,70 @@ def test_a_page_request_on_the_api_backend_is_answered_without_a_database_of_its
 
     assert "<title>Split" in page
     assert not (folder / sqlite.DATABASE).exists()
+
+
+def test_the_api_domain_reads_the_ledger_folder_from_the_environment_and_counts_milliseconds(monkeypatch, tmp_path):
+    import importlib
+
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
+    reloaded = importlib.reload(plain)
+
+    assert reloaded.LEDGER_DIR == tmp_path
+    assert abs(reloaded.now_ms() - time.time() * 1000) < 5000
+
+
+def test_a_registry_write_commits_on_a_clean_exit_and_is_refused_once_another_writer_moved_it(api):
+    stored, base = api
+    repository = remote.RemoteLedgerRepository(remote.Client(base, "secret"))
+    with repository.connect() as session:
+        found = repository.registry("bin", session)
+        repository.save_registry(session, "bin", {**found, "split": 5})
+
+    with stored.connect() as connection:
+        assert stored.registry("bin", connection) == {"split": 5}
+
+    with pytest.raises(remote.RegistryConflict), repository.connect() as session:
+        repository.registry("bin", session)
+        with stored.connect() as connection, connection:
+            stored.save_registry(connection, "bin", {})
+        repository.save_registry(session, "bin", {"other": 1})
+
+
+def test_a_registry_saved_without_reading_it_first_is_refused(api):
+    _, base = api
+    client = remote.Client(base, "secret")
+
+    status, answer = client.call("POST", "/registries", body=dict(expected={}, set={"bin": {}}, purge=[]))
+
+    assert (status, answer) == (400, {"code": "bad_request", "registries": ["bin"]})
+
+
+def test_a_quoted_slug_reaches_the_ledger_it_names(api):
+    _, base = api
+    client = remote.Client(base, "secret")
+
+    status, answer = client.call("GET", "/ledgers/%73plit/read", {"read": ["title"]})
+
+    assert (status, answer) == (200, {"title": "Split"})
+
+
+def test_an_oversized_body_is_refused_before_it_is_read(api):
+    _, base = api
+    request = urllib.request.Request(
+        f"{base}/api/v1/store/held",
+        data=b"{}",
+        method="POST",
+        headers={"Authorization": "Bearer secret", "Content-Length": str(store.MAX_BODY + 1)},
+    )
+
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(request, timeout=10)
+    assert refused.value.code == 400
+
+
+def test_the_api_refuses_to_start_without_a_token_unless_told_to_serve_open(monkeypatch):
+    monkeypatch.delenv(store.TOKEN_ENV, raising=False)
+
+    with pytest.raises(SystemExit) as stopped:
+        store.main(["--port", "0"])
+    assert stopped.value.code == 2

@@ -91,7 +91,7 @@ api:
   env: {}
   # The only place AGENTIHOOKS_SWARM_DATABASE_URL lives once ledger.backend is api: [{name, secretName, key}].
   secretEnv: []
-  # Secret key holding the token the ledger server sends and the api checks; empty leaves the api open in cluster.
+  # Secret key holding the token the ledger server sends and the api checks; required once api.enabled is on.
   token:
     secretName: ""
     key: ""

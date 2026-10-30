@@ -1,12 +1,14 @@
 import copy
+import http.client
 import json
 import mimetypes
 import threading
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from types import ModuleType
 from urllib.parse import quote, urlencode
 
 from .entry import Entry
@@ -25,6 +27,12 @@ class Unavailable(OSError):
     pass
 
 
+class RegistryConflict(ValueError):
+    def __init__(self, names: list[str]) -> None:
+        super().__init__(names)
+        self.names = names
+
+
 class Client:
     def __init__(self, base: str, token: str = "") -> None:
         self.base, self.token = base.rstrip("/") + PREFIX, token
@@ -37,13 +45,13 @@ class Client:
         if self.token:
             request.add_header("Authorization", f"Bearer {self.token}")
         try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
-                raw = response.read()
-                return response.status, json.loads(raw) if raw else None
-        except urllib.error.HTTPError as answer:
-            raw = answer.read()
-            return answer.code, json.loads(raw) if raw else None
-        except (urllib.error.URLError, TimeoutError) as failure:
+            try:
+                with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+                    status, raw = response.status, response.read()
+            except urllib.error.HTTPError as answer:
+                status, raw = answer.code, answer.read()
+            return status, json.loads(raw) if raw else None
+        except (OSError, http.client.HTTPException, ValueError) as failure:
             raise Unavailable(str(failure)) from failure
 
     def expect(self, method: str, path: str, query: dict | None = None, body: object = None) -> object:
@@ -99,7 +107,7 @@ class Session:
         body = dict(expected=self.seen, set=self.saved, purge=self.purged)
         status, answer = self.client.call("POST", "/registries", body=body)
         if status == 409:
-            raise Conflict(",".join(answer.get("registries", [])), -1)
+            raise RegistryConflict(answer.get("registries", []))
         if status != 200:
             raise Unavailable(f"{status} {answer}")
 
@@ -116,14 +124,14 @@ class RemoteLedgerRepository:
     adopts = False
     remote = True
 
-    def __init__(self, client: Client, domain=None) -> None:
+    def __init__(self, client: Client, domain: ModuleType | None = None) -> None:
         self.client = client
         self._domain = domain
         self._cache: dict[str, Entry] = {}
         self._guard = threading.Lock()
 
     @property
-    def domain(self):
+    def domain(self) -> ModuleType:
         if self._domain is None:
             import ledger_core
 
@@ -134,7 +142,7 @@ class RemoteLedgerRepository:
     def directory(self) -> Path:
         return self.domain.LEDGER_DIR
 
-    def bound(self, domain) -> "RemoteLedgerRepository":
+    def bound(self, domain: ModuleType) -> "RemoteLedgerRepository":
         if domain is self.domain:
             return self
         twin = RemoteLedgerRepository(self.client, domain)
@@ -193,13 +201,15 @@ class RemoteLedgerRepository:
     def list_summaries(self) -> list:
         return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]
 
-    def encoded_view(self, slug: str, view) -> str | bytes:
+    def encoded_view(self, slug: str, view: Callable[[dict], str | bytes]) -> str | bytes:
         entry = self.current(slug)
         if view not in entry.views:
             entry.views[view] = view(entry.state)
         return entry.views[view]
 
-    def export_since(self, slug: str, since: int, view, changes) -> tuple[int, str | bytes]:
+    def export_since(
+        self, slug: str, since: int, view: Callable[[object], str | bytes], patch: Callable[..., object]
+    ) -> tuple[int, str | bytes]:
         entry = self.current(slug)
         if view not in entry.views:
             entry.views[view] = view(entry.fragments)
@@ -226,25 +236,34 @@ class RemoteLedgerRepository:
         return self._remember(slug, Entry(answer["generation"], None, fragments.value, fragments))
 
     def apply_ops(
-        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
+        self,
+        slug: str,
+        changes: list | None = None,
+        ops: list | None = None,
+        gate: object = None,
+        *,
+        copy_state: bool = True,
+    ) -> tuple[dict, list]:
+        for _ in range(ATTEMPTS - 1):
+            try:
+                return self._ruled(slug, changes, ops, gate, copy_state)
+            except Conflict:
+                continue
+        return self._ruled(slug, changes, ops, gate, copy_state)
+
+    def _ruled(
+        self, slug: str, changes: list | None, ops: list | None, gate: object, copy_state: bool
     ) -> tuple[dict, list]:
         from . import artifact_files, media_files, mutation
 
-        for attempt in range(1, ATTEMPTS + 1):
-            entry = self.current(slug)
-            state = entry.mutable()
-            revision = state["_meta"]["rev"]
-            rejected, ctx = mutation.apply(slug, state, self.domain, copy.deepcopy(changes), copy.deepcopy(ops), gate)
-            try:
-                written = self.commit(slug, revision, entry.state, state, ctx.events if ctx.changed else [])
-            except Conflict:
-                if attempt == ATTEMPTS:
-                    raise
-                continue
-            artifact_files.drop(slug, ctx.unstored)
-            media_files.drop(slug, ctx.unstored)
-            return (written.mutable() if copy_state else written.state), rejected
-        raise Conflict(slug, -1)
+        entry = self.current(slug)
+        state = entry.mutable()
+        revision = state["_meta"]["rev"]
+        rejected, ctx = mutation.apply(slug, state, self.domain, copy.deepcopy(changes), copy.deepcopy(ops), gate)
+        written = self.commit(slug, revision, entry.state, state, ctx.events if ctx.changed else [])
+        artifact_files.drop(slug, ctx.unstored)
+        media_files.drop(slug, ctx.unstored)
+        return (written.mutable() if copy_state else written.state), rejected
 
     def generations(self) -> dict:
         with self._guard:
