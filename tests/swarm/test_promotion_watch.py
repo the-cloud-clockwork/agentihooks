@@ -1,3 +1,4 @@
+import base64
 import json
 import subprocess
 from types import SimpleNamespace
@@ -5,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import promotion_watch
+from scripts.swarm import github_reads, promotion_watch
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig
@@ -73,11 +74,32 @@ class Ledger:
 PROMOTED = [{"name": "promote / promote", "conclusion": "success"}]
 
 
-def gh(runs, jobs=PROMOTED, calls=None):
+PR_URL = "https://github.com/o/r/pull/77"
+MERGE_SHA = "e" * 40
+MERGED_AT = "2026-10-30T10:00:00Z"
+MAPPED = "tests/swarm/test_pinned.py"
+MAPPED_CHANGE = {"filename": MAPPED, "status": "modified"}
+FEATURES = {
+    "features": [
+        {"id": "pinned", "tests": [f"{MAPPED}::test_it", 7]},
+        {"id": "bare"},
+        "not an entry",
+        {"id": "other", "tests": ["tests/test_other.py::test_case"]},
+    ]
+}
+CONTENT = json.dumps({"content": base64.encodebytes(json.dumps(FEATURES).encode()).decode()})
+
+
+def gh(runs, jobs=PROMOTED, calls=None, files=(MAPPED_CHANGE,), merged_at=MERGED_AT):
     def run(argv, **kwargs):
         if calls is not None:
             calls.append((argv, kwargs))
-        body = jobs if "/jobs" in argv[2] else runs
+        if "/contents/" in argv[2]:
+            return subprocess.CompletedProcess(argv, 0, CONTENT, "")
+        if "/pulls/" in argv[2]:
+            body = list(files) if "/files" in argv[2] else [{"merged_at": merged_at, "merge_commit_sha": MERGE_SHA}]
+        else:
+            body = jobs if "/jobs" in argv[2] else runs
         return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(item) for item in body), "")
 
     return run
@@ -609,8 +631,8 @@ def test_the_watch_reads_at_most_once_per_refresh_window(store):
 
 def test_a_green_run_closes_open_and_blocked_promotion_tasks_and_the_alert(store):
     tasks = [
-        {"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open"},
-        {"id": "promo-900-1", "title": "Promotion red: unit (3.11, 1)", "state": "blocked"},
+        {"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open", "pr_url": PR_URL},
+        {"id": "promo-900-1", "title": "Promotion red: unit (3.11, 1)", "state": "blocked", "pr_url": PR_URL},
         {"id": "promo-800-0", "title": "Promotion red: lint", "state": "claimed"},
         {"id": "promo-700-0", "title": "Promotion red: lint", "state": "done"},
         {"id": "t9", "title": "Other work", "state": "open"},
@@ -648,7 +670,7 @@ def test_a_green_run_closes_open_and_blocked_promotion_tasks_and_the_alert(store
     ],
 )
 def test_a_green_run_whose_promote_did_not_succeed_keeps_the_promotion_red_open(store, promote):
-    tasks = [{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open"}]
+    tasks = [{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open", "pr_url": PR_URL}]
     alerts = [{"id": "al-1", "source": "promotion", "text": "red", "state": "open"}]
     store.redis.set(promotion_watch.key(SLUG, "seen"), 900)
     store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-900-0", "helm-kind")
@@ -664,13 +686,13 @@ def test_a_green_run_whose_promote_did_not_succeed_keeps_the_promotion_red_open(
 
 
 def test_only_the_promote_job_and_its_called_jobs_decide_whether_a_green_run_clears(store):
-    ledger = Ledger([{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open"}])
+    ledger = Ledger([{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open", "pr_url": PR_URL}])
     refresh(store, ledger, gh([GREEN], [*PROMOTED, {"name": "promote smoke", "conclusion": "skipped"}]))
     assert ledger.tasks[0]["state"] == "done"
 
 
 def test_a_task_claimed_before_the_close_lands_is_not_reported_closed(store):
-    ledger = Ledger([{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open"}])
+    ledger = Ledger([{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open", "pr_url": PR_URL}])
     ledger.update_task = lambda slug, task_id, fields, by="swarm", if_state=(): {"id": task_id, "state": "claimed"}
     assert refresh(store, ledger, gh([GREEN])) == []
     assert ledger.comments == []
@@ -679,7 +701,7 @@ def test_a_task_claimed_before_the_close_lands_is_not_reported_closed(store):
 def test_a_green_run_releases_the_cause_of_a_fixer_the_ledger_kept_blocked(store):
     ledger = Ledger()
     refresh(store, ledger, smoke_run("Build the image", []))
-    ledger.tasks[0]["state"] = "blocked"
+    ledger.tasks[0].update(state="blocked", pr_url=PR_URL)
     ledger.update_task = lambda slug, task_id, fields, by="swarm", if_state=(): {"id": task_id, "state": "blocked"}
     refresh(store, ledger, gh([GREEN]), NOW * 2)
     assert filed(store) == {}
@@ -696,6 +718,114 @@ def test_a_fixer_someone_works_through_a_green_run_still_holds_its_job(store, st
     assert filed(store) == {"promo-900-0": "swarm-image / smoke: Build the image"}
     refresh(store, ledger, smoke_run("Build the image", [], 902), NOW * 3)
     assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0"]
+
+
+def fixer(**extra):
+    return {"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open", **extra}
+
+
+def test_a_fixer_whose_merged_pull_request_changed_a_mapped_test_closes_on_green(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    calls, ledger = [], Ledger([fixer(pr_url=PR_URL)])
+    actions = refresh(store, ledger, gh([GREEN], calls=calls, files=({"filename": "scripts/x.py"}, MAPPED_CHANGE)))
+    assert ledger.tasks[0]["state"] == "done" and ledger.added == []
+    assert actions == ["closed promo-900-0, dev push run 901 passed"]
+    kwargs = {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
+    pull = "repos/{owner}/{repo}/pulls/77"
+    contents = f"repos/{{owner}}/{{repo}}/contents/feature-map.json?ref={MERGE_SHA}"
+    assert [(argv, kw) for argv, kw in calls if "/pulls/" in argv[2] or "/contents/" in argv[2]] == [
+        (["gh", "api", pull, "--jq", "{merged_at, merge_commit_sha} | @json"], kwargs),
+        (
+            [
+                "gh",
+                "api",
+                f"{pull}/files?per_page=100",
+                "--paginate",
+                "--jq",
+                ".[] | {filename, status} | @json",
+                "--include",
+            ],
+            kwargs,
+        ),
+        (["gh", "api", contents], kwargs),
+    ]
+    rows = [json.loads(line) for line in (github_reads.home() / "charged.jsonl").read_text().splitlines()]
+    assert [row["caller"] for row in rows if row["endpoint"].startswith("repos/{owner}/{repo}/contents/")] == [
+        "swarm.promotion_watch"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("extra", "files", "merged_at"),
+    [
+        ({}, (MAPPED_CHANGE,), MERGED_AT),
+        ({"pr_url": "https://github.com/o/r/issues/77"}, (MAPPED_CHANGE,), MERGED_AT),
+        ({"pr_url": PR_URL}, ({"filename": "tests/test_other.txt", "status": "added"},), MERGED_AT),
+        ({"pr_url": PR_URL}, ({"filename": MAPPED, "status": "removed"},), MERGED_AT),
+        ({"pr_url": PR_URL}, (MAPPED_CHANGE,), None),
+    ],
+)
+def test_a_fixer_whose_pull_request_added_no_mapped_test_stays_open_with_its_pinning_task(
+    store, extra, files, merged_at
+):
+    ledger = Ledger([fixer(**extra)])
+    actions = refresh(store, ledger, gh([GREEN], files=files, merged_at=merged_at))
+    assert ledger.tasks[0]["state"] == "open"
+    description = (
+        "The promotion fixer promo-900-0 for dev push run failures went green at dev push run 901 without a merged "
+        "pull request that added or changed a test mapped in feature-map.json. Add a test that fails on that cause, "
+        "map it in feature-map.json, and close with swarm done and the feature it proved."
+    )
+    pin = {
+        "task": "pin-promo-900-0",
+        "title": "Pin a test for helm-kind",
+        "lane": "eng",
+        "kind": "code",
+        "contract": {"feature": "yes"},
+        "description": description,
+        "not_duplicate": "The promotion watch files one pinning task per fixer that went green without a mapped test.",
+    }
+    assert ledger.added == [(SLUG, pin, "swarm")]
+    assert ledger.updates == [(SLUG, "promo-900-0", {"depends_on": ["pin-promo-900-0"]}, "swarm", ("open", "blocked"))]
+    waiting = (
+        "A later dev push run of Tests passed, but no merged pull request on this task added or changed a mapped "
+        "test, so the swarm filed a pinning task and closes this one once that task is done."
+    )
+    assert ledger.comments == [(SLUG, "promo-900-0", waiting, "swarm")]
+    assert actions == ["filed pin-promo-900-0 to pin a test for promo-900-0, dev push run 901 passed"]
+
+
+def test_a_pinning_task_for_a_title_the_ledger_would_refuse_gets_a_plain_title(store):
+    ledger = Ledger([fixer(title="Promotion red: check docs.md")])
+    refresh(store, ledger, gh([GREEN]))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Pin a test for a promotion red"]
+
+
+def test_a_pinned_fixer_closes_on_a_later_green_once_its_pinning_task_is_done(store):
+    ledger = Ledger([fixer()])
+    refresh(store, ledger, gh([GREEN]))
+    assert refresh(store, ledger, gh([{**GREEN, "id": 902}]), NOW * 2) == []
+    assert len(ledger.added) == len(ledger.comments) == 1 and ledger.tasks[0]["state"] == "open"
+    ledger.tasks[1]["state"] = "done"
+    actions = refresh(store, ledger, gh([{**GREEN, "id": 903}]), NOW * 3)
+    assert ledger.tasks[0]["state"] == "done"
+    assert actions == ["closed promo-900-0, dev push run 903 passed"]
+
+
+def test_an_unread_pull_request_leaves_the_fixer_for_the_next_green(store):
+    answer = gh([GREEN])
+
+    def run(argv, **kwargs):
+        if "/pulls/" in argv[2]:
+            raise subprocess.CalledProcessError(1, argv, stderr="HTTP 502")
+        return answer(argv, **kwargs)
+
+    ledger = Ledger([fixer(pr_url=PR_URL)])
+    assert refresh(store, ledger, run) == []
+    assert (ledger.tasks[0]["state"], ledger.added, ledger.comments) == ("open", [], [])
+    assert refresh(store, ledger, gh([{**GREEN, "id": 902}]), NOW * 2) == [
+        "closed promo-900-0, dev push run 902 passed"
+    ]
 
 
 def test_a_failed_read_skips_the_pass_and_leaves_the_run_unhandled(store, capsys):

@@ -1,3 +1,4 @@
+import base64
 import json
 import subprocess
 import sys
@@ -80,7 +81,20 @@ def linked():
     return store, SchemaLedger((WATCHED, DOCTOR))
 
 
+PR_URL = "https://github.com/o/r/pull/77"
+MAPPED = {"features": [{"id": "pinned", "tests": ["tests/test_pinned.py::test_it"]}]}
+
+
 def github(argv, **kwargs):
+    if "/contents/" in argv[2]:
+        content = base64.b64encode(json.dumps(MAPPED).encode()).decode()
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"content": content}), "")
+    if "/pulls/" in argv[2]:
+        files = [{"filename": "tests/test_pinned.py", "status": "added"}]
+        pull = [{"merged_at": "2026-10-30T10:00:00Z", "merge_commit_sha": "e" * 40}]
+        return subprocess.CompletedProcess(
+            argv, 0, "\n".join(json.dumps(row) for row in (files if "/files" in argv[2] else pull)), ""
+        )
     jobs = [{"name": "coverage-ratchet", "conclusion": "failure", "steps": []}]
     if RED["conclusion"] == "success":
         jobs = [{"name": "promote / promote", "conclusion": "success"}]
@@ -166,6 +180,7 @@ def test_handover_on_a_new_failed_run_preserves_the_existing_active_repair(linke
 def test_handover_reconciles_prior_repairs_on_green_and_allows_the_next_real_failure(linked, monkeypatch):
     store, ledger = linked
     observe(store, ledger, WATCHED)
+    ledger.docs[WATCHED]["tasks"][0]["pr_url"] = PR_URL
     store.update(WATCHED, state="stopped")
     monkeypatch.setitem(RED, "id", 901)
     monkeypatch.setitem(RED, "conclusion", "success")
@@ -181,6 +196,7 @@ def test_handover_reconciles_prior_repairs_on_green_and_allows_the_next_real_fai
 def test_a_doctor_tick_closes_watched_repairs_on_green_under_the_watched_lease(linked, monkeypatch):
     store, ledger = linked
     observe(store, ledger, WATCHED)
+    ledger.docs[WATCHED]["tasks"][0]["pr_url"] = PR_URL
     watched = lease.acquire(store, WATCHED, "watched-hive")
     store.redis.set(store.key(DOCTOR, "control-epoch"), watched.epoch + 5)
     doctor = lease.acquire(store, DOCTOR, "doctor-hive")
@@ -204,7 +220,12 @@ def test_a_green_run_releases_a_fixer_the_master_kept_blocked_so_the_next_red_fi
     monkeypatch.setitem(RED, "id", 901)
     monkeypatch.setitem(RED, "conclusion", "success")
     observe(store, ledger, DOCTOR, NOW + promotion_watch.REFRESH_MS)
-    assert ledger.docs[WATCHED]["tasks"][0]["state"] == "blocked"
+    assert [(task["id"], task["state"]) for task in ledger.docs[WATCHED]["tasks"]] == [
+        ("promo-900-0", "blocked"),
+        ("pin-promo-900-0", "open"),
+    ]
+    assert ledger.docs[WATCHED]["tasks"][1]["contract"] == {"feature": "yes"}
+    assert ledger.docs[WATCHED]["tasks"][0]["depends_on"] == ["pin-promo-900-0"]
     monkeypatch.setitem(RED, "id", 902)
     monkeypatch.setitem(RED, "conclusion", "failure")
     observe(store, ledger, DOCTOR, NOW + promotion_watch.REFRESH_MS * 2)
