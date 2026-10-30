@@ -369,6 +369,16 @@ def _unit_step_index(predicate) -> tuple[int, dict]:
     return index, steps[index]
 
 
+_TEST_ENV_KEY = "./.github/actions/test-env-key"
+
+
+def _test_env_key_step() -> dict:
+    """Return the one step of the shared action that names the test environment key."""
+    action = yaml.safe_load((_ROOT / ".github/actions/test-env-key/action.yml").read_text())
+    (step,) = action["runs"]["steps"]
+    return step
+
+
 def test_unit_installs_extras_with_uv_and_no_uv_cache():
     uv_index, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
     install_index, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
@@ -389,17 +399,18 @@ def test_unit_restores_one_venv_per_interpreter_and_dependency_files() -> None:
     assert cache["with"]["path"] == "~/venv"
     assert cache["with"]["key"] == "${{ steps.day.outputs.key }}"
     _, day = _unit_step_index(lambda s: s.get("id") == "day")
-    key = day["env"]["KEY_PREFIX"] + day["env"]["KEY_INPUTS"]
+    assert day["uses"] == _TEST_ENV_KEY
+    assert day["with"] == {"python-version": f"${{{{ steps.{python['id']}.outputs.python-version }}}}"}
+    step = _test_env_key_step()
+    key = step["env"]["KEY_PREFIX"] + step["env"]["KEY_INPUTS"]
     assert "${{ runner.os }}" in key
-    assert f"${{{{ steps.{python['id']}.outputs.python-version }}}}" in key
+    assert "${{ inputs.python-version }}" in key
     assert "${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}" in key
     assert "${{ hashFiles('.github/test-requirements.lock') }}" in key
-    assert day["run"].splitlines() == [
+    assert step["run"].splitlines() == [
         "date=$(date -u +%F)",
-        'echo "date=$date" >> "$GITHUB_OUTPUT"',
         'echo "key=$KEY_PREFIX-$date-$KEY_INPUTS" >> "$GITHUB_OUTPUT"',
     ]
-    assert "matrix.shard" not in key
 
 
 def test_records_name_the_test_environment_when_the_wheelhouse_skips_its_restore() -> None:
@@ -508,21 +519,20 @@ def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs()
         "pytest<9.2",
         "--constraint test-requirements.lock",
     ]
+    assert "${{ hashFiles('.github/test-constraints.txt') }}" in _test_env_key_step()["env"]["KEY_INPUTS"]
     for job in ("test-count", "split", "unit"):
         assert workflow["jobs"][job]["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
         cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
         day = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "day")
         assert cache["with"]["key"] == "${{ steps.day.outputs.key }}"
-        assert "${{ hashFiles('.github/test-constraints.txt') }}" in day["env"]["KEY_INPUTS"]
+        assert day["uses"] == _TEST_ENV_KEY
 
 
 def test_every_job_sharing_the_test_environment_installs_the_baked_browser_version() -> None:
     sharing, unpinned = [], []
     for path in sorted((_ROOT / ".github/workflows").glob("*.yml")):
         for name, job in (yaml.safe_load(path.read_text())["jobs"] or {}).items():
-            keys = [str((step.get("with") or {}).get("key", "")) for step in job.get("steps", [])]
-            keys += [str((step.get("env") or {}).get("KEY_PREFIX", "")) for step in job.get("steps", [])]
-            if any(key.startswith("venv-") for key in keys):
+            if any(step.get("uses") == _TEST_ENV_KEY for step in job.get("steps", [])):
                 sharing.append(f"{path.name}:{name}")
                 if (job.get("env") or {}).get(
                     "UV_CONSTRAINT"
@@ -531,6 +541,33 @@ def test_every_job_sharing_the_test_environment_installs_the_baked_browser_versi
     assert "count-record.yml:count-record" in sharing
     assert "test.yml:unit" in sharing
     assert unpinned == []
+
+
+def test_every_test_environment_key_comes_from_the_shared_action() -> None:
+    keyed, stray = set(), []
+    for path in sorted((_ROOT / ".github/workflows").glob("*.yml")):
+        text = path.read_text()
+        if "venv-${{" in text:
+            stray.append(path.name)
+        for name, job in (yaml.safe_load(text)["jobs"] or {}).items():
+            steps = job.get("steps", [])
+            caches = [step for step in steps if (step.get("with") or {}).get("path") == "~/venv"]
+            if not caches:
+                continue
+            day = next((step for step in steps if step.get("id") == "day"), None)
+            python = next((step for step in steps if step.get("uses", "").startswith("actions/setup-python")), None)
+            assert day and python, f"{path.name}:{name}"
+            assert day.get("uses") == _TEST_ENV_KEY, f"{path.name}:{name}"
+            assert day["with"] == {"python-version": f"${{{{ steps.{python['id']}.outputs.python-version }}}}"}
+            for cache in caches:
+                saves = cache["uses"].startswith("actions/cache/save")
+                assert steps.index(day) < steps.index(cache), f"{path.name}:{name}"
+                assert cache["with"]["key"] == (
+                    "${{ steps.venv.outputs.cache-primary-key }}" if saves else "${{ steps.day.outputs.key }}"
+                ), f"{path.name}:{name}"
+            keyed.add(path.name)
+    assert {"count-record.yml", "test.yml"} <= keyed
+    assert stray == []
 
 
 def test_queue_browser_setup_cannot_enter_the_downloading_action():
