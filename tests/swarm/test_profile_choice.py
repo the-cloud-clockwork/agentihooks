@@ -495,6 +495,42 @@ def test_a_handoff_whose_launch_never_reported_options_keeps_its_identity():
     assert profile_choice.transfer({**task, "handoff_envelope": {"launch": half}}) == half
 
 
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        {},
+        {"launch": {}},
+        {"launch": {"profile": "", "harness": "", "model": "claude-opus-5-5", "effort": "medium"}},
+        {"launch": {"profile": "engineer", "harness": ""}},
+        {"launch": {"profile": "", "harness": "claude"}},
+    ],
+    ids=["no-envelope", "no-launch", "empty-identity", "no-harness", "no-profile"],
+)
+def test_a_handoff_without_a_complete_launch_identity_spawns_fresh_with_its_text(envelope):
+    task = {"id": "t962", "handoff": "## Next\nGo on\n", "handoff_envelope": envelope}
+    fresh = profile_choice.fresh_when_incomplete(task)
+    assert fresh == {**task, profile_choice.FRESH: True}
+    assert profile_choice.transfer(fresh) == {}
+
+
+def test_an_incomplete_saved_launch_without_handoff_text_also_spawns_fresh():
+    task = {"id": "t962", "handoff_envelope": {"launch": {"profile": "", "harness": "", "model": "m"}}}
+    assert profile_choice.fresh_when_incomplete(task) == {**task, profile_choice.FRESH: True}
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        {"id": "t1"},
+        {"id": "t1", "handoff_envelope": {"launch": {}}},
+        {"id": "t1", "handoff": "doc", "handoff_envelope": {"launch": {"profile": "engineer", "harness": "codex"}}},
+    ],
+    ids=["no-handoff", "no-handoff-empty-launch", "complete-launch"],
+)
+def test_a_task_with_no_handoff_or_a_complete_launch_keeps_its_transfer(task):
+    assert profile_choice.fresh_when_incomplete(task) is task
+
+
 class UnsupportedHandoffRuntime(LaterUnresolvedRuntime):
     def placement_refusal(self, lane, task):
         self.checked.append(task.get("id"))

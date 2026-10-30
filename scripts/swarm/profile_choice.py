@@ -95,6 +95,13 @@ def transfer(task: dict) -> dict:
     return saved
 
 
+def fresh_when_incomplete(task: dict) -> dict:
+    saved = (task.get("handoff_envelope") or {}).get("launch") or {}
+    if (task.get("handoff") or saved) and not all(saved.get(key) for key in ("profile", "harness")):
+        return {**task, FRESH: True}
+    return task
+
+
 def needs_ci_push(task: dict) -> bool:
     return (task.get("contract") or {}).get("push") == "yes"
 

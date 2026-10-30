@@ -88,7 +88,7 @@ from scripts.swarm import idle as idle_state
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.naming import lane_of, parse, seat_label
 from scripts.swarm.pane import PaneObservation
-from scripts.swarm.profile_choice import ProfileUnresolved
+from scripts.swarm.profile_choice import ProfileUnresolved, fresh_when_incomplete
 from scripts.swarm.ready import awaiting as awaiting_merge
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
@@ -1337,12 +1337,14 @@ def _prepare(run, lane, task, taken, failing, peers):
         timing.timed(store.record_launch, slug, record, "pending")
         store.seats.occupy(seat, name, now_ms)
         task["transfer"] = timing.timed(transfers.attach, store, slug, record)
-        primed_task = {
-            **timing.timed(primed, store, slug, seat, task),
-            ACK_LATER: True,
-            "detached_launch": True,
-            **_steer(slug, store, task, failing),
-        }
+        primed_task = fresh_when_incomplete(
+            {
+                **timing.timed(primed, store, slug, seat, task),
+                ACK_LATER: True,
+                "detached_launch": True,
+                **_steer(slug, store, task, failing),
+            }
+        )
     except Exception as exc:
         failed = Failed(record, task, exc)
         return None, timing.timed(_not_launched, slug, store, ledger, runtime, rows, failed, now_ms)

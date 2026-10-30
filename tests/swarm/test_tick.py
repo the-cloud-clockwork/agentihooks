@@ -1865,6 +1865,21 @@ def test_a_handed_off_task_revalidates_its_handoff_continuation(store, reclaims)
     assert "reclaim" not in runtime.tasks[-1]
 
 
+def test_a_handoff_with_an_empty_launch_identity_respawns_fresh_with_its_doc(store, reclaims):
+    from scripts.swarm import profile_choice
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    empty = {"profile": "", "harness": "", "model": "claude-opus-5-5", "effort": "medium"}
+    store.put_handoff("sw", "t1", "seam 1 green", envelope={"launch": empty})
+    store.put_agent("sw", replace(workers(store)[0], state="finished"))
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0002", "t1")
+    assert runtime.tasks[-1]["handoff"] == "seam 1 green"
+    assert runtime.tasks[-1][profile_choice.FRESH] is True
+    assert profile_choice.transfer(runtime.tasks[-1]) == {}
+
+
 def test_a_spawned_agent_keeps_the_model_and_effort_it_was_placed_with(store):
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     (agent,) = workers(store)
