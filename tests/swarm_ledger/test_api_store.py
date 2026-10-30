@@ -487,7 +487,7 @@ def test_the_store_owner_serves_the_shared_database_when_its_url_is_set(monkeypa
     assert storage.owned(plain) == "built"
     assert built == [(address, plain)]
     folder = storage.owned(plain, Path("/unused/ledgers.sqlite3"))
-    assert isinstance(folder, storage.Folder) and folder.domain is plain
+    assert (type(folder), folder.domain, folder.adopts) == (SQLiteLedgerRepository, plain, False)
 
 
 class Listening:
@@ -667,14 +667,6 @@ def test_views_and_task_rows_of_the_cached_ledger_are_built_once_per_generation(
     _, base = api
     repository = remote.RemoteLedgerRepository(remote.Client(base, "secret"))
     repository.apply_ops("split", ops=[ADD])
-    built = []
-
-    def titled(state: dict) -> str:
-        built.append(state)
-        return state["title"]
-
-    assert repository.encoded_view("split", titled) == repository.encoded_view("split", titled) == "Split"
-    assert len(built) == 1
     generation, exported = repository.export_since("split", 0, lambda fragments: fragments.value["title"], None)
     assert (generation, exported) == (repository.generations()["split"], "Split")
     rows = repository.task_rows("split")

@@ -6,6 +6,7 @@ import os
 import sys
 from contextlib import nullcontext
 from enum import StrEnum, auto
+from functools import partialmethod
 from http import HTTPMethod
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -21,10 +22,14 @@ DEFAULT_PORT = 8766
 MAX_BODY = 64 << 20
 FILES = {artifact_files.TABLE: artifact_files, media_files.TABLE: media_files}
 WITH_BODY = {HTTPMethod.POST, HTTPMethod.PUT}
+VERBS = (HTTPMethod.GET, HTTPMethod.POST, HTTPMethod.PUT, HTTPMethod.DELETE)
+HTTP_1_1 = "HTTP/1.1"
 AUTHORIZATION = "Authorization"
 CONTENT_LENGTH = "Content-Length"
 CONTENT_TYPE = "Content-Type"
 JSON = "application/json"
+CONNECTION = "Connection"
+CLOSE = "close"
 
 
 class Code(StrEnum):
@@ -64,8 +69,8 @@ class Answer(Exception):
         self.status, self.body = status, body
 
 
-def refused(status: int, code: Code, **details: object) -> Answer:
-    return Answer(status, dict(code=code.value, **details))
+def refused(status: int, code: Code, details: dict[str, object] | None = None) -> Answer:
+    return Answer(status, dict(code=code.value, **(details or {})))
 
 
 def first(query: dict, key: str, default: str | None) -> str | None:
@@ -96,7 +101,7 @@ def commit_shape(body: dict) -> None:
     shapes = dict(revision=int, changed=dict, dropped=list, events=list, summary=dict)
     wrong = sorted(name for name, kind in shapes.items() if type(body.get(name)) is not kind)
     if wrong or "_meta" in body["dropped"] or not isinstance(body["changed"].get("_meta", {}), dict):
-        raise refused(400, Code.BAD_REQUEST, fields=wrong or ["_meta"])
+        raise refused(400, Code.BAD_REQUEST, {"fields": wrong or ["_meta"]})
 
 
 def committing(stored: LedgerRepository, slug: str, body: dict) -> dict:
@@ -106,7 +111,7 @@ def committing(stored: LedgerRepository, slug: str, body: dict) -> dict:
             slug, body["revision"], body["changed"], body["dropped"], body["events"], body["summary"]
         )
     except Conflict as conflict:
-        raise refused(409, Code.REVISION_CONFLICT, revision=conflict.revision) from conflict
+        raise refused(409, Code.REVISION_CONFLICT, {"revision": conflict.revision}) from conflict
     return dict(generation=written.generation, revision=written.state["_meta"]["rev"])
 
 
@@ -178,12 +183,12 @@ def registry_read(stored: LedgerRepository, name: str) -> dict:
 def registry_commit(stored: LedgerRepository, body: dict) -> dict:
     unread = sorted(set(body["set"]) - set(body["expected"]))
     if unread:
-        raise refused(400, Code.BAD_REQUEST, registries=unread)
+        raise refused(400, Code.BAD_REQUEST, {"registries": unread})
     with request_metrics.locked(stored.domain.LOCK), stored.connect() as connection, connection:
         request_metrics.begin(connection, BEGIN_IMMEDIATE)
         moved = [name for name, held in body["expected"].items() if stored.registry(name, connection) != held]
         if moved:
-            raise refused(409, Code.REVISION_CONFLICT, registries=moved)
+            raise refused(409, Code.REVISION_CONFLICT, {"registries": moved})
         for slug in body["purge"]:
             stored.purge(slug, connection)
         for name, entries in body["set"].items():
@@ -214,22 +219,6 @@ def route(stored: LedgerRepository, method: str, path: str, query: dict, body: d
 class Handler(BaseHTTPRequestHandler):
     stored: LedgerRepository
     token: str = ""
-    protocol_version = "HTTP/1.1"
-
-    def log_message(self, format: str, *args: object) -> None:
-        return None
-
-    def do_GET(self) -> None:
-        self.serve(HTTPMethod.GET)
-
-    def do_POST(self) -> None:
-        self.serve(HTTPMethod.POST)
-
-    def do_PUT(self) -> None:
-        self.serve(HTTPMethod.PUT)
-
-    def do_DELETE(self) -> None:
-        self.serve(HTTPMethod.DELETE)
 
     def serve(self, method: HTTPMethod) -> None:
         parts = urlsplit(self.path)
@@ -247,11 +236,9 @@ class Handler(BaseHTTPRequestHandler):
         except Missing:
             answer = refused(404, Code.LEDGER_NOT_FOUND)
         except (KeyError, TypeError, ValueError) as failure:
-            answer = refused(400, Code.BAD_REQUEST, detail=str(failure))
+            answer = refused(400, Code.BAD_REQUEST, {"detail": str(failure)})
         except Exception as failure:  # noqa: BLE001
-            answer = refused(500, Code.STORE_FAILED, detail=type(failure).__name__)
-        if answer.status >= 400:
-            self.close_connection = True
+            answer = refused(500, Code.STORE_FAILED, {"detail": type(failure).__name__})
         self.send(answer)
 
     def allowed(self) -> bool:
@@ -274,15 +261,22 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(answer.status)
         self.send_header(CONTENT_TYPE, JSON)
         self.send_header(CONTENT_LENGTH, str(len(data)))
+        if answer.status >= 400:
+            self.send_header(CONNECTION, CLOSE)
         self.end_headers()
         self.wfile.write(data)
 
 
+def quiet(*_: object) -> None:
+    return None
+
+
 def server(stored: LedgerRepository, host: str, port: int, token: str) -> ThreadingHTTPServer:
-    handler = type("Bound", (Handler,), dict(stored=stored, token=token))
-    listening = ThreadingHTTPServer((host, port), handler)
-    listening.daemon_threads = True
-    return listening
+    verbs = {f"do_{method}": partialmethod(Handler.serve, method) for method in VERBS}
+    handler = type(
+        "Bound", (Handler,), dict(stored=stored, token=token, protocol_version=HTTP_1_1, log_message=quiet, **verbs)
+    )
+    return ThreadingHTTPServer((host, port), handler)
 
 
 def relaying(stored: LedgerRepository, relay: bool) -> object:

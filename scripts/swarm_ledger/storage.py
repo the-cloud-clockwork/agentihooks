@@ -12,20 +12,15 @@ Missing = sqlite.Missing
 Conflict = sqlite.Conflict
 
 
-class Folder(sqlite.SQLiteLedgerRepository):
-    adopts = False
-
-    def _adopt(self, slug: str | None = None) -> None:
-        """A store owner's folder never imports legacy ledger files."""
-
-
 def owned(domain: object, path: Path | None = None) -> LedgerRepository:
     """The repository a process that owns the store serves: the shared database when its URL is set, else the
     ledger folder, never adopting legacy files."""
     address = shared()
     if path is None and address:
         return postgres.PostgresLedgerRepository(address, domain)
-    return Folder(path, domain)
+    folder = sqlite.SQLiteLedgerRepository(path, domain)
+    folder.adopts = False
+    return folder
 
 
 def shared() -> str | None:

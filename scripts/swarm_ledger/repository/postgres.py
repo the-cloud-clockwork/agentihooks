@@ -9,6 +9,7 @@ from types import ModuleType, SimpleNamespace
 from scripts.swarm_ledger import request_metrics
 
 from . import hierarchy, refresh
+from .entry import Entry
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, TOKEN, Snapshot, SQLiteLedgerRepository
 
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
@@ -315,9 +316,6 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
         twin._cache, twin._loads, twin._ready, twin._guard = self._cache, self._loads, self._ready, self._guard
         return twin
 
-    def _adopt(self, slug: str | None = None) -> None:
-        """The shared database never imports legacy ledger files."""
-
     def _key(self, slug):
         return self.address, slug
 
@@ -356,7 +354,15 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
                 connection.execute(GUARD_TRIGGER)
             self._ready.add(address)
 
-    def _write(self, connection, slug: str, entry, state: dict, events: list, summary: dict | None = None):
+    def _write(
+        self,
+        connection: sqlite3.Connection,
+        slug: str,
+        entry: Entry,
+        state: dict,
+        events: list,
+        summary: dict | None = None,
+    ) -> Entry:
         stored = connection.execute(FLOOR).fetchone()
         required = REQUIRED if stored is None else stored[0]
         if required > VERSION:

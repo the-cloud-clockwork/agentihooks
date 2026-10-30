@@ -562,6 +562,8 @@ class SQLiteLedgerRepository:
                 self._remember(slug, Entry(generation, None, fragments.value, fragments))
 
     def _adopt(self, slug: str | None = None) -> None:
+        if not self.adopts:
+            return
         from . import legacy
 
         legacy.adopt(self, slug)
@@ -703,7 +705,13 @@ class SQLiteLedgerRepository:
         return written
 
     def _write(
-        self, connection, slug: str, entry: Entry, state: dict, events: list, summary: dict | None = None
+        self,
+        connection: sqlite3.Connection,
+        slug: str,
+        entry: Entry,
+        state: dict,
+        events: list,
+        summary: dict | None = None,
     ) -> Entry:
         meta, previous = state["_meta"], entry.state["_meta"]
         meta["task_revision"] = (

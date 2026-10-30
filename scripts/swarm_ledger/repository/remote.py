@@ -250,12 +250,6 @@ class RemoteLedgerRepository:
     def list_summaries(self) -> list:
         return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]
 
-    def encoded_view(self, slug: str, view: Callable[[dict], str | bytes]) -> str | bytes:
-        entry = self.current(slug)
-        if view not in entry.views:
-            entry.views[view] = view(entry.state)
-        return entry.views[view]
-
     def export_since(
         self, slug: str, since: int, view: Callable[[object], str | bytes], patch: Callable[..., object]
     ) -> tuple[int, str | bytes]:
