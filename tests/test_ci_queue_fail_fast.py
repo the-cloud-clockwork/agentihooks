@@ -164,6 +164,7 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
         "flake-budget",
         "coverage-baseline",
         "coverage-ratchet",
+        "dep-manifest",
         "stage-budget",
         "kind-due",
         "worker-image",
