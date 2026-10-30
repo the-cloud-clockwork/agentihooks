@@ -19,6 +19,7 @@ services:
       MALLOC_ARENA_MAX: "2"
       AGENTIHOOKS_SWARM_REDIS_URL: ${SWARM_ADOPT_REDIS_URL:?run agentihooks swarm init --adopt}
       AGENTIHOOKS_BUS: memory
+      AGENTIHOOKS_SCHEDULER_STATE_BACKEND: redis
     volumes:
       - ${SWARM_ADOPT_LEDGER_DIR}:${SWARM_ADOPT_LEDGER_DIR}
       - ${SWARM_ADOPT_HOME}/.agentihooks:${SWARM_ADOPT_HOME}/.agentihooks

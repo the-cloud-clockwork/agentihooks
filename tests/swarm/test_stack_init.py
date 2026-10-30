@@ -274,6 +274,7 @@ def test_the_adoption_override_serves_the_host_folder_as_the_host_user():
         "MALLOC_ARENA_MAX": "2",
         "AGENTIHOOKS_SWARM_REDIS_URL": "${SWARM_ADOPT_REDIS_URL:?run agentihooks swarm init --adopt}",
         "AGENTIHOOKS_BUS": "memory",
+        "AGENTIHOOKS_SCHEDULER_STATE_BACKEND": "redis",
     }
     assert swarm["volumes"] == [
         "${SWARM_ADOPT_LEDGER_DIR}:${SWARM_ADOPT_LEDGER_DIR}",
