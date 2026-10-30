@@ -2,7 +2,10 @@
 
 import hashlib
 import json
+import sys
+from collections.abc import Mapping
 from pathlib import Path
+from types import ModuleType
 
 CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
@@ -54,10 +57,18 @@ def code_digest(code_dirs: tuple[Path, ...] = CODE_DIRS) -> str:
 
 
 def record(
-    folder: Path, pid: int, stamp: int, code_dirs: tuple[Path, ...] = CODE_DIRS, digest: str | None = None
+    folder: Path,
+    pid: int,
+    stamp: int,
+    code_dirs: tuple[Path, ...] = CODE_DIRS,
+    digest: str | None = None,
+    files: dict[str, str] | None = None,
 ) -> None:
     written = folder / f"{RECORD}.{pid}"
     held = {"pid": pid, "stamp": stamp, "dirs": [str(d) for d in code_dirs], "digest": digest or code_digest(code_dirs)}
+    if files is not None:
+        held["files"] = files
+        held["digest"] = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
     written.write_text(json.dumps(held))
     written.replace(folder / RECORD)
 
@@ -79,5 +90,38 @@ def stale(folder: Path, pid: int) -> bool:
     held = loaded(folder)
     if held is None or held.get("pid") != pid:
         return True
+    if "files" in held:
+        return any(file_digest(Path(path)) != digest for path, digest in held["files"].items())
     dirs = tuple(Path(d) for d in held.get("dirs", ()))
     return code_stamp(dirs) != held.get("stamp") and code_digest(dirs) != held.get("digest")
+
+
+def file_digest(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+class LoadedCode:
+    def __init__(self, root: Path = ROOT, modules: Mapping[str, ModuleType | None] = sys.modules) -> None:
+        self.root = root.resolve()
+        self.modules = modules
+        self.files: dict[str, str] = {}
+        self.capture()
+
+    def capture(self) -> None:
+        for module in tuple(self.modules.values()):
+            name = getattr(module, "__file__", None)
+            if name is None:
+                continue
+            path = Path(name).resolve()
+            if path.suffix != ".py" or not path.is_relative_to(self.root) or str(path) in self.files:
+                continue
+            digest = file_digest(path)
+            if digest is not None:
+                self.files[str(path)] = digest
+
+    def changed(self) -> bool:
+        self.capture()
+        return any(file_digest(Path(path)) != digest for path, digest in self.files.items())

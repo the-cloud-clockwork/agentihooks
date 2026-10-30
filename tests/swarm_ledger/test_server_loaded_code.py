@@ -89,11 +89,11 @@ def test_server_close_finishes_active_requests_before_returning() -> None:
 
 
 def test_shared_successor_waits_until_its_predecessor_has_drained(monkeypatch: pytest.MonkeyPatch) -> None:
-    parents = iter((42, 42, 42, 1))
+    parents = iter((42, 42, 1))
     sleeps: list[float] = []
     monkeypatch.setattr(server_handoff.os, "getppid", lambda: next(parents))
     monkeypatch.setattr(server_handoff.time, "sleep", sleeps.append)
-    server_handoff.wait_predecessor()
+    server_handoff.wait_predecessor(42)
     assert sleeps == [0.05, 0.05]
 
 
