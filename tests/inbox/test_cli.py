@@ -317,11 +317,13 @@ def test_a_listing_across_name_alias_and_seat_reads_no_pipeline_above_the_batch(
 ) -> None:
     from scripts.inbox.store import ROW_BATCH
 
-    store.names.alias("old-bob", "bob")
-    store.seats.occupy("eng-1@sw", "bob", 1)
-    ids = _seed(store, {"bob": ROW_BATCH + 1, "old-bob": ROW_BATCH, "eng-1@sw": ROW_BATCH + 7})
+    store.names.mint_code("sw", "sw", "/repo")
+    name = store.names.next("sw", "eng")
+    store.names.alias("old-bob", name)
+    store.seats.occupy("eng-1@sw", name, 1)
+    ids = _seed(store, {name: ROW_BATCH + 1, "old-bob": ROW_BATCH, "eng-1@sw": ROW_BATCH + 7})
     reads = _record_reads(store, monkeypatch)
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "bob")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
     assert run("inbox") == 0
     assert [line.split("\t")[0] for line in capsys.readouterr().out.splitlines()] == ids
     assert max(reads) == ROW_BATCH
@@ -332,6 +334,8 @@ def test_a_listing_across_name_alias_and_seat_reads_no_pipeline_above_the_batch(
     "argv, window",
     [
         ((), slice(0, 7)),
+        (("--page", "1"), slice(0, 7)),
+        (("--page", "2"), slice(7, 7)),
         (("--page", "1", "--size", "3"), slice(0, 3)),
         (("--page", "2", "--size", "3"), slice(3, 6)),
         (("--page", "3", "--size", "3"), slice(6, 7)),
