@@ -68,7 +68,7 @@ def test_legacy_filters_keep_existing_cursor_subjects_and_new_wire_subjects():
     assert legacy_target("agentihooks.queue.work", {}) == "agentihooks.queue.work"
 
 
-def test_legacy_stream_creation_keeps_the_dedupe_window():
+def test_legacy_stream_creation_keeps_the_dedupe_window() -> None:
     import asyncio
     from unittest.mock import AsyncMock
 
@@ -85,7 +85,7 @@ def test_legacy_stream_creation_keeps_the_dedupe_window():
     )
 
 
-def test_legacy_stream_upgrade_retains_configuration_and_refuses_unexpected_errors():
+def test_legacy_stream_upgrade_retains_configuration_and_refuses_unexpected_errors() -> None:
     import asyncio
     from unittest.mock import AsyncMock
 
