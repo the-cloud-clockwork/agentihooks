@@ -17,7 +17,7 @@ HANDOFF = """# Handoff v2
 ## Intent
 Prove the feature suite harness on real services.
 ## Done
-- Canary reported and heartbeat seen by the feature suite harness test
+- Canary reported and heartbeat seen, `pytest tests/features` launch check passed
 ## Stopped at
 The harness test asked for this handoff.
 ## Decisions and promises
