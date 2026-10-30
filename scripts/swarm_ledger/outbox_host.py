@@ -36,7 +36,7 @@ class Relay:
 @contextmanager
 def running(repository, interval: float = INTERVAL) -> Iterator[None]:
     config = BusConfig.from_environ()
-    if config.backend == "memory":
+    if config.backend == "memory" or getattr(repository, "remote", False):
         yield
         return
     relay = Relay(repository, config)
