@@ -104,7 +104,9 @@ def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(
     handoff = store.handoff("sw", MASTER)
     assert f"master of sw; {agent.name} sat 15 minutes on {held} while operator items waited" in handoff
     assert handoff.endswith("<!-- handoff complete -->\n")
-    assert store.handoff_envelope("sw", MASTER)["reason"] == "recycle"
+    envelope = store.handoff_envelope("sw", MASTER)
+    assert envelope is not None
+    assert envelope["reason"] == "recycle"
     [row] = transfers.list_transfers(store, "sw")
     assert (row["reason"], row["predecessor"]) == (master_stall.STALLED, agent.name)
     recycled = master_prompt_stall.REASON.format(prompt=held, minutes=15)

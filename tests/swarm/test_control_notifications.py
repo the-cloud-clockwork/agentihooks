@@ -1,5 +1,6 @@
 from argparse import Namespace
 from dataclasses import replace
+from typing import Protocol
 
 import pytest
 
@@ -11,6 +12,10 @@ from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = pytest.mark.unit
+
+
+class NotificationLedger(Protocol):
+    said: list[tuple[str, str | None]]
 
 
 @pytest.fixture
@@ -76,7 +81,7 @@ def test_the_masters_own_pause_sends_it_nothing(controls, monkeypatch, explicit)
 
 
 def test_a_master_without_a_seat_receives_the_notification_by_name(
-    controls: tuple[RedisStore, FakeLedger, AgentRecord],
+    controls: tuple[RedisStore, NotificationLedger, AgentRecord],
 ) -> None:
     store, ledger, master = controls
     store.put_agent("demo", replace(master, seat=""))

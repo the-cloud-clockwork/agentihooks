@@ -1,4 +1,5 @@
 import json
+from typing import Protocol
 
 import pytest
 
@@ -6,11 +7,15 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.store import RedisStore
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_cli import run
-from tests.swarm.test_tick import FakeLedger, FakeRuntime
+from tests.swarm.test_tick import FakeRuntime
+
+
+class BroadcastLedger(Protocol):
+    said: list[tuple[str, str | None]]
 
 
 def test_send_message_reaches_every_live_agent_through_the_inbox_and_never_chat(
-    env: tuple[RedisStore, FakeLedger, FakeRuntime],
+    env: tuple[RedisStore, BroadcastLedger, FakeRuntime],
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

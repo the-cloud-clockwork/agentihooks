@@ -70,6 +70,7 @@ def test_stalled_master_is_asked_for_a_handoff_then_recycled_in_its_seat(store: 
     assert handoff.endswith("<!-- handoff complete -->\n")
     assert store.handoff_seat("sw", MASTER) == agent.seat
     found = store.handoff_envelope("sw", MASTER)
+    assert found is not None
     assert (found["agent"], found["seat"], found["reason"], found["ledger"]) == (
         agent.name,
         agent.seat,
@@ -78,6 +79,7 @@ def test_stalled_master_is_asked_for_a_handoff_then_recycled_in_its_seat(store: 
     )
     assert found["claims"] == []
     [row] = transfers.list_transfers(store, "sw")
+    assert row is not None
     assert (row["reason"], row["predecessor"], row["seat"]) == (master_stall.STALLED, agent.name, agent.seat)
     assert row["at"] == START + 15 * MINUTE
     assert runtime.killed == []

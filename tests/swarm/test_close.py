@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -12,8 +12,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from scripts.swarm.store import RedisStore
-    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+    from tests.swarm.test_tick import FakeRuntime
 from tests.swarm.test_cli import env, run  # noqa: F401
+
+
+class ClosingLedger(Protocol):
+    calls: list[tuple[str, str, str]]
 
 
 @pytest.fixture
@@ -73,7 +77,7 @@ def test_the_master_running_close_signs_the_summary(closing, monkeypatch):
 
 
 def test_close_hands_itself_to_a_live_master_and_changes_nothing_else(
-    closing: tuple[RedisStore, FakeLedger, FakeRuntime, Path], capsys: pytest.CaptureFixture[str]
+    closing: tuple[RedisStore, ClosingLedger, FakeRuntime, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
     store, ledger, rt, tmp_path = closing
     assert run("sw", "close") == 0
