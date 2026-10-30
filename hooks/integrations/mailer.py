@@ -15,22 +15,8 @@ Note: If SMTP_USER and SMTP_PASS are provided, STARTTLS authentication is used.
 If not provided, assumes open SMTP relay (no authentication)
 
 Usage:
-    from hooks.integrations.mailer import EmailClient, send_email
-
-    # Quick send
-    send_email(
-        to="user@example.com,team@example.com",
-        subject="Notification",
-        body="# Report\n\nMarkdown content here...",
-    )
-
-    # Using client
-    client = EmailClient.get_client()
-    client.send_html(
-        recipients=["user@example.com"],
-        subject="Report",
-        html_content="<h1>HTML content</h1>",
-    )
+    send_email(to="user@example.com,team@example.com", subject="Notification", body="# Report")
+    EmailClient.get_client().send_html(recipients=["user@example.com"], subject="Report", html_content="<h1>Hi</h1>")
 """
 
 import json
@@ -46,18 +32,13 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from typing import List, Optional, Union
 
-# Add parent directories to path for direct script execution
 _script_dir = Path(__file__).resolve().parent
-_app_dir = _script_dir.parent.parent  # /app
+_app_dir = _script_dir.parent.parent
 if str(_app_dir) not in sys.path:
     sys.path.insert(0, str(_app_dir))
 
 from hooks.common import log
 from hooks.integrations.base import IntegrationBase, IntegrationRegistry
-
-# =============================================================================
-# INTEGRATION DEFINITION
-# =============================================================================
 
 
 @IntegrationRegistry.register
@@ -77,11 +58,6 @@ class EmailIntegration(IntegrationBase):
     }
 
 
-# =============================================================================
-# DATA CLASSES
-# =============================================================================
-
-
 @dataclass
 class EmailResult:
     """Result of email send operation."""
@@ -91,13 +67,13 @@ class EmailResult:
     error: Optional[str] = None
 
 
-# =============================================================================
-# EMAIL CLIENT
-# =============================================================================
-
-
 class EmailClient:
-    """SMTP email client with HTML and markdown support."""
+    """SMTP email client with HTML and markdown support.
+
+    SMTP_USER and SMTP_PASS are set together or not at all; a half-set pair is
+    reported as incomplete_auth_config. Authenticated connections default to the
+    STARTTLS port 587.
+    """
 
     _instance: Optional["EmailClient"] = None
 
@@ -116,18 +92,15 @@ class EmailClient:
         """
         self._smtp_server = smtp_server or os.getenv("SMTP_SERVER", "")
         self._sender = sender or os.getenv("SENDER_EMAIL", "")
-        self._smtp_server_ip = os.getenv("SMTP_SERVER_IP", "")  # Optional fallback IP
+        self._smtp_server_ip = os.getenv("SMTP_SERVER_IP", "")
 
-        # SMTP Authentication (optional)
         self._smtp_user = os.getenv("SMTP_USER", "")
         self._smtp_pass = os.getenv("SMTP_PASS", "")
 
-        # Determine if authentication is required
         self._use_auth = bool(self._smtp_user and self._smtp_pass)
 
-        # Adjust default port based on auth mode
         if self._use_auth and smtp_port is None and "SMTP_PORT" not in os.environ:
-            self._smtp_port = 587  # Default to STARTTLS port for authenticated connections
+            self._smtp_port = 587
         else:
             self._smtp_port = smtp_port or int(os.getenv("SMTP_PORT", "25"))
 
@@ -178,7 +151,6 @@ class EmailClient:
             )
             return True
 
-        # Validate auth credentials consistency
         if bool(self._smtp_user) != bool(self._smtp_pass):
             log(
                 "Email send skipped: SMTP_USER and SMTP_PASS must both be set or both empty",
@@ -211,11 +183,9 @@ class EmailClient:
             return
 
         try:
-            # Enable TLS encryption
             server.starttls()
             log("STARTTLS enabled for SMTP connection")
 
-            # Authenticate with credentials
             server.login(self._smtp_user, self._smtp_pass)
             log(f"SMTP authentication successful for user: {self._smtp_user}")
 
@@ -244,7 +214,6 @@ class EmailClient:
         Returns:
             EmailResult with success status.
         """
-        # Check if email is configured
         if self.should_skip():
             return EmailResult(
                 success=True,
@@ -255,7 +224,6 @@ class EmailClient:
         if not recipients:
             return EmailResult(success=False, recipients_count=0, error="No recipients specified")
 
-        # Filter empty recipients
         recipients = [r.strip() for r in recipients if r.strip()]
         if not recipients:
             return EmailResult(success=False, recipients_count=0, error="All recipient addresses are empty")
@@ -279,14 +247,11 @@ class EmailClient:
             msg["To"] = ", ".join(recipients)
             msg["Subject"] = subject
 
-            # Attach HTML part
             html_part = MIMEText(html_content, "html", "utf-8")
             msg.attach(html_part)
 
-            # Try primary server
             try:
                 with smtplib.SMTP(self._smtp_server, self._smtp_port, timeout=30) as server:
-                    # Authenticate if credentials are configured
                     self._authenticate_smtp(server)
 
                     server.send_message(msg)
@@ -294,11 +259,9 @@ class EmailClient:
                 return EmailResult(success=True, recipients_count=len(recipients))
 
             except (smtplib.SMTPException, OSError) as e:
-                # Try IP fallback if configured
                 if self._smtp_server_ip and self._smtp_server != self._smtp_server_ip:
                     log(f"Primary SMTP failed ({e}), trying IP fallback: {self._smtp_server_ip}")
                     with smtplib.SMTP(self._smtp_server_ip, self._smtp_port, timeout=30) as server:
-                        # Authenticate fallback connection
                         self._authenticate_smtp(server)
 
                         server.send_message(msg)
@@ -372,7 +335,6 @@ class EmailClient:
         Returns:
             EmailResult with success status.
         """
-        # Convert newlines to paragraphs
         paragraphs = text_content.strip().split("\n\n")
         html_body = "".join(f"<p>{p.replace(chr(10), '<br>')}</p>" for p in paragraphs)
         html_content = wrap_html_body(html_body, title or subject)
@@ -394,11 +356,6 @@ class EmailClient:
         return self._sender
 
 
-# =============================================================================
-# MARKDOWN TO HTML CONVERSION
-# =============================================================================
-
-
 def markdown_to_html(content: str) -> str:
     """
     Convert markdown to basic HTML.
@@ -414,22 +371,18 @@ def markdown_to_html(content: str) -> str:
     """
     html = content
 
-    # Escape HTML entities first
     html = html.replace("&", "&amp;")
     html = html.replace("<", "&lt;")
     html = html.replace(">", "&gt;")
 
-    # Headers
     html = re.sub(r"^#### (.+)$", r"<h4>\1</h4>", html, flags=re.MULTILINE)
     html = re.sub(r"^### (.+)$", r"<h3>\1</h3>", html, flags=re.MULTILINE)
     html = re.sub(r"^## (.+)$", r"<h2>\1</h2>", html, flags=re.MULTILINE)
     html = re.sub(r"^# (.+)$", r"<h1>\1</h1>", html, flags=re.MULTILINE)
 
-    # Bold and italic
     html = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", html)
     html = re.sub(r"\*(.+?)\*", r"<em>\1</em>", html)
 
-    # Code blocks
     def restore_code_block(match):
         code = match.group(2)
         code = code.replace("&lt;", "<").replace("&gt;", ">")
@@ -439,14 +392,12 @@ def markdown_to_html(content: str) -> str:
 
     html = re.sub(r"```(\w*)\n(.*?)```", restore_code_block, html, flags=re.DOTALL)
 
-    # Inline code
     html = re.sub(
         r"`(.+?)`",
         r'<code style="background:#f4f4f4;padding:2px 4px;border-radius:2px;">\1</code>',
         html,
     )
 
-    # Tables
     def convert_table(match):
         lines = match.group(0).strip().split("\n")
         if len(lines) < 2:
@@ -468,7 +419,6 @@ def markdown_to_html(content: str) -> str:
 
     html = re.sub(r"(\|.+\|\n)+", convert_table, html)
 
-    # Horizontal rules
     html = re.sub(
         r"^---+$",
         '<hr style="border:none;border-top:1px solid #ddd;margin:20px 0;">',
@@ -476,7 +426,6 @@ def markdown_to_html(content: str) -> str:
         flags=re.MULTILINE,
     )
 
-    # Lists
     html = re.sub(r"^- (.+)$", r"<li>\1</li>", html, flags=re.MULTILINE)
     html = re.sub(
         r"(<li>.*</li>\n?)+",
@@ -484,11 +433,9 @@ def markdown_to_html(content: str) -> str:
         html,
     )
 
-    # Checkboxes
     html = html.replace("[ ]", "&#9744;")
     html = html.replace("[x]", "&#9745;")
 
-    # Paragraphs
     lines = html.split("\n")
     result = []
     for line in lines:
@@ -536,11 +483,6 @@ def wrap_html_body(content: str, title: str = "Notification") -> str:
 </html>"""
 
 
-# =============================================================================
-# UTILITY FUNCTIONS
-# =============================================================================
-
-
 def parse_recipients(recipients_str: str) -> List[str]:
     """
     Parse comma or semicolon separated email list.
@@ -551,14 +493,8 @@ def parse_recipients(recipients_str: str) -> List[str]:
     Returns:
         List of email addresses.
     """
-    # Support both comma and semicolon separators
     recipients = re.split(r"[,;]\s*", recipients_str)
     return [r.strip() for r in recipients if r.strip()]
-
-
-# =============================================================================
-# CONFIG FILE LOADING
-# =============================================================================
 
 
 @dataclass
@@ -576,12 +512,15 @@ class EmailRecipientCategories:
 
 @dataclass
 class EmailConfig:
-    """Email configuration from JSON file (V2 format)."""
+    """Email configuration from JSON file (V2 format).
+
+    recipients are the fallback recipients; defaults holds subject and content.
+    """
 
     version: str
     categories: EmailRecipientCategories
-    recipients: List[str]  # Fallback recipients
-    defaults: dict  # {subject: str, content: str}
+    recipients: List[str]
+    defaults: dict
 
     @classmethod
     def from_dict(cls, data: dict) -> "EmailConfig":
@@ -596,7 +535,6 @@ class EmailConfig:
         Raises:
             ValueError: If required fields missing or invalid version
         """
-        # Validate version field
         version = data.get("version")
         if not version:
             raise ValueError(
@@ -607,7 +545,6 @@ class EmailConfig:
         if version != "2.0":
             raise ValueError(f"Unsupported version: {version}. Expected '2.0'")
 
-        # Parse categories
         categories_data = data.get("categories", {})
         categories = EmailRecipientCategories(
             error_recipients=categories_data.get("error_recipients", []),
@@ -615,10 +552,8 @@ class EmailConfig:
             notifications_recipients=categories_data.get("notifications_recipients", []),
         )
 
-        # Parse fallback recipients
         recipients = data.get("recipients", [])
 
-        # Parse defaults (now optional)
         defaults = data.get("defaults", {})
 
         return cls(version=version, categories=categories, recipients=recipients, defaults=defaults)
@@ -635,7 +570,7 @@ class EmailConfig:
         category_recipients = self.categories.get_recipients(category)
         if category_recipients:
             return category_recipients
-        return self.recipients  # Fallback
+        return self.recipients
 
 
 def load_email_config(config_path: Path) -> Optional[EmailConfig]:
@@ -711,7 +646,8 @@ def load_html_template(template_path: Path) -> Optional[str]:
 def inject_template_variables(template: str, context: dict) -> str:
     """Inject variables into HTML template.
 
-    Replaces placeholders like {{variable}} with values from context.
+    Replaces placeholders like {{variable}} with values from context; placeholders
+    left unreplaced are logged.
 
     Args:
         template: HTML template with {{variable}} placeholders
@@ -723,10 +659,9 @@ def inject_template_variables(template: str, context: dict) -> str:
     html = template
 
     for key, value in context.items():
-        placeholder = f"{{{{{key}}}}}"  # {{key}}
+        placeholder = f"{{{{{key}}}}}"
         html = html.replace(placeholder, str(value))
 
-    # Warn about unreplaced placeholders
     remaining = re.findall(r"\{\{(\w+)\}\}", html)
     if remaining:
         log("Unreplaced template placeholders", {"placeholders": remaining})
@@ -747,20 +682,13 @@ def scan_for_config_files(working_dir: Optional[Path] = None) -> tuple[Optional[
 
     log("Scanning for email config files", {"directory": str(directory)})
 
-    # Look for email.json
     config_path = directory / "email.json"
     config = load_email_config(config_path)
 
-    # Look for template.html
     template_path = directory / "template.html"
     template = load_html_template(template_path)
 
     return config, template
-
-
-# =============================================================================
-# TEMPLATE-BASED SENDING
-# =============================================================================
 
 
 def send_from_config(
@@ -779,14 +707,11 @@ def send_from_config(
         EmailResult with success status
     """
     try:
-        # Get subject and content from defaults
         subject = config.defaults.get("subject", "Notification")
         content = config.defaults.get("content", "")
 
-        # Convert content (assume markdown)
         html_content = markdown_to_html(content)
 
-        # Build template context
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         context = {
             "content": html_content,
@@ -795,7 +720,6 @@ def send_from_config(
             "recipients": ", ".join(config.recipients),
         }
 
-        # Use template or default HTML wrapper
         if template:
             log("Using custom HTML template")
             final_html = inject_template_variables(template, context)
@@ -803,7 +727,6 @@ def send_from_config(
             log("Using default HTML wrapper")
             final_html = wrap_html_body(html_content, subject)
 
-        # Send email
         client = EmailClient.get_client()
         return client.send_html(
             recipients=config.recipients,
@@ -842,21 +765,17 @@ def send_from_config_with_category(
         EmailResult with success status
     """
     try:
-        # Get recipients for category
         recipients = config.get_recipients_for_category(category)
         if not recipients:
             return EmailResult(
                 success=False, recipients_count=0, error=f"No recipients configured for category: {category}"
             )
 
-        # Determine content and subject
         content = content_override or config.defaults.get("content", "")
         subject = subject_override or config.defaults.get("subject", "Notification")
 
-        # Convert markdown to HTML
         html_content = markdown_to_html(content)
 
-        # Build template context
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         context = {
             "content": html_content,
@@ -867,11 +786,9 @@ def send_from_config_with_category(
             "alert_level": _infer_alert_level(category),
         }
 
-        # Merge extra context
         if extra_context:
             context.update(extra_context)
 
-        # Use template or default wrapper
         if template:
             log("Using custom HTML template")
             final_html = inject_template_variables(template, context)
@@ -879,7 +796,6 @@ def send_from_config_with_category(
             log("Using default HTML wrapper")
             final_html = wrap_html_body(html_content, subject)
 
-        # Send email
         client = EmailClient.get_client()
         return client.send_html(
             recipients=recipients,
@@ -999,11 +915,6 @@ def send_info_notification(
     )
 
 
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
-
-
 def send_email(
     to: Union[str, List[str]],
     subject: str,
@@ -1048,7 +959,6 @@ def send_email(
             html="<h1>Alert</h1><p>Something happened</p>",
         )
     """
-    # Parse recipients
     if isinstance(to, str):
         recipients = parse_recipients(to)
     else:
@@ -1057,7 +967,6 @@ def send_email(
     client = EmailClient.get_client()
 
     if html:
-        # If HTML doesn't look complete, wrap it
         if not html.strip().lower().startswith("<!doctype") and not html.strip().lower().startswith("<html"):
             html = wrap_html_body(html, title or subject)
         return client.send_html(recipients, subject, html, sender)
@@ -1099,14 +1008,9 @@ def send_markdown_file(
     return send_email(to, subject, markdown=content, title=title, sender=sender)
 
 
-# =============================================================================
-# CLI INTERFACE
-# =============================================================================
-
-
 def main():
     """CLI entry point for email operations."""
-    import json as json_module  # Avoid shadowing json variable
+    import json as json_module
 
     if len(sys.argv) < 2:
         print("Usage: /app/hooks/integrations/mailer.py <command> [args]")
@@ -1152,7 +1056,6 @@ def main():
     command = sys.argv[1]
 
     if command == "check":
-        # Check configuration status
         integration = EmailIntegration()
         as_json = "--json" in sys.argv
         integration.print_status(as_json=as_json)
@@ -1160,12 +1063,10 @@ def main():
 
     elif command == "send":
         try:
-            # Check for demo flag (testing mode)
             if "--demo" in sys.argv:
                 log("[DEMO] Email hook triggered - SMTP integration ready")
                 sys.exit(0)
 
-            # Parse flags
             scan_paths = False
             working_dir = None
             recipients = None
@@ -1190,12 +1091,10 @@ def main():
                     content = sys.argv[i + 1]
                     i += 2
                 elif sys.argv[i] == "--demo":
-                    # Already handled above, skip
                     i += 1
                 else:
                     i += 1
 
-            # Mode 1: Scan for config files
             if scan_paths:
                 log("Scanning for email config files")
                 config, template = scan_for_config_files(working_dir)
@@ -1225,7 +1124,6 @@ def main():
 
                 sys.exit(0 if result.success else 1)
 
-            # Mode 2: CLI arguments
             else:
                 if not recipients or not subject or not content:
                     print(
@@ -1238,14 +1136,12 @@ def main():
                     )
                     sys.exit(1)
 
-                # Parse recipients (comma-separated string)
                 recipient_list = parse_recipients(recipients)
 
-                # Send email using existing function
                 result = send_email(
                     to=recipient_list,
                     subject=subject,
-                    markdown=content,  # Treat content as markdown
+                    markdown=content,
                 )
 
                 print(
