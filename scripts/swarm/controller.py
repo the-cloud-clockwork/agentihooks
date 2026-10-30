@@ -32,7 +32,6 @@ NO_KUBERNETES = "the distributed controller spawns only through its Kubernetes r
 WORKSTATION = "the workstation hive spawns {lane} work"
 DISABLED = "the {backend} runtime is disabled on this controller"
 OVERFLOW = "the local machine takes {lane} work"
-HOST_MARK = "controller-host"
 
 
 def deployment_for(config: SwarmConfig, environ: Mapping[str, str]) -> str:
@@ -475,20 +474,11 @@ def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runti
     from scripts.swarm.commands import hive_id
 
     runtimes = runtimes or {}
-    slugs = ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, ""))
-    host = hive_id()
-    for slug in slugs:
-        store.redis.set(store.key(slug, HOST_MARK), host, px=lease.ttl_ms())
-    return {
-        slug: run_tick(store, slug, ledger, runtimes.get(slug, runtime), messenger, scheduled=True) for slug in slugs
-    }
-
-
-def hosted_elsewhere(store: RedisStore, slug: str) -> bool:
-    from scripts.swarm.commands import hive_id
-
-    host = store.redis.get(store.key(slug, HOST_MARK))
-    return bool(host) and host != hive_id()
+    host, actions = hive_id(), {}
+    for slug in ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, "")):
+        store.redis.set(store.key(slug, "controller-host"), host, px=lease.ttl_ms())
+        actions[slug] = run_tick(store, slug, ledger, runtimes.get(slug, runtime), messenger, scheduled=True)
+    return actions
 
 
 def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
