@@ -126,7 +126,7 @@ def failed_reload(host: Host, pid: int, reason: str, error: str) -> None:
         log.write(json.dumps(record) + "\n")
 
 
-def code_identity(folder: Path) -> dict | None:
+def code_identity(folder: Path) -> dict[str, object] | None:
     held = server_code.loaded(folder)
     return None if held is None else {key: held.get(key) for key in ("pid", "stamp", "digest")}
 

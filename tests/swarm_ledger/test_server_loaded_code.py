@@ -1,4 +1,6 @@
 import importlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import socket
@@ -6,6 +8,7 @@ import sys
 import threading
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -131,7 +134,7 @@ def test_watchdog_records_each_successful_code_reload(tmp_path: Path, monkeypatc
     monkeypatch.setattr(ledger_watchdog.server_code, "loaded", lambda folder: next(snapshots))
     monkeypatch.setattr(ledger_watchdog, "relaunch", lambda host, command, flag: "")
     monkeypatch.setattr(ledger_watchdog.time, "time", lambda: 100.0)
-    host = SimpleNamespace(folder=tmp_path)
+    host = cast(ledger_watchdog.Host, SimpleNamespace(folder=tmp_path))
     assert ledger_watchdog.reload_stale(host, ["server"]) == ""
     assert json.loads((tmp_path / ledger_watchdog.LOG).read_text()) == {
         "at": 100.0,
@@ -181,8 +184,6 @@ def test_source_loader_preserves_the_requested_module_name(tmp_path: Path) -> No
 
 
 def test_finder_uses_package_paths_and_skips_non_source_loaders(tmp_path: Path) -> None:
-    import importlib.machinery
-
     package = tmp_path / "package"
     package.mkdir()
     path = package / "child.py"
@@ -292,8 +293,6 @@ def test_shared_successor_drains_the_original_parent_before_starting(
 def test_finder_preserves_reload_target_for_cached_path_importers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import importlib.machinery
-
     original = tmp_path / "original.py"
     replacement = tmp_path / "replacement.py"
     original.write_text("value = 1\n")

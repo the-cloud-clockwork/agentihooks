@@ -8,6 +8,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import CodeType, ModuleType
+from typing import Any, cast
 
 CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
@@ -68,7 +69,12 @@ def record(
     files: dict[str, str] | None = None,
 ) -> None:
     written = folder / f"{RECORD}.{pid}"
-    held = {"pid": pid, "stamp": stamp, "dirs": [str(d) for d in code_dirs], "digest": digest or code_digest(code_dirs)}
+    held: dict[str, object] = {
+        "pid": pid,
+        "stamp": stamp,
+        "dirs": [str(d) for d in code_dirs],
+        "digest": digest or code_digest(code_dirs),
+    }
     if files is not None:
         held["files"] = files
         held["digest"] = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
@@ -76,12 +82,12 @@ def record(
     written.replace(folder / RECORD)
 
 
-def loaded(folder: Path) -> dict | None:
+def loaded(folder: Path) -> dict[str, Any] | None:
     try:
         held = json.loads((folder / RECORD).read_text())
     except (OSError, ValueError):
         return None
-    return held if isinstance(held, dict) else None
+    return cast(dict[str, Any], held) if isinstance(held, dict) else None
 
 
 def recorded(folder: Path, pid: int) -> bool:
@@ -170,4 +176,4 @@ class LoadedCode(importlib.abc.MetaPathFinder):
         return spec
 
 
-SELF_DIGEST = source_identity(Path(__file__), sys._getframe().f_code)
+SELF_DIGEST = source_identity(Path(__file__), sys._getframe().f_code)  # pyright: ignore[reportPrivateUsage]
