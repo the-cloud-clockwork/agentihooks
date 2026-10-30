@@ -1,6 +1,7 @@
 import re
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 
 import pytest
 
@@ -204,14 +205,15 @@ def test_a_targets_read_returns_only_the_tasks_naming_that_pull_request(tmp_path
     repository = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3")
     repository.import_document("one", {"title": "One", "tasks": tasks, "_meta": {"task_revision": 3, "rev": 13}})
     host = SimpleNamespace(repository=repository)
-    found = routes.ledger_read(host, "one", "tasks", {"targets": url})
+    handler = SimpleNamespace(path=f"/api/v1/ledgers/one/tasks?{urlencode({'targets': url})}", headers={})
+    found = routes.ledger_get(handler, host, "one", "tasks")
     assert [row["title"] for row in found["data"]] == ["Own", "Half", "Scope"]
     assert found["next_cursor"] is None
     assert [row["title"] for row in routes.ledger_read(host, "one", "tasks", {})["data"]][3] == "Other"
 
 
 def test_a_targets_read_returns_every_match_in_one_reply() -> None:
-    from scripts.swarm_ledger.api import task_list
+    from scripts.swarm_ledger.api import resources, task_list
 
     url = "https://github.com/o/r/pull/7"
     rows = [{"id": f"t{n}", "pr_url": url, "comments": [{"id": "c"}]} for n in range(120)]
@@ -219,6 +221,8 @@ def test_a_targets_read_returns_every_match_in_one_reply() -> None:
     assert [row["id"] for row in found["data"]] == [f"t{n}" for n in range(120)]
     assert found["next_cursor"] is None
     assert found["data"][0]["comments_count"] == 1 and "comments" not in found["data"][0]
+    assert found["data"][0]["revision"] == resources.revision(rows[0])
+    assert found["revision"] == resources.revision(rows)
 
 
 @pytest.mark.parametrize(
@@ -228,11 +232,13 @@ def test_a_targets_read_returns_every_match_in_one_reply() -> None:
         ("tasks", {"targets": "u", "state": "done"}),
         ("tasks", {"targets": ""}),
         ("tasks", {"targets": "u", "limit": 5}),
+        ("tasks", {"targets": "u", "q": "x"}),
+        ("tasks", {"targets": "u", "offset": 0}),
+        ("tasks", {"targets": "u", "cursor": "a" * 64 + ":1"}),
     ],
 )
 def test_a_targets_read_is_refused_outside_a_plain_tasks_read(path: str, query: dict) -> None:
     from types import SimpleNamespace
-    from urllib.parse import urlencode
 
     from scripts.swarm_ledger.api import routes
     from scripts.swarm_ledger.api.errors import APIError
