@@ -1399,7 +1399,6 @@ def _handoff_doc(tmp_path, intent="Finish the parser task for the swarm."):
     return doc
 
 
-@pytest.mark.feature("swarm-handoff")
 def test_handoff_finishes_the_agent_keeps_the_claim_and_stores_the_doc(env, tmp_path, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
@@ -1428,7 +1427,6 @@ def test_handoff_records_the_reason_given(env, tmp_path, capsys):
     assert store.handoff_envelope("sw", "t1")["reason"] == "quota"
 
 
-@pytest.mark.feature("swarm-handoff")
 def test_handoff_refuses_a_malformed_document_and_stores_nothing(env, tmp_path, capsys):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
@@ -2109,7 +2107,6 @@ def test_swarm_pr_records_the_pull_request_head_branch(env, monkeypatch, capsys,
     assert {key: out[key] for key in out if key != "intent"} == {"task": "t1", "pr_url": URL3, **fields}
 
 
-@pytest.mark.feature("swarm-master-handoff")
 def test_a_master_handoff_stores_the_doc_for_its_successor(env, tmp_path):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")

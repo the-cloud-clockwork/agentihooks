@@ -57,6 +57,7 @@ def test_a_small_task_does_not_unblock_a_dependent_that_still_waits_on_other_ope
     assert ordered(ledger)[:4] == ["s2", "big", "s", "y"]
 
 
+@pytest.mark.feature("swarm-claim-dependencies")
 def test_a_dependency_missing_from_the_ledger_still_blocks_the_dependent():
     ledger = rows(
         {"id": "big"},

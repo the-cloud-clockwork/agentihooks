@@ -234,7 +234,6 @@ def tasks(*specs):
     return FakeLedger([{"id": i, "lane": lane} for i, lane in specs])
 
 
-@pytest.mark.feature("swarm-manual-caps")
 def test_scale_up_is_immediate_and_capped_per_lane(store):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng"), ("t4", "ci"), ("t5", "ci")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -962,7 +961,6 @@ def test_a_failed_hive_launch_gone_from_the_store_still_releases_its_hive_room(s
     assert admission.pending(store.redis, "remote") == 0
 
 
-@pytest.mark.feature("swarm-session-cap")
 def test_no_free_session_slot_claims_nothing(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -997,7 +995,6 @@ def test_every_lane_takes_a_session_before_any_lane_takes_a_second(store):
     assert ledger.rows["t2"]["state"] == "open"
 
 
-@pytest.mark.feature("swarm-session-cap")
 def test_the_spawn_pass_says_when_it_stops_at_the_session_cap(store):
     actions = tick("sw", store, tasks(("t1", "eng"), ("t2", "eng")), SessionsLeft(1), now_ms=1_000)
     assert "every agent is at its session cap, waiting" in actions
@@ -1020,7 +1017,6 @@ def _slow_launches(monkeypatch, runtime, seconds):
     return clock
 
 
-@pytest.mark.feature("swarm-tick-launch-budget")
 def test_a_launch_that_spends_the_budget_leaves_the_next_task_for_the_next_pass(store, monkeypatch):
     from scripts.swarm.tick import SPAWN_BUDGET_S
 
@@ -1311,7 +1307,6 @@ def test_a_task_closed_done_during_a_tick_is_not_blocked_by_the_claim_cap(store)
     assert actions == ["spawned master master@a1b2c3-0001", "task t1 is done on the ledger, not claimed", "drained"]
 
 
-@pytest.mark.feature("swarm-reclaim")
 def test_a_claimed_task_without_an_agent_is_reopened(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     store.update("sw", state="paused")
@@ -1353,7 +1348,6 @@ def test_a_task_held_by_a_known_agent_is_not_reopened_as_an_orphan(store):
     assert "task t1 had no agent, reopened" not in actions
 
 
-@pytest.mark.feature("swarm-idle-retire")
 def test_an_idle_agent_is_retired_without_a_typed_nudge_and_its_task_reopened(store):
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
@@ -1824,7 +1818,6 @@ def reclaims(monkeypatch):
     return seen
 
 
-@pytest.mark.feature("swarm-reclaim")
 def test_a_task_reclaimed_after_its_agent_was_lost_is_given_that_agents_branch(store, reclaims):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -1882,7 +1875,6 @@ def masters(store):
     return [a for a in store.agents("sw") if a.lane == MASTER]
 
 
-@pytest.mark.feature("swarm-master-seat")
 def test_a_running_swarm_spawns_one_master_that_claims_no_task(store):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
     assert "spawned master master@a1b2c3-0001" in tick("sw", store, ledger, runtime, 1)
@@ -2012,7 +2004,6 @@ def test_a_stopped_swarm_with_nothing_for_its_master_stays_down(store):
 
 
 @pytest.mark.parametrize("state", ["stopped", "paused", "running"])
-@pytest.mark.feature("swarm-tick-pass-scope")
 def test_only_reopened_swarms_run_normal_tick_passes(store, monkeypatch, state):
     from scripts.swarm import tick as module
 
@@ -2305,7 +2296,6 @@ def spawned_ids(runtime):
     return [task_id for _, _, task_id in runtime.spawned]
 
 
-@pytest.mark.feature("swarm-claim-dependencies")
 def test_a_task_waits_on_an_open_dependency_and_is_claimed_once_it_is_done(store):
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"]}])
     runtime = FakeRuntime()
@@ -2340,7 +2330,6 @@ def test_a_critical_chain_successor_is_claimed_the_tick_after_its_predecessor_me
     ) in ledger.comments
 
 
-@pytest.mark.feature("swarm-claim-dependencies")
 def test_a_task_starts_stacked_on_claimed_and_in_pr_dependencies_that_carry_a_branch(store):
     store.update("sw", max_eng=3)
     ledger = FakeLedger([{"id": "t1"}, {"id": "t0"}, {"id": "t2", "depends_on": ["t1", "t0", "t9"]}, {"id": "t9"}])
@@ -2927,7 +2916,6 @@ def idle_for(store, ledger, runtime, ticks, start):
         tick("sw", store, ledger, runtime, now_ms=start + n * 60_000)
 
 
-@pytest.mark.feature("swarm-idle-retire")
 def test_an_idle_agent_under_a_declared_wait_is_never_nudged_or_retired(store):
     from scripts.swarm import idle
     from scripts.swarm.tick import IDLE_KILL_TICKS

@@ -20,11 +20,10 @@
     {
       "id": "swarm-tick-pass-scope",
       "origin": "inventory",
-      "behaviour": "The tick runs its normal passes only for running or reopened swarms and skips retired ledgers before any pass.",
+      "behaviour": "The host tick skips retired, closed and unavailable ledgers before any tick pass.",
       "seam": "scripts.swarm.tick run passes over the host's swarm selection",
       "tests": [
-        "tests/swarm/test_tick_selection.py::test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass",
-        "tests/swarm/test_tick.py::test_only_reopened_swarms_run_normal_tick_passes"
+        "tests/swarm/test_tick_selection.py::test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass"
       ]
     },
     {
@@ -40,11 +39,10 @@
     {
       "id": "swarm-tick-launch-budget",
       "origin": "inventory",
-      "behaviour": "A tick pass stops launching once its launch budget is spent and leaves the next task for the next pass.",
+      "behaviour": "A tick pass stops launching once its launch budget is spent.",
       "seam": "The spawn pass of scripts.swarm.tick",
       "tests": [
-        "tests/swarm/test_tick_launch_budget.py::test_a_slow_preparation_stops_the_pass_at_the_launch_budget",
-        "tests/swarm/test_tick.py::test_a_launch_that_spends_the_budget_leaves_the_next_task_for_the_next_pass"
+        "tests/swarm/test_tick_launch_budget.py::test_a_slow_preparation_stops_the_pass_at_the_launch_budget"
       ]
     },
     {
@@ -60,11 +58,11 @@
     {
       "id": "swarm-claim-dependencies",
       "origin": "inventory",
-      "behaviour": "A task waits on an open dependency and is claimed once it is done, or stacked on a claimed or in pr dependency that carries a branch.",
-      "seam": "The tick claim pass over the ledger tasks",
+      "behaviour": "A task waits on an open dependency, a missing dependency still blocks it, and stacking on a live dependency is claimable while parked work waits.",
+      "seam": "The tick claim pass and scripts.swarm.claim_order",
       "tests": [
-        "tests/swarm/test_tick.py::test_a_task_waits_on_an_open_dependency_and_is_claimed_once_it_is_done",
-        "tests/swarm/test_tick.py::test_a_task_starts_stacked_on_claimed_and_in_pr_dependencies_that_carry_a_branch"
+        "tests/swarm/test_urgent_hold.py::test_stacking_on_a_live_dependency_is_claimable_but_parked_work_waits",
+        "tests/swarm/test_claim_order.py::test_a_dependency_missing_from_the_ledger_still_blocks_the_dependent"
       ]
     },
     {
@@ -90,11 +88,10 @@
     {
       "id": "swarm-reclaim",
       "origin": "inventory",
-      "behaviour": "A claimed task whose agent is gone is reopened, and its next claimant is given the lost agent's branch.",
-      "seam": "The tick reclaim pass",
+      "behaviour": "A task reclaimed after its agent was lost launches on that agent's recorded branch.",
+      "seam": "The tick reclaim launch in scripts.swarm.continuation",
       "tests": [
-        "tests/swarm/test_tick.py::test_a_claimed_task_without_an_agent_is_reopened",
-        "tests/swarm/test_tick.py::test_a_task_reclaimed_after_its_agent_was_lost_is_given_that_agents_branch"
+        "tests/swarm/test_continuation_ownership.py::test_reclaimed_launch_uses_its_recorded_task_branch"
       ]
     },
     {
@@ -111,10 +108,11 @@
     {
       "id": "swarm-master-seat",
       "origin": "inventory",
-      "behaviour": "A running swarm keeps one master that claims no task.",
-      "seam": "The tick master pass",
+      "behaviour": "A swarm whose master is down launches its master first and promotes one live engineer only when the forced launch fails.",
+      "seam": "scripts.swarm.tick_master",
       "tests": [
-        "tests/swarm/test_tick.py::test_a_running_swarm_spawns_one_master_that_claims_no_task"
+        "tests/swarm/test_tick_master.py::test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promoted",
+        "tests/swarm/test_tick_master.py::test_a_failed_forced_launch_promotes_one_live_engineer"
       ]
     },
     {
@@ -151,21 +149,20 @@
     {
       "id": "swarm-handoff",
       "origin": "inventory",
-      "behaviour": "A Handoff v2 submission finishes the agent, keeps the claim, stores the document and derives the seat recap; a malformed document is refused.",
-      "seam": "agentihooks swarm handoff",
+      "behaviour": "A Handoff v2 document is checked for its headings and their order before it is stored, and the seat recap is derived from it.",
+      "seam": "scripts.handoff.check and agentihooks swarm handoff",
       "tests": [
-        "tests/swarm/test_cli.py::test_handoff_finishes_the_agent_keeps_the_claim_and_stores_the_doc",
-        "tests/swarm/test_cli.py::test_handoff_refuses_a_malformed_document_and_stores_nothing",
-        "tests/swarm/test_handoff_v2_priming.py::test_handoff_derives_the_seat_recap_without_another_file"
+        "tests/swarm/test_handoff_v2_priming.py::test_handoff_derives_the_seat_recap_without_another_file",
+        "tests/handoff/test_check.py::test_missing_heading_is_refused",
+        "tests/handoff/test_check.py::test_headings_out_of_order_are_refused"
       ]
     },
     {
       "id": "swarm-master-handoff",
       "origin": "inventory",
-      "behaviour": "A master handoff stores its document for the successor, even when it lands mid tick.",
-      "seam": "agentihooks swarm handoff from the master and the tick master pass",
+      "behaviour": "A master handoff that lands mid tick still launches the successor with the document.",
+      "seam": "The tick master pass",
       "tests": [
-        "tests/swarm/test_cli.py::test_a_master_handoff_stores_the_doc_for_its_successor",
         "tests/swarm/test_tick_master_handoff.py::test_a_master_handoff_landing_mid_tick_still_launches_the_successor_with_the_doc"
       ]
     },
@@ -364,21 +361,20 @@
     {
       "id": "swarm-manual-caps",
       "origin": "inventory",
-      "behaviour": "Manual lane caps hold against a stored lane shift and scale up at once per lane.",
+      "behaviour": "Manual lane caps hold against a stored lane shift.",
       "seam": "agentihooks swarm set max-eng-agents and max-ci-agents",
       "tests": [
-        "tests/swarm/test_lane_caps_owner.py::test_manual_caps_ignore_a_stored_lane_shift",
-        "tests/swarm/test_tick.py::test_scale_up_is_immediate_and_capped_per_lane"
+        "tests/swarm/test_lane_caps_owner.py::test_manual_caps_ignore_a_stored_lane_shift"
       ]
     },
     {
       "id": "swarm-session-cap",
       "origin": "inventory",
-      "behaviour": "With no free session slot the spawn pass claims nothing and says it stopped at the session cap.",
-      "seam": "The tick spawn pass",
+      "behaviour": "With no free session slot the spawn and the master seat are held and the hold says why.",
+      "seam": "The dispatcher seat and master fill passes",
       "tests": [
-        "tests/swarm/test_tick.py::test_no_free_session_slot_claims_nothing",
-        "tests/swarm/test_tick.py::test_the_spawn_pass_says_when_it_stops_at_the_session_cap"
+        "tests/swarm/test_dispatch_seat.py::test_no_session_slot_holds_the_spawn",
+        "tests/swarm/test_master_fill.py::test_no_session_slot_holds_the_seat_and_says_why"
       ]
     },
     {
@@ -401,16 +397,6 @@
         "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
         "tests/swarm/test_freeze.py::test_an_urgent_task_and_a_doctor_fix_pass_a_focus",
         "tests/swarm/test_focus_budget.py::test_ten_lane_slots_allocate_five_focused_and_five_normal_tasks"
-      ]
-    },
-    {
-      "id": "swarm-idle-retire",
-      "origin": "inventory",
-      "behaviour": "An idle agent is retired at its idle tick limit without a typed nudge and its task reopened, while a declared wait holds it.",
-      "seam": "The tick idle pass in scripts.swarm.tick",
-      "tests": [
-        "tests/swarm/test_tick.py::test_an_idle_agent_is_retired_without_a_typed_nudge_and_its_task_reopened",
-        "tests/swarm/test_tick.py::test_an_idle_agent_under_a_declared_wait_is_never_nudged_or_retired"
       ]
     },
     {
