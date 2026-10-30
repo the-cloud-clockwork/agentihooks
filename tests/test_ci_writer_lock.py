@@ -10,7 +10,7 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario():
+def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario() -> None:
     caller = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["writer-lock"]
     assert caller["uses"] == "./.github/workflows/writer-lock.yml"
     workflow = yaml.safe_load((ROOT / ".github/workflows/writer-lock.yml").read_text())
@@ -18,10 +18,13 @@ def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario():
     jobs = workflow["jobs"]
     key = jobs["inputs"]
     assert "services" not in key
-    assert key["outputs"] == {
+    expected = {
         "hit": "${{ steps.key.outputs.hit }}",
         "key": "${{ steps.key.outputs.key }}",
     }
+    if "hive-join" in jobs:
+        expected["hive_join"] = "${{ steps.hive-join.outputs.due }}"
+    assert key["outputs"] == expected
     [lookup] = [step for step in key["steps"] if step.get("uses") == "./.github/actions/input-key"]
     assert lookup["id"] == "key"
     assert lookup["with"]["job"] == "writer-lock"

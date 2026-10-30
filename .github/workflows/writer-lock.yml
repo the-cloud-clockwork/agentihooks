@@ -19,15 +19,43 @@ jobs:
     outputs:
       hit: ${{ steps.key.outputs.hit }}
       key: ${{ steps.key.outputs.key }}
+      hive_join: ${{ steps.hive-join.outputs.due }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
       - name: Key the declared inputs
         id: key
         uses: ./.github/actions/input-key
         with:
           job: writer-lock
+      - name: Select hive join smoke inputs
+        id: hive-join
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: origin/${{ github.base_ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          HIVE_JOIN_INPUTS: >-
+            scripts/hive/daemon.py scripts/hive/dispatch.py scripts/hive/orders.py
+            scripts/packaging/hive-join-smoke.sh .github/workflows/writer-lock.yml
+            .github/workflows/swarm-smoke.yml .github/workflows/hive-join.yml .github/workflows/test.yml
+        run: |
+          base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/hive-join-changed"
+          due=false
+          read -r -a inputs <<< "$HIVE_JOIN_INPUTS"
+          while IFS= read -r -d '' path; do
+            for input in "${inputs[@]}"; do
+              if [[ "$path" == "$input" ]]; then due=true; fi
+            done
+          done < "$RUNNER_TEMP/hive-join-changed"
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+
+  hive-join:
+    needs: [inputs]
+    if: github.event_name == 'pull_request' && needs.inputs.outputs.hive_join == 'true'
+    uses: ./.github/workflows/hive-join.yml
 
   scenario:
     needs: [inputs]
