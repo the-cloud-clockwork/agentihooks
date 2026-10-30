@@ -568,6 +568,19 @@ def test_a_split_file_ignores_stored_tests_its_source_no_longer_has(heavy):
     assert not any("test_gone" in unit or unit == "tests/test_heavy1.py" for unit in units)
 
 
+def test_a_file_over_its_leg_share_with_a_stored_class_pytest_refuses_stays_whole(heavy):
+    write(
+        heavy,
+        {
+            "tests/test_heavy1.py": "from hooks import sample\ndef test_a(): pass\n"
+            "class TestInit:\n    def __init__(self): pass\n    def test_b(self): pass\n"
+        },
+    )
+    durations = {"tests/test_heavy1.py::test_a": 200.0, "tests/test_heavy1.py::TestInit::test_b": 200.0}
+    _, legs = decide(heavy, ["hooks/sample.py"], durations)
+    assert ["tests/test_heavy1.py"] in legs
+
+
 def test_a_split_file_sums_each_top_level_test_over_its_nodes(tmp_path):
     write(
         tmp_path,
@@ -609,7 +622,9 @@ def test_the_split_units_of_one_file_share_its_collection_on_a_leg(tmp_path):
     durations = {
         "tests/test_heavy1.py::test_a": 120.0,
         "tests/test_heavy1.py::test_b": 40.0,
-        **seconds(test_heavy2=60.0, test_heavy3=50.0),
+        "tests/test_heavy2.py::test_case[one]": 30.0,
+        "tests/test_heavy2.py::test_case[two]": 30.0,
+        **seconds(test_heavy3=50.0),
     }
     tests = {"tests/test_heavy1.py", "tests/test_heavy2.py", "tests/test_heavy3.py"}
     assert ci_select.legs_for(tmp_path, tests, durations, 4) == [
