@@ -106,6 +106,9 @@ def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
         return Lease(**data) if data is not None else None
     from scripts.swarm.commands import hive_id
 
+    host = store.redis.get(store.key(slug, "controller-host"))
+    if host and host != owner:
+        return None
     hostname = socket.gethostname() if owner == hive_id() else owner
 
     def take(doc):

@@ -164,6 +164,38 @@ def test_cheap_checks_pass_their_context_and_read_the_brain_overlay(tmp_path, mo
     assert listed == [["pane", "list"]]
 
 
+def test_shared_login_join_checks_use_each_holders_chain_and_brain(tmp_path, monkeypatch):
+    from fakeredis import FakeRedis
+
+    from scripts import master_claude_login as login
+    from scripts.hive import join_checks
+
+    home = tmp_path / "login" / "claude"
+    home.mkdir(parents=True)
+    (home / ".agentihooks-render.json").write_text(json.dumps({"chain": ["rig-base"], "overlays": []}))
+    (home.parent / login.RENDERS).write_text(
+        json.dumps(
+            {
+                "master@rig-1": {"chain": ["rig-base"], "overlays": []},
+                "master@doctor-1": {"chain": ["doctor-base", "brain"], "overlays": ["brain"]},
+            }
+        )
+    )
+    monkeypatch.setattr(join_checks, "redis_checks", lambda *_: {})
+    monkeypatch.setattr(join_checks, "settings_ready", lambda *_: True)
+    monkeypatch.setattr(join_checks, "pane_ready", lambda *_: True)
+    for slug, expected_brain in (("doctor", True), ("rig", False)):
+        report = {
+            "agent": f"master@{slug}-1",
+            "slug": slug,
+            "execution_id": "execution",
+            "started_at": 1,
+            "context": {"home": str(home), "profile": f"{slug}-base", "transcript_dir": str(tmp_path), "pane": "pane"},
+        }
+        found = join_checks.cheap(FakeRedis(decode_responses=True), report)
+        assert (found["profile"], found["brain"]) == (True, expected_brain)
+
+
 def test_settings_probe_reads_hooks_rendered_for_the_harness(monkeypatch, tmp_path):
     from scripts.hive import join_checks
     from scripts.swarm import live_binding

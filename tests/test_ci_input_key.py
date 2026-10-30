@@ -240,7 +240,9 @@ def test_the_lookup_only_checks_the_key_and_reports_a_hit_as_true_or_false():
 def test_a_keyed_job_runs_its_heavy_steps_only_on_a_miss_and_saves_only_after_they_pass(job):
     jobs = yaml.safe_load((_ROOT / f".github/workflows/{job}.yml").read_text())["jobs"]
     [(name, keyed)] = [
-        (name, job_def) for name, job_def in jobs.items() if any(s.get("uses") == _KEY for s in job_def["steps"])
+        (name, job_def)
+        for name, job_def in jobs.items()
+        if any(s.get("uses") == _KEY for s in job_def.get("steps", []))
     ]
     steps = keyed["steps"]
     index = next(i for i, step in enumerate(steps) if step.get("uses") == _KEY)
@@ -253,7 +255,9 @@ def test_a_keyed_job_runs_its_heavy_steps_only_on_a_miss_and_saves_only_after_th
     if "hit" in keyed.get("outputs", {}):
         assert keyed["outputs"]["hit"] == "${{ steps.key.outputs.hit }}"
         assert keyed["outputs"]["key"] == "${{ steps.key.outputs.key }}"
-        [scenario] = [definition for definition in jobs.values() if definition.get("needs") == [name]]
+        [scenario] = [
+            definition for definition in jobs.values() if definition.get("needs") == [name] and "steps" in definition
+        ]
         assert "services" not in keyed
         assert scenario["if"] == f"github.event_name == 'workflow_dispatch' || needs.{name}.outputs.hit != 'true'"
         [save] = [step for step in scenario["steps"] if step.get("uses") == _SAVE]

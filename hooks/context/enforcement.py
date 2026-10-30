@@ -205,11 +205,13 @@ def _load_user_bundle_enforcements() -> list[dict]:
 
 
 def _load_profile_enforcements() -> list[dict]:
+    from scripts.master_claude_login import rendered_overlays
+
     profile = _get_active_profile()
     if not profile:
         return []
     home = {"claude": claude_home, "codex": codex_home, "copilot": copilot_home}[current_target()]()
-    profile = ",".join([profile, *profile_chain.rendered_overlays(home)])
+    profile = ",".join([profile, *rendered_overlays(home, os.environ.get("AGENTIHOOKS_AGENT_NAME"))])
     entries = []
     for _name, profile_dir in profile_chain.rendered_dirs(
         _get_bundle_path(), profile, _get_linked_profiles(), _get_user_bundle_path()

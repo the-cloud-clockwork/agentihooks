@@ -432,6 +432,34 @@ def test_stamped_overlays_override_enforcements_in_render_order(bundle_dir, tmp_
     ]
 
 
+def test_shared_login_enforcements_use_each_holders_overlay(bundle_dir, tmp_path, monkeypatch):
+    from hooks.context import enforcement, profile_chain
+    from scripts import master_claude_login as login
+
+    home = tmp_path / "login" / "claude"
+    home.mkdir(parents=True)
+    (home / profile_chain.RENDER_STAMP).write_text(json.dumps({"chain": ["testprofile", "rig"], "overlays": ["rig"]}))
+    records = {}
+    for slug in ("rig", "doctor"):
+        overlay = bundle_dir / "profiles" / slug
+        overlay.mkdir()
+        (overlay / "enforcements.json").write_text(
+            json.dumps({"enforcements": [{"id": "holder-rule", "message": f"{slug} holder rule", "cadence": 1}]})
+        )
+        records[f"master@{slug}-1"] = {"chain": ["testprofile", slug], "overlays": [slug]}
+    (home.parent / login.RENDERS).write_text(json.dumps(records))
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    monkeypatch.setattr(enforcement, "_get_bundle_path", lambda: bundle_dir)
+    monkeypatch.setattr(enforcement, "_get_active_profile", lambda: "testprofile")
+    monkeypatch.setattr(enforcement, "ENFORCEMENT_INJECTION_ENABLED", True)
+    for slug, other in (("doctor", "rig"), ("rig", "doctor")):
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", f"master@{slug}-1")
+        found = enforcement.get_pretool_enforcements(f"{slug}-holder")
+        assert f"{slug} holder rule" in (found or "")
+        assert f"{other} holder rule" not in (found or "")
+
+
 class TestThreeSourceMerge:
     def test_bundle_only(self, bundle_dir):
         from hooks.context.enforcement import load_all_enforcements

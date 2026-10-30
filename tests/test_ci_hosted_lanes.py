@@ -51,6 +51,9 @@ CALLED = {
     "semgrep.yml:feature-tests": "feature fixtures run in a called workflow and must not hold the caller lane",
     "semgrep.yml:charts": "a job added to a called workflow needs the called lane form for the branch lane grader",
 }
+if (_WORKFLOWS / "hive-join.yml").is_file():
+    CALLED["hive-join.yml"] = "called hive join smoke must not hold the caller lane"
+
 EXCLUDED = {
     "branch-lanes.yml": "every branch push runs one short grader that must refuse and cancel lane skipping workflows at once",
     "codex-cache.yml": "main push, six hourly and manual, one short job that seeds the Codex and nats server caches, no pull request trigger",

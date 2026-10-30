@@ -1059,12 +1059,13 @@ def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypa
     timer.assert_called_once_with(trace_flush.POLL_SEC, state=None)
 
 
-@pytest.mark.parametrize("failure", ["timeout", "connection"])
+@pytest.mark.parametrize("failure", ["timeout", "connection", "conflict"])
 def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tmp_path, monkeypatch, failure):
     from unittest.mock import Mock, call
 
     from redis.exceptions import ConnectionError, TimeoutError
 
+    from scripts.events.bus import StateConflict
     from scripts.scheduler import process_timer
 
     transcript = tmp_path / "transcript.jsonl"
@@ -1081,7 +1082,7 @@ def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tm
         clock.sleep(trace_flush.POLL_SEC)
         if not timers:
             timers.append(None)
-            error = TimeoutError if failure == "timeout" else ConnectionError
+            error = {"timeout": TimeoutError, "connection": ConnectionError, "conflict": StateConflict}[failure]
             raise error("scheduler did not answer")
         entry = Mock(state="fired", id=f"timer-{len(timers)}", scheduler=scheduler)
         timers.append(entry)
@@ -1152,6 +1153,147 @@ def test_scheduler_wait_returns_within_its_bound_when_the_timer_never_rings(monk
     monkeypatch.setattr(trace_flush, "timer_wait", never_rings)
     trace_flush.scheduled_wait(trace_flush.POLL_SEC)
     assert waited == [trace_flush.POLL_LIMIT_SEC] == [5.0]
+
+
+@pytest.mark.parametrize("phase", ["construct", "wait", "retire", "wait-and-retire"])
+def test_scheduler_deadline_covers_the_complete_timer_lifecycle(monkeypatch, phase, capsys):
+    import signal
+    from unittest.mock import MagicMock, Mock
+
+    from scripts.scheduler import process_timer
+
+    real_sleep, finished = time.sleep, []
+    context = MagicMock()
+
+    def unowned_alarm(_signum, _frame):
+        raise AssertionError("the exporter did not install its deadline handler")
+
+    def stall(at):
+        if phase == at or phase == "wait-and-retire" and at in ("wait", "retire"):
+            real_sleep(0.1)
+            finished.append(at)
+
+    def construct(*args, **kwargs):
+        stall("construct")
+        return context
+
+    context.__enter__.return_value.wait.side_effect = lambda timeout=None: stall("wait")
+    context.__exit__.side_effect = lambda *args: stall("retire")
+    monkeypatch.setattr(process_timer, "Timer", construct)
+    monkeypatch.setattr(trace_flush, "POLL_LIMIT_SEC", 0.01)
+    sleep = Mock()
+    monkeypatch.setattr(trace_flush.time, "sleep", sleep)
+    previous = signal.signal(signal.SIGALRM, unowned_alarm)
+    try:
+        trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+        assert finished == []
+        sleep.assert_called_once_with(trace_flush.POLL_SEC)
+        assert signal.getsignal(signal.SIGALRM) is unowned_alarm
+        assert capsys.readouterr().err == (
+            "trace_flush unknown: scheduler fallback: TimeoutError: scheduler lifecycle deadline exceeded\n"
+        )
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def test_scheduler_failure_names_the_exporting_session(monkeypatch, capsys):
+    from unittest.mock import Mock
+
+    from scripts.events.bus import StateConflict
+
+    monkeypatch.setattr(trace_flush, "timer_wait", Mock(side_effect=StateConflict("changed")))
+    monkeypatch.setattr(trace_flush.time, "sleep", Mock())
+    trace_flush.scheduled_wait(trace_flush.POLL_SEC, session_id="export-session")
+    assert capsys.readouterr().err == "trace_flush export-session: scheduler fallback: StateConflict: changed\n"
+
+
+@pytest.mark.parametrize(("remaining", "restored"), [(30.0, 28.0), (1.0, 0.001)])
+def test_scheduler_deadline_restores_the_previous_alarm_after_interruption(monkeypatch, remaining, restored):
+    import signal
+    from types import SimpleNamespace
+    from unittest.mock import Mock, call
+
+    previous = Mock()
+    handler = Mock(return_value=previous)
+    timer = Mock(return_value=(remaining, 2.0))
+    monkeypatch.setattr(trace_flush.signal, "signal", handler)
+    monkeypatch.setattr(trace_flush.signal, "setitimer", timer)
+    monkeypatch.setattr(trace_flush, "time", SimpleNamespace(monotonic=Mock(side_effect=[10.0, 12.0]), sleep=Mock()))
+    monkeypatch.setattr(trace_flush, "timer_wait", Mock(side_effect=KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    assert handler.call_args_list[-1] == call(signal.SIGALRM, previous)
+    assert timer.call_args_list == [
+        call(signal.ITIMER_REAL, trace_flush.POLL_LIMIT_SEC, trace_flush.POLL_LIMIT_SEC),
+        call(signal.ITIMER_REAL, 0),
+        call(signal.ITIMER_REAL, restored, 2.0),
+    ]
+    trace_flush.time.sleep.assert_not_called()
+
+
+def test_default_supervisor_scheduler_failure_names_its_session(home, tmp_path, monkeypatch, capsys):
+    from unittest.mock import Mock
+
+    from scripts.events.bus import StateConflict
+
+    transcript = tmp_path / "transcript.jsonl"
+    _grow(transcript)
+    _request("export-session", transcript)
+    clock, owner = Clock(), {"alive": True}
+    clock.hooks.append((1, lambda: owner.update(alive=False)))
+    monkeypatch.setattr(trace_flush, "timer_wait", Mock(side_effect=StateConflict("changed")))
+    monkeypatch.setattr(trace_flush.time, "sleep", clock.sleep)
+    assert (
+        trace_flush.supervise(
+            "export-session",
+            trace_flush.Budget(15, 5, 3),
+            lambda *args: True,
+            clock,
+            clock.sleep,
+            lambda record: owner["alive"],
+        )
+        == "owner exited"
+    )
+    assert capsys.readouterr().err == "trace_flush export-session: scheduler fallback: StateConflict: changed\n"
+
+
+def test_supervisor_keeps_the_supplied_wait_instead_of_the_default(home, tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    transcript = tmp_path / "transcript.jsonl"
+    _grow(transcript)
+    _request("export-session", transcript)
+    clock, owner = Clock(), {"alive": True}
+    clock.hooks.append((1, lambda: owner.update(alive=False)))
+    default_wait = Mock(side_effect=AssertionError("the supplied wait was replaced"))
+    monkeypatch.setattr(trace_flush, "scheduled_wait", default_wait)
+    assert (
+        trace_flush.supervise(
+            "export-session",
+            trace_flush.Budget(15, 5, 3),
+            lambda *args: True,
+            clock,
+            clock.sleep,
+            lambda record: owner["alive"],
+            timer_wait=clock.sleep,
+        )
+        == "owner exited"
+    )
+    default_wait.assert_not_called()
+
+
+def test_terminal_exporter_failure_names_the_session(monkeypatch, capsys):
+    from unittest.mock import Mock
+
+    from scripts.events.bus import StateConflict
+
+    monkeypatch.setattr(trace_flush.signal, "alarm", Mock())
+    monkeypatch.setattr(trace_flush.os, "nice", Mock())
+    monkeypatch.setattr(trace_flush, "supervise", Mock(side_effect=StateConflict("changed")))
+    with pytest.raises(StateConflict, match="changed"):
+        trace_flush.run("export-session")
+    assert capsys.readouterr().err == "trace_flush export-session: FAILED: StateConflict: changed\n"
 
 
 IDENTITY = {
