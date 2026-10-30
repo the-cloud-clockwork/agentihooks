@@ -7,5 +7,6 @@
   "hooks/integrations/mailer.py",
   "hooks/integrations/postgres.py",
   "hooks/integrations/session_state.py",
-  "hooks/integrations/storage.py"
+  "hooks/integrations/storage.py",
+  "tests/test_integrations_failure_paths.py"
 ]
