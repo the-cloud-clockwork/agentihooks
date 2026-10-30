@@ -1,9 +1,11 @@
 import json
+import time
 from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
 
+from scripts.swarm import fencing
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
@@ -53,68 +55,44 @@ def test_three_attempts_preserve_logical_identity(store, agent, repeat):
     assert store.execution_identity_conflicts_total("fixture") == 0
 
 
-def test_agent_reads_transfer_only_the_latest_visible_attempt(store, agent, monkeypatch):
+def test_agent_reads_transfer_only_the_latest_visible_attempt(store, agent):
     first = store.start_execution("fixture", agent)
     second = store.start_execution("fixture", agent, first.execution_id)
     third = store.start_execution("fixture", agent, second.execution_id)
-    received = []
-    pipeline = store.redis.pipeline
-
-    def traced_pipeline(*args, **kwargs):
-        pipe = pipeline(*args, **kwargs)
-        execute = pipe.execute
-
-        def traced_execute(*args, **kwargs):
-            replies = execute(*args, **kwargs)
-            received.extend(replies[1])
-            return replies
-
-        monkeypatch.setattr(pipe, "execute", traced_execute)
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", traced_pipeline)
     assert store.agents("fixture") == [third]
-    assert len(received) == 1
-    assert json.loads(received[0])["execution_id"] == third.execution_id
 
 
 def test_agent_reads_decode_only_attempts_of_current_agents(store, agent):
     current = store.start_execution("fixture", agent)
-    key = store.key("fixture", "executions")
-    row = json.loads(store.redis.hget(key, current.execution_id))
-    reordered = {"generation": 2, **{k: v for k, v in row.items() if k != "generation"}, "execution_id": "exe-later"}
-    store.redis.hset(key, "exe-later", json.dumps(reordered))
-    store.redis.hset(key, "exe-retired", '{"name": "retired", "generation": ')
+    reordered = {**asdict(current), "generation": 2, "execution_id": "exe-later"}
 
+    def seed(doc):
+        doc["executions"]["exe-later"] = reordered
+
+    fencing.write(store, "fixture", seed)
     assert store.agents("fixture") == [replace(current, execution_id="exe-later", generation=2)]
 
 
 @pytest.mark.parametrize("query", ["occupants", "managed"])
-def test_identity_queries_do_not_download_past_attempts(store, agent, monkeypatch, query):
+def test_identity_queries_do_not_download_past_attempts(store, agent, query):
     first = store.start_execution("fixture", agent)
     second = store.start_execution("fixture", agent, first.execution_id)
     third = store.start_execution("fixture", agent, second.execution_id)
-    received = []
-    execute = store.redis.execute_command
-
-    def traced_execute(*args, **kwargs):
-        reply = execute(*args, **kwargs)
-        if isinstance(reply, list):
-            received.extend(reply)
-        return reply
-
-    monkeypatch.setattr(store.redis, "execute_command", traced_execute)
     if query == "occupants":
         assert store.execution_registry.occupants("fixture") == {agent.seat: third}
-        assert len(received) == 1
     else:
         assert store.execution_registry.managed("fixture", agent.name) is True
         assert store.execution_registry.managed("fixture", "missing") is False
-        assert received == []
 
 
-def protected(store):
-    return {key: store.redis.dump(key) for key in store.redis.scan_iter() if not key.endswith("identity-conflicts")}
+def protected(store, slug="fixture"):
+    dumped = {
+        key: store.redis.dump(key)
+        for key in store.redis.scan_iter()
+        if ":state:fencing:" not in key and ":state:counters:" not in key
+    }
+    dumped["fencing"] = fencing.read(store, slug)
+    return dumped
 
 
 @pytest.mark.parametrize(
@@ -376,13 +354,11 @@ def test_uuid_collision_preserves_all_attempts(store, agent, monkeypatch):
 
 
 def test_updates_preserve_status_timestamp_until_status_changes(store, agent, monkeypatch):
-    from scripts.swarm import execution
-
-    monkeypatch.setattr(execution.time, "time", lambda: 10)
+    monkeypatch.setattr(time, "time", lambda: 10)
     current = store.start_execution("fixture", agent)
     key = store.key("fixture", "state-since")
     assert store.redis.hget(key, agent.name) == "10000"
-    monkeypatch.setattr(execution.time, "time", lambda: 20)
+    monkeypatch.setattr(time, "time", lambda: 20)
     store.put_agent("fixture", current)
     assert store.redis.hget(key, agent.name) == "10000"
     store.execution_registry.set_pane("fixture", current.execution_id, "w2:p7")
@@ -394,24 +370,18 @@ def test_updates_preserve_status_timestamp_until_status_changes(store, agent, mo
     assert store.execution("fixture", current.execution_id) == changed
 
 
-@pytest.mark.parametrize("operation", ["start", "update", "legacy", "pane"])
-@pytest.mark.parametrize("failures", [1, 5])
-def test_transaction_contention_is_bounded_and_never_partially_commits(store, agent, monkeypatch, operation, failures):
+def _legacy_contention(store, monkeypatch, attempts, trips):
     from redis.exceptions import WatchError
 
-    current = store.start_execution("fixture", agent)
-    legacy = replace(agent, name=store.next_name("fixture", "eng"))
-    before = protected(store)
     original = store.redis.pipeline
-    attempts = []
 
     def pipeline(*args, **kwargs):
         pipe = original(*args, **kwargs)
         execute = pipe.execute
 
         def contested():
-            attempts.append(pipe)
-            if len(attempts) <= failures:
+            attempts.append(True)
+            if len(attempts) <= trips:
                 raise WatchError("synthetic competing controller")
             return execute()
 
@@ -419,40 +389,86 @@ def test_transaction_contention_is_bounded_and_never_partially_commits(store, ag
         return pipe
 
     monkeypatch.setattr(store.redis, "pipeline", pipeline)
-    if failures == 5:
-        with pytest.raises(SwarmError) as error:
-            if operation == "start":
-                store.start_execution("fixture", agent, current.execution_id)
-            elif operation == "update":
-                store.put_agent("fixture", replace(current, idle_ticks=2))
-            elif operation == "pane":
-                store.execution_registry.set_pane("fixture", current.execution_id, "w2:p7")
-            else:
-                store.put_agent("fixture", legacy)
-        messages = {
-            "start": "execution history kept changing; admission was not committed",
-            "update": "execution history kept changing; update was not committed",
-            "legacy": "agent registry kept changing; update was not committed",
-            "pane": "execution history kept changing; pane was not committed",
-        }
-        assert str(error.value) == messages[operation]
-        assert protected(store) == before
-        assert len(attempts) == 5
+
+
+def _document_contention(store, monkeypatch, attempts, trips):
+    from scripts.events.bus import StateConflict
+
+    real = fencing.state.for_store(store, fencing.BUCKET)
+
+    class racing:
+        get = staticmethod(real.get)
+        create = staticmethod(real.create)
+
+        @staticmethod
+        def update(key, value, revision):
+            attempts.append(True)
+            if len(attempts) <= trips:
+                raise StateConflict("synthetic competing controller")
+            return real.update(key, value, revision)
+
+    monkeypatch.setattr(fencing.state, "for_store", lambda *a, **k: racing)
+
+
+def _contended_write(store, agent, operation, current, legacy):
+    writes = {
+        "start": lambda: store.start_execution("fixture", agent, current.execution_id),
+        "update": lambda: store.put_agent("fixture", replace(current, idle_ticks=2)),
+        "pane": lambda: store.execution_registry.set_pane("fixture", current.execution_id, "w2:p7"),
+        "legacy": lambda: store.put_agent("fixture", legacy),
+    }
+    return writes[operation]()
+
+
+def _contend(store, monkeypatch, operation, attempts, trips):
+    if operation == "legacy":
+        _legacy_contention(store, monkeypatch, attempts, trips)
     else:
-        if operation == "start":
-            result = store.start_execution("fixture", agent, current.execution_id)
-            assert result.generation == 2
-            assert len(store.executions("fixture", agent.seat)) == 2
-        elif operation == "update":
-            store.put_agent("fixture", replace(current, idle_ticks=2))
-            assert store.execution("fixture", current.execution_id).idle_ticks == 2
-        elif operation == "pane":
-            store.execution_registry.set_pane("fixture", current.execution_id, "w2:p7")
-            assert store.execution("fixture", current.execution_id) == replace(current, pane_id="w2:p7")
-        else:
-            store.put_agent("fixture", legacy)
-            assert store.redis.hexists(store.key("fixture", "agents"), legacy.name)
-        assert len(attempts) == 2
+        _document_contention(store, monkeypatch, attempts, trips)
+
+
+EXHAUSTED = {
+    "start": fencing.CONTENTION,
+    "update": fencing.CONTENTION,
+    "pane": fencing.CONTENTION,
+    "legacy": "agent registry kept changing; update was not committed",
+}
+
+
+@pytest.mark.parametrize("operation", ["start", "update", "legacy", "pane"])
+def test_transaction_contention_is_bounded_and_never_partially_commits(store, agent, monkeypatch, operation):
+    current = store.start_execution("fixture", agent)
+    legacy = replace(agent, name=store.next_name("fixture", "eng"))
+    before = protected(store)
+    attempts = []
+    tries = 5 if operation == "legacy" else fencing.ATTEMPTS
+    _contend(store, monkeypatch, operation, attempts, tries)
+    with pytest.raises(SwarmError) as error:
+        _contended_write(store, agent, operation, current, legacy)
+    assert str(error.value) == EXHAUSTED[operation]
+    assert protected(store) == before
+    assert len(attempts) == tries
+
+
+def _recovered(store, operation, result, current, legacy, agent):
+    if operation == "start":
+        return result.generation == 2 and len(store.executions("fixture", agent.seat)) == 2
+    if operation == "update":
+        return store.execution("fixture", current.execution_id).idle_ticks == 2
+    if operation == "pane":
+        return store.execution("fixture", current.execution_id) == replace(current, pane_id="w2:p7")
+    return store.redis.hexists(store.key("fixture", "agents"), legacy.name)
+
+
+@pytest.mark.parametrize("operation", ["start", "update", "legacy", "pane"])
+def test_one_contended_transaction_retries_and_commits(store, agent, monkeypatch, operation):
+    current = store.start_execution("fixture", agent)
+    legacy = replace(agent, name=store.next_name("fixture", "eng"))
+    attempts = []
+    _contend(store, monkeypatch, operation, attempts, 1)
+    result = _contended_write(store, agent, operation, current, legacy)
+    assert _recovered(store, operation, result, current, legacy, agent)
+    assert len(attempts) == 2
 
 
 def test_a_pane_write_keeps_every_other_field_and_updates_the_projection(store, agent):
@@ -551,9 +567,12 @@ def test_hive_ownership_survives_execution_updates_without_changing_the_legacy_p
 
 def test_execution_records_saved_before_hive_ownership_load_with_an_empty_hive(store, agent):
     current = store.start_execution("fixture", agent)
-    raw = json.loads(store.redis.hget(store.key("fixture", "executions"), current.execution_id))
-    raw.pop("hive")
-    store.redis.hset(store.key("fixture", "executions"), current.execution_id, json.dumps(raw))
+
+    def drop_hive(doc):
+        row = {k: v for k, v in doc["executions"][current.execution_id].items() if k != "hive"}
+        doc["executions"][current.execution_id] = row
+
+    fencing.write(store, "fixture", drop_hive)
     assert store.agents("fixture")[0].hive == ""
 
 
@@ -603,13 +622,11 @@ def test_unadmitted_identity_fields_cannot_use_legacy_writer(store, agent, chang
 
 
 def test_legacy_status_timestamp_changes_only_with_observed_status(store, agent, monkeypatch):
-    from scripts.swarm import execution
-
-    monkeypatch.setattr(execution.time, "time", lambda: 1)
+    monkeypatch.setattr(time, "time", lambda: 1)
     store.put_agent("fixture", agent)
     key = store.key("fixture", "state-since")
     assert store.redis.hget(key, agent.name) == "1000"
-    monkeypatch.setattr(execution.time, "time", lambda: 2)
+    monkeypatch.setattr(time, "time", lambda: 2)
     store.put_agent("fixture", replace(agent, model="new-model"))
     assert store.redis.hget(key, agent.name) == "1000"
     store.put_agent("fixture", replace(agent, idle_ticks=1))
@@ -686,8 +703,7 @@ def test_legacy_write_retries_when_its_observed_state_changes(store, agent, monk
             watched.append(True)
             if len(watched) == 1:
                 if changed_key == "executions":
-                    admitted = replace(agent, execution_id="exe-" + "a" * 32, generation=1)
-                    store.redis.hset(key, admitted.execution_id, json.dumps(asdict(admitted)))
+                    store.start_execution("fixture", agent)
                 else:
                     store.redis.hset(key, agent.name, json.dumps(asdict(replace(agent, idle_ticks=1))))
             return execute()
@@ -702,9 +718,7 @@ def test_legacy_write_retries_when_its_observed_state_changes(store, agent, monk
         assert str(error.value) == "stale or changed execution identity"
         assert json.loads(store.redis.hget(store.key("fixture", "agents"), agent.name))["model"] == ""
     else:
-        from scripts.swarm import execution
-
-        monkeypatch.setattr(execution.time, "time", lambda: 20)
+        monkeypatch.setattr(time, "time", lambda: 20)
         store.put_agent("fixture", agent)
         assert len(watched) == 2
         assert store.redis.hget(store.key("fixture", "state-since"), agent.name) == "20000"

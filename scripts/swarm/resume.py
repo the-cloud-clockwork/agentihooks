@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from scripts import agent_choice
 from scripts.handoff import transfers
-from scripts.swarm import deliberate_exit, idle, outage, profile_choice
+from scripts.swarm import deliberate_exit, fencing, idle, outage, profile_choice
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
 
@@ -241,10 +241,9 @@ def _recovery_owner(store, slug, agent, rows, now_ms):
         return False
     if agent.seat and store.seats.occupant(agent.seat).occupant != agent.name:
         return False
-    raw = store.redis.get(store.key(slug, "task-authority", agent.task))
-    if not raw:
+    claim = fencing.read(store, slug)["claims"].get(agent.task)
+    if not claim:
         return not agent.execution_id or agent.runtime_backend == "local"
-    claim = json.loads(raw)
     return (
         claim["state"] == "active"
         and claim["holder"] == agent.name
@@ -255,8 +254,8 @@ def _recovery_owner(store, slug, agent, rows, now_ms):
 
 
 def _recovery_identity(store, slug, agent):
-    raw = store.redis.get(store.key(slug, "task-authority", agent.task))
-    generation = json.loads(raw)["generation"] if raw else 0
+    claim = fencing.read(store, slug)["claims"].get(agent.task)
+    generation = claim["generation"] if claim else 0
     return [agent.task, agent.seat, agent.execution_id, agent.generation, generation]
 
 

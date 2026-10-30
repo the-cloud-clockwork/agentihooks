@@ -34,9 +34,7 @@
       ]
     },
     "leaked": [],
-    "protected_changed": [
-      "control-owner"
-    ],
+    "protected_changed": [],
     "refusals": {
       "forged_resume": "unrecognized_report",
       "shallow_backup": "shallow_report",

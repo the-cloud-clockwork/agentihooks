@@ -199,6 +199,8 @@ def test_the_reader_places_ended_lives_on_the_hive_their_execution_ran_on():
 
     import fakeredis
 
+    from scripts.swarm import fencing
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", 1, 0))
     names = ("ci@archived", "ci@live", "ci@local")
@@ -206,16 +208,20 @@ def test_the_reader_places_ended_lives_on_the_hive_their_execution_ran_on():
         store.put_agent("sw", AgentRecord(name, "ci", "t2", pane_id="w2:pD", started_at=AT - 20))
     base = AgentRecord("", "ci", "t2", pane_id="w2:pD", started_at=AT - 20, state="ended")
     executions = {
-        "executions-archive": [replace(base, name="ci@archived", hive="h6", runtime_backend="kubernetes")],
+        "archive": [replace(base, name="ci@archived", hive="h6", runtime_backend="kubernetes")],
         "executions": [
             replace(base, name="ci@live", hive="h7"),
             replace(base, name="ci@archived", hive="h8", started_at=AT - 90),
         ],
     }
-    for key, records in executions.items():
-        for n, agent in enumerate(records):
-            agent = replace(agent, execution_id=f"exe-{key}-{n}")
-            store.redis.hset(store.key("sw", key), agent.execution_id, json.dumps(asdict(agent)))
+
+    def seed(doc):
+        for section, records in executions.items():
+            for n, agent in enumerate(records):
+                agent = replace(agent, execution_id=f"exe-{section}-{n}")
+                doc[section][agent.execution_id] = asdict(agent)
+
+    fencing.write(store, "sw", seed)
     for name in names:
         store.drop_agent("sw", name, at=AT + 5)
     message = "sw: local slot claim new for t9 on root counted 0 of 6: "
