@@ -217,6 +217,7 @@ def test_outage_join_is_kept_replayed_once_and_counted_at_launch(
 
     if pinned:
         monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", ENG)
+        monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
     agent = AgentRecord(ENG, "eng", "t1", started_at=1)
     assert launch_check.joined_at(agent, stored()) is None
     server.stop()
