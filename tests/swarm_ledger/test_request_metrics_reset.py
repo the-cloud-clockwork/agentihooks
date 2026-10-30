@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ pytestmark = pytest.mark.xdist_group("request-metrics-reset")
 
 
 def test_a_restore_with_real_time_sets_the_held_and_lost_journal_state(tmp_path: Path) -> None:
-    now = request_metrics.time.time()
+    now = time.time()
     path = tmp_path / request_metrics.JOURNAL_NAME
     path.write_text(
         json.dumps(["held", now - 100.0])
