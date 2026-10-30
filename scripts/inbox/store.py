@@ -193,11 +193,12 @@ class InboxStore:
             raise InboxError("a message needs a sender, an address and text")
         from scripts.hive import scope
 
-        sender, address = self.names.resolve(sender), self.seats.recipient(address)
+        requested = self.names.resolve(address)
+        sender, address = self.names.resolve(sender), self.seats.recipient(requested)
         home = self.home(address)
         if home != self.world and not scope.member():
             routed = InboxStore(self.redis, persist=self.persist, world=home)
-            return routed.send(sender, address, text, ref, fyi, task, item_id)
+            return routed.send(sender, requested, text, ref, fyi, task, item_id)
         at = now_ms()
         item = Item(
             item_id or new_item_id(),
@@ -213,7 +214,7 @@ class InboxStore:
             task=task,
         )
         key = self.key("item", item.id)
-        masters = self.pool.masters_for(sender, address) if home == self.world else []
+        masters = self.pool.masters_for(sender, requested) if home == self.world else []
         with self.redis.pipeline() as pipe:
             if item_id:
                 pipe.watch(key)
