@@ -229,7 +229,7 @@ def test_recorded_critic_capacity_refusal_allows_escalation_and_block(
     [
         runner.RouteRefused("claude", "all Claude accounts are closed"),
         runner.RouteRefused("codex", "no Claude account has a free session under its quota band"),
-        HeadlessError("no Claude account has a free session under its quota band"),
+        HeadlessError("claude refused to route: no Claude account has a free session under its quota band"),
     ],
 )
 def test_other_critic_failures_keep_the_blocker_gate(
