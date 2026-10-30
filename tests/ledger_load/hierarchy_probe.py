@@ -1,4 +1,5 @@
 import cProfile
+import gc
 import gzip
 import io
 import json
@@ -30,6 +31,7 @@ def fetch(port, path, samples):
         body = response.read()
         assert response.status == 200
     used = samples.get(timeout=10)
+    print(json.dumps({"path": path, "cpu_seconds": used, "gc": gc.get_stats()}))
     return body.decode(), used
 
 
@@ -115,6 +117,12 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     observations = []
+    collections = []
+
+    def record_collection(phase, info):
+        collections.append({"phase": phase, "cpu": time.thread_time(), **info})
+
+    gc.callbacks.append(record_collection)
     try:
         state = recorded["state"]
         repo.import_document(SLUG, state, token="hierarchy-proof")
@@ -130,7 +138,13 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
         repo.import_document(SLUG, changed, token="hierarchy-proof", replace=True)
         observations.append(observe(port, samples, changed))
         assert observations[0]["outputs"] != observations[1]["outputs"]
+        changed["phases"][0]["done"] = not changed["phases"][0]["done"]
+        repo.import_document(SLUG, changed, token="hierarchy-proof", replace=True)
+        profiling.set()
+        fetch(port, "hierarchy", samples)
+        profiling.clear()
     finally:
+        gc.callbacks.remove(record_collection)
         httpd.shutdown()
         httpd.server_close()
         thread.join(timeout=10)
@@ -141,6 +155,8 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
         "mean_cpu_seconds": sum(seconds) / len(seconds),
         "observations": observations,
         "profile": profiles[0],
+        "post_mutation_profile": profiles[-1],
+        "collections": collections,
     }
     Path(os.environ["HIERARCHY_CPU_REPORT"]).write_text(json.dumps(report))
     print(json.dumps({key: value for key, value in report.items() if key != "observations"}, indent=2))
