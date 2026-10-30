@@ -26,7 +26,7 @@ def workflow(name: str) -> dict:
     ],
 )
 def test_hive_join_selection(path: str, expected: str, tmp_path: Path) -> None:
-    steps = workflow("test")["jobs"]["select"]["steps"]
+    steps = workflow("writer-lock")["jobs"]["inputs"]["steps"]
     run = next(step["run"] for step in steps if step.get("id") == "hive-join")
     paths = tmp_path / "hive-join-paths"
     paths.write_bytes(path.encode() + b"\0")
@@ -53,14 +53,17 @@ def test_hive_join_selection(path: str, expected: str, tmp_path: Path) -> None:
 
 def test_hive_join_is_required_only_for_selected_pull_requests() -> None:
     jobs = workflow("test")["jobs"]
-    caller = jobs["swarm-image"]
-    assert "select" in caller["needs"]
-    assert "needs.select.outputs.hive_join == 'true'" in caller["if"]
-    assert caller["with"]["hive-join-only"] == "${{ github.event_name == 'pull_request' }}"
-    assert jobs["select"]["outputs"]["hive_join"] == "${{ steps.hive-join.outputs.due }}"
-    gate = jobs["gate-required"]["steps"][0]["run"]
-    assert '.select.outputs.hive_join == "true"' in gate
-    assert '["swarm-image"]' in gate
+    assert "writer-lock" in jobs["gate-required"]["needs"]
+    assert "github.event_name == 'pull_request'" in jobs["writer-lock"]["if"]
+    smoke_jobs = workflow("writer-lock")["jobs"]
+    caller = smoke_jobs["hive-join"]
+    assert caller["needs"] == ["inputs"]
+    assert "github.event_name == 'pull_request'" in caller["if"]
+    assert "needs.inputs.outputs.hive_join == 'true'" in caller["if"]
+    assert caller["uses"] == "./.github/workflows/swarm-smoke.yml"
+    assert caller["with"]["hive-join-only"] is True
+    assert smoke_jobs["inputs"]["outputs"]["hive_join"] == "${{ steps.hive-join.outputs.due }}"
+    assert "hive-join" not in smoke_jobs["scenario"]["needs"]
 
 
 def test_hive_join_mode_preserves_promotion_scenarios() -> None:
