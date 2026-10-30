@@ -1893,7 +1893,10 @@ def test_parked_successor_restacks_and_publishes_with_predecessor_checkout_prese
     assert (root / "task.txt").read_text() == "parked work"
 
 
-@pytest.mark.parametrize(("stacked", "replayed"), [("rebased", "2"), ("dependency", "1"), ("dependency-rebased", "1")])
+@pytest.mark.parametrize(
+    ("stacked", "replayed"),
+    [("rebased", "2"), ("dependency", "1"), ("dependency-rebased", "1"), ("dependency-modified", "1")],
+)
 def test_a_restack_after_a_manual_rebase_replays_only_the_task_commits(
     publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, stacked: str, replayed: str
 ) -> None:
@@ -1913,6 +1916,9 @@ def test_a_restack_after_a_manual_rebase_replays_only_the_task_commits(
         (repository / "blocker.txt").write_text("completed dependency")
         git(repository, "add", "blocker.txt")
         git(repository, "commit", "-qm", "Squash dependency")
+        if stacked == "dependency-modified":
+            (repository / "blocker.txt").write_text("newer dependency")
+            git(repository, "commit", "-qam", "Advance dependency after squash")
     (root / "task.txt").write_text("parked work")
     git(root, "add", "task.txt")
     git(root, "commit", "-qm", "Parked task work")
