@@ -271,7 +271,11 @@ def test_named_master_messages_bypass_pool_rotation(
     assert inbox.get(first.id).address == FRONT
     address = "previous-master" if alias else "sw-master-1"
     if alias:
-        inbox.names.alias(address, "sw-master-1")
+        inbox.names.adopt(SLUG, "123456", SLUG, "repo")
+        name = inbox.names.next(SLUG, "master")
+        swarm.put_agent(SLUG, AgentRecord(name, "master", "master", seat=FRONT, state="working"))
+        inbox.seats.occupy(FRONT, name, at=2)
+        inbox.names.alias(address, name)
     question = inbox.send(address, "worker", "question")
     answer = (
         inbox.reply(question.id, "worker", "answer")
