@@ -825,6 +825,7 @@ def test_the_store_serves_a_bound_handler_on_daemon_threads_and_labels_answers_j
         data = raw(base, b"GET /healthz HTTP/1.1\r\nHost: api\r\nConnection: close\r\n\r\n")
 
     assert (listening.RequestHandlerClass.__name__, listening.daemon_threads) == ("Bound", True)
+    assert listening.RequestHandlerClass.log_message is store.quiet
     assert data.startswith(b"HTTP/1.1 200")
     assert b"\r\nContent-Type: application/json\r\n" in data
 
