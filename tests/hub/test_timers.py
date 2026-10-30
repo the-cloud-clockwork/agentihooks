@@ -413,7 +413,7 @@ def test_unchanged_timer_state_reuses_the_cached_heap(monkeypatch):
     assert calls == [1]
 
 
-def test_tombstones_past_the_keep_window_leave_the_index_on_the_next_write():
+def test_tombstones_past_the_keep_window_leave_the_index_on_the_next_write() -> None:
     import json
 
     from scripts.events import deadlines
@@ -438,7 +438,7 @@ def test_tombstones_past_the_keep_window_leave_the_index_on_the_next_write():
     assert rows[fresh.key]["version"] == 2
 
 
-def test_tombstones_record_when_they_ended():
+def test_tombstones_record_when_they_ended() -> None:
     import json
 
     from scripts.events import deadlines
@@ -454,7 +454,7 @@ def test_tombstones_record_when_they_ended():
     assert rows == {request.key: {"version": 1, "request": None, "ended": 1500}}
 
 
-def test_legacy_tombstones_without_an_end_time_leave_on_the_first_write():
+def test_legacy_tombstones_without_an_end_time_leave_on_the_first_write() -> None:
     import json
 
     from scripts.events import deadlines
@@ -467,3 +467,27 @@ def test_legacy_tombstones_without_an_end_time_leave_on_the_first_write():
     timers.Timers(bus, clock).handle(request)
     rows = json.loads(store.get(timers.INDEX).value)
     assert rows == {request.key: {"version": 1, "request": request.to_dict()}}
+
+
+def test_hub_versions_refuse_an_old_deadline_after_its_tombstone_left_the_index() -> None:
+    from scripts.events import deadlines
+    from scripts.hub import timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    timer = timers.Timers(bus, clock)
+    hub = runner.HubRunner(bus, registry.Registry([timer.reactor()]), "holder", clock)
+    request = deadlines.schedule(source(), "idle", 1000)
+    bus.events.publish(deadlines.subject(request), request)
+    assert hub.run_once(timeout_ms=0) == {"timers": ["handled"]}
+    output = bus.events.consumer("expiry", "swarm.*.deadline.expired")
+    assert [delivery.event for delivery in output.fetch(10, 0)] == [deadlines.expired(request)]
+    clock.now = 1000 + timers.KEEP_MS
+    other = deadlines.schedule(source(key="execution-other"), "idle", 10**9)
+    bus.events.publish(deadlines.subject(other), other)
+    assert hub.run_once(timeout_ms=0) == {"timers": ["handled"]}
+    replay = replace(request, id="replayed")
+    bus.events.publish(deadlines.subject(replay), replay)
+    assert hub.run_once(timeout_ms=0) == {"timers": ["skipped"]}
+    timer.fire()
+    assert output.fetch(10, 0) == []
+    hub.stop()
