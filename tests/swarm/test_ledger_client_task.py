@@ -50,3 +50,35 @@ def test_any_other_refusal_of_a_task_read_is_raised_with_its_body(monkeypatch, c
         ledger_client.LedgerClient().task("demo", "t2")
     assert raised.value.code == code
     assert json.loads(raised.value.read())["error"]["code"] == error
+
+
+def test_a_targeting_read_asks_the_ledger_for_the_tasks_naming_one_pull(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads = served(monkeypatch, [{"id": "t2"}])
+    assert ledger_client.LedgerClient().tasks_targeting("demo", "https://github.com/o/r/pull/7") == [{"id": "t2"}]
+    assert reads == [("demo", "tasks?targets=https%3A%2F%2Fgithub.com%2Fo%2Fr%2Fpull%2F7", False, False)]
+
+
+def test_a_ledger_without_targeting_falls_back_to_filtering_its_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://github.com/o/r/pull/7"
+    rows = [{"id": "t1", "pr_url": url}, {"id": "t2", "pr_url": url + "0"}, {"id": "t3", "split_pulls": [url]}]
+    reads = []
+
+    def resource(slug: str, path: str, service: bool, collection: bool) -> list[dict]:
+        reads.append((path, collection))
+        if not collection:
+            raise refused(400, "schema_invalid")
+        return rows
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(resource=resource))
+    assert [row["id"] for row in ledger_client.LedgerClient().tasks_targeting("demo", url)] == ["t1", "t3"]
+    assert [collection for _, collection in reads] == [False, True]
+
+
+@pytest.mark.parametrize("code,error", [(400, "revision_conflict"), (500, "schema_invalid")])
+def test_any_other_refusal_of_a_targeting_read_is_raised(
+    monkeypatch: pytest.MonkeyPatch, code: int, error: str
+) -> None:
+    served(monkeypatch, refused(code, error))
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        ledger_client.LedgerClient().tasks_targeting("demo", "https://github.com/o/r/pull/7")
+    assert raised.value.code == code
