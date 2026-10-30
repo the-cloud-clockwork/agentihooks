@@ -9,6 +9,7 @@ from types import ModuleType, SimpleNamespace
 from scripts.swarm_ledger import request_metrics
 
 from . import hierarchy, refresh
+from .entry import Entry
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, TOKEN, Snapshot, SQLiteLedgerRepository
 
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
@@ -353,7 +354,15 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
                 connection.execute(GUARD_TRIGGER)
             self._ready.add(address)
 
-    def _write(self, connection, slug: str, entry, state: dict, events: list):
+    def _write(
+        self,
+        connection: sqlite3.Connection,
+        slug: str,
+        entry: Entry,
+        state: dict,
+        events: list,
+        summary: dict | None = None,
+    ) -> Entry:
         stored = connection.execute(FLOOR).fetchone()
         required = REQUIRED if stored is None else stored[0]
         if required > VERSION:
@@ -368,7 +377,7 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
             for address, version, floor in refused:
                 text = f"The ledger writer at {address} was refused: {refusal(version, floor)}"
                 ledger_alerts.raise_warning(state, raised, (ledger_alerts.WRITER, text), before)
-        return super()._write(connection, slug, entry, state, events)
+        return super()._write(connection, slug, entry, state, events, summary)
 
     @contextmanager
     def snapshot(self) -> Iterator[Snapshot]:
