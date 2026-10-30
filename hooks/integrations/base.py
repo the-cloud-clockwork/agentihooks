@@ -7,22 +7,14 @@ Provides a common foundation for integrations that:
 3. Prevents silent failures by making missing config visible
 
 Usage:
-    from hooks.integrations.base import IntegrationBase
-
     class MyIntegration(IntegrationBase):
         INTEGRATION_NAME = "my-integration"
-        REQUIRED_ENV_VARS = {
-            "MY_API_KEY": "API key for service",
-            "MY_ENDPOINT": "Service endpoint URL",
-        }
-        OPTIONAL_ENV_VARS = {
-            "MY_TIMEOUT": "Request timeout in seconds (default: 30)",
-        }
+        REQUIRED_ENV_VARS = {"MY_API_KEY": "API key for service"}
+        OPTIONAL_ENV_VARS = {"MY_TIMEOUT": "Request timeout in seconds (default: 30)"}
 
-    # Check configuration
     integration = MyIntegration()
     if not integration.is_configured:
-        integration.log_status()  # Logs missing vars
+        integration.log_status()
 """
 
 import json
@@ -35,21 +27,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Add parent directories to path for direct script execution
 _script_dir = Path(__file__).resolve().parent
-_app_dir = _script_dir.parent.parent  # /app
+_app_dir = _script_dir.parent.parent
 if str(_app_dir) not in sys.path:
     sys.path.insert(0, str(_app_dir))
 
 from hooks.common import log as agent_log
 
-# Python logger for this module
 logger = logging.getLogger("hooks.integrations")
-
-
-# =============================================================================
-# DATA CLASSES
-# =============================================================================
 
 
 @dataclass
@@ -60,7 +45,7 @@ class EnvVarStatus:
     description: str
     is_set: bool
     is_required: bool
-    value_hint: Optional[str] = None  # Masked value hint for debugging
+    value_hint: Optional[str] = None
 
 
 @dataclass
@@ -92,11 +77,6 @@ class ConfigStatus:
             ],
             "timestamp": self.timestamp,
         }
-
-
-# =============================================================================
-# BASE CLASS
-# =============================================================================
 
 
 class IntegrationBase(ABC):
@@ -153,12 +133,10 @@ class IntegrationBase(ABC):
 
         env_vars = []
 
-        # Check required vars
         for var_name, description in self.REQUIRED_ENV_VARS.items():
             value = os.getenv(var_name, "")
             is_set = bool(value)
 
-            # Create masked hint for debugging (show first/last chars)
             value_hint = None
             if is_set and len(value) > 4:
                 value_hint = f"{value[:2]}...{value[-2:]}"
@@ -175,7 +153,6 @@ class IntegrationBase(ABC):
                 )
             )
 
-        # Check optional vars
         for var_name, description in self.OPTIONAL_ENV_VARS.items():
             value = os.getenv(var_name, "")
             is_set = bool(value)
@@ -214,7 +191,6 @@ class IntegrationBase(ABC):
         """
         status = self.get_config_status()
 
-        # Build log message
         if status.is_configured:
             message = f"[{self.INTEGRATION_NAME}] Configuration OK"
             payload = {
@@ -232,10 +208,8 @@ class IntegrationBase(ABC):
                 "required_vars": {name: desc for name, desc in self.REQUIRED_ENV_VARS.items()},
             }
 
-        # Log to agent log (hooks.log)
         agent_log(message, payload)
 
-        # Log to Python logger
         log_func = getattr(logger, level, logger.info)
         if status.is_configured:
             log_func(f"{self.INTEGRATION_NAME}: configured")
@@ -260,7 +234,6 @@ class IntegrationBase(ABC):
             print(json.dumps(status.to_dict(), indent=2))
             return
 
-        # Human-readable format
         print(f"\n{'=' * 60}")
         print(f"  {self.INTEGRATION_NAME.upper()} CONFIGURATION STATUS")
         print(f"{'=' * 60}")
@@ -287,7 +260,6 @@ class IntegrationBase(ABC):
                     print(f"      → {desc}")
             print()
 
-        # Show configured vars
         configured = [v for v in status.env_vars if v.is_set]
         if configured:
             print("  CONFIGURED:")
@@ -297,11 +269,6 @@ class IntegrationBase(ABC):
             print()
 
         print(f"{'=' * 60}\n")
-
-
-# =============================================================================
-# INTEGRATION REGISTRY
-# =============================================================================
 
 
 class IntegrationRegistry:
@@ -367,11 +334,6 @@ class IntegrationRegistry:
         return results
 
 
-# =============================================================================
-# CLI
-# =============================================================================
-
-
 def main():
     """CLI for checking integration configurations."""
     if len(sys.argv) < 2:
@@ -389,7 +351,6 @@ def main():
         as_json = "--json" in sys.argv
 
         if as_json:
-            # Import all integrations to register them
             try:
                 from hooks.integrations import mailer, sqs
             except ImportError:
@@ -399,7 +360,6 @@ def main():
             output = {name: status.to_dict() for name, status in results.items()}
             print(json.dumps(output, indent=2))
         else:
-            # Import all integrations to register them
             try:
                 from hooks.integrations import mailer, sqs  # noqa: F401
             except ImportError:

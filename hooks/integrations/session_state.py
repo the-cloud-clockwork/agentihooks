@@ -5,36 +5,17 @@ Provides atomic read/merge/write operations on the shared session map file
 (~/conversation_map.json). Any agent or hook can enrich session data which
 the API layer reads after session completion.
 
-The session map is keyed by session_id (UUID) and stores arbitrary data:
-    {
-        "session-uuid-123": {
-            "wait": true,
-            "platform": "slack",
-            "signed_urls": {...},    # Added by hooks
-            "custom_field": {...}    # Added by any agent
-        }
-    }
+The session map is keyed by session_id (UUID) and stores arbitrary data,
+such as wait, platform, signed_urls added by hooks and custom fields added
+by any agent.
 
 Usage:
-    from hooks.integrations.session_state import enrich_session, get_session
-
-    # Write data to session (atomic merge)
-    enrich_session("uuid-123", {
-        "signed_urls": {"png": "https://..."},
-        "status": "complete"
-    })
-
-    # Read session data
+    enrich_session("uuid-123", {"signed_urls": {"png": "https://..."}, "status": "complete"})
     data = get_session("uuid-123")
 
 CLI:
-    # Get session data
     session_state.py get --session-id <uuid>
-
-    # Enrich session with JSON data
     session_state.py enrich --session-id <uuid> --data '{"key": "value"}'
-
-    # List all sessions
     session_state.py list
 """
 
@@ -45,7 +26,6 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-# Add repo root to path so hooks package is importable when run as a script
 _src_root = Path(__file__).resolve().parent.parent.parent
 if str(_src_root) not in sys.path:
     sys.path.insert(0, str(_src_root))
@@ -64,17 +44,7 @@ except ImportError:
     AGENTIHOOKS_HOME = _Path(_os.environ.get("AGENTIHOOKS_HOME", str(_Path.home() / ".agentihooks")))
 
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
-# Session map file location (shared with agenticore API)
 SESSION_MAP_FILE = AGENTIHOOKS_HOME / "conversation_map.json"
-
-
-# =============================================================================
-# CORE FUNCTIONS
-# =============================================================================
 
 
 def _get_redis_convmap_key(session_id: str) -> str:
@@ -106,7 +76,8 @@ def get_session_map() -> Dict[str, Any]:
 def get_session(session_id: str) -> Optional[Dict[str, Any]]:
     """Get data for a specific session.
 
-    Tries Redis first, falls back to file-based storage.
+    Tries Redis first, falls back to file-based storage. A Redis error falls back
+    silently, because hooks must never crash the parent process.
 
     Args:
         session_id: The session UUID
@@ -114,7 +85,6 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Session data dict or None if not found
     """
-    # Try Redis first
     try:
         from hooks._redis import get_redis
 
@@ -129,10 +99,9 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
                     except (json.JSONDecodeError, TypeError):
                         result[k] = v
                 return result
-    except Exception:  # NOSONAR — hooks must never crash the parent process
-        pass  # Silent fallback
+    except Exception:  # NOSONAR
+        pass
 
-    # File fallback
     mappings = get_session_map()
     return mappings.get(session_id)
 
@@ -141,7 +110,8 @@ def enrich_session(session_id: str, data: Dict[str, Any]) -> bool:
     """Atomically merge data into a session entry.
 
     Tries Redis first (atomic HSET per-field merge), falls back to
-    temp file + rename for the file backend.
+    temp file + rename for the file backend. A Redis error falls back
+    silently, because hooks must never crash the parent process.
 
     Args:
         session_id: The session UUID
@@ -150,7 +120,6 @@ def enrich_session(session_id: str, data: Dict[str, Any]) -> bool:
     Returns:
         True if write succeeded, False otherwise
     """
-    # Try Redis first
     try:
         from hooks._redis import SESSION_TTL, get_redis
 
@@ -165,10 +134,9 @@ def enrich_session(session_id: str, data: Dict[str, Any]) -> bool:
                 {"session_id": session_id, "keys_added": list(data.keys())},
             )
             return True
-    except Exception:  # NOSONAR — hooks must never crash the parent process
-        pass  # Silent fallback to file
+    except Exception:  # NOSONAR
+        pass
 
-    # File fallback
     try:
         mappings = get_session_map()
 
@@ -206,7 +174,9 @@ def enrich_session(session_id: str, data: Dict[str, Any]) -> bool:
 def delete_session(session_id: str) -> bool:
     """Remove a session entry from the map.
 
-    Tries Redis first, falls back to file-based storage.
+    Tries Redis first, falls back to file-based storage. A Redis error falls back
+    silently, because hooks must never crash the parent process. A session
+    already absent from the file counts as deleted.
 
     Args:
         session_id: The session UUID to remove
@@ -214,7 +184,6 @@ def delete_session(session_id: str) -> bool:
     Returns:
         True if deletion succeeded, False otherwise
     """
-    # Try Redis first
     try:
         from hooks._redis import get_redis
 
@@ -224,15 +193,14 @@ def delete_session(session_id: str) -> bool:
             r.delete(key)
             log("Deleted session (Redis)", {"session_id": session_id})
             return True
-    except Exception:  # NOSONAR — hooks must never crash the parent process
-        pass  # Silent fallback to file
+    except Exception:  # NOSONAR
+        pass
 
-    # File fallback
     try:
         mappings = get_session_map()
 
         if session_id not in mappings:
-            return True  # Already gone
+            return True
 
         del mappings[session_id]
 
@@ -255,11 +223,6 @@ def delete_session(session_id: str) -> bool:
         return False
 
 
-# =============================================================================
-# CLI INTERFACE
-# =============================================================================
-
-
 def main():
     """CLI entry point for session state operations."""
     if len(sys.argv) < 2:
@@ -280,7 +243,6 @@ def main():
     command = sys.argv[1]
 
     if command == "get":
-        # Parse --session-id
         session_id = None
         args = sys.argv[2:]
         for i, arg in enumerate(args):
@@ -301,7 +263,6 @@ def main():
         sys.exit(0)
 
     elif command == "enrich":
-        # Parse --session-id and --data
         session_id = None
         data_str = None
         args = sys.argv[2:]
@@ -335,7 +296,6 @@ def main():
         sys.exit(0 if success else 1)
 
     elif command == "delete":
-        # Parse --session-id
         session_id = None
         args = sys.argv[2:]
         for i, arg in enumerate(args):

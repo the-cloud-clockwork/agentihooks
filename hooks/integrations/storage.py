@@ -9,31 +9,13 @@ Environment Variables:
     IS_EVALUATION: Skip upload in evaluation mode (default: false)
 
 Usage:
-    # Python import
-    from hooks.integrations.storage import upload_path
+    upload_path(session_id="uuid-123", path="/path/to/file.txt", prefix="transcripts")
+    upload_path(session_id="uuid-123", path="/path/to/dir", prefix="artifacts")
+    storage.py hook --path /app/transcript.jsonl --prefix transcripts
+    storage.py hook --path /app/outputs --prefix results --match-uuid
+    storage.py upload uuid-123 --path /file.txt --prefix logs
 
-    # Upload single file
-    result = upload_path(
-        session_id="uuid-123",
-        path="/path/to/file.txt",
-        prefix="transcripts"
-    )
-
-    # Upload directory (recursive)
-    result = upload_path(
-        session_id="uuid-123",
-        path="/path/to/dir",
-        prefix="artifacts"
-    )
-
-    # CLI - As hook (reads from stdin)
-    /app/hooks/integrations/storage.py hook --path /app/transcript.jsonl --prefix transcripts
-
-    # CLI - As hook with UUID matching (only upload files containing UUID in name)
-    /app/hooks/integrations/storage.py hook --path /app/outputs --prefix results --match-uuid
-
-    # CLI - Direct upload
-    /app/hooks/integrations/storage.py upload uuid-123 --path /file.txt --prefix logs
+With --match-uuid only files whose name contains the session UUID are uploaded.
 """
 
 import json
@@ -43,9 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-# Add parent directories to path for direct script execution
 _script_dir = Path(__file__).resolve().parent
-_app_dir = _script_dir.parent.parent  # /app
+_app_dir = _script_dir.parent.parent
 if str(_app_dir) not in sys.path:
     sys.path.insert(0, str(_app_dir))
 
@@ -59,13 +40,7 @@ except ImportError:
 from hooks.common import get_correlation_id, log
 from hooks.integrations.base import IntegrationBase, IntegrationRegistry
 
-# State file for session metadata enrichment
 DEFAULT_STATE_FILE = Path.home() / "conversation_map.json"
-
-
-# =============================================================================
-# INTEGRATION DEFINITION
-# =============================================================================
 
 
 @IntegrationRegistry.register
@@ -81,11 +56,6 @@ class StorageIntegration(IntegrationBase):
         "AWS_PROFILE": "AWS profile to use for credentials",
         "AWS_REGION": "AWS region for S3 bucket",
     }
-
-
-# =============================================================================
-# STATE LOADING (for metadata enrichment)
-# =============================================================================
 
 
 def load_state_for_session(
@@ -110,7 +80,6 @@ def load_state_for_session(
             log("State file not found", {"file": str(state_file)})
             return None
 
-        # Use correlation ID (external UUID) for lookup - API stores state under this key
         correlation_id = get_correlation_id(session_id)
 
         log(
@@ -161,25 +130,17 @@ def state_to_s3_metadata(state: Optional[Dict[str, Any]]) -> Dict[str, str]:
 
     metadata = {}
     for key, value in state.items():
-        # Skip None values
         if value is None:
             continue
-        # Convert to string based on type
         if isinstance(value, bool):
             metadata[key] = "true" if value else "false"
         elif isinstance(value, (str, int, float)):
             metadata[key] = str(value)
         elif isinstance(value, (list, dict)):
-            # JSON-encode complex types
             metadata[key] = json.dumps(value)
 
     log("Converted state to S3 metadata", {"fields": list(metadata.keys())})
     return metadata
-
-
-# =============================================================================
-# DATA CLASSES
-# =============================================================================
 
 
 @dataclass
@@ -192,11 +153,6 @@ class UploadResult:
     session_id: Optional[str] = None
     prefix: Optional[str] = None
     error: Optional[str] = None
-
-
-# =============================================================================
-# S3 CLIENT
-# =============================================================================
 
 
 class S3StorageClient:
@@ -219,13 +175,11 @@ class S3StorageClient:
         self._skip_evaluation = skip_evaluation
         self._s3_client = None
 
-        # Parse bucket and base prefix from STORAGE_URL
         self._bucket = None
         self._base_prefix = None
         if self._storage_url:
             self._parse_storage_url()
 
-        # Check if we should skip (evaluation mode)
         self._is_evaluation = os.getenv("IS_EVALUATION", "false").lower() == "true"
 
     def _parse_storage_url(self):
@@ -238,7 +192,6 @@ class S3StorageClient:
             log("Invalid STORAGE_URL", {"url": url, "expected": "s3://..."})
             return
 
-        # Remove s3:// prefix
         parts = url[5:].split("/", 1)
         self._bucket = parts[0]
         self._base_prefix = parts[1] if len(parts) > 1 else ""
@@ -281,7 +234,6 @@ class S3StorageClient:
 
     def should_skip(self) -> bool:
         """Check if upload should be skipped."""
-        # Skip if no storage URL configured
         if not self._storage_url or not self._bucket:
             log(
                 "Storage upload skipped: STORAGE_URL not configured",
@@ -289,7 +241,6 @@ class S3StorageClient:
             )
             return True
 
-        # Skip if evaluation mode
         if self._skip_evaluation and self._is_evaluation:
             log(
                 "Storage upload skipped: IS_EVALUATION=true",
@@ -324,7 +275,6 @@ class S3StorageClient:
         Returns:
             UploadResult with success status and upload count
         """
-        # Check if we should skip upload
         if self.should_skip():
             return UploadResult(
                 success=True,
@@ -337,7 +287,6 @@ class S3StorageClient:
         try:
             local_path = Path(path)
 
-            # Validate path exists
             if not local_path.exists():
                 error_msg = f"Path does not exist: {path}"
                 log("Upload failed", {"error": error_msg, "path": path})
@@ -349,12 +298,10 @@ class S3StorageClient:
                     error=error_msg,
                 )
 
-            # Build S3 key prefix: base_prefix/artifacts/
-            # Flat structure - session ID is in filename, not path
             key_parts = []
             if self._base_prefix:
                 key_parts.append(self._base_prefix.strip("/"))
-            key_parts.append("artifacts")  # All artifacts go flat under artifacts/
+            key_parts.append("artifacts")
 
             s3_prefix = "/".join(key_parts)
 
@@ -370,9 +317,7 @@ class S3StorageClient:
                 },
             )
 
-            # Upload based on path type
             if local_path.is_file():
-                # Single file: check if matches UUID (if filtering enabled)
                 if match_uuid and not self._filename_matches_uuid(local_path.name, session_id):
                     log("File skipped (UUID not in name)", {"file": local_path.name})
                     files_uploaded = 0
@@ -409,7 +354,6 @@ class S3StorageClient:
             )
 
         except Exception as e:
-            # Silent failure - log but don't raise
             error_msg = str(e)
             log(
                 "S3 upload failed",
@@ -456,7 +400,6 @@ class S3StorageClient:
         Returns:
             Number of files uploaded (1 on success)
         """
-        # S3 key: prefix/filename
         s3_key = f"{s3_prefix}/{file_path.name}"
 
         log(
@@ -474,7 +417,6 @@ class S3StorageClient:
             "Key": s3_key,
         }
 
-        # Add metadata if provided
         if metadata:
             put_params["Metadata"] = metadata
 
@@ -508,23 +450,18 @@ class S3StorageClient:
         files_uploaded = 0
         files_skipped = 0
 
-        # Walk directory tree
         for file_path in dir_path.rglob("*"):
-            # Skip directories (only upload files)
             if not file_path.is_file():
                 continue
 
-            # Check UUID match if filtering enabled
             if match_uuid and not self._filename_matches_uuid(file_path.name, session_id):
                 log("File skipped (UUID not in name)", {"file": file_path.name})
                 files_skipped += 1
                 continue
 
-            # Calculate relative path from dir_path
             relative_path = file_path.relative_to(dir_path)
 
-            # S3 key: prefix/relative/path/to/file
-            s3_key = f"{s3_prefix}/{relative_path}".replace("\\", "/")  # Handle Windows paths
+            s3_key = f"{s3_prefix}/{relative_path}".replace("\\", "/")
 
             log(
                 "Uploading file",
@@ -542,7 +479,6 @@ class S3StorageClient:
                     "Key": s3_key,
                 }
 
-                # Add metadata if provided
                 if metadata:
                     put_params["Metadata"] = metadata
 
@@ -572,11 +508,6 @@ class S3StorageClient:
             )
 
         return files_uploaded
-
-
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
 
 
 def upload_path(
@@ -620,7 +551,6 @@ def upload_path(
             enrich=True  # Loads conversation_id, platform, etc. from state
         )
     """
-    # Load metadata from state if enrich=True and no explicit metadata
     if enrich and not metadata:
         state = load_state_for_session(session_id)
         metadata = state_to_s3_metadata(state)
@@ -629,13 +559,11 @@ def upload_path(
     return client.upload_path(session_id, path, prefix, match_uuid, metadata)
 
 
-# =============================================================================
-# CLI INTERFACE
-# =============================================================================
-
-
 def main():
-    """CLI entry point for S3 storage operations."""
+    """CLI entry point for S3 storage operations.
+
+    Hook mode reports an error as JSON and exits 0, so a failed upload never breaks Claude Code.
+    """
     if len(sys.argv) < 2:
         print("Usage: /app/hooks/integrations/storage.py <command> [args]")
         print("")
@@ -694,33 +622,27 @@ def main():
     command = sys.argv[1]
 
     if command == "check":
-        # Check configuration status
         integration = StorageIntegration()
         as_json = "--json" in sys.argv
         integration.print_status(as_json=as_json)
         sys.exit(0 if integration.is_configured else 1)
 
     elif command == "hook":
-        # Hook mode: Read from stdin to get session_id
         try:
-            # Check for demo flag (testing mode)
             if "--demo" in sys.argv:
                 log("[DEMO] Storage hook triggered - S3 integration ready")
                 sys.exit(0)
 
-            # Early validation - fail loudly if not configured
             integration = StorageIntegration()
             if not integration.is_configured:
                 missing = integration.get_missing_required()
                 error_msg = f"Storage hook SKIPPED - missing env vars: {missing}"
                 log(error_msg, {"integration": "storage", "missing": missing})
-                # Print to STDOUT so Claude Code shows it
                 print(f"\n{'=' * 60}")
                 print(f"[STORAGE] ERROR: {error_msg}")
                 print(f"{'=' * 60}\n")
-                sys.exit(0)  # Exit cleanly but warn
+                sys.exit(0)
 
-            # Parse flags
             path = None
             prefix = ""
             match_uuid = False
@@ -741,7 +663,6 @@ def main():
                     enrich = True
                     i += 1
                 elif sys.argv[i] == "--demo":
-                    # Already handled above, skip
                     i += 1
                 else:
                     i += 1
@@ -757,7 +678,6 @@ def main():
                 )
                 sys.exit(1)
 
-            # Read Stop event from stdin
             payload = json.load(sys.stdin)
             session_id = payload.get("session_id", "")
 
@@ -772,7 +692,6 @@ def main():
                 )
                 sys.exit(1)
 
-            # Upload (with optional metadata enrichment)
             result = upload_path(session_id, path, prefix, match_uuid=match_uuid, enrich=enrich)
 
             print(
@@ -791,7 +710,6 @@ def main():
             sys.exit(0 if result.success else 1)
 
         except Exception as e:
-            # Silent failure for hooks
             print(
                 json.dumps(
                     {
@@ -800,7 +718,7 @@ def main():
                     }
                 )
             )
-            sys.exit(0)  # Exit 0 to not break Claude Code
+            sys.exit(0)
 
     elif command == "upload":
         if len(sys.argv) < 3:
@@ -812,7 +730,6 @@ def main():
 
         session_id = sys.argv[2]
 
-        # Parse flags
         path = None
         prefix = ""
         match_uuid = False

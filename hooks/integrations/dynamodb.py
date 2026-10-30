@@ -13,27 +13,10 @@ Environment Variables:
     IS_EVALUATION: Skip write in evaluation mode (default: false)
 
 Usage:
-    # Python import
-    from hooks.integrations.dynamodb import put_item
-
-    # Simple write (PK from payload)
-    result = put_item({"session_id": "uuid-123", "status": "success"})
-
-    # With state enrichment
-    result = put_item(
-        {"session_id": "uuid-123", "transcript_path": "/path"},
-        enrich_from_state=True
-    )
-
-    # CLI - Check configuration
-    /app/hooks/integrations/dynamodb.py check [--json]
-
-    # CLI - As hook (reads from stdin)
-    /app/hooks/integrations/dynamodb.py hook < stop_event.json
-    /app/hooks/integrations/dynamodb.py hook --demo
-
-    # CLI - Direct write
-    /app/hooks/integrations/dynamodb.py put --data '{"session_id": "uuid-123", "key": "value"}'
+    put_item({"session_id": "uuid-123", "status": "success"}, enrich_from_state=True)
+    dynamodb.py check [--json]
+    dynamodb.py hook [--demo] < stop_event.json
+    dynamodb.py put --data '{"session_id": "uuid-123", "key": "value"}'
 """
 
 import json
@@ -45,15 +28,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Add parent directories to path for direct script execution
 _script_dir = Path(__file__).resolve().parent
-_app_dir = _script_dir.parent.parent  # /app
+_app_dir = _script_dir.parent.parent
 if str(_app_dir) not in sys.path:
     sys.path.insert(0, str(_app_dir))
 
 try:
     import boto3
-    from botocore.config import Config  # noqa: F401 (used by boto3 resource calls)
+    from botocore.config import Config  # noqa: F401
 
     BOTO3_AVAILABLE = True
 except ImportError:
@@ -61,10 +43,6 @@ except ImportError:
 
 from hooks.common import get_correlation_id, log
 from hooks.integrations.base import IntegrationBase, IntegrationRegistry
-
-# =============================================================================
-# INTEGRATION DEFINITION
-# =============================================================================
 
 
 @IntegrationRegistry.register
@@ -84,17 +62,8 @@ class DynamoDBIntegration(IntegrationBase):
     }
 
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
 DEFAULT_STATE_FILE = Path.home() / "conversation_map.json"
 DEFAULT_PARTITION_KEY = "session_id"
-
-
-# =============================================================================
-# DATA CLASSES
-# =============================================================================
 
 
 @dataclass
@@ -108,11 +77,6 @@ class DynamoDBResult:
     sort_key: Optional[str] = None
     sort_key_value: Optional[str] = None
     error: Optional[str] = None
-
-
-# =============================================================================
-# STATE MANAGEMENT
-# =============================================================================
 
 
 def load_state(session_id: str, state_file: Optional[Path] = None) -> Dict[str, Any]:
@@ -134,13 +98,11 @@ def load_state(session_id: str, state_file: Optional[Path] = None) -> Dict[str, 
         if not state_path.exists():
             return {}
 
-        # Use correlation ID (external UUID) for lookup
         correlation_id = get_correlation_id(session_id)
 
         mappings = json.loads(state_path.read_text())
         state = mappings.get(correlation_id, {})
 
-        # Handle legacy format (string only) - convert to dict
         if isinstance(state, str):
             return {"conversation_id": state, "wait": False}
 
@@ -149,11 +111,6 @@ def load_state(session_id: str, state_file: Optional[Path] = None) -> Dict[str, 
     except Exception as e:
         log("Failed to load state", {"session_id": session_id, "error": str(e)})
         return {}
-
-
-# =============================================================================
-# DYNAMODB CLIENT
-# =============================================================================
 
 
 class DynamoDBClient:
@@ -189,7 +146,6 @@ class DynamoDBClient:
         self._dynamodb_client = None
         self._dynamodb_resource = None
 
-        # Check if we should skip (evaluation mode)
         self._is_evaluation = os.getenv("IS_EVALUATION", "false").lower() == "true"
 
     @classmethod
@@ -236,7 +192,6 @@ class DynamoDBClient:
 
     def should_skip(self) -> bool:
         """Check if write should be skipped."""
-        # Skip if no table name configured
         if not self._table_name:
             log(
                 "DynamoDB put_item skipped: DYNAMODB_TABLE_NAME not configured",
@@ -244,7 +199,6 @@ class DynamoDBClient:
             )
             return True
 
-        # Skip if evaluation mode
         if self._skip_evaluation and self._is_evaluation:
             log(
                 "DynamoDB put_item skipped: IS_EVALUATION=true",
@@ -261,6 +215,11 @@ class DynamoDBClient:
     ) -> DynamoDBResult:
         """Write an item to DynamoDB table.
 
+        State fields fill gaps in the payload and payload keys win. A state with
+        wait true skips the write, because the caller takes a synchronous
+        response. A missing sort key value defaults to the current UTC time.
+        Failures are logged and returned, never raised.
+
         Args:
             payload: Item data to write (must contain partition key)
             enrich_from_state: If True and payload has 'session_id',
@@ -269,7 +228,6 @@ class DynamoDBClient:
         Returns:
             DynamoDBResult with success status and key info
         """
-        # Check if we should skip write
         if self.should_skip():
             return DynamoDBResult(
                 success=True,
@@ -277,14 +235,12 @@ class DynamoDBClient:
             )
 
         try:
-            # Enrich with state if requested
             enriched_payload = payload.copy()
 
             if enrich_from_state and "session_id" in payload:
                 session_id = payload["session_id"]
                 state = load_state(session_id, self._state_file)
 
-                # Check if wait=true (skip DynamoDB for synchronous responses)
                 if state.get("wait", False):
                     log(
                         "Skipping DynamoDB put_item",
@@ -298,7 +254,6 @@ class DynamoDBClient:
                         table_name=self._table_name,
                     )
 
-                # Merge state into payload (payload overrides state)
                 enriched_payload = {**state, **payload}
 
                 log(
@@ -309,7 +264,6 @@ class DynamoDBClient:
                     },
                 )
 
-            # Validate partition key exists
             pk_value = enriched_payload.get(self._partition_key)
             if not pk_value:
                 error_msg = f"Partition key '{self._partition_key}' not found in payload"
@@ -321,12 +275,10 @@ class DynamoDBClient:
                     error=error_msg,
                 )
 
-            # Validate sort key if configured
             sk_value = None
             if self._sort_key:
                 sk_value = enriched_payload.get(self._sort_key)
                 if not sk_value:
-                    # Auto-generate timestamp for sort key if not provided
                     sk_value = datetime.now(timezone.utc).isoformat()
                     enriched_payload[self._sort_key] = sk_value
                     log(
@@ -334,7 +286,6 @@ class DynamoDBClient:
                         {"sort_key": self._sort_key, "value": sk_value},
                     )
 
-            # Add metadata
             enriched_payload["_created_at"] = datetime.now(timezone.utc).isoformat()
             enriched_payload["_integration"] = "dynamodb"
 
@@ -350,7 +301,6 @@ class DynamoDBClient:
                 },
             )
 
-            # Write to DynamoDB
             self.table.put_item(Item=enriched_payload)
 
             log(
@@ -371,7 +321,6 @@ class DynamoDBClient:
             )
 
         except Exception as e:
-            # Silent failure - log but don't raise
             error_msg = str(e)
             log(
                 "DynamoDB put_item failed",
@@ -453,11 +402,6 @@ class DynamoDBClient:
                 },
             )
             return []
-
-
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
 
 
 def put_item(
@@ -638,11 +582,6 @@ def poll_for_item(
     return None
 
 
-# =============================================================================
-# TRANSCRIPT HELPER
-# =============================================================================
-
-
 def get_last_assistant_response(transcript_path: str) -> Optional[str]:
     """Extract the last assistant response from transcript JSONL."""
     try:
@@ -666,11 +605,6 @@ def get_last_assistant_response(transcript_path: str) -> Optional[str]:
         return last_response
     except Exception:
         return None
-
-
-# =============================================================================
-# CLI INTERFACE
-# =============================================================================
 
 
 def main():
@@ -734,52 +668,43 @@ def main():
     command = sys.argv[1]
 
     if command == "check":
-        # Check configuration status
         integration = DynamoDBIntegration()
         as_json = "--json" in sys.argv
         integration.print_status(as_json=as_json)
         sys.exit(0 if integration.is_configured else 1)
 
     elif command == "hook":
-        # Hook mode: Read from stdin, write to DynamoDB
         try:
-            # Check for demo flag (testing mode)
             if "--demo" in sys.argv:
                 log("[DEMO] DynamoDB hook triggered - DynamoDB integration ready")
                 sys.exit(0)
 
-            # Early validation - fail loudly if not configured
             integration = DynamoDBIntegration()
             if not integration.is_configured:
                 missing = integration.get_missing_required()
                 error_msg = f"DynamoDB hook SKIPPED - missing env vars: {missing}"
                 log(error_msg, {"integration": "dynamodb", "missing": missing})
-                # Print to STDOUT so Claude Code shows it
                 print(f"\n{'=' * 60}")
                 print(f"[DYNAMODB] ERROR: {error_msg}")
                 print(f"{'=' * 60}\n")
-                sys.exit(0)  # Exit cleanly but warn
+                sys.exit(0)
 
             payload = json.load(sys.stdin)
 
-            # Extract last assistant response from transcript
             transcript_path = payload.get("transcript_path", "")
             if transcript_path:
                 last_response = get_last_assistant_response(transcript_path)
                 if last_response:
                     payload["last_response"] = last_response
 
-            # Add integration identifier
             payload["integration"] = "dynamodb"
 
-            # Write with state enrichment
             put_item(payload, enrich_from_state=True)
             sys.exit(0)
         except Exception:
-            sys.exit(0)  # Silent failure for hooks
+            sys.exit(0)
 
     elif command == "put":
-        # Parse --data flag
         data_json = None
         enrich = "--enrich" in sys.argv or "-e" in sys.argv
 
@@ -851,7 +776,6 @@ def main():
             sys.exit(1)
 
     elif command == "query":
-        # Query items by partition key
         pk_value = None
         pk_name = None
         limit = 10
@@ -905,7 +829,6 @@ def main():
             sys.exit(1)
 
     elif command == "poll":
-        # Poll until item is ready
         pk_value = None
         pk_name = None
         ready_field = "status"
