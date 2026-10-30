@@ -9,7 +9,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def inbox(monkeypatch):
+def inbox(monkeypatch: pytest.MonkeyPatch) -> InboxStore:
     import fakeredis
 
     store = InboxStore(fakeredis.FakeRedis(decode_responses=True))
@@ -20,15 +20,21 @@ def inbox(monkeypatch):
     store.seats.occupy("master@crew", master, 1)
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", sender)
+    monkeypatch.setattr(
+        "scripts.inbox.addresses.get_active_sessions",
+        lambda **kwargs: {"sender-session": {"name": sender}, "master-session": {"name": master}},
+    )
     return store
 
 
-def test_unknown_destination_is_refused_with_sender_swarm_addresses_and_nothing_stored(inbox, capsys):
+def test_unknown_destination_is_refused_with_sender_swarm_addresses_and_nothing_stored(
+    inbox: InboxStore, capsys: pytest.CaptureFixture[str]
+) -> None:
     before = sorted(inbox.redis.keys())
     assert cli.main(["send", "swarm", "status"]) == 1
     error = capsys.readouterr().err
     assert "unknown inbox address swarm" in error
-    for address in ("engineer@123456-0001", "master@123456-0001", "eng-1@crew", "master@crew", "operator"):
+    for address in ("eng-1@crew", "master@crew"):
         assert address in error
     assert sorted(inbox.redis.keys()) == before
 
@@ -84,3 +90,38 @@ def test_reply_to_a_registered_sender_still_closes_the_original(inbox, capsys):
     result = json.loads(capsys.readouterr().out)
     assert result["to"] == "master@123456-0001"
     assert inbox.get(item.id).state == "done"
+
+
+@pytest.mark.parametrize("command", ["send", "reply"])
+def test_unknown_address_refusal_is_bounded_and_lists_only_live_seats(
+    inbox: InboxStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], command: str
+) -> None:
+    historical = [inbox.names.next("crew", "eng") for _ in range(2000)]
+    inbox.seats.occupy("eng-2@crew", historical[-1], 1)
+    active = {"master-session": {"name": "master@123456-0001"}}
+    for index in range(20):
+        name = inbox.names.next("crew", "ci")
+        inbox.seats.occupy(f"ci-{index + 1}@crew", name, 1)
+        active[f"session-{index}"] = {"name": name}
+    monkeypatch.setattr("scripts.inbox.addresses.get_active_sessions", lambda **kwargs: active)
+    args = ["send", "absent-recipient", "hello"]
+    if command == "reply":
+        item = inbox.send("absent-recipient", "engineer@123456-0001", "question")
+        args = ["reply", item.id, "answer"]
+    assert cli.main(args) == 1
+    error = capsys.readouterr().err
+    assert "unknown inbox address absent-recipient" in error
+    assert len(error) < 500
+    suggestions = error.strip().split("live seats: ", 1)[1].split(", ")
+    assert 1 <= len(suggestions) <= 8
+    assert all(seat.startswith("ci-") and seat.endswith("@crew") or seat == "master@crew" for seat in suggestions)
+    assert "eng-2@crew" not in error
+    assert not any(name in error for name in historical)
+
+
+def test_unknown_address_without_live_seats_has_no_historical_suggestions(
+    inbox: InboxStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {})
+    assert cli.main(["send", "absent-recipient", "hello"]) == 1
+    assert capsys.readouterr().err.strip() == "unknown inbox address absent-recipient; live seats: none"
