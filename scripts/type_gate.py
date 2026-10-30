@@ -1,0 +1,190 @@
+"""Strict type gate: basedpyright error totals per file may only shrink against the base's baseline."""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+BASEDPYRIGHT_VERSION = "1.40.2"
+BASELINE = Path("tests/TYPE_BASELINE.json")
+CONFIG = {
+    "include": ["hooks", "scripts", "tests"],
+    "pythonVersion": "3.12",
+    "pythonPlatform": "Linux",
+    "typeCheckingMode": "standard",
+    "strict": ["hooks", "scripts"],
+}
+_BASEDPYRIGHT = (sys.executable, "-I", "-m", "basedpyright")
+_NODE_OPTIONS = "--max-old-space-size=6656"
+
+
+class GradeError(Exception):
+    pass
+
+
+def _basedpyright_version() -> str:
+    """Return the installed basedpyright version, or an empty string when it is missing."""
+    result = subprocess.run([*_BASEDPYRIGHT, "--version"], capture_output=True, text=True)
+    return result.stdout.partition("\n")[0].strip().removeprefix("basedpyright ")
+
+
+def config_errors(head: Path) -> list[str]:
+    """Return an error when the head's basedpyright settings differ from the gate's."""
+    settings = tomllib.loads((head / "pyproject.toml").read_text()).get("tool", {}).get("basedpyright")
+    if settings == CONFIG:
+        return []
+    return [f"pyproject.toml [tool.basedpyright] is {settings!r}; the type gate grades only with {CONFIG!r}"]
+
+
+def sources(head: Path) -> list[str]:
+    """Return every checked source under the included folders, sorted so each run checks them in one order.
+
+    basedpyright infers some types differently depending on which file it checks first, and the order it lists a
+    folder in follows the filesystem, so an unsorted run can count other errors on another runner.
+    """
+    return sorted(
+        path.relative_to(head).as_posix()
+        for folder in CONFIG["include"]
+        for path in (head / folder).rglob("*.py*")
+        if path.suffix in (".py", ".pyi")
+        and not any(part.startswith(".") or part == "__pycache__" for part in path.relative_to(head).parts)
+    )
+
+
+def measure(head: Path) -> dict[str, int]:
+    """Run basedpyright over the head's sources in sorted order and count its errors per file.
+
+    The checker empties its type cache once the Node heap passes ninety percent of its limit, and when that happens
+    varies between runs, so the heap limit is raised well above what the check uses.
+    """
+    result = subprocess.run(
+        [
+            *_BASEDPYRIGHT,
+            "--outputjson",
+            "--project",
+            str(head / "pyproject.toml"),
+            "--pythonpath",
+            sys.executable,
+            *sources(head),
+        ],
+        cwd=head,
+        env={**os.environ, "NODE_OPTIONS": _NODE_OPTIONS},
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode not in (0, 1):
+        raise GradeError(f"basedpyright exited {result.returncode}: {result.stderr.strip() or result.stdout.strip()}")
+    try:
+        report = json.loads(result.stdout)
+    except ValueError as exc:
+        raise GradeError(f"basedpyright printed no report: {result.stderr.strip()}") from exc
+    if not report["summary"]["filesAnalyzed"]:
+        raise GradeError("basedpyright analysed no files")
+    root = head.resolve()
+    counts: dict[str, int] = {}
+    for diagnostic in report["generalDiagnostics"]:
+        if diagnostic["severity"] == "error":
+            path = Path(diagnostic["file"]).resolve().relative_to(root).as_posix()
+            counts[path] = counts.get(path, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def load(tree: Path) -> dict[str, int] | None:
+    """Return the baseline recorded in a tree, or None when it has none."""
+    path = tree / BASELINE
+    return json.loads(path.read_text()) if path.is_file() else None
+
+
+def changed(base: Path, head: Path, paths: set[str]) -> set[str]:
+    """Return the paths whose contents differ between the base and head trees."""
+    return {path for path in paths if _contents(base / path) != _contents(head / path)}
+
+
+def _contents(path: Path) -> bytes | None:
+    """Return a file's bytes, or None when it does not exist."""
+    return path.read_bytes() if path.is_file() else None
+
+
+def write(head: Path) -> None:
+    """Record the head's measurement as its baseline."""
+    (head / BASELINE).write_text(json.dumps(measure(head), indent=2) + "\n")
+
+
+def grade(
+    base: dict[str, int], head: dict[str, int], recorded: dict[str, int] | None, touched: set[str] | None = None
+) -> list[str]:
+    """Return every changed file whose errors grew against the base, and drift between the head and its baseline.
+
+    Growth and drift are graded on files the head changes, drift also on baseline entries it edits; with ``touched``
+    None, on every file. An untouched file keeps the count the base recorded until a change to it, or a baseline
+    refresh from the gate's own measurement, rewrites it, so one merge order cannot turn every later head red.
+    """
+    errors = [
+        f"{path} has {count} type errors, more than the {base.get(path, 0)} the base allows"
+        for path, count in head.items()
+        if count > base.get(path, 0) and (touched is None or path in touched)
+    ]
+    recorded = recorded or {}
+    errors += [
+        f"{BASELINE} records {recorded.get(path, 0)} type errors in {path}, the head has {head.get(path, 0)}; "
+        "run python -m scripts.type_gate --write"
+        for path in sorted(set(recorded) | set(head))
+        if recorded.get(path, 0) != head.get(path, 0)
+        and (touched is None or path in touched or recorded.get(path, 0) != base.get(path, 0))
+    ]
+    return errors
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Return the command line parser for the gate."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base", type=Path)
+    parser.add_argument("--head", type=Path, default=Path.cwd())
+    parser.add_argument("--measured", type=Path)
+    parser.add_argument("--write", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Grade the head against the base, or record the head's baseline with --write."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not (args.write or args.base):
+        parser.error("grading needs --base")
+    if (version := _basedpyright_version()) != BASEDPYRIGHT_VERSION:
+        print(f"::error::The type gate needs basedpyright {BASEDPYRIGHT_VERSION}, found {version or 'none'}.")
+        return 1
+    try:
+        if errors := config_errors(args.head):
+            print(f"::error::{errors[0]}")
+            return 1
+        if args.write:
+            write(args.head)
+            return 0
+        head = measure(args.head)
+        recorded = load(args.head)
+        base = load(args.base)
+    except (GradeError, ValueError, KeyError, OSError) as exc:
+        print(f"::error::{exc}")
+        return 1
+    if args.measured:
+        args.measured.parent.mkdir(parents=True, exist_ok=True)
+        args.measured.write_text(json.dumps(head, indent=2) + "\n")
+    touched = None
+    if base is None:
+        print(f"::notice::The base carries no {BASELINE}; this head introduces it.")
+        base = recorded or {}
+    else:
+        touched = changed(args.base, args.head, set(head) | set(recorded or {}))
+    errors = grade(base, head, recorded, touched)
+    print(f"{sum(head.values())} type errors in {len(head)} files, {sum(base.values())} allowed, {len(errors)} errors")
+    for error in errors:
+        print(f"::error::{error}")
+    return 1 if errors else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

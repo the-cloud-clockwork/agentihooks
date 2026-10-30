@@ -7,7 +7,8 @@ from pathlib import Path
 from scripts.handoff import check as handoff_check
 from scripts.handoff.resolve import Resolver
 from scripts.swarm import apply_wait
-from scripts.swarm.store import SwarmError
+from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
 WORK_KINDS = ("ops", "tune", "troubleshoot", "research")
@@ -16,14 +17,14 @@ SSH_UNVERIFIED = ("Host key verification failed", "Permission denied (publickey"
 WT_SCRIPT = Path(__file__).resolve().parents[2] / "profiles" / "package" / "skills" / "worktree" / "scripts" / "wt.sh"
 
 
-def shell(argv: list[str]) -> subprocess.CompletedProcess:
+def shell(argv: list[str]) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(argv, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError) as exc:
         raise SwarmError(f"{' '.join(argv[:2])} could not run: {exc}") from exc
 
 
-def _out(argv, refused):
+def _out(argv: list[str], refused: str) -> str:
     done = shell(argv)
     if done.returncode != 0:
         raise SwarmError(f"{refused}: {done.stderr.strip()}")
@@ -312,7 +313,7 @@ def _restack_branch() -> str:
     return branch
 
 
-def _restack_base(row, context):
+def _restack_base(row: dict, context: list[str]) -> tuple[str, Path]:
     ref = f"refs/remotes/origin/{row.get('branch', '')}"
     if shell(["git", "show-ref", "--verify", "--quiet", ref]).returncode != 0:
         ref = f"refs/heads/{row.get('branch', '')}"
@@ -320,6 +321,7 @@ def _restack_base(row, context):
         ["git", "rev-parse", "--verify", "--end-of-options", f"{row['stacked_base']}^{{commit}}"],
         "cannot resolve the stacked base",
     )
+    base = _completed(base)
     path = Path(_out(["git", "rev-parse", "--git-path", "agentihooks-restack.json"], "cannot locate restack state"))
     if (
         shell(["git", "merge-base", "--is-ancestor", base, "HEAD"]).returncode == 0
@@ -339,6 +341,43 @@ def _restack_base(row, context):
     raise SwarmError("the stacked base is not in this branch; use a worktree cut from the parked branch")
 
 
+def _contains(candidate: str, base: str) -> bool:
+    merged = shell(["git", "merge-tree", "--write-tree", candidate, base])
+    return merged.returncode == 0 and merged.stdout.strip() == _out(
+        ["git", "rev-parse", f"{candidate}^{{tree}}"], "cannot resolve the completed rebase tree"
+    )
+
+
+def _completed(base: str) -> str:
+    """Return the dev commit containing completed dependency work after a manual rebase."""
+    landed = _out(["git", "merge-base", "HEAD", "origin/dev"], "the task shares no history with dev")
+    if shell(["git", "merge-base", "--is-ancestor", base, landed]).returncode == 0:
+        return landed
+    if shell(["git", "merge-base", "--is-ancestor", base, "HEAD"]).returncode == 0:
+        return base
+    if _contains(landed, base):
+        return landed
+    fork = _out(["git", "merge-base", base, landed], "the stacked base shares no history with dev")
+    changed = shell(["git", "diff", "--name-only", "-z", fork, base])
+    if changed.returncode != 0:
+        raise SwarmError(f"cannot list dependency files: {changed.stderr.strip()}")
+    history = _out(
+        [
+            "git",
+            "--literal-pathspecs",
+            "rev-list",
+            f"{fork}..{landed}",
+            "--",
+            *changed.stdout.removesuffix("\0").split("\0"),
+        ],
+        "cannot read completed dependency history",
+    )
+    for candidate in history.splitlines():
+        if _contains(candidate, base):
+            return landed
+    return base
+
+
 def _rebase(base: str) -> None:
     done = shell(["git", "rebase", "--onto", "origin/dev", base])
     if done.returncode != 0:
@@ -349,7 +388,7 @@ def _rebase(base: str) -> None:
         )
 
 
-def restack(slug: str, agent, ledger) -> dict:
+def restack(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
     rows = {t["id"]: t for t in ledger.state(slug)["tasks"]}
     row = rows.get(agent.task) or {}
     if not row.get("parked_on") or not row.get("stacked_base"):

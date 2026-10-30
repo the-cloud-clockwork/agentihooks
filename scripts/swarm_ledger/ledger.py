@@ -109,6 +109,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm_ledger import ledger_route
 
@@ -262,13 +263,14 @@ def ledger_remote_auth_failures_total() -> int:
     return sum(AUTH_FAILURES.values())
 
 
-def call(slug: str, ops: list[dict] | None = None, service: bool = False) -> dict:
+def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict:
     if ledger_link.remote(slug=slug):
         return remote_call(slug, ops, service)
     talking = talk(ops)
+    joining = bool(ops) and len(ops) == 1 and ops[0]["op"] == "join"
     if outbox.waiting("ledger"):
         outbox.flush(None)
-    if ops and not (len(ops) == 1 and ops[0]["op"] == "join") and outbox.waiting("ledger"):
+    if ops and not joining and outbox.waiting("ledger"):
         if not talking:
             sys.exit(
                 f"ledger talk queued while the server was down still waits in {outbox.path()}; retry once it lands"
@@ -290,12 +292,12 @@ def call(slug: str, ops: list[dict] | None = None, service: bool = False) -> dic
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
     except OSError as exc:
-        if talking:
+        if talking or joining:
             return queue(slug, ops, service)
         sys.exit(f"ledger server not answering on {base()}: {exc}")
 
 
-def talk(ops):
+def talk(ops: list[dict[str, Any]] | None) -> bool:
     return bool(ops) and all(
         o["op"] in TALK_OPS or (o["op"] == "add" and "by" in o and not o.get("attachments")) for o in ops
     )

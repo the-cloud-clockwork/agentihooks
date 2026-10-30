@@ -51,11 +51,6 @@ def _get_summarizer_model() -> str:
     return os.getenv("VOICE_SUMMARIZER_MODEL", _DEFAULT_SUMMARIZER_MODEL)
 
 
-# ---------------------------------------------------------------------------
-# Quota management (global, auto-expires after 1 hour)
-# ---------------------------------------------------------------------------
-
-
 def _write_quota_flag() -> None:
     _FLAG_DIR.mkdir(parents=True, exist_ok=True)
     _QUOTA_FLAG.write_text(str(int(time.time())))
@@ -84,11 +79,6 @@ def check_quota_banner(session_id: str) -> str | None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# Rate limiting (max 1 speak per COOLDOWN_SECONDS)
-# ---------------------------------------------------------------------------
-
-
 def _check_cooldown() -> bool:
     try:
         if not _LAST_SPOKE_FLAG.exists():
@@ -107,22 +97,12 @@ def _record_spoke() -> None:
         pass
 
 
-# ---------------------------------------------------------------------------
-# Signal detection
-# ---------------------------------------------------------------------------
-
-
 def contains_enable_signal(text: str) -> bool:
     return bool(_RE_ENABLE.search(text))
 
 
 def contains_disable_signal(text: str) -> bool:
     return bool(_RE_DISABLE.search(text))
-
-
-# ---------------------------------------------------------------------------
-# Flag management (session-scoped, no TTL)
-# ---------------------------------------------------------------------------
 
 
 def set_voice_enabled(session_id: str) -> None:
@@ -185,11 +165,6 @@ def cleanup_stale_flags(max_age_seconds: int = 86400) -> int:
     return removed
 
 
-# ---------------------------------------------------------------------------
-# Haiku summarizer (CLI, no --bare — uses existing OAuth auth)
-# ---------------------------------------------------------------------------
-
-
 def _summarize(text: str) -> str | None:
     """Summarize ``text`` into one short sentence via the ``claude`` CLI.
 
@@ -198,12 +173,11 @@ def _summarize(text: str) -> str | None:
     long input). Override with VOICE_SUMMARIZER_MODEL env var.
     """
     clamped = text[:1500] if len(text) > 1500 else text
-    # Strip noise that shouldn't be spoken
-    clamped = re.sub(r"\b[0-9a-f]{7,40}\b", "", clamped)  # git hashes
-    clamped = re.sub(r"```[\s\S]*?```", "", clamped)  # code blocks
-    clamped = re.sub(r"`[^`]+`", "", clamped)  # inline code
-    clamped = re.sub(r"https?://\S+", "", clamped)  # URLs
-    clamped = re.sub(r"\s+", " ", clamped).strip()  # collapse whitespace
+    clamped = re.sub(r"\b[0-9a-f]{7,40}\b", "", clamped)
+    clamped = re.sub(r"```[\s\S]*?```", "", clamped)
+    clamped = re.sub(r"`[^`]+`", "", clamped)
+    clamped = re.sub(r"https?://\S+", "", clamped)
+    clamped = re.sub(r"\s+", " ", clamped).strip()
     prefix = _get_summarizer_prefix()
     model = _get_summarizer_model()
     prompt = f"{prefix}{clamped}"
@@ -239,11 +213,6 @@ def _summarize(text: str) -> str | None:
     except Exception as e:
         log("voice_output: summarizer failed", {"model": model, "error": str(e)})
         return None
-
-
-# ---------------------------------------------------------------------------
-# TTS + playback
-# ---------------------------------------------------------------------------
 
 
 _wsl2_cache: bool | None = None
@@ -425,12 +394,8 @@ def _speak_and_play(text: str, voice_service_url: str) -> bool:
         return False
 
 
-# ---------------------------------------------------------------------------
-# Entry point (called from on_stop)
-# ---------------------------------------------------------------------------
-
-
 def maybe_speak(session_id: str, last_assistant_message: str) -> None:
+    """Speak a summary of the last message, detached through fork_and_call so the Stop hook never waits on the child."""
     from hooks.config import VOICE_ENABLED, VOICE_SERVICE_URL
 
     if not VOICE_ENABLED:
@@ -454,9 +419,6 @@ def maybe_speak(session_id: str, last_assistant_message: str) -> None:
     if len(text) > 5000:
         return
 
-    # Dispatch through fork_and_call: double-fork detaches from the hook
-    # parent's stdio, so Claude Code's harness doesn't wait on child EOF.
-    # This was the ~8s "stuck-on-stop" lag even though the hook returned.
     from hooks._async import fork_and_call
 
     fork_and_call(

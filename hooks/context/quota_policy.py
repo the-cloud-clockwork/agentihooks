@@ -146,11 +146,6 @@ def decide(
     return made("handoff", trigger, api) if api and not push else made("push" if push else "stop", trigger)
 
 
-# ---------------------------------------------------------------------------
-# Inputs
-# ---------------------------------------------------------------------------
-
-
 def _codex_windows(session_id: str) -> tuple[float, float, float | None, float | None] | None:
     from scripts.codex_quota import session_quota
 
@@ -329,11 +324,6 @@ def reserved(candidates: list[Candidate], held: "Reservation | None") -> list[Ca
     return [replace(c, reserved=True) if held.closes(c.account, c.week_used) else c for c in candidates]
 
 
-# ---------------------------------------------------------------------------
-# Operator override: "keep pushing"
-# ---------------------------------------------------------------------------
-
-
 def _push_path(session_id: str) -> Path:
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in session_id)
     return AGENTIHOOKS_HOME / "quota_policy" / f"{safe}.push"
@@ -357,11 +347,6 @@ def record_push_signal(session_id: str, prompt: str) -> bool:
 def clear_session_state(session_id: str) -> None:
     if session_id:
         _push_path(session_id).unlink(missing_ok=True)
-
-
-# ---------------------------------------------------------------------------
-# Directives
-# ---------------------------------------------------------------------------
 
 
 def _pct(value: float) -> str:
@@ -397,11 +382,11 @@ def _others_text(d: Decision) -> str:
 
 
 def _repo_slug(cwd: str) -> str:
+    """Return the repo name for cwd; a linked worktree keeps its repo name one level up."""
     path = Path(cwd or os.getcwd())
     for parent in (path, *path.parents):
         git = parent / ".git"
         if git.is_file():
-            # A linked worktree (~/dev/worktrees/<repo>/<name>) keeps its repo name one level up.
             return parent.parent.name
         if git.is_dir():
             return parent.name
@@ -509,11 +494,6 @@ def prompt_context(session_id: str, cwd: str) -> str | None:
     return render(d, session_id, cwd)
 
 
-# ---------------------------------------------------------------------------
-# Early warning: Codex sessions outside a swarm, once per account, window and reset
-# ---------------------------------------------------------------------------
-
-
 def _claim_warning(account: str, window: str, reset: float | None) -> bool:
     path = AGENTIHOOKS_HOME / "quota_policy" / "warned" / f"codex-{account}-{window}"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -538,6 +518,7 @@ def _warning_text(account: str, window: str, used: float, reset: float | None, h
 
 
 def early_warning(session_id: str) -> str | None:
+    """Warn a Codex session outside a swarm once per account, window and reset."""
     from hooks.context.account_sessions import API_ACCOUNT, agent_pid, session_account
 
     if os.environ.get("AGENTIHOOKS_TARGET") != "codex" or os.environ.get("AGENTIHOOKS_SWARM"):

@@ -673,7 +673,7 @@ class SQLiteLedgerRepository:
             self._remember(slug, written)
         return (written.mutable() if copy_state else written.state), rejected
 
-    def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
+    def _write(self, connection: sqlite3.Connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
         meta, previous = state["_meta"], entry.state["_meta"]
         meta["task_revision"] = (
             meta["rev"]
@@ -782,14 +782,6 @@ class SQLiteLedgerRepository:
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
             return hierarchy.read(connection, slug, read, node)
-
-    def events_since(self, slug: str, revision: int) -> list:
-        self._adopt(slug)
-        with self.connect() as connection:
-            connection.execute(BEGIN)
-            if connection.execute(STORED, (slug,)).fetchone() is None:
-                raise Missing(slug)
-            return read_events(connection, slug, revision)
 
     def summaries(self, connection=None) -> list:
         """Every stored ledger's summary with its bin facts, newest write first."""
