@@ -19,6 +19,9 @@ def test_status_batches_account_discovery_without_losing_findings(monkeypatch):
     foreign = accounts.Slot("foreign", "other/eng-1", "other-execution", 9, "reserved", expires_ms=1)
     redis.hset(accounts.account_key("foreign"), foreign.holder, accounts.encode(foreign))
     monkeypatch.setattr(status, "page_quota", lambda: {})
+    from scripts.swarm import fencing
+
+    fencing.read(store, "sw")
 
     with patch.object(redis, "execute_command", wraps=redis.execute_command) as commands:
         report = status.status_report(store, "sw", {"tasks": []})

@@ -206,10 +206,12 @@ def test_operation_identity_is_written_before_external_apply(fixture):
 
 
 def test_payload_is_not_persisted_and_errors_do_not_disclose_it(fixture):
+    from scripts.swarm import fencing
+
     store, agent, transport, operations = fixture
     first = operations.execute("fixture", request(agent, payload={"prompt": "sensitive fixture content"}))
-    stored = store.redis.hget(store.key("fixture", "runtime-operations"), first.operation_id)
-    assert "sensitive fixture content" not in stored
+    stored = fencing.read(store, "fixture")["operations"][first.operation_id]
+    assert "sensitive fixture content" not in json.dumps(stored)
     with pytest.raises(OperationConflict) as error:
         operations.execute("fixture", request(agent, payload={"prompt": "other sensitive content"}))
     assert "sensitive" not in str(error.value)
@@ -350,31 +352,37 @@ def test_journal_settlement_refuses_a_missing_entry_and_changed_target(fixture):
 
 
 def test_transaction_contention_is_bounded_and_never_dispatches(fixture, monkeypatch):
-    from redis.exceptions import WatchError
-
-    from scripts.swarm_v2.runtime.operations import WRITE_ATTEMPTS
+    from scripts.events.bus import StateConflict
+    from scripts.swarm import fencing
 
     store, agent, transport, operations = fixture
-    original = store.redis.pipeline
+    original = fencing.state.for_store
     attempts = []
 
-    def pipeline():
-        pipe = original()
+    class Racing:
+        def __init__(self, inner):
+            self.inner = inner
 
-        def watch(*keys):
-            attempts.append(keys)
-            raise WatchError
+        def get(self, key):
+            return self.inner.get(key)
 
-        pipe.watch = watch
-        return pipe
+        def create(self, key, value):
+            return self.inner.create(key, value)
 
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+        def update(self, key, value, revision):
+            attempts.append(True)
+            raise StateConflict("fixture contention")
+
+        def watch(self, key, from_revision=0):
+            return self.inner.watch(key, from_revision)
+
+    def for_store(store_, bucket, environ=None):
+        return Racing(original(store_, bucket, environ))
+
+    monkeypatch.setattr(fencing.state, "for_store", for_store)
     with pytest.raises(OperationConflict, match="kept changing"):
         operations.execute("fixture", request(agent))
-    assert len(attempts) == WRITE_ATTEMPTS
-    assert all(
-        keys == (store.key("fixture", "runtime-operations"), store.key("fixture", "executions")) for keys in attempts
-    )
+    assert len(attempts) == fencing.ATTEMPTS
     assert not operations.journal.records("fixture")
     assert not transport.creations
 
@@ -564,10 +572,14 @@ def test_a_prepare_without_a_renderer_keeps_the_journaled_spec(fixture):
 
 
 def strip_spec(store, operation_id):
-    key = store.key("fixture", "runtime-operations")
-    legacy = json.loads(store.redis.hget(key, operation_id))
-    del legacy["spec_digest"]
-    store.redis.hset(key, operation_id, json.dumps(legacy))
+    from scripts.swarm import fencing
+
+    def change(doc):
+        legacy = dict(doc["operations"][operation_id])
+        del legacy["spec_digest"]
+        doc["operations"][operation_id] = legacy
+
+    fencing.write(store, "fixture", change)
 
 
 def test_a_journal_record_written_before_spec_digests_reads_as_empty(fixture):

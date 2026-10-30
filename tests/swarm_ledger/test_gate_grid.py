@@ -24,6 +24,7 @@ ORDER = [
     "lane-split",
     "nightwatch",
     "reset",
+    "feature",
     "talk",
 ]
 

@@ -39,8 +39,8 @@
   "PLR0912": 15
  },
  "hooks/hook_manager.py::on_post_tool_use": {
-  "C901": 56,
-  "PLR0912": 56
+  "C901": 55,
+  "PLR0912": 55
  },
  "hooks/hook_manager.py::on_pre_tool_use": {
   "C901": 77,

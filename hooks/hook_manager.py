@@ -2110,11 +2110,9 @@ def on_post_tool_use(payload: dict) -> None:
             from hooks.config import FILE_READ_CACHE_ENABLED
 
             if FILE_READ_CACHE_ENABLED:
-                from hooks.context.file_read_cache import mark_file_read
+                from hooks.context.file_read_cache import mark_read_result
 
-                file_path = payload.get("tool_input", {}).get("file_path", "")
-                if file_path and payload.get("session_id"):
-                    mark_file_read(payload["session_id"], file_path)
+                mark_read_result(payload)
         except Exception as e:
             log("file_read_cache mark failed", {"error": str(e)})
 
