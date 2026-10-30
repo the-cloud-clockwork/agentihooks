@@ -28,7 +28,7 @@ def test_unversioned_event_records_are_refused(tmp_path):
         repo.export_document("events")
 
 
-def test_stored_unversioned_event_is_readable_but_cannot_be_revision_filtered(tmp_path):
+def test_stored_unversioned_event_is_readable(tmp_path):
     from scripts.swarm_ledger.repository.events import read_events
 
     repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
@@ -40,8 +40,6 @@ def test_stored_unversioned_event_is_readable_but_cannot_be_revision_filtered(tm
         )
         connection.commit()
         assert read_events(connection, "events")[-1] == {"kind": "legacy"}
-    with pytest.raises(KeyError, match="^'rev'$"):
-        repo.events_since("events", 0)
 
 
 def test_appending_an_unversioned_event_reports_the_refusal(tmp_path):
@@ -61,7 +59,6 @@ def test_three_identical_events_remain_distinct_records(tmp_path):
     repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
     repo.import_document("events", state)
     assert repo.export_document("events") == state
-    assert repo.events_since("events", 1) == state["_meta"]["events"]
 
 
 def test_event_rows_keep_canonical_identity_after_restart(tmp_path):

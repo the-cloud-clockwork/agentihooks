@@ -32,6 +32,19 @@ def test_storage_builds_the_folder_or_the_shared_database_and_never_reads_an_api
     assert type(storage.build()) is built
 
 
+@pytest.mark.parametrize("database", ["postgresql://ledger@db/ledger", None])
+def test_the_shared_address_is_the_database_url_whatever_the_api_address(
+    monkeypatch: pytest.MonkeyPatch, database: str | None
+) -> None:
+    monkeypatch.setenv(API_URL, "http://api:8770")
+    if database is None:
+        monkeypatch.delenv(postgres.URL, raising=False)
+    else:
+        monkeypatch.setenv(postgres.URL, database)
+
+    assert storage.shared() == database
+
+
 def written(tmp_path: Path, change: Callable[[dict], None]) -> tuple[sqlite.SQLiteLedgerRepository, dict, dict]:
     """Create the ledger, write its stored state changed by change at the next revision, and return the repository
     with the state before and after the write."""

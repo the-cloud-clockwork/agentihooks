@@ -86,8 +86,6 @@ def test_import_exports_the_source_document_and_survives_a_restart(tmp_path):
     restarted = store(tmp_path)
     assert restarted.export_document("ledger") == state
     assert restarted.token("ledger") == "t" * 24
-    assert restarted.events_since("ledger", 0) == state["_meta"]["events"]
-    assert restarted.events_since("ledger", 1) == []
     with repo.connect() as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
@@ -176,7 +174,7 @@ def test_every_write_leaves_rows_and_events_equal_to_the_returned_state(tmp_path
         state, _ = repo.apply_ops("ledger", ops=ops)
         assert store(tmp_path).get_document("ledger") == state
         assert len(state["_meta"]["events"]) <= 3
-        assert store(tmp_path).events_since("ledger", -1) == state["_meta"]["events"]
+        assert store(tmp_path).export_document("ledger")["_meta"]["events"] == state["_meta"]["events"]
 
 
 def test_checkbox_changes_keep_the_stale_base_guard(tmp_path):
@@ -390,7 +388,7 @@ def test_whole_and_every_ledger_reads_need_no_writable_connection(tmp_path):
 
 def test_missing_ledgers_raise_one_error_both_lookup_and_value_callers_catch(tmp_path):
     repo = store(tmp_path)
-    for call in (lambda: repo.get_document("missing"), lambda: repo.events_since("missing", 0)):
+    for call in (lambda: repo.get_document("missing"), lambda: repo.export_document("missing")):
         with pytest.raises(KeyError):
             call()
         with pytest.raises(ValueError):
