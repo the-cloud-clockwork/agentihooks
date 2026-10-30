@@ -36,3 +36,19 @@ def relay_journal():
         for kind, slugs in journal.held_revisions().items():
             for slug in slugs:
                 journal.drop_revisions(kind, slug)
+
+
+@pytest.fixture(autouse=True)
+def request_metrics_journal(monkeypatch: pytest.MonkeyPatch) -> None:
+    from collections import deque
+
+    from scripts.swarm_ledger import request_metrics
+
+    monkeypatch.setattr(request_metrics, "SAMPLES", deque(maxlen=request_metrics.MAX_SAMPLES))
+    monkeypatch.setattr(request_metrics, "PENDING", [])
+    monkeypatch.setattr(request_metrics, "EVICTED_THROUGH", float("-inf"))
+    monkeypatch.setattr(request_metrics, "HELD_SINCE", None)
+    monkeypatch.setattr(request_metrics, "LOST", [])
+    monkeypatch.setattr(request_metrics, "JOURNAL", None)
+    monkeypatch.setattr(request_metrics, "APPENDED", 0)
+    monkeypatch.setattr(request_metrics, "STALE", False)
